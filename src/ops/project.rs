@@ -98,12 +98,12 @@ impl Project {
         let left = match expression.left {
             ProjectExpressionBase::Column(i) => &record[i],
             ProjectExpressionBase::Literal(ref data) => data,
-        }.clone();
+        };
 
         let right = match expression.right {
             ProjectExpressionBase::Column(i) => &record[i],
             ProjectExpressionBase::Literal(ref data) => data,
-        }.clone();
+        };
 
         match expression.op {
             ArithmeticOperator::Add => left + right,

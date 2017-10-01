@@ -203,12 +203,12 @@ impl Into<i64> for DataType {
     }
 }
 
-impl Into<f64> for DataType {
+impl<'a> Into<f64> for &'a DataType {
     fn into(self) -> f64 {
         match self {
-            DataType::Real(i, f) => i as f64 + (f as f64) / FLOAT_PRECISION,
-            DataType::Int(i) => i as f64,
-            DataType::BigInt(i) => i as f64,
+            &DataType::Real(i, f) => i as f64 + (f as f64) / FLOAT_PRECISION,
+            &DataType::Int(i) => i as f64,
+            &DataType::BigInt(i) => i as f64,
             _ => unreachable!(),
         }
     }
@@ -242,14 +242,14 @@ impl<'a> From<&'a str> for DataType {
 macro_rules! arithmetic_operation (
     ($op:tt, $first:ident, $second:ident) => (
         match ($first, $second) {
-            (DataType::Int(a), DataType::Int(b)) => (a $op b).into(),
-            (DataType::BigInt(a), DataType::BigInt(b)) => (a $op b).into(),
-            (DataType::Int(a), DataType::BigInt(b)) => ((a as i64) $op b).into(),
-            (DataType::BigInt(a), DataType::Int(b)) => (a $op (b as i64)).into(),
+            (&DataType::Int(a), &DataType::Int(b)) => (a $op b).into(),
+            (&DataType::BigInt(a), &DataType::BigInt(b)) => (a $op b).into(),
+            (&DataType::Int(a), &DataType::BigInt(b)) => ((a as i64) $op b).into(),
+            (&DataType::BigInt(a), &DataType::Int(b)) => (a $op (b as i64)).into(),
 
-            (first @ DataType::Int(..), second @ DataType::Real(..)) |
-            (first @ DataType::Real(..), second @ DataType::Int(..)) |
-            (first @ DataType::Real(..), second @ DataType::Real(..)) => {
+            (first @ &DataType::Int(..), second @ &DataType::Real(..)) |
+            (first @ &DataType::Real(..), second @ &DataType::Int(..)) |
+            (first @ &DataType::Real(..), second @ &DataType::Real(..)) => {
                 let a: f64 = first.into();
                 let b: f64 = second.into();
                 (a $op b).into()
@@ -266,34 +266,34 @@ macro_rules! arithmetic_operation (
     );
 );
 
-impl Add for DataType {
+impl<'a, 'b> Add<&'b DataType> for &'a DataType {
     type Output = DataType;
 
-    fn add(self, other: DataType) -> DataType {
+    fn add(self, other: &'b DataType) -> DataType {
         arithmetic_operation!(+, self, other)
     }
 }
 
-impl Sub for DataType {
+impl<'a, 'b> Sub<&'b DataType> for &'a DataType {
     type Output = DataType;
 
-    fn sub(self, other: DataType) -> DataType {
+    fn sub(self, other: &'b DataType) -> DataType {
         arithmetic_operation!(-, self, other)
     }
 }
 
-impl Mul for DataType {
+impl<'a, 'b> Mul<&'b DataType> for &'a DataType {
     type Output = DataType;
 
-    fn mul(self, other: DataType) -> DataType {
+    fn mul(self, other: &'b DataType) -> DataType {
         arithmetic_operation!(*, self, other)
     }
 }
 
-impl Div for DataType {
+impl<'a, 'b> Div<&'b DataType> for &'a DataType {
     type Output = DataType;
 
-    fn div(self, other: DataType) -> DataType {
+    fn div(self, other: &'b DataType) -> DataType {
         arithmetic_operation!(/, self, other)
     }
 }
@@ -519,52 +519,52 @@ mod tests {
     fn real_to_float() {
         let original = 2.5;
         let data_type: DataType = original.into();
-        let converted: f64 = data_type.into();
+        let converted: f64 = (&data_type).into();
         assert_eq!(original, converted);
     }
 
     #[test]
     fn add_data_types() {
-        assert_eq!(DataType::from(1) + DataType::from(2), 3.into());
-        assert_eq!(DataType::from(1.5) + DataType::from(2), (3.5).into());
-        assert_eq!(DataType::from(2) + DataType::from(1.5), (3.5).into());
-        assert_eq!(DataType::from(1.5) + DataType::from(2.5), (4.0).into());
-        assert_eq!(DataType::BigInt(1) + DataType::BigInt(2), 3.into());
-        assert_eq!(DataType::from(1) + DataType::BigInt(2), 3.into());
-        assert_eq!(DataType::BigInt(2) + DataType::from(1), 3.into());
+        assert_eq!(&DataType::from(1) + &DataType::from(2), 3.into());
+        assert_eq!(&DataType::from(1.5) + &DataType::from(2), (3.5).into());
+        assert_eq!(&DataType::from(2) + &DataType::from(1.5), (3.5).into());
+        assert_eq!(&DataType::from(1.5) + &DataType::from(2.5), (4.0).into());
+        assert_eq!(&DataType::BigInt(1) + &DataType::BigInt(2), 3.into());
+        assert_eq!(&DataType::from(1) + &DataType::BigInt(2), 3.into());
+        assert_eq!(&DataType::BigInt(2) + &DataType::from(1), 3.into());
     }
 
     #[test]
     fn subtract_data_types() {
-        assert_eq!(DataType::from(2) - DataType::from(1), 1.into());
-        assert_eq!(DataType::from(3.5) - DataType::from(2), (1.5).into());
-        assert_eq!(DataType::from(2) - DataType::from(1.5), (0.5).into());
-        assert_eq!(DataType::from(3.5) - DataType::from(2.0), (1.5).into());
-        assert_eq!(DataType::BigInt(1) - DataType::BigInt(2), (-1).into());
-        assert_eq!(DataType::from(1) - DataType::BigInt(2), (-1).into());
-        assert_eq!(DataType::BigInt(2) - DataType::from(1), 1.into());
+        assert_eq!(&DataType::from(2) - &DataType::from(1), 1.into());
+        assert_eq!(&DataType::from(3.5) - &DataType::from(2), (1.5).into());
+        assert_eq!(&DataType::from(2) - &DataType::from(1.5), (0.5).into());
+        assert_eq!(&DataType::from(3.5) - &DataType::from(2.0), (1.5).into());
+        assert_eq!(&DataType::BigInt(1) - &DataType::BigInt(2), (-1).into());
+        assert_eq!(&DataType::from(1) - &DataType::BigInt(2), (-1).into());
+        assert_eq!(&DataType::BigInt(2) - &DataType::from(1), 1.into());
     }
 
     #[test]
     fn multiply_data_types() {
-        assert_eq!(DataType::from(2) * DataType::from(1), 2.into());
-        assert_eq!(DataType::from(3.5) * DataType::from(2), (7.0).into());
-        assert_eq!(DataType::from(2) * DataType::from(1.5), (3.0).into());
-        assert_eq!(DataType::from(3.5) * DataType::from(2.0), (7.0).into());
-        assert_eq!(DataType::BigInt(1) * DataType::BigInt(2), 2.into());
-        assert_eq!(DataType::from(1) * DataType::BigInt(2), 2.into());
-        assert_eq!(DataType::BigInt(2) * DataType::from(1), 2.into());
+        assert_eq!(&DataType::from(2) * &DataType::from(1), 2.into());
+        assert_eq!(&DataType::from(3.5) * &DataType::from(2), (7.0).into());
+        assert_eq!(&DataType::from(2) * &DataType::from(1.5), (3.0).into());
+        assert_eq!(&DataType::from(3.5) * &DataType::from(2.0), (7.0).into());
+        assert_eq!(&DataType::BigInt(1) * &DataType::BigInt(2), 2.into());
+        assert_eq!(&DataType::from(1) * &DataType::BigInt(2), 2.into());
+        assert_eq!(&DataType::BigInt(2) * &DataType::from(1), 2.into());
     }
 
     #[test]
     fn divide_data_types() {
-        assert_eq!(DataType::from(2) / DataType::from(1), 2.into());
-        assert_eq!(DataType::from(7.5) / DataType::from(2), (3.75).into());
-        assert_eq!(DataType::from(7) / DataType::from(2.5), (2.8).into());
-        assert_eq!(DataType::from(3.5) / DataType::from(2.0), (1.75).into());
-        assert_eq!(DataType::BigInt(4) / DataType::BigInt(2), 2.into());
-        assert_eq!(DataType::from(4) / DataType::BigInt(2), 2.into());
-        assert_eq!(DataType::BigInt(4) / DataType::from(2), 2.into());
+        assert_eq!(&DataType::from(2) / &DataType::from(1), 2.into());
+        assert_eq!(&DataType::from(7.5) / &DataType::from(2), (3.75).into());
+        assert_eq!(&DataType::from(7) / &DataType::from(2.5), (2.8).into());
+        assert_eq!(&DataType::from(3.5) / &DataType::from(2.0), (1.75).into());
+        assert_eq!(&DataType::BigInt(4) / &DataType::BigInt(2), 2.into());
+        assert_eq!(&DataType::from(4) / &DataType::BigInt(2), 2.into());
+        assert_eq!(&DataType::BigInt(4) / &DataType::from(2), 2.into());
     }
 
     #[test]
@@ -572,7 +572,7 @@ mod tests {
     fn add_invalid_types() {
         let a: DataType = "hi".into();
         let b: DataType = 5.into();
-        a + b;
+        &a + &b;
     }
 
     #[test]
