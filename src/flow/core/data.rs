@@ -11,6 +11,7 @@ use std::hash::{Hash, Hasher};
 use std::ops::{Add, Deref, DerefMut, Div, Mul, Sub};
 use std::fmt;
 
+const FLOAT_PRECISION: f64 = 1000_000_000.0;
 const TINYTEXT_WIDTH: usize = 15;
 
 /// The main type used for user data throughout the codebase.
@@ -128,7 +129,7 @@ impl From<f64> for DataType {
         }
 
         let mut i = f.trunc() as i32;
-        let mut frac = (f.fract() * 1000_000_000.0).round() as i32;
+        let mut frac = (f.fract() * FLOAT_PRECISION).round() as i32;
         if frac == 1000_000_000 {
             i += 1;
             frac = 0;
@@ -205,7 +206,7 @@ impl Into<i64> for DataType {
 impl Into<f64> for DataType {
     fn into(self) -> f64 {
         match self {
-            DataType::Real(i, f) => i as f64 + (f as f64) / 1000_000_000.0,
+            DataType::Real(i, f) => i as f64 + (f as f64) / FLOAT_PRECISION,
             DataType::Int(i) => i as f64,
             DataType::BigInt(i) => i as f64,
             _ => unreachable!(),

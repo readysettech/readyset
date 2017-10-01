@@ -397,7 +397,6 @@ fn it_works_with_join_arithmetic() {
     assert_eq!(result[0][1], (price as f64 * fraction).into());
 }
 
-
 #[test]
 fn votes() {
     use distributary::{Aggregation, Base, Join, JoinType, Union};
