@@ -219,11 +219,23 @@ impl GraphViz for MirNodeType {
             } => {
                 write!(
                     out,
-                    "π: {}{}",
+                    "π: {}{}{}",
                     emit.iter()
                         .map(|c| c.name.as_str())
                         .collect::<Vec<_>>()
                         .join(", "),
+                    if arithmetic.len() > 0 {
+                        format!(
+                            ", {}",
+                            arithmetic
+                                .iter()
+                                .map(|&(ref n, ref e)| format!("{}: {:?}", n, e))
+                                .collect::<Vec<_>>()
+                                .join(", ")
+                        )
+                    } else {
+                        format!("")
+                    },
                     if literals.len() > 0 {
                         format!(
                             ", lit: {}",
@@ -236,8 +248,6 @@ impl GraphViz for MirNodeType {
                     } else {
                         format!("")
                     }
-
-                    // TODO(ekmartin): handle arithmetic
                 )?;
             }
             MirNodeType::Reuse { ref node } => {

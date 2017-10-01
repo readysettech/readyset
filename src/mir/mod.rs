@@ -1173,11 +1173,23 @@ impl Debug for MirNodeType {
                 ref arithmetic,
             } => write!(
                 f,
-                "π [{}{}]",
+                "π [{}{}{}]",
                 emit.iter()
                     .map(|c| c.name.as_str())
                     .collect::<Vec<_>>()
                     .join(", "),
+                if arithmetic.len() > 0 {
+                    format!(
+                        ", {}",
+                        arithmetic
+                            .iter()
+                            .map(|&(ref n, ref e)| format!("{}: {:?}", n, e))
+                            .collect::<Vec<_>>()
+                            .join(", ")
+                    )
+                } else {
+                    format!("")
+                },
                 if literals.len() > 0 {
                     format!(
                         ", lit: {}",
@@ -1189,9 +1201,7 @@ impl Debug for MirNodeType {
                     )
                 } else {
                     format!("")
-                }
-
-                // TODO: format arithmetic
+                },
             ),
             MirNodeType::Reuse { ref node } => write!(
                 f,

@@ -1305,6 +1305,30 @@ mod tests {
     }
 
     #[test]
+    fn it_incorporates_arithmetic_projection() {
+        // set up graph
+        let mut g = Blender::new();
+        let mut inc = SqlIncorporator::default();
+        let mut mig = g.start_migration();
+
+        assert!(
+            inc.add_query(
+                "CREATE TABLE users (id int, age int);",
+                None,
+                &mut mig
+            ).is_ok()
+        );
+
+        let res = inc.add_query("SELECT 2 * users.age FROM users;", None, &mut mig);
+        assert!(res.is_ok());
+
+        // leaf view node
+        let edge = get_node(&inc, &mig, &res.unwrap().name);
+        assert_eq!(edge.fields(), &["arithmetic"]);
+        assert_eq!(edge.description(), format!("π[(lit: 2) * 1]"));
+    }
+
+    #[test]
     fn it_incorporates_join_with_nested_query() {
         let mut g = Blender::new();
         let mut inc = SqlIncorporator::default();

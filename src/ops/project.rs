@@ -1,4 +1,5 @@
 use nom_sql::ArithmeticOperator;
+use std::fmt;
 use std::collections::HashMap;
 
 use flow::prelude::*;
@@ -27,6 +28,28 @@ impl ProjectExpression {
             left: left,
             right: right,
         }
+    }
+}
+
+impl fmt::Display for ProjectExpressionBase {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        match *self {
+            ProjectExpressionBase::Column(u) => write!(f, "{}", u),
+            ProjectExpressionBase::Literal(ref l) => write!(f, "(lit: {})", l),
+        }
+    }
+}
+
+impl fmt::Display for ProjectExpression {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        let op = match self.op {
+            ArithmeticOperator::Add => "+",
+            ArithmeticOperator::Subtract => "-",
+            ArithmeticOperator::Divide => "/",
+            ArithmeticOperator::Multiply => "*",
+        };
+
+        write!(f, "{} {} {}", self.left, op, self.right)
     }
 }
 
@@ -178,28 +201,31 @@ impl Ingredient for Project {
     }
 
     fn description(&self) -> String {
-        let emit_cols = match self.emit.as_ref() {
-            None => "*".into(),
-            // TODO: print out arithmetic expressions as well:
+        let mut emit_cols = vec![];
+        match self.emit.as_ref() {
+            None => emit_cols.push("*".to_string()),
             Some(emit) => {
-                match self.additional {
-                    None => {
-                        emit.iter()
-                            .map(|e| e.to_string())
-                            .collect::<Vec<_>>()
-                            .join(", ")
-                    }
-                    Some(ref add) => {
-                        emit.iter()
-                            .map(|e| e.to_string())
-                            .chain(add.iter().map(|e| format!("lit: {}", e.to_string())))
-                            .collect::<Vec<_>>()
-                            .join(", ")
-                    }
+                emit_cols.extend(emit.iter().map(|e| e.to_string()).collect::<Vec<_>>());
+
+                if let Some(ref arithmetic) = self.expressions {
+                    emit_cols.extend(
+                        arithmetic
+                            .iter()
+                            .map(|e| format!("{}", e))
+                            .collect::<Vec<_>>(),
+                    );
+                }
+
+                if let Some(ref add) = self.additional {
+                    emit_cols.extend(
+                        add.iter()
+                            .map(|e| format!("lit: {}", e.to_string()))
+                            .collect::<Vec<_>>(),
+                    );
                 }
             }
         };
-        format!("π[{}]", emit_cols)
+        format!("π[{}]", emit_cols.join(", "))
     }
 
     fn parent_columns(&self, column: usize) -> Vec<(NodeIndex, Option<usize>)> {
@@ -270,6 +296,12 @@ mod tests {
     fn it_describes() {
         let p = setup(false, false, true);
         assert_eq!(p.node().description(), "π[2, 0, lit: \"hello\", lit: 42]");
+    }
+
+    #[test]
+    fn it_describes_arithmetic() {
+        let mut p = setup_column_arithmetic(ArithmeticOperator::Add);
+        assert_eq!(p.node().description(), "π[0, 1, 0 + 1]");
     }
 
     #[test]
