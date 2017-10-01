@@ -398,6 +398,41 @@ fn it_works_with_join_arithmetic() {
 }
 
 #[test]
+fn it_works_with_function_arithmetic() {
+    let mut g = distributary::Blender::new();
+    let sql = "
+        CREATE TABLE Bread (id int, price int, PRIMARY KEY(id));
+        Price: SELECT 2 * COUNT(price) FROM Bread WHERE id = ?;
+    ";
+
+    let recipe = {
+        let mut mig = g.start_migration();
+        let mut recipe = distributary::Recipe::from_str(&sql, None).unwrap();
+        recipe.activate(&mut mig, false).unwrap();
+        mig.commit();
+        recipe
+    };
+
+    let bread_index = recipe.node_addr_for("Bread").unwrap();
+    let query_index = recipe.node_addr_for("Price").unwrap();
+    let mut mutator = g.get_mutator(bread_index);
+    let getter = g.get_getter(query_index).unwrap();
+    let max_price = 20;
+    for (i, price) in (10..max_price).enumerate() {
+        let id: distributary::DataType = (i as i32).into();
+        mutator.put(vec![id, price.into()]).unwrap();
+    }
+
+    // Let writes propagate:
+    thread::sleep(time::Duration::from_millis(SETTLE_TIME_MS));
+
+    // Retrieve the result of the count query:
+    let result = getter.lookup(&1.into(), true).unwrap();
+    assert_eq!(result.len(), 1);
+    assert_eq!(result[0][1], 2.into());
+}
+
+#[test]
 fn votes() {
     use distributary::{Aggregation, Base, Join, JoinType, Union};
 

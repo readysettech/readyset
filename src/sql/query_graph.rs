@@ -1,5 +1,6 @@
-use nom_sql::{ArithmeticExpression, Column, ConditionBase, ConditionExpression, ConditionTree,
-              FieldExpression, JoinConstraint, JoinOperator, JoinRightSide, Literal, Operator};
+use nom_sql::{ArithmeticBase, ArithmeticExpression, Column, ConditionBase, ConditionExpression,
+              ConditionTree, FieldExpression, JoinConstraint, JoinOperator, JoinRightSide,
+              Literal, Operator};
 use nom_sql::SelectStatement;
 use nom_sql::ConditionExpression::*;
 
@@ -669,6 +670,24 @@ pub fn to_query_graph(st: &SelectStatement) -> Result<QueryGraph, String> {
         }
     }
 
+    // Adds a computed column to the query graph if the given column has a function:
+    let add_computed_column = |query_graph: &mut QueryGraph, column: &Column| {
+        match column.function {
+            None => (), // we've already dealt with this column as part of some relation
+            Some(_) => {
+                // add a special node representing the computed columns; if it already
+                // exists, add another computed column to it
+                let n = query_graph.relations
+                    .entry(String::from("computed_columns"))
+                    .or_insert_with(
+                        || new_node(String::from("computed_columns"), vec![], st),
+                    );
+
+                n.columns.push(column.clone());
+            }
+        }
+    };
+
     // 4. Add query graph nodes for any computed columns, which won't be represented in the
     //    nodes corresponding to individual relations.
     for field in st.fields.iter() {
@@ -684,6 +703,14 @@ pub fn to_query_graph(st: &SelectStatement) -> Result<QueryGraph, String> {
                 }));
             }
             FieldExpression::Arithmetic(ref a) => {
+                if let ArithmeticBase::Column(ref c) = a.left {
+                    add_computed_column(&mut qg, c);
+                }
+
+                if let ArithmeticBase::Column(ref c) = a.right {
+                    add_computed_column(&mut qg, c);
+                }
+
                 qg.columns.push(OutputColumn::Arithmetic(ArithmeticColumn {
                     name: String::from("arithmetic"),
                     table: None,
@@ -691,19 +718,7 @@ pub fn to_query_graph(st: &SelectStatement) -> Result<QueryGraph, String> {
                 }));
             }
             FieldExpression::Col(ref c) => {
-                match c.function {
-                    None => (), // we've already dealt with this column as part of some relation
-                    Some(_) => {
-                        // add a special node representing the computed columns; if it already
-                        // exists, add another computed column to it
-                        let n = qg.relations
-                            .entry(String::from("computed_columns"))
-                            .or_insert_with(
-                                || new_node(String::from("computed_columns"), vec![], st),
-                            );
-                        n.columns.push(c.clone());
-                    }
-                }
+                add_computed_column(&mut qg, c);
                 qg.columns.push(OutputColumn::Data(c.clone()));
             }
         }
