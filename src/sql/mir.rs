@@ -736,9 +736,12 @@ impl SqlToMirConverter {
     ) -> MirNodeRef {
         //assert!(proj_cols.iter().all(|c| c.table == parent_name));
 
-        // TODO(ekmartin): group these two together
-        let arithmetic_names: Vec<String> = arithmetic.iter().map(|&(ref n, _)| n.clone()).collect();
-        let literal_names: Vec<String> = literals.iter().map(|&(ref n, _)| n.clone()).collect();
+        let names: Vec<String> = literals
+            .iter()
+            .map(|&(ref n, _)| n.clone())
+            .chain(arithmetic.iter().map(|&(ref n, _)| n.clone()))
+            .collect();
+
         let fields = proj_cols
             .clone()
             .into_iter()
@@ -751,15 +754,7 @@ impl SqlToMirConverter {
                 },
                 None => c.clone(),
             })
-            .chain(literal_names.into_iter().map(|n| {
-                Column {
-                    name: n,
-                    alias: None,
-                    table: Some(String::from(name)),
-                    function: None,
-                }
-            }))
-            .chain(arithmetic_names.into_iter().map(|n| {
+            .chain(names.into_iter().map(|n| {
                 Column {
                     name: n,
                     alias: None,
