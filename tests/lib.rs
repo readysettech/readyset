@@ -402,7 +402,7 @@ fn it_works_with_function_arithmetic() {
     let mut g = distributary::Blender::new();
     let sql = "
         CREATE TABLE Bread (id int, price int, PRIMARY KEY(id));
-        Price: SELECT 2 * COUNT(price) FROM Bread WHERE id = ?;
+        Price: SELECT 2 * MAX(price) FROM Bread;
     ";
 
     let recipe = {
@@ -418,18 +418,19 @@ fn it_works_with_function_arithmetic() {
     let mut mutator = g.get_mutator(bread_index);
     let getter = g.get_getter(query_index).unwrap();
     let max_price = 20;
-    for (i, price) in (10..max_price).enumerate() {
-        let id: distributary::DataType = (i as i32).into();
-        mutator.put(vec![id, price.into()]).unwrap();
+    for (i, price) in (10..max_price + 1).enumerate() {
+        let id = (i + 1) as i32;
+        mutator.put(vec![id.into(), price.into()]).unwrap();
     }
 
     // Let writes propagate:
     thread::sleep(time::Duration::from_millis(SETTLE_TIME_MS));
 
     // Retrieve the result of the count query:
-    let result = getter.lookup(&1.into(), true).unwrap();
+    let key = distributary::DataType::BigInt(max_price * 2);
+    let result = getter.lookup(&key, true).unwrap();
     assert_eq!(result.len(), 1);
-    assert_eq!(result[0][1], 2.into());
+    assert_eq!(result[0][0], key);
 }
 
 #[test]
