@@ -236,7 +236,7 @@ impl Recipe {
         }
     }
 
-    /// Creates a new universe
+    /// Creates a new security universe
     pub fn create_universe(
         &mut self,
         mig: &mut Migration,
@@ -253,7 +253,7 @@ impl Recipe {
         for expr in self.expressions.values() {
             let (n, q) = expr.clone();
             // add the universe-specific query
-            // don't user query name to avoid conflict with global queries
+            // don't use query name to avoid conflict with global queries
             let new_name = match n {
                 Some(ref name) => Some(format!("{}_u{}", name, mig.universe())),
                 None => None,
