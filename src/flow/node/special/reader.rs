@@ -43,7 +43,6 @@ pub struct Reader {
 impl Clone for Reader {
     fn clone(&self) -> Self {
         assert!(self.writer.is_none());
-        assert!(self.streamers.is_empty());
         Reader {
             writer: None,
             streamers: self.streamers.clone(),
