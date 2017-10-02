@@ -26,13 +26,11 @@ fn main() {
                FROM awvc GROUP BY awvc.user;
     ";
 
-    {
+    g.migrate(|mig| {
         // migrate from the empty recipe to below
-        let mut mig = g.start_migration();
         let mut recipe = Recipe::from_str(&sql, None).unwrap();
-        recipe.activate(&mut mig, false).unwrap();
-        mig.commit();
-    }
+        recipe.activate(mig, false).unwrap();
+    });
 
     println!("{}", g);
 

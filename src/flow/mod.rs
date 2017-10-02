@@ -259,6 +259,7 @@ impl Blender {
     }
 
     /// Start setting up a new `Migration`.
+    #[deprecated]
     pub fn start_migration(&mut self) -> Migration {
         info!(self.log, "starting migration");
         let miglog = self.log.new(o!());
@@ -271,6 +272,27 @@ impl Blender {
             start: time::Instant::now(),
             log: miglog,
         }
+    }
+
+    /// Perform a new query schema migration.
+    pub fn migrate<F, T>(&mut self, f: F) -> T
+    where
+        F: FnOnce(&mut Migration) -> T,
+    {
+        info!(self.log, "starting migration");
+        let miglog = self.log.new(o!());
+        let mut m = Migration {
+            mainline: self,
+            added: Default::default(),
+            columns: Default::default(),
+            readers: Default::default(),
+
+            start: time::Instant::now(),
+            log: miglog,
+        };
+        let r = f(&mut m);
+        m.commit();
+        r
     }
 
     /// Get a boxed function which can be used to validate tokens.
@@ -1082,10 +1104,8 @@ mod tests {
         let mut r = Recipe::from_str(r_txt, None).unwrap();
 
         let mut b = Blender::new();
-        {
-            let mut mig = b.start_migration();
-            assert!(r.activate(&mut mig, false).is_ok());
-            mig.commit();
-        }
+        b.migrate(|mig| {
+            assert!(r.activate(mig, false).is_ok());
+        });
     }
 }

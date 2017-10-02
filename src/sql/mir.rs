@@ -1,8 +1,10 @@
 use flow::core::DataType;
 use flow::prelude::NodeIndex;
-use mir::{GroupedNodeType, MirNode, MirNodeType};
+pub use mir::MirNodeRef;
+use mir::node::{GroupedNodeType, MirNode, MirNodeType};
+use mir::query::MirQuery;
 // TODO(malte): remove if possible
-pub use mir::{FlowNode, MirNodeRef, MirQuery};
+pub use mir::to_flow::FlowNode;
 use ops::join::JoinType;
 
 use nom_sql::{Column, ColumnSpecification, ConditionBase, ConditionExpression, ConditionTree,
@@ -399,7 +401,7 @@ impl SqlToMirConverter {
                         // remember the schema for this version
                         let base_schemas = self.base_schemas
                             .entry(String::from(name))
-                            .or_insert(Vec::new());
+                            .or_default();
                         base_schemas.push((self.schema_version, columns.clone()));
 
                         return MirNode::adapt_base(existing_node, columns_added, columns_removed);
@@ -432,7 +434,7 @@ impl SqlToMirConverter {
         // remember the schema for this version
         let base_schemas = self.base_schemas
             .entry(String::from(name))
-            .or_insert(Vec::new());
+            .or_default();
         base_schemas.push((self.schema_version, cols.clone()));
 
         // make node
@@ -1071,7 +1073,7 @@ impl SqlToMirConverter {
                     for col in cols {
                         column_to_predicates
                             .entry(col)
-                            .or_insert(Vec::new())
+                            .or_default()
                             .push(pred);
                     }
                 }

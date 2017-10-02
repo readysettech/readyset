@@ -305,10 +305,10 @@ fn classify_conditionals(
                             right: Box::new(ces.last().unwrap().clone()),
                         });
 
-                        let e = local.entry(t.to_string()).or_insert(Vec::new());
+                        let e = local.entry(t.to_string()).or_default();
                         e.push(new_ce);
                     } else {
-                        let e = local.entry(t.to_string()).or_insert(Vec::new());
+                        let e = local.entry(t.to_string()).or_default();
                         e.extend(ces);
                     }
                 },
@@ -334,7 +334,7 @@ fn classify_conditionals(
                             right: Box::new(ces.last().unwrap().clone()),
                         });
 
-                        let e = local.entry(t.to_string()).or_insert(Vec::new());
+                        let e = local.entry(t.to_string()).or_default();
                         e.push(new_ce);
                     }
                 }
@@ -378,7 +378,7 @@ fn classify_conditionals(
                                 // and thus all columns carry table names
                                 assert!(lf.table.is_some());
                                 let e =
-                                    local.entry(lf.table.clone().unwrap()).or_insert(Vec::new());
+                                    local.entry(lf.table.clone().unwrap()).or_default();
                                 e.push(ce.clone());
                             }
                         }

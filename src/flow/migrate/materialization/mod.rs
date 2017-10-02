@@ -259,18 +259,18 @@ impl Materializations {
 
                 if self.have
                     .entry(mi)
-                    .or_insert_with(HashSet::new)
+                    .or_default()
                     .insert(columns.clone())
                 {
                     // also add a replay obligation to enable partial
                     replay_obligations
                         .entry(mi)
-                        .or_insert_with(HashSet::new)
+                        .or_default()
                         .insert(columns.clone());
 
                     self.added
                         .entry(mi)
-                        .or_insert_with(HashSet::new)
+                        .or_default()
                         .insert(columns);
                 }
             }
@@ -396,7 +396,7 @@ impl Materializations {
                 self.partial.insert(ni);
                 warn!(self.log, "using partial materialization for {}", ni.index());
                 for (mi, indices) in add {
-                    let m = replay_obligations.entry(mi).or_insert_with(HashSet::new);
+                    let m = replay_obligations.entry(mi).or_default();
                     for index in indices {
                         m.insert(index);
                     }
@@ -422,7 +422,7 @@ impl Materializations {
                         // about new partial replay paths sourced from this node.
                         self.added
                             .entry(ni)
-                            .or_insert_with(HashSet::new)
+                            .or_default()
                             .insert(index);
                     }
                 }

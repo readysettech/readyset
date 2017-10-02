@@ -267,7 +267,7 @@ impl CheckTable {
     }
 
     fn update_granular_checktables(&mut self, base: NodeIndex, ts: i64, rs: &Records) {
-        let t = &mut self.granular.entry(base).or_insert_with(HashMap::new);
+        let t = &mut self.granular.entry(base).or_default();
         for record in rs.iter() {
             for (i, value) in record.iter().enumerate() {
                 let mut delete = false;
@@ -275,7 +275,7 @@ impl CheckTable {
                     if m.len() > 10000000 {
                         delete = true;
                     } else {
-                        *m.entry(value.clone()).or_insert(0) = ts;
+                        *m.entry(value.clone()).or_default() = ts;
                     }
                 }
                 if delete {
@@ -364,7 +364,7 @@ impl CheckTable {
             match *conflict {
                 Conflict::BaseTable(..) => {}
                 Conflict::BaseColumn(base, col) => {
-                    let t = &mut self.granular.entry(base).or_insert_with(HashMap::new);
+                    let t = &mut self.granular.entry(base).or_default();
                     t.entry(col)
                         .or_insert((HashMap::new(), self.next_timestamp - 1));
                 }
