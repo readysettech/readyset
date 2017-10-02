@@ -11,9 +11,7 @@ fn main() {
     let mut g = distributary::Blender::new();
     g.log_with(distributary::logger_pls());
 
-    {
-        let mut mig = g.start_migration();
-
+    g.migrate(|mig| {
         // add article base node
         let article =
             mig.add_ingredient("article", &["id", "user", "title", "url"], Base::default());
@@ -49,10 +47,7 @@ fn main() {
 
         mig.maintain(awvc, 0);
         mig.maintain(karma, 0);
-
-        // commit migration
-        mig.commit();
-    }
+    });
 
     web::run(Arc::new(Mutex::new(g))).unwrap();
 }
