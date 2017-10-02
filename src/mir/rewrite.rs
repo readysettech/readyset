@@ -1,4 +1,5 @@
-use mir::{MirNodeRef, MirQuery};
+use mir::MirNodeRef;
+use mir::query::MirQuery;
 use nom_sql::Column;
 
 fn has_column(n: &MirNodeRef, column: &Column) -> bool {

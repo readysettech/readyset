@@ -1,8 +1,10 @@
 use flow::core::DataType;
 use flow::prelude::NodeIndex;
-use mir::{GroupedNodeType, MirNode, MirNodeType};
+pub use mir::MirNodeRef;
+use mir::node::{GroupedNodeType, MirNode, MirNodeType};
+use mir::query::MirQuery;
 // TODO(malte): remove if possible
-pub use mir::{FlowNode, MirNodeRef, MirQuery};
+pub use mir::to_flow::FlowNode;
 use ops::join::JoinType;
 
 use nom_sql::{Column, ColumnSpecification, ConditionBase, ConditionExpression, ConditionTree,

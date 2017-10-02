@@ -11,7 +11,8 @@ use mir::reuse as mir_reuse;
 use nom_sql::parser as sql_parser;
 use nom_sql::{Column, SqlQuery};
 use nom_sql::SelectStatement;
-use self::mir::{MirNodeRef, MirQuery, SqlToMirConverter};
+use self::mir::{MirNodeRef, SqlToMirConverter};
+use mir::query::MirQuery;
 use self::reuse::{ReuseConfig, ReuseConfigType};
 use sql::query_graph::{to_query_graph, QueryGraph};
 
@@ -214,7 +215,7 @@ impl SqlIncorporator {
                         match mir_reuse::rewind_until_columns_found(mir_query.leaf.clone(), &params)
                         {
                             Some(mn) => {
-                                use mir::MirNodeType;
+                                use mir::node::MirNodeType;
                                 let project_columns = match mn.borrow().inner {
                                     MirNodeType::Project { .. } => None,
                                     _ => {

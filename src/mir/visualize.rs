@@ -3,7 +3,8 @@ use std::fmt::{self, Write};
 
 use ops::grouped::aggregate::Aggregation as AggregationKind;
 use ops::grouped::extremum::Extremum as ExtremumKind;
-use super::{MirNode, MirNodeType, MirQuery};
+use mir::node::{MirNode, MirNodeType};
+use mir::query::MirQuery;
 
 pub trait GraphViz {
     fn to_graphviz(&self) -> Result<String, fmt::Error>;

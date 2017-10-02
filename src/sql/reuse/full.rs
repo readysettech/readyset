@@ -1,6 +1,6 @@
 use sql::reuse::{ReuseConfiguration, ReuseType};
 use sql::query_graph::QueryGraph;
-use mir::MirQuery;
+use mir::query::MirQuery;
 
 use std::vec::Vec;
 use std::collections::HashMap;
