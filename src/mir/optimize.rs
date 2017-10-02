@@ -1,4 +1,6 @@
-use mir::{MirNode, MirNodeRef, MirNodeType, MirQuery};
+use mir::MirNodeRef;
+use mir::node::{MirNode, MirNodeType};
+use mir::query::MirQuery;
 use std::collections::HashMap;
 use nom_sql::Operator;
 use flow::core::DataType;

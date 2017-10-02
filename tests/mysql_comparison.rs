@@ -272,27 +272,21 @@ fn check_query(
     target: &BTreeMap<String, Vec<Vec<String>>>,
 ) -> Result<(), String> {
     let mut g = Blender::new();
-    let recipe;
-    {
-        // migrate
-        let mut mig = g.start_migration();
-
+    let recipe = g.migrate(|mig| {
         let queries: Vec<_> = tables
             .values()
             .map(|t| t.create_query.clone())
             .chain(Some(query_name.to_owned() + ": " + &query.select_query))
             .collect();
 
-        recipe = match Recipe::from_str(&queries.join("\n"), None) {
+        match Recipe::from_str(&queries.join("\n"), None) {
             Ok(mut recipe) => {
-                recipe.activate(&mut mig, false).unwrap();
+                recipe.activate(mig, false).unwrap();
                 recipe
             }
             Err(e) => panic!(e),
-        };
-
-        mig.commit();
-    }
+        }
+    });
 
     for (table_name, table) in tables.iter() {
         let mut mutator = g.get_mutator(recipe.node_addr_for(table_name).unwrap());
