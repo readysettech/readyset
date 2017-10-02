@@ -7,7 +7,7 @@ use std::env;
 
 use std::collections::HashMap;
 
-const DEFAULT_SETTLE_TIME_MS: u64 = 500;
+const DEFAULT_SETTLE_TIME_MS: u64 = 100;
 
 fn get_settle_time() -> time::Duration {
     let settle_time: u64 = match env::var("SETTLE_TIME") {
