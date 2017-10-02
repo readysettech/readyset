@@ -3,3 +3,5 @@ language: rust
 rust:
   - nightly
 cache: cargo
+env:
+  - SETTLE_TIME=2000
