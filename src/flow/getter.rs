@@ -132,6 +132,11 @@ impl Getter {
         })
     }
 
+    /// Returns the number of populated keys
+    pub fn len(&self) -> usize {
+        self.handle.len()
+    }
+
     /// Returns true if this getter supports transactional reads.
     pub fn supports_transactions(&self) -> bool {
         self.generator.is_some()

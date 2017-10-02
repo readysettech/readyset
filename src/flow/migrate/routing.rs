@@ -274,7 +274,7 @@ pub fn connect(
 
                 let shards = domains[&n.domain()].shards();
                 let domain = domains.get_mut(&sender_node.domain()).unwrap();
-                if shards != 1 && sender_node.sharded_by() != Sharding::None {
+                if shards != 1 && !sender_node.sharded_by().is_none() {
                     // we need to be a bit careful here in the particular case where we have a
                     // sharded egress that sends to another domain sharded by the same key.
                     // specifically, in that case we shouldn't have each shard of domain A send to

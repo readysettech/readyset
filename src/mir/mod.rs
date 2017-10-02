@@ -18,6 +18,7 @@ use sql::QueryFlowParts;
 pub mod reuse;
 mod rewrite;
 mod optimize;
+pub mod visualize;
 
 #[derive(Clone, Debug)]
 pub enum FlowNode {
@@ -170,30 +171,14 @@ impl Display for MirQuery {
             in_edge_counts.insert(n.borrow().versioned_name(), 0);
         }
 
-        writeln!(f, "digraph {{")?;
-        writeln!(f, "node [shape=record, fontsize=10]")?;
-
         while !node_queue.is_empty() {
             let n = node_queue.pop_front().unwrap();
             assert_eq!(in_edge_counts[&n.borrow().versioned_name()], 0);
 
-            let vn = n.borrow().versioned_name();
-            writeln!(
-                f,
-                "\"{}\" [label=\"{{ {} | {} }}\"]",
-                vn,
-                vn,
-                n.borrow()
-                    .columns()
-                    .iter()
-                    .map(|c| c.name.as_str())
-                    .collect::<Vec<_>>()
-                    .join(", \\n")
-            )?;
+            writeln!(f, "{} MIR node {:?}", self.name, n.borrow())?;
 
             for child in n.borrow().children.iter() {
                 let nd = child.borrow().versioned_name();
-                writeln!(f, "\"{}\" -> \"{}\"", n.borrow().versioned_name(), nd)?;
                 let in_edges = if in_edge_counts.contains_key(&nd) {
                     in_edge_counts[&nd]
                 } else {
@@ -207,7 +192,6 @@ impl Display for MirQuery {
                 in_edge_counts.insert(nd, in_edges - 1);
             }
         }
-        write!(f, "}}")?;
 
         Ok(())
     }
@@ -376,7 +360,14 @@ impl MirNode {
     }
 
     pub fn add_column(&mut self, c: Column) {
-        self.columns.push(c.clone());
+        match self.inner {
+            // the aggregation column must always be the last column
+            MirNodeType::Aggregation { .. } => {
+                let pos = self.columns.len() - 1;
+                self.columns.insert(pos, c.clone());
+            }
+            _ => self.columns.push(c.clone()),
+        }
         self.inner.add_column(c);
     }
 
@@ -403,15 +394,18 @@ impl MirNode {
             MirNodeType::Base {
                 ref column_specs, ..
             } => match column_specs.iter().rposition(|cs| cs.0.column == *c) {
-                None => panic!("tried to look up non-existent column {:?}", c),
+                None => panic!("tried to look up non-existent column {:?} in {}", c, self.name),
                 Some(id) => column_specs[id]
                     .1
                     .expect("must have an absolute column ID on base"),
             },
             MirNodeType::Reuse { ref node } => node.borrow().column_id_for_column(c),
             // otherwise, just look up in the column set
-            _ => match self.columns.iter().position(|cc| cc == c) {
-                None => panic!("tried to look up non-existent column {:?}", c.name),
+            _ => match self.columns.iter().position(|cc| cc.name == c.name && cc.table == c.table) {
+                None => {
+                        println!("{:?}, {:?}", c, self.columns );
+                        panic!("tried to look up non-existent column {:?}", c.name);
+                }
                 Some(id) => id,
             },
         }
@@ -906,6 +900,22 @@ impl MirNodeType {
                     _ => false,
                 }
             }
+            MirNodeType::Extremum {
+                on: ref our_on,
+                group_by: ref our_group_by,
+                kind: ref our_kind,
+            } => {
+                match *other {
+                    MirNodeType::Extremum {
+                        ref on,
+                        ref group_by,
+                        ref kind,
+                    } => {
+                        our_on == on && our_group_by == group_by && our_kind == kind
+                    }
+                    _ => false,
+                }
+            }
             MirNodeType::Filter {
                 conditions: ref our_conditions,
             } => match *other {
@@ -977,6 +987,12 @@ impl MirNodeType {
             },
             _ => unimplemented!(),
         }
+    }
+}
+
+impl Display for MirNode {
+    fn fmt(&self, f: &mut Formatter) -> Result<(), Error> {
+        write!(f, "{}", self.inner.description())
     }
 }
 
@@ -1169,7 +1185,12 @@ impl Debug for MirNodeType {
                     format!("")
                 }
             ),
-            MirNodeType::Reuse { ref node } => write!(f, "Reuse [{:#?}]", node),
+            MirNodeType::Reuse { ref node } => write!(
+                f,
+                "Reuse [{}: {}]",
+                node.borrow().versioned_name(),
+                node.borrow()
+            ),
             MirNodeType::TopK {
                 ref order, ref k, ..
             } => write!(f, "TopK [k: {}, {:?}]", k, order),
@@ -1359,9 +1380,9 @@ fn make_grouped_node(
 ) -> FlowNode {
     assert!(group_by.len() > 0);
     assert!(
-        group_by.len() <= 4,
+        group_by.len() <= 6,
         format!(
-            "can't have >4 group columns due to compound key restrictions, {} needs {}",
+            "can't have >6 group columns due to compound key restrictions, {} needs {}",
             name,
             group_by.len()
         )

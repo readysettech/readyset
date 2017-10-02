@@ -1,6 +1,7 @@
 use nom_sql::parser as sql_parser;
 use nom_sql::SqlQuery;
 use {Migration, SqlIncorporator};
+use sql::reuse::ReuseConfigType;
 use flow::prelude::NodeIndex;
 
 use slog;
@@ -91,6 +92,16 @@ impl Recipe {
     /// By default, all log messages are discarded.
     pub fn log_with(&mut self, log: slog::Logger) {
         self.log = log;
+    }
+
+    /// Disable node reuse.
+    pub fn disable_reuse(&mut self) {
+        self.inc.as_mut().unwrap().disable_reuse();
+    }
+
+    /// Enable reuse
+    pub fn enable_reuse(&mut self, reuse_type: ReuseConfigType) {
+        self.inc.as_mut().unwrap().enable_reuse(reuse_type)
     }
 
     /// Obtains the `NodeIndex` for the node corresponding to a named query or a write type.
@@ -321,6 +332,8 @@ impl Recipe {
             new.expressions.insert(qid, q);
             new.expression_order.push(qid);
         }
+
+        new.aliases.extend(add_rp.aliases);
 
         // return new recipe as replacement for self
         Ok(new)
