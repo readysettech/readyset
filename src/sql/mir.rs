@@ -7,8 +7,8 @@ use mir::query::MirQuery;
 pub use mir::to_flow::FlowNode;
 use ops::join::JoinType;
 
-use nom_sql::{ArithmeticExpression, Column, ColumnSpecification, ConditionBase, ConditionExpression, ConditionTree,
-              Literal, Operator, SqlQuery, TableKey};
+use nom_sql::{ArithmeticExpression, Column, ColumnSpecification, ConditionBase,
+              ConditionExpression, ConditionTree, Literal, Operator, SqlQuery, TableKey};
 use nom_sql::{LimitClause, OrderClause, SelectStatement};
 use sql::query_graph::{JoinRef, OutputColumn, QueryGraph, QueryGraphEdge};
 
@@ -1344,7 +1344,7 @@ impl SqlToMirConverter {
                 .filter_map(|oc| match *oc {
                     OutputColumn::Arithmetic(ref ac) => {
                         Some((ac.name.clone(), ac.expression.clone()))
-                    },
+                    }
                     OutputColumn::Data(_) => None,
                     OutputColumn::Literal(_) => None,
                 })
@@ -1361,8 +1361,13 @@ impl SqlToMirConverter {
                 .collect();
 
             let ident = format!("q_{:x}_n{}", qg.signature().hash, new_node_count);
-            let leaf_project_node =
-                self.make_project_node(&ident, final_node, projected_columns, projected_arithmetic, projected_literals);
+            let leaf_project_node = self.make_project_node(
+                &ident,
+                final_node,
+                projected_columns,
+                projected_arithmetic,
+                projected_literals,
+            );
             nodes_added.push(leaf_project_node.clone());
 
             // We always materialize leaves of queries (at least currently), so add a

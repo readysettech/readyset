@@ -37,7 +37,9 @@ impl StarExpansion for SqlQuery {
                         let v: Vec<_> = expand_table(t).collect();
                         v.into_iter()
                     }
-                    FieldExpression::Arithmetic(a) => vec![FieldExpression::Arithmetic(a)].into_iter(),
+                    FieldExpression::Arithmetic(a) => {
+                        vec![FieldExpression::Arithmetic(a)].into_iter()
+                    }
                     FieldExpression::Literal(l) => vec![FieldExpression::Literal(l)].into_iter(),
                     FieldExpression::Col(c) => vec![FieldExpression::Col(c)].into_iter(),
                 })

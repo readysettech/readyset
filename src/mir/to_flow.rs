@@ -393,13 +393,15 @@ pub(crate) fn make_project_node(
 
     let (_, literal_values): (Vec<_>, Vec<_>) = literals.iter().cloned().unzip();
 
-        let projected_arithmetic: Vec<ProjectExpression> = arithmetic
+    let projected_arithmetic: Vec<ProjectExpression> = arithmetic
         .iter()
-        .map(|&(_, ref e)| ProjectExpression::new(
-            e.op.clone(),
-            generate_projection_base(&parent, &e.left),
-            generate_projection_base(&parent, &e.right),
-        ))
+        .map(|&(_, ref e)| {
+            ProjectExpression::new(
+                e.op.clone(),
+                generate_projection_base(&parent, &e.left),
+                generate_projection_base(&parent, &e.right),
+            )
+        })
         .collect();
 
     let n = mig.add_ingredient(

@@ -1,5 +1,5 @@
-use nom_sql::{ArithmeticBase, Column, ConditionExpression, ConditionTree, FieldExpression, JoinRightSide,
-              SqlQuery, Table};
+use nom_sql::{ArithmeticBase, Column, ConditionExpression, ConditionTree, FieldExpression,
+              JoinRightSide, SqlQuery, Table};
 
 use std::collections::HashMap;
 

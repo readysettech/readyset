@@ -254,7 +254,14 @@ macro_rules! arithmetic_operation (
                 let b: f64 = second.into();
                 (a $op b).into()
             }
-            (first, second) => panic!(format!("can't {} a {:?} and {:?}", stringify!($op), first, second)),
+            (first, second) => panic!(
+                format!(
+                    "can't {} a {:?} and {:?}",
+                    stringify!($op),
+                    first,
+                    second,
+                )
+            ),
         }
     );
 );

@@ -369,7 +369,9 @@ fn it_works_with_join_arithmetic() {
     let fraction = 0.7;
     car_mutator.put(vec![id.into(), id.into()]).unwrap();
     price_mutator.put(vec![id.into(), price.into()]).unwrap();
-    sales_mutator.put(vec![id.into(), id.into(), fraction.into()]).unwrap();
+    sales_mutator
+        .put(vec![id.into(), id.into(), fraction.into()])
+        .unwrap();
 
     // Let writes propagate:
     thread::sleep(time::Duration::from_millis(SETTLE_TIME_MS));

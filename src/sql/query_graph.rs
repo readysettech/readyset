@@ -676,11 +676,10 @@ pub fn to_query_graph(st: &SelectStatement) -> Result<QueryGraph, String> {
             Some(_) => {
                 // add a special node representing the computed columns; if it already
                 // exists, add another computed column to it
-                let n = query_graph.relations
+                let n = query_graph
+                    .relations
                     .entry(String::from("computed_columns"))
-                    .or_insert_with(
-                        || new_node(String::from("computed_columns"), vec![], st),
-                    );
+                    .or_insert_with(|| new_node(String::from("computed_columns"), vec![], st));
 
                 n.columns.push(column.clone());
             }

@@ -168,19 +168,15 @@ impl Ingredient for Project {
                     new_r.push(r[*i].clone());
                 }
                 match self.expressions {
-                    Some(ref e) => {
-                        for i in e {
-                            new_r.push(self.eval_expression(i, r));
-                        }
-                    }
+                    Some(ref e) => for i in e {
+                        new_r.push(self.eval_expression(i, r));
+                    },
                     None => (),
                 }
                 match self.additional {
-                    Some(ref a) => {
-                        for i in a {
-                            new_r.push(i.clone());
-                        }
-                    }
+                    Some(ref a) => for i in a {
+                        new_r.push(i.clone());
+                    },
                     None => (),
                 }
                 **r = new_r;

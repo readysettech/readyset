@@ -204,7 +204,7 @@ impl SqlIncorporator {
                             }
 
                             !is_function
-                        },
+                        }
                         OutputColumn::Data(ref dc) => dc.function.is_none(),
                     }) {
                         // QGs are identical, except for parameters (or their order)
@@ -1021,10 +1021,7 @@ mod tests {
             assert_eq!(mig.graph().node_count(), ncount + 2);
             // only the projection node is returned in the vector of new nodes
             assert_eq!(qfp.new_nodes.len(), 1);
-            assert_eq!(
-                get_node(&inc, mig, &qfp.name).description(),
-                "π[0, 1, 2]"
-            );
+            assert_eq!(get_node(&inc, mig, &qfp.name).description(), "π[0, 1, 2]");
             // we should be based off the new projection as our leaf
             let id_node = qfp.new_nodes.iter().next().unwrap();
             assert_eq!(qfp.query_leaf, *id_node);
@@ -1278,11 +1275,8 @@ mod tests {
         let mut inc = SqlIncorporator::default();
         g.migrate(|mig| {
             assert!(
-                inc.add_query(
-                    "CREATE TABLE users (id int, age int);",
-                    None,
-                    mig
-                ).is_ok()
+                inc.add_query("CREATE TABLE users (id int, age int);", None, mig)
+                    .is_ok()
             );
 
             let res = inc.add_query("SELECT 2 * users.age FROM users;", None, mig);
