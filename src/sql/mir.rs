@@ -1,8 +1,10 @@
 use flow::core::DataType;
 use flow::prelude::NodeIndex;
-use mir::{GroupedNodeType, MirNode, MirNodeType};
+pub use mir::MirNodeRef;
+use mir::node::{GroupedNodeType, MirNode, MirNodeType};
+use mir::query::MirQuery;
 // TODO(malte): remove if possible
-pub use mir::{MirNodeRef, MirQuery};
+pub use mir::to_flow::FlowNode;
 use security::{Policy};
 use ops::join::JoinType;
 
@@ -282,7 +284,7 @@ impl SqlToMirConverter {
         let nodes = self.make_nodes_for_selection(&name, sq, qg, universe);
         let mut roots = Vec::new();
         let mut leaves = Vec::new();
-        for (i, mn) in nodes.into_iter().enumerate() {
+        for mn in nodes.into_iter() {
             let node_id = (String::from(mn.borrow().name()), self.schema_version);
             // only add the node if we don't have it registered at this schema version already. If
             // we don't do this, we end up adding the node again for every re-use of it, with
@@ -290,16 +292,6 @@ impl SqlToMirConverter {
             if !self.nodes.contains_key(&node_id) {
                 self.nodes.insert(node_id, mn.clone());
             }
-
-            trace!(
-                self.log,
-                "{} MIR node {} ({}, v{}): {:?}",
-                name,
-                i,
-                mn.borrow().name(),
-                self.schema_version,
-                mn
-            );
 
             if mn.borrow().ancestors().len() == 0 {
                 // root
@@ -434,7 +426,7 @@ impl SqlToMirConverter {
                         // remember the schema for this version
                         let base_schemas = self.base_schemas
                             .entry(String::from(name))
-                            .or_insert(Vec::new());
+                            .or_default();
                         base_schemas.push((self.schema_version, columns.clone()));
 
                         return MirNode::adapt_base(existing_node, columns_added, columns_removed);
@@ -469,7 +461,7 @@ impl SqlToMirConverter {
         // remember the schema for this version
         let base_schemas = self.base_schemas
             .entry(String::from(name))
-            .or_insert(Vec::new());
+            .or_default();
         base_schemas.push((self.schema_version, cols.clone()));
 
         // make node
@@ -1348,7 +1340,7 @@ impl SqlToMirConverter {
                     for col in cols {
                         column_to_predicates
                             .entry(col)
-                            .or_insert(Vec::new())
+                            .or_default()
                             .push(pred);
                     }
                 }

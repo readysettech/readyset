@@ -306,22 +306,23 @@ fn classify_conditionals(
             );
 
             match ct.operator {
-                Operator::And => {
-                    for (t, ces) in new_local {
-                        assert!(ces.len() <= 2, "can only combine two or fewer ConditionExpression's");
-                        if ces.len() == 2 {
-                            let new_ce = ConditionExpression::LogicalOp(ConditionTree {
-                                operator: Operator::And,
-                                left: Box::new(ces.first().unwrap().clone()),
-                                right: Box::new(ces.last().unwrap().clone()),
-                            });
+                Operator::And => for (t, ces) in new_local {
+                    assert!(
+                        ces.len() <= 2,
+                        "can only combine two or fewer ConditionExpression's"
+                    );
+                    if ces.len() == 2 {
+                        let new_ce = ConditionExpression::LogicalOp(ConditionTree {
+                            operator: Operator::And,
+                            left: Box::new(ces.first().unwrap().clone()),
+                            right: Box::new(ces.last().unwrap().clone()),
+                        });
 
-                            let e = local.entry(t.to_string()).or_insert(Vec::new());
-                            e.push(new_ce);
-                        } else {
-                            let e = local.entry(t.to_string()).or_insert(Vec::new());
-                            e.extend(ces);
-                        }
+                        let e = local.entry(t.to_string()).or_default();
+                        e.push(new_ce);
+                    } else {
+                        let e = local.entry(t.to_string()).or_default();
+                        e.extend(ces);
                     }
                 },
                 Operator::Or => {
@@ -336,7 +337,7 @@ fn classify_conditionals(
                             right: Box::new(ces.last().unwrap().clone()),
                         });
 
-                        let e = local.entry(t.to_string()).or_insert(Vec::new());
+                        let e = local.entry(t.to_string()).or_default();
                         e.push(new_ce);
                     }
                 }
@@ -382,7 +383,7 @@ fn classify_conditionals(
                                 // and thus all columns carry table names
                                 assert!(lf.table.is_some());
                                 let e =
-                                    local.entry(lf.table.clone().unwrap()).or_insert(Vec::new());
+                                    local.entry(lf.table.clone().unwrap()).or_default();
                                 e.push(ce.clone());
                             }
                         }

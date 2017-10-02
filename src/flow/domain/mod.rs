@@ -248,7 +248,7 @@ impl Domain {
                 // remember to notify this Redo when backfill completes
                 if e.into_mut().insert(redo.clone()) {
                     // this Redo should wait for this backfill to complete before redoing
-                    w.holes.entry(redo).or_insert(0).add_assign(1);
+                    w.holes.entry(redo).or_default().add_assign(1);
                 }
                 redundant = true;
             }
@@ -259,7 +259,7 @@ impl Domain {
                 redos.insert(redo.clone());
                 e.insert(redos);
                 // this Redo should wait for this backfill to complete before redoing
-                w.holes.entry(redo).or_insert(0).add_assign(1);
+                w.holes.entry(redo).or_default().add_assign(1);
             }
         }
 

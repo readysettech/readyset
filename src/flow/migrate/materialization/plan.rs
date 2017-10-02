@@ -118,7 +118,7 @@ impl<'a> Plan<'a> {
             // non-partial views should not have one replay path per index. that would cause us to
             // replay several times, even though one full replay should always be sufficient.
             // we do need to keep track of the fact that there should be an index here though.
-            self.tags.entry(index_on).or_insert_with(Vec::new);
+            self.tags.entry(index_on).or_default();
             return;
         }
 
@@ -152,7 +152,7 @@ impl<'a> Plan<'a> {
                         self.m
                             .domains_on_path
                             .entry(tag.clone())
-                            .or_insert_with(Vec::new)
+                            .or_default()
                             .push(domain);
                     }
                 }
@@ -297,7 +297,7 @@ impl<'a> Plan<'a> {
 
         self.tags
             .entry(index_on)
-            .or_insert_with(Vec::new)
+            .or_default()
             .extend(tags);
     }
 
