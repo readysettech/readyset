@@ -16,7 +16,7 @@ use self::mir::{MirNodeRef, SqlToMirConverter};
 use mir::query::MirQuery;
 use self::reuse::{ReuseConfig, ReuseConfigType};
 use sql::query_graph::{to_query_graph, QueryGraph};
-use security::{Policy};
+use security::Policy;
 
 use slog;
 use std::collections::HashMap;
@@ -113,7 +113,8 @@ impl SqlIncorporator {
         mig: &mut Migration,
     ) -> Result<QueryFlowParts, String> {
         // First, we need to create a UserContext base node.
-        let context = mig.user_context().expect("Migration must have user context");
+        let context = mig.user_context()
+            .expect("Migration must have user context");
         let uid = context.get("id").expect("Context must have id").clone();
 
         info!(self.log, "Starting user universe {}", uid);
@@ -143,7 +144,7 @@ impl SqlIncorporator {
             let predicate = self.rewrite_query(policy.predicate.clone(), false, mig);
             let st = match predicate {
                 SqlQuery::Select(ref st) => st,
-                _ => unreachable!()
+                _ => unreachable!(),
             };
 
             // TODO(larat): currently we only support policies with a single predicate. These can be
@@ -235,11 +236,13 @@ impl SqlIncorporator {
         match self.mir_queries.get(&(qg_hash, universe.clone())) {
             None => (),
             Some(ref mir_query) => {
-                let existing_qg = self.query_graphs.get(&qg_hash).expect("query graph should be present");
+                let existing_qg = self.query_graphs
+                    .get(&qg_hash)
+                    .expect("query graph should be present");
                 // note that this also checks the *order* in which parameters are specified; a
                 // different order means that we cannot simply reuse the existing reader.
-                if existing_qg.signature() == qg.signature() &&
-                    existing_qg.parameters() == qg.parameters()
+                if existing_qg.signature() == qg.signature()
+                    && existing_qg.parameters() == qg.parameters()
                 {
                     // we already have this exact query, down to the exact same reader key columns
                     // in exactly the same order
@@ -341,11 +344,12 @@ impl SqlIncorporator {
                 reuse_candidates
             );
 
-            let mir_queries: Vec<MirQuery> = reuse_candidates.iter()
-            .map(|c| {
-                self.mir_queries[&(c.1.signature().hash, "global".into())].clone()
-            })
-            .collect();
+            let mir_queries: Vec<MirQuery> = reuse_candidates
+                .iter()
+                .map(|c| {
+                    self.mir_queries[&(c.1.signature().hash, "global".into())].clone()
+                })
+                .collect();
 
             return (qg, QueryGraphReuse::ExtendExisting(mir_queries));
         } else {
@@ -441,8 +445,9 @@ impl SqlIncorporator {
         let universe = mig.universe();
         // no QG-level reuse possible, so we'll build a new query.
         // first, compute the MIR representation of the SQL query
-        let mut mir = self.mir_converter
-            .named_query_to_mir(query_name, query, &qg, universe.clone());
+        let mut mir =
+            self.mir_converter
+                .named_query_to_mir(query_name, query, &qg, universe.clone());
 
         trace!(self.log, "Unoptimized MIR:\n{}", mir.to_graphviz().unwrap());
 
@@ -488,8 +493,9 @@ impl SqlIncorporator {
 
         // no QG-level reuse possible, so we'll build a new query.
         // first, compute the MIR representation of the SQL query
-        let new_query_mir = self.mir_converter
-            .named_query_to_mir(query_name, query, &qg, universe.clone());
+        let new_query_mir =
+            self.mir_converter
+                .named_query_to_mir(query_name, query, &qg, universe.clone());
         // TODO(malte): should we run the MIR-level optimizations here?
         let new_opt_mir = new_query_mir.optimize();
 
@@ -503,10 +509,11 @@ impl SqlIncorporator {
         let mut reused_mir = new_opt_mir.clone();
         let mut num_reused_nodes = 0;
         for m in reuse_mirs {
-            let res =
-                merge_mir_for_queries(&self.log, &reused_mir, &m);
+            let res = merge_mir_for_queries(&self.log, &reused_mir, &m);
             reused_mir = res.0;
-            if res.1 > num_reused_nodes { num_reused_nodes = res.1; }
+            if res.1 > num_reused_nodes {
+                num_reused_nodes = res.1;
+            }
         }
 
         let mut post_reuse_opt_mir = reused_mir.optimize_post_reuse();
@@ -529,7 +536,8 @@ impl SqlIncorporator {
         // We made a new query, so store the query graph and the corresponding leaf MIR node
         let qg_hash = qg.signature().hash;
         self.query_graphs.insert(qg_hash, qg);
-        self.mir_queries.insert((qg_hash, universe), post_reuse_opt_mir);
+        self.mir_queries
+            .insert((qg_hash, universe), post_reuse_opt_mir);
 
         qfp
     }
@@ -549,10 +557,11 @@ impl SqlIncorporator {
     }
 
     /// Runs some standard rewrite passes on the query.
-    fn rewrite_query(&mut self,
+    fn rewrite_query(
+        &mut self,
         q: SqlQuery,
         policy_enhanced: bool,
-        mig: &mut Migration
+        mig: &mut Migration,
     ) -> SqlQuery {
         use sql::passes::alias_removal::AliasRemoval;
         use sql::passes::count_star_rewrite::CountStarRewrite;
@@ -610,8 +619,7 @@ impl SqlIncorporator {
             // does, we will amend or reuse it; if it does not, we create it.
             SqlQuery::CreateTable(_) => (),
             // other kinds of queries *do* require their referred tables to exist!
-            ref q @ SqlQuery::Select(_) |
-            ref q @ SqlQuery::Insert(_) => {
+            ref q @ SqlQuery::Select(_) | ref q @ SqlQuery::Insert(_) => {
                 for t in &q.referred_tables() {
                     if !self.view_schemas.contains_key(&t.name) {
                         panic!("query refers to unknown table \"{}\"", t.name);
@@ -623,7 +631,7 @@ impl SqlIncorporator {
         // Get universe id for table alias expansion.
         let uid = match mig.user_context() {
             Some(ctx) => Some(ctx.get("id").unwrap().clone()),
-            None => None
+            None => None,
         };
 
         // Run some standard rewrite passes on the query. This makes the later work easier,
@@ -642,7 +650,6 @@ impl SqlIncorporator {
         policy_enhanced: bool,
         mig: &mut Migration,
     ) -> Result<QueryFlowParts, String> {
-
         self.num_queries += 1;
         let q = self.rewrite_query(q, policy_enhanced, mig);
 

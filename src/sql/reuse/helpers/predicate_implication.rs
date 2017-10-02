@@ -3,54 +3,42 @@ use nom_sql::ConditionExpression::*;
 
 fn direct_elimination(op1: &Operator, op2: &Operator) -> Option<Operator> {
     match *op1 {
-        Operator::Equal => {
-            match *op2 {
-                Operator::Equal => Some(Operator::Equal),
-                Operator::Less => Some(Operator::Less),
-                Operator::Greater => Some(Operator::Greater),
-                _ => unimplemented!(),
-            }
-        }
-        Operator::NotEqual => {
-            match *op2 {
-                Operator::Equal => Some(Operator::NotEqual),
-                Operator::Less => None,
-                Operator::Greater => None,
-                _ => unimplemented!(),
-            }
-        }
-        Operator::Less => {
-            match *op2 {
-                Operator::Equal => Some(Operator::Less),
-                Operator::Less => Some(Operator::Less),
-                Operator::Greater => None,
-                _ => unimplemented!(),
-            }
-        }
-        Operator::LessOrEqual => {
-            match *op2 {
-                Operator::Equal => Some(Operator::LessOrEqual),
-                Operator::Less => Some(Operator::LessOrEqual),
-                Operator::Greater => None,
-                _ => unimplemented!(),
-            }
-        }
-        Operator::Greater => {
-            match *op2 {
-                Operator::Equal => Some(Operator::Greater),
-                Operator::Less => None,
-                Operator::Greater => Some(Operator::Greater),
-                _ => unimplemented!(),
-            }
-        }
-        Operator::GreaterOrEqual => {
-            match *op2 {
-                Operator::Equal => Some(Operator::GreaterOrEqual),
-                Operator::Less => None,
-                Operator::Greater => Some(Operator::Greater),
-                _ => unimplemented!(),
-            }
-        }
+        Operator::Equal => match *op2 {
+            Operator::Equal => Some(Operator::Equal),
+            Operator::Less => Some(Operator::Less),
+            Operator::Greater => Some(Operator::Greater),
+            _ => unimplemented!(),
+        },
+        Operator::NotEqual => match *op2 {
+            Operator::Equal => Some(Operator::NotEqual),
+            Operator::Less => None,
+            Operator::Greater => None,
+            _ => unimplemented!(),
+        },
+        Operator::Less => match *op2 {
+            Operator::Equal => Some(Operator::Less),
+            Operator::Less => Some(Operator::Less),
+            Operator::Greater => None,
+            _ => unimplemented!(),
+        },
+        Operator::LessOrEqual => match *op2 {
+            Operator::Equal => Some(Operator::LessOrEqual),
+            Operator::Less => Some(Operator::LessOrEqual),
+            Operator::Greater => None,
+            _ => unimplemented!(),
+        },
+        Operator::Greater => match *op2 {
+            Operator::Equal => Some(Operator::Greater),
+            Operator::Less => None,
+            Operator::Greater => Some(Operator::Greater),
+            _ => unimplemented!(),
+        },
+        Operator::GreaterOrEqual => match *op2 {
+            Operator::Equal => Some(Operator::GreaterOrEqual),
+            Operator::Less => None,
+            Operator::Greater => Some(Operator::Greater),
+            _ => unimplemented!(),
+        },
         _ => None,
     }
 }
@@ -86,18 +74,18 @@ where
 
 pub fn predicate_is_equivalent(np: &ConditionTree, ep: &ConditionTree) -> bool {
     let nl_col = match *np.left {
-            ConditionExpression::Base(ConditionBase::Field(ref f)) => f.clone(),
-            _ => unimplemented!(),
-        };
+        ConditionExpression::Base(ConditionBase::Field(ref f)) => f.clone(),
+        _ => unimplemented!(),
+    };
     let nr_col = match *np.right {
         ConditionExpression::Base(ConditionBase::Field(ref f)) => f.clone(),
         _ => unimplemented!(),
     };
 
     let el_col = match *ep.left {
-            ConditionExpression::Base(ConditionBase::Field(ref f)) => f.clone(),
-            _ => unimplemented!(),
-        };
+        ConditionExpression::Base(ConditionBase::Field(ref f)) => f.clone(),
+        _ => unimplemented!(),
+    };
     let er_col = match *ep.right {
         ConditionExpression::Base(ConditionBase::Field(ref f)) => f.clone(),
         _ => unimplemented!(),
@@ -111,44 +99,41 @@ pub fn complex_predicate_implies(np: &ConditionExpression, ep: &ConditionExpress
     match *ep {
         LogicalOp(ref ect) => {
             match *np {
-                LogicalOp(ref nct) => {
-                    if nct.operator == ect.operator {
-                        return (complex_predicate_implies(&*nct.left, &*ect.left) && complex_predicate_implies(&*nct.right, &*ect.right)) ||
-                                (complex_predicate_implies(&*nct.left, &*ect.right) && complex_predicate_implies(&*nct.right, &*ect.left));
-                    }
-                }
+                LogicalOp(ref nct) => if nct.operator == ect.operator {
+                    return (complex_predicate_implies(&*nct.left, &*ect.left)
+                        && complex_predicate_implies(&*nct.right, &*ect.right))
+                        || (complex_predicate_implies(&*nct.left, &*ect.right)
+                            && complex_predicate_implies(&*nct.right, &*ect.left));
+                },
                 _ => (),
             }
 
             match ect.operator {
                 Operator::And => {
-                    complex_predicate_implies(np, &*ect.left) && complex_predicate_implies(np, &*ect.right)
+                    complex_predicate_implies(np, &*ect.left)
+                        && complex_predicate_implies(np, &*ect.right)
                 }
                 Operator::Or => {
-                    complex_predicate_implies(np, &*ect.left) || complex_predicate_implies(np, &*ect.right)
-                }
-                _ => unreachable!()
-            }
-
-        },
-        ComparisonOp(ref ect) => {
-            match *np {
-                LogicalOp(ref nct) => {
-                    match nct.operator {
-                        Operator::And => {
-                            complex_predicate_implies(&*nct.left, ep) || complex_predicate_implies(&*nct.right, ep)
-                        }
-                        Operator::Or => {
-                            complex_predicate_implies(&*nct.left, ep) && complex_predicate_implies(&*nct.right, ep)
-                        }
-                        _ => unreachable!()
-                    }
-                }
-                ComparisonOp(ref nct) => {
-                    nct.left == ect.left && predicate_implies(nct, ect)
+                    complex_predicate_implies(np, &*ect.left)
+                        || complex_predicate_implies(np, &*ect.right)
                 }
                 _ => unreachable!(),
             }
+        }
+        ComparisonOp(ref ect) => match *np {
+            LogicalOp(ref nct) => match nct.operator {
+                Operator::And => {
+                    complex_predicate_implies(&*nct.left, ep)
+                        || complex_predicate_implies(&*nct.right, ep)
+                }
+                Operator::Or => {
+                    complex_predicate_implies(&*nct.left, ep)
+                        && complex_predicate_implies(&*nct.right, ep)
+                }
+                _ => unreachable!(),
+            },
+            ComparisonOp(ref nct) => nct.left == ect.left && predicate_implies(nct, ect),
+            _ => unreachable!(),
         },
         _ => unreachable!(),
     }
@@ -244,21 +229,21 @@ mod tests {
         let cp1 = LogicalOp(ConditionTree {
             left: Box::new(pa.clone()),
             right: Box::new(pb.clone()),
-            operator: Operator::Or
+            operator: Operator::Or,
         });
 
         // a < 10 or a > 80
         let cp2 = LogicalOp(ConditionTree {
             left: Box::new(pc),
             right: Box::new(pd),
-            operator: Operator::Or
+            operator: Operator::Or,
         });
 
         // a > 60 or a < 20
         let cp3 = LogicalOp(ConditionTree {
             left: Box::new(pb),
             right: Box::new(pa),
-            operator: Operator::Or
+            operator: Operator::Or,
         });
 
 
@@ -298,21 +283,21 @@ mod tests {
         let cp1 = LogicalOp(ConditionTree {
             left: Box::new(pa.clone()),
             right: Box::new(pb.clone()),
-            operator: Operator::And
+            operator: Operator::And,
         });
 
         // a > 10 and a < 80
         let cp2 = LogicalOp(ConditionTree {
             left: Box::new(pc),
             right: Box::new(pd),
-            operator: Operator::And
+            operator: Operator::And,
         });
 
         // a < 60 and a > 20
         let cp3 = LogicalOp(ConditionTree {
             left: Box::new(pb),
             right: Box::new(pa),
-            operator: Operator::And
+            operator: Operator::And,
         });
 
 
@@ -342,7 +327,7 @@ mod tests {
         let cp1 = LogicalOp(ConditionTree {
             left: Box::new(pa.clone()),
             right: Box::new(pb.clone()),
-            operator: Operator::Or
+            operator: Operator::Or,
         });
 
 
@@ -372,7 +357,7 @@ mod tests {
         let cp1 = LogicalOp(ConditionTree {
             left: Box::new(pa.clone()),
             right: Box::new(pb.clone()),
-            operator: Operator::And
+            operator: Operator::And,
         });
 
 
@@ -382,4 +367,3 @@ mod tests {
         assert!(complex_predicate_implies(&cp1, &pb));
     }
 }
-

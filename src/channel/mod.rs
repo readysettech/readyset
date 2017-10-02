@@ -4,7 +4,7 @@ use std::hash::Hash;
 use std::sync::Mutex;
 use std::sync::mpsc::{self, SendError};
 
-use serde::{Serialize, Serializer, Deserialize, Deserializer};
+use serde::{Deserialize, Deserializer, Serialize, Serializer};
 
 #[derive(Debug)]
 pub enum ChannelSender<T> {

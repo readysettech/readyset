@@ -27,7 +27,10 @@ use std::collections::HashMap;
 pub struct Relaxed;
 
 impl ReuseConfiguration for Relaxed {
-    fn reuse_candidates<'a>(qg: &QueryGraph, query_graphs: &'a HashMap<u64, QueryGraph>) -> Vec<(ReuseType, &'a QueryGraph)>{
+    fn reuse_candidates<'a>(
+        qg: &QueryGraph,
+        query_graphs: &'a HashMap<u64, QueryGraph>,
+    ) -> Vec<(ReuseType, &'a QueryGraph)> {
         let mut reuse_candidates = Vec::new();
         for existing_qg in query_graphs.values() {
             if existing_qg
@@ -72,7 +75,9 @@ impl Relaxed {
         for (srcdst, ex_qge) in &existing_qg.edges {
             match *ex_qge {
                 QueryGraphEdge::Join(_) => {
-                    if !new_qg.edges.contains_key(srcdst) { return None; }
+                    if !new_qg.edges.contains_key(srcdst) {
+                        return None;
+                    }
                     let new_qge = &new_qg.edges[srcdst];
                     match *new_qge {
                         QueryGraphEdge::Join(_) => {}
@@ -81,7 +86,9 @@ impl Relaxed {
                     }
                 }
                 QueryGraphEdge::LeftJoin(_) => {
-                    if !new_qg.edges.contains_key(srcdst) { return None; }
+                    if !new_qg.edges.contains_key(srcdst) {
+                        return None;
+                    }
                     let new_qge = &new_qg.edges[srcdst];
                     match *new_qge {
                         QueryGraphEdge::LeftJoin(_) => {}
@@ -89,7 +96,7 @@ impl Relaxed {
                         _ => return None,
                     }
                 }
-                _ => continue
+                _ => continue,
             }
         }
 
@@ -97,7 +104,9 @@ impl Relaxed {
         for (srcdst, ex_qge) in &existing_qg.edges {
             match *ex_qge {
                 QueryGraphEdge::GroupBy(ref ex_columns) => {
-                    if !new_qg.edges.contains_key(srcdst) { return Some(ReuseType::PrefixReuse); }
+                    if !new_qg.edges.contains_key(srcdst) {
+                        return Some(ReuseType::PrefixReuse);
+                    }
                     let new_qge = &new_qg.edges[srcdst];
                     match *new_qge {
                         QueryGraphEdge::GroupBy(ref new_columns) => {
@@ -121,13 +130,15 @@ impl Relaxed {
                         _ => return Some(ReuseType::PrefixReuse),
                     }
                 }
-                _ => continue
+                _ => continue,
             }
         }
 
         // Check that the new query's predicates imply the existing query's predicate.
         for (name, ex_qgn) in &existing_qg.relations {
-            if !new_qg.relations.contains_key(name) { return Some(ReuseType::PrefixReuse); }
+            if !new_qg.relations.contains_key(name) {
+                return Some(ReuseType::PrefixReuse);
+            }
             let new_qgn = &new_qg.relations[name];
 
             // iterate over predicates and ensure that each matching one on the existing QG is implied
@@ -138,7 +149,7 @@ impl Relaxed {
                 for np in &new_qgn.predicates {
                     if complex_predicate_implies(np, ep) {
                         matched = true;
-                        break
+                        break;
                     }
                 }
                 if !matched {

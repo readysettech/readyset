@@ -94,7 +94,6 @@ impl TopK {
         state: &StateMap,
         group: &[DataType],
     ) -> Records {
-
         let mut delta: Vec<Record> = Vec::new();
         let mut current: Vec<&Row<Vec<DataType>>> = current_topk.iter().collect();
         current.sort_by(|a, b| self.order.cmp(&&***a, &&***b));

@@ -4,7 +4,7 @@ use {Migration, SqlIncorporator};
 use sql::reuse::ReuseConfigType;
 use flow::prelude::NodeIndex;
 
-use security::{Policy};
+use security::Policy;
 
 use slog;
 use std::collections::HashMap;
@@ -50,9 +50,9 @@ pub struct Recipe {
 impl PartialEq for Recipe {
     /// Equality for recipes is defined in terms of all members apart from `inc`.
     fn eq(&self, other: &Recipe) -> bool {
-        self.expressions == other.expressions && self.expression_order == other.expression_order &&
-            self.aliases == other.aliases && self.version == other.version &&
-            self.prior == other.prior
+        self.expressions == other.expressions && self.expression_order == other.expression_order
+            && self.aliases == other.aliases && self.version == other.version
+            && self.prior == other.prior
     }
 }
 
@@ -123,13 +123,11 @@ impl Recipe {
                     }
                 };
                 match na {
-                    None => {
-                        Err(format!(
-                            "No query endpoint for \"{}\" exists at v{}.",
-                            name,
-                            self.version
-                        ))
-                    }
+                    None => Err(format!(
+                        "No query endpoint for \"{}\" exists at v{}.",
+                        name,
+                        self.version
+                    )),
                     Some(na) => Ok(na),
                 }
             }
@@ -141,7 +139,11 @@ impl Recipe {
     /// a set of security policies in a string.
     /// Note that the recipe is not backed by a Soup data-flow graph until `activate` is called on
     /// it.
-    pub fn from_str_with_policy(recipe_text: &str, policy_text: Option<&str>, log: Option<slog::Logger>) -> Result<Recipe, String> {
+    pub fn from_str_with_policy(
+        recipe_text: &str,
+        policy_text: Option<&str>,
+        log: Option<slog::Logger>,
+    ) -> Result<Recipe, String> {
         let recipe = match Recipe::from_str(recipe_text, log) {
             Ok(mut r) => {
                 let ps = match policy_text {
@@ -159,7 +161,7 @@ impl Recipe {
                 r.policies = policies;
 
                 Ok(r)
-            },
+            }
             Err(e) => Err(e),
         };
 
@@ -237,17 +239,17 @@ impl Recipe {
     }
 
     /// Creates a new security universe
-    pub fn create_universe(
-        &mut self,
-        mig: &mut Migration,
-    ) -> Result<ActivationResult, String> {
+    pub fn create_universe(&mut self, mig: &mut Migration) -> Result<ActivationResult, String> {
         let mut result = ActivationResult {
             new_nodes: HashMap::default(),
             expressions_added: 0,
             expressions_removed: 0,
         };
 
-        let qfp = self.inc.as_mut().unwrap().start_universe(&self.policies, mig)?;
+        let qfp = self.inc
+            .as_mut()
+            .unwrap()
+            .start_universe(&self.policies, mig)?;
         result.new_nodes.insert(qfp.name.clone(), qfp.query_leaf);
 
         for expr in self.expressions.values() {
@@ -259,13 +261,16 @@ impl Recipe {
                 None => None,
             };
 
-            let qfp = self.inc.as_mut().unwrap().add_parsed_query(q, new_name, true, mig)?;
+            let qfp = self.inc
+                .as_mut()
+                .unwrap()
+                .add_parsed_query(q, new_name, true, mig)?;
 
             // If the user provided us with a query name, use that.
             // If not, use the name internally used by the QFP.
             let query_name = match n {
                 Some(name) => name,
-                None => qfp.name.clone()
+                None => qfp.name.clone(),
             };
 
             result.new_nodes.insert(query_name, qfp.query_leaf);
@@ -319,7 +324,10 @@ impl Recipe {
             let (n, q) = self.expressions[&qid].clone();
 
             // add the query
-            let qfp = self.inc.as_mut().unwrap().add_parsed_query(q, n.clone(), false, mig)?;
+            let qfp = self.inc
+                .as_mut()
+                .unwrap()
+                .add_parsed_query(q, n.clone(), false, mig)?;
 
             // we currently use a domain per query
             // let d = mig.add_domain();
@@ -331,7 +339,7 @@ impl Recipe {
             // If not, use the name internally used by the QFP.
             let query_name = match n {
                 Some(name) => name,
-                None => qfp.name.clone()
+                None => qfp.name.clone(),
             };
 
             result.new_nodes.insert(query_name, qfp.query_leaf);
@@ -498,7 +506,7 @@ impl Recipe {
 
     /// Increments the version of a recipe. Returns the new version number.
     pub fn next(&mut self) -> usize {
-        self.version+=1;
+        self.version += 1;
         self.version
     }
 

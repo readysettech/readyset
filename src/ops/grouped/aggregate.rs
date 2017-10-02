@@ -249,7 +249,7 @@ mod tests {
         // multiple positives and negatives should update aggregation value by appropriate amount
         let rs = c.narrow_one(u, true);
         assert_eq!(rs.len(), 5); // one - and one + for each group, except 3 which is new
-        // group 1 lost 1 and gained 2
+                                 // group 1 lost 1 and gained 2
         assert!(rs.iter().any(|r| if let Record::Negative(ref r) = *r {
             r[0] == 1.into() && r[1] == 1.into()
         } else {

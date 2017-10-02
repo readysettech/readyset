@@ -2,7 +2,7 @@ use std::fmt;
 use std::collections::HashMap;
 use petgraph::graph::NodeIndex;
 
-use serde::{Serialize, Serializer, Deserialize, Deserializer};
+use serde::{Deserialize, Deserializer, Serialize, Serializer};
 
 /// A domain-local node identifier.
 #[derive(Eq, PartialEq, Ord, PartialOrd, Hash, Clone, Copy, Debug, Serialize, Deserialize)]
@@ -42,9 +42,9 @@ use std::ops::Deref;
 impl Deref for IndexPair {
     type Target = LocalNodeIndex;
     fn deref(&self) -> &Self::Target {
-        self.local.as_ref().expect(
-            "tried to access local node index, which has not yet been assigned",
-        )
+        self.local
+            .as_ref()
+            .expect("tried to access local node index, which has not yet been assigned")
     }
 }
 

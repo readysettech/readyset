@@ -30,7 +30,7 @@ mod mutator;
 mod getter;
 mod transactions;
 
-use self::prelude::{Ingredient, DataType};
+use self::prelude::{DataType, Ingredient};
 
 pub use self::mutator::{Mutator, MutatorError};
 pub use self::getter::Getter;
@@ -386,7 +386,6 @@ impl Blender {
 
                         ((di.clone(), i), (domain_stats, node_map))
                     })
-
             })
             .collect();
 
@@ -415,14 +414,17 @@ impl fmt::LowerHex for Blender {
         let mut visited = HashSet::new();
         while !nodes.is_empty() {
             let n = nodes.pop().unwrap();
-            if visited.contains(&n) { continue; }
+            if visited.contains(&n) {
+                continue;
+            }
             if self.ingredients[n].is_internal() {
                 indentln(f)?;
                 write!(f, "{}", n.index())?;
                 self.ingredients[n].describe(f, n)?;
             }
 
-            let mut targets: Vec<NodeIndex> = self.ingredients.edges(n).map(|e| e.target()).collect();
+            let mut targets: Vec<NodeIndex> =
+                self.ingredients.edges(n).map(|e| e.target()).collect();
             let mut propagated_targets = HashSet::new();
 
             while !targets.is_empty() {
@@ -431,12 +433,9 @@ impl fmt::LowerHex for Blender {
                     for e in self.ingredients.edges(node) {
                         targets.push(e.target());
                     }
-                }
-
-                else {
+                } else {
                     propagated_targets.insert(node);
                 }
-
             }
 
             for target in propagated_targets {
@@ -447,7 +446,6 @@ impl fmt::LowerHex for Blender {
             }
 
             visited.insert(n);
-
         }
 
         // Output footer.
@@ -530,8 +528,8 @@ impl<'a> Migration<'a> {
         i.on_connected(&self.mainline.ingredients);
         let parents = i.ancestors();
 
-        let transactional = !parents.is_empty() &&
-            parents
+        let transactional = !parents.is_empty()
+            && parents
                 .iter()
                 .all(|&p| self.mainline.ingredients[p].is_transactional());
 
@@ -723,8 +721,9 @@ impl<'a> Migration<'a> {
             .unwrap()
             .track(&token_generator);
 
-        self.mainline.ingredients[ri]
-            .with_reader_mut(|r| { r.set_token_generator(token_generator); });
+        self.mainline.ingredients[ri].with_reader_mut(|r| {
+            r.set_token_generator(token_generator);
+        });
     }
 
     /// Set up the given node such that its output can be efficiently queried.
@@ -756,7 +755,9 @@ impl<'a> Migration<'a> {
         // directly.
         let ri = self.readers[&n];
         let mut res = None;
-        self.mainline.ingredients[ri].with_reader_mut(|r| { res = Some(r.add_streamer(tx)); });
+        self.mainline.ingredients[ri].with_reader_mut(|r| {
+            res = Some(r.add_streamer(tx));
+        });
         tx = match res.unwrap() {
             Ok(_) => return rx,
             Err(tx) => tx,
@@ -1015,19 +1016,15 @@ impl<'a> Migration<'a> {
         for (ni, change) in self.columns {
             let n = &mainline.ingredients[ni];
             let m = match change {
-                ColumnChange::Add(field, default) => {
-                    box payload::Packet::AddBaseColumn {
-                        node: *n.local_addr(),
-                        field: field,
-                        default: default,
-                    }
-                }
-                ColumnChange::Drop(column) => {
-                    box payload::Packet::DropBaseColumn {
-                        node: *n.local_addr(),
-                        column: column,
-                    }
-                }
+                ColumnChange::Add(field, default) => box payload::Packet::AddBaseColumn {
+                    node: *n.local_addr(),
+                    field: field,
+                    default: default,
+                },
+                ColumnChange::Drop(column) => box payload::Packet::DropBaseColumn {
+                    node: *n.local_addr(),
+                    column: column,
+                },
             };
 
             let domain = mainline.domains.get_mut(&n.domain()).unwrap();

@@ -1,4 +1,4 @@
-use nom_sql::{SqlQuery, ConditionExpression, ConditionBase, Column, JoinRightSide};
+use nom_sql::{Column, ConditionBase, ConditionExpression, JoinRightSide, SqlQuery};
 use nom_sql::ConditionExpression::*;
 
 #[derive(Debug, PartialEq)]
@@ -21,12 +21,10 @@ fn extract_subqueries_from_condition<'a>(ce: &'a mut ConditionExpression) -> Vec
             lb.into_iter().chain(rb.into_iter()).collect()
         }
         NegationOp(ref mut bce) => extract_subqueries_from_condition(&mut *bce),
-        Base(ref mut cb) => {
-            match *cb {
-                NestedSelect(_) => vec![Subquery::InComparison(cb)],
-                _ => vec![],
-            }
-        }
+        Base(ref mut cb) => match *cb {
+            NestedSelect(_) => vec![Subquery::InComparison(cb)],
+            _ => vec![],
+        },
     }
 }
 
@@ -46,14 +44,16 @@ pub fn query_from_condition_base(cond: &ConditionBase) -> (SqlQuery, Column) {
     match *cond {
         NestedSelect(ref bst) => {
             sq = SqlQuery::Select(*bst.clone());
-            column = bst.fields.iter().map(|fe| {
-                match *fe {
+            column = bst.fields
+                .iter()
+                .map(|fe| match *fe {
                     FieldExpression::Col(ref c) => c.clone(),
-                    _ => unreachable!()
-                }
-            }).nth(0).unwrap();
+                    _ => unreachable!(),
+                })
+                .nth(0)
+                .unwrap();
         }
-        _ => unreachable!()
+        _ => unreachable!(),
     };
 
     (sq, column)
@@ -88,13 +88,13 @@ impl SubQueries for SqlQuery {
 
 #[cfg(test)]
 mod tests {
-    use nom_sql::{ConditionTree, Operator, Table, FieldExpression, Column, SelectStatement,
-                  SqlQuery};
+    use nom_sql::{Column, ConditionTree, FieldExpression, Operator, SelectStatement, SqlQuery,
+                  Table};
     use nom_sql::ConditionBase::*;
     use nom_sql::ConditionExpression::*;
     use super::*;
 
-    fn wrap(cb: ConditionBase) -> Box<ConditionExpression>{
+    fn wrap(cb: ConditionBase) -> Box<ConditionExpression> {
         Box::new(Base(cb))
     }
     #[test]
@@ -106,7 +106,7 @@ mod tests {
             where_clause: Some(ComparisonOp(ConditionTree {
                 operator: Operator::Equal,
                 left: wrap(Field(Column::from("type"))),
-                right: wrap(Literal(1.into()))
+                right: wrap(Literal(1.into())),
             })),
             ..Default::default()
         };
@@ -140,7 +140,7 @@ mod tests {
             where_clause: Some(ComparisonOp(ConditionTree {
                 operator: Operator::Equal,
                 left: wrap(Field(Column::from("type"))),
-                right: wrap(Literal(1.into()))
+                right: wrap(Literal(1.into())),
             })),
             ..Default::default()
         });
@@ -160,7 +160,11 @@ mod tests {
         //          and votes.aid = articles.aid;
 
         let mut q = SqlQuery::Select(SelectStatement {
-            tables: vec![Table::from("articles"), Table::from("users"), Table::from("votes")],
+            tables: vec![
+                Table::from("articles"),
+                Table::from("users"),
+                Table::from("votes"),
+            ],
             fields: vec![
                 FieldExpression::Col(Column::from("users.name")),
                 FieldExpression::Col(Column::from("articles.title")),
@@ -170,12 +174,12 @@ mod tests {
                 left: Box::new(ComparisonOp(ConditionTree {
                     left: wrap(Field(Column::from("users.id"))),
                     right: wrap(Field(Column::from("articles.author"))),
-                    operator: Operator::Equal
+                    operator: Operator::Equal,
                 })),
                 right: Box::new(ComparisonOp(ConditionTree {
                     left: wrap(Field(Column::from("votes.aid"))),
                     right: wrap(Field(Column::from("articles.aid"))),
-                    operator: Operator::Equal
+                    operator: Operator::Equal,
                 })),
                 operator: Operator::And,
             })),

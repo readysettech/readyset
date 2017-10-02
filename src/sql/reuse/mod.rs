@@ -16,8 +16,7 @@ mod join_order;
 pub enum ReuseType {
     DirectExtension,
     PrefixReuse,
-    #[allow(dead_code)]
-    BackjoinRequired(Vec<Table>),
+    #[allow(dead_code)] BackjoinRequired(Vec<Table>),
 }
 
 #[derive(Clone, Debug, PartialEq)]
@@ -50,10 +49,13 @@ impl ReuseConfig {
         self.reorder_joins(qg, &reuse_candidates);
 
         reuse_candidates
-
     }
 
-    pub fn reorder_joins(&self, qg: &mut QueryGraph, reuse_candidates: &Vec<(ReuseType, &QueryGraph)>) {
+    pub fn reorder_joins(
+        &self,
+        qg: &mut QueryGraph,
+        reuse_candidates: &Vec<(ReuseType, &QueryGraph)>,
+    ) {
         reorder_joins(qg, reuse_candidates);
     }
 
@@ -86,5 +88,8 @@ impl ReuseConfig {
 }
 
 pub trait ReuseConfiguration {
-    fn reuse_candidates<'a>(qg: &QueryGraph, query_graphs: &'a HashMap<u64, QueryGraph>) -> Vec<(ReuseType, &'a QueryGraph)>;
+    fn reuse_candidates<'a>(
+        qg: &QueryGraph,
+        query_graphs: &'a HashMap<u64, QueryGraph>,
+    ) -> Vec<(ReuseType, &'a QueryGraph)>;
 }

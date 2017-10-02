@@ -1,5 +1,5 @@
-use nom_sql::{Column, ConditionExpression, ConditionTree, FieldExpression, SqlQuery,
-              ConditionBase, Table};
+use nom_sql::{Column, ConditionBase, ConditionExpression, ConditionTree, FieldExpression,
+              SqlQuery, Table};
 
 
 use std::collections::HashMap;
@@ -61,9 +61,9 @@ impl CountStarRewrite for SqlQuery {
                         .position(|c| c.name == *bogo_column)
                         .is_some()
                     {
-                        bogo_column = schema_iter.next().expect(
-                            "ran out of columns trying to pick a bogo column for COUNT(*)",
-                        );
+                        bogo_column = schema_iter
+                            .next()
+                            .expect("ran out of columns trying to pick a bogo column for COUNT(*)");
                     }
 
                     c.function = Some(Box::new(Count(

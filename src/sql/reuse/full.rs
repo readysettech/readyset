@@ -16,13 +16,11 @@ impl ReuseConfiguration for Full {
         query_graphs: &'a HashMap<u64, QueryGraph>,
     ) -> Vec<(ReuseType, &'a QueryGraph)> {
         // sort keys to make reuse deterministic
-        let mut sorted_keys: Vec<u64> = query_graphs
-                            .keys()
-                            .cloned()
-                            .collect();
+        let mut sorted_keys: Vec<u64> = query_graphs.keys().cloned().collect();
         sorted_keys.sort();
-        sorted_keys.iter()
-        .map(|k| (ReuseType::DirectExtension, &query_graphs[k]))
+        sorted_keys
+            .iter()
+            .map(|k| (ReuseType::DirectExtension, &query_graphs[k]))
             .collect()
     }
 }

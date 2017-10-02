@@ -136,9 +136,9 @@ impl Ingredient for Base {
                     let cols = self.primary_key
                         .as_ref()
                         .expect("base must have a primary key to support deletions");
-                    let db = state.get(&*self.us.unwrap()).expect(
-                        "base must have its own state materialized to support deletions",
-                    );
+                    let db = state
+                        .get(&*self.us.unwrap())
+                        .expect("base must have its own state materialized to support deletions");
 
                     match db.lookup(cols.as_slice(), &KeyType::from(&key[..])) {
                         LookupResult::Some(rows) => {

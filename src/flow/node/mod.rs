@@ -360,8 +360,7 @@ impl Node {
 
     pub fn is_sender(&self) -> bool {
         match self.inner {
-            NodeType::Egress { .. } |
-            NodeType::Sharder(..) => true,
+            NodeType::Egress { .. } | NodeType::Sharder(..) => true,
             _ => false,
         }
     }

@@ -66,8 +66,7 @@ impl Mutator {
 
                 // get a handle to the underlying data vector
                 let r = match *r {
-                    Record::Positive(ref mut r) |
-                    Record::Negative(ref mut r) => r,
+                    Record::Positive(ref mut r) | Record::Negative(ref mut r) => r,
                     _ => continue,
                 };
 
@@ -198,7 +197,8 @@ impl Mutator {
             ));
         }
 
-        self.tx_send(data.into(), t).map_err(|()|MutatorError::TransactionFailed)
+        self.tx_send(data.into(), t)
+            .map_err(|()| MutatorError::TransactionFailed)
     }
 
     /// Perform a non-transactional delete from the base node this Mutator was generated for.
@@ -219,7 +219,7 @@ impl Mutator {
         I: Into<Vec<DataType>>,
     {
         self.tx_send(vec![Record::DeleteRequest(key.into())].into(), t)
-            .map_err(|()|MutatorError::TransactionFailed)
+            .map_err(|()| MutatorError::TransactionFailed)
     }
 
     /// Perform a non-transactional update (delete followed by put) to the base node this Mutator
@@ -242,9 +242,7 @@ impl Mutator {
         }
 
         let pkey = self.key.iter().map(|&col| &u[col]).cloned().collect();
-        Ok(self.send(
-            vec![Record::DeleteRequest(pkey), u.into()].into(),
-        ))
+        Ok(self.send(vec![Record::DeleteRequest(pkey), u.into()].into()))
     }
 
     /// Perform a transactional update (delete followed by put) to the base node this Mutator was
@@ -274,7 +272,8 @@ impl Mutator {
             Record::DeleteRequest(self.key.iter().map(|&col| &u[col]).cloned().collect()),
             u.into(),
         ].into();
-        self.tx_send(m, t).map_err(|()|MutatorError::TransactionFailed)
+        self.tx_send(m, t)
+            .map_err(|()| MutatorError::TransactionFailed)
     }
 
     /// Trace subsequent packets by sending events on the global debug channel until `stop_tracing`

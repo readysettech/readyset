@@ -3,7 +3,7 @@ use std::cell;
 
 // core types
 use flow::core;
-pub use flow::core::{LocalNodeIndex, IndexPair};
+pub use flow::core::{IndexPair, LocalNodeIndex};
 pub use petgraph::graph::NodeIndex;
 pub use flow::core::{DataType, Datas, Record, Records};
 pub use flow::core::{Ingredient, Miss, ProcessingResult, RawProcessingResult, ReplayContext};

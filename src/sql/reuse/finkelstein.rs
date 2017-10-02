@@ -13,7 +13,10 @@ pub struct Finkelstein;
 /// For Soup's purpose this algorithm is sometimes too strict as it only
 /// considers reuse of final materializations, not intermediate ones.
 impl ReuseConfiguration for Finkelstein {
-    fn reuse_candidates<'a>(qg: &QueryGraph, query_graphs: &'a HashMap<u64, QueryGraph>) -> Vec<(ReuseType, &'a QueryGraph)>{
+    fn reuse_candidates<'a>(
+        qg: &QueryGraph,
+        query_graphs: &'a HashMap<u64, QueryGraph>,
+    ) -> Vec<(ReuseType, &'a QueryGraph)> {
         let mut reuse_candidates = Vec::new();
         for existing_qg in query_graphs.values() {
             if existing_qg
@@ -32,16 +35,16 @@ impl ReuseConfiguration for Finkelstein {
 
         if reuse_candidates.len() > 0 {
             vec![Self::choose_best_option(reuse_candidates)]
-        }
-        else {
+        } else {
             reuse_candidates
         }
     }
-
 }
 
 impl Finkelstein {
-    fn choose_best_option<'a>(options: Vec<(ReuseType, &'a QueryGraph)>) -> (ReuseType, &'a QueryGraph) {
+    fn choose_best_option<'a>(
+        options: Vec<(ReuseType, &'a QueryGraph)>,
+    ) -> (ReuseType, &'a QueryGraph) {
         let mut best_choice = None;
         let mut best_score = 0;
 
@@ -58,7 +61,7 @@ impl Finkelstein {
                 ReuseType::BackjoinRequired(_) => {
                     score += qg.relations.len() + 3 * qg.edges.len();
                 }
-                _ => unreachable!()
+                _ => unreachable!(),
             }
 
             if score > best_score {
@@ -105,7 +108,7 @@ impl Finkelstein {
                 for np in &new_qgn.predicates {
                     if complex_predicate_implies(np, ep) {
                         matched = true;
-                        break
+                        break;
                     }
                 }
                 if !matched {

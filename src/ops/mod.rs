@@ -1,4 +1,4 @@
-use std::collections::{HashSet, HashMap};
+use std::collections::{HashMap, HashSet};
 
 use flow::core::processing::Ingredient;
 use flow::prelude::*;
@@ -39,12 +39,18 @@ macro_rules! nodeop_from_impl {
 }
 
 nodeop_from_impl!(NodeOperator::Base, base::Base);
-nodeop_from_impl!(NodeOperator::Sum,
-                  grouped::GroupedOperator<grouped::aggregate::Aggregator>);
-nodeop_from_impl!(NodeOperator::Extremum,
-                  grouped::GroupedOperator<grouped::extremum::ExtremumOperator>);
-nodeop_from_impl!(NodeOperator::Concat,
-                  grouped::GroupedOperator<grouped::concat::GroupConcat>);
+nodeop_from_impl!(
+    NodeOperator::Sum,
+    grouped::GroupedOperator<grouped::aggregate::Aggregator>
+);
+nodeop_from_impl!(
+    NodeOperator::Extremum,
+    grouped::GroupedOperator<grouped::extremum::ExtremumOperator>
+);
+nodeop_from_impl!(
+    NodeOperator::Concat,
+    grouped::GroupedOperator<grouped::concat::GroupConcat>
+);
 nodeop_from_impl!(NodeOperator::Join, join::Join);
 nodeop_from_impl!(NodeOperator::Latest, latest::Latest);
 nodeop_from_impl!(NodeOperator::Project, project::Project);
@@ -91,13 +97,13 @@ macro_rules! impl_ingredient_fn_ref {
 
 impl Ingredient for NodeOperator {
     fn take(&mut self) -> NodeOperator {
-        impl_ingredient_fn_mut!(self,take,)
+        impl_ingredient_fn_mut!(self, take,)
     }
     fn ancestors(&self) -> Vec<NodeIndex> {
-        impl_ingredient_fn_ref!(self,ancestors,)
+        impl_ingredient_fn_ref!(self, ancestors,)
     }
     fn must_replay_among(&self) -> Option<HashSet<NodeIndex>> {
-        impl_ingredient_fn_ref!(self,must_replay_among,)
+        impl_ingredient_fn_ref!(self, must_replay_among,)
     }
     fn suggest_indexes(&self, you: NodeIndex) -> HashMap<NodeIndex, (Vec<usize>, bool)> {
         impl_ingredient_fn_ref!(self, suggest_indexes, you)
@@ -164,7 +170,7 @@ impl Ingredient for NodeOperator {
         )
     }
     fn can_query_through(&self) -> bool {
-        impl_ingredient_fn_ref!(self, can_query_through, )
+        impl_ingredient_fn_ref!(self, can_query_through,)
     }
     fn query_through<'a>(
         &self,
@@ -367,9 +373,11 @@ pub mod test {
                     Record::DeleteRequest(..) => unreachable!(),
                 };
             } else {
-                assert!(false,
-                        "unnecessary seed value for {} (never used by any node)",
-                        base.as_global().index());
+                assert!(
+                    false,
+                    "unnecessary seed value for {} (never used by any node)",
+                    base.as_global().index()
+                );
             }
         }
 

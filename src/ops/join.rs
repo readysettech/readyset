@@ -194,13 +194,11 @@ impl Ingredient for Join {
     fn must_replay_among(&self) -> Option<HashSet<NodeIndex>> {
         match self.kind {
             JoinType::Left => Some(Some(self.left.as_global()).into_iter().collect()),
-            JoinType::Inner => {
-                Some(
-                    vec![self.left.as_global(), self.right.as_global()]
-                        .into_iter()
-                        .collect(),
-                )
-            }
+            JoinType::Inner => Some(
+                vec![self.left.as_global(), self.right.as_global()]
+                    .into_iter()
+                    .collect(),
+            ),
         }
     }
 

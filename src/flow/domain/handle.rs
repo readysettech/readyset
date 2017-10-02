@@ -43,13 +43,11 @@ impl DomainInputHandle {
             let key_col = key[0];
             let shard = {
                 let key = match p.data()[0] {
-                    Record::Positive(ref r) |
-                    Record::Negative(ref r) => &r[key_col],
+                    Record::Positive(ref r) | Record::Negative(ref r) => &r[key_col],
                     Record::DeleteRequest(ref k) => &k[0],
                 };
                 if !p.data().iter().all(|r| match *r {
-                    Record::Positive(ref r) |
-                    Record::Negative(ref r) => &r[key_col] == key,
+                    Record::Positive(ref r) | Record::Negative(ref r) => &r[key_col] == key,
                     Record::DeleteRequest(ref k) => k.len() == 1 && &k[0] == key,
                 }) {
                     // batch with different keys to sharded base
@@ -161,12 +159,11 @@ impl DomainHandle {
         debug_tx: &Option<mpsc::Sender<debug::DebugEvent>>,
         ts: i64,
     ) {
-        for (i, ((tx, in_tx), back_tx)) in
-            self.txs
-                .iter()
-                .zip(self.in_txs.iter())
-                .zip(self.back_txs.iter())
-                .enumerate()
+        for (i, ((tx, in_tx), back_tx)) in self.txs
+            .iter()
+            .zip(self.in_txs.iter())
+            .zip(self.back_txs.iter())
+            .enumerate()
         {
             channel_coordinator.insert_tx(
                 (self.idx, i),
@@ -248,40 +245,32 @@ impl DomainHandle {
                 ref node,
                 ref new_tx,
                 ref new_tag,
-            } => {
-                box Packet::UpdateEgress {
-                    node: node.clone(),
-                    new_tx: new_tx.clone(),
-                    new_tag: new_tag.clone(),
-                }
-            }
+            } => box Packet::UpdateEgress {
+                node: node.clone(),
+                new_tx: new_tx.clone(),
+                new_tag: new_tag.clone(),
+            },
             Packet::UpdateSharder {
                 ref node,
                 ref new_txs,
-            } => {
-                box Packet::UpdateSharder {
-                    node: node.clone(),
-                    new_txs: new_txs.clone(),
-                }
-            }
+            } => box Packet::UpdateSharder {
+                node: node.clone(),
+                new_txs: new_txs.clone(),
+            },
             Packet::AddStreamer {
                 ref node,
                 ref new_streamer,
-            } => {
-                box Packet::AddStreamer {
-                    node: node.clone(),
-                    new_streamer: new_streamer.clone(),
-                }
-            }
+            } => box Packet::AddStreamer {
+                node: node.clone(),
+                new_streamer: new_streamer.clone(),
+            },
             Packet::PrepareState {
                 ref node,
                 ref state,
-            } => {
-                box Packet::PrepareState {
-                    node: node.clone(),
-                    state: state.clone(),
-                }
-            }
+            } => box Packet::PrepareState {
+                node: node.clone(),
+                state: state.clone(),
+            },
             Packet::StateSizeProbe { ref node } => {
                 box Packet::StateSizeProbe { node: node.clone() }
             }
@@ -291,57 +280,45 @@ impl DomainHandle {
                 ref path,
                 notify_done,
                 ref trigger,
-            } => {
-                box Packet::SetupReplayPath {
-                    tag: tag.clone(),
-                    source: source.clone(),
-                    path: path.clone(),
-                    notify_done,
-                    trigger: trigger.clone(),
-                }
-            }
-            Packet::RequestPartialReplay { ref tag, ref key } => {
-                box Packet::RequestPartialReplay {
-                    tag: tag.clone(),
-                    key: key.clone(),
-                }
-            }
-            Packet::StartReplay { ref tag, ref from } => {
-                box Packet::StartReplay {
-                    tag: tag.clone(),
-                    from: from.clone(),
-                }
-            }
+            } => box Packet::SetupReplayPath {
+                tag: tag.clone(),
+                source: source.clone(),
+                path: path.clone(),
+                notify_done,
+                trigger: trigger.clone(),
+            },
+            Packet::RequestPartialReplay { ref tag, ref key } => box Packet::RequestPartialReplay {
+                tag: tag.clone(),
+                key: key.clone(),
+            },
+            Packet::StartReplay { ref tag, ref from } => box Packet::StartReplay {
+                tag: tag.clone(),
+                from: from.clone(),
+            },
             Packet::Ready {
                 ref node,
                 ref index,
-            } => {
-                box Packet::Ready {
-                    node: node.clone(),
-                    index: index.clone(),
-                }
-            }
+            } => box Packet::Ready {
+                node: node.clone(),
+                index: index.clone(),
+            },
             Packet::Quit => box Packet::Quit,
             Packet::StartMigration {
                 ref at,
                 ref prev_ts,
-            } => {
-                box Packet::StartMigration {
-                    at: at.clone(),
-                    prev_ts: prev_ts.clone(),
-                }
-            }
+            } => box Packet::StartMigration {
+                at: at.clone(),
+                prev_ts: prev_ts.clone(),
+            },
             Packet::CompleteMigration {
                 ref at,
                 ref ingress_from_base,
                 ref egress_for_base,
-            } => {
-                box Packet::CompleteMigration {
-                    at: at.clone(),
-                    ingress_from_base: ingress_from_base.clone(),
-                    egress_for_base: egress_for_base.clone(),
-                }
-            }
+            } => box Packet::CompleteMigration {
+                at: at.clone(),
+                ingress_from_base: ingress_from_base.clone(),
+                egress_for_base: egress_for_base.clone(),
+            },
             Packet::GetStatistics => box Packet::GetStatistics,
             _ => unreachable!(),
         }

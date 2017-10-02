@@ -242,8 +242,8 @@ fn compare_results(mysql: &Vec<Vec<String>>, soup: &Vec<Vec<String>>) -> Option<
     soup.sort();
 
     // TODO: Remove hack to drop key column from Soup output.
-    if mysql.len() == soup.len() &&
-        mysql
+    if mysql.len() == soup.len()
+        && mysql
             .iter()
             .zip(soup.iter())
             .all(|(m, s)| m == s || m[..] == s[..(s.len() - 1)])

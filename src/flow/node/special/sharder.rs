@@ -74,14 +74,16 @@ impl Sharder {
         if m.tag().is_some() {
             // this is a replay packet, which we need to make sure we route correctly
             if let box Packet::ReplayPiece {
-                context: payload::ReplayPieceContext::Partial { .. }, ..
+                context: payload::ReplayPieceContext::Partial { .. },
+                ..
             } = m
             {
                 // we need to send one message to each shard in for_keys
                 let shards = if let box Packet::ReplayPiece {
-                    context: payload::ReplayPieceContext::Partial {
-                        ref mut for_keys, ..
-                    },
+                    context:
+                        payload::ReplayPieceContext::Partial {
+                            ref mut for_keys, ..
+                        },
                     ..
                 } = m
                 {
@@ -110,9 +112,10 @@ impl Sharder {
                         let mut p = m.clone_data();
                         if let Packet::ReplayPiece {
                             ref mut nshards,
-                            context: payload::ReplayPieceContext::Partial {
-                                ref mut for_keys, ..
-                            },
+                            context:
+                                payload::ReplayPieceContext::Partial {
+                                    ref mut for_keys, ..
+                                },
                             ..
                         } = p
                         {
@@ -155,7 +158,8 @@ impl Sharder {
 
         let mut force_all = false;
         if let Packet::ReplayPiece {
-            context: payload::ReplayPieceContext::Regular { last: true }, ..
+            context: payload::ReplayPieceContext::Regular { last: true },
+            ..
         } = *m
         {
             // this is the last replay piece for a full replay
@@ -183,7 +187,10 @@ impl Sharder {
             // it's unclear how we do that.
             unimplemented!();
         }
-        if let Packet::ReplayPiece { ref mut nshards, .. } = *m {
+        if let Packet::ReplayPiece {
+            ref mut nshards, ..
+        } = *m
+        {
             *nshards = self.sharded.len();
         }
 
