@@ -130,10 +130,7 @@ impl DomainHandle {
         // the code currently relies on the fact that the domains that are sharded by the same key
         // *also* have the same number of shards. if this no longer holds, we actually need to do a
         // shuffle, otherwise writes will end up on the wrong shard. keep that in mind.
-        let num_shards = match sharded_by {
-            Sharding::None => 1,
-            _ => ::SHARDS,
-        };
+        let num_shards = if sharded_by.is_none() { 1 } else { ::SHARDS };
 
         let mut txs = Vec::new();
         let mut cr_rxs = Vec::new();

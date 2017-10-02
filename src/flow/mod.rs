@@ -353,7 +353,7 @@ impl Blender {
     /// Obtain a `Getter` that allows querying a given (already maintained) reader node.
     pub fn get_getter(&self, node: prelude::NodeIndex) -> Option<Getter> {
         self.find_getter_for(node).and_then(|r| {
-            let sharded = self.ingredients[r].sharded_by() != migrate::sharding::Sharding::None;
+            let sharded = !self.ingredients[r].sharded_by().is_none();
             Getter::new(r, sharded, &self.readers, &self.ingredients)
         })
     }
