@@ -242,9 +242,7 @@ impl Mutator {
         }
 
         let pkey = self.key.iter().map(|&col| &u[col]).cloned().collect();
-        Ok(
-            self.send(vec![Record::DeleteRequest(pkey), u.into()].into()),
-        )
+        Ok(self.send(vec![Record::DeleteRequest(pkey), u.into()].into()))
     }
 
     /// Perform a transactional update (delete followed by put) to the base node this Mutator was

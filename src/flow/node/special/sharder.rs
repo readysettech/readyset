@@ -80,9 +80,10 @@ impl Sharder {
             {
                 // we need to send one message to each shard in for_keys
                 let shards = if let box Packet::ReplayPiece {
-                    context: payload::ReplayPieceContext::Partial {
-                        ref mut for_keys, ..
-                    },
+                    context:
+                        payload::ReplayPieceContext::Partial {
+                            ref mut for_keys, ..
+                        },
                     ..
                 } = m
                 {
@@ -111,9 +112,10 @@ impl Sharder {
                         let mut p = m.clone_data();
                         if let Packet::ReplayPiece {
                             ref mut nshards,
-                            context: payload::ReplayPieceContext::Partial {
-                                ref mut for_keys, ..
-                            },
+                            context:
+                                payload::ReplayPieceContext::Partial {
+                                    ref mut for_keys, ..
+                                },
                             ..
                         } = p
                         {

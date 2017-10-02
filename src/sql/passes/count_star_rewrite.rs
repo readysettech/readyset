@@ -61,9 +61,9 @@ impl CountStarRewrite for SqlQuery {
                         .position(|c| c.name == *bogo_column)
                         .is_some()
                     {
-                        bogo_column = schema_iter.next().expect(
-                            "ran out of columns trying to pick a bogo column for COUNT(*)",
-                        );
+                        bogo_column = schema_iter
+                            .next()
+                            .expect("ran out of columns trying to pick a bogo column for COUNT(*)");
                     }
 
                     c.function = Some(Box::new(Count(

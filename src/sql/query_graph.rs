@@ -406,8 +406,7 @@ fn classify_conditionals(
                                 // we assume that implied table names have previously been expanded
                                 // and thus all columns carry table names
                                 assert!(lf.table.is_some());
-                                let e =
-                                    local.entry(lf.table.clone().unwrap()).or_default();
+                                let e = local.entry(lf.table.clone().unwrap()).or_default();
                                 e.push(ce.clone());
                             }
                         }
@@ -543,8 +542,8 @@ pub fn to_query_graph(st: &SelectStatement) -> Result<QueryGraph, String> {
                                     ConditionExpression::Base(ConditionBase::Field(ref f)) => f,
                                     _ => unimplemented!(),
                                 };
-                                if *l.table.as_ref().unwrap() == right_table &&
-                                    *r.table.as_ref().unwrap() == left_table
+                                if *l.table.as_ref().unwrap() == right_table
+                                    && *r.table.as_ref().unwrap() == left_table
                                 {
                                     ConditionTree {
                                         operator: ct.operator.clone(),
@@ -745,8 +744,7 @@ pub fn to_query_graph(st: &SelectStatement) -> Result<QueryGraph, String> {
 
     // create initial join order
     {
-        let mut sorted_edges: Vec<(&(String, String), &QueryGraphEdge)> =
-                    qg.edges.iter().collect();
+        let mut sorted_edges: Vec<(&(String, String), &QueryGraphEdge)> = qg.edges.iter().collect();
         // Sort the edges to ensure deterministic join order.
         sorted_edges.sort_by(|&(a, _), &(b, _)| {
             let src_ord = b.0.cmp(&a.0);
@@ -760,26 +758,30 @@ pub fn to_query_graph(st: &SelectStatement) -> Result<QueryGraph, String> {
         for (&(ref src, ref dst), edge) in sorted_edges {
             match *edge {
                 QueryGraphEdge::Join(ref jps) => qg.join_order.extend(
-                                                        jps.iter()
-                                                        .enumerate()
-                                                        .map(|(idx, _)| JoinRef {
-                                                            src: src.clone(),
-                                                            dst: dst.clone(),
-                                                            index: idx
-                                                        })
-                                                        .collect::<Vec<_>>()
-                                                    ),
+                    jps.iter()
+                        .enumerate()
+                        .map(|(idx, _)| {
+                            JoinRef {
+                                src: src.clone(),
+                                dst: dst.clone(),
+                                index: idx,
+                            }
+                        })
+                        .collect::<Vec<_>>(),
+                ),
                 QueryGraphEdge::LeftJoin(ref jps) => qg.join_order.extend(
-                                                        jps.iter()
-                                                        .enumerate()
-                                                        .map(|(idx, _)| JoinRef {
-                                                            src: src.clone(),
-                                                            dst: dst.clone(),
-                                                            index: idx
-                                                        })
-                                                        .collect::<Vec<_>>()
-                                                    ),
-                QueryGraphEdge::GroupBy(_) => continue
+                    jps.iter()
+                        .enumerate()
+                        .map(|(idx, _)| {
+                            JoinRef {
+                                src: src.clone(),
+                                dst: dst.clone(),
+                                index: idx,
+                            }
+                        })
+                        .collect::<Vec<_>>(),
+                ),
+                QueryGraphEdge::GroupBy(_) => continue,
             }
         }
     }

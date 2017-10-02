@@ -174,8 +174,8 @@ impl SqlIncorporator {
             Some(&(ref existing_qg, ref mir_query)) => {
                 // note that this also checks the *order* in which parameters are specified; a
                 // different order means that we cannot simply reuse the existing reader.
-                if existing_qg.signature() == qg.signature() &&
-                    existing_qg.parameters() == qg.parameters()
+                if existing_qg.signature() == qg.signature()
+                    && existing_qg.parameters() == qg.parameters()
                 {
                     // we already have this exact query, down to the exact same reader key columns
                     // in exactly the same order

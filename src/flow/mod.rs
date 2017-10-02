@@ -447,8 +447,8 @@ impl<'a> Migration<'a> {
         i.on_connected(&self.mainline.ingredients);
         let parents = i.ancestors();
 
-        let transactional = !parents.is_empty() &&
-            parents
+        let transactional = !parents.is_empty()
+            && parents
                 .iter()
                 .all(|&p| self.mainline.ingredients[p].is_transactional());
 
