@@ -453,7 +453,10 @@ mod tests {
         assert_eq!(format!("{:?}", tiny_text), "TinyText(\"hi\")");
         assert_eq!(format!("{:?}", text), "Text(\"I contain \\' and \\\"\")");
         assert_eq!(format!("{:?}", real), "Real(-0.050000000)");
-        assert_eq!(format!("{:?}", timestamp), "Timestamp(1970-01-01T00:00:00.042)");
+        assert_eq!(
+            format!("{:?}", timestamp),
+            "Timestamp(1970-01-01T00:00:00.042)"
+        );
         assert_eq!(format!("{:?}", int), "Int(5)");
         assert_eq!(format!("{:?}", big_int), "BigInt(5)");
     }

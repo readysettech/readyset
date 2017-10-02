@@ -105,9 +105,8 @@ mod tests {
         use sql::query_graph::to_query_graph;
         use nom_sql::parser::{parse_query, SqlQuery};
 
-        let qa = parse_query(
-            "SELECT a.c1, b.c3 FROM a, b WHERE a.c1 = b.c1 AND a.c2 = 42;",
-        ).unwrap();
+        let qa =
+            parse_query("SELECT a.c1, b.c3 FROM a, b WHERE a.c1 = b.c1 AND a.c2 = 42;").unwrap();
         let qb = parse_query("SELECT b.c3 FROM a, b WHERE a.c1 = b.c1;").unwrap();
         let qc = parse_query("SELECT b.c3 FROM a, b WHERE a.c1 = b.c1 AND b.c4 = 21;").unwrap();
 

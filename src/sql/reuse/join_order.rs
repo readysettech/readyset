@@ -1,5 +1,5 @@
 use sql::reuse::helpers::predicate_implication::predicate_is_equivalent;
-use sql::query_graph::{QueryGraph, QueryGraphEdge, JoinRef};
+use sql::query_graph::{JoinRef, QueryGraph, QueryGraphEdge};
 use std::vec::Vec;
 use std::collections::HashSet;
 use nom_sql::ConditionTree;
@@ -12,7 +12,7 @@ use sql::reuse::ReuseType;
 struct JoinChain {
     pub join_order: Vec<JoinRef>,
     tables: HashSet<String>,
-    pub stopped: bool
+    pub stopped: bool,
 }
 
 impl JoinChain {
@@ -44,9 +44,10 @@ impl JoinChain {
 
     fn merge_chain(self, other: JoinChain) -> JoinChain {
         let tables = self.tables.union(&other.tables).cloned().collect();
-        let join_order = self.join_order.into_iter()
-                            .chain(other.join_order.into_iter())
-                            .collect();
+        let join_order = self.join_order
+            .into_iter()
+            .chain(other.join_order.into_iter())
+            .collect();
         let stopped = self.stopped && other.stopped;
 
         JoinChain {
@@ -55,7 +56,6 @@ impl JoinChain {
             stopped: stopped,
         }
     }
-
 }
 
 /// Update a list of join chains by adding a new predicate.
@@ -80,9 +80,10 @@ fn extend_chains(chains: &mut Vec<JoinChain>, jref: &JoinRef) {
 fn greedy_merge(mc: JoinChain, existing_chains: &mut Vec<JoinChain>) {
     // find the existing chains that conflict with `mc` and count
     // the number of join predicates
-    let reused_joins = existing_chains.iter()
-                            .filter(|ref c| mc.conflicts(c))
-                            .fold(0, |acc, ref c| acc+c.join_count());
+    let reused_joins = existing_chains
+        .iter()
+        .filter(|ref c| mc.conflicts(c))
+        .fold(0, |acc, ref c| acc + c.join_count());
 
     // if `mc` has more join predicates than the conflicting chains,
     // delete the conflicting chains and add `mc`
@@ -142,7 +143,9 @@ pub fn reorder_joins(qg: &mut QueryGraph, reuse_candidates: &Vec<(ReuseType, &Qu
 
             // if the chain has been stopped, maybe because it diverged
             // from the chains in the new query graph, move on to next predicate
-            if existing_chain.stopped { continue }
+            if existing_chain.stopped {
+                continue;
+            }
 
             let ejp = from_join_ref(&existing_jref, eqg);
 

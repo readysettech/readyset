@@ -10,7 +10,7 @@ use ops::join::JoinType;
 use nom_sql::{Column, ColumnSpecification, ConditionBase, ConditionExpression, ConditionTree,
               Literal, Operator, SqlQuery, TableKey};
 use nom_sql::{LimitClause, OrderClause, SelectStatement};
-use sql::query_graph::{OutputColumn, QueryGraph, QueryGraphEdge, JoinRef};
+use sql::query_graph::{JoinRef, OutputColumn, QueryGraph, QueryGraphEdge};
 
 use slog;
 use std::collections::{HashMap, HashSet};
@@ -45,7 +45,7 @@ fn sanitize_leaf_column(mut c: Column, view_name: &str) -> Column {
 
 struct JoinChain {
     tables: HashSet<String>,
-    last_node: MirNodeRef
+    last_node: MirNodeRef,
 }
 
 impl JoinChain {
@@ -360,8 +360,8 @@ impl SqlToMirConverter {
                         }
                     }
 
-                    if columns_unchanged.len() > 0 &&
-                        (columns_added.len() > 0 || columns_removed.len() > 0)
+                    if columns_unchanged.len() > 0
+                        && (columns_added.len() > 0 || columns_removed.len() > 0)
                     {
                         error!(
                             self.log,
@@ -394,14 +394,12 @@ impl SqlToMirConverter {
                         }
                         assert_eq!(
                             columns.len(),
-                            existing_node.borrow().columns().len() + columns_added.len() -
-                                columns_removed.len()
+                            existing_node.borrow().columns().len() + columns_added.len()
+                                - columns_removed.len()
                         );
 
                         // remember the schema for this version
-                        let base_schemas = self.base_schemas
-                            .entry(String::from(name))
-                            .or_default();
+                        let base_schemas = self.base_schemas.entry(String::from(name)).or_default();
                         base_schemas.push((self.schema_version, columns.clone()));
 
                         return MirNode::adapt_base(existing_node, columns_added, columns_removed);
@@ -432,9 +430,7 @@ impl SqlToMirConverter {
         assert!(primary_keys.len() <= 1);
 
         // remember the schema for this version
-        let base_schemas = self.base_schemas
-            .entry(String::from(name))
-            .or_default();
+        let base_schemas = self.base_schemas.entry(String::from(name)).or_default();
         base_schemas.push((self.schema_version, cols.clone()));
 
         // make node
@@ -994,22 +990,28 @@ impl SqlToMirConverter {
                 let mut join_chains = Vec::new();
 
                 let pick_join_chains = |src: &String,
-                                         dst: &String,
-                                         join_chains: &mut Vec<JoinChain>|
+                                        dst: &String,
+                                        join_chains: &mut Vec<JoinChain>|
                  -> (JoinChain, JoinChain) {
-                    let left_chain = match join_chains.iter().position(|ref chain| chain.has_table(src)) {
+                    let left_chain = match join_chains
+                        .iter()
+                        .position(|ref chain| chain.has_table(src))
+                    {
                         Some(idx) => join_chains.swap_remove(idx),
                         None => JoinChain {
                             tables: vec![src.clone()].into_iter().collect(),
-                            last_node: base_nodes[src.as_str()].clone()
+                            last_node: base_nodes[src.as_str()].clone(),
                         },
                     };
 
-                    let right_chain = match join_chains.iter().position(|ref chain| chain.has_table(dst)) {
+                    let right_chain = match join_chains
+                        .iter()
+                        .position(|ref chain| chain.has_table(dst))
+                    {
                         Some(idx) => join_chains.swap_remove(idx),
                         None => JoinChain {
                             tables: vec![dst.clone()].into_iter().collect(),
-                            last_node: base_nodes[dst.as_str()].clone()
+                            last_node: base_nodes[dst.as_str()].clone(),
                         },
                     };
 
@@ -1019,8 +1021,12 @@ impl SqlToMirConverter {
                 let from_join_ref = |jref: &JoinRef| -> (JoinType, &ConditionTree) {
                     let edge = qg.edges.get(&(jref.src.clone(), jref.dst.clone())).unwrap();
                     match *edge {
-                        QueryGraphEdge::Join(ref jps) => (JoinType::Inner, jps.get(jref.index).unwrap()),
-                        QueryGraphEdge::LeftJoin(ref jps) => (JoinType::Left, jps.get(jref.index).unwrap()),
+                        QueryGraphEdge::Join(ref jps) => {
+                            (JoinType::Inner, jps.get(jref.index).unwrap())
+                        }
+                        QueryGraphEdge::LeftJoin(ref jps) => {
+                            (JoinType::Left, jps.get(jref.index).unwrap())
+                        }
                         QueryGraphEdge::GroupBy(_) => unreachable!(),
                     }
                 };
@@ -1071,10 +1077,7 @@ impl SqlToMirConverter {
                     let cols = self.predicate_columns(pred.clone());
 
                     for col in cols {
-                        column_to_predicates
-                            .entry(col)
-                            .or_default()
-                            .push(pred);
+                        column_to_predicates.entry(col).or_default().push(pred);
                     }
                 }
             }
@@ -1144,14 +1147,15 @@ impl SqlToMirConverter {
                             let over_table = over_col.table.as_ref().unwrap().as_str();
                             // get any parameter columns that aren't also in the group-by
                             // column set
-                            let param_cols: Vec<_> = qg.relations
-                                .values()
-                                .fold(vec![], |acc, rel| {
-                                    acc.into_iter().chain(
-                                        rel.parameters
-                                        .iter()
-                                        .filter(|ref c| !gb_cols.contains(c))
-                                    ).collect()
+                            let param_cols: Vec<_> =
+                                qg.relations.values().fold(vec![], |acc, rel| {
+                                    acc.into_iter()
+                                        .chain(
+                                            rel.parameters
+                                                .iter()
+                                                .filter(|ref c| !gb_cols.contains(c)),
+                                        )
+                                        .collect()
                                 });
                             // combine
                             let gb_and_param_cols: Vec<_> =

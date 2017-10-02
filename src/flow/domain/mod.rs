@@ -1565,8 +1565,8 @@ impl Domain {
                         // this is the case either if the current node is waiting for a replay,
                         // *or* if the target is a reader. the last case is special in that when a
                         // client requests a replay, the Reader isn't marked as "waiting".
-                        let target = backfill_keys.is_some() && i == path.len() - 1 &&
-                            (is_reader || self.waiting.contains_key(&segment.node));
+                        let target = backfill_keys.is_some() && i == path.len() - 1
+                            && (is_reader || self.waiting.contains_key(&segment.node));
 
                         // targets better be last
                         assert!(!target || i == path.len() - 1);
@@ -1728,8 +1728,8 @@ impl Domain {
                         //     replay count! note that it's *not* sufficient to check if the
                         //     *current* node is a target/reader, because we could miss during a
                         //     join along the path.
-                        if backfill_keys.is_some() && finished_partial == 0 &&
-                            (dst_is_reader || dst_is_target)
+                        if backfill_keys.is_some() && finished_partial == 0
+                            && (dst_is_reader || dst_is_target)
                         {
                             finished_partial = backfill_keys.as_ref().unwrap().len();
                         }

@@ -74,18 +74,18 @@ where
 
 pub fn predicate_is_equivalent(np: &ConditionTree, ep: &ConditionTree) -> bool {
     let nl_col = match *np.left {
-            ConditionExpression::Base(ConditionBase::Field(ref f)) => f.clone(),
-            _ => unimplemented!(),
-        };
+        ConditionExpression::Base(ConditionBase::Field(ref f)) => f.clone(),
+        _ => unimplemented!(),
+    };
     let nr_col = match *np.right {
         ConditionExpression::Base(ConditionBase::Field(ref f)) => f.clone(),
         _ => unimplemented!(),
     };
 
     let el_col = match *ep.left {
-            ConditionExpression::Base(ConditionBase::Field(ref f)) => f.clone(),
-            _ => unimplemented!(),
-        };
+        ConditionExpression::Base(ConditionBase::Field(ref f)) => f.clone(),
+        _ => unimplemented!(),
+    };
     let er_col = match *ep.right {
         ConditionExpression::Base(ConditionBase::Field(ref f)) => f.clone(),
         _ => unimplemented!(),
@@ -100,22 +100,22 @@ pub fn complex_predicate_implies(np: &ConditionExpression, ep: &ConditionExpress
         LogicalOp(ref ect) => {
             match *np {
                 LogicalOp(ref nct) => if nct.operator == ect.operator {
-                    return (complex_predicate_implies(&*nct.left, &*ect.left) &&
-                        complex_predicate_implies(&*nct.right, &*ect.right)) ||
-                        (complex_predicate_implies(&*nct.left, &*ect.right) &&
-                            complex_predicate_implies(&*nct.right, &*ect.left));
+                    return (complex_predicate_implies(&*nct.left, &*ect.left)
+                        && complex_predicate_implies(&*nct.right, &*ect.right))
+                        || (complex_predicate_implies(&*nct.left, &*ect.right)
+                            && complex_predicate_implies(&*nct.right, &*ect.left));
                 },
                 _ => (),
             }
 
             match ect.operator {
                 Operator::And => {
-                    complex_predicate_implies(np, &*ect.left) &&
-                        complex_predicate_implies(np, &*ect.right)
+                    complex_predicate_implies(np, &*ect.left)
+                        && complex_predicate_implies(np, &*ect.right)
                 }
                 Operator::Or => {
-                    complex_predicate_implies(np, &*ect.left) ||
-                        complex_predicate_implies(np, &*ect.right)
+                    complex_predicate_implies(np, &*ect.left)
+                        || complex_predicate_implies(np, &*ect.right)
                 }
                 _ => unreachable!(),
             }
@@ -123,12 +123,12 @@ pub fn complex_predicate_implies(np: &ConditionExpression, ep: &ConditionExpress
         ComparisonOp(ref ect) => match *np {
             LogicalOp(ref nct) => match nct.operator {
                 Operator::And => {
-                    complex_predicate_implies(&*nct.left, ep) ||
-                        complex_predicate_implies(&*nct.right, ep)
+                    complex_predicate_implies(&*nct.left, ep)
+                        || complex_predicate_implies(&*nct.right, ep)
                 }
                 Operator::Or => {
-                    complex_predicate_implies(&*nct.left, ep) &&
-                        complex_predicate_implies(&*nct.right, ep)
+                    complex_predicate_implies(&*nct.left, ep)
+                        && complex_predicate_implies(&*nct.right, ep)
                 }
                 _ => unreachable!(),
             },

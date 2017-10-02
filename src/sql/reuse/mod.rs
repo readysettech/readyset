@@ -50,10 +50,13 @@ impl ReuseConfig {
         self.reorder_joins(qg, &reuse_candidates);
 
         reuse_candidates
-
     }
 
-    pub fn reorder_joins(&self, qg: &mut QueryGraph, reuse_candidates: &Vec<(ReuseType, &QueryGraph)>) {
+    pub fn reorder_joins(
+        &self,
+        qg: &mut QueryGraph,
+        reuse_candidates: &Vec<(ReuseType, &QueryGraph)>,
+    ) {
         reorder_joins(qg, reuse_candidates);
     }
 

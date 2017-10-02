@@ -442,7 +442,11 @@ pub(crate) fn make_topk_node(
     FlowNode::New(na)
 }
 
-pub(crate) fn materialize_leaf_node(node: &MirNodeRef, key_cols: &Vec<Column>, mig: &mut Migration) {
+pub(crate) fn materialize_leaf_node(
+    node: &MirNodeRef,
+    key_cols: &Vec<Column>,
+    mig: &mut Migration,
+) {
     let na = node.borrow().flow_node_addr().unwrap();
 
     // we must add a new reader for this query. This also requires adding an identity node (at

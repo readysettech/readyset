@@ -295,10 +295,7 @@ impl<'a> Plan<'a> {
             tags.push((tag, last_domain.unwrap()));
         }
 
-        self.tags
-            .entry(index_on)
-            .or_default()
-            .extend(tags);
+        self.tags.entry(index_on).or_default().extend(tags);
     }
 
     /// Instructs the target node to set up appropriate state for any new indices that have been

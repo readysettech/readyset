@@ -49,10 +49,11 @@ impl Node {
 
                     let mut replay = match (&mut **m,) {
                         (&mut Packet::ReplayPiece {
-                            context: payload::ReplayPieceContext::Partial {
-                                ref mut for_keys,
-                                ignore,
-                            },
+                            context:
+                                payload::ReplayPieceContext::Partial {
+                                    ref mut for_keys,
+                                    ignore,
+                                },
                             ..
                         },) => {
                             use std::mem;
@@ -122,9 +123,10 @@ impl Node {
 
                     if let ReplayContext::Partial { keys, .. } = replay {
                         if let Packet::ReplayPiece {
-                            context: payload::ReplayPieceContext::Partial {
-                                ref mut for_keys, ..
-                            },
+                            context:
+                                payload::ReplayPieceContext::Partial {
+                                    ref mut for_keys, ..
+                                },
                             ..
                         } = **m
                         {

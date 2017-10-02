@@ -42,9 +42,9 @@ use std::ops::Deref;
 impl Deref for IndexPair {
     type Target = LocalNodeIndex;
     fn deref(&self) -> &Self::Target {
-        self.local.as_ref().expect(
-            "tried to access local node index, which has not yet been assigned",
-        )
+        self.local
+            .as_ref()
+            .expect("tried to access local node index, which has not yet been assigned")
     }
 }
 
