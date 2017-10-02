@@ -300,7 +300,7 @@ mod tests {
 
     #[test]
     fn it_describes_arithmetic() {
-        let mut p = setup_column_arithmetic(ArithmeticOperator::Add);
+        let p = setup_column_arithmetic(ArithmeticOperator::Add);
         assert_eq!(p.node().description(), "π[0, 1, 0 + 1]");
     }
 

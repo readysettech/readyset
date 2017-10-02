@@ -1276,23 +1276,23 @@ mod tests {
         // set up graph
         let mut g = Blender::new();
         let mut inc = SqlIncorporator::default();
-        let mut mig = g.start_migration();
+        g.migrate(|mig| {
+            assert!(
+                inc.add_query(
+                    "CREATE TABLE users (id int, age int);",
+                    None,
+                    mig
+                ).is_ok()
+            );
 
-        assert!(
-            inc.add_query(
-                "CREATE TABLE users (id int, age int);",
-                None,
-                &mut mig
-            ).is_ok()
-        );
+            let res = inc.add_query("SELECT 2 * users.age FROM users;", None, mig);
+            assert!(res.is_ok());
 
-        let res = inc.add_query("SELECT 2 * users.age FROM users;", None, &mut mig);
-        assert!(res.is_ok());
-
-        // leaf view node
-        let edge = get_node(&inc, &mig, &res.unwrap().name);
-        assert_eq!(edge.fields(), &["arithmetic"]);
-        assert_eq!(edge.description(), format!("π[(lit: 2) * 1]"));
+            // leaf view node
+            let edge = get_node(&inc, mig, &res.unwrap().name);
+            assert_eq!(edge.fields(), &["arithmetic"]);
+            assert_eq!(edge.description(), format!("π[(lit: 2) * 1]"));
+        });
     }
 
     #[test]

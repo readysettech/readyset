@@ -314,13 +314,11 @@ fn it_works_with_simple_arithmetic() {
         CarPrice: SELECT 2 * price FROM Car WHERE id = ?;
     ";
 
-    let recipe = {
-        let mut mig = g.start_migration();
+    let recipe = g.migrate(|mig| {
         let mut recipe = distributary::Recipe::from_str(&sql, None).unwrap();
-        recipe.activate(&mut mig, false).unwrap();
-        mig.commit();
+        recipe.activate(mig, false).unwrap();
         recipe
-    };
+    });
 
     let car_index = recipe.node_addr_for("Car").unwrap();
     let count_index = recipe.node_addr_for("CarPrice").unwrap();
@@ -352,13 +350,11 @@ fn it_works_with_join_arithmetic() {
                   WHERE car_id = ?;
     ";
 
-    let recipe = {
-        let mut mig = g.start_migration();
+    let recipe = g.migrate(|mig| {
         let mut recipe = distributary::Recipe::from_str(&sql, None).unwrap();
-        recipe.activate(&mut mig, false).unwrap();
-        mig.commit();
+        recipe.activate(mig, false).unwrap();
         recipe
-    };
+    });
 
     let car_index = recipe.node_addr_for("Car").unwrap();
     let price_index = recipe.node_addr_for("Price").unwrap();
@@ -392,13 +388,11 @@ fn it_works_with_function_arithmetic() {
         Price: SELECT 2 * MAX(price) FROM Bread;
     ";
 
-    let recipe = {
-        let mut mig = g.start_migration();
+    let recipe = g.migrate(|mig| {
         let mut recipe = distributary::Recipe::from_str(&sql, None).unwrap();
-        recipe.activate(&mut mig, false).unwrap();
-        mig.commit();
+        recipe.activate(mig, false).unwrap();
         recipe
-    };
+    });
 
     let bread_index = recipe.node_addr_for("Bread").unwrap();
     let query_index = recipe.node_addr_for("Price").unwrap();
