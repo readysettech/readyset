@@ -167,7 +167,11 @@ impl SingleReadHandle {
         }
     }
 
-    pub(crate) fn try_find_and<F, T>(&self, key: &DataType, mut then: F) -> Result<(Option<T>, i64), ()>
+    pub(crate) fn try_find_and<F, T>(
+        &self,
+        key: &DataType,
+        mut then: F,
+    ) -> Result<(Option<T>, i64), ()>
     where
         F: FnMut(&[Arc<Vec<DataType>>]) -> T,
     {

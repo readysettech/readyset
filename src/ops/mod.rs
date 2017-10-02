@@ -17,9 +17,7 @@ pub mod topk;
 pub enum NodeOperator {
     Base(base::Base),
     Sum(grouped::GroupedOperator<grouped::aggregate::Aggregator>),
-    Extremum(
-        grouped::GroupedOperator<grouped::extremum::ExtremumOperator>,
-    ),
+    Extremum(grouped::GroupedOperator<grouped::extremum::ExtremumOperator>),
     Concat(grouped::GroupedOperator<grouped::concat::GroupConcat>),
     Join(join::Join),
     Latest(latest::Latest),

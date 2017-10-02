@@ -241,8 +241,8 @@ impl Worker {
     }
 
     fn heartbeat(&mut self) -> Result<(), channel::tcp::SendError> {
-        if self.last_heartbeat.is_some() &&
-            self.last_heartbeat.as_ref().unwrap().elapsed() > self.heartbeat_every
+        if self.last_heartbeat.is_some()
+            && self.last_heartbeat.as_ref().unwrap().elapsed() > self.heartbeat_every
         {
             let msg = self.wrap_payload(CoordinationPayload::Heartbeat);
             match self.sender.as_mut().unwrap().send(msg) {

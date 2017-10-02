@@ -257,21 +257,14 @@ impl Materializations {
                           "columns" => ?columns,
                       );
 
-                if self.have
-                    .entry(mi)
-                    .or_default()
-                    .insert(columns.clone())
-                {
+                if self.have.entry(mi).or_default().insert(columns.clone()) {
                     // also add a replay obligation to enable partial
                     replay_obligations
                         .entry(mi)
                         .or_default()
                         .insert(columns.clone());
 
-                    self.added
-                        .entry(mi)
-                        .or_default()
-                        .insert(columns);
+                    self.added.entry(mi).or_default().insert(columns);
                 }
             }
         }
@@ -339,9 +332,8 @@ impl Materializations {
                     }
                 } else {
                     // non-materialized child -- keep walking
-                    stack.extend(
-                        graph.neighbors_directed(child, petgraph::EdgeDirection::Outgoing),
-                    );
+                    stack
+                        .extend(graph.neighbors_directed(child, petgraph::EdgeDirection::Outgoing));
                 }
             }
 
@@ -420,10 +412,7 @@ impl Materializations {
                         // we need to add to self.added even if we didn't explicitly add any new
                         // indices if we're partial, because existing domains will need to be told
                         // about new partial replay paths sourced from this node.
-                        self.added
-                            .entry(ni)
-                            .or_default()
-                            .insert(index);
+                        self.added.entry(ni).or_default().insert(index);
                     }
                 }
             } else {
