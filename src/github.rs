@@ -21,19 +21,10 @@ impl GithubNotifier {
         GithubNotifier { api_token: String::from(api_token) }
     }
 
-    fn get_client(&self) -> Github {
-        Github::new(self.api_token.clone()).unwrap()
-    }
-
-    pub fn notify_pending(&self, push: &Push, commit: &Commit) -> Result<(), String> {
-        let payload = Payload {
-            state: String::from("pending"),
-            description: String::from("Currently tasting..."),
-            context: String::from("Taster"),
-        };
-
-        let result = self.get_client()
-            .post(&payload)
+    fn post_status(&self, push: &Push, commit: &Commit, payload: &Payload) -> Result<(), String> {
+        let client = Github::new(self.api_token.clone()).unwrap();
+        let result = client
+            .post(payload)
             .repos()
             .owner(push.owner_name.clone().unwrap().as_str())
             .repo(push.repo_name.clone().unwrap().as_str())
@@ -45,6 +36,16 @@ impl GithubNotifier {
             Ok(_) => Ok(()),
             Err(e) => Err(e.to_string()),
         }
+    }
+
+    pub fn notify_pending(&self, push: &Push, commit: &Commit) -> Result<(), String> {
+        let payload = Payload {
+            context: "Taster".to_string(),
+            state: "pending".to_string(),
+            description: "Currently tasting...".to_string(),
+        };
+
+        self.post_status(push, commit, &payload)
     }
 
     pub fn notify(
@@ -69,24 +70,11 @@ impl GithubNotifier {
         };
 
         let payload = Payload {
+            context: "Taster".to_string(),
             state: state.to_string(),
             description: format!("It {}.", taste),
-            context: "Taster".to_string(),
         };
 
-        // TODO: move this to a method
-        let result = self.get_client()
-            .post(&payload)
-            .repos()
-            .owner(push.owner_name.clone().unwrap().as_str())
-            .repo(push.repo_name.clone().unwrap().as_str())
-            .statuses()
-            .sha(&commit.id.to_string())
-            .execute::<Value>();
-
-        match result {
-            Ok(_) => Ok(()),
-            Err(e) => Err(e.to_string()),
-        }
+        self.post_status(push, commit, &payload)
     }
 }
