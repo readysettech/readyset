@@ -11,8 +11,6 @@ use std::vec::Vec;
 
 use sql::query_signature::QuerySignature;
 
-pub const CONTEXT: &'static str = "UserContext";
-
 #[derive(Clone, Debug, Eq, Hash, PartialEq)]
 pub struct LiteralColumn {
     pub name: String,

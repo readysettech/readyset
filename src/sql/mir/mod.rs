@@ -11,13 +11,15 @@ use ops::join::JoinType;
 use nom_sql::{Column, ColumnSpecification, ConditionBase, ConditionExpression, ConditionTree,
               Literal, Operator, SqlQuery, TableKey};
 use nom_sql::{LimitClause, OrderClause, SelectStatement};
-use sql::query_graph::{JoinRef, OutputColumn, QueryGraph, QueryGraphEdge, CONTEXT};
+use sql::query_graph::{JoinRef, OutputColumn, QueryGraph, QueryGraphEdge};
 
 use slog;
 use std::collections::{HashMap, HashSet};
 use std::collections::hash_map::Entry;
 use std::ops::Deref;
 use std::vec::Vec;
+
+mod security;
 
 fn target_columns_from_computed_column(computed_col: &Column) -> &Column {
     use nom_sql::FunctionExpression::*;
@@ -136,10 +138,6 @@ impl SqlToMirConverter {
             }
             ConditionExpression::Base(ConditionBase::Literal(Literal::String(ref s))) => {
                 DataType::from(s.clone())
-            }
-            ConditionExpression::Base(ConditionBase::Field(ref rf)) => {
-                assert_eq!(rf.clone().table.unwrap(), CONTEXT);
-                DataType::ContextKey(rf.clone().name)
             }
             _ => unimplemented!(),
         };
@@ -660,7 +658,7 @@ impl SqlToMirConverter {
     }
 
     fn make_join_node(
-        &mut self,
+        &self,
         name: &str,
         jp: &ConditionTree,
         left_node: MirNodeRef,
@@ -951,173 +949,6 @@ impl SqlToMirConverter {
         predicates_above_group_by_nodes
     }
 
-    fn make_security_nodes(
-        &mut self,
-        rel: &str,
-        base_node: &MirNodeRef,
-        universe_id: DataType,
-        node_for_rel: HashMap<&str, MirNodeRef>,
-    ) -> Vec<MirNodeRef> {
-        use std::cmp::Ordering;
-        let policies = match self.policies.get(&(universe_id.clone(), String::from(rel))) {
-            Some(p) => p.clone(),
-            // no policies associated with this base node
-            None => return Vec::new(),
-        };
-
-        let mut node_count = 0;
-        let mut local_node_for_rel = node_for_rel.clone();
-
-        debug!(
-            self.log,
-            "Found {} policies for table {}",
-            policies.len(),
-            rel
-        );
-
-        let mut security_nodes = Vec::new();
-        let mut last_policy_nodes = Vec::new();
-
-        for qg in policies.iter() {
-            let mut prev_node = Some(base_node.clone());
-            let mut base_nodes: Vec<MirNodeRef> = Vec::new();
-            let mut join_nodes: Vec<MirNodeRef> = Vec::new();
-            let mut filter_nodes: Vec<MirNodeRef> = Vec::new();
-            let mut joined_tables = HashSet::new();
-
-            let mut sorted_rels: Vec<&str> = qg.relations.keys().map(String::as_str).collect();
-
-            sorted_rels.sort();
-
-            let mut sorted_edges: Vec<(&(String, String), &QueryGraphEdge)> =
-                qg.edges.iter().collect();
-
-            // all base nodes should be present in local_node_for_rel, except for UserContext
-            // if policy uses UserContext, add it to local_node_for_rel
-            for rel in &sorted_rels {
-                if *rel == "computed_columns" {
-                    continue;
-                }
-                if local_node_for_rel.contains_key(*rel) {
-                    continue;
-                }
-
-                let latest_existing = self.current.get(*rel);
-                let view_for_rel = match latest_existing {
-                    None => panic!("Policy refers to unknown view \"{}\"", rel),
-                    Some(v) => {
-                        let existing = self.nodes.get(&(String::from(*rel), *v));
-                        match existing {
-                            None => {
-                                panic!(
-                                    "Inconsistency: base node \"{}\" does not exist at v{}",
-                                    *rel,
-                                    v
-                                );
-                            }
-                            Some(bmn) => MirNode::reuse(bmn.clone(), self.schema_version),
-                        }
-                    }
-                };
-
-                local_node_for_rel.insert(*rel, view_for_rel.clone());
-                base_nodes.push(view_for_rel.clone());
-            }
-
-            // Sort the edges to ensure deterministic join order.
-            sorted_edges.sort_by(|&(a, _), &(b, _)| {
-                let src_ord = a.0.cmp(&b.0);
-                if src_ord == Ordering::Equal {
-                    a.1.cmp(&b.1)
-                } else {
-                    src_ord
-                }
-            });
-
-            // handles joins against UserContext table
-            for &(&(ref src, ref dst), edge) in &sorted_edges {
-                let (join_type, jps) = match *edge {
-                    QueryGraphEdge::LeftJoin(ref jps) => (JoinType::Left, jps),
-                    QueryGraphEdge::Join(ref jps) => (JoinType::Inner, jps),
-                    _ => continue,
-                };
-
-                for jp in jps.iter() {
-                    let (left_node, right_node) = self.pick_join_columns(
-                        src,
-                        dst,
-                        prev_node,
-                        &joined_tables,
-                        &local_node_for_rel,
-                    );
-                    let jn = self.make_join_node(
-                        &format!("sp_{:x}_n{:x}", qg.signature().hash, node_count),
-                        jp,
-                        left_node,
-                        right_node,
-                        join_type.clone(),
-                    );
-                    join_nodes.push(jn.clone());
-                    prev_node = Some(jn);
-
-                    joined_tables.insert(src);
-                    joined_tables.insert(dst);
-                    node_count += 1;
-                }
-            }
-
-            // handles predicate nodes
-            for rel in &sorted_rels {
-                let qgn = qg.relations
-                    .get(*rel)
-                    .expect("relation should have a query graph node.");
-                assert!(*rel != "computed_collumns");
-
-                // Skip empty predicates
-                if qgn.predicates.is_empty() {
-                    continue;
-                }
-
-                for pred in &qgn.predicates {
-                    let new_nodes = self.make_predicate_nodes(
-                        &format!("sp_{:x}_n{:x}", qg.signature().hash, node_count),
-                        prev_node.expect("empty previous node"),
-                        pred,
-                        0,
-                    );
-
-                    prev_node = Some(
-                        new_nodes
-                            .iter()
-                            .last()
-                            .expect("no new nodes were created")
-                            .clone(),
-                    );
-                    filter_nodes.extend(new_nodes);
-                }
-            }
-
-            let policy_nodes: Vec<_> = base_nodes
-                .into_iter()
-                .chain(join_nodes.into_iter())
-                .chain(filter_nodes.into_iter())
-                .collect();
-
-            assert!(policy_nodes.len() > 0, "no nodes where created for policy");
-
-            security_nodes.extend(policy_nodes.clone());
-            last_policy_nodes.push(policy_nodes.last().unwrap().clone())
-        }
-
-        if last_policy_nodes.len() > 1 {
-            let final_node = self.make_union_node(&format!("sp_final_union"), last_policy_nodes);
-
-            security_nodes.push(final_node);
-        }
-
-        security_nodes
-    }
-
     fn pick_join_columns(
         &self,
         src: &String,
@@ -1202,29 +1033,9 @@ impl SqlToMirConverter {
                 node_for_rel.insert(*rel, base_for_rel);
             }
 
-            // If this is creating a new user universe, create the appropriate security nodes
-            // for each base node relation.
-            let mut policy_nodes: Vec<MirNodeRef> = Vec::new();
-            if universe != "global".into() {
-                for (rel, b) in &node_for_rel.clone() {
-                    let policies =
-                        self.make_security_nodes(*rel, &b, universe.clone(), node_for_rel.clone());
-                    debug!(
-                        self.log,
-                        "Created {} security nodes for table {}",
-                        policies.len(),
-                        *rel
-                    );
-                    policy_nodes.extend(policies.clone());
-
-                    // Further nodes added should refer to the last node in base node's policy chain
-                    // instead of the base node itself.
-                    if !policies.is_empty() {
-                        let last_pol = policies.last().unwrap();
-                        node_for_rel.insert(*rel, last_pol.clone());
-                    }
-                }
-            }
+            // TODO(larat): push this downwards the graph
+            use sql::mir::security::SecurityBoundary;
+            let policy_nodes = self.make_security_boundary(universe.clone(), &mut node_for_rel, &mut None);
 
             // 1. Generate join nodes for the query.
             // This is done by creating/merging join chains as each predicate is added.
@@ -1286,7 +1097,12 @@ impl SqlToMirConverter {
                         pick_join_chains(&jref.src, &jref.dst, &mut join_chains);
 
                     let jn = self.make_join_node(
-                        &format!("q_{:x}_n{}", qg.signature().hash, new_node_count),
+                        &format!(
+                            "q_{:x}_n{}_u{}",
+                            qg.signature().hash,
+                            new_node_count,
+                            universe
+                        ),
                         jp,
                         left_chain.last_node.clone(),
                         right_chain.last_node.clone(),
@@ -1359,7 +1175,12 @@ impl SqlToMirConverter {
                             };
 
                             let new_mpns = self.predicates_above_group_by(
-                                &format!("q_{:x}_n{}", qg.signature().hash, new_node_count),
+                                &format!(
+                                    "q_{:x}_n{}_u{}",
+                                    qg.signature().hash,
+                                    new_node_count,
+                                    universe
+                                ),
                                 &column_to_predicates,
                                 over_col.clone(),
                                 parent,
@@ -1422,7 +1243,12 @@ impl SqlToMirConverter {
                             };
 
                             let n = self.make_function_node(
-                                &format!("q_{:x}_n{}", qg.signature().hash, new_node_count),
+                                &format!(
+                                    "q_{:x}_n{}_u{}",
+                                    qg.signature().hash,
+                                    new_node_count,
+                                    universe
+                                ),
                                 fn_col,
                                 gb_and_param_cols,
                                 parent_node,
@@ -1434,8 +1260,12 @@ impl SqlToMirConverter {
                     } else {
                         // Function columns without GROUP BY
                         for computed_col in &computed_cols_cgn.columns {
-                            let agg_node_name =
-                                &format!("q_{:x}_n{}", qg.signature().hash, new_node_count);
+                            let agg_node_name = &format!(
+                                "q_{:x}_n{}_u{}",
+                                qg.signature().hash,
+                                new_node_count,
+                                universe
+                            );
 
                             let over_col = target_columns_from_computed_column(computed_col);
                             let over_table = over_col.table.as_ref().unwrap().as_str();
@@ -1511,7 +1341,13 @@ impl SqlToMirConverter {
                         };
 
                         let fns = self.make_predicate_nodes(
-                            &format!("q_{:x}_n{}_p{}", qg.signature().hash, new_node_count, i),
+                            &format!(
+                                "q_{:x}_n{}_p{}_u{}",
+                                qg.signature().hash,
+                                new_node_count,
+                                i,
+                                universe
+                            ),
                             parent,
                             p,
                             0,
@@ -1539,7 +1375,12 @@ impl SqlToMirConverter {
                 let group_by = qg.parameters();
 
                 let node = self.make_topk_node(
-                    &format!("q_{:x}_n{}", qg.signature().hash, new_node_count),
+                    &format!(
+                        "q_{:x}_n{}_u{}",
+                        qg.signature().hash,
+                        new_node_count,
+                        universe
+                    ),
                     final_node,
                     group_by,
                     &st.order,
@@ -1588,7 +1429,12 @@ impl SqlToMirConverter {
                 })
                 .collect();
 
-            let ident = format!("q_{:x}_n{}", qg.signature().hash, new_node_count);
+            let ident = format!(
+                "q_{:x}_n{}_u{}",
+                qg.signature().hash,
+                new_node_count,
+                universe
+            );
             let leaf_project_node =
                 self.make_project_node(&ident, final_node, projected_columns, projected_literals);
             nodes_added.push(leaf_project_node.clone());

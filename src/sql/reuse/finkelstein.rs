@@ -100,8 +100,8 @@ impl Finkelstein {
         for (name, ex_qgn) in &existing_qg.relations {
             let new_qgn = &new_qg.relations[name];
 
-            // iterate over predicates and ensure that each matching one on the existing QG is implied
-            // by the new one
+            // iterate over predicates and ensure that each matching one on the existing QG is
+            // implied by the new one
             for ep in &ex_qgn.predicates {
                 let mut matched = false;
 
@@ -179,8 +179,8 @@ impl Finkelstein {
         //         return Some(ReuseType::DirectExtension);
         //     } else {
         //         if name == "computed_columns" {
-        //             // NQG has some extra columns, and they're computed ones (i.e., grouped/function
-        //             // columns). We can recompute those, but not via a backjoin.
+        //             // NQG has some extra columns, and they're computed ones (i.e., grouped/
+        //             // function columns). We can recompute those, but not via a backjoin.
         //             // TODO(malte): be cleverer about this situation
         //             return None;
         //         }

@@ -39,8 +39,6 @@ pub enum DataType {
     TinyText([u8; TINYTEXT_WIDTH]),
     /// A timestamp for date/time types.
     Timestamp(NaiveDateTime),
-    /// A context key used to extract values stored in security nodes
-    ContextKey(String),
 }
 
 #[cfg(feature = "web")]
@@ -54,7 +52,6 @@ impl DataType {
             DataType::Real(i, f) => json!((i as f64) + (f as f64) * 1.0e-9),
             DataType::Text(..) | DataType::TinyText(..) => Value::String(self.into()),
             DataType::Timestamp(ts) => json!(ts.format("%+").to_string()),
-            DataType::ContextKey(ref k) => json!(k),
         }
     }
 }
@@ -107,7 +104,6 @@ impl Hash for DataType {
             DataType::Text(ref t) => t.hash(state),
             DataType::TinyText(t) => t.hash(state),
             DataType::Timestamp(ts) => ts.hash(state),
-            DataType::ContextKey(ref k) => k.hash(state),
         }
     }
 }
@@ -245,7 +241,6 @@ impl fmt::Debug for DataType {
             DataType::Real(..) => write!(f, "Real({})", self),
             DataType::Int(n) => write!(f, "Int({})", n),
             DataType::BigInt(n) => write!(f, "BigInt({})", n),
-            DataType::ContextKey(ref n) => write!(f, "ContextKey({})", n),
         }
     }
 }
@@ -269,7 +264,6 @@ impl fmt::Display for DataType {
                 }
             }
             DataType::Timestamp(ts) => write!(f, "{}", format!("{}", ts.format("%c"))),
-            DataType::ContextKey(ref k) => write!(f, "context.{}", k),
         }
     }
 }

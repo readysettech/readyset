@@ -814,6 +814,10 @@ impl MirNodeType {
                 MirNodeType::Leaf { ref keys, .. } => keys == our_keys,
                 _ => false,
             },
+            MirNodeType::Union { emit: ref our_emit } => match *other {
+                MirNodeType::Union { ref emit } => emit == our_emit,
+                _ => false,
+            },
             _ => unimplemented!(),
         }
     }
