@@ -295,6 +295,8 @@ pub fn main() {
                 head_commit: hc,
                 push_ref: Some(b.clone()),
                 pusher: None,
+                owner_name: None,
+                repo_name: None,
             };
             let res = taste::taste_commit(
                 &ws,
@@ -342,7 +344,17 @@ pub fn main() {
                     repo_name: Some(repository.name.clone()),
                 };
 
-                let notify = |cfg: Option<&Config>, res: &taste::TastingResult, push: &Push, commit: &Commit| {
+                let notify_pending = |push: &Push, commit: &Commit| {
+                    // github status notification
+                    if gn.is_some() {
+                        gn.as_ref().unwrap().notify_pending(&push, &commit).unwrap();
+                    }
+                };
+
+                let notify = |cfg: Option<&Config>,
+                              res: &taste::TastingResult,
+                              push: &Push,
+                              commit: &Commit| {
                     // email notification
                     if en.is_some() {
                         en.as_ref().unwrap().notify(cfg, &res, &push).unwrap();
@@ -353,15 +365,15 @@ pub fn main() {
                     }
                     // github status notification
                     if gn.is_some() {
-                        gn.as_ref().unwrap().notify(cfg, &res, &push, &commit).unwrap();
+                        gn.as_ref()
+                            .unwrap()
+                            .notify(cfg, &res, &push, &commit)
+                            .unwrap();
                     }
                 };
 
                 {
-                    if gn.is_some() {
-                        gn.as_ref().unwrap().notify_pending(&push, &push.head_commit).unwrap();
-                    }
-
+                    notify_pending(&push, &push.head_commit);
                     let ws = wsl.lock().unwrap();
                     let mut history = hl.lock().unwrap();
                     // First taste the head commit
@@ -396,6 +408,7 @@ pub fn main() {
                                         msg: c.message.clone(),
                                         url: c.url.clone(),
                                     };
+                                    notify_pending(&push, &cur_c);
                                     // taste
                                     let res = taste::taste_commit(
                                         &ws,
