@@ -6,7 +6,7 @@ use std::collections::HashMap;
 use flow::core::DataType;
 
 pub trait AliasRemoval {
-    fn expand_table_aliases(self, universe_id: Option<DataType>) -> SqlQuery;
+    fn expand_table_aliases(self, universe_id: DataType) -> SqlQuery;
 }
 
 fn rewrite_conditional(
@@ -65,7 +65,7 @@ fn rewrite_conditional(
 }
 
 impl AliasRemoval for SqlQuery {
-    fn expand_table_aliases(self, universe_id: Option<DataType>) -> SqlQuery {
+    fn expand_table_aliases(self, universe_id: DataType) -> SqlQuery {
         let mut table_aliases = HashMap::new();
 
         match self {
@@ -77,12 +77,7 @@ impl AliasRemoval for SqlQuery {
                     };
 
                     // Add alias from `UserContext` to `UserContext_{:uid}`
-                    if universe_id.is_some() {
-                        add_alias(
-                            "UserContext",
-                            &format!("UserContext_{}", universe_id.unwrap()),
-                        );
-                    }
+                    add_alias("UserContext", &format!("UserContext_{}", universe_id));
 
                     for t in &sq.tables {
                         match t.alias {

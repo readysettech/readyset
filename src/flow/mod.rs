@@ -190,8 +190,8 @@ impl Blender {
 
     /// Adds a new user universe to the Blender.
     /// User universes automatically enforce security policies.
-    pub fn add_universe(&mut self, user_context: HashMap<String, DataType>) -> Migration {
-        info!(self.log, "adding a new user universe");
+    pub fn add_universe(&mut self, context: HashMap<String, DataType>) -> Migration {
+        info!(self.log, "Adding a new Soup universe");
         let miglog = self.log.new(o!());
         Migration {
             mainline: self,
@@ -201,7 +201,7 @@ impl Blender {
 
             start: time::Instant::now(),
             log: miglog,
-            user_context: Some(user_context),
+            context: context,
         }
     }
 
@@ -215,10 +215,10 @@ impl Blender {
             added: Default::default(),
             columns: Default::default(),
             readers: Default::default(),
+            context: Default::default(),
 
             start: time::Instant::now(),
             log: miglog,
-            user_context: None,
         }
     }
 
@@ -234,7 +234,7 @@ impl Blender {
             added: Default::default(),
             columns: Default::default(),
             readers: Default::default(),
-            user_context: None,
+            context: Default::default(),
             start: time::Instant::now(),
             log: miglog,
         };
@@ -501,7 +501,9 @@ pub struct Migration<'a> {
     added: Vec<NodeIndex>,
     columns: Vec<(NodeIndex, ColumnChange)>,
     readers: HashMap<NodeIndex, NodeIndex>,
-    user_context: Option<HashMap<String, DataType>>,
+
+    /// Additional migration information provided by the client
+    context: HashMap<String, DataType>,
 
     start: time::Instant,
     log: slog::Logger,
@@ -562,16 +564,16 @@ impl<'a> Migration<'a> {
         ni.into()
     }
 
-    /// Returns the user context of this migration
-    pub fn user_context(&self) -> Option<HashMap<String, DataType>> {
-        self.user_context.clone()
+    /// Returns the context of this migration
+    pub fn context(&self) -> HashMap<String, DataType> {
+        self.context.clone()
     }
 
-    /// Returns the universe of this migration.
+    /// Returns the universe in which this migration is operating in.
     /// If not specified, assumes `global` universe.
     pub fn universe(&self) -> DataType {
-        match self.user_context {
-            Some(ref c) => c.get("id").expect("universe must have an id").clone(),
+        match self.context.get("id") {
+            Some(id) => id.clone(),
             None => "global".into(),
         }
     }

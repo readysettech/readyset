@@ -245,6 +245,7 @@ impl Recipe {
             expressions_added: 0,
             expressions_removed: 0,
         };
+        use sql::security::Secure;
 
         let qfp = self.inc
             .as_mut()
@@ -264,7 +265,7 @@ impl Recipe {
             let qfp = self.inc
                 .as_mut()
                 .unwrap()
-                .add_parsed_query(q, new_name, true, mig)?;
+                .add_parsed_query(q, new_name, mig)?;
 
             // If the user provided us with a query name, use that.
             // If not, use the name internally used by the QFP.
@@ -327,7 +328,7 @@ impl Recipe {
             let qfp = self.inc
                 .as_mut()
                 .unwrap()
-                .add_parsed_query(q, n.clone(), false, mig)?;
+                .add_parsed_query(q, n.clone(), mig)?;
 
             // we currently use a domain per query
             // let d = mig.add_domain();

@@ -5,6 +5,7 @@ use std::vec::Vec;
 use std::collections::HashMap;
 
 use sql::reuse::join_order::reorder_joins;
+use sql::security::UniverseId;
 
 mod finkelstein;
 mod relaxed;
@@ -57,6 +58,15 @@ impl ReuseConfig {
         reuse_candidates: &Vec<(ReuseType, &QueryGraph)>,
     ) {
         reorder_joins(qg, reuse_candidates);
+    }
+
+    // Return which universes are available for reuse opportunities
+    pub fn reuse_universes(&self, universe: UniverseId) -> Vec<UniverseId> {
+        if universe == "global".into() {
+            vec![universe.clone()]
+        } else {
+            vec!["global".into(), universe.clone()]
+        }
     }
 
     pub fn new(reuse_type: ReuseConfigType) -> ReuseConfig {

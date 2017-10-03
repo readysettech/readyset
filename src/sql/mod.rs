@@ -3,6 +3,7 @@ mod passes;
 mod query_graph;
 mod query_signature;
 mod query_utils;
+pub mod security;
 pub mod reuse;
 
 use flow::Migration;
@@ -16,14 +17,12 @@ use self::mir::{MirNodeRef, SqlToMirConverter};
 use mir::query::MirQuery;
 use self::reuse::{ReuseConfig, ReuseConfigType};
 use sql::query_graph::{to_query_graph, QueryGraph};
-use security::Policy;
+use self::security::UniverseId;
 
 use slog;
 use std::collections::HashMap;
 use std::str;
 use std::vec::Vec;
-
-type UniverseId = DataType;
 
 /// Represents the result of a query incorporation, specifying query name (auto-generated or
 /// reflecting a pre-specified name), new nodes added for the query, reused nodes that are part of
@@ -106,62 +105,6 @@ impl SqlIncorporator {
         self.reuse_type = reuse_type;
     }
 
-    /// Starts a new user universe
-    pub fn start_universe(
-        &mut self,
-        policies: &HashMap<u64, Policy>,
-        mig: &mut Migration,
-    ) -> Result<QueryFlowParts, String> {
-        // First, we need to create a UserContext base node.
-        let context = mig.user_context()
-            .expect("Migration must have user context");
-        let uid = context.get("id").expect("Context must have id").clone();
-
-        info!(self.log, "Starting user universe {}", uid);
-
-        let name = format!("UserContext_{}", uid);
-        let mut s = String::new();
-        s.push_str(&format!("CREATE TABLE `{}` (", name));
-        for k in context.keys() {
-            s.push_str("\n");
-            s.push_str(&format!("`{}` text NOT NULL,", k));
-        }
-        s.push_str("\n");
-        s.push_str(") ENGINE=MyISAM DEFAULT CHARSET=utf8;");
-
-        let res = self.add_query(&s, Some(name), mig);
-
-        // Then, we need to transform policies' predicates into QueryGraphs.
-        // We do this in a per-universe base, instead of once per policy,
-        // because predicates can have nested subqueries, which will trigger
-        // a view creation and these views might be unique to each universe
-        // e.g. if they reference UserContext.
-
-        self.mir_converter.clear_policies(&uid);
-        for policy in policies.values() {
-            // Policies should have access to all the data in graph, because of that we set
-            // policy_enhanced to false, so any subviews also have access to all the data.
-            let predicate = self.rewrite_query(policy.predicate.clone(), false, mig);
-            let st = match predicate {
-                SqlQuery::Select(ref st) => st,
-                _ => unreachable!(),
-            };
-
-            // TODO(larat): currently we only support policies with a single predicate. These can be
-            // represented as a query graph. This will change for more complex policies eg. column
-            // replacement and aggregation permission.
-
-            let qg = match to_query_graph(st) {
-                Ok(qg) => qg,
-                Err(e) => panic!(e),
-            };
-
-            self.mir_converter.add_policy(&uid, policy, qg);
-        }
-
-        res
-    }
-
     /// Incorporates a single query into via the flow graph migration in `mig`. The `query`
     /// argument is a string that holds a parameterized SQL query, and the `name` argument supplies
     /// an optional name for the query. If no `name` is specified, the table name is used in the
@@ -190,12 +133,11 @@ impl SqlIncorporator {
         &mut self,
         query: SqlQuery,
         name: Option<String>,
-        policy_enhanced: bool,
         mig: &mut Migration,
     ) -> Result<QueryFlowParts, String> {
         match name {
-            None => self.nodes_for_query(query, policy_enhanced, mig),
-            Some(n) => self.nodes_for_named_query(query, n, policy_enhanced, mig),
+            None => self.nodes_for_query(query, mig),
+            Some(n) => self.nodes_for_named_query(query, n, mig),
         }
     }
 
@@ -329,6 +271,7 @@ impl SqlIncorporator {
 
         let reuse_config = ReuseConfig::new(self.reuse_type.clone());
 
+        // Find a promising set of query graphs
         let reuse_candidates = reuse_config.reuse_candidates(&mut qg, &self.query_graphs);
 
         if reuse_candidates.len() > 0 {
@@ -344,19 +287,23 @@ impl SqlIncorporator {
                 reuse_candidates
             );
 
-            let mir_queries: Vec<MirQuery> = reuse_candidates
-                .iter()
-                .map(|c| {
-                    self.mir_queries[&(c.1.signature().hash, "global".into())].clone()
-                })
-                .collect();
+            let mut mir_queries: Vec<MirQuery> = Vec::new();
+            for uid in reuse_config.reuse_universes(universe) {
+                let mqs: Vec<MirQuery> = reuse_candidates
+                    .iter()
+                    .filter_map(|c| {
+                        self.mir_queries.get(&(c.1.signature().hash, uid.clone()))
+                    })
+                    .cloned()
+                    .collect();
+
+                mir_queries.extend(mqs);
+            }
 
             return (qg, QueryGraphReuse::ExtendExisting(mir_queries));
         } else {
             info!(self.log, "No reuse opportunity, adding fresh query");
         }
-
-        // TODO(larat): still possible to look for reuse opportunities in global universe
 
         (qg, QueryGraphReuse::None)
     }
@@ -545,7 +492,6 @@ impl SqlIncorporator {
     fn nodes_for_query(
         &mut self,
         q: SqlQuery,
-        policy_enhanced: bool,
         mig: &mut Migration,
     ) -> Result<QueryFlowParts, String> {
         let name = match q {
@@ -553,16 +499,11 @@ impl SqlIncorporator {
             SqlQuery::Select(_) => format!("q_{}", self.num_queries),
             _ => panic!("only CREATE TABLE and SELECT queries can be added to the graph!"),
         };
-        self.nodes_for_named_query(q, name, policy_enhanced, mig)
+        self.nodes_for_named_query(q, name, mig)
     }
 
     /// Runs some standard rewrite passes on the query.
-    fn rewrite_query(
-        &mut self,
-        q: SqlQuery,
-        policy_enhanced: bool,
-        mig: &mut Migration,
-    ) -> SqlQuery {
+    fn rewrite_query(&mut self, q: SqlQuery, mig: &mut Migration) -> SqlQuery {
         use sql::passes::alias_removal::AliasRemoval;
         use sql::passes::count_star_rewrite::CountStarRewrite;
         use sql::passes::implied_tables::ImpliedTableExpansion;
@@ -587,7 +528,7 @@ impl SqlIncorporator {
                 Subquery::InComparison(cond_base) => {
                     let (sq, column) = query_from_condition_base(&cond_base);
 
-                    let qfp = self.add_parsed_query(sq, None, policy_enhanced, mig)
+                    let qfp = self.add_parsed_query(sq, None, mig)
                         .expect("failed to add subquery");
                     *cond_base = field_with_table_name(qfp.name.clone(), column);
                 }
@@ -597,7 +538,6 @@ impl SqlIncorporator {
                             let qfp = self.add_parsed_query(
                                 SqlQuery::Select(ns.clone()),
                                 alias.clone(),
-                                policy_enhanced,
                                 mig,
                             ).expect("failed to add subquery in join");
                             JoinRightSide::Table(Table {
@@ -628,15 +568,9 @@ impl SqlIncorporator {
             }
         }
 
-        // Get universe id for table alias expansion.
-        let uid = match mig.user_context() {
-            Some(ctx) => Some(ctx.get("id").unwrap().clone()),
-            None => None,
-        };
-
         // Run some standard rewrite passes on the query. This makes the later work easier,
         // as we no longer have to consider complications like aliases.
-        fq.expand_table_aliases(uid)
+        fq.expand_table_aliases(mig.universe())
             .remove_negation()
             .expand_stars(&self.view_schemas)
             .expand_implied_tables(&self.view_schemas)
@@ -647,11 +581,10 @@ impl SqlIncorporator {
         &mut self,
         q: SqlQuery,
         query_name: String,
-        policy_enhanced: bool,
         mig: &mut Migration,
     ) -> Result<QueryFlowParts, String> {
         self.num_queries += 1;
-        let q = self.rewrite_query(q, policy_enhanced, mig);
+        let q = self.rewrite_query(q, mig);
 
         // TODO(larat): extend existing should handle policy nodes
         // if this is a selection, we compute its `QueryGraph` and consider the existing ones we
@@ -746,7 +679,7 @@ impl<'a> ToFlowParts for &'a str {
 
         // if ok, manufacture a node for the query structure we got
         match parsed_query {
-            Ok(q) => inc.add_parsed_query(q, name, false, mig),
+            Ok(q) => inc.add_parsed_query(q, name, mig),
             Err(e) => Err(String::from(e)),
         }
     }
