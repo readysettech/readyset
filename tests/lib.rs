@@ -345,7 +345,7 @@ fn it_works_with_simple_arithmetic() {
     mutator.put(vec![id.clone(), price]).unwrap();
 
     // Let writes propagate:
-    thread::sleep(time::Duration::from_millis(SETTLE_TIME_MS));
+    sleep();
 
     // Retrieve the result of the count query:
     let result = getter.lookup(&id, true).unwrap();
@@ -390,7 +390,7 @@ fn it_works_with_join_arithmetic() {
         .unwrap();
 
     // Let writes propagate:
-    thread::sleep(time::Duration::from_millis(SETTLE_TIME_MS));
+    sleep();
 
     // Retrieve the result of the count query:
     let result = getter.lookup(&id.into(), true).unwrap();
@@ -423,7 +423,7 @@ fn it_works_with_function_arithmetic() {
     }
 
     // Let writes propagate:
-    thread::sleep(time::Duration::from_millis(SETTLE_TIME_MS));
+    sleep();
 
     // Retrieve the result of the count query:
     let key = distributary::DataType::BigInt(max_price * 2);
