@@ -1,4 +1,5 @@
 use Push;
+use Commit;
 use config::Config;
 use taste::{TastingResult};
 use github_rs::client::{Executor, Github};
@@ -24,7 +25,7 @@ impl GithubNotifier {
         Github::new(self.api_token.clone()).unwrap()
     }
 
-    pub fn notify_pending(&self, push: &Push) -> Result<(), String> {
+    pub fn notify_pending(&self, push: &Push, commit: &Commit) -> Result<(), String> {
         let payload = Payload {
             state: String::from("pending"),
             description: String::from("Currently tasting..."),
@@ -37,8 +38,7 @@ impl GithubNotifier {
             .owner(push.owner_name.clone().unwrap().as_str())
             .repo(push.repo_name.clone().unwrap().as_str())
             .statuses()
-            // TODO: this shouldn't be head always
-            .sha(&push.head_commit.id.to_string())
+            .sha(&commit.id.to_string())
             .execute::<Value>();
 
         match result {
@@ -52,6 +52,7 @@ impl GithubNotifier {
         _cfg: Option<&Config>,
         res: &TastingResult,
         push: &Push,
+        commit: &Commit,
     ) -> Result<(), String> {
         let state = if !res.build || !res.test || !res.bench {
             "failure"
@@ -80,7 +81,7 @@ impl GithubNotifier {
             .owner(push.owner_name.clone().unwrap().as_str())
             .repo(push.repo_name.clone().unwrap().as_str())
             .statuses()
-            .sha(&push.head_commit.id.to_string())
+            .sha(&commit.id.to_string())
             .execute::<Value>();
 
         match result {

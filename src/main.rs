@@ -342,7 +342,7 @@ pub fn main() {
                     repo_name: Some(repository.name.clone()),
                 };
 
-                let notify = |cfg: Option<&Config>, res: &taste::TastingResult, push: &Push| {
+                let notify = |cfg: Option<&Config>, res: &taste::TastingResult, push: &Push, commit: &Commit| {
                     // email notification
                     if en.is_some() {
                         en.as_ref().unwrap().notify(cfg, &res, &push).unwrap();
@@ -353,13 +353,13 @@ pub fn main() {
                     }
                     // github status notification
                     if gn.is_some() {
-                        gn.as_ref().unwrap().notify(cfg, &res, &push).unwrap();
+                        gn.as_ref().unwrap().notify(cfg, &res, &push, &commit).unwrap();
                     }
                 };
 
                 {
                     if gn.is_some() {
-                        gn.as_ref().unwrap().notify_pending(&push).unwrap();
+                        gn.as_ref().unwrap().notify_pending(&push, &push.head_commit).unwrap();
                     }
 
                     let ws = wsl.lock().unwrap();
@@ -383,7 +383,7 @@ pub fn main() {
                             )
                         }
                         Ok((cfg, tr)) => {
-                            notify(cfg.as_ref(), &tr, &push);
+                            notify(cfg.as_ref(), &tr, &push, &push.head_commit);
                             // Taste others if needed
                             if !taste_head_only {
                                 for c in commits.iter() {
@@ -413,7 +413,7 @@ pub fn main() {
                                                 e
                                             )
                                         }
-                                        Ok((cfg, tr)) => notify(cfg.as_ref(), &tr, &push),
+                                        Ok((cfg, tr)) => notify(cfg.as_ref(), &tr, &push, &cur_c),
                                     }
                                 }
                             } else if !commits.is_empty() {
