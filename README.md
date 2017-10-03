@@ -38,6 +38,7 @@ cargo run -- \
     --listen_addr 127.0.0.1:4567 \
     --github_repo "https://github.com/my/repo" \
     --secret "my_secret" \
+    --github_api_key "123key" \
     --slack_hook_url <SLACK_HOOK_URL> \
     --slack_channel "#chan"
 ```

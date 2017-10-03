@@ -14,3 +14,7 @@ log = "0.3"
 regex = "0.1.80"
 slack-hook = { git = "https://github.com/ms705/rust-slack.git" }
 toml = "0.2.1"
+github-rs = "0.6"
+serde = "1.0"
+serde_derive = "1.0"
+serde_json = "1.0"
