@@ -262,9 +262,10 @@ impl<'a> Plan<'a> {
                 }
 
                 if i != segments.len() - 1 {
-                    // since there is a later domain, the last node of any non-final domain must either
-                    // be an egress or a Sharder. If it's an egress, we need to tell it about this
-                    // replay path so that it knows what path to forward replay packets on.
+                    // since there is a later domain, the last node of any non-final domain
+                    // must either be an egress or a Sharder. If it's an egress, we need
+                    // to tell it about this replay path so that it knows
+                    // what path to forward replay packets on.
                     let n = &self.graph[nodes.last().unwrap().0];
                     if n.is_egress() {
                         self.domains

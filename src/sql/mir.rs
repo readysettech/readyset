@@ -870,7 +870,8 @@ impl SqlToMirConverter {
                 }
             }
             ComparisonOp(ref ct) => {
-                // currently, we only support filter-like comparison operations, no nested-selections
+                // currently, we only support filter-like
+                // comparison operations, no nested-selections
                 let f = self.make_filter_node(&format!("{}_f{}", name, nc), parent, ct);
 
                 pred_nodes.push(f);

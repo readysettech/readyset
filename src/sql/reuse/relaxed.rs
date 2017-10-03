@@ -11,7 +11,9 @@ use std::collections::HashMap;
 /// While Finkelstein checks if queries are compatible for direct extension,
 /// this algorithm considers the possibility of reuse of internal views.
 /// For example, given the queries:
-/// 1) select * from Paper, PaperReview where Paper.paperId = PaperReview.paperId and PaperReview.reviewType = 1;
+/// 1) select * from Paper, PaperReview
+///         where Paper.paperId = PaperReview.paperId
+///               and PaperReview.reviewType = 1;
 /// 2) select * from Paper, PaperReview where Paper.paperId = PaperReview.paperId;
 ///
 /// Finkelstein reuse would be conditional on the order the queries are added,
@@ -142,8 +144,8 @@ impl Relaxed {
             }
             let new_qgn = &new_qg.relations[name];
 
-            // iterate over predicates and ensure that each matching one on the existing QG is implied
-            // by the new one
+            // iterate over predicates and ensure that each
+            // matching one on the existing QG is implied by the new one
             for ep in &ex_qgn.predicates {
                 let mut matched = false;
 
