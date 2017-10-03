@@ -29,7 +29,7 @@ impl GithubNotifier {
         }
     }
 
-    fn post_status(&self, push: &Push, commit: &Commit, payload: &Payload) -> Result<(), String> {
+    fn post_status(&self, push: &Push, commit: &Commit, payload: Payload) -> Result<(), String> {
         let owner_name = push.owner_name.clone().unwrap();
         let repo_name = push.repo_name.clone().unwrap();
         println!(
@@ -42,7 +42,7 @@ impl GithubNotifier {
 
         let client = Github::new(self.api_token.clone()).unwrap();
         let result = client
-            .post(payload)
+            .post(&payload)
             .repos()
             .owner(owner_name.as_str())
             .repo(repo_name.as_str())
@@ -69,7 +69,7 @@ impl GithubNotifier {
             description: "Currently tasting...".to_string(),
         };
 
-        self.post_status(push, commit, &payload)
+        self.post_status(push, commit, payload)
     }
 
     pub fn notify(
@@ -99,6 +99,6 @@ impl GithubNotifier {
             description: format!("It {}.", taste),
         };
 
-        self.post_status(push, commit, &payload)
+        self.post_status(push, commit, payload)
     }
 }
