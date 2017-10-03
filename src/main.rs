@@ -10,6 +10,10 @@ extern crate hyper;
 extern crate regex;
 extern crate slack_hook;
 extern crate toml;
+extern crate github_rs;
+#[macro_use]
+extern crate serde_derive;
+extern crate serde_json;
 
 mod auth;
 mod config;
@@ -17,6 +21,7 @@ mod email;
 mod repo;
 mod slack;
 mod taste;
+mod github;
 
 use afterparty::{Delivery, Event, Hub};
 use hyper::Server;
@@ -45,6 +50,8 @@ pub struct Push {
     pub head_commit: Commit,
     pub push_ref: Option<String>,
     pub pusher: Option<String>,
+    pub owner_name: Option<String>,
+    pub repo_name: Option<String>,
 }
 
 pub fn main() {
@@ -125,6 +132,13 @@ pub fn main() {
                 .help("Slack channel for notifications"),
         )
         .arg(
+            Arg::with_name("github_api_key")
+                .long("github_api_key")
+                .takes_value(true)
+                .required(false)
+                .help("GitHub API key to provide status notifications"),
+        )
+        .arg(
             Arg::with_name("taste_commit")
                 .long("taste_commit")
                 .short("t")
@@ -168,6 +182,7 @@ pub fn main() {
     let slack_hook_url = args.value_of("slack_hook_url");
     let slack_channel = args.value_of("slack_channel");
     let taste_commit = args.value_of("taste_commit");
+    let github_api_key = args.value_of("github_api_key");
     let taste_head_only = args.is_present("taste_head_only");
     let workdir = Path::new(args.value_of("workdir").unwrap());
     let verbose_notify = args.is_present("verbose_notifications");
@@ -193,6 +208,11 @@ pub fn main() {
     } else {
         None
     };
+    let gn = if let Some(key) = github_api_key {
+        Some(github::GithubNotifier::new(key))
+    } else {
+        None
+    };
 
     if taste_commit.is_some() {
         let cid = if let Some("HEAD") = taste_commit {
@@ -214,6 +234,8 @@ pub fn main() {
                     head_commit: hc,
                     push_ref: None,
                     pusher: None,
+                    owner_name: None,
+                    repo_name: None,
                 };
                 let res = taste::taste_commit(
                     &ws,
@@ -297,6 +319,7 @@ pub fn main() {
                 ref commits,
                 ref head_commit,
                 ref pusher,
+                ref repository,
                 ..
             } => {
                 println!(
@@ -315,6 +338,8 @@ pub fn main() {
                     head_commit: hc,
                     push_ref: Some(_ref.clone()),
                     pusher: Some(pusher.name.clone()),
+                    owner_name: Some(repository.owner.name.clone()),
+                    repo_name: Some(repository.name.clone()),
                 };
 
                 let notify = |cfg: Option<&Config>, res: &taste::TastingResult, push: &Push| {
@@ -326,9 +351,17 @@ pub fn main() {
                     if sn.is_some() {
                         sn.as_ref().unwrap().notify(cfg, &res, &push).unwrap();
                     }
+                    // github status notification
+                    if gn.is_some() {
+                        gn.as_ref().unwrap().notify(cfg, &res, &push).unwrap();
+                    }
                 };
 
                 {
+                    if gn.is_some() {
+                        gn.as_ref().unwrap().notify_pending(&push).unwrap();
+                    }
+
                     let ws = wsl.lock().unwrap();
                     let mut history = hl.lock().unwrap();
                     // First taste the head commit
