@@ -354,6 +354,39 @@ fn it_works_with_simple_arithmetic() {
 }
 
 #[test]
+fn it_works_with_multiple_arithmetic_expressions() {
+    let mut g = distributary::Blender::new();
+    let sql = "
+        CREATE TABLE Car (id int, price int, PRIMARY KEY(id));
+        CarPrice: SELECT 10 * 10, 2 * price, 10 * price, FROM Car WHERE id = ?;
+    ";
+
+    let recipe = g.migrate(|mig| {
+        let mut recipe = distributary::Recipe::from_str(&sql, None).unwrap();
+        recipe.activate(mig, false).unwrap();
+        recipe
+    });
+
+    let car_index = recipe.node_addr_for("Car").unwrap();
+    let count_index = recipe.node_addr_for("CarPrice").unwrap();
+    let mut mutator = g.get_mutator(car_index);
+    let getter = g.get_getter(count_index).unwrap();
+    let id: distributary::DataType = 1.into();
+    let price: distributary::DataType = 123.into();
+    mutator.put(vec![id.clone(), price]).unwrap();
+
+    // Let writes propagate:
+    sleep();
+
+    // Retrieve the result of the count query:
+    let result = getter.lookup(&id, true).unwrap();
+    assert_eq!(result.len(), 1);
+    assert_eq!(result[0][1], 100.into());
+    assert_eq!(result[0][2], 246.into());
+    assert_eq!(result[0][3], 1230.into());
+}
+
+#[test]
 fn it_works_with_join_arithmetic() {
     let mut g = distributary::Blender::new();
     let sql = "
