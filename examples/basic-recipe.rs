@@ -6,7 +6,7 @@ use std::{thread, time};
 use distributary::{Blender, Recipe};
 use backend::Backend;
 
-fn load_recipe() -> Result<Backend, String> {
+fn load_recipe() -> Backend {
     // inline recipe definition
     let sql = "# base tables
                CREATE TABLE Article (aid int, title varchar(255), \
@@ -26,21 +26,17 @@ fn load_recipe() -> Result<Backend, String> {
 
     let recipe = soup.migrate(|mig| {
         // install recipe
-        match Recipe::from_str(&sql, None) {
-            Ok(mut recipe) => {
-                recipe.activate(mig, false)?;
-                recipe
-            }
-            Err(e) => return Err(e),
-        }
+        let mut recipe = Recipe::from_str(&sql, None).unwrap();
+        recipe.activate(mig, false).unwrap();
         // return brings up new graph for processing
+        recipe
     });
 
-    Ok(Backend::new(soup, recipe))
+    Backend::new(soup, recipe)
 }
 
 fn main() {
-    let mut backend = load_recipe().unwrap();
+    let mut backend = load_recipe();
 
     println!("Soup graph:\n{}", backend.soup);
 
