@@ -225,7 +225,9 @@ impl GraphViz for MirNodeType {
                         .map(|c| c.name.as_str())
                         .collect::<Vec<_>>()
                         .join(", "),
-                    if arithmetic.len() > 0 {
+                    if arithmetic.is_empty() {
+                        format!("")
+                    } else {
                         format!(
                             ", {}",
                             arithmetic
@@ -234,10 +236,10 @@ impl GraphViz for MirNodeType {
                                 .collect::<Vec<_>>()
                                 .join(", ")
                         )
-                    } else {
-                        format!("")
                     },
-                    if literals.len() > 0 {
+                    if literals.is_empty() {
+                        format!("")
+                    } else {
                         format!(
                             ", lit: {}",
                             literals
@@ -246,8 +248,6 @@ impl GraphViz for MirNodeType {
                                 .collect::<Vec<_>>()
                                 .join(", ")
                         )
-                    } else {
-                        format!("")
                     }
                 )?;
             }
