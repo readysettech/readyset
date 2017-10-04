@@ -92,7 +92,11 @@ impl GroupedOperation for Aggregator {
         }
     }
 
-    fn apply(&self, current: Option<&DataType>, diffs: Vec<Self::Diff>) -> DataType {
+    fn apply(
+        &self,
+        current: Option<&DataType>,
+        diffs: &mut Iterator<Item = Self::Diff>,
+    ) -> DataType {
         let n = match current {
             Some(&DataType::Int(n)) => n as i64,
             Some(&DataType::BigInt(n)) => n,
