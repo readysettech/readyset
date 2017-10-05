@@ -641,7 +641,7 @@ pub fn to_query_graph(st: &SelectStatement) -> Result<QueryGraph, String> {
                 }
 
                 qg.columns.push(OutputColumn::Arithmetic(ArithmeticColumn {
-                    name: String::from("arithmetic"),
+                    name: a.alias.clone().unwrap_or(String::from("arithmetic")),
                     table: None,
                     expression: a.clone(),
                 }));
