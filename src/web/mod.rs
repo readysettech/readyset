@@ -26,6 +26,8 @@ struct PutEndpoint<Mutator> {
 /// All nodes are available for reading by GETing from `localhost:8080/<view>?key=<key>`. A JSON
 /// array with all matching records is returned. Each record is represented as a JSON object with
 /// field names as dictated by those passed to `new()` for the view being queried.
+// https://github.com/Ogeon/rustful/issues/133
+#[allow(unused_mut)]
 pub fn run(soup: Arc<Mutex<Blender>>) -> HttpResult<Listening> {
     use rustful::header::ContentType;
 

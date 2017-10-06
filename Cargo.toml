@@ -90,7 +90,6 @@ path = "src/lib.rs"
 
 [[example]]
 name = "basic-recipe"
-required-features = ["binaries"]
 
 [[bin]]
 name = "web"

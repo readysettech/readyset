@@ -34,9 +34,14 @@ Run the test suite
 $ cargo test
 ```
 
-And build the documentation (in `target/doc/distributary/`)
+Build the documentation (in `target/doc/distributary/`)
 ```console
 $ cargo doc
+```
+
+And run the example
+```console
+$ cargo run --example basic-recipe
 ```
 
 ## Benchmarks

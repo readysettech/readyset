@@ -58,8 +58,8 @@ pub type Edge = ();
 ///
 /// It keeps track of the structure of the underlying data flow graph and its domains. `Blender`
 /// does not allow direct manipulation of the graph. Instead, changes must be instigated through a
-/// `Migration`, which can be started using `Blender::start_migration`. Only one `Migration` can
-/// occur at any given point in time.
+/// `Migration`, which can be performed using `Blender::migrate`. Only one `Migration` can occur at
+/// any given point in time.
 pub struct Blender {
     ingredients: petgraph::Graph<node::Node, Edge>,
     source: NodeIndex,

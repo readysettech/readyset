@@ -129,29 +129,28 @@
 //! # use distributary::{Blender, Base, Aggregation, Join, JoinType};
 //! // set up graph
 //! let mut g = Blender::new();
-//! let mut mig = g.start_migration();
+//! g.migrate(|mig| {
+//!     // base types
+//!     let article = mig.add_ingredient("article", &["id", "title"], Base::default());
+//!     let vote = mig.add_ingredient("vote", &["user", "id"], Base::default());
 //!
-//! // base types
-//! let article = mig.add_ingredient("article", &["id", "title"], Base::default());
-//! let vote = mig.add_ingredient("vote", &["user", "id"], Base::default());
+//!     // vote count is an aggregation over vote where we group by the second field ([1])
+//!     let vc = mig.add_ingredient("vc", &["id", "votes"], Aggregation::COUNT.over(vote, 0, &[1]));
 //!
-//! // vote count is an aggregation over vote where we group by the second field ([1])
-//! let vc = mig.add_ingredient("vc", &["id", "votes"], Aggregation::COUNT.over(vote, 0, &[1]));
+//!     // add final join using first field from article and first from vc.
+//!     // joins are trickier because you need to specify what to join on. the vec![1, 0] here
+//!     // signifies that the first field of article and vc should be equal,
+//!     // and the second field can be whatever.
+//!     use distributary::JoinSource::*;
+//!     let j = Join::new(article, vc, JoinType::Inner, vec![B(0, 0), L(1), R(1)]);
+//!     let awvc = mig.add_ingredient("end", &["id", "title", "votes"], j);
 //!
-//! // add final join using first field from article and first from vc.
-//! // joins are trickier because you need to specify what to join on. the vec![1, 0] here
-//! // signifies that the first field of article and vc should be equal, and the second field can
-//! // be whatever.
-//! use distributary::JoinSource::*;
-//! let j = Join::new(article, vc, JoinType::Inner, vec![B(0, 0), L(1), R(1)]);
-//! let awvc = mig.add_ingredient("end", &["id", "title", "votes"], j);
+//!     // we want to be able to query awvc_q using "id"
+//!     let awvc_q = mig.maintain(awvc, 0);
+//!     # drop(awvc_q);
 //!
-//! // we want to be able to query awvc_q using "id"
-//! let awvc_q = mig.maintain(awvc, 0);
-//! # drop(awvc_q);
-//!
-//! // start the data flow graph
-//! mig.commit();
+//!     // returning will commit the migration and start the data flow graph
+//! });
 //! ```
 //!
 //! This may look daunting, but reading through you should quickly recognize the queries from
@@ -173,12 +172,9 @@
 //! ```rust
 //! # use distributary::{Blender, Base};
 //! # let mut g = Blender::new();
-//! # let article = {
-//! # let mut mig = g.start_migration();
-//! # let article = mig.add_ingredient("article", &["id", "title"], Base::default());
-//! # mig.commit();
-//! # article
-//! # };
+//! # let article = g.migrate(|mig|
+//! #     mig.add_ingredient("article", &["id", "title"], Base::default())
+//! # );
 //! let mut muta = g.get_mutator(article);
 //! muta.put(vec![1.into(), "Hello world".into()]);
 //! ```
@@ -236,12 +232,7 @@
 //! ```rust
 //! # use distributary::{Blender, Base};
 //! # let mut g = Blender::new();
-//! # let vote = {
-//! # let mut mig = g.start_migration();
-//! # let vote = mig.add_ingredient("vote", &["user", "id"], Base::default());
-//! # mig.commit();
-//! # vote
-//! # };
+//! # let vote = g.migrate(|mig| mig.add_ingredient("vote", &["user", "id"], Base::default()));
 //! let mut mutv = g.get_mutator(vote);
 //! mutv.put(vec![1000.into(), 1.into()]);
 //! ```

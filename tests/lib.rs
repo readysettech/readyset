@@ -3,10 +3,26 @@ extern crate distributary;
 use std::time;
 use std::thread;
 use std::sync::mpsc;
+use std::env;
 
 use std::collections::HashMap;
 
-const SETTLE_TIME_MS: u64 = 500;
+const DEFAULT_SETTLE_TIME_MS: u64 = 100;
+
+fn get_settle_time() -> time::Duration {
+    let settle_time: u64 = match env::var("SETTLE_TIME") {
+        Ok(value) => value.parse().unwrap(),
+        Err(_) => DEFAULT_SETTLE_TIME_MS,
+    };
+
+    time::Duration::from_millis(settle_time)
+}
+
+// Sleeps for either DEFAULT_SETTLE_TIME_MS milliseconds, or
+// for the value given through the SETTLE_TIME environment variable.
+fn sleep() {
+    thread::sleep(get_settle_time());
+}
 
 #[test]
 fn it_works_basic() {
@@ -48,7 +64,7 @@ fn it_works_basic() {
     muta.put(vec![id.clone(), 2.into()]).unwrap();
 
     // give it some time to propagate
-    thread::sleep(time::Duration::from_millis(SETTLE_TIME_MS));
+    sleep();
 
     // send a query to c
     assert_eq!(cq.lookup(&id, true), Ok(vec![vec![1.into(), 2.into()]]));
@@ -57,7 +73,7 @@ fn it_works_basic() {
     mutb.put(vec![id.clone(), 4.into()]).unwrap();
 
     // give it some time to propagate
-    thread::sleep(time::Duration::from_millis(SETTLE_TIME_MS));
+    sleep();
 
     // check that value was updated again
     let res = cq.lookup(&id, true).unwrap();
@@ -68,7 +84,7 @@ fn it_works_basic() {
     muta.delete(vec![id.clone()]).unwrap();
 
     // give it some time to propagate
-    thread::sleep(time::Duration::from_millis(SETTLE_TIME_MS));
+    sleep();
 
     // send a query to c
     assert_eq!(cq.lookup(&id, true), Ok(vec![vec![1.into(), 4.into()]]));
@@ -77,7 +93,7 @@ fn it_works_basic() {
     mutb.update(vec![id.clone(), 6.into()]).unwrap();
 
     // give it some time to propagate
-    thread::sleep(time::Duration::from_millis(SETTLE_TIME_MS));
+    sleep();
 
     // send a query to c
     assert_eq!(cq.lookup(&id, true), Ok(vec![vec![1.into(), 6.into()]]));
@@ -107,14 +123,14 @@ fn it_works_streaming() {
     // send a value on a
     muta.put(vec![id.clone(), 2.into()]).unwrap();
     assert_eq!(
-        cq.recv_timeout(time::Duration::from_millis(SETTLE_TIME_MS)),
+        cq.recv_timeout(get_settle_time()),
         Ok(vec![vec![id.clone(), 2.into()].into()])
     );
 
     // update value again
     mutb.put(vec![id.clone(), 4.into()]).unwrap();
     assert_eq!(
-        cq.recv_timeout(time::Duration::from_millis(SETTLE_TIME_MS)),
+        cq.recv_timeout(get_settle_time()),
         Ok(vec![vec![id.clone(), 4.into()].into()])
     );
 }
@@ -145,22 +161,22 @@ fn shared_interdomain_ancestor() {
     // send a value on a
     muta.put(vec![id.clone(), 2.into()]).unwrap();
     assert_eq!(
-        bq.recv_timeout(time::Duration::from_millis(SETTLE_TIME_MS)),
+        bq.recv_timeout(get_settle_time()),
         Ok(vec![vec![id.clone(), 2.into()].into()])
     );
     assert_eq!(
-        cq.recv_timeout(time::Duration::from_millis(SETTLE_TIME_MS)),
+        cq.recv_timeout(get_settle_time()),
         Ok(vec![vec![id.clone(), 2.into()].into()])
     );
 
     // update value again
     muta.put(vec![id.clone(), 4.into()]).unwrap();
     assert_eq!(
-        bq.recv_timeout(time::Duration::from_millis(SETTLE_TIME_MS)),
+        bq.recv_timeout(get_settle_time()),
         Ok(vec![vec![id.clone(), 4.into()].into()])
     );
     assert_eq!(
-        cq.recv_timeout(time::Duration::from_millis(SETTLE_TIME_MS)),
+        cq.recv_timeout(get_settle_time()),
         Ok(vec![vec![id.clone(), 4.into()].into()])
     );
 }
@@ -193,7 +209,7 @@ fn it_works_w_mat() {
     muta.put(vec![id.clone(), 3.into()]).unwrap();
 
     // give them some time to propagate
-    thread::sleep(time::Duration::from_millis(SETTLE_TIME_MS));
+    sleep();
 
     // send a query to c
     // we should see all the a values
@@ -209,7 +225,7 @@ fn it_works_w_mat() {
     mutb.put(vec![id.clone(), 6.into()]).unwrap();
 
     // give it some time to propagate
-    thread::sleep(time::Duration::from_millis(SETTLE_TIME_MS));
+    sleep();
 
     // check that value was updated again
     let res = cq.lookup(&id, true).unwrap();
@@ -253,14 +269,14 @@ fn it_works_deletion() {
     // send a value on a
     muta.put(vec![1.into(), 2.into()]).unwrap();
     assert_eq!(
-        cq.recv_timeout(time::Duration::from_millis(SETTLE_TIME_MS)),
+        cq.recv_timeout(get_settle_time()),
         Ok(vec![vec![1.into(), 2.into()].into()])
     );
 
     // update value again
     mutb.put(vec![0.into(), 1.into(), 4.into()]).unwrap();
     assert_eq!(
-        cq.recv_timeout(time::Duration::from_millis(SETTLE_TIME_MS)),
+        cq.recv_timeout(get_settle_time()),
         Ok(vec![vec![1.into(), 4.into()].into()])
     );
 
@@ -268,7 +284,7 @@ fn it_works_deletion() {
     use distributary::StreamUpdate::*;
     muta.delete(vec![2.into()]).unwrap();
     assert_eq!(
-        cq.recv_timeout(time::Duration::from_millis(SETTLE_TIME_MS)),
+        cq.recv_timeout(get_settle_time()),
         Ok(vec![DeleteRow(vec![1.into(), 2.into()])])
     );
 }
@@ -298,7 +314,7 @@ fn it_works_with_sql_recipe() {
     }
 
     // Let writes propagate:
-    thread::sleep(time::Duration::from_millis(SETTLE_TIME_MS));
+    sleep();
 
     // Retrieve the result of the count query:
     let result = getter.lookup(&"Volvo".into(), true).unwrap();
@@ -360,7 +376,7 @@ fn votes() {
     mut1.put(vec![a1.clone(), 2.into()]).unwrap();
 
     // give it some time to propagate
-    thread::sleep(time::Duration::from_millis(SETTLE_TIME_MS));
+    sleep();
 
     // query articles to see that it was updated
     assert_eq!(
@@ -372,7 +388,7 @@ fn votes() {
     mut2.put(vec![a2.clone(), 4.into()]).unwrap();
 
     // give it some time to propagate
-    thread::sleep(time::Duration::from_millis(SETTLE_TIME_MS));
+    sleep();
 
     // query articles again to see that the new article was absorbed
     // and that the old one is still present
@@ -389,7 +405,7 @@ fn votes() {
     mutv.put(vec![1.into(), a1.clone()]).unwrap();
 
     // give it some time to propagate
-    thread::sleep(time::Duration::from_millis(SETTLE_TIME_MS));
+    sleep();
 
     // query vote count to see that the count was updated
     let res = vcq.lookup(&a1, true).unwrap();
@@ -494,7 +510,7 @@ fn transactional_vote() {
     );
 
     // give it some time to propagate
-    thread::sleep(time::Duration::from_millis(SETTLE_TIME_MS));
+    sleep();
 
     // query articles to see that it was absorbed
     let (res, token) = articleq.transactional_lookup(&a1).unwrap();
@@ -512,7 +528,7 @@ fn transactional_vote() {
     );
 
     // give it some time to propagate
-    thread::sleep(time::Duration::from_millis(SETTLE_TIME_MS));
+    sleep();
 
     // query articles again to see that the new article was absorbed
     // and that the old one is still present
@@ -540,7 +556,7 @@ fn transactional_vote() {
     );
 
     // give it some time to propagate
-    thread::sleep(time::Duration::from_millis(SETTLE_TIME_MS));
+    sleep();
 
     // check endq tokens
     assert!(!validate(&endq_token));
@@ -596,7 +612,7 @@ fn empty_migration() {
     muta.put(vec![id.clone(), 2.into()]).unwrap();
 
     // give it some time to propagate
-    thread::sleep(time::Duration::from_millis(SETTLE_TIME_MS));
+    sleep();
 
     // send a query to c
     assert_eq!(cq.lookup(&id, true), Ok(vec![vec![1.into(), 2.into()]]));
@@ -605,7 +621,7 @@ fn empty_migration() {
     mutb.put(vec![id.clone(), 4.into()]).unwrap();
 
     // give it some time to propagate
-    thread::sleep(time::Duration::from_millis(SETTLE_TIME_MS));
+    sleep();
 
     // check that value was updated again
     let res = cq.lookup(&id, true).unwrap();
@@ -632,7 +648,7 @@ fn simple_migration() {
     muta.put(vec![id.clone(), 2.into()]).unwrap();
 
     // give it some time to propagate
-    thread::sleep(time::Duration::from_millis(SETTLE_TIME_MS));
+    sleep();
 
     // check that a got it
     assert_eq!(aq.lookup(&id, true), Ok(vec![vec![1.into(), 2.into()]]));
@@ -651,7 +667,7 @@ fn simple_migration() {
     mutb.put(vec![id.clone(), 4.into()]).unwrap();
 
     // give it some time to propagate
-    thread::sleep(time::Duration::from_millis(SETTLE_TIME_MS));
+    sleep();
 
     // check that b got it
     assert_eq!(bq.lookup(&id, true), Ok(vec![vec![1.into(), 4.into()]]));
@@ -679,7 +695,7 @@ fn add_columns() {
 
     // check that a got it
     assert_eq!(
-        aq.recv_timeout(time::Duration::from_millis(SETTLE_TIME_MS)),
+        aq.recv_timeout(get_settle_time()),
         Ok(vec![vec![id.clone(), "y".into()].into()])
     );
 
@@ -693,7 +709,7 @@ fn add_columns() {
 
     // check that a got it, and added the new, third column's default
     assert_eq!(
-        aq.recv_timeout(time::Duration::from_millis(SETTLE_TIME_MS)),
+        aq.recv_timeout(get_settle_time()),
         Ok(vec![vec![id.clone(), "z".into(), 3.into()].into()])
     );
 
@@ -703,7 +719,7 @@ fn add_columns() {
 
     // check that a got it, and included the third column
     assert_eq!(
-        aq.recv_timeout(time::Duration::from_millis(SETTLE_TIME_MS)),
+        aq.recv_timeout(get_settle_time()),
         Ok(vec![vec![id.clone(), "a".into(), 10.into()].into()])
     );
 }
@@ -726,7 +742,7 @@ fn migrate_added_columns() {
 
     // send a value on a
     muta.put(vec![id.clone(), "y".into()]).unwrap();
-    thread::sleep(time::Duration::from_millis(SETTLE_TIME_MS));
+    sleep();
 
     // add a third column to a, and a view that uses it
     let b = g.migrate(|mig| {
@@ -749,7 +765,7 @@ fn migrate_added_columns() {
     muta.put(vec![id.clone(), "a".into(), 10.into()]).unwrap();
 
     // give it some time to propagate
-    thread::sleep(time::Duration::from_millis(SETTLE_TIME_MS));
+    sleep();
 
     // we should now see the pre-migration write and the old post-migration write with the default
     // value, and the new post-migration write with the value it contained.
@@ -783,7 +799,7 @@ fn migrate_drop_columns() {
 
     // send a value on a
     muta1.put(vec![id.clone(), "bx".into()]).unwrap();
-    thread::sleep(time::Duration::from_millis(SETTLE_TIME_MS));
+    sleep();
 
     // drop a column
     g.migrate(|mig| {
@@ -794,7 +810,7 @@ fn migrate_drop_columns() {
     // and should inject default for a.b
     let mut muta2 = g.get_mutator(a);
     muta2.put(vec![id.clone()]).unwrap();
-    thread::sleep(time::Duration::from_millis(SETTLE_TIME_MS));
+    sleep();
 
     // add a new column
     g.migrate(|mig| {
@@ -804,33 +820,33 @@ fn migrate_drop_columns() {
     // new mutator allows putting two values, and injects default for a.b
     let mut muta3 = g.get_mutator(a);
     muta3.put(vec![id.clone(), "cy".into()]).unwrap();
-    thread::sleep(time::Duration::from_millis(SETTLE_TIME_MS));
+    sleep();
 
     // using an old putter now should add default for c
     muta1.put(vec![id.clone(), "bz".into()]).unwrap();
-    thread::sleep(time::Duration::from_millis(SETTLE_TIME_MS));
+    sleep();
 
     // using putter that knows of neither b nor c should result in defaults for both
     muta2.put(vec![id.clone()]).unwrap();
 
     assert_eq!(
-        stream.recv_timeout(time::Duration::from_millis(SETTLE_TIME_MS)),
+        stream.recv_timeout(get_settle_time()),
         Ok(vec![vec![id.clone(), "bx".into()].into()])
     );
     assert_eq!(
-        stream.recv_timeout(time::Duration::from_millis(SETTLE_TIME_MS)),
+        stream.recv_timeout(get_settle_time()),
         Ok(vec![vec![id.clone(), "b".into()].into()])
     );
     assert_eq!(
-        stream.recv_timeout(time::Duration::from_millis(SETTLE_TIME_MS)),
+        stream.recv_timeout(get_settle_time()),
         Ok(vec![vec![id.clone(), "b".into(), "cy".into()].into()])
     );
     assert_eq!(
-        stream.recv_timeout(time::Duration::from_millis(SETTLE_TIME_MS)),
+        stream.recv_timeout(get_settle_time()),
         Ok(vec![vec![id.clone(), "bz".into(), "c".into()].into()])
     );
     assert_eq!(
-        stream.recv_timeout(time::Duration::from_millis(SETTLE_TIME_MS)),
+        stream.recv_timeout(get_settle_time()),
         Ok(vec![vec![id.clone(), "b".into(), "c".into()].into()])
     );
     assert_eq!(stream.try_recv(), Err(mpsc::TryRecvError::Empty));
@@ -926,7 +942,7 @@ fn replay_during_replay() {
     mutu2.put(vec!["b".into(), 2.into()]).unwrap();
     mutu2.put(vec!["c".into(), 3.into()]).unwrap();
 
-    thread::sleep(time::Duration::from_millis(SETTLE_TIME_MS));
+    sleep();
 
     // since u and target are both partial, the writes should not actually have propagated through
     // yet. do a read to see that one makes it through correctly:
@@ -965,7 +981,7 @@ fn replay_during_replay() {
     // u has a hole for a=2, but not for u=b, and so should forward this to both children
     mutu2.put(vec!["b".into(), 2.into()]).unwrap();
 
-    thread::sleep(time::Duration::from_millis(SETTLE_TIME_MS));
+    sleep();
 
     // what happens if we now query for 2?
     assert_eq!(
@@ -1008,7 +1024,7 @@ fn full_aggregation_with_bogokey() {
     base.put(vec![3.into()]).unwrap();
 
     // give it some time to propagate
-    thread::sleep(time::Duration::from_millis(SETTLE_TIME_MS));
+    sleep();
 
     // send a query to aggregation materialization
     assert_eq!(
@@ -1020,7 +1036,7 @@ fn full_aggregation_with_bogokey() {
     base.put(vec![4.into()]).unwrap();
 
     // give it some time to propagate
-    thread::sleep(time::Duration::from_millis(SETTLE_TIME_MS));
+    sleep();
 
     // check that value was updated again
     assert_eq!(
@@ -1047,7 +1063,7 @@ fn transactional_migration() {
         .unwrap();
 
     // give it some time to propagate
-    thread::sleep(time::Duration::from_millis(SETTLE_TIME_MS));
+    sleep();
 
     // check that a got it
     assert_eq!(
@@ -1070,7 +1086,7 @@ fn transactional_migration() {
         .unwrap();
 
     // give it some time to propagate
-    thread::sleep(time::Duration::from_millis(SETTLE_TIME_MS));
+    sleep();
 
     // check that b got it
     assert_eq!(
@@ -1107,7 +1123,7 @@ fn transactional_migration() {
         .unwrap();
 
     // give them some time to propagate
-    thread::sleep(time::Duration::from_millis(SETTLE_TIME_MS));
+    sleep();
 
     // check that c got them
     assert_eq!(
@@ -1142,14 +1158,14 @@ fn crossing_migration() {
     // send a value on a
     muta.put(vec![id.clone(), 2.into()]).unwrap();
     assert_eq!(
-        cq.recv_timeout(time::Duration::from_millis(SETTLE_TIME_MS)),
+        cq.recv_timeout(get_settle_time()),
         Ok(vec![vec![id.clone(), 2.into()].into()])
     );
 
     // update value again
     mutb.put(vec![id.clone(), 4.into()]).unwrap();
     assert_eq!(
-        cq.recv_timeout(time::Duration::from_millis(SETTLE_TIME_MS)),
+        cq.recv_timeout(get_settle_time()),
         Ok(vec![vec![id.clone(), 4.into()].into()])
     );
 }
@@ -1173,7 +1189,7 @@ fn independent_domain_migration() {
     muta.put(vec![id.clone(), 2.into()]).unwrap();
 
     // give it some time to propagate
-    thread::sleep(time::Duration::from_millis(SETTLE_TIME_MS));
+    sleep();
 
     // check that a got it
     assert_eq!(aq.lookup(&id, true), Ok(vec![vec![1.into(), 2.into()]]));
@@ -1192,7 +1208,7 @@ fn independent_domain_migration() {
     mutb.put(vec![id.clone(), 4.into()]).unwrap();
 
     // give it some time to propagate
-    thread::sleep(time::Duration::from_millis(SETTLE_TIME_MS));
+    sleep();
 
     // check that a got it
     assert_eq!(bq.lookup(&id, true), Ok(vec![vec![1.into(), 4.into()]]));
@@ -1224,14 +1240,14 @@ fn domain_amend_migration() {
     // send a value on a
     muta.put(vec![id.clone(), 2.into()]).unwrap();
     assert_eq!(
-        cq.recv_timeout(time::Duration::from_millis(SETTLE_TIME_MS)),
+        cq.recv_timeout(get_settle_time()),
         Ok(vec![vec![id.clone(), 2.into()].into()])
     );
 
     // update value again
     mutb.put(vec![id.clone(), 4.into()]).unwrap();
     assert_eq!(
-        cq.recv_timeout(time::Duration::from_millis(SETTLE_TIME_MS)),
+        cq.recv_timeout(get_settle_time()),
         Ok(vec![vec![id.clone(), 4.into()].into()])
     );
 }
@@ -1289,8 +1305,7 @@ fn state_replay_migration_stream() {
     // there are (/should be) two records in a with x == 1
     mutb.put(vec![1.into(), "n".into()]).unwrap();
     // they may arrive in any order
-    let res = out.recv_timeout(time::Duration::from_millis(SETTLE_TIME_MS))
-        .unwrap();
+    let res = out.recv_timeout(get_settle_time()).unwrap();
     assert!(
         res.iter()
             .any(|r| r == &vec![1.into(), "a".into(), "n".into()].into())
@@ -1303,7 +1318,7 @@ fn state_replay_migration_stream() {
     // there are (/should be) one record in a with x == 2
     mutb.put(vec![2.into(), "o".into()]).unwrap();
     assert_eq!(
-        out.recv_timeout(time::Duration::from_millis(SETTLE_TIME_MS)),
+        out.recv_timeout(get_settle_time()),
         Ok(vec![vec![2.into(), "c".into(), "o".into()].into()])
     );
 
@@ -1391,7 +1406,7 @@ fn do_full_vote_migration(old_puts_after: bool) {
     }
 
     let last = g.get_getter(end).unwrap();
-    thread::sleep(time::Duration::from_millis(3 * SETTLE_TIME_MS));
+    thread::sleep(get_settle_time().checked_mul(3).unwrap());
     for i in 0..n {
         let rows = last.lookup(&i.into(), true).unwrap();
         assert!(!rows.is_empty(), "every article should be voted for");
@@ -1444,7 +1459,7 @@ fn do_full_vote_migration(old_puts_after: bool) {
         mutr.put(vec![1.into(), i.into(), raten.clone()]).unwrap();
     }
 
-    thread::sleep(time::Duration::from_millis(3 * SETTLE_TIME_MS));
+    thread::sleep(get_settle_time().checked_mul(3).unwrap());
     for i in 0..n {
         let rows = last.lookup(&i.into(), true).unwrap();
         assert!(!rows.is_empty(), "every article should be voted for");
@@ -1477,7 +1492,6 @@ fn full_vote_migration_new_and_old() {
 
 #[test]
 fn live_writes() {
-    use std::time::Duration;
     use distributary::{Aggregation, Blender, DataType};
     let mut g = Blender::new();
     let (vote, vc) = g.migrate(|mig| {
@@ -1514,7 +1528,7 @@ fn live_writes() {
     });
 
     // let a few writes through to make migration take a while
-    thread::sleep(Duration::from_millis(SETTLE_TIME_MS));
+    sleep();
 
     // now do a migration that's going to have to copy state
     let vc2 = g.migrate(|mig| {
@@ -1535,8 +1549,7 @@ fn live_writes() {
     jh.join().unwrap();
 
     // allow the system to catch up with the last writes
-    // N.B.: due to coarse-grained backpressure, this needs to be more than just SETTLE_TIME_MS
-    thread::sleep(Duration::from_millis(5 * SETTLE_TIME_MS));
+    sleep();
 
     // check that all writes happened the right number of times
     for i in 0..ids {
@@ -1590,7 +1603,7 @@ fn state_replay_migration_query() {
         j
     });
     let out = g.get_getter(out).unwrap();
-    thread::sleep(time::Duration::from_millis(SETTLE_TIME_MS));
+    sleep();
 
     // if all went according to plan, the join should now be fully populated!
     // there are (/should be) two records in a with x == 1
