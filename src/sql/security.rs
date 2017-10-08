@@ -4,7 +4,8 @@ use std::collections::HashMap;
 use nom_sql::SqlQuery;
 use security::Policy;
 use sql::{QueryFlowParts, SqlIncorporator};
-use sql::query_graph::to_query_graph;
+use sql::query_graph::{to_query_graph, QueryGraph};
+use std::collections::hash_map::Entry;
 
 pub type UniverseId = DataType;
 
@@ -48,7 +49,9 @@ impl ManyUniverses for SqlIncorporator {
         // e.g. if they reference UserContext.
 
         self.mir_converter.clear_policies(&uid);
+        let mut policies_qg: HashMap<(DataType, String), Vec<QueryGraph>> = HashMap::new();
         for policy in policies.values() {
+            trace!(self.log, "Adding policy {:?}", policy);
             // Policies should have access to all the data in graph, because of that we set
             // policy_enhanced to false, so any subviews also have access to all the data.
             let predicate = self.rewrite_query(policy.predicate.clone(), mig);
@@ -66,8 +69,19 @@ impl ManyUniverses for SqlIncorporator {
                 Err(e) => panic!(e),
             };
 
-            self.mir_converter.add_policy(&uid, policy, qg);
+            match policies_qg.entry((uid.clone(), policy.table.clone()))
+            {
+                Entry::Occupied(mut e) => {
+                    e.get_mut().push(qg);
+                }
+                Entry::Vacant(e) => {
+                    e.insert(vec![qg]);
+                }
+            };
+
         }
+
+        self.mir_converter.set_policies(policies_qg);
 
         res
     }

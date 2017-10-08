@@ -11,7 +11,7 @@ pub trait SecurityBoundary {
         &self,
         universe: DataType,
         node_for_rel: &mut HashMap<&str, MirNodeRef>,
-        prev_node: &mut Option<MirNodeRef>,
+        prev_node: Option<MirNodeRef>,
     ) -> Vec<MirNodeRef>;
 
     fn make_security_nodes(
@@ -73,6 +73,7 @@ impl SecurityBoundary for SqlToMirConverter {
                     continue;
                 }
                 if local_node_for_rel.contains_key(*rel) {
+                    local_node_for_rel.insert(*rel, prev_node.clone().unwrap());
                     continue;
                 }
 
@@ -185,7 +186,7 @@ impl SecurityBoundary for SqlToMirConverter {
 
         if last_policy_nodes.len() > 1 {
             let final_node = self.make_union_node(
-                &format!("sp_final_union_u{}", universe_id),
+                &format!("sp_union_u{}", universe_id),
                 last_policy_nodes,
             );
 
@@ -199,15 +200,17 @@ impl SecurityBoundary for SqlToMirConverter {
         &self,
         universe: DataType,
         node_for_rel: &mut HashMap<&str, MirNodeRef>,
-        prev_node: &mut Option<MirNodeRef>,
+        prev_node: Option<MirNodeRef>,
     ) -> Vec<MirNodeRef> {
         let mut security_nodes: Vec<MirNodeRef> = Vec::new();
         if universe == "global".into() {
             return security_nodes;
         }
 
-        for (rel, b) in &node_for_rel.clone() {
-            let nodes = self.make_security_nodes(*rel, &b, universe.clone(), node_for_rel.clone());
+        let mut prev_node = prev_node.unwrap().clone();
+
+        for (rel, _) in &node_for_rel.clone() {
+            let nodes = self.make_security_nodes(*rel, &prev_node, universe.clone(), node_for_rel.clone());
             debug!(
                 self.log,
                 "Created {} security nodes for table {}",
@@ -222,6 +225,7 @@ impl SecurityBoundary for SqlToMirConverter {
             if !security_nodes.is_empty() {
                 let last_pol = security_nodes.last().unwrap();
                 node_for_rel.insert(*rel, last_pol.clone());
+                prev_node = last_pol.clone();
             }
         }
 

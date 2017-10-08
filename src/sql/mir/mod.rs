@@ -5,7 +5,7 @@ use mir::node::{GroupedNodeType, MirNode, MirNodeType};
 use mir::query::MirQuery;
 // TODO(malte): remove if possible
 pub use mir::to_flow::FlowNode;
-use security::Policy;
+
 use ops::join::JoinType;
 
 use nom_sql::{Column, ColumnSpecification, ConditionBase, ConditionExpression, ConditionTree,
@@ -15,7 +15,7 @@ use sql::query_graph::{JoinRef, OutputColumn, QueryGraph, QueryGraphEdge};
 
 use slog;
 use std::collections::{HashMap, HashSet};
-use std::collections::hash_map::Entry;
+
 use std::ops::Deref;
 use std::vec::Vec;
 
@@ -100,17 +100,8 @@ impl SqlToMirConverter {
 
     /// Sets the policies for a given graph.
     /// Policies are set upon universe creation and don't change.
-    pub fn add_policy(&mut self, universe_id: &DataType, policy: &Policy, qg: QueryGraph) {
-        match self.policies
-            .entry((universe_id.clone(), policy.table.clone()))
-        {
-            Entry::Occupied(mut e) => {
-                e.get_mut().push(qg);
-            }
-            Entry::Vacant(e) => {
-                e.insert(vec![qg]);
-            }
-        };
+    pub fn set_policies(&mut self, policies: HashMap<(DataType, String), Vec<QueryGraph>>) {
+        self.policies = policies;
     }
 
     pub fn clear_policies(&mut self, universe_id: &DataType) {
@@ -1039,10 +1030,6 @@ impl SqlToMirConverter {
                 node_for_rel.insert(*rel, base_for_rel);
             }
 
-            // TODO(larat): push this downwards the graph
-            use sql::mir::security::SecurityBoundary;
-            let policy_nodes = self.make_security_boundary(universe.clone(), &mut node_for_rel, &mut None);
-
             // 1. Generate join nodes for the query.
             // This is done by creating/merging join chains as each predicate is added.
             // If a predicate's parent tables appear in a previous predicate, the
@@ -1127,7 +1114,19 @@ impl SqlToMirConverter {
 
             let mut prev_node = match join_nodes.last() {
                 Some(n) => Some(n.clone()),
-                None => None,
+                None => {
+                    assert_eq!(base_nodes.len(), 1);
+                    Some(base_nodes.last().unwrap().clone())
+                },
+            };
+
+            // TODO(larat): push this downwards the graph
+            use sql::mir::security::SecurityBoundary;
+            let policy_nodes = self.make_security_boundary(universe.clone(), &mut node_for_rel, prev_node.clone());
+
+            prev_node = match policy_nodes.last() {
+                Some(n) => Some(n.clone()),
+                None => prev_node.clone(),
             };
 
             // 2. Get columns used by each predicate. This will be used to check
