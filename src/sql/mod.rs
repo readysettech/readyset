@@ -885,7 +885,6 @@ mod tests {
                 mig,
             );
             assert!(res.is_ok());
-            println!("{:?}", res);
             // added the aggregation and the edge view, and a reader
             assert_eq!(mig.graph().node_count(), 5);
             // check aggregation view

@@ -875,7 +875,7 @@ impl SqlToMirConverter {
                         let last_right = right.last().unwrap().clone();
                         let union =
                             self.make_union_node(
-                                &format!("{}_u", name),
+                                &format!("{}_union", name),
                                 vec![last_left, last_right],
                             );
 
@@ -996,6 +996,12 @@ impl SqlToMirConverter {
         let mut nodes_added: Vec<MirNodeRef>;
         let mut new_node_count = 0;
 
+        let uformat = if universe == "global".into() {
+            String::from("")
+        } else {
+            format!("_u{}", universe)
+        };
+
         // Canonical operator order: B-J-G-F-P-R
         // (Base, Join, GroupBy, Filter, Project, Reader)
         {
@@ -1098,10 +1104,10 @@ impl SqlToMirConverter {
 
                     let jn = self.make_join_node(
                         &format!(
-                            "q_{:x}_n{}_u{}",
+                            "q_{:x}_n{}{}",
                             qg.signature().hash,
                             new_node_count,
-                            universe
+                            uformat,
                         ),
                         jp,
                         left_chain.last_node.clone(),
@@ -1176,10 +1182,10 @@ impl SqlToMirConverter {
 
                             let new_mpns = self.predicates_above_group_by(
                                 &format!(
-                                    "q_{:x}_n{}_u{}",
+                                    "q_{:x}_n{}{}",
                                     qg.signature().hash,
                                     new_node_count,
-                                    universe
+                                    uformat
                                 ),
                                 &column_to_predicates,
                                 over_col.clone(),
@@ -1244,10 +1250,10 @@ impl SqlToMirConverter {
 
                             let n = self.make_function_node(
                                 &format!(
-                                    "q_{:x}_n{}_u{}",
+                                    "q_{:x}_n{}{}",
                                     qg.signature().hash,
                                     new_node_count,
-                                    universe
+                                    uformat
                                 ),
                                 fn_col,
                                 gb_and_param_cols,
@@ -1261,10 +1267,10 @@ impl SqlToMirConverter {
                         // Function columns without GROUP BY
                         for computed_col in &computed_cols_cgn.columns {
                             let agg_node_name = &format!(
-                                "q_{:x}_n{}_u{}",
+                                "q_{:x}_n{}{}",
                                 qg.signature().hash,
                                 new_node_count,
-                                universe
+                                uformat
                             );
 
                             let over_col = target_columns_from_computed_column(computed_col);
@@ -1342,11 +1348,11 @@ impl SqlToMirConverter {
 
                         let fns = self.make_predicate_nodes(
                             &format!(
-                                "q_{:x}_n{}_p{}_u{}",
+                                "q_{:x}_n{}_p{}{}",
                                 qg.signature().hash,
                                 new_node_count,
                                 i,
-                                universe
+                                uformat
                             ),
                             parent,
                             p,
@@ -1376,10 +1382,10 @@ impl SqlToMirConverter {
 
                 let node = self.make_topk_node(
                     &format!(
-                        "q_{:x}_n{}_u{}",
+                        "q_{:x}_n{}{}",
                         qg.signature().hash,
                         new_node_count,
-                        universe
+                        uformat
                     ),
                     final_node,
                     group_by,
@@ -1430,10 +1436,10 @@ impl SqlToMirConverter {
                 .collect();
 
             let ident = format!(
-                "q_{:x}_n{}_u{}",
+                "q_{:x}_n{}{}",
                 qg.signature().hash,
                 new_node_count,
-                universe
+                uformat
             );
             let leaf_project_node =
                 self.make_project_node(&ident, final_node, projected_columns, projected_literals);
