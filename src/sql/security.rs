@@ -69,8 +69,7 @@ impl ManyUniverses for SqlIncorporator {
                 Err(e) => panic!(e),
             };
 
-            match policies_qg.entry((uid.clone(), policy.table.clone()))
-            {
+            match policies_qg.entry((uid.clone(), policy.table.clone())) {
                 Entry::Occupied(mut e) => {
                     e.get_mut().push(qg);
                 }
@@ -78,7 +77,6 @@ impl ManyUniverses for SqlIncorporator {
                     e.insert(vec![qg]);
                 }
             };
-
         }
 
         self.mir_converter.set_policies(policies_qg);

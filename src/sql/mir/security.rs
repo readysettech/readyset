@@ -185,10 +185,8 @@ impl SecurityBoundary for SqlToMirConverter {
         }
 
         if last_policy_nodes.len() > 1 {
-            let final_node = self.make_union_node(
-                &format!("sp_union_u{}", universe_id),
-                last_policy_nodes,
-            );
+            let final_node =
+                self.make_union_node(&format!("sp_union_u{}", universe_id), last_policy_nodes);
 
             security_nodes.push(final_node);
         }
@@ -210,7 +208,8 @@ impl SecurityBoundary for SqlToMirConverter {
         let mut prev_node = prev_node.unwrap().clone();
 
         for (rel, _) in &node_for_rel.clone() {
-            let nodes = self.make_security_nodes(*rel, &prev_node, universe.clone(), node_for_rel.clone());
+            let nodes =
+                self.make_security_nodes(*rel, &prev_node, universe.clone(), node_for_rel.clone());
             debug!(
                 self.log,
                 "Created {} security nodes for table {}",

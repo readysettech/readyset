@@ -864,11 +864,10 @@ impl SqlToMirConverter {
 
                         let last_left = left.last().unwrap().clone();
                         let last_right = right.last().unwrap().clone();
-                        let union =
-                            self.make_union_node(
-                                &format!("{}_union", name),
-                                vec![last_left, last_right],
-                            );
+                        let union = self.make_union_node(
+                            &format!("{}_union", name),
+                            vec![last_left, last_right],
+                        );
 
                         pred_nodes.extend(left.clone());
                         pred_nodes.extend(right.clone());
@@ -1090,12 +1089,7 @@ impl SqlToMirConverter {
                         pick_join_chains(&jref.src, &jref.dst, &mut join_chains);
 
                     let jn = self.make_join_node(
-                        &format!(
-                            "q_{:x}_n{}{}",
-                            qg.signature().hash,
-                            new_node_count,
-                            uformat,
-                        ),
+                        &format!("q_{:x}_n{}{}", qg.signature().hash, new_node_count, uformat,),
                         jp,
                         left_chain.last_node.clone(),
                         right_chain.last_node.clone(),
@@ -1117,12 +1111,13 @@ impl SqlToMirConverter {
                 None => {
                     assert_eq!(base_nodes.len(), 1);
                     Some(base_nodes.last().unwrap().clone())
-                },
+                }
             };
 
             // TODO(larat): push this downwards the graph
             use sql::mir::security::SecurityBoundary;
-            let policy_nodes = self.make_security_boundary(universe.clone(), &mut node_for_rel, prev_node.clone());
+            let policy_nodes =
+                self.make_security_boundary(universe.clone(), &mut node_for_rel, prev_node.clone());
 
             prev_node = match policy_nodes.last() {
                 Some(n) => Some(n.clone()),
@@ -1380,12 +1375,7 @@ impl SqlToMirConverter {
                 let group_by = qg.parameters();
 
                 let node = self.make_topk_node(
-                    &format!(
-                        "q_{:x}_n{}{}",
-                        qg.signature().hash,
-                        new_node_count,
-                        uformat
-                    ),
+                    &format!("q_{:x}_n{}{}", qg.signature().hash, new_node_count, uformat),
                     final_node,
                     group_by,
                     &st.order,
@@ -1434,12 +1424,7 @@ impl SqlToMirConverter {
                 })
                 .collect();
 
-            let ident = format!(
-                "q_{:x}_n{}{}",
-                qg.signature().hash,
-                new_node_count,
-                uformat
-            );
+            let ident = format!("q_{:x}_n{}{}", qg.signature().hash, new_node_count, uformat);
             let leaf_project_node =
                 self.make_project_node(&ident, final_node, projected_columns, projected_literals);
             nodes_added.push(leaf_project_node.clone());
