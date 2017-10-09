@@ -190,8 +190,10 @@ impl SqlIncorporator {
                     // in exactly the same order
                     info!(
                         self.log,
-                        "An exact match for query \"{}\" already exists, reusing it",
-                        query_name
+                        "An exact match for query \"{}\" already exists in universe \"{}\", reusing MirQuery {}",
+                        query_name,
+                        universe,
+                        mir_query.name
                     );
                     return (qg, QueryGraphReuse::ExactMatch(mir_query.leaf.clone()));
                 } else if existing_qg.signature() == qg.signature() {
