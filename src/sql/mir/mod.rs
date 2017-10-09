@@ -498,25 +498,14 @@ impl SqlToMirConverter {
         }
     }
 
-    fn make_union_node(&self, name: &str, ancestors: Vec<MirNodeRef>) -> MirNodeRef {
-        let mut emit: Vec<Vec<Column>> = Vec::new();
+    fn make_union_node(&self, name: &str, ancestors: Vec<MirNodeRef>, columns: Vec<Column>) -> MirNodeRef {
         assert!(ancestors.len() > 1, "union must have more than 1 ancestors");
-
-        let mut projected_columns: Vec<Column> = Vec::new();
-
-        for ancestor in ancestors.iter() {
-            let cols: Vec<Column> = ancestor.borrow().columns().iter().cloned().collect();
-            // TODO(larat): project the intersection of ancestor columns
-            if cols.len() > projected_columns.len() {
-                projected_columns = cols.clone();
-            }
-            emit.push(cols.clone());
-        }
+        let emit = ancestors.iter().map(|_| columns.clone()).collect();
 
         MirNode::new(
             name,
             self.schema_version,
-            projected_columns,
+            columns,
             MirNodeType::Union { emit },
             ancestors.clone(),
             vec![],
@@ -833,6 +822,7 @@ impl SqlToMirConverter {
         use nom_sql::ConditionExpression::*;
 
         let mut pred_nodes: Vec<MirNodeRef> = Vec::new();
+        let output_cols = parent.borrow().columns().iter().cloned().collect();
         match *ce {
             LogicalOp(ref ct) => {
                 let (left, right);
@@ -867,6 +857,7 @@ impl SqlToMirConverter {
                         let union = self.make_union_node(
                             &format!("{}_union", name),
                             vec![last_left, last_right],
+                            output_cols,
                         );
 
                         pred_nodes.extend(left.clone());

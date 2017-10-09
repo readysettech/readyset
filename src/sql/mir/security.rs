@@ -28,7 +28,7 @@ impl SecurityBoundary for SqlToMirConverter {
     fn make_security_nodes(
         &self,
         rel: &str,
-        base_node: &MirNodeRef,
+        prev_node: &MirNodeRef,
         universe_id: DataType,
         node_for_rel: HashMap<&str, MirNodeRef>,
     ) -> Vec<MirNodeRef> {
@@ -49,11 +49,12 @@ impl SecurityBoundary for SqlToMirConverter {
             rel
         );
 
+        let output_cols = prev_node.borrow().columns().iter().cloned().collect();
         let mut security_nodes = Vec::new();
         let mut last_policy_nodes = Vec::new();
 
         for qg in policies.iter() {
-            let mut prev_node = Some(base_node.clone());
+            let mut prev_node = Some(prev_node.clone());
             let mut base_nodes: Vec<MirNodeRef> = Vec::new();
             let mut join_nodes: Vec<MirNodeRef> = Vec::new();
             let mut filter_nodes: Vec<MirNodeRef> = Vec::new();
@@ -186,7 +187,7 @@ impl SecurityBoundary for SqlToMirConverter {
 
         if last_policy_nodes.len() > 1 {
             let final_node =
-                self.make_union_node(&format!("sp_union_u{}", universe_id), last_policy_nodes);
+                self.make_union_node(&format!("sp_union_u{}", universe_id), last_policy_nodes, output_cols);
 
             security_nodes.push(final_node);
         }
