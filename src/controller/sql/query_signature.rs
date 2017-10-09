@@ -216,4 +216,45 @@ mod tests {
         assert!(!qsa.is_generalization_of(&qsc));
     }
 
+    #[test]
+    fn it_compares_signatures() {
+        use sql::query_graph::to_query_graph;
+        use nom_sql::parser::{parse_query, SqlQuery};
+
+        let qa = parse_query("SELECT b.c3 FROM a, b WHERE a.c1 = 42;").unwrap();
+        let qb = parse_query("SELECT b.c3 FROM a, b WHERE a.c1 > 42;").unwrap();
+        let qc = parse_query("SELECT b.c3 FROM a, b WHERE a.c1 = 42 AND b.c4 = a.c2;").unwrap();
+        let qd = parse_query("SELECT b.c3 FROM a, b WHERE a.c1 = 21 AND b.c4 = a.c2;").unwrap();
+
+        let qga = match qa {
+            SqlQuery::Select(ref q) => to_query_graph(q).unwrap(),
+            _ => panic!(),
+        };
+        let qgb = match qb {
+            SqlQuery::Select(ref q) => to_query_graph(q).unwrap(),
+            _ => panic!(),
+        };
+        let qgc = match qc {
+            SqlQuery::Select(ref q) => to_query_graph(q).unwrap(),
+            _ => panic!(),
+        };
+        let qgd = match qd {
+            SqlQuery::Select(ref q) => to_query_graph(q).unwrap(),
+            _ => panic!(),
+        };
+
+        let qsa = qga.signature();
+        let qsb = qgb.signature();
+        let qsc = qgc.signature();
+        let qsd = qgd.signature();
+
+        // identical queries = identical signatures
+        assert_eq!(qsa, qsa);
+        // but not if operators differ
+        assert_ne!(qsa, qsb);
+        // ... or if literals differ
+        assert_ne!(qsc, qsd);
+        // ... or if additional predicates exist
+        assert_ne!(qsa, qsc);
+    }
 }
