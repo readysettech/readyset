@@ -11,6 +11,7 @@ use nom_sql::{Column, ColumnSpecification, ConditionBase, ConditionExpression, C
               Literal, Operator, SqlQuery, TableKey};
 use nom_sql::{LimitClause, OrderClause, SelectStatement};
 use sql::query_graph::{JoinRef, OutputColumn, QueryGraph, QueryGraphEdge};
+use sql::query_signature::Signature;
 
 use slog;
 use std::collections::{HashMap, HashSet};

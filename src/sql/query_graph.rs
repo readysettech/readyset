@@ -1,15 +1,11 @@
 use nom_sql::{Column, ConditionBase, ConditionExpression, ConditionTree, FieldExpression,
               JoinConstraint, JoinOperator, JoinRightSide, Literal, Operator};
 use nom_sql::SelectStatement;
-use nom_sql::ConditionExpression::*;
 
 use std::cmp::Ordering;
-use std::collections::{HashMap, HashSet};
-use std::hash::{Hash, Hasher};
+use std::collections::HashMap;
 use std::string::String;
 use std::vec::Vec;
-
-use sql::query_signature::QuerySignature;
 
 #[derive(Clone, Debug, Eq, Hash, PartialEq)]
 pub struct LiteralColumn {
@@ -151,73 +147,6 @@ impl QueryGraph {
                 acc.extend(qgn.parameters.iter());
                 acc
             })
-    }
-
-    /// Used to get a concise signature for a query graph. The `hash` member can be used to check
-    /// for identical sets of relations and attributes covered (as per Finkelstein algorithm),
-    /// while `relations` and `attributes` as `HashSet`s that allow for efficient subset checks.
-    pub fn signature(&self) -> QuerySignature {
-        use std::collections::hash_map::DefaultHasher;
-
-        let mut hasher = DefaultHasher::new();
-        let rels = self.relations.keys().map(|r| String::as_str(r)).collect();
-
-        // Compute relations part of hash
-        let mut r_vec: Vec<&str> = self.relations.keys().map(String::as_str).collect();
-        r_vec.sort();
-        for r in &r_vec {
-            r.hash(&mut hasher);
-        }
-
-        // Collect attributes from predicates and projected columns
-        let mut attrs = HashSet::<&Column>::new();
-        let mut attrs_vec = Vec::<&Column>::new();
-        for n in self.relations.values() {
-            for p in &n.predicates {
-                match *p {
-                    ComparisonOp(ref ct) | LogicalOp(ref ct) => for c in &ct.contained_columns() {
-                        attrs_vec.push(c);
-                        attrs.insert(c);
-                    },
-                    _ => unreachable!(),
-                }
-            }
-        }
-        for e in self.edges.values() {
-            match *e {
-                QueryGraphEdge::Join(ref join_predicates) |
-                QueryGraphEdge::LeftJoin(ref join_predicates) => for p in join_predicates {
-                    for c in &p.contained_columns() {
-                        attrs_vec.push(c);
-                        attrs.insert(c);
-                    }
-                },
-                QueryGraphEdge::GroupBy(ref cols) => for c in cols {
-                    attrs_vec.push(c);
-                    attrs.insert(c);
-                },
-            }
-        }
-
-        // Compute attributes part of hash
-        attrs_vec.sort();
-        for a in &attrs_vec {
-            a.hash(&mut hasher);
-        }
-
-        let mut proj_columns: Vec<&OutputColumn> = self.columns.iter().collect();
-        // Compute projected columns part of hash. We sort here since the order in which columns
-        // appear does not matter for query graph equivalence.
-        proj_columns.sort();
-        for c in proj_columns {
-            c.hash(&mut hasher);
-        }
-
-        QuerySignature {
-            relations: rels,
-            attributes: attrs,
-            hash: hasher.finish(),
-        }
     }
 }
 

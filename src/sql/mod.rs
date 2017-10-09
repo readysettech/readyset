@@ -15,6 +15,7 @@ use self::mir::{MirNodeRef, SqlToMirConverter};
 use mir::query::MirQuery;
 use self::reuse::{ReuseConfig, ReuseConfigType};
 use sql::query_graph::{to_query_graph, QueryGraph};
+use sql::query_signature::Signature;
 
 use slog;
 use std::collections::HashMap;
