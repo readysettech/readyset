@@ -24,6 +24,8 @@ pub struct MutatorBuilder {
     pub(crate) transactional: bool,
     pub(crate) dropped: VecMap<DataType>,
     pub(crate) expected_columns: usize,
+
+    #[serde(skip)] pub(crate) is_local: bool,
 }
 
 impl MutatorBuilder {
@@ -38,6 +40,7 @@ impl MutatorBuilder {
             dropped: self.dropped,
             tracer: None,
             expected_columns: self.expected_columns,
+            is_local: self.is_local,
         }
     }
 }
@@ -52,6 +55,7 @@ pub struct Mutator {
     dropped: VecMap<DataType>,
     tracer: Tracer,
     expected_columns: usize,
+    is_local: bool,
 }
 
 impl Mutator {
@@ -144,7 +148,7 @@ impl Mutator {
         };
 
         self.domain_input_handle
-            .base_send(m, &self.key[..])
+            .base_send(m, &self.key[..], self.is_local)
             .unwrap();
     }
 
@@ -158,8 +162,9 @@ impl Mutator {
             state: TransactionState::Pending(t, self.domain_input_handle.tx_reply_addr()),
             tracer: self.tracer.clone(),
         };
+
         self.domain_input_handle
-            .base_send(m, &self.key[..])
+            .base_send(m, &self.key[..], self.is_local)
             .unwrap();
         self.domain_input_handle.receive_transaction_result()
     }

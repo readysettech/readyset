@@ -45,7 +45,12 @@ impl DomainInputHandle {
         })
     }
 
-    pub fn base_send(&mut self, mut p: Box<Packet>, key: &[usize]) -> Result<(), tcp::SendError> {
+    pub fn base_send(
+        &mut self,
+        mut p: Box<Packet>,
+        key: &[usize],
+        local: bool,
+    ) -> Result<(), tcp::SendError> {
         if self.txs.len() == 1 {
             self.txs[0].send(p)
         } else {
@@ -72,9 +77,14 @@ impl DomainInputHandle {
             }
 
             for (s, rs) in shard_writes.drain(..).enumerate() {
-                let mut p = p.clone_data(); // ok here, as data previously emptied
+                let mut p = Box::new(p.clone_data()); // ok here, as data previously emptied
                 p.swap_data(rs.into());
-                self.txs[s].send(box p)?;
+
+                if local {
+                    p = p.make_local();
+                }
+
+                self.txs[s].send(p)?;
             }
             Ok(())
         }

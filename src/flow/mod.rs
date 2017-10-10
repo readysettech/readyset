@@ -443,6 +443,7 @@ impl Blender {
             transactional: self.ingredients[base].is_transactional(),
             dropped: base_operator.get_dropped(),
             expected_columns: num_fields - base_operator.get_dropped().len(),
+            is_local: true,
         }
     }
 

@@ -2136,6 +2136,7 @@ impl Domain {
                 KeepPolling
             }
             PollEvent::Process(packet) => {
+                let packet = packet.make_normal();
                 if let Packet::Quit = *packet {
                     return StopPolling;
                 }

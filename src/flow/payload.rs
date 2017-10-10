@@ -1,4 +1,5 @@
 use petgraph;
+use serde::{Deserialize, Deserializer, Serialize, Serializer};
 
 #[cfg(debug_assertions)]
 use backtrace::Backtrace;
@@ -249,6 +250,10 @@ pub enum Packet {
 
     /// The packet was captured awaiting the receipt of other replays.
     Captured,
+
+    /// The packet is being sent locally, so a pointer is sent to avoid
+    /// serialization/deserialization costs.
+    Local(LocalPacket),
 }
 
 impl Packet {
@@ -411,6 +416,18 @@ impl Packet {
             _ => None,
         }
     }
+
+    /// If self is `Packet::Local` then replace with the packet pointed to.
+    pub fn make_normal(self: Box<Self>) -> Box<Self> {
+        match self {
+            box Packet::Local(LocalPacket(ptr)) => unsafe { Box::from_raw(ptr) },
+            s => s,
+        }
+    }
+
+    pub fn make_local(self: Box<Self>) -> Box<Self> {
+        Box::new(Packet::Local(LocalPacket(Box::into_raw(self))))
+    }
 }
 
 impl fmt::Debug for Packet {
@@ -468,5 +485,26 @@ impl ControlReplyPacket {
     #[cfg(not(debug_assertions))]
     pub fn ack() -> ControlReplyPacket {
         ControlReplyPacket::Ack(())
+    }
+}
+
+
+pub struct LocalPacket(*mut Packet);
+
+unsafe impl Send for LocalPacket {}
+impl Serialize for LocalPacket {
+    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: Serializer,
+    {
+        (self.0 as usize).serialize(serializer)
+    }
+}
+impl<'de> Deserialize<'de> for LocalPacket {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: Deserializer<'de>,
+    {
+        usize::deserialize(deserializer).map(|p| LocalPacket(p as *mut Packet))
     }
 }
