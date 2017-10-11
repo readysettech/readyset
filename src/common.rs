@@ -392,6 +392,34 @@ named!(pub as_alias<&[u8], &str>,
     )
 );
 
+named!(field_value<&[u8], (Column,Literal) >,
+    chain!(
+        column: column_identifier_no_alias ~
+        multispace? ~
+        tag!("=") ~
+        multispace? ~
+        value: literal,
+        || { (column, value) }
+    )
+);
+
+named!(pub field_value_list<&[u8], Vec<(Column,Literal)> >,
+       many1!(
+           chain!(
+               field_value: field_value ~
+               opt!(
+                   complete!(chain!(
+                       multispace? ~
+                       tag!(",") ~
+                       multispace?,
+                       ||{}
+                   ))
+               ),
+               || { field_value }
+           )
+       )
+);
+
 /// Parse rule for a comma-separated list of fields without aliases.
 named!(pub field_list<&[u8], Vec<Column> >,
        many0!(

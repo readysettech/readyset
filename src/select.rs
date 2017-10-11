@@ -214,7 +214,7 @@ named!(order_clause<&[u8], OrderClause>,
 );
 
 /// Parse WHERE clause of a selection
-named!(where_clause<&[u8], ConditionExpression>,
+named!(pub where_clause<&[u8], ConditionExpression>,
     complete!(chain!(
         multispace? ~
         caseless_tag!("where") ~
