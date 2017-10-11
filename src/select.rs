@@ -1055,7 +1055,6 @@ mod tests {
         assert_eq!(res.unwrap().1, outer_select);
     }
 
-
     #[test]
     fn project_arithmetic_expressions() {
         use arithmetic::{ArithmeticBase, ArithmeticExpression, ArithmeticOperator};
@@ -1067,6 +1066,7 @@ mod tests {
             tables: vec![Table::from("orders")],
             fields: vec![
                 FieldExpression::Arithmetic(ArithmeticExpression {
+                    alias: None,
                     op: ArithmeticOperator::Subtract,
                     left: ArithmeticBase::Column(Column {
                         name: String::from("max(o_id)"),
@@ -1083,4 +1083,31 @@ mod tests {
         assert_eq!(res.unwrap().1, expected);
     }
 
+    #[test]
+    fn project_arithmetic_expressions_with_aliases() {
+        use arithmetic::{ArithmeticBase, ArithmeticExpression, ArithmeticOperator};
+
+        let qstr = "SELECT max(o_id) * 2 as double_max FROM orders;";
+        let res = selection(qstr.as_bytes());
+
+        let expected = SelectStatement {
+            tables: vec![Table::from("orders")],
+            fields: vec![
+                FieldExpression::Arithmetic(ArithmeticExpression {
+                    alias: Some(String::from("double_max")),
+                    op: ArithmeticOperator::Multiply,
+                    left: ArithmeticBase::Column(Column {
+                        name: String::from("max(o_id)"),
+                        alias: None,
+                        table: None,
+                        function: Some(Box::new(FunctionExpression::Max("o_id".into()))),
+                    }),
+                    right: ArithmeticBase::Scalar(2.into()),
+                }),
+            ],
+            ..Default::default()
+        };
+
+        assert_eq!(res.unwrap().1, expected);
+    }
 }
