@@ -1,7 +1,7 @@
 use nom::multispace;
 use std::str;
 
-use common::{column_identifier_no_alias, integer_literal, Literal};
+use common::{as_alias, column_identifier_no_alias, integer_literal, Literal};
 use column::Column;
 
 #[derive(Debug, Clone, Deserialize, Eq, Hash, PartialEq, Serialize)]
@@ -23,14 +23,21 @@ pub struct ArithmeticExpression {
     pub op: ArithmeticOperator,
     pub left: ArithmeticBase,
     pub right: ArithmeticBase,
+    pub alias: Option<String>,
 }
 
 impl ArithmeticExpression {
-    pub fn new(op: ArithmeticOperator, left: ArithmeticBase, right: ArithmeticBase) -> Self {
+    pub fn new(
+        op: ArithmeticOperator,
+        left: ArithmeticBase,
+        right: ArithmeticBase,
+        alias: Option<String>,
+    ) -> Self {
         Self {
             op: op,
             left: left,
             right: right,
+            alias: alias,
         }
     }
 }
@@ -62,12 +69,17 @@ named!(pub arithmetic_expression<&[u8], ArithmeticExpression>,
         multispace? ~
         op: arithmetic_operator ~
         multispace? ~
-        right: arithmetic_base,
+        right: arithmetic_base ~
+        alias: opt!(as_alias),
         || {
             ArithmeticExpression {
                 op: op,
                 left: left,
-                right: right
+                right: right,
+                alias: match alias {
+                    None => None,
+                    Some(a) => Some(String::from(a)),
+                },
             }
         }
     ))
@@ -84,23 +96,49 @@ mod tests {
         use super::ArithmeticBase::Scalar;
         use super::ArithmeticBase::Column as ABColumn;
 
-        let lit_ae = ["5 + 42", "5+42", "5 * 42", "5 - 42", "5 / 42"];
+        let lit_ae = [
+            "5 + 42",
+            "5+42",
+            "5 * 42",
+            "5 - 42",
+            "5 / 42",
+            "2 * 10 AS twenty ",
+        ];
+
         // N.B. trailing space in "5 + foo " is required because `sql_identifier`'s keyword
         // detection requires a follow-up character (in practice, there always is one because we
         // use semicolon-terminated queries).
-        let col_lit_ae = ["foo+5", "foo + 5", "5 + foo ", "MAX(foo)-3333"];
+        let col_lit_ae = [
+            "foo+5",
+            "foo + 5",
+            "5 + foo ",
+            "foo * bar AS foobar",
+            "MAX(foo)-3333",
+        ];
 
         let expected_lit_ae = [
-            ArithmeticExpression::new(Add, Scalar(5.into()), Scalar(42.into())),
-            ArithmeticExpression::new(Add, Scalar(5.into()), Scalar(42.into())),
-            ArithmeticExpression::new(Multiply, Scalar(5.into()), Scalar(42.into())),
-            ArithmeticExpression::new(Subtract, Scalar(5.into()), Scalar(42.into())),
-            ArithmeticExpression::new(Divide, Scalar(5.into()), Scalar(42.into())),
+            ArithmeticExpression::new(Add, Scalar(5.into()), Scalar(42.into()), None),
+            ArithmeticExpression::new(Add, Scalar(5.into()), Scalar(42.into()), None),
+            ArithmeticExpression::new(Multiply, Scalar(5.into()), Scalar(42.into()), None),
+            ArithmeticExpression::new(Subtract, Scalar(5.into()), Scalar(42.into()), None),
+            ArithmeticExpression::new(Divide, Scalar(5.into()), Scalar(42.into()), None),
+            ArithmeticExpression::new(
+                Multiply,
+                Scalar(2.into()),
+                Scalar(10.into()),
+                Some(String::from("twenty")),
+            ),
         ];
         let expected_col_lit_ae = [
-            ArithmeticExpression::new(Add, ABColumn("foo".into()), Scalar(5.into())),
-            ArithmeticExpression::new(Add, ABColumn("foo".into()), Scalar(5.into())),
-            ArithmeticExpression::new(Add, Scalar(5.into()), ABColumn("foo".into())),
+            ArithmeticExpression::new(Add, ABColumn("foo".into()), Scalar(5.into()), None),
+            ArithmeticExpression::new(Add, ABColumn("foo".into()), Scalar(5.into()), None),
+            ArithmeticExpression::new(Add, Scalar(5.into()), ABColumn("foo".into()), None),
+            ArithmeticExpression::new(
+                Multiply,
+                ABColumn("foo".into()),
+                ABColumn("bar".into()),
+                Some(String::from("foobar")),
+            ),
             ArithmeticExpression::new(
                 Subtract,
                 ABColumn(Column {
@@ -110,6 +148,7 @@ mod tests {
                     function: Some(Box::new(FunctionExpression::Max("foo".into()))),
                 }),
                 Scalar(3333.into()),
+                None,
             ),
         ];
 
