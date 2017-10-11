@@ -482,7 +482,7 @@ named!(pub table_list<&[u8], Vec<Table> >,
 /// Integer literal value
 named!(pub integer_literal<&[u8], Literal>,
     chain!(
-        val: delimited!(opt!(multispace), digit, opt!(multispace)),
+        val: digit,
         || {
             let intval = i64::from_str(str::from_utf8(val).unwrap()).unwrap();
             Literal::Integer(intval)
@@ -493,13 +493,10 @@ named!(pub integer_literal<&[u8], Literal>,
 /// String literal value
 named!(pub string_literal<&[u8], Literal>,
     chain!(
-        val: delimited!(opt!(multispace),
-                 alt_complete!(
-                       delimited!(tag!("\""), opt!(take_until!("\"")), tag!("\""))
-                     | delimited!(tag!("'"), opt!(take_until!("'")), tag!("'"))
-                 ),
-                 opt!(multispace)
-              ),
+        val: alt_complete!(
+            delimited!(tag!("\""), opt!(take_until!("\"")), tag!("\""))
+            | delimited!(tag!("'"), opt!(take_until!("'")), tag!("'"))
+        ),
         || {
             let val = val.unwrap_or("".as_bytes());
             let s = String::from(str::from_utf8(val).unwrap());
