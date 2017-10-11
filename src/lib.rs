@@ -31,3 +31,5 @@ mod insert;
 mod join;
 mod select;
 mod table;
+mod delete;
+mod update;
