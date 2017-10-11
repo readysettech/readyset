@@ -482,7 +482,7 @@ named!(pub table_list<&[u8], Vec<Table> >,
 /// Integer literal value
 named!(pub integer_literal<&[u8], Literal>,
     chain!(
-        val: delimited!(opt!(multispace), digit, opt!(multispace)),
+        val: digit,
         || {
             let intval = i64::from_str(str::from_utf8(val).unwrap()).unwrap();
             Literal::Integer(intval)
