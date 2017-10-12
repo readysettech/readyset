@@ -2,6 +2,7 @@ use nom::{alphanumeric, digit, multispace};
 use nom::{IResult, Err, ErrorKind, Needed};
 use std::str;
 use std::str::FromStr;
+use std::fmt;
 
 use common::{column_identifier_no_alias, field_list, sql_identifier, statement_terminator,
              table_reference, Literal, SqlType, TableKey};
@@ -13,6 +14,33 @@ pub struct CreateTableStatement {
     pub table: Table,
     pub fields: Vec<ColumnSpecification>,
     pub keys: Option<Vec<TableKey>>,
+}
+
+impl fmt::Display for CreateTableStatement {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        write!(f, "CREATE TABLE {} ", self.table)?;
+        write!(f, "(")?;
+        write!(
+            f,
+            "{}",
+            self.fields
+                .iter()
+                .map(|field| format!("{}", field))
+                .collect::<Vec<_>>()
+                .join(", ")
+        )?;
+        if let Some(ref keys) = self.keys {
+            write!(
+                f,
+                ", {}",
+                keys.iter()
+                    .map(|key| format!("{}", key))
+                    .collect::<Vec<_>>()
+                    .join(", ")
+            )?;
+        }
+        write!(f, ")")
+    }
 }
 
 fn len_as_u16(len: &[u8]) -> u16 {
