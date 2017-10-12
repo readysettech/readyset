@@ -52,6 +52,7 @@ impl DomainInputHandle {
         local: bool,
     ) -> Result<(), tcp::SendError> {
         if self.txs.len() == 1 {
+            p = p.make_local();
             self.txs[0].send(p)
         } else {
             if key.is_empty() {
