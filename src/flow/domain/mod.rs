@@ -180,7 +180,7 @@ impl DomainBuilder {
         let mut control_reply_tx = TcpSender::connect(&self.control_addr, None).unwrap();
 
         // Create polling loop and tell the controller what port we are listening on.
-        let polling_loop = PollingLoop::<Box<Packet>>::new(listen_addr);
+        let polling_loop = PollingLoop::<Packet>::new(listen_addr);
         // We extract this here because `listen_addr` may not specify a port and rely on
         // auto-assignment
         let addr = polling_loop.get_listener_addr().unwrap();
@@ -2109,7 +2109,7 @@ impl Domain {
         }
     }
 
-    pub fn run(mut self, mut polling_loop: PollingLoop<Box<Packet>>) {
+    pub fn run(mut self, mut polling_loop: PollingLoop<Packet>) {
         let mut group_commit_queues = persistence::GroupCommitQueueSet::new(
             self.index,
             self.shard.unwrap_or(0),
@@ -2136,7 +2136,7 @@ impl Domain {
                 KeepPolling
             }
             PollEvent::Process(packet) => {
-                let packet = packet.make_normal();
+                let packet = packet.make_boxed_normal();
                 if let Packet::Quit = *packet {
                     return StopPolling;
                 }

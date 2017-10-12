@@ -418,10 +418,10 @@ impl Packet {
     }
 
     /// If self is `Packet::Local` then replace with the packet pointed to.
-    pub fn make_normal(self: Box<Self>) -> Box<Self> {
+    pub fn make_boxed_normal(self) -> Box<Self> {
         match self {
-            box Packet::Local(LocalPacket(ptr)) => unsafe { Box::from_raw(ptr) },
-            s => s,
+            Packet::Local(LocalPacket(ptr)) => unsafe { Box::from_raw(ptr) },
+            s => box s,
         }
     }
 
