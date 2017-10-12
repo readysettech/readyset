@@ -1,6 +1,7 @@
 use nom::multispace;
 use nom::{IResult, Err, ErrorKind, Needed};
 use std::str;
+use std::fmt;
 
 use common::{field_list, statement_terminator, table_reference, value_list, Literal};
 use column::Column;
@@ -10,6 +11,30 @@ use table::Table;
 pub struct InsertStatement {
     pub table: Table,
     pub fields: Vec<(Column, Literal)>,
+}
+
+impl fmt::Display for InsertStatement {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        write!(f, "INSERT INTO {}", self.table)?;
+        write!(
+            f,
+            " ({})",
+            self.fields
+                .iter()
+                .map(|&(ref col, _)| col.name.to_owned())
+                .collect::<Vec<_>>()
+                .join(", ")
+        )?;
+        write!(
+            f,
+            " VALUES ({})",
+            self.fields
+                .iter()
+                .map(|&(_, ref literal)| literal.to_string())
+                .collect::<Vec<_>>()
+                .join(", ")
+        )
+    }
 }
 
 /// Parse rule for a SQL insert query.

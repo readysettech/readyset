@@ -17,6 +17,29 @@ pub struct UpdateStatement {
     pub where_clause: Option<ConditionExpression>,
 }
 
+impl fmt::Display for UpdateStatement {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        write!(f, "UPDATE {} ", self.table)?;
+        assert!(self.fields.len() > 0);
+        write!(
+            f,
+            "SET {}",
+            self.fields
+                .iter()
+                .map(|&(ref col, ref literal)| {
+                    format!("{} = {}", col, literal.to_string())
+                })
+                .collect::<Vec<_>>()
+                .join(", ")
+        )?;
+        if let Some(ref where_clause) = self.where_clause {
+            write!(f, " WHERE ")?;
+            write!(f, "{}", where_clause)?;
+        }
+        Ok(())
+    }
+}
+
 
 named!(pub updating<&[u8], UpdateStatement>,
     chain!(
@@ -88,6 +111,14 @@ mod tests {
                 ..Default::default()
             }
         );
+    }
+
+    #[test]
+    fn format_update_with_where_clause() {
+        let qstring = "UPDATE users SET id = 42, name = 'test' WHERE id = 1";
+        let expected = "UPDATE users SET id = 42, name = 'test' WHERE id = 1";
+        let res = updating(qstring.as_bytes());
+        assert_eq!(format!("{}", res.unwrap().1), expected);
     }
 
 }
