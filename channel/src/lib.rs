@@ -109,7 +109,8 @@ pub type TransactionReplySender<T> = ChannelSender<T>;
 pub type StreamSender<T> = ChannelSender<T>;
 
 struct ChannelCoordinatorInner<K: Eq + Hash + Clone> {
-    addrs: HashMap<K, SocketAddr>,
+    /// Map from key to tuple of address and whether the endpoint is local.
+    addrs: HashMap<K, (SocketAddr, bool)>,
 }
 
 pub struct ChannelCoordinator<K: Eq + Hash + Clone> {
@@ -125,29 +126,39 @@ impl<K: Eq + Hash + Clone> ChannelCoordinator<K> {
         }
     }
 
-    pub fn insert_addr(&self, key: K, addr: SocketAddr) {
+    pub fn insert_addr(&self, key: K, addr: SocketAddr, local: bool) {
         let mut inner = self.inner.lock().unwrap();
-        inner.addrs.insert(key, addr);
+        inner.addrs.insert(key, (addr, local));
     }
 
     pub fn get_addr(&self, key: &K) -> Option<SocketAddr> {
-        self.inner.lock().unwrap().addrs.get(key).cloned()
+        self.inner.lock().unwrap().addrs.get(key).map(|a| a.0)
     }
 
-    fn get_sized_tx<T: Serialize>(&self, key: &K, size: Option<u32>) -> Option<TcpSender<T>> {
-        let addr = { self.inner.lock().unwrap().addrs.get(key).cloned() };
-        addr.and_then(|addr| TcpSender::connect(&addr, size).ok())
+    pub fn is_local(&self, key: &K) -> Option<bool> {
+        self.inner.lock().unwrap().addrs.get(key).map(|a| a.1)
     }
 
-    pub fn get_tx<T: Serialize>(&self, key: &K) -> Option<TcpSender<T>> {
+    fn get_sized_tx<T: Serialize>(
+        &self,
+        key: &K,
+        size: Option<u32>,
+    ) -> Option<(TcpSender<T>, bool)> {
+        let val = { self.inner.lock().unwrap().addrs.get(key).cloned() };
+        val.and_then(|(addr, local)| {
+            TcpSender::connect(&addr, size).ok().map(|s| (s, local))
+        })
+    }
+
+    pub fn get_tx<T: Serialize>(&self, key: &K) -> Option<(TcpSender<T>, bool)> {
         self.get_sized_tx(key, None)
     }
 
-    pub fn get_input_tx<T: Serialize>(&self, key: &K) -> Option<TcpSender<T>> {
+    pub fn get_input_tx<T: Serialize>(&self, key: &K) -> Option<(TcpSender<T>, bool)> {
         self.get_sized_tx(key, None)
     }
 
-    pub fn get_unbounded_tx<T: Serialize>(&self, key: &K) -> Option<TcpSender<T>> {
+    pub fn get_unbounded_tx<T: Serialize>(&self, key: &K) -> Option<(TcpSender<T>, bool)> {
         self.get_sized_tx(key, None)
     }
 }

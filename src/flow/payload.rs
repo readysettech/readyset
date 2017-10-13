@@ -111,7 +111,7 @@ pub type Tracer = Option<(u64, Option<channel::TraceSender<DebugEvent>>)>;
 pub type IngressFromBase = HashMap<petgraph::graph::NodeIndex, usize>;
 pub type EgressForBase = HashMap<petgraph::graph::NodeIndex, Vec<LocalNodeIndex>>;
 
-#[derive(Serialize, Deserialize)]
+#[derive(Clone, Serialize, Deserialize)]
 pub enum Packet {
     // Data messages
     //
@@ -506,5 +506,10 @@ impl<'de> Deserialize<'de> for LocalPacket {
         D: Deserializer<'de>,
     {
         usize::deserialize(deserializer).map(|p| LocalPacket(p as *mut Packet))
+    }
+}
+impl Clone for LocalPacket {
+    fn clone(&self) -> LocalPacket {
+        panic!("LocalPacket cannot be cloned");
     }
 }

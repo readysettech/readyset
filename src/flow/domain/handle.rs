@@ -113,7 +113,7 @@ pub struct DomainHandle {
     _idx: domain::Index,
 
     cr_poll: PollingLoop<ControlReplyPacket>,
-    txs: Vec<TcpSender<Box<Packet>>>,
+    txs: Vec<(TcpSender<Box<Packet>>, bool)>,
 
     // used during booting
     threads: Vec<thread::JoinHandle<()>>,
@@ -147,6 +147,8 @@ impl DomainHandle {
         let mut cr_rxs = Vec::new();
         let mut threads = Vec::new();
         let mut nodes = Some(Self::build_descriptors(graph, nodes));
+
+        let all_local = workers.is_empty();
 
         for i in 0..num_shards {
             let logger = if num_shards == 1 {
@@ -215,7 +217,7 @@ impl DomainHandle {
         cr_poll.run_polling_loop(|event| match event {
             PollEvent::ResumePolling(_) => KeepPolling,
             PollEvent::Process(ControlReplyPacket::Booted(shard, addr)) => {
-                channel_coordinator.insert_addr((idx, shard), addr.clone());
+                channel_coordinator.insert_addr((idx, shard), addr.clone(), all_local);
                 txs.push(channel_coordinator.get_tx(&(idx, shard)).unwrap());
 
                 // TODO(malte): this is a hack, and not an especially neat one. In response to a
@@ -279,14 +281,22 @@ impl DomainHandle {
     }
 
     pub fn send(&mut self, p: Box<Packet>) -> Result<(), tcp::SendError> {
-        for tx in self.txs.iter_mut() {
-            tx.send_ref(&p)?;
+        for &mut (ref mut tx, is_local) in self.txs.iter_mut() {
+            if is_local {
+                // TODO: avoid clone on last iteration.
+                tx.send(p.clone().make_local())?;
+            } else {
+                tx.send_ref(&p)?;
+            }
         }
         Ok(())
     }
 
-    pub fn send_to_shard(&mut self, i: usize, p: Box<Packet>) -> Result<(), tcp::SendError> {
-        self.txs[i].send(p)
+    pub fn send_to_shard(&mut self, i: usize, mut p: Box<Packet>) -> Result<(), tcp::SendError> {
+        if self.txs[i].1 {
+            p = p.make_local();
+        }
+        self.txs[i].0.send(p)
     }
 
     fn wait_for_next_reply(&mut self) -> ControlReplyPacket {

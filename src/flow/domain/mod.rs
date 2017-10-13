@@ -860,8 +860,8 @@ impl Domain {
                         });
                         let mut n = self.nodes[&node].borrow_mut();
                         n.with_egress_mut(move |e| {
-                            if let (Some(new_tx), Some(channel)) = (new_tx, channel) {
-                                e.add_tx(new_tx.0, new_tx.1, channel);
+                            if let (Some(new_tx), Some((channel, is_local))) = (new_tx, channel) {
+                                e.add_tx(new_tx.0, new_tx.1, channel, is_local);
                             }
                             if let Some(new_tag) = new_tag {
                                 e.add_tag(new_tag.0, new_tag.1);
@@ -941,10 +941,14 @@ impl Domain {
                                             let n = txs.len();
                                             &mut txs[::shard_by(key, n)]
                                         };
-                                        tx.send(box Packet::RequestPartialReplay {
+                                        let mut m = box Packet::RequestPartialReplay {
                                             key: vec![key.clone()],
                                             tag: tag,
-                                        }).unwrap();
+                                        };
+                                        if tx.1 {
+                                            m = m.make_local();
+                                        }
+                                        tx.0.send(m).unwrap();
                                     });
                                 assert!(
                                     self.readers
@@ -1011,9 +1015,11 @@ impl Domain {
                             payload::TriggerEndpoint::End(domain, shards) => TriggerEndpoint::End(
                                 (0..shards)
                                     .map(|shard| {
+                                        // TODO: take advantage of local channels for replay paths.
                                         self.channel_coordinator
                                             .get_unbounded_tx(&(domain, shard))
                                             .unwrap()
+                                            .0
                                     })
                                     .collect(),
                             ),
