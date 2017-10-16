@@ -1,5 +1,5 @@
 use std;
-use std::io::{self, Read, Write};
+use std::io::{self, BufReader, Read, Write};
 use std::marker::PhantomData;
 use std::net::SocketAddr;
 
@@ -149,7 +149,7 @@ impl Buffer {
 }
 
 pub struct TcpReceiver<T> {
-    pub(crate) stream: NonBlockingWriter<mio::net::TcpStream>,
+    pub(crate) stream: BufReader<NonBlockingWriter<mio::net::TcpStream>>,
     unacked: u32,
     poisoned: bool,
 
@@ -170,7 +170,7 @@ where
 {
     pub fn new(stream: mio::net::TcpStream) -> Self {
         Self {
-            stream: NonBlockingWriter::new(stream),
+            stream: BufReader::new(NonBlockingWriter::new(stream)),
             unacked: 0,
             poisoned: false,
             window: None,
@@ -189,11 +189,11 @@ where
     }
 
     pub fn local_addr(&self) -> Result<SocketAddr, io::Error> {
-        self.stream.get_ref().local_addr()
+        self.stream.get_ref().get_ref().local_addr()
     }
 
     fn send_ack(&mut self) {
-        match self.stream.write(&[0u8]) {
+        match self.stream.get_mut().write(&[0u8]) {
             Ok(n) => assert_eq!(n, 1),
             Err(ref e) if e.kind() == io::ErrorKind::BrokenPipe => {}
             Err(ref e) if e.kind() == io::ErrorKind::ConnectionReset => {}
@@ -223,7 +223,7 @@ where
         }
 
         // Make sure that any previously issued ACKs are sent out on the wire.
-        match self.stream.flush() {
+        match self.stream.get_mut().flush() {
             Ok(()) => {}
             Err(ref e) if e.kind() == io::ErrorKind::BrokenPipe => {}
             Err(ref e) if e.kind() == io::ErrorKind::ConnectionReset => {}
@@ -274,7 +274,10 @@ impl<T> Evented for TcpReceiver<T> {
         interest: Ready,
         opts: PollOpt,
     ) -> io::Result<()> {
-        self.stream.get_ref().register(poll, token, interest, opts)
+        self.stream
+            .get_ref()
+            .get_ref()
+            .register(poll, token, interest, opts)
     }
 
     fn reregister(
@@ -286,11 +289,12 @@ impl<T> Evented for TcpReceiver<T> {
     ) -> io::Result<()> {
         self.stream
             .get_ref()
+            .get_ref()
             .reregister(poll, token, interest, opts)
     }
 
     fn deregister(&self, poll: &Poll) -> io::Result<()> {
-        self.stream.get_ref().deregister(poll)
+        self.stream.get_ref().get_ref().deregister(poll)
     }
 }
 

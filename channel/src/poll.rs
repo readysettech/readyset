@@ -200,15 +200,18 @@ where
                     }
                 } else if token < MAX_CHANNEL {
                     let channel = token - CHANNEL_OFFSET;
-                    match self.inner.channels[channel].as_mut().unwrap().try_recv() {
-                        Ok(message) => {
-                            stop = process_event(GeneralizedPollEvent::ProcessChannel(message))
+                    loop {
+                        match self.inner.channels[channel].as_mut().unwrap().try_recv() {
+                            Ok(message) => {
+                                stop = process_event(GeneralizedPollEvent::ProcessChannel(message))
+                            }
+                            Err(TryRecvError::Disconnected) => {
+                                self.inner.remove_channel(channel);
+                                break;
+                            }
+                            Err(TryRecvError::Empty) => break,
+                            Err(TryRecvError::DeserializationError) => unreachable!(),
                         }
-                        Err(TryRecvError::Disconnected) => {
-                            self.inner.remove_channel(channel);
-                        }
-                        Err(TryRecvError::Empty) => {}
-                        Err(TryRecvError::DeserializationError) => unreachable!(),
                     }
                 } else if token < MAX_RPC {
                     let endpoint = token - RPC_OFFSET;
