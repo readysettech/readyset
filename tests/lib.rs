@@ -293,7 +293,7 @@ fn it_works_deletion() {
 fn it_works_with_sql_recipe() {
     let mut g = distributary::Blender::new();
     let sql = "
-        CREATE Table Car (id int, brand varchar(255), PRIMARY KEY(id));
+        CREATE TABLE Car (id int, brand varchar(255), PRIMARY KEY(id));
         CountCars: SELECT COUNT(*) FROM Car WHERE brand = ?;
     ";
 
@@ -320,6 +320,149 @@ fn it_works_with_sql_recipe() {
     let result = getter.lookup(&"Volvo".into(), true).unwrap();
     assert_eq!(result.len(), 1);
     assert_eq!(result[0][0], 2.into());
+}
+
+#[test]
+fn it_works_with_simple_arithmetic() {
+    let mut g = distributary::Blender::new();
+    let sql = "
+        CREATE TABLE Car (id int, price int, PRIMARY KEY(id));
+        CarPrice: SELECT 2 * price FROM Car WHERE id = ?;
+    ";
+
+    let recipe = g.migrate(|mig| {
+        let mut recipe = distributary::Recipe::from_str(&sql, None).unwrap();
+        recipe.activate(mig, false).unwrap();
+        recipe
+    });
+
+    let car_index = recipe.node_addr_for("Car").unwrap();
+    let count_index = recipe.node_addr_for("CarPrice").unwrap();
+    let mut mutator = g.get_mutator(car_index);
+    let getter = g.get_getter(count_index).unwrap();
+    let id: distributary::DataType = 1.into();
+    let price: distributary::DataType = 123.into();
+    mutator.put(vec![id.clone(), price]).unwrap();
+
+    // Let writes propagate:
+    sleep();
+
+    // Retrieve the result of the count query:
+    let result = getter.lookup(&id, true).unwrap();
+    assert_eq!(result.len(), 1);
+    assert_eq!(result[0][1], 246.into());
+}
+
+#[test]
+fn it_works_with_multiple_arithmetic_expressions() {
+    let mut g = distributary::Blender::new();
+    let sql = "
+        CREATE TABLE Car (id int, price int, PRIMARY KEY(id));
+        CarPrice: SELECT 10 * 10, 2 * price, 10 * price, FROM Car WHERE id = ?;
+    ";
+
+    let recipe = g.migrate(|mig| {
+        let mut recipe = distributary::Recipe::from_str(&sql, None).unwrap();
+        recipe.activate(mig, false).unwrap();
+        recipe
+    });
+
+    let car_index = recipe.node_addr_for("Car").unwrap();
+    let count_index = recipe.node_addr_for("CarPrice").unwrap();
+    let mut mutator = g.get_mutator(car_index);
+    let getter = g.get_getter(count_index).unwrap();
+    let id: distributary::DataType = 1.into();
+    let price: distributary::DataType = 123.into();
+    mutator.put(vec![id.clone(), price]).unwrap();
+
+    // Let writes propagate:
+    sleep();
+
+    // Retrieve the result of the count query:
+    let result = getter.lookup(&id, true).unwrap();
+    assert_eq!(result.len(), 1);
+    assert_eq!(result[0][1], 100.into());
+    assert_eq!(result[0][2], 246.into());
+    assert_eq!(result[0][3], 1230.into());
+}
+
+#[test]
+fn it_works_with_join_arithmetic() {
+    let mut g = distributary::Blender::new();
+    let sql = "
+        CREATE TABLE Car (car_id int, price_id int, PRIMARY KEY(car_id));
+        CREATE TABLE Price (price_id int, price int, PRIMARY KEY(price_id));
+        CREATE TABLE Sales (sales_id int, price_id int, fraction float, PRIMARY KEY(sales_id));
+        CarPrice: SELECT price * fraction FROM Car \
+                  JOIN Price ON Car.price_id = Price.price_id \
+                  JOIN Sales ON Price.price_id = Sales.price_id \
+                  WHERE car_id = ?;
+    ";
+
+    let recipe = g.migrate(|mig| {
+        let mut recipe = distributary::Recipe::from_str(&sql, None).unwrap();
+        recipe.activate(mig, false).unwrap();
+        recipe
+    });
+
+    let car_index = recipe.node_addr_for("Car").unwrap();
+    let price_index = recipe.node_addr_for("Price").unwrap();
+    let sales_index = recipe.node_addr_for("Sales").unwrap();
+    let query_index = recipe.node_addr_for("CarPrice").unwrap();
+    let mut car_mutator = g.get_mutator(car_index);
+    let mut price_mutator = g.get_mutator(price_index);
+    let mut sales_mutator = g.get_mutator(sales_index);
+    let getter = g.get_getter(query_index).unwrap();
+    let id = 1;
+    let price = 123;
+    let fraction = 0.7;
+    car_mutator.put(vec![id.into(), id.into()]).unwrap();
+    price_mutator.put(vec![id.into(), price.into()]).unwrap();
+    sales_mutator
+        .put(vec![id.into(), id.into(), fraction.into()])
+        .unwrap();
+
+    // Let writes propagate:
+    sleep();
+
+    // Retrieve the result of the count query:
+    let result = getter.lookup(&id.into(), true).unwrap();
+    assert_eq!(result.len(), 1);
+    assert_eq!(result[0][1], (price as f64 * fraction).into());
+}
+
+#[test]
+fn it_works_with_function_arithmetic() {
+    let mut g = distributary::Blender::new();
+    let sql = "
+        CREATE TABLE Bread (id int, price int, PRIMARY KEY(id));
+        Price: SELECT 2 * MAX(price) FROM Bread;
+    ";
+
+    let recipe = g.migrate(|mig| {
+        let mut recipe = distributary::Recipe::from_str(&sql, None).unwrap();
+        recipe.activate(mig, false).unwrap();
+        recipe
+    });
+
+    let bread_index = recipe.node_addr_for("Bread").unwrap();
+    let query_index = recipe.node_addr_for("Price").unwrap();
+    let mut mutator = g.get_mutator(bread_index);
+    let getter = g.get_getter(query_index).unwrap();
+    let max_price = 20;
+    for (i, price) in (10..max_price + 1).enumerate() {
+        let id = (i + 1) as i32;
+        mutator.put(vec![id.into(), price.into()]).unwrap();
+    }
+
+    // Let writes propagate:
+    sleep();
+
+    // Retrieve the result of the count query:
+    let key = distributary::DataType::BigInt(max_price * 2);
+    let result = getter.lookup(&key, true).unwrap();
+    assert_eq!(result.len(), 1);
+    assert_eq!(result[0][0], key);
 }
 
 #[test]
@@ -750,7 +893,7 @@ fn migrate_added_columns() {
         let b = mig.add_ingredient(
             "x",
             &["c", "b"],
-            distributary::Project::new(a, &[2, 0], None),
+            distributary::Project::new(a, &[2, 0], None, None),
         );
         mig.maintain(b, 1);
         b
@@ -871,7 +1014,7 @@ fn key_on_added() {
         let b = mig.add_ingredient(
             "x",
             &["c", "b"],
-            distributary::Project::new(a, &[2, 1], None),
+            distributary::Project::new(a, &[2, 1], None, None),
         );
         mig.maintain(b, 0);
         b
@@ -1004,7 +1147,7 @@ fn full_aggregation_with_bogokey() {
         let bogo = mig.add_ingredient(
             "bogo",
             &["x", "bogo"],
-            distributary::Project::new(base, &[0], Some(vec![0.into()])),
+            distributary::Project::new(base, &[0], Some(vec![0.into()]), None),
         );
         let agg = mig.add_ingredient(
             "agg",

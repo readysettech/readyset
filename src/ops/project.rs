@@ -1,6 +1,58 @@
+use nom_sql::ArithmeticOperator;
+use std::fmt;
 use std::collections::HashMap;
 
 use flow::prelude::*;
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub enum ProjectExpressionBase {
+    Column(usize),
+    Literal(DataType),
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ProjectExpression {
+    op: ArithmeticOperator,
+    left: ProjectExpressionBase,
+    right: ProjectExpressionBase,
+}
+
+impl ProjectExpression {
+    pub fn new(
+        op: ArithmeticOperator,
+        left: ProjectExpressionBase,
+        right: ProjectExpressionBase,
+    ) -> ProjectExpression {
+        ProjectExpression {
+            op: op,
+            left: left,
+            right: right,
+        }
+    }
+}
+
+impl fmt::Display for ProjectExpressionBase {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        match *self {
+            ProjectExpressionBase::Column(u) => write!(f, "{}", u),
+            ProjectExpressionBase::Literal(ref l) => write!(f, "(lit: {})", l),
+        }
+    }
+}
+
+impl fmt::Display for ProjectExpression {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        let op = match self.op {
+            ArithmeticOperator::Add => "+",
+            ArithmeticOperator::Subtract => "-",
+            ArithmeticOperator::Divide => "/",
+            ArithmeticOperator::Multiply => "*",
+        };
+
+        write!(f, "{} {} {}", self.left, op, self.right)
+    }
+}
+
 
 /// Permutes or omits columns from its source node, or adds additional literal value columns.
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -8,16 +60,23 @@ pub struct Project {
     us: Option<IndexPair>,
     emit: Option<Vec<usize>>,
     additional: Option<Vec<DataType>>,
+    expressions: Option<Vec<ProjectExpression>>,
     src: IndexPair,
     cols: usize,
 }
 
 impl Project {
     /// Construct a new permuter operator.
-    pub fn new(src: NodeIndex, emit: &[usize], additional: Option<Vec<DataType>>) -> Project {
+    pub fn new(
+        src: NodeIndex,
+        emit: &[usize],
+        additional: Option<Vec<DataType>>,
+        expressions: Option<Vec<ProjectExpression>>,
+    ) -> Project {
         Project {
             emit: Some(emit.into()),
             additional: additional,
+            expressions: expressions,
             src: src.into(),
             cols: 0,
             us: None,
@@ -32,6 +91,25 @@ impl Project {
             );
         } else {
             self.emit.as_ref().map_or(col, |emit| emit[col])
+        }
+    }
+
+    fn eval_expression(&self, expression: &ProjectExpression, record: &Record) -> DataType {
+        let left = match expression.left {
+            ProjectExpressionBase::Column(i) => &record[i],
+            ProjectExpressionBase::Literal(ref data) => data,
+        };
+
+        let right = match expression.right {
+            ProjectExpressionBase::Column(i) => &record[i],
+            ProjectExpressionBase::Literal(ref data) => data,
+        };
+
+        match expression.op {
+            ArithmeticOperator::Add => left + right,
+            ArithmeticOperator::Subtract => left - right,
+            ArithmeticOperator::Multiply => left * right,
+            ArithmeticOperator::Divide => left / right,
         }
     }
 }
@@ -89,6 +167,12 @@ impl Ingredient for Project {
                 for i in e {
                     new_r.push(r[*i].clone());
                 }
+                match self.expressions {
+                    Some(ref e) => for i in e {
+                        new_r.push(self.eval_expression(i, r));
+                    },
+                    None => (),
+                }
                 match self.additional {
                     Some(ref a) => for i in a {
                         new_r.push(i.clone());
@@ -113,21 +197,31 @@ impl Ingredient for Project {
     }
 
     fn description(&self) -> String {
-        let emit_cols = match self.emit.as_ref() {
-            None => "*".into(),
-            Some(emit) => match self.additional {
-                None => emit.iter()
-                    .map(|e| e.to_string())
-                    .collect::<Vec<_>>()
-                    .join(", "),
-                Some(ref add) => emit.iter()
-                    .map(|e| e.to_string())
-                    .chain(add.iter().map(|e| format!("lit: {}", e.to_string())))
-                    .collect::<Vec<_>>()
-                    .join(", "),
-            },
+        let mut emit_cols = vec![];
+        match self.emit.as_ref() {
+            None => emit_cols.push("*".to_string()),
+            Some(emit) => {
+                emit_cols.extend(emit.iter().map(|e| e.to_string()).collect::<Vec<_>>());
+
+                if let Some(ref arithmetic) = self.expressions {
+                    emit_cols.extend(
+                        arithmetic
+                            .iter()
+                            .map(|e| format!("{}", e))
+                            .collect::<Vec<_>>(),
+                    );
+                }
+
+                if let Some(ref add) = self.additional {
+                    emit_cols.extend(
+                        add.iter()
+                            .map(|e| format!("lit: {}", e.to_string()))
+                            .collect::<Vec<_>>(),
+                    );
+                }
+            }
         };
-        format!("π[{}]", emit_cols)
+        format!("π[{}]", emit_cols.join(", "))
     }
 
     fn parent_columns(&self, column: usize) -> Vec<(NodeIndex, Option<usize>)> {
@@ -159,16 +253,51 @@ mod tests {
         g.set_op(
             "permute",
             &["x", "y", "z"],
-            Project::new(s.as_global(), &permutation[..], additional),
+            Project::new(s.as_global(), &permutation[..], additional, None),
             materialized,
         );
         g
+    }
+
+    fn setup_arithmetic(expression: ProjectExpression) -> ops::test::MockGraph {
+        let mut g = ops::test::MockGraph::new();
+        let s = g.add_base("source", &["x", "y", "z"]);
+
+        let permutation = vec![0, 1];
+        g.set_op(
+            "permute",
+            &["x", "y", "z"],
+            Project::new(
+                s.as_global(),
+                &permutation[..],
+                None,
+                Some(vec![expression]),
+            ),
+            false,
+        );
+        g
+    }
+
+    fn setup_column_arithmetic(op: ArithmeticOperator) -> ops::test::MockGraph {
+        let expression = ProjectExpression {
+            left: ProjectExpressionBase::Column(0),
+            right: ProjectExpressionBase::Column(1),
+            op: op,
+        };
+
+        setup_arithmetic(expression)
     }
 
     #[test]
     fn it_describes() {
         let p = setup(false, false, true);
         assert_eq!(p.node().description(), "π[2, 0, lit: \"hello\", lit: 42]");
+    }
+
+    #[test]
+    fn it_describes_arithmetic() {
+        let p = setup_column_arithmetic(ArithmeticOperator::Add);
+        assert_eq!(p.node().description(), "π[0, 1, 0 + 1]");
     }
 
     #[test]
@@ -224,6 +353,81 @@ mod tests {
                     42.into(),
                 ],
             ].into()
+        );
+    }
+
+    #[test]
+    fn it_forwards_addition_arithmetic() {
+        let mut p = setup_column_arithmetic(ArithmeticOperator::Add);
+        let rec = vec![10.into(), 20.into()];
+        assert_eq!(
+            p.narrow_one_row(rec, false),
+            vec![vec![10.into(), 20.into(), 30.into()]].into()
+        );
+    }
+
+    #[test]
+    fn it_forwards_subtraction_arithmetic() {
+        let mut p = setup_column_arithmetic(ArithmeticOperator::Subtract);
+        let rec = vec![10.into(), 20.into()];
+        assert_eq!(
+            p.narrow_one_row(rec, false),
+            vec![vec![10.into(), 20.into(), (-10).into()]].into()
+        );
+    }
+
+    #[test]
+    fn it_forwards_multiplication_arithmetic() {
+        let mut p = setup_column_arithmetic(ArithmeticOperator::Multiply);
+        let rec = vec![10.into(), 20.into()];
+        assert_eq!(
+            p.narrow_one_row(rec, false),
+            vec![vec![10.into(), 20.into(), 200.into()]].into()
+        );
+    }
+
+    #[test]
+    fn it_forwards_division_arithmetic() {
+        let mut p = setup_column_arithmetic(ArithmeticOperator::Divide);
+        let rec = vec![10.into(), 2.into()];
+        assert_eq!(
+            p.narrow_one_row(rec, false),
+            vec![vec![10.into(), 2.into(), 5.into()]].into()
+        );
+    }
+
+    #[test]
+    fn it_forwards_arithmetic_w_literals() {
+        let number: DataType = 40.into();
+        let expression = ProjectExpression {
+            left: ProjectExpressionBase::Column(0),
+            right: ProjectExpressionBase::Literal(number),
+            op: ArithmeticOperator::Multiply,
+        };
+
+        let mut p = setup_arithmetic(expression);
+        let rec = vec![10.into(), 0.into()];
+        assert_eq!(
+            p.narrow_one_row(rec, false),
+            vec![vec![10.into(), 0.into(), 400.into()]].into()
+        );
+    }
+
+    #[test]
+    fn it_forwards_arithmetic_w_only_literals() {
+        let a: DataType = 80.into();
+        let b: DataType = 40.into();
+        let expression = ProjectExpression {
+            left: ProjectExpressionBase::Literal(a),
+            right: ProjectExpressionBase::Literal(b),
+            op: ArithmeticOperator::Divide,
+        };
+
+        let mut p = setup_arithmetic(expression);
+        let rec = vec![0.into(), 0.into()];
+        assert_eq!(
+            p.narrow_one_row(rec, false),
+            vec![vec![0.into(), 0.into(), 2.into()]].into()
         );
     }
 

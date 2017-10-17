@@ -1,4 +1,5 @@
-use nom_sql::{Column, ColumnConstraint, ColumnSpecification, Operator, OrderType};
+use nom_sql::{ArithmeticBase, ArithmeticExpression, Column, ColumnConstraint, ColumnSpecification,
+              Operator, OrderType};
 use std::collections::HashMap;
 
 use flow::Migration;
@@ -9,7 +10,7 @@ use mir::node::GroupedNodeType;
 use ops;
 use ops::join::{Join, JoinType};
 use ops::latest::Latest;
-use ops::project::Project;
+use ops::project::{Project, ProjectExpression, ProjectExpressionBase};
 
 #[derive(Clone, Debug)]
 pub enum FlowNode {
@@ -360,11 +361,26 @@ pub(crate) fn make_latest_node(
     FlowNode::New(na)
 }
 
+// Converts a nom_sql::ArithmeticBase into a project::ProjectExpressionBase:
+fn generate_projection_base(parent: &MirNodeRef, base: &ArithmeticBase) -> ProjectExpressionBase {
+    match *base {
+        ArithmeticBase::Column(ref column) => {
+            let column_id = parent.borrow().column_id_for_column(column);
+            ProjectExpressionBase::Column(column_id)
+        }
+        ArithmeticBase::Scalar(ref literal) => {
+            let data: DataType = literal.into();
+            ProjectExpressionBase::Literal(data)
+        }
+    }
+}
+
 pub(crate) fn make_project_node(
     name: &str,
     parent: MirNodeRef,
     columns: &[Column],
     emit: &Vec<Column>,
+    arithmetic: &Vec<(String, ArithmeticExpression)>,
     literals: &Vec<(String, DataType)>,
     mig: &mut Migration,
 ) -> FlowNode {
@@ -377,6 +393,17 @@ pub(crate) fn make_project_node(
 
     let (_, literal_values): (Vec<_>, Vec<_>) = literals.iter().cloned().unzip();
 
+    let projected_arithmetic: Vec<ProjectExpression> = arithmetic
+        .iter()
+        .map(|&(_, ref e)| {
+            ProjectExpression::new(
+                e.op.clone(),
+                generate_projection_base(&parent, &e.left),
+                generate_projection_base(&parent, &e.right),
+            )
+        })
+        .collect();
+
     let n = mig.add_ingredient(
         String::from(name),
         column_names.as_slice(),
@@ -384,6 +411,7 @@ pub(crate) fn make_project_node(
             parent_na,
             projected_column_ids.as_slice(),
             Some(literal_values),
+            Some(projected_arithmetic),
         ),
     );
     FlowNode::New(n)
