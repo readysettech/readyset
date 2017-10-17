@@ -139,8 +139,8 @@
 //!
 //!     // add final join using first field from article and first from vc.
 //!     // joins are trickier because you need to specify what to join on. the vec![1, 0] here
-//!     // signifies that the first field of article and vc should be equal, and the second field can
-//!     // be whatever.
+//!     // signifies that the first field of article and vc should be equal,
+//!     // and the second field can be whatever.
 //!     use distributary::JoinSource::*;
 //!     let j = Join::new(article, vc, JoinType::Inner, vec![B(0, 0), L(1), R(1)]);
 //!     let awvc = mig.add_ingredient("end", &["id", "title", "votes"], j);
@@ -172,7 +172,9 @@
 //! ```rust
 //! # use distributary::{Blender, Base};
 //! # let mut g = Blender::new();
-//! # let article = g.migrate(|mig| mig.add_ingredient("article", &["id", "title"], Base::default()));
+//! # let article = g.migrate(|mig|
+//! #     mig.add_ingredient("article", &["id", "title"], Base::default())
+//! # );
 //! let mut muta = g.get_mutator(article);
 //! muta.put(vec![1.into(), "Hello world".into()]);
 //! ```

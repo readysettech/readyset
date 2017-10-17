@@ -102,7 +102,11 @@ impl GroupedOperation for ExtremumOperator {
         }
     }
 
-    fn apply(&self, current: Option<&DataType>, diffs: Vec<Self::Diff>) -> DataType {
+    fn apply(
+        &self,
+        current: Option<&DataType>,
+        diffs: &mut Iterator<Item = Self::Diff>,
+    ) -> DataType {
         // Extreme values are those that are at least as extreme as the current min/max (if any).
         // let mut is_extreme_value : Box<Fn(i64) -> bool> = Box::new(|_|true);
         let mut extreme_values: Vec<i64> = vec![];
@@ -172,102 +176,136 @@ mod tests {
 
     use ops;
 
-    fn setup(mat: bool) -> ops::test::MockGraph {
+    fn setup(op: Extremum, mat: bool) -> ops::test::MockGraph {
         let mut g = ops::test::MockGraph::new();
         let s = g.add_base("source", &["x", "y"]);
 
-        g.set_op(
-            "agg",
-            &["x", "ys"],
-            Extremum::MAX.over(s.as_global(), 1, &[0]),
-            mat,
-        );
+        g.set_op("agg", &["x", "ys"], op.over(s.as_global(), 1, &[0]), mat);
         g
     }
 
+    fn assert_positive_record(group: i32, new: i32, rs: Records) {
+        assert_eq!(rs.len(), 1);
+
+        match rs.into_iter().next().unwrap() {
+            Record::Positive(r) => {
+                assert_eq!(r[0], group.into());
+                assert_eq!(r[1], new.into());
+            }
+            _ => unreachable!(),
+        }
+    }
+
+    fn assert_record_change(group: i32, old: i32, new: i32, rs: Records) {
+        assert_eq!(rs.len(), 2);
+        let mut rs = rs.into_iter();
+
+        match rs.next().unwrap() {
+            Record::Negative(r) => {
+                assert_eq!(r[0], group.into());
+                assert_eq!(r[1], old.into());
+            }
+            _ => unreachable!(),
+        }
+        match rs.next().unwrap() {
+            Record::Positive(r) => {
+                assert_eq!(r[0], group.into());
+                assert_eq!(r[1], new.into());
+            }
+            _ => unreachable!(),
+        }
+    }
+
     #[test]
-    fn it_forwards() {
-        let mut c = setup(true);
-
-        let check_first_max = |group, val, rs: Records| {
-            assert_eq!(rs.len(), 1);
-
-            match rs.into_iter().next().unwrap() {
-                Record::Positive(r) => {
-                    assert_eq!(r[0], group);
-                    assert_eq!(r[1], val);
-                }
-                _ => unreachable!(),
-            }
-        };
-
-        let check_new_max = |group, old, new, rs: Records| {
-            assert_eq!(rs.len(), 2);
-            let mut rs = rs.into_iter();
-
-            match rs.next().unwrap() {
-                Record::Negative(r) => {
-                    assert_eq!(r[0], group);
-                    assert_eq!(r[1], old);
-                }
-                _ => unreachable!(),
-            }
-            match rs.next().unwrap() {
-                Record::Positive(r) => {
-                    assert_eq!(r[0], group);
-                    assert_eq!(r[1], new);
-                }
-                _ => unreachable!(),
-            }
-        };
+    fn it_forwards_maximum() {
+        let mut c = setup(Extremum::MAX, true);
+        let key = 1;
 
         // First insertion should trigger an update.
-        let out = c.narrow_one_row(vec![1.into(), 4.into()], true);
-        check_first_max(1.into(), 4.into(), out);
+        let out = c.narrow_one_row(vec![key.into(), 4.into()], true);
+        assert_positive_record(key, 4, out);
 
         // Larger value should also trigger an update.
-        let out = c.narrow_one_row(vec![1.into(), 7.into()], true);
-        check_new_max(1.into(), 4.into(), 7.into(), out);
+        let out = c.narrow_one_row(vec![key.into(), 7.into()], true);
+        assert_record_change(key, 4, 7, out);
 
         // No change if new value isn't the max.
-        let rs = c.narrow_one_row(vec![1.into(), 2.into()], true);
+        let rs = c.narrow_one_row(vec![key.into(), 2.into()], true);
         assert!(rs.is_empty());
 
         // Insertion into a different group should be independent.
         let out = c.narrow_one_row(vec![2.into(), 3.into()], true);
-        check_first_max(2.into(), 3.into(), out);
+        assert_positive_record(2, 3, out);
 
         // Larger than last value, but not largest in group.
-        let rs = c.narrow_one_row(vec![1.into(), 5.into()], true);
+        let rs = c.narrow_one_row(vec![key.into(), 5.into()], true);
         assert!(rs.is_empty());
 
         // One more new max.
-        let out = c.narrow_one_row(vec![1.into(), 22.into()], true);
-        check_new_max(1.into(), 7.into(), 22.into(), out);
+        let out = c.narrow_one_row(vec![key.into(), 22.into()], true);
+        assert_record_change(key, 7, 22, out);
 
         // Negative for old max should be fine if there is a positive for a larger value.
         let u = vec![
-            (vec![1.into(), 22.into()], false),
-            (vec![1.into(), 23.into()], true),
+            (vec![key.into(), 22.into()], false),
+            (vec![key.into(), 23.into()], true),
         ];
         let out = c.narrow_one(u, true);
-        check_new_max(1.into(), 22.into(), 23.into(), out);
-
-        // Competing positive and negative should cancel out.
-        let u = vec![
-            (vec![1.into(), 24.into()], true),
-            (vec![1.into(), 24.into()], false),
-        ];
-        let rs = c.narrow_one(u, true);
-        assert!(rs.is_empty());
+        assert_record_change(key, 22, 23, out);
     }
 
-    // TODO: also test MIN
+    #[test]
+    fn it_forwards_minimum() {
+        let mut c = setup(Extremum::MIN, true);
+        let key = 1;
+
+        // First insertion should trigger an update.
+        let out = c.narrow_one_row(vec![key.into(), 10.into()], true);
+        assert_positive_record(key, 10, out);
+
+        // Smaller value should also trigger an update.
+        let out = c.narrow_one_row(vec![key.into(), 7.into()], true);
+        assert_record_change(key, 10, 7, out);
+
+        // No change if new value isn't the min.
+        let rs = c.narrow_one_row(vec![key.into(), 9.into()], true);
+        assert!(rs.is_empty());
+
+        // Insertion into a different group should be independent.
+        let out = c.narrow_one_row(vec![2.into(), 15.into()], true);
+        assert_positive_record(2, 15, out);
+
+        // Smaller than last value, but not smallest in group.
+        let rs = c.narrow_one_row(vec![key.into(), 8.into()], true);
+        assert!(rs.is_empty());
+
+        // Negative for old min should be fine if there is a positive for a smaller value.
+        let u = vec![
+            (vec![key.into(), 7.into()], false),
+            (vec![key.into(), 5.into()], true),
+        ];
+        let out = c.narrow_one(u, true);
+        assert_record_change(key, 7, 5, out);
+    }
+
+    #[test]
+    fn it_cancels_out_opposite_records() {
+        let mut c = setup(Extremum::MAX, true);
+        c.narrow_one_row(vec![1.into(), 5.into()], true);
+        // Competing positive and negative should cancel out.
+        let u = vec![
+            (vec![1.into(), 10.into()], true),
+            (vec![1.into(), 10.into()], false),
+        ];
+
+        let out = c.narrow_one(u, true);
+        assert!(out.is_empty());
+    }
 
     #[test]
     fn it_suggests_indices() {
         let me = 1.into();
-        let c = setup(false);
+        let c = setup(Extremum::MAX, false);
         let idx = c.node().suggest_indexes(me);
 
         // should only add index on own columns
@@ -280,7 +318,7 @@ mod tests {
 
     #[test]
     fn it_resolves() {
-        let c = setup(false);
+        let c = setup(Extremum::MAX, false);
         assert_eq!(
             c.node().resolve(0),
             Some(vec![(c.narrow_base_id().as_global(), 0)])

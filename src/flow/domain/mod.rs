@@ -1501,7 +1501,13 @@ impl Domain {
                     transaction_state,
                 } => {
                     if let ReplayPieceContext::Partial { ref for_keys, .. } = context {
-                        trace!(self.log, "replaying batch"; "#" => data.len(), "tag" => tag.id(), "keys" => ?for_keys);
+                        trace!(
+                            self.log,
+                            "replaying batch";
+                            "#" => data.len(),
+                            "tag" => tag.id(),
+                            "keys" => ?for_keys,
+                        );
                     } else {
                         debug!(self.log, "replaying batch"; "#" => data.len());
                     }

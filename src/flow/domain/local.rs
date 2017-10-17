@@ -200,66 +200,40 @@ enum KeyedState<T: Eq + Hash> {
     Sex(FnvHashMap<(T, T, T, T, T, T), Vec<Row<Vec<T>>>>),
 }
 
-impl<'a, T: 'static + Eq + Hash + Clone> From<&'a [T]> for KeyType<'a, T> {
-    fn from(other: &'a [T]) -> Self {
-        match other.len() {
+impl<'a, T: 'static + Eq + Hash + Clone> KeyType<'a, T> {
+    pub fn from<I>(other: I) -> Self
+    where
+        I: IntoIterator<Item = &'a T>,
+        <I as IntoIterator>::IntoIter: ExactSizeIterator,
+    {
+        let mut other = other.into_iter();
+        let len = other.len();
+        let mut more = move || other.next().unwrap();
+        match len {
             0 => unreachable!(),
-            1 => KeyType::Single(&other[0]),
-            2 => KeyType::Double((other[0].clone(), other[1].clone())),
-            3 => KeyType::Tri((other[0].clone(), other[1].clone(), other[2].clone())),
+            1 => KeyType::Single(more()),
+            2 => KeyType::Double((more().clone(), more().clone())),
+            3 => KeyType::Tri((more().clone(), more().clone(), more().clone())),
             4 => KeyType::Quad((
-                other[0].clone(),
-                other[1].clone(),
-                other[2].clone(),
-                other[3].clone(),
+                more().clone(),
+                more().clone(),
+                more().clone(),
+                more().clone(),
             )),
             5 => KeyType::Quin((
-                other[0].clone(),
-                other[1].clone(),
-                other[2].clone(),
-                other[3].clone(),
-                other[4].clone(),
+                more().clone(),
+                more().clone(),
+                more().clone(),
+                more().clone(),
+                more().clone(),
             )),
             6 => KeyType::Sex((
-                other[0].clone(),
-                other[1].clone(),
-                other[2].clone(),
-                other[3].clone(),
-                other[4].clone(),
-                other[5].clone(),
-            )),
-            _ => unimplemented!(),
-        }
-    }
-}
-
-impl<'a, T: 'static + Eq + Hash + Clone> From<&'a [&'a T]> for KeyType<'a, T> {
-    fn from(other: &'a [&'a T]) -> Self {
-        match other.len() {
-            0 => unreachable!(),
-            1 => KeyType::Single(other[0]),
-            2 => KeyType::Double((other[0].clone(), other[1].clone())),
-            3 => KeyType::Tri((other[0].clone(), other[1].clone(), other[2].clone())),
-            4 => KeyType::Quad((
-                other[0].clone(),
-                other[1].clone(),
-                other[2].clone(),
-                other[3].clone(),
-            )),
-            5 => KeyType::Quin((
-                other[0].clone(),
-                other[1].clone(),
-                other[2].clone(),
-                other[3].clone(),
-                other[4].clone(),
-            )),
-            6 => KeyType::Sex((
-                other[0].clone(),
-                other[1].clone(),
-                other[2].clone(),
-                other[3].clone(),
-                other[4].clone(),
-                other[5].clone(),
+                more().clone(),
+                more().clone(),
+                more().clone(),
+                more().clone(),
+                more().clone(),
+                more().clone(),
             )),
             _ => unimplemented!(),
         }

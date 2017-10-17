@@ -5,3 +5,9 @@ rust:
 cache: cargo
 env:
   - SETTLE_TIME=2000
+before_script:
+  - export PATH="$PATH:$HOME/.cargo/bin"
+  - cargo install --git https://github.com/rust-lang-nursery/rustfmt.git --rev 6e41100725267974fa6dcc61134d4377b676ad01 --force
+script:
+  - cargo fmt -- --write-mode=diff
+  - cargo test --verbose

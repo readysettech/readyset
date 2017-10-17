@@ -149,7 +149,11 @@ impl GroupedOperation for GroupConcat {
         }
     }
 
-    fn apply(&self, current: Option<&DataType>, diffs: Vec<Self::Diff>) -> DataType {
+    fn apply(
+        &self,
+        current: Option<&DataType>,
+        diffs: &mut Iterator<Item = Self::Diff>,
+    ) -> DataType {
         use std::collections::BTreeSet;
         use std::iter::FromIterator;
 
@@ -168,14 +172,18 @@ impl GroupedOperation for GroupConcat {
         let clen = current.len();
 
         // TODO this is not particularly robust, and requires a non-empty separator
-        let mut current = BTreeSet::from_iter(current.split_terminator(&self.separator));
-        for diff in &diffs {
-            match *diff {
-                Modify::Add(ref s) => {
-                    current.insert(s);
+        let mut current = BTreeSet::from_iter(
+            current
+                .split_terminator(&self.separator)
+                .map(|s| Cow::Borrowed(s)),
+        );
+        for diff in diffs {
+            match diff {
+                Modify::Add(s) => {
+                    current.insert(Cow::Owned(s));
                 }
-                Modify::Remove(ref s) => {
-                    current.remove(&**s);
+                Modify::Remove(s) => {
+                    current.remove(&*s);
                 }
             }
         }
@@ -184,7 +192,7 @@ impl GroupedOperation for GroupConcat {
         let mut new = current
             .into_iter()
             .fold(String::with_capacity(2 * clen), |mut acc, s| {
-                acc.push_str(s);
+                acc.push_str(&*s);
                 acc.push_str(&self.separator);
                 acc
             });
