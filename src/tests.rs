@@ -376,6 +376,62 @@ fn it_works_with_arithmetic_aliases() {
 }
 
 #[test]
+fn it_recovers_persisted_logs() {
+    let setup = || {
+        let mut g = distributary::Blender::new();
+        let pparams = distributary::PersistenceParameters::new(
+            distributary::DurabilityMode::DeleteOnExit,
+            128,
+            time::Duration::from_millis(1),
+        );
+        g.with_persistence_options(pparams);
+
+        let sql = "
+            CREATE TABLE Car (id int, price int, PRIMARY KEY(id));
+            CarPrice: SELECT price FROM Car WHERE id = ?;
+        ";
+
+
+        let recipe = g.migrate(|mig| {
+            let mut recipe = distributary::Recipe::from_str(&sql, None).unwrap();
+            recipe.activate(mig, false).unwrap();
+            recipe
+        });
+
+        (g, recipe)
+    };
+
+    let (g, recipe) = setup();
+    let mut mutator = g.get_mutator(recipe.node_addr_for("Car").unwrap());
+
+    for i in 1..10 {
+        let price = i * 10;
+        mutator.put(vec![i.into(), price.into()]).unwrap();
+    }
+
+    // Let writes propagate:
+    sleep();
+
+    let (mut g, recipe) = setup();
+    let getter = g.get_getter(recipe.node_addr_for("CarPrice").unwrap())
+        .unwrap();
+
+    // Make sure that the new graph is empty:
+    assert_eq!(getter.lookup(&1.into(), true).unwrap().len(), 0);
+
+    // Recover and let the writes propagate:
+    g.recover();
+    sleep();
+
+    for i in 1..10 {
+        let price = i * 10;
+        let result = getter.lookup(&i.into(), true).unwrap();
+        assert_eq!(result.len(), 1);
+        assert_eq!(result[0][0], price.into());
+    }
+}
+
+#[test]
 fn it_works_with_simple_arithmetic() {
     let mut g = ControllerBuilder::default().build_inner();
     let sql = "
