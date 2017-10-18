@@ -30,8 +30,9 @@ fn main() {
 
     // set up Soup via recipe
     let blender = ControllerBuilder::default().build();
-    blender.set_persistence(persistence_params);
+    blender.with_persistence_options(persistence_params);
     blender.install_recipe(sql.to_owned());
+    blender.recover();
 
     // Get mutators and getter.
     let inputs = blender.inputs();
