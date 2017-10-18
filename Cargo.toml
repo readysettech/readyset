@@ -14,7 +14,7 @@ binaries = ["default"]
 generate_mysql_tests = ["default"]
 
 [dependencies]
-arccstr = "1.0.2"
+arccstr = "1.0.3"
 arrayvec = "0.4.0"
 bincode = "0.9.0"
 buf_redux = "0.6.1"
@@ -78,6 +78,7 @@ default-features = false
 backtrace = { version = "0.3.2", features = ["serialize-serde"] }
 toml = "0.4.1"
 diff = "0.1.10"
+time = "0.1.38"
 
 [profile.release]
 debug=true

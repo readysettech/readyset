@@ -205,6 +205,9 @@ impl GroupCommitQueueSet {
                         })
                         .collect();
                     serde_json::to_writer(&mut file, &data_to_flush).unwrap();
+                    // Separate log flushes with a newline so that the
+                    // file can be easily parsed later on:
+                    writeln!(&mut file, "").unwrap();
                 }
 
                 file.flush().unwrap();

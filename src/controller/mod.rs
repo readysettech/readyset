@@ -19,6 +19,16 @@ use std::{fmt, io, thread, time};
 use futures::{Future, Stream};
 use hyper::Client;
 use mio::net::TcpListener;
+<<<<<<< HEAD
+=======
+
+use std::io::{BufRead, BufReader};
+use std::fs::File;
+use std::path::PathBuf;
+
+use serde_json;
+use slog;
+>>>>>>> Initial recovery implementation
 use petgraph;
 use petgraph::visit::Bfs;
 use petgraph::graph::NodeIndex;
@@ -516,6 +526,43 @@ impl ControllerInner {
         let r = f(&mut m);
         m.commit();
         r
+    }
+
+    /// TODO
+    pub fn recover(&self) {
+        info!(self.log, "Recovering from log");
+        for &(_index, ref node) in self.inputs().iter() {
+            let path = PathBuf::from(&format!(
+                "soup-log-{}_{}-{}.json",
+                node.domain().index(),
+                1, // TODO: handle sharding
+                node.local_addr().id()
+            ));
+
+            if !path.exists() {
+                debug!(
+                    self.log,
+                    "Could not find file while recovering";
+                    "path" => format!("{:?}", path)
+                );
+
+                continue;
+            }
+
+            let file = File::open(path).unwrap();
+            BufReader::new(file)
+                .lines()
+                .flat_map(|line| {
+                    let line = line.unwrap();
+                    let records: Vec<prelude::Records> = serde_json::from_str(&line).unwrap();
+                    records
+                })
+                .flat_map(|r| r)
+                .for_each(|record| {
+                    let mut mutator = self.get_mutator(node.global_addr());
+                    mutator.put(record.rec()).unwrap();
+                });
+        }
     }
 
     /// Get a boxed function which can be used to validate tokens.
