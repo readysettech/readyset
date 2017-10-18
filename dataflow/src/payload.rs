@@ -223,6 +223,9 @@ pub enum Packet {
     /// A packet used solely to drive the event loop forward.
     Spin,
 
+    /// Signal that a base node's domain should start replaying logs.
+    StartRecovery,
+
     // Transaction time messages
     //
     /// Instruct domain to flush pending transactions and notify upon completion. `prev_ts` is the

@@ -129,13 +129,8 @@ impl GroupCommitQueueSet {
             node.id()
         );
 
-        // TODO(jmftrindade): Current semantics is to overwrite an existing log.
-        // Once we have recovery code, we obviously do not want to overwrite this
-        // log before recovering.
         let file = OpenOptions::new()
-            .read(false)
-            .append(false)
-            .write(true)
+            .append(true)
             .create(true)
             .open(PathBuf::from(&filename))
             .unwrap();

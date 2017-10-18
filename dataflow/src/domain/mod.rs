@@ -3,6 +3,9 @@ use std::collections::{HashMap, HashSet, VecDeque};
 use std::sync::{Arc, Mutex};
 use std::thread;
 use std::time;
+use std::io::{BufRead, BufReader};
+use std::fs::File;
+use std::path::PathBuf;
 use std::collections::hash_map::Entry;
 use std::rc::Rc;
 
@@ -18,6 +21,7 @@ use transactions;
 use persistence;
 use debug;
 use checktable;
+use serde_json;
 use slog::Logger;
 use timekeeper::{RealTime, SimpleTracker, ThreadTime, Timer, TimerSet};
 use tarpc::sync::client::{self, ClientExt};
@@ -803,6 +807,9 @@ impl Domain {
             Packet::ReplayPiece { .. } => {
                 self.handle_replay(m);
             }
+            Packet::StartRecovery { .. } => {
+                self.handle_recovery();
+            }
             consumed => {
                 match consumed {
                     // workaround #16223
@@ -1564,6 +1571,57 @@ impl Domain {
         if let Some(m) = m {
             self.handle_replay(m);
         }
+    }
+
+    fn handle_recovery(&mut self) {
+        let indices = self.nodes
+            .iter()
+            .map(|(index, _node)| index)
+            .collect::<Vec<_>>();
+
+        for index in indices {
+            let path = PathBuf::from(&format!(
+                "soup-log-{}_{}-{}.json",
+                self.index.index(),
+                self.shard.unwrap_or(0),
+                index.id(),
+            ));
+
+            if !path.exists() {
+                debug!(
+                    self.log,
+                    "Could not find file while recovering";
+                    "path" => format!("{:?}", path)
+                );
+
+                continue;
+            }
+
+            debug!(self.log, "Recovering from file"; "path" => format!("{:?}", path));
+            let file = File::open(path).unwrap();
+            BufReader::new(file)
+                .lines()
+                .flat_map(|line| {
+                    let line = line.unwrap();
+                    let records: Vec<Records> = serde_json::from_str(&line).unwrap();
+                    records
+                })
+                .for_each(|records| {
+                    let packet = box Packet::Message {
+                        data: records,
+                        link: Link::new(index, index),
+                        tracer: None,
+                    };
+
+                    self.handle(packet);
+                });
+        }
+
+        self.control_reply_tx
+            .as_ref()
+            .unwrap()
+            .send(ControlReplyPacket::ack())
+            .unwrap();
     }
 
     fn handle_replay(&mut self, m: Box<Packet>) {

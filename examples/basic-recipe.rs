@@ -56,17 +56,6 @@ fn main() {
     println!("Casting vote...");
     let uid = time::get_time().sec;
     vote.put(vec![aid.into(), uid.into()]).unwrap();
-    article
-        .put(vec![
-            1.into(),
-            "test title".into(),
-            "http://csail.mit.edu".into(),
-        ])
-        .unwrap();
-
-    vote.put(vec![1.into(), 42.into()]).unwrap();
-    vote.put(vec![1.into(), 43.into()]).unwrap();
-    vote.put(vec![1.into(), 44.into()]).unwrap();
 
     println!("Finished writing! Let's wait for things to propagate...");
     thread::sleep(Duration::from_millis(1000));
