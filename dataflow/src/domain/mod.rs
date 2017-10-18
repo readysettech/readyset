@@ -5,7 +5,6 @@ use std::thread;
 use std::time;
 use std::io::{BufRead, BufReader};
 use std::fs::File;
-use std::path::PathBuf;
 use std::collections::hash_map::Entry;
 use std::rc::Rc;
 
@@ -1579,14 +1578,8 @@ impl Domain {
             .map(|(index, _node)| index)
             .collect::<Vec<_>>();
 
-        for index in indices {
-            let path = PathBuf::from(&format!(
-                "soup-log-{}_{}-{}.json",
-                self.index.index(),
-                self.shard.unwrap_or(0),
-                index.id(),
-            ));
-
+        for node_index in indices {
+            let path = persistence::log_path(&node_index, self.index, self.shard.unwrap_or(0));
             if !path.exists() {
                 debug!(
                     self.log,
@@ -1609,7 +1602,7 @@ impl Domain {
                 .for_each(|records| {
                     let packet = box Packet::Message {
                         data: records,
-                        link: Link::new(index, index),
+                        link: Link::new(node_index, node_index),
                         tracer: None,
                     };
 

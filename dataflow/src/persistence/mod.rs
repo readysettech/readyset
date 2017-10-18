@@ -74,6 +74,22 @@ impl Parameters {
     }
 }
 
+/// Returns the path that would be used for the given domain/shard pair's logs.
+pub fn log_path(
+    node: &LocalNodeIndex,
+    domain_index: domain::Index,
+    domain_shard: usize,
+) -> PathBuf {
+    let filename = format!(
+        "soup-log-{}_{}-{}.json",
+        domain_index.index(),
+        domain_shard,
+        node.id()
+    );
+
+    PathBuf::from(&filename)
+}
+
 pub struct GroupCommitQueueSet {
     /// Packets that are queued to be persisted.
     pending_packets: Map<Vec<Box<Packet>>>,
@@ -121,24 +137,15 @@ impl GroupCommitQueueSet {
         }
     }
 
-    fn create_file(&self, node: &LocalNodeIndex) -> (PathBuf, BufWriter<File, WhenFull>) {
-        let filename = format!(
-            "soup-log-{}_{}-{}.json",
-            self.domain_index.index(),
-            self.domain_shard,
-            node.id()
-        );
-
+    fn get_or_create_file(&self, node: &LocalNodeIndex) -> (PathBuf, BufWriter<File, WhenFull>) {
+        let path = log_path(node, self.domain_index, self.domain_shard);
         let file = OpenOptions::new()
             .append(true)
             .create(true)
-            .open(PathBuf::from(&filename))
+            .open(&path)
             .unwrap();
 
-        (
-            PathBuf::from(filename),
-            BufWriter::with_capacity(self.capacity * 1024, file),
-        )
+        (path, BufWriter::with_capacity(self.capacity * 1024, file))
     }
 
     /// Returns None for packet types not relevant to persistence, and the node the packet was
@@ -185,7 +192,7 @@ impl GroupCommitQueueSet {
         match self.durability_mode {
             DurabilityMode::DeleteOnExit | DurabilityMode::Permanent => {
                 if !self.files.contains_key(node) {
-                    let file = self.create_file(node);
+                    let file = self.get_or_create_file(node);
                     self.files.insert(node.clone(), file);
                 }
 
