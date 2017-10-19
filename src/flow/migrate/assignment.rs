@@ -39,64 +39,65 @@ pub fn assign(
         topo_list.push(node);
     }
 
-    let mut next_domain = || {
-        *ndomains += 1;
-        *ndomains - 1
-    };
+    // let mut next_domain = || {
+    //     *ndomains += 1;
+    //     *ndomains - 1
+    // };
 
     for node in topo_list {
-        let assignment = {
-            let n = &graph[node];
-            let ps: Vec<_> = graph
-                .neighbors_directed(node, petgraph::EdgeDirection::Incoming)
-                .map(|ni| (ni, &graph[ni]))
-                .collect();
+        let assignment = *ndomains;
+        // let assignment = {
+        //     let n = &graph[node];
+        //     let ps: Vec<_> = graph
+        //         .neighbors_directed(node, petgraph::EdgeDirection::Incoming)
+        //         .map(|ni| (ni, &graph[ni]))
+        //         .collect();
 
-            if ps.iter().any(|&(_, ref p)| p.is_sharder()) {
-                // child of a sharder
-                // TODO: this is stupid -- assign to some domain that already exists under the
-                // sharder if possible.
-                next_domain()
-            } else if n.is_sharder() {
-                // sharder belongs to parent domain
-                ps[0].1.domain().index()
-            } else if n.sharded_by().is_none()
-                && ps.iter().any(|&(_, ref p)| !p.sharded_by().is_none())
-            {
-                // shard merger
-                next_domain()
-            } else if n.is_reader() {
-                // reader can be in its own domain
-                next_domain()
-            } else if n.is_internal() {
-                match **n {
-                    NodeOperator::Base(..) => {
-                        // base nodes start new domains
-                        next_domain()
-                    }
-                    NodeOperator::Sum(..) |
-                    NodeOperator::Extremum(..) |
-                    NodeOperator::Concat(..) => {
-                        // aggregation
-                        next_domain()
-                    }
-                    _ => {
-                        // "all other nodes", but only internal
-                        // prefer new
-                        if let Some(&(_, ref p)) =
-                            ps.iter().find(|&&(ref pni, _)| new.contains(pni))
-                        {
-                            p.domain().index()
-                        } else {
-                            ps[0].1.domain().index()
-                        }
-                    }
-                }
-            } else {
-                // actually all other nodes
-                ps[0].1.domain().index()
-            }
-        };
+        //     if ps.iter().any(|&(_, ref p)| p.is_sharder()) {
+        //         // child of a sharder
+        //         // TODO: this is stupid -- assign to some domain that already exists under the
+        //         // sharder if possible.
+        //         next_domain()
+        //     } else if n.is_sharder() {
+        //         // sharder belongs to parent domain
+        //         ps[0].1.domain().index()
+        //     } else if n.sharded_by().is_none()
+        //         && ps.iter().any(|&(_, ref p)| !p.sharded_by().is_none())
+        //     {
+        //         // shard merger
+        //         next_domain()
+        //     } else if n.is_reader() {
+        //         // reader can be in its own domain
+        //         next_domain()
+        //     } else if n.is_internal() {
+        //         match **n {
+        //             NodeOperator::Base(..) => {
+        //                 // base nodes start new domains
+        //                 next_domain()
+        //             }
+        //             NodeOperator::Sum(..) |
+        //             NodeOperator::Extremum(..) |
+        //             NodeOperator::Concat(..) => {
+        //                 // aggregation
+        //                 next_domain()
+        //             }
+        //             _ => {
+        //                 // "all other nodes", but only internal
+        //                 // prefer new
+        //                 if let Some(&(_, ref p)) =
+        //                     ps.iter().find(|&&(ref pni, _)| new.contains(pni))
+        //                 {
+        //                     p.domain().index()
+        //                 } else {
+        //                     ps[0].1.domain().index()
+        //                 }
+        //             }
+        //         }
+        //     } else {
+        //         // actually all other nodes
+        //         ps[0].1.domain().index()
+        //     }
+        // };
         debug!(log, "node added to domain";
            "node" => node.index(),
            "type" => ?graph[node],
