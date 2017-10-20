@@ -104,7 +104,12 @@ pub fn run(soup: Arc<Mutex<Blender>>) -> HttpResult<Listening> {
                                 key.into_owned().into()
                             };
 
-                            let data = get.lock().unwrap().lookup(&key, true).into_iter().map(|row| {
+                            let data = get
+                                .lock()
+                                .unwrap()
+                                .lookup(&key, true)
+                                .into_iter()
+                                .map(|row| {
                                     args
                                     .clone()
                                     .into_iter()

@@ -80,37 +80,37 @@ impl Ingredient for Latest {
         let mut out = Vec::with_capacity(rs.len());
         {
             let currents = rs.into_iter().filter_map(|r| {
-            // We don't allow standalone negatives as input to a latest. This is because it would
-            // be very computationally expensive (and currently impossible) to find what the
-            // *previous* latest was if the current latest was revoked.
-            if !r.is_positive() {
-                return None;
-            }
+                // We don't allow standalone negatives as input to a latest. This is because it
+                // would be very computationally expensive (and currently impossible) to find what
+                // the *previous* latest was if the current latest was revoked.
+                if !r.is_positive() {
+                    return None;
+                }
 
-            match db.lookup(&[self.key[0]], &KeyType::Single(&r[self.key[0]])) {
-                LookupResult::Some(rs) => {
-                    debug_assert!(rs.len() <= 1, "a group had more than 1 result");
-                    Some((r, rs.get(0)))
+                match db.lookup(&[self.key[0]], &KeyType::Single(&r[self.key[0]])) {
+                    LookupResult::Some(rs) => {
+                        debug_assert!(rs.len() <= 1, "a group had more than 1 result");
+                        Some((r, rs.get(0)))
+                    }
+                    LookupResult::Missing => {
+                        // we don't actively materialize holes unless requested by a read. this
+                        // can't be a read, because reads cause replay, which fill holes with an
+                        // empty set before processing!
+                        misses.push(Miss {
+                            node: *us,
+                            columns: vec![self.key[0]],
+                            replay_key: replay_key_col.map(|col| {
+                                debug_assert_eq!(col, self.key[0]);
+                                // since latest is an identity, we don't need to map this output
+                                // column to an input column.
+                                vec![r[col].clone()]
+                            }),
+                            key: vec![r[self.key[0]].clone()],
+                        });
+                        None
+                    }
                 }
-                LookupResult::Missing => {
-                    // we don't actively materialize holes unless requested by a read. this can't
-                    // be a read, because reads cause replay, which fill holes with an empty set
-                    // before processing!
-                    misses.push(Miss{
-                        node: *us,
-                        columns: vec![self.key[0]],
-                        replay_key: replay_key_col.map(|col| {
-                            debug_assert_eq!(col, self.key[0]);
-                            // since latest is an identity, we don't need to map this output column
-                            // to an input column.
-                            vec![r[col].clone()]
-                        }),
-                        key: vec![r[self.key[0]].clone()],
-                    });
-                    None
-                }
-            }
-        });
+            });
 
             // buffer emitted records
             for (r, current) in currents {

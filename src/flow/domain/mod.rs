@@ -1105,59 +1105,59 @@ impl Domain {
                             let nshards = self.nshards;
                             let domain_addr = self.addr;
                             thread::Builder::new()
-                            .name(format!(
-                                "replay{}.{}",
-                                self.nodes
-                                    .values()
-                                    .next()
-                                    .unwrap()
-                                    .borrow()
-                                    .domain()
-                                    .index(),
-                                link.src
-                            ))
-                            .spawn(move || {
-                                use itertools::Itertools;
+                                .name(format!(
+                                    "replay{}.{}",
+                                    self.nodes
+                                        .values()
+                                        .next()
+                                        .unwrap()
+                                        .borrow()
+                                        .domain()
+                                        .index(),
+                                    link.src
+                                ))
+                                .spawn(move || {
+                                    use itertools::Itertools;
 
-                                let mut chunked_replay_tx =
-                                    TcpSender::connect(&domain_addr, Some(1)).unwrap();
+                                    let mut chunked_replay_tx =
+                                        TcpSender::connect(&domain_addr, Some(1)).unwrap();
 
-                                let start = time::Instant::now();
-                                debug!(log, "starting state chunker"; "node" => %link.dst);
+                                    let start = time::Instant::now();
+                                    debug!(log, "starting state chunker"; "node" => %link.dst);
 
-                                let iter = state.into_iter().chunks(BATCH_SIZE);
-                                let mut iter = iter.into_iter().enumerate().peekable();
+                                    let iter = state.into_iter().chunks(BATCH_SIZE);
+                                    let mut iter = iter.into_iter().enumerate().peekable();
 
-                                // process all records in state to completion within domain
-                                // and then forward on tx (if there is one)
-                                while let Some((i, chunk)) = iter.next() {
-                                    use std::iter::FromIterator;
-                                    let chunk = Records::from_iter(chunk.into_iter());
-                                    let len = chunk.len();
-                                    let last = iter.peek().is_none();
-                                    let p = box Packet::ReplayPiece {
-                                        tag: tag,
-                                        link: link.clone(), // to will be overwritten by receiver
-                                        nshards: nshards,
-                                        context: ReplayPieceContext::Regular { last },
-                                        data: chunk,
-                                        transaction_state: None,
-                                    };
+                                    // process all records in state to completion within domain
+                                    // and then forward on tx (if there is one)
+                                    while let Some((i, chunk)) = iter.next() {
+                                        use std::iter::FromIterator;
+                                        let chunk = Records::from_iter(chunk.into_iter());
+                                        let len = chunk.len();
+                                        let last = iter.peek().is_none();
+                                        let p = box Packet::ReplayPiece {
+                                            tag: tag,
+                                            link: link.clone(), // to is overwritten by receiver
+                                            nshards: nshards,
+                                            context: ReplayPieceContext::Regular { last },
+                                            data: chunk,
+                                            transaction_state: None,
+                                        };
 
-                                    trace!(log, "sending batch"; "#" => i, "[]" => len);
-                                    if chunked_replay_tx.send(p).is_err() {
-                                        warn!(log, "replayer noticed domain shutdown");
-                                        break;
+                                        trace!(log, "sending batch"; "#" => i, "[]" => len);
+                                        if chunked_replay_tx.send(p).is_err() {
+                                            warn!(log, "replayer noticed domain shutdown");
+                                            break;
+                                        }
                                     }
-                                }
 
-                                debug!(log,
+                                    debug!(log,
                                    "state chunker finished";
                                    "node" => %link.dst,
                                    "μs" => dur_to_ns!(start.elapsed()) / 1000
                                 );
-                            })
-                            .unwrap();
+                                })
+                                .unwrap();
                         }
 
                         self.handle_replay(p);

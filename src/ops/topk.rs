@@ -277,8 +277,8 @@ impl Ingredient for TopK {
         let mut out = Vec::with_capacity(2 * self.k);
         {
             let group_by = &self.group_by[..];
-            let current = consolidate.into_iter().filter_map(
-                |(group, diffs)| match db.lookup(group_by, &KeyType::from(&group[..])) {
+            let current = consolidate.into_iter().filter_map(|(group, diffs)| {
+                match db.lookup(group_by, &KeyType::from(&group[..])) {
                     LookupResult::Some(rs) => Some((group, diffs, rs)),
                     LookupResult::Missing => {
                         misses.push(Miss {
@@ -293,8 +293,8 @@ impl Ingredient for TopK {
                         });
                         None
                     }
-                },
-            );
+                }
+            });
 
             for (group, mut diffs, old_rs) in current {
                 // Retrieve then update the number of times in this group

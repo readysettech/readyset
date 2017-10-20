@@ -42,7 +42,11 @@ impl Sharder {
         }
     }
 
-    pub fn add_sharded_child(&mut self, dst: LocalNodeIndex, txs: Vec<(TcpSender<Box<Packet>>, bool)>) {
+    pub fn add_sharded_child(
+        &mut self,
+        dst: LocalNodeIndex,
+        txs: Vec<(TcpSender<Box<Packet>>, bool)>,
+    ) {
         assert_eq!(self.txs.len(), 0);
         // TODO: add support for "shared" sharder?
         for tx in txs {

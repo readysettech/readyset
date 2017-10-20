@@ -205,17 +205,18 @@ where
                             }
                             LookupResult::Missing => {
                                 misses.push(Miss {
-                                node: *us,
-                                columns: out_key.clone(),
-                                replay_key: replay_key_col.map(|col| {
-                                    // since group columns go first in our output, and the replay
-                                    // key must be on our group by column (partial can't go through
-                                    // generated columns), this column should be < group.len()
-                                    debug_assert!(col < group.len());
-                                    vec![group[col].clone()]
-                                }),
-                                key: group,
-                            });
+                                    node: *us,
+                                    columns: out_key.clone(),
+                                    replay_key: replay_key_col.map(|col| {
+                                        // since group columns go first in our output, and the
+                                        // replay key must be on our group by column (partial can't
+                                        // go through generated columns), this column should be
+                                        // < group.len()
+                                        debug_assert!(col < group.len());
+                                        vec![group[col].clone()]
+                                    }),
+                                    key: group,
+                                });
                                 return;
                             }
                         }
