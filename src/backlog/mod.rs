@@ -112,6 +112,7 @@ impl WriteHandle {
     }
 }
 
+/// Handle to get the state of a single shard of a reader.
 #[derive(Clone)]
 pub struct SingleReadHandle {
     handle: evmap::ReadHandle<DataType, Arc<Vec<DataType>>, i64, FnvBuildHasher>,
@@ -166,7 +167,11 @@ impl SingleReadHandle {
         }
     }
 
-    pub fn try_find_and<F, T>(&self, key: &DataType, mut then: F) -> Result<(Option<T>, i64), ()>
+    pub(crate) fn try_find_and<F, T>(
+        &self,
+        key: &DataType,
+        mut then: F,
+    ) -> Result<(Option<T>, i64), ()>
     where
         F: FnMut(&[Arc<Vec<DataType>>]) -> T,
     {
@@ -174,7 +179,7 @@ impl SingleReadHandle {
     }
 
     #[allow(dead_code)]
-    pub fn len(&self) -> usize {
+    pub(crate) fn len(&self) -> usize {
         self.handle.len()
     }
 }

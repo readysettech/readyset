@@ -304,13 +304,14 @@
 //! propagating the `Update` since there are no descendant views.
 //!
 #![feature(optin_builtin_traits)]
-#![feature(mpsc_select)]
 #![feature(try_from)]
 #![feature(box_patterns)]
 #![feature(box_syntax)]
 #![feature(conservative_impl_trait)]
 #![feature(entry_or_default)]
 #![deny(missing_docs)]
+#![feature(plugin, use_extern_macros)]
+#![plugin(tarpc_plugins)]
 
 /// The number of domain threads to spin up for each sharded subtree of the data-flow graph.
 const SHARDS: usize = 2;
@@ -346,7 +347,6 @@ extern crate arccstr;
 extern crate arrayvec;
 extern crate evmap;
 extern crate fnv;
-extern crate hurdles;
 extern crate vec_map;
 
 extern crate itertools;
@@ -359,9 +359,7 @@ extern crate timekeeper;
 #[cfg(feature = "web")]
 extern crate rustful;
 
-#[cfg(feature = "b_netsoup")]
 extern crate bincode;
-#[cfg(feature = "b_netsoup")]
 extern crate bufstream;
 
 extern crate serde;
@@ -372,9 +370,14 @@ extern crate serde_json;
 
 extern crate buf_redux;
 extern crate chrono;
+extern crate mio;
+#[macro_use]
+extern crate tarpc;
+extern crate tokio_core;
+
+extern crate channel;
 
 mod backlog;
-mod channel;
 mod checktable;
 mod flow;
 mod mir;
@@ -382,16 +385,20 @@ mod ops;
 mod recipe;
 mod sql;
 
+pub use backlog::SingleReadHandle;
 pub use checktable::{Token, TransactionResult};
-pub use flow::{Blender, Getter, Migration, Mutator, MutatorError};
+pub use flow::{Blender, Getter, Migration, Mutator, MutatorBuilder, MutatorError, ReadQuery,
+               ReadReply, RemoteGetter, RemoteGetterBuilder};
 pub use flow::core::{DataType, Datas};
 pub use petgraph::graph::NodeIndex;
+pub use flow::coordination::{CoordinationMessage, CoordinationPayload};
 pub use flow::node::StreamUpdate;
 pub use flow::debug::{DebugEvent, DebugEventType};
-pub use flow::domain::Index;
+pub use flow::domain::{DomainBuilder, Index};
 pub use flow::payload::PacketEvent;
 pub use flow::persistence::Parameters as PersistenceParameters;
 pub use flow::persistence::DurabilityMode;
+pub use flow::prelude::ChannelCoordinator;
 pub use ops::base::Base;
 pub use ops::grouped::aggregate::{Aggregation, Aggregator};
 pub use ops::grouped::concat::{GroupConcat, TextComponent};
@@ -420,6 +427,5 @@ pub fn logger_pls() -> slog::Logger {
 /// web provides a simple REST HTTP server for reading from and writing to the data flow graph.
 pub mod web;
 
-#[cfg(feature = "b_netsoup")]
 /// srv provides a networked RPC server for accessing the data flow graph.
 pub mod srv;

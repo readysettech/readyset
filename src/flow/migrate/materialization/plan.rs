@@ -1,6 +1,5 @@
 use std::collections::{HashMap, HashSet};
 use flow::payload::TriggerEndpoint;
-use backlog::ReadHandle;
 use flow::prelude::*;
 use flow::domain;
 use flow::keys;
@@ -312,26 +311,6 @@ impl<'a> Plan<'a> {
         // mutable references to taken state.
         let s = self.graph[self.node]
             .with_reader(|r| {
-                // we need to make sure there's an entry in readers for this reader!
-                if self.graph[self.node].sharded_by().is_none() {
-                    self.m
-                        .readers
-                        .lock()
-                        .unwrap()
-                        .insert(self.node, ReadHandle::Singleton(None));
-                } else {
-                    use arrayvec::ArrayVec;
-                    let mut shards = ArrayVec::new();
-                    for _ in 0..::SHARDS {
-                        shards.push(None);
-                    }
-                    self.m
-                        .readers
-                        .lock()
-                        .unwrap()
-                        .insert(self.node, ReadHandle::Sharded(shards));
-                }
-
                 if self.partial {
                     // we only currently support replay to readers with a single path. supporting
                     // multiple paths (i.e., through unions) would require that the clients know to

@@ -1,12 +1,9 @@
-use flow;
 use flow::prelude::*;
+use flow::domain::DomainInputHandle;
 use checktable;
-use channel::TransactionReplySender;
 
+use std::net::SocketAddr;
 use vec_map::VecMap;
-
-use std::sync::mpsc;
-use std::thread;
 
 /// Indicates why a Mutator operation failed.
 #[derive(Serialize, Deserialize, Debug)]
@@ -17,42 +14,48 @@ pub enum MutatorError {
     TransactionFailed,
 }
 
-/// A `Mutator` is used to perform reads and writes to base nodes.
-pub struct Mutator {
-    pub(crate) tx: flow::domain::DomainInputHandle,
+/// Serializable struct that Mutators can be constructed from.
+#[derive(Clone, Serialize, Deserialize)]
+pub struct MutatorBuilder {
+    pub(crate) txs: Vec<SocketAddr>,
     pub(crate) addr: LocalNodeIndex,
     pub(crate) key_is_primary: bool,
     pub(crate) key: Vec<usize>,
-    pub(crate) tx_reply_channel: (
-        TransactionReplySender<Result<i64, ()>>,
-        mpsc::Receiver<Result<i64, ()>>,
-    ),
     pub(crate) transactional: bool,
     pub(crate) dropped: VecMap<DataType>,
-    pub(crate) tracer: Tracer,
     pub(crate) expected_columns: usize,
+
+    #[serde(skip)] pub(crate) is_local: bool,
 }
 
-impl Clone for Mutator {
-    fn clone(&self) -> Self {
-        let reply_chan = mpsc::channel();
-        let reply_chan = (
-            TransactionReplySender::from_local(reply_chan.0),
-            reply_chan.1,
-        );
-
-        Self {
-            tx: self.tx.clone(),
-            addr: self.addr.clone(),
-            key: self.key.clone(),
-            key_is_primary: self.key_is_primary.clone(),
-            tx_reply_channel: reply_chan,
+impl MutatorBuilder {
+    /// Construct a `Mutator`.
+    pub fn build(self, listen_addr: SocketAddr) -> Mutator {
+        Mutator {
+            domain_input_handle: DomainInputHandle::new(listen_addr, self.txs).unwrap(),
+            addr: self.addr,
+            key: self.key,
+            key_is_primary: self.key_is_primary,
             transactional: self.transactional,
-            dropped: self.dropped.clone(),
+            dropped: self.dropped,
             tracer: None,
             expected_columns: self.expected_columns,
+            is_local: self.is_local,
         }
     }
+}
+
+/// A `Mutator` is used to perform reads and writes to base nodes.
+pub struct Mutator {
+    domain_input_handle: DomainInputHandle,
+    addr: LocalNodeIndex,
+    key_is_primary: bool,
+    key: Vec<usize>,
+    transactional: bool,
+    dropped: VecMap<DataType>,
+    tracer: Tracer,
+    expected_columns: usize,
+    is_local: bool,
 }
 
 impl Mutator {
@@ -144,28 +147,26 @@ impl Mutator {
             }
         };
 
-        self.tx.base_send(m, &self.key[..]).unwrap();
+        self.domain_input_handle
+            .base_send(m, &self.key[..], self.is_local)
+            .unwrap();
     }
 
     fn tx_send(&mut self, mut rs: Records, t: checktable::Token) -> Result<i64, ()> {
         assert!(self.transactional);
 
         self.inject_dropped_cols(&mut rs);
-        let send = self.tx_reply_channel.0.clone();
         let m = box Packet::Transaction {
             link: Link::new(self.addr, self.addr),
             data: rs,
-            state: TransactionState::Pending(t, send),
+            state: TransactionState::Pending(t, self.domain_input_handle.tx_reply_addr()),
             tracer: self.tracer.clone(),
         };
-        self.tx.base_send(m, &self.key[..]).unwrap();
-        loop {
-            match self.tx_reply_channel.1.try_recv() {
-                Ok(r) => return r,
-                Err(mpsc::TryRecvError::Empty) => thread::yield_now(),
-                Err(mpsc::TryRecvError::Disconnected) => unreachable!(),
-            }
-        }
+
+        self.domain_input_handle
+            .base_send(m, &self.key[..], self.is_local)
+            .unwrap();
+        self.domain_input_handle.receive_transaction_result()
     }
 
     /// Perform a non-transactional write to the base node this Mutator was generated for.
@@ -174,6 +175,22 @@ impl Mutator {
         V: Into<Vec<DataType>>,
     {
         let data = vec![u.into()];
+        if data[0].len() != self.expected_columns {
+            return Err(MutatorError::WrongColumnCount(
+                self.expected_columns,
+                data[0].len(),
+            ));
+        }
+
+        Ok(self.send(data.into()))
+    }
+
+    /// Perform some non-transactional writes to the base node this Mutator was generated for.
+    pub fn multi_put<V>(&mut self, u: V) -> Result<(), MutatorError>
+    where
+        V: Into<Vec<Vec<DataType>>>,
+    {
+        let data = u.into();
         if data[0].len() != self.expected_columns {
             return Err(MutatorError::WrongColumnCount(
                 self.expected_columns,

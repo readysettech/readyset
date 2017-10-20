@@ -9,8 +9,11 @@ pub enum DebugEventType {
 }
 
 /// Sent along the debug channel to indicate that some notable event has occurred.
+#[derive(Serialize, Deserialize)]
 pub struct DebugEvent {
-    /// The time when this event happened.
+    /// The time when this event happened, or the last time this event was deserialized.
+    #[serde(skip)]
+    #[serde(default = "time::Instant::now")]
     pub instant: time::Instant,
     /// What the event was.
     pub event: DebugEventType,

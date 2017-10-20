@@ -5,16 +5,23 @@ use ops::base::Base;
 
 use std::collections::HashMap;
 use std::collections::HashSet;
+use std::net::SocketAddr;
 use std::sync::{Arc, Mutex};
 use std::sync::mpsc;
+use std::net::IpAddr;
 use std::time;
 use std::fmt;
+
+use mio::net::TcpListener;
 
 use slog;
 use petgraph;
 use petgraph::visit::Bfs;
 use petgraph::graph::NodeIndex;
 
+use tarpc::sync::client::{self, ClientExt};
+
+pub mod coordination;
 pub mod core;
 pub mod debug;
 pub mod domain;
@@ -23,6 +30,7 @@ pub mod migrate;
 pub mod node;
 pub mod payload;
 pub mod persistence;
+pub mod placement;
 pub mod prelude;
 pub mod statistics;
 
@@ -30,10 +38,10 @@ mod mutator;
 mod getter;
 mod transactions;
 
-use self::prelude::Ingredient;
+use self::prelude::{Ingredient, WorkerEndpoint, WorkerIdentifier};
 
-pub use self::mutator::{Mutator, MutatorError};
-pub use self::getter::Getter;
+pub use self::mutator::{Mutator, MutatorBuilder, MutatorError};
+pub use self::getter::{Getter, ReadQuery, ReadReply, RemoteGetter, RemoteGetterBuilder};
 
 const NANOS_PER_SEC: u64 = 1_000_000_000;
 macro_rules! dur_to_ns {
@@ -43,7 +51,7 @@ macro_rules! dur_to_ns {
     }}
 }
 
-type Readers = Arc<Mutex<HashMap<NodeIndex, backlog::ReadHandle>>>;
+type Readers = Arc<Mutex<HashMap<(NodeIndex, usize), backlog::SingleReadHandle>>>;
 pub type Edge = ();
 
 /// `Blender` is the core component of the alternate Soup implementation.
@@ -56,7 +64,8 @@ pub struct Blender {
     ingredients: petgraph::Graph<node::Node, Edge>,
     source: NodeIndex,
     ndomains: usize,
-    checktable: Arc<Mutex<checktable::CheckTable>>,
+    checktable: checktable::CheckTableClient,
+    checktable_addr: SocketAddr,
     sharding_enabled: bool,
 
     domain_config: domain::Config,
@@ -67,15 +76,30 @@ pub struct Blender {
 
     domains: HashMap<domain::Index, domain::DomainHandle>,
     channel_coordinator: Arc<prelude::ChannelCoordinator>,
-    debug_channel: Option<mpsc::Sender<debug::DebugEvent>>,
+    debug_channel: Option<SocketAddr>,
 
-    readers: Arc<Mutex<HashMap<NodeIndex, backlog::ReadHandle>>>,
+    listen_addr: IpAddr,
+    readers: Readers,
+    workers: HashMap<WorkerIdentifier, WorkerEndpoint>,
+    remote_readers: HashMap<(domain::Index, usize), SocketAddr>,
 
     log: slog::Logger,
 }
 
 impl Default for Blender {
     fn default() -> Self {
+        Blender::with_listen("127.0.0.1".parse().unwrap())
+    }
+}
+
+impl Blender {
+    /// Construct a new, empty `Blender`
+    pub fn new() -> Self {
+        Blender::default()
+    }
+
+    /// Construct `Blender` with a specified listening interface
+    pub fn with_listen(addr: IpAddr) -> Self {
         let mut g = petgraph::Graph::new();
         let source = g.add_node(node::Node::new(
             "source",
@@ -84,15 +108,20 @@ impl Default for Blender {
             true,
         ));
 
-        let readers = Readers::default();
+        let checktable_addr =
+            checktable::service::CheckTableServer::start(SocketAddr::new(addr.clone(), 0));
+        let checktable =
+            checktable::CheckTableClient::connect(checktable_addr, client::Options::default())
+                .unwrap();
         let log = slog::Logger::root(slog::Discard, o!());
-        let materializations = migrate::materialization::Materializations::new(&log, &readers);
+        let materializations = migrate::materialization::Materializations::new(&log);
 
         Blender {
             ingredients: g,
             source: source,
             ndomains: 0,
-            checktable: Arc::new(Mutex::new(checktable::CheckTable::new())),
+            checktable,
+            checktable_addr,
             sharding_enabled: true,
             materializations: materializations,
 
@@ -108,17 +137,13 @@ impl Default for Blender {
             channel_coordinator: Arc::new(prelude::ChannelCoordinator::new()),
             debug_channel: None,
 
-            readers: readers,
+            listen_addr: addr,
+            readers: Arc::default(),
+            workers: HashMap::default(),
+            remote_readers: HashMap::default(),
 
             log: log,
         }
-    }
-}
-
-impl Blender {
-    /// Construct a new, empty `Blender`
-    pub fn new() -> Self {
-        Blender::default()
     }
 
     /// Set the maximum number of concurrent partial replay requests a domain can have outstanding
@@ -151,13 +176,58 @@ impl Blender {
         self.sharding_enabled = false;
     }
 
+    /// Adds another worker to host domains.
+    pub fn add_worker(&mut self, addr: SocketAddr, sender: WorkerEndpoint) {
+        if !self.workers.contains_key(&addr) {
+            debug!(self.log, "added new worker {:?} to Blender", addr);
+            self.workers.insert(addr.clone(), sender);
+        } else {
+            warn!(
+                self.log,
+                "worker {:?} already exists; ignoring request to add it!",
+                addr
+            );
+        }
+    }
+
+    /// Return the number of workers currently registered.
+    pub fn worker_count(&self) -> usize {
+        self.workers.len()
+    }
+
+    /// Tell the blender about a remote domain so that reads can be routed to the worker that
+    /// maintains it.
+    pub fn register_remote_domain(
+        &mut self,
+        index: domain::Index,
+        shard: usize,
+        read_addr: SocketAddr,
+    ) {
+        if !self.remote_readers.contains_key(&(index, shard)) {
+            debug!(
+                self.log,
+                "added new remote domain {:?} with read_addr {:} to Blender",
+                (index, shard),
+                read_addr,
+            );
+            self.remote_readers.insert((index, shard), read_addr);
+        } else {
+            warn!(
+                self.log,
+                "remote domain {:?} already exists; ignoring request to add it!",
+                (index, shard)
+            );
+        }
+    }
+
     /// Use a debug channel. This function may only be called once because the receiving end it
     /// returned.
-    pub fn create_debug_channel(&mut self) -> mpsc::Receiver<debug::DebugEvent> {
+    pub fn create_debug_channel(&mut self) -> TcpListener {
         assert!(self.debug_channel.is_none());
-        let (tx, rx) = mpsc::channel();
-        self.debug_channel = Some(tx);
-        rx
+        let addr: SocketAddr = "127.0.0.1:0".parse().unwrap();
+        let listener = TcpListener::bind(&addr).unwrap();
+        self.debug_channel = Some(listener.local_addr().unwrap());
+        listener
     }
 
     /// Controls the persistence mode, and parameters related to persistence.
@@ -227,9 +297,11 @@ impl Blender {
 
     /// Get a boxed function which can be used to validate tokens.
     pub fn get_validator(&self) -> Box<Fn(&checktable::Token) -> bool> {
-        let checktable = self.checktable.clone();
+        let checktable =
+            checktable::CheckTableClient::connect(self.checktable_addr, client::Options::default())
+                .unwrap();
         Box::new(move |t: &checktable::Token| {
-            checktable.lock().unwrap().validate_token(t)
+            checktable.validate_token(t.clone()).unwrap()
         })
     }
 
@@ -302,14 +374,38 @@ impl Blender {
 
     /// Obtain a `Getter` that allows querying a given (already maintained) reader node.
     pub fn get_getter(&self, node: prelude::NodeIndex) -> Option<Getter> {
-        self.find_getter_for(node)
-            .and_then(|r| Getter::new(r, &self.readers, &self.ingredients))
+        self.find_getter_for(node).and_then(|r| {
+            let sharded = !self.ingredients[r].sharded_by().is_none();
+            Getter::new(r, sharded, &self.readers, &self.ingredients)
+        })
     }
 
-    /// Obtain a mutator that can be used to perform writes and deletes from the given base node.
+    /// Obtain a `RemoteGetterBuilder` that can be sent to a client and then used to query a given
+    /// (already maintained) reader node.
+    pub fn get_remote_getter_builder(
+        &self,
+        node: prelude::NodeIndex,
+    ) -> Option<RemoteGetterBuilder> {
+        self.find_getter_for(node).map(|r| {
+            let domain = self.ingredients[r].domain();
+            let shards = (0..self.domains[&domain].shards())
+                .map(|i| self.remote_readers.get(&(domain, i)).unwrap().clone())
+                .collect();
+
+            RemoteGetterBuilder { node: r, shards }
+        })
+    }
+
+    /// Convience method that obtains a MutatorBuilder and then calls build() on it.
     pub fn get_mutator(&self, base: prelude::NodeIndex) -> Mutator {
+        self.get_mutator_builder(base)
+            .build(SocketAddr::new(self.listen_addr, 0))
+    }
+
+    /// Obtain a MutatorBuild that can be used to construct a Mutator to perform writes and deletes
+    /// from the given base node.
+    pub fn get_mutator_builder(&self, base: prelude::NodeIndex) -> MutatorBuilder {
         let node = &self.ingredients[base];
-        let tx = self.domains[&node.domain()].get_input_handle();
 
         trace!(self.log, "creating mutator"; "for" => base.index());
 
@@ -327,25 +423,27 @@ impl Blender {
             is_primary = true;
         }
 
-        let reply_chan = mpsc::channel();
-        let reply_chan = (
-            channel::TransactionReplySender::from_local(reply_chan.0),
-            reply_chan.1,
-        );
+
+        let txs = (0..self.domains[&node.domain()].shards())
+            .map(|i| {
+                self.channel_coordinator
+                    .get_addr(&(node.domain(), i))
+                    .unwrap()
+            })
+            .collect();
 
         let num_fields = node.fields().len();
         let base_operator = node.get_base()
             .expect("asked to get mutator for non-base node");
-        Mutator {
-            tx: tx,
+        MutatorBuilder {
+            txs,
             addr: (*node.local_addr()).into(),
             key: key,
             key_is_primary: is_primary,
-            tx_reply_channel: reply_chan,
             transactional: self.ingredients[base].is_transactional(),
             dropped: base_operator.get_dropped(),
-            tracer: None,
             expected_columns: num_fields - base_operator.get_dropped().len(),
+            is_local: true,
         }
     }
 
@@ -622,9 +720,8 @@ impl<'a> Migration<'a> {
         let token_generator = checktable::TokenGenerator::new(coarse_parents, granular_parents);
         self.mainline
             .checktable
-            .lock()
-            .unwrap()
-            .track(&token_generator);
+            .track(token_generator.clone())
+            .unwrap();
 
         self.mainline.ingredients[ri].with_reader_mut(|r| {
             r.set_token_generator(token_generator);
@@ -877,9 +974,15 @@ impl<'a> Migration<'a> {
             domain_nodes,
         );
         let (start_ts, end_ts, prevs) =
-            mainline.checktable.lock().unwrap().perform_migration(&deps);
+            mainline.checktable.perform_migration(deps.clone()).unwrap();
 
         info!(log, "migration claimed timestamp range"; "start" => start_ts, "end" => end_ts);
+
+        // take snapshow of workers that are currently around; for type and lifetime reasons, we
+        // have to copy the HashMap here, it seems.
+        let mut workers = mainline.workers.clone();
+        let placer_workers = workers.clone(); // XXX unnecessary clone
+        let mut placer = placement::RoundRobinPlacer::new(&placer_workers);
 
         // Boot up new domains (they'll ignore all updates for now)
         debug!(log, "booting new domains");
@@ -890,18 +993,21 @@ impl<'a> Migration<'a> {
             }
 
             let nodes = uninformed_domain_nodes.remove(&domain).unwrap();
-            let mut d =
-                domain::DomainHandle::new(domain, mainline.ingredients[nodes[0].0].sharded_by());
-            d.boot(
+            let d = domain::DomainHandle::new(
+                domain,
+                mainline.ingredients[nodes[0].0].sharded_by(),
                 &log,
                 &mut mainline.ingredients,
-                &mainline.domain_config,
                 &mainline.readers,
+                &mainline.domain_config,
                 nodes,
                 &mainline.persistence,
-                &mainline.checktable,
+                &mainline.listen_addr,
+                &mainline.checktable_addr,
                 &mainline.channel_coordinator,
                 &mainline.debug_channel,
+                &mut workers,
+                &mut placer,
                 start_ts,
             );
             mainline.domains.insert(domain, d);
@@ -956,9 +1062,8 @@ impl<'a> Migration<'a> {
         // request timestamps until after the migration in finished.
         mainline
             .checktable
-            .lock()
-            .unwrap()
-            .add_replay_paths(&mut mainline.materializations.domains_on_path);
+            .add_replay_paths(mainline.materializations.domains_on_path.clone())
+            .unwrap();
 
         migrate::transactions::finalize(deps, &log, &mut mainline.domains, end_ts);
 
@@ -968,7 +1073,6 @@ impl<'a> Migration<'a> {
 
 impl Drop for Blender {
     fn drop(&mut self) {
-        self.channel_coordinator.reset();
         for (_, d) in &mut self.domains {
             // don't unwrap, because given domain may already have terminated
             drop(d.send(box payload::Packet::Quit));

@@ -8,16 +8,20 @@ use std::fs;
 use std::fs::{File, OpenOptions};
 use std::io::Write;
 use std::path::PathBuf;
-use std::sync::{Arc, Mutex};
 use std::time;
+use std::collections::HashMap;
+use std::net::SocketAddr;
+use std::rc::Rc;
 
 use flow::debug::DebugEventType;
 use flow::domain;
 use flow::prelude::*;
 use checktable;
 
+use channel::TcpSender;
+
 /// Indicates to what degree updates should be persisted.
-#[derive(Clone)]
+#[derive(Clone, Debug, Serialize, Deserialize)]
 pub enum DurabilityMode {
     /// Don't do any durability
     MemoryOnly,
@@ -28,7 +32,7 @@ pub enum DurabilityMode {
 }
 
 /// Parameters to control the operation of GroupCommitQueue.
-#[derive(Clone)]
+#[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct Parameters {
     /// Number of elements to buffer before flushing.
     pub queue_capacity: usize,
@@ -82,9 +86,7 @@ pub struct GroupCommitQueueSet {
     /// Name of, and handle to the files that packets should be persisted to.
     files: Map<(PathBuf, BufWriter<File, WhenFull>)>,
 
-    /// Passed to the checktable to learn which packets committed. Stored here to avoid an
-    /// allocation on the critical path.
-    commit_decisions: Vec<bool>,
+    transaction_reply_txs: HashMap<SocketAddr, TcpSender<Result<i64, ()>>>,
 
     domain_index: domain::Index,
     domain_shard: usize,
@@ -92,7 +94,7 @@ pub struct GroupCommitQueueSet {
     capacity: usize,
     durability_mode: DurabilityMode,
 
-    checktable: Arc<Mutex<checktable::CheckTable>>,
+    checktable: Rc<checktable::CheckTableClient>,
 }
 
 impl GroupCommitQueueSet {
@@ -101,13 +103,12 @@ impl GroupCommitQueueSet {
         domain_index: domain::Index,
         domain_shard: usize,
         params: &Parameters,
-        checktable: Arc<Mutex<checktable::CheckTable>>,
+        checktable: Rc<checktable::CheckTableClient>,
     ) -> Self {
         assert!(params.queue_capacity > 0);
 
         Self {
             pending_packets: Map::default(),
-            commit_decisions: Vec::with_capacity(params.queue_capacity),
             wait_start: Map::default(),
             files: Map::default(),
 
@@ -116,6 +117,7 @@ impl GroupCommitQueueSet {
             timeout: params.flush_timeout,
             capacity: params.queue_capacity,
             durability_mode: params.mode.clone(),
+            transaction_reply_txs: HashMap::new(),
             checktable,
         }
     }
@@ -153,6 +155,17 @@ impl GroupCommitQueueSet {
                 Some(link.dst)
             }
             _ => None,
+        }
+    }
+
+    /// Returns whether the given packet should be persisted.
+    pub fn should_append(&self, p: &Box<Packet>, nodes: &DomainNodes) -> bool {
+        match Self::packet_destination(p) {
+            Some(n) => {
+                let node = &nodes[&n].borrow();
+                node.is_internal() && node.get_base().is_some()
+            }
+            None => false,
         }
     }
 
@@ -204,9 +217,9 @@ impl GroupCommitQueueSet {
         self.wait_start.remove(node);
         Self::merge_packets(
             &mut self.pending_packets[node],
-            &mut self.commit_decisions,
             nodes,
             &self.checktable,
+            &mut self.transaction_reply_txs,
         )
     }
 
@@ -314,69 +327,108 @@ impl GroupCommitQueueSet {
     /// if every packet in packets is not a `Packet::Transaction`, or if packets is empty.
     fn merge_transactional_packets(
         packets: &mut Vec<Box<Packet>>,
-        commit_decisions: &mut Vec<bool>,
         nodes: &DomainNodes,
-        checktable: &Arc<Mutex<checktable::CheckTable>>,
+        checktable: &Rc<checktable::CheckTableClient>,
+        transaction_reply_txs: &mut HashMap<SocketAddr, TcpSender<Result<i64, ()>>>,
     ) -> Option<Box<Packet>> {
+        let mut send_reply = |addr: SocketAddr, reply| {
+            transaction_reply_txs
+                .entry(addr.clone())
+                .or_insert_with(|| TcpSender::connect(&addr, None).unwrap())
+                .send(reply)
+                .unwrap()
+        };
+
         let base = if let box Packet::Transaction { ref link, .. } = packets[0] {
             nodes[&link.dst].borrow().global_addr()
         } else {
             unreachable!()
         };
 
-        let (ts, prevs) = {
-            let mut checktable = checktable.lock().unwrap();
-            match checktable.apply_batch(base, packets, commit_decisions) {
-                checktable::TransactionResult::Aborted => {
+        let reply = {
+            let transactions = packets
+                .iter()
+                .enumerate()
+                .map(|(i, p)| {
+                    let id = checktable::TransactionId(i as u64);
+                    if let box Packet::Transaction {
+                        ref data,
+                        ref state,
+                        ..
+                    } = *p
+                    {
+                        match *state {
+                            TransactionState::Pending(ref token, _) => {
+                                (id, data.clone(), Some(token.clone()))
+                            }
+                            TransactionState::WillCommit => (id, data.clone(), None),
+                            TransactionState::Committed(..) => unreachable!(),
+                        }
+                    } else {
+                        unreachable!();
+                    }
+                })
+                .collect();
+
+            let request = checktable::service::TimestampRequest { transactions, base };
+            match checktable.apply_batch(request).unwrap() {
+                None => {
                     for packet in packets.drain(..) {
                         if let (box Packet::Transaction {
-                            state: TransactionState::Pending(_, ref mut sender),
+                            state: TransactionState::Pending(_, ref mut addr),
                             ..
                         },) = (packet,)
                         {
-                            sender.send(Err(())).unwrap();
+                            send_reply(addr.clone(), Err(()));
                         } else {
                             unreachable!();
                         }
                     }
                     return None;
                 }
-                checktable::TransactionResult::Committed(ts, prevs) => (ts, prevs),
+                Some(mut reply) => {
+                    reply.committed_transactions.sort();
+                    reply
+                }
             }
         };
 
-        let committed_packets = packets
-            .drain(..)
-            .zip(commit_decisions.iter())
-            .map(|(mut packet, committed)| {
-                if let box Packet::Transaction {
-                    state: TransactionState::Pending(_, ref mut sender),
-                    ..
-                } = packet
+        let prevs = reply.prevs;
+        let timestamp = reply.timestamp;
+        let committed_transactions = reply.committed_transactions;
+
+        // TODO: persist list of committed transacions.
+
+        let committed_packets = packets.drain(..).enumerate().filter_map(|(i, mut packet)| {
+            if let box Packet::Transaction {
+                state: TransactionState::Pending(_, ref mut addr),
+                ..
+            } = packet
+            {
+                if committed_transactions
+                    .binary_search(&checktable::TransactionId(i as u64))
+                    .is_err()
                 {
-                    if *committed {
-                        sender.send(Ok(ts)).unwrap();
-                    } else {
-                        sender.send(Err(())).unwrap();
-                    }
+                    send_reply(addr.clone(), Err(()));
+                    return None;
                 }
-                (packet, committed)
-            })
-            .filter(|&(_, committed)| *committed)
-            .map(|(packet, _)| packet);
+                send_reply(addr.clone(), Ok(timestamp));
+            }
+            Some(packet)
+        });
 
         Self::merge_committed_packets(
             committed_packets,
-            Some(TransactionState::Committed(ts, base, prevs)),
+            Some(TransactionState::Committed(reply.timestamp, base, prevs)),
         )
     }
 
     /// Merge the contents of packets into a single packet, emptying packets in the process.
     fn merge_packets(
         packets: &mut Vec<Box<Packet>>,
-        commit_decisions: &mut Vec<bool>,
         nodes: &DomainNodes,
-        checktable: &Arc<Mutex<checktable::CheckTable>>,
+        checktable: &Rc<checktable::CheckTableClient>,
+        transaction_reply_txs: &mut HashMap<SocketAddr, TcpSender<Result<i64, ()>>>,
     ) -> Option<Box<Packet>> {
         if packets.is_empty() {
             return None;
@@ -385,7 +437,7 @@ impl GroupCommitQueueSet {
         match packets[0] {
             box Packet::Message { .. } => Self::merge_committed_packets(packets.drain(..), None),
             box Packet::Transaction { .. } => {
-                Self::merge_transactional_packets(packets, commit_decisions, nodes, checktable)
+                Self::merge_transactional_packets(packets, nodes, checktable, transaction_reply_txs)
             }
             _ => unreachable!(),
         }

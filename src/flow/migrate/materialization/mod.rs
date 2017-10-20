@@ -5,11 +5,9 @@
 //! domains, but does not perform that copying itself (that is the role of the `augmentation`
 //! module).
 
-use flow;
 use flow::keys;
 use flow::domain;
 use flow::prelude::*;
-use backlog::ReadHandle;
 use petgraph;
 use petgraph::graph::NodeIndex;
 use std::collections::{HashMap, HashSet};
@@ -52,12 +50,11 @@ pub struct Materializations {
     pub domains_on_path: HashMap<Tag, Vec<domain::Index>>,
 
     tag_generator: AtomicUsize,
-    readers: flow::Readers,
 }
 
 impl Materializations {
     /// Create a new set of materializations.
-    pub fn new(logger: &Logger, readers: &flow::Readers) -> Self {
+    pub fn new(logger: &Logger) -> Self {
         Materializations {
             log: logger.new(o!()),
 
@@ -70,7 +67,6 @@ impl Materializations {
             domains_on_path: Default::default(),
 
             tag_generator: AtomicUsize::default(),
-            readers: readers.clone(),
         }
     }
 
@@ -596,27 +592,6 @@ impl Materializations {
             let prep = n.with_reader(|r| {
                 r.key().map(|key| {
                     use flow::payload::InitialState;
-
-                    match n.sharded_by() {
-                        Sharding::None => {
-                            self.readers
-                                .lock()
-                                .unwrap()
-                                .insert(ni, ReadHandle::Singleton(None));
-                        }
-                        _ => {
-                            use arrayvec::ArrayVec;
-                            let mut shards = ArrayVec::new();
-                            for _ in 0..::SHARDS {
-                                shards.push(None);
-                            }
-                            self.readers
-                                .lock()
-                                .unwrap()
-                                .insert(ni, ReadHandle::Sharded(shards));
-                        }
-                    }
-
                     box Packet::PrepareState {
                         node: *n.local_addr(),
                         state: InitialState::Global {
