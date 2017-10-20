@@ -228,7 +228,8 @@ where
                         // or "" if there is no current group
                         let current = old.map(|r| Cow::Borrowed(&r[r.len() - 1]));
 
-                        // new is the result of applying all diffs for the group to the current value
+                        // new is the result of applying all diffs for the group to the current
+                        // value
                         let new = inner.apply(current.as_ref().map(|v| &**v), &mut diffs as &mut _);
                         (current, new)
                     };
