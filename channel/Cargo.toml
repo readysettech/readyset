@@ -4,7 +4,7 @@ version = "0.1.0"
 authors = ["The Distributary Developers"]
 
 [dependencies]
-bincode = "0.8.0"
+bincode = "0.9.0"
 bufstream = "0.1.3"
 byteorder = "1.0.0"
 mio = "0.6.9"

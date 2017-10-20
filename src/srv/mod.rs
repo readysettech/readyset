@@ -100,7 +100,7 @@ pub fn main(stream: TcpStream, s: Server) {
             },
             Err(e) => {
                 match *e {
-                    bincode::internal::ErrorKind::IoError(e) => {
+                    bincode::internal::ErrorKind::Io(e) => {
                         if e.kind() != io::ErrorKind::UnexpectedEof {
                             println!("client left: {:?}", e);
                         }
