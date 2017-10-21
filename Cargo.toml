@@ -64,10 +64,8 @@ features = ["rustc_json_body", "multipart"]
 optional = true
 
 [dependencies.timekeeper]
-version = "0.2.4"
+version = "0.3.0"
 default-features = false
-# for Mac OS X build
-# git = "https://github.com/ms705/timekeeper"
 
 [dev-dependencies]
 backtrace = { version = "0.3.2", features = ["serialize-serde"] }
