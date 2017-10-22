@@ -20,10 +20,6 @@ use futures::{Future, Stream};
 use hyper::Client;
 use mio::net::TcpListener;
 
-use std::io::{BufRead, BufReader};
-use std::fs::File;
-use std::path::PathBuf;
-
 use std::time;
 use std::fmt;
 

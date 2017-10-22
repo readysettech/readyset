@@ -64,7 +64,6 @@ impl Default for Parameters {
             flush_timeout: time::Duration::from_millis(1),
             mode: DurabilityMode::MemoryOnly,
             log_prefix: None,
-
         }
     }
 }
@@ -306,24 +305,34 @@ impl GroupCommitQueueSet {
                     let records: Vec<LogEntry> = serde_json::from_str(&line).unwrap();
                     records
                 })
-                .map(|entry| {
+                .enumerate()
+                .map(|(i, entry)| {
+                    let link = Link::new(*local_addr, *local_addr);
+                    let data = entry.records.into_owned();
                     box match entry.packet_type {
                         PacketType::Message => Packet::Message {
-                            data: entry.records.into_owned(),
-                            link: Link::new(*local_addr, *local_addr),
+                            link,
+                            data,
                             tracer: None,
                         },
                         PacketType::Transaction => {
-                            let (ts, prev) = self.checktable
-                                .lock()
-                                .unwrap()
-                                .apply_unconditional(global_addr, &entry.records);
+                            let id = checktable::TransactionId(i as u64);
+                            let transactions = vec![(id, data.clone(), None)];
+                            let request = checktable::service::TimestampRequest {
+                                transactions,
+                                base: global_addr,
+                            };
 
+                            let reply = self.checktable.apply_batch(request).unwrap().unwrap();
                             Packet::Transaction {
-                                data: entry.records.into_owned(),
-                                link: Link::new(*local_addr, *local_addr),
-                                state: TransactionState::Committed(ts, global_addr, prev),
+                                link,
+                                data,
                                 tracer: None,
+                                state: TransactionState::Committed(
+                                    reply.timestamp,
+                                    global_addr,
+                                    reply.prevs,
+                                ),
                             }
                         }
                     }

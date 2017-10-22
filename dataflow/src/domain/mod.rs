@@ -1583,8 +1583,6 @@ impl Domain {
             .for_each(|packet| self.handle(packet));
 
         self.control_reply_tx
-            .as_ref()
-            .unwrap()
             .send(ControlReplyPacket::ack())
             .unwrap();
     }
