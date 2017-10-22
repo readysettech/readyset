@@ -5,7 +5,7 @@ use serde_json;
 
 use std::fs;
 use std::fs::{File, OpenOptions};
-use std::io::{BufRead, BufReader, Write};
+use std::io::{BufRead, BufReader, ErrorKind, Write};
 use std::path::PathBuf;
 use std::time;
 use std::collections::HashMap;
@@ -121,11 +121,12 @@ pub fn retrieve_recovery_packets(
         let local_addr = node.local_addr();
         let global_addr = node.global_addr();
         let path = params.log_path(&local_addr, domain_index, domain_shard);
-        if !path.exists() {
-            continue;
-        }
+        let file = match File::open(&path) {
+            Ok(f) => f,
+            Err(ref e) if e.kind() == ErrorKind::NotFound => continue,
+            Err(e) => panic!("Could not open log file {:?}: {}", path, e),
+        };
 
-        let file = File::open(path).unwrap();
         BufReader::new(file)
             .lines()
             .flat_map(|line| {
@@ -213,7 +214,8 @@ impl GroupCommitQueueSet {
     }
 
     fn get_or_create_file(&self, node: &LocalNodeIndex) -> (PathBuf, BufWriter<File, WhenFull>) {
-        let path = self.params.log_path(node, self.domain_index, self.domain_shard);
+        let path = self.params
+            .log_path(node, self.domain_index, self.domain_shard);
         let file = OpenOptions::new()
             .append(true)
             .create(true)
