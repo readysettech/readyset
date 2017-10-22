@@ -5,7 +5,6 @@ use serde_json;
 
 use std::fs;
 use std::fs::{File, OpenOptions};
-use std::borrow::Cow;
 use std::io::{BufRead, BufReader, Write};
 use std::path::PathBuf;
 use std::time;
@@ -41,7 +40,7 @@ pub struct Parameters {
     /// Whether the output files should be deleted when the GroupCommitQueue is dropped.
     pub mode: DurabilityMode,
     /// Filename prefix for persistent log entries.
-    pub log_prefix: Option<String>,
+    pub log_prefix: String,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
@@ -56,7 +55,7 @@ impl Default for Parameters {
             queue_capacity: 256,
             flush_timeout: time::Duration::from_millis(1),
             mode: DurabilityMode::MemoryOnly,
-            log_prefix: None,
+            log_prefix: String::from("soup"),
         }
     }
 }
@@ -85,9 +84,89 @@ impl Parameters {
             queue_capacity,
             flush_timeout,
             mode,
-            log_prefix,
+            log_prefix: log_prefix.unwrap_or(String::from("soup")),
         }
     }
+
+    /// The path that would be used for the given domain/shard pair's logs.
+    pub fn log_path(
+        &self,
+        node: &LocalNodeIndex,
+        domain_index: domain::Index,
+        domain_shard: usize,
+    ) -> PathBuf {
+        let filename = format!(
+            "{}-log-{}_{}-{}.json",
+            self.log_prefix,
+            domain_index.index(),
+            domain_shard,
+            node.id()
+        );
+
+        PathBuf::from(&filename)
+    }
+}
+
+/// Retrieves a vector of packets from the persistent log.
+pub fn retrieve_recovery_packets(
+    nodes: &DomainNodes,
+    domain_index: domain::Index,
+    domain_shard: usize,
+    params: &Parameters,
+    checktable: Rc<checktable::CheckTableClient>,
+) -> Vec<Box<Packet>> {
+    let mut packets = vec![];
+    for (_index, node) in nodes.iter() {
+        let node = node.borrow();
+        let local_addr = node.local_addr();
+        let global_addr = node.global_addr();
+        let path = params.log_path(&local_addr, domain_index, domain_shard);
+        if !path.exists() {
+            continue;
+        }
+
+        let file = File::open(path).unwrap();
+        BufReader::new(file)
+            .lines()
+            .flat_map(|line| {
+                let line = line.unwrap();
+                let entries: Vec<Records> = serde_json::from_str(&line).unwrap();
+                entries
+            })
+            .enumerate()
+            .map(|(i, data)| {
+                let link = Link::new(*local_addr, *local_addr);
+                if node.is_transactional() {
+                    let id = checktable::TransactionId(i as u64);
+                    let transactions = vec![(id, data.clone(), None)];
+                    let request = checktable::service::TimestampRequest {
+                        transactions,
+                        base: global_addr,
+                    };
+
+                    let reply = checktable.apply_batch(request).unwrap().unwrap();
+                    Packet::Transaction {
+                        link,
+                        data,
+                        tracer: None,
+                        state: TransactionState::Committed(
+                            reply.timestamp,
+                            global_addr,
+                            reply.prevs,
+                        ),
+                    }
+                } else {
+                    Packet::Message {
+                        link,
+                        data,
+                        tracer: None,
+                    }
+                }
+            })
+            .for_each(|packet| packets.push(box packet));
+    }
+
+    packets
 }
 
 pub struct GroupCommitQueueSet {
@@ -105,12 +184,9 @@ pub struct GroupCommitQueueSet {
 
     domain_index: domain::Index,
     domain_shard: usize,
-    timeout: time::Duration,
-    capacity: usize,
-    durability_mode: DurabilityMode,
 
+    params: Parameters,
     checktable: Rc<checktable::CheckTableClient>,
-    log_prefix: String,
 }
 
 impl GroupCommitQueueSet {
@@ -130,37 +206,24 @@ impl GroupCommitQueueSet {
 
             domain_index,
             domain_shard,
-            timeout: params.flush_timeout,
-            capacity: params.queue_capacity,
-            durability_mode: params.mode.clone(),
+            params: params.clone(),
             transaction_reply_txs: HashMap::new(),
             checktable,
-            log_prefix: params.log_prefix.clone().unwrap_or(String::from("soup")),
         }
     }
 
-    /// The path that would be used for the given domain/shard pair's logs.
-    pub fn log_path(&self, node: &LocalNodeIndex) -> PathBuf {
-        let filename = format!(
-            "{}-log-{}_{}-{}.json",
-            self.log_prefix,
-            self.domain_index.index(),
-            self.domain_shard,
-            node.id()
-        );
-
-        PathBuf::from(&filename)
-    }
-
     fn get_or_create_file(&self, node: &LocalNodeIndex) -> (PathBuf, BufWriter<File, WhenFull>) {
-        let path = self.log_path(node);
+        let path = self.params.log_path(node, self.domain_index, self.domain_shard);
         let file = OpenOptions::new()
             .append(true)
             .create(true)
             .open(&path)
             .unwrap();
 
-        (path, BufWriter::with_capacity(self.capacity * 1024, file))
+        (
+            path,
+            BufWriter::with_capacity(self.params.queue_capacity * 1024, file),
+        )
     }
 
     /// Returns None for packet types not relevant to persistence, and the node the packet was
@@ -189,7 +252,7 @@ impl GroupCommitQueueSet {
     pub fn flush_if_necessary(&mut self, nodes: &DomainNodes) -> Option<Box<Packet>> {
         let mut needs_flush = None;
         for (node, wait_start) in self.wait_start.iter() {
-            if wait_start.elapsed() >= self.timeout {
+            if wait_start.elapsed() >= self.params.flush_timeout {
                 needs_flush = Some(node);
                 break;
             }
@@ -204,7 +267,7 @@ impl GroupCommitQueueSet {
         node: &LocalNodeIndex,
         nodes: &DomainNodes,
     ) -> Option<Box<Packet>> {
-        match self.durability_mode {
+        match self.params.mode {
             DurabilityMode::DeleteOnExit | DurabilityMode::Permanent => {
                 if !self.files.contains_key(node) {
                     let file = self.get_or_create_file(node);
@@ -248,11 +311,11 @@ impl GroupCommitQueueSet {
         let node = Self::packet_destination(&p).unwrap();
         if !self.pending_packets.contains_key(&node) {
             self.pending_packets
-                .insert(node.clone(), Vec::with_capacity(self.capacity));
+                .insert(node.clone(), Vec::with_capacity(self.params.queue_capacity));
         }
 
         self.pending_packets[&node].push(p);
-        if self.pending_packets[&node].len() >= self.capacity {
+        if self.pending_packets[&node].len() >= self.params.queue_capacity {
             return self.flush_internal(&node, nodes);
         } else if !self.wait_start.contains_key(&node) {
             self.wait_start.insert(node, time::Instant::now());
@@ -265,67 +328,12 @@ impl GroupCommitQueueSet {
         self.wait_start
             .values()
             .map(|i| {
-                self.timeout
+                self.params
+                    .flush_timeout
                     .checked_sub(i.elapsed())
                     .unwrap_or(time::Duration::from_millis(0))
             })
             .min()
-    }
-
-    /// Retrieves a vector of packets from the persistent log.
-    pub fn retrieve_recovery_packets(&self, nodes: &DomainNodes) -> Vec<Box<Packet>> {
-        let mut packets = vec![];
-        for (_index, node) in nodes.iter() {
-            let node = node.borrow();
-            let local_addr = node.local_addr();
-            let global_addr = node.global_addr();
-            let path = self.log_path(&local_addr);
-            if !path.exists() {
-                continue;
-            }
-
-            let file = File::open(path).unwrap();
-            BufReader::new(file)
-                .lines()
-                .flat_map(|line| {
-                    let line = line.unwrap();
-                    let entries: Vec<Records> = serde_json::from_str(&line).unwrap();
-                    entries
-                })
-                .enumerate()
-                .map(|(i, data)| {
-                    let link = Link::new(*local_addr, *local_addr);
-                    if node.is_transactional() {
-                        let id = checktable::TransactionId(i as u64);
-                        let transactions = vec![(id, data.clone(), None)];
-                        let request = checktable::service::TimestampRequest {
-                            transactions,
-                            base: global_addr,
-                        };
-
-                        let reply = self.checktable.apply_batch(request).unwrap().unwrap();
-                        Packet::Transaction {
-                            link,
-                            data,
-                            tracer: None,
-                            state: TransactionState::Committed(
-                                reply.timestamp,
-                                global_addr,
-                                reply.prevs,
-                            ),
-                        }
-                    } else {
-                        Packet::Message {
-                            link,
-                            data,
-                            tracer: None,
-                        }
-                    }
-                })
-                .for_each(|packet| packets.push(box packet));
-        }
-
-        packets
     }
 
     fn merge_committed_packets<I>(
@@ -521,7 +529,7 @@ impl GroupCommitQueueSet {
 
 impl Drop for GroupCommitQueueSet {
     fn drop(&mut self) {
-        if let DurabilityMode::DeleteOnExit = self.durability_mode {
+        if let DurabilityMode::DeleteOnExit = self.params.mode {
             for &(ref filename, _) in self.files.values() {
                 fs::remove_file(filename).unwrap();
             }

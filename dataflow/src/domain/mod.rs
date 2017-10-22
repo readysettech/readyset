@@ -1570,18 +1570,15 @@ impl Domain {
     }
 
     fn handle_recovery(&mut self) {
-        let group_commit_queues = persistence::GroupCommitQueueSet::new(
+        let packets = persistence::retrieve_recovery_packets(
+            &self.nodes,
             self.index,
             self.shard.unwrap_or(0),
             &self.persistence_parameters,
             self.transaction_state.get_checktable().clone(),
         );
 
-        group_commit_queues
-            .retrieve_recovery_packets(&self.nodes)
-            .into_iter()
-            .for_each(|packet| self.handle(packet));
-
+        packets.into_iter().for_each(|packet| self.handle(packet));
         self.control_reply_tx
             .send(ControlReplyPacket::ack())
             .unwrap();
