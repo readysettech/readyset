@@ -5,6 +5,7 @@ use serde_json;
 
 use std::fs;
 use std::fs::{File, OpenOptions};
+use std::borrow::Cow;
 use std::io::{BufRead, BufReader, Write};
 use std::path::PathBuf;
 use std::time;
@@ -51,8 +52,8 @@ enum PacketType {
 
 /// The object that gets written to the physical recovery log.
 #[derive(Clone, Debug, Serialize, Deserialize)]
-struct LogEntry {
-    records: Records,
+struct LogEntry<'a> {
+    records: Cow<'a, Records>,
     packet_type: PacketType,
 }
 
@@ -63,6 +64,7 @@ impl Default for Parameters {
             flush_timeout: time::Duration::from_millis(1),
             mode: DurabilityMode::MemoryOnly,
             log_prefix: None,
+
         }
     }
 }
@@ -223,13 +225,11 @@ impl GroupCommitQueueSet {
                         .iter()
                         .map(|p| match **p {
                             Packet::Transaction { ref data, .. } => LogEntry {
-                                // TODO(ekmartin): remove .clone():
-                                records: data.clone(),
+                                records: Cow::Borrowed(data),
                                 packet_type: PacketType::Transaction,
                             },
                             Packet::Message { ref data, .. } => LogEntry {
-                                // TODO(ekmartin): remove .clone():
-                                records: data.clone(),
+                                records: Cow::Borrowed(data),
                                 packet_type: PacketType::Message,
                             },
                             _ => unreachable!(),
@@ -309,7 +309,7 @@ impl GroupCommitQueueSet {
                 .map(|entry| {
                     box match entry.packet_type {
                         PacketType::Message => Packet::Message {
-                            data: entry.records,
+                            data: entry.records.into_owned(),
                             link: Link::new(*local_addr, *local_addr),
                             tracer: None,
                         },
@@ -320,7 +320,7 @@ impl GroupCommitQueueSet {
                                 .apply_unconditional(global_addr, &entry.records);
 
                             Packet::Transaction {
-                                data: entry.records,
+                                data: entry.records.into_owned(),
                                 link: Link::new(*local_addr, *local_addr),
                                 state: TransactionState::Committed(ts, global_addr, prev),
                                 tracer: None,
