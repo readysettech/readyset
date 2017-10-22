@@ -50,13 +50,6 @@ enum PacketType {
     Transaction,
 }
 
-/// The object that gets written to the physical recovery log.
-#[derive(Clone, Debug, Serialize, Deserialize)]
-struct LogEntry<'a> {
-    records: Cow<'a, Records>,
-    packet_type: PacketType,
-}
-
 impl Default for Parameters {
     fn default() -> Self {
         Self {
@@ -220,21 +213,15 @@ impl GroupCommitQueueSet {
 
                 let mut file = &mut self.files[node].1;
                 {
-                    let entries_to_flush: Vec<_> = self.pending_packets[&node]
+                    let data_to_flush: Vec<_> = self.pending_packets[&node]
                         .iter()
                         .map(|p| match **p {
-                            Packet::Transaction { ref data, .. } => LogEntry {
-                                records: Cow::Borrowed(data),
-                                packet_type: PacketType::Transaction,
-                            },
-                            Packet::Message { ref data, .. } => LogEntry {
-                                records: Cow::Borrowed(data),
-                                packet_type: PacketType::Message,
-                            },
+                            Packet::Transaction { ref data, .. } |
+                            Packet::Message { ref data, .. } => data,
                             _ => unreachable!(),
                         })
                         .collect();
-                    serde_json::to_writer(&mut file, &entries_to_flush).unwrap();
+                    serde_json::to_writer(&mut file, &data_to_flush).unwrap();
                     // Separate log flushes with a newline so that the
                     // file can be easily parsed later on:
                     writeln!(&mut file, "").unwrap();
@@ -302,42 +289,40 @@ impl GroupCommitQueueSet {
                 .lines()
                 .flat_map(|line| {
                     let line = line.unwrap();
-                    let records: Vec<LogEntry> = serde_json::from_str(&line).unwrap();
-                    records
+                    let entries: Vec<Records> = serde_json::from_str(&line).unwrap();
+                    entries
                 })
                 .enumerate()
-                .map(|(i, entry)| {
+                .map(|(i, data)| {
                     let link = Link::new(*local_addr, *local_addr);
-                    let data = entry.records.into_owned();
-                    box match entry.packet_type {
-                        PacketType::Message => Packet::Message {
+                    if node.is_transactional() {
+                        let id = checktable::TransactionId(i as u64);
+                        let transactions = vec![(id, data.clone(), None)];
+                        let request = checktable::service::TimestampRequest {
+                            transactions,
+                            base: global_addr,
+                        };
+
+                        let reply = self.checktable.apply_batch(request).unwrap().unwrap();
+                        Packet::Transaction {
                             link,
                             data,
                             tracer: None,
-                        },
-                        PacketType::Transaction => {
-                            let id = checktable::TransactionId(i as u64);
-                            let transactions = vec![(id, data.clone(), None)];
-                            let request = checktable::service::TimestampRequest {
-                                transactions,
-                                base: global_addr,
-                            };
-
-                            let reply = self.checktable.apply_batch(request).unwrap().unwrap();
-                            Packet::Transaction {
-                                link,
-                                data,
-                                tracer: None,
-                                state: TransactionState::Committed(
-                                    reply.timestamp,
-                                    global_addr,
-                                    reply.prevs,
-                                ),
-                            }
+                            state: TransactionState::Committed(
+                                reply.timestamp,
+                                global_addr,
+                                reply.prevs,
+                            ),
+                        }
+                    } else {
+                        Packet::Message {
+                            link,
+                            data,
+                            tracer: None,
                         }
                     }
                 })
-                .for_each(|packet| packets.push(packet));
+                .for_each(|packet| packets.push(box packet));
         }
 
         packets
