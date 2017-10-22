@@ -1573,6 +1573,13 @@ impl Domain {
     }
 
     fn handle_recovery(&mut self) {
+        let group_commit_queues = persistence::GroupCommitQueueSet::new(
+            self.index,
+            self.shard.unwrap_or(0),
+            &self.persistence_parameters,
+            self.transaction_state.get_checktable().clone(),
+        );
+
         let indices = self.nodes
             .iter()
             .map(|(_index, node)| {
@@ -1582,13 +1589,7 @@ impl Domain {
             .collect::<Vec<_>>();
 
         for (local_addr, global_addr) in indices {
-            let path = persistence::log_path(
-                &local_addr,
-                self.index,
-                self.shard.unwrap_or(0),
-                self.persistence_parameters.log_prefix.clone(),
-            );
-
+            let path = group_commit_queues.log_path(&local_addr);
             if !path.exists() {
                 debug!(
                     self.log,

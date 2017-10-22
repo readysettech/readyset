@@ -96,25 +96,6 @@ impl Parameters {
     }
 }
 
-/// Returns the path that would be used for the given domain/shard pair's logs.
-pub fn log_path(
-    node: &LocalNodeIndex,
-    domain_index: domain::Index,
-    domain_shard: usize,
-    log_prefix: Option<String>,
-) -> PathBuf {
-    let prefix = log_prefix.unwrap_or(String::from("soup"));
-    let filename = format!(
-        "{}-log-{}_{}-{}.json",
-        prefix,
-        domain_index.index(),
-        domain_shard,
-        node.id()
-    );
-
-    PathBuf::from(&filename)
-}
-
 pub struct GroupCommitQueueSet {
     /// Packets that are queued to be persisted.
     pending_packets: Map<Vec<Box<Packet>>>,
@@ -135,7 +116,7 @@ pub struct GroupCommitQueueSet {
     durability_mode: DurabilityMode,
 
     checktable: Rc<checktable::CheckTableClient>,
-    log_prefix: Option<String>,
+    log_prefix: String,
 }
 
 impl GroupCommitQueueSet {
@@ -160,17 +141,25 @@ impl GroupCommitQueueSet {
             durability_mode: params.mode.clone(),
             transaction_reply_txs: HashMap::new(),
             checktable,
-            log_prefix: params.log_prefix.clone(),
+            log_prefix: params.log_prefix.clone().unwrap_or(String::from("soup")),
         }
     }
 
-    fn get_or_create_file(&self, node: &LocalNodeIndex) -> (PathBuf, BufWriter<File, WhenFull>) {
-        let path = log_path(
-            node,
-            self.domain_index,
+    /// The path that would be used for the given domain/shard pair's logs.
+    pub fn log_path(&self, node: &LocalNodeIndex) -> PathBuf {
+        let filename = format!(
+            "{}-log-{}_{}-{}.json",
+            self.log_prefix,
+            self.domain_index.index(),
             self.domain_shard,
-            self.log_prefix.clone(),
+            node.id()
         );
+
+        PathBuf::from(&filename)
+    }
+
+    fn get_or_create_file(&self, node: &LocalNodeIndex) -> (PathBuf, BufWriter<File, WhenFull>) {
+        let path = self.log_path(node);
         let file = OpenOptions::new()
             .append(true)
             .create(true)
