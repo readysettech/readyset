@@ -1,4 +1,4 @@
-soup-log-*.json
+*-log-*.json
 *.png
 *.log
 plotting/*.png
