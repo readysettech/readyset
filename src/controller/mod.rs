@@ -19,11 +19,6 @@ use std::{fmt, io, thread, time};
 use futures::{Future, Stream};
 use hyper::Client;
 use mio::net::TcpListener;
-
-use std::time;
-use std::fmt;
-
-use slog;
 use petgraph;
 use petgraph::visit::Bfs;
 use petgraph::graph::NodeIndex;
@@ -532,9 +527,13 @@ impl ControllerInner {
             .map(|&(_input, ref node)| node.domain())
             .collect::<Vec<_>>();
 
-        for index in indices {
+        for index in indices.clone() {
             let domain = self.domains.get_mut(&index).unwrap();
             domain.send(box payload::Packet::StartRecovery).unwrap();
+        }
+
+        for index in indices {
+            let domain = self.domains.get_mut(&index).unwrap();
             domain.wait_for_ack().unwrap();
         }
     }
