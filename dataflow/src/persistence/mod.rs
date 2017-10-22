@@ -5,7 +5,7 @@ use serde_json;
 
 use std::fs;
 use std::fs::{File, OpenOptions};
-use std::io::Write;
+use std::io::{BufRead, BufReader, Write};
 use std::path::PathBuf;
 use std::time;
 use std::collections::HashMap;
@@ -44,16 +44,16 @@ pub struct Parameters {
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
-pub enum PacketType {
+enum PacketType {
     Message,
     Transaction,
 }
 
 /// The object that gets written to the physical recovery log.
 #[derive(Clone, Debug, Serialize, Deserialize)]
-pub struct LogEntry {
-    pub records: Records,
-    pub packet_type: PacketType,
+struct LogEntry {
+    records: Records,
+    packet_type: PacketType,
 }
 
 impl Default for Parameters {
@@ -284,6 +284,54 @@ impl GroupCommitQueueSet {
                     .unwrap_or(time::Duration::from_millis(0))
             })
             .min()
+    }
+
+    /// Retrieves a vector of packets from the persistent log.
+    pub fn retrieve_recovery_packets(&self, nodes: &DomainNodes) -> Vec<Box<Packet>> {
+        let mut packets = vec![];
+        for (_index, node) in nodes.iter() {
+            let node = node.borrow();
+            let local_addr = node.local_addr();
+            let global_addr = node.global_addr();
+            let path = self.log_path(&local_addr);
+            if !path.exists() {
+                continue;
+            }
+
+            let file = File::open(path).unwrap();
+            BufReader::new(file)
+                .lines()
+                .flat_map(|line| {
+                    let line = line.unwrap();
+                    let records: Vec<LogEntry> = serde_json::from_str(&line).unwrap();
+                    records
+                })
+                .map(|entry| {
+                    box match entry.packet_type {
+                        PacketType::Message => Packet::Message {
+                            data: entry.records,
+                            link: Link::new(*local_addr, *local_addr),
+                            tracer: None,
+                        },
+                        PacketType::Transaction => {
+                            let (ts, prev) = self.checktable
+                                .lock()
+                                .unwrap()
+                                .apply_unconditional(global_addr, &entry.records);
+
+                            Packet::Transaction {
+                                data: entry.records,
+                                link: Link::new(*local_addr, *local_addr),
+                                state: TransactionState::Committed(ts, global_addr, prev),
+                                tracer: None,
+                            }
+                        }
+                    }
+                })
+                .for_each(|packet| packets.push(packet));
+        }
+
+        packets
     }
 
     fn merge_committed_packets<I>(

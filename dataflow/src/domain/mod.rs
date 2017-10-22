@@ -3,8 +3,6 @@ use std::collections::{HashMap, HashSet, VecDeque};
 use std::sync::{Arc, Mutex};
 use std::thread;
 use std::time;
-use std::io::{BufRead, BufReader};
-use std::fs::File;
 use std::collections::hash_map::Entry;
 use std::rc::Rc;
 
@@ -20,7 +18,6 @@ use transactions;
 use persistence;
 use debug;
 use checktable;
-use serde_json;
 use slog::Logger;
 use timekeeper::{RealTime, SimpleTracker, ThreadTime, Timer, TimerSet};
 use tarpc::sync::client::{self, ClientExt};
@@ -1580,62 +1577,10 @@ impl Domain {
             self.transaction_state.get_checktable().clone(),
         );
 
-        let indices = self.nodes
-            .iter()
-            .map(|(_index, node)| {
-                let node = node.borrow();
-                (node.local_addr().clone(), node.global_addr().clone())
-            })
-            .collect::<Vec<_>>();
-
-        for (local_addr, global_addr) in indices {
-            let path = group_commit_queues.log_path(&local_addr);
-            if !path.exists() {
-                debug!(
-                    self.log,
-                    "Could not find file while recovering";
-                    "path" => format!("{:?}", path)
-                );
-
-                continue;
-            }
-
-            // TODO(ekmartin): move to GroupCommitQueue
-            debug!(self.log, "Recovering from file"; "path" => format!("{:?}", path));
-            let file = File::open(path).unwrap();
-            BufReader::new(file)
-                .lines()
-                .flat_map(|line| {
-                    let line = line.unwrap();
-                    let records: Vec<persistence::LogEntry> = serde_json::from_str(&line).unwrap();
-                    records
-                })
-                .for_each(|entry| {
-                    let packet = match entry.packet_type {
-                        persistence::PacketType::Message => box Packet::Message {
-                            data: entry.records,
-                            link: Link::new(local_addr, local_addr),
-                            tracer: None,
-                        },
-                        persistence::PacketType::Transaction => {
-                            let (ts, prev) = self.transaction_state
-                                .get_checktable()
-                                .lock()
-                                .unwrap()
-                                .apply_unconditional(global_addr, &entry.records);
-
-                            box Packet::Transaction {
-                                data: entry.records,
-                                link: Link::new(local_addr, local_addr),
-                                state: TransactionState::Committed(ts, global_addr, prev),
-                                tracer: None,
-                            }
-                        }
-                    };
-
-                    self.handle(packet);
-                });
-        }
+        group_commit_queues
+            .retrieve_recovery_packets(&self.nodes)
+            .into_iter()
+            .for_each(|packet| self.handle(packet));
 
         self.control_reply_tx
             .as_ref()
