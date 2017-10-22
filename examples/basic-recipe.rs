@@ -26,6 +26,7 @@ fn main() {
         distributary::DurabilityMode::Permanent,
         512,
         Duration::from_millis(1),
+        Some(String::from("example")),
     );
 
     // set up Soup via recipe

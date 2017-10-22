@@ -39,6 +39,21 @@ pub struct Parameters {
     pub flush_timeout: time::Duration,
     /// Whether the output files should be deleted when the GroupCommitQueue is dropped.
     pub mode: DurabilityMode,
+    /// Filename prefix for persistent log entries.
+    pub log_prefix: Option<String>,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub enum PacketType {
+    Message,
+    Transaction,
+}
+
+/// The object that gets written to the physical recovery log.
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct LogEntry {
+    pub records: Records,
+    pub packet_type: PacketType,
 }
 
 impl Default for Parameters {
@@ -47,6 +62,7 @@ impl Default for Parameters {
             queue_capacity: 256,
             flush_timeout: time::Duration::from_millis(1),
             mode: DurabilityMode::MemoryOnly,
+            log_prefix: None,
         }
     }
 }
@@ -65,11 +81,17 @@ impl Parameters {
     /// `queue_capacity` indicates the number of packets that should be buffered until
     /// flushing, and `flush_timeout` indicates the length of time to wait before flushing
     /// anyway.
-    pub fn new(mode: DurabilityMode, queue_capacity: usize, flush_timeout: time::Duration) -> Self {
+    pub fn new(
+        mode: DurabilityMode,
+        queue_capacity: usize,
+        flush_timeout: time::Duration,
+        log_prefix: Option<String>,
+    ) -> Self {
         Self {
             queue_capacity,
             flush_timeout,
             mode,
+            log_prefix,
         }
     }
 }
@@ -79,9 +101,12 @@ pub fn log_path(
     node: &LocalNodeIndex,
     domain_index: domain::Index,
     domain_shard: usize,
+    log_prefix: Option<String>,
 ) -> PathBuf {
+    let prefix = log_prefix.unwrap_or(String::from("soup"));
     let filename = format!(
-        "soup-log-{}_{}-{}.json",
+        "{}-log-{}_{}-{}.json",
+        prefix,
         domain_index.index(),
         domain_shard,
         node.id()
@@ -110,6 +135,7 @@ pub struct GroupCommitQueueSet {
     durability_mode: DurabilityMode,
 
     checktable: Rc<checktable::CheckTableClient>,
+    log_prefix: Option<String>,
 }
 
 impl GroupCommitQueueSet {
@@ -134,11 +160,17 @@ impl GroupCommitQueueSet {
             durability_mode: params.mode.clone(),
             transaction_reply_txs: HashMap::new(),
             checktable,
+            log_prefix: params.log_prefix.clone(),
         }
     }
 
     fn get_or_create_file(&self, node: &LocalNodeIndex) -> (PathBuf, BufWriter<File, WhenFull>) {
-        let path = log_path(node, self.domain_index, self.domain_shard);
+        let path = log_path(
+            node,
+            self.domain_index,
+            self.domain_shard,
+            self.log_prefix.clone(),
+        );
         let file = OpenOptions::new()
             .append(true)
             .create(true)
@@ -198,15 +230,23 @@ impl GroupCommitQueueSet {
 
                 let mut file = &mut self.files[node].1;
                 {
-                    let data_to_flush: Vec<_> = self.pending_packets[&node]
+                    let entries_to_flush: Vec<_> = self.pending_packets[&node]
                         .iter()
                         .map(|p| match **p {
-                            Packet::Transaction { ref data, .. } |
-                            Packet::Message { ref data, .. } => data,
+                            Packet::Transaction { ref data, .. } => LogEntry {
+                                // TODO(ekmartin): remove .clone():
+                                records: data.clone(),
+                                packet_type: PacketType::Transaction,
+                            },
+                            Packet::Message { ref data, .. } => LogEntry {
+                                // TODO(ekmartin): remove .clone():
+                                records: data.clone(),
+                                packet_type: PacketType::Message,
+                            },
                             _ => unreachable!(),
                         })
                         .collect();
-                    serde_json::to_writer(&mut file, &data_to_flush).unwrap();
+                    serde_json::to_writer(&mut file, &entries_to_flush).unwrap();
                     // Separate log flushes with a newline so that the
                     // file can be easily parsed later on:
                     writeln!(&mut file, "").unwrap();

@@ -59,6 +59,7 @@ fn it_works_basic() {
         DurabilityMode::DeleteOnExit,
         128,
         time::Duration::from_millis(1),
+        Some(String::from("it_works_basic")),
     );
     g.with_persistence_options(pparams);
     let (a, b, c) = g.migrate(|mig| {
@@ -383,6 +384,7 @@ fn it_recovers_persisted_logs() {
             distributary::DurabilityMode::DeleteOnExit,
             128,
             time::Duration::from_millis(1),
+            Some(String::from("it_recovers_persisted_logs")),
         );
         g.with_persistence_options(pparams);
 
@@ -427,6 +429,59 @@ fn it_recovers_persisted_logs() {
         let result = getter.lookup(&i.into(), true).unwrap();
         assert_eq!(result.len(), 1);
         assert_eq!(result[0][0], price.into());
+    }
+}
+
+#[test]
+fn it_recovers_persisted_logs_w_transactions() {
+    let setup = || {
+        let mut g = distributary::Blender::new();
+        let pparams = distributary::PersistenceParameters::new(
+            distributary::DurabilityMode::DeleteOnExit,
+            128,
+            time::Duration::from_millis(1),
+            Some(String::from("it_recovers_persisted_logs_w_transactions")),
+        );
+        g.with_persistence_options(pparams);
+
+        let a = g.migrate(|mig| {
+            let a = mig.add_transactional_base("a", &["a", "b"], distributary::Base::default());
+            mig.maintain(a, 0);
+            a
+        });
+
+        (g, a)
+    };
+
+    let (g, a) = setup();
+    let mut mutator = g.get_mutator(a);
+
+
+    for i in 1..10 {
+        let b = i * 10;
+        mutator
+            .transactional_put(vec![i.into(), b.into()], distributary::Token::empty())
+            .unwrap();
+    }
+
+    // Let writes propagate:
+    sleep();
+
+    let (mut g, a) = setup();
+    let mut getter = g.get_getter(a).unwrap();
+
+    // Make sure that the new graph is empty:
+    assert_eq!(getter.transactional_lookup(&1.into()).unwrap().0.len(), 0);
+
+    // Recover and let the writes propagate:
+    g.recover();
+
+    for i in 1..10 {
+        let price = i * 10;
+        let (result, _token) = getter.transactional_lookup(&i.into()).unwrap();
+        assert_eq!(result.len(), 1);
+        assert_eq!(result[0][0], i.into());
+        assert_eq!(result[0][1], price.into());
     }
 }
 

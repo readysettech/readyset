@@ -1575,11 +1575,20 @@ impl Domain {
     fn handle_recovery(&mut self) {
         let indices = self.nodes
             .iter()
-            .map(|(index, _node)| index)
+            .map(|(_index, node)| {
+                let node = node.borrow();
+                (node.local_addr().clone(), node.global_addr().clone())
+            })
             .collect::<Vec<_>>();
 
-        for node_index in indices {
-            let path = persistence::log_path(&node_index, self.index, self.shard.unwrap_or(0));
+        for (local_addr, global_addr) in indices {
+            let path = persistence::log_path(
+                &local_addr,
+                self.index,
+                self.shard.unwrap_or(0),
+                self.persistence_parameters.log_prefix.clone(),
+            );
+
             if !path.exists() {
                 debug!(
                     self.log,
@@ -1590,20 +1599,37 @@ impl Domain {
                 continue;
             }
 
+            // TODO(ekmartin): move to GroupCommitQueue
             debug!(self.log, "Recovering from file"; "path" => format!("{:?}", path));
             let file = File::open(path).unwrap();
             BufReader::new(file)
                 .lines()
                 .flat_map(|line| {
                     let line = line.unwrap();
-                    let records: Vec<Records> = serde_json::from_str(&line).unwrap();
+                    let records: Vec<persistence::LogEntry> = serde_json::from_str(&line).unwrap();
                     records
                 })
-                .for_each(|records| {
-                    let packet = box Packet::Message {
-                        data: records,
-                        link: Link::new(node_index, node_index),
-                        tracer: None,
+                .for_each(|entry| {
+                    let packet = match entry.packet_type {
+                        persistence::PacketType::Message => box Packet::Message {
+                            data: entry.records,
+                            link: Link::new(local_addr, local_addr),
+                            tracer: None,
+                        },
+                        persistence::PacketType::Transaction => {
+                            let (ts, prev) = self.transaction_state
+                                .get_checktable()
+                                .lock()
+                                .unwrap()
+                                .apply_unconditional(global_addr, &entry.records);
+
+                            box Packet::Transaction {
+                                data: entry.records,
+                                link: Link::new(local_addr, local_addr),
+                                state: TransactionState::Committed(ts, global_addr, prev),
+                                tracer: None,
+                            }
+                        }
                     };
 
                     self.handle(packet);
