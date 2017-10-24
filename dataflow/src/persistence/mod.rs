@@ -129,11 +129,12 @@ pub fn retrieve_recovery_packets(
 
         BufReader::new(file)
             .lines()
-            .flat_map(|line| {
+            .filter_map(|line| {
                 let line = line.unwrap();
-                let entries: Vec<Records> = serde_json::from_str(&line).unwrap();
-                entries
+                let entries: Result<Vec<Records>, _> = serde_json::from_str(&line);
+                entries.ok()
             })
+            .flat_map(|r| r)
             .enumerate()
             .map(|(i, data)| {
                 let link = Link::new(*local_addr, *local_addr);
