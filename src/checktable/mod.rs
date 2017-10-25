@@ -15,6 +15,11 @@ use flow::prelude::*;
 use flow::payload::{EgressForBase, IngressFromBase};
 use flow::migrate::materialization::Tag as ReplayPath;
 
+pub mod service;
+pub use self::service::SyncClient as CheckTableClient;
+pub use self::service::TransactionId;
+
+
 #[derive(Clone, Debug, Eq, PartialEq, Hash, Serialize, Deserialize)]
 enum Conflict {
     /// This conflict should trigger an abort if the given base table has seen a write after the
@@ -83,7 +88,7 @@ impl Debug for Token {
     }
 }
 
-#[derive(Clone)]
+#[derive(Clone, Serialize, Deserialize)]
 pub struct TokenGenerator {
     conflicts: Vec<Conflict>,
 }
@@ -240,44 +245,25 @@ impl CheckTable {
     pub fn apply_batch(
         &mut self,
         base: NodeIndex,
-        packets: &mut Vec<Box<Packet>>,
-        decisions: &mut Vec<bool>,
-    ) -> TransactionResult {
-        decisions.clear();
-
+        transactions: &service::TransactionBatch,
+    ) -> (TransactionResult, Vec<service::TransactionId>) {
+        let mut committed = Vec::with_capacity(transactions.len());
         let mut result = TransactionResult::Aborted;
-        for packet in packets.iter() {
-            let (commit, rs) = if let box Packet::Transaction {
-                ref data,
-                ref state,
-                ..
-            } = *packet
-            {
-                match *state {
-                    TransactionState::Pending(ref token, _) => (self.validate_token(token), data),
-                    TransactionState::WillCommit => (true, data),
-                    TransactionState::Committed(..) => unreachable!(),
+        for &(id, ref rs, ref token) in transactions {
+            if token.is_none() || self.validate_token(token.as_ref().unwrap()) {
+                committed.push(id);
+                match result {
+                    TransactionResult::Committed(ts, _) => {
+                        self.update_granular_checktables(base.clone(), ts, rs);
+                    }
+                    TransactionResult::Aborted => {
+                        let (ts, prevs) = self.apply_unconditional(base, rs);
+                        result = TransactionResult::Committed(ts, prevs);
+                    }
                 }
-            } else {
-                unreachable!();
-            };
-
-            decisions.push(commit);
-            if !commit {
-                continue;
             }
-
-            match result {
-                TransactionResult::Committed(ts, _) => {
-                    self.update_granular_checktables(base.clone(), ts, rs);
-                }
-                TransactionResult::Aborted => {
-                    let (ts, prevs) = self.apply_unconditional(base, rs);
-                    result = TransactionResult::Committed(ts, prevs);
-                }
-            };
         }
-        result
+        (result, committed)
     }
 
     fn update_granular_checktables(&mut self, base: NodeIndex, ts: i64, rs: &Records) {

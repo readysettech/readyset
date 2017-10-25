@@ -1,10 +1,15 @@
 use petgraph::graph::NodeIndex;
 use std::collections::{HashMap, HashSet, VecDeque};
-use std::sync::{mpsc, Arc, Mutex};
+use std::sync::{Arc, Mutex};
 use std::thread;
 use std::time;
 use std::collections::hash_map::Entry;
-use channel::{ChannelSender, TraceSender};
+use std::rc::Rc;
+
+use std::net::SocketAddr;
+
+use channel::TcpSender;
+use channel::poll::{KeepPolling, PollEvent, PollingLoop, StopPolling};
 use flow::prelude::*;
 use flow::payload::{ControlReplyPacket, ReplayPieceContext, ReplayTransactionState,
                     TransactionState};
@@ -16,8 +21,9 @@ use flow;
 use checktable;
 use slog::Logger;
 use timekeeper::{RealTime, SimpleTracker, ThreadTime, Timer, TimerSet};
+use tarpc::sync::client::{self, ClientExt};
 
-#[derive(Clone)]
+#[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct Config {
     pub concurrent_replays: usize,
     pub replay_batch_timeout: time::Duration,
@@ -83,7 +89,7 @@ impl PartialEq for DomainMode {
 enum TriggerEndpoint {
     None,
     Start(Vec<usize>),
-    End(Vec<ChannelSender<Box<Packet>>>),
+    End(Vec<TcpSender<Box<Packet>>>),
     Local(Vec<usize>),
 }
 
@@ -122,6 +128,129 @@ struct Waiting {
     redos: HashMap<Hole, HashSet<Redo>>,
 }
 
+/// Struct sent to a worker to start a domain.
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct DomainBuilder {
+    /// The domain's index.
+    pub index: Index,
+    /// The shard ID represented by this `DomainBuilder`.
+    pub shard: usize,
+    /// The number of shards in the domain.
+    pub nshards: usize,
+    /// The nodes in the domain.
+    pub nodes: DomainNodes,
+    /// The domain's persistence setting.
+    pub persistence_parameters: persistence::Parameters,
+    /// The starting timestamp.
+    pub ts: i64,
+    /// The socket address at which this domain receives control messages.
+    pub control_addr: SocketAddr,
+    /// The socket address over which this domain communicates with the checktable service.
+    pub checktable_addr: SocketAddr,
+    /// The socket address for debug interactions with this domain.
+    pub debug_addr: Option<SocketAddr>,
+    /// Configuration parameters for the domain.
+    pub config: Config,
+}
+
+impl DomainBuilder {
+    /// Starts up the domain represented by this `DomainBuilder`.
+    pub fn boot(
+        self,
+        log: Logger,
+        readers: flow::Readers,
+        channel_coordinator: Arc<ChannelCoordinator>,
+        listen_addr: SocketAddr,
+    ) -> (thread::JoinHandle<()>, SocketAddr) {
+        // initially, all nodes are not ready
+        let not_ready = self.nodes
+            .values()
+            .map(|n| *n.borrow().local_addr())
+            .collect();
+
+        let shard = if self.nshards == 1 {
+            None
+        } else {
+            Some(self.shard)
+        };
+
+        let debug_tx = self.debug_addr
+            .as_ref()
+            .map(|addr| TcpSender::connect(addr, None).unwrap());
+        let mut control_reply_tx = TcpSender::connect(&self.control_addr, None).unwrap();
+
+        // Create polling loop and tell the controller what port we are listening on.
+        let polling_loop = PollingLoop::<Packet>::new(listen_addr);
+        // We extract this here because `listen_addr` may not specify a port and rely on
+        // auto-assignment
+        let addr = polling_loop.get_listener_addr().unwrap();
+        control_reply_tx
+            .send(ControlReplyPacket::Booted(shard.unwrap_or(0), addr.clone()))
+            .unwrap();
+
+        info!(log, "booting domain"; "nodes" => self.nodes.iter().count());
+        let name = match shard {
+            Some(shard) => format!("domain{}.{}", self.index.0, shard),
+            None => format!("domain{}", self.index.0),
+        };
+
+        let jh = thread::Builder::new()
+            .name(name)
+            .spawn(move || {
+                let checktable = Rc::new(
+                    checktable::CheckTableClient::connect(
+                        self.checktable_addr,
+                        client::Options::default(),
+                    ).unwrap(),
+                );
+
+                Domain {
+                    index: self.index,
+                    shard,
+                    nshards: self.nshards,
+                    transaction_state: transactions::DomainState::new(
+                        self.index,
+                        checktable,
+                        self.ts,
+                    ),
+                    persistence_parameters: self.persistence_parameters,
+                    nodes: self.nodes,
+                    state: StateMap::default(),
+                    log,
+                    not_ready,
+                    mode: DomainMode::Forwarding,
+                    waiting: local::Map::new(),
+                    reader_triggered: local::Map::new(),
+                    replay_paths: HashMap::new(),
+
+                    addr,
+                    readers,
+                    inject: None,
+                    _debug_tx: debug_tx,
+                    control_reply_tx,
+                    channel_coordinator,
+
+                    buffered_replay_requests: HashMap::new(),
+                    has_buffered_replay_requests: false,
+                    replay_batch_size: self.config.replay_batch_size,
+                    replay_batch_timeout: self.config.replay_batch_timeout,
+
+                    concurrent_replays: 0,
+                    max_concurrent_replays: self.config.concurrent_replays,
+                    replay_request_queue: Default::default(),
+
+                    total_time: Timer::new(),
+                    total_ptime: Timer::new(),
+                    wait_time: Timer::new(),
+                    process_times: TimerSet::new(),
+                    process_ptimes: TimerSet::new(),
+                }.run(polling_loop)
+            })
+            .unwrap();
+        (jh, addr)
+    }
+}
+
 pub struct Domain {
     index: Index,
     shard: Option<usize>,
@@ -145,11 +274,11 @@ pub struct Domain {
     max_concurrent_replays: usize,
     replay_request_queue: VecDeque<(Tag, Vec<DataType>)>,
 
+    addr: SocketAddr,
     readers: flow::Readers,
     inject: Option<Box<Packet>>,
-    chunked_replay_tx: Option<mpsc::SyncSender<Box<Packet>>>,
-    debug_tx: Option<mpsc::Sender<debug::DebugEvent>>,
-    control_reply_tx: Option<mpsc::SyncSender<ControlReplyPacket>>,
+    _debug_tx: Option<TcpSender<debug::DebugEvent>>,
+    control_reply_tx: TcpSender<ControlReplyPacket>,
     channel_coordinator: Arc<ChannelCoordinator>,
 
     buffered_replay_requests: HashMap<Tag, (time::Instant, HashSet<Vec<DataType>>)>,
@@ -165,63 +294,6 @@ pub struct Domain {
 }
 
 impl Domain {
-    pub fn new(
-        log: Logger,
-        index: Index,
-        shard: usize,
-        nshards: usize,
-        nodes: DomainNodes,
-        config: Config,
-        readers: &flow::Readers,
-        persistence_parameters: persistence::Parameters,
-        checktable: Arc<Mutex<checktable::CheckTable>>,
-        channel_coordinator: Arc<ChannelCoordinator>,
-        ts: i64,
-    ) -> Self {
-        // initially, all nodes are not ready
-        let not_ready = nodes.values().map(|n| *n.borrow().local_addr()).collect();
-
-        let shard = if nshards == 1 { None } else { Some(shard) };
-
-        Domain {
-            index,
-            shard: shard,
-            nshards: nshards,
-            transaction_state: transactions::DomainState::new(index, checktable, ts),
-            persistence_parameters,
-            nodes,
-            state: StateMap::default(),
-            log,
-            not_ready,
-            mode: DomainMode::Forwarding,
-            waiting: local::Map::new(),
-            reader_triggered: local::Map::new(),
-            replay_paths: HashMap::new(),
-
-            readers: readers.clone(),
-            inject: None,
-            debug_tx: None,
-            chunked_replay_tx: None,
-            control_reply_tx: None,
-            channel_coordinator,
-
-            buffered_replay_requests: HashMap::new(),
-            has_buffered_replay_requests: false,
-            replay_batch_size: config.replay_batch_size,
-            replay_batch_timeout: config.replay_batch_timeout,
-
-            concurrent_replays: 0,
-            max_concurrent_replays: config.concurrent_replays,
-            replay_request_queue: Default::default(),
-
-            total_time: Timer::new(),
-            total_ptime: Timer::new(),
-            wait_time: Timer::new(),
-            process_times: TimerSet::new(),
-            process_ptimes: TimerSet::new(),
-        }
-    }
-
     fn on_replay_miss(
         &mut self,
         miss_in: LocalNodeIndex,
@@ -650,8 +722,6 @@ impl Domain {
                 transactions::Event::Transaction(m) => self.transactional_dispatch(m),
                 transactions::Event::StartMigration => {
                     self.control_reply_tx
-                        .as_ref()
-                        .unwrap()
                         .send(ControlReplyPacket::ack())
                         .unwrap();
                 }
@@ -760,10 +830,7 @@ impl Domain {
                         n.get_base_mut()
                             .expect("told to add base column to non-base node")
                             .add_column(default);
-
                         self.control_reply_tx
-                            .as_ref()
-                            .unwrap()
                             .send(ControlReplyPacket::ack())
                             .unwrap();
                     }
@@ -772,10 +839,7 @@ impl Domain {
                         n.get_base_mut()
                             .expect("told to drop base column from non-base node")
                             .drop_column(column);
-
                         self.control_reply_tx
-                            .as_ref()
-                            .unwrap()
                             .send(ControlReplyPacket::ack())
                             .unwrap();
                     }
@@ -784,13 +848,20 @@ impl Domain {
                         new_tx,
                         new_tag,
                     } => {
-                        let channel = new_tx
-                            .as_ref()
-                            .and_then(|&(_, _, ref k)| self.channel_coordinator.get_tx(k));
+                        let channel = new_tx.as_ref().map(|&(_, _, ref k)| {
+                            let mut tx = None;
+                            // The `UpdateEgress` message can race with the channel
+                            // coordinator finding out about a parent domain. Thus, we need to
+                            // spin here to ensure that the parent is indeed connected.
+                            while tx.is_none() {
+                                tx = self.channel_coordinator.get_tx(k);
+                            }
+                            tx.unwrap()
+                        });
                         let mut n = self.nodes[&node].borrow_mut();
                         n.with_egress_mut(move |e| {
-                            if let (Some(new_tx), Some(channel)) = (new_tx, channel) {
-                                e.add_tx(new_tx.0, new_tx.1, channel);
+                            if let (Some(new_tx), Some((channel, is_local))) = (new_tx, channel) {
+                                e.add_tx(new_tx.0, new_tx.1, channel, is_local);
                             }
                             if let Some(new_tag) = new_tag {
                                 e.add_tag(new_tag.0, new_tag.1);
@@ -815,8 +886,6 @@ impl Domain {
                     Packet::StateSizeProbe { node } => {
                         let size = self.state.get(&node).map(|state| state.len()).unwrap_or(0);
                         self.control_reply_tx
-                            .as_ref()
-                            .unwrap()
                             .send(ControlReplyPacket::StateSize(size))
                             .unwrap();
                     }
@@ -872,17 +941,22 @@ impl Domain {
                                             let n = txs.len();
                                             &mut txs[::shard_by(key, n)]
                                         };
-                                        tx.send(box Packet::RequestPartialReplay {
+                                        let mut m = box Packet::RequestPartialReplay {
                                             key: vec![key.clone()],
                                             tag: tag,
-                                        }).unwrap();
+                                        };
+                                        if tx.1 {
+                                            m = m.make_local();
+                                        }
+                                        tx.0.send(m).unwrap();
                                     });
-                                self.readers
-                                    .lock()
-                                    .unwrap()
-                                    .get_mut(&gid)
-                                    .unwrap()
-                                    .set_single_handle(self.shard, r_part);
+                                assert!(
+                                    self.readers
+                                        .lock()
+                                        .unwrap()
+                                        .insert((gid, *self.shard.as_ref().unwrap_or(&0)), r_part)
+                                        .is_none()
+                                );
 
                                 let mut n = self.nodes[&node].borrow_mut();
                                 n.with_reader_mut(|r| {
@@ -893,12 +967,13 @@ impl Domain {
                             InitialState::Global { gid, cols, key } => {
                                 use backlog;
                                 let (r_part, w_part) = backlog::new(cols, key);
-                                self.readers
-                                    .lock()
-                                    .unwrap()
-                                    .get_mut(&gid)
-                                    .unwrap()
-                                    .set_single_handle(self.shard, r_part);
+                                assert!(
+                                    self.readers
+                                        .lock()
+                                        .unwrap()
+                                        .insert((gid, *self.shard.as_ref().unwrap_or(&0)), r_part)
+                                        .is_none()
+                                );
 
                                 let mut n = self.nodes[&node].borrow_mut();
                                 n.with_reader_mut(|r| {
@@ -917,8 +992,6 @@ impl Domain {
                     } => {
                         // let coordinator know that we've registered the tagged path
                         self.control_reply_tx
-                            .as_ref()
-                            .unwrap()
                             .send(ControlReplyPacket::ack())
                             .unwrap();
 
@@ -942,9 +1015,11 @@ impl Domain {
                             payload::TriggerEndpoint::End(domain, shards) => TriggerEndpoint::End(
                                 (0..shards)
                                     .map(|shard| {
+                                        // TODO: take advantage of local channels for replay paths.
                                         self.channel_coordinator
                                             .get_unbounded_tx(&(domain, shard))
                                             .unwrap()
+                                            .0
                                     })
                                     .collect(),
                             ),
@@ -1028,58 +1103,61 @@ impl Domain {
                         if !state.is_empty() {
                             let log = self.log.new(o!());
                             let nshards = self.nshards;
-                            let chunked_replay_tx = self.chunked_replay_tx.clone().unwrap();
+                            let domain_addr = self.addr;
                             thread::Builder::new()
-                            .name(format!(
-                                "replay{}.{}",
-                                self.nodes
-                                    .values()
-                                    .next()
-                                    .unwrap()
-                                    .borrow()
-                                    .domain()
-                                    .index(),
-                                link.src
-                            ))
-                            .spawn(move || {
-                                use itertools::Itertools;
+                                .name(format!(
+                                    "replay{}.{}",
+                                    self.nodes
+                                        .values()
+                                        .next()
+                                        .unwrap()
+                                        .borrow()
+                                        .domain()
+                                        .index(),
+                                    link.src
+                                ))
+                                .spawn(move || {
+                                    use itertools::Itertools;
 
-                                let start = time::Instant::now();
-                                debug!(log, "starting state chunker"; "node" => %link.dst);
+                                    let mut chunked_replay_tx =
+                                        TcpSender::connect(&domain_addr, Some(1)).unwrap();
 
-                                let iter = state.into_iter().chunks(BATCH_SIZE);
-                                let mut iter = iter.into_iter().enumerate().peekable();
+                                    let start = time::Instant::now();
+                                    debug!(log, "starting state chunker"; "node" => %link.dst);
 
-                                // process all records in state to completion within domain
-                                // and then forward on tx (if there is one)
-                                while let Some((i, chunk)) = iter.next() {
-                                    use std::iter::FromIterator;
-                                    let chunk = Records::from_iter(chunk.into_iter());
-                                    let len = chunk.len();
-                                    let last = iter.peek().is_none();
-                                    let p = box Packet::ReplayPiece {
-                                        tag: tag,
-                                        link: link.clone(), // to will be overwritten by receiver
-                                        nshards: nshards,
-                                        context: ReplayPieceContext::Regular { last },
-                                        data: chunk,
-                                        transaction_state: None,
-                                    };
+                                    let iter = state.into_iter().chunks(BATCH_SIZE);
+                                    let mut iter = iter.into_iter().enumerate().peekable();
 
-                                    trace!(log, "sending batch"; "#" => i, "[]" => len);
-                                    if chunked_replay_tx.send(p).is_err() {
-                                        warn!(log, "replayer noticed domain shutdown");
-                                        break;
+                                    // process all records in state to completion within domain
+                                    // and then forward on tx (if there is one)
+                                    while let Some((i, chunk)) = iter.next() {
+                                        use std::iter::FromIterator;
+                                        let chunk = Records::from_iter(chunk.into_iter());
+                                        let len = chunk.len();
+                                        let last = iter.peek().is_none();
+                                        let p = box Packet::ReplayPiece {
+                                            tag: tag,
+                                            link: link.clone(), // to is overwritten by receiver
+                                            nshards: nshards,
+                                            context: ReplayPieceContext::Regular { last },
+                                            data: chunk,
+                                            transaction_state: None,
+                                        };
+
+                                        trace!(log, "sending batch"; "#" => i, "[]" => len);
+                                        if chunked_replay_tx.send(p).is_err() {
+                                            warn!(log, "replayer noticed domain shutdown");
+                                            break;
+                                        }
                                     }
-                                }
 
-                                debug!(log,
+                                    debug!(log,
                                    "state chunker finished";
                                    "node" => %link.dst,
                                    "μs" => dur_to_ns!(start.elapsed()) / 1000
                                 );
-                            })
-                            .unwrap();
+                                })
+                                .unwrap();
                         }
 
                         self.handle_replay(p);
@@ -1127,8 +1205,6 @@ impl Domain {
                         }
 
                         self.control_reply_tx
-                            .as_ref()
-                            .unwrap()
                             .send(ControlReplyPacket::ack())
                             .unwrap();
                     }
@@ -1163,8 +1239,6 @@ impl Domain {
                             .collect();
 
                         self.control_reply_tx
-                            .as_ref()
-                            .unwrap()
                             .send(ControlReplyPacket::Statistics(domain_stats, node_stats))
                             .unwrap();
                     }
@@ -1501,7 +1575,13 @@ impl Domain {
                     transaction_state,
                 } => {
                     if let ReplayPieceContext::Partial { ref for_keys, .. } = context {
-                        trace!(self.log, "replaying batch"; "#" => data.len(), "tag" => tag.id(), "keys" => ?for_keys);
+                        trace!(
+                            self.log,
+                            "replaying batch";
+                            "#" => data.len(),
+                            "tag" => tag.id(),
+                            "keys" => ?for_keys,
+                        );
                     } else {
                         debug!(self.log, "replaying batch"; "#" => data.len());
                     }
@@ -2019,10 +2099,7 @@ impl Domain {
             if self.replay_paths[&tag].notify_done {
                 // NOTE: this will only be Some for non-partial replays
                 info!(self.log, "acknowledging replay completed"; "node" => node.id());
-
                 self.control_reply_tx
-                    .as_ref()
-                    .unwrap()
                     .send(ControlReplyPacket::ack())
                     .unwrap();
             } else {
@@ -2038,147 +2115,68 @@ impl Domain {
         }
     }
 
-    pub fn boot(
-        mut self,
-        rx: mpsc::Receiver<Box<Packet>>,
-        input_rx: mpsc::Receiver<Box<Packet>>,
-        back_rx: mpsc::Receiver<Box<Packet>>,
-        control_reply_tx: mpsc::SyncSender<ControlReplyPacket>,
-        debug_tx: Option<mpsc::Sender<debug::DebugEvent>>,
-    ) -> thread::JoinHandle<()> {
-        info!(self.log, "booting domain"; "nodes" => self.nodes.iter().count());
-        let name: usize = self.nodes.values().next().unwrap().borrow().domain().into();
-        let name = match self.shard {
-            Some(shard) => format!("domain{}.{}", name, shard),
-            None => format!("domain{}", name),
-        };
-        thread::Builder::new()
-            .name(name)
-            .spawn(move || {
-                let (chunked_replay_tx, chunked_replay_rx) = mpsc::sync_channel(1);
+    pub fn run(mut self, mut polling_loop: PollingLoop<Packet>) {
+        let mut group_commit_queues = persistence::GroupCommitQueueSet::new(
+            self.index,
+            self.shard.unwrap_or(0),
+            &self.persistence_parameters,
+            self.transaction_state.get_checktable().clone(),
+        );
 
-                // construct select so we can receive on all channels at the same time
-                let sel = mpsc::Select::new();
-                let mut rx_handle = sel.handle(&rx);
-                let mut chunked_replay_rx_handle = sel.handle(&chunked_replay_rx);
-                let mut back_rx_handle = sel.handle(&back_rx);
-                let mut input_rx_handle = sel.handle(&input_rx);
-
-                unsafe {
-                    // select is currently not fair, but tries in order
-                    // first try chunked_replay, because it'll make progress on a replay
-                    chunked_replay_rx_handle.add();
-                    // then see if there are outstanding replay requests
-                    back_rx_handle.add();
-                    // then see if there's new data from our ancestors
-                    rx_handle.add();
-                    // and *then* see if there's new base node input
-                    input_rx_handle.add();
+        // Run polling loop.
+        self.total_time.start();
+        self.total_ptime.start();
+        polling_loop.run_polling_loop(|event| match event {
+            PollEvent::ResumePolling(timeout) => {
+                *timeout = group_commit_queues.duration_until_flush().or_else(|| {
+                    let now = time::Instant::now();
+                    self.buffered_replay_requests
+                        .iter()
+                        .map(|(_, &(first, _))| {
+                            self.replay_batch_timeout
+                                .checked_sub(now.duration_since(first))
+                                .unwrap_or(time::Duration::from_millis(0))
+                        })
+                        .min()
+                });
+                KeepPolling
+            }
+            PollEvent::Process(packet) => {
+                let packet = packet.make_boxed_normal();
+                if let Packet::Quit = *packet {
+                    return StopPolling;
                 }
 
-                self.debug_tx = debug_tx;
-                self.chunked_replay_tx = Some(chunked_replay_tx);
-                self.control_reply_tx = Some(control_reply_tx);
-
-                let mut group_commit_queues = persistence::GroupCommitQueueSet::new(
-                    self.index,
-                    self.shard.unwrap_or(0),
-                    &self.persistence_parameters,
-                    self.transaction_state.get_checktable().clone(),
-                );
-
-                self.total_time.start();
-                self.total_ptime.start();
-                loop {
-                    let mut packet;
-                    let mut from_input = false;
-
-                    // If a flush is needed at some point then spin waiting for packets until
-                    // then. If no flush is needed, then avoid going to sleep for 1ms because sleeps
-                    // and wakeups are expensive.
-                    let duration_until_flush = group_commit_queues.duration_until_flush();
-                    let spin_duration =
-                        duration_until_flush.unwrap_or(time::Duration::from_millis(1));
-                    let start = time::Instant::now();
-                    loop {
-                        if let Ok(p) = self.inject
-                            .take()
-                            .ok_or(mpsc::TryRecvError::Empty)
-                            .or_else(|_| chunked_replay_rx.try_recv())
-                            .or_else(|_| back_rx.try_recv())
-                            .or_else(|_| rx.try_recv())
-                        {
-                            packet = Some(p);
-                            break;
-                        }
-
-                        if let Ok(p) = input_rx.try_recv() {
-                            packet = Some(p);
-                            from_input = true;
-                            break;
-                        }
-
-                        if start.elapsed() >= spin_duration {
-                            packet = group_commit_queues.flush_if_necessary(&self.nodes);
-                            if packet.is_none() && self.has_buffered_replay_requests {
-                                packet = Some(box Packet::Spin);
-                            }
-                            break;
-                        }
+                // TODO: Initialize tracer here, and when flushing group commit
+                // queue.
+                if group_commit_queues.should_append(&packet, &self.nodes) {
+                    debug_assert!(packet.is_regular());
+                    packet.trace(PacketEvent::ExitInputChannel);
+                    let merged_packet = group_commit_queues.append(packet, &self.nodes);
+                    if let Some(packet) = merged_packet {
+                        self.handle(packet);
                     }
-
-                    // Block until the next packet arrives.
-                    if packet.is_none() {
-                        self.wait_time.start();
-                        let id = sel.wait();
-                        self.wait_time.stop();
-
-                        assert!(self.inject.is_none());
-                        let p = if id == rx_handle.id() {
-                            rx_handle.recv()
-                        } else if id == chunked_replay_rx_handle.id() {
-                            chunked_replay_rx_handle.recv()
-                        } else if id == back_rx_handle.id() {
-                            back_rx_handle.recv()
-                        } else if id == input_rx_handle.id() {
-                            from_input = true;
-                            input_rx_handle.recv()
-                        } else {
-                            unreachable!()
-                        };
-
-                        match p {
-                            Ok(m) => packet = Some(m),
-                            Err(_) => return,
-                        }
-                    }
-
-                    // Initialize tracer if necessary.
-                    if let Some(Some(&mut Some((_, ref mut tx @ None)))) =
-                        packet.as_mut().map(|m| m.tracer())
-                    {
-                        *tx = self.debug_tx
-                            .as_ref()
-                            .map(|tx| TraceSender::from_local(tx.clone()));
-                    }
-
-                    // If we received an input packet, place it into the relevant group commit
-                    // queue, and possibly produce a merged packet.
-                    if from_input {
-                        let m = packet.unwrap();
-                        debug_assert!(m.is_regular());
-                        m.trace(PacketEvent::ExitInputChannel);
-                        packet = group_commit_queues.append(m, &self.nodes);
-                    }
-
-                    // Process the packet.
-                    match packet {
-                        Some(box Packet::Quit) => return,
-                        Some(m) => self.handle(m),
-                        None => {}
-                    }
+                } else {
+                    self.handle(packet);
                 }
-            })
-            .unwrap()
+
+                while let Some(p) = self.inject.take() {
+                    self.handle(p);
+                }
+
+                KeepPolling
+            }
+            PollEvent::Timeout => {
+                if let Some(m) = group_commit_queues.flush_if_necessary(&self.nodes) {
+                    self.handle(m);
+                    while let Some(p) = self.inject.take() {
+                        self.handle(p);
+                    }
+                } else if self.has_buffered_replay_requests {
+                    self.handle(box Packet::Spin);
+                }
+                KeepPolling
+            }
+        });
     }
 }

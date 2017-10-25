@@ -216,15 +216,30 @@ impl GraphViz for MirNodeType {
             MirNodeType::Project {
                 ref emit,
                 ref literals,
+                ref arithmetic,
             } => {
                 write!(
                     out,
-                    "π: {}{}",
+                    "π: {}{}{}",
                     emit.iter()
                         .map(|c| c.name.as_str())
                         .collect::<Vec<_>>()
                         .join(", "),
-                    if literals.len() > 0 {
+                    if arithmetic.is_empty() {
+                        format!("")
+                    } else {
+                        format!(
+                            ", {}",
+                            arithmetic
+                                .iter()
+                                .map(|&(ref n, ref e)| format!("{}: {:?}", n, e))
+                                .collect::<Vec<_>>()
+                                .join(", ")
+                        )
+                    },
+                    if literals.is_empty() {
+                        format!("")
+                    } else {
                         format!(
                             ", lit: {}",
                             literals
@@ -233,8 +248,6 @@ impl GraphViz for MirNodeType {
                                 .collect::<Vec<_>>()
                                 .join(", ")
                         )
-                    } else {
-                        format!("")
                     }
                 )?;
             }

@@ -1,11 +1,32 @@
 use std::collections::HashMap;
 use flow::prelude::*;
-use channel::ChannelSender;
+use channel::{STcpSender, TcpSender};
 
-#[derive(Clone, Serialize, Deserialize)]
+/// Holds a transmit handle for an egress node. This struct appears Serializeable, but because it
+/// contains a STcpSender, it will actually panic if serialized.
+#[derive(Serialize, Deserialize)]
+struct EgressTx {
+    node: NodeIndex,
+    local: LocalNodeIndex,
+    sender: STcpSender<Box<Packet>>,
+    is_local: bool,
+}
+
+#[derive(Serialize, Deserialize)]
 pub struct Egress {
-    txs: Vec<(NodeIndex, LocalNodeIndex, ChannelSender<Box<Packet>>)>,
+    txs: Vec<EgressTx>,
     tags: HashMap<Tag, NodeIndex>,
+}
+
+impl Clone for Egress {
+    fn clone(&self) -> Self {
+        assert!(self.txs.is_empty());
+
+        Self {
+            txs: Vec::new(),
+            tags: self.tags.clone(),
+        }
+    }
 }
 
 impl Default for Egress {
@@ -22,9 +43,18 @@ impl Egress {
         &mut self,
         dst_g: NodeIndex,
         dst_l: LocalNodeIndex,
-        tx: ChannelSender<Box<Packet>>,
+        tx: TcpSender<Box<Packet>>,
+        is_local: bool,
     ) {
-        self.txs.push((dst_g, dst_l, tx));
+        self.txs.push(EgressTx {
+            node: dst_g,
+            local: dst_l,
+            sender: STcpSender(tx),
+            is_local,
+        });
+
+        // Sort txs so that the local connections come last. This simplifies the logic in process.
+        self.txs.sort_by_key(|tx| tx.is_local);
     }
 
     pub fn add_tag(&mut self, tag: Tag, dst: NodeIndex) {
@@ -38,6 +68,7 @@ impl Egress {
         } = self;
 
         // send any queued updates to all external children
+        assert!(txs.len() > 0);
         let txn = txs.len() - 1;
 
         // we need to find the ingress node following this egress according to the path
@@ -49,38 +80,47 @@ impl Egress {
                 .expect("egress node told about replay message, but not on replay path")
         });
 
-        for (txi, &mut (ref globaddr, dst, ref mut tx)) in txs.iter_mut().enumerate() {
-            let mut take = txi == txn;
-            if let Some(replay_to) = replay_to.as_ref() {
-                if replay_to == globaddr {
-                    take = true;
-                } else {
-                    continue;
+        for (txi, ref mut tx) in txs.iter_mut().enumerate() {
+            if !tx.is_local {
+                let m = m.as_mut().unwrap();
+                m.link_mut().src = unsafe { LocalNodeIndex::make(shard as u32) };
+                m.link_mut().dst = tx.local;
+                if tx.sender.send_ref(m).is_err() {
+                    break;
                 }
-            }
-
-            // avoid cloning if this is last send
-            let mut m = if take {
-                m.take().unwrap()
             } else {
-                // we know this is a data (not a replay)
-                // because, a replay will force a take
-                m.as_ref().map(|m| box m.clone_data()).unwrap()
-            };
+                let mut take = txi == txn;
+                if let Some(replay_to) = replay_to.as_ref() {
+                    if *replay_to == tx.node {
+                        take = true;
+                    } else {
+                        continue;
+                    }
+                }
 
-            // src is usually ignored and overwritten by ingress
-            // *except* if the ingress is marked as a shard merger
-            // in which case it wants to know about the shard
-            m.link_mut().src = unsafe { LocalNodeIndex::make(shard as u32) };
-            m.link_mut().dst = dst;
+                // Avoid cloning if this is last send
+                let mut m = if take {
+                    m.take().unwrap()
+                } else {
+                    // we know this is a data (not a replay)
+                    // because, a replay will force a take
+                    m.as_ref().map(|m| box m.clone_data()).unwrap()
+                };
 
-            if tx.send(m).is_err() {
-                // we must be shutting down...
-                break;
-            }
+                // src is usually ignored and overwritten by ingress
+                // *except* if the ingress is marked as a shard merger
+                // in which case it wants to know about the shard
+                m.link_mut().src = unsafe { LocalNodeIndex::make(shard as u32) };
+                m.link_mut().dst = tx.local;
 
-            if take {
-                break;
+                if tx.sender.send(m.make_local()).is_err() {
+                    // we must be shutting down...
+                    break;
+                }
+
+                if take {
+                    break;
+                }
             }
         }
     }

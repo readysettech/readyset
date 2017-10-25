@@ -1,20 +1,22 @@
 use flow::prelude::*;
 use flow::payload;
 use vec_map::VecMap;
-use channel::ChannelSender;
+use channel::{STcpSender, TcpSender};
 use std::collections::HashSet;
 
 #[derive(Serialize, Deserialize)]
 pub struct Sharder {
-    txs: Vec<(LocalNodeIndex, ChannelSender<Box<Packet>>)>,
+    txs: Vec<(LocalNodeIndex, STcpSender<Box<Packet>>, bool)>,
     sharded: VecMap<Box<Packet>>,
     shard_by: usize,
 }
 
 impl Clone for Sharder {
     fn clone(&self) -> Self {
+        assert!(self.txs.is_empty());
+
         Sharder {
-            txs: self.txs.clone(),
+            txs: Vec::new(),
             sharded: Default::default(),
             shard_by: self.shard_by,
         }
@@ -40,11 +42,15 @@ impl Sharder {
         }
     }
 
-    pub fn add_sharded_child(&mut self, dst: LocalNodeIndex, txs: Vec<ChannelSender<Box<Packet>>>) {
+    pub fn add_sharded_child(
+        &mut self,
+        dst: LocalNodeIndex,
+        txs: Vec<(TcpSender<Box<Packet>>, bool)>,
+    ) {
         assert_eq!(self.txs.len(), 0);
         // TODO: add support for "shared" sharder?
         for tx in txs {
-            self.txs.push((dst, tx));
+            self.txs.push((dst, STcpSender(tx.0), tx.1));
         }
     }
 
@@ -134,10 +140,13 @@ impl Sharder {
                     shards[shard].map_data(|rs| rs.push(record));
                 }
 
-                for (shard, p) in shards {
+                for (shard, mut p) in shards {
                     let tx = &mut self.txs[shard];
                     m.link_mut().src = index;
                     m.link_mut().dst = tx.0;
+                    if tx.2 {
+                        p = p.make_local();
+                    }
                     if tx.1.send(p).is_err() {
                         // we must be shutting down...
                     }
@@ -194,11 +203,13 @@ impl Sharder {
             *nshards = self.sharded.len();
         }
 
-        for (i, &mut (dst, ref mut tx)) in self.txs.iter_mut().enumerate() {
+        for (i, &mut (dst, ref mut tx, is_local)) in self.txs.iter_mut().enumerate() {
             if let Some(mut shard) = self.sharded.remove(i) {
                 shard.link_mut().src = index.into();
                 shard.link_mut().dst = dst;
-
+                if is_local {
+                    shard = shard.make_local();
+                }
                 if tx.send(shard).is_err() {
                     // we must be shutting down...
                     break;

@@ -1,4 +1,4 @@
-use nom_sql::{Column, ColumnSpecification, Operator, OrderType};
+use nom_sql::{ArithmeticExpression, Column, ColumnSpecification, Operator, OrderType};
 use std::cell::RefCell;
 use std::fmt::{Debug, Display, Error, Formatter};
 use std::rc::Rc;
@@ -477,6 +477,7 @@ impl MirNode {
                     MirNodeType::Project {
                         ref emit,
                         ref literals,
+                        ref arithmetic,
                     } => {
                         assert_eq!(self.ancestors.len(), 1);
                         let parent = self.ancestors[0].clone();
@@ -485,6 +486,7 @@ impl MirNode {
                             parent,
                             self.columns.as_slice(),
                             emit,
+                            arithmetic,
                             literals,
                             mig,
                         )
@@ -598,6 +600,7 @@ pub enum MirNodeType {
     /// emit columns
     Project {
         emit: Vec<Column>,
+        arithmetic: Vec<(String, ArithmeticExpression)>,
         literals: Vec<(String, DataType)>,
     },
     /// emit columns
@@ -772,11 +775,13 @@ impl MirNodeType {
             MirNodeType::Project {
                 emit: ref our_emit,
                 literals: ref our_literals,
+                arithmetic: ref our_arithmetic,
             } => match *other {
                 MirNodeType::Project {
                     ref emit,
                     ref literals,
-                } => our_emit == emit && our_literals == literals,
+                    ref arithmetic,
+                } => our_emit == emit && our_literals == literals && our_arithmetic == arithmetic,
                 _ => false,
             },
             MirNodeType::Reuse { node: ref us } => {
@@ -998,14 +1003,29 @@ impl Debug for MirNodeType {
             MirNodeType::Project {
                 ref emit,
                 ref literals,
+                ref arithmetic,
             } => write!(
                 f,
-                "π [{}{}]",
+                "π [{}{}{}]",
                 emit.iter()
                     .map(|c| c.name.as_str())
                     .collect::<Vec<_>>()
                     .join(", "),
-                if literals.len() > 0 {
+                if arithmetic.is_empty() {
+                    format!("")
+                } else {
+                    format!(
+                        ", {}",
+                        arithmetic
+                            .iter()
+                            .map(|&(ref n, ref e)| format!("{}: {:?}", n, e))
+                            .collect::<Vec<_>>()
+                            .join(", ")
+                    )
+                },
+                if literals.is_empty() {
+                    format!("")
+                } else {
                     format!(
                         ", lit: {}",
                         literals
@@ -1014,9 +1034,7 @@ impl Debug for MirNodeType {
                             .collect::<Vec<_>>()
                             .join(", ")
                     )
-                } else {
-                    format!("")
-                }
+                },
             ),
             MirNodeType::Reuse { ref node } => write!(
                 f,

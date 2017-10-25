@@ -1,37 +1,59 @@
-use channel::ChannelSender;
+use channel::{tcp, TcpReceiver, TcpSender};
+use channel::poll::{KeepPolling, PollEvent, PollingLoop, StopPolling};
+
 use flow;
-use flow::payload::ControlReplyPacket;
-use flow::prelude::*;
-use flow::debug;
 use flow::domain;
-use flow::checktable;
+use flow::coordination::{CoordinationMessage, CoordinationPayload};
+use flow::payload::ControlReplyPacket;
 use flow::persistence;
-use petgraph::graph::NodeIndex;
-use std::collections::HashMap;
-use std::sync::mpsc;
-use std::sync::{Arc, Mutex};
-use std::cell;
-use std::thread;
-use slog::Logger;
+use flow::placement;
+use flow::prelude::*;
 use flow::statistics::{DomainStats, NodeStats};
+
+use std::{self, cell, io, thread};
+use std::collections::HashMap;
+use std::net::{IpAddr, SocketAddr};
+use std::sync::Arc;
+
+use mio;
+use petgraph::graph::NodeIndex;
+use slog::Logger;
 
 #[derive(Debug)]
 pub enum WaitError {
     WrongReply(ControlReplyPacket),
-    RecvError(mpsc::RecvError),
 }
 
-#[derive(Clone)]
-pub struct DomainInputHandle(Vec<mpsc::SyncSender<Box<Packet>>>);
+pub struct DomainInputHandle {
+    txs: Vec<TcpSender<Box<Packet>>>,
+    tx_reply: PollingLoop<Result<i64, ()>>,
+    tx_reply_addr: SocketAddr,
+}
 
 impl DomainInputHandle {
+    pub fn new(listen_addr: SocketAddr, txs: Vec<SocketAddr>) -> Result<Self, io::Error> {
+        let txs: Result<Vec<_>, _> = txs.iter()
+            .map(|addr| TcpSender::connect(addr, None))
+            .collect();
+        let tx_reply = PollingLoop::new(listen_addr);
+        let tx_reply_addr = tx_reply.get_listener_addr().unwrap();
+
+        Ok(Self {
+            txs: txs?,
+            tx_reply,
+            tx_reply_addr,
+        })
+    }
+
     pub fn base_send(
         &mut self,
-        p: Box<Packet>,
+        mut p: Box<Packet>,
         key: &[usize],
-    ) -> Result<(), mpsc::SendError<Box<Packet>>> {
-        if self.0.len() == 1 {
-            self.0[0].send(p)
+        local: bool,
+    ) -> Result<(), tcp::SendError> {
+        if self.txs.len() == 1 {
+            p = p.make_local();
+            self.txs[0].send(p)
         } else {
             if key.is_empty() {
                 unreachable!("sharded base without a key?");
@@ -41,94 +63,200 @@ impl DomainInputHandle {
                 unimplemented!();
             }
             let key_col = key[0];
-            let shard = {
-                let key = match p.data()[0] {
-                    Record::Positive(ref r) | Record::Negative(ref r) => &r[key_col],
-                    Record::DeleteRequest(ref k) => &k[0],
+
+            let mut shard_writes = vec![Vec::new(); self.txs.len()];
+            let mut data = p.take_data();
+            for r in data.drain(..) {
+                let shard = {
+                    let key = match r {
+                        Record::Positive(ref r) | Record::Negative(ref r) => &r[key_col],
+                        Record::DeleteRequest(ref k) => &k[0],
+                    };
+                    ::shard_by(key, self.txs.len())
                 };
-                if !p.data().iter().all(|r| match *r {
-                    Record::Positive(ref r) | Record::Negative(ref r) => &r[key_col] == key,
-                    Record::DeleteRequest(ref k) => k.len() == 1 && &k[0] == key,
-                }) {
-                    // batch with different keys to sharded base
-                    unimplemented!();
+                shard_writes[shard].push(r);
+            }
+
+            for (s, rs) in shard_writes.drain(..).enumerate() {
+                let mut p = Box::new(p.clone_data()); // ok here, as data previously emptied
+                p.swap_data(rs.into());
+
+                if local {
+                    p = p.make_local();
                 }
-                ::shard_by(key, self.0.len())
-            };
-            self.0[shard].send(p)
+
+                self.txs[s].send(p)?;
+            }
+            Ok(())
         }
+    }
+
+    pub fn receive_transaction_result(&mut self) -> Result<i64, ()> {
+        let mut result = Err(());
+        self.tx_reply.run_polling_loop(|event| match event {
+            PollEvent::ResumePolling(_) => KeepPolling,
+            PollEvent::Process(r) => {
+                result = r;
+                StopPolling
+            }
+            PollEvent::Timeout => unreachable!(),
+        });
+        result
+    }
+
+    pub fn tx_reply_addr(&self) -> SocketAddr {
+        self.tx_reply_addr.clone()
     }
 }
 
 pub struct DomainHandle {
-    idx: domain::Index,
+    _idx: domain::Index,
 
-    txs: Vec<mpsc::SyncSender<Box<Packet>>>,
-    in_txs: Vec<mpsc::SyncSender<Box<Packet>>>,
-    cr_rxs: Vec<mpsc::Receiver<ControlReplyPacket>>,
-    back_txs: Vec<mpsc::Sender<Box<Packet>>>,
+    cr_poll: PollingLoop<ControlReplyPacket>,
+    txs: Vec<(TcpSender<Box<Packet>>, bool)>,
 
     // used during booting
     threads: Vec<thread::JoinHandle<()>>,
-    boot_args: Vec<
-        (
-            mpsc::Receiver<Box<Packet>>,
-            mpsc::Receiver<Box<Packet>>,
-            mpsc::Receiver<Box<Packet>>,
-            mpsc::SyncSender<ControlReplyPacket>,
-        ),
-    >,
-
-    // used during operation
-    tx_buf: Option<Box<Packet>>,
 }
 
 impl DomainHandle {
-    pub fn new(domain: domain::Index, sharded_by: Sharding) -> Self {
-        let mut txs = Vec::new();
-        let mut in_txs = Vec::new();
-        let mut back_txs = Vec::new();
-        let mut cr_rxs = Vec::new();
-        let mut boot_args = Vec::new();
-        {
-            let mut add = || {
-                let (in_tx, in_rx) = mpsc::sync_channel(512);
-                let (tx, rx) = mpsc::sync_channel(1);
-                let (cr_tx, cr_rx) = mpsc::sync_channel(1);
-                let (back_tx, back_rx) = mpsc::channel();
+    pub fn new(
+        idx: domain::Index,
+        sharded_by: Sharding,
+        log: &Logger,
+        graph: &mut Graph,
+        readers: &flow::Readers,
+        config: &domain::Config,
+        nodes: Vec<(NodeIndex, bool)>,
+        persistence_params: &persistence::Parameters,
+        listen_addr: &IpAddr,
+        checktable_addr: &SocketAddr,
+        channel_coordinator: &Arc<ChannelCoordinator>,
+        debug_addr: &Option<SocketAddr>,
+        workers: &mut HashMap<WorkerIdentifier, WorkerEndpoint>,
+        placer: &mut placement::DomainPlacementStrategy,
+        ts: i64,
+    ) -> Self {
+        // NOTE: warning to future self...
+        // the code currently relies on the fact that the domains that are sharded by the same key
+        // *also* have the same number of shards. if this no longer holds, we actually need to do a
+        // shuffle, otherwise writes will end up on the wrong shard. keep that in mind.
+        let num_shards = if sharded_by.is_none() { 1 } else { ::SHARDS };
 
-                txs.push(tx);
-                in_txs.push(in_tx);
-                back_txs.push(back_tx);
-                cr_rxs.push(cr_rx);
-                boot_args.push((rx, in_rx, back_rx, cr_tx));
+        let mut txs = Vec::new();
+        let mut cr_rxs = Vec::new();
+        let mut threads = Vec::new();
+        let mut nodes = Some(Self::build_descriptors(graph, nodes));
+
+        let all_local = workers.is_empty();
+
+        for i in 0..num_shards {
+            let logger = if num_shards == 1 {
+                log.new(o!("domain" => idx.index()))
+            } else {
+                log.new(o!("domain" => format!("{}.{}", idx.index(), i)))
             };
-            add();
-            if !sharded_by.is_none() {
-                // NOTE: warning to future self
-                // the code currently relies on the fact that the domains that are sharded by
-                // the same key *also* have the same number of shards. if this no longer holds,
-                // we actually need to do a shuffle, otherwise writes will end up on the wrong
-                // shard. keep that in mind.
-                for _ in 1..::SHARDS {
-                    add();
+            let nodes = if i == num_shards - 1 {
+                nodes.take().unwrap()
+            } else {
+                nodes.clone().unwrap()
+            };
+
+            let control_listener =
+                std::net::TcpListener::bind(SocketAddr::new(listen_addr.clone(), 0)).unwrap();
+            let domain = domain::DomainBuilder {
+                index: idx,
+                shard: i,
+                nshards: num_shards,
+                config: config.clone(),
+                nodes,
+                persistence_parameters: persistence_params.clone(),
+                ts,
+                control_addr: control_listener.local_addr().unwrap(),
+                checktable_addr: checktable_addr.clone(),
+                debug_addr: debug_addr.clone(),
+            };
+
+            // TODO(malte): simple round-robin placement for the moment
+            let worker = placer.place_domain(&idx, i).map(|wi| workers[&wi].clone());
+
+            match worker {
+                Some(worker) => {
+                    // send domain to worker
+                    let mut w = worker.lock().unwrap();
+                    debug!(
+                        log,
+                        "sending domain {}.{} to worker {:?}",
+                        domain.index.index(),
+                        domain.shard,
+                        w.peer_addr()
+                    );
+                    let src = w.local_addr().unwrap();
+                    w.send(CoordinationMessage {
+                        source: src,
+                        payload: CoordinationPayload::AssignDomain(domain),
+                    }).unwrap();
+                }
+                None => {
+                    let (jh, _) = domain.boot(
+                        logger,
+                        readers.clone(),
+                        channel_coordinator.clone(),
+                        "127.0.0.1:0".parse().unwrap(),
+                    );
+                    threads.push(jh);
                 }
             }
-        }
-        DomainHandle {
-            txs,
-            in_txs,
-            back_txs,
-            cr_rxs,
-            idx: domain,
-            tx_buf: None,
-            threads: Vec::new(),
-            boot_args,
-        }
-    }
 
-    pub fn get_input_handle(&self) -> DomainInputHandle {
-        DomainInputHandle(self.in_txs.clone())
+            let stream =
+                mio::net::TcpStream::from_stream(control_listener.accept().unwrap().0).unwrap();
+            cr_rxs.push(TcpReceiver::new(stream));
+        }
+
+        let mut cr_poll = PollingLoop::from_receivers(cr_rxs);
+        cr_poll.run_polling_loop(|event| match event {
+            PollEvent::ResumePolling(_) => KeepPolling,
+            PollEvent::Process(ControlReplyPacket::Booted(shard, addr)) => {
+                channel_coordinator.insert_addr((idx, shard), addr.clone(), all_local);
+                txs.push(channel_coordinator.get_tx(&(idx, shard)).unwrap());
+
+                // TODO(malte): this is a hack, and not an especially neat one. In response to a
+                // domain boot message, we broadcast information about this new domain to all
+                // workers, which inform their ChannelCoordinators about it. This is required so
+                // that domains can find each other when starting up.
+                // Moreover, it is required for us to do this *here*, since this code runs on
+                // the thread that initiated the migration, and which will query domains to ask
+                // if they're ready. No domain will be ready until it has found its neighbours,
+                // so by sending out the information here, we ensure that we cannot deadlock
+                // with the migration waiting for a domain to become ready when trying to send
+                // the information. (We used to do this in the controller thread, with the
+                // result of a nasty deadlock.)
+                for (_worker, endpoint) in workers.iter_mut() {
+                    let mut s = endpoint.lock().unwrap();
+                    let msg = CoordinationMessage {
+                        source: s.local_addr().unwrap(),
+                        payload: CoordinationPayload::DomainBooted((idx, shard), addr),
+                    };
+
+                    s.send(msg).unwrap();
+                }
+
+                if txs.len() == num_shards {
+                    StopPolling
+                } else {
+                    KeepPolling
+                }
+            }
+            PollEvent::Process(_) => unreachable!(),
+            PollEvent::Timeout => unreachable!(),
+        });
+
+        DomainHandle {
+            _idx: idx,
+            threads,
+            cr_poll,
+            txs,
+        }
     }
 
     pub fn shards(&self) -> usize {
@@ -146,234 +274,73 @@ impl DomainHandle {
             .collect()
     }
 
-    pub fn boot(
-        &mut self,
-        log: &Logger,
-        graph: &mut Graph,
-        config: &domain::Config,
-        readers: &flow::Readers,
-        nodes: Vec<(NodeIndex, bool)>,
-        persistence_params: &persistence::Parameters,
-        checktable: &Arc<Mutex<checktable::CheckTable>>,
-        channel_coordinator: &Arc<ChannelCoordinator>,
-        debug_tx: &Option<mpsc::Sender<debug::DebugEvent>>,
-        ts: i64,
-    ) {
-        for (i, ((tx, in_tx), back_tx)) in self.txs
-            .iter()
-            .zip(self.in_txs.iter())
-            .zip(self.back_txs.iter())
-            .enumerate()
-        {
-            channel_coordinator.insert_tx(
-                (self.idx, i),
-                ChannelSender::LocalSync(tx.clone()),
-                ChannelSender::LocalSync(in_tx.clone()),
-                ChannelSender::Local(back_tx.clone()),
-            );
-        }
-
-        let mut nodes = Some(Self::build_descriptors(graph, nodes));
-        let n = self.boot_args.len();
-        for (i, (rx, in_rx, back_rx, cr_tx)) in self.boot_args.drain(..).enumerate() {
-            let logger = if n == 1 {
-                log.new(o!("domain" => self.idx.index()))
-            } else {
-                log.new(o!("domain" => format!("{}.{}", self.idx.index(), i)))
-            };
-            let nodes = if i == n - 1 {
-                nodes.take().unwrap()
-            } else {
-                nodes.clone().unwrap()
-            };
-            let domain = domain::Domain::new(
-                logger,
-                self.idx,
-                i,
-                n,
-                nodes,
-                config.clone(),
-                readers,
-                persistence_params.clone(),
-                checktable.clone(),
-                channel_coordinator.clone(),
-                ts,
-            );
-            self.threads
-                .push(domain.boot(rx, in_rx, back_rx, cr_tx, debug_tx.clone()));
-        }
-    }
-
     pub fn wait(&mut self) {
         for t in self.threads.drain(..) {
             t.join().unwrap();
         }
     }
 
-    #[inline]
-    fn nextp(&mut self, i: usize, of: usize) -> Box<Packet> {
-        assert!(self.tx_buf.is_some());
-        if i == of - 1 {
-            return self.tx_buf.take().unwrap();
-        }
-
-        // DomainHandles are only used by Blender and its derivatives, never internally in the
-        // graph. Because of this, we know that we can only receive one of a small set of Packet
-        // types (all of which are clone-able). We deal with those here:
-        let p = self.tx_buf.as_ref().unwrap();
-        match **p {
-            Packet::Message { .. } => box p.clone_data(),
-            Packet::Transaction { .. } => box p.clone_data(),
-            Packet::AddNode {
-                ref node,
-                ref parents,
-            } => box Packet::AddNode {
-                node: node.clone(),
-                parents: parents.clone(),
-            },
-            Packet::AddBaseColumn {
-                node,
-                ref field,
-                ref default,
-            } => box Packet::AddBaseColumn {
-                node: node,
-                field: field.clone(),
-                default: default.clone(),
-            },
-            Packet::DropBaseColumn { node, column } => box Packet::DropBaseColumn { node, column },
-            Packet::UpdateEgress {
-                ref node,
-                ref new_tx,
-                ref new_tag,
-            } => box Packet::UpdateEgress {
-                node: node.clone(),
-                new_tx: new_tx.clone(),
-                new_tag: new_tag.clone(),
-            },
-            Packet::UpdateSharder {
-                ref node,
-                ref new_txs,
-            } => box Packet::UpdateSharder {
-                node: node.clone(),
-                new_txs: new_txs.clone(),
-            },
-            Packet::AddStreamer {
-                ref node,
-                ref new_streamer,
-            } => box Packet::AddStreamer {
-                node: node.clone(),
-                new_streamer: new_streamer.clone(),
-            },
-            Packet::PrepareState {
-                ref node,
-                ref state,
-            } => box Packet::PrepareState {
-                node: node.clone(),
-                state: state.clone(),
-            },
-            Packet::StateSizeProbe { ref node } => {
-                box Packet::StateSizeProbe { node: node.clone() }
-            }
-            Packet::SetupReplayPath {
-                ref tag,
-                ref source,
-                ref path,
-                notify_done,
-                ref trigger,
-            } => box Packet::SetupReplayPath {
-                tag: tag.clone(),
-                source: source.clone(),
-                path: path.clone(),
-                notify_done,
-                trigger: trigger.clone(),
-            },
-            Packet::RequestPartialReplay { ref tag, ref key } => box Packet::RequestPartialReplay {
-                tag: tag.clone(),
-                key: key.clone(),
-            },
-            Packet::StartReplay { ref tag, ref from } => box Packet::StartReplay {
-                tag: tag.clone(),
-                from: from.clone(),
-            },
-            Packet::Ready {
-                ref node,
-                ref index,
-            } => box Packet::Ready {
-                node: node.clone(),
-                index: index.clone(),
-            },
-            Packet::Quit => box Packet::Quit,
-            Packet::StartMigration {
-                ref at,
-                ref prev_ts,
-            } => box Packet::StartMigration {
-                at: at.clone(),
-                prev_ts: prev_ts.clone(),
-            },
-            Packet::CompleteMigration {
-                ref at,
-                ref ingress_from_base,
-                ref egress_for_base,
-            } => box Packet::CompleteMigration {
-                at: at.clone(),
-                ingress_from_base: ingress_from_base.clone(),
-                egress_for_base: egress_for_base.clone(),
-            },
-            Packet::GetStatistics => box Packet::GetStatistics,
-            _ => unreachable!(),
-        }
-    }
-
-    pub fn send(&mut self, p: Box<Packet>) -> Result<(), mpsc::SendError<Box<Packet>>> {
-        self.tx_buf = Some(p);
-        let txs = self.txs.len();
-        for i in 0..txs {
-            let p = self.nextp(i, txs);
-            self.txs[i].send(p)?;
-        }
-        Ok(())
-    }
-
-    pub fn send_to_shard(
-        &mut self,
-        i: usize,
-        p: Box<Packet>,
-    ) -> Result<(), mpsc::SendError<Box<Packet>>> {
-        self.txs[i].send(p)
-    }
-
-    pub fn wait_for_ack(&self) -> Result<(), WaitError> {
-        for rx in &self.cr_rxs {
-            match rx.recv() {
-                Ok(ControlReplyPacket::Ack(_)) => {}
-                Ok(r) => return Err(WaitError::WrongReply(r)),
-                Err(e) => return Err(WaitError::RecvError(e)),
+    pub fn send(&mut self, p: Box<Packet>) -> Result<(), tcp::SendError> {
+        for &mut (ref mut tx, is_local) in self.txs.iter_mut() {
+            if is_local {
+                // TODO: avoid clone on last iteration.
+                tx.send(p.clone().make_local())?;
+            } else {
+                tx.send_ref(&p)?;
             }
         }
         Ok(())
     }
 
-    pub fn wait_for_state_size(&self) -> Result<usize, WaitError> {
+    pub fn send_to_shard(&mut self, i: usize, mut p: Box<Packet>) -> Result<(), tcp::SendError> {
+        if self.txs[i].1 {
+            p = p.make_local();
+        }
+        self.txs[i].0.send(p)
+    }
+
+    fn wait_for_next_reply(&mut self) -> ControlReplyPacket {
+        let mut reply = None;
+        self.cr_poll.run_polling_loop(|event| match event {
+            PollEvent::Process(packet) => {
+                reply = Some(packet);
+                StopPolling
+            }
+            PollEvent::ResumePolling(_) => KeepPolling,
+            PollEvent::Timeout => unreachable!(),
+        });
+        reply.unwrap()
+    }
+
+    pub fn wait_for_ack(&mut self) -> Result<(), WaitError> {
+        for _ in 0..self.shards() {
+            match self.wait_for_next_reply() {
+                ControlReplyPacket::Ack(_) => {}
+                r => return Err(WaitError::WrongReply(r)),
+            }
+        }
+        Ok(())
+    }
+
+    pub fn wait_for_state_size(&mut self) -> Result<usize, WaitError> {
         let mut size = 0;
-        for rx in &self.cr_rxs {
-            match rx.recv() {
-                Ok(ControlReplyPacket::StateSize(s)) => size += s,
-                Ok(r) => return Err(WaitError::WrongReply(r)),
-                Err(e) => return Err(WaitError::RecvError(e)),
+        for _ in 0..self.shards() {
+            match self.wait_for_next_reply() {
+                ControlReplyPacket::StateSize(s) => size += s,
+                r => return Err(WaitError::WrongReply(r)),
             }
         }
         Ok(size)
     }
 
     pub fn wait_for_statistics(
-        &self,
+        &mut self,
     ) -> Result<Vec<(DomainStats, HashMap<NodeIndex, NodeStats>)>, WaitError> {
-        let mut stats = Vec::with_capacity(self.cr_rxs.len());
-        for rx in &self.cr_rxs {
-            match rx.recv() {
-                Ok(ControlReplyPacket::Statistics(d, s)) => stats.push((d, s)),
-                Ok(r) => return Err(WaitError::WrongReply(r)),
-                Err(e) => return Err(WaitError::RecvError(e)),
+        let mut stats = Vec::with_capacity(self.shards());
+        for _ in 0..self.shards() {
+            match self.wait_for_next_reply() {
+                ControlReplyPacket::Statistics(d, s) => stats.push((d, s)),
+                r => return Err(WaitError::WrongReply(r)),
             }
         }
         Ok(stats)

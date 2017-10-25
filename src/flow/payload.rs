@@ -1,4 +1,5 @@
 use petgraph;
+use serde::{Deserialize, Deserializer, Serialize, Serializer};
 
 #[cfg(debug_assertions)]
 use backtrace::Backtrace;
@@ -13,6 +14,7 @@ use flow::prelude::*;
 use std::fmt;
 use std::collections::{HashMap, HashSet};
 use std::time;
+use std::net::SocketAddr;
 
 #[derive(Clone, PartialEq, Serialize, Deserialize)]
 pub struct Link {
@@ -80,10 +82,7 @@ pub enum TransactionState {
         petgraph::graph::NodeIndex,
         Option<Box<HashMap<domain::Index, i64>>>,
     ),
-    Pending(
-        checktable::Token,
-        channel::TransactionReplySender<Result<i64, ()>>,
-    ),
+    Pending(checktable::Token, SocketAddr),
     WillCommit,
 }
 
@@ -112,7 +111,7 @@ pub type Tracer = Option<(u64, Option<channel::TraceSender<DebugEvent>>)>;
 pub type IngressFromBase = HashMap<petgraph::graph::NodeIndex, usize>;
 pub type EgressForBase = HashMap<petgraph::graph::NodeIndex, Vec<LocalNodeIndex>>;
 
-#[derive(Serialize, Deserialize)]
+#[derive(Clone, Serialize, Deserialize)]
 pub enum Packet {
     // Data messages
     //
@@ -251,6 +250,10 @@ pub enum Packet {
 
     /// The packet was captured awaiting the receipt of other replays.
     Captured,
+
+    /// The packet is being sent locally, so a pointer is sent to avoid
+    /// serialization/deserialization costs.
+    Local(LocalPacket),
 }
 
 impl Packet {
@@ -319,6 +322,17 @@ impl Packet {
             Packet::ReplayPiece { ref data, .. } => data,
             _ => unreachable!(),
         }
+    }
+
+    pub fn swap_data(&mut self, new_data: Records) -> Records {
+        use std::mem;
+        let inner = match *self {
+            Packet::Message { ref mut data, .. } => data,
+            Packet::Transaction { ref mut data, .. } => data,
+            Packet::ReplayPiece { ref mut data, .. } => data,
+            _ => unreachable!(),
+        };
+        mem::replace(inner, new_data)
     }
 
     pub fn take_data(&mut self) -> Records {
@@ -402,6 +416,18 @@ impl Packet {
             _ => None,
         }
     }
+
+    /// If self is `Packet::Local` then replace with the packet pointed to.
+    pub fn make_boxed_normal(self) -> Box<Self> {
+        match self {
+            Packet::Local(LocalPacket(ptr)) => unsafe { Box::from_raw(ptr) },
+            s => box s,
+        }
+    }
+
+    pub fn make_local(self: Box<Self>) -> Box<Self> {
+        Box::new(Packet::Local(LocalPacket(Box::into_raw(self))))
+    }
 }
 
 impl fmt::Debug for Packet {
@@ -438,7 +464,7 @@ impl fmt::Debug for Packet {
     }
 }
 
-#[derive(Debug)]
+#[derive(Debug, Serialize, Deserialize)]
 pub enum ControlReplyPacket {
     #[cfg(debug_assertions)] Ack(Backtrace),
     #[cfg(not(debug_assertions))] Ack(()),
@@ -447,6 +473,7 @@ pub enum ControlReplyPacket {
         statistics::DomainStats,
         HashMap<petgraph::graph::NodeIndex, statistics::NodeStats>,
     ),
+    Booted(usize, SocketAddr),
 }
 
 impl ControlReplyPacket {
@@ -458,5 +485,31 @@ impl ControlReplyPacket {
     #[cfg(not(debug_assertions))]
     pub fn ack() -> ControlReplyPacket {
         ControlReplyPacket::Ack(())
+    }
+}
+
+
+pub struct LocalPacket(*mut Packet);
+
+unsafe impl Send for LocalPacket {}
+impl Serialize for LocalPacket {
+    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: Serializer,
+    {
+        (self.0 as usize).serialize(serializer)
+    }
+}
+impl<'de> Deserialize<'de> for LocalPacket {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: Deserializer<'de>,
+    {
+        usize::deserialize(deserializer).map(|p| LocalPacket(p as *mut Packet))
+    }
+}
+impl Clone for LocalPacket {
+    fn clone(&self) -> LocalPacket {
+        panic!("LocalPacket cannot be cloned");
     }
 }

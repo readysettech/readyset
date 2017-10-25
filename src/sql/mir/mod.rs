@@ -8,10 +8,11 @@ pub use mir::to_flow::FlowNode;
 
 use ops::join::JoinType;
 
-use nom_sql::{Column, ColumnSpecification, ConditionBase, ConditionExpression, ConditionTree,
-              Literal, Operator, SqlQuery, TableKey};
+use nom_sql::{ArithmeticExpression, Column, ColumnSpecification, ConditionBase,
+              ConditionExpression, ConditionTree, Literal, Operator, SqlQuery, TableKey};
 use nom_sql::{LimitClause, OrderClause, SelectStatement};
 use sql::query_graph::{JoinRef, OutputColumn, QueryGraph, QueryGraphEdge};
+use sql::query_signature::Signature;
 
 use slog;
 use std::collections::{HashMap, HashSet};
@@ -184,6 +185,7 @@ impl SqlToMirConverter {
                 MirNodeType::Project {
                     emit: columns.clone(),
                     literals: vec![],
+                    arithmetic: vec![],
                 },
                 vec![parent.clone()],
                 vec![],
@@ -715,6 +717,7 @@ impl SqlToMirConverter {
             name,
             parent,
             vec![fn_col],
+            vec![],
             vec![(String::from("grp"), DataType::from(0 as i32))],
         )
     }
@@ -724,11 +727,17 @@ impl SqlToMirConverter {
         name: &str,
         parent_node: MirNodeRef,
         proj_cols: Vec<&Column>,
+        arithmetic: Vec<(String, ArithmeticExpression)>,
         literals: Vec<(String, DataType)>,
     ) -> MirNodeRef {
         //assert!(proj_cols.iter().all(|c| c.table == parent_name));
 
-        let literal_names: Vec<String> = literals.iter().map(|&(ref n, _)| n.clone()).collect();
+        let names: Vec<String> = literals
+            .iter()
+            .map(|&(ref n, _)| n.clone())
+            .chain(arithmetic.iter().map(|&(ref n, _)| n.clone()))
+            .collect();
+
         let fields = proj_cols
             .clone()
             .into_iter()
@@ -741,7 +750,7 @@ impl SqlToMirConverter {
                 },
                 None => c.clone(),
             })
-            .chain(literal_names.into_iter().map(|n| {
+            .chain(names.into_iter().map(|n| {
                 Column {
                     name: n,
                     alias: None,
@@ -773,6 +782,7 @@ impl SqlToMirConverter {
             MirNodeType::Project {
                 emit: emit_cols,
                 literals: literals,
+                arithmetic: arithmetic,
             },
             vec![parent_node.clone()],
             vec![],
@@ -855,7 +865,7 @@ impl SqlToMirConverter {
                         let last_left = left.last().unwrap().clone();
                         let last_right = right.last().unwrap().clone();
                         let union = self.make_union_node(
-                            &format!("{}_union", name),
+                            &format!("{}_un", name),
                             vec![last_left, last_right],
                             output_cols,
                         );
@@ -868,7 +878,8 @@ impl SqlToMirConverter {
                 }
             }
             ComparisonOp(ref ct) => {
-                // currently, we only support filter-like comparison operations, no nested-selections
+                // currently, we only support filter-like
+                // comparison operations, no nested-selections
                 let f = self.make_filter_node(&format!("{}_f{}", name, nc), parent, ct);
 
                 pred_nodes.push(f);
@@ -1396,6 +1407,7 @@ impl SqlToMirConverter {
             let mut projected_columns: Vec<&Column> = qg.columns
                 .iter()
                 .filter_map(|oc| match *oc {
+                    OutputColumn::Arithmetic(_) => None,
                     OutputColumn::Data(ref c) => Some(c),
                     OutputColumn::Literal(_) => None,
                 })
@@ -1405,9 +1417,20 @@ impl SqlToMirConverter {
                     projected_columns.push(pc);
                 }
             }
+            let projected_arithmetic: Vec<(String, ArithmeticExpression)> = qg.columns
+                .iter()
+                .filter_map(|oc| match *oc {
+                    OutputColumn::Arithmetic(ref ac) => {
+                        Some((ac.name.clone(), ac.expression.clone()))
+                    }
+                    OutputColumn::Data(_) => None,
+                    OutputColumn::Literal(_) => None,
+                })
+                .collect();
             let projected_literals: Vec<(String, DataType)> = qg.columns
                 .iter()
                 .filter_map(|oc| match *oc {
+                    OutputColumn::Arithmetic(_) => None,
                     OutputColumn::Data(_) => None,
                     OutputColumn::Literal(ref lc) => {
                         Some((lc.name.clone(), DataType::from(&lc.value)))
@@ -1416,8 +1439,14 @@ impl SqlToMirConverter {
                 .collect();
 
             let ident = format!("q_{:x}_n{}{}", qg.signature().hash, new_node_count, uformat);
-            let leaf_project_node =
-                self.make_project_node(&ident, final_node, projected_columns, projected_literals);
+            let leaf_project_node = self.make_project_node(
+                &ident,
+                final_node,
+                projected_columns,
+                projected_arithmetic,
+                projected_literals,
+            );
+
             nodes_added.push(leaf_project_node.clone());
 
             // We always materialize leaves of queries (at least currently), so add a

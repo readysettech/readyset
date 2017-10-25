@@ -1,15 +1,12 @@
-use nom_sql::{Column, ConditionBase, ConditionExpression, ConditionTree, FieldExpression,
-              JoinConstraint, JoinOperator, JoinRightSide, Literal, Operator};
+use nom_sql::{ArithmeticBase, ArithmeticExpression, Column, ConditionBase, ConditionExpression,
+              ConditionTree, FieldExpression, JoinConstraint, JoinOperator, JoinRightSide,
+              Literal, Operator};
 use nom_sql::SelectStatement;
-use nom_sql::ConditionExpression::*;
 
 use std::cmp::Ordering;
-use std::collections::{HashMap, HashSet};
-use std::hash::{Hash, Hasher};
+use std::collections::HashMap;
 use std::string::String;
 use std::vec::Vec;
-
-use sql::query_signature::QuerySignature;
 
 #[derive(Clone, Debug, Eq, Hash, PartialEq)]
 pub struct LiteralColumn {
@@ -19,14 +16,27 @@ pub struct LiteralColumn {
 }
 
 #[derive(Clone, Debug, Eq, Hash, PartialEq)]
+pub struct ArithmeticColumn {
+    pub name: String,
+    pub table: Option<String>,
+    pub expression: ArithmeticExpression,
+}
+
+#[derive(Clone, Debug, Eq, Hash, PartialEq)]
 pub enum OutputColumn {
     Data(Column),
+    Arithmetic(ArithmeticColumn),
     Literal(LiteralColumn),
 }
 
 impl Ord for OutputColumn {
     fn cmp(&self, other: &OutputColumn) -> Ordering {
         match *self {
+            OutputColumn::Arithmetic(ArithmeticColumn {
+                ref name,
+                ref table,
+                ..
+            }) |
             OutputColumn::Data(Column {
                 ref name,
                 ref table,
@@ -37,6 +47,11 @@ impl Ord for OutputColumn {
                 ref table,
                 ..
             }) => match *other {
+                OutputColumn::Arithmetic(ArithmeticColumn {
+                    name: ref other_name,
+                    table: ref other_table,
+                    ..
+                }) |
                 OutputColumn::Data(Column {
                     name: ref other_name,
                     table: ref other_table,
@@ -62,6 +77,11 @@ impl Ord for OutputColumn {
 impl PartialOrd for OutputColumn {
     fn partial_cmp(&self, other: &OutputColumn) -> Option<Ordering> {
         match *self {
+            OutputColumn::Arithmetic(ArithmeticColumn {
+                ref name,
+                ref table,
+                ..
+            }) |
             OutputColumn::Data(Column {
                 ref name,
                 ref table,
@@ -72,6 +92,11 @@ impl PartialOrd for OutputColumn {
                 ref table,
                 ..
             }) => match *other {
+                OutputColumn::Arithmetic(ArithmeticColumn {
+                    name: ref other_name,
+                    table: ref other_table,
+                    ..
+                }) |
                 OutputColumn::Data(Column {
                     name: ref other_name,
                     table: ref other_table,
@@ -151,73 +176,6 @@ impl QueryGraph {
                 acc.extend(qgn.parameters.iter());
                 acc
             })
-    }
-
-    /// Used to get a concise signature for a query graph. The `hash` member can be used to check
-    /// for identical sets of relations and attributes covered (as per Finkelstein algorithm),
-    /// while `relations` and `attributes` as `HashSet`s that allow for efficient subset checks.
-    pub fn signature(&self) -> QuerySignature {
-        use std::collections::hash_map::DefaultHasher;
-
-        let mut hasher = DefaultHasher::new();
-        let rels = self.relations.keys().map(|r| String::as_str(r)).collect();
-
-        // Compute relations part of hash
-        let mut r_vec: Vec<&str> = self.relations.keys().map(String::as_str).collect();
-        r_vec.sort();
-        for r in &r_vec {
-            r.hash(&mut hasher);
-        }
-
-        // Collect attributes from predicates and projected columns
-        let mut attrs = HashSet::<&Column>::new();
-        let mut attrs_vec = Vec::<&Column>::new();
-        for n in self.relations.values() {
-            for p in &n.predicates {
-                match *p {
-                    ComparisonOp(ref ct) | LogicalOp(ref ct) => for c in &ct.contained_columns() {
-                        attrs_vec.push(c);
-                        attrs.insert(c);
-                    },
-                    _ => unreachable!(),
-                }
-            }
-        }
-        for e in self.edges.values() {
-            match *e {
-                QueryGraphEdge::Join(ref join_predicates) |
-                QueryGraphEdge::LeftJoin(ref join_predicates) => for p in join_predicates {
-                    for c in &p.contained_columns() {
-                        attrs_vec.push(c);
-                        attrs.insert(c);
-                    }
-                },
-                QueryGraphEdge::GroupBy(ref cols) => for c in cols {
-                    attrs_vec.push(c);
-                    attrs.insert(c);
-                },
-            }
-        }
-
-        // Compute attributes part of hash
-        attrs_vec.sort();
-        for a in &attrs_vec {
-            a.hash(&mut hasher);
-        }
-
-        let mut proj_columns: Vec<&OutputColumn> = self.columns.iter().collect();
-        // Compute projected columns part of hash. We sort here since the order in which columns
-        // appear does not matter for query graph equivalence.
-        proj_columns.sort();
-        for c in proj_columns {
-            c.hash(&mut hasher);
-        }
-
-        QuerySignature {
-            relations: rels,
-            attributes: attrs,
-            hash: hasher.finish(),
-        }
     }
 }
 
@@ -408,9 +366,11 @@ pub fn to_query_graph(st: &SelectStatement) -> Result<QueryGraph, String> {
     let mut qg = QueryGraph::new();
 
     // a handy closure for making new relation nodes
-    let new_node =
-        |rel: String, preds: Vec<ConditionExpression>, st: &SelectStatement| -> QueryGraphNode {
-            QueryGraphNode {
+    let new_node = |rel: String,
+                    preds: Vec<ConditionExpression>,
+                    st: &SelectStatement|
+     -> QueryGraphNode {
+        QueryGraphNode {
             rel_name: rel.clone(),
             predicates: preds,
             columns: st.fields
@@ -422,6 +382,7 @@ pub fn to_query_graph(st: &SelectStatement) -> Result<QueryGraph, String> {
                     // No need to do anything for literals here, as they aren't associated with a
                     // relation (and thus have no QGN)
                     FieldExpression::Literal(_) => None,
+                    FieldExpression::Arithmetic(_) => None,
                     FieldExpression::Col(ref c) => {
                         match c.table.as_ref() {
                             None => {
@@ -444,7 +405,7 @@ pub fn to_query_graph(st: &SelectStatement) -> Result<QueryGraph, String> {
                 .collect(),
             parameters: Vec::new(),
         }
-        };
+    };
 
     // 1. Add any relations mentioned in the query to the query graph.
     // This is needed so that we don't end up with an empty query graph when there are no
@@ -642,6 +603,23 @@ pub fn to_query_graph(st: &SelectStatement) -> Result<QueryGraph, String> {
         }
     }
 
+    // Adds a computed column to the query graph if the given column has a function:
+    let add_computed_column = |query_graph: &mut QueryGraph, column: &Column| {
+        match column.function {
+            None => (), // we've already dealt with this column as part of some relation
+            Some(_) => {
+                // add a special node representing the computed columns; if it already
+                // exists, add another computed column to it
+                let n = query_graph
+                    .relations
+                    .entry(String::from("computed_columns"))
+                    .or_insert_with(|| new_node(String::from("computed_columns"), vec![], st));
+
+                n.columns.push(column.clone());
+            }
+        }
+    };
+
     // 4. Add query graph nodes for any computed columns, which won't be represented in the
     //    nodes corresponding to individual relations.
     for field in st.fields.iter() {
@@ -656,20 +634,23 @@ pub fn to_query_graph(st: &SelectStatement) -> Result<QueryGraph, String> {
                     value: l.clone(),
                 }));
             }
-            FieldExpression::Col(ref c) => {
-                match c.function {
-                    None => (), // we've already dealt with this column as part of some relation
-                    Some(_) => {
-                        // add a special node representing the computed columns; if it already
-                        // exists, add another computed column to it
-                        let n = qg.relations
-                            .entry(String::from("computed_columns"))
-                            .or_insert_with(
-                                || new_node(String::from("computed_columns"), vec![], st),
-                            );
-                        n.columns.push(c.clone());
-                    }
+            FieldExpression::Arithmetic(ref a) => {
+                if let ArithmeticBase::Column(ref c) = a.left {
+                    add_computed_column(&mut qg, c);
                 }
+
+                if let ArithmeticBase::Column(ref c) = a.right {
+                    add_computed_column(&mut qg, c);
+                }
+
+                qg.columns.push(OutputColumn::Arithmetic(ArithmeticColumn {
+                    name: String::from("arithmetic"),
+                    table: None,
+                    expression: a.clone(),
+                }));
+            }
+            FieldExpression::Col(ref c) => {
+                add_computed_column(&mut qg, c);
                 qg.columns.push(OutputColumn::Data(c.clone()));
             }
         }

@@ -129,29 +129,28 @@
 //! # use distributary::{Blender, Base, Aggregation, Join, JoinType};
 //! // set up graph
 //! let mut g = Blender::new();
-//! let mut mig = g.start_migration();
+//! g.migrate(|mig| {
+//!     // base types
+//!     let article = mig.add_ingredient("article", &["id", "title"], Base::default());
+//!     let vote = mig.add_ingredient("vote", &["user", "id"], Base::default());
 //!
-//! // base types
-//! let article = mig.add_ingredient("article", &["id", "title"], Base::default());
-//! let vote = mig.add_ingredient("vote", &["user", "id"], Base::default());
+//!     // vote count is an aggregation over vote where we group by the second field ([1])
+//!     let vc = mig.add_ingredient("vc", &["id", "votes"], Aggregation::COUNT.over(vote, 0, &[1]));
 //!
-//! // vote count is an aggregation over vote where we group by the second field ([1])
-//! let vc = mig.add_ingredient("vc", &["id", "votes"], Aggregation::COUNT.over(vote, 0, &[1]));
+//!     // add final join using first field from article and first from vc.
+//!     // joins are trickier because you need to specify what to join on. the vec![1, 0] here
+//!     // signifies that the first field of article and vc should be equal,
+//!     // and the second field can be whatever.
+//!     use distributary::JoinSource::*;
+//!     let j = Join::new(article, vc, JoinType::Inner, vec![B(0, 0), L(1), R(1)]);
+//!     let awvc = mig.add_ingredient("end", &["id", "title", "votes"], j);
 //!
-//! // add final join using first field from article and first from vc.
-//! // joins are trickier because you need to specify what to join on. the vec![1, 0] here
-//! // signifies that the first field of article and vc should be equal, and the second field can
-//! // be whatever.
-//! use distributary::JoinSource::*;
-//! let j = Join::new(article, vc, JoinType::Inner, vec![B(0, 0), L(1), R(1)]);
-//! let awvc = mig.add_ingredient("end", &["id", "title", "votes"], j);
+//!     // we want to be able to query awvc_q using "id"
+//!     let awvc_q = mig.maintain(awvc, 0);
+//!     # drop(awvc_q);
 //!
-//! // we want to be able to query awvc_q using "id"
-//! let awvc_q = mig.maintain(awvc, 0);
-//! # drop(awvc_q);
-//!
-//! // start the data flow graph
-//! mig.commit();
+//!     // returning will commit the migration and start the data flow graph
+//! });
 //! ```
 //!
 //! This may look daunting, but reading through you should quickly recognize the queries from
@@ -173,12 +172,9 @@
 //! ```rust
 //! # use distributary::{Blender, Base};
 //! # let mut g = Blender::new();
-//! # let article = {
-//! # let mut mig = g.start_migration();
-//! # let article = mig.add_ingredient("article", &["id", "title"], Base::default());
-//! # mig.commit();
-//! # article
-//! # };
+//! # let article = g.migrate(|mig|
+//! #     mig.add_ingredient("article", &["id", "title"], Base::default())
+//! # );
 //! let mut muta = g.get_mutator(article);
 //! muta.put(vec![1.into(), "Hello world".into()]);
 //! ```
@@ -236,12 +232,7 @@
 //! ```rust
 //! # use distributary::{Blender, Base};
 //! # let mut g = Blender::new();
-//! # let vote = {
-//! # let mut mig = g.start_migration();
-//! # let vote = mig.add_ingredient("vote", &["user", "id"], Base::default());
-//! # mig.commit();
-//! # vote
-//! # };
+//! # let vote = g.migrate(|mig| mig.add_ingredient("vote", &["user", "id"], Base::default()));
 //! let mut mutv = g.get_mutator(vote);
 //! mutv.put(vec![1000.into(), 1.into()]);
 //! ```
@@ -313,13 +304,14 @@
 //! propagating the `Update` since there are no descendant views.
 //!
 #![feature(optin_builtin_traits)]
-#![feature(mpsc_select)]
 #![feature(try_from)]
 #![feature(box_patterns)]
 #![feature(box_syntax)]
 #![feature(conservative_impl_trait)]
 #![feature(entry_or_default)]
 #![deny(missing_docs)]
+#![feature(plugin, use_extern_macros)]
+#![plugin(tarpc_plugins)]
 
 /// The number of domain threads to spin up for each sharded subtree of the data-flow graph.
 const SHARDS: usize = 2;
@@ -355,7 +347,6 @@ extern crate arccstr;
 extern crate arrayvec;
 extern crate evmap;
 extern crate fnv;
-extern crate hurdles;
 extern crate vec_map;
 
 extern crate itertools;
@@ -368,9 +359,7 @@ extern crate timekeeper;
 #[cfg(feature = "web")]
 extern crate rustful;
 
-#[cfg(feature = "b_netsoup")]
 extern crate bincode;
-#[cfg(feature = "b_netsoup")]
 extern crate bufstream;
 
 extern crate serde;
@@ -381,9 +370,14 @@ extern crate serde_json;
 
 extern crate buf_redux;
 extern crate chrono;
+extern crate mio;
+#[macro_use]
+extern crate tarpc;
+extern crate tokio_core;
+
+extern crate channel;
 
 mod backlog;
-mod channel;
 mod checktable;
 mod flow;
 mod mir;
@@ -392,16 +386,20 @@ mod recipe;
 mod sql;
 mod security;
 
+pub use backlog::SingleReadHandle;
 pub use checktable::{Token, TransactionResult};
-pub use flow::{Blender, Getter, Migration, Mutator, MutatorError};
+pub use flow::{Blender, Getter, Migration, Mutator, MutatorBuilder, MutatorError, ReadQuery,
+               ReadReply, RemoteGetter, RemoteGetterBuilder};
 pub use flow::core::{DataType, Datas};
 pub use petgraph::graph::NodeIndex;
+pub use flow::coordination::{CoordinationMessage, CoordinationPayload};
 pub use flow::node::StreamUpdate;
 pub use flow::debug::{DebugEvent, DebugEventType};
-pub use flow::domain::Index;
+pub use flow::domain::{DomainBuilder, Index};
 pub use flow::payload::PacketEvent;
 pub use flow::persistence::Parameters as PersistenceParameters;
 pub use flow::persistence::DurabilityMode;
+pub use flow::prelude::ChannelCoordinator;
 pub use ops::base::Base;
 pub use ops::grouped::aggregate::{Aggregation, Aggregator};
 pub use ops::grouped::concat::{GroupConcat, TextComponent};
@@ -430,6 +428,5 @@ pub fn logger_pls() -> slog::Logger {
 /// web provides a simple REST HTTP server for reading from and writing to the data flow graph.
 pub mod web;
 
-#[cfg(feature = "b_netsoup")]
 /// srv provides a networked RPC server for accessing the data flow graph.
 pub mod srv;

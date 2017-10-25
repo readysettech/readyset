@@ -11,13 +11,14 @@ use flow::prelude::NodeIndex;
 use mir::reuse as mir_reuse;
 use flow::core::DataType;
 use nom_sql::parser as sql_parser;
-use nom_sql::{Column, SqlQuery};
+use nom_sql::{ArithmeticBase, Column, SqlQuery};
 use nom_sql::SelectStatement;
 use self::mir::{MirNodeRef, SqlToMirConverter};
 use mir::query::MirQuery;
 use self::reuse::{ReuseConfig, ReuseConfigType};
 use sql::query_graph::{to_query_graph, QueryGraph};
 use self::security::UniverseId;
+use sql::query_signature::Signature;
 
 use slog;
 use std::collections::HashMap;
@@ -210,6 +211,18 @@ impl SqlIncorporator {
                     // GROUP BY clause
                     if qg.columns.iter().all(|c| match *c {
                         OutputColumn::Literal(_) => true,
+                        OutputColumn::Arithmetic(ref ac) => {
+                            let mut is_function = false;
+                            if let ArithmeticBase::Column(ref c) = ac.expression.left {
+                                is_function = is_function || c.function.is_some();
+                            }
+
+                            if let ArithmeticBase::Column(ref c) = ac.expression.right {
+                                is_function = is_function || c.function.is_some();
+                            }
+
+                            !is_function
+                        }
                         OutputColumn::Data(ref dc) => dc.function.is_none(),
                     }) {
                         // QGs are identical, except for parameters (or their order)
@@ -747,7 +760,7 @@ mod tests {
             // Should have two nodes: source and "users" base table
             let ncount = mig.graph().node_count();
             assert_eq!(ncount, 2);
-            assert_eq!(get_node(&inc, &*mig, "users").name(), "users");
+            assert_eq!(get_node(&inc, mig, "users").name(), "users");
 
             assert!(
                 "SELECT users.id from users;"
@@ -782,9 +795,9 @@ mod tests {
             );
             // Should have source and "users" base table node
             assert_eq!(mig.graph().node_count(), 2);
-            assert_eq!(get_node(&inc, &*mig, "users").name(), "users");
-            assert_eq!(get_node(&inc, &*mig, "users").fields(), &["id", "name"]);
-            assert_eq!(get_node(&inc, &*mig, "users").description(), "B");
+            assert_eq!(get_node(&inc, mig, "users").name(), "users");
+            assert_eq!(get_node(&inc, mig, "users").fields(), &["id", "name"]);
+            assert_eq!(get_node(&inc, mig, "users").description(), "B");
 
             // Establish a base write type for "articles"
             assert!(
@@ -796,12 +809,12 @@ mod tests {
             );
             // Should have source and "users" base table node
             assert_eq!(mig.graph().node_count(), 3);
-            assert_eq!(get_node(&inc, &*mig, "articles").name(), "articles");
+            assert_eq!(get_node(&inc, mig, "articles").name(), "articles");
             assert_eq!(
-                get_node(&inc, &*mig, "articles").fields(),
+                get_node(&inc, mig, "articles").fields(),
                 &["id", "author", "title"]
             );
-            assert_eq!(get_node(&inc, &*mig, "articles").description(), "B");
+            assert_eq!(get_node(&inc, mig, "articles").description(), "B");
 
             // Try a simple equi-JOIN query
             let q = "SELECT users.name, articles.title \
@@ -815,13 +828,13 @@ mod tests {
                 &[&Column::from("articles.title"), &Column::from("users.name")],
             );
             // join node
-            let new_join_view = get_node(&inc, &*mig, &format!("q_{:x}_n0", qid));
+            let new_join_view = get_node(&inc, mig, &format!("q_{:x}_n0", qid));
             assert_eq!(
                 new_join_view.fields(),
                 &["id", "author", "title", "id", "name"]
             );
             // leaf node
-            let new_leaf_view = get_node(&inc, &*mig, &q.unwrap().name);
+            let new_leaf_view = get_node(&inc, mig, &q.unwrap().name);
             assert_eq!(new_leaf_view.fields(), &["name", "title"]);
             assert_eq!(new_leaf_view.description(), format!("π[4, 2]"));
         });
@@ -840,9 +853,9 @@ mod tests {
             );
             // Should have source and "users" base table node
             assert_eq!(mig.graph().node_count(), 2);
-            assert_eq!(get_node(&inc, &*mig, "users").name(), "users");
-            assert_eq!(get_node(&inc, &*mig, "users").fields(), &["id", "name"]);
-            assert_eq!(get_node(&inc, &*mig, "users").description(), "B");
+            assert_eq!(get_node(&inc, mig, "users").name(), "users");
+            assert_eq!(get_node(&inc, mig, "users").fields(), &["id", "name"]);
+            assert_eq!(get_node(&inc, mig, "users").description(), "B");
 
             // Try a simple query
             let res = inc.add_query(
@@ -858,11 +871,11 @@ mod tests {
                 &[&Column::from("users.name")],
             );
             // filter node
-            let filter = get_node(&inc, &*mig, &format!("q_{:x}_n0_p0_f0", qid));
+            let filter = get_node(&inc, mig, &format!("q_{:x}_n0_p0_f0", qid));
             assert_eq!(filter.fields(), &["id", "name"]);
             assert_eq!(filter.description(), format!("σ[f0 = 42]"));
             // leaf view node
-            let edge = get_node(&inc, &*mig, &res.unwrap().name);
+            let edge = get_node(&inc, mig, &res.unwrap().name);
             assert_eq!(edge.fields(), &["name"]);
             assert_eq!(edge.description(), format!("π[1]"));
         });
@@ -881,9 +894,9 @@ mod tests {
             );
             // Should have source and "users" base table node
             assert_eq!(mig.graph().node_count(), 2);
-            assert_eq!(get_node(&inc, &*mig, "votes").name(), "votes");
-            assert_eq!(get_node(&inc, &*mig, "votes").fields(), &["aid", "userid"]);
-            assert_eq!(get_node(&inc, &*mig, "votes").description(), "B");
+            assert_eq!(get_node(&inc, mig, "votes").name(), "votes");
+            assert_eq!(get_node(&inc, mig, "votes").fields(), &["aid", "userid"]);
+            assert_eq!(get_node(&inc, mig, "votes").description(), "B");
 
             // Try a simple COUNT function
             let res = inc.add_query(
@@ -912,11 +925,11 @@ mod tests {
                     },
                 ],
             );
-            let agg_view = get_node(&inc, &*mig, &format!("q_{:x}_n0", qid));
+            let agg_view = get_node(&inc, mig, &format!("q_{:x}_n0", qid));
             assert_eq!(agg_view.fields(), &["aid", "votes"]);
             assert_eq!(agg_view.description(), format!("|*| γ[0]"));
             // check edge view
-            let edge_view = get_node(&inc, &*mig, &res.unwrap().name);
+            let edge_view = get_node(&inc, mig, &res.unwrap().name);
             assert_eq!(edge_view.fields(), &["votes"]);
             assert_eq!(edge_view.description(), format!("π[1]"));
         });
@@ -964,9 +977,9 @@ mod tests {
             );
             // Should have source and "users" base table node
             assert_eq!(mig.graph().node_count(), 2);
-            assert_eq!(get_node(&inc, &*mig, "users").name(), "users");
-            assert_eq!(get_node(&inc, &*mig, "users").fields(), &["id", "name"]);
-            assert_eq!(get_node(&inc, &*mig, "users").description(), "B");
+            assert_eq!(get_node(&inc, mig, "users").name(), "users");
+            assert_eq!(get_node(&inc, mig, "users").fields(), &["id", "name"]);
+            assert_eq!(get_node(&inc, mig, "users").description(), "B");
 
             // Add a new query
             let res = inc.add_query("SELECT id, name FROM users WHERE users.id = 42;", None, mig);
@@ -1002,12 +1015,12 @@ mod tests {
             );
             // Should have source and "users" base table node
             assert_eq!(mig.graph().node_count(), 2);
-            assert_eq!(get_node(&inc, &*mig, "users").name(), "users");
+            assert_eq!(get_node(&inc, mig, "users").name(), "users");
             assert_eq!(
-                get_node(&inc, &*mig, "users").fields(),
+                get_node(&inc, mig, "users").fields(),
                 &["id", "name", "address"]
             );
-            assert_eq!(get_node(&inc, &*mig, "users").description(), "B");
+            assert_eq!(get_node(&inc, mig, "users").description(), "B");
 
             // Add a new query
             let res = inc.add_query("SELECT id, name FROM users WHERE users.id = ?;", None, mig);
@@ -1028,7 +1041,7 @@ mod tests {
             assert_eq!(mig.graph().node_count(), ncount + 2);
             // only the identity node is returned in the vector of new nodes
             assert_eq!(qfp.new_nodes.len(), 1);
-            assert_eq!(get_node(&inc, &*mig, &qfp.name).description(), "≡");
+            assert_eq!(get_node(&inc, mig, &qfp.name).description(), "≡");
             // we should be based off the identity as our leaf
             let id_node = qfp.new_nodes.iter().next().unwrap();
             assert_eq!(qfp.query_leaf, *id_node);
@@ -1047,10 +1060,7 @@ mod tests {
             assert_eq!(mig.graph().node_count(), ncount + 2);
             // only the projection node is returned in the vector of new nodes
             assert_eq!(qfp.new_nodes.len(), 1);
-            assert_eq!(
-                get_node(&inc, &*mig, &qfp.name).description(),
-                "π[0, 1, 2]"
-            );
+            assert_eq!(get_node(&inc, mig, &qfp.name).description(), "π[0, 1, 2]");
             // we should be based off the new projection as our leaf
             let id_node = qfp.new_nodes.iter().next().unwrap();
             assert_eq!(qfp.query_leaf, *id_node);
@@ -1070,9 +1080,9 @@ mod tests {
             );
             // Should have source and "users" base table node
             assert_eq!(mig.graph().node_count(), 2);
-            assert_eq!(get_node(&inc, &*mig, "votes").name(), "votes");
-            assert_eq!(get_node(&inc, &*mig, "votes").fields(), &["aid", "userid"]);
-            assert_eq!(get_node(&inc, &*mig, "votes").description(), "B");
+            assert_eq!(get_node(&inc, mig, "votes").name(), "votes");
+            assert_eq!(get_node(&inc, mig, "votes").fields(), &["aid", "userid"]);
+            assert_eq!(get_node(&inc, mig, "votes").description(), "B");
             // Try a simple COUNT function without a GROUP BY clause
             let res = inc.add_query("SELECT COUNT(votes.userid) AS count FROM votes;", None, mig);
             assert!(res.is_ok());
@@ -1095,16 +1105,16 @@ mod tests {
                     },
                 ],
             );
-            let proj_helper_view = get_node(&inc, &*mig, &format!("q_{:x}_n0_prj_hlpr", qid));
+            let proj_helper_view = get_node(&inc, mig, &format!("q_{:x}_n0_prj_hlpr", qid));
             assert_eq!(proj_helper_view.fields(), &["userid", "grp"]);
             assert_eq!(proj_helper_view.description(), format!("π[1, lit: 0]"));
             // check aggregation view
-            let agg_view = get_node(&inc, &*mig, &format!("q_{:x}_n0", qid));
+            let agg_view = get_node(&inc, mig, &format!("q_{:x}_n0", qid));
             assert_eq!(agg_view.fields(), &["grp", "count"]);
             assert_eq!(agg_view.description(), format!("|*| γ[1]"));
             // check edge view -- note that it's not actually currently possible to read from
             // this for a lack of key (the value would be the key)
-            let edge_view = get_node(&inc, &*mig, &res.unwrap().name);
+            let edge_view = get_node(&inc, mig, &res.unwrap().name);
             assert_eq!(edge_view.fields(), &["count"]);
             assert_eq!(edge_view.description(), format!("π[1]"));
         });
@@ -1123,9 +1133,9 @@ mod tests {
             );
             // Should have source and "users" base table node
             assert_eq!(mig.graph().node_count(), 2);
-            assert_eq!(get_node(&inc, &*mig, "votes").name(), "votes");
-            assert_eq!(get_node(&inc, &*mig, "votes").fields(), &["userid", "aid"]);
-            assert_eq!(get_node(&inc, &*mig, "votes").description(), "B");
+            assert_eq!(get_node(&inc, mig, "votes").name(), "votes");
+            assert_eq!(get_node(&inc, mig, "votes").fields(), &["userid", "aid"]);
+            assert_eq!(get_node(&inc, mig, "votes").description(), "B");
             // Try a simple COUNT function without a GROUP BY clause
             let res = inc.add_query(
                 "SELECT COUNT(*) AS count FROM votes GROUP BY votes.userid;",
@@ -1149,12 +1159,12 @@ mod tests {
                     },
                 ],
             );
-            let agg_view = get_node(&inc, &*mig, &format!("q_{:x}_n0", qid));
+            let agg_view = get_node(&inc, mig, &format!("q_{:x}_n0", qid));
             assert_eq!(agg_view.fields(), &["userid", "count"]);
             assert_eq!(agg_view.description(), format!("|*| γ[0]"));
             // check edge view -- note that it's not actually currently possible to read from
             // this for a lack of key (the value would be the key)
-            let edge_view = get_node(&inc, &*mig, &res.unwrap().name);
+            let edge_view = get_node(&inc, mig, &res.unwrap().name);
             assert_eq!(edge_view.fields(), &["count"]);
             assert_eq!(edge_view.description(), format!("π[1]"));
         });
@@ -1260,13 +1270,13 @@ mod tests {
                     &Column::from("votes.uid"),
                 ],
             );
-            let join1_view = get_node(&inc, &*mig, &format!("q_{:x}_n0", qid));
+            let join1_view = get_node(&inc, mig, &format!("q_{:x}_n0", qid));
             // articles join votes
             assert_eq!(
                 join1_view.fields(),
                 &["aid", "title", "author", "id", "name"]
             );
-            let join2_view = get_node(&inc, &*mig, &format!("q_{:x}_n1", qid));
+            let join2_view = get_node(&inc, mig, &format!("q_{:x}_n1", qid));
             // join1_view join users
             assert_eq!(
                 join2_view.fields(),
@@ -1293,9 +1303,30 @@ mod tests {
             assert!(res.is_ok());
 
             // leaf view node
-            let edge = get_node(&inc, &*mig, &res.unwrap().name);
+            let edge = get_node(&inc, mig, &res.unwrap().name);
             assert_eq!(edge.fields(), &["name", "literal"]);
             assert_eq!(edge.description(), format!("π[1, lit: 1]"));
+        });
+    }
+
+    #[test]
+    fn it_incorporates_arithmetic_projection() {
+        // set up graph
+        let mut g = Blender::new();
+        let mut inc = SqlIncorporator::default();
+        g.migrate(|mig| {
+            assert!(
+                inc.add_query("CREATE TABLE users (id int, age int);", None, mig)
+                    .is_ok()
+            );
+
+            let res = inc.add_query("SELECT 2 * users.age FROM users;", None, mig);
+            assert!(res.is_ok());
+
+            // leaf view node
+            let edge = get_node(&inc, mig, &res.unwrap().name);
+            assert_eq!(edge.fields(), &["arithmetic"]);
+            assert_eq!(edge.description(), format!("π[(lit: 2) * 1]"));
         });
     }
 
@@ -1334,13 +1365,13 @@ mod tests {
                 ],
             );
             // join node
-            let new_join_view = get_node(&inc, &*mig, &format!("q_{:x}_n0", qid));
+            let new_join_view = get_node(&inc, mig, &format!("q_{:x}_n0", qid));
             assert_eq!(
                 new_join_view.fields(),
                 &["id", "name", "id", "author", "title"]
             );
             // leaf node
-            let new_leaf_view = get_node(&inc, &*mig, &q.unwrap().name);
+            let new_leaf_view = get_node(&inc, mig, &q.unwrap().name);
             assert_eq!(new_leaf_view.fields(), &["name", "title"]);
             assert_eq!(new_leaf_view.description(), format!("π[1, 4]"));
         });

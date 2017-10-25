@@ -79,9 +79,10 @@ where
 
     // is it a generated column?
     if resolved.len() == 1 && resolved[0].0 == node {
-        assert!(resolved[0].1.is_none()); // how could this be Some?
-                                          // path terminates here, and has no connection to ancestors
-                                          // so, we depend on *all* our *full* parents
+        // how could this be Some?
+        // path terminates here, and has no connection to ancestors
+        // so, we depend on *all* our *full* parents
+        assert!(resolved[0].1.is_none());
         let mut paths = Vec::with_capacity(parents.len());
         for p in parents {
             let mut path = path.clone();

@@ -8,9 +8,10 @@ use nom_sql::Literal;
 use serde_json::Value;
 
 use std::hash::{Hash, Hasher};
-use std::ops::{Deref, DerefMut};
+use std::ops::{Add, Deref, DerefMut, Div, Mul, Sub};
 use std::fmt;
 
+const FLOAT_PRECISION: f64 = 1000_000_000.0;
 const TINYTEXT_WIDTH: usize = 15;
 
 /// The main type used for user data throughout the codebase.
@@ -128,7 +129,7 @@ impl From<f64> for DataType {
         }
 
         let mut i = f.trunc() as i32;
-        let mut frac = (f.fract() * 1000_000_000.0).round() as i32;
+        let mut frac = (f.fract() * FLOAT_PRECISION).round() as i32;
         if frac == 1000_000_000 {
             i += 1;
             frac = 0;
@@ -202,6 +203,17 @@ impl Into<i64> for DataType {
     }
 }
 
+impl<'a> Into<f64> for &'a DataType {
+    fn into(self) -> f64 {
+        match self {
+            &DataType::Real(i, f) => i as f64 + (f as f64) / FLOAT_PRECISION,
+            &DataType::Int(i) => i as f64,
+            &DataType::BigInt(i) => i as f64,
+            _ => unreachable!(),
+        }
+    }
+}
+
 impl From<String> for DataType {
     fn from(s: String) -> Self {
         let len = s.as_bytes().len();
@@ -222,6 +234,67 @@ impl From<String> for DataType {
 impl<'a> From<&'a str> for DataType {
     fn from(s: &'a str) -> Self {
         DataType::from(s.to_owned())
+    }
+}
+
+// Performs an arithmetic operation on two numeric DataTypes,
+// returning a new DataType as the result.
+macro_rules! arithmetic_operation (
+    ($op:tt, $first:ident, $second:ident) => (
+        match ($first, $second) {
+            (&DataType::Int(a), &DataType::Int(b)) => (a $op b).into(),
+            (&DataType::BigInt(a), &DataType::BigInt(b)) => (a $op b).into(),
+            (&DataType::Int(a), &DataType::BigInt(b)) => ((a as i64) $op b).into(),
+            (&DataType::BigInt(a), &DataType::Int(b)) => (a $op (b as i64)).into(),
+
+            (first @ &DataType::Int(..), second @ &DataType::Real(..)) |
+            (first @ &DataType::Real(..), second @ &DataType::Int(..)) |
+            (first @ &DataType::Real(..), second @ &DataType::Real(..)) => {
+                let a: f64 = first.into();
+                let b: f64 = second.into();
+                (a $op b).into()
+            }
+            (first, second) => panic!(
+                format!(
+                    "can't {} a {:?} and {:?}",
+                    stringify!($op),
+                    first,
+                    second,
+                )
+            ),
+        }
+    );
+);
+
+impl<'a, 'b> Add<&'b DataType> for &'a DataType {
+    type Output = DataType;
+
+    fn add(self, other: &'b DataType) -> DataType {
+        arithmetic_operation!(+, self, other)
+    }
+}
+
+impl<'a, 'b> Sub<&'b DataType> for &'a DataType {
+    type Output = DataType;
+
+    fn sub(self, other: &'b DataType) -> DataType {
+        arithmetic_operation!(-, self, other)
+    }
+}
+
+impl<'a, 'b> Mul<&'b DataType> for &'a DataType {
+    type Output = DataType;
+
+    fn mul(self, other: &'b DataType) -> DataType {
+        arithmetic_operation!(*, self, other)
+    }
+}
+
+impl<'a, 'b> Div<&'b DataType> for &'a DataType {
+    type Output = DataType;
+
+    fn div(self, other: &'b DataType) -> DataType {
+        arithmetic_operation!(/, self, other)
     }
 }
 
@@ -440,6 +513,66 @@ mod tests {
         assert_eq!(a.to_json(), json!(2.5));
         assert_eq!(b.to_json(), json!(-2.01));
         assert_eq!(c.to_json(), json!(-0.012345678));
+    }
+
+    #[test]
+    fn real_to_float() {
+        let original = 2.5;
+        let data_type: DataType = original.into();
+        let converted: f64 = (&data_type).into();
+        assert_eq!(original, converted);
+    }
+
+    #[test]
+    fn add_data_types() {
+        assert_eq!(&DataType::from(1) + &DataType::from(2), 3.into());
+        assert_eq!(&DataType::from(1.5) + &DataType::from(2), (3.5).into());
+        assert_eq!(&DataType::from(2) + &DataType::from(1.5), (3.5).into());
+        assert_eq!(&DataType::from(1.5) + &DataType::from(2.5), (4.0).into());
+        assert_eq!(&DataType::BigInt(1) + &DataType::BigInt(2), 3.into());
+        assert_eq!(&DataType::from(1) + &DataType::BigInt(2), 3.into());
+        assert_eq!(&DataType::BigInt(2) + &DataType::from(1), 3.into());
+    }
+
+    #[test]
+    fn subtract_data_types() {
+        assert_eq!(&DataType::from(2) - &DataType::from(1), 1.into());
+        assert_eq!(&DataType::from(3.5) - &DataType::from(2), (1.5).into());
+        assert_eq!(&DataType::from(2) - &DataType::from(1.5), (0.5).into());
+        assert_eq!(&DataType::from(3.5) - &DataType::from(2.0), (1.5).into());
+        assert_eq!(&DataType::BigInt(1) - &DataType::BigInt(2), (-1).into());
+        assert_eq!(&DataType::from(1) - &DataType::BigInt(2), (-1).into());
+        assert_eq!(&DataType::BigInt(2) - &DataType::from(1), 1.into());
+    }
+
+    #[test]
+    fn multiply_data_types() {
+        assert_eq!(&DataType::from(2) * &DataType::from(1), 2.into());
+        assert_eq!(&DataType::from(3.5) * &DataType::from(2), (7.0).into());
+        assert_eq!(&DataType::from(2) * &DataType::from(1.5), (3.0).into());
+        assert_eq!(&DataType::from(3.5) * &DataType::from(2.0), (7.0).into());
+        assert_eq!(&DataType::BigInt(1) * &DataType::BigInt(2), 2.into());
+        assert_eq!(&DataType::from(1) * &DataType::BigInt(2), 2.into());
+        assert_eq!(&DataType::BigInt(2) * &DataType::from(1), 2.into());
+    }
+
+    #[test]
+    fn divide_data_types() {
+        assert_eq!(&DataType::from(2) / &DataType::from(1), 2.into());
+        assert_eq!(&DataType::from(7.5) / &DataType::from(2), (3.75).into());
+        assert_eq!(&DataType::from(7) / &DataType::from(2.5), (2.8).into());
+        assert_eq!(&DataType::from(3.5) / &DataType::from(2.0), (1.75).into());
+        assert_eq!(&DataType::BigInt(4) / &DataType::BigInt(2), 2.into());
+        assert_eq!(&DataType::from(4) / &DataType::BigInt(2), 2.into());
+        assert_eq!(&DataType::BigInt(4) / &DataType::from(2), 2.into());
+    }
+
+    #[test]
+    #[should_panic(expected = "can't + a TinyText(\"hi\") and Int(5)")]
+    fn add_invalid_types() {
+        let a: DataType = "hi".into();
+        let b: DataType = 5.into();
+        &a + &b;
     }
 
     #[test]

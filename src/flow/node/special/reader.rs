@@ -2,7 +2,6 @@ use backlog;
 use channel;
 use checktable;
 use flow::prelude::*;
-use hurdles::Barrier;
 
 /// A StreamUpdate reflects the addition or deletion of a row from a reader node.
 #[derive(Clone, Debug, PartialEq)]
@@ -33,11 +32,9 @@ impl From<Vec<DataType>> for StreamUpdate {
 pub struct Reader {
     #[serde(skip)] writer: Option<backlog::WriteHandle>,
 
-    #[serde(skip)] streamers: Option<Vec<channel::StreamSender<Vec<StreamUpdate>>>>,
+    #[serde(skip)] streamers: Vec<channel::StreamSender<Vec<StreamUpdate>>>,
 
     #[serde(skip)] token_generator: Option<checktable::TokenGenerator>,
-
-    #[serde(skip)] barrier: Option<Barrier>,
 
     for_node: NodeIndex,
     state: Option<usize>,
@@ -46,19 +43,12 @@ pub struct Reader {
 impl Clone for Reader {
     fn clone(&self) -> Self {
         assert!(self.writer.is_none());
-        assert!(
-            self.streamers
-                .as_ref()
-                .map(|s| s.is_empty())
-                .unwrap_or(true)
-        );
         Reader {
             writer: None,
             streamers: self.streamers.clone(),
             state: self.state.clone(),
             token_generator: self.token_generator.clone(),
             for_node: self.for_node,
-            barrier: self.barrier.clone(),
         }
     }
 }
@@ -67,17 +57,14 @@ impl Reader {
     pub fn new(for_node: NodeIndex) -> Self {
         Reader {
             writer: None,
-            streamers: Some(Vec::new()),
+            streamers: Vec::new(),
             state: None,
             token_generator: None,
             for_node,
-            barrier: None,
         }
     }
 
-    pub fn shard(&mut self, n: usize) {
-        self.barrier = Some(Barrier::new(n));
-    }
+    pub fn shard(&mut self, _: usize) {}
 
     pub fn is_for(&self) -> NodeIndex {
         self.for_node
@@ -92,13 +79,13 @@ impl Reader {
     }
 
     pub fn take(&mut self) -> Self {
+        use std::mem;
         Self {
             writer: self.writer.take(),
-            streamers: self.streamers.take(),
+            streamers: mem::replace(&mut self.streamers, Vec::new()),
             state: self.state.clone(),
             token_generator: self.token_generator.clone(),
             for_node: self.for_node,
-            barrier: self.barrier.take(),
         }
     }
 
@@ -106,12 +93,8 @@ impl Reader {
         &mut self,
         new_streamer: channel::StreamSender<Vec<StreamUpdate>>,
     ) -> Result<(), channel::StreamSender<Vec<StreamUpdate>>> {
-        if let Some(ref mut streamers) = self.streamers {
-            streamers.push(new_streamer);
-            Ok(())
-        } else {
-            Err(new_streamer)
-        }
+        self.streamers.push(new_streamer);
+        Ok(())
     }
 
     pub fn is_materialized(&self) -> bool {
@@ -198,7 +181,7 @@ impl Reader {
                 });
             }
 
-            if self.streamers.as_ref().unwrap().is_empty() {
+            if self.streamers.is_empty() {
                 state.add(m.take_data());
             } else {
                 state.add(m.data().iter().cloned());
@@ -212,17 +195,6 @@ impl Reader {
             }
 
             if swap {
-                if let Some(ref mut b) = self.barrier {
-                    if let Packet::Transaction { .. } = **m {
-                        // if the reader is sharded, we want to make sure *all* the shards are
-                        // about to expose this transaction timestamp. note that this will *block*
-                        // the current domain. that is *only* okay here because since *we* released
-                        // this transaction, the other shards must also have been sent a packet
-                        // with the same transaction timestamp, and thus are not waiting on us in
-                        // any way.
-                        b.wait();
-                    }
-                }
                 // TODO: avoid doing the pointer swap if we didn't modify anything (inc. ts)
                 state.swap();
             }
@@ -232,12 +204,12 @@ impl Reader {
 
         m.as_mut().unwrap().trace(PacketEvent::ReachedReader);
 
-        if !self.streamers.as_ref().unwrap().is_empty() {
+        if !self.streamers.is_empty() {
             let mut data = Some(m.take().unwrap().take_data()); // so we can .take() for last tx
-            let mut left = self.streamers.as_ref().unwrap().len();
+            let mut left = self.streamers.len();
 
             // remove any channels where the receiver has hung up
-            self.streamers.as_mut().unwrap().retain(|tx| {
+            self.streamers.retain(|tx| {
                 left -= 1;
                 if left == 0 {
                     tx.send(data.take().unwrap().into_iter().map(|r| r.into()).collect())

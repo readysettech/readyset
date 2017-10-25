@@ -5,6 +5,7 @@ use sql::mir::SqlToMirConverter;
 use sql::query_graph::QueryGraphEdge;
 use std::collections::{HashMap, HashSet};
 use flow::core::DataType;
+use sql::query_signature::Signature;
 
 pub trait SecurityBoundary {
     fn make_security_boundary(

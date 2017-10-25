@@ -4,7 +4,6 @@ use sql::query_graph::QueryGraph;
 use std::vec::Vec;
 use std::collections::HashMap;
 
-
 /// Full reuse algorithm
 /// Implementation of reuse algorithm that checks all available reuse options.
 /// This algorithm yields maximum reuse, since it checks all possible options.
