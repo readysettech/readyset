@@ -477,11 +477,11 @@ fn it_recovers_persisted_logs_w_transactions() {
     g.recover();
 
     for i in 1..10 {
-        let price = i * 10;
+        let b = i * 10;
         let (result, _token) = getter.transactional_lookup(&i.into()).unwrap();
         assert_eq!(result.len(), 1);
         assert_eq!(result[0][0], i.into());
-        assert_eq!(result[0][1], price.into());
+        assert_eq!(result[0][1], b.into());
     }
 }
 

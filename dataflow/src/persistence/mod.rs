@@ -146,27 +146,18 @@ pub fn retrieve_recovery_packets(
                 acc
             }))
             // Then create Packet objects from the data:
-            .enumerate()
-            .map(|(i, data)| {
+            .map(|data| {
                 let link = Link::new(*local_addr, *local_addr);
                 if node.is_transactional() {
-                    let id = checktable::TransactionId(i as u64);
-                    let transactions = vec![(id, data.clone(), None)];
-                    let request = checktable::service::TimestampRequest {
-                        transactions,
-                        base: global_addr,
-                    };
+                    let (ts, prevs) = checktable
+                        .recover(global_addr, node.fields().len())
+                        .unwrap();
 
-                    let reply = checktable.apply_batch(request).unwrap().unwrap();
                     Packet::Transaction {
                         link,
                         data,
                         tracer: None,
-                        state: TransactionState::Committed(
-                            reply.timestamp,
-                            global_addr,
-                            reply.prevs,
-                        ),
+                        state: TransactionState::Committed(ts, global_addr, prevs),
                     }
                 } else {
                     Packet::Message {
