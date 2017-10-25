@@ -2,6 +2,7 @@ use buf_redux::BufWriter;
 use buf_redux::strategy::WhenFull;
 
 use serde_json;
+use itertools::Itertools;
 
 use std::fs;
 use std::fs::{File, OpenOptions};
@@ -107,6 +108,8 @@ impl Parameters {
     }
 }
 
+const RECOVERY_BATCH_SIZE: usize = 512;
+
 /// Retrieves a vector of packets from the persistent log.
 pub fn retrieve_recovery_packets(
     nodes: &DomainNodes,
@@ -135,6 +138,14 @@ pub fn retrieve_recovery_packets(
                 entries.ok()
             })
             .flat_map(|r| r)
+            // Merge packets into batches of RECOVERY_BATCH_SIZE:
+            .chunks(RECOVERY_BATCH_SIZE)
+            .into_iter()
+            .map(|chunk| chunk.fold(Records::default(), |mut acc, ref mut data| {
+                acc.append(data);
+                acc
+            }))
+            // Then create Packet objects from the data:
             .enumerate()
             .map(|(i, data)| {
                 let link = Link::new(*local_addr, *local_addr);
