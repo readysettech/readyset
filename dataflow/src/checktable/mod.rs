@@ -6,7 +6,7 @@
 
 use petgraph::graph::NodeIndex;
 
-use std::collections::hash_map::{Entry, HashMap};
+use std::collections::HashMap;
 use std::fmt;
 use std::fmt::Debug;
 
@@ -285,11 +285,7 @@ impl CheckTable {
         }
     }
 
-    pub fn recover(
-        &mut self,
-        base: NodeIndex,
-        columns: usize,
-    ) -> (i64, Option<Box<HashMap<domain::Index, i64>>>) {
+    pub fn recover(&mut self, base: NodeIndex) -> (i64, Option<Box<HashMap<domain::Index, i64>>>) {
         // Take timestamp
         let ts = self.next_timestamp;
         self.next_timestamp += 1;
@@ -301,19 +297,10 @@ impl CheckTable {
         self.last_base = Some(base);
         self.toplevel.insert(base, ts);
 
-        // Set the timestamp for each column:
         let t = &mut self.granular.entry(base).or_default();
-        for i in 0..columns {
-            match t.entry(i) {
-                Entry::Occupied(mut entry) => {
-                    let g = entry.get_mut();
-                    assert!(g.0.is_empty(), "checktable should be empty before recovery");
-                    g.1 = ts;
-                }
-                Entry::Vacant(entry) => {
-                    entry.insert((HashMap::new(), ts));
-                }
-            }
+        for (_column, g) in t.iter_mut() {
+            assert!(g.0.is_empty(), "checktable should be empty before recovery");
+            g.1 = ts;
         }
 
         (ts, prev_times)

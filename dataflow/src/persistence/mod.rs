@@ -149,10 +149,7 @@ pub fn retrieve_recovery_packets(
             .map(|data| {
                 let link = Link::new(*local_addr, *local_addr);
                 if node.is_transactional() {
-                    let (ts, prevs) = checktable
-                        .recover(global_addr, node.fields().len())
-                        .unwrap();
-
+                    let (ts, prevs) = checktable.recover(global_addr).unwrap();
                     Packet::Transaction {
                         link,
                         data,
