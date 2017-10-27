@@ -7,7 +7,7 @@ env:
   - SETTLE_TIME=2000
 before_script:
   - export PATH="$PATH:$HOME/.cargo/bin"
-  - cargo install rustfmt-nightly --vers 0.2.9 --force
+  - cargo install --git https://github.com/rust-lang-nursery/rustfmt.git --rev 9754bcb535fa84c000fe78cb91b30c3f661fc849 --force
 script:
   - cargo fmt -- --write-mode=diff
   - cargo test --verbose
