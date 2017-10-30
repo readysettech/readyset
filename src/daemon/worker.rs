@@ -7,9 +7,9 @@ use std::time::{Duration, Instant};
 use std::thread::{self, JoinHandle};
 use std::sync::{Arc, Mutex};
 
-use distributary::{ChannelCoordinator, CoordinationMessage, CoordinationPayload, DomainBuilder,
-                   NodeIndex, ReadQuery, ReadReply, SingleReadHandle};
-use distributary::Index as DomainIndex;
+use {ChannelCoordinator, CoordinationMessage, CoordinationPayload, DomainBuilder, NodeIndex,
+     ReadQuery, ReadReply, SingleReadHandle};
+use Index as DomainIndex;
 
 pub struct Worker {
     log: Logger,
@@ -34,7 +34,7 @@ pub struct Worker {
 }
 
 impl Worker {
-    fn serve_reads(
+    pub fn serve_reads(
         mut polling_loop: RpcPollingLoop<ReadQuery, ReadReply>,
         readers: Arc<Mutex<HashMap<(NodeIndex, usize), SingleReadHandle>>>,
     ) {

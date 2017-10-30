@@ -25,7 +25,7 @@ use std::panic;
 use std::thread;
 use std::time;
 
-use distributary::{Blender, DataType, Recipe};
+use distributary::{Blender, DataType};
 
 const DIRECTORY_PREFIX: &str = "tests/mysql_comparison_tests";
 
@@ -271,25 +271,19 @@ fn check_query(
     query: &Query,
     target: &BTreeMap<String, Vec<Vec<String>>>,
 ) -> Result<(), String> {
-    let mut g = Blender::new();
-    let recipe = g.migrate(|mig| {
-        let queries: Vec<_> = tables
-            .values()
-            .map(|t| t.create_query.clone())
-            .chain(Some(query_name.to_owned() + ": " + &query.select_query))
-            .collect();
+    let queries: Vec<_> = tables
+        .values()
+        .map(|t| t.create_query.clone())
+        .chain(Some(query_name.to_owned() + ": " + &query.select_query))
+        .collect();
 
-        match Recipe::from_str(&queries.join("\n"), None) {
-            Ok(mut recipe) => {
-                recipe.activate(mig, false).unwrap();
-                recipe
-            }
-            Err(e) => panic!(e),
-        }
-    });
+    let g = Blender::new();
+    g.install_recipe(queries.join("\n"));
+    let inputs = g.inputs();
+    let outputs = g.outputs();
 
     for (table_name, table) in tables.iter() {
-        let mut mutator = g.get_mutator(recipe.node_addr_for(table_name).unwrap());
+        let mut mutator = g.get_mutator(inputs[table_name]).unwrap();
         for row in table.data.as_ref().unwrap().iter() {
             assert_eq!(row.len(), table.types.len());
             let row: Vec<DataType> = row.iter()
@@ -302,8 +296,8 @@ fn check_query(
 
     thread::sleep(time::Duration::from_millis(300));
 
-    let nd = recipe.node_addr_for(query_name).unwrap();
-    let getter = g.get_getter(nd).unwrap();
+    let nd = outputs[query_name];
+    let mut getter = g.get_getter(nd).unwrap();
 
     for (i, query_parameter) in query.values.iter().enumerate() {
         let query_param = query.types[0].make_datatype(&query_parameter[0]);

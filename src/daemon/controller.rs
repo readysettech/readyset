@@ -1,7 +1,7 @@
 use channel::tcp::TcpSender;
 use channel::poll::{PollEvent, PollingLoop};
-use distributary::{Blender, CoordinationMessage, CoordinationPayload};
-use distributary::Index as DomainIndex;
+use {Blender, CoordinationMessage, CoordinationPayload};
+use Index as DomainIndex;
 use slog::Logger;
 use std::io;
 use std::collections::HashMap;
@@ -135,11 +135,12 @@ impl Controller {
     ) -> Result<(), io::Error> {
         {
             let mut b = self.blender.lock().unwrap();
-            b.register_remote_domain(
-                domain.0,
-                domain.1,
-                self.read_addrs.get(&msg.source).unwrap().clone(),
-            );
+            // b.register_remote_domain(
+            //     domain.0,
+            //     domain.1,
+            //     self.read_addrs.get(&msg.source).unwrap().clone(),
+            // );
+            unimplemented!()
         }
 
         Ok(())
@@ -164,7 +165,8 @@ impl Controller {
         self.read_addrs.insert(msg.source.clone(), read_listen_addr);
 
         let mut b = self.blender.lock().unwrap();
-        b.add_worker(msg.source, sender);
+        //b.add_worker(msg.source, sender);
+        unimplemented!();
 
         Ok(())
     }

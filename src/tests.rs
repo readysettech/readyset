@@ -1,4 +1,34 @@
-extern crate distributary;
+
+use flow::prelude::*;
+use flow::ControllerBuilder;
+use backlog::SingleReadHandle;
+use checktable::{Token, TransactionResult};
+use flow::{Blender, Getter, Migration, Mutator, MutatorBuilder, MutatorError, ReadQuery,
+           ReadReply, RemoteGetter, RemoteGetterBuilder};
+use flow::core::{DataType, Datas};
+use petgraph::graph::NodeIndex;
+use flow::coordination::{CoordinationMessage, CoordinationPayload};
+use flow::node::StreamUpdate;
+use flow::debug::{DebugEvent, DebugEventType};
+use flow::domain::{DomainBuilder, Index};
+use flow::payload::PacketEvent;
+use flow::persistence::Parameters as PersistenceParameters;
+use flow::persistence::DurabilityMode;
+use flow::prelude::ChannelCoordinator;
+use ops::base::Base;
+use ops::grouped::aggregate::{Aggregation, Aggregator};
+use ops::grouped::concat::{GroupConcat, TextComponent};
+use ops::grouped::extremum::{Extremum, ExtremumOperator};
+use ops::identity::Identity;
+use ops::project::Project;
+use ops::join::{Join, JoinSource, JoinType};
+use ops::union::Union;
+use ops::latest::Latest;
+use ops::filter::{Filter, Operator};
+use ops::topk::TopK;
+use recipe::{ActivationResult, Recipe};
+use sql::{SqlIncorporator, ToFlowParts};
+use sql::reuse::ReuseConfigType;
 
 use std::time;
 use std::thread;
@@ -27,38 +57,30 @@ fn sleep() {
 #[test]
 fn it_works_basic() {
     // set up graph
-    let mut g = distributary::Blender::new();
-    let pparams = distributary::PersistenceParameters::new(
-        distributary::DurabilityMode::DeleteOnExit,
+    let mut g = ControllerBuilder::default().build_inner();
+    let pparams = PersistenceParameters::new(
+        DurabilityMode::DeleteOnExit,
         128,
         time::Duration::from_millis(1),
     );
     g.with_persistence_options(pparams);
     let (a, b, c) = g.migrate(|mig| {
-        let a = mig.add_ingredient(
-            "a",
-            &["a", "b"],
-            distributary::Base::new(vec![]).with_key(vec![0]),
-        );
-        let b = mig.add_ingredient(
-            "b",
-            &["a", "b"],
-            distributary::Base::new(vec![]).with_key(vec![0]),
-        );
+        let a = mig.add_ingredient("a", &["a", "b"], Base::new(vec![]).with_key(vec![0]));
+        let b = mig.add_ingredient("b", &["a", "b"], Base::new(vec![]).with_key(vec![0]));
 
         let mut emits = HashMap::new();
         emits.insert(a, vec![0, 1]);
         emits.insert(b, vec![0, 1]);
-        let u = distributary::Union::new(emits);
+        let u = Union::new(emits);
         let c = mig.add_ingredient("c", &["a", "b"], u);
         mig.maintain(c, 0);
         (a, b, c)
     });
 
-    let cq = g.get_getter(c).unwrap();
+    let mut cq = g.get_getter(c).unwrap();
     let mut muta = g.get_mutator(a);
     let mut mutb = g.get_mutator(b);
-    let id: distributary::DataType = 1.into();
+    let id: DataType = 1.into();
 
     // send a value on a
     muta.put(vec![id.clone(), 2.into()]).unwrap();
@@ -102,23 +124,23 @@ fn it_works_basic() {
 #[test]
 fn it_works_streaming() {
     // set up graph
-    let mut g = distributary::Blender::new();
+    let mut g = ControllerBuilder::default().build_inner();
     let (a, b, cq) = g.migrate(|mig| {
-        let a = mig.add_ingredient("a", &["a", "b"], distributary::Base::default());
-        let b = mig.add_ingredient("b", &["a", "b"], distributary::Base::default());
+        let a = mig.add_ingredient("a", &["a", "b"], Base::default());
+        let b = mig.add_ingredient("b", &["a", "b"], Base::default());
 
         let mut emits = HashMap::new();
         emits.insert(a, vec![0, 1]);
         emits.insert(b, vec![0, 1]);
-        let u = distributary::Union::new(emits);
+        let u = Union::new(emits);
         let c = mig.add_ingredient("c", &["a", "b"], u);
-        let cq = mig.stream(c);
+        let mut cq = mig.stream(c);
         (a, b, cq)
     });
 
     let mut muta = g.get_mutator(a);
     let mut mutb = g.get_mutator(b);
-    let id: distributary::DataType = 1.into();
+    let id: DataType = 1.into();
 
     // send a value on a
     muta.put(vec![id.clone(), 2.into()]).unwrap();
@@ -138,25 +160,25 @@ fn it_works_streaming() {
 #[test]
 fn shared_interdomain_ancestor() {
     // set up graph
-    let mut g = distributary::Blender::new();
+    let mut g = ControllerBuilder::default().build_inner();
     let (a, bq, cq) = g.migrate(|mig| {
-        let a = mig.add_ingredient("a", &["a", "b"], distributary::Base::default());
+        let a = mig.add_ingredient("a", &["a", "b"], Base::default());
 
         let mut emits = HashMap::new();
         emits.insert(a, vec![0, 1]);
 
-        let u = distributary::Union::new(emits.clone());
+        let u = Union::new(emits.clone());
         let b = mig.add_ingredient("b", &["a", "b"], u);
-        let bq = mig.stream(b);
+        let mut bq = mig.stream(b);
 
-        let u = distributary::Union::new(emits);
+        let u = Union::new(emits);
         let c = mig.add_ingredient("c", &["a", "b"], u);
-        let cq = mig.stream(c);
+        let mut cq = mig.stream(c);
         (a, bq, cq)
     });
 
     let mut muta = g.get_mutator(a);
-    let id: distributary::DataType = 1.into();
+    let id: DataType = 1.into();
 
     // send a value on a
     muta.put(vec![id.clone(), 2.into()]).unwrap();
@@ -184,24 +206,24 @@ fn shared_interdomain_ancestor() {
 #[test]
 fn it_works_w_mat() {
     // set up graph
-    let mut g = distributary::Blender::new();
+    let mut g = ControllerBuilder::default().build_inner();
     let (a, b, c) = g.migrate(|mig| {
-        let a = mig.add_ingredient("a", &["a", "b"], distributary::Base::default());
-        let b = mig.add_ingredient("b", &["a", "b"], distributary::Base::default());
+        let a = mig.add_ingredient("a", &["a", "b"], Base::default());
+        let b = mig.add_ingredient("b", &["a", "b"], Base::default());
 
         let mut emits = HashMap::new();
         emits.insert(a, vec![0, 1]);
         emits.insert(b, vec![0, 1]);
-        let u = distributary::Union::new(emits);
+        let u = Union::new(emits);
         let c = mig.add_ingredient("c", &["a", "b"], u);
         mig.maintain(c, 0);
         (a, b, c)
     });
 
-    let cq = g.get_getter(c).unwrap();
+    let mut cq = g.get_getter(c).unwrap();
     let mut muta = g.get_mutator(a);
     let mut mutb = g.get_mutator(b);
-    let id: distributary::DataType = 1.into();
+    let id: DataType = 1.into();
 
     // send a few values on a
     muta.put(vec![id.clone(), 1.into()]).unwrap();
@@ -241,25 +263,17 @@ fn it_works_w_mat() {
 #[test]
 fn it_works_deletion() {
     // set up graph
-    let mut g = distributary::Blender::new();
+    let mut g = ControllerBuilder::default().build_inner();
     let (a, b, cq) = g.migrate(|mig| {
-        let a = mig.add_ingredient(
-            "a",
-            &["x", "y"],
-            distributary::Base::new(vec![]).with_key(vec![1]),
-        );
-        let b = mig.add_ingredient(
-            "b",
-            &["_", "x", "y"],
-            distributary::Base::new(vec![]).with_key(vec![2]),
-        );
+        let a = mig.add_ingredient("a", &["x", "y"], Base::new(vec![]).with_key(vec![1]));
+        let b = mig.add_ingredient("b", &["_", "x", "y"], Base::new(vec![]).with_key(vec![2]));
 
         let mut emits = HashMap::new();
         emits.insert(a, vec![0, 1]);
         emits.insert(b, vec![1, 2]);
-        let u = distributary::Union::new(emits);
+        let u = Union::new(emits);
         let c = mig.add_ingredient("c", &["x", "y"], u);
-        let cq = mig.stream(c);
+        let mut cq = mig.stream(c);
         (a, b, cq)
     });
 
@@ -281,7 +295,7 @@ fn it_works_deletion() {
     );
 
     // delete first value
-    use distributary::StreamUpdate::*;
+    use StreamUpdate::*;
     muta.delete(vec![2.into()]).unwrap();
     assert_eq!(
         cq.recv_timeout(get_settle_time()),
@@ -291,14 +305,14 @@ fn it_works_deletion() {
 
 #[test]
 fn it_works_with_sql_recipe() {
-    let mut g = distributary::Blender::new();
+    let mut g = ControllerBuilder::default().build_inner();
     let sql = "
         CREATE TABLE Car (id int, brand varchar(255), PRIMARY KEY(id));
         CountCars: SELECT COUNT(*) FROM Car WHERE brand = ?;
     ";
 
     let recipe = g.migrate(|mig| {
-        let mut recipe = distributary::Recipe::from_str(&sql, None).unwrap();
+        let mut recipe = Recipe::from_str(&sql, None).unwrap();
         recipe.activate(mig, false).unwrap();
         recipe
     });
@@ -306,7 +320,7 @@ fn it_works_with_sql_recipe() {
     let car_index = recipe.node_addr_for("Car").unwrap();
     let count_index = recipe.node_addr_for("CountCars").unwrap();
     let mut mutator = g.get_mutator(car_index);
-    let getter = g.get_getter(count_index).unwrap();
+    let mut getter = g.get_getter(count_index).unwrap();
     let brands = vec!["Volvo", "Volvo", "Volkswagen"];
     for (i, &brand) in brands.iter().enumerate() {
         let id = i as i32;
@@ -324,14 +338,14 @@ fn it_works_with_sql_recipe() {
 
 #[test]
 fn it_works_with_simple_arithmetic() {
-    let mut g = distributary::Blender::new();
+    let mut g = ControllerBuilder::default().build_inner();
     let sql = "
         CREATE TABLE Car (id int, price int, PRIMARY KEY(id));
         CarPrice: SELECT 2 * price FROM Car WHERE id = ?;
     ";
 
     let recipe = g.migrate(|mig| {
-        let mut recipe = distributary::Recipe::from_str(&sql, None).unwrap();
+        let mut recipe = Recipe::from_str(&sql, None).unwrap();
         recipe.activate(mig, false).unwrap();
         recipe
     });
@@ -339,9 +353,9 @@ fn it_works_with_simple_arithmetic() {
     let car_index = recipe.node_addr_for("Car").unwrap();
     let count_index = recipe.node_addr_for("CarPrice").unwrap();
     let mut mutator = g.get_mutator(car_index);
-    let getter = g.get_getter(count_index).unwrap();
-    let id: distributary::DataType = 1.into();
-    let price: distributary::DataType = 123.into();
+    let mut getter = g.get_getter(count_index).unwrap();
+    let id: DataType = 1.into();
+    let price: DataType = 123.into();
     mutator.put(vec![id.clone(), price]).unwrap();
 
     // Let writes propagate:
@@ -355,14 +369,14 @@ fn it_works_with_simple_arithmetic() {
 
 #[test]
 fn it_works_with_multiple_arithmetic_expressions() {
-    let mut g = distributary::Blender::new();
+    let mut g = ControllerBuilder::default().build_inner();
     let sql = "
         CREATE TABLE Car (id int, price int, PRIMARY KEY(id));
         CarPrice: SELECT 10 * 10, 2 * price, 10 * price, FROM Car WHERE id = ?;
     ";
 
     let recipe = g.migrate(|mig| {
-        let mut recipe = distributary::Recipe::from_str(&sql, None).unwrap();
+        let mut recipe = Recipe::from_str(&sql, None).unwrap();
         recipe.activate(mig, false).unwrap();
         recipe
     });
@@ -370,9 +384,9 @@ fn it_works_with_multiple_arithmetic_expressions() {
     let car_index = recipe.node_addr_for("Car").unwrap();
     let count_index = recipe.node_addr_for("CarPrice").unwrap();
     let mut mutator = g.get_mutator(car_index);
-    let getter = g.get_getter(count_index).unwrap();
-    let id: distributary::DataType = 1.into();
-    let price: distributary::DataType = 123.into();
+    let mut getter = g.get_getter(count_index).unwrap();
+    let id: DataType = 1.into();
+    let price: DataType = 123.into();
     mutator.put(vec![id.clone(), price]).unwrap();
 
     // Let writes propagate:
@@ -388,7 +402,7 @@ fn it_works_with_multiple_arithmetic_expressions() {
 
 #[test]
 fn it_works_with_join_arithmetic() {
-    let mut g = distributary::Blender::new();
+    let mut g = ControllerBuilder::default().build_inner();
     let sql = "
         CREATE TABLE Car (car_id int, price_id int, PRIMARY KEY(car_id));
         CREATE TABLE Price (price_id int, price int, PRIMARY KEY(price_id));
@@ -400,7 +414,7 @@ fn it_works_with_join_arithmetic() {
     ";
 
     let recipe = g.migrate(|mig| {
-        let mut recipe = distributary::Recipe::from_str(&sql, None).unwrap();
+        let mut recipe = Recipe::from_str(&sql, None).unwrap();
         recipe.activate(mig, false).unwrap();
         recipe
     });
@@ -412,7 +426,7 @@ fn it_works_with_join_arithmetic() {
     let mut car_mutator = g.get_mutator(car_index);
     let mut price_mutator = g.get_mutator(price_index);
     let mut sales_mutator = g.get_mutator(sales_index);
-    let getter = g.get_getter(query_index).unwrap();
+    let mut getter = g.get_getter(query_index).unwrap();
     let id = 1;
     let price = 123;
     let fraction = 0.7;
@@ -433,14 +447,14 @@ fn it_works_with_join_arithmetic() {
 
 #[test]
 fn it_works_with_function_arithmetic() {
-    let mut g = distributary::Blender::new();
+    let mut g = ControllerBuilder::default().build_inner();
     let sql = "
         CREATE TABLE Bread (id int, price int, PRIMARY KEY(id));
         Price: SELECT 2 * MAX(price) FROM Bread;
     ";
 
     let recipe = g.migrate(|mig| {
-        let mut recipe = distributary::Recipe::from_str(&sql, None).unwrap();
+        let mut recipe = Recipe::from_str(&sql, None).unwrap();
         recipe.activate(mig, false).unwrap();
         recipe
     });
@@ -448,7 +462,7 @@ fn it_works_with_function_arithmetic() {
     let bread_index = recipe.node_addr_for("Bread").unwrap();
     let query_index = recipe.node_addr_for("Price").unwrap();
     let mut mutator = g.get_mutator(bread_index);
-    let getter = g.get_getter(query_index).unwrap();
+    let mut getter = g.get_getter(query_index).unwrap();
     let max_price = 20;
     for (i, price) in (10..max_price + 1).enumerate() {
         let id = (i + 1) as i32;
@@ -459,7 +473,7 @@ fn it_works_with_function_arithmetic() {
     sleep();
 
     // Retrieve the result of the count query:
-    let key = distributary::DataType::BigInt(max_price * 2);
+    let key = DataType::BigInt(max_price * 2);
     let result = getter.lookup(&key, true).unwrap();
     assert_eq!(result.len(), 1);
     assert_eq!(result[0][0], key);
@@ -467,10 +481,10 @@ fn it_works_with_function_arithmetic() {
 
 #[test]
 fn votes() {
-    use distributary::{Aggregation, Base, Join, JoinType, Union};
+    use {Aggregation, Base, Join, JoinType, Union};
 
     // set up graph
-    let mut g = distributary::Blender::new();
+    let mut g = ControllerBuilder::default().build_inner();
     let (article1, article2, vote, article, vc, end) = g.migrate(|mig| {
         // add article base nodes (we use two so we can exercise unions too)
         let article1 = mig.add_ingredient("article1", &["id", "title"], Base::default());
@@ -496,7 +510,7 @@ fn votes() {
         mig.maintain(vc, 0);
 
         // add final join using first field from article and first from vc
-        use distributary::JoinSource::*;
+        use JoinSource::*;
         let j = Join::new(article, vc, JoinType::Inner, vec![B(0, 0), L(1), R(1)]);
         let end = mig.add_ingredient("end", &["id", "title", "votes"], j);
         mig.maintain(end, 0);
@@ -504,16 +518,16 @@ fn votes() {
         (article1, article2, vote, article, vc, end)
     });
 
-    let articleq = g.get_getter(article).unwrap();
-    let vcq = g.get_getter(vc).unwrap();
-    let endq = g.get_getter(end).unwrap();
+    let mut articleq = g.get_getter(article).unwrap();
+    let mut vcq = g.get_getter(vc).unwrap();
+    let mut endq = g.get_getter(end).unwrap();
 
     let mut mut1 = g.get_mutator(article1);
     let mut mut2 = g.get_mutator(article2);
     let mut mutv = g.get_mutator(vote);
 
-    let a1: distributary::DataType = 1.into();
-    let a2: distributary::DataType = 2.into();
+    let a1: DataType = 1.into();
+    let a2: DataType = 2.into();
 
     // make one article
     mut1.put(vec![a1.clone(), 2.into()]).unwrap();
@@ -573,11 +587,12 @@ fn votes() {
 
 #[test]
 fn transactional_vote() {
-    use distributary::{Aggregation, Base, Identity, Join, JoinType, Union};
+    use {Aggregation, Base, Identity, Join, JoinType, Union};
 
     // set up graph
-    let mut g = distributary::Blender::new();
+    let mut g = ControllerBuilder::default();
     g.disable_partial(); // because end_votes forces full below partial
+    let mut g = g.build_inner();
     let validate = g.get_validator();
 
     let (article1, article2, vote, article, vc, end, end_title, end_votes) = g.migrate(|mig| {
@@ -605,7 +620,7 @@ fn transactional_vote() {
         mig.maintain(vc, 0);
 
         // add final join using first field from article and first from vc
-        use distributary::JoinSource::*;
+        use JoinSource::*;
         let j = Join::new(article, vc, JoinType::Inner, vec![B(0, 0), L(1), R(1)]);
         let end = mig.add_ingredient("end", &["id", "title", "votes"], j);
         let end_title = mig.add_ingredient("end2", &["id", "title", "votes"], Identity::new(end));
@@ -628,7 +643,7 @@ fn transactional_vote() {
     });
 
     let mut articleq = g.get_getter(article).unwrap();
-    let vcq = g.get_getter(vc).unwrap();
+    let mut vcq = g.get_getter(vc).unwrap();
     let mut endq = g.get_getter(end).unwrap();
     let mut endq_title = g.get_getter(end_title).unwrap();
     let mut endq_votes = g.get_getter(end_votes).unwrap();
@@ -637,14 +652,14 @@ fn transactional_vote() {
     let mut mut2 = g.get_mutator(article2);
     let mut mutv = g.get_mutator(vote);
 
-    let a1: distributary::DataType = 1.into();
-    let a2: distributary::DataType = 2.into();
+    let a1: DataType = 1.into();
+    let a2: DataType = 2.into();
 
     let token = articleq.transactional_lookup(&a1).unwrap().1;
 
-    let endq_token = endq.transactional_lookup(&a2).unwrap().1;
-    let endq_title_token = endq_title.transactional_lookup(&4.into()).unwrap().1;
-    let endq_votes_token = endq_votes.transactional_lookup(&0.into()).unwrap().1;
+    let mut endq_token = endq.transactional_lookup(&a2).unwrap().1;
+    let mut endq_title_token = endq_title.transactional_lookup(&4.into()).unwrap().1;
+    let mut endq_votes_token = endq_votes.transactional_lookup(&0.into()).unwrap().1;
 
     // make one article
     assert!(
@@ -688,9 +703,9 @@ fn transactional_vote() {
     token.merge(token2);
     assert!(validate(&token));
 
-    let endq_token = endq.transactional_lookup(&a1).unwrap().1;
-    let endq_title_token = endq_title.transactional_lookup(&4.into()).unwrap().1;
-    let endq_votes_token = endq_votes.transactional_lookup(&0.into()).unwrap().1;
+    let mut endq_token = endq.transactional_lookup(&a1).unwrap().1;
+    let mut endq_title_token = endq_title.transactional_lookup(&4.into()).unwrap().1;
+    let mut endq_votes_token = endq_votes.transactional_lookup(&0.into()).unwrap().1;
 
     // create a vote (user 1 votes for article 1)
     assert!(
@@ -730,26 +745,26 @@ fn transactional_vote() {
 #[test]
 fn empty_migration() {
     // set up graph
-    let mut g = distributary::Blender::new();
+    let mut g = ControllerBuilder::default().build_inner();
     g.migrate(|_| {});
 
     let (a, b, c) = g.migrate(|mig| {
-        let a = mig.add_ingredient("a", &["a", "b"], distributary::Base::default());
-        let b = mig.add_ingredient("b", &["a", "b"], distributary::Base::default());
+        let a = mig.add_ingredient("a", &["a", "b"], Base::default());
+        let b = mig.add_ingredient("b", &["a", "b"], Base::default());
 
         let mut emits = HashMap::new();
         emits.insert(a, vec![0, 1]);
         emits.insert(b, vec![0, 1]);
-        let u = distributary::Union::new(emits);
+        let u = Union::new(emits);
         let c = mig.add_ingredient("c", &["a", "b"], u);
         mig.maintain(c, 0);
         (a, b, c)
     });
 
-    let cq = g.get_getter(c).unwrap();
+    let mut cq = g.get_getter(c).unwrap();
     let mut muta = g.get_mutator(a);
     let mut mutb = g.get_mutator(b);
-    let id: distributary::DataType = 1.into();
+    let id: DataType = 1.into();
 
     // send a value on a
     muta.put(vec![id.clone(), 2.into()]).unwrap();
@@ -774,17 +789,17 @@ fn empty_migration() {
 
 #[test]
 fn simple_migration() {
-    let id: distributary::DataType = 1.into();
+    let id: DataType = 1.into();
 
     // set up graph
-    let mut g = distributary::Blender::new();
+    let mut g = ControllerBuilder::default().build_inner();
     let a = g.migrate(|mig| {
-        let a = mig.add_ingredient("a", &["a", "b"], distributary::Base::default());
+        let a = mig.add_ingredient("a", &["a", "b"], Base::default());
         mig.maintain(a, 0);
         a
     });
 
-    let aq = g.get_getter(a).unwrap();
+    let mut aq = g.get_getter(a).unwrap();
     let mut muta = g.get_mutator(a);
 
     // send a value on a
@@ -798,12 +813,12 @@ fn simple_migration() {
 
     // add unrelated node b in a migration
     let b = g.migrate(|mig| {
-        let b = mig.add_ingredient("b", &["a", "b"], distributary::Base::default());
+        let b = mig.add_ingredient("b", &["a", "b"], Base::default());
         mig.maintain(b, 0);
         b
     });
 
-    let bq = g.get_getter(b).unwrap();
+    let mut bq = g.get_getter(b).unwrap();
     let mut mutb = g.get_mutator(b);
 
     // send a value on b
@@ -818,17 +833,13 @@ fn simple_migration() {
 
 #[test]
 fn add_columns() {
-    let id: distributary::DataType = "x".into();
+    let id: DataType = "x".into();
 
     // set up graph
-    let mut g = distributary::Blender::new();
+    let mut g = ControllerBuilder::default().build_inner();
     let (a, aq) = g.migrate(|mig| {
-        let a = mig.add_ingredient(
-            "a",
-            &["a", "b"],
-            distributary::Base::new(vec![1.into(), 2.into()]),
-        );
-        let aq = mig.stream(a);
+        let a = mig.add_ingredient("a", &["a", "b"], Base::new(vec![1.into(), 2.into()]));
+        let mut aq = mig.stream(a);
         (a, aq)
     });
     let mut muta = g.get_mutator(a);
@@ -869,16 +880,12 @@ fn add_columns() {
 
 #[test]
 fn migrate_added_columns() {
-    let id: distributary::DataType = "x".into();
+    let id: DataType = "x".into();
 
     // set up graph
-    let mut g = distributary::Blender::new();
+    let mut g = ControllerBuilder::default().build_inner();
     let a = g.migrate(|mig| {
-        let a = mig.add_ingredient(
-            "a",
-            &["a", "b"],
-            distributary::Base::new(vec![1.into(), 2.into()]),
-        );
+        let a = mig.add_ingredient("a", &["a", "b"], Base::new(vec![1.into(), 2.into()]));
         a
     });
     let mut muta = g.get_mutator(a);
@@ -890,16 +897,12 @@ fn migrate_added_columns() {
     // add a third column to a, and a view that uses it
     let b = g.migrate(|mig| {
         mig.add_column(a, "c", 3.into());
-        let b = mig.add_ingredient(
-            "x",
-            &["c", "b"],
-            distributary::Project::new(a, &[2, 0], None, None),
-        );
+        let b = mig.add_ingredient("x", &["c", "b"], Project::new(a, &[2, 0], None, None));
         mig.maintain(b, 1);
         b
     });
 
-    let bq = g.get_getter(b).unwrap();
+    let mut bq = g.get_getter(b).unwrap();
 
     // send another (old) value on a
     muta.put(vec![id.clone(), "z".into()]).unwrap();
@@ -925,16 +928,12 @@ fn migrate_added_columns() {
 
 #[test]
 fn migrate_drop_columns() {
-    let id: distributary::DataType = "x".into();
+    let id: DataType = "x".into();
 
     // set up graph
-    let mut g = distributary::Blender::new();
+    let mut g = ControllerBuilder::default().build_inner();
     let (a, stream) = g.migrate(|mig| {
-        let a = mig.add_ingredient(
-            "a",
-            &["a", "b"],
-            distributary::Base::new(vec!["a".into(), "b".into()]),
-        );
+        let a = mig.add_ingredient("a", &["a", "b"], Base::new(vec!["a".into(), "b".into()]));
         let stream = mig.stream(a);
         (a, stream)
     });
@@ -998,61 +997,51 @@ fn migrate_drop_columns() {
 #[test]
 fn key_on_added() {
     // set up graph
-    let mut g = distributary::Blender::new();
+    let mut g = ControllerBuilder::default().build_inner();
     let a = g.migrate(|mig| {
-        let a = mig.add_ingredient(
-            "a",
-            &["a", "b"],
-            distributary::Base::new(vec![1.into(), 2.into()]),
-        );
+        let a = mig.add_ingredient("a", &["a", "b"], Base::new(vec![1.into(), 2.into()]));
         a
     });
 
     // add a maintained view keyed on newly added column
     let b = g.migrate(|mig| {
         mig.add_column(a, "c", 3.into());
-        let b = mig.add_ingredient(
-            "x",
-            &["c", "b"],
-            distributary::Project::new(a, &[2, 1], None, None),
-        );
+        let b = mig.add_ingredient("x", &["c", "b"], Project::new(a, &[2, 1], None, None));
         mig.maintain(b, 0);
         b
     });
 
     // make sure we can read (may trigger a replay)
-    let bq = g.get_getter(b).unwrap();
+    let mut bq = g.get_getter(b).unwrap();
     assert!(bq.lookup(&3.into(), true).unwrap().is_empty());
 }
 
 #[test]
 fn replay_during_replay() {
+    panic!("Unwrap fails causing test to fail. TODO: figure out why");
     // what we're trying to set up here is a case where a join receives a record with a value for
     // the join key that does not exist in the view the record was sent from. since joins only do
     // lookups into the origin view during forward processing when it receives things from the
     // right in a left join, that's what we have to construct.
-    let mut g = distributary::Blender::new();
-    g.disable_sharding();
+    let mut g = ControllerBuilder::default();
+    g.disable_partial();
+    let mut g = g.build_inner();
     let (a, u1, u2) = g.migrate(|mig| {
         // we need three bases:
         //
         //  - a will be the left side of the left join
         //  - u1 and u2 will be joined together with a regular one-to-one join to produce a partial
         //    view (remember, we need to miss in the source of the replay, so it must be partial).
-        let a = mig.add_ingredient("a", &["a"], distributary::Base::new(vec![1.into()]));
-        let u1 = mig.add_ingredient("u1", &["u"], distributary::Base::new(vec![1.into()]));
-        let u2 = mig.add_ingredient(
-            "u2",
-            &["u", "a"],
-            distributary::Base::new(vec![1.into(), 2.into()]),
-        );
+        let a = mig.add_ingredient("a", &["a"], Base::new(vec![1.into()]));
+        let u1 = mig.add_ingredient("u1", &["u"], Base::new(vec![1.into()]));
+        let u2 = mig.add_ingredient("u2", &["u", "a"], Base::new(vec![1.into(), 2.into()]));
         (a, u1, u2)
     });
 
     // add our joins
     let (u, target) = g.migrate(|mig| {
-        use distributary::{Join, JoinType};
-        use distributary::JoinSource::*;
+        use {Join, JoinType};
+        use JoinSource::*;
         // u = u1 * u2
         let j = Join::new(u1, u2, JoinType::Inner, vec![B(0, 0), R(1)]);
         let u = mig.add_ingredient("u", &["u", "a"], j);
@@ -1089,7 +1078,7 @@ fn replay_during_replay() {
 
     // since u and target are both partial, the writes should not actually have propagated through
     // yet. do a read to see that one makes it through correctly:
-    let r = g.get_getter(target).unwrap();
+    let mut r = g.get_getter(target).unwrap();
 
     assert_eq!(
         r.lookup(&1.into(), true),
@@ -1102,7 +1091,7 @@ fn replay_during_replay() {
         mig.maintain(u, 0);
     });
 
-    let second = g.get_getter(u).unwrap();
+    let mut second = g.get_getter(u).unwrap();
 
     // second is partial and empty, so any read should trigger a replay.
     // though that shouldn't interact with target in any way.
@@ -1136,9 +1125,9 @@ fn replay_during_replay() {
 #[test]
 fn full_aggregation_with_bogokey() {
     // set up graph
-    let mut g = distributary::Blender::new();
+    let mut g = ControllerBuilder::default().build_inner();
     let base = g.migrate(|mig| {
-        mig.add_ingredient("base", &["x"], distributary::Base::new(vec![1.into()]))
+        mig.add_ingredient("base", &["x"], Base::new(vec![1.into()]))
     });
 
     // add an aggregation over the base with a bogo key.
@@ -1147,18 +1136,18 @@ fn full_aggregation_with_bogokey() {
         let bogo = mig.add_ingredient(
             "bogo",
             &["x", "bogo"],
-            distributary::Project::new(base, &[0], Some(vec![0.into()]), None),
+            Project::new(base, &[0], Some(vec![0.into()]), None),
         );
         let agg = mig.add_ingredient(
             "agg",
             &["bogo", "count"],
-            distributary::Aggregation::COUNT.over(bogo, 0, &[1]),
+            Aggregation::COUNT.over(bogo, 0, &[1]),
         );
         mig.maintain(agg, 0);
         agg
     });
 
-    let aggq = g.get_getter(agg).unwrap();
+    let mut aggq = g.get_getter(agg).unwrap();
     let mut base = g.get_mutator(base);
 
     // insert some values
@@ -1191,9 +1180,9 @@ fn full_aggregation_with_bogokey() {
 #[test]
 fn transactional_migration() {
     // set up graph
-    let mut g = distributary::Blender::new();
+    let mut g = ControllerBuilder::default().build_inner();
     let a = g.migrate(|mig| {
-        let a = mig.add_transactional_base("a", &["a", "b"], distributary::Base::default());
+        let a = mig.add_transactional_base("a", &["a", "b"], Base::default());
         mig.maintain(a, 0);
         a
     });
@@ -1202,7 +1191,7 @@ fn transactional_migration() {
     let mut muta = g.get_mutator(a);
 
     // send a value on a
-    muta.transactional_put(vec![1.into(), 2.into()], distributary::Token::empty())
+    muta.transactional_put(vec![1.into(), 2.into()], Token::empty())
         .unwrap();
 
     // give it some time to propagate
@@ -1216,7 +1205,7 @@ fn transactional_migration() {
 
     // add unrelated node b in a migration
     let b = g.migrate(|mig| {
-        let b = mig.add_transactional_base("b", &["a", "b"], distributary::Base::default());
+        let b = mig.add_transactional_base("b", &["a", "b"], Base::default());
         mig.maintain(b, 0);
         b
     });
@@ -1225,7 +1214,7 @@ fn transactional_migration() {
     let mut mutb = g.get_mutator(b);
 
     // send a value on b
-    mutb.transactional_put(vec![2.into(), 4.into()], distributary::Token::empty())
+    mutb.transactional_put(vec![2.into(), 4.into()], Token::empty())
         .unwrap();
 
     // give it some time to propagate
@@ -1241,7 +1230,7 @@ fn transactional_migration() {
         let mut emits = HashMap::new();
         emits.insert(a, vec![0, 1]);
         emits.insert(b, vec![0, 1]);
-        let u = distributary::Union::new(emits);
+        let u = Union::new(emits);
         let c = mig.add_ingredient("c", &["a", "b"], u);
         mig.maintain(c, 0);
         c
@@ -1260,9 +1249,9 @@ fn transactional_migration() {
     );
 
     // send a value on a and b
-    muta.transactional_put(vec![3.into(), 5.into()], distributary::Token::empty())
+    muta.transactional_put(vec![3.into(), 5.into()], Token::empty())
         .unwrap();
-    mutb.transactional_put(vec![3.into(), 6.into()], distributary::Token::empty())
+    mutb.transactional_put(vec![3.into(), 6.into()], Token::empty())
         .unwrap();
 
     // give them some time to propagate
@@ -1278,25 +1267,25 @@ fn transactional_migration() {
 #[test]
 fn crossing_migration() {
     // set up graph
-    let mut g = distributary::Blender::new();
+    let mut g = ControllerBuilder::default().build_inner();
     let (a, b) = g.migrate(|mig| {
-        let a = mig.add_ingredient("a", &["a", "b"], distributary::Base::default());
-        let b = mig.add_ingredient("b", &["a", "b"], distributary::Base::default());
+        let a = mig.add_ingredient("a", &["a", "b"], Base::default());
+        let b = mig.add_ingredient("b", &["a", "b"], Base::default());
         (a, b)
     });
     let mut muta = g.get_mutator(a);
     let mut mutb = g.get_mutator(b);
 
-    let cq = g.migrate(|mig| {
+    let mut cq = g.migrate(|mig| {
         let mut emits = HashMap::new();
         emits.insert(a, vec![0, 1]);
         emits.insert(b, vec![0, 1]);
-        let u = distributary::Union::new(emits);
+        let u = Union::new(emits);
         let c = mig.add_ingredient("c", &["a", "b"], u);
         mig.stream(c)
     });
 
-    let id: distributary::DataType = 1.into();
+    let id: DataType = 1.into();
 
     // send a value on a
     muta.put(vec![id.clone(), 2.into()]).unwrap();
@@ -1315,17 +1304,17 @@ fn crossing_migration() {
 
 #[test]
 fn independent_domain_migration() {
-    let id: distributary::DataType = 1.into();
+    let id: DataType = 1.into();
 
     // set up graph
-    let mut g = distributary::Blender::new();
+    let mut g = ControllerBuilder::default().build_inner();
     let a = g.migrate(|mig| {
-        let a = mig.add_ingredient("a", &["a", "b"], distributary::Base::default());
+        let a = mig.add_ingredient("a", &["a", "b"], Base::default());
         mig.maintain(a, 0);
         a
     });
 
-    let aq = g.get_getter(a).unwrap();
+    let mut aq = g.get_getter(a).unwrap();
     let mut muta = g.get_mutator(a);
 
     // send a value on a
@@ -1339,12 +1328,12 @@ fn independent_domain_migration() {
 
     // add unrelated node b in a migration
     let b = g.migrate(|mig| {
-        let b = mig.add_ingredient("b", &["a", "b"], distributary::Base::default());
+        let b = mig.add_ingredient("b", &["a", "b"], Base::default());
         mig.maintain(b, 0);
         b
     });
 
-    let bq = g.get_getter(b).unwrap();
+    let mut bq = g.get_getter(b).unwrap();
     let mut mutb = g.get_mutator(b);
 
     // send a value on b
@@ -1360,25 +1349,25 @@ fn independent_domain_migration() {
 #[test]
 fn domain_amend_migration() {
     // set up graph
-    let mut g = distributary::Blender::new();
+    let mut g = ControllerBuilder::default().build_inner();
     let (a, b) = g.migrate(|mig| {
-        let a = mig.add_ingredient("a", &["a", "b"], distributary::Base::default());
-        let b = mig.add_ingredient("b", &["a", "b"], distributary::Base::default());
+        let a = mig.add_ingredient("a", &["a", "b"], Base::default());
+        let b = mig.add_ingredient("b", &["a", "b"], Base::default());
         (a, b)
     });
     let mut muta = g.get_mutator(a);
     let mut mutb = g.get_mutator(b);
 
-    let cq = g.migrate(|mig| {
+    let mut cq = g.migrate(|mig| {
         let mut emits = HashMap::new();
         emits.insert(a, vec![0, 1]);
         emits.insert(b, vec![0, 1]);
-        let u = distributary::Union::new(emits);
+        let u = Union::new(emits);
         let c = mig.add_ingredient("c", &["a", "b"], u);
         mig.stream(c)
     });
 
-    let id: distributary::DataType = 1.into();
+    let id: DataType = 1.into();
 
     // send a value on a
     muta.put(vec![id.clone(), 2.into()]).unwrap();
@@ -1410,9 +1399,9 @@ fn state_replay_migration_stream() {
     // and send through some updates on the other (new) side of the join, and see that the expected
     // things come out the other end.
 
-    let mut g = distributary::Blender::new();
+    let mut g = ControllerBuilder::default().build_inner();
     let a = g.migrate(|mig| {
-        let a = mig.add_ingredient("a", &["x", "y"], distributary::Base::default());
+        let a = mig.add_ingredient("a", &["x", "y"], Base::default());
         a
     });
     let mut muta = g.get_mutator(a);
@@ -1424,14 +1413,9 @@ fn state_replay_migration_stream() {
 
     let (out, b) = g.migrate(|mig| {
         // add a new base and a join
-        let b = mig.add_ingredient("b", &["x", "z"], distributary::Base::default());
-        use distributary::JoinSource::*;
-        let j = distributary::Join::new(
-            a,
-            b,
-            distributary::JoinType::Inner,
-            vec![B(0, 0), L(1), R(1)],
-        );
+        let b = mig.add_ingredient("b", &["x", "z"], Base::default());
+        use JoinSource::*;
+        let j = Join::new(a, b, JoinType::Inner, vec![B(0, 0), L(1), R(1)]);
         let j = mig.add_ingredient("j", &["x", "y", "z"], j);
 
         // we want to observe what comes out of the join
@@ -1479,28 +1463,25 @@ fn migration_depends_on_unchanged_domain() {
     // this is tricky, because the system must realize that n is materialized, even though it
     // normally wouldn't even look at that part of the data flow graph!
 
-    let mut g = distributary::Blender::new();
+    let mut g = ControllerBuilder::default().build_inner();
     let left = g.migrate(|mig| {
         // base node, so will be materialized
-        let left = mig.add_ingredient("foo", &["a", "b"], distributary::Base::default());
+        let left = mig.add_ingredient("foo", &["a", "b"], Base::default());
 
         // node in different domain that depends on foo causes egress to be added
-        mig.add_ingredient("bar", &["a", "b"], distributary::Identity::new(left));
+        mig.add_ingredient("bar", &["a", "b"], Identity::new(left));
         left
     });
 
     g.migrate(|mig| {
         // joins require their inputs to be materialized
         // we need a new base as well so we can actually make a join
-        let tmp = mig.add_ingredient("tmp", &["a", "b"], distributary::Base::default());
-        let j = distributary::Join::new(
+        let tmp = mig.add_ingredient("tmp", &["a", "b"], Base::default());
+        let j = Join::new(
             left,
             tmp,
-            distributary::JoinType::Inner,
-            vec![
-                distributary::JoinSource::B(0, 0),
-                distributary::JoinSource::R(1),
-            ],
+            JoinType::Inner,
+            vec![JoinSource::B(0, 0), JoinSource::R(1)],
         );
         mig.add_ingredient("join", &["a", "b"], j);
     });
@@ -1508,8 +1489,8 @@ fn migration_depends_on_unchanged_domain() {
 }
 
 fn do_full_vote_migration(old_puts_after: bool) {
-    use distributary::{Aggregation, Base, Blender, DataType, Join, JoinType};
-    let mut g = Blender::new();
+    use {Aggregation, Base, Blender, DataType, Join, JoinType};
+    let mut g = ControllerBuilder::default().build_inner();
     let (article, vote, vc, end) = g.migrate(|mig| {
         // migrate
 
@@ -1527,7 +1508,7 @@ fn do_full_vote_migration(old_puts_after: bool) {
         );
 
         // add final join using first field from article and first from vc
-        use distributary::JoinSource::*;
+        use JoinSource::*;
         let j = Join::new(article, vc, JoinType::Left, vec![B(0, 0), L(1), R(1)]);
         let end = mig.add_ingredient("awvc", &["id", "title", "votes"], j);
 
@@ -1548,7 +1529,7 @@ fn do_full_vote_migration(old_puts_after: bool) {
         mutv.put(vec![1.into(), i.into()]).unwrap();
     }
 
-    let last = g.get_getter(end).unwrap();
+    let mut last = g.get_getter(end).unwrap();
     thread::sleep(get_settle_time().checked_mul(3).unwrap());
     for i in 0..n {
         let rows = last.lookup(&i.into(), true).unwrap();
@@ -1577,7 +1558,7 @@ fn do_full_vote_migration(old_puts_after: bool) {
         );
 
         // join vote count and rsum (and in theory, sum them)
-        use distributary::JoinSource::*;
+        use JoinSource::*;
         let j = Join::new(rs, vc, JoinType::Left, vec![B(0, 0), L(1), R(1)]);
         let total = mig.add_ingredient("total", &["id", "ratings", "votes"], j);
 
@@ -1593,7 +1574,7 @@ fn do_full_vote_migration(old_puts_after: bool) {
         (rating, newend)
     });
 
-    let last = g.get_getter(last).unwrap();
+    let mut last = g.get_getter(last).unwrap();
     let mut mutr = g.get_mutator(rating);
     for i in 0..n {
         if old_puts_after {
@@ -1635,13 +1616,13 @@ fn full_vote_migration_new_and_old() {
 
 #[test]
 fn live_writes() {
-    use distributary::{Aggregation, Blender, DataType};
-    let mut g = Blender::new();
+    use {Aggregation, Blender, DataType};
+    let mut g = ControllerBuilder::default().build_inner();
     let (vote, vc) = g.migrate(|mig| {
         // migrate
 
         // add vote base table
-        let vote = mig.add_ingredient("vote", &["user", "id"], distributary::Base::default());
+        let vote = mig.add_ingredient("vote", &["user", "id"], Base::default());
 
         // add vote count
         let vc = mig.add_ingredient(
@@ -1654,7 +1635,7 @@ fn live_writes() {
         (vote, vc)
     });
 
-    let vc_state = g.get_getter(vc).unwrap();
+    let mut vc_state = g.get_getter(vc).unwrap();
     let mut add = g.get_mutator(vote);
 
     let ids = 1000;
@@ -1684,7 +1665,7 @@ fn live_writes() {
         vc2
     });
 
-    let vc2_state = g.get_getter(vc2).unwrap();
+    let mut vc2_state = g.get_getter(vc2).unwrap();
 
     // TODO: check that the writer did indeed complete writes during the migration
 
@@ -1713,10 +1694,10 @@ fn state_replay_migration_query() {
     // read from rather than relying on forwarding. to further stress the graph, *both* base nodes
     // are created and populated before the migration, meaning we have to replay through a join.
 
-    let mut g = distributary::Blender::new();
+    let mut g = ControllerBuilder::default().build_inner();
     let (a, b) = g.migrate(|mig| {
-        let a = mig.add_ingredient("a", &["x", "y"], distributary::Base::default());
-        let b = mig.add_ingredient("b", &["x", "z"], distributary::Base::default());
+        let a = mig.add_ingredient("a", &["x", "y"], Base::default());
+        let b = mig.add_ingredient("b", &["x", "z"], Base::default());
 
         (a, b)
     });
@@ -1732,20 +1713,15 @@ fn state_replay_migration_query() {
 
     let out = g.migrate(|mig| {
         // add join and a reader node
-        use distributary::JoinSource::*;
-        let j = distributary::Join::new(
-            a,
-            b,
-            distributary::JoinType::Inner,
-            vec![B(0, 0), L(1), R(1)],
-        );
+        use JoinSource::*;
+        let j = Join::new(a, b, JoinType::Inner, vec![B(0, 0), L(1), R(1)]);
         let j = mig.add_ingredient("j", &["x", "y", "z"], j);
 
         // we want to observe what comes out of the join
         mig.maintain(j, 0);
         j
     });
-    let out = g.get_getter(out).unwrap();
+    let mut out = g.get_getter(out).unwrap();
     sleep();
 
     // if all went according to plan, the join should now be fully populated!
@@ -1774,33 +1750,33 @@ fn state_replay_migration_query() {
 #[test]
 fn recipe_activates() {
     let r_txt = "CREATE TABLE b (a text, c text, x text);\n";
-    let mut r = distributary::Recipe::from_str(r_txt, None).unwrap();
+    let mut r = Recipe::from_str(r_txt, None).unwrap();
     assert_eq!(r.version(), 0);
     assert_eq!(r.expressions().len(), 1);
     assert_eq!(r.prior(), None);
 
-    let mut g = distributary::Blender::new();
+    let mut g = ControllerBuilder::default().build_inner();
     g.migrate(|mig| {
         assert!(r.activate(mig, false).is_ok());
     });
     // one base node
-    assert_eq!(g.inputs().len(), 1);
+    assert_eq!(g.inputs(()).len(), 1);
 }
 
 #[test]
 fn recipe_activates_and_migrates() {
     let r_txt = "CREATE TABLE b (a text, c text, x text);\n";
-    let mut r = distributary::Recipe::from_str(r_txt, None).unwrap();
+    let mut r = Recipe::from_str(r_txt, None).unwrap();
     assert_eq!(r.version(), 0);
     assert_eq!(r.expressions().len(), 1);
     assert_eq!(r.prior(), None);
 
-    let mut g = distributary::Blender::new();
+    let mut g = ControllerBuilder::default().build_inner();
     g.migrate(|mig| {
         assert!(r.activate(mig, false).is_ok());
     });
     // one base node
-    assert_eq!(g.inputs().len(), 1);
+    assert_eq!(g.inputs(()).len(), 1);
 
     let r_copy = r.clone();
 
@@ -1814,26 +1790,26 @@ fn recipe_activates_and_migrates() {
         assert!(r1.activate(mig, false).is_ok());
     });
     // still one base node
-    assert_eq!(g.inputs().len(), 1);
+    assert_eq!(g.inputs(()).len(), 1);
     // two leaf nodes
-    assert_eq!(g.outputs().len(), 2);
+    assert_eq!(g.outputs(()).len(), 2);
 }
 
 #[test]
 fn recipe_activates_and_migrates_with_join() {
     let r_txt = "CREATE TABLE a (x int, y int, z int);\n
                  CREATE TABLE b (r int, s int);\n";
-    let mut r = distributary::Recipe::from_str(r_txt, None).unwrap();
+    let mut r = Recipe::from_str(r_txt, None).unwrap();
     assert_eq!(r.version(), 0);
     assert_eq!(r.expressions().len(), 2);
     assert_eq!(r.prior(), None);
 
-    let mut g = distributary::Blender::new();
+    let mut g = ControllerBuilder::default().build_inner();
     g.migrate(|mig| {
         assert!(r.activate(mig, false).is_ok());
     });
     // two base nodes
-    assert_eq!(g.inputs().len(), 2);
+    assert_eq!(g.inputs(()).len(), 2);
 
     let r_copy = r.clone();
 
@@ -1846,9 +1822,9 @@ fn recipe_activates_and_migrates_with_join() {
         assert!(r1.activate(mig, false).is_ok());
     });
     // still two base nodes
-    assert_eq!(g.inputs().len(), 2);
+    assert_eq!(g.inputs(()).len(), 2);
     // one leaf node
-    assert_eq!(g.outputs().len(), 1);
+    assert_eq!(g.outputs(()).len(), 1);
 }
 
 #[test]
@@ -1857,8 +1833,8 @@ fn finkelstein1982_queries() {
     use std::fs::File;
 
     // set up graph
-    let mut g = distributary::Blender::new();
-    let mut inc = distributary::SqlIncorporator::default();
+    let mut g = ControllerBuilder::default().build_inner();
+    let mut inc = SqlIncorporator::default();
     g.migrate(|mig| {
         let mut f = File::open("tests/finkelstein82.txt").unwrap();
         let mut s = String::new();
@@ -1889,8 +1865,8 @@ fn tpc_w() {
     use std::fs::File;
 
     // set up graph
-    let mut g = distributary::Blender::new();
-    let mut r = distributary::Recipe::blank(None);
+    let mut g = ControllerBuilder::default().build_inner();
+    let mut r = Recipe::blank(None);
     g.migrate(|mig| {
         let mut f = File::open("tests/tpc-w-queries.txt").unwrap();
         let mut s = String::new();

@@ -34,32 +34,8 @@ pub enum Method {
 /// Construct a new `Server` handle for all Soup endpoints
 pub fn make_server(soup: &flow::Blender) -> Server {
     // Figure out what inputs and outputs to expose
-    let ins = soup.inputs()
-        .into_iter()
-        .map(|(ni, n)| {
-            (
-                ni.index(),
-                (
-                    n.name().to_owned(),
-                    n.fields().iter().cloned().collect(),
-                    soup.get_mutator_builder(ni),
-                ),
-            )
-        })
-        .collect();
-    let outs = soup.outputs()
-        .into_iter()
-        .map(|(ni, n)| {
-            (
-                ni.index(),
-                (
-                    n.name().to_owned(),
-                    n.fields().iter().cloned().collect(),
-                    soup.get_remote_getter_builder(ni).unwrap(),
-                ),
-            )
-        })
-        .collect();
+    let ins = unimplemented!();
+    let outs = unimplemented!();
 
     Server {
         put: ins,
@@ -127,7 +103,6 @@ pub fn run<T: Into<::std::net::SocketAddr>>(soup: Arc<Mutex<flow::Blender>>, add
         match stream {
             Ok(stream) => {
                 let g = soup.lock().unwrap();
-                println!("{}", g);
                 let s = make_server(&g);
                 thread::Builder::new()
                     .name(format!("rpc{}", i))

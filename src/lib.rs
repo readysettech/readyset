@@ -312,6 +312,7 @@
 #![deny(missing_docs)]
 #![feature(plugin, use_extern_macros)]
 #![plugin(tarpc_plugins)]
+#![allow(unused)]
 
 /// The number of domain threads to spin up for each sharded subtree of the data-flow graph.
 const SHARDS: usize = 2;
@@ -347,6 +348,8 @@ extern crate arccstr;
 extern crate arrayvec;
 extern crate evmap;
 extern crate fnv;
+extern crate futures;
+extern crate hyper;
 extern crate vec_map;
 
 extern crate itertools;
@@ -379,11 +382,15 @@ extern crate channel;
 
 mod backlog;
 mod checktable;
+mod daemon;
 mod flow;
 mod mir;
 mod ops;
 mod recipe;
 mod sql;
+
+#[cfg(test)]
+mod tests;
 
 pub use backlog::SingleReadHandle;
 pub use checktable::{Token, TransactionResult};

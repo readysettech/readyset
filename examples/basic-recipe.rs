@@ -3,7 +3,7 @@ extern crate distributary;
 mod backend;
 
 use std::{thread, time};
-use distributary::{Blender, Recipe};
+use distributary::Blender;
 use backend::Backend;
 
 fn load_recipe() -> Backend {
@@ -21,24 +21,14 @@ fn load_recipe() -> Backend {
                             WHERE Article.aid = VoteCount.aid AND Article.aid = ?;";
 
     // set up Soup via recipe
-    let mut soup = Blender::new();
-    soup.log_with(distributary::logger_pls());
+    let soup = Blender::new();
+    soup.install_recipe(sql.to_owned());
 
-    let recipe = soup.migrate(|mig| {
-        // install recipe
-        let mut recipe = Recipe::from_str(&sql, None).unwrap();
-        recipe.activate(mig, false).unwrap();
-        // return brings up new graph for processing
-        recipe
-    });
-
-    Backend::new(soup, recipe)
+    Backend::new(soup)
 }
 
 fn main() {
     let mut backend = load_recipe();
-
-    println!("Soup graph:\n{}", backend.soup);
 
     println!("Writing...");
     let aid = 1;

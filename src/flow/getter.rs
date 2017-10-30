@@ -52,8 +52,8 @@ pub struct RemoteGetter {
 }
 
 impl RemoteGetter {
-    /// Query for the results for the given key, optionally blocking if it is not yet available.
-    pub fn lookup(&mut self, keys: Vec<DataType>, block: bool) -> Vec<Result<Datas, ()>> {
+    /// Query for the results for the given keys, optionally blocking if it is not yet available.
+    pub fn multi_lookup(&mut self, keys: Vec<DataType>, block: bool) -> Vec<Result<Datas, ()>> {
         if self.shards.len() == 1 {
             let ReadReply(rows) = self.shards[0]
                 .send(&ReadQuery {
@@ -85,6 +85,23 @@ impl RemoteGetter {
                 })
                 .collect()
         }
+    }
+
+    /// Lookup a single key.
+    pub fn lookup(&mut self, key: &DataType, block: bool) -> Result<Datas, ()> {
+        // TODO: Optimized version of this function?
+        self.multi_lookup(vec![key.clone()], block)
+            .into_iter()
+            .next()
+            .unwrap()
+    }
+
+    /// Do a transactional lookup for a single key.
+    pub fn transactional_lookup(
+        &mut self,
+        key: &DataType,
+    ) -> Result<(Datas, checktable::Token), ()> {
+        unimplemented!()
     }
 }
 

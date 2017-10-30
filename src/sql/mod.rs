@@ -671,7 +671,7 @@ impl<'a> ToFlowParts for &'a str {
 mod tests {
     use nom_sql::Column;
     use flow::node::Node;
-    use flow::Migration;
+    use flow::{ControllerBuilder, Migration};
     use flow::prelude::Ingredient;
     use Blender;
     use super::{SqlIncorporator, ToFlowParts};
@@ -708,7 +708,7 @@ mod tests {
     #[test]
     fn it_parses() {
         // set up graph
-        let mut g = Blender::new();
+        let mut g = ControllerBuilder::default().build_inner();
         let mut inc = SqlIncorporator::default();
         g.migrate(|mig| {
             // Must have a base node for type inference to work, so make one manually
@@ -746,7 +746,7 @@ mod tests {
     #[test]
     fn it_incorporates_simple_join() {
         // set up graph
-        let mut g = Blender::new();
+        let mut g = ControllerBuilder::default().build_inner();
         let mut inc = SqlIncorporator::default();
         g.migrate(|mig| {
             // Establish a base write type for "users"
@@ -804,7 +804,7 @@ mod tests {
     #[test]
     fn it_incorporates_simple_selection() {
         // set up graph
-        let mut g = Blender::new();
+        let mut g = ControllerBuilder::default().build_inner();
         let mut inc = SqlIncorporator::default();
         g.migrate(|mig| {
             // Establish a base write type
@@ -845,7 +845,7 @@ mod tests {
     #[test]
     fn it_incorporates_aggregation() {
         // set up graph
-        let mut g = Blender::new();
+        let mut g = ControllerBuilder::default().build_inner();
         let mut inc = SqlIncorporator::default();
         g.migrate(|mig| {
             // Establish a base write types
@@ -900,7 +900,7 @@ mod tests {
     #[test]
     fn it_does_not_reuse_if_disabled() {
         // set up graph
-        let mut g = Blender::new();
+        let mut g = ControllerBuilder::default().build_inner();
         let mut inc = SqlIncorporator::default();
         inc.disable_reuse();
         g.migrate(|mig| {
@@ -929,7 +929,7 @@ mod tests {
     #[test]
     fn it_reuses_identical_query() {
         // set up graph
-        let mut g = Blender::new();
+        let mut g = ControllerBuilder::default().build_inner();
         let mut inc = SqlIncorporator::default();
         g.migrate(|mig| {
             // Establish a base write type
@@ -964,7 +964,7 @@ mod tests {
     #[test]
     fn it_reuses_with_different_parameter() {
         // set up graph
-        let mut g = Blender::new();
+        let mut g = ControllerBuilder::default().build_inner();
         let mut inc = SqlIncorporator::default();
         g.migrate(|mig| {
             // Establish a base write type
@@ -1032,7 +1032,7 @@ mod tests {
     #[test]
     fn it_incorporates_aggregation_no_group_by() {
         // set up graph
-        let mut g = Blender::new();
+        let mut g = ControllerBuilder::default().build_inner();
         let mut inc = SqlIncorporator::default();
         g.migrate(|mig| {
             // Establish a base write type
@@ -1085,7 +1085,7 @@ mod tests {
     #[test]
     fn it_incorporates_aggregation_count_star() {
         // set up graph
-        let mut g = Blender::new();
+        let mut g = ControllerBuilder::default().build_inner();
         let mut inc = SqlIncorporator::default();
         g.migrate(|mig| {
             // Establish a base write type
@@ -1135,7 +1135,7 @@ mod tests {
     #[test]
     fn it_incorporates_explicit_multi_join() {
         // set up graph
-        let mut g = Blender::new();
+        let mut g = ControllerBuilder::default().build_inner();
         let mut inc = SqlIncorporator::default();
         g.migrate(|mig| {
             // Establish base write types for "users" and "articles" and "votes"
@@ -1187,7 +1187,7 @@ mod tests {
     #[test]
     fn it_incorporates_implicit_multi_join() {
         // set up graph
-        let mut g = Blender::new();
+        let mut g = ControllerBuilder::default().build_inner();
         let mut inc = SqlIncorporator::default();
         g.migrate(|mig| {
             // Establish base write types for "users" and "articles" and "votes"
@@ -1251,7 +1251,7 @@ mod tests {
     #[test]
     fn it_incorporates_literal_projection() {
         // set up graph
-        let mut g = Blender::new();
+        let mut g = ControllerBuilder::default().build_inner();
         let mut inc = SqlIncorporator::default();
         g.migrate(|mig| {
             assert!(
@@ -1272,7 +1272,7 @@ mod tests {
     #[test]
     fn it_incorporates_arithmetic_projection() {
         // set up graph
-        let mut g = Blender::new();
+        let mut g = ControllerBuilder::default().build_inner();
         let mut inc = SqlIncorporator::default();
         g.migrate(|mig| {
             assert!(
@@ -1292,7 +1292,7 @@ mod tests {
 
     #[test]
     fn it_incorporates_join_with_nested_query() {
-        let mut g = Blender::new();
+        let mut g = ControllerBuilder::default().build_inner();
         let mut inc = SqlIncorporator::default();
         g.migrate(|mig| {
             assert!(

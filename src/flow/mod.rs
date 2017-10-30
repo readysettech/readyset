@@ -1,25 +1,31 @@
 use backlog;
 use channel;
+use channel::poll::{PollEvent, PollingLoop, ProcessResult, RpcPollEvent, RpcPollingLoop};
 use checktable;
 use ops::base::Base;
+use daemon::Worker;
 
-use std::collections::HashMap;
-use std::collections::HashSet;
+use std::collections::{BTreeMap, HashMap, HashSet};
+use std::error::Error;
+use std::io::Write;
 use std::net::SocketAddr;
 use std::sync::{Arc, Mutex};
 use std::sync::mpsc;
 use std::net::IpAddr;
-use std::time;
-use std::fmt;
+use std::{fmt, thread, time};
 
+use futures::{Future, Stream};
+use hyper::Client;
 use mio::net::TcpListener;
-
-use slog;
 use petgraph;
 use petgraph::visit::Bfs;
 use petgraph::graph::NodeIndex;
-
+use serde::Serialize;
+use serde::de::DeserializeOwned;
+use serde_json;
+use slog;
 use tarpc::sync::client::{self, ClientExt};
+use tokio_core::reactor::Core;
 
 pub mod coordination;
 pub mod core;
@@ -54,98 +60,32 @@ macro_rules! dur_to_ns {
 type Readers = Arc<Mutex<HashMap<(NodeIndex, usize), backlog::SingleReadHandle>>>;
 pub type Edge = ();
 
-/// `Blender` is the core component of the alternate Soup implementation.
-///
-/// It keeps track of the structure of the underlying data flow graph and its domains. `Blender`
-/// does not allow direct manipulation of the graph. Instead, changes must be instigated through a
-/// `Migration`, which can be performed using `Blender::migrate`. Only one `Migration` can occur at
-/// any given point in time.
-pub struct Blender {
-    ingredients: petgraph::Graph<node::Node, Edge>,
-    source: NodeIndex,
-    ndomains: usize,
-    checktable: checktable::CheckTableClient,
-    checktable_addr: SocketAddr,
+pub struct ControllerBuilder {
     sharding_enabled: bool,
-
     domain_config: domain::Config,
-
-    /// Parameters for persistence code.
     persistence: persistence::Parameters,
     materializations: migrate::materialization::Materializations,
-
-    domains: HashMap<domain::Index, domain::DomainHandle>,
-    channel_coordinator: Arc<prelude::ChannelCoordinator>,
-    debug_channel: Option<SocketAddr>,
-
     listen_addr: IpAddr,
-    readers: Readers,
-    workers: HashMap<WorkerIdentifier, WorkerEndpoint>,
-    remote_readers: HashMap<(domain::Index, usize), SocketAddr>,
-
     log: slog::Logger,
 }
-
-impl Default for Blender {
+impl Default for ControllerBuilder {
     fn default() -> Self {
-        Blender::with_listen("127.0.0.1".parse().unwrap())
-    }
-}
-
-impl Blender {
-    /// Construct a new, empty `Blender`
-    pub fn new() -> Self {
-        Blender::default()
-    }
-
-    /// Construct `Blender` with a specified listening interface
-    pub fn with_listen(addr: IpAddr) -> Self {
-        let mut g = petgraph::Graph::new();
-        let source = g.add_node(node::Node::new(
-            "source",
-            &["because-type-inference"],
-            node::special::Source,
-            true,
-        ));
-
-        let checktable_addr =
-            checktable::service::CheckTableServer::start(SocketAddr::new(addr.clone(), 0));
-        let checktable =
-            checktable::CheckTableClient::connect(checktable_addr, client::Options::default())
-                .unwrap();
         let log = slog::Logger::root(slog::Discard, o!());
-        let materializations = migrate::materialization::Materializations::new(&log);
-
-        Blender {
-            ingredients: g,
-            source: source,
-            ndomains: 0,
-            checktable,
-            checktable_addr,
+        Self {
             sharding_enabled: true,
-            materializations: materializations,
-
             domain_config: domain::Config {
                 concurrent_replays: 512,
                 replay_batch_timeout: time::Duration::from_millis(1),
                 replay_batch_size: 32,
             },
-
-            persistence: persistence::Parameters::default(),
-
-            domains: Default::default(),
-            channel_coordinator: Arc::new(prelude::ChannelCoordinator::new()),
-            debug_channel: None,
-
-            listen_addr: addr,
-            readers: Arc::default(),
-            workers: HashMap::default(),
-            remote_readers: HashMap::default(),
-
-            log: log,
+            persistence: Default::default(),
+            materializations: migrate::materialization::Materializations::new(&log),
+            listen_addr: "127.0.0.1".parse().unwrap(),
+            log,
         }
     }
-
+}
+impl ControllerBuilder {
     /// Set the maximum number of concurrent partial replay requests a domain can have outstanding
     /// at any given time.
     ///
@@ -176,23 +116,164 @@ impl Blender {
         self.sharding_enabled = false;
     }
 
-    /// Adds another worker to host domains.
-    pub fn add_worker(&mut self, addr: SocketAddr, sender: WorkerEndpoint) {
-        if !self.workers.contains_key(&addr) {
-            debug!(self.log, "added new worker {:?} to Blender", addr);
-            self.workers.insert(addr.clone(), sender);
-        } else {
-            warn!(
-                self.log,
-                "worker {:?} already exists; ignoring request to add it!",
-                addr
-            );
-        }
+    #[cfg(test)]
+    pub fn build_inner(self) -> ControllerInner {
+        ControllerInner::with_listen(self.listen_addr)
     }
 
-    /// Return the number of workers currently registered.
-    pub fn worker_count(&self) -> usize {
-        self.workers.len()
+    pub fn build(self) -> Blender {
+        let inner = Arc::new(Mutex::new(ControllerInner::with_listen(self.listen_addr)));
+        let addr = ControllerInner::main_loop(inner, "127.0.0.1:0".parse().unwrap());
+
+        Blender {
+            url: format!("http://{}", addr),
+        }
+    }
+}
+
+/// `Controller` is the core component of the alternate Soup implementation.
+///
+/// It keeps track of the structure of the underlying data flow graph and its domains. `Controller`
+/// does not allow direct manipulation of the graph. Instead, changes must be instigated through a
+/// `Migration`, which can be performed using `ControllerInner::migrate`. Only one `Migration` can
+/// occur at any given point in time.
+pub struct ControllerInner {
+    ingredients: petgraph::Graph<node::Node, Edge>,
+    source: NodeIndex,
+    ndomains: usize,
+    checktable: checktable::CheckTableClient,
+    checktable_addr: SocketAddr,
+    sharding_enabled: bool,
+
+    domain_config: domain::Config,
+
+    /// Parameters for persistence code.
+    persistence: persistence::Parameters,
+    materializations: migrate::materialization::Materializations,
+
+    domains: HashMap<domain::Index, domain::DomainHandle>,
+    channel_coordinator: Arc<prelude::ChannelCoordinator>,
+    debug_channel: Option<SocketAddr>,
+
+    listen_addr: IpAddr,
+    read_listen_addr: SocketAddr,
+    readers: Readers,
+    workers: HashMap<WorkerIdentifier, WorkerEndpoint>,
+    remote_readers: HashMap<(domain::Index, usize), SocketAddr>,
+
+    log: slog::Logger,
+}
+
+impl ControllerInner {
+    pub fn main_loop(controller: Arc<Mutex<ControllerInner>>, addr: SocketAddr) -> SocketAddr {
+        use rustful::{Context, Handler, Response, Server, TreeRouter};
+
+        enum C<Q, R> {
+            OpMut(Box<Fn(&mut ControllerInner, Q) -> R + Send + Sync>),
+            Op(Box<Fn(&ControllerInner, Q) -> R + Send + Sync>),
+        }
+        impl<Q: DeserializeOwned + 'static, R: Serialize + 'static> Handler for C<Q, R> {
+            fn handle_request(&self, ctx: Context, res: Response) {
+                let controller = ctx.global.get::<Arc<Mutex<ControllerInner>>>().unwrap();
+                let mut controller = controller.lock().unwrap();
+
+                let q = serde_json::from_reader(ctx.body).unwrap();
+                let r = match *self {
+                    C::Op(ref f) => f(&mut controller, q),
+                    C::OpMut(ref f) => f(&mut controller, q),
+                };
+                res.send(serde_json::to_string(&r).unwrap());
+            }
+        }
+        impl<Q: DeserializeOwned + 'static, R: Serialize + 'static> C<Q, R> {
+            fn handler(self) -> Box<Handler> {
+                Box::new(self) as Box<Handler>
+            }
+        }
+
+        let handlers = insert_routes!{
+            TreeRouter::new() => {
+                "inputs" => Post: C::Op(Box::new(Self::inputs)).handler(),
+                "outputs" => Post: C::Op(Box::new(Self::outputs)).handler(),
+                "mutator_builder" => Post: C::Op(Box::new(Self::get_mutator_builder)).handler(),
+                "getter_builder" =>  Post: C::Op(Box::new(Self::get_getter_builder)).handler(),
+                "get_statistics" => Post: C::OpMut(Box::new(Self::get_statistics)).handler(),
+                "install_recipe" => Post: C::OpMut(Box::new(Self::install_recipe)).handler(),
+            }
+        };
+
+        let listen = Server {
+            handlers,
+            host: addr.into(),
+            server: "netsoup".to_owned(),
+            threads: Some(1),
+            content_type: "application/json".parse().unwrap(),
+            global: Box::new(controller).into(),
+            ..Server::default()
+        }.run()
+            .unwrap();
+
+        // Bit of a dance to return socket while keeping the server running in another thread.
+        let socket = listen.socket.clone();
+        thread::spawn(move || drop(listen));
+        socket
+    }
+
+    /// Construct `Controller` with a specified listening interface
+    pub fn with_listen(addr: IpAddr) -> Self {
+        let mut g = petgraph::Graph::new();
+        let source = g.add_node(node::Node::new(
+            "source",
+            &["because-type-inference"],
+            node::special::Source,
+            true,
+        ));
+
+        let checktable_addr =
+            checktable::service::CheckTableServer::start(SocketAddr::new(addr.clone(), 0));
+        let checktable =
+            checktable::CheckTableClient::connect(checktable_addr, client::Options::default())
+                .unwrap();
+        let log = slog::Logger::root(slog::Discard, o!());
+        let materializations = migrate::materialization::Materializations::new(&log);
+
+        let readers: Readers = Arc::default();
+        let readers_clone = readers.clone();
+        let read_polling_loop = RpcPollingLoop::new(SocketAddr::new(addr.clone(), 0));
+        let read_listen_addr = read_polling_loop.get_listener_addr().unwrap();
+        thread::spawn(move || {
+            Worker::serve_reads(read_polling_loop, readers_clone)
+        });
+
+        ControllerInner {
+            ingredients: g,
+            source: source,
+            ndomains: 0,
+            checktable,
+            checktable_addr,
+            sharding_enabled: true,
+            materializations: materializations,
+
+            domain_config: domain::Config {
+                concurrent_replays: 512,
+                replay_batch_timeout: time::Duration::from_millis(1),
+                replay_batch_size: 32,
+            },
+
+            persistence: persistence::Parameters::default(),
+
+            domains: Default::default(),
+            channel_coordinator: Arc::new(prelude::ChannelCoordinator::new()),
+            debug_channel: None,
+
+            readers,
+            listen_addr: addr,
+            read_listen_addr,
+            workers: HashMap::default(),
+            remote_readers: HashMap::default(),
+
+            log: log,
+        }
     }
 
     /// Tell the blender about a remote domain so that reads can be routed to the worker that
@@ -206,7 +287,7 @@ impl Blender {
         if !self.remote_readers.contains_key(&(index, shard)) {
             debug!(
                 self.log,
-                "added new remote domain {:?} with read_addr {:} to Blender",
+                "added new remote domain {:?} with read_addr {:} to Controller",
                 (index, shard),
                 read_addr,
             );
@@ -236,7 +317,7 @@ impl Blender {
     ///
     ///  1. `DurabilityMode::Permanent`: all writes to base nodes should be written to disk.
     ///  2. `DurabilityMode::DeleteOnExit`: all writes are written to disk, but the log is
-    ///     deleted once the `Blender` is dropped. Useful for tests.
+    ///     deleted once the `Controller` is dropped. Useful for tests.
     ///  3. `DurabilityMode::MemoryOnly`: no writes to disk, store all writes in memory.
     ///     Useful for baseline numbers.
     ///
@@ -310,33 +391,27 @@ impl Blender {
         &self.ingredients
     }
 
-    /// Get references to all known input nodes.
+    /// Get a Vec of all known input nodes.
     ///
     /// Input nodes are here all nodes of type `Base`. The addresses returned by this function will
     /// all have been returned as a key in the map from `commit` at some point in the past.
-    ///
-    /// This function will only tell you which nodes are input nodes in the graph. To obtain a
-    /// function for inserting writes, use `Blender::get_putter`.
-    pub fn inputs(&self) -> Vec<(prelude::NodeIndex, &node::Node)> {
+    pub fn inputs(&self, _: ()) -> BTreeMap<String, prelude::NodeIndex> {
         self.ingredients
             .neighbors_directed(self.source, petgraph::EdgeDirection::Outgoing)
             .map(|n| {
                 let base = &self.ingredients[n];
                 assert!(base.is_internal());
                 assert!(base.get_base().is_some());
-                (n.into(), base)
+                (base.name().to_owned(), n.into())
             })
             .collect()
     }
 
-    /// Get a reference to all known output nodes.
+    /// Get a Vec of all known output nodes.
     ///
     /// Output nodes here refers to nodes of type `Reader`, which is the nodes created in response
     /// to calling `.maintain` or `.stream` for a node during a migration.
-    ///
-    /// This function will only tell you which nodes are output nodes in the graph. To obtain a
-    /// function for performing reads, call `.get_reader()` on the returned reader.
-    pub fn outputs(&self) -> Vec<(prelude::NodeIndex, &node::Node)> {
+    pub fn outputs(&self, _: ()) -> BTreeMap<String, prelude::NodeIndex> {
         self.ingredients
             .externals(petgraph::EdgeDirection::Outgoing)
             .filter_map(|n| {
@@ -344,7 +419,7 @@ impl Blender {
                     // we want to give the the node that is being materialized
                     // not the reader node itself
                     let src = r.is_for();
-                    (src, &self.ingredients[src])
+                    (self.ingredients[src].name().to_owned(), src)
                 })
             })
             .collect()
@@ -372,34 +447,22 @@ impl Blender {
         reader
     }
 
-    /// Obtain a `Getter` that allows querying a given (already maintained) reader node.
-    pub fn get_getter(&self, node: prelude::NodeIndex) -> Option<Getter> {
-        self.find_getter_for(node).and_then(|r| {
-            let sharded = !self.ingredients[r].sharded_by().is_none();
-            Getter::new(r, sharded, &self.readers, &self.ingredients)
-        })
-    }
-
     /// Obtain a `RemoteGetterBuilder` that can be sent to a client and then used to query a given
     /// (already maintained) reader node.
-    pub fn get_remote_getter_builder(
-        &self,
-        node: prelude::NodeIndex,
-    ) -> Option<RemoteGetterBuilder> {
+    pub fn get_getter_builder(&self, node: prelude::NodeIndex) -> Option<RemoteGetterBuilder> {
         self.find_getter_for(node).map(|r| {
             let domain = self.ingredients[r].domain();
             let shards = (0..self.domains[&domain].shards())
-                .map(|i| self.remote_readers.get(&(domain, i)).unwrap().clone())
+                .map(|i| {
+                    self.remote_readers
+                        .get(&(domain, i))
+                        .unwrap_or(&self.read_listen_addr)
+                        .clone()
+                })
                 .collect();
 
             RemoteGetterBuilder { node: r, shards }
         })
-    }
-
-    /// Convience method that obtains a MutatorBuilder and then calls build() on it.
-    pub fn get_mutator(&self, base: prelude::NodeIndex) -> Mutator {
-        self.get_mutator_builder(base)
-            .build(SocketAddr::new(self.listen_addr, 0))
     }
 
     /// Obtain a MutatorBuild that can be used to construct a Mutator to perform writes and deletes
@@ -448,7 +511,7 @@ impl Blender {
     }
 
     /// Get statistics about the time spent processing different parts of the graph.
-    pub fn get_statistics(&mut self) -> statistics::GraphStats {
+    pub fn get_statistics(&mut self, _: ()) -> statistics::GraphStats {
         // TODO: request stats from domains in parallel.
         let domains = self.domains
             .iter_mut()
@@ -471,9 +534,27 @@ impl Blender {
 
         statistics::GraphStats { domains: domains }
     }
+
+    pub fn install_recipe(&mut self, r_txt: String) {
+        self.migrate(|mig| {
+            use Recipe;
+            let mut r = Recipe::from_str(&r_txt, None).unwrap();
+            assert!(r.activate(mig, false).is_ok());
+        });
+    }
+
+    #[cfg(test)]
+    pub fn get_mutator(&self, base: prelude::NodeIndex) -> Mutator {
+        self.get_mutator_builder(base)
+            .build("127.0.0.1:0".parse().unwrap())
+    }
+    #[cfg(test)]
+    pub fn get_getter(&self, node: prelude::NodeIndex) -> Option<RemoteGetter> {
+        self.get_getter_builder(node).map(|g| g.build())
+    }
 }
 
-impl fmt::Display for Blender {
+impl fmt::Display for ControllerInner {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         let indentln = |f: &mut fmt::Formatter| write!(f, "    ");
 
@@ -515,7 +596,7 @@ enum ColumnChange {
 /// Only one `Migration` can be in effect at any point in time. No changes are made to the running
 /// graph until the `Migration` is committed (using `Migration::commit`).
 pub struct Migration<'a> {
-    mainline: &'a mut Blender,
+    mainline: &'a mut ControllerInner,
     added: Vec<NodeIndex>,
     columns: Vec<(NodeIndex, ColumnChange)>,
     readers: HashMap<NodeIndex, NodeIndex>,
@@ -730,8 +811,8 @@ impl<'a> Migration<'a> {
 
     /// Set up the given node such that its output can be efficiently queried.
     ///
-    /// To query into the maintained state, use `Blender::get_getter` or
-    /// `Blender::get_transactional_getter`
+    /// To query into the maintained state, use `ControllerInner::get_getter` or
+    /// `ControllerInner::get_transactional_getter`
     pub fn maintain(&mut self, n: prelude::NodeIndex, key: usize) {
         self.ensure_reader_for(n);
         if self.mainline.ingredients[n].is_transactional() {
@@ -1071,7 +1152,7 @@ impl<'a> Migration<'a> {
     }
 }
 
-impl Drop for Blender {
+impl Drop for ControllerInner {
     fn drop(&mut self) {
         for (_, d) in &mut self.domains {
             // don't unwrap, because given domain may already have terminated
@@ -1083,30 +1164,126 @@ impl Drop for Blender {
     }
 }
 
+/// `Blender` is a handle to a Controller.
+pub struct Blender {
+    url: String,
+}
+impl Default for Blender {
+    fn default() -> Self {
+        unreachable!()
+    }
+}
+impl Blender {
+    /// ...
+    pub fn new() -> Self {
+        unreachable!()
+    }
+
+    fn rpc<Q: Serialize, R: DeserializeOwned>(
+        &self,
+        path: &str,
+        request: &Q,
+    ) -> Result<R, Box<Error>> {
+        use hyper;
+
+        let mut core = Core::new().unwrap();
+        let client = Client::new(&core.handle());
+        let url = format!("{}/{}", self.url, path);
+
+        let mut r = hyper::Request::new(hyper::Method::Post, url.parse().unwrap());
+        r.set_body(serde_json::to_string(request).unwrap());
+
+        let work = client.request(r).and_then(|res| {
+            res.body().concat2().and_then(move |body| {
+                let reply: R = serde_json::from_slice(&body)
+                    .map_err(|e| ::std::io::Error::new(::std::io::ErrorKind::Other, e))
+                    .unwrap();
+                Ok(reply)
+            })
+        });
+        Ok(core.run(work).unwrap())
+    }
+
+    /// Get a Vec of all known input nodes.
+    ///
+    /// Input nodes are here all nodes of type `Base`. The addresses returned by this function will
+    /// all have been returned as a key in the map from `commit` at some point in the past.
+    pub fn inputs(&self) -> BTreeMap<String, prelude::NodeIndex> {
+        self.rpc("inputs", &()).unwrap()
+    }
+
+    /// Get a Vec of to all known output nodes.
+    ///
+    /// Output nodes here refers to nodes of type `Reader`, which is the nodes created in response
+    /// to calling `.maintain` or `.stream` for a node during a migration.
+    pub fn outputs(&self) -> BTreeMap<String, prelude::NodeIndex> {
+        self.rpc("outputs", &()).unwrap()
+    }
+
+    /// Obtain a `RemoteGetterBuilder` that can be sent to a client and then used to query a given
+    /// (already maintained) reader node.
+    pub fn get_getter_builder(&self, node: prelude::NodeIndex) -> Option<RemoteGetterBuilder> {
+        self.rpc("getter_builder", &node).unwrap()
+    }
+
+    /// Obtain a `RemoteGetter`.
+    pub fn get_getter(&self, node: prelude::NodeIndex) -> Option<RemoteGetter> {
+        self.get_getter_builder(node).map(|g| g.build())
+    }
+
+    /// Obtain a MutatorBuild that can be used to construct a Mutator to perform writes and deletes
+    /// from the given base node.
+    pub fn get_mutator_builder(
+        &self,
+        base: prelude::NodeIndex,
+    ) -> Result<MutatorBuilder, Box<Error>> {
+        self.rpc("get_mutator_builder", &base)
+    }
+
+    /// Obtain a Mutator
+    pub fn get_mutator(&self, base: prelude::NodeIndex) -> Result<Mutator, Box<Error>> {
+        self.get_mutator_builder(base)
+            .map(|m| m.build("127.0.0.1".parse().unwrap()))
+    }
+
+    /// Get statistics about the time spent processing different parts of the graph.
+    pub fn get_statistics(&mut self) -> statistics::GraphStats {
+        self.rpc("get_statistics", &()).unwrap()
+    }
+
+    /// Install a new recipe on the controller.
+    pub fn install_recipe(&self, new_recipe: String) {
+        self.rpc("install_recipe", &new_recipe).unwrap()
+    }
+
+    /// Set the `Logger` to use for internal log messages.
+    pub fn log_with(&mut self, _: slog::Logger) {}
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
 
-    // Blender without any domains gets dropped once it leaves the scope.
+    // Controller without any domains gets dropped once it leaves the scope.
     #[test]
     fn it_works_default() {
-        // Blender gets dropped. It doesn't have Domains, so we don't see any dropped.
-        let b = Blender::default();
-        assert_eq!(b.ndomains, 0);
+        // Controller gets dropped. It doesn't have Domains, so we don't see any dropped.
+        ControllerBuilder::default().build();
     }
 
-    // Blender with a few domains drops them once it leaves the scope.
+    // Controller with a few domains drops them once it leaves the scope.
     #[test]
     fn it_works_blender_with_migration() {
-        use Recipe;
+        // use Recipe;
 
         let r_txt = "CREATE TABLE a (x int, y int, z int);\n
                      CREATE TABLE b (r int, s int);\n";
-        let mut r = Recipe::from_str(r_txt, None).unwrap();
+        // let mut r = Recipe::from_str(r_txt, None).unwrap();
 
-        let mut b = Blender::new();
-        b.migrate(|mig| {
-            assert!(r.activate(mig, false).is_ok());
-        });
+        let c = ControllerBuilder::default().build();
+        c.install_recipe(r_txt.to_owned());
+        // b.migrate(|mig| {
+        //     assert!(r.activate(mig, false).is_ok());
+        // });
     }
 }

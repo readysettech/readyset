@@ -19,15 +19,15 @@ use slog::Logger;
 
 pub fn inform(
     log: &Logger,
-    blender: &mut flow::Blender,
+    controller: &mut flow::ControllerInner,
     nodes: HashMap<domain::Index, Vec<(NodeIndex, bool)>>,
     ts: i64,
     prevs: Box<HashMap<domain::Index, i64>>,
 ) {
-    let source = blender.source;
+    let source = controller.source;
     for (domain, nodes) in nodes {
         let log = log.new(o!("domain" => domain.index()));
-        let ctx = blender.domains.get_mut(&domain).unwrap();
+        let ctx = controller.domains.get_mut(&domain).unwrap();
 
         trace!(log, "informing domain of migration start");
         let _ = ctx.send(box Packet::StartMigration {
@@ -53,9 +53,9 @@ pub fn inform(
                 continue;
             }
 
-            let node = blender.ingredients.node_weight_mut(ni).unwrap().take();
-            let node = node.finalize(&mut blender.ingredients);
-            let graph = &blender.ingredients;
+            let node = controller.ingredients.node_weight_mut(ni).unwrap().take();
+            let node = node.finalize(&mut controller.ingredients);
+            let graph = &controller.ingredients;
             // new parents already have the right child list
             let old_parents = graph
                 .neighbors_directed(ni, petgraph::EdgeDirection::Incoming)
