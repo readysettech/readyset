@@ -1,5 +1,6 @@
 use backlog;
 use channel;
+use channel::tcp::TcpSender;
 use channel::poll::{PollEvent, PollingLoop, ProcessResult, RpcPollEvent, RpcPollingLoop};
 use checktable;
 use ops::base::Base;
@@ -8,11 +9,11 @@ use daemon::Worker;
 use std::collections::{BTreeMap, HashMap, HashSet};
 use std::error::Error;
 use std::io::Write;
-use std::net::SocketAddr;
+use std::net::{IpAddr, SocketAddr};
+use std::time::{Duration, Instant};
 use std::sync::{Arc, Mutex};
 use std::sync::mpsc;
-use std::net::IpAddr;
-use std::{fmt, thread, time};
+use std::{fmt, io, thread, time};
 
 use futures::{Future, Stream};
 use hyper::Client;
@@ -45,6 +46,7 @@ mod getter;
 mod transactions;
 
 use self::prelude::{Ingredient, WorkerEndpoint, WorkerIdentifier};
+use self::coordination::{CoordinationMessage, CoordinationPayload};
 
 pub use self::mutator::{Mutator, MutatorBuilder, MutatorError};
 pub use self::getter::{Getter, ReadQuery, ReadReply, RemoteGetter, RemoteGetterBuilder};
@@ -60,6 +62,24 @@ macro_rules! dur_to_ns {
 type Readers = Arc<Mutex<HashMap<(NodeIndex, usize), backlog::SingleReadHandle>>>;
 pub type Edge = ();
 
+#[derive(Clone)]
+struct WorkerStatus {
+    healthy: bool,
+    last_heartbeat: Instant,
+    sender: Arc<Mutex<TcpSender<CoordinationMessage>>>,
+}
+
+impl WorkerStatus {
+    pub fn new(sender: Arc<Mutex<TcpSender<CoordinationMessage>>>) -> Self {
+        WorkerStatus {
+            healthy: true,
+            last_heartbeat: Instant::now(),
+            sender,
+        }
+    }
+}
+
+
 /// Used to construct a controller.
 pub struct ControllerBuilder {
     sharding_enabled: bool,
@@ -67,6 +87,8 @@ pub struct ControllerBuilder {
     persistence: persistence::Parameters,
     materializations: migrate::materialization::Materializations,
     listen_addr: IpAddr,
+    heartbeat_every: Duration,
+    healthcheck_every: Duration,
     log: slog::Logger,
 }
 impl Default for ControllerBuilder {
@@ -82,6 +104,8 @@ impl Default for ControllerBuilder {
             persistence: Default::default(),
             materializations: migrate::materialization::Materializations::new(&log),
             listen_addr: "127.0.0.1".parse().unwrap(),
+            heartbeat_every: Duration::from_secs(1),
+            healthcheck_every: Duration::from_secs(10),
             log,
         }
     }
@@ -124,13 +148,17 @@ impl ControllerBuilder {
 
     #[cfg(test)]
     pub fn build_inner(self) -> ControllerInner {
-        ControllerInner::with_listen(self.listen_addr)
+        ControllerInner::from_builder(self)
     }
 
     /// Build a controller, and return a Blender to provide access to it.
     pub fn build(self) -> Blender {
-        let inner = Arc::new(Mutex::new(ControllerInner::with_listen(self.listen_addr)));
-        let addr = ControllerInner::main_loop(inner, "127.0.0.1:0".parse().unwrap());
+        // TODO(fintelia): Don't hard code addresses in this function.
+        let inner = Arc::new(Mutex::new(ControllerInner::from_builder(self)));
+        let addr = ControllerInner::listen_external(inner.clone(), "127.0.0.1:0".parse().unwrap());
+        thread::spawn(|| {
+            ControllerInner::listen_internal(inner, "127.0.0.1:0".parse().unwrap())
+        });
 
         Blender {
             url: format!("http://{}", addr),
@@ -165,14 +193,24 @@ pub struct ControllerInner {
     listen_addr: IpAddr,
     read_listen_addr: SocketAddr,
     readers: Readers,
-    workers: HashMap<WorkerIdentifier, WorkerEndpoint>,
-    remote_readers: HashMap<(domain::Index, usize), SocketAddr>,
+
+    /// Map from worker address to the address the worker is listening on for reads.
+    read_addrs: HashMap<WorkerIdentifier, SocketAddr>,
+    workers: HashMap<WorkerIdentifier, WorkerStatus>,
+
+    heartbeat_every: Duration,
+    healthcheck_every: Duration,
+    last_checked_workers: Instant,
 
     log: slog::Logger,
 }
 
 impl ControllerInner {
-    pub fn main_loop(controller: Arc<Mutex<ControllerInner>>, addr: SocketAddr) -> SocketAddr {
+    /// Listen for messages from clients.
+    pub fn listen_external(
+        controller: Arc<Mutex<ControllerInner>>,
+        addr: SocketAddr,
+    ) -> SocketAddr {
         use rustful::{Context, Handler, Response, Server, TreeRouter};
 
         enum C<Q, R> {
@@ -226,8 +264,95 @@ impl ControllerInner {
         socket
     }
 
+    /// Listen for messages from workers.
+    pub fn listen_internal(controller: Arc<Mutex<ControllerInner>>, addr: SocketAddr) {
+        use channel::poll::ProcessResult;
+        use mio::net::TcpListener;
+        use std::str::FromStr;
+
+        let mut pl: PollingLoop<CoordinationMessage> = PollingLoop::new(addr);
+        pl.run_polling_loop(|e| {
+            let mut inner = controller.lock().unwrap();
+            match e {
+                PollEvent::Process(ref msg) => {
+                    trace!(inner.log, "Received {:?}", msg);
+                    let process = match msg.payload {
+                        CoordinationPayload::Register {
+                            ref addr,
+                            ref read_listen_addr,
+                        } => inner.handle_register(msg, addr, read_listen_addr.clone()),
+                        CoordinationPayload::Heartbeat => inner.handle_heartbeat(msg),
+                        CoordinationPayload::DomainBooted(ref domain, ref addr) => Ok(()),
+                        _ => unimplemented!(),
+                    };
+                    match process {
+                        Ok(_) => (),
+                        Err(e) => error!(inner.log, "failed to handle message {:?}: {:?}", msg, e),
+                    }
+                }
+                PollEvent::ResumePolling(timeout) => *timeout = Some(inner.healthcheck_every),
+                PollEvent::Timeout => (),
+            }
+
+            // TODO(fintelia): Avoid checking worker liveness more frequently than
+            // inner.healthcheck_every.
+            inner.check_worker_liveness();
+
+            ProcessResult::KeepPolling
+        });
+    }
+
+    fn handle_register(
+        &mut self,
+        msg: &CoordinationMessage,
+        remote: &SocketAddr,
+        read_listen_addr: SocketAddr,
+    ) -> Result<(), io::Error> {
+        info!(
+            self.log,
+            "new worker registered from {:?}, which listens on {:?}",
+            msg.source,
+            remote
+        );
+
+        let sender = Arc::new(Mutex::new(TcpSender::connect(remote, None)?));
+        let ws = WorkerStatus::new(sender.clone());
+        self.workers.insert(msg.source.clone(), ws);
+        self.read_addrs.insert(msg.source.clone(), read_listen_addr);
+
+        Ok(())
+    }
+
+    fn check_worker_liveness(&mut self) {
+        if self.last_checked_workers.elapsed() > self.healthcheck_every {
+            for (addr, ws) in self.workers.iter_mut() {
+                if ws.healthy && ws.last_heartbeat.elapsed() > self.heartbeat_every * 3 {
+                    warn!(self.log, "worker at {:?} has failed!", addr);
+                    ws.healthy = false;
+                }
+            }
+            self.last_checked_workers = Instant::now();
+        }
+    }
+
+
+    fn handle_heartbeat(&mut self, msg: &CoordinationMessage) -> Result<(), io::Error> {
+        match self.workers.get_mut(&msg.source) {
+            None => crit!(
+                self.log,
+                "got heartbeat for unknown worker {:?}",
+                msg.source
+            ),
+            Some(ref mut ws) => {
+                ws.last_heartbeat = Instant::now();
+            }
+        }
+
+        Ok(())
+    }
+
     /// Construct `Controller` with a specified listening interface
-    pub fn with_listen(addr: IpAddr) -> Self {
+    pub fn from_builder(builder: ControllerBuilder) -> Self {
         let mut g = petgraph::Graph::new();
         let source = g.add_node(node::Node::new(
             "source",
@@ -236,17 +361,15 @@ impl ControllerInner {
             true,
         ));
 
-        let checktable_addr =
-            checktable::service::CheckTableServer::start(SocketAddr::new(addr.clone(), 0));
+        let addr = SocketAddr::new(builder.listen_addr.clone(), 0);
+        let checktable_addr = checktable::service::CheckTableServer::start(addr.clone());
         let checktable =
             checktable::CheckTableClient::connect(checktable_addr, client::Options::default())
                 .unwrap();
-        let log = slog::Logger::root(slog::Discard, o!());
-        let materializations = migrate::materialization::Materializations::new(&log);
 
         let readers: Readers = Arc::default();
         let readers_clone = readers.clone();
-        let read_polling_loop = RpcPollingLoop::new(SocketAddr::new(addr.clone(), 0));
+        let read_polling_loop = RpcPollingLoop::new(addr.clone());
         let read_listen_addr = read_polling_loop.get_listener_addr().unwrap();
         thread::spawn(move || {
             Worker::serve_reads(read_polling_loop, readers_clone)
@@ -258,53 +381,26 @@ impl ControllerInner {
             ndomains: 0,
             checktable,
             checktable_addr,
-            sharding_enabled: true,
-            materializations: materializations,
 
-            domain_config: domain::Config {
-                concurrent_replays: 512,
-                replay_batch_timeout: time::Duration::from_millis(1),
-                replay_batch_size: 32,
-            },
-
-            persistence: persistence::Parameters::default(),
+            sharding_enabled: builder.sharding_enabled,
+            materializations: builder.materializations,
+            domain_config: builder.domain_config,
+            persistence: builder.persistence,
+            listen_addr: builder.listen_addr,
+            heartbeat_every: builder.heartbeat_every,
+            healthcheck_every: builder.healthcheck_every,
+            log: builder.log,
 
             domains: Default::default(),
             channel_coordinator: Arc::new(prelude::ChannelCoordinator::new()),
             debug_channel: None,
 
             readers,
-            listen_addr: addr,
             read_listen_addr,
+            read_addrs: HashMap::default(),
             workers: HashMap::default(),
-            remote_readers: HashMap::default(),
 
-            log: log,
-        }
-    }
-
-    /// Tell the blender about a remote domain so that reads can be routed to the worker that
-    /// maintains it.
-    pub fn register_remote_domain(
-        &mut self,
-        index: domain::Index,
-        shard: usize,
-        read_addr: SocketAddr,
-    ) {
-        if !self.remote_readers.contains_key(&(index, shard)) {
-            debug!(
-                self.log,
-                "added new remote domain {:?} with read_addr {:} to Controller",
-                (index, shard),
-                read_addr,
-            );
-            self.remote_readers.insert((index, shard), read_addr);
-        } else {
-            warn!(
-                self.log,
-                "remote domain {:?} already exists; ignoring request to add it!",
-                (index, shard)
-            );
+            last_checked_workers: Instant::now(),
         }
     }
 
@@ -460,11 +556,9 @@ impl ControllerInner {
         self.find_getter_for(node).map(|r| {
             let domain = self.ingredients[r].domain();
             let shards = (0..self.domains[&domain].shards())
-                .map(|i| {
-                    self.remote_readers
-                        .get(&(domain, i))
-                        .unwrap_or(&self.read_listen_addr)
-                        .clone()
+                .map(|i| match self.domains[&domain].assignment(i) {
+                    Some(worker) => self.read_addrs[&worker].clone(),
+                    None => self.read_listen_addr.clone(),
                 })
                 .collect();
 
@@ -1086,11 +1180,18 @@ impl<'a> Migration<'a> {
 
         info!(log, "migration claimed timestamp range"; "start" => start_ts, "end" => end_ts);
 
-        // take snapshow of workers that are currently around; for type and lifetime reasons, we
-        // have to copy the HashMap here, it seems.
-        let mut workers = mainline.workers.clone();
-        let placer_workers = workers.clone(); // XXX unnecessary clone
-        let mut placer = placement::RoundRobinPlacer::new(&placer_workers);
+        let mut workers: Vec<_> = mainline
+            .workers
+            .values()
+            .map(|w| w.sender.clone())
+            .collect();
+        let placer_workers: Vec<_> = mainline
+            .workers
+            .iter()
+            .map(|(id, status)| (id.clone(), status.sender.clone()))
+            .collect();
+        let mut placer: Box<Iterator<Item = (WorkerIdentifier, WorkerEndpoint)>> =
+            Box::new(placer_workers.into_iter().cycle());
 
         // Boot up new domains (they'll ignore all updates for now)
         debug!(log, "booting new domains");
@@ -1114,12 +1215,13 @@ impl<'a> Migration<'a> {
                 &mainline.checktable_addr,
                 &mainline.channel_coordinator,
                 &mainline.debug_channel,
-                &mut workers,
                 &mut placer,
+                &mut workers,
                 start_ts,
             );
             mainline.domains.insert(domain, d);
         }
+
 
         // Add any new nodes to existing domains (they'll also ignore all updates for now)
         debug!(log, "mutating existing domains");

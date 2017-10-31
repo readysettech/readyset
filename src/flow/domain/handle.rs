@@ -115,12 +115,15 @@ pub struct DomainHandle {
     cr_poll: PollingLoop<ControlReplyPacket>,
     txs: Vec<(TcpSender<Box<Packet>>, bool)>,
 
+    // Which worker each shard is assigned to, if any.
+    assignments: Vec<Option<WorkerIdentifier>>,
+
     // used during booting
     threads: Vec<thread::JoinHandle<()>>,
 }
 
 impl DomainHandle {
-    pub fn new(
+    pub fn new<'a>(
         idx: domain::Index,
         sharded_by: Sharding,
         log: &Logger,
@@ -133,8 +136,8 @@ impl DomainHandle {
         checktable_addr: &SocketAddr,
         channel_coordinator: &Arc<ChannelCoordinator>,
         debug_addr: &Option<SocketAddr>,
-        workers: &mut HashMap<WorkerIdentifier, WorkerEndpoint>,
-        placer: &mut placement::DomainPlacementStrategy,
+        placer: &'a mut Box<Iterator<Item = (WorkerIdentifier, WorkerEndpoint)>>,
+        workers: &'a mut Vec<WorkerEndpoint>,
         ts: i64,
     ) -> Self {
         // NOTE: warning to future self...
@@ -146,9 +149,10 @@ impl DomainHandle {
         let mut txs = Vec::new();
         let mut cr_rxs = Vec::new();
         let mut threads = Vec::new();
+        let mut assignments = Vec::new();
         let mut nodes = Some(Self::build_descriptors(graph, nodes));
 
-        let all_local = workers.is_empty();
+        let mut all_local = true;
 
         for i in 0..num_shards {
             let logger = if num_shards == 1 {
@@ -178,12 +182,12 @@ impl DomainHandle {
             };
 
             // TODO(malte): simple round-robin placement for the moment
-            let worker = placer.place_domain(&idx, i).map(|wi| workers[&wi].clone());
+            match placer.next() {
+                Some((identifier, endpoint)) => {
+                    all_local = false;
 
-            match worker {
-                Some(worker) => {
                     // send domain to worker
-                    let mut w = worker.lock().unwrap();
+                    let mut w = endpoint.lock().unwrap();
                     debug!(
                         log,
                         "sending domain {}.{} to worker {:?}",
@@ -196,6 +200,8 @@ impl DomainHandle {
                         source: src,
                         payload: CoordinationPayload::AssignDomain(domain),
                     }).unwrap();
+
+                    assignments.push(Some(identifier));
                 }
                 None => {
                     let (jh, _) = domain.boot(
@@ -205,6 +211,7 @@ impl DomainHandle {
                         "127.0.0.1:0".parse().unwrap(),
                     );
                     threads.push(jh);
+                    assignments.push(None);
                 }
             }
 
@@ -231,7 +238,7 @@ impl DomainHandle {
                 // with the migration waiting for a domain to become ready when trying to send
                 // the information. (We used to do this in the controller thread, with the
                 // result of a nasty deadlock.)
-                for (_worker, endpoint) in workers.iter_mut() {
+                for endpoint in workers.iter() {
                     let mut s = endpoint.lock().unwrap();
                     let msg = CoordinationMessage {
                         source: s.local_addr().unwrap(),
@@ -256,11 +263,16 @@ impl DomainHandle {
             threads,
             cr_poll,
             txs,
+            assignments,
         }
     }
 
     pub fn shards(&self) -> usize {
         self.txs.len()
+    }
+
+    pub fn assignment(&self, shard: usize) -> Option<WorkerIdentifier> {
+        self.assignments[shard].clone()
     }
 
     fn build_descriptors(graph: &mut Graph, nodes: Vec<(NodeIndex, bool)>) -> DomainNodes {

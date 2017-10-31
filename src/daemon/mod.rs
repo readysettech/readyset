@@ -1,4 +1,3 @@
-mod controller;
 mod worker;
 
 pub struct Config {
@@ -10,5 +9,4 @@ pub struct Config {
     pub healthcheck_freq: u64,
 }
 
-pub use self::controller::Controller;
 pub use self::worker::Worker;
