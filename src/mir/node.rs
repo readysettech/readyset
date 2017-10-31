@@ -444,7 +444,7 @@ impl MirNode {
                     MirNodeType::Leaf { ref keys, .. } => {
                         assert_eq!(self.ancestors.len(), 1);
                         let parent = self.ancestors[0].clone();
-                        materialize_leaf_node(&parent, keys, mig);
+                        materialize_leaf_node(&parent, name, keys, mig);
                         // TODO(malte): below is yucky, but required to satisfy the type system:
                         // each match arm must return a `FlowNode`, so we use the parent's one
                         // here.

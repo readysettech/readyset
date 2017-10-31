@@ -471,11 +471,12 @@ pub(crate) fn make_topk_node(
 }
 
 pub(crate) fn materialize_leaf_node(
-    node: &MirNodeRef,
+    parent: &MirNodeRef,
+    name: String,
     key_cols: &Vec<Column>,
     mig: &mut Migration,
 ) {
-    let na = node.borrow().flow_node_addr().unwrap();
+    let na = parent.borrow().flow_node_addr().unwrap();
 
     // we must add a new reader for this query. This also requires adding an identity node (at
     // least currently), since a node can only have a single associated reader. However, the
@@ -488,11 +489,11 @@ pub(crate) fn materialize_leaf_node(
         // TODO(malte): this does not yet cover the case when there are multiple query
         // parameters, which requires compound key support on Reader nodes.
         //assert_eq!(key_cols.len(), 1);
-        let first_key_col_id = node.borrow()
+        let first_key_col_id = parent.borrow()
             .column_id_for_column(key_cols.iter().next().unwrap());
-        mig.maintain(na, first_key_col_id);
+        mig.maintain(name, na, first_key_col_id);
     } else {
         // if no key specified, default to the first column
-        mig.maintain(na, 0);
+        mig.maintain(name, na, 0);
     }
 }

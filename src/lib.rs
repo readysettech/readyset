@@ -394,8 +394,8 @@ mod tests;
 
 pub use backlog::SingleReadHandle;
 pub use checktable::{Token, TransactionResult};
-pub use flow::{Blender, Getter, Migration, Mutator, MutatorBuilder, MutatorError, ReadQuery,
-               ReadReply, RemoteGetter, RemoteGetterBuilder};
+pub use flow::{Blender, ControllerBuilder, Getter, Migration, Mutator, MutatorBuilder,
+               MutatorError, ReadQuery, ReadReply, RemoteGetter, RemoteGetterBuilder};
 pub use flow::core::{DataType, Datas};
 pub use petgraph::graph::NodeIndex;
 pub use flow::coordination::{CoordinationMessage, CoordinationPayload};

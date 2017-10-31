@@ -60,6 +60,7 @@ macro_rules! dur_to_ns {
 type Readers = Arc<Mutex<HashMap<(NodeIndex, usize), backlog::SingleReadHandle>>>;
 pub type Edge = ();
 
+/// Used to construct a controller.
 pub struct ControllerBuilder {
     sharding_enabled: bool,
     domain_config: domain::Config,
@@ -106,6 +107,11 @@ impl ControllerBuilder {
         self.domain_config.replay_batch_timeout = t;
     }
 
+    /// Set the persistence parameters used by the system.
+    pub fn set_persistence(&mut self, p: persistence::Parameters) {
+        self.persistence = p;
+    }
+
     /// Disable partial materialization for all subsequent migrations
     pub fn disable_partial(&mut self) {
         self.materializations.disable_partial();
@@ -121,6 +127,7 @@ impl ControllerBuilder {
         ControllerInner::with_listen(self.listen_addr)
     }
 
+    /// Build a controller, and return a Blender to provide access to it.
     pub fn build(self) -> Blender {
         let inner = Arc::new(Mutex::new(ControllerInner::with_listen(self.listen_addr)));
         let addr = ControllerInner::main_loop(inner, "127.0.0.1:0".parse().unwrap());
@@ -415,11 +422,11 @@ impl ControllerInner {
         self.ingredients
             .externals(petgraph::EdgeDirection::Outgoing)
             .filter_map(|n| {
+                let name = self.ingredients[n].name().to_owned();
                 self.ingredients[n].with_reader(|r| {
-                    // we want to give the the node that is being materialized
-                    // not the reader node itself
-                    let src = r.is_for();
-                    (self.ingredients[src].name().to_owned(), src)
+                    // we want to give the the node address that is being materialized not that of
+                    // the reader node itself.
+                    (name, r.is_for())
                 })
             })
             .collect()
@@ -752,11 +759,15 @@ impl<'a> Migration<'a> {
         self.mainline.graph()
     }
 
-    fn ensure_reader_for(&mut self, n: prelude::NodeIndex) {
+    fn ensure_reader_for(&mut self, n: prelude::NodeIndex, name: Option<String>) {
         if !self.readers.contains_key(&n) {
             // make a reader
             let r = node::special::Reader::new(n);
-            let r = self.mainline.ingredients[n].mirror(r);
+            let r = if let Some(name) = name {
+                self.mainline.ingredients[n].named_mirror(r, name)
+            } else {
+                self.mainline.ingredients[n].mirror(r)
+            };
             let r = self.mainline.ingredients.add_node(r);
             self.mainline.ingredients.add_edge(n, r, ());
             self.readers.insert(n, r);
@@ -813,8 +824,24 @@ impl<'a> Migration<'a> {
     ///
     /// To query into the maintained state, use `ControllerInner::get_getter` or
     /// `ControllerInner::get_transactional_getter`
-    pub fn maintain(&mut self, n: prelude::NodeIndex, key: usize) {
-        self.ensure_reader_for(n);
+    #[cfg(test)]
+    pub fn maintain_anonymous(&mut self, n: prelude::NodeIndex, key: usize) {
+        self.ensure_reader_for(n, None);
+        if self.mainline.ingredients[n].is_transactional() {
+            self.ensure_token_generator(n, key);
+        }
+
+        let ri = self.readers[&n];
+
+        self.mainline.ingredients[ri].with_reader_mut(|r| r.set_key(key));
+    }
+
+    /// Set up the given node such that its output can be efficiently queried.
+    ///
+    /// To query into the maintained state, use `ControllerInner::get_getter` or
+    /// `ControllerInner::get_transactional_getter`
+    pub fn maintain(&mut self, name: String, n: prelude::NodeIndex, key: usize) {
+        self.ensure_reader_for(n, Some(name));
         if self.mainline.ingredients[n].is_transactional() {
             self.ensure_token_generator(n, key);
         }
@@ -830,7 +857,7 @@ impl<'a> Migration<'a> {
     /// returned channel. Node that this channel is *not* bounded, and thus a receiver that is
     /// slower than the system as a hole will accumulate a large buffer over time.
     pub fn stream(&mut self, n: prelude::NodeIndex) -> mpsc::Receiver<Vec<node::StreamUpdate>> {
-        self.ensure_reader_for(n);
+        self.ensure_reader_for(n, None);
         let (tx, rx) = mpsc::channel();
         let mut tx = channel::StreamSender::from_local(tx);
 
@@ -1237,13 +1264,13 @@ impl Blender {
         &self,
         base: prelude::NodeIndex,
     ) -> Result<MutatorBuilder, Box<Error>> {
-        self.rpc("get_mutator_builder", &base)
+        self.rpc("mutator_builder", &base)
     }
 
     /// Obtain a Mutator
     pub fn get_mutator(&self, base: prelude::NodeIndex) -> Result<Mutator, Box<Error>> {
         self.get_mutator_builder(base)
-            .map(|m| m.build("127.0.0.1".parse().unwrap()))
+            .map(|m| m.build("127.0.0.1:0".parse().unwrap()))
     }
 
     /// Get statistics about the time spent processing different parts of the graph.

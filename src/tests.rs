@@ -73,7 +73,7 @@ fn it_works_basic() {
         emits.insert(b, vec![0, 1]);
         let u = Union::new(emits);
         let c = mig.add_ingredient("c", &["a", "b"], u);
-        mig.maintain(c, 0);
+        mig.maintain_anonymous(c, 0);
         (a, b, c)
     });
 
@@ -216,7 +216,7 @@ fn it_works_w_mat() {
         emits.insert(b, vec![0, 1]);
         let u = Union::new(emits);
         let c = mig.add_ingredient("c", &["a", "b"], u);
-        mig.maintain(c, 0);
+        mig.maintain_anonymous(c, 0);
         (a, b, c)
     });
 
@@ -496,7 +496,7 @@ fn votes() {
         emits.insert(article2, vec![0, 1]);
         let u = Union::new(emits);
         let article = mig.add_ingredient("article", &["id", "title"], u);
-        mig.maintain(article, 0);
+        mig.maintain_anonymous(article, 0);
 
         // add vote base table
         let vote = mig.add_ingredient("vote", &["user", "id"], Base::default());
@@ -507,13 +507,13 @@ fn votes() {
             &["id", "votes"],
             Aggregation::COUNT.over(vote, 0, &[1]),
         );
-        mig.maintain(vc, 0);
+        mig.maintain_anonymous(vc, 0);
 
         // add final join using first field from article and first from vc
         use JoinSource::*;
         let j = Join::new(article, vc, JoinType::Inner, vec![B(0, 0), L(1), R(1)]);
         let end = mig.add_ingredient("end", &["id", "title", "votes"], j);
-        mig.maintain(end, 0);
+        mig.maintain_anonymous(end, 0);
 
         (article1, article2, vote, article, vc, end)
     });
@@ -606,7 +606,7 @@ fn transactional_vote() {
         emits.insert(article2, vec![0, 1]);
         let u = Union::new(emits);
         let article = mig.add_ingredient("article", &["id", "title"], u);
-        mig.maintain(article, 0);
+        mig.maintain_anonymous(article, 0);
 
         // add vote base table
         let vote = mig.add_transactional_base("vote", &["user", "id"], Base::default());
@@ -617,7 +617,7 @@ fn transactional_vote() {
             &["id", "votes"],
             Aggregation::COUNT.over(vote, 0, &[1]),
         );
-        mig.maintain(vc, 0);
+        mig.maintain_anonymous(vc, 0);
 
         // add final join using first field from article and first from vc
         use JoinSource::*;
@@ -626,9 +626,9 @@ fn transactional_vote() {
         let end_title = mig.add_ingredient("end2", &["id", "title", "votes"], Identity::new(end));
         let end_votes = mig.add_ingredient("end2", &["id", "title", "votes"], Identity::new(end));
 
-        mig.maintain(end, 0);
-        mig.maintain(end_title, 1);
-        mig.maintain(end_votes, 2);
+        mig.maintain_anonymous(end, 0);
+        mig.maintain_anonymous(end_title, 1);
+        mig.maintain_anonymous(end_votes, 2);
 
         (
             article1,
@@ -757,7 +757,7 @@ fn empty_migration() {
         emits.insert(b, vec![0, 1]);
         let u = Union::new(emits);
         let c = mig.add_ingredient("c", &["a", "b"], u);
-        mig.maintain(c, 0);
+        mig.maintain_anonymous(c, 0);
         (a, b, c)
     });
 
@@ -795,7 +795,7 @@ fn simple_migration() {
     let mut g = ControllerBuilder::default().build_inner();
     let a = g.migrate(|mig| {
         let a = mig.add_ingredient("a", &["a", "b"], Base::default());
-        mig.maintain(a, 0);
+        mig.maintain_anonymous(a, 0);
         a
     });
 
@@ -814,7 +814,7 @@ fn simple_migration() {
     // add unrelated node b in a migration
     let b = g.migrate(|mig| {
         let b = mig.add_ingredient("b", &["a", "b"], Base::default());
-        mig.maintain(b, 0);
+        mig.maintain_anonymous(b, 0);
         b
     });
 
@@ -898,7 +898,7 @@ fn migrate_added_columns() {
     let b = g.migrate(|mig| {
         mig.add_column(a, "c", 3.into());
         let b = mig.add_ingredient("x", &["c", "b"], Project::new(a, &[2, 0], None, None));
-        mig.maintain(b, 1);
+        mig.maintain_anonymous(b, 1);
         b
     });
 
@@ -1007,7 +1007,7 @@ fn key_on_added() {
     let b = g.migrate(|mig| {
         mig.add_column(a, "c", 3.into());
         let b = mig.add_ingredient("x", &["c", "b"], Project::new(a, &[2, 1], None, None));
-        mig.maintain(b, 0);
+        mig.maintain_anonymous(b, 0);
         b
     });
 
@@ -1047,7 +1047,7 @@ fn replay_during_replay() {
         let u = mig.add_ingredient("u", &["u", "a"], j);
         let j = Join::new(a, u, JoinType::Left, vec![B(0, 1), R(0)]);
         let end = mig.add_ingredient("end", &["a", "u"], j);
-        mig.maintain(end, 0);
+        mig.maintain_anonymous(end, 0);
         (u, end)
     });
 
@@ -1088,7 +1088,7 @@ fn replay_during_replay() {
     // we now know that u has key a=1 in its index
     // now we add a secondary index on u.u
     g.migrate(|mig| {
-        mig.maintain(u, 0);
+        mig.maintain_anonymous(u, 0);
     });
 
     let mut second = g.get_getter(u).unwrap();
@@ -1143,7 +1143,7 @@ fn full_aggregation_with_bogokey() {
             &["bogo", "count"],
             Aggregation::COUNT.over(bogo, 0, &[1]),
         );
-        mig.maintain(agg, 0);
+        mig.maintain_anonymous(agg, 0);
         agg
     });
 
@@ -1183,7 +1183,7 @@ fn transactional_migration() {
     let mut g = ControllerBuilder::default().build_inner();
     let a = g.migrate(|mig| {
         let a = mig.add_transactional_base("a", &["a", "b"], Base::default());
-        mig.maintain(a, 0);
+        mig.maintain_anonymous(a, 0);
         a
     });
 
@@ -1206,7 +1206,7 @@ fn transactional_migration() {
     // add unrelated node b in a migration
     let b = g.migrate(|mig| {
         let b = mig.add_transactional_base("b", &["a", "b"], Base::default());
-        mig.maintain(b, 0);
+        mig.maintain_anonymous(b, 0);
         b
     });
 
@@ -1232,7 +1232,7 @@ fn transactional_migration() {
         emits.insert(b, vec![0, 1]);
         let u = Union::new(emits);
         let c = mig.add_ingredient("c", &["a", "b"], u);
-        mig.maintain(c, 0);
+        mig.maintain_anonymous(c, 0);
         c
     });
 
@@ -1310,7 +1310,7 @@ fn independent_domain_migration() {
     let mut g = ControllerBuilder::default().build_inner();
     let a = g.migrate(|mig| {
         let a = mig.add_ingredient("a", &["a", "b"], Base::default());
-        mig.maintain(a, 0);
+        mig.maintain_anonymous(a, 0);
         a
     });
 
@@ -1329,7 +1329,7 @@ fn independent_domain_migration() {
     // add unrelated node b in a migration
     let b = g.migrate(|mig| {
         let b = mig.add_ingredient("b", &["a", "b"], Base::default());
-        mig.maintain(b, 0);
+        mig.maintain_anonymous(b, 0);
         b
     });
 
@@ -1512,7 +1512,7 @@ fn do_full_vote_migration(old_puts_after: bool) {
         let j = Join::new(article, vc, JoinType::Left, vec![B(0, 0), L(1), R(1)]);
         let end = mig.add_ingredient("awvc", &["id", "title", "votes"], j);
 
-        mig.maintain(end, 0);
+        mig.maintain_anonymous(end, 0);
         (article, vote, vc, end)
     });
     let mut muta = g.get_mutator(article);
@@ -1570,7 +1570,7 @@ fn do_full_vote_migration(old_puts_after: bool) {
             vec![B(0, 0), L(1), R(1), R(2)],
         );
         let newend = mig.add_ingredient("awr", &["id", "title", "ratings", "votes"], j);
-        mig.maintain(newend, 0);
+        mig.maintain_anonymous(newend, 0);
         (rating, newend)
     });
 
@@ -1631,7 +1631,7 @@ fn live_writes() {
             Aggregation::COUNT.over(vote, 0, &[1]),
         );
 
-        mig.maintain(vc, 0);
+        mig.maintain_anonymous(vc, 0);
         (vote, vc)
     });
 
@@ -1661,7 +1661,7 @@ fn live_writes() {
             &["id", "votes"],
             Aggregation::SUM.over(vc, 1, &[0]),
         );
-        mig.maintain(vc2, 0);
+        mig.maintain_anonymous(vc2, 0);
         vc2
     });
 
@@ -1718,7 +1718,7 @@ fn state_replay_migration_query() {
         let j = mig.add_ingredient("j", &["x", "y", "z"], j);
 
         // we want to observe what comes out of the join
-        mig.maintain(j, 0);
+        mig.maintain_anonymous(j, 0);
         j
     });
     let mut out = g.get_getter(out).unwrap();

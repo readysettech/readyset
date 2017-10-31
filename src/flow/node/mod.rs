@@ -60,6 +60,10 @@ impl Node {
     pub fn mirror<NT: Into<NodeType>>(&self, n: NT) -> Node {
         Self::new(&*self.name, &self.fields, n, self.transactional)
     }
+
+    pub fn named_mirror<NT: Into<NodeType>>(&self, n: NT, name: String) -> Node {
+        Self::new(name, &self.fields, n, self.transactional)
+    }
 }
 
 #[must_use]
