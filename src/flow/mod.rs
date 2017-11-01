@@ -1297,17 +1297,7 @@ impl Drop for ControllerInner {
 pub struct Blender {
     url: String,
 }
-impl Default for Blender {
-    fn default() -> Self {
-        unreachable!()
-    }
-}
 impl Blender {
-    /// ...
-    pub fn new() -> Self {
-        unreachable!()
-    }
-
     fn rpc<Q: Serialize, R: DeserializeOwned>(
         &self,
         path: &str,
