@@ -1018,7 +1018,6 @@ fn key_on_added() {
 
 #[test]
 fn replay_during_replay() {
-    panic!("Unwrap fails causing test to fail. TODO: figure out why");
     // what we're trying to set up here is a case where a join receives a record with a value for
     // the join key that does not exist in the view the record was sent from. since joins only do
     // lookups into the origin view during forward processing when it receives things from the

@@ -25,7 +25,7 @@ use std::panic;
 use std::thread;
 use std::time;
 
-use distributary::{Blender, DataType};
+use distributary::{ControllerBuilder, DataType};
 
 const DIRECTORY_PREFIX: &str = "tests/mysql_comparison_tests";
 
@@ -277,7 +277,7 @@ fn check_query(
         .chain(Some(query_name.to_owned() + ": " + &query.select_query))
         .collect();
 
-    let g = Blender::new();
+    let g = ControllerBuilder::default().build();
     g.install_recipe(queries.join("\n"));
     let inputs = g.inputs();
     let outputs = g.outputs();
