@@ -382,12 +382,12 @@ extern crate channel;
 
 mod backlog;
 mod checktable;
-mod daemon;
 mod flow;
 mod mir;
 mod ops;
 mod recipe;
 mod sql;
+mod worker;
 
 #[cfg(test)]
 mod tests;
@@ -420,6 +420,7 @@ pub use ops::topk::TopK;
 pub use recipe::{ActivationResult, Recipe};
 pub use sql::{SqlIncorporator, ToFlowParts};
 pub use sql::reuse::ReuseConfigType;
+pub use worker::Worker;
 
 /// Just give me a damn terminal logger
 pub fn logger_pls() -> slog::Logger {

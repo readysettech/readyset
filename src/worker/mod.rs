@@ -11,6 +11,8 @@ use {ChannelCoordinator, CoordinationMessage, CoordinationPayload, DomainBuilder
      ReadQuery, ReadReply, SingleReadHandle};
 use Index as DomainIndex;
 
+/// Workers are responsible for running domains, and serving reads to any materializations contained
+/// within them.
 pub struct Worker {
     log: Logger,
 
@@ -34,6 +36,7 @@ pub struct Worker {
 }
 
 impl Worker {
+    /// Use the given polling loop and readers object to serve reads.
     pub fn serve_reads(
         mut polling_loop: RpcPollingLoop<ReadQuery, ReadReply>,
         readers: Arc<Mutex<HashMap<(NodeIndex, usize), SingleReadHandle>>>,
@@ -74,6 +77,7 @@ impl Worker {
         unreachable!();
     }
 
+    /// Create a new worker.
     pub fn new(
         controller: &str,
         listen_addr: &str,

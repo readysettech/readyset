@@ -20,9 +20,11 @@ bincode = "0.9.0"
 buf_redux = "0.6.1"
 bufstream = "0.1.3"
 bus = "1.3.0"
+clap = "2.25.0"
 evmap = "1.0.0"
 fnv = "1.0.5"
 futures = "0.1.16"
+hostname = "0.1.3"
 hurdles = "1.0.0"
 hyper = "0.11.6"
 itertools = "0.6.0"
@@ -93,3 +95,7 @@ required-features = ["binaries"]
 name = "web_sql"
 path = "src/web/sql_main.rs"
 required-features = ["binaries"]
+
+[[bin]]
+name = "worker"
+path = "src/worker/main.rs"

@@ -4,14 +4,14 @@ use channel::tcp::TcpSender;
 use channel::poll::{PollEvent, PollingLoop, ProcessResult, RpcPollEvent, RpcPollingLoop};
 use checktable;
 use ops::base::Base;
-use daemon::Worker;
+use worker::Worker;
 
 use std::collections::{BTreeMap, HashMap, HashSet};
 use std::error::Error;
 use std::io::Write;
 use std::net::{IpAddr, SocketAddr};
 use std::time::{Duration, Instant};
-use std::sync::{Arc, Mutex};
+use std::sync::{Arc, Barrier, Mutex};
 use std::sync::mpsc;
 use std::{fmt, io, thread, time};
 
@@ -89,6 +89,7 @@ pub struct ControllerBuilder {
     listen_addr: IpAddr,
     heartbeat_every: Duration,
     healthcheck_every: Duration,
+    nworkers: usize,
     log: slog::Logger,
 }
 impl Default for ControllerBuilder {
@@ -106,6 +107,7 @@ impl Default for ControllerBuilder {
             listen_addr: "127.0.0.1".parse().unwrap(),
             heartbeat_every: Duration::from_secs(1),
             healthcheck_every: Duration::from_secs(10),
+            nworkers: 0,
             log,
         }
     }
@@ -146,6 +148,12 @@ impl ControllerBuilder {
         self.sharding_enabled = false;
     }
 
+    /// Set how many workers the controller should wait for before starting. More workers can join
+    /// later, but they won't be assigned any of the initial domains.
+    pub fn set_nworkers(&mut self, workers: usize) {
+        self.nworkers = workers;
+    }
+
     #[cfg(test)]
     pub fn build_inner(self) -> ControllerInner {
         ControllerInner::from_builder(self)
@@ -154,11 +162,10 @@ impl ControllerBuilder {
     /// Build a controller, and return a Blender to provide access to it.
     pub fn build(self) -> Blender {
         // TODO(fintelia): Don't hard code addresses in this function.
+        let nworkers = self.nworkers;
         let inner = Arc::new(Mutex::new(ControllerInner::from_builder(self)));
-        let addr = ControllerInner::listen_external(inner.clone(), "127.0.0.1:0".parse().unwrap());
-        thread::spawn(|| {
-            ControllerInner::listen_internal(inner, "127.0.0.1:0".parse().unwrap())
-        });
+        let addr = ControllerInner::listen_external(inner.clone(), "127.0.0.1:9000".parse().unwrap());
+        ControllerInner::listen_internal(inner, "127.0.0.1:8000".parse().unwrap(), nworkers);
 
         Blender {
             url: format!("http://{}", addr),
@@ -265,41 +272,56 @@ impl ControllerInner {
     }
 
     /// Listen for messages from workers.
-    pub fn listen_internal(controller: Arc<Mutex<ControllerInner>>, addr: SocketAddr) {
+    pub fn listen_internal(controller: Arc<Mutex<ControllerInner>>, addr: SocketAddr, nworkers: usize) {
         use channel::poll::ProcessResult;
         use mio::net::TcpListener;
         use std::str::FromStr;
 
-        let mut pl: PollingLoop<CoordinationMessage> = PollingLoop::new(addr);
-        pl.run_polling_loop(|e| {
-            let mut inner = controller.lock().unwrap();
-            match e {
-                PollEvent::Process(ref msg) => {
-                    trace!(inner.log, "Received {:?}", msg);
-                    let process = match msg.payload {
-                        CoordinationPayload::Register {
-                            ref addr,
-                            ref read_listen_addr,
-                        } => inner.handle_register(msg, addr, read_listen_addr.clone()),
-                        CoordinationPayload::Heartbeat => inner.handle_heartbeat(msg),
-                        CoordinationPayload::DomainBooted(ref domain, ref addr) => Ok(()),
-                        _ => unimplemented!(),
-                    };
-                    match process {
-                        Ok(_) => (),
-                        Err(e) => error!(inner.log, "failed to handle message {:?}: {:?}", msg, e),
+        let (tx, rx) = mpsc::channel();
+
+        thread::spawn(move || {
+            let mut workers_arrived = false;
+            let mut pl: PollingLoop<CoordinationMessage> = PollingLoop::new(addr);
+            pl.run_polling_loop(|e| {
+                let mut inner = controller.lock().unwrap();
+                match e {
+                    PollEvent::Process(ref msg) => {
+                        trace!(inner.log, "Received {:?}", msg);
+                        let process = match msg.payload {
+                            CoordinationPayload::Register {
+                                ref addr,
+                                ref read_listen_addr,
+                            } => inner.handle_register(msg, addr, read_listen_addr.clone()),
+                            CoordinationPayload::Heartbeat => inner.handle_heartbeat(msg),
+                            CoordinationPayload::DomainBooted(ref domain, ref addr) => Ok(()),
+                            _ => unimplemented!(),
+                        };
+                        match process {
+                            Ok(_) => (),
+                            Err(e) => {
+                                error!(inner.log, "failed to handle message {:?}: {:?}", msg, e)
+                            }
+                        }
                     }
+                    PollEvent::ResumePolling(timeout) => *timeout = Some(inner.healthcheck_every),
+                    PollEvent::Timeout => (),
                 }
-                PollEvent::ResumePolling(timeout) => *timeout = Some(inner.healthcheck_every),
-                PollEvent::Timeout => (),
-            }
 
-            // TODO(fintelia): Avoid checking worker liveness more frequently than
-            // inner.healthcheck_every.
-            inner.check_worker_liveness();
+                // TODO(fintelia): Avoid checking worker liveness more frequently than
+                // inner.healthcheck_every.
+                inner.check_worker_liveness();
 
-            ProcessResult::KeepPolling
+                if !workers_arrived && inner.workers.len() == nworkers {
+                    workers_arrived = true;
+                    tx.send(());
+                }
+
+                ProcessResult::KeepPolling
+            });
         });
+
+        // Wait for enough workers to join.
+        let _ = rx.recv();
     }
 
     fn handle_register(

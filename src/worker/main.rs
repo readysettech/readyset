@@ -2,25 +2,25 @@
 extern crate clap;
 extern crate distributary;
 extern crate hostname;
-#[macro_use]
-extern crate rustful;
-#[macro_use]
 extern crate serde_json;
 #[macro_use]
 extern crate slog;
 extern crate slog_term;
 
-extern crate gulaschkanone;
-
-use distributary::Blender;
-use gulaschkanone::{Config, Controller, Worker};
+use distributary::Worker;
 
 use slog::Logger;
 use std::thread;
-use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
-mod api;
+struct Config {
+    pub hostname: String,
+    pub addr: String,
+    pub port: u16,
+    pub controller: Option<String>,
+    pub heartbeat_freq: u64,
+    pub healthcheck_freq: u64,
+}
 
 fn logger_pls() -> slog::Logger {
     use slog::Drain;
@@ -125,26 +125,27 @@ fn main() {
 
     match config.controller {
         None => {
-            let blender = Arc::new(Mutex::new(Blender::new()));
+            // let blender = Arc::new(Mutex::new(Blender::new()));
 
-            let mut controller = Controller::new(
-                blender.clone(),
-                &config.addr,
-                config.port,
-                Duration::from_millis(config.heartbeat_freq),
-                Duration::from_millis(config.healthcheck_freq),
-                log.clone(),
-            );
+            // let mut controller = Controller::new(
+            //     blender.clone(),
+            //     &config.addr,
+            //     config.port,
+            //     Duration::from_millis(config.heartbeat_freq),
+            //     Duration::from_millis(config.healthcheck_freq),
+            //     log.clone(),
+            // );
 
-            // run the API server (to receive recipes)
-            let tb = thread::Builder::new().name("api-srv".into());
-            let api_jh = match tb.spawn(|| api::run(blender, log).unwrap()) {
-                Ok(jh) => jh,
-                Err(e) => panic!("failed to spawn API server: {:?}", e),
-            };
+            // // run the API server (to receive recipes)
+            // let tb = thread::Builder::new().name("api-srv".into());
+            // let api_jh = match tb.spawn(|| api::run(blender, log).unwrap()) {
+            //     Ok(jh) => jh,
+            //     Err(e) => panic!("failed to spawn API server: {:?}", e),
+            // };
 
-            controller.listen();
-            api_jh.join().unwrap();
+            // controller.listen();
+            // api_jh.join().unwrap();
+            unimplemented!()
         }
         Some(c) => {
             let mut worker = Worker::new(
