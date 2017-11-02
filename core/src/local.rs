@@ -1,9 +1,17 @@
-use flow::prelude::*;
+use *;
 use std::ops::{Deref, Index, IndexMut};
 use std::iter::FromIterator;
 use std::collections::HashMap;
 use std::collections::hash_map::Entry;
 use std::rc::Rc;
+
+#[derive(Clone, Copy, Eq, PartialEq, Ord, PartialOrd, Hash, Debug, Serialize, Deserialize)]
+pub struct Tag(pub u32);
+impl Tag {
+    pub fn id(&self) -> u32 {
+        self.0
+    }
+}
 
 #[derive(Serialize, Deserialize)]
 pub struct Map<T> {

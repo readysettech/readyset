@@ -1,7 +1,5 @@
 use std::fmt;
-use petgraph::graph::NodeIndex;
 use flow::node::{Node, NodeType};
-use flow::core::processing::Ingredient;
 use flow::prelude::*;
 
 impl fmt::Debug for Node {

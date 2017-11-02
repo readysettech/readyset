@@ -1,6 +1,6 @@
 use ops;
 use flow::node::special;
-use flow::core::processing::Ingredient;
+use flow::processing::Ingredient;
 
 #[derive(Clone, Serialize, Deserialize)]
 pub enum NodeType {

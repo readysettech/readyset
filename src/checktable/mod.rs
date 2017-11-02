@@ -13,7 +13,7 @@ use std::fmt::Debug;
 use flow::domain;
 use flow::prelude::*;
 use flow::payload::{EgressForBase, IngressFromBase};
-use flow::migrate::materialization::Tag as ReplayPath;
+use core::local::Tag as ReplayPath;
 
 pub mod service;
 pub use self::service::SyncClient as CheckTableClient;

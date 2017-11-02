@@ -5,7 +5,7 @@ use backlog::SingleReadHandle;
 use checktable::{Token, TransactionResult};
 use flow::{Blender, Getter, Migration, Mutator, MutatorBuilder, MutatorError, ReadQuery,
            ReadReply, RemoteGetter, RemoteGetterBuilder};
-use flow::core::{DataType, Datas};
+use core::{DataType, Datas};
 use petgraph::graph::NodeIndex;
 use flow::coordination::{CoordinationMessage, CoordinationPayload};
 use flow::node::StreamUpdate;

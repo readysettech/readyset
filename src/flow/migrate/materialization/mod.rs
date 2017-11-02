@@ -26,15 +26,6 @@ macro_rules! dur_to_ns {
 }
 
 
-#[derive(Clone, Copy, Eq, PartialEq, Ord, PartialOrd, Hash, Debug, Serialize, Deserialize)]
-pub struct Tag(u32);
-
-impl Tag {
-    pub fn id(&self) -> u32 {
-        self.0
-    }
-}
-
 type Indices = HashSet<Vec<usize>>;
 
 pub struct Materializations {

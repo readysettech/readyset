@@ -1,4 +1,4 @@
-use flow::core::{DataType, Record};
+use core::{DataType, Record};
 use fnv::FnvBuildHasher;
 use evmap;
 use arrayvec::ArrayVec;

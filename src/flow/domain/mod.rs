@@ -63,7 +63,6 @@ impl Index {
     }
 }
 
-pub mod local;
 mod handle;
 pub use self::handle::{DomainHandle, DomainInputHandle};
 

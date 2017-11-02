@@ -29,7 +29,6 @@ use tarpc::sync::client::{self, ClientExt};
 use tokio_core::reactor::Core;
 
 pub mod coordination;
-pub mod core;
 pub mod debug;
 pub mod domain;
 pub mod keys;
@@ -39,6 +38,7 @@ pub mod payload;
 pub mod persistence;
 pub mod placement;
 pub mod prelude;
+pub mod processing;
 pub mod statistics;
 
 mod mutator;

@@ -1,5 +1,4 @@
-use flow::core::DataType;
-use flow::prelude::NodeIndex;
+use core::{DataType, NodeIndex};
 pub use mir::MirNodeRef;
 use mir::node::{GroupedNodeType, MirNode, MirNodeType};
 use mir::query::MirQuery;

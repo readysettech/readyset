@@ -4,8 +4,7 @@ use std::fmt::{Debug, Display, Error, Formatter};
 use std::rc::Rc;
 
 use flow::Migration;
-use flow::core::DataType;
-use flow::prelude::NodeIndex;
+use core::{DataType, NodeIndex};
 use mir::MirNodeRef;
 use mir::to_flow::FlowNode;
 use mir::to_flow::{adapt_base_node, make_base_node, make_filter_node, make_grouped_node,

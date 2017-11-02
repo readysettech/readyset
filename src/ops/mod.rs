@@ -1,6 +1,5 @@
 use std::collections::{HashMap, HashSet};
 
-use flow::core::processing::Ingredient;
 use flow::prelude::*;
 
 pub mod base;

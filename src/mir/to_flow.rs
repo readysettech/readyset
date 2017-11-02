@@ -3,8 +3,7 @@ use nom_sql::{ArithmeticBase, ArithmeticExpression, Column, ColumnConstraint, Co
 use std::collections::HashMap;
 
 use flow::Migration;
-use flow::core::DataType;
-use flow::prelude::NodeIndex;
+use core::{DataType, NodeIndex};
 use mir::MirNodeRef;
 use mir::node::GroupedNodeType;
 use ops;

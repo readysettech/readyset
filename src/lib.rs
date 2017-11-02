@@ -379,6 +379,7 @@ extern crate tarpc;
 extern crate tokio_core;
 
 extern crate channel;
+extern crate core;
 
 mod backlog;
 mod checktable;
@@ -392,11 +393,12 @@ mod worker;
 #[cfg(test)]
 mod tests;
 
+pub use core::{DataType, Datas};
+
 pub use backlog::SingleReadHandle;
 pub use checktable::{Token, TransactionResult};
 pub use flow::{Blender, ControllerBuilder, Getter, Migration, Mutator, MutatorBuilder,
                MutatorError, ReadQuery, ReadReply, RemoteGetter, RemoteGetterBuilder};
-pub use flow::core::{DataType, Datas};
 pub use petgraph::graph::NodeIndex;
 pub use flow::coordination::{CoordinationMessage, CoordinationPayload};
 pub use flow::node::StreamUpdate;
