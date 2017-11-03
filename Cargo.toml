@@ -4,7 +4,7 @@ version = "0.1.0"
 authors = ["Jon Gjengset <jon@thesquareplanet.com>"]
 
 [workspace]
-members = ["benchmarks", "channel", "core"]
+members = ["benchmarks", "channel", "core", "mir"]
 
 [features]
 web = ["rustful"]
@@ -56,6 +56,7 @@ nom_sql = { git = "https://github.com/ms705/nom-sql.git", rev = "b01998fc34a5d47
 channel = { path = "channel" }
 core = { path = "core" }
 dataflow = { path = "dataflow" }
+mir = { path = "mir" }
 
 # Not needed directly, but we want to force the version used by our
 # dependencies to have default features. If this isn't here, then the features

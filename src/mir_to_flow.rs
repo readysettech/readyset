@@ -2,28 +2,286 @@ use nom_sql::{ArithmeticBase, ArithmeticExpression, Column, ColumnConstraint, Co
               Operator, OrderType};
 use std::collections::HashMap;
 
-use flow::Migration;
 use core::{DataType, NodeIndex};
-use mir::MirNodeRef;
-use mir::node::GroupedNodeType;
-use dataflow::ops;
+use mir::{FlowNode, MirNodeRef};
+use mir::node::{GroupedNodeType, MirNode, MirNodeType};
+use mir::query::{MirQuery, QueryFlowParts};
 use dataflow::ops::join::{Join, JoinType};
 use dataflow::ops::latest::Latest;
 use dataflow::ops::project::{Project, ProjectExpression, ProjectExpressionBase};
+use dataflow::ops;
+use flow::Migration;
 
-#[derive(Clone, Debug)]
-pub enum FlowNode {
-    New(NodeIndex),
-    Existing(NodeIndex),
-}
+pub fn mir_query_to_flow_parts(mir_query: &mut MirQuery, mig: &mut Migration) -> QueryFlowParts {
+    use std::collections::VecDeque;
 
-impl FlowNode {
-    pub fn address(&self) -> NodeIndex {
-        match *self {
-            FlowNode::New(na) | FlowNode::Existing(na) => na,
+    let mut new_nodes = Vec::new();
+    let mut reused_nodes = Vec::new();
+
+    // starting at the roots, add nodes in topological order
+    let mut node_queue = VecDeque::new();
+    node_queue.extend(mir_query.roots.iter().cloned());
+    let mut in_edge_counts = HashMap::new();
+    for n in &node_queue {
+        in_edge_counts.insert(n.borrow().versioned_name(), 0);
+    }
+    while !node_queue.is_empty() {
+        let n = node_queue.pop_front().unwrap();
+        assert_eq!(in_edge_counts[&n.borrow().versioned_name()], 0);
+
+        let flow_node = mir_node_to_flow_parts(&mut n.borrow_mut(), mig);
+        match flow_node {
+            FlowNode::New(na) => new_nodes.push(na),
+            FlowNode::Existing(na) => reused_nodes.push(na),
+        }
+
+        for child in n.borrow().children.iter() {
+            let nd = child.borrow().versioned_name();
+            let in_edges = if in_edge_counts.contains_key(&nd) {
+                in_edge_counts[&nd]
+            } else {
+                child.borrow().ancestors.len()
+            };
+            assert!(in_edges >= 1);
+            if in_edges == 1 {
+                // last edge removed
+                node_queue.push_back(child.clone());
+            }
+            in_edge_counts.insert(nd, in_edges - 1);
         }
     }
+
+    let leaf_na = mir_query
+        .leaf
+        .borrow()
+        .flow_node
+        .as_ref()
+        .expect("Leaf must have FlowNode by now")
+        .address();
+
+    QueryFlowParts {
+        name: mir_query.name.clone(),
+        new_nodes: new_nodes,
+        reused_nodes: reused_nodes,
+        query_leaf: leaf_na,
+    }
 }
+
+pub fn mir_node_to_flow_parts(mir_node: &mut MirNode, mig: &mut Migration) -> FlowNode {
+    let name = mir_node.name.clone();
+    match mir_node.flow_node {
+        None => {
+            let flow_node = match mir_node.inner {
+                MirNodeType::Aggregation {
+                    ref on,
+                    ref group_by,
+                    ref kind,
+                } => {
+                    assert_eq!(mir_node.ancestors.len(), 1);
+                    let parent = mir_node.ancestors[0].clone();
+                    make_grouped_node(
+                        &name,
+                        parent,
+                        mir_node.columns.as_slice(),
+                        on,
+                        group_by,
+                        GroupedNodeType::Aggregation(kind.clone()),
+                        mig,
+                    )
+                }
+                MirNodeType::Base {
+                    ref mut column_specs,
+                    ref keys,
+                    transactional,
+                    ref adapted_over,
+                } => match *adapted_over {
+                    None => {
+                        make_base_node(&name, column_specs.as_mut_slice(), keys, mig, transactional)
+                    }
+                    Some(ref bna) => adapt_base_node(
+                        bna.over.clone(),
+                        mig,
+                        column_specs.as_mut_slice(),
+                        &bna.columns_added,
+                        &bna.columns_removed,
+                    ),
+                },
+                MirNodeType::Extremum {
+                    ref on,
+                    ref group_by,
+                    ref kind,
+                } => {
+                    assert_eq!(mir_node.ancestors.len(), 1);
+                    let parent = mir_node.ancestors[0].clone();
+                    make_grouped_node(
+                        &name,
+                        parent,
+                        mir_node.columns.as_slice(),
+                        on,
+                        group_by,
+                        GroupedNodeType::Extremum(kind.clone()),
+                        mig,
+                    )
+                }
+                MirNodeType::Filter { ref conditions } => {
+                    assert_eq!(mir_node.ancestors.len(), 1);
+                    let parent = mir_node.ancestors[0].clone();
+                    make_filter_node(&name, parent, mir_node.columns.as_slice(), conditions, mig)
+                }
+                MirNodeType::GroupConcat {
+                    ref on,
+                    ref separator,
+                } => {
+                    assert_eq!(mir_node.ancestors.len(), 1);
+                    let parent = mir_node.ancestors[0].clone();
+                    let group_cols = parent.borrow().columns().iter().cloned().collect();
+                    make_grouped_node(
+                        &name,
+                        parent,
+                        mir_node.columns.as_slice(),
+                        on,
+                        &group_cols,
+                        GroupedNodeType::GroupConcat(separator.to_string()),
+                        mig,
+                    )
+                }
+                MirNodeType::Identity => {
+                    assert_eq!(mir_node.ancestors.len(), 1);
+                    let parent = mir_node.ancestors[0].clone();
+                    make_identity_node(&name, parent, mir_node.columns.as_slice(), mig)
+                }
+                MirNodeType::Join {
+                    ref on_left,
+                    ref on_right,
+                    ref project,
+                } => {
+                    assert_eq!(mir_node.ancestors.len(), 2);
+                    let left = mir_node.ancestors[0].clone();
+                    let right = mir_node.ancestors[1].clone();
+                    make_join_node(
+                        &name,
+                        left,
+                        right,
+                        mir_node.columns.as_slice(),
+                        on_left,
+                        on_right,
+                        project,
+                        JoinType::Inner,
+                        mig,
+                    )
+                }
+                MirNodeType::Latest { ref group_by } => {
+                    assert_eq!(mir_node.ancestors.len(), 1);
+                    let parent = mir_node.ancestors[0].clone();
+                    make_latest_node(&name, parent, mir_node.columns.as_slice(), group_by, mig)
+                }
+                MirNodeType::Leaf { ref keys, .. } => {
+                    assert_eq!(mir_node.ancestors.len(), 1);
+                    let parent = mir_node.ancestors[0].clone();
+                    materialize_leaf_node(&parent, name, keys, mig);
+                    // TODO(malte): below is yucky, but required to satisfy the type system:
+                    // each match arm must return a `FlowNode`, so we use the parent's one
+                    // here.
+                    let node = match *parent.borrow().flow_node.as_ref().unwrap() {
+                        FlowNode::New(na) => FlowNode::Existing(na),
+                        ref n @ FlowNode::Existing(..) => n.clone(),
+                    };
+                    node
+                }
+                MirNodeType::LeftJoin {
+                    ref on_left,
+                    ref on_right,
+                    ref project,
+                } => {
+                    assert_eq!(mir_node.ancestors.len(), 2);
+                    let left = mir_node.ancestors[0].clone();
+                    let right = mir_node.ancestors[1].clone();
+                    make_join_node(
+                        &name,
+                        left,
+                        right,
+                        mir_node.columns.as_slice(),
+                        on_left,
+                        on_right,
+                        project,
+                        JoinType::Left,
+                        mig,
+                    )
+                }
+                MirNodeType::Project {
+                    ref emit,
+                    ref literals,
+                    ref arithmetic,
+                } => {
+                    assert_eq!(mir_node.ancestors.len(), 1);
+                    let parent = mir_node.ancestors[0].clone();
+                    make_project_node(
+                        &name,
+                        parent,
+                        mir_node.columns.as_slice(),
+                        emit,
+                        arithmetic,
+                        literals,
+                        mig,
+                    )
+                }
+                MirNodeType::Reuse { ref node } => {
+                    match *node.borrow()
+                           .flow_node
+                           .as_ref()
+                           .expect("Reused MirNode must have FlowNode") {
+                               // "New" => flow node was originally created for the node that we
+                               // are reusing
+                               FlowNode::New(na) |
+                               // "Existing" => flow node was already reused from some other
+                               // MIR node
+                               FlowNode::Existing(na) => FlowNode::Existing(na),
+                        }
+                }
+                MirNodeType::Union { ref emit } => {
+                    assert_eq!(mir_node.ancestors.len(), emit.len());
+                    make_union_node(
+                        &name,
+                        mir_node.columns.as_slice(),
+                        emit,
+                        mir_node.ancestors(),
+                        mig,
+                    )
+                }
+                MirNodeType::TopK {
+                    ref order,
+                    ref group_by,
+                    ref k,
+                    ref offset,
+                } => {
+                    assert_eq!(mir_node.ancestors.len(), 1);
+                    let parent = mir_node.ancestors[0].clone();
+                    make_topk_node(
+                        &name,
+                        parent,
+                        mir_node.columns.as_slice(),
+                        order,
+                        group_by,
+                        *k,
+                        *offset,
+                        mig,
+                    )
+                }
+            };
+
+            // any new flow nodes have been instantiated by now, so we replace them with
+            // existing ones, but still return `FlowNode::New` below in order to notify higher
+            // layers of the new nodes.
+            mir_node.flow_node = match flow_node {
+                FlowNode::New(na) => Some(FlowNode::Existing(na)),
+                ref n @ FlowNode::Existing(..) => Some(n.clone()),
+            };
+            flow_node
+        }
+        Some(ref flow_node) => flow_node.clone(),
+    }
+}
+
 
 pub(crate) fn adapt_base_node(
     over_node: MirNodeRef,
@@ -488,7 +746,8 @@ pub(crate) fn materialize_leaf_node(
         // TODO(malte): this does not yet cover the case when there are multiple query
         // parameters, which requires compound key support on Reader nodes.
         //assert_eq!(key_cols.len(), 1);
-        let first_key_col_id = parent.borrow()
+        let first_key_col_id = parent
+            .borrow()
             .column_id_for_column(key_cols.iter().next().unwrap());
         mig.maintain(name, na, first_key_col_id);
     } else {

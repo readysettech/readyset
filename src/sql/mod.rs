@@ -12,27 +12,16 @@ use nom_sql::parser as sql_parser;
 use nom_sql::{ArithmeticBase, Column, SqlQuery};
 use nom_sql::SelectStatement;
 use self::mir::{MirNodeRef, SqlToMirConverter};
-use mir::query::MirQuery;
+use mir::query::{MirQuery, QueryFlowParts};
 use self::reuse::{ReuseConfig, ReuseConfigType};
 use sql::query_graph::{to_query_graph, QueryGraph};
 use sql::query_signature::Signature;
+use mir_to_flow::mir_query_to_flow_parts;
 
 use slog;
 use std::collections::HashMap;
 use std::str;
 use std::vec::Vec;
-
-/// Represents the result of a query incorporation, specifying query name (auto-generated or
-/// reflecting a pre-specified name), new nodes added for the query, reused nodes that are part of
-/// the query, and the leaf node that represents the query result (and off whom we've hung a
-/// `Reader` node),
-#[derive(Clone, Debug, PartialEq)]
-pub struct QueryFlowParts {
-    pub name: String,
-    pub new_nodes: Vec<NodeIndex>,
-    pub reused_nodes: Vec<NodeIndex>,
-    pub query_leaf: NodeIndex,
-}
 
 #[derive(Clone, Debug)]
 enum QueryGraphReuse {
@@ -324,7 +313,7 @@ impl SqlIncorporator {
 
         // push it into the flow graph using the migration in `mig`, and obtain `QueryFlowParts`.
         // Note that we don't need to optimize the MIR here, because the query is trivial.
-        let qfp = mir.into_flow_parts(&mut mig);
+        let qfp = mir_query_to_flow_parts(&mut mir, &mut mig);
 
         // TODO(malte): we currently need to remember these for local state, but should figure out
         // a better plan (see below)
@@ -368,7 +357,7 @@ impl SqlIncorporator {
             .collect::<Vec<_>>();
 
         // push it into the flow graph using the migration in `mig`, and obtain `QueryFlowParts`
-        let qfp = mir.into_flow_parts(&mut mig);
+        let qfp = mir_query_to_flow_parts(&mut mir, &mut mig);
 
         // TODO(malte): get rid of duplication and figure out where to track this state
         self.view_schemas.insert(String::from(query_name), fields);
@@ -406,7 +395,7 @@ impl SqlIncorporator {
             .collect::<Vec<_>>();
 
         // push it into the flow graph using the migration in `mig`, and obtain `QueryFlowParts`
-        let qfp = mir.into_flow_parts(&mut mig);
+        let qfp = mir_query_to_flow_parts(&mut mir, &mut mig);
 
         // TODO(malte): get rid of duplication and figure out where to track this state
         self.view_schemas.insert(String::from(query_name), fields);
@@ -460,7 +449,7 @@ impl SqlIncorporator {
             post_reuse_opt_mir.to_graphviz().unwrap()
         );
 
-        let qfp = post_reuse_opt_mir.into_flow_parts(&mut mig);
+        let qfp = mir_query_to_flow_parts(&mut post_reuse_opt_mir, &mut mig);
 
         info!(
             self.log,

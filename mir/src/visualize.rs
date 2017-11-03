@@ -3,8 +3,8 @@ use std::fmt::{self, Write};
 
 use dataflow::ops::grouped::aggregate::Aggregation as AggregationKind;
 use dataflow::ops::grouped::extremum::Extremum as ExtremumKind;
-use mir::node::{MirNode, MirNodeType};
-use mir::query::MirQuery;
+use node::{MirNode, MirNodeType};
+use query::MirQuery;
 
 pub trait GraphViz {
     fn to_graphviz(&self) -> Result<String, fmt::Error>;

@@ -1,10 +1,20 @@
 use std::collections::HashMap;
 use std::fmt::{Display, Error, Formatter};
 
-use flow::Migration;
-use mir::MirNodeRef;
-use mir::to_flow::FlowNode;
-use sql::QueryFlowParts;
+use core::*;
+use MirNodeRef;
+
+/// Represents the result of a query incorporation, specifying query name (auto-generated or
+/// reflecting a pre-specified name), new nodes added for the query, reused nodes that are part of
+/// the query, and the leaf node that represents the query result (and off whom we've hung a
+/// `Reader` node),
+#[derive(Clone, Debug, PartialEq)]
+pub struct QueryFlowParts {
+    pub name: String,
+    pub new_nodes: Vec<NodeIndex>,
+    pub reused_nodes: Vec<NodeIndex>,
+    pub query_leaf: NodeIndex,
+}
 
 #[derive(Clone, Debug)]
 pub struct MirQuery {
@@ -55,60 +65,6 @@ impl MirQuery {
             }
         }
         nodes
-    }
-
-    pub fn into_flow_parts(&mut self, mig: &mut Migration) -> QueryFlowParts {
-        use std::collections::VecDeque;
-
-        let mut new_nodes = Vec::new();
-        let mut reused_nodes = Vec::new();
-
-        // starting at the roots, add nodes in topological order
-        let mut node_queue = VecDeque::new();
-        node_queue.extend(self.roots.iter().cloned());
-        let mut in_edge_counts = HashMap::new();
-        for n in &node_queue {
-            in_edge_counts.insert(n.borrow().versioned_name(), 0);
-        }
-        while !node_queue.is_empty() {
-            let n = node_queue.pop_front().unwrap();
-            assert_eq!(in_edge_counts[&n.borrow().versioned_name()], 0);
-
-            let flow_node = n.borrow_mut().into_flow_parts(mig);
-            match flow_node {
-                FlowNode::New(na) => new_nodes.push(na),
-                FlowNode::Existing(na) => reused_nodes.push(na),
-            }
-
-            for child in n.borrow().children.iter() {
-                let nd = child.borrow().versioned_name();
-                let in_edges = if in_edge_counts.contains_key(&nd) {
-                    in_edge_counts[&nd]
-                } else {
-                    child.borrow().ancestors.len()
-                };
-                assert!(in_edges >= 1);
-                if in_edges == 1 {
-                    // last edge removed
-                    node_queue.push_back(child.clone());
-                }
-                in_edge_counts.insert(nd, in_edges - 1);
-            }
-        }
-
-        let leaf_na = self.leaf
-            .borrow()
-            .flow_node
-            .as_ref()
-            .expect("Leaf must have FlowNode by now")
-            .address();
-
-        QueryFlowParts {
-            name: self.name.clone(),
-            new_nodes: new_nodes,
-            reused_nodes: reused_nodes,
-            query_leaf: leaf_na,
-        }
     }
 
     pub fn optimize(mut self) -> MirQuery {

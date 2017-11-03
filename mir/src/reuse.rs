@@ -1,6 +1,6 @@
-use mir::MirNodeRef;
-use mir::node::{MirNode, MirNodeType};
-use mir::query::MirQuery;
+use MirNodeRef;
+use node::{MirNode, MirNodeType};
+use query::MirQuery;
 use nom_sql::Column;
 use slog;
 
@@ -213,8 +213,8 @@ pub fn merge_mir_for_queries(
 mod tests {
     use super::*;
     use nom_sql::{Column, ColumnSpecification, SqlType};
-    use mir::node::{MirNode, MirNodeType};
-    use mir::MirNodeRef;
+    use node::{MirNode, MirNodeType};
+    use MirNodeRef;
 
     fn make_nodes() -> (MirNodeRef, MirNodeRef, MirNodeRef, MirNodeRef) {
         let cspec = |n: &str| -> (ColumnSpecification, Option<usize>) {
@@ -277,8 +277,8 @@ mod tests {
 
     #[test]
     fn merge_mir() {
-        use mir::node::{MirNode, MirNodeType};
-        use mir::query::MirQuery;
+        use node::{MirNode, MirNodeType};
+        use query::MirQuery;
 
         let log = slog::Logger::root(slog::Discard, o!());
 

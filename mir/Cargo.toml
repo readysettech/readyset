@@ -1,0 +1,15 @@
+[package]
+name = "mir"
+version = "0.1.0"
+authors = ["The Distributary Developers"]
+
+[dependencies]
+regex = "0.2.2"
+slog = "2.0.6"
+
+# git deps
+nom_sql = { git = "https://github.com/ms705/nom-sql.git", rev = "b01998fc34a5d473387987110724a395298fc6c0"}
+
+# local deps
+core = { path = "../core" }
+dataflow = { path = "../dataflow" }

@@ -1,6 +1,6 @@
-use mir::MirNodeRef;
-use mir::node::{MirNode, MirNodeType};
-use mir::query::MirQuery;
+use MirNodeRef;
+use node::{MirNode, MirNodeType};
+use query::MirQuery;
 use std::collections::HashMap;
 use nom_sql::Operator;
 use core::DataType;

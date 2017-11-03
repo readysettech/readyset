@@ -3,17 +3,11 @@ use std::cell::RefCell;
 use std::fmt::{Debug, Display, Error, Formatter};
 use std::rc::Rc;
 
-use flow::Migration;
 use core::{DataType, NodeIndex};
-use mir::MirNodeRef;
-use mir::to_flow::FlowNode;
-use mir::to_flow::{adapt_base_node, make_base_node, make_filter_node, make_grouped_node,
-                   make_identity_node, make_join_node, make_latest_node, make_project_node,
-                   make_topk_node, make_union_node, materialize_leaf_node};
 use dataflow::ops;
 use dataflow::ops::grouped::aggregate::Aggregation as AggregationKind;
 use dataflow::ops::grouped::extremum::Extremum as ExtremumKind;
-use dataflow::ops::join::JoinType;
+use {MirNodeRef, FlowNode};
 
 /// Helper enum to avoid having separate `make_aggregation_node` and `make_extremum_node` functions
 pub enum GroupedNodeType {
@@ -26,7 +20,7 @@ pub struct MirNode {
     pub name: String,
     pub from_version: usize,
     pub columns: Vec<Column>,
-    pub(crate) inner: MirNodeType,
+    pub inner: MirNodeType,
     pub ancestors: Vec<MirNodeRef>,
     pub children: Vec<MirNodeRef>,
     pub flow_node: Option<FlowNode>,
@@ -327,227 +321,14 @@ impl MirNode {
             self.columns.len()
         )
     }
-
-    pub fn into_flow_parts(&mut self, mig: &mut Migration) -> FlowNode {
-        let name = self.name.clone();
-        match self.flow_node {
-            None => {
-                let flow_node = match self.inner {
-                    MirNodeType::Aggregation {
-                        ref on,
-                        ref group_by,
-                        ref kind,
-                    } => {
-                        assert_eq!(self.ancestors.len(), 1);
-                        let parent = self.ancestors[0].clone();
-                        make_grouped_node(
-                            &name,
-                            parent,
-                            self.columns.as_slice(),
-                            on,
-                            group_by,
-                            GroupedNodeType::Aggregation(kind.clone()),
-                            mig,
-                        )
-                    }
-                    MirNodeType::Base {
-                        ref mut column_specs,
-                        ref keys,
-                        transactional,
-                        ref adapted_over,
-                    } => match *adapted_over {
-                        None => make_base_node(
-                            &name,
-                            column_specs.as_mut_slice(),
-                            keys,
-                            mig,
-                            transactional,
-                        ),
-                        Some(ref bna) => adapt_base_node(
-                            bna.over.clone(),
-                            mig,
-                            column_specs.as_mut_slice(),
-                            &bna.columns_added,
-                            &bna.columns_removed,
-                        ),
-                    },
-                    MirNodeType::Extremum {
-                        ref on,
-                        ref group_by,
-                        ref kind,
-                    } => {
-                        assert_eq!(self.ancestors.len(), 1);
-                        let parent = self.ancestors[0].clone();
-                        make_grouped_node(
-                            &name,
-                            parent,
-                            self.columns.as_slice(),
-                            on,
-                            group_by,
-                            GroupedNodeType::Extremum(kind.clone()),
-                            mig,
-                        )
-                    }
-                    MirNodeType::Filter { ref conditions } => {
-                        assert_eq!(self.ancestors.len(), 1);
-                        let parent = self.ancestors[0].clone();
-                        make_filter_node(&name, parent, self.columns.as_slice(), conditions, mig)
-                    }
-                    MirNodeType::GroupConcat {
-                        ref on,
-                        ref separator,
-                    } => {
-                        assert_eq!(self.ancestors.len(), 1);
-                        let parent = self.ancestors[0].clone();
-                        let group_cols = parent.borrow().columns().iter().cloned().collect();
-                        make_grouped_node(
-                            &name,
-                            parent,
-                            self.columns.as_slice(),
-                            on,
-                            &group_cols,
-                            GroupedNodeType::GroupConcat(separator.to_string()),
-                            mig,
-                        )
-                    }
-                    MirNodeType::Identity => {
-                        assert_eq!(self.ancestors.len(), 1);
-                        let parent = self.ancestors[0].clone();
-                        make_identity_node(&name, parent, self.columns.as_slice(), mig)
-                    }
-                    MirNodeType::Join {
-                        ref on_left,
-                        ref on_right,
-                        ref project,
-                    } => {
-                        assert_eq!(self.ancestors.len(), 2);
-                        let left = self.ancestors[0].clone();
-                        let right = self.ancestors[1].clone();
-                        make_join_node(
-                            &name,
-                            left,
-                            right,
-                            self.columns.as_slice(),
-                            on_left,
-                            on_right,
-                            project,
-                            JoinType::Inner,
-                            mig,
-                        )
-                    }
-                    MirNodeType::Latest { ref group_by } => {
-                        assert_eq!(self.ancestors.len(), 1);
-                        let parent = self.ancestors[0].clone();
-                        make_latest_node(&name, parent, self.columns.as_slice(), group_by, mig)
-                    }
-                    MirNodeType::Leaf { ref keys, .. } => {
-                        assert_eq!(self.ancestors.len(), 1);
-                        let parent = self.ancestors[0].clone();
-                        materialize_leaf_node(&parent, name, keys, mig);
-                        // TODO(malte): below is yucky, but required to satisfy the type system:
-                        // each match arm must return a `FlowNode`, so we use the parent's one
-                        // here.
-                        let node = match *parent.borrow().flow_node.as_ref().unwrap() {
-                            FlowNode::New(na) => FlowNode::Existing(na),
-                            ref n @ FlowNode::Existing(..) => n.clone(),
-                        };
-                        node
-                    }
-                    MirNodeType::LeftJoin {
-                        ref on_left,
-                        ref on_right,
-                        ref project,
-                    } => {
-                        assert_eq!(self.ancestors.len(), 2);
-                        let left = self.ancestors[0].clone();
-                        let right = self.ancestors[1].clone();
-                        make_join_node(
-                            &name,
-                            left,
-                            right,
-                            self.columns.as_slice(),
-                            on_left,
-                            on_right,
-                            project,
-                            JoinType::Left,
-                            mig,
-                        )
-                    }
-                    MirNodeType::Project {
-                        ref emit,
-                        ref literals,
-                        ref arithmetic,
-                    } => {
-                        assert_eq!(self.ancestors.len(), 1);
-                        let parent = self.ancestors[0].clone();
-                        make_project_node(
-                            &name,
-                            parent,
-                            self.columns.as_slice(),
-                            emit,
-                            arithmetic,
-                            literals,
-                            mig,
-                        )
-                    }
-                    MirNodeType::Reuse { ref node } => {
-                        match *node.borrow()
-                           .flow_node
-                           .as_ref()
-                           .expect("Reused MirNode must have FlowNode") {
-                               // "New" => flow node was originally created for the node that we
-                               // are reusing
-                               FlowNode::New(na) |
-                               // "Existing" => flow node was already reused from some other
-                               // MIR node
-                               FlowNode::Existing(na) => FlowNode::Existing(na),
-                        }
-                    }
-                    MirNodeType::Union { ref emit } => {
-                        assert_eq!(self.ancestors.len(), emit.len());
-                        make_union_node(&name, self.columns.as_slice(), emit, self.ancestors(), mig)
-                    }
-                    MirNodeType::TopK {
-                        ref order,
-                        ref group_by,
-                        ref k,
-                        ref offset,
-                    } => {
-                        assert_eq!(self.ancestors.len(), 1);
-                        let parent = self.ancestors[0].clone();
-                        make_topk_node(
-                            &name,
-                            parent,
-                            self.columns.as_slice(),
-                            order,
-                            group_by,
-                            *k,
-                            *offset,
-                            mig,
-                        )
-                    }
-                };
-
-                // any new flow nodes have been instantiated by now, so we replace them with
-                // existing ones, but still return `FlowNode::New` below in order to notify higher
-                // layers of the new nodes.
-                self.flow_node = match flow_node {
-                    FlowNode::New(na) => Some(FlowNode::Existing(na)),
-                    ref n @ FlowNode::Existing(..) => Some(n.clone()),
-                };
-                flow_node
-            }
-            Some(ref flow_node) => flow_node.clone(),
-        }
-    }
 }
 
 /// Specifies the adapatation of an existing base node by column addition/removal.
 /// `over` is a `MirNode` of type `Base`.
 pub struct BaseNodeAdaptation {
-    over: MirNodeRef,
-    columns_added: Vec<ColumnSpecification>,
-    columns_removed: Vec<ColumnSpecification>,
+    pub over: MirNodeRef,
+    pub columns_added: Vec<ColumnSpecification>,
+    pub columns_removed: Vec<ColumnSpecification>,
 }
 
 pub enum MirNodeType {

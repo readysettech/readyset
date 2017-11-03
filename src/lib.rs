@@ -358,9 +358,10 @@ extern crate tokio_core;
 extern crate channel;
 extern crate core;
 extern crate dataflow;
+extern crate mir;
 
 mod flow;
-mod mir;
+mod mir_to_flow;
 mod recipe;
 mod sql;
 mod worker;

@@ -3,7 +3,7 @@ pub use mir::MirNodeRef;
 use mir::node::{GroupedNodeType, MirNode, MirNodeType};
 use mir::query::MirQuery;
 // TODO(malte): remove if possible
-pub use mir::to_flow::FlowNode;
+pub use mir::FlowNode;
 use dataflow::ops::join::JoinType;
 
 use nom_sql::{ArithmeticExpression, Column, ColumnSpecification, ConditionBase,
