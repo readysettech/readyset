@@ -410,6 +410,3 @@ pub fn logger_pls() -> slog::Logger {
 #[cfg(feature = "web")]
 /// web provides a simple REST HTTP server for reading from and writing to the data flow graph.
 pub mod web;
-
-/// srv provides a networked RPC server for accessing the data flow graph.
-pub mod srv;
