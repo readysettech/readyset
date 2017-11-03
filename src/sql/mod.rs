@@ -309,19 +309,17 @@ impl SqlIncorporator {
             );
 
             let mut mir_queries = Vec::new();
-            flame::span_of("loop", || {
-                for uid in reuse_config.reuse_universes(universe) {
-                    let sig = (c.1).0;
-                    let mqs: Vec<_> = reuse_candidates
-                        .iter()
-                        .map(|c| {
-                            (sig, uid.clone())
-                        })
-                        .collect();
+            for uid in reuse_config.reuse_universes(universe) {
+                let mqs: Vec<_> = reuse_candidates
+                    .iter()
+                    .map(|c| {
+                        let sig = (c.1).0;
+                        (sig, uid.clone())
+                    })
+                    .collect();
 
-                    mir_queries.extend(mqs);
-                }
-            });
+                mir_queries.extend(mqs);
+            }
 
             return (qg, QueryGraphReuse::ExtendExisting(mir_queries));
         } else {

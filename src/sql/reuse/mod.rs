@@ -37,7 +37,7 @@ impl ReuseConfig {
     pub fn reuse_candidates<'a>(
         &self,
         qg: &mut QueryGraph,
-        query_graphs: &'a HashMap<u64, (QueryGraph, MirQuery)>,
+        query_graphs: &'a HashMap<u64, QueryGraph>,
     ) -> Vec<(ReuseType, (u64, &'a QueryGraph))> {
         let reuse_candidates = match self.config {
             ReuseConfigType::Finkelstein => {
@@ -100,6 +100,6 @@ impl ReuseConfig {
 pub trait ReuseConfiguration {
     fn reuse_candidates<'a>(
         qg: &QueryGraph,
-        query_graphs: &'a HashMap<u64, (QueryGraph, MirQuery)>,
+        query_graphs: &'a HashMap<u64, QueryGraph>,
     ) -> Vec<(ReuseType, (u64, &'a QueryGraph))>;
 }

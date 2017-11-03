@@ -12,7 +12,7 @@ pub struct Full;
 impl ReuseConfiguration for Full {
     fn reuse_candidates<'a>(
         _qg: &QueryGraph,
-        query_graphs: &'a HashMap<u64, (QueryGraph, MirQuery)>,
+        query_graphs: &'a HashMap<u64, QueryGraph>,
     ) -> Vec<(ReuseType, (u64, &'a QueryGraph))> {
         // sort keys to make reuse deterministic
         let mut sorted_keys: Vec<u64> = query_graphs.keys().cloned().collect();
@@ -20,7 +20,7 @@ impl ReuseConfiguration for Full {
         sorted_keys
             .iter()
             .map(|k| {
-                (ReuseType::DirectExtension, (k.clone(), &query_graphs[k].0))
+                (ReuseType::DirectExtension, (k.clone(), &query_graphs[k]))
             })
             .collect()
     }
