@@ -40,7 +40,7 @@ pub struct QueryFlowParts {
 #[derive(Clone, Debug)]
 enum QueryGraphReuse {
     ExactMatch(MirNodeRef),
-    ExtendExisting(Vec<MirQuery>),
+    ExtendExisting(Vec<(u64, DataType)>),
     /// (node, columns to re-project if necessary, parameters)
     ReaderOntoExisting(MirNodeRef, Option<Vec<Column>>, Vec<Column>),
     None,
@@ -308,18 +308,19 @@ impl SqlIncorporator {
                 reuse_candidates
             );
 
-            let mut mir_queries: Vec<MirQuery> = Vec::new();
-            for uid in reuse_config.reuse_universes(universe) {
-                let mqs: Vec<MirQuery> = reuse_candidates
-                    .iter()
-                    .filter_map(|c| {
-                        self.mir_queries.get(&(c.1.signature().hash, uid.clone()))
-                    })
-                    .cloned()
-                    .collect();
+            let mut mir_queries = Vec::new();
+            flame::span_of("loop", || {
+                for uid in reuse_config.reuse_universes(universe) {
+                    let mqs: Vec<_> = reuse_candidates
+                        .iter()
+                        .map(|c| {
+                            (c.2, uid.clone())
+                        })
+                        .collect();
 
-                mir_queries.extend(mqs);
-            }
+                    mir_queries.extend(mqs);
+                }
+            });
 
             return (qg, QueryGraphReuse::ExtendExisting(mir_queries));
         } else {
@@ -452,7 +453,7 @@ impl SqlIncorporator {
         query_name: &str,
         query: &SelectStatement,
         qg: QueryGraph,
-        reuse_mirs: Vec<MirQuery>,
+        reuse_mirs: Vec<(u64, DataType)>,
         mut mig: &mut Migration,
     ) -> QueryFlowParts {
         use super::mir::reuse::merge_mir_for_queries;
@@ -477,7 +478,11 @@ impl SqlIncorporator {
         let mut reused_mir = new_opt_mir.clone();
         let mut num_reused_nodes = 0;
         for m in reuse_mirs {
-            let res = merge_mir_for_queries(&self.log, &reused_mir, &m);
+            if !self.mir_queries.contains_key(&m) {
+                continue;
+            }
+            let mq = self.mir_queries.get(&m).unwrap();
+            let res = merge_mir_for_queries(&self.log, &reused_mir, &mq);
             reused_mir = res.0;
             if res.1 > num_reused_nodes {
                 num_reused_nodes = res.1;

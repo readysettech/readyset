@@ -38,7 +38,7 @@ impl ReuseConfig {
         &self,
         qg: &mut QueryGraph,
         query_graphs: &'a HashMap<u64, QueryGraph>,
-    ) -> Vec<(ReuseType, &'a QueryGraph)> {
+    ) -> Vec<(ReuseType, &'a QueryGraph, u64)> {
         let reuse_candidates = match self.config {
             ReuseConfigType::Finkelstein => {
                 finkelstein::Finkelstein::reuse_candidates(qg, query_graphs)
@@ -55,7 +55,7 @@ impl ReuseConfig {
     pub fn reorder_joins(
         &self,
         qg: &mut QueryGraph,
-        reuse_candidates: &Vec<(ReuseType, &QueryGraph)>,
+        reuse_candidates: &Vec<(ReuseType, &QueryGraph, u64)>,
     ) {
         reorder_joins(qg, reuse_candidates);
     }
@@ -101,5 +101,5 @@ pub trait ReuseConfiguration {
     fn reuse_candidates<'a>(
         qg: &QueryGraph,
         query_graphs: &'a HashMap<u64, QueryGraph>,
-    ) -> Vec<(ReuseType, &'a QueryGraph)>;
+    ) -> Vec<(ReuseType, &'a QueryGraph, u64)>;
 }

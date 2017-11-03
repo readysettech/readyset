@@ -33,9 +33,9 @@ impl ReuseConfiguration for Relaxed {
     fn reuse_candidates<'a>(
         qg: &QueryGraph,
         query_graphs: &'a HashMap<u64, QueryGraph>,
-    ) -> Vec<(ReuseType, &'a QueryGraph)> {
+    ) -> Vec<(ReuseType, &'a QueryGraph, u64)> {
         let mut reuse_candidates = Vec::new();
-        for existing_qg in query_graphs.values() {
+        for (k, existing_qg) in query_graphs {
             if existing_qg
                 .signature()
                 .is_weak_generalization_of(&qg.signature())
@@ -43,7 +43,7 @@ impl ReuseConfiguration for Relaxed {
                 match Self::check_compatibility(&qg, existing_qg) {
                     Some(reuse) => {
                         // QGs are compatible, we can reuse `existing_qg` as part of `qg`!
-                        reuse_candidates.push((reuse, existing_qg));
+                        reuse_candidates.push((reuse, existing_qg, k.clone()));
                     }
                     None => (),
                 }
