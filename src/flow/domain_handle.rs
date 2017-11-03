@@ -6,7 +6,7 @@ use dataflow::payload::ControlReplyPacket;
 use dataflow::prelude::*;
 use dataflow::statistics::{DomainStats, NodeStats};
 use flow::coordination::{CoordinationMessage, CoordinationPayload};
-use flow::{placement, WorkerEndpoint, WorkerIdentifier};
+use flow::{WorkerEndpoint, WorkerIdentifier};
 
 use std::{self, cell, io, thread};
 use std::collections::HashMap;

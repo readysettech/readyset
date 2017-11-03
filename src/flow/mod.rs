@@ -33,7 +33,6 @@ pub mod coordination;
 pub mod domain_handle;
 pub mod keys;
 pub mod migrate;
-pub mod placement;
 
 mod mutator;
 mod getter;
