@@ -292,7 +292,10 @@ impl SqlIncorporator {
 
             let mir_queries: Vec<MirQuery> = reuse_candidates
                 .iter()
-                .map(|c| self.query_graphs[&c.1.signature().hash].1.clone())
+                .map(|c| {
+                    let sig = (c.1).0;
+                    self.query_graphs[&sig].1.clone()
+                })
                 .collect();
 
             return (qg, QueryGraphReuse::ExtendExisting(mir_queries));

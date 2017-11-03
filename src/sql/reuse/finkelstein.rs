@@ -18,9 +18,9 @@ impl ReuseConfiguration for Finkelstein {
     fn reuse_candidates<'a>(
         qg: &QueryGraph,
         query_graphs: &'a HashMap<u64, (QueryGraph, MirQuery)>,
-    ) -> Vec<(ReuseType, &'a QueryGraph)> {
+    ) -> Vec<(ReuseType, (u64, &'a QueryGraph))> {
         let mut reuse_candidates = Vec::new();
-        for &(ref existing_qg, _) in query_graphs.values() {
+        for (sig, &(ref existing_qg, _)) in query_graphs {
             if existing_qg
                 .signature()
                 .is_generalization_of(&qg.signature())
@@ -28,7 +28,7 @@ impl ReuseConfiguration for Finkelstein {
                 match Self::check_compatibility(&qg, existing_qg) {
                     Some(reuse) => {
                         // QGs are compatible, we can reuse `existing_qg` as part of `qg`!
-                        reuse_candidates.push((reuse, existing_qg));
+                        reuse_candidates.push((reuse, (sig.clone(), existing_qg)));
                     }
                     None => (),
                 }
@@ -45,12 +45,12 @@ impl ReuseConfiguration for Finkelstein {
 
 impl Finkelstein {
     fn choose_best_option<'a>(
-        options: Vec<(ReuseType, &'a QueryGraph)>,
-    ) -> (ReuseType, &'a QueryGraph) {
+        options: Vec<(ReuseType, (u64, &'a QueryGraph))>,
+    ) -> (ReuseType, (u64, &'a QueryGraph)) {
         let mut best_choice = None;
         let mut best_score = 0;
 
-        for (o, qg) in options {
+        for (o, (sig, qg)) in options {
             let mut score = 0;
 
             // crude scoring: direct extension always preferrable over backjoins; reusing larger
@@ -68,7 +68,7 @@ impl Finkelstein {
 
             if score > best_score {
                 best_score = score;
-                best_choice = Some((o, qg));
+                best_choice = Some((o, (sig, qg)));
             }
         }
 

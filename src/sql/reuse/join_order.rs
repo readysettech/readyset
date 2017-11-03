@@ -126,11 +126,11 @@ fn from_join_ref<'a>(jref: &JoinRef, qg: &'a QueryGraph) -> &'a ConditionTree {
 }
 
 
-pub fn reorder_joins(qg: &mut QueryGraph, reuse_candidates: &Vec<(ReuseType, &QueryGraph)>) {
+pub fn reorder_joins(qg: &mut QueryGraph, reuse_candidates: &Vec<(ReuseType, (u64, &QueryGraph))>) {
     let mut join_chains = Vec::new();
     // For each reuse candidate, let's find the common join
     // chains it has with the new query graph.
-    for &(_, eqg) in reuse_candidates {
+    for &(_, (_, eqg)) in reuse_candidates {
         let mut existing_join_chains = Vec::new();
         let mut shared_join_chains = Vec::new();
 
