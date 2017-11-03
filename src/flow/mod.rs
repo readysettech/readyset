@@ -1,9 +1,10 @@
-use backlog;
-use channel;
-use channel::tcp::TcpSender;
 use channel::poll::{PollEvent, PollingLoop, ProcessResult, RpcPollEvent, RpcPollingLoop};
-use checktable;
-use ops::base::Base;
+use channel::tcp::TcpSender;
+use channel;
+use dataflow::prelude::*;
+use dataflow::{backlog, checktable, node, payload, DomainConfig, PersistenceParameters, Readers};
+use dataflow::ops::base::Base;
+use dataflow::statistics::GraphStats;
 use worker::Worker;
 
 use std::collections::{BTreeMap, HashMap, HashSet};
@@ -29,27 +30,22 @@ use tarpc::sync::client::{self, ClientExt};
 use tokio_core::reactor::Core;
 
 pub mod coordination;
-pub mod debug;
-pub mod domain;
+pub mod domain_handle;
 pub mod keys;
 pub mod migrate;
-pub mod node;
-pub mod payload;
-pub mod persistence;
 pub mod placement;
-pub mod prelude;
-pub mod processing;
-pub mod statistics;
 
 mod mutator;
 mod getter;
-mod transactions;
 
-use self::prelude::{Ingredient, WorkerEndpoint, WorkerIdentifier};
+use self::domain_handle::DomainHandle;
 use self::coordination::{CoordinationMessage, CoordinationPayload};
 
 pub use self::mutator::{Mutator, MutatorBuilder, MutatorError};
 pub use self::getter::{Getter, ReadQuery, ReadReply, RemoteGetter, RemoteGetterBuilder};
+
+pub type WorkerIdentifier = SocketAddr;
+pub type WorkerEndpoint = Arc<Mutex<TcpSender<CoordinationMessage>>>;
 
 const NANOS_PER_SEC: u64 = 1_000_000_000;
 macro_rules! dur_to_ns {
@@ -58,9 +54,6 @@ macro_rules! dur_to_ns {
         d.as_secs() * NANOS_PER_SEC + d.subsec_nanos() as u64
     }}
 }
-
-type Readers = Arc<Mutex<HashMap<(NodeIndex, usize), backlog::SingleReadHandle>>>;
-pub type Edge = ();
 
 #[derive(Clone)]
 struct WorkerStatus {
@@ -83,8 +76,8 @@ impl WorkerStatus {
 /// Used to construct a controller.
 pub struct ControllerBuilder {
     sharding_enabled: bool,
-    domain_config: domain::Config,
-    persistence: persistence::Parameters,
+    domain_config: DomainConfig,
+    persistence: PersistenceParameters,
     materializations: migrate::materialization::Materializations,
     listen_addr: IpAddr,
     heartbeat_every: Duration,
@@ -97,7 +90,7 @@ impl Default for ControllerBuilder {
         let log = slog::Logger::root(slog::Discard, o!());
         Self {
             sharding_enabled: true,
-            domain_config: domain::Config {
+            domain_config: DomainConfig {
                 concurrent_replays: 512,
                 replay_batch_timeout: time::Duration::from_millis(1),
                 replay_batch_size: 32,
@@ -134,7 +127,7 @@ impl ControllerBuilder {
     }
 
     /// Set the persistence parameters used by the system.
-    pub fn set_persistence(&mut self, p: persistence::Parameters) {
+    pub fn set_persistence(&mut self, p: PersistenceParameters) {
         self.persistence = p;
     }
 
@@ -164,7 +157,8 @@ impl ControllerBuilder {
         // TODO(fintelia): Don't hard code addresses in this function.
         let nworkers = self.nworkers;
         let inner = Arc::new(Mutex::new(ControllerInner::from_builder(self)));
-        let addr = ControllerInner::listen_external(inner.clone(), "127.0.0.1:9000".parse().unwrap());
+        let addr =
+            ControllerInner::listen_external(inner.clone(), "127.0.0.1:9000".parse().unwrap());
         ControllerInner::listen_internal(inner, "127.0.0.1:8000".parse().unwrap(), nworkers);
 
         Blender {
@@ -187,14 +181,14 @@ pub struct ControllerInner {
     checktable_addr: SocketAddr,
     sharding_enabled: bool,
 
-    domain_config: domain::Config,
+    domain_config: DomainConfig,
 
     /// Parameters for persistence code.
-    persistence: persistence::Parameters,
+    persistence: PersistenceParameters,
     materializations: migrate::materialization::Materializations,
 
-    domains: HashMap<domain::Index, domain::DomainHandle>,
-    channel_coordinator: Arc<prelude::ChannelCoordinator>,
+    domains: HashMap<DomainIndex, DomainHandle>,
+    channel_coordinator: Arc<ChannelCoordinator>,
     debug_channel: Option<SocketAddr>,
 
     listen_addr: IpAddr,
@@ -272,7 +266,11 @@ impl ControllerInner {
     }
 
     /// Listen for messages from workers.
-    pub fn listen_internal(controller: Arc<Mutex<ControllerInner>>, addr: SocketAddr, nworkers: usize) {
+    pub fn listen_internal(
+        controller: Arc<Mutex<ControllerInner>>,
+        addr: SocketAddr,
+        nworkers: usize,
+    ) {
         use channel::poll::ProcessResult;
         use mio::net::TcpListener;
         use std::str::FromStr;
@@ -414,7 +412,7 @@ impl ControllerInner {
             log: builder.log,
 
             domains: Default::default(),
-            channel_coordinator: Arc::new(prelude::ChannelCoordinator::new()),
+            channel_coordinator: Arc::new(ChannelCoordinator::new()),
             debug_channel: None,
 
             readers,
@@ -451,7 +449,7 @@ impl ControllerInner {
     /// anyway.
     ///
     /// Must be called before any domains have been created.
-    pub fn with_persistence_options(&mut self, params: persistence::Parameters) {
+    pub fn with_persistence_options(&mut self, params: PersistenceParameters) {
         assert_eq!(self.ndomains, 0);
         self.persistence = params;
     }
@@ -512,7 +510,7 @@ impl ControllerInner {
     }
 
     #[cfg(test)]
-    pub fn graph(&self) -> &prelude::Graph {
+    pub fn graph(&self) -> &Graph {
         &self.ingredients
     }
 
@@ -520,7 +518,7 @@ impl ControllerInner {
     ///
     /// Input nodes are here all nodes of type `Base`. The addresses returned by this function will
     /// all have been returned as a key in the map from `commit` at some point in the past.
-    pub fn inputs(&self, _: ()) -> BTreeMap<String, prelude::NodeIndex> {
+    pub fn inputs(&self, _: ()) -> BTreeMap<String, NodeIndex> {
         self.ingredients
             .neighbors_directed(self.source, petgraph::EdgeDirection::Outgoing)
             .map(|n| {
@@ -536,7 +534,7 @@ impl ControllerInner {
     ///
     /// Output nodes here refers to nodes of type `Reader`, which is the nodes created in response
     /// to calling `.maintain` or `.stream` for a node during a migration.
-    pub fn outputs(&self, _: ()) -> BTreeMap<String, prelude::NodeIndex> {
+    pub fn outputs(&self, _: ()) -> BTreeMap<String, NodeIndex> {
         self.ingredients
             .externals(petgraph::EdgeDirection::Outgoing)
             .filter_map(|n| {
@@ -550,7 +548,7 @@ impl ControllerInner {
             .collect()
     }
 
-    fn find_getter_for(&self, node: prelude::NodeIndex) -> Option<NodeIndex> {
+    fn find_getter_for(&self, node: NodeIndex) -> Option<NodeIndex> {
         // reader should be a child of the given node. however, due to sharding, it may not be an
         // *immediate* child. furthermore, once we go beyond depth 1, we may accidentally hit an
         // *unrelated* reader node. to account for this, readers keep track of what node they are
@@ -574,7 +572,7 @@ impl ControllerInner {
 
     /// Obtain a `RemoteGetterBuilder` that can be sent to a client and then used to query a given
     /// (already maintained) reader node.
-    pub fn get_getter_builder(&self, node: prelude::NodeIndex) -> Option<RemoteGetterBuilder> {
+    pub fn get_getter_builder(&self, node: NodeIndex) -> Option<RemoteGetterBuilder> {
         self.find_getter_for(node).map(|r| {
             let domain = self.ingredients[r].domain();
             let shards = (0..self.domains[&domain].shards())
@@ -590,7 +588,7 @@ impl ControllerInner {
 
     /// Obtain a MutatorBuild that can be used to construct a Mutator to perform writes and deletes
     /// from the given base node.
-    pub fn get_mutator_builder(&self, base: prelude::NodeIndex) -> MutatorBuilder {
+    pub fn get_mutator_builder(&self, base: NodeIndex) -> MutatorBuilder {
         let node = &self.ingredients[base];
 
         trace!(self.log, "creating mutator"; "for" => base.index());
@@ -602,7 +600,7 @@ impl ControllerInner {
             .unwrap_or_else(Vec::new);
         let mut is_primary = false;
         if key.is_empty() {
-            if let prelude::Sharding::ByColumn(col) = self.ingredients[base].sharded_by() {
+            if let Sharding::ByColumn(col) = self.ingredients[base].sharded_by() {
                 key = vec![col];
             }
         } else {
@@ -634,7 +632,7 @@ impl ControllerInner {
     }
 
     /// Get statistics about the time spent processing different parts of the graph.
-    pub fn get_statistics(&mut self, _: ()) -> statistics::GraphStats {
+    pub fn get_statistics(&mut self, _: ()) -> GraphStats {
         // TODO: request stats from domains in parallel.
         let domains = self.domains
             .iter_mut()
@@ -655,7 +653,7 @@ impl ControllerInner {
             })
             .collect();
 
-        statistics::GraphStats { domains: domains }
+        GraphStats { domains: domains }
     }
 
     pub fn install_recipe(&mut self, r_txt: String) {
@@ -667,12 +665,12 @@ impl ControllerInner {
     }
 
     #[cfg(test)]
-    pub fn get_mutator(&self, base: prelude::NodeIndex) -> Mutator {
+    pub fn get_mutator(&self, base: NodeIndex) -> Mutator {
         self.get_mutator_builder(base)
             .build("127.0.0.1:0".parse().unwrap())
     }
     #[cfg(test)]
-    pub fn get_getter(&self, node: prelude::NodeIndex) -> Option<RemoteGetter> {
+    pub fn get_getter(&self, node: NodeIndex) -> Option<RemoteGetter> {
         self.get_getter_builder(node).map(|g| g.build())
     }
 }
@@ -710,7 +708,7 @@ impl fmt::Display for ControllerInner {
 }
 
 enum ColumnChange {
-    Add(String, prelude::DataType),
+    Add(String, DataType),
     Drop(usize),
 }
 
@@ -734,17 +732,12 @@ impl<'a> Migration<'a> {
     /// The returned identifier can later be used to refer to the added ingredient.
     /// Edges in the data flow graph are automatically added based on the ingredient's reported
     /// `ancestors`.
-    pub fn add_ingredient<S1, FS, S2, I>(
-        &mut self,
-        name: S1,
-        fields: FS,
-        mut i: I,
-    ) -> prelude::NodeIndex
+    pub fn add_ingredient<S1, FS, S2, I>(&mut self, name: S1, fields: FS, mut i: I) -> NodeIndex
     where
         S1: ToString,
         S2: ToString,
         FS: IntoIterator<Item = S2>,
-        I: prelude::Ingredient + Into<prelude::NodeOperator>,
+        I: Ingredient + Into<NodeOperator>,
     {
         i.on_connected(&self.mainline.ingredients);
         let parents = i.ancestors();
@@ -789,14 +782,14 @@ impl<'a> Migration<'a> {
         name: S1,
         fields: FS,
         mut b: Base,
-    ) -> prelude::NodeIndex
+    ) -> NodeIndex
     where
         S1: ToString,
         S2: ToString,
         FS: IntoIterator<Item = S2>,
     {
         b.on_connected(&self.mainline.ingredients);
-        let b: prelude::NodeOperator = b.into();
+        let b: NodeOperator = b.into();
 
         // add to the graph
         let ni = self.mainline
@@ -824,9 +817,9 @@ impl<'a> Migration<'a> {
     /// new type.
     pub fn add_column<S: ToString>(
         &mut self,
-        node: prelude::NodeIndex,
+        node: NodeIndex,
         field: S,
-        default: prelude::DataType,
+        default: DataType,
     ) -> usize {
         // not allowed to add columns to new nodes
         assert!(!self.added.iter().any(|&ni| ni == node));
@@ -854,7 +847,7 @@ impl<'a> Migration<'a> {
     }
 
     /// Drop a column from a base node.
-    pub fn drop_column(&mut self, node: prelude::NodeIndex, column: usize) {
+    pub fn drop_column(&mut self, node: NodeIndex, column: usize) {
         // not allowed to drop columns from new nodes
         assert!(!self.added.iter().any(|&ni| ni == node));
 
@@ -871,11 +864,11 @@ impl<'a> Migration<'a> {
     }
 
     #[cfg(test)]
-    pub fn graph(&self) -> &prelude::Graph {
+    pub fn graph(&self) -> &Graph {
         self.mainline.graph()
     }
 
-    fn ensure_reader_for(&mut self, n: prelude::NodeIndex, name: Option<String>) {
+    fn ensure_reader_for(&mut self, n: NodeIndex, name: Option<String>) {
         if !self.readers.contains_key(&n) {
             // make a reader
             let r = node::special::Reader::new(n);
@@ -890,7 +883,7 @@ impl<'a> Migration<'a> {
         }
     }
 
-    fn ensure_token_generator(&mut self, n: prelude::NodeIndex, key: usize) {
+    fn ensure_token_generator(&mut self, n: NodeIndex, key: usize) {
         let ri = self.readers[&n];
         if self.mainline.ingredients[ri]
             .with_reader(|r| r.token_generator().is_some())
@@ -941,7 +934,7 @@ impl<'a> Migration<'a> {
     /// To query into the maintained state, use `ControllerInner::get_getter` or
     /// `ControllerInner::get_transactional_getter`
     #[cfg(test)]
-    pub fn maintain_anonymous(&mut self, n: prelude::NodeIndex, key: usize) {
+    pub fn maintain_anonymous(&mut self, n: NodeIndex, key: usize) {
         self.ensure_reader_for(n, None);
         if self.mainline.ingredients[n].is_transactional() {
             self.ensure_token_generator(n, key);
@@ -956,7 +949,7 @@ impl<'a> Migration<'a> {
     ///
     /// To query into the maintained state, use `ControllerInner::get_getter` or
     /// `ControllerInner::get_transactional_getter`
-    pub fn maintain(&mut self, name: String, n: prelude::NodeIndex, key: usize) {
+    pub fn maintain(&mut self, name: String, n: NodeIndex, key: usize) {
         self.ensure_reader_for(n, Some(name));
         if self.mainline.ingredients[n].is_transactional() {
             self.ensure_token_generator(n, key);
@@ -972,7 +965,7 @@ impl<'a> Migration<'a> {
     /// As new updates are processed by the given node, its outputs will be streamed to the
     /// returned channel. Node that this channel is *not* bounded, and thus a receiver that is
     /// slower than the system as a hole will accumulate a large buffer over time.
-    pub fn stream(&mut self, n: prelude::NodeIndex) -> mpsc::Receiver<Vec<node::StreamUpdate>> {
+    pub fn stream(&mut self, n: NodeIndex) -> mpsc::Receiver<Vec<node::StreamUpdate>> {
         self.ensure_reader_for(n, None);
         let (tx, rx) = mpsc::channel();
         let mut tx = channel::StreamSender::from_local(tx);
@@ -1087,7 +1080,7 @@ impl<'a> Migration<'a> {
         let swapped = swapped0;
 
         // Find all nodes for domains that have changed
-        let changed_domains: HashSet<domain::Index> = new.iter()
+        let changed_domains: HashSet<DomainIndex> = new.iter()
             .filter(|&&ni| !mainline.ingredients[ni].is_dropped())
             .map(|&ni| mainline.ingredients[ni].domain())
             .collect();
@@ -1129,8 +1122,8 @@ impl<'a> Migration<'a> {
                            "local" => nnodes
                     );
 
-                    let mut ip: prelude::IndexPair = ni.into();
-                    ip.set_local(unsafe { prelude::LocalNodeIndex::make(nnodes as u32) });
+                    let mut ip: IndexPair = ni.into();
+                    ip.set_local(unsafe { LocalNodeIndex::make(nnodes as u32) });
                     mainline.ingredients[ni].set_finalized_addr(ip);
                     local_remap.insert(ni, ip);
                     nnodes += 1;
@@ -1224,7 +1217,7 @@ impl<'a> Migration<'a> {
             }
 
             let nodes = uninformed_domain_nodes.remove(&domain).unwrap();
-            let d = domain::DomainHandle::new(
+            let d = DomainHandle::new(
                 domain,
                 mainline.ingredients[nodes[0].0].sharded_by(),
                 &log,
@@ -1349,7 +1342,7 @@ impl Blender {
     ///
     /// Input nodes are here all nodes of type `Base`. The addresses returned by this function will
     /// all have been returned as a key in the map from `commit` at some point in the past.
-    pub fn inputs(&self) -> BTreeMap<String, prelude::NodeIndex> {
+    pub fn inputs(&self) -> BTreeMap<String, NodeIndex> {
         self.rpc("inputs", &()).unwrap()
     }
 
@@ -1357,38 +1350,35 @@ impl Blender {
     ///
     /// Output nodes here refers to nodes of type `Reader`, which is the nodes created in response
     /// to calling `.maintain` or `.stream` for a node during a migration.
-    pub fn outputs(&self) -> BTreeMap<String, prelude::NodeIndex> {
+    pub fn outputs(&self) -> BTreeMap<String, NodeIndex> {
         self.rpc("outputs", &()).unwrap()
     }
 
     /// Obtain a `RemoteGetterBuilder` that can be sent to a client and then used to query a given
     /// (already maintained) reader node.
-    pub fn get_getter_builder(&self, node: prelude::NodeIndex) -> Option<RemoteGetterBuilder> {
+    pub fn get_getter_builder(&self, node: NodeIndex) -> Option<RemoteGetterBuilder> {
         self.rpc("getter_builder", &node).unwrap()
     }
 
     /// Obtain a `RemoteGetter`.
-    pub fn get_getter(&self, node: prelude::NodeIndex) -> Option<RemoteGetter> {
+    pub fn get_getter(&self, node: NodeIndex) -> Option<RemoteGetter> {
         self.get_getter_builder(node).map(|g| g.build())
     }
 
     /// Obtain a MutatorBuild that can be used to construct a Mutator to perform writes and deletes
     /// from the given base node.
-    pub fn get_mutator_builder(
-        &self,
-        base: prelude::NodeIndex,
-    ) -> Result<MutatorBuilder, Box<Error>> {
+    pub fn get_mutator_builder(&self, base: NodeIndex) -> Result<MutatorBuilder, Box<Error>> {
         self.rpc("mutator_builder", &base)
     }
 
     /// Obtain a Mutator
-    pub fn get_mutator(&self, base: prelude::NodeIndex) -> Result<Mutator, Box<Error>> {
+    pub fn get_mutator(&self, base: NodeIndex) -> Result<Mutator, Box<Error>> {
         self.get_mutator_builder(base)
             .map(|m| m.build("127.0.0.1:0".parse().unwrap()))
     }
 
     /// Get statistics about the time spent processing different parts of the graph.
-    pub fn get_statistics(&mut self) -> statistics::GraphStats {
+    pub fn get_statistics(&mut self) -> GraphStats {
         self.rpc("get_statistics", &()).unwrap()
     }
 

@@ -1,8 +1,8 @@
 use std::collections::HashMap;
 use std::fmt::{self, Write};
 
-use ops::grouped::aggregate::Aggregation as AggregationKind;
-use ops::grouped::extremum::Extremum as ExtremumKind;
+use dataflow::ops::grouped::aggregate::Aggregation as AggregationKind;
+use dataflow::ops::grouped::extremum::Extremum as ExtremumKind;
 use mir::node::{MirNode, MirNodeType};
 use mir::query::MirQuery;
 

@@ -4,7 +4,7 @@ use rustful::server::Global;
 use std::sync::{Arc, Mutex};
 
 use flow::ControllerInner;
-use flow::prelude::DataType;
+use core::DataType;
 use serde_json::{self, Value};
 
 struct GetEndpoint<F> {

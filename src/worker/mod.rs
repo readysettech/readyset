@@ -7,9 +7,10 @@ use std::time::{Duration, Instant};
 use std::thread::{self, JoinHandle};
 use std::sync::{Arc, Mutex};
 
-use {ChannelCoordinator, CoordinationMessage, CoordinationPayload, DomainBuilder, NodeIndex,
-     ReadQuery, ReadReply, SingleReadHandle};
-use Index as DomainIndex;
+use dataflow::prelude::DomainIndex;
+use dataflow::DomainBuilder;
+use dataflow::prelude::ChannelCoordinator;
+use {CoordinationMessage, CoordinationPayload, NodeIndex, ReadQuery, ReadReply, SingleReadHandle};
 
 /// Workers are responsible for running domains, and serving reads to any materializations contained
 /// within them.

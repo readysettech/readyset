@@ -6,7 +6,7 @@ mod query_utils;
 pub mod reuse;
 
 use flow::Migration;
-use flow::prelude::NodeIndex;
+use core::NodeIndex;
 use mir::reuse as mir_reuse;
 use nom_sql::parser as sql_parser;
 use nom_sql::{ArithmeticBase, Column, SqlQuery};
@@ -670,9 +670,8 @@ impl<'a> ToFlowParts for &'a str {
 #[cfg(test)]
 mod tests {
     use nom_sql::Column;
-    use flow::node::Node;
+    use dataflow::prelude::*;
     use flow::{ControllerBuilder, Migration};
-    use flow::prelude::Ingredient;
     use Blender;
     use super::{SqlIncorporator, ToFlowParts};
     use nom_sql::FunctionExpression;

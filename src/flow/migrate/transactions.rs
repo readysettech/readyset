@@ -1,8 +1,8 @@
-use flow::domain;
-use flow::prelude::*;
-use flow::payload::{EgressForBase, IngressFromBase};
+use dataflow::prelude::*;
+use dataflow::payload::{EgressForBase, IngressFromBase};
+use dataflow;
+use flow::domain_handle::DomainHandle;
 use petgraph;
-use petgraph::graph::NodeIndex;
 use std::borrow::Borrow;
 use std::collections::HashMap;
 use slog::Logger;
@@ -11,7 +11,7 @@ fn count_base_ingress(
     graph: &Graph,
     source: NodeIndex,
     nodes: &[(NodeIndex, bool)],
-    domain: &domain::Index,
+    domain: &DomainIndex,
 ) -> IngressFromBase {
     let ingress_nodes: Vec<_> = nodes
         .into_iter()
@@ -29,7 +29,7 @@ fn count_base_ingress(
                     petgraph::algo::has_path_connecting(graph, base, ingress, None)
                 })
                 .map(|&ingress| if graph[ingress].is_shard_merger() {
-                    ::SHARDS
+                    dataflow::SHARDS
                 } else {
                     1
                 })
@@ -72,8 +72,8 @@ fn base_egress_map(graph: &Graph, source: NodeIndex, nodes: &[(NodeIndex, bool)]
 pub fn analyze_graph(
     graph: &Graph,
     source: NodeIndex,
-    domain_nodes: HashMap<domain::Index, Vec<(NodeIndex, bool)>>,
-) -> HashMap<domain::Index, (IngressFromBase, EgressForBase)> {
+    domain_nodes: HashMap<DomainIndex, Vec<(NodeIndex, bool)>>,
+) -> HashMap<DomainIndex, (IngressFromBase, EgressForBase)> {
     domain_nodes
         .into_iter()
         .map(|(domain, nodes): (_, Vec<(NodeIndex, bool)>)| {
@@ -89,9 +89,9 @@ pub fn analyze_graph(
 }
 
 pub fn finalize(
-    deps: HashMap<domain::Index, (IngressFromBase, EgressForBase)>,
+    deps: HashMap<DomainIndex, (IngressFromBase, EgressForBase)>,
     log: &Logger,
-    txs: &mut HashMap<domain::Index, domain::DomainHandle>,
+    txs: &mut HashMap<DomainIndex, DomainHandle>,
     at: i64,
 ) {
     for (domain, (ingress_from_base, egress_for_base)) in deps {

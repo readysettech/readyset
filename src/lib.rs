@@ -314,29 +314,6 @@
 #![plugin(tarpc_plugins)]
 #![allow(unused)]
 
-/// The number of domain threads to spin up for each sharded subtree of the data-flow graph.
-const SHARDS: usize = 2;
-
-#[inline]
-fn shard_by(dt: &DataType, shards: usize) -> usize {
-    match *dt {
-        DataType::Int(n) => n as usize % shards,
-        DataType::BigInt(n) => n as usize % shards,
-        DataType::Text(..) | DataType::TinyText(..) => {
-            use std::hash::Hasher;
-            use std::borrow::Cow;
-            let mut hasher = fnv::FnvHasher::default();
-            let s: Cow<str> = dt.into();
-            hasher.write(s.as_bytes());
-            hasher.finish() as usize % shards
-        }
-        ref x => {
-            println!("asked to shard on value {:?}", x);
-            unimplemented!();
-        }
-    }
-}
-
 #[cfg(debug_assertions)]
 extern crate backtrace;
 
@@ -380,12 +357,10 @@ extern crate tokio_core;
 
 extern crate channel;
 extern crate core;
+extern crate dataflow;
 
-mod backlog;
-mod checktable;
 mod flow;
 mod mir;
-mod ops;
 mod recipe;
 mod sql;
 mod worker;
@@ -393,32 +368,30 @@ mod worker;
 #[cfg(test)]
 mod tests;
 
-pub use core::{DataType, Datas};
+pub use core::{DataType, Datas, NodeIndex};
 
-pub use backlog::SingleReadHandle;
-pub use checktable::{Token, TransactionResult};
+pub use dataflow::backlog::SingleReadHandle;
+pub use dataflow::checktable::{Token, TransactionResult};
+pub use dataflow::debug::{DebugEvent, DebugEventType};
+pub use dataflow::node::StreamUpdate;
+pub use dataflow::payload::PacketEvent;
+pub use dataflow::ops::base::Base;
+pub use dataflow::ops::grouped::aggregate::{Aggregation, Aggregator};
+pub use dataflow::ops::grouped::concat::{GroupConcat, TextComponent};
+pub use dataflow::ops::grouped::extremum::{Extremum, ExtremumOperator};
+pub use dataflow::ops::identity::Identity;
+pub use dataflow::ops::project::Project;
+pub use dataflow::ops::join::{Join, JoinSource, JoinType};
+pub use dataflow::ops::union::Union;
+pub use dataflow::ops::latest::Latest;
+pub use dataflow::ops::filter::{Filter, Operator};
+pub use dataflow::ops::topk::TopK;
+pub use dataflow::prelude::DomainIndex;
+pub use dataflow::{DurabilityMode, PersistenceParameters};
+
 pub use flow::{Blender, ControllerBuilder, Getter, Migration, Mutator, MutatorBuilder,
                MutatorError, ReadQuery, ReadReply, RemoteGetter, RemoteGetterBuilder};
-pub use petgraph::graph::NodeIndex;
 pub use flow::coordination::{CoordinationMessage, CoordinationPayload};
-pub use flow::node::StreamUpdate;
-pub use flow::debug::{DebugEvent, DebugEventType};
-pub use flow::domain::{DomainBuilder, Index};
-pub use flow::payload::PacketEvent;
-pub use flow::persistence::Parameters as PersistenceParameters;
-pub use flow::persistence::DurabilityMode;
-pub use flow::prelude::ChannelCoordinator;
-pub use ops::base::Base;
-pub use ops::grouped::aggregate::{Aggregation, Aggregator};
-pub use ops::grouped::concat::{GroupConcat, TextComponent};
-pub use ops::grouped::extremum::{Extremum, ExtremumOperator};
-pub use ops::identity::Identity;
-pub use ops::project::Project;
-pub use ops::join::{Join, JoinSource, JoinType};
-pub use ops::union::Union;
-pub use ops::latest::Latest;
-pub use ops::filter::{Filter, Operator};
-pub use ops::topk::TopK;
 pub use recipe::{ActivationResult, Recipe};
 pub use sql::{SqlIncorporator, ToFlowParts};
 pub use sql::reuse::ReuseConfigType;

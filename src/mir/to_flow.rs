@@ -6,10 +6,10 @@ use flow::Migration;
 use core::{DataType, NodeIndex};
 use mir::MirNodeRef;
 use mir::node::GroupedNodeType;
-use ops;
-use ops::join::{Join, JoinType};
-use ops::latest::Latest;
-use ops::project::{Project, ProjectExpression, ProjectExpressionBase};
+use dataflow::ops;
+use dataflow::ops::join::{Join, JoinType};
+use dataflow::ops::latest::Latest;
+use dataflow::ops::project::{Project, ProjectExpression, ProjectExpressionBase};
 
 #[derive(Clone, Debug)]
 pub enum FlowNode {
@@ -225,7 +225,7 @@ pub(crate) fn make_grouped_node(
             extr.over(parent_na, over_col_indx, group_col_indx.as_slice()),
         ),
         GroupedNodeType::GroupConcat(sep) => {
-            use ops::grouped::concat::{GroupConcat, TextComponent};
+            use dataflow::ops::grouped::concat::{GroupConcat, TextComponent};
 
             let gc = GroupConcat::new(parent_na, vec![TextComponent::Column(over_col_indx)], sep);
             mig.add_ingredient(String::from(name), column_names.as_slice(), gc)
@@ -263,7 +263,7 @@ pub(crate) fn make_join_node(
     kind: JoinType,
     mig: &mut Migration,
 ) -> FlowNode {
-    use ops::join::JoinSource;
+    use dataflow::ops::join::JoinSource;
 
     assert_eq!(on_left.len(), on_right.len());
 

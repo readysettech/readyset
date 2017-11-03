@@ -55,6 +55,7 @@ nom_sql = { git = "https://github.com/ms705/nom-sql.git", rev = "b01998fc34a5d47
 # local deps
 channel = { path = "channel" }
 core = { path = "core" }
+dataflow = { path = "dataflow" }
 
 # Not needed directly, but we want to force the version used by our
 # dependencies to have default features. If this isn't here, then the features

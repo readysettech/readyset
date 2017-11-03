@@ -1,27 +1,10 @@
-use flow::prelude::*;
-use flow::node;
+use dataflow::prelude::*;
+use dataflow::{self, node};
 use petgraph::graph::NodeIndex;
 use std::collections::{HashMap, HashSet};
 use slog::Logger;
 use petgraph;
-use ops;
-
-#[derive(Copy, Clone, PartialEq, Eq, Debug, Serialize, Deserialize)]
-pub enum Sharding {
-    None,
-    ForcedNone,
-    Random,
-    ByColumn(usize),
-}
-
-impl Sharding {
-    pub fn is_none(&self) -> bool {
-        match *self {
-            Sharding::None | Sharding::ForcedNone => true,
-            _ => false,
-        }
-    }
-}
+use dataflow::ops;
 
 pub fn shard(
     log: &Logger,
@@ -73,7 +56,7 @@ pub fn shard(
                 info!(log, "de-sharding prior to stream-only reader"; "node" => ?node);
             } else {
                 info!(log, "sharding reader"; "node" => ?node);
-                graph[node].with_reader_mut(|r| r.shard(::SHARDS));
+                graph[node].with_reader_mut(|r| r.shard(dataflow::SHARDS));
             }
 
             if s != input_shardings[&ni] {
@@ -575,14 +558,14 @@ fn reshard(
     let node = match to {
         Sharding::None | Sharding::ForcedNone => {
             // NOTE: this *must* be a union so that we correctly buffer partial replays
-            let n: NodeOperator = ops::union::Union::new_deshard(src.into(), ::SHARDS).into();
+            let n: NodeOperator = ops::union::Union::new_deshard(src.into(), dataflow::SHARDS).into();
             let mut n = graph[src].mirror(n);
             n.shard_by(to);
             n.mark_as_shard_merger(true);
             n
         }
         Sharding::ByColumn(c) => {
-            use flow::node;
+            use dataflow::node;
             let mut n = graph[src].mirror(node::special::Sharder::new(c));
             n.shard_by(graph[src].sharded_by());
             n

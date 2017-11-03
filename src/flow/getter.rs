@@ -1,9 +1,8 @@
 use channel::rpc::RpcClient;
 
-use flow::prelude::*;
-use flow;
-use checktable;
-use backlog::{self, ReadHandle};
+use dataflow::prelude::*;
+use dataflow::backlog::{self, ReadHandle};
+use dataflow::{self, checktable, Readers};
 
 use std::sync::Arc;
 use std::net::SocketAddr;
@@ -66,7 +65,7 @@ impl RemoteGetter {
         } else {
             let mut shard_queries = vec![Vec::new(); self.shards.len()];
             for key in keys {
-                let shard = ::shard_by(&key, self.shards.len());
+                let shard = dataflow::shard_by(&key, self.shards.len());
                 shard_queries[shard].push(key);
             }
 
@@ -116,14 +115,14 @@ impl Getter {
     pub(crate) fn new(
         node: NodeIndex,
         sharded: bool,
-        readers: &flow::Readers,
+        readers: &Readers,
         ingredients: &Graph,
     ) -> Option<Self> {
         let rh = if sharded {
             let vr = readers.lock().unwrap();
 
             let mut array = ArrayVec::new();
-            for shard in 0..::SHARDS {
+            for shard in 0..dataflow::SHARDS {
                 match vr.get(&(node, shard)).cloned() {
                     Some(rh) => array.push(Some(rh)),
                     None => return None,

@@ -6,8 +6,7 @@
 //!  - Existing egress nodes that gain new children must gain channels to facilitate forwarding
 //!  - State must be replayed for materializations in other domains that need it
 
-use flow::prelude::*;
-use flow::domain;
+use dataflow::prelude::*;
 use flow;
 
 use std::collections::{HashMap, HashSet};
@@ -20,9 +19,9 @@ use slog::Logger;
 pub fn inform(
     log: &Logger,
     controller: &mut flow::ControllerInner,
-    nodes: HashMap<domain::Index, Vec<(NodeIndex, bool)>>,
+    nodes: HashMap<DomainIndex, Vec<(NodeIndex, bool)>>,
     ts: i64,
-    prevs: Box<HashMap<domain::Index, i64>>,
+    prevs: Box<HashMap<DomainIndex, i64>>,
 ) {
     let source = controller.source;
     for (domain, nodes) in nodes {

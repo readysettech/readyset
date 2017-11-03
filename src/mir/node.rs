@@ -10,10 +10,10 @@ use mir::to_flow::FlowNode;
 use mir::to_flow::{adapt_base_node, make_base_node, make_filter_node, make_grouped_node,
                    make_identity_node, make_join_node, make_latest_node, make_project_node,
                    make_topk_node, make_union_node, materialize_leaf_node};
-use ops;
-use ops::grouped::aggregate::Aggregation as AggregationKind;
-use ops::grouped::extremum::Extremum as ExtremumKind;
-use ops::join::JoinType;
+use dataflow::ops;
+use dataflow::ops::grouped::aggregate::Aggregation as AggregationKind;
+use dataflow::ops::grouped::extremum::Extremum as ExtremumKind;
+use dataflow::ops::join::JoinType;
 
 /// Helper enum to avoid having separate `make_aggregation_node` and `make_extremum_node` functions
 pub enum GroupedNodeType {

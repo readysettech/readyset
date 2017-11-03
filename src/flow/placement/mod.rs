@@ -2,11 +2,11 @@ use std::collections::HashMap;
 use std::collections::hash_map::Iter;
 use std::iter::{Cycle, Iterator};
 
-use flow::prelude::{WorkerEndpoint, WorkerIdentifier};
-use flow::domain;
+use dataflow::prelude::DomainIndex;
+use flow::{WorkerEndpoint, WorkerIdentifier};
 
 pub trait DomainPlacementStrategy {
-    fn place_domain(&mut self, d: &domain::Index, s: usize) -> Option<WorkerIdentifier>;
+    fn place_domain(&mut self, d: &DomainIndex, s: usize) -> Option<WorkerIdentifier>;
 }
 
 pub(crate) struct RoundRobinPlacer<'a> {
@@ -22,7 +22,7 @@ impl<'a> RoundRobinPlacer<'a> {
 }
 
 impl<'a> DomainPlacementStrategy for RoundRobinPlacer<'a> {
-    fn place_domain(&mut self, _: &domain::Index, _: usize) -> Option<WorkerIdentifier> {
+    fn place_domain(&mut self, _: &DomainIndex, _: usize) -> Option<WorkerIdentifier> {
         self.iter.next().map(|ref w| w.0.clone())
     }
 }
@@ -40,7 +40,7 @@ impl ShardIdPlacer {
 }
 
 impl DomainPlacementStrategy for ShardIdPlacer {
-    fn place_domain(&mut self, _: &domain::Index, si: usize) -> Option<WorkerIdentifier> {
+    fn place_domain(&mut self, _: &DomainIndex, si: usize) -> Option<WorkerIdentifier> {
         self.ids.get(si % self.ids.len()).cloned()
     }
 }
