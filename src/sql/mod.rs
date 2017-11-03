@@ -311,10 +311,11 @@ impl SqlIncorporator {
             let mut mir_queries = Vec::new();
             flame::span_of("loop", || {
                 for uid in reuse_config.reuse_universes(universe) {
+                    let sig = (c.1).0;
                     let mqs: Vec<_> = reuse_candidates
                         .iter()
                         .map(|c| {
-                            (c.2, uid.clone())
+                            (sig, uid.clone())
                         })
                         .collect();
 
