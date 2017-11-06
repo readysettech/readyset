@@ -11,8 +11,6 @@ use std::rc::Rc;
 use std::cell::RefCell;
 
 use core::*;
-use dataflow::ops::base::Base;
-use dataflow::prelude::NodeOperator;
 
 pub mod reuse;
 pub mod node;
