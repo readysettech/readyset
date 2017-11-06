@@ -2,11 +2,10 @@ use buf_redux::BufWriter;
 use buf_redux::strategy::WhenFull;
 
 use serde_json;
-use itertools::Itertools;
 
 use std::fs;
 use std::fs::{File, OpenOptions};
-use std::io::{BufRead, BufReader, ErrorKind, Write};
+use std::io::Write;
 use std::path::PathBuf;
 use std::time;
 use std::collections::HashMap;
@@ -106,68 +105,6 @@ impl Parameters {
 
         PathBuf::from(&filename)
     }
-}
-
-const RECOVERY_BATCH_SIZE: usize = 512;
-
-/// Retrieves a vector of packets from the persistent log.
-pub fn retrieve_recovery_packets(
-    nodes: &DomainNodes,
-    domain_index: domain::Index,
-    domain_shard: usize,
-    params: &Parameters,
-    checktable: Rc<checktable::CheckTableClient>,
-) -> Vec<Box<Packet>> {
-    let mut packets = vec![];
-    for (_index, node) in nodes.iter() {
-        let node = node.borrow();
-        let local_addr = node.local_addr();
-        let global_addr = node.global_addr();
-        let path = params.log_path(&local_addr, domain_index, domain_shard);
-        let file = match File::open(&path) {
-            Ok(f) => f,
-            Err(ref e) if e.kind() == ErrorKind::NotFound => continue,
-            Err(e) => panic!("Could not open log file {:?}: {}", path, e),
-        };
-
-        BufReader::new(file)
-            .lines()
-            .filter_map(|line| {
-                let line = line.unwrap();
-                let entries: Result<Vec<Records>, _> = serde_json::from_str(&line);
-                entries.ok()
-            })
-            .flat_map(|r| r)
-            // Merge packets into batches of RECOVERY_BATCH_SIZE:
-            .chunks(RECOVERY_BATCH_SIZE)
-            .into_iter()
-            .map(|chunk| chunk.fold(Records::default(), |mut acc, ref mut data| {
-                acc.append(data);
-                acc
-            }))
-            // Then create Packet objects from the data:
-            .map(|data| {
-                let link = Link::new(*local_addr, *local_addr);
-                if node.is_transactional() {
-                    let (ts, prevs) = checktable.recover(global_addr).unwrap();
-                    Packet::Transaction {
-                        link,
-                        data,
-                        tracer: None,
-                        state: TransactionState::Committed(ts, global_addr, prevs),
-                    }
-                } else {
-                    Packet::Message {
-                        link,
-                        data,
-                        tracer: None,
-                    }
-                }
-            })
-            .for_each(|packet| packets.push(box packet));
-    }
-
-    packets
 }
 
 pub struct GroupCommitQueueSet {

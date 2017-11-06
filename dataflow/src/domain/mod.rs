@@ -5,10 +5,13 @@ use std::thread;
 use std::time;
 use std::collections::hash_map::Entry;
 use std::rc::Rc;
+use std::io::{BufRead, BufReader, ErrorKind};
+use std::fs::File;
 
 use std::net::SocketAddr;
 
 use Readers;
+
 use channel::TcpSender;
 use channel::poll::{KeepPolling, PollEvent, PollingLoop, StopPolling};
 use prelude::*;
@@ -18,6 +21,8 @@ use transactions;
 use persistence;
 use debug;
 use checktable;
+use serde_json;
+use itertools::Itertools;
 use slog::Logger;
 use timekeeper::{RealTime, SimpleTracker, ThreadTime, Timer, TimerSet};
 use tarpc::sync::client::{self, ClientExt};
@@ -30,6 +35,7 @@ pub struct Config {
 }
 
 const BATCH_SIZE: usize = 256;
+const RECOVERY_BATCH_SIZE: usize = 512;
 
 const NANOS_PER_SEC: u64 = 1_000_000_000;
 macro_rules! dur_to_ns {
@@ -1570,15 +1576,65 @@ impl Domain {
     }
 
     fn handle_recovery(&mut self) {
-        let packets = persistence::retrieve_recovery_packets(
-            &self.nodes,
-            self.index,
-            self.shard.unwrap_or(0),
-            &self.persistence_parameters,
-            self.transaction_state.get_checktable().clone(),
-        );
+        let node_info: Vec<_> = self.nodes
+            .iter()
+            .map(|(index, node)| {
+                let n = node.borrow();
+                (index.clone(), n.global_addr(), n.is_transactional())
+            })
+            .collect();
 
-        packets.into_iter().for_each(|packet| self.handle(packet));
+        for (local_addr, global_addr, is_transactional) in node_info {
+            let checktable = self.transaction_state.get_checktable();
+            let path = self.persistence_parameters.log_path(
+                &local_addr,
+                self.index,
+                self.shard.unwrap_or(0),
+            );
+
+            let file = match File::open(&path) {
+                Ok(f) => f,
+                Err(ref e) if e.kind() == ErrorKind::NotFound => continue,
+                Err(e) => panic!("Could not open log file {:?}: {}", path, e),
+            };
+
+            BufReader::new(file)
+                .lines()
+                .filter_map(|line| {
+                    let line = line.unwrap();
+                    let entries: Result<Vec<Records>, _> = serde_json::from_str(&line);
+                    entries.ok()
+                })
+                .flat_map(|r| r)
+                // Merge packets into batches of RECOVERY_BATCH_SIZE:
+                .chunks(RECOVERY_BATCH_SIZE)
+                .into_iter()
+                .map(|chunk| chunk.fold(Records::default(), |mut acc, ref mut data| {
+                    acc.append(data);
+                    acc
+                }))
+                // Then create Packet objects from the data:
+                .map(|data| {
+                    let link = Link::new(local_addr, local_addr);
+                    if is_transactional {
+                        let (ts, prevs) = checktable.recover(global_addr).unwrap();
+                        Packet::Transaction {
+                            link,
+                            data,
+                            tracer: None,
+                            state: TransactionState::Committed(ts, global_addr, prevs),
+                        }
+                    } else {
+                        Packet::Message {
+                            link,
+                            data,
+                            tracer: None,
+                        }
+                    }
+                })
+                .for_each(|packet| self.handle(box packet));
+        }
+
         self.control_reply_tx
             .send(ControlReplyPacket::ack())
             .unwrap();
