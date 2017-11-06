@@ -16,6 +16,7 @@ fn count_base_ingress(
 ) -> IngressFromBase {
     let ingress_nodes: Vec<_> = nodes
         .into_iter()
+        // .filter(|&&(_, new)| new)
         .map(|&(ni, _)| ni)
         .filter(|&ni| graph[ni].borrow().is_ingress())
         .filter(|&ni| graph[ni].borrow().is_transactional())
@@ -55,6 +56,7 @@ fn base_egress_map(
 ) -> EgressForBase {
     let output_nodes: Vec<_> = nodes
         .into_iter()
+        .filter(|&&(_, new)| new)
         .map(|&(ni, _)| ni)
         .filter(|&ni| graph[ni].is_output())
         //.filter(|&ni| graph[ni].is_transactional())
@@ -106,6 +108,27 @@ pub fn analyze_graph(
             )
         })
         .collect()
+}
+
+pub fn merge_deps(
+    old: &mut HashMap<domain::Index, (IngressFromBase, EgressForBase)>,
+    new: HashMap<domain::Index, (IngressFromBase, EgressForBase)>
+) {
+    for (di, (new_ingress, new_egress)) in new {
+        let entry = old.entry(di).or_insert((HashMap::new(), HashMap::new()));
+        let old_ingress = &mut entry.0;
+        let old_egress = &mut entry.1;
+        for (base, v) in new_egress {
+            let e = old_egress.entry(base).or_insert(vec![]);
+            (*e).extend(v);
+            // *e = v;
+        }
+
+        for (base, v) in new_ingress {
+            let e = old_ingress.entry(base).or_insert(0);
+            *e = v;
+        }
+    }
 }
 
 pub fn finalize(
