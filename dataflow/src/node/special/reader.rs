@@ -34,7 +34,7 @@ pub struct Reader {
 
     #[serde(skip)] streamers: Vec<channel::StreamSender<Vec<StreamUpdate>>>,
 
-    #[serde(skip)] token_generator: Option<checktable::TokenGenerator>,
+    token_generator: Option<checktable::TokenGenerator>,
 
     for_node: NodeIndex,
     state: Option<usize>,

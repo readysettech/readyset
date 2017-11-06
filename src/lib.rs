@@ -125,7 +125,7 @@
 //! go look at that if you want to see the code. It looks roughly like this (some details omitted
 //! for clarity)
 //!
-//! ```rust
+//! ```rust,ignore
 //! # use distributary::{Blender, Base, Aggregation, Join, JoinType};
 //! // set up graph
 //! let mut g = Blender::new();
@@ -169,7 +169,7 @@
 //! Let us see what happens when a new `Article` write enters the system. This happens by passing
 //! the new record to the put function on a mutator obtained for article.
 //!
-//! ```rust
+//! ```rust,ignore
 //! # use distributary::{Blender, Base};
 //! # let mut g = Blender::new();
 //! # let article = g.migrate(|mig|
@@ -229,7 +229,7 @@
 //!
 //! Let's next trace what happens when a `Vote` is introduced into the system using
 //!
-//! ```rust
+//! ```rust,ignore
 //! # use distributary::{Blender, Base};
 //! # let mut g = Blender::new();
 //! # let vote = g.migrate(|mig| mig.add_ingredient("vote", &["user", "id"], Base::default()));

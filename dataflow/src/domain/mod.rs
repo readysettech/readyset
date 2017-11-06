@@ -945,16 +945,21 @@ impl Domain {
                                         }
                                         tx.0.send(m).unwrap();
                                     });
-                                assert!(
-                                    self.readers
-                                        .lock()
-                                        .unwrap()
-                                        .insert((gid, *self.shard.as_ref().unwrap_or(&0)), r_part)
-                                        .is_none()
-                                );
 
                                 let mut n = self.nodes[&node].borrow_mut();
                                 n.with_reader_mut(|r| {
+                                    let token_generator = r.token_generator().cloned();
+                                    assert!(
+                                        self.readers
+                                            .lock()
+                                            .unwrap()
+                                            .insert(
+                                                (gid, *self.shard.as_ref().unwrap_or(&0)),
+                                                (r_part, token_generator)
+                                            )
+                                            .is_none()
+                                    );
+
                                     // make sure Reader is actually prepared to receive state
                                     r.set_write_handle(w_part)
                                 });
@@ -962,16 +967,21 @@ impl Domain {
                             InitialState::Global { gid, cols, key } => {
                                 use backlog;
                                 let (r_part, w_part) = backlog::new(cols, key);
-                                assert!(
-                                    self.readers
-                                        .lock()
-                                        .unwrap()
-                                        .insert((gid, *self.shard.as_ref().unwrap_or(&0)), r_part)
-                                        .is_none()
-                                );
 
                                 let mut n = self.nodes[&node].borrow_mut();
                                 n.with_reader_mut(|r| {
+                                    let token_generator = r.token_generator().cloned();
+                                    assert!(
+                                        self.readers
+                                            .lock()
+                                            .unwrap()
+                                            .insert(
+                                                (gid, *self.shard.as_ref().unwrap_or(&0)),
+                                                (r_part, token_generator)
+                                            )
+                                            .is_none()
+                                    );
+
                                     // make sure Reader is actually prepared to receive state
                                     r.set_write_handle(w_part)
                                 });

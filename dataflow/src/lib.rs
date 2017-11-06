@@ -2,7 +2,6 @@
 #![feature(box_patterns)]
 #![feature(use_extern_macros)]
 #![feature(entry_or_default)]
-
 #![feature(plugin, use_extern_macros)]
 #![plugin(tarpc_plugins)]
 
@@ -28,10 +27,10 @@ extern crate nom_sql;
 extern crate petgraph;
 extern crate regex;
 extern crate serde;
+extern crate serde_json;
 extern crate timekeeper;
 extern crate tokio_core;
 extern crate vec_map;
-extern crate serde_json;
 
 pub mod backlog;
 pub mod checktable;
@@ -53,7 +52,11 @@ pub const SHARDS: usize = 2;
 use std::sync::{Arc, Mutex};
 use std::collections::HashMap;
 
-pub type Readers = Arc<Mutex<HashMap<(core::NodeIndex, usize), backlog::SingleReadHandle>>>;
+use checktable::TokenGenerator;
+
+pub type Readers = Arc<
+    Mutex<HashMap<(core::NodeIndex, usize), (backlog::SingleReadHandle, Option<TokenGenerator>)>>,
+>;
 pub type PersistenceParameters = persistence::Parameters;
 pub type DomainConfig = domain::Config;
 
@@ -96,4 +99,3 @@ pub fn shard_by(dt: &core::DataType, shards: usize) -> usize {
         }
     }
 }
-

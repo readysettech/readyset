@@ -82,6 +82,8 @@ pub struct ControllerBuilder {
     heartbeat_every: Duration,
     healthcheck_every: Duration,
     nworkers: usize,
+    internal_port: u16,
+    external_port: u16,
     log: slog::Logger,
 }
 impl Default for ControllerBuilder {
@@ -99,6 +101,8 @@ impl Default for ControllerBuilder {
             listen_addr: "127.0.0.1".parse().unwrap(),
             heartbeat_every: Duration::from_secs(1),
             healthcheck_every: Duration::from_secs(10),
+            internal_port: if cfg!(test) { 0 } else { 8000 },
+            external_port: if cfg!(test) { 0 } else { 9000 },
             nworkers: 0,
             log,
         }
@@ -154,11 +158,13 @@ impl ControllerBuilder {
     /// Build a controller, and return a Blender to provide access to it.
     pub fn build(self) -> Blender {
         // TODO(fintelia): Don't hard code addresses in this function.
+        let internal_addr = SocketAddr::new("127.0.0.1".parse().unwrap(), self.internal_port);
+        let external_addr = SocketAddr::new("127.0.0.1".parse().unwrap(), self.external_port);
         let nworkers = self.nworkers;
+
         let inner = Arc::new(Mutex::new(ControllerInner::from_builder(self)));
-        let addr =
-            ControllerInner::listen_external(inner.clone(), "127.0.0.1:9000".parse().unwrap());
-        ControllerInner::listen_internal(inner, "127.0.0.1:8000".parse().unwrap(), nworkers);
+        let addr = ControllerInner::listen_external(inner.clone(), external_addr);
+        ControllerInner::listen_internal(inner, internal_addr, nworkers);
 
         Blender {
             url: format!("http://{}", addr),

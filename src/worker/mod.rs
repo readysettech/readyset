@@ -7,8 +7,9 @@ use std::time::{Duration, Instant};
 use std::thread::{self, JoinHandle};
 use std::sync::{Arc, Mutex};
 
+use dataflow::checktable::TokenGenerator;
 use dataflow::prelude::DomainIndex;
-use dataflow::DomainBuilder;
+use dataflow::{DomainBuilder, Readers};
 use dataflow::prelude::ChannelCoordinator;
 use {CoordinationMessage, CoordinationPayload, NodeIndex, ReadQuery, ReadReply, SingleReadHandle};
 
@@ -29,7 +30,7 @@ pub struct Worker {
     sender: Option<TcpSender<CoordinationMessage>>,
     channel_coordinator: Arc<ChannelCoordinator>,
     domain_threads: Vec<JoinHandle<()>>,
-    readers: Arc<Mutex<HashMap<(NodeIndex, usize), SingleReadHandle>>>,
+    readers: Readers,
 
     // liveness
     heartbeat_every: Duration,
@@ -38,23 +39,28 @@ pub struct Worker {
 
 impl Worker {
     /// Use the given polling loop and readers object to serve reads.
-    pub fn serve_reads(
-        mut polling_loop: RpcPollingLoop<ReadQuery, ReadReply>,
-        readers: Arc<Mutex<HashMap<(NodeIndex, usize), SingleReadHandle>>>,
-    ) {
-        let mut readers_cache: HashMap<(NodeIndex, usize), SingleReadHandle> = HashMap::new();
+    pub fn serve_reads(mut polling_loop: RpcPollingLoop<ReadQuery, ReadReply>, readers: Readers) {
+        let mut readers_cache: HashMap<
+            (NodeIndex, usize),
+            (SingleReadHandle, Option<TokenGenerator>),
+        > = HashMap::new();
 
         polling_loop.run_polling_loop(|event| match event {
             RpcPollEvent::ResumePolling(_) => ProcessResult::KeepPolling,
             RpcPollEvent::Timeout => unreachable!(),
-            RpcPollEvent::Process(query, reply) => {
-                *reply = Some(ReadReply(
-                    query
-                        .keys
-                        .iter()
+            RpcPollEvent::Process(
+                ReadQuery::Normal {
+                    target,
+                    keys,
+                    block,
+                },
+                reply,
+            ) => {
+                *reply = Some(ReadReply::Normal(
+                    keys.iter()
                         .map(|key| {
-                            let reader = readers_cache.entry(query.target.clone()).or_insert_with(
-                                || readers.lock().unwrap().get(&query.target).unwrap().clone(),
+                            let &mut (ref mut reader, _) = readers_cache.entry(target.clone()).or_insert_with(
+                                || readers.lock().unwrap().get(&target).unwrap().clone(),
                             );
 
                             reader
@@ -65,10 +71,42 @@ impl Worker {
                                             .map(|r| r.iter().map(|v| v.deep_clone()).collect())
                                             .collect()
                                     },
-                                    query.block,
+                                    block,
                                 )
                                 .map(|r| r.0)
                                 .map(|r| r.unwrap_or_else(Vec::new))
+                        })
+                        .collect(),
+                ));
+                ProcessResult::KeepPolling
+            }
+            RpcPollEvent::Process(
+                ReadQuery::WithToken {
+                    target,
+                    keys,
+                },
+                reply,
+            ) => {
+                *reply = Some(ReadReply::WithToken(
+                    keys.into_iter()
+                        .map(|key| {
+                            let &mut (ref mut reader, ref mut generator) =
+                                readers_cache.entry(target.clone()).or_insert_with(
+                                    || readers.lock().unwrap().get(&target).unwrap().clone(),
+                                );
+
+                            reader
+                                .find_and(
+                                    &key,
+                                    |rs| {
+                                        rs.into_iter()
+                                            .map(|r| r.iter().map(|v| v.deep_clone()).collect())
+                                            .collect()
+                                    },
+                                    true,
+                                )
+                                .map(|r| (r.0.unwrap_or_else(Vec::new), r.1))
+                                .map(|r| (r.0, generator.as_ref().unwrap().generate(r.1, key)))
                         })
                         .collect(),
                 ));
