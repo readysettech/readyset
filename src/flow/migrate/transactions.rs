@@ -81,7 +81,6 @@ fn has_path(graph: &Graph, source: NodeIndex) -> HashSet<(NodeIndex, NodeIndex)>
     for b in graph.neighbors_directed(source, petgraph::EdgeDirection::Outgoing) {
         let mut bfs = Bfs::new(&graph, b);
         while let Some(nx) = bfs.next(&graph) {
-            // we can access `graph` mutably here still
             has_path.insert((b, nx));
         }
     }
