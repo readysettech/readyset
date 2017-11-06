@@ -1,7 +1,6 @@
-use flow::prelude::*;
+use dataflow::prelude::*;
 
 use petgraph;
-use petgraph::graph::NodeIndex;
 
 use std::collections::HashMap;
 

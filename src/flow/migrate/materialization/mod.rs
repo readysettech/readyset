@@ -5,9 +5,9 @@
 //! domains, but does not perform that copying itself (that is the role of the `augmentation`
 //! module).
 
+use dataflow::prelude::*;
+use flow::domain_handle::DomainHandle;
 use flow::keys;
-use flow::domain;
-use flow::prelude::*;
 use petgraph;
 use petgraph::graph::NodeIndex;
 use std::collections::{HashMap, HashSet};
@@ -26,15 +26,6 @@ macro_rules! dur_to_ns {
 }
 
 
-#[derive(Clone, Copy, Eq, PartialEq, Ord, PartialOrd, Hash, Debug, Serialize, Deserialize)]
-pub struct Tag(u32);
-
-impl Tag {
-    pub fn id(&self) -> u32 {
-        self.0
-    }
-}
-
 type Indices = HashSet<Vec<usize>>;
 
 pub struct Materializations {
@@ -47,7 +38,7 @@ pub struct Materializations {
     partial_enabled: bool,
 
     // TODO: this doesn't belong here
-    pub domains_on_path: HashMap<Tag, Vec<domain::Index>>,
+    pub domains_on_path: HashMap<Tag, Vec<DomainIndex>>,
 
     tag_generator: AtomicUsize,
 }
@@ -430,7 +421,7 @@ impl Materializations {
         &mut self,
         graph: &Graph,
         new: &HashSet<NodeIndex>,
-        domains: &mut HashMap<domain::Index, domain::DomainHandle>,
+        domains: &mut HashMap<DomainIndex, DomainHandle>,
     ) {
         self.extend(graph, new);
 
@@ -514,7 +505,7 @@ impl Materializations {
                            "cols" => ?index_on);
             // unimplemented!();
             } else {
-                use flow::payload::InitialState;
+                use dataflow::payload::InitialState;
                 domains
                     .get_mut(&n.domain())
                     .unwrap()
@@ -576,7 +567,7 @@ impl Materializations {
         index_on: &mut HashSet<Vec<usize>>,
         graph: &Graph,
         empty: &mut HashSet<NodeIndex>,
-        domains: &mut HashMap<domain::Index, domain::DomainHandle>,
+        domains: &mut HashMap<DomainIndex, DomainHandle>,
     ) {
         let n = &graph[ni];
         if graph
@@ -591,7 +582,7 @@ impl Materializations {
             // we need to make sure the domain constructs reader backlog handles!
             let prep = n.with_reader(|r| {
                 r.key().map(|key| {
-                    use flow::payload::InitialState;
+                    use dataflow::payload::InitialState;
                     box Packet::PrepareState {
                         node: *n.local_addr(),
                         state: InitialState::Global {
@@ -642,7 +633,7 @@ impl Materializations {
         index_on: &mut HashSet<Vec<usize>>,
         graph: &Graph,
         empty: &HashSet<NodeIndex>,
-        domains: &mut HashMap<domain::Index, domain::DomainHandle>,
+        domains: &mut HashMap<DomainIndex, DomainHandle>,
     ) {
         if index_on.is_empty() {
             // we must be reconstructing a Reader.

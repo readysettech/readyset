@@ -1,6 +1,6 @@
-use flow::prelude::*;
-use flow::domain::DomainInputHandle;
-use checktable;
+use dataflow::prelude::*;
+use flow::domain_handle::DomainInputHandle;
+use dataflow::checktable;
 
 use std::net::SocketAddr;
 use vec_map::VecMap;

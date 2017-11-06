@@ -1,6 +1,7 @@
 use std::net::SocketAddr;
 
-use flow::domain::{self, DomainBuilder};
+use dataflow::prelude::*;
+use dataflow::DomainBuilder;
 
 /// Coordination-layer message wrapper; adds a mandatory `source` field to each message.
 #[derive(Clone, Debug, Deserialize, Serialize)]
@@ -30,5 +31,5 @@ pub enum CoordinationPayload {
     /// Remove a running domain from a worker.
     RemoveDomain,
     /// Domain connectivity gossip.
-    DomainBooted((domain::Index, usize), SocketAddr),
+    DomainBooted((DomainIndex, usize), SocketAddr),
 }

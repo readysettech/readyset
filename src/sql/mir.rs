@@ -1,11 +1,10 @@
-use flow::core::DataType;
-use flow::prelude::NodeIndex;
+use core::{DataType, NodeIndex};
 pub use mir::MirNodeRef;
 use mir::node::{GroupedNodeType, MirNode, MirNodeType};
 use mir::query::MirQuery;
 // TODO(malte): remove if possible
-pub use mir::to_flow::FlowNode;
-use ops::join::JoinType;
+pub use mir::FlowNode;
+use dataflow::ops::join::JoinType;
 
 use nom_sql::{ArithmeticExpression, Column, ColumnSpecification, ConditionBase,
               ConditionExpression, ConditionTree, Literal, Operator, SqlQuery, TableKey};
@@ -539,8 +538,8 @@ impl SqlToMirConverter {
         group_cols: Vec<&Column>,
         parent: MirNodeRef,
     ) -> MirNodeRef {
-        use ops::grouped::aggregate::Aggregation;
-        use ops::grouped::extremum::Extremum;
+        use dataflow::ops::grouped::aggregate::Aggregation;
+        use dataflow::ops::grouped::extremum::Extremum;
         use nom_sql::FunctionExpression::*;
 
         let mknode = |over: &Column, t: GroupedNodeType| {
