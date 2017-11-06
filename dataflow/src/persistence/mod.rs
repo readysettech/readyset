@@ -43,12 +43,6 @@ pub struct Parameters {
     pub log_prefix: String,
 }
 
-#[derive(Clone, Debug, Serialize, Deserialize)]
-enum PacketType {
-    Message,
-    Transaction,
-}
-
 impl Default for Parameters {
     fn default() -> Self {
         Self {
