@@ -42,6 +42,8 @@ use self::prelude::{Ingredient, WorkerEndpoint, WorkerIdentifier};
 
 pub use self::mutator::{Mutator, MutatorBuilder, MutatorError};
 pub use self::getter::{Getter, ReadQuery, ReadReply, RemoteGetter, RemoteGetterBuilder};
+use self::payload::{IngressFromBase, EgressForBase};
+
 
 const NANOS_PER_SEC: u64 = 1_000_000_000;
 macro_rules! dur_to_ns {
@@ -82,6 +84,9 @@ pub struct Blender {
     readers: Readers,
     workers: HashMap<WorkerIdentifier, WorkerEndpoint>,
     remote_readers: HashMap<(domain::Index, usize), SocketAddr>,
+
+    /// State between migrations
+    deps: HashMap<domain::Index, (IngressFromBase, EgressForBase)>,
 
     log: slog::Logger,
 }
@@ -141,6 +146,8 @@ impl Blender {
             readers: Arc::default(),
             workers: HashMap::default(),
             remote_readers: HashMap::default(),
+
+            deps: HashMap::default(),
 
             log: log,
         }
@@ -968,13 +975,15 @@ impl<'a> Migration<'a> {
         // println!("{}", mainline);
 
         let mut uninformed_domain_nodes = domain_nodes.clone();
-        let deps = migrate::transactions::analyze_graph(
+        migrate::transactions::analyze_graph(
             &mainline.ingredients,
             mainline.source,
             domain_nodes,
+            &mut mainline.deps,
         );
+
         let (start_ts, end_ts, prevs) =
-            mainline.checktable.perform_migration(deps.clone()).unwrap();
+            mainline.checktable.perform_migration(mainline.deps.clone()).unwrap();
 
         info!(log, "migration claimed timestamp range"; "start" => start_ts, "end" => end_ts);
 
@@ -1065,7 +1074,7 @@ impl<'a> Migration<'a> {
             .add_replay_paths(mainline.materializations.domains_on_path.clone())
             .unwrap();
 
-        migrate::transactions::finalize(deps, &log, &mut mainline.domains, end_ts);
+        migrate::transactions::finalize(mainline.deps.clone(), &log, &mut mainline.domains, end_ts);
 
         warn!(log, "migration completed"; "ms" => dur_to_ns!(start.elapsed()) / 1_000_000);
     }

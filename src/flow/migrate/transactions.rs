@@ -11,11 +11,11 @@ fn count_base_ingress(
     graph: &Graph,
     source: NodeIndex,
     nodes: &[(NodeIndex, bool)],
-    domain: &domain::Index,
     has_path: &HashSet<(NodeIndex, NodeIndex)>,
 ) -> IngressFromBase {
     let ingress_nodes: Vec<_> = nodes
         .into_iter()
+        .filter(|&&(_, new)| new)
         .map(|&(ni, _)| ni)
         .filter(|&ni| graph[ni].borrow().is_ingress())
         .filter(|&ni| graph[ni].borrow().is_transactional())
@@ -24,7 +24,7 @@ fn count_base_ingress(
     graph
         .neighbors_directed(source, petgraph::EdgeDirection::Outgoing)
         .map(|base| {
-            let mut num_paths = ingress_nodes
+            let num_paths = ingress_nodes
                 .iter()
                 .filter(|&&ingress| {
                     has_path.contains(&(base, ingress))
@@ -35,12 +35,6 @@ fn count_base_ingress(
                     1
                 })
                 .sum();
-
-            // Domains containing a base node will get a single copy of each packet sent to it.
-            if graph[base].domain() == *domain {
-                assert_eq!(num_paths, 0);
-                num_paths = 1;
-            }
 
             (base, num_paths)
         })
@@ -55,6 +49,7 @@ fn base_egress_map(
 ) -> EgressForBase {
     let output_nodes: Vec<_> = nodes
         .into_iter()
+        .filter(|&&(_, new)| new)
         .map(|&(ni, _)| ni)
         .filter(|&ni| graph[ni].is_output())
         //.filter(|&ni| graph[ni].is_transactional())
@@ -92,20 +87,50 @@ pub fn analyze_graph(
     graph: &Graph,
     source: NodeIndex,
     domain_nodes: HashMap<domain::Index, Vec<(NodeIndex, bool)>>,
-) -> HashMap<domain::Index, (IngressFromBase, EgressForBase)> {
+    old: &mut HashMap<domain::Index, (IngressFromBase, EgressForBase)>,
+) {
     let has_path = has_path(graph, source);
-    domain_nodes
+    let new = domain_nodes
         .into_iter()
         .map(|(domain, nodes): (_, Vec<(NodeIndex, bool)>)| {
             (
                 domain,
                 (
-                    count_base_ingress(graph, source, &nodes[..], &domain, &has_path),
+                    count_base_ingress(graph, source, &nodes[..], &has_path),
                     base_egress_map(graph, source, &nodes[..], &has_path),
                 ),
             )
         })
-        .collect()
+        .collect();
+
+    merge_deps(graph, old, new);
+}
+
+fn merge_deps(
+    graph: &Graph,
+    old: &mut HashMap<domain::Index, (IngressFromBase, EgressForBase)>,
+    new: HashMap<domain::Index, (IngressFromBase, EgressForBase)>
+) {
+    for (di, (new_ingress, new_egress)) in new {
+        let entry = old.entry(di).or_insert((HashMap::new(), HashMap::new()));
+        let old_ingress = &mut entry.0;
+        let old_egress = &mut entry.1;
+
+        for (base, v) in new_egress {
+            let e = old_egress.entry(base).or_insert(vec![]);
+            (*e).extend(v);
+        }
+
+        for (base, v) in new_ingress {
+            let e = old_ingress.entry(base).or_insert(0);
+            *e += v;
+
+            // Domains containing a base node will get a single copy of each packet sent to it.
+            if graph[base].domain() == di {
+                *e = 1;
+            }
+        }
+    }
 }
 
 pub fn finalize(
