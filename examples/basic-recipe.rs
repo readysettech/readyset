@@ -1,8 +1,6 @@
 extern crate distributary;
 extern crate time;
 
-mod backend;
-
 use distributary::ControllerBuilder;
 
 use std::thread;
@@ -30,8 +28,10 @@ fn main() {
     );
 
     // set up Soup via recipe
-    let blender = ControllerBuilder::default().build();
-    blender.with_persistence_options(persistence_params);
+    let mut builder = ControllerBuilder::default();
+    builder.set_persistence(persistence_params);
+
+    let mut blender = builder.build();
     blender.install_recipe(sql.to_owned());
     blender.recover();
 
@@ -45,7 +45,7 @@ fn main() {
     println!("Creating article...");
     let aid = 1;
     // Make sure the article exists:
-    if article.lookup(&aid.into(), true).is_empty() {
+    if awvc.lookup(&aid.into(), true).unwrap().is_empty() {
         println!("Creating new article...");
         let title = "test title";
         let url = "http://pdos.csail.mit.edu";

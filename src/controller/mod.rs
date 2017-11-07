@@ -258,6 +258,7 @@ impl ControllerInner {
                 "outputs" => Post: C::Op(Box::new(Self::outputs)).handler(),
                 "mutator_builder" => Post: C::Op(Box::new(Self::get_mutator_builder)).handler(),
                 "getter_builder" =>  Post: C::Op(Box::new(Self::get_getter_builder)).handler(),
+                "recover" => Post: C::OpMut(Box::new(Self::recover)).handler(),
                 "get_statistics" => Post: C::OpMut(Box::new(Self::get_statistics)).handler(),
                 "install_recipe" => Post: C::OpMut(Box::new(Self::install_recipe)).handler(),
                 "graphviz" => Post: C::Op(Box::new(Self::graphviz)).handler(),
@@ -520,11 +521,14 @@ impl ControllerInner {
 
     /// Initiaties log recovery by sending a
     /// StartRecovery packet to each base node domain.
-    pub fn recover(&mut self) {
+    pub fn recover(&mut self, _: ()) {
         info!(self.log, "Recovering from log");
-        let indices = self.inputs()
+        let indices = self.inputs(())
             .iter()
-            .map(|&(_input, ref node)| node.domain())
+            .map(|(_name, index)| {
+                let node = &self.ingredients[*index];
+                node.domain()
+            })
             .collect::<Vec<_>>();
 
         for index in indices.clone() {
@@ -1458,6 +1462,12 @@ impl Blender {
     pub fn get_mutator(&self, base: NodeIndex) -> Result<Mutator, Box<Error>> {
         self.get_mutator_builder(base)
             .map(|m| m.build("127.0.0.1:0".parse().unwrap()))
+    }
+
+    /// Initiaties log recovery by sending a
+    /// StartRecovery packet to each base node domain.
+    pub fn recover(&mut self) {
+        self.rpc("recover", &()).unwrap()
     }
 
     /// Get statistics about the time spent processing different parts of the graph.

@@ -379,9 +379,9 @@ fn it_works_with_arithmetic_aliases() {
 #[test]
 fn it_recovers_persisted_logs() {
     let setup = || {
-        let mut g = distributary::Blender::new();
-        let pparams = distributary::PersistenceParameters::new(
-            distributary::DurabilityMode::DeleteOnExit,
+        let mut g = ControllerBuilder::default().build_inner();
+        let pparams = PersistenceParameters::new(
+            DurabilityMode::DeleteOnExit,
             128,
             time::Duration::from_millis(1),
             Some(String::from("it_recovers_persisted_logs")),
@@ -395,7 +395,7 @@ fn it_recovers_persisted_logs() {
 
 
         let recipe = g.migrate(|mig| {
-            let mut recipe = distributary::Recipe::from_str(&sql, None).unwrap();
+            let mut recipe = Recipe::from_str(&sql, None).unwrap();
             recipe.activate(mig, false).unwrap();
             recipe
         });
@@ -415,14 +415,14 @@ fn it_recovers_persisted_logs() {
     sleep();
 
     let (mut g, recipe) = setup();
-    let getter = g.get_getter(recipe.node_addr_for("CarPrice").unwrap())
+    let mut getter = g.get_getter(recipe.node_addr_for("CarPrice").unwrap())
         .unwrap();
 
     // Make sure that the new graph is empty:
     assert_eq!(getter.lookup(&1.into(), true).unwrap().len(), 0);
 
     // Recover and let the writes propagate:
-    g.recover();
+    g.recover(());
 
     for i in 1..10 {
         let price = i * 10;
@@ -435,9 +435,9 @@ fn it_recovers_persisted_logs() {
 #[test]
 fn it_recovers_persisted_logs_w_transactions() {
     let setup = || {
-        let mut g = distributary::Blender::new();
-        let pparams = distributary::PersistenceParameters::new(
-            distributary::DurabilityMode::DeleteOnExit,
+        let mut g = ControllerBuilder::default().build_inner();
+        let pparams = PersistenceParameters::new(
+            DurabilityMode::DeleteOnExit,
             128,
             time::Duration::from_millis(1),
             Some(String::from("it_recovers_persisted_logs_w_transactions")),
@@ -445,8 +445,8 @@ fn it_recovers_persisted_logs_w_transactions() {
         g.with_persistence_options(pparams);
 
         let a = g.migrate(|mig| {
-            let a = mig.add_transactional_base("a", &["a", "b"], distributary::Base::default());
-            mig.maintain(a, 0);
+            let a = mig.add_transactional_base("a", &["a", "b"], Base::default());
+            mig.maintain_anonymous(a, 0);
             a
         });
 
@@ -456,11 +456,10 @@ fn it_recovers_persisted_logs_w_transactions() {
     let (g, a) = setup();
     let mut mutator = g.get_mutator(a);
 
-
     for i in 1..10 {
         let b = i * 10;
         mutator
-            .transactional_put(vec![i.into(), b.into()], distributary::Token::empty())
+            .transactional_put(vec![i.into(), b.into()], Token::empty())
             .unwrap();
     }
 
@@ -474,7 +473,7 @@ fn it_recovers_persisted_logs_w_transactions() {
     assert_eq!(getter.transactional_lookup(&1.into()).unwrap().0.len(), 0);
 
     // Recover and let the writes propagate:
-    g.recover();
+    g.recover(());
 
     for i in 1..10 {
         let b = i * 10;
