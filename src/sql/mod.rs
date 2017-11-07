@@ -579,15 +579,7 @@ impl SqlIncorporator {
                     QueryGraphReuse::ExtendExisting(mqs) => {
                         self.extend_existing_query(&query_name, sq, qg, mqs, mig)
                     }
-                    QueryGraphReuse::ReaderOntoExisting(mn, project_columns, params) => {
-                        self.add_leaf_to_existing_query(
-                            &query_name,
-                            &params,
-                            mn,
-                            project_columns,
-                            mig,
-                        )
-                    }
+                    QueryGraphReuse::ReaderOntoExisting(mn, project_columns, params) => self.add_leaf_to_existing_query(&query_name, &params, mn, project_columns, mig),
                     QueryGraphReuse::None => self.add_query_via_mir(&query_name, sq, qg, mig),
                 }
             }

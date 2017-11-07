@@ -865,10 +865,7 @@ impl SqlToMirConverter {
 
                         let last_left = left.last().unwrap().clone();
                         let last_right = right.last().unwrap().clone();
-                        let union = self.make_union_node(
-                            &format!("{}_u", name),
-                            vec![last_left, last_right],
-                        );
+                        let union = self.make_union_node(&format!("{}_u", name), vec![last_left, last_right]);
 
                         pred_nodes.extend(left.clone());
                         pred_nodes.extend(right.clone());

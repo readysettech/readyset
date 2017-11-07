@@ -7,7 +7,7 @@ use core::{DataType, NodeIndex};
 use dataflow::ops;
 use dataflow::ops::grouped::aggregate::Aggregation as AggregationKind;
 use dataflow::ops::grouped::extremum::Extremum as ExtremumKind;
-use {MirNodeRef, FlowNode};
+use {FlowNode, MirNodeRef};
 
 /// Helper enum to avoid having separate `make_aggregation_node` and `make_extremum_node` functions
 pub enum GroupedNodeType {

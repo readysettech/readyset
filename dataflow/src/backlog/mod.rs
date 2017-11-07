@@ -307,9 +307,11 @@ mod tests {
 
         let n = 10000;
         let (r, mut w) = new(1, 0);
-        thread::spawn(move || for i in 0..n {
-            w.add(vec![Record::Positive(vec![i.into()])]);
-            w.swap();
+        thread::spawn(move || {
+            for i in 0..n {
+                w.add(vec![Record::Positive(vec![i.into()])]);
+                w.swap();
+            }
         });
 
         for i in 0..n {

@@ -8,8 +8,8 @@ extern crate backtrace;
 extern crate channel;
 extern crate chrono;
 extern crate fnv;
-extern crate petgraph;
 extern crate nom_sql;
+extern crate petgraph;
 extern crate regex;
 extern crate serde;
 #[macro_use]

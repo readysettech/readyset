@@ -916,10 +916,12 @@ impl<'a> Migration<'a> {
 
         let granular_parents = base_columns
             .into_iter()
-            .filter_map(|(ni, o)| if o.is_some() {
-                Some((ni, o.unwrap()))
-            } else {
-                None
+            .filter_map(|(ni, o)| {
+                if o.is_some() {
+                    Some((ni, o.unwrap()))
+                } else {
+                    None
+                }
             })
             .collect();
 

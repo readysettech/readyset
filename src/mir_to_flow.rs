@@ -570,10 +570,12 @@ pub(crate) fn make_join_node(
     let join_config = projected_cols_left
         .iter()
         .enumerate()
-        .map(|(i, _)| if i == left_join_col_id {
-            JoinSource::B(i, right_join_col_id)
-        } else {
-            JoinSource::L(i)
+        .map(|(i, _)| {
+            if i == left_join_col_id {
+                JoinSource::B(i, right_join_col_id)
+            } else {
+                JoinSource::L(i)
+            }
         })
         .chain(
             projected_cols_right

@@ -130,17 +130,19 @@ impl Join {
         self.emit
             .iter()
             .enumerate()
-            .map(|(i, &(from_left, col))| if from_left {
-                if let Preprocessed::Left = reusing {
-                    left[i].clone()
+            .map(|(i, &(from_left, col))| {
+                if from_left {
+                    if let Preprocessed::Left = reusing {
+                        left[i].clone()
+                    } else {
+                        left[col].clone()
+                    }
                 } else {
-                    left[col].clone()
-                }
-            } else {
-                if let Preprocessed::Right = reusing {
-                    right[i].clone()
-                } else {
-                    right[col].clone()
+                    if let Preprocessed::Right = reusing {
+                        right[i].clone()
+                    } else {
+                        right[col].clone()
+                    }
                 }
             })
             .collect()
@@ -180,10 +182,12 @@ impl Join {
     fn generate_null(&self, left: &[DataType]) -> Vec<DataType> {
         self.emit
             .iter()
-            .map(|&(from_left, col)| if from_left {
-                left[col].clone()
-            } else {
-                DataType::None
+            .map(|&(from_left, col)| {
+                if from_left {
+                    left[col].clone()
+                } else {
+                    DataType::None
+                }
             })
             .collect()
     }

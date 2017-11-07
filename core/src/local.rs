@@ -1,4 +1,4 @@
-use *;
+use ::*;
 use std::ops::{Deref, Index, IndexMut};
 use std::iter::FromIterator;
 use std::collections::HashMap;

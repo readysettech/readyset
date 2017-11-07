@@ -450,11 +450,13 @@ impl Domain {
                     let last = self.replay_paths[tag].path.last().unwrap();
                     self.replay_paths
                         .iter()
-                        .filter(|&(_, p)| if let TriggerEndpoint::End(..) = p.trigger {
-                            let p = p.path.last().unwrap();
-                            p.node == last.node && p.partial_key == last.partial_key
-                        } else {
-                            false
+                        .filter(|&(_, p)| {
+                            if let TriggerEndpoint::End(..) = p.trigger {
+                                let p = p.path.last().unwrap();
+                                p.node == last.node && p.partial_key == last.partial_key
+                            } else {
+                                false
+                            }
                         })
                         .count()
                 };
@@ -1199,13 +1201,13 @@ impl Domain {
                         {
                             let mut n = self.nodes[&node].borrow_mut();
                             if n.is_reader() {
-                                n.with_reader_mut(
-                                    |r| if let Some(ref mut state) = r.writer_mut() {
+                                n.with_reader_mut(|r| {
+                                    if let Some(ref mut state) = r.writer_mut() {
                                         trace!(self.log, "swapping state"; "local" => node.id());
                                         state.swap();
                                         trace!(self.log, "state swapped"; "local" => node.id());
-                                    },
-                                );
+                                    }
+                                });
                             }
                         }
 
@@ -1671,8 +1673,10 @@ impl Domain {
                                     // we must be filling a hole in a Reader. we need to ensure
                                     // that the hole for the key we're replaying ends up being
                                     // filled, even if that hole is empty!
-                                    r.writer_mut().map(|wh| for key in backfill_keys.iter() {
-                                        wh.mark_filled(&key[0]);
+                                    r.writer_mut().map(|wh| {
+                                        for key in backfill_keys.iter() {
+                                            wh.mark_filled(&key[0]);
+                                        }
                                     });
                                 });
                             }
@@ -1732,8 +1736,10 @@ impl Domain {
                                     }
                                 } else {
                                     n.with_reader_mut(|r| {
-                                        r.writer_mut().map(|wh| for miss in &missed_on {
-                                            wh.mark_hole(&miss[0]);
+                                        r.writer_mut().map(|wh| {
+                                            for miss in &missed_on {
+                                                wh.mark_hole(&miss[0]);
+                                            }
                                         });
                                     });
                                 }

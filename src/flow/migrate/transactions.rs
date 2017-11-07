@@ -26,13 +26,13 @@ fn count_base_ingress(
         .map(|base| {
             let mut num_paths = ingress_nodes
                 .iter()
-                .filter(|&&ingress| {
-                    has_path.contains(&(base, ingress))
-                })
-                .map(|&ingress| if graph[ingress].is_shard_merger() {
-                    dataflow::SHARDS
-                } else {
-                    1
+                .filter(|&&ingress| has_path.contains(&(base, ingress)))
+                .map(|&ingress| {
+                    if graph[ingress].is_shard_merger() {
+                        dataflow::SHARDS
+                    } else {
+                        1
+                    }
                 })
                 .sum();
 
@@ -51,7 +51,7 @@ fn base_egress_map(
     graph: &Graph,
     source: NodeIndex,
     nodes: &[(NodeIndex, bool)],
-    has_path: &HashSet<(NodeIndex, NodeIndex)>
+    has_path: &HashSet<(NodeIndex, NodeIndex)>,
 ) -> EgressForBase {
     let output_nodes: Vec<_> = nodes
         .into_iter()
@@ -65,9 +65,7 @@ fn base_egress_map(
         .map(|base| {
             let outs = output_nodes
                 .iter()
-                .filter(|&&out| {
-                    has_path.contains(&(base, out))
-                })
+                .filter(|&&out| has_path.contains(&(base, out)))
                 .map(|&out| *graph[out].local_addr())
                 .collect();
             (base, outs)

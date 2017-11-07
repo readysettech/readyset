@@ -603,8 +603,10 @@ impl Materializations {
         // needs to happen *after* the empty parents check so that we keep tracking whether or not
         // nodes are empty.
         let mut has_state = !index_on.is_empty();
-        n.with_reader(|r| if r.is_materialized() {
-            has_state = true;
+        n.with_reader(|r| {
+            if r.is_materialized() {
+                has_state = true;
+            }
         });
 
         if !has_state {

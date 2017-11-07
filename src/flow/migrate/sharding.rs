@@ -558,7 +558,8 @@ fn reshard(
     let node = match to {
         Sharding::None | Sharding::ForcedNone => {
             // NOTE: this *must* be a union so that we correctly buffer partial replays
-            let n: NodeOperator = ops::union::Union::new_deshard(src.into(), dataflow::SHARDS).into();
+            let n: NodeOperator =
+                ops::union::Union::new_deshard(src.into(), dataflow::SHARDS).into();
             let mut n = graph[src].mirror(n);
             n.shard_by(to);
             n.mark_as_shard_merger(true);

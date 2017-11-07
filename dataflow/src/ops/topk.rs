@@ -253,10 +253,12 @@ impl Ingredient for TopK {
         for rec in rs.iter() {
             let group = rec.iter()
                 .enumerate()
-                .filter_map(|(i, v)| if self.group_by.iter().any(|col| col == &i) {
-                    Some(v)
-                } else {
-                    None
+                .filter_map(|(i, v)| {
+                    if self.group_by.iter().any(|col| col == &i) {
+                        Some(v)
+                    } else {
+                        None
+                    }
                 })
                 .cloned()
                 .collect::<Vec<_>>();

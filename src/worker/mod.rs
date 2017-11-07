@@ -59,9 +59,10 @@ impl Worker {
                 *reply = Some(ReadReply::Normal(
                     keys.iter()
                         .map(|key| {
-                            let &mut (ref mut reader, _) = readers_cache.entry(target.clone()).or_insert_with(
-                                || readers.lock().unwrap().get(&target).unwrap().clone(),
-                            );
+                            let &mut (ref mut reader, _) =
+                                readers_cache.entry(target.clone()).or_insert_with(
+                                    || readers.lock().unwrap().get(&target).unwrap().clone(),
+                                );
 
                             reader
                                 .find_and(
@@ -80,13 +81,7 @@ impl Worker {
                 ));
                 ProcessResult::KeepPolling
             }
-            RpcPollEvent::Process(
-                ReadQuery::WithToken {
-                    target,
-                    keys,
-                },
-                reply,
-            ) => {
+            RpcPollEvent::Process(ReadQuery::WithToken { target, keys }, reply) => {
                 *reply = Some(ReadReply::WithToken(
                     keys.into_iter()
                         .map(|key| {
