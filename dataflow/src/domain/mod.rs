@@ -1593,7 +1593,15 @@ impl Domain {
 
             let file = match File::open(&path) {
                 Ok(f) => f,
-                Err(ref e) if e.kind() == ErrorKind::NotFound => continue,
+                Err(ref e) if e.kind() == ErrorKind::NotFound => {
+                    warn!(
+                        self.log,
+                        "No log file found for node {}, starting out empty",
+                        local_addr
+                    );
+
+                    continue;
+                }
                 Err(e) => panic!("Could not open log file {:?}: {}", path, e),
             };
 
