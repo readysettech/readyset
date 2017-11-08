@@ -11,7 +11,6 @@ use std::fs::File;
 use std::net::SocketAddr;
 
 use Readers;
-
 use channel::TcpSender;
 use channel::poll::{KeepPolling, PollEvent, PollingLoop, StopPolling};
 use prelude::*;
@@ -1605,16 +1604,17 @@ impl Domain {
                     let entries: Result<Vec<Records>, _> = serde_json::from_str(&line);
                     entries.ok()
                 })
+                // Parsing each individual line gives us an iterator over Vec<Records>.
+                // We're interested in chunking each record, so let's flat_map twice:
+                // Iter<Vec<Records>> -> Iter<Records> -> Iter<Record>
                 .flat_map(|r| r)
-                // Merge packets into batches of RECOVERY_BATCH_SIZE:
+                .flat_map(|r| r)
+                // Merge individual records into batches of RECOVERY_BATCH_SIZE:
                 .chunks(RECOVERY_BATCH_SIZE)
                 .into_iter()
-                .map(|chunk| chunk.fold(Records::default(), |mut acc, ref mut data| {
-                    acc.append(data);
-                    acc
-                }))
                 // Then create Packet objects from the data:
-                .map(|data| {
+                .map(|chunk| {
+                    let data: Records = chunk.collect();
                     let link = Link::new(local_addr, local_addr);
                     if is_transactional {
                         let (ts, prevs) = checktable.recover(global_addr).unwrap();
