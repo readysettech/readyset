@@ -1,4 +1,4 @@
-use nom::{IResult, Err, ErrorKind, Needed};
+use nom::{Err, ErrorKind, IResult, Needed};
 
 use std::str;
 

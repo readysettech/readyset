@@ -1,5 +1,5 @@
 use nom::{alphanumeric, digit, eof, is_alphanumeric, line_ending, multispace};
-use nom::{IResult, Err, ErrorKind, Needed};
+use nom::{Err, ErrorKind, IResult, Needed};
 use std::fmt::{self, Display};
 use std::str;
 use std::str::FromStr;
@@ -66,15 +66,13 @@ impl ToString for Literal {
             Literal::Null => "NULL".to_string(),
             Literal::Integer(ref i) => format!("{}", i),
             Literal::String(ref s) => s.clone(),
-            Literal::Blob(ref bv) => {
-                format!(
-                    "{}",
-                    bv.iter()
-                        .map(|v| format!("{:x}", v))
-                        .collect::<Vec<String>>()
-                        .join(" ")
-                )
-            }
+            Literal::Blob(ref bv) => format!(
+                "{}",
+                bv.iter()
+                    .map(|v| format!("{:x}", v))
+                    .collect::<Vec<String>>()
+                    .join(" ")
+            ),
             Literal::CurrentTime => "CURRENT_TIME".to_string(),
             Literal::CurrentDate => "CURRENT_DATE".to_string(),
             Literal::CurrentTimestamp => "CURRENT_TIMESTAMP".to_string(),
