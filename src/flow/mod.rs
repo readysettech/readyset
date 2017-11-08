@@ -876,21 +876,20 @@ impl<'a> Migration<'a> {
             .filter(|&&ni| !mainline.ingredients[ni].is_dropped())
             .map(|&ni| mainline.ingredients[ni].domain())
             .collect();
-        let mut domain_nodes = mainline
-            .ingredients
-            .node_indices()
-            .filter(|&ni| ni != mainline.source)
-            .filter(|&ni| !mainline.ingredients[ni].is_dropped())
-            .map(|ni| {
-                (mainline.ingredients[ni].domain(), ni, new.contains(&ni))
+
+        let mut domain_new_nodes = new.iter()
+            .filter(|&&ni| ni != mainline.source)
+            .filter(|&&ni| !mainline.ingredients[ni].is_dropped())
+            .map(|&ni| {
+                (mainline.ingredients[ni].domain(), ni)
             })
-            .fold(HashMap::new(), |mut dns, (d, ni, new)| {
-                dns.entry(d).or_insert_with(Vec::new).push((ni, new));
+            .fold(HashMap::new(), |mut dns, (d, ni)| {
+                dns.entry(d).or_insert_with(Vec::new).push(ni);
                 dns
             });
 
         // Assign local addresses to all new nodes, and initialize them
-        for (domain, nodes) in &mut domain_nodes {
+        for (domain, nodes) in &mut domain_new_nodes {
             // Number of pre-existing nodes
             let mut nnodes = mainline.remap.entry(*domain).or_insert_with(HashMap::new).len();
 
@@ -902,26 +901,24 @@ impl<'a> Migration<'a> {
             let log = log.new(o!("domain" => domain.index()));
 
             // Give local addresses to every (new) node
-            for &(ni, new) in nodes.iter() {
-                if new {
-                    debug!(log,
-                           "assigning local index";
-                           "type" => format!("{:?}", mainline.ingredients[ni]),
-                           "node" => ni.index(),
-                           "local" => nnodes
-                    );
+            for &ni in nodes.iter() {
+                debug!(log,
+                       "assigning local index";
+                       "type" => format!("{:?}", mainline.ingredients[ni]),
+                       "node" => ni.index(),
+                       "local" => nnodes
+                );
 
-                    let mut ip: prelude::IndexPair = ni.into();
-                    ip.set_local(unsafe { prelude::LocalNodeIndex::make(nnodes as u32) });
-                    mainline.ingredients[ni].set_finalized_addr(ip);
-                    mainline.remap.entry(*domain).or_insert_with(HashMap::new).insert(ni, ip);
-                    nnodes += 1;
-                }
+                let mut ip: prelude::IndexPair = ni.into();
+                ip.set_local(unsafe { prelude::LocalNodeIndex::make(nnodes as u32) });
+                mainline.ingredients[ni].set_finalized_addr(ip);
+                mainline.remap.entry(*domain).or_insert_with(HashMap::new).insert(ni, ip);
+                nnodes += 1;
             }
 
             // Initialize each new node
-            for &(ni, new) in nodes.iter() {
-                if new && mainline.ingredients[ni].is_internal() {
+            for &ni in nodes.iter() {
+                if mainline.ingredients[ni].is_internal() {
                     // Figure out all the remappings that have happened
                     // NOTE: this has to be *per node*, since a shared parent may be remapped
                     // differently to different children (due to sharding for example). we just
@@ -970,13 +967,25 @@ impl<'a> Migration<'a> {
         // etc.
         // println!("{}", mainline);
 
-        let mut uninformed_domain_nodes = domain_nodes.clone();
         migrate::transactions::analyze_graph(
             &mainline.ingredients,
             mainline.source,
-            domain_nodes,
+            domain_new_nodes,
             &mut mainline.deps,
         );
+
+        let mut uninformed_domain_nodes = mainline
+            .ingredients
+            .node_indices()
+            .filter(|&ni| ni != mainline.source)
+            .filter(|&ni| !mainline.ingredients[ni].is_dropped())
+            .map(|ni| {
+                (mainline.ingredients[ni].domain(), ni, new.contains(&ni))
+            })
+            .fold(HashMap::new(), |mut dns, (d, ni, new)| {
+                dns.entry(d).or_insert_with(Vec::new).push((ni, new));
+                dns
+        });
 
         let (start_ts, end_ts, prevs) =
             mainline.checktable.perform_migration(mainline.deps.clone()).unwrap();

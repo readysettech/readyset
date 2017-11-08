@@ -10,15 +10,13 @@ use slog::Logger;
 fn count_base_ingress(
     graph: &Graph,
     source: NodeIndex,
-    nodes: &[(NodeIndex, bool)],
+    nodes: &[NodeIndex],
     has_path: &HashSet<(NodeIndex, NodeIndex)>,
 ) -> IngressFromBase {
     let ingress_nodes: Vec<_> = nodes
         .into_iter()
-        .filter(|&&(_, new)| new)
-        .map(|&(ni, _)| ni)
-        .filter(|&ni| graph[ni].borrow().is_ingress())
-        .filter(|&ni| graph[ni].borrow().is_transactional())
+        .filter(|&&ni| graph[ni].borrow().is_ingress())
+        .filter(|&&ni| graph[ni].borrow().is_transactional())
         .collect();
 
     graph
@@ -27,9 +25,9 @@ fn count_base_ingress(
             let num_paths = ingress_nodes
                 .iter()
                 .filter(|&&ingress| {
-                    has_path.contains(&(base, ingress))
+                    has_path.contains(&(base, *ingress))
                 })
-                .map(|&ingress| if graph[ingress].is_shard_merger() {
+                .map(|&&ingress| if graph[ingress].is_shard_merger() {
                     ::SHARDS
                 } else {
                     1
@@ -44,14 +42,12 @@ fn count_base_ingress(
 fn base_egress_map(
     graph: &Graph,
     source: NodeIndex,
-    nodes: &[(NodeIndex, bool)],
+    nodes: &[NodeIndex],
     has_path: &HashSet<(NodeIndex, NodeIndex)>
 ) -> EgressForBase {
     let output_nodes: Vec<_> = nodes
         .into_iter()
-        .filter(|&&(_, new)| new)
-        .map(|&(ni, _)| ni)
-        .filter(|&ni| graph[ni].is_output())
+        .filter(|&&ni| graph[ni].is_output())
         //.filter(|&ni| graph[ni].is_transactional())
         .collect();
 
@@ -61,9 +57,9 @@ fn base_egress_map(
             let outs = output_nodes
                 .iter()
                 .filter(|&&out| {
-                    has_path.contains(&(base, out))
+                    has_path.contains(&(base, *out))
                 })
-                .map(|&out| *graph[out].local_addr())
+                .map(|&&out| *graph[out].local_addr())
                 .collect();
             (base, outs)
         })
@@ -86,13 +82,13 @@ fn has_path(graph: &Graph, source: NodeIndex) -> HashSet<(NodeIndex, NodeIndex)>
 pub fn analyze_graph(
     graph: &Graph,
     source: NodeIndex,
-    domain_nodes: HashMap<domain::Index, Vec<(NodeIndex, bool)>>,
+    domain_nodes: HashMap<domain::Index, Vec<NodeIndex>>,
     old: &mut HashMap<domain::Index, (IngressFromBase, EgressForBase)>,
 ) {
     let has_path = has_path(graph, source);
     let new = domain_nodes
         .into_iter()
-        .map(|(domain, nodes): (_, Vec<(NodeIndex, bool)>)| {
+        .map(|(domain, nodes): (_, Vec<NodeIndex>)| {
             (
                 domain,
                 (
