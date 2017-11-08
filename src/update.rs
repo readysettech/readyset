@@ -31,7 +31,7 @@ named!(pub updating<&[u8], UpdateStatement>,
         || {
             UpdateStatement {
                 table: table,
-                fields: fields, 
+                fields: fields,
                 where_clause: cond,
             }
         }

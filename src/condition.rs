@@ -1,5 +1,5 @@
 use nom::multispace;
-use nom::{IResult, Err, ErrorKind, Needed};
+use nom::{Err, ErrorKind, IResult, Needed};
 use std::collections::{HashSet, VecDeque};
 use std::str;
 
@@ -7,7 +7,7 @@ use column::Column;
 use common::{binary_comparison_operator, column_identifier, integer_literal, string_literal,
              Literal, Operator};
 
-use select::{SelectStatement, nested_selection};
+use select::{nested_selection, SelectStatement};
 
 #[derive(Clone, Debug, Hash, PartialEq, Serialize, Deserialize)]
 pub enum ConditionBase {
@@ -191,7 +191,7 @@ named!(predicate<&[u8], ConditionExpression>,
 mod tests {
     use super::*;
     use column::Column;
-    use common::{Literal, Operator, FieldExpression};
+    use common::{FieldExpression, Literal, Operator};
 
     fn columns(cols: &[&str]) -> Vec<FieldExpression> {
         cols.iter()
@@ -451,7 +451,6 @@ mod tests {
         );
 
         assert_eq!(res.unwrap().1, expected);
-
     }
 
     #[test]
@@ -474,23 +473,18 @@ mod tests {
         let left = flat_condition_tree(
             Operator::In,
             Field("paperId".into()),
-            NestedSelect(nested_select)
+            NestedSelect(nested_select),
         );
 
-        let right = flat_condition_tree(
-            Operator::Greater,
-            Field("size".into()),
-            Literal(0.into()),
-        );
+        let right = flat_condition_tree(Operator::Greater, Field("size".into()), Literal(0.into()));
 
         let expected = ConditionExpression::LogicalOp(ConditionTree {
             left: Box::new(left),
             right: Box::new(right),
-            operator: Operator::And
+            operator: Operator::And,
         });
 
         assert_eq!(res.unwrap().1, expected);
-
     }
 
 }

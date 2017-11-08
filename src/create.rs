@@ -1,5 +1,5 @@
 use nom::{alphanumeric, digit, multispace};
-use nom::{IResult, Err, ErrorKind, Needed};
+use nom::{Err, ErrorKind, IResult, Needed};
 use std::str;
 use std::str::FromStr;
 
@@ -17,12 +17,10 @@ pub struct CreateTableStatement {
 
 fn len_as_u16(len: &[u8]) -> u16 {
     match str::from_utf8(len) {
-        Ok(s) => {
-            match u16::from_str(s) {
-                Ok(v) => v,
-                Err(e) => panic!(e),
-            }
-        }
+        Ok(s) => match u16::from_str(s) {
+            Ok(v) => v,
+            Err(e) => panic!(e),
+        },
         Err(e) => panic!(e),
     }
 }
@@ -487,10 +485,7 @@ mod tests {
                     ColumnSpecification::new(Column::from("email"), SqlType::Varchar(255)),
                 ],
                 keys: Some(vec![
-                    TableKey::UniqueKey(
-                        Some(String::from("id_k")),
-                        vec![Column::from("id")],
-                    ),
+                    TableKey::UniqueKey(Some(String::from("id_k")), vec![Column::from("id")]),
                 ]),
                 ..Default::default()
             }

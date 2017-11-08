@@ -53,7 +53,7 @@ macro_rules! caseless_tag_bytes (
 
 #[test]
 fn test_caseless_tag() {
-    use nom::{IResult, Err, ErrorKind, Needed};
+    use nom::{Err, ErrorKind, IResult, Needed};
     use std::str;
 
     named!(x, caseless_tag!("AbCD"));

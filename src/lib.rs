@@ -1,9 +1,9 @@
 #[macro_use]
 extern crate nom;
 
+extern crate serde;
 #[macro_use]
 extern crate serde_derive;
-extern crate serde;
 
 pub use self::arithmetic::{ArithmeticBase, ArithmeticExpression, ArithmeticOperator};
 pub use self::common::{FieldExpression, Literal, Operator, SqlType, TableKey};
@@ -13,8 +13,8 @@ pub use self::create::CreateTableStatement;
 pub use self::insert::InsertStatement;
 pub use self::join::{JoinConstraint, JoinOperator, JoinRightSide};
 pub use self::parser::*;
-pub use self::select::{SelectStatement, GroupByClause, JoinClause, LimitClause, OrderClause,
-                       OrderType};
+pub use self::select::{GroupByClause, JoinClause, LimitClause, OrderClause, OrderType,
+                       SelectStatement};
 pub use self::table::Table;
 
 pub mod parser;

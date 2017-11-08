@@ -52,22 +52,18 @@ pub struct Column {
 impl<'a> From<&'a str> for Column {
     fn from(c: &str) -> Column {
         match c.find(".") {
-            None => {
-                Column {
-                    name: String::from(c),
-                    alias: None,
-                    table: None,
-                    function: None,
-                }
-            }
-            Some(i) => {
-                Column {
-                    name: String::from(&c[i + 1..]),
-                    alias: None,
-                    table: Some(String::from(&c[0..i])),
-                    function: None,
-                }
-            }
+            None => Column {
+                name: String::from(c),
+                alias: None,
+                table: None,
+                function: None,
+            },
+            Some(i) => Column {
+                name: String::from(&c[i + 1..]),
+                alias: None,
+                table: Some(String::from(&c[0..i])),
+                function: None,
+            },
         }
     }
 }
