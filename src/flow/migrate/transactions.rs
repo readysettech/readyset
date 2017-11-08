@@ -77,14 +77,13 @@ fn has_path(graph: &Graph, source: NodeIndex) -> HashSet<(NodeIndex, NodeIndex)>
     has_path
 }
 
-pub fn analyze_graph(
+pub fn analyze_changes(
     graph: &Graph,
     source: NodeIndex,
-    domain_nodes: HashMap<DomainIndex, Vec<NodeIndex>>,
-    old: &mut HashMap<DomainIndex, (IngressFromBase, EgressForBase)>,
-) {
+    domain_new_nodes: HashMap<DomainIndex, Vec<NodeIndex>>,
+) -> HashMap<DomainIndex, (IngressFromBase, EgressForBase)> {
     let has_path = has_path(graph, source);
-    let new = domain_nodes
+    domain_new_nodes
         .into_iter()
         .map(|(domain, nodes): (_, Vec<NodeIndex>)| {
             (
@@ -95,12 +94,10 @@ pub fn analyze_graph(
                 ),
             )
         })
-        .collect();
-
-    merge_deps(graph, old, new);
+        .collect()
 }
 
-fn merge_deps(
+pub fn merge_deps(
     graph: &Graph,
     old: &mut HashMap<DomainIndex, (IngressFromBase, EgressForBase)>,
     new: HashMap<DomainIndex, (IngressFromBase, EgressForBase)>
@@ -111,8 +108,8 @@ fn merge_deps(
         let old_egress = &mut entry.1;
 
         for (base, v) in new_egress {
-            let e = old_egress.entry(base).or_insert(vec![]);
-            (*e).extend(v);
+            let e = old_egress.entry(base).or_insert_with(Vec::new);
+            e.extend(v);
         }
 
         for (base, v) in new_ingress {

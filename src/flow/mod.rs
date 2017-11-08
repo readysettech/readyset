@@ -1115,7 +1115,7 @@ impl<'a> Migration<'a> {
         // Assign local addresses to all new nodes, and initialize them
         for (domain, nodes) in &mut domain_new_nodes {
             // Number of pre-existing nodes
-            let mut nnodes = mainline.remap.entry(*domain).or_insert_with(HashMap::new).len();
+            let mut nnodes = mainline.remap.get(domain).map(HashMap::len).unwrap_or(0);
 
             if nodes.is_empty() {
                 // Nothing to do here
@@ -1191,12 +1191,13 @@ impl<'a> Migration<'a> {
         // etc.
         // println!("{}", mainline);
 
-        migrate::transactions::analyze_graph(
+        let new_deps = migrate::transactions::analyze_changes(
             &mainline.ingredients,
             mainline.source,
             domain_new_nodes,
-            &mut mainline.deps,
         );
+
+        migrate::transactions::merge_deps(&mainline.ingredients, &mut mainline.deps, new_deps);
 
         let mut uninformed_domain_nodes = mainline
             .ingredients
