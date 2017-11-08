@@ -5,7 +5,6 @@ use std::str;
 use common::table_reference;
 use condition::ConditionExpression;
 use table::Table;
-use std::fmt;
 use select::where_clause;
 
 #[derive(Clone, Debug, Default, Hash, PartialEq, Serialize, Deserialize)]

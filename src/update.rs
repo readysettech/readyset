@@ -6,7 +6,6 @@ use common::{field_value_list, table_reference, Literal};
 use condition::ConditionExpression;
 use table::Table;
 use column::Column;
-use std::fmt;
 use select::where_clause;
 
 
