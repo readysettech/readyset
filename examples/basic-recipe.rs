@@ -1,12 +1,9 @@
 extern crate distributary;
 
-mod backend;
-
 use std::{thread, time};
-use distributary::{Blender, Recipe};
-use backend::Backend;
+use distributary::ControllerBuilder;
 
-fn load_recipe() -> Backend {
+fn main() {
     // inline recipe definition
     let sql = "# base tables
                CREATE TABLE Article (aid int, title varchar(255), \
@@ -21,38 +18,33 @@ fn load_recipe() -> Backend {
                             WHERE Article.aid = VoteCount.aid AND Article.aid = ?;";
 
     // set up Soup via recipe
-    let mut soup = Blender::new();
-    soup.log_with(distributary::logger_pls());
+    let blender = ControllerBuilder::default().build();
+    blender.install_recipe(sql.to_owned());
 
-    let recipe = soup.migrate(|mig| {
-        // install recipe
-        let mut recipe = Recipe::from_str(&sql, None).unwrap();
-        recipe.activate(mig, false).unwrap();
-        // return brings up new graph for processing
-        recipe
-    });
+    // Get mutators and getter.
+    let inputs = blender.inputs();
+    let outputs = blender.outputs();
+    let mut article = blender.get_mutator(inputs["Article"]).unwrap();
+    let mut vote = blender.get_mutator(inputs["Vote"]).unwrap();
+    let mut awvc = blender.get_getter(outputs["ArticleWithVoteCount"]).unwrap();
 
-    Backend::new(soup, recipe)
-}
-
-fn main() {
-    let mut backend = load_recipe();
-
-    println!("Soup graph:\n{}", backend.soup);
-
-    println!("Writing...");
-    let aid = 1;
-    let title = "test title";
-    let url = "http://pdos.csail.mit.edu";
-    let uid = 42;
-    backend
-        .put("Article", &[aid.into(), title.into(), url.into()])
+    println!("Creating article...");
+    article
+        .put(vec![
+            1.into(),
+            "test title".into(),
+            "http://csail.mit.edu".into(),
+        ])
         .unwrap();
-    backend.put("Vote", &[aid.into(), uid.into()]).unwrap();
+
+    println!("Casting votes...");
+    vote.put(vec![1.into(), 42.into()]).unwrap();
+    vote.put(vec![1.into(), 43.into()]).unwrap();
+    vote.put(vec![1.into(), 44.into()]).unwrap();
 
     println!("Finished writing! Let's wait for things to propagate...");
     thread::sleep(time::Duration::from_millis(1000));
 
     println!("Reading...");
-    println!("{:#?}", backend.get("ArticleWithVoteCount", aid))
+    println!("{:#?}", awvc.lookup(&1.into(), true))
 }

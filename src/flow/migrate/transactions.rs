@@ -1,8 +1,8 @@
-use flow::domain;
-use flow::prelude::*;
-use flow::payload::{EgressForBase, IngressFromBase};
+use dataflow::prelude::*;
+use dataflow::payload::{EgressForBase, IngressFromBase};
+use dataflow;
+use flow::domain_handle::DomainHandle;
 use petgraph;
-use petgraph::graph::NodeIndex;
 use std::borrow::Borrow;
 use std::collections::{HashMap, HashSet};
 use slog::Logger;
@@ -24,13 +24,13 @@ fn count_base_ingress(
         .map(|base| {
             let num_paths = ingress_nodes
                 .iter()
-                .filter(|&&ingress| {
-                    has_path.contains(&(base, *ingress))
-                })
-                .map(|&&ingress| if graph[ingress].is_shard_merger() {
-                    ::SHARDS
-                } else {
-                    1
+                .filter(|&&ingress| has_path.contains(&(base, *ingress)))
+                .map(|&&ingress| {
+                    if graph[ingress].is_shard_merger() {
+                        dataflow::SHARDS
+                    } else {
+                        1
+                    }
                 })
                 .sum();
 
@@ -56,9 +56,7 @@ fn base_egress_map(
         .map(|base| {
             let outs = output_nodes
                 .iter()
-                .filter(|&&out| {
-                    has_path.contains(&(base, *out))
-                })
+                .filter(|&&out| has_path.contains(&(base, *out)))
                 .map(|&&out| *graph[out].local_addr())
                 .collect();
             (base, outs)
@@ -82,8 +80,8 @@ fn has_path(graph: &Graph, source: NodeIndex) -> HashSet<(NodeIndex, NodeIndex)>
 pub fn analyze_graph(
     graph: &Graph,
     source: NodeIndex,
-    domain_nodes: HashMap<domain::Index, Vec<NodeIndex>>,
-    old: &mut HashMap<domain::Index, (IngressFromBase, EgressForBase)>,
+    domain_nodes: HashMap<DomainIndex, Vec<NodeIndex>>,
+    old: &mut HashMap<DomainIndex, (IngressFromBase, EgressForBase)>,
 ) {
     let has_path = has_path(graph, source);
     let new = domain_nodes
@@ -104,8 +102,8 @@ pub fn analyze_graph(
 
 fn merge_deps(
     graph: &Graph,
-    old: &mut HashMap<domain::Index, (IngressFromBase, EgressForBase)>,
-    new: HashMap<domain::Index, (IngressFromBase, EgressForBase)>
+    old: &mut HashMap<DomainIndex, (IngressFromBase, EgressForBase)>,
+    new: HashMap<DomainIndex, (IngressFromBase, EgressForBase)>
 ) {
     for (di, (new_ingress, new_egress)) in new {
         let entry = old.entry(di).or_insert((HashMap::new(), HashMap::new()));
@@ -130,9 +128,9 @@ fn merge_deps(
 }
 
 pub fn finalize(
-    deps: HashMap<domain::Index, (IngressFromBase, EgressForBase)>,
+    deps: HashMap<DomainIndex, (IngressFromBase, EgressForBase)>,
     log: &Logger,
-    txs: &mut HashMap<domain::Index, domain::DomainHandle>,
+    txs: &mut HashMap<DomainIndex, DomainHandle>,
     at: i64,
 ) {
     for (domain, (ingress_from_base, egress_for_base)) in deps {

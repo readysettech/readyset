@@ -125,7 +125,7 @@
 //! go look at that if you want to see the code. It looks roughly like this (some details omitted
 //! for clarity)
 //!
-//! ```rust
+//! ```rust,ignore
 //! # use distributary::{Blender, Base, Aggregation, Join, JoinType};
 //! // set up graph
 //! let mut g = Blender::new();
@@ -169,7 +169,7 @@
 //! Let us see what happens when a new `Article` write enters the system. This happens by passing
 //! the new record to the put function on a mutator obtained for article.
 //!
-//! ```rust
+//! ```rust,ignore
 //! # use distributary::{Blender, Base};
 //! # let mut g = Blender::new();
 //! # let article = g.migrate(|mig|
@@ -229,7 +229,7 @@
 //!
 //! Let's next trace what happens when a `Vote` is introduced into the system using
 //!
-//! ```rust
+//! ```rust,ignore
 //! # use distributary::{Blender, Base};
 //! # let mut g = Blender::new();
 //! # let vote = g.migrate(|mig| mig.add_ingredient("vote", &["user", "id"], Base::default()));
@@ -312,29 +312,7 @@
 #![deny(missing_docs)]
 #![feature(plugin, use_extern_macros)]
 #![plugin(tarpc_plugins)]
-
-/// The number of domain threads to spin up for each sharded subtree of the data-flow graph.
-const SHARDS: usize = 2;
-
-#[inline]
-fn shard_by(dt: &DataType, shards: usize) -> usize {
-    match *dt {
-        DataType::Int(n) => n as usize % shards,
-        DataType::BigInt(n) => n as usize % shards,
-        DataType::Text(..) | DataType::TinyText(..) => {
-            use std::hash::Hasher;
-            use std::borrow::Cow;
-            let mut hasher = fnv::FnvHasher::default();
-            let s: Cow<str> = dt.into();
-            hasher.write(s.as_bytes());
-            hasher.finish() as usize % shards
-        }
-        ref x => {
-            println!("asked to shard on value {:?}", x);
-            unimplemented!();
-        }
-    }
-}
+#![allow(unused)]
 
 #[cfg(debug_assertions)]
 extern crate backtrace;
@@ -347,6 +325,8 @@ extern crate arccstr;
 extern crate arrayvec;
 extern crate evmap;
 extern crate fnv;
+extern crate futures;
+extern crate hyper;
 extern crate vec_map;
 
 extern crate itertools;
@@ -376,43 +356,47 @@ extern crate tarpc;
 extern crate tokio_core;
 
 extern crate channel;
+extern crate core;
+extern crate dataflow;
+extern crate mir;
 
-mod backlog;
-mod checktable;
 mod flow;
-mod mir;
-mod ops;
+mod mir_to_flow;
 mod recipe;
 mod sql;
+mod worker;
 
-pub use backlog::SingleReadHandle;
-pub use checktable::{Token, TransactionResult};
-pub use flow::{Blender, Getter, Migration, Mutator, MutatorBuilder, MutatorError, ReadQuery,
-               ReadReply, RemoteGetter, RemoteGetterBuilder};
-pub use flow::core::{DataType, Datas};
-pub use petgraph::graph::NodeIndex;
+#[cfg(test)]
+mod tests;
+
+pub use core::{DataType, Datas, NodeIndex};
+
+pub use dataflow::backlog::SingleReadHandle;
+pub use dataflow::checktable::{Token, TransactionResult};
+pub use dataflow::debug::{DebugEvent, DebugEventType};
+pub use dataflow::node::StreamUpdate;
+pub use dataflow::payload::PacketEvent;
+pub use dataflow::ops::base::Base;
+pub use dataflow::ops::grouped::aggregate::{Aggregation, Aggregator};
+pub use dataflow::ops::grouped::concat::{GroupConcat, TextComponent};
+pub use dataflow::ops::grouped::extremum::{Extremum, ExtremumOperator};
+pub use dataflow::ops::identity::Identity;
+pub use dataflow::ops::project::Project;
+pub use dataflow::ops::join::{Join, JoinSource, JoinType};
+pub use dataflow::ops::union::Union;
+pub use dataflow::ops::latest::Latest;
+pub use dataflow::ops::filter::{Filter, Operator};
+pub use dataflow::ops::topk::TopK;
+pub use dataflow::prelude::DomainIndex;
+pub use dataflow::{DurabilityMode, PersistenceParameters};
+
+pub use flow::{Blender, ControllerBuilder, Getter, Migration, Mutator, MutatorBuilder,
+               MutatorError, ReadQuery, ReadReply, RemoteGetter, RemoteGetterBuilder};
 pub use flow::coordination::{CoordinationMessage, CoordinationPayload};
-pub use flow::node::StreamUpdate;
-pub use flow::debug::{DebugEvent, DebugEventType};
-pub use flow::domain::{DomainBuilder, Index};
-pub use flow::payload::PacketEvent;
-pub use flow::persistence::Parameters as PersistenceParameters;
-pub use flow::persistence::DurabilityMode;
-pub use flow::prelude::ChannelCoordinator;
-pub use ops::base::Base;
-pub use ops::grouped::aggregate::{Aggregation, Aggregator};
-pub use ops::grouped::concat::{GroupConcat, TextComponent};
-pub use ops::grouped::extremum::{Extremum, ExtremumOperator};
-pub use ops::identity::Identity;
-pub use ops::project::Project;
-pub use ops::join::{Join, JoinSource, JoinType};
-pub use ops::union::Union;
-pub use ops::latest::Latest;
-pub use ops::filter::{Filter, Operator};
-pub use ops::topk::TopK;
 pub use recipe::{ActivationResult, Recipe};
 pub use sql::{SqlIncorporator, ToFlowParts};
 pub use sql::reuse::ReuseConfigType;
+pub use worker::Worker;
 
 /// Just give me a damn terminal logger
 pub fn logger_pls() -> slog::Logger {
@@ -426,6 +410,3 @@ pub fn logger_pls() -> slog::Logger {
 #[cfg(feature = "web")]
 /// web provides a simple REST HTTP server for reading from and writing to the data flow graph.
 pub mod web;
-
-/// srv provides a networked RPC server for accessing the data flow graph.
-pub mod srv;

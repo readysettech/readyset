@@ -6,9 +6,9 @@
 //!  - Egress nodes must be added to nodes that now have children in a different domain
 //!  - Egress nodes that gain new children must gain channels to facilitate forwarding
 
-use flow::prelude::*;
-use flow::domain;
-use flow::node;
+use dataflow::prelude::*;
+use dataflow::node;
+use flow::domain_handle::DomainHandle;
 use petgraph;
 use petgraph::graph::NodeIndex;
 use std::collections::{HashMap, HashSet};
@@ -251,7 +251,7 @@ pub fn add(
 pub fn connect(
     log: &Logger,
     graph: &mut Graph,
-    domains: &mut HashMap<domain::Index, domain::DomainHandle>,
+    domains: &mut HashMap<DomainIndex, DomainHandle>,
     new: &HashSet<NodeIndex>,
 ) {
     // ensure all egress nodes contain the tx channel of the domains of their child ingress nodes

@@ -1,6 +1,6 @@
-use flow::prelude::*;
-use flow::domain::DomainInputHandle;
-use checktable;
+use dataflow::prelude::*;
+use flow::domain_handle::DomainInputHandle;
+use dataflow::checktable;
 
 use std::net::SocketAddr;
 use vec_map::VecMap;
@@ -259,9 +259,7 @@ impl Mutator {
         }
 
         let pkey = self.key.iter().map(|&col| &u[col]).cloned().collect();
-        Ok(self.send(
-            vec![Record::DeleteRequest(pkey), u.into()].into(),
-        ))
+        Ok(self.send(vec![Record::DeleteRequest(pkey), u.into()].into()))
     }
 
     /// Perform a transactional update (delete followed by put) to the base node this Mutator was
