@@ -87,6 +87,7 @@ pub struct Blender {
 
     /// State between migrations
     deps: HashMap<domain::Index, (IngressFromBase, EgressForBase)>,
+    remap: HashMap<domain::Index, HashMap<NodeIndex, prelude::IndexPair>>,
 
     log: slog::Logger,
 }
@@ -148,6 +149,7 @@ impl Blender {
             remote_readers: HashMap::default(),
 
             deps: HashMap::default(),
+            remap: HashMap::default(),
 
             log: log,
         }
@@ -888,13 +890,11 @@ impl<'a> Migration<'a> {
             });
 
         // Assign local addresses to all new nodes, and initialize them
-        let mut local_remap = HashMap::new();
-        let mut remap = HashMap::new();
         for (domain, nodes) in &mut domain_nodes {
             // Number of pre-existing nodes
-            let mut nnodes = nodes.iter().filter(|&&(_, new)| !new).count();
+            let mut nnodes = mainline.remap.entry(*domain).or_insert_with(HashMap::new).len();
 
-            if nnodes == nodes.len() {
+            if nodes.is_empty() {
                 // Nothing to do here
                 continue;
             }
@@ -902,7 +902,6 @@ impl<'a> Migration<'a> {
             let log = log.new(o!("domain" => domain.index()));
 
             // Give local addresses to every (new) node
-            local_remap.clear();
             for &(ni, new) in nodes.iter() {
                 if new {
                     debug!(log,
@@ -915,10 +914,8 @@ impl<'a> Migration<'a> {
                     let mut ip: prelude::IndexPair = ni.into();
                     ip.set_local(unsafe { prelude::LocalNodeIndex::make(nnodes as u32) });
                     mainline.ingredients[ni].set_finalized_addr(ip);
-                    local_remap.insert(ni, ip);
+                    mainline.remap.entry(*domain).or_insert_with(HashMap::new).insert(ni, ip);
                     nnodes += 1;
-                } else {
-                    local_remap.insert(ni, *mainline.ingredients[ni].get_index());
                 }
             }
 
@@ -929,8 +926,7 @@ impl<'a> Migration<'a> {
                     // NOTE: this has to be *per node*, since a shared parent may be remapped
                     // differently to different children (due to sharding for example). we just
                     // allocate it once though.
-                    remap.clear();
-                    remap.extend(local_remap.iter().map(|(&k, &v)| (k, v)));
+                    let mut remap = mainline.remap[domain].clone();
 
                     // Parents in other domains have been swapped for ingress nodes.
                     // Those ingress nodes' indices are now local.
@@ -940,7 +936,7 @@ impl<'a> Migration<'a> {
                             continue;
                         }
 
-                        let old = remap.insert(src, local_remap[&instead]);
+                        let old = remap.insert(src, mainline.remap[domain][&instead]);
                         assert_eq!(old, None);
                     }
 
