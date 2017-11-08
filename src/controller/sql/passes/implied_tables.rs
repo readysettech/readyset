@@ -280,6 +280,7 @@ impl ImpliedTableExpansion for SqlQuery {
                     .collect();
                 SqlQuery::Insert(iq)
             }
+            _ => unreachable!(),
         }
     }
 }
