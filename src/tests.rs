@@ -423,6 +423,7 @@ fn it_recovers_persisted_logs() {
 
     // Recover and let the writes propagate:
     g.recover(());
+    sleep();
 
     for i in 1..10 {
         let price = i * 10;
@@ -474,6 +475,7 @@ fn it_recovers_persisted_logs_w_transactions() {
 
     // Recover and let the writes propagate:
     g.recover(());
+    sleep();
 
     for i in 1..10 {
         let b = i * 10;

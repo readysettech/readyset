@@ -34,6 +34,7 @@ fn main() {
     let mut blender = builder.build();
     blender.install_recipe(sql.to_owned());
     blender.recover();
+    thread::sleep(Duration::from_millis(1000));
 
     // Get mutators and getter.
     let inputs = blender.inputs();
