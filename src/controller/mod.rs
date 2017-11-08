@@ -523,21 +523,15 @@ impl ControllerInner {
     /// StartRecovery packet to each base node domain.
     pub fn recover(&mut self, _: ()) {
         info!(self.log, "Recovering from log");
-        let indices = self.inputs(())
-            .iter()
-            .map(|(_name, index)| {
-                let node = &self.ingredients[*index];
-                node.domain()
-            })
-            .collect::<Vec<_>>();
-
-        for index in indices.clone() {
-            let domain = self.domains.get_mut(&index).unwrap();
+        for (_name, index) in self.inputs(()).iter() {
+            let node = &self.ingredients[*index];
+            let domain = self.domains.get_mut(&node.domain()).unwrap();
             domain.send(box payload::Packet::StartRecovery).unwrap();
         }
 
-        for index in indices {
-            let domain = self.domains.get_mut(&index).unwrap();
+        for (_name, index) in self.inputs(()).iter() {
+            let node = &self.ingredients[*index];
+            let domain = self.domains.get_mut(&node.domain()).unwrap();
             domain.wait_for_ack().unwrap();
         }
     }
