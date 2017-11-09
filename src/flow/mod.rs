@@ -721,6 +721,7 @@ impl fmt::Display for ControllerInner {
     }
 }
 
+#[derive(Clone)]
 enum ColumnChange {
     Add(String, DataType),
     Drop(usize),
@@ -1274,25 +1275,48 @@ impl<'a> Migration<'a> {
             prevs.unwrap(),
         );
 
-        // Tell all base nodes about newly added columns
+        // Tell all base nodes and base ingress children about newly added columns
         for (ni, change) in self.columns {
-            let n = &mainline.ingredients[ni];
-            let m = match change {
-                ColumnChange::Add(field, default) => box payload::Packet::AddBaseColumn {
-                    node: *n.local_addr(),
-                    field: field,
-                    default: default,
-                },
-                ColumnChange::Drop(column) => box payload::Packet::DropBaseColumn {
-                    node: *n.local_addr(),
-                    column: column,
-                },
+            let mut inform = if let ColumnChange::Add(..) = change {
+                // we need to inform all of the base's children too,
+                // so that they know to add columns to existing records when replaying
+                mainline
+                    .ingredients
+                    .neighbors_directed(ni, petgraph::EdgeDirection::Outgoing)
+                    .filter(|&eni| mainline.ingredients[eni].is_egress())
+                    .flat_map(|eni| {
+                        // find ingresses under this egress
+                        mainline
+                            .ingredients
+                            .neighbors_directed(eni, petgraph::EdgeDirection::Outgoing)
+                    })
+                    .collect()
+            } else {
+                // ingress nodes don't need to know about deleted columns, because those are only
+                // relevant when new writes enter the graph.
+                Vec::new()
             };
+            inform.push(ni);
 
-            let domain = mainline.domains.get_mut(&n.domain()).unwrap();
+            for ni in inform {
+                let n = &mainline.ingredients[ni];
+                let m = match change.clone() {
+                    ColumnChange::Add(field, default) => box payload::Packet::AddBaseColumn {
+                        node: *n.local_addr(),
+                        field: field,
+                        default: default,
+                    },
+                    ColumnChange::Drop(column) => box payload::Packet::DropBaseColumn {
+                        node: *n.local_addr(),
+                        column: column,
+                    },
+                };
 
-            domain.send(m).unwrap();
-            domain.wait_for_ack().unwrap();
+                let domain = mainline.domains.get_mut(&n.domain()).unwrap();
+
+                domain.send(m).unwrap();
+                domain.wait_for_ack().unwrap();
+            }
         }
 
         // Set up inter-domain connections

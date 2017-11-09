@@ -218,6 +218,8 @@ impl DomainBuilder {
                     reader_triggered: Default::default(),
                     replay_paths: Default::default(),
 
+                    ingress_inject: Default::default(),
+
                     addr,
                     readers,
                     inject: None,
@@ -256,6 +258,8 @@ pub struct Domain {
     log: Logger,
 
     not_ready: HashSet<LocalNodeIndex>,
+
+    ingress_inject: local::Map<(usize, Vec<DataType>)>,
 
     transaction_state: transactions::DomainState,
     persistence_parameters: persistence::Parameters,
@@ -824,9 +828,17 @@ impl Domain {
                     } => {
                         let mut n = self.nodes[&node].borrow_mut();
                         n.add_column(&field);
-                        n.get_base_mut()
-                            .expect("told to add base column to non-base node")
-                            .add_column(default);
+                        if n.is_internal() && n.get_base().is_some() {
+                            n.get_base_mut().unwrap().add_column(default);
+                        } else if n.is_ingress() {
+                            self.ingress_inject
+                                .entry(node)
+                                .or_insert_with(|| (n.fields().len(), Vec::new()))
+                                .1
+                                .push(default);
+                        } else {
+                            unreachable!("node unrelated to base got AddBaseColumn");
+                        }
                         self.control_reply_tx
                             .send(ControlReplyPacket::ack())
                             .unwrap();
@@ -1111,6 +1123,31 @@ impl Domain {
                             let log = self.log.new(o!());
                             let nshards = self.nshards;
                             let domain_addr = self.addr;
+
+                            let added_cols = self.ingress_inject.get(&from).cloned();
+                            let default = {
+                                let n = self.nodes[&from].borrow();
+                                let mut default = None;
+                                if n.is_internal() {
+                                    if let Some(b) = n.get_base() {
+                                        let mut row = (Vec::new(), true).into();
+                                        b.fix(&mut row);
+                                        default = Some(row);
+                                    }
+                                }
+                                default
+                            };
+                            let fix = move |mut r: Vec<DataType>| -> Vec<DataType> {
+                                if let Some((start, ref added)) = added_cols {
+                                    let rlen = r.len();
+                                    r.extend(added.iter().skip(rlen - start).cloned());
+                                } else if let Some(ref defaults) = default {
+                                    let rlen = r.len();
+                                    r.extend(defaults.iter().skip(rlen).cloned());
+                                }
+                                r
+                            };
+
                             thread::Builder::new()
                                 .name(format!(
                                     "replay{}.{}",
@@ -1139,7 +1176,7 @@ impl Domain {
                                     // and then forward on tx (if there is one)
                                     while let Some((i, chunk)) = iter.next() {
                                         use std::iter::FromIterator;
-                                        let chunk = Records::from_iter(chunk.into_iter());
+                                        let chunk = Records::from_iter(chunk.into_iter().map(&fix));
                                         let len = chunk.len();
                                         let last = iter.peek().is_none();
                                         let p = box Packet::ReplayPiece {
@@ -1289,6 +1326,26 @@ impl Domain {
         }
     }
 
+    fn seed_row(&self, source: LocalNodeIndex, row: &Row<Vec<DataType>>) -> Record {
+        if let Some(&(start, ref defaults)) = self.ingress_inject.get(&source) {
+            let mut v = Vec::with_capacity(start + defaults.len());
+            v.extend(row.iter().cloned());
+            v.extend(defaults.iter().cloned());
+            return (v, true).into();
+        }
+
+        let n = self.nodes[&source].borrow();
+        if n.is_internal() {
+            if let Some(b) = n.get_base() {
+                let mut row = ((*row).clone(), true).into();
+                b.fix(&mut row);
+                return row;
+            }
+        }
+
+        return ((*row).clone(), true).into();
+    }
+
     fn seed_all(&mut self, tag: Tag, keys: HashSet<Vec<DataType>>) {
         let (m, source, is_miss) = match self.replay_paths[&tag] {
             ReplayPath {
@@ -1305,7 +1362,7 @@ impl Domain {
                 let (keys, misses): (HashSet<_>, _) = keys.into_iter().partition(|key| {
                     match state.lookup(&cols[..], &KeyType::Single(&key[0])) {
                         LookupResult::Some(res) => {
-                            rs.extend(res.into_iter().map(|r| (**r).clone()));
+                            rs.extend(res.into_iter().map(|r| self.seed_row(source, r)));
                             true
                         }
                         LookupResult::Missing => false,
@@ -1462,7 +1519,7 @@ impl Domain {
                             for_keys: k,
                             ignore: false,
                         },
-                        data: Records::from_iter(rs.into_iter().map(|r| (**r).clone())),
+                        data: Records::from_iter(rs.into_iter().map(|r| self.seed_row(source, r))),
                         transaction_state: transaction_state,
                     });
                     (m, source, None)
