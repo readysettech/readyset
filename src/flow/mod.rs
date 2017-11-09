@@ -42,6 +42,8 @@ use self::coordination::{CoordinationMessage, CoordinationPayload};
 
 pub use self::mutator::{Mutator, MutatorBuilder, MutatorError};
 pub use self::getter::{Getter, ReadQuery, ReadReply, RemoteGetter, RemoteGetterBuilder};
+use self::payload::{IngressFromBase, EgressForBase};
+
 
 pub type WorkerIdentifier = SocketAddr;
 pub type WorkerEndpoint = Arc<Mutex<TcpSender<CoordinationMessage>>>;
@@ -203,6 +205,10 @@ pub struct ControllerInner {
     /// Map from worker address to the address the worker is listening on for reads.
     read_addrs: HashMap<WorkerIdentifier, SocketAddr>,
     workers: HashMap<WorkerIdentifier, WorkerStatus>,
+
+    /// State between migrations
+    deps: HashMap<DomainIndex, (IngressFromBase, EgressForBase)>,
+    remap: HashMap<DomainIndex, HashMap<NodeIndex, IndexPair>>,
 
     heartbeat_every: Duration,
     healthcheck_every: Duration,
@@ -419,6 +425,9 @@ impl ControllerInner {
             domains: Default::default(),
             channel_coordinator: Arc::new(ChannelCoordinator::new()),
             debug_channel: None,
+
+            deps: HashMap::default(),
+            remap: HashMap::default(),
 
             readers,
             read_listen_addr,
@@ -1091,27 +1100,24 @@ impl<'a> Migration<'a> {
             .filter(|&&ni| !mainline.ingredients[ni].is_dropped())
             .map(|&ni| mainline.ingredients[ni].domain())
             .collect();
-        let mut domain_nodes = mainline
-            .ingredients
-            .node_indices()
-            .filter(|&ni| ni != mainline.source)
-            .filter(|&ni| !mainline.ingredients[ni].is_dropped())
-            .map(|ni| {
-                (mainline.ingredients[ni].domain(), ni, new.contains(&ni))
+
+        let mut domain_new_nodes = new.iter()
+            .filter(|&&ni| ni != mainline.source)
+            .filter(|&&ni| !mainline.ingredients[ni].is_dropped())
+            .map(|&ni| {
+                (mainline.ingredients[ni].domain(), ni)
             })
-            .fold(HashMap::new(), |mut dns, (d, ni, new)| {
-                dns.entry(d).or_insert_with(Vec::new).push((ni, new));
+            .fold(HashMap::new(), |mut dns, (d, ni)| {
+                dns.entry(d).or_insert_with(Vec::new).push(ni);
                 dns
             });
 
         // Assign local addresses to all new nodes, and initialize them
-        let mut local_remap = HashMap::new();
-        let mut remap = HashMap::new();
-        for (domain, nodes) in &mut domain_nodes {
+        for (domain, nodes) in &mut domain_new_nodes {
             // Number of pre-existing nodes
-            let mut nnodes = nodes.iter().filter(|&&(_, new)| !new).count();
+            let mut nnodes = mainline.remap.get(domain).map(HashMap::len).unwrap_or(0);
 
-            if nnodes == nodes.len() {
+            if nodes.is_empty() {
                 // Nothing to do here
                 continue;
             }
@@ -1119,35 +1125,29 @@ impl<'a> Migration<'a> {
             let log = log.new(o!("domain" => domain.index()));
 
             // Give local addresses to every (new) node
-            local_remap.clear();
-            for &(ni, new) in nodes.iter() {
-                if new {
-                    debug!(log,
-                           "assigning local index";
-                           "type" => format!("{:?}", mainline.ingredients[ni]),
-                           "node" => ni.index(),
-                           "local" => nnodes
-                    );
+            for &ni in nodes.iter() {
+                debug!(log,
+                       "assigning local index";
+                       "type" => format!("{:?}", mainline.ingredients[ni]),
+                       "node" => ni.index(),
+                       "local" => nnodes
+                );
 
-                    let mut ip: IndexPair = ni.into();
-                    ip.set_local(unsafe { LocalNodeIndex::make(nnodes as u32) });
-                    mainline.ingredients[ni].set_finalized_addr(ip);
-                    local_remap.insert(ni, ip);
-                    nnodes += 1;
-                } else {
-                    local_remap.insert(ni, *mainline.ingredients[ni].get_index());
-                }
+                let mut ip: IndexPair = ni.into();
+                ip.set_local(unsafe { LocalNodeIndex::make(nnodes as u32) });
+                mainline.ingredients[ni].set_finalized_addr(ip);
+                mainline.remap.entry(*domain).or_insert_with(HashMap::new).insert(ni, ip);
+                nnodes += 1;
             }
 
             // Initialize each new node
-            for &(ni, new) in nodes.iter() {
-                if new && mainline.ingredients[ni].is_internal() {
+            for &ni in nodes.iter() {
+                if mainline.ingredients[ni].is_internal() {
                     // Figure out all the remappings that have happened
                     // NOTE: this has to be *per node*, since a shared parent may be remapped
                     // differently to different children (due to sharding for example). we just
                     // allocate it once though.
-                    remap.clear();
-                    remap.extend(local_remap.iter().map(|(&k, &v)| (k, v)));
+                    let mut remap = mainline.remap[domain].clone();
 
                     // Parents in other domains have been swapped for ingress nodes.
                     // Those ingress nodes' indices are now local.
@@ -1157,7 +1157,7 @@ impl<'a> Migration<'a> {
                             continue;
                         }
 
-                        let old = remap.insert(src, local_remap[&instead]);
+                        let old = remap.insert(src, mainline.remap[domain][&instead]);
                         assert_eq!(old, None);
                     }
 
@@ -1191,14 +1191,29 @@ impl<'a> Migration<'a> {
         // etc.
         // println!("{}", mainline);
 
-        let mut uninformed_domain_nodes = domain_nodes.clone();
-        let deps = migrate::transactions::analyze_graph(
+        let new_deps = migrate::transactions::analyze_changes(
             &mainline.ingredients,
             mainline.source,
-            domain_nodes,
+            domain_new_nodes,
         );
+
+        migrate::transactions::merge_deps(&mainline.ingredients, &mut mainline.deps, new_deps);
+
+        let mut uninformed_domain_nodes = mainline
+            .ingredients
+            .node_indices()
+            .filter(|&ni| ni != mainline.source)
+            .filter(|&ni| !mainline.ingredients[ni].is_dropped())
+            .map(|ni| {
+                (mainline.ingredients[ni].domain(), ni, new.contains(&ni))
+            })
+            .fold(HashMap::new(), |mut dns, (d, ni, new)| {
+                dns.entry(d).or_insert_with(Vec::new).push((ni, new));
+                dns
+        });
+
         let (start_ts, end_ts, prevs) =
-            mainline.checktable.perform_migration(deps.clone()).unwrap();
+            mainline.checktable.perform_migration(mainline.deps.clone()).unwrap();
 
         info!(log, "migration claimed timestamp range"; "start" => start_ts, "end" => end_ts);
 
@@ -1297,7 +1312,7 @@ impl<'a> Migration<'a> {
             .add_replay_paths(mainline.materializations.domains_on_path.clone())
             .unwrap();
 
-        migrate::transactions::finalize(deps, &log, &mut mainline.domains, end_ts);
+        migrate::transactions::finalize(mainline.deps.clone(), &log, &mut mainline.domains, end_ts);
 
         warn!(log, "migration completed"; "ms" => dur_to_ns!(start.elapsed()) / 1_000_000);
     }
