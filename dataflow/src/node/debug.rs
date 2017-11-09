@@ -23,16 +23,14 @@ impl Node {
             Sharding::ByColumn(_) | Sharding::Random => "filled,dashed",
             _ => "filled",
         };
-        s.push_str(
-            &format!(
-                " [style=\"{}\", fillcolor={}, label=\"",
-                border,
-                self.domain
-                    .map(|d| -> usize { d.into() })
-                    .map(|d| format!("\"/set312/{}\"", (d % 12) + 1))
-                    .unwrap_or("white".into())
-            )
-        );
+        s.push_str(&format!(
+            " [style=\"{}\", fillcolor={}, label=\"",
+            border,
+            self.domain
+                .map(|d| -> usize { d.into() })
+                .map(|d| format!("\"/set312/{}\"", (d % 12) + 1))
+                .unwrap_or("white".into())
+        ));
 
         let addr = match self.index {
             Some(ref idx) => if idx.has_local() {
@@ -59,14 +57,12 @@ impl Node {
                 s.push_str(&format!("{{"));
 
                 // Output node name and description. First row.
-                s.push_str(
-                    &format!(
-                        "{{ {} / {} | {} }}",
-                        addr,
-                        Self::escape(self.name()),
-                        Self::escape(&i.description())
-                    )
-                );
+                s.push_str(&format!(
+                    "{{ {} / {} | {} }}",
+                    addr,
+                    Self::escape(self.name()),
+                    Self::escape(&i.description())
+                ));
 
                 // Output node outputs. Second row.
                 s.push_str(&format!(" | {}", self.fields().join(", \\n")));

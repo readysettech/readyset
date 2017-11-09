@@ -711,7 +711,11 @@ impl ControllerInner {
         // edges.
         for (_, edge) in self.ingredients.raw_edges().iter().enumerate() {
             indentln(&mut s);
-            s.push_str(&format!("{} -> {}", edge.source().index(), edge.target().index()));
+            s.push_str(&format!(
+                "{} -> {}",
+                edge.source().index(),
+                edge.target().index()
+            ));
             s.push_str("\n");
         }
 
