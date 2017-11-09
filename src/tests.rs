@@ -334,6 +334,49 @@ fn it_works_with_sql_recipe() {
 }
 
 #[test]
+fn it_works_with_arithmetic_aliases() {
+    let mut g = ControllerBuilder::default().build_inner();
+    let sql = "
+        CREATE TABLE Car (cid int, pid int, brand varchar(255), PRIMARY KEY(cid));
+        CREATE TABLE Price (pid int, cent_price int, PRIMARY KEY(pid));
+        CarPrice: SELECT cid, ActualPrice.price FROM Car \
+            JOIN (SELECT pid, cent_price / 100 AS price FROM Price) AS ActualPrice \
+            ON Car.pid = ActualPrice.pid WHERE cid = ?;
+    ";
+
+    let recipe = g.migrate(|mig| {
+        let mut recipe = Recipe::from_str(&sql, None).unwrap();
+        recipe.activate(mig, false).unwrap();
+        recipe
+    });
+
+    let car_index = recipe.node_addr_for("Car").unwrap();
+    let price_index = recipe.node_addr_for("Price").unwrap();
+    let car_price_index = recipe.node_addr_for("CarPrice").unwrap();
+    let mut car_mutator = g.get_mutator(car_index);
+    let mut price_mutator = g.get_mutator(price_index);
+    let mut getter = g.get_getter(car_price_index).unwrap();
+    let cid = 1;
+    let pid = 1;
+    let cent_price = 10000;
+    price_mutator
+        .put(vec![pid.into(), cent_price.into()])
+        .unwrap();
+
+    car_mutator
+        .put(vec![cid.into(), pid.into(), "Volvo".into()])
+        .unwrap();
+
+    // Let writes propagate:
+    sleep();
+
+    // Retrieve the result of the count query:
+    let result = getter.lookup(&cid.into(), true).unwrap();
+    assert_eq!(result.len(), 1);
+    assert_eq!(result[0][1], 100.into());
+}
+
+#[test]
 fn it_works_with_simple_arithmetic() {
     let mut g = ControllerBuilder::default().build_inner();
     let sql = "
@@ -1853,8 +1896,6 @@ fn finkelstein1982_queries() {
             assert!(inc.add_query(q, None, mig).is_ok());
         }
     });
-
-    println!("{}", g);
 }
 
 #[test]
@@ -1898,6 +1939,4 @@ fn tpc_w() {
             }
         }
     });
-
-    println!("{}", g);
 }

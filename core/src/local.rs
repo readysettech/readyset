@@ -2,7 +2,6 @@ use ::*;
 use std::ops::{Deref, Index, IndexMut};
 use std::iter::FromIterator;
 use std::collections::HashMap;
-use std::collections::hash_map::Entry;
 use std::rc::Rc;
 
 #[derive(Clone, Copy, Eq, PartialEq, Ord, PartialOrd, Hash, Debug, Serialize, Deserialize)]
@@ -34,6 +33,67 @@ impl<T: Clone> Clone for Map<T> {
             n: self.n,
             things: self.things.clone(),
         }
+    }
+}
+
+pub enum Entry<'a, V: 'a> {
+    Vacant(VacantEntry<'a, V>),
+    Occupied(OccupiedEntry<'a, V>),
+}
+
+pub struct VacantEntry<'a, V: 'a> {
+    map: &'a mut Map<V>,
+    index: LocalNodeIndex,
+}
+
+pub struct OccupiedEntry<'a, V: 'a> {
+    map: &'a mut Map<V>,
+    index: LocalNodeIndex,
+}
+
+impl<'a, V> Entry<'a, V> {
+    pub fn or_insert(self, default: V) -> &'a mut V {
+        match self {
+            Entry::Occupied(entry) => entry.into_mut(),
+            Entry::Vacant(entry) => entry.insert(default),
+        }
+    }
+    pub fn or_insert_with<F: FnOnce() -> V>(self, default: F) -> &'a mut V {
+        match self {
+            Entry::Occupied(entry) => entry.into_mut(),
+            Entry::Vacant(entry) => entry.insert(default()),
+        }
+    }
+}
+
+impl<'a, V> VacantEntry<'a, V> {
+    pub fn insert(self, value: V) -> &'a mut V {
+        let index = self.index;
+        self.map.insert(index, value);
+        &mut self.map[&index]
+    }
+}
+
+impl<'a, V> OccupiedEntry<'a, V> {
+    pub fn get(&self) -> &V {
+        let index = self.index;
+        &self.map[&index]
+    }
+    pub fn get_mut(&mut self) -> &mut V {
+        let index = self.index;
+        &mut self.map[&index]
+    }
+    pub fn into_mut(self) -> &'a mut V {
+        let index = self.index;
+        &mut self.map[&index]
+    }
+    pub fn insert(&mut self, value: V) -> V {
+        let index = self.index;
+        self.map.insert(index, value).unwrap()
+    }
+    pub fn remove(self) -> V {
+        let index = self.index;
+        self.map.remove(&index).unwrap()
     }
 }
 
@@ -109,6 +169,20 @@ impl<T> Map<T> {
 
     pub fn len(&self) -> usize {
         self.n
+    }
+
+    pub fn entry(&mut self, key: LocalNodeIndex) -> Entry<T> {
+        if self.contains_key(&key) {
+            Entry::Occupied(OccupiedEntry {
+                map: self,
+                index: key,
+            })
+        } else {
+            Entry::Vacant(VacantEntry {
+                map: self,
+                index: key,
+            })
+        }
     }
 }
 
@@ -412,6 +486,7 @@ impl<T: Hash + Eq + Clone + 'static> State<T> {
     ///
     /// Returns false if a hole was encountered (and the record hence not inserted).
     fn insert_into(s: &mut SingleState<T>, r: Row<Vec<T>>) -> bool {
+        use std::collections::hash_map::Entry;
         match s.state {
             KeyedState::Single(ref mut map) => {
                 // treat this specially to avoid the extra Vec

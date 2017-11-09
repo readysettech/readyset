@@ -72,6 +72,17 @@ impl Base {
             .map(|&col| (col, self.defaults[col].clone()))
             .collect()
     }
+
+    pub fn fix(&self, row: &mut Record) {
+        if self.unmodified {
+            return;
+        }
+
+        if row.len() != self.defaults.len() {
+            let rlen = row.len();
+            row.extend(self.defaults.iter().skip(rlen).cloned());
+        }
+    }
 }
 
 /// A Base clone must have a different unique_id so that no two copies write to the same file.
@@ -151,26 +162,13 @@ impl Ingredient for Base {
             }
         });
 
-        let rs = if self.unmodified {
-            results.collect()
-        } else {
-            results
-                .map(|r| {
-                    //rustfmt
-                    if r.len() != self.defaults.len() {
-                        let rlen = r.len();
-                        let (mut v, pos) = r.extract();
-                        v.extend(self.defaults.iter().skip(rlen).cloned());
-                        (v, pos).into()
-                    } else {
-                        r
-                    }
-                })
-                .collect()
-        };
-
         ProcessingResult {
-            results: rs,
+            results: results
+                .map(|mut r| {
+                    self.fix(&mut r);
+                    r
+                })
+                .collect(),
             misses: Vec::new(),
         }
     }

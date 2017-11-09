@@ -175,13 +175,9 @@ impl<'a> Plan<'a> {
                 seen.insert(domain);
 
                 // we're not replaying through the starter node
-                // *unless* it's a Base (because it might need to add defaults)
                 let mut skip_first = 0;
                 if i == 0 {
-                    let n = &self.graph[segments[0].1[0].0];
-                    if !n.is_internal() || n.get_base().is_none() {
-                        skip_first = 1;
-                    }
+                    skip_first = 1;
                 }
 
                 // use the local index for each node

@@ -262,6 +262,7 @@ impl ControllerInner {
                 "install_recipe" => Post: C::OpMut(Box::new(Self::install_recipe)).handler(),
                 "install_recipe_with_policies" => Post: C::OpMut(Box::new(Self::install_recipe_with_policies)).handler(),
                 "create_universe" => Post: C::OpMut(Box::new(Self::create_universe)).handler(),
+                "graphviz" => Post: C::Op(Box::new(Self::graphviz)).handler(),
             }
         };
 
@@ -752,6 +753,42 @@ impl ControllerInner {
     pub fn get_getter(&self, node: NodeIndex) -> Option<RemoteGetter> {
         self.get_getter_builder(node).map(|g| g.build())
     }
+
+    pub fn graphviz(&self, _: ()) -> String {
+        let mut s = String::new();
+
+        let indentln = |s: &mut String| s.push_str("    ");
+
+        // header.
+        s.push_str("digraph {{\n");
+
+        // global formatting.
+        indentln(&mut s);
+        s.push_str("node [shape=record, fontsize=10]\n");
+
+        // node descriptions.
+        for index in self.ingredients.node_indices() {
+            indentln(&mut s);
+            s.push_str(&format!("{}", index.index()));
+            s.push_str(&self.ingredients[index].describe(index));
+        }
+
+        // edges.
+        for (_, edge) in self.ingredients.raw_edges().iter().enumerate() {
+            indentln(&mut s);
+            s.push_str(&format!(
+                "{} -> {}",
+                edge.source().index(),
+                edge.target().index()
+            ));
+            s.push_str("\n");
+        }
+
+        // footer.
+        s.push_str("}}");
+
+        s
+    }
 }
 
 // Using this format trait will omit egress and sharder nodes.
@@ -816,38 +853,7 @@ impl fmt::LowerHex for ControllerInner {
     }
 }
 
-impl fmt::Display for ControllerInner {
-    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        let indentln = |f: &mut fmt::Formatter| write!(f, "    ");
-
-        // Output header.
-        writeln!(f, "digraph {{")?;
-
-        // Output global formatting.
-        indentln(f)?;
-        writeln!(f, "node [shape=record, fontsize=10]")?;
-
-        // Output node descriptions.
-        for index in self.ingredients.node_indices() {
-            indentln(f)?;
-            write!(f, "{}", index.index())?;
-            self.ingredients[index].describe(f, index)?;
-        }
-
-        // Output edges.
-        for (_, edge) in self.ingredients.raw_edges().iter().enumerate() {
-            indentln(f)?;
-            write!(f, "{} -> {}", edge.source().index(), edge.target().index())?;
-            writeln!(f, "")?;
-        }
-
-        // Output footer.
-        write!(f, "}}")?;
-
-        Ok(())
-    }
-}
-
+#[derive(Clone)]
 enum ColumnChange {
     Add(String, DataType),
     Drop(usize),
@@ -1418,25 +1424,48 @@ impl<'a> Migration<'a> {
             prevs.unwrap(),
         );
 
-        // Tell all base nodes about newly added columns
+        // Tell all base nodes and base ingress children about newly added columns
         for (ni, change) in self.columns {
-            let n = &mainline.ingredients[ni];
-            let m = match change {
-                ColumnChange::Add(field, default) => box payload::Packet::AddBaseColumn {
-                    node: *n.local_addr(),
-                    field: field,
-                    default: default,
-                },
-                ColumnChange::Drop(column) => box payload::Packet::DropBaseColumn {
-                    node: *n.local_addr(),
-                    column: column,
-                },
+            let mut inform = if let ColumnChange::Add(..) = change {
+                // we need to inform all of the base's children too,
+                // so that they know to add columns to existing records when replaying
+                mainline
+                    .ingredients
+                    .neighbors_directed(ni, petgraph::EdgeDirection::Outgoing)
+                    .filter(|&eni| mainline.ingredients[eni].is_egress())
+                    .flat_map(|eni| {
+                        // find ingresses under this egress
+                        mainline
+                            .ingredients
+                            .neighbors_directed(eni, petgraph::EdgeDirection::Outgoing)
+                    })
+                    .collect()
+            } else {
+                // ingress nodes don't need to know about deleted columns, because those are only
+                // relevant when new writes enter the graph.
+                Vec::new()
             };
+            inform.push(ni);
 
-            let domain = mainline.domains.get_mut(&n.domain()).unwrap();
+            for ni in inform {
+                let n = &mainline.ingredients[ni];
+                let m = match change.clone() {
+                    ColumnChange::Add(field, default) => box payload::Packet::AddBaseColumn {
+                        node: *n.local_addr(),
+                        field: field,
+                        default: default,
+                    },
+                    ColumnChange::Drop(column) => box payload::Packet::DropBaseColumn {
+                        node: *n.local_addr(),
+                        column: column,
+                    },
+                };
 
-            domain.send(m).unwrap();
-            domain.wait_for_ack().unwrap();
+                let domain = mainline.domains.get_mut(&n.domain()).unwrap();
+
+                domain.send(m).unwrap();
+                domain.wait_for_ack().unwrap();
+            }
         }
 
         // Set up inter-domain connections
@@ -1565,6 +1594,11 @@ impl Blender {
     /// Install a new set of policies on the controller.
     pub fn create_universe(&self, context: HashMap<String, DataType>) {
         self.rpc("create_universe", &context).unwrap()
+    }
+
+    /// graphviz description of the dataflow graph
+    pub fn graphviz(&self) -> String {
+        self.rpc("graphviz", &()).unwrap()
     }
 
     /// Set the `Logger` to use for internal log messages.
