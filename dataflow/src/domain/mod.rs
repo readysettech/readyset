@@ -214,9 +214,9 @@ impl DomainBuilder {
                     log,
                     not_ready,
                     mode: DomainMode::Forwarding,
-                    waiting: local::Map::new(),
-                    reader_triggered: local::Map::new(),
-                    replay_paths: HashMap::new(),
+                    waiting: Default::default(),
+                    reader_triggered: Default::default(),
+                    replay_paths: Default::default(),
 
                     addr,
                     readers,
@@ -225,7 +225,7 @@ impl DomainBuilder {
                     control_reply_tx,
                     channel_coordinator,
 
-                    buffered_replay_requests: HashMap::new(),
+                    buffered_replay_requests: Default::default(),
                     has_buffered_replay_requests: false,
                     replay_batch_size: self.config.replay_batch_size,
                     replay_batch_timeout: self.config.replay_batch_timeout,
