@@ -43,7 +43,7 @@ fn base_egress_map(
     graph: &Graph,
     source: NodeIndex,
     nodes: &[NodeIndex],
-    has_path: &HashSet<(NodeIndex, NodeIndex)>
+    has_path: &HashSet<(NodeIndex, NodeIndex)>,
 ) -> EgressForBase {
     let output_nodes: Vec<_> = nodes
         .into_iter()
@@ -100,7 +100,7 @@ pub fn analyze_changes(
 pub fn merge_deps(
     graph: &Graph,
     old: &mut HashMap<DomainIndex, (IngressFromBase, EgressForBase)>,
-    new: HashMap<DomainIndex, (IngressFromBase, EgressForBase)>
+    new: HashMap<DomainIndex, (IngressFromBase, EgressForBase)>,
 ) {
     for (di, (new_ingress, new_egress)) in new {
         let entry = old.entry(di).or_insert((HashMap::new(), HashMap::new()));

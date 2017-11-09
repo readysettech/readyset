@@ -42,7 +42,7 @@ use self::coordination::{CoordinationMessage, CoordinationPayload};
 
 pub use self::mutator::{Mutator, MutatorBuilder, MutatorError};
 pub use self::getter::{Getter, ReadQuery, ReadReply, RemoteGetter, RemoteGetterBuilder};
-use self::payload::{IngressFromBase, EgressForBase};
+use self::payload::{EgressForBase, IngressFromBase};
 
 
 pub type WorkerIdentifier = SocketAddr;
@@ -1104,9 +1104,7 @@ impl<'a> Migration<'a> {
         let mut domain_new_nodes = new.iter()
             .filter(|&&ni| ni != mainline.source)
             .filter(|&&ni| !mainline.ingredients[ni].is_dropped())
-            .map(|&ni| {
-                (mainline.ingredients[ni].domain(), ni)
-            })
+            .map(|&ni| (mainline.ingredients[ni].domain(), ni))
             .fold(HashMap::new(), |mut dns, (d, ni)| {
                 dns.entry(d).or_insert_with(Vec::new).push(ni);
                 dns
@@ -1136,7 +1134,11 @@ impl<'a> Migration<'a> {
                 let mut ip: IndexPair = ni.into();
                 ip.set_local(unsafe { LocalNodeIndex::make(nnodes as u32) });
                 mainline.ingredients[ni].set_finalized_addr(ip);
-                mainline.remap.entry(*domain).or_insert_with(HashMap::new).insert(ni, ip);
+                mainline
+                    .remap
+                    .entry(*domain)
+                    .or_insert_with(HashMap::new)
+                    .insert(ni, ip);
                 nnodes += 1;
             }
 
@@ -1210,10 +1212,12 @@ impl<'a> Migration<'a> {
             .fold(HashMap::new(), |mut dns, (d, ni, new)| {
                 dns.entry(d).or_insert_with(Vec::new).push((ni, new));
                 dns
-        });
+            });
 
-        let (start_ts, end_ts, prevs) =
-            mainline.checktable.perform_migration(mainline.deps.clone()).unwrap();
+        let (start_ts, end_ts, prevs) = mainline
+            .checktable
+            .perform_migration(mainline.deps.clone())
+            .unwrap();
 
         info!(log, "migration claimed timestamp range"; "start" => start_ts, "end" => end_ts);
 
