@@ -25,7 +25,7 @@ pub struct TastingResult {
     pub build: bool,
     pub test: bool,
     pub bench: bool,
-    pub results: Option<Vec<HashMap<String, BenchmarkResult<f64>>>>,
+    pub results: Option<Vec<(Benchmark, ExitStatus, HashMap<String, BenchmarkResult<f64>>)>>,
 }
 
 fn run_benchmark(workdir: &str, cfg: &Config, bench: &Benchmark) -> Output {
@@ -271,28 +271,30 @@ pub fn taste_commit(
         }
     };
 
-    let bench_out = match branch {
+    let bench_results = match branch {
         Some(ref branch) => {
             let branch_history = history.entry(branch.clone()).or_insert(HashMap::new());
             cfg.benchmarks
                 .iter()
                 .map(|b| {
-                    let new_result =
+                    let (status, res) =
                         benchmark(&ws.path, &cfg, b, commit.id, branch_history.get(&b.name));
-                    branch_history.insert(b.name.clone(), new_result.1.clone());
-                    new_result
+                    branch_history.insert(b.name.clone(), res.clone());
+                    (b.clone(), status, res)
                 })
-                .collect::<Vec<(ExitStatus, HashMap<String, BenchmarkResult<f64>>)>>()
+                .collect::<Vec<(Benchmark, ExitStatus, HashMap<String, BenchmarkResult<f64>>)>>()
         }
         None => {
             cfg.benchmarks
                 .iter()
-                .map(|b| benchmark(&ws.path, &cfg, b, commit.id, None))
-                .collect::<Vec<(ExitStatus, HashMap<String, BenchmarkResult<f64>>)>>()
+                .map(|b| {
+                    let (status, res) = benchmark(&ws.path, &cfg, b, commit.id, None);
+                    (b.clone(), status, res)
+                })
+                .collect::<Vec<(Benchmark, ExitStatus, HashMap<String, BenchmarkResult<f64>>)>>()
         }
     };
-    let bench_success = bench_out.iter().all(|x| x.0.success());
-    let bench_results = bench_out.iter().map(|x| x.1.clone()).collect();
+    let bench_success = bench_results.iter().all(|x| x.1.success());
 
     Ok((
         Some(cfg),

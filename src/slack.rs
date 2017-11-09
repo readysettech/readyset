@@ -122,7 +122,17 @@ impl SlackNotifier {
         match res.results {
             None => (),
             Some(ref r) => {
-                for res in r {
+                for &(ref bm, ref status, ref res) in r {
+                    if !status.success() {
+                        let att = AttachmentBuilder::new("")
+                            .color("danger")
+                            .text(format!("*{}:* failed!", bm.name))
+                            .build()
+                            .unwrap();
+                        attachments.push(att);
+                        continue
+                    }
+
                     let mut nv = res.iter()
                         .map(|(k, v)| {
                             let val = match *v {

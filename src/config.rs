@@ -5,7 +5,7 @@ use std::io::{Error, ErrorKind, Read};
 use std::path::Path;
 use toml;
 
-#[derive(Debug)]
+#[derive(Clone, Debug)]
 pub struct Benchmark {
     pub name: String,
     pub cmd: String,
