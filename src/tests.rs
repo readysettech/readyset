@@ -1853,8 +1853,6 @@ fn finkelstein1982_queries() {
             assert!(inc.add_query(q, None, mig).is_ok());
         }
     });
-
-    println!("{}", g);
 }
 
 #[test]
@@ -1898,6 +1896,4 @@ fn tpc_w() {
             }
         }
     });
-
-    println!("{}", g);
 }
