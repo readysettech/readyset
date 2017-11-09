@@ -29,6 +29,8 @@ use slog;
 use tarpc::sync::client::{self, ClientExt};
 use tokio_core::reactor::Core;
 
+use recipe::Recipe;
+
 pub mod coordination;
 pub mod domain_handle;
 pub mod keys;
@@ -47,6 +49,8 @@ use self::payload::{EgressForBase, IngressFromBase};
 
 pub type WorkerIdentifier = SocketAddr;
 pub type WorkerEndpoint = Arc<Mutex<TcpSender<CoordinationMessage>>>;
+
+static mut recipe: Option<Recipe> = None;
 
 const NANOS_PER_SEC: u64 = 1_000_000_000;
 macro_rules! dur_to_ns {
@@ -257,6 +261,7 @@ impl ControllerInner {
                 "get_statistics" => Post: C::OpMut(Box::new(Self::get_statistics)).handler(),
                 "install_recipe" => Post: C::OpMut(Box::new(Self::install_recipe)).handler(),
                 "install_recipe_with_policies" => Post: C::OpMut(Box::new(Self::install_recipe_with_policies)).handler(),
+                "create_universe" => Post: C::OpMut(Box::new(Self::create_universe)).handler(),
             }
         };
 
@@ -477,21 +482,26 @@ impl ControllerInner {
         self.materializations.set_logger(&self.log);
     }
 
-    /// Adds a new user universe to the Blender.
+    /// Adds a new user universe.
     /// User universes automatically enforce security policies.
-    pub fn add_universe(&mut self, context: HashMap<String, DataType>) -> Migration {
-        info!(self.log, "Adding a new Soup universe");
+    pub fn add_universe<F, T>(&mut self, context: HashMap<String, DataType>, f: F) -> T
+    where
+        F: FnOnce(&mut Migration) -> T,
+    {
+        info!(self.log, "adding a new soup universe");
         let miglog = self.log.new(o!());
-        Migration {
+        let mut m = Migration {
             mainline: self,
             added: Default::default(),
             columns: Default::default(),
             readers: Default::default(),
-
+            context: context,
             start: time::Instant::now(),
             log: miglog,
-            context: context,
-        }
+        };
+        let r = f(&mut m);
+        m.commit();
+        r
     }
 
     /// Start setting up a new `Migration`.
@@ -694,6 +704,9 @@ impl ControllerInner {
             use Recipe;
             let mut r = Recipe::from_str(&r_txt, None).unwrap();
             assert!(r.activate(mig, false).is_ok());
+            unsafe {
+                recipe = Some(r)
+            };
         });
     }
 
@@ -702,6 +715,31 @@ impl ControllerInner {
             use Recipe;
             let mut r = Recipe::from_str_with_policy(&r, Some(&p), None).unwrap();
             assert!(r.activate(mig, false).is_ok());
+            unsafe {
+                recipe = Some(r);
+            }
+        })
+    }
+
+    pub fn create_universe(&mut self, context: HashMap<String, DataType>) {
+        let log = self.log.clone();
+        self.add_universe(context, |mut mig| {
+            use Recipe;
+            unsafe {
+                let mut r = recipe.clone().unwrap();
+                r.next();
+                match r.create_universe(&mut mig) {
+                    Ok(ar) => {
+                        info!(log, "{} expressions added", ar.expressions_added);
+                        info!(log, "{} expressions removed", ar.expressions_removed);
+                    }
+                    Err(e) => panic!("failed to activate recipe: {}", e),
+                };
+                assert!(r.activate(&mut mig, false).is_ok());
+
+                recipe = Some(r.clone());
+            }
+
         });
     }
 
@@ -1522,6 +1560,11 @@ impl Blender {
     /// Install a new set of policies on the controller.
     pub fn install_recipe_with_policies(&self, r: String, p: String) {
         self.rpc("install_recipe_with_policies", &(r, p)).unwrap()
+    }
+
+    /// Install a new set of policies on the controller.
+    pub fn create_universe(&self, context: HashMap<String, DataType>) {
+        self.rpc("create_universe", &context).unwrap()
     }
 
     /// Set the `Logger` to use for internal log messages.
