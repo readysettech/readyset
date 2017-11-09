@@ -256,6 +256,7 @@ impl ControllerInner {
                 "getter_builder" =>  Post: C::Op(Box::new(Self::get_getter_builder)).handler(),
                 "get_statistics" => Post: C::OpMut(Box::new(Self::get_statistics)).handler(),
                 "install_recipe" => Post: C::OpMut(Box::new(Self::install_recipe)).handler(),
+                "graphviz" => Post: C::Op(Box::new(Self::graphviz)).handler(),
             }
         };
 
@@ -687,37 +688,37 @@ impl ControllerInner {
     pub fn get_getter(&self, node: NodeIndex) -> Option<RemoteGetter> {
         self.get_getter_builder(node).map(|g| g.build())
     }
-}
 
-impl fmt::Display for ControllerInner {
-    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        let indentln = |f: &mut fmt::Formatter| write!(f, "    ");
+    pub fn graphviz(&self, _: ()) -> String {
+        let mut s = String::new();
 
-        // Output header.
-        writeln!(f, "digraph {{")?;
+        let indentln = |s: &mut String| s.push_str("    ");
 
-        // Output global formatting.
-        indentln(f)?;
-        writeln!(f, "node [shape=record, fontsize=10]")?;
+        // header.
+        s.push_str("digraph {{\n");
 
-        // Output node descriptions.
+        // global formatting.
+        indentln(&mut s);
+        s.push_str("node [shape=record, fontsize=10]\n");
+
+        // node descriptions.
         for index in self.ingredients.node_indices() {
-            indentln(f)?;
-            write!(f, "{}", index.index())?;
-            self.ingredients[index].describe(f, index)?;
+            indentln(&mut s);
+            s.push_str(&format!("{}", index.index()));
+            s.push_str(&self.ingredients[index].describe(index));
         }
 
-        // Output edges.
+        // edges.
         for (_, edge) in self.ingredients.raw_edges().iter().enumerate() {
-            indentln(f)?;
-            write!(f, "{} -> {}", edge.source().index(), edge.target().index())?;
-            writeln!(f, "")?;
+            indentln(&mut s);
+            s.push_str(&format!("{} -> {}", edge.source().index(), edge.target().index()));
+            s.push_str("\n");
         }
 
-        // Output footer.
-        write!(f, "}}")?;
+        // footer.
+        s.push_str("}}");
 
-        Ok(())
+        s
     }
 }
 
@@ -1435,6 +1436,11 @@ impl Blender {
     /// Install a new recipe on the controller.
     pub fn install_recipe(&self, new_recipe: String) {
         self.rpc("install_recipe", &new_recipe).unwrap()
+    }
+
+    /// graphviz description of the dataflow graph
+    pub fn graphviz(&self) -> String {
+        self.rpc("graphviz", &()).unwrap()
     }
 
     /// Set the `Logger` to use for internal log messages.

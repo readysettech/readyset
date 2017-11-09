@@ -17,20 +17,22 @@ impl fmt::Debug for Node {
 }
 
 impl Node {
-    pub fn describe(&self, f: &mut fmt::Write, idx: NodeIndex) -> fmt::Result {
+    pub fn describe(&self, idx: NodeIndex) -> String {
+        let mut s = String::new();
         let border = match self.sharded_by {
             Sharding::ByColumn(_) | Sharding::Random => "filled,dashed",
             _ => "filled",
         };
-        write!(
-            f,
-            " [style=\"{}\", fillcolor={}, label=\"",
-            border,
-            self.domain
-                .map(|d| -> usize { d.into() })
-                .map(|d| format!("\"/set312/{}\"", (d % 12) + 1))
-                .unwrap_or("white".into())
-        )?;
+        s.push_str(
+            &format!(
+                " [style=\"{}\", fillcolor={}, label=\"",
+                border,
+                self.domain
+                    .map(|d| -> usize { d.into() })
+                    .map(|d| format!("\"/set312/{}\"", (d % 12) + 1))
+                    .unwrap_or("white".into())
+            )
+        );
 
         let addr = match self.index {
             Some(ref idx) => if idx.has_local() {
@@ -41,32 +43,33 @@ impl Node {
             None => format!("{} / -", idx.index()),
         };
         match self.inner {
-            NodeType::Source => write!(f, "(source)"),
-            NodeType::Dropped => write!(f, "✗"),
-            NodeType::Ingress => write!(f, "{{ {} | (ingress) }}", addr),
-            NodeType::Egress { .. } => write!(f, "{{ {} | (egress) }}", addr),
-            NodeType::Sharder { .. } => write!(f, "{{ {} | (sharder) }}", addr),
+            NodeType::Source => s.push_str("(source)"),
+            NodeType::Dropped => s.push_str("✗"),
+            NodeType::Ingress => s.push_str(&format!("{{ {} | (ingress) }}", addr)),
+            NodeType::Egress { .. } => s.push_str(&format!("{{ {} | (egress) }}", addr)),
+            NodeType::Sharder { .. } => s.push_str(&format!("{{ {} | (sharder) }}", addr)),
             NodeType::Reader(ref r) => {
                 let key = match r.key() {
                     None => String::from("none"),
                     Some(k) => format!("{}", k),
                 };
-                write!(f, "{{ {} | (reader / key: {}) }}", addr, key)
+                s.push_str(&format!("{{ {} | (reader / key: {}) }}", addr, key))
             }
             NodeType::Internal(ref i) => {
-                write!(f, "{{")?;
+                s.push_str(&format!("{{"));
 
                 // Output node name and description. First row.
-                write!(
-                    f,
-                    "{{ {} / {} | {} }}",
-                    addr,
-                    Self::escape(self.name()),
-                    Self::escape(&i.description())
-                )?;
+                s.push_str(
+                    &format!(
+                        "{{ {} / {} | {} }}",
+                        addr,
+                        Self::escape(self.name()),
+                        Self::escape(&i.description())
+                    )
+                );
 
                 // Output node outputs. Second row.
-                write!(f, " | {}", self.fields().join(", \\n"))?;
+                s.push_str(&format!(" | {}", self.fields().join(", \\n")));
 
                 // Maybe output node's HAVING conditions. Optional third row.
                 // TODO
@@ -78,11 +81,13 @@ impl Node {
                 //     write!(f, " | σ({})", escape(&conds))?;
                 // }
 
-                write!(f, " }}")
+                s.push_str(" }}")
             }
-        }?;
+        };
 
-        writeln!(f, "\"]")
+        s.push_str("\"]\n");
+
+        s
     }
 
     fn escape(s: &str) -> String {
