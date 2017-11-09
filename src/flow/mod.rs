@@ -256,6 +256,7 @@ impl ControllerInner {
                 "getter_builder" =>  Post: C::Op(Box::new(Self::get_getter_builder)).handler(),
                 "get_statistics" => Post: C::OpMut(Box::new(Self::get_statistics)).handler(),
                 "install_recipe" => Post: C::OpMut(Box::new(Self::install_recipe)).handler(),
+                "install_recipe_with_policies" => Post: C::OpMut(Box::new(Self::install_recipe_with_policies)).handler(),
             }
         };
 
@@ -692,6 +693,14 @@ impl ControllerInner {
         self.migrate(|mig| {
             use Recipe;
             let mut r = Recipe::from_str(&r_txt, None).unwrap();
+            assert!(r.activate(mig, false).is_ok());
+        });
+    }
+
+    pub fn install_recipe_with_policies(&mut self, (r, p): (String, String)) {
+        self.migrate(|mig| {
+            use Recipe;
+            let mut r = Recipe::from_str_with_policy(&r, Some(&p), None).unwrap();
             assert!(r.activate(mig, false).is_ok());
         });
     }
@@ -1508,6 +1517,11 @@ impl Blender {
     /// Install a new recipe on the controller.
     pub fn install_recipe(&self, new_recipe: String) {
         self.rpc("install_recipe", &new_recipe).unwrap()
+    }
+
+    /// Install a new set of policies on the controller.
+    pub fn install_recipe_with_policies(&self, r: String, p: String) {
+        self.rpc("install_recipe_with_policies", &(r, p)).unwrap()
     }
 
     /// Set the `Logger` to use for internal log messages.
