@@ -1,8 +1,8 @@
 use std::collections::{HashMap, HashSet};
-use flow::payload::TriggerEndpoint;
-use flow::prelude::*;
-use flow::domain;
+use dataflow::payload::TriggerEndpoint;
+use dataflow::prelude::*;
 use flow::keys;
+use flow::domain_handle::DomainHandle;
 use petgraph;
 
 const FILTER_SPECIFICITY: usize = 10;
@@ -12,10 +12,10 @@ pub(crate) struct Plan<'a> {
     graph: &'a Graph,
     node: NodeIndex,
     empty: &'a HashSet<NodeIndex>,
-    domains: &'a mut HashMap<domain::Index, domain::DomainHandle>,
+    domains: &'a mut HashMap<DomainIndex, DomainHandle>,
     partial: bool,
 
-    tags: HashMap<Vec<usize>, Vec<(Tag, domain::Index)>>,
+    tags: HashMap<Vec<usize>, Vec<(Tag, DomainIndex)>>,
     paths: HashMap<Tag, Vec<NodeIndex>>,
     pending: Vec<PendingReplay>,
 }
@@ -24,8 +24,8 @@ pub(crate) struct Plan<'a> {
 pub(crate) struct PendingReplay {
     pub tag: Tag,
     pub source: LocalNodeIndex,
-    pub source_domain: domain::Index,
-    pub target_domain: domain::Index,
+    pub source_domain: DomainIndex,
+    pub target_domain: DomainIndex,
 }
 
 impl<'a> Plan<'a> {
@@ -34,7 +34,7 @@ impl<'a> Plan<'a> {
         graph: &'a Graph,
         node: NodeIndex,
         empty: &'a HashSet<NodeIndex>,
-        domains: &'a mut HashMap<domain::Index, domain::DomainHandle>,
+        domains: &'a mut HashMap<DomainIndex, DomainHandle>,
     ) -> Plan<'a> {
         let partial = m.partial.contains(&node);
         Plan {
@@ -305,7 +305,7 @@ impl<'a> Plan<'a> {
     ///
     /// Returns a list of backfill replays that need to happen before the migration is complete.
     pub fn finalize(mut self) -> Vec<PendingReplay> {
-        use flow::payload::InitialState;
+        use dataflow::payload::InitialState;
 
         // NOTE: we cannot use the impl of DerefMut here, since it (reasonably) disallows getting
         // mutable references to taken state.

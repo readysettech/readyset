@@ -1,9 +1,8 @@
 use channel::rpc::RpcClient;
 
-use flow::prelude::*;
-use flow;
-use checktable;
-use backlog::{self, ReadHandle};
+use dataflow::prelude::*;
+use dataflow::backlog::{self, ReadHandle};
+use dataflow::{self, checktable, Readers};
 
 use std::sync::Arc;
 use std::net::SocketAddr;
@@ -12,18 +11,33 @@ use arrayvec::ArrayVec;
 
 /// A request to read a specific key.
 #[derive(Serialize, Deserialize)]
-pub struct ReadQuery {
-    /// Where to read from
-    pub target: (NodeIndex, usize),
-    /// Keys to read with
-    pub keys: Vec<DataType>,
-    /// Whether to block of a partial reply is triggered
-    pub block: bool,
+pub enum ReadQuery {
+    /// Read normally
+    Normal {
+        /// Where to read from
+        target: (NodeIndex, usize),
+        /// Keys to read with
+        keys: Vec<DataType>,
+        /// Whether to block if a partial replay is triggered
+        block: bool,
+    },
+    /// Read and also get a checktable token
+    WithToken {
+        /// Where to read from
+        target: (NodeIndex, usize),
+        /// Keys to read with
+        keys: Vec<DataType>,
+    },
 }
 
 /// The contents of a specific key
 #[derive(Serialize, Deserialize)]
-pub struct ReadReply(pub Vec<Result<Vec<Vec<DataType>>, ()>>);
+pub enum ReadReply {
+    /// Read normally
+    Normal(Vec<Result<Datas, ()>>),
+    /// Read and got checktable tokens
+    WithToken(Vec<Result<(Datas, checktable::Token), ()>>),
+}
 
 /// Serializeable version of a `RemoteGetter`.
 #[derive(Clone, Debug, Serialize, Deserialize)]
@@ -52,21 +66,24 @@ pub struct RemoteGetter {
 }
 
 impl RemoteGetter {
-    /// Query for the results for the given key, optionally blocking if it is not yet available.
-    pub fn lookup(&mut self, keys: Vec<DataType>, block: bool) -> Vec<Result<Datas, ()>> {
+    /// Query for the results for the given keys, optionally blocking if it is not yet available.
+    pub fn multi_lookup(&mut self, keys: Vec<DataType>, block: bool) -> Vec<Result<Datas, ()>> {
         if self.shards.len() == 1 {
-            let ReadReply(rows) = self.shards[0]
-                .send(&ReadQuery {
+            let reply = self.shards[0]
+                .send(&ReadQuery::Normal {
                     target: (self.node, 0),
                     keys,
                     block,
                 })
                 .unwrap();
-            rows
+            match reply {
+                ReadReply::Normal(rows) => rows,
+                _ => unreachable!(),
+            }
         } else {
             let mut shard_queries = vec![Vec::new(); self.shards.len()];
             for key in keys {
-                let shard = ::shard_by(&key, self.shards.len());
+                let shard = dataflow::shard_by(&key, self.shards.len());
                 shard_queries[shard].push(key);
             }
 
@@ -74,17 +91,85 @@ impl RemoteGetter {
                 .into_iter()
                 .enumerate()
                 .flat_map(|(shard, keys)| {
-                    let ReadReply(rows) = self.shards[shard]
-                        .send(&ReadQuery {
+                    let reply = self.shards[shard]
+                        .send(&ReadQuery::Normal {
                             target: (self.node, shard),
                             keys,
                             block,
                         })
                         .unwrap();
-                    rows
+
+                    match reply {
+                        ReadReply::Normal(rows) => rows,
+                        _ => unreachable!(),
+                    }
                 })
                 .collect()
         }
+    }
+
+    /// Query for the results for the given keys, optionally blocking if it is not yet available.
+    pub fn transactional_multi_lookup(
+        &mut self,
+        keys: Vec<DataType>,
+    ) -> Vec<Result<(Datas, checktable::Token), ()>> {
+        if self.shards.len() == 1 {
+            let reply = self.shards[0]
+                .send(&ReadQuery::WithToken {
+                    target: (self.node, 0),
+                    keys,
+                })
+                .unwrap();
+            match reply {
+                ReadReply::WithToken(rows) => rows,
+                _ => unreachable!(),
+            }
+        } else {
+            let mut shard_queries = vec![Vec::new(); self.shards.len()];
+            for key in keys {
+                let shard = dataflow::shard_by(&key, self.shards.len());
+                shard_queries[shard].push(key);
+            }
+
+            shard_queries
+                .into_iter()
+                .enumerate()
+                .flat_map(|(shard, keys)| {
+                    let reply = self.shards[shard]
+                        .send(&ReadQuery::WithToken {
+                            target: (self.node, shard),
+                            keys,
+                        })
+                        .unwrap();
+
+                    match reply {
+                        ReadReply::WithToken(rows) => rows,
+                        _ => unreachable!(),
+                    }
+                })
+                .collect()
+        }
+    }
+
+    /// Lookup a single key.
+    pub fn lookup(&mut self, key: &DataType, block: bool) -> Result<Datas, ()> {
+        // TODO: Optimized version of this function?
+        self.multi_lookup(vec![key.clone()], block)
+            .into_iter()
+            .next()
+            .unwrap()
+    }
+
+    /// Do a transactional lookup for a single key.
+    pub fn transactional_lookup(
+        &mut self,
+        key: &DataType,
+    ) -> Result<(Datas, checktable::Token), ()> {
+        // TODO: Optimized version of this function?
+        self.transactional_multi_lookup(vec![key.clone()])
+            .into_iter()
+            .next()
+            .unwrap()
     }
 }
 
@@ -99,16 +184,16 @@ impl Getter {
     pub(crate) fn new(
         node: NodeIndex,
         sharded: bool,
-        readers: &flow::Readers,
+        readers: &Readers,
         ingredients: &Graph,
     ) -> Option<Self> {
         let rh = if sharded {
             let vr = readers.lock().unwrap();
 
             let mut array = ArrayVec::new();
-            for shard in 0..::SHARDS {
+            for shard in 0..dataflow::SHARDS {
                 match vr.get(&(node, shard)).cloned() {
-                    Some(rh) => array.push(Some(rh)),
+                    Some((rh, _)) => array.push(Some(rh)),
                     None => return None,
                 }
             }
@@ -116,7 +201,7 @@ impl Getter {
         } else {
             let vr = readers.lock().unwrap();
             match vr.get(&(node, 0)).cloned() {
-                Some(rh) => ReadHandle::Singleton(Some(rh)),
+                Some((rh, _)) => ReadHandle::Singleton(Some(rh)),
                 None => return None,
             }
         };

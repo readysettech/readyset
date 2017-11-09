@@ -7,35 +7,24 @@ pub mod security;
 pub mod reuse;
 
 use flow::Migration;
-use flow::prelude::NodeIndex;
+use core::NodeIndex;
 use mir::reuse as mir_reuse;
-use flow::core::DataType;
+use dataflow::prelude::DataType;
 use nom_sql::parser as sql_parser;
 use nom_sql::{ArithmeticBase, Column, SqlQuery};
 use nom_sql::SelectStatement;
 use self::mir::{MirNodeRef, SqlToMirConverter};
-use mir::query::MirQuery;
+use mir::query::{MirQuery, QueryFlowParts};
 use self::reuse::{ReuseConfig, ReuseConfigType};
 use sql::query_graph::{to_query_graph, QueryGraph};
 use self::security::UniverseId;
 use sql::query_signature::Signature;
+use mir_to_flow::mir_query_to_flow_parts;
 
 use slog;
 use std::collections::HashMap;
 use std::str;
 use std::vec::Vec;
-
-/// Represents the result of a query incorporation, specifying query name (auto-generated or
-/// reflecting a pre-specified name), new nodes added for the query, reused nodes that are part of
-/// the query, and the leaf node that represents the query result (and off whom we've hung a
-/// `Reader` node),
-#[derive(Clone, Debug, PartialEq)]
-pub struct QueryFlowParts {
-    pub name: String,
-    pub new_nodes: Vec<NodeIndex>,
-    pub reused_nodes: Vec<NodeIndex>,
-    pub query_leaf: NodeIndex,
-}
 
 #[derive(Clone, Debug)]
 enum QueryGraphReuse {
@@ -350,7 +339,7 @@ impl SqlIncorporator {
 
         // push it into the flow graph using the migration in `mig`, and obtain `QueryFlowParts`.
         // Note that we don't need to optimize the MIR here, because the query is trivial.
-        let qfp = mir.into_flow_parts(&mut mig);
+        let qfp = mir_query_to_flow_parts(&mut mir, &mut mig);
 
         // TODO(malte): we currently need to remember these for local state, but should figure out
         // a better plan (see below)
@@ -394,7 +383,7 @@ impl SqlIncorporator {
             .collect::<Vec<_>>();
 
         // push it into the flow graph using the migration in `mig`, and obtain `QueryFlowParts`
-        let qfp = mir.into_flow_parts(&mut mig);
+        let qfp = mir_query_to_flow_parts(&mut mir, &mut mig);
 
         // TODO(malte): get rid of duplication and figure out where to track this state
         self.view_schemas.insert(String::from(query_name), fields);
@@ -434,7 +423,7 @@ impl SqlIncorporator {
             .collect::<Vec<_>>();
 
         // push it into the flow graph using the migration in `mig`, and obtain `QueryFlowParts`
-        let qfp = mir.into_flow_parts(&mut mig);
+        let qfp = mir_query_to_flow_parts(&mut mir, &mut mig);
 
         // TODO(malte): get rid of duplication and figure out where to track this state
         self.view_schemas.insert(String::from(query_name), fields);
@@ -496,7 +485,7 @@ impl SqlIncorporator {
             post_reuse_opt_mir.to_graphviz().unwrap()
         );
 
-        let qfp = post_reuse_opt_mir.into_flow_parts(&mut mig);
+        let qfp = mir_query_to_flow_parts(&mut post_reuse_opt_mir, &mut mig);
 
         info!(
             self.log,
@@ -713,9 +702,8 @@ impl<'a> ToFlowParts for &'a str {
 #[cfg(test)]
 mod tests {
     use nom_sql::Column;
-    use flow::node::Node;
-    use flow::Migration;
-    use flow::prelude::Ingredient;
+    use dataflow::prelude::*;
+    use flow::{ControllerBuilder, Migration};
     use Blender;
     use super::{SqlIncorporator, ToFlowParts};
     use nom_sql::FunctionExpression;
@@ -751,7 +739,7 @@ mod tests {
     #[test]
     fn it_parses() {
         // set up graph
-        let mut g = Blender::new();
+        let mut g = ControllerBuilder::default().build_inner();
         let mut inc = SqlIncorporator::default();
         g.migrate(|mig| {
             // Must have a base node for type inference to work, so make one manually
@@ -789,7 +777,7 @@ mod tests {
     #[test]
     fn it_incorporates_simple_join() {
         // set up graph
-        let mut g = Blender::new();
+        let mut g = ControllerBuilder::default().build_inner();
         let mut inc = SqlIncorporator::default();
         g.migrate(|mig| {
             // Establish a base write type for "users"
@@ -847,7 +835,7 @@ mod tests {
     #[test]
     fn it_incorporates_simple_selection() {
         // set up graph
-        let mut g = Blender::new();
+        let mut g = ControllerBuilder::default().build_inner();
         let mut inc = SqlIncorporator::default();
         g.migrate(|mig| {
             // Establish a base write type
@@ -888,7 +876,7 @@ mod tests {
     #[test]
     fn it_incorporates_aggregation() {
         // set up graph
-        let mut g = Blender::new();
+        let mut g = ControllerBuilder::default().build_inner();
         let mut inc = SqlIncorporator::default();
         g.migrate(|mig| {
             // Establish a base write types
@@ -942,7 +930,7 @@ mod tests {
     #[test]
     fn it_does_not_reuse_if_disabled() {
         // set up graph
-        let mut g = Blender::new();
+        let mut g = ControllerBuilder::default().build_inner();
         let mut inc = SqlIncorporator::default();
         inc.disable_reuse();
         g.migrate(|mig| {
@@ -971,7 +959,7 @@ mod tests {
     #[test]
     fn it_reuses_identical_query() {
         // set up graph
-        let mut g = Blender::new();
+        let mut g = ControllerBuilder::default().build_inner();
         let mut inc = SqlIncorporator::default();
         g.migrate(|mig| {
             // Establish a base write type
@@ -1006,7 +994,7 @@ mod tests {
     #[test]
     fn it_reuses_with_different_parameter() {
         // set up graph
-        let mut g = Blender::new();
+        let mut g = ControllerBuilder::default().build_inner();
         let mut inc = SqlIncorporator::default();
         g.migrate(|mig| {
             // Establish a base write type
@@ -1074,7 +1062,7 @@ mod tests {
     #[test]
     fn it_incorporates_aggregation_no_group_by() {
         // set up graph
-        let mut g = Blender::new();
+        let mut g = ControllerBuilder::default().build_inner();
         let mut inc = SqlIncorporator::default();
         g.migrate(|mig| {
             // Establish a base write type
@@ -1127,7 +1115,7 @@ mod tests {
     #[test]
     fn it_incorporates_aggregation_count_star() {
         // set up graph
-        let mut g = Blender::new();
+        let mut g = ControllerBuilder::default().build_inner();
         let mut inc = SqlIncorporator::default();
         g.migrate(|mig| {
             // Establish a base write type
@@ -1177,7 +1165,7 @@ mod tests {
     #[test]
     fn it_incorporates_explicit_multi_join() {
         // set up graph
-        let mut g = Blender::new();
+        let mut g = ControllerBuilder::default().build_inner();
         let mut inc = SqlIncorporator::default();
         g.migrate(|mig| {
             // Establish base write types for "users" and "articles" and "votes"
@@ -1230,7 +1218,7 @@ mod tests {
     #[test]
     fn it_incorporates_implicit_multi_join() {
         // set up graph
-        let mut g = Blender::new();
+        let mut g = ControllerBuilder::default().build_inner();
         let mut inc = SqlIncorporator::default();
         g.migrate(|mig| {
             // Establish base write types for "users" and "articles" and "votes"
@@ -1295,7 +1283,7 @@ mod tests {
     #[test]
     fn it_incorporates_literal_projection() {
         // set up graph
-        let mut g = Blender::new();
+        let mut g = ControllerBuilder::default().build_inner();
         let mut inc = SqlIncorporator::default();
         g.migrate(|mig| {
             assert!(
@@ -1316,7 +1304,7 @@ mod tests {
     #[test]
     fn it_incorporates_arithmetic_projection() {
         // set up graph
-        let mut g = Blender::new();
+        let mut g = ControllerBuilder::default().build_inner();
         let mut inc = SqlIncorporator::default();
         g.migrate(|mig| {
             assert!(
@@ -1336,7 +1324,7 @@ mod tests {
 
     #[test]
     fn it_incorporates_join_with_nested_query() {
-        let mut g = Blender::new();
+        let mut g = ControllerBuilder::default().build_inner();
         let mut inc = SqlIncorporator::default();
         g.migrate(|mig| {
             assert!(

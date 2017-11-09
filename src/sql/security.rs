@@ -1,4 +1,4 @@
-use flow::core::DataType;
+use dataflow::prelude::DataType;
 use flow::Migration;
 use std::collections::HashMap;
 use nom_sql::SqlQuery;

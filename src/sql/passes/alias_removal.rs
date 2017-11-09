@@ -3,7 +3,7 @@ use nom_sql::{Column, ConditionBase, ConditionExpression, ConditionTree, FieldEx
 
 use std::collections::HashMap;
 
-use flow::core::DataType;
+use dataflow::prelude::DataType;
 
 pub trait AliasRemoval {
     fn expand_table_aliases(self, universe_id: DataType) -> SqlQuery;

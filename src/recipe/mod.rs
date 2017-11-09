@@ -2,7 +2,7 @@ use nom_sql::parser as sql_parser;
 use nom_sql::SqlQuery;
 use {Migration, SqlIncorporator};
 use sql::reuse::ReuseConfigType;
-use flow::prelude::NodeIndex;
+use core::NodeIndex;
 
 use security::Policy;
 
