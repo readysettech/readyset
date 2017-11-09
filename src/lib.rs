@@ -30,6 +30,7 @@ mod create;
 mod insert;
 mod join;
 mod select;
+mod compound_select;
 mod table;
 mod delete;
 mod update;
