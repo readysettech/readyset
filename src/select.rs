@@ -77,7 +77,7 @@ named!(group_by_clause<&[u8], GroupByClause>,
 );
 
 /// Parse LIMIT clause
-named!(limit_clause<&[u8], LimitClause>,
+named!(pub limit_clause<&[u8], LimitClause>,
     complete!(chain!(
         multispace? ~
         caseless_tag!("limit") ~
@@ -173,7 +173,7 @@ named!(join_rhs<&[u8], JoinRightSide>,
 );
 
 /// Parse ORDER BY clause
-named!(order_clause<&[u8], OrderClause>,
+named!(pub order_clause<&[u8], OrderClause>,
     complete!(chain!(
         multispace? ~
         caseless_tag!("order by") ~
