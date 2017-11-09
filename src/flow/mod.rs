@@ -791,68 +791,6 @@ impl ControllerInner {
     }
 }
 
-// Using this format trait will omit egress and sharder nodes.
-impl fmt::LowerHex for ControllerInner {
-    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        use petgraph::visit::EdgeRef;
-        let indentln = |f: &mut fmt::Formatter| write!(f, "    ");
-
-        // Output header.
-        writeln!(f, "digraph {{")?;
-
-        // Output global formatting.
-        indentln(f)?;
-        writeln!(f, "node [shape=record, fontsize=10]")?;
-
-        // Output node descriptions.
-
-        let mut nodes = Vec::new();
-        nodes.push(self.source);
-
-        let mut visited = HashSet::new();
-        while !nodes.is_empty() {
-            let n = nodes.pop().unwrap();
-            if visited.contains(&n) {
-                continue;
-            }
-            if self.ingredients[n].is_internal() {
-                indentln(f)?;
-                write!(f, "{}", n.index())?;
-                self.ingredients[n].describe(f, n)?;
-            }
-
-            let mut targets: Vec<NodeIndex> =
-                self.ingredients.edges(n).map(|e| e.target()).collect();
-            let mut propagated_targets = HashSet::new();
-
-            while !targets.is_empty() {
-                let node = targets.pop().unwrap();
-                if !self.ingredients[node].is_internal() {
-                    for e in self.ingredients.edges(node) {
-                        targets.push(e.target());
-                    }
-                } else {
-                    propagated_targets.insert(node);
-                }
-            }
-
-            for target in propagated_targets {
-                indentln(f)?;
-                write!(f, "{} -> {}", n.index(), target.index())?;
-                writeln!(f, "")?;
-                nodes.push(target);
-            }
-
-            visited.insert(n);
-        }
-
-        // Output footer.
-        write!(f, "}}")?;
-
-        Ok(())
-    }
-}
-
 #[derive(Clone)]
 enum ColumnChange {
     Add(String, DataType),
