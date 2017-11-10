@@ -1,14 +1,16 @@
 use nom::IResult;
 use std::str;
 
-use create::*;
-use insert::*;
-use select::*;
+use create::{creation, CreateTableStatement};
+use insert::{insertion, InsertStatement};
+use compound_select::{compound_selection, CompoundSelectStatement};
+use select::{selection, SelectStatement};
 
 #[derive(Clone, Debug, Hash, PartialEq, Serialize, Deserialize)]
 pub enum SqlQuery {
     CreateTable(CreateTableStatement),
     Insert(InsertStatement),
+    CompoundSelect(CompoundSelectStatement),
     Select(SelectStatement),
 }
 
@@ -30,6 +32,11 @@ pub fn parse_query(input: &str) -> Result<SqlQuery, &str> {
 
     match insertion(&q_bytes) {
         IResult::Done(_, o) => return Ok(SqlQuery::Insert(o)),
+        _ => (),
+    };
+
+    match compound_selection(&q_bytes) {
+        IResult::Done(_, o) => return Ok(SqlQuery::CompoundSelect(o)),
         _ => (),
     };
 

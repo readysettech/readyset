@@ -5,7 +5,7 @@ use std::str;
 use select::{limit_clause, nested_selection, order_clause, LimitClause, OrderClause,
              SelectStatement};
 
-#[derive(Debug, Hash, PartialEq)]
+#[derive(Clone, Debug, Hash, PartialEq, Deserialize, Serialize)]
 pub enum CompoundOperation {
     Union,
     DistinctUnion,
@@ -13,7 +13,7 @@ pub enum CompoundOperation {
     Except,
 }
 
-#[derive(Debug, Hash, PartialEq)]
+#[derive(Clone, Debug, Hash, PartialEq, Deserialize, Serialize)]
 pub struct CompoundSelectStatement {
     pub selects: Vec<(Option<CompoundOperation>, SelectStatement)>,
     pub order: Option<OrderClause>,
@@ -50,7 +50,7 @@ named!(compound_op<&[u8], CompoundOperation>,
 );
 
 /// Parse compound selection
-named!(compound_select<&[u8], CompoundSelectStatement>,
+named!(pub compound_selection<&[u8], CompoundSelectStatement>,
     complete!(chain!(
         first_select: nested_selection ~
         other_selects: many0!(
@@ -91,7 +91,7 @@ mod tests {
     #[test]
     fn union() {
         let qstr = "SELECT id, 1 FROM Vote UNION SELECT id, stars from Rating;";
-        let res = compound_select(qstr.as_bytes());
+        let res = compound_selection(qstr.as_bytes());
 
         let first_select = SelectStatement {
             tables: vec![Table::from("Vote")],
@@ -126,7 +126,7 @@ mod tests {
         let qstr = "SELECT id, 1 FROM Vote \
                     UNION SELECT id, stars from Rating \
                     UNION DISTINCT SELECT 42, 5 FROM Vote;";
-        let res = compound_select(qstr.as_bytes());
+        let res = compound_selection(qstr.as_bytes());
 
         let first_select = SelectStatement {
             tables: vec![Table::from("Vote")],
@@ -169,7 +169,7 @@ mod tests {
     #[test]
     fn union_all() {
         let qstr = "SELECT id, 1 FROM Vote UNION ALL SELECT id, stars from Rating;";
-        let res = compound_select(qstr.as_bytes());
+        let res = compound_selection(qstr.as_bytes());
 
         let first_select = SelectStatement {
             tables: vec![Table::from("Vote")],
