@@ -1,3 +1,8 @@
+<<<<<<< HEAD
+=======
+extern crate time;
+
+>>>>>>> Suffix test log files with a timestamp
 use core::{DataType, Datas};
 use dataflow::DomainBuilder;
 use dataflow::backlog::SingleReadHandle;
@@ -27,7 +32,7 @@ use controller::recipe::{ActivationResult, Recipe};
 use controller::sql::reuse::ReuseConfigType;
 use controller::sql::{SqlIncorporator, ToFlowParts};
 
-use std::time;
+use std::time::Duration;
 use std::thread;
 use std::sync::mpsc;
 use std::env;
@@ -36,13 +41,20 @@ use std::collections::HashMap;
 
 const DEFAULT_SETTLE_TIME_MS: u64 = 100;
 
-fn get_settle_time() -> time::Duration {
+fn get_settle_time() -> Duration {
     let settle_time: u64 = match env::var("SETTLE_TIME") {
         Ok(value) => value.parse().unwrap(),
         Err(_) => DEFAULT_SETTLE_TIME_MS,
     };
 
-    time::Duration::from_millis(settle_time)
+    Duration::from_millis(settle_time)
+}
+
+// Suffixes the given log base with a timestamp, ensuring that
+// subsequent test runs do not reuse log files in the case of failures:
+fn get_log_name(base: &str) -> String {
+    let current_time = time::get_time();
+    format!("{}-{}-{}", base, current_time.sec, current_time.nsec)
 }
 
 // Sleeps for either DEFAULT_SETTLE_TIME_MS milliseconds, or
@@ -58,8 +70,8 @@ fn it_works_basic() {
     let pparams = PersistenceParameters::new(
         DurabilityMode::DeleteOnExit,
         128,
-        time::Duration::from_millis(1),
-        Some(String::from("it_works_basic")),
+        Duration::from_millis(1),
+        Some(get_log_name("it_works_basic")),
     );
     g.with_persistence_options(pparams);
     let (a, b, c) = g.migrate(|mig| {
@@ -378,13 +390,14 @@ fn it_works_with_arithmetic_aliases() {
 
 #[test]
 fn it_recovers_persisted_logs() {
+    let log_name = get_log_name("it_recovers_persisted_logs");
     let setup = || {
         let mut g = ControllerBuilder::default().build_inner();
         let pparams = PersistenceParameters::new(
             DurabilityMode::DeleteOnExit,
             128,
-            time::Duration::from_millis(1),
-            Some(String::from("it_recovers_persisted_logs")),
+            Duration::from_millis(1),
+            Some(log_name.clone()),
         );
         g.with_persistence_options(pparams);
 
@@ -435,13 +448,14 @@ fn it_recovers_persisted_logs() {
 
 #[test]
 fn it_recovers_persisted_logs_w_multiple_nodes() {
+    let log_name = get_log_name("it_recovers_persisted_logs_w_multiple_nodes");
     let setup = || {
         let mut g = ControllerBuilder::default().build_inner();
         let pparams = PersistenceParameters::new(
             DurabilityMode::DeleteOnExit,
             128,
-            time::Duration::from_millis(1),
-            Some(String::from("it_recovers_persisted_logs_w_multiple_nodes")),
+            Duration::from_millis(1),
+            Some(log_name.clone()),
         );
         g.with_persistence_options(pparams);
 
@@ -492,13 +506,14 @@ fn it_recovers_persisted_logs_w_multiple_nodes() {
 
 #[test]
 fn it_recovers_persisted_logs_w_transactions() {
+    let log_name = get_log_name("it_recovers_persisted_logs");
     let setup = || {
         let mut g = ControllerBuilder::default().build_inner();
         let pparams = PersistenceParameters::new(
             DurabilityMode::DeleteOnExit,
             128,
-            time::Duration::from_millis(1),
-            Some(String::from("it_recovers_persisted_logs_w_transactions")),
+            Duration::from_millis(1),
+            Some(log_name.clone()),
         );
         g.with_persistence_options(pparams);
 
