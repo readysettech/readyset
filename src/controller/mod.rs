@@ -1104,17 +1104,21 @@ impl<'a> Migration<'a> {
             }
         }
         let swapped = swapped0;
+        let mut sorted_new = new.iter().collect::<Vec<_>>();
+        sorted_new.sort();
 
         // Find all nodes for domains that have changed
-        let changed_domains: HashSet<DomainIndex> = new.iter()
-            .filter(|&&ni| !mainline.ingredients[ni].is_dropped())
-            .map(|&ni| mainline.ingredients[ni].domain())
+        let changed_domains: HashSet<DomainIndex> = sorted_new
+            .iter()
+            .filter(|&&&ni| !mainline.ingredients[ni].is_dropped())
+            .map(|&&ni| mainline.ingredients[ni].domain())
             .collect();
 
-        let mut domain_new_nodes = new.iter()
-            .filter(|&&ni| ni != mainline.source)
-            .filter(|&&ni| !mainline.ingredients[ni].is_dropped())
-            .map(|&ni| (mainline.ingredients[ni].domain(), ni))
+        let mut domain_new_nodes = sorted_new
+            .iter()
+            .filter(|&&&ni| ni != mainline.source)
+            .filter(|&&&ni| !mainline.ingredients[ni].is_dropped())
+            .map(|&&ni| (mainline.ingredients[ni].domain(), ni))
             .fold(HashMap::new(), |mut dns, (d, ni)| {
                 dns.entry(d).or_insert_with(Vec::new).push(ni);
                 dns
