@@ -12,6 +12,7 @@ use dataflow::ops::grouped::concat::{GroupConcat, TextComponent};
 use dataflow::ops::grouped::extremum::{Extremum, ExtremumOperator};
 use dataflow::ops::identity::Identity;
 use dataflow::ops::join::{Join, JoinSource, JoinType};
+use dataflow::ops::join::JoinSource::*;
 use dataflow::ops::latest::Latest;
 use dataflow::ops::project::Project;
 use dataflow::ops::topk::TopK;
@@ -19,13 +20,13 @@ use dataflow::ops::union::Union;
 use dataflow::payload::PacketEvent;
 use dataflow::prelude::*;
 use dataflow::{DurabilityMode, PersistenceParameters};
-use flow::ControllerBuilder;
-use flow::coordination::{CoordinationMessage, CoordinationPayload};
-use flow::{Blender, Getter, Migration, Mutator, MutatorBuilder, MutatorError, ReadQuery,
-           ReadReply, RemoteGetter, RemoteGetterBuilder};
-use recipe::{ActivationResult, Recipe};
-use sql::reuse::ReuseConfigType;
-use sql::{SqlIncorporator, ToFlowParts};
+use controller::ControllerBuilder;
+use coordination::{CoordinationMessage, CoordinationPayload};
+use controller::{Blender, Getter, Migration, Mutator, MutatorBuilder, MutatorError, ReadQuery,
+                 ReadReply, RemoteGetter, RemoteGetterBuilder};
+use controller::recipe::{ActivationResult, Recipe};
+use controller::sql::reuse::ReuseConfigType;
+use controller::sql::{SqlIncorporator, ToFlowParts};
 
 use std::time;
 use std::thread;
@@ -292,11 +293,10 @@ fn it_works_deletion() {
     );
 
     // delete first value
-    use StreamUpdate::*;
     muta.delete(vec![2.into()]).unwrap();
     assert_eq!(
         cq.recv_timeout(get_settle_time()),
-        Ok(vec![DeleteRow(vec![1.into(), 2.into()])])
+        Ok(vec![StreamUpdate::DeleteRow(vec![1.into(), 2.into()])])
     );
 }
 
@@ -521,8 +521,6 @@ fn it_works_with_function_arithmetic() {
 
 #[test]
 fn votes() {
-    use {Aggregation, Base, Join, JoinType, Union};
-
     // set up graph
     let mut g = ControllerBuilder::default().build_inner();
     let (article1, article2, vote, article, vc, end) = g.migrate(|mig| {
@@ -550,7 +548,6 @@ fn votes() {
         mig.maintain_anonymous(vc, 0);
 
         // add final join using first field from article and first from vc
-        use JoinSource::*;
         let j = Join::new(article, vc, JoinType::Inner, vec![B(0, 0), L(1), R(1)]);
         let end = mig.add_ingredient("end", &["id", "title", "votes"], j);
         mig.maintain_anonymous(end, 0);
@@ -627,8 +624,6 @@ fn votes() {
 
 #[test]
 fn transactional_vote() {
-    use {Aggregation, Base, Identity, Join, JoinType, Union};
-
     // set up graph
     let mut g = ControllerBuilder::default();
     g.disable_partial(); // because end_votes forces full below partial
@@ -660,7 +655,6 @@ fn transactional_vote() {
         mig.maintain_anonymous(vc, 0);
 
         // add final join using first field from article and first from vc
-        use JoinSource::*;
         let j = Join::new(article, vc, JoinType::Inner, vec![B(0, 0), L(1), R(1)]);
         let end = mig.add_ingredient("end", &["id", "title", "votes"], j);
         let end_title = mig.add_ingredient("end2", &["id", "title", "votes"], Identity::new(end));
@@ -1079,8 +1073,6 @@ fn replay_during_replay() {
 
     // add our joins
     let (u, target) = g.migrate(|mig| {
-        use {Join, JoinType};
-        use JoinSource::*;
         // u = u1 * u2
         let j = Join::new(u1, u2, JoinType::Inner, vec![B(0, 0), R(1)]);
         let u = mig.add_ingredient("u", &["u", "a"], j);
@@ -1453,7 +1445,6 @@ fn state_replay_migration_stream() {
     let (out, b) = g.migrate(|mig| {
         // add a new base and a join
         let b = mig.add_ingredient("b", &["x", "z"], Base::default());
-        use JoinSource::*;
         let j = Join::new(a, b, JoinType::Inner, vec![B(0, 0), L(1), R(1)]);
         let j = mig.add_ingredient("j", &["x", "y", "z"], j);
 
@@ -1528,7 +1519,6 @@ fn migration_depends_on_unchanged_domain() {
 }
 
 fn do_full_vote_migration(old_puts_after: bool) {
-    use {Aggregation, Base, Blender, DataType, Join, JoinType};
     let mut g = ControllerBuilder::default().build_inner();
     let (article, vote, vc, end) = g.migrate(|mig| {
         // migrate
@@ -1547,7 +1537,6 @@ fn do_full_vote_migration(old_puts_after: bool) {
         );
 
         // add final join using first field from article and first from vc
-        use JoinSource::*;
         let j = Join::new(article, vc, JoinType::Left, vec![B(0, 0), L(1), R(1)]);
         let end = mig.add_ingredient("awvc", &["id", "title", "votes"], j);
 
@@ -1597,7 +1586,6 @@ fn do_full_vote_migration(old_puts_after: bool) {
         );
 
         // join vote count and rsum (and in theory, sum them)
-        use JoinSource::*;
         let j = Join::new(rs, vc, JoinType::Left, vec![B(0, 0), L(1), R(1)]);
         let total = mig.add_ingredient("total", &["id", "ratings", "votes"], j);
 
@@ -1655,7 +1643,6 @@ fn full_vote_migration_new_and_old() {
 
 #[test]
 fn live_writes() {
-    use {Aggregation, Blender, DataType};
     let mut g = ControllerBuilder::default().build_inner();
     let (vote, vc) = g.migrate(|mig| {
         // migrate
@@ -1752,7 +1739,6 @@ fn state_replay_migration_query() {
 
     let out = g.migrate(|mig| {
         // add join and a reader node
-        use JoinSource::*;
         let j = Join::new(a, b, JoinType::Inner, vec![B(0, 0), L(1), R(1)]);
         let j = mig.add_ingredient("j", &["x", "y", "z"], j);
 
@@ -1882,12 +1868,10 @@ fn finkelstein1982_queries() {
         f.read_to_string(&mut s).unwrap();
         let lines: Vec<String> = s.lines()
             .filter(|l| !l.is_empty() && !l.starts_with("#"))
-            .map(|l| {
-                if !(l.ends_with("\n") || l.ends_with(";")) {
-                    String::from(l) + "\n"
-                } else {
-                    String::from(l)
-                }
+            .map(|l| if !(l.ends_with("\n") || l.ends_with(";")) {
+                String::from(l) + "\n"
+            } else {
+                String::from(l)
             })
             .collect();
 
@@ -1914,12 +1898,10 @@ fn tpc_w() {
         f.read_to_string(&mut s).unwrap();
         let lines: Vec<String> = s.lines()
             .filter(|l| !l.is_empty() && !l.starts_with('#'))
-            .map(|l| {
-                if !(l.ends_with('\n') || l.ends_with(';')) {
-                    String::from(l) + "\n"
-                } else {
-                    String::from(l)
-                }
+            .map(|l| if !(l.ends_with('\n') || l.ends_with(';')) {
+                String::from(l) + "\n"
+            } else {
+                String::from(l)
             })
             .collect();
 

@@ -1,5 +1,3 @@
-use channel::{self, TcpSender};
-use channel::poll::{PollEvent, PollingLoop, ProcessResult, RpcPollEvent, RpcPollingLoop};
 use slog::Logger;
 use std::collections::HashMap;
 use std::net::SocketAddr;
@@ -7,11 +5,15 @@ use std::time::{Duration, Instant};
 use std::thread::{self, JoinHandle};
 use std::sync::{Arc, Mutex};
 
+use channel::{self, TcpSender};
+use channel::poll::{PollEvent, PollingLoop, ProcessResult, RpcPollEvent, RpcPollingLoop};
+use dataflow::{Readers, DomainBuilder};
 use dataflow::checktable::TokenGenerator;
-use dataflow::prelude::DomainIndex;
-use dataflow::{DomainBuilder, Readers};
-use dataflow::prelude::ChannelCoordinator;
-use {CoordinationMessage, CoordinationPayload, NodeIndex, ReadQuery, ReadReply, SingleReadHandle};
+use dataflow::backlog::SingleReadHandle;
+use dataflow::prelude::*;
+
+use controller::{ReadQuery, ReadReply};
+use coordination::{CoordinationMessage, CoordinationPayload};
 
 /// Workers are responsible for running domains, and serving reads to any materializations contained
 /// within them.

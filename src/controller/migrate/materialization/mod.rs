@@ -6,8 +6,8 @@
 //! module).
 
 use dataflow::prelude::*;
-use flow::domain_handle::DomainHandle;
-use flow::keys;
+use controller::domain_handle::DomainHandle;
+use controller::keys;
 use petgraph;
 use petgraph::graph::NodeIndex;
 use std::collections::{HashMap, HashSet};

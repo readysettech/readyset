@@ -1,5 +1,5 @@
-use sql::reuse::{ReuseConfiguration, ReuseType};
-use sql::query_graph::QueryGraph;
+use controller::sql::reuse::{ReuseConfiguration, ReuseType};
+use controller::sql::query_graph::QueryGraph;
 use mir::query::MirQuery;
 
 use std::vec::Vec;

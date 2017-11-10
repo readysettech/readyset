@@ -1,7 +1,8 @@
 use nom_sql::parser as sql_parser;
 use nom_sql::SqlQuery;
-use {Migration, SqlIncorporator};
-use sql::reuse::ReuseConfigType;
+use controller::Migration;
+use controller::sql::reuse::ReuseConfigType;
+use controller::sql::SqlIncorporator;
 use core::NodeIndex;
 
 use slog;

@@ -1,13 +1,3 @@
-use channel::{tcp, TcpReceiver, TcpSender};
-use channel::poll::{KeepPolling, PollEvent, PollingLoop, StopPolling};
-
-use dataflow::{self, DomainBuilder, DomainConfig, PersistenceParameters, Readers};
-use dataflow::payload::ControlReplyPacket;
-use dataflow::prelude::*;
-use dataflow::statistics::{DomainStats, NodeStats};
-use flow::coordination::{CoordinationMessage, CoordinationPayload};
-use flow::{WorkerEndpoint, WorkerIdentifier};
-
 use std::{self, cell, io, thread};
 use std::collections::HashMap;
 use std::net::{IpAddr, SocketAddr};
@@ -15,6 +5,16 @@ use std::sync::Arc;
 
 use mio;
 use slog::Logger;
+
+use channel::{tcp, TcpReceiver, TcpSender};
+use channel::poll::{KeepPolling, PollEvent, PollingLoop, StopPolling};
+use dataflow::{self, DomainBuilder, DomainConfig, PersistenceParameters, Readers};
+use dataflow::payload::ControlReplyPacket;
+use dataflow::prelude::*;
+use dataflow::statistics::{DomainStats, NodeStats};
+
+use coordination::{CoordinationMessage, CoordinationPayload};
+use controller::{WorkerEndpoint, WorkerIdentifier};
 
 #[derive(Debug)]
 pub enum WaitError {

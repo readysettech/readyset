@@ -1,11 +1,11 @@
 use nom_sql::Table;
-use sql::query_graph::QueryGraph;
+use controller::sql::query_graph::QueryGraph;
 use mir::query::MirQuery;
 
 use std::vec::Vec;
 use std::collections::HashMap;
 
-use sql::reuse::join_order::reorder_joins;
+use controller::sql::reuse::join_order::reorder_joins;
 
 mod finkelstein;
 mod relaxed;

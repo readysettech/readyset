@@ -29,16 +29,20 @@ use slog;
 use tarpc::sync::client::{self, ClientExt};
 use tokio_core::reactor::Core;
 
-pub mod coordination;
 pub mod domain_handle;
 pub mod keys;
 pub mod migrate;
 
-mod mutator;
+pub(crate) mod recipe;
+pub(crate) mod sql;
+
 mod getter;
+mod mir_to_flow;
+mod mutator;
+mod web;
 
 use self::domain_handle::DomainHandle;
-use self::coordination::{CoordinationMessage, CoordinationPayload};
+use coordination::{CoordinationMessage, CoordinationPayload};
 
 pub use self::mutator::{Mutator, MutatorBuilder, MutatorError};
 pub use self::getter::{Getter, ReadQuery, ReadReply, RemoteGetter, RemoteGetterBuilder};
@@ -673,7 +677,7 @@ impl ControllerInner {
 
     pub fn install_recipe(&mut self, r_txt: String) {
         self.migrate(|mig| {
-            use Recipe;
+            use controller::recipe::Recipe;
             let mut r = Recipe::from_str(&r_txt, None).unwrap();
             assert!(r.activate(mig, false).is_ok());
         });

@@ -1,7 +1,7 @@
-use sql::reuse::helpers::predicate_implication::complex_predicate_implies;
-use sql::reuse::{ReuseConfiguration, ReuseType};
-use sql::query_graph::{QueryGraph, QueryGraphEdge};
-use sql::query_signature::Signature;
+use controller::sql::reuse::helpers::predicate_implication::complex_predicate_implies;
+use controller::sql::reuse::{ReuseConfiguration, ReuseType};
+use controller::sql::query_graph::{QueryGraph, QueryGraphEdge};
+use controller::sql::query_signature::Signature;
 use mir::query::MirQuery;
 
 use std::vec::Vec;

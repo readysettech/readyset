@@ -444,7 +444,7 @@ pub fn to_query_graph(st: &SelectStatement) -> Result<QueryGraph, String> {
 
                 let join_pred = match jc.constraint {
                     JoinConstraint::On(ref cond) => {
-                        use sql::query_utils::ReferredTables;
+                        use controller::sql::query_utils::ReferredTables;
 
                         // find all distinct tables mentioned in the condition
                         // conditions for now.

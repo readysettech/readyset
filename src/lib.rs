@@ -360,10 +360,8 @@ extern crate core;
 extern crate dataflow;
 extern crate mir;
 
-mod flow;
-mod mir_to_flow;
-mod recipe;
-mod sql;
+mod controller;
+mod coordination;
 mod worker;
 
 #[cfg(test)]
@@ -371,31 +369,13 @@ mod tests;
 
 pub use core::{DataType, Datas, NodeIndex};
 
-pub use dataflow::backlog::SingleReadHandle;
 pub use dataflow::checktable::{Token, TransactionResult};
 pub use dataflow::debug::{DebugEvent, DebugEventType};
-pub use dataflow::node::StreamUpdate;
-pub use dataflow::payload::PacketEvent;
-pub use dataflow::ops::base::Base;
-pub use dataflow::ops::grouped::aggregate::{Aggregation, Aggregator};
-pub use dataflow::ops::grouped::concat::{GroupConcat, TextComponent};
-pub use dataflow::ops::grouped::extremum::{Extremum, ExtremumOperator};
-pub use dataflow::ops::identity::Identity;
-pub use dataflow::ops::project::Project;
-pub use dataflow::ops::join::{Join, JoinSource, JoinType};
-pub use dataflow::ops::union::Union;
-pub use dataflow::ops::latest::Latest;
-pub use dataflow::ops::filter::{Filter, Operator};
-pub use dataflow::ops::topk::TopK;
 pub use dataflow::prelude::DomainIndex;
 pub use dataflow::{DurabilityMode, PersistenceParameters};
 
-pub use flow::{Blender, ControllerBuilder, Getter, Migration, Mutator, MutatorBuilder,
-               MutatorError, ReadQuery, ReadReply, RemoteGetter, RemoteGetterBuilder};
-pub use flow::coordination::{CoordinationMessage, CoordinationPayload};
-pub use recipe::{ActivationResult, Recipe};
-pub use sql::{SqlIncorporator, ToFlowParts};
-pub use sql::reuse::ReuseConfigType;
+pub use controller::{Blender, ControllerBuilder, Mutator, MutatorBuilder, MutatorError, ReadQuery,
+                     ReadReply, RemoteGetter, RemoteGetterBuilder};
 pub use worker::Worker;
 
 /// Just give me a damn terminal logger
@@ -406,7 +386,3 @@ pub fn logger_pls() -> slog::Logger {
     use std::sync::Mutex;
     Logger::root(Mutex::new(term_full()).fuse(), o!())
 }
-
-#[cfg(feature = "web")]
-/// web provides a simple REST HTTP server for reading from and writing to the data flow graph.
-pub mod web;

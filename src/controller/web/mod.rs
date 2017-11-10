@@ -3,7 +3,7 @@ use rustful::server::Listening;
 use rustful::server::Global;
 use std::sync::{Arc, Mutex};
 
-use flow::ControllerInner;
+use controller::ControllerInner;
 use core::DataType;
 use serde_json::{self, Value};
 

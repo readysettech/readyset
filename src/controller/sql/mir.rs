@@ -9,8 +9,8 @@ use dataflow::ops::join::JoinType;
 use nom_sql::{ArithmeticExpression, Column, ColumnSpecification, ConditionBase,
               ConditionExpression, ConditionTree, Literal, Operator, SqlQuery, TableKey};
 use nom_sql::{LimitClause, OrderClause, SelectStatement};
-use sql::query_graph::{JoinRef, OutputColumn, QueryGraph, QueryGraphEdge};
-use sql::query_signature::Signature;
+use controller::sql::query_graph::{JoinRef, OutputColumn, QueryGraph, QueryGraphEdge};
+use controller::sql::query_signature::Signature;
 
 use slog;
 use std::collections::{HashMap, HashSet};

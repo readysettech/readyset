@@ -1,12 +1,12 @@
-use sql::reuse::helpers::predicate_implication::predicate_is_equivalent;
-use sql::query_graph::{JoinRef, QueryGraph, QueryGraphEdge};
+use controller::sql::reuse::helpers::predicate_implication::predicate_is_equivalent;
+use controller::sql::query_graph::{JoinRef, QueryGraph, QueryGraphEdge};
 use std::vec::Vec;
 use std::collections::HashSet;
 use nom_sql::ConditionTree;
 
 use std::mem;
 
-use sql::reuse::ReuseType;
+use controller::sql::reuse::ReuseType;
 
 #[derive(Debug, Clone)]
 struct JoinChain {

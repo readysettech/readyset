@@ -5,18 +5,18 @@ mod query_signature;
 mod query_utils;
 pub mod reuse;
 
-use flow::Migration;
 use core::NodeIndex;
-use mir::reuse as mir_reuse;
+use controller::Migration;
+use controller::mir_to_flow::mir_query_to_flow_parts;
 use nom_sql::parser as sql_parser;
 use nom_sql::{ArithmeticBase, Column, SqlQuery};
 use nom_sql::SelectStatement;
 use self::mir::{MirNodeRef, SqlToMirConverter};
-use mir::query::{MirQuery, QueryFlowParts};
 use self::reuse::{ReuseConfig, ReuseConfigType};
-use sql::query_graph::{to_query_graph, QueryGraph};
-use sql::query_signature::Signature;
-use mir_to_flow::mir_query_to_flow_parts;
+use self::query_graph::{to_query_graph, QueryGraph};
+use self::query_signature::Signature;
+use mir::query::{MirQuery, QueryFlowParts};
+use mir::reuse as mir_reuse;
 
 use slog;
 use std::collections::HashMap;
@@ -417,7 +417,7 @@ impl SqlIncorporator {
         reuse_mirs: Vec<MirQuery>,
         mut mig: &mut Migration,
     ) -> QueryFlowParts {
-        use super::mir::reuse::merge_mir_for_queries;
+        use mir::reuse::merge_mir_for_queries;
         use mir::visualize::GraphViz;
 
         // no QG-level reuse possible, so we'll build a new query.
@@ -489,12 +489,12 @@ impl SqlIncorporator {
     ) -> Result<QueryFlowParts, String> {
         use nom_sql::{JoinRightSide, Table};
         use self::query_utils::ReferredTables;
-        use sql::passes::alias_removal::AliasRemoval;
-        use sql::passes::count_star_rewrite::CountStarRewrite;
-        use sql::passes::implied_tables::ImpliedTableExpansion;
-        use sql::passes::star_expansion::StarExpansion;
-        use sql::passes::negation_removal::NegationRemoval;
-        use sql::passes::subqueries::SubQueries;
+        use self::passes::alias_removal::AliasRemoval;
+        use self::passes::count_star_rewrite::CountStarRewrite;
+        use self::passes::implied_tables::ImpliedTableExpansion;
+        use self::passes::star_expansion::StarExpansion;
+        use self::passes::negation_removal::NegationRemoval;
+        use self::passes::subqueries::SubQueries;
 
         // need to increment here so that each subquery has a unique name.
         // (subqueries call recursively into `nodes_for_named_query` via `add_parsed_query` below,
@@ -505,8 +505,8 @@ impl SqlIncorporator {
         // to existing views in the graph
         let mut fq = q.clone();
         for sq in fq.extract_subqueries() {
-            use sql::passes::subqueries::{field_with_table_name, query_from_condition_base,
-                                          Subquery};
+            use self::passes::subqueries::{field_with_table_name, query_from_condition_base,
+                                           Subquery};
             match sq {
                 Subquery::InComparison(cond_base) => {
                     let (sq, column) = query_from_condition_base(&cond_base);
@@ -663,7 +663,7 @@ impl<'a> ToFlowParts for &'a str {
 mod tests {
     use nom_sql::Column;
     use dataflow::prelude::*;
-    use flow::{ControllerBuilder, Migration};
+    use controller::{ControllerBuilder, Migration};
     use Blender;
     use super::{SqlIncorporator, ToFlowParts};
     use nom_sql::FunctionExpression;
@@ -679,7 +679,7 @@ mod tests {
     /// Note that the argument slices must be ordered in the same way as &str and &Column are
     /// ordered by `Ord`.
     fn query_id_hash(relations: &[&str], attrs: &[&Column], columns: &[&Column]) -> u64 {
-        use sql::query_graph::OutputColumn;
+        use controller::sql::query_graph::OutputColumn;
         use std::hash::{Hash, Hasher};
         use std::collections::hash_map::DefaultHasher;
 
