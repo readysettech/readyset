@@ -434,6 +434,63 @@ fn it_recovers_persisted_logs() {
 }
 
 #[test]
+fn it_recovers_persisted_logs_w_multiple_nodes() {
+    let setup = || {
+        let mut g = ControllerBuilder::default().build_inner();
+        let pparams = PersistenceParameters::new(
+            DurabilityMode::DeleteOnExit,
+            128,
+            time::Duration::from_millis(1),
+            Some(String::from("it_recovers_persisted_logs_w_multiple_nodes")),
+        );
+        g.with_persistence_options(pparams);
+
+        let sql = "
+            CREATE TABLE A (id int, PRIMARY KEY(id));
+            CREATE TABLE B (id int, PRIMARY KEY(id));
+            CREATE TABLE C (id int, PRIMARY KEY(id));
+
+            AID: SELECT id FROM A WHERE id = ?;
+            BID: SELECT id FROM B WHERE id = ?;
+            CID: SELECT id FROM C WHERE id = ?;
+        ";
+
+
+        let recipe = g.migrate(|mig| {
+            let mut recipe = Recipe::from_str(&sql, None).unwrap();
+            recipe.activate(mig, false).unwrap();
+            recipe
+        });
+
+        (g, recipe)
+    };
+
+    let (g, recipe) = setup();
+    let tables = vec!["A", "B", "C"];
+    for (i, table) in tables.iter().enumerate() {
+        let mut mutator = g.get_mutator(recipe.node_addr_for(table).unwrap());
+        mutator.put(vec![(i as i32).into()]).unwrap();
+    }
+
+    // Let writes propagate:
+    sleep();
+
+    let (mut g, recipe) = setup();
+    // Recover and let the writes propagate:
+    g.recover(());
+    sleep();
+
+    for (i, table) in tables.iter().enumerate() {
+        let id = i as i32;
+        let mut getter = g.get_getter(recipe.node_addr_for(&format!("{}ID", table)).unwrap())
+            .unwrap();
+        let result = getter.lookup(&id.into(), true).unwrap();
+        assert_eq!(result.len(), 1);
+        assert_eq!(result[0][0], id.into());
+    }
+}
+
+#[test]
 fn it_recovers_persisted_logs_w_transactions() {
     let setup = || {
         let mut g = ControllerBuilder::default().build_inner();
