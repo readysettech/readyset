@@ -1,8 +1,6 @@
-<<<<<<< HEAD
-=======
+extern crate glob;
 extern crate time;
 
->>>>>>> Suffix test log files with a timestamp
 use core::{DataType, Datas};
 use dataflow::DomainBuilder;
 use dataflow::backlog::SingleReadHandle;
@@ -36,7 +34,7 @@ use std::time::Duration;
 use std::thread;
 use std::sync::mpsc;
 use std::env;
-
+use std::fs;
 use std::collections::HashMap;
 
 const DEFAULT_SETTLE_TIME_MS: u64 = 100;
@@ -51,10 +49,18 @@ fn get_settle_time() -> Duration {
 }
 
 // Suffixes the given log base with a timestamp, ensuring that
-// subsequent test runs do not reuse log files in the case of failures:
+// subsequent test runs do not reuse log files in the case of failures.
 fn get_log_name(base: &str) -> String {
     let current_time = time::get_time();
     format!("{}-{}-{}", base, current_time.sec, current_time.nsec)
+}
+
+// Removes the log files matching the glob ./{log_name}-*.json.
+// Used to clean up after recovery tests, where a persistent log is created.
+fn delete_log_files(log_name: String) {
+    for log_path in glob::glob(&format!("./{}-*.json", log_name)).unwrap() {
+        fs::remove_file(log_path.unwrap()).unwrap();
+    }
 }
 
 // Sleeps for either DEFAULT_SETTLE_TIME_MS milliseconds, or
@@ -394,7 +400,7 @@ fn it_recovers_persisted_logs() {
     let setup = || {
         let mut g = ControllerBuilder::default().build_inner();
         let pparams = PersistenceParameters::new(
-            DurabilityMode::DeleteOnExit,
+            DurabilityMode::Permanent,
             128,
             Duration::from_millis(1),
             Some(log_name.clone()),
@@ -406,7 +412,6 @@ fn it_recovers_persisted_logs() {
             CarPrice: SELECT price FROM Car WHERE id = ?;
         ";
 
-
         let recipe = g.migrate(|mig| {
             let mut recipe = Recipe::from_str(&sql, None).unwrap();
             recipe.activate(mig, false).unwrap();
@@ -416,16 +421,18 @@ fn it_recovers_persisted_logs() {
         (g, recipe)
     };
 
-    let (g, recipe) = setup();
-    let mut mutator = g.get_mutator(recipe.node_addr_for("Car").unwrap());
+    {
+        let (g, recipe) = setup();
+        let mut mutator = g.get_mutator(recipe.node_addr_for("Car").unwrap());
 
-    for i in 1..10 {
-        let price = i * 10;
-        mutator.put(vec![i.into(), price.into()]).unwrap();
+        for i in 1..10 {
+            let price = i * 10;
+            mutator.put(vec![i.into(), price.into()]).unwrap();
+        }
+
+        // Let writes propagate:
+        sleep();
     }
-
-    // Let writes propagate:
-    sleep();
 
     let (mut g, recipe) = setup();
     let mut getter = g.get_getter(recipe.node_addr_for("CarPrice").unwrap())
@@ -444,15 +451,18 @@ fn it_recovers_persisted_logs() {
         assert_eq!(result.len(), 1);
         assert_eq!(result[0][0], price.into());
     }
+
+    delete_log_files(log_name.clone());
 }
 
 #[test]
 fn it_recovers_persisted_logs_w_multiple_nodes() {
     let log_name = get_log_name("it_recovers_persisted_logs_w_multiple_nodes");
+    let tables = vec!["A", "B", "C"];
     let setup = || {
         let mut g = ControllerBuilder::default().build_inner();
         let pparams = PersistenceParameters::new(
-            DurabilityMode::DeleteOnExit,
+            DurabilityMode::Permanent,
             128,
             Duration::from_millis(1),
             Some(log_name.clone()),
@@ -479,15 +489,16 @@ fn it_recovers_persisted_logs_w_multiple_nodes() {
         (g, recipe)
     };
 
-    let (g, recipe) = setup();
-    let tables = vec!["A", "B", "C"];
-    for (i, table) in tables.iter().enumerate() {
-        let mut mutator = g.get_mutator(recipe.node_addr_for(table).unwrap());
-        mutator.put(vec![(i as i32).into()]).unwrap();
-    }
+    {
+        let (g, recipe) = setup();
+        for (i, table) in tables.iter().enumerate() {
+            let mut mutator = g.get_mutator(recipe.node_addr_for(table).unwrap());
+            mutator.put(vec![(i as i32).into()]).unwrap();
+        }
 
-    // Let writes propagate:
-    sleep();
+        // Let writes propagate:
+        sleep();
+    }
 
     let (mut g, recipe) = setup();
     // Recover and let the writes propagate:
@@ -502,15 +513,17 @@ fn it_recovers_persisted_logs_w_multiple_nodes() {
         assert_eq!(result.len(), 1);
         assert_eq!(result[0][0], id.into());
     }
+
+    delete_log_files(log_name.clone());
 }
 
 #[test]
 fn it_recovers_persisted_logs_w_transactions() {
-    let log_name = get_log_name("it_recovers_persisted_logs");
+    let log_name = get_log_name("it_recovers_persisted_logs_w_transactions");
     let setup = || {
         let mut g = ControllerBuilder::default().build_inner();
         let pparams = PersistenceParameters::new(
-            DurabilityMode::DeleteOnExit,
+            DurabilityMode::Permanent,
             128,
             Duration::from_millis(1),
             Some(log_name.clone()),
@@ -526,18 +539,20 @@ fn it_recovers_persisted_logs_w_transactions() {
         (g, a)
     };
 
-    let (g, a) = setup();
-    let mut mutator = g.get_mutator(a);
+    {
+        let (g, a) = setup();
+        let mut mutator = g.get_mutator(a);
 
-    for i in 1..10 {
-        let b = i * 10;
-        mutator
-            .transactional_put(vec![i.into(), b.into()], Token::empty())
-            .unwrap();
+        for i in 1..10 {
+            let b = i * 10;
+            mutator
+                .transactional_put(vec![i.into(), b.into()], Token::empty())
+                .unwrap();
+        }
+
+        // Let writes propagate:
+        sleep();
     }
-
-    // Let writes propagate:
-    sleep();
 
     let (mut g, a) = setup();
     let mut getter = g.get_getter(a).unwrap();
@@ -556,6 +571,8 @@ fn it_recovers_persisted_logs_w_transactions() {
         assert_eq!(result[0][0], i.into());
         assert_eq!(result[0][1], b.into());
     }
+
+    delete_log_files(log_name.clone());
 }
 
 #[test]
