@@ -53,7 +53,7 @@ named!(compound_op<&[u8], CompoundOperation>,
 named!(pub compound_selection<&[u8], CompoundSelectStatement>,
     complete!(chain!(
         first_select: nested_selection ~
-        other_selects: many0!(
+        other_selects: many1!(
             complete!(
                 chain!(multispace? ~
                        op: compound_op ~
