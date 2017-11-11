@@ -1,4 +1,3 @@
-
 use buf_redux::BufWriter;
 use buf_redux::strategy::WhenFull;
 
