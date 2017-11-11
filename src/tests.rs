@@ -39,6 +39,35 @@ use std::collections::HashMap;
 
 const DEFAULT_SETTLE_TIME_MS: u64 = 100;
 
+// Suffixes the given log prefix with a timestamp, ensuring that
+// subsequent test runs do not reuse log files in the case of failures.
+fn get_log_name(prefix: &str) -> String {
+    let current_time = time::get_time();
+    format!("{}-{}-{}", prefix, current_time.sec, current_time.nsec)
+}
+
+// Ensures correct handling of log file names, by deleting used log files in Drop.
+struct LogName {
+    name: String,
+}
+
+impl LogName {
+    fn new(prefix: &str) -> LogName {
+        let name = get_log_name(prefix);
+        LogName { name }
+    }
+}
+
+// Removes the log files matching the glob ./{log_name}-*.json.
+// Used to clean up after recovery tests, where a persistent log is created.
+impl Drop for LogName {
+    fn drop(&mut self) {
+        for log_path in glob::glob(&format!("./{}-*.json", self.name)).unwrap() {
+            fs::remove_file(log_path.unwrap()).unwrap();
+        }
+    }
+}
+
 fn get_settle_time() -> Duration {
     let settle_time: u64 = match env::var("SETTLE_TIME") {
         Ok(value) => value.parse().unwrap(),
@@ -46,21 +75,6 @@ fn get_settle_time() -> Duration {
     };
 
     Duration::from_millis(settle_time)
-}
-
-// Suffixes the given log base with a timestamp, ensuring that
-// subsequent test runs do not reuse log files in the case of failures.
-fn get_log_name(base: &str) -> String {
-    let current_time = time::get_time();
-    format!("{}-{}-{}", base, current_time.sec, current_time.nsec)
-}
-
-// Removes the log files matching the glob ./{log_name}-*.json.
-// Used to clean up after recovery tests, where a persistent log is created.
-fn delete_log_files(log_name: String) {
-    for log_path in glob::glob(&format!("./{}-*.json", log_name)).unwrap() {
-        fs::remove_file(log_path.unwrap()).unwrap();
-    }
 }
 
 // Sleeps for either DEFAULT_SETTLE_TIME_MS milliseconds, or
@@ -396,14 +410,14 @@ fn it_works_with_arithmetic_aliases() {
 
 #[test]
 fn it_recovers_persisted_logs() {
-    let log_name = get_log_name("it_recovers_persisted_logs");
+    let log_name = LogName::new("it_recovers_persisted_logs");
     let setup = || {
         let mut g = ControllerBuilder::default().build_inner();
         let pparams = PersistenceParameters::new(
             DurabilityMode::Permanent,
             128,
             Duration::from_millis(1),
-            Some(log_name.clone()),
+            Some(log_name.name.clone()),
         );
         g.with_persistence_options(pparams);
 
@@ -451,13 +465,11 @@ fn it_recovers_persisted_logs() {
         assert_eq!(result.len(), 1);
         assert_eq!(result[0][0], price.into());
     }
-
-    delete_log_files(log_name.clone());
 }
 
 #[test]
 fn it_recovers_persisted_logs_w_multiple_nodes() {
-    let log_name = get_log_name("it_recovers_persisted_logs_w_multiple_nodes");
+    let log_name = LogName::new("it_recovers_persisted_logs_w_multiple_nodes");
     let tables = vec!["A", "B", "C"];
     let setup = || {
         let mut g = ControllerBuilder::default().build_inner();
@@ -465,7 +477,7 @@ fn it_recovers_persisted_logs_w_multiple_nodes() {
             DurabilityMode::Permanent,
             128,
             Duration::from_millis(1),
-            Some(log_name.clone()),
+            Some(log_name.name.clone()),
         );
         g.with_persistence_options(pparams);
 
@@ -513,20 +525,18 @@ fn it_recovers_persisted_logs_w_multiple_nodes() {
         assert_eq!(result.len(), 1);
         assert_eq!(result[0][0], id.into());
     }
-
-    delete_log_files(log_name.clone());
 }
 
 #[test]
 fn it_recovers_persisted_logs_w_transactions() {
-    let log_name = get_log_name("it_recovers_persisted_logs_w_transactions");
+    let log_name = LogName::new("it_recovers_persisted_logs_w_transactions");
     let setup = || {
         let mut g = ControllerBuilder::default().build_inner();
         let pparams = PersistenceParameters::new(
             DurabilityMode::Permanent,
             128,
             Duration::from_millis(1),
-            Some(log_name.clone()),
+            Some(log_name.name.clone()),
         );
         g.with_persistence_options(pparams);
 
@@ -571,8 +581,6 @@ fn it_recovers_persisted_logs_w_transactions() {
         assert_eq!(result[0][0], i.into());
         assert_eq!(result[0][1], b.into());
     }
-
-    delete_log_files(log_name.clone());
 }
 
 #[test]
