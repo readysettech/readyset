@@ -7,7 +7,7 @@ use std::sync::{Arc, Mutex};
 
 use channel::{self, TcpSender};
 use channel::poll::{PollEvent, PollingLoop, ProcessResult, RpcPollEvent, RpcPollingLoop};
-use dataflow::{Readers, DomainBuilder};
+use dataflow::{DomainBuilder, Readers};
 use dataflow::checktable::TokenGenerator;
 use dataflow::backlog::SingleReadHandle;
 use dataflow::prelude::*;
