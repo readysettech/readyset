@@ -1,5 +1,5 @@
 use nom_sql::{ArithmeticBase, Column, ConditionExpression, ConditionTree, FieldExpression,
-              JoinRightSide, SqlQuery, Table};
+              JoinRightSide, SelectStatement, SqlQuery, Table};
 
 use std::collections::HashMap;
 
@@ -51,177 +51,192 @@ where
     }
 }
 
+// Sets the table for the `Column` in `f`to `table`. This is mostly useful for CREATE TABLE
+// and INSERT queries and deliberately leaves function specifications unaffected, since
+// they can refer to remote tables and `set_table` should not be used for queries that have
+// computed columns.
+fn set_table(mut f: Column, table: &Table) -> Column {
+    f.table = match f.table {
+        None => match f.function {
+            Some(ref mut f) => panic!(
+                "set_table({}) invoked on computed column {:?}",
+                table.name,
+                f
+            ),
+            None => Some(table.name.clone()),
+        },
+        Some(x) => Some(x),
+    };
+    f
+}
+
+fn rewrite_selection(
+    mut sq: SelectStatement,
+    write_schemas: &HashMap<String, Vec<String>>,
+) -> SelectStatement {
+    use nom_sql::FunctionExpression::*;
+    use nom_sql::{GroupByClause, OrderClause};
+    use nom_sql::TableKey::*;
+
+    // Tries to find a table with a matching column in the `tables_in_query` (information
+    // passed as `write_schemas`; this is not something the parser or the expansion pass can
+    // know on their own). Panics if no match is found or the match is ambiguous.
+    let find_table = |f: &Column, tables_in_query: &Vec<Table>| -> Option<String> {
+        let mut matches = write_schemas
+            .iter()
+            .filter(|&(t, _)| {
+                if tables_in_query.len() > 0 {
+                    for qt in tables_in_query {
+                        if qt.name == *t {
+                            return true;
+                        }
+                    }
+                    false
+                } else {
+                    // preserve all tables if there are no tables in the query
+                    true
+                }
+            })
+            .filter_map(|(t, ws)| {
+                let num_matching = ws.iter().filter(|c| **c == f.name).count();
+                assert!(num_matching <= 1);
+                if num_matching == 1 {
+                    Some((*t).clone())
+                } else {
+                    None
+                }
+            })
+            .collect::<Vec<String>>();
+        if matches.len() > 1 {
+            println!(
+                "Ambiguous column {} exists in tables: {} -- picking a random one",
+                f.name,
+                matches.as_slice().join(", ")
+            );
+            Some(matches.pop().unwrap())
+        } else if matches.is_empty() {
+            // This might be an alias for a computed column, which has no
+            // implied table. So, we allow it to pass and our code should
+            // crash in the future if this is not the case.
+            None
+        } else {
+            // exactly one match
+            Some(matches.pop().unwrap())
+        }
+    };
+
+    let err = "Must apply StarExpansion pass before ImpliedTableExpansion"; // for wrapping
+
+    // Traverses a query and calls `find_table` on any column that has no explicit table set,
+    // including computed columns. Should not be used for CREATE TABLE and INSERT queries,
+    // which can use the simpler `set_table`.
+    let expand_columns = |mut f: Column, tables_in_query: &Vec<Table>| -> Column {
+        f.table = match f.table {
+            None => {
+                match f.function {
+                    Some(ref mut f) => {
+                        // There is no implied table (other than "self") for anonymous function
+                        // columns, but we have to peek inside the function to expand implied
+                        // tables in its specification
+                        match (*f).as_mut() {
+                            &mut Avg(ref mut fe, _) |
+                            &mut Count(ref mut fe, _) |
+                            &mut Sum(ref mut fe, _) |
+                            &mut Min(ref mut fe) |
+                            &mut Max(ref mut fe) |
+                            &mut GroupConcat(ref mut fe, _) => {
+                                fe.table = find_table(fe, tables_in_query);
+                                None
+                            }
+                            &mut CountStar => None,
+                        }
+                    }
+                    None => find_table(&f, tables_in_query),
+                }
+            }
+            Some(x) => Some(x),
+        };
+        f
+    };
+
+
+    let mut tables: Vec<Table> = sq.tables.clone();
+    // tables mentioned in JOINs are also available for expansion
+    for jc in sq.join.iter() {
+        match jc.right {
+            JoinRightSide::Table(ref join_table) => tables.push(join_table.clone()),
+            JoinRightSide::Tables(ref join_tables) => tables.extend(join_tables.clone()),
+            _ => unimplemented!(),
+        }
+    }
+    // Expand within field list
+    for field in sq.fields.iter_mut() {
+        match field {
+            &mut FieldExpression::All => panic!(err),
+            &mut FieldExpression::AllInTable(_) => panic!(err),
+            &mut FieldExpression::Literal(_) => (),
+            &mut FieldExpression::Arithmetic(ref mut e) => {
+                if let ArithmeticBase::Column(ref mut c) = e.left {
+                    *c = expand_columns(c.clone(), &tables);
+                }
+
+                if let ArithmeticBase::Column(ref mut c) = e.right {
+                    *c = expand_columns(c.clone(), &tables);
+                }
+            }
+            &mut FieldExpression::Col(ref mut f) => {
+                *f = expand_columns(f.clone(), &tables);
+            }
+        }
+    }
+    // Expand within WHERE clause
+    sq.where_clause = match sq.where_clause {
+        None => None,
+        Some(wc) => Some(rewrite_conditional(&expand_columns, wc, &tables)),
+    };
+    // Expand within GROUP BY clause
+    sq.group_by = match sq.group_by {
+        None => None,
+        Some(gbc) => Some(GroupByClause {
+            columns: gbc.columns
+                .into_iter()
+                .map(|f| expand_columns(f, &tables))
+                .collect(),
+            having: match gbc.having {
+                None => None,
+                Some(hc) => Some(rewrite_conditional(&expand_columns, hc, &tables)),
+            },
+        }),
+    };
+    // Expand within ORDER BY clause
+    sq.order = match sq.order {
+        None => None,
+        Some(oc) => Some(OrderClause {
+            columns: oc.columns
+                .into_iter()
+                .map(|(f, o)| (expand_columns(f, &tables), o))
+                .collect(),
+        }),
+    };
+
+    sq
+}
+
 impl ImpliedTableExpansion for SqlQuery {
     fn expand_implied_tables(self, write_schemas: &HashMap<String, Vec<String>>) -> SqlQuery {
         use nom_sql::FunctionExpression::*;
         use nom_sql::{GroupByClause, OrderClause};
         use nom_sql::TableKey::*;
 
-        // Tries to find a table with a matching column in the `tables_in_query` (information
-        // passed as `write_schemas`; this is not something the parser or the expansion pass can
-        // know on their own). Panics if no match is found or the match is ambiguous.
-        let find_table = |f: &Column, tables_in_query: &Vec<Table>| -> Option<String> {
-            let mut matches = write_schemas
-                .iter()
-                .filter(|&(t, _)| {
-                    if tables_in_query.len() > 0 {
-                        for qt in tables_in_query {
-                            if qt.name == *t {
-                                return true;
-                            }
-                        }
-                        false
-                    } else {
-                        // preserve all tables if there are no tables in the query
-                        true
-                    }
-                })
-                .filter_map(|(t, ws)| {
-                    let num_matching = ws.iter().filter(|c| **c == f.name).count();
-                    assert!(num_matching <= 1);
-                    if num_matching == 1 {
-                        Some((*t).clone())
-                    } else {
-                        None
-                    }
-                })
-                .collect::<Vec<String>>();
-            if matches.len() > 1 {
-                println!(
-                    "Ambiguous column {} exists in tables: {} -- picking a random one",
-                    f.name,
-                    matches.as_slice().join(", ")
-                );
-                Some(matches.pop().unwrap())
-            } else if matches.is_empty() {
-                // This might be an alias for a computed column, which has no
-                // implied table. So, we allow it to pass and our code should
-                // crash in the future if this is not the case.
-                None
-            } else {
-                // exactly one match
-                Some(matches.pop().unwrap())
-            }
-        };
-
-        let err = "Must apply StarExpansion pass before ImpliedTableExpansion"; // for wrapping
-
-        // Traverses a query and calls `find_table` on any column that has no explicit table set,
-        // including computed columns. Should not be used for CREATE TABLE and INSERT queries,
-        // which can use the simpler `set_table`.
-        let expand_columns = |mut f: Column, tables_in_query: &Vec<Table>| -> Column {
-            f.table = match f.table {
-                None => {
-                    match f.function {
-                        Some(ref mut f) => {
-                            // There is no implied table (other than "self") for anonymous function
-                            // columns, but we have to peek inside the function to expand implied
-                            // tables in its specification
-                            match (*f).as_mut() {
-                                &mut Avg(ref mut fe, _) |
-                                &mut Count(ref mut fe, _) |
-                                &mut Sum(ref mut fe, _) |
-                                &mut Min(ref mut fe) |
-                                &mut Max(ref mut fe) |
-                                &mut GroupConcat(ref mut fe, _) => {
-                                    fe.table = find_table(fe, tables_in_query);
-                                    None
-                                }
-                                &mut CountStar => None,
-                            }
-                        }
-                        None => find_table(&f, tables_in_query),
-                    }
-                }
-                Some(x) => Some(x),
-            };
-            f
-        };
-
-        // Sets the table for the `Column` in `f`to `table`. This is mostly useful for CREATE TABLE
-        // and INSERT queries and deliberately leaves function specifications unaffected, since
-        // they can refer to remote tables and `set_table` should not be used for queries that have
-        // computed columns.
-        let set_table = |mut f: Column, table: &Table| -> Column {
-            f.table = match f.table {
-                None => match f.function {
-                    Some(ref mut f) => panic!(
-                        "set_table({}) invoked on computed column {:?}",
-                        table.name,
-                        f
-                    ),
-                    None => Some(table.name.clone()),
-                },
-                Some(x) => Some(x),
-            };
-            f
-        };
-
         match self {
-            SqlQuery::Select(mut sq) => {
-                let mut tables: Vec<Table> = sq.tables.clone();
-                // tables mentioned in JOINs are also available for expansion
-                for jc in sq.join.iter() {
-                    match jc.right {
-                        JoinRightSide::Table(ref join_table) => tables.push(join_table.clone()),
-                        JoinRightSide::Tables(ref join_tables) => {
-                            tables.extend(join_tables.clone())
-                        }
-                        _ => unimplemented!(),
-                    }
-                }
-                // Expand within field list
-                for field in sq.fields.iter_mut() {
-                    match field {
-                        &mut FieldExpression::All => panic!(err),
-                        &mut FieldExpression::AllInTable(_) => panic!(err),
-                        &mut FieldExpression::Literal(_) => (),
-                        &mut FieldExpression::Arithmetic(ref mut e) => {
-                            if let ArithmeticBase::Column(ref mut c) = e.left {
-                                *c = expand_columns(c.clone(), &tables);
-                            }
-
-                            if let ArithmeticBase::Column(ref mut c) = e.right {
-                                *c = expand_columns(c.clone(), &tables);
-                            }
-                        }
-                        &mut FieldExpression::Col(ref mut f) => {
-                            *f = expand_columns(f.clone(), &tables);
-                        }
-                    }
-                }
-                // Expand within WHERE clause
-                sq.where_clause = match sq.where_clause {
-                    None => None,
-                    Some(wc) => Some(rewrite_conditional(&expand_columns, wc, &tables)),
-                };
-                // Expand within GROUP BY clause
-                sq.group_by = match sq.group_by {
-                    None => None,
-                    Some(gbc) => Some(GroupByClause {
-                        columns: gbc.columns
-                            .into_iter()
-                            .map(|f| expand_columns(f, &tables))
-                            .collect(),
-                        having: match gbc.having {
-                            None => None,
-                            Some(hc) => Some(rewrite_conditional(&expand_columns, hc, &tables)),
-                        },
-                    }),
-                };
-                // Expand within ORDER BY clause
-                sq.order = match sq.order {
-                    None => None,
-                    Some(oc) => Some(OrderClause {
-                        columns: oc.columns
-                            .into_iter()
-                            .map(|(f, o)| (expand_columns(f, &tables), o))
-                            .collect(),
-                    }),
-                };
-
-                SqlQuery::Select(sq)
+            SqlQuery::CompoundSelect(mut csq) => {
+                csq.selects = csq.selects
+                    .into_iter()
+                    .map(|(op, sq)| (op, rewrite_selection(sq, write_schemas)))
+                    .collect();
+                SqlQuery::CompoundSelect(csq)
             }
+            SqlQuery::Select(mut sq) => SqlQuery::Select(rewrite_selection(sq, write_schemas)),
             SqlQuery::CreateTable(mut ctq) => {
                 let table = ctq.table.clone();
                 let transform_key = |key_cols: Vec<Column>| {

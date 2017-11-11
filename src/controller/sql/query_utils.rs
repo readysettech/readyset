@@ -10,6 +10,13 @@ impl ReferredTables for SqlQuery {
             SqlQuery::CreateTable(ref ctq) => vec![ctq.table.clone()],
             SqlQuery::Insert(ref iq) => vec![iq.table.clone()],
             SqlQuery::Select(ref sq) => sq.tables.iter().cloned().collect(),
+            SqlQuery::CompoundSelect(ref csq) => csq.selects.iter().fold(
+                Vec::new(),
+                |mut acc, &(_, ref sq)| {
+                    acc.extend(sq.tables.iter().cloned().collect::<Vec<_>>());
+                    acc
+                },
+            ),
         }
     }
 }

@@ -26,7 +26,7 @@ serde = { version = "1.0.8", features = ["rc"] }
 timekeeper = {version = "0.3.0", default-features = false }
 # git deps
 petgraph = { git = "https://github.com/fintelia/petgraph", branch = "serde", features = ["serde"] }
-nom_sql = { git = "https://github.com/ms705/nom-sql.git", rev = "fcf7faa4bbb5592b0c1a4991278c0a6cb62926d4"}
+nom_sql = { git = "https://github.com/ms705/nom-sql.git", rev = "8999bac7613910d1e03da2f91c16d57d52bf6d81" }
 vec_map = { version = "0.8.0", features = ["eders"] }
 
 # local deps
