@@ -90,15 +90,5 @@ path = "src/lib.rs"
 name = "basic-recipe"
 
 [[bin]]
-name = "web"
-path = "src/web/main.rs"
-required-features = ["binaries"]
-
-[[bin]]
-name = "web_sql"
-path = "src/web/sql_main.rs"
-required-features = ["binaries"]
-
-[[bin]]
 name = "worker"
 path = "src/worker/main.rs"
