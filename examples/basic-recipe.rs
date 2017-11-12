@@ -1,10 +1,9 @@
 extern crate distributary;
-extern crate time;
 
 use distributary::ControllerBuilder;
 
 use std::thread;
-use std::time::Duration;
+use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 fn main() {
     // inline recipe definition
@@ -57,7 +56,10 @@ fn main() {
 
     // Then create a new vote:
     println!("Casting vote...");
-    let uid = time::get_time().sec;
+    let uid = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .unwrap()
+        .as_secs() as i64;
     vote.put(vec![aid.into(), uid.into()]).unwrap();
 
     println!("Finished writing! Let's wait for things to propagate...");

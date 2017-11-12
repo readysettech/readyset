@@ -1,5 +1,4 @@
 extern crate glob;
-extern crate time;
 
 use core::{DataType, Datas};
 use dataflow::DomainBuilder;
@@ -30,7 +29,7 @@ use controller::recipe::{ActivationResult, Recipe};
 use controller::sql::reuse::ReuseConfigType;
 use controller::sql::{SqlIncorporator, ToFlowParts};
 
-use std::time::Duration;
+use std::time::{Duration, SystemTime, UNIX_EPOCH};
 use std::thread;
 use std::sync::mpsc;
 use std::env;
@@ -42,8 +41,13 @@ const DEFAULT_SETTLE_TIME_MS: u64 = 100;
 // Suffixes the given log prefix with a timestamp, ensuring that
 // subsequent test runs do not reuse log files in the case of failures.
 fn get_log_name(prefix: &str) -> String {
-    let current_time = time::get_time();
-    format!("{}-{}-{}", prefix, current_time.sec, current_time.nsec)
+    let current_time = SystemTime::now().duration_since(UNIX_EPOCH).unwrap();
+    format!(
+        "{}-{}-{}",
+        prefix,
+        current_time.as_secs(),
+        current_time.subsec_nanos()
+    )
 }
 
 // Ensures correct handling of log file names, by deleting used log files in Drop.
