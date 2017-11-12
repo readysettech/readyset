@@ -527,11 +527,6 @@ impl ControllerInner {
             let node = &self.ingredients[*index];
             let domain = self.domains.get_mut(&node.domain()).unwrap();
             domain.send(box payload::Packet::StartRecovery).unwrap();
-        }
-
-        for (_name, index) in self.inputs(()).iter() {
-            let node = &self.ingredients[*index];
-            let domain = self.domains.get_mut(&node.domain()).unwrap();
             domain.wait_for_ack().unwrap();
         }
     }
