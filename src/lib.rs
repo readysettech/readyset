@@ -13,6 +13,7 @@ pub use self::create::CreateTableStatement;
 pub use self::insert::InsertStatement;
 pub use self::join::{JoinConstraint, JoinOperator, JoinRightSide};
 pub use self::parser::*;
+pub use self::compound_select::{CompoundSelectOperator, CompoundSelectStatement};
 pub use self::select::{GroupByClause, JoinClause, LimitClause, OrderClause, OrderType,
                        SelectStatement};
 pub use self::table::Table;
