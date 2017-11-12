@@ -1575,16 +1575,16 @@ impl Domain {
     }
 
     fn handle_recovery(&mut self) {
+        let checktable = self.transaction_state.get_checktable();
         let node_info: Vec<_> = self.nodes
             .iter()
             .map(|(index, node)| {
                 let n = node.borrow();
-                (index.clone(), n.global_addr(), n.is_transactional())
+                (index, n.global_addr(), n.is_transactional())
             })
             .collect();
 
         for (local_addr, global_addr, is_transactional) in node_info {
-            let checktable = self.transaction_state.get_checktable();
             let path = self.persistence_parameters.log_path(
                 &local_addr,
                 self.index,
@@ -1608,7 +1608,8 @@ impl Domain {
             BufReader::new(file)
                 .lines()
                 .filter_map(|line| {
-                    let line = line.unwrap();
+                    let line = line
+                        .expect(&format!("Failed to read line from log file: {:?}", path));
                     let entries: Result<Vec<Records>, _> = serde_json::from_str(&line);
                     entries.ok()
                 })

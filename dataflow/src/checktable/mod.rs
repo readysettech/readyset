@@ -285,6 +285,8 @@ impl CheckTable {
         }
     }
 
+    // Reserve a timestamp for the given base node, and update each column to said timestamp.
+    // This should be called for each batch of recovery updates.
     pub fn recover(&mut self, base: NodeIndex) -> (i64, Option<Box<HashMap<domain::Index, i64>>>) {
         // Take timestamp
         let ts = self.next_timestamp;
