@@ -6,7 +6,7 @@ use select::{limit_clause, nested_selection, order_clause, LimitClause, OrderCla
              SelectStatement};
 
 #[derive(Clone, Debug, Hash, PartialEq, Deserialize, Serialize)]
-pub enum CompoundOperation {
+pub enum CompoundSelectOperator {
     Union,
     DistinctUnion,
     Intersect,
@@ -15,13 +15,13 @@ pub enum CompoundOperation {
 
 #[derive(Clone, Debug, Hash, PartialEq, Deserialize, Serialize)]
 pub struct CompoundSelectStatement {
-    pub selects: Vec<(Option<CompoundOperation>, SelectStatement)>,
+    pub selects: Vec<(Option<CompoundSelectOperator>, SelectStatement)>,
     pub order: Option<OrderClause>,
     pub limit: Option<LimitClause>,
 }
 
 /// Parse compound operator
-named!(compound_op<&[u8], CompoundOperation>,
+named!(compound_op<&[u8], CompoundSelectOperator>,
     alt_complete!(
           chain!(
               caseless_tag!("union") ~
@@ -33,19 +33,19 @@ named!(compound_op<&[u8], CompoundOperation>,
               || {
                   match distinct {
                       // DISTINCT is the default in both MySQL and SQLite
-                      None => CompoundOperation::DistinctUnion,
+                      None => CompoundSelectOperator::DistinctUnion,
                       Some(d) => {
                           if d {
-                              CompoundOperation::DistinctUnion
+                              CompoundSelectOperator::DistinctUnion
                           } else {
-                              CompoundOperation::Union
+                              CompoundSelectOperator::Union
                           }
                       },
                   }
               }
           )
-        | map!(caseless_tag!("intersect"), |_| CompoundOperation::Intersect)
-        | map!(caseless_tag!("except"), |_| CompoundOperation::Except)
+        | map!(caseless_tag!("intersect"), |_| CompoundSelectOperator::Intersect)
+        | map!(caseless_tag!("except"), |_| CompoundSelectOperator::Except)
     )
 );
 
@@ -112,7 +112,7 @@ mod tests {
         let expected = CompoundSelectStatement {
             selects: vec![
                 (None, first_select),
-                (Some(CompoundOperation::DistinctUnion), second_select),
+                (Some(CompoundSelectOperator::DistinctUnion), second_select),
             ],
             order: None,
             limit: None,
@@ -156,8 +156,8 @@ mod tests {
         let expected = CompoundSelectStatement {
             selects: vec![
                 (None, first_select),
-                (Some(CompoundOperation::DistinctUnion), second_select),
-                (Some(CompoundOperation::DistinctUnion), third_select),
+                (Some(CompoundSelectOperator::DistinctUnion), second_select),
+                (Some(CompoundSelectOperator::DistinctUnion), third_select),
             ],
             order: None,
             limit: None,
@@ -190,7 +190,7 @@ mod tests {
         let expected = CompoundSelectStatement {
             selects: vec![
                 (None, first_select),
-                (Some(CompoundOperation::Union), second_select),
+                (Some(CompoundSelectOperator::Union), second_select),
             ],
             order: None,
             limit: None,
