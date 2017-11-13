@@ -1,6 +1,6 @@
 use nom::multispace;
 use nom::{Err, ErrorKind, IResult, Needed};
-use std::str;
+use std::{fmt, str};
 
 use common::table_reference;
 use condition::ConditionExpression;
@@ -11,6 +11,18 @@ use select::where_clause;
 pub struct DeleteStatement {
     pub table: Table,
     pub where_clause: Option<ConditionExpression>,
+}
+
+impl fmt::Display for DeleteStatement {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        write!(f, "DELETE FROM ")?;
+        write!(f, "{}", self.table)?;
+        if let Some(ref where_clause) = self.where_clause {
+            write!(f, " WHERE ")?;
+            write!(f, "{}", where_clause)?;
+        }
+        Ok(())
+    }
 }
 
 
@@ -70,5 +82,13 @@ mod tests {
                 ..Default::default()
             }
         );
+    }
+
+    #[test]
+    fn format_delete() {
+        let qstring = "DELETE FROM users WHERE id = 1";
+        let expected = "DELETE FROM users WHERE id = 1";
+        let res = deletion(qstring.as_bytes());
+        assert_eq!(format!("{}", res.unwrap().1), expected);
     }
 }
