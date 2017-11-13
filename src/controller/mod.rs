@@ -79,6 +79,7 @@ impl WorkerStatus {
 
 enum ControlEvent {
     WorkerCoordination(CoordinationMessage),
+    ExternalGet(String, String, Sender<String>),
     ExternalPost(String, String, Sender<String>),
 }
 
@@ -261,11 +262,18 @@ impl ControllerInner {
                             tx.send(());
                         }
                     }
+                    ControlEvent::ExternalGet(path, body, reply_tx) => {
+                        reply_tx
+                            .send(match path.as_ref() {
+                                "graph" => self.graphviz(),
+                                _ => "NOT FOUND".to_owned(),
+                            })
+                            .unwrap();
+                    }
                     ControlEvent::ExternalPost(path, body, reply_tx) => {
                         use serde_json as json;
                         reply_tx
                             .send(match path.as_ref() {
-                                "graph" => self.graphviz(),
                                 "inputs" => json::to_string(&self.inputs()).unwrap(),
                                 "outputs" => json::to_string(&self.outputs()).unwrap(),
                                 "recover" => json::to_string(&self.recover()).unwrap(),
@@ -335,6 +343,18 @@ impl ControllerInner {
                     {
                         let event_tx = event_tx.lock().unwrap();
                         event_tx.send(ControlEvent::ExternalPost(path, body, tx)).unwrap();
+                    }
+                    res.send(rx.recv().unwrap());
+                }) as Box<Handler>,
+                ":path" => Get: Box::new(move |mut ctx: Context, mut res: Response| {
+                    let (tx, rx) = mpsc::channel();
+                    let path = ctx.variables.get("path").unwrap().to_string();
+                    let mut body = String::new();
+                    ctx.body.read_to_string(&mut body);
+                    let event_tx = ctx.global.get::<Arc<Mutex<Sender<ControlEvent>>>>().unwrap();
+                    {
+                        let event_tx = event_tx.lock().unwrap();
+                        event_tx.send(ControlEvent::ExternalGet(path, body, tx)).unwrap();
                     }
                     res.send(rx.recv().unwrap());
                 }) as Box<Handler>,
