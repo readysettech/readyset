@@ -119,24 +119,28 @@ mod tests {
         let qstring2 = "SELECT name, password FROM users AS u";
         let qstring3 = "SELECT name, password FROM users AS u WHERE user_id = '1'";
         let qstring4 = "SELECT name, password FROM users AS u WHERE user = 'aaa' AND password = 'xxx'";
+        let qstring5 = "SELECT name * 2 AS double_name FROM users";
 
         let res0 = parse_query(qstring0);
         let res1 = parse_query(qstring1);
         let res2 = parse_query(qstring2);
         let res3 = parse_query(qstring3);
         let res4 = parse_query(qstring4);
+        let res5 = parse_query(qstring5);
 
         assert!(res0.is_ok());
         assert!(res1.is_ok());
         assert!(res2.is_ok());
         assert!(res3.is_ok());
         assert!(res4.is_ok());
+        assert!(res5.is_ok());
 
         assert_eq!(qstring0, format!("{}", res0.unwrap()));
         assert_eq!(qstring1, format!("{}", res1.unwrap()));
         assert_eq!(qstring2, format!("{}", res2.unwrap()));
         assert_eq!(qstring3, format!("{}", res3.unwrap()));
         assert_eq!(qstring4, format!("{}", res4.unwrap()));
+        assert_eq!(qstring5, format!("{}", res5.unwrap()));
     }
 
     #[test]

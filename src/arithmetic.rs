@@ -1,5 +1,5 @@
 use nom::multispace;
-use std::str;
+use std::{fmt, str};
 
 use common::{as_alias, column_identifier_no_alias, integer_literal, Literal};
 use column::Column;
@@ -38,6 +38,35 @@ impl ArithmeticExpression {
             left: left,
             right: right,
             alias: alias,
+        }
+    }
+}
+
+impl fmt::Display for ArithmeticOperator {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        match *self {
+            ArithmeticOperator::Add => write!(f, "+"),
+            ArithmeticOperator::Subtract => write!(f, "-"),
+            ArithmeticOperator::Multiply => write!(f, "*"),
+            ArithmeticOperator::Divide => write!(f, "/"),
+        }
+    }
+}
+
+impl fmt::Display for ArithmeticBase {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        match *self {
+            ArithmeticBase::Column(ref col) => write!(f, "{}", col),
+            ArithmeticBase::Scalar(ref lit) => write!(f, "{}", lit.to_string()),
+        }
+    }
+}
+
+impl fmt::Display for ArithmeticExpression {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        match self.alias {
+            Some(ref alias) => write!(f, "{} {} {} AS {}", self.left, self.op, self.right, alias),
+            None => write!(f, "{} {} {}", self.left, self.op, self.right),
         }
     }
 }
@@ -162,6 +191,36 @@ mod tests {
             let res = arithmetic_expression(e.as_bytes());
             assert!(res.is_done());
             assert_eq!(res.unwrap().1, expected_col_lit_ae[i]);
+        }
+    }
+
+    #[test]
+    fn it_displays_arithmetic_expressions() {
+        use super::ArithmeticOperator::*;
+        use super::ArithmeticBase::Scalar;
+        use super::ArithmeticBase::Column as ABColumn;
+
+        let expressions = [
+            ArithmeticExpression::new(Add, ABColumn("foo".into()), Scalar(5.into()), None),
+            ArithmeticExpression::new(Subtract, Scalar(5.into()), ABColumn("foo".into()), None),
+            ArithmeticExpression::new(
+                Multiply,
+                ABColumn("foo".into()),
+                ABColumn("bar".into()),
+                None,
+            ),
+            ArithmeticExpression::new(Divide, Scalar(10.into()), Scalar(2.into()), None),
+            ArithmeticExpression::new(
+                Add,
+                Scalar(10.into()),
+                Scalar(2.into()),
+                Some(String::from("bob")),
+            ),
+        ];
+
+        let expected_strings = ["foo + 5", "5 - foo", "foo * bar", "10 / 2", "10 + 2 AS bob"];
+        for (i, e) in expressions.iter().enumerate() {
+            assert_eq!(expected_strings[i], format!("{}", e));
         }
     }
 }
