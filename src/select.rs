@@ -1,6 +1,7 @@
 use nom::multispace;
 use nom::{Err, ErrorKind, IResult, Needed};
 use std::str;
+use std::fmt;
 
 use column::Column;
 use common::FieldExpression;
@@ -50,6 +51,43 @@ pub struct SelectStatement {
     pub group_by: Option<GroupByClause>,
     pub order: Option<OrderClause>,
     pub limit: Option<LimitClause>,
+}
+
+
+impl fmt::Display for SelectStatement {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        write!(f, "SELECT ")?;
+        if self.distinct {
+            write!(f, "DISTINCT ")?;
+        }
+        write!(
+            f,
+            "{}",
+            self.fields
+                .iter()
+                .map(|field| format!("{}", field))
+                .collect::<Vec<_>>()
+                .join(", ")
+        )?;
+
+        if self.tables.len() > 0 {
+            write!(f, " FROM ")?;
+            write!(
+                f,
+                "{}",
+                self.tables
+                    .iter()
+                    .map(|table| format!("{}", table))
+                    .collect::<Vec<_>>()
+                    .join(", ")
+            )?;
+        }
+        if let Some(ref where_clause) = self.where_clause {
+            write!(f, " WHERE ")?;
+            write!(f, "{}", where_clause)?;
+        }
+        Ok(())
+    }
 }
 
 /// Parse GROUP BY clause
