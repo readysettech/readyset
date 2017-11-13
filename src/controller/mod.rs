@@ -39,7 +39,6 @@ pub(crate) mod sql;
 mod getter;
 mod mir_to_flow;
 mod mutator;
-mod web;
 
 use self::domain_handle::DomainHandle;
 use coordination::{CoordinationMessage, CoordinationPayload};
@@ -228,6 +227,7 @@ impl ControllerInner {
         addr: SocketAddr,
     ) -> SocketAddr {
         use rustful::{Context, Handler, Response, Server, TreeRouter};
+        use rustful::header::ContentType;
 
         enum C<Q, R> {
             OpMut(Box<Fn(&mut ControllerInner, Q) -> R + Send + Sync>),
@@ -262,6 +262,31 @@ impl ControllerInner {
                 "get_statistics" => Post: C::OpMut(Box::new(Self::get_statistics)).handler(),
                 "install_recipe" => Post: C::OpMut(Box::new(Self::install_recipe)).handler(),
                 "graphviz" => Post: C::Op(Box::new(Self::graphviz)).handler(),
+                "graph" => Get: Box::new(move |ctx: Context, mut res: Response| {
+                    let controller = ctx.global.get::<Arc<Mutex<ControllerInner>>>().unwrap();
+                    res.headers_mut().set(ContentType::plaintext());
+                    res.send(controller.lock().unwrap().graphviz(()));
+                }) as Box<Handler>,
+                "graph.html" => Get: Box::new(move |_ctx: Context, mut res: Response| {
+                    res.headers_mut().set(ContentType::html());
+                    res.send(include_str!("graph.html"));
+                }) as Box<Handler>,
+                "js/dot-checker.js" => Get: Box::new(move |_ctx: Context, mut res: Response| {
+                    res.headers_mut().set(ContentType::plaintext());
+                    res.send(include_str!("js/dot-checker.js"));
+                }) as Box<Handler>,
+                "js/layout-worker.js" => Get: Box::new(move |_ctx: Context, mut res: Response| {
+                    res.headers_mut().set(ContentType::plaintext());
+                    res.send(include_str!("js/layout-worker.js"));
+                }) as Box<Handler>,
+                "js/renderer.js" => Get: Box::new(move |_ctx: Context, mut res: Response| {
+                    res.headers_mut().set(ContentType::plaintext());
+                    res.send(include_str!("js/renderer.js"));
+                }) as Box<Handler>,
+                "js/worker.js" => Get: Box::new(move |_ctx: Context, mut res: Response| {
+                    res.headers_mut().set(ContentType::plaintext());
+                    res.send(include_str!("js/worker.js"));
+                }) as Box<Handler>,
             }
         };
 
@@ -948,12 +973,10 @@ impl<'a> Migration<'a> {
 
         let granular_parents = base_columns
             .into_iter()
-            .filter_map(|(ni, o)| {
-                if o.is_some() {
-                    Some((ni, o.unwrap()))
-                } else {
-                    None
-                }
+            .filter_map(|(ni, o)| if o.is_some() {
+                Some((ni, o.unwrap()))
+            } else {
+                None
             })
             .collect();
 
