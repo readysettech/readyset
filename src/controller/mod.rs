@@ -9,11 +9,11 @@ use worker::Worker;
 
 use std::collections::{BTreeMap, HashMap, HashSet};
 use std::error::Error;
-use std::io::Write;
+use std::io::{Read, Write};
 use std::net::{IpAddr, SocketAddr};
 use std::time::{Duration, Instant};
 use std::sync::{Arc, Barrier, Mutex};
-use std::sync::mpsc;
+use std::sync::mpsc::{self, Receiver, Sender};
 use std::{fmt, io, thread, time};
 
 use futures::{Future, Stream};
@@ -76,6 +76,11 @@ impl WorkerStatus {
     }
 }
 
+
+enum ControlEvent {
+    WorkerCoordination(CoordinationMessage),
+    ExternalPost(String, String, Sender<String>),
+}
 
 /// Used to construct a controller.
 pub struct ControllerBuilder {
@@ -167,9 +172,12 @@ impl ControllerBuilder {
         let external_addr = SocketAddr::new("127.0.0.1".parse().unwrap(), self.external_port);
         let nworkers = self.nworkers;
 
-        let inner = Arc::new(Mutex::new(ControllerInner::from_builder(self)));
-        let addr = ControllerInner::listen_external(inner.clone(), external_addr);
-        ControllerInner::listen_internal(inner, internal_addr, nworkers);
+        let (tx, rx) = mpsc::channel();
+
+        let addr = ControllerInner::listen_external(tx.clone(), external_addr);
+        ControllerInner::listen_internal(tx, internal_addr);
+
+        ControllerInner::from_builder(self).main_loop(rx, nworkers);
 
         Blender {
             url: format!("http://{}", addr),
@@ -221,51 +229,82 @@ pub struct ControllerInner {
 }
 
 impl ControllerInner {
+    fn main_loop(mut self, receiver: mpsc::Receiver<ControlEvent>, nworkers: usize) {
+        let (tx, rx) = mpsc::channel();
+
+        thread::spawn(move || {
+            let mut workers_arrived = false;
+            for event in receiver {
+                match event {
+                    ControlEvent::WorkerCoordination(msg) => {
+                        trace!(self.log, "Received {:?}", msg);
+                        let process = match msg.payload {
+                            CoordinationPayload::Register {
+                                ref addr,
+                                ref read_listen_addr,
+                            } => self.handle_register(&msg, addr, read_listen_addr.clone()),
+                            CoordinationPayload::Heartbeat => self.handle_heartbeat(&msg),
+                            CoordinationPayload::DomainBooted(ref domain, ref addr) => Ok(()),
+                            _ => unimplemented!(),
+                        };
+                        match process {
+                            Ok(_) => (),
+                            Err(e) => {
+                                error!(self.log, "failed to handle message {:?}: {:?}", msg, e)
+                            }
+                        }
+
+                        self.check_worker_liveness();
+
+                        if !workers_arrived && self.workers.len() == nworkers {
+                            workers_arrived = true;
+                            tx.send(());
+                        }
+                    }
+                    ControlEvent::ExternalPost(path, body, reply_tx) => {
+                        use serde_json as json;
+                        reply_tx
+                            .send(match path.as_ref() {
+                                "graph" => self.graphviz(),
+                                "inputs" => json::to_string(&self.inputs()).unwrap(),
+                                "outputs" => json::to_string(&self.outputs()).unwrap(),
+                                "recover" => json::to_string(&self.recover()).unwrap(),
+                                "graphviz" => json::to_string(&self.graphviz()).unwrap(),
+                                "get_statistics" => {
+                                    json::to_string(&self.get_statistics()).unwrap()
+                                }
+                                "mutator_builder" => json::to_string(
+                                    &self.mutator_builder(json::from_str(&body).unwrap()),
+                                ).unwrap(),
+                                "getter_builder" => json::to_string(
+                                    &self.getter_builder(json::from_str(&body).unwrap()),
+                                ).unwrap(),
+                                "install_recipe" => json::to_string(
+                                    &self.install_recipe(json::from_str(&body).unwrap()),
+                                ).unwrap(),
+                                _ => "NOT FOUND".to_owned(),
+                            })
+                            .unwrap();
+                    }
+                }
+            }
+        });
+
+        // Wait for enough workers to join.
+        if nworkers > 0 {
+            let _ = rx.recv();
+        }
+    }
+
     /// Listen for messages from clients.
-    pub fn listen_external(
-        controller: Arc<Mutex<ControllerInner>>,
-        addr: SocketAddr,
-    ) -> SocketAddr {
+    fn listen_external(event_tx: Sender<ControlEvent>, addr: SocketAddr) -> SocketAddr {
         use rustful::{Context, Handler, Response, Server, TreeRouter};
         use rustful::header::ContentType;
-
-        enum C<Q, R> {
-            OpMut(Box<Fn(&mut ControllerInner, Q) -> R + Send + Sync>),
-            Op(Box<Fn(&ControllerInner, Q) -> R + Send + Sync>),
-        }
-        impl<Q: DeserializeOwned + 'static, R: Serialize + 'static> Handler for C<Q, R> {
-            fn handle_request(&self, ctx: Context, res: Response) {
-                let controller = ctx.global.get::<Arc<Mutex<ControllerInner>>>().unwrap();
-                let mut controller = controller.lock().unwrap();
-
-                let q = serde_json::from_reader(ctx.body).unwrap();
-                let r = match *self {
-                    C::Op(ref f) => f(&mut controller, q),
-                    C::OpMut(ref f) => f(&mut controller, q),
-                };
-                res.send(serde_json::to_string(&r).unwrap());
-            }
-        }
-        impl<Q: DeserializeOwned + 'static, R: Serialize + 'static> C<Q, R> {
-            fn handler(self) -> Box<Handler> {
-                Box::new(self) as Box<Handler>
-            }
-        }
-
         let handlers = insert_routes!{
             TreeRouter::new() => {
-                "inputs" => Post: C::Op(Box::new(Self::inputs)).handler(),
-                "outputs" => Post: C::Op(Box::new(Self::outputs)).handler(),
-                "mutator_builder" => Post: C::Op(Box::new(Self::get_mutator_builder)).handler(),
-                "getter_builder" =>  Post: C::Op(Box::new(Self::get_getter_builder)).handler(),
-                "recover" => Post: C::OpMut(Box::new(Self::recover)).handler(),
-                "get_statistics" => Post: C::OpMut(Box::new(Self::get_statistics)).handler(),
-                "install_recipe" => Post: C::OpMut(Box::new(Self::install_recipe)).handler(),
-                "graphviz" => Post: C::Op(Box::new(Self::graphviz)).handler(),
-                "graph" => Get: Box::new(move |ctx: Context, mut res: Response| {
-                    let controller = ctx.global.get::<Arc<Mutex<ControllerInner>>>().unwrap();
-                    res.headers_mut().set(ContentType::plaintext());
-                    res.send(controller.lock().unwrap().graphviz(()));
+                "graph.html" => Get: Box::new(move |ctx: Context, mut res: Response| {
+                    res.headers_mut().set(ContentType::html());
+                    res.send(include_str!("graph.html"));
                 }) as Box<Handler>,
                 "graph.html" => Get: Box::new(move |_ctx: Context, mut res: Response| {
                     res.headers_mut().set(ContentType::html());
@@ -287,6 +326,18 @@ impl ControllerInner {
                     res.headers_mut().set(ContentType::plaintext());
                     res.send(include_str!("js/worker.js"));
                 }) as Box<Handler>,
+                ":path" => Post: Box::new(move |mut ctx: Context, mut res: Response| {
+                    let (tx, rx) = mpsc::channel();
+                    let path = ctx.variables.get("path").unwrap().to_string();
+                    let mut body = String::new();
+                    ctx.body.read_to_string(&mut body);
+                    let event_tx = ctx.global.get::<Arc<Mutex<Sender<ControlEvent>>>>().unwrap();
+                    {
+                        let event_tx = event_tx.lock().unwrap();
+                        event_tx.send(ControlEvent::ExternalPost(path, body, tx)).unwrap();
+                    }
+                    res.send(rx.recv().unwrap());
+                }) as Box<Handler>,
             }
         };
 
@@ -296,7 +347,7 @@ impl ControllerInner {
             server: "netsoup".to_owned(),
             threads: Some(1),
             content_type: "application/json".parse().unwrap(),
-            global: Box::new(controller).into(),
+            global: Box::new(Arc::new(Mutex::new(event_tx))).into(),
             ..Server::default()
         }.run()
             .unwrap();
@@ -308,60 +359,18 @@ impl ControllerInner {
     }
 
     /// Listen for messages from workers.
-    pub fn listen_internal(
-        controller: Arc<Mutex<ControllerInner>>,
-        addr: SocketAddr,
-        nworkers: usize,
-    ) {
-        use channel::poll::ProcessResult;
-        use mio::net::TcpListener;
-        use std::str::FromStr;
-
-        let (tx, rx) = mpsc::channel();
-
+    fn listen_internal(event_tx: Sender<ControlEvent>, addr: SocketAddr) {
         thread::spawn(move || {
-            let mut workers_arrived = false;
             let mut pl: PollingLoop<CoordinationMessage> = PollingLoop::new(addr);
             pl.run_polling_loop(|e| {
-                let mut inner = controller.lock().unwrap();
-                match e {
-                    PollEvent::Process(ref msg) => {
-                        trace!(inner.log, "Received {:?}", msg);
-                        let process = match msg.payload {
-                            CoordinationPayload::Register {
-                                ref addr,
-                                ref read_listen_addr,
-                            } => inner.handle_register(msg, addr, read_listen_addr.clone()),
-                            CoordinationPayload::Heartbeat => inner.handle_heartbeat(msg),
-                            CoordinationPayload::DomainBooted(ref domain, ref addr) => Ok(()),
-                            _ => unimplemented!(),
-                        };
-                        match process {
-                            Ok(_) => (),
-                            Err(e) => {
-                                error!(inner.log, "failed to handle message {:?}: {:?}", msg, e)
-                            }
-                        }
+                if let PollEvent::Process(msg) = e {
+                    if !event_tx.send(ControlEvent::WorkerCoordination(msg)).is_ok() {
+                        return ProcessResult::StopPolling;
                     }
-                    PollEvent::ResumePolling(timeout) => *timeout = Some(inner.healthcheck_every),
-                    PollEvent::Timeout => (),
                 }
-
-                // TODO(fintelia): Avoid checking worker liveness more frequently than
-                // inner.healthcheck_every.
-                inner.check_worker_liveness();
-
-                if !workers_arrived && inner.workers.len() == nworkers {
-                    workers_arrived = true;
-                    tx.send(());
-                }
-
                 ProcessResult::KeepPolling
             });
         });
-
-        // Wait for enough workers to join.
-        let _ = rx.recv();
     }
 
     fn handle_register(
@@ -546,9 +555,9 @@ impl ControllerInner {
 
     /// Initiaties log recovery by sending a
     /// StartRecovery packet to each base node domain.
-    pub fn recover(&mut self, _: ()) {
+    pub fn recover(&mut self) {
         info!(self.log, "Recovering from log");
-        for (_name, index) in self.inputs(()).iter() {
+        for (_name, index) in self.inputs().iter() {
             let node = &self.ingredients[*index];
             let domain = self.domains.get_mut(&node.domain()).unwrap();
             domain.send(box payload::Packet::StartRecovery).unwrap();
@@ -575,7 +584,7 @@ impl ControllerInner {
     ///
     /// Input nodes are here all nodes of type `Base`. The addresses returned by this function will
     /// all have been returned as a key in the map from `commit` at some point in the past.
-    pub fn inputs(&self, _: ()) -> BTreeMap<String, NodeIndex> {
+    pub fn inputs(&self) -> BTreeMap<String, NodeIndex> {
         self.ingredients
             .neighbors_directed(self.source, petgraph::EdgeDirection::Outgoing)
             .map(|n| {
@@ -591,7 +600,7 @@ impl ControllerInner {
     ///
     /// Output nodes here refers to nodes of type `Reader`, which is the nodes created in response
     /// to calling `.maintain` or `.stream` for a node during a migration.
-    pub fn outputs(&self, _: ()) -> BTreeMap<String, NodeIndex> {
+    pub fn outputs(&self) -> BTreeMap<String, NodeIndex> {
         self.ingredients
             .externals(petgraph::EdgeDirection::Outgoing)
             .filter_map(|n| {
@@ -629,7 +638,7 @@ impl ControllerInner {
 
     /// Obtain a `RemoteGetterBuilder` that can be sent to a client and then used to query a given
     /// (already maintained) reader node.
-    pub fn get_getter_builder(&self, node: NodeIndex) -> Option<RemoteGetterBuilder> {
+    pub fn getter_builder(&self, node: NodeIndex) -> Option<RemoteGetterBuilder> {
         self.find_getter_for(node).map(|r| {
             let domain = self.ingredients[r].domain();
             let shards = (0..self.domains[&domain].shards())
@@ -645,7 +654,7 @@ impl ControllerInner {
 
     /// Obtain a MutatorBuild that can be used to construct a Mutator to perform writes and deletes
     /// from the given base node.
-    pub fn get_mutator_builder(&self, base: NodeIndex) -> MutatorBuilder {
+    pub fn mutator_builder(&self, base: NodeIndex) -> MutatorBuilder {
         let node = &self.ingredients[base];
 
         trace!(self.log, "creating mutator"; "for" => base.index());
@@ -689,7 +698,7 @@ impl ControllerInner {
     }
 
     /// Get statistics about the time spent processing different parts of the graph.
-    pub fn get_statistics(&mut self, _: ()) -> GraphStats {
+    pub fn get_statistics(&mut self) -> GraphStats {
         // TODO: request stats from domains in parallel.
         let domains = self.domains
             .iter_mut()
@@ -723,15 +732,15 @@ impl ControllerInner {
 
     #[cfg(test)]
     pub fn get_mutator(&self, base: NodeIndex) -> Mutator {
-        self.get_mutator_builder(base)
+        self.mutator_builder(base)
             .build("127.0.0.1:0".parse().unwrap())
     }
     #[cfg(test)]
     pub fn get_getter(&self, node: NodeIndex) -> Option<RemoteGetter> {
-        self.get_getter_builder(node).map(|g| g.build())
+        self.getter_builder(node).map(|g| g.build())
     }
 
-    pub fn graphviz(&self, _: ()) -> String {
+    pub fn graphviz(&self) -> String {
         let mut s = String::new();
 
         let indentln = |s: &mut String| s.push_str("    ");

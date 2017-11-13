@@ -460,7 +460,7 @@ fn it_recovers_persisted_logs() {
     assert_eq!(getter.lookup(&1.into(), true).unwrap().len(), 0);
 
     // Recover and let the writes propagate:
-    g.recover(());
+    g.recover();
     sleep();
 
     for i in 1..10 {
@@ -518,7 +518,7 @@ fn it_recovers_persisted_logs_w_multiple_nodes() {
 
     let (mut g, recipe) = setup();
     // Recover and let the writes propagate:
-    g.recover(());
+    g.recover();
     sleep();
 
     for (i, table) in tables.iter().enumerate() {
@@ -575,7 +575,7 @@ fn it_recovers_persisted_logs_w_transactions() {
     assert_eq!(getter.transactional_lookup(&1.into()).unwrap().0.len(), 0);
 
     // Recover and let the writes propagate:
-    g.recover(());
+    g.recover();
     sleep();
 
     for i in 1..10 {
@@ -1996,7 +1996,7 @@ fn recipe_activates() {
         assert!(r.activate(mig, false).is_ok());
     });
     // one base node
-    assert_eq!(g.inputs(()).len(), 1);
+    assert_eq!(g.inputs().len(), 1);
 }
 
 #[test]
@@ -2012,7 +2012,7 @@ fn recipe_activates_and_migrates() {
         assert!(r.activate(mig, false).is_ok());
     });
     // one base node
-    assert_eq!(g.inputs(()).len(), 1);
+    assert_eq!(g.inputs().len(), 1);
 
     let r_copy = r.clone();
 
@@ -2026,9 +2026,9 @@ fn recipe_activates_and_migrates() {
         assert!(r1.activate(mig, false).is_ok());
     });
     // still one base node
-    assert_eq!(g.inputs(()).len(), 1);
+    assert_eq!(g.inputs().len(), 1);
     // two leaf nodes
-    assert_eq!(g.outputs(()).len(), 2);
+    assert_eq!(g.outputs().len(), 2);
 }
 
 #[test]
@@ -2045,7 +2045,7 @@ fn recipe_activates_and_migrates_with_join() {
         assert!(r.activate(mig, false).is_ok());
     });
     // two base nodes
-    assert_eq!(g.inputs(()).len(), 2);
+    assert_eq!(g.inputs().len(), 2);
 
     let r_copy = r.clone();
 
@@ -2058,9 +2058,9 @@ fn recipe_activates_and_migrates_with_join() {
         assert!(r1.activate(mig, false).is_ok());
     });
     // still two base nodes
-    assert_eq!(g.inputs(()).len(), 2);
+    assert_eq!(g.inputs().len(), 2);
     // one leaf node
-    assert_eq!(g.outputs(()).len(), 1);
+    assert_eq!(g.outputs().len(), 1);
 }
 
 #[test]
