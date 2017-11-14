@@ -53,8 +53,6 @@ use self::payload::{EgressForBase, IngressFromBase};
 pub type WorkerIdentifier = SocketAddr;
 pub type WorkerEndpoint = Arc<Mutex<TcpSender<CoordinationMessage>>>;
 
-static mut recipe: Option<Recipe> = None;
-
 const NANOS_PER_SEC: u64 = 1_000_000_000;
 macro_rules! dur_to_ns {
     ($d:expr) => {{
@@ -309,6 +307,9 @@ impl ControllerInner {
                             ).unwrap(),
                             "create_universe" => json::to_string(
                                 &self.create_universe(json::from_str(&body).unwrap()),
+                            ).unwrap(),
+                            "enable_reuse" => json::to_string(
+                                &self.enable_reuse(json::from_str(&body).unwrap()),
                             ).unwrap(),
                             _ => "NOT FOUND".to_owned(),
                         })
@@ -790,34 +791,34 @@ impl ControllerInner {
     }
 
     pub fn install_recipe_with_policies(&mut self, (r, p): (String, String)) {
+        let mut r = Recipe::from_str_with_policy(&r, Some(&p), None).unwrap();
+        let old = self.recipe.clone();
+        let mut new = old.replace(r).unwrap();
         self.migrate(|mig| {
-            let mut r = Recipe::from_str_with_policy(&r, Some(&p), None).unwrap();
-            unsafe {
-                let mut new = recipe.clone().unwrap().replace(r).unwrap();
-                assert!(new.activate(mig, false).is_ok());
-                recipe = Some(new);
-            }
-        })
+            assert!(new.activate(mig, false).is_ok());
+        });
+        self.recipe = new;
     }
 
     pub fn create_universe(&mut self, context: HashMap<String, DataType>) {
         let log = self.log.clone();
+        let mut r = self.recipe.clone();
         self.add_universe(context, |mut mig| {
-            unsafe {
-                let mut r = recipe.clone().unwrap();
-                r.next();
-                match r.create_universe(&mut mig) {
-                    Ok(ar) => {
-                        info!(log, "{} expressions added", ar.expressions_added);
-                        info!(log, "{} expressions removed", ar.expressions_removed);
-                    }
-                    Err(e) => panic!("failed to activate recipe: {}", e),
-                };
-
-                recipe = Some(r);
-            }
+            r.next();
+            match r.create_universe(&mut mig) {
+                Ok(ar) => {
+                    info!(log, "{} expressions added", ar.expressions_added);
+                    info!(log, "{} expressions removed", ar.expressions_removed);
+                }
+                Err(e) => panic!("failed to activate recipe: {}", e),
+            };
 
         });
+        self.recipe = r;
+    }
+
+    pub fn enable_reuse(&mut self, reuse_type: ReuseConfigType) {
+        self.recipe.enable_reuse(reuse_type);
     }
 
     #[cfg(test)]
@@ -1630,15 +1631,7 @@ impl Blender {
 
     /// Enable reuse type
     pub fn enable_reuse(&self, reuse_type: ReuseConfigType) {
-        unsafe {
-            if recipe.is_none() {
-                recipe = Some(Recipe::blank(None));
-            }
-
-            let mut r = recipe.clone().unwrap();
-            r.enable_reuse(reuse_type);
-            recipe = Some(r);
-        }
+        self.rpc("enable_reuse", &reuse_type).unwrap()
     }
 }
 

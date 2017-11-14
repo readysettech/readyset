@@ -21,7 +21,7 @@ pub enum ReuseType {
     #[allow(dead_code)] BackjoinRequired(Vec<Table>),
 }
 
-#[derive(Clone, Debug, PartialEq)]
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[allow(missing_docs)]
 pub enum ReuseConfigType {
     Finkelstein,
