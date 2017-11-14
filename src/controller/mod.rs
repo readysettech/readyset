@@ -178,7 +178,16 @@ impl ControllerBuilder {
         let addr = ControllerInner::listen_external(tx.clone(), external_addr);
         ControllerInner::listen_internal(tx, internal_addr);
 
-        ControllerInner::from_builder(self).main_loop(rx, nworkers);
+        let (worker_ready_tx, worker_ready_rx) = mpsc::channel();
+
+        thread::spawn(move || {
+            ControllerInner::from_builder(self).main_loop(rx, worker_ready_tx, nworkers);
+        });
+
+        // Wait for enough workers to join.
+        if nworkers > 0 {
+            let _ = worker_ready_rx.recv();
+        }
 
         Blender {
             url: format!("http://{}", addr),
@@ -230,77 +239,69 @@ pub struct ControllerInner {
 }
 
 impl ControllerInner {
-    fn main_loop(mut self, receiver: mpsc::Receiver<ControlEvent>, nworkers: usize) {
-        let (tx, rx) = mpsc::channel();
-
-        thread::spawn(move || {
-            let mut workers_arrived = false;
-            for event in receiver {
-                match event {
-                    ControlEvent::WorkerCoordination(msg) => {
-                        trace!(self.log, "Received {:?}", msg);
-                        let process = match msg.payload {
-                            CoordinationPayload::Register {
-                                ref addr,
-                                ref read_listen_addr,
-                            } => self.handle_register(&msg, addr, read_listen_addr.clone()),
-                            CoordinationPayload::Heartbeat => self.handle_heartbeat(&msg),
-                            CoordinationPayload::DomainBooted(ref domain, ref addr) => Ok(()),
-                            _ => unimplemented!(),
-                        };
-                        match process {
-                            Ok(_) => (),
-                            Err(e) => {
-                                error!(self.log, "failed to handle message {:?}: {:?}", msg, e)
-                            }
-                        }
-
-                        self.check_worker_liveness();
-
-                        if !workers_arrived && self.workers.len() == nworkers {
-                            workers_arrived = true;
-                            tx.send(());
-                        }
+    fn main_loop(
+        mut self,
+        receiver: mpsc::Receiver<ControlEvent>,
+        worker_ready_tx: mpsc::Sender<()>,
+        nworkers: usize,
+    ) {
+        let mut workers_arrived = false;
+        for event in receiver {
+            match event {
+                ControlEvent::WorkerCoordination(msg) => {
+                    trace!(self.log, "Received {:?}", msg);
+                    let process = match msg.payload {
+                        CoordinationPayload::Register {
+                            ref addr,
+                            ref read_listen_addr,
+                        } => self.handle_register(&msg, addr, read_listen_addr.clone()),
+                        CoordinationPayload::Heartbeat => self.handle_heartbeat(&msg),
+                        CoordinationPayload::DomainBooted(ref domain, ref addr) => Ok(()),
+                        _ => unimplemented!(),
+                    };
+                    match process {
+                        Ok(_) => (),
+                        Err(e) => error!(self.log, "failed to handle message {:?}: {:?}", msg, e),
                     }
-                    ControlEvent::ExternalGet(path, body, reply_tx) => {
-                        reply_tx
-                            .send(match path.as_ref() {
-                                "graph" => self.graphviz(),
-                                _ => "NOT FOUND".to_owned(),
-                            })
-                            .unwrap();
-                    }
-                    ControlEvent::ExternalPost(path, body, reply_tx) => {
-                        use serde_json as json;
-                        reply_tx
-                            .send(match path.as_ref() {
-                                "inputs" => json::to_string(&self.inputs()).unwrap(),
-                                "outputs" => json::to_string(&self.outputs()).unwrap(),
-                                "recover" => json::to_string(&self.recover()).unwrap(),
-                                "graphviz" => json::to_string(&self.graphviz()).unwrap(),
-                                "get_statistics" => {
-                                    json::to_string(&self.get_statistics()).unwrap()
-                                }
-                                "mutator_builder" => json::to_string(
-                                    &self.mutator_builder(json::from_str(&body).unwrap()),
-                                ).unwrap(),
-                                "getter_builder" => json::to_string(
-                                    &self.getter_builder(json::from_str(&body).unwrap()),
-                                ).unwrap(),
-                                "install_recipe" => json::to_string(
-                                    &self.install_recipe(json::from_str(&body).unwrap()),
-                                ).unwrap(),
-                                _ => "NOT FOUND".to_owned(),
-                            })
-                            .unwrap();
+
+                    self.check_worker_liveness();
+
+                    if !workers_arrived && self.workers.len() == nworkers {
+                        workers_arrived = true;
+                        worker_ready_tx.send(());
                     }
                 }
+                ControlEvent::ExternalGet(path, body, reply_tx) => {
+                    reply_tx
+                        .send(match path.as_ref() {
+                            "graph" => self.graphviz(),
+                            _ => "NOT FOUND".to_owned(),
+                        })
+                        .unwrap();
+                }
+                ControlEvent::ExternalPost(path, body, reply_tx) => {
+                    use serde_json as json;
+                    reply_tx
+                        .send(match path.as_ref() {
+                            "inputs" => json::to_string(&self.inputs()).unwrap(),
+                            "outputs" => json::to_string(&self.outputs()).unwrap(),
+                            "recover" => json::to_string(&self.recover()).unwrap(),
+                            "graphviz" => json::to_string(&self.graphviz()).unwrap(),
+                            "get_statistics" => json::to_string(&self.get_statistics()).unwrap(),
+                            "mutator_builder" => json::to_string(
+                                &self.mutator_builder(json::from_str(&body).unwrap()),
+                            ).unwrap(),
+                            "getter_builder" => json::to_string(
+                                &self.getter_builder(json::from_str(&body).unwrap()),
+                            ).unwrap(),
+                            "install_recipe" => json::to_string(
+                                &self.install_recipe(json::from_str(&body).unwrap()),
+                            ).unwrap(),
+                            _ => "NOT FOUND".to_owned(),
+                        })
+                        .unwrap();
+                }
             }
-        });
-
-        // Wait for enough workers to join.
-        if nworkers > 0 {
-            let _ = rx.recv();
         }
     }
 
