@@ -30,6 +30,7 @@ use tarpc::sync::client::{self, ClientExt};
 use tokio_core::reactor::Core;
 
 use recipe::Recipe;
+use sql::reuse::ReuseConfigType;
 
 pub mod coordination;
 pub mod domain_handle;
@@ -706,7 +707,7 @@ impl ControllerInner {
             let mut r = Recipe::from_str(&r_txt, None).unwrap();
             assert!(r.activate(mig, false).is_ok());
             unsafe {
-                recipe = Some(r)
+                recipe = Some(recipe.clone().unwrap().replace(r).unwrap());
             };
         });
     }
@@ -715,9 +716,10 @@ impl ControllerInner {
         self.migrate(|mig| {
             use Recipe;
             let mut r = Recipe::from_str_with_policy(&r, Some(&p), None).unwrap();
-            assert!(r.activate(mig, false).is_ok());
             unsafe {
-                recipe = Some(r);
+                let mut new = recipe.clone().unwrap().replace(r).unwrap();
+                assert!(new.activate(mig, false).is_ok());
+                recipe = Some(new);
             }
         })
     }
@@ -736,9 +738,8 @@ impl ControllerInner {
                     }
                     Err(e) => panic!("failed to activate recipe: {}", e),
                 };
-                assert!(r.activate(&mut mig, false).is_ok());
 
-                recipe = Some(r.clone());
+                recipe = Some(r);
             }
 
         });
@@ -1541,6 +1542,19 @@ impl Blender {
 
     /// Set the `Logger` to use for internal log messages.
     pub fn log_with(&mut self, _: slog::Logger) {}
+
+    /// Enable reuse type
+    pub fn enable_reuse(&self, reuse_type: ReuseConfigType) {
+        unsafe {
+            if recipe.is_none() {
+                recipe = Some(Recipe::blank(None));
+            }
+
+            let mut r = recipe.clone().unwrap();
+            r.enable_reuse(reuse_type);
+            recipe = Some(r);
+        }
+    }
 }
 
 #[cfg(test)]
