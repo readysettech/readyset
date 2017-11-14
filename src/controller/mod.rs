@@ -751,10 +751,12 @@ impl ControllerInner {
 
     pub fn install_recipe(&mut self, r_txt: String) {
         let mut r = Recipe::from_str(&r_txt, None).unwrap();
+        let old = self.recipe.clone();
+        let mut new = old.replace(r).unwrap();
         self.migrate(|mig| {
-            assert!(r.activate(mig, false).is_ok());
+            assert!(new.activate(mig, false).is_ok());
         });
-        self.recipe = r;
+        self.recipe = new;
     }
 
     #[cfg(test)]
