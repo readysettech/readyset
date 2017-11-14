@@ -721,7 +721,7 @@ mod tests {
     /// Helper to grab a reference to a named view.
     fn get_node<'a>(inc: &SqlIncorporator, mig: &'a Migration, name: &str) -> &'a Node {
         let na = inc.get_flow_node_address(name, 0)
-            .expect(&format!("No node named \"{}\" at v0", name));
+            .expect(&format!("No node named \"{}\" exists", name));
         mig.graph().node_weight(na).unwrap()
     }
 
@@ -1405,7 +1405,5 @@ mod tests {
             assert_eq!(union_view.fields(), &["id", "name"]);
             assert_eq!(union_view.description(), format!("3:[0, 1] ⋃ 7:[0, 1]"));
         });
-
-        println!("{}", g.graphviz())
     }
 }
