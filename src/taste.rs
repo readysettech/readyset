@@ -1,4 +1,4 @@
-use config::{Benchmark, Config, parse_config};
+use config::{parse_config, Benchmark, Config};
 use Commit;
 use git2;
 use Push;
@@ -55,8 +55,8 @@ fn write_output(output: &Output, commit_id: git2::Oid, name: &str) {
     use std::fs::File;
     use std::io::Write;
 
-    let mut stdout_file = File::create(&format!("{}-{}-stdout.log", commit_id, name))
-        .expect(&format!(
+    let mut stdout_file =
+        File::create(&format!("{}-{}-stdout.log", commit_id, name)).expect(&format!(
             "Failed to create stdout log file for '{}' at commit '{}'.",
             name,
             commit_id
@@ -64,8 +64,8 @@ fn write_output(output: &Output, commit_id: git2::Oid, name: &str) {
     stdout_file
         .write_all(output.stdout.as_slice())
         .expect("Failed to write output to stdout log file!");
-    let mut stderr_file = File::create(&format!("{}-{}-stderr.log", commit_id, name))
-        .expect(&format!(
+    let mut stderr_file =
+        File::create(&format!("{}-{}-stderr.log", commit_id, name)).expect(&format!(
             "Failed to create stderr log file for '{}' at commit '{}'.",
             name,
             commit_id
@@ -82,7 +82,6 @@ fn benchmark(
     commit_id: git2::Oid,
     previous_result: Option<&HashMap<String, BenchmarkResult<f64>>>,
 ) -> (ExitStatus, HashMap<String, BenchmarkResult<f64>>) {
-
     // Run the benchmark and collect its output
     let output = run_benchmark(workdir, cfg, bench);
     write_output(&output, commit_id, &bench.name);
@@ -126,13 +125,11 @@ fn benchmark(
                         Some(prev_res) => {
                             let old_val = match prev_res.get(&bm_name) {
                                 None => val,
-                                Some(pv) => {
-                                    match *pv {
-                                        BenchmarkResult::Improvement(v, _) => v,
-                                        BenchmarkResult::Regression(v, _) => v,
-                                        BenchmarkResult::Neutral(v, _) => v,
-                                    }
-                                }
+                                Some(pv) => match *pv {
+                                    BenchmarkResult::Improvement(v, _) => v,
+                                    BenchmarkResult::Regression(v, _) => v,
+                                    BenchmarkResult::Neutral(v, _) => v,
+                                },
                             };
                             let new_result = if bench.lower_is_better {
                                 if val >= old_val * (1.0 + bench.regression_threshold) {
@@ -185,12 +182,10 @@ pub fn taste_commit(
 
     let branch = match push.push_ref {
         None => None,
-        Some(ref pr) => {
-            match pr.rfind("/") {
-                None => None,
-                Some(i) => Some(String::from(&pr[i + 1..])),
-            }
-        }
+        Some(ref pr) => match pr.rfind("/") {
+            None => None,
+            Some(i) => Some(String::from(&pr[i + 1..])),
+        },
     };
 
     let do_update = !Path::new(&format!("{}/Cargo.lock", ws.path)).exists();
@@ -230,45 +225,43 @@ pub fn taste_commit(
         def_regression_threshold,
     ) {
         Ok(c) => c,
-        Err(e) => {
-            match e.kind() {
-                io::ErrorKind::NotFound => {
-                    println!(
-                        "Skipping commit {} which doesn't have a Taster config.",
-                        commit.id
-                    );
-                    return Ok((
-                        None,
-                        TastingResult {
-                            branch: branch,
-                            commit: commit.clone(),
-                            build: build_success,
-                            test: test_output.status.success(),
-                            bench: false,
-                            results: None,
-                        },
-                    ));
-                }
-                io::ErrorKind::InvalidInput => {
-                    println!(
-                        "Skipping commit {} which has an invalid Taster config.",
-                        commit.id
-                    );
-                    return Ok((
-                        None,
-                        TastingResult {
-                            branch: branch,
-                            commit: commit.clone(),
-                            build: build_success,
-                            test: test_output.status.success(),
-                            bench: false,
-                            results: None,
-                        },
-                    ));
-                }
-                _ => unimplemented!(),
+        Err(e) => match e.kind() {
+            io::ErrorKind::NotFound => {
+                println!(
+                    "Skipping commit {} which doesn't have a Taster config.",
+                    commit.id
+                );
+                return Ok((
+                    None,
+                    TastingResult {
+                        branch: branch,
+                        commit: commit.clone(),
+                        build: build_success,
+                        test: test_output.status.success(),
+                        bench: false,
+                        results: None,
+                    },
+                ));
             }
-        }
+            io::ErrorKind::InvalidInput => {
+                println!(
+                    "Skipping commit {} which has an invalid Taster config.",
+                    commit.id
+                );
+                return Ok((
+                    None,
+                    TastingResult {
+                        branch: branch,
+                        commit: commit.clone(),
+                        build: build_success,
+                        test: test_output.status.success(),
+                        bench: false,
+                        results: None,
+                    },
+                ));
+            }
+            _ => unimplemented!(),
+        },
     };
 
     let bench_results = match branch {
@@ -284,15 +277,13 @@ pub fn taste_commit(
                 })
                 .collect::<Vec<(Benchmark, ExitStatus, HashMap<String, BenchmarkResult<f64>>)>>()
         }
-        None => {
-            cfg.benchmarks
-                .iter()
-                .map(|b| {
-                    let (status, res) = benchmark(&ws.path, &cfg, b, commit.id, None);
-                    (b.clone(), status, res)
-                })
-                .collect::<Vec<(Benchmark, ExitStatus, HashMap<String, BenchmarkResult<f64>>)>>()
-        }
+        None => cfg.benchmarks
+            .iter()
+            .map(|b| {
+                let (status, res) = benchmark(&ws.path, &cfg, b, commit.id, None);
+                (b.clone(), status, res)
+            })
+            .collect::<Vec<(Benchmark, ExitStatus, HashMap<String, BenchmarkResult<f64>>)>>(),
     };
     let bench_success = bench_results.iter().all(|x| x.1.success());
 

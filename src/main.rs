@@ -1,19 +1,19 @@
-extern crate log;
 extern crate env_logger;
+extern crate log;
 
 extern crate afterparty;
 #[macro_use]
 extern crate clap;
-extern crate lettre;
 extern crate git2;
-extern crate hyper;
-extern crate regex;
-extern crate slack_hook;
-extern crate toml;
 extern crate github_rs;
+extern crate hyper;
+extern crate lettre;
+extern crate regex;
 #[macro_use]
 extern crate serde_derive;
 extern crate serde_json;
+extern crate slack_hook;
+extern crate toml;
 
 mod auth;
 mod config;
@@ -55,7 +55,7 @@ pub struct Push {
 }
 
 pub fn main() {
-    use clap::{Arg, App};
+    use clap::{App, Arg};
 
     env_logger::init().unwrap();
 
@@ -387,13 +387,11 @@ pub fn main() {
                         regression_threshold,
                     );
                     match head_res {
-                        Err(e) => {
-                            println!(
-                                "ERROR: failed to taste HEAD commit {}: {}",
-                                head_commit.id,
-                                e
-                            )
-                        }
+                        Err(e) => println!(
+                            "ERROR: failed to taste HEAD commit {}: {}",
+                            head_commit.id,
+                            e
+                        ),
                         Ok((cfg, tr)) => {
                             notify(cfg.as_ref(), &tr, &push, &push.head_commit);
                             // Taste others if needed
@@ -419,13 +417,11 @@ pub fn main() {
                                         regression_threshold,
                                     );
                                     match res {
-                                        Err(e) => {
-                                            println!(
-                                                "ERROR: failed to taste commit {}: {}",
-                                                c.id,
-                                                e
-                                            )
-                                        }
+                                        Err(e) => println!(
+                                            "ERROR: failed to taste commit {}: {}",
+                                            c.id,
+                                            e
+                                        ),
                                         Ok((cfg, tr)) => notify(cfg.as_ref(), &tr, &push, &cur_c),
                                     }
                                 }

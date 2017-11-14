@@ -1,5 +1,5 @@
-use slack_hook::{Attachment, AttachmentBuilder, Field, PayloadBuilder, Slack, SlackText, SlackLink};
-use slack_hook::SlackTextContent::{Text, Link};
+use slack_hook::{Attachment, AttachmentBuilder, Field, PayloadBuilder, Slack, SlackLink, SlackText};
+use slack_hook::SlackTextContent::{Link, Text};
 
 use Push;
 use config::Config;
@@ -28,9 +28,7 @@ impl SlackNotifier {
     ) -> Result<(), String> {
         let mut text = vec![
             Text("I've tasted _".into()),
-            Text(
-                format!("\"{}\"_ (", push.head_commit.msg.lines().next().unwrap()).into(),
-            ),
+            Text(format!("\"{}\"_ (", push.head_commit.msg.lines().next().unwrap()).into()),
             Link(SlackLink::new(
                 &push.head_commit.url,
                 &format!("{}", push.head_commit.id)[0..6],
@@ -39,12 +37,10 @@ impl SlackNotifier {
         match push.pusher {
             Some(ref p) => {
                 let alias = match cfg {
-                    Some(cfg) => {
-                        match cfg.slack_aliases.get(p) {
-                            None => p,
-                            Some(a) => a,
-                        }
-                    }
+                    Some(cfg) => match cfg.slack_aliases.get(p) {
+                        None => p,
+                        Some(a) => a,
+                    },
                     None => p,
                 };
                 text.push(Text(format!("), pushed by @{}", alias).into()))
@@ -130,7 +126,7 @@ impl SlackNotifier {
                             .build()
                             .unwrap();
                         attachments.push(att);
-                        continue
+                        continue;
                     }
 
                     let mut nv = res.iter()
