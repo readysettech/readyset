@@ -28,24 +28,44 @@ pub struct TastingResult {
     pub results: Option<Vec<(Benchmark, ExitStatus, HashMap<String, BenchmarkResult<f64>>)>>,
 }
 
-fn run_benchmark(workdir: &str, cfg: &Config, bench: &Benchmark) -> Output {
-    let mut cmd;
-
-    if cfg.version.is_none() || cfg.version.unwrap() < 2 {
+fn run_benchmark(workdir: &str, cfg: &Config, bench: &Benchmark, timeout: Option<u64>) -> Output {
+    let mut cmd = if cfg.version.is_none() || cfg.version.unwrap() < 2 {
         // older taster configs assume an implied "cargo" prefix on each benchmark command
-        cmd = Command::new("cargo");
-        cmd.current_dir(workdir)
-            .env("RUST_BACKTRACE", "1")
-            .arg(&bench.cmd)
-            .args(bench.args.as_slice());
+        match timeout {
+            None => {
+                let mut cmd = Command::new("cargo");
+                cmd.arg(&bench.cmd);
+                cmd
+            }
+            Some(timeout) => {
+                let mut cmd = Command::new("timeout");
+                cmd.arg("-k")
+                    .arg(&format!("{}s", timeout + 30))
+                    .arg(&format!("{}s", timeout))
+                    .arg("cargo")
+                    .arg(&bench.cmd);
+                cmd
+            }
+        }
     } else {
         // from taster config version 2, we no longer assume an implicit "cargo" prefix on
         // benchmark commands
-        cmd = Command::new(&bench.cmd);
-        cmd.current_dir(workdir)
-            .env("RUST_BACKTRACE", "1")
-            .args(bench.args.as_slice());
-    }
+        match timeout {
+            None => Command::new(&bench.cmd),
+            Some(timeout) => {
+                let mut cmd = Command::new("timeout");
+                cmd.arg("-k")
+                    .arg(&format!("{}s", timeout + 30))
+                    .arg(&format!("{}s", timeout))
+                    .arg(&bench.cmd);
+                cmd
+            }
+        }
+    };
+
+    cmd.current_dir(workdir)
+        .env("RUST_BACKTRACE", "1")
+        .args(bench.args.as_slice());
 
     cmd.output()
         .expect(&format!("Failed to execute benchmark '{}'!", bench.name))
@@ -81,9 +101,10 @@ fn benchmark(
     bench: &Benchmark,
     commit_id: git2::Oid,
     previous_result: Option<&HashMap<String, BenchmarkResult<f64>>>,
+    timeout: Option<u64>,
 ) -> (ExitStatus, HashMap<String, BenchmarkResult<f64>>) {
     // Run the benchmark and collect its output
-    let output = run_benchmark(workdir, cfg, bench);
+    let output = run_benchmark(workdir, cfg, bench, timeout);
     write_output(&output, commit_id, &bench.name);
 
     let lines = str::from_utf8(output.stdout.as_slice())
@@ -176,6 +197,7 @@ pub fn taste_commit(
     commit: &Commit,
     def_improvement_threshold: f64,
     def_regression_threshold: f64,
+    timeout: Option<u64>,
 ) -> Result<(Option<Config>, TastingResult), String> {
     println!("Tasting commit {}", commit.id);
     ws.checkout_commit(&commit.id)?;
@@ -212,7 +234,7 @@ pub fn taste_commit(
         update_success && build_output.status.success()
     };
 
-    let test_output = test(&ws.path);
+    let test_output = test(&ws.path, timeout);
     write_output(&test_output, commit.id, "test");
 
     if !test_output.status.success() {
@@ -264,27 +286,28 @@ pub fn taste_commit(
         },
     };
 
-    let bench_results = match branch {
-        Some(ref branch) => {
-            let branch_history = history.entry(branch.clone()).or_insert(HashMap::new());
-            cfg.benchmarks
+    let bench_results =
+        match branch {
+            Some(ref branch) => {
+                let branch_history = history.entry(branch.clone()).or_insert(HashMap::new());
+                cfg.benchmarks
                 .iter()
                 .map(|b| {
                     let (status, res) =
-                        benchmark(&ws.path, &cfg, b, commit.id, branch_history.get(&b.name));
+                        benchmark(&ws.path, &cfg, b, commit.id, branch_history.get(&b.name), timeout);
                     branch_history.insert(b.name.clone(), res.clone());
                     (b.clone(), status, res)
                 })
                 .collect::<Vec<(Benchmark, ExitStatus, HashMap<String, BenchmarkResult<f64>>)>>()
-        }
-        None => cfg.benchmarks
-            .iter()
-            .map(|b| {
-                let (status, res) = benchmark(&ws.path, &cfg, b, commit.id, None);
-                (b.clone(), status, res)
-            })
-            .collect::<Vec<(Benchmark, ExitStatus, HashMap<String, BenchmarkResult<f64>>)>>(),
-    };
+            }
+            None => cfg.benchmarks
+                .iter()
+                .map(|b| {
+                    let (status, res) = benchmark(&ws.path, &cfg, b, commit.id, None, timeout);
+                    (b.clone(), status, res)
+                })
+                .collect::<Vec<(Benchmark, ExitStatus, HashMap<String, BenchmarkResult<f64>>)>>(),
+        };
     let bench_success = bench_results.iter().all(|x| x.1.success());
 
     Ok((
@@ -300,10 +323,24 @@ pub fn taste_commit(
     ))
 }
 
-fn test(workdir: &str) -> Output {
-    Command::new("cargo")
-        .current_dir(workdir)
-        .arg("test")
+fn test(workdir: &str, timeout: Option<u64>) -> Output {
+    let mut cmd = match timeout {
+        None => {
+            let mut cmd = Command::new("cargo");
+            cmd.arg("test");
+            cmd
+        }
+        Some(timeout) => {
+            let mut cmd = Command::new("timeout");
+            cmd.arg("-k")
+                .arg(&format!("{}s", timeout + 30))
+                .arg(&format!("{}s", timeout))
+                .arg("cargo")
+                .arg("test");
+            cmd
+        }
+    };
+    cmd.current_dir(workdir)
         .env("RUST_BACKTRACE", "1")
         .env("RUST_TEST_THREADS", "1")
         .output()

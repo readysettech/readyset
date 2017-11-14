@@ -55,7 +55,7 @@ pub struct Push {
 }
 
 pub fn main() {
-    use clap::{App, Arg};
+    use clap::{App, Arg, ErrorKind};
 
     env_logger::init().unwrap();
 
@@ -150,9 +150,14 @@ pub fn main() {
             Arg::with_name("taste_head_only")
                 .long("taste_head_only")
                 .required(false)
-                .help(
-                    "When multiple commits are pushed, taste the head commit only",
-                ),
+                .help("When multiple commits are pushed, taste the head commit only"),
+        )
+        .arg(
+            Arg::with_name("timeout")
+                .long("timeout")
+                .required(false)
+                .takes_value(true)
+                .help("Timeout (in seconds) after which benchmarks should be killed"),
         )
         .arg(
             Arg::with_name("verbose_notifications")
@@ -190,6 +195,13 @@ pub fn main() {
         value_t_or_exit!(args, "default_improvement_reporting_threshold", f64);
     let regression_threshold =
         value_t_or_exit!(args, "default_regression_reporting_threshold", f64);
+    let timeout = match value_t!(args, "timeout", u64) {
+        Ok(timeout) => Some(timeout),
+        Err(e) => match e.kind {
+            ErrorKind::ArgumentNotFound => None,
+            _ => panic!("failed to parse timeout: {:?}", e),
+        },
+    };
 
     let mut history = HashMap::new();
     let ws = repo::Workspace::new(repo, workdir);
@@ -244,6 +256,7 @@ pub fn main() {
                     &push.head_commit,
                     improvement_threshold,
                     regression_threshold,
+                    timeout,
                 );
                 match res {
                     Err(e) => println!("ERROR: failed to taste{}: {}", cid, e),
@@ -305,6 +318,7 @@ pub fn main() {
                 &push.head_commit,
                 improvement_threshold,
                 regression_threshold,
+                timeout,
             );
             assert!(res.is_ok());
         }
@@ -385,6 +399,7 @@ pub fn main() {
                         &push.head_commit,
                         improvement_threshold,
                         regression_threshold,
+                        timeout,
                     );
                     match head_res {
                         Err(e) => println!(
@@ -415,6 +430,7 @@ pub fn main() {
                                         &cur_c,
                                         improvement_threshold,
                                         regression_threshold,
+                                        timeout,
                                     );
                                     match res {
                                         Err(e) => println!(
