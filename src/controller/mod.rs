@@ -295,6 +295,12 @@ impl ControllerInner {
                                 "install_recipe" => json::to_string(
                                     &self.install_recipe(json::from_str(&body).unwrap()),
                                 ).unwrap(),
+                                "install_recipe_with_policies" => json::to_string(
+                                    &self.install_recipe_with_policies(json::from_str(&body).unwrap()),
+                                ).unwrap(),
+                                "create_universe" => json::to_string(
+                                    &self.create_universe(json::from_str(&body).unwrap()),
+                                ).unwrap(),
                                 _ => "NOT FOUND".to_owned(),
                             })
                             .unwrap();

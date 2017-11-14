@@ -377,6 +377,7 @@ pub use dataflow::{DurabilityMode, PersistenceParameters};
 
 pub use controller::{Blender, ControllerBuilder, Mutator, MutatorBuilder, MutatorError, ReadQuery,
                      ReadReply, RemoteGetter, RemoteGetterBuilder};
+pub use controller::sql::reuse::ReuseConfigType;
 pub use worker::Worker;
 
 /// Just give me a damn terminal logger
