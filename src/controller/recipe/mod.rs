@@ -246,7 +246,7 @@ impl Recipe {
             expressions_added: 0,
             expressions_removed: 0,
         };
-        use sql::security::ManyUniverses;
+        use controller::sql::security::ManyUniverses;
 
         let qfp = self.inc
             .as_mut()

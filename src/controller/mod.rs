@@ -29,10 +29,9 @@ use slog;
 use tarpc::sync::client::{self, ClientExt};
 use tokio_core::reactor::Core;
 
-use recipe::Recipe;
-use sql::reuse::ReuseConfigType;
+use self::recipe::Recipe;
+use self::sql::reuse::ReuseConfigType;
 
-pub mod coordination;
 pub mod domain_handle;
 pub mod keys;
 pub mod migrate;
@@ -784,7 +783,6 @@ impl ControllerInner {
 
     pub fn install_recipe_with_policies(&mut self, (r, p): (String, String)) {
         self.migrate(|mig| {
-            use Recipe;
             let mut r = Recipe::from_str_with_policy(&r, Some(&p), None).unwrap();
             unsafe {
                 let mut new = recipe.clone().unwrap().replace(r).unwrap();
@@ -797,7 +795,6 @@ impl ControllerInner {
     pub fn create_universe(&mut self, context: HashMap<String, DataType>) {
         let log = self.log.clone();
         self.add_universe(context, |mut mig| {
-            use Recipe;
             unsafe {
                 let mut r = recipe.clone().unwrap();
                 r.next();

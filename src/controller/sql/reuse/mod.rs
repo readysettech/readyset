@@ -6,7 +6,7 @@ use std::vec::Vec;
 use std::collections::HashMap;
 
 use controller::sql::reuse::join_order::reorder_joins;
-use sql::security::UniverseId;
+use controller::sql::security::UniverseId;
 
 mod finkelstein;
 mod relaxed;

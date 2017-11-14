@@ -427,7 +427,7 @@ impl SqlIncorporator {
         sq: &SelectStatement,
         mut mig: &mut Migration,
     ) -> (QueryFlowParts, Option<MirQuery>) {
-        let (qg, reuse) = self.consider_query_graph(&query_name, sq);
+        let (qg, reuse) = self.consider_query_graph(&query_name, mig.universe(), sq);
         match reuse {
             QueryGraphReuse::ExactMatch(mn) => {
                 let flow_node = mn.borrow().flow_node.as_ref().unwrap().address();
@@ -481,12 +481,12 @@ impl SqlIncorporator {
         let qfp = mir_query_to_flow_parts(&mut mir, &mut mig);
 
         // register local state
-        self.register_query(query_name, qg, &mir);
+        self.register_query(query_name, qg, &mir, universe);
 
         (qfp, mir)
     }
 
-    fn register_query(&mut self, query_name: &str, qg: QueryGraph, mir: &MirQuery) {
+    fn register_query(&mut self, query_name: &str, qg: QueryGraph, mir: &MirQuery, universe: DataType) {
         // TODO(malte): we currently need to remember these for local state, but should figure out
         // a better plan (see below)
         let fields = mir.leaf
@@ -502,9 +502,7 @@ impl SqlIncorporator {
         // We made a new query, so store the query graph and the corresponding leaf MIR node
         let qg_hash = qg.signature().hash;
         self.query_graphs.insert(qg_hash, qg);
-        self.mir_queries.insert((qg_hash, universe), mir);
-
-        qfp
+        self.mir_queries.insert((qg_hash, universe), mir.clone());
     }
 
     fn extend_existing_query(
@@ -589,13 +587,13 @@ impl SqlIncorporator {
 
     /// Runs some standard rewrite passes on the query.
     fn rewrite_query(&mut self, q: SqlQuery, mig: &mut Migration) -> SqlQuery {
-        use sql::passes::alias_removal::AliasRemoval;
-        use sql::passes::count_star_rewrite::CountStarRewrite;
-        use sql::passes::implied_tables::ImpliedTableExpansion;
-        use sql::passes::star_expansion::StarExpansion;
-        use sql::passes::negation_removal::NegationRemoval;
-        use sql::passes::subqueries::SubQueries;
-        use sql::query_utils::ReferredTables;
+        use controller::sql::passes::alias_removal::AliasRemoval;
+        use controller::sql::passes::count_star_rewrite::CountStarRewrite;
+        use controller::sql::passes::implied_tables::ImpliedTableExpansion;
+        use controller::sql::passes::star_expansion::StarExpansion;
+        use controller::sql::passes::negation_removal::NegationRemoval;
+        use controller::sql::passes::subqueries::SubQueries;
+        use controller::sql::query_utils::ReferredTables;
         // need to increment here so that each subquery has a unique name.
         // (subqueries call recursively into `nodes_for_named_query` via `add_parsed_query` below,
         // so we will end up incrementing this for every subquery.
@@ -608,7 +606,6 @@ impl SqlIncorporator {
             use self::passes::subqueries::{field_with_table_name, query_from_condition_base,
                                           Subquery};
             use nom_sql::{JoinRightSide, Table};
-                                           Subquery};
             match sq {
                 Subquery::InComparison(cond_base) => {
                     let (sq, column) = query_from_condition_base(&cond_base);
@@ -648,7 +645,7 @@ impl SqlIncorporator {
             ref q @ SqlQuery::Select(_) |
             ref q @ SqlQuery::Insert(_) => for t in &q.referred_tables() {
                 if !self.view_schemas.contains_key(&t.name) {
-                    return Err(format!("query refers to unknown table \"{}\"", t.name));
+                    panic!("query refers to unknown table \"{}\"", t.name);
                 }
             },
         }
@@ -699,8 +696,9 @@ impl SqlIncorporator {
                             mig,
                         )
                     }
-                    QueryGraphReuse::None => self.add_query_via_mir(&query_name, sq, qg, mig),
+                    QueryGraphReuse::None => self.add_query_via_mir(&query_name, sq, qg, mig).0,
                 }
+            }
             SqlQuery::CompoundSelect(ref csq) => {
                 // NOTE(malte): We can't currently reuse complete compound select queries, since
                 // our reuse logic operates on `SqlQuery` structures. Their subqueries do get

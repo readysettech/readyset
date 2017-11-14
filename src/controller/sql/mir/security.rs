@@ -1,11 +1,11 @@
 use mir::MirNodeRef;
 use mir::node::MirNode;
 use dataflow::ops::join::JoinType;
-use sql::mir::SqlToMirConverter;
-use sql::query_graph::QueryGraphEdge;
+use controller::sql::mir::SqlToMirConverter;
+use controller::sql::query_graph::QueryGraphEdge;
 use std::collections::{HashMap, HashSet};
 use dataflow::prelude::DataType;
-use sql::query_signature::Signature;
+use controller::sql::query_signature::Signature;
 
 pub trait SecurityBoundary {
     fn make_security_boundary(
