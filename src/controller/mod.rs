@@ -46,6 +46,7 @@ use coordination::{CoordinationMessage, CoordinationPayload};
 pub use self::mutator::{Mutator, MutatorBuilder, MutatorError};
 pub use self::getter::{Getter, ReadQuery, ReadReply, RemoteGetter, RemoteGetterBuilder};
 use self::payload::{EgressForBase, IngressFromBase};
+use self::recipe::Recipe;
 
 
 pub type WorkerIdentifier = SocketAddr;
@@ -214,6 +215,9 @@ pub struct ControllerInner {
     /// Parameters for persistence code.
     persistence: PersistenceParameters,
     materializations: migrate::materialization::Materializations,
+
+    /// Current recipe
+    recipe: Recipe,
 
     domains: HashMap<DomainIndex, DomainHandle>,
     channel_coordinator: Arc<ChannelCoordinator>,
@@ -487,6 +491,8 @@ impl ControllerInner {
             channel_coordinator: Arc::new(ChannelCoordinator::new()),
             debug_channel: None,
 
+            recipe: Recipe::blank(None),
+
             deps: HashMap::default(),
             remap: HashMap::default(),
 
@@ -744,11 +750,11 @@ impl ControllerInner {
     }
 
     pub fn install_recipe(&mut self, r_txt: String) {
+        let mut r = Recipe::from_str(&r_txt, None).unwrap();
         self.migrate(|mig| {
-            use controller::recipe::Recipe;
-            let mut r = Recipe::from_str(&r_txt, None).unwrap();
             assert!(r.activate(mig, false).is_ok());
         });
+        self.recipe = r;
     }
 
     #[cfg(test)]
