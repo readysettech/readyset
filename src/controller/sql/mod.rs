@@ -1390,9 +1390,11 @@ mod tests {
             );
 
             let res = inc.add_query(
-                "SELECT users.id, users.name FROM users WHERE users.id = 32 \
+                "SELECT users.id, users.name FROM users \
+                 WHERE users.id = 32 \
                  UNION \
-                 SELECT users.id, users.name FROM users WHERE users.id = 42 AND users.name = 'bob';",
+                 SELECT users.id, users.name FROM users \
+                 WHERE users.id = 42 AND users.name = 'bob';",
                 None,
                 mig,
             );
