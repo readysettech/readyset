@@ -229,7 +229,6 @@ impl MirNode {
                 .position(|cc| cc.name == c.name && cc.table == c.table)
             {
                 None => {
-                    println!("{:?}, {:?}", c, self.columns);
                     panic!("tried to look up non-existent column {:?}", c.name);
                 }
                 Some(id) => id,

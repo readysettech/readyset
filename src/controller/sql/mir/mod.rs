@@ -239,18 +239,10 @@ impl SqlToMirConverter {
     ) -> MirQuery {
         let union_name = format!("{}_union", name);
         let ancestors: Vec<_> = sqs.iter().map(|mq| mq.leaf.clone()).collect();
-        let ucols: Vec<Column> = ancestors
-            .first()
-            .unwrap()
-            .borrow()
-            .columns()
-            .iter()
-            .cloned()
-            .collect();
 
         let mut final_node = match op {
             CompoundSelectOperator::Union => {
-                self.make_union_node(&union_name, ancestors, ucols)
+                self.make_union_node(&union_name, ancestors)
             }
             _ => unimplemented!(),
         };
@@ -562,7 +554,42 @@ impl SqlToMirConverter {
         }
     }
 
-    fn make_union_node(&self, name: &str, ancestors: Vec<MirNodeRef>, columns: Vec<Column>) -> MirNodeRef {
+    fn make_union_node(&self, name: &str, ancestors: Vec<MirNodeRef>) -> MirNodeRef {
+        let mut emit: Vec<Vec<Column>> = Vec::new();
+        assert!(ancestors.len() > 1, "union must have more than 1 ancestors");
+
+        let ucols: Vec<Column> = ancestors
+            .first()
+            .unwrap()
+            .borrow()
+            .columns()
+            .iter()
+            .cloned()
+            .collect();
+
+        assert!(
+            ancestors
+                .iter()
+                .all(|a| a.borrow().columns().len() == ucols.len()),
+            "all ancestors columns must have the same size"
+        );
+
+        for ancestor in ancestors.iter() {
+            let cols: Vec<Column> = ancestor.borrow().columns().iter().cloned().collect();
+            emit.push(cols.clone());
+        }
+
+        MirNode::new(
+            name,
+            self.schema_version,
+            ucols,
+            MirNodeType::Union { emit },
+            ancestors.clone(),
+            vec![],
+        )
+    }
+
+    fn make_union_from_same_base(&self, name: &str, ancestors: Vec<MirNodeRef>, columns: Vec<Column>) -> MirNodeRef {
         assert!(ancestors.len() > 1, "union must have more than 1 ancestors");
         let emit = ancestors.iter().map(|_| columns.clone()).collect();
 
@@ -926,7 +953,7 @@ impl SqlToMirConverter {
 
                         let last_left = left.last().unwrap().clone();
                         let last_right = right.last().unwrap().clone();
-                        let union = self.make_union_node(
+                        let union = self.make_union_from_same_base(
                             &format!("{}_un", name),
                             vec![last_left, last_right],
                             output_cols,

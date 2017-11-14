@@ -782,7 +782,7 @@ impl ControllerInner {
             let mut r = Recipe::from_str(&r_txt, None).unwrap();
             assert!(r.activate(mig, false).is_ok());
             unsafe {
-                recipe = Some(recipe.clone().unwrap().replace(r).unwrap());
+                recipe = Some(r);
             };
         });
     }

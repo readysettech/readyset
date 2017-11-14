@@ -188,7 +188,7 @@ impl SecurityBoundary for SqlToMirConverter {
 
         if last_policy_nodes.len() > 1 {
             let final_node =
-                self.make_union_node(&format!("sp_union_u{}", universe_id), last_policy_nodes, output_cols);
+                self.make_union_from_same_base(&format!("sp_union_u{}", universe_id), last_policy_nodes, output_cols);
 
             security_nodes.push(final_node);
         }
