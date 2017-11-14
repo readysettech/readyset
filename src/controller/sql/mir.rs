@@ -6,8 +6,9 @@ use mir::query::MirQuery;
 pub use mir::FlowNode;
 use dataflow::ops::join::JoinType;
 
-use nom_sql::{ArithmeticExpression, Column, ColumnSpecification, ConditionBase,
-              ConditionExpression, ConditionTree, Literal, Operator, SqlQuery, TableKey};
+use nom_sql::{ArithmeticExpression, Column, ColumnSpecification, CompoundSelectOperator,
+              CompoundSelectStatement, ConditionBase, ConditionExpression, ConditionTree, Literal,
+              Operator, SqlQuery, TableKey};
 use nom_sql::{LimitClause, OrderClause, SelectStatement};
 use controller::sql::query_graph::{JoinRef, OutputColumn, QueryGraph, QueryGraphEdge};
 use controller::sql::query_signature::Signature;
@@ -211,6 +212,60 @@ impl SqlToMirConverter {
             name: String::from(name),
             roots: vec![parent],
             leaf: new_leaf,
+        }
+    }
+
+    pub fn compound_query_to_mir(
+        &mut self,
+        name: &str,
+        sqs: Vec<&MirQuery>,
+        op: CompoundSelectOperator,
+        order: &Option<OrderClause>,
+        limit: &Option<LimitClause>,
+    ) -> MirQuery {
+        let union_name = format!("{}_union", name);
+        let mut final_node = match op {
+            CompoundSelectOperator::Union => {
+                self.make_union_node(&union_name, sqs.iter().map(|mq| mq.leaf.clone()).collect())
+            }
+            _ => unimplemented!(),
+        };
+        let node_id = (union_name, self.schema_version);
+        if !self.nodes.contains_key(&node_id) {
+            self.nodes.insert(node_id, final_node.clone());
+        }
+
+        let columns: Vec<Column> = final_node.borrow().columns().iter().cloned().collect();
+        if limit.is_some() {
+            let topk_node = self.make_topk_node(
+                &format!("{}_topk", name),
+                final_node,
+                columns.iter().collect(),
+                order,
+                limit.as_ref().unwrap(),
+            );
+            final_node = topk_node;
+        }
+
+        let leaf_node = MirNode::new(
+            name,
+            self.schema_version,
+            columns,
+            MirNodeType::Leaf {
+                node: final_node.clone(),
+                keys: vec![],
+            },
+            vec![final_node.clone()],
+            vec![],
+        );
+
+        MirQuery {
+            name: String::from(name),
+            roots: sqs.iter().fold(Vec::new(), |mut acc, mq| {
+                acc.extend(mq.roots.iter().cloned().collect::<Vec<MirNodeRef>>());
+                acc
+            }),
+            leaf: leaf_node,
         }
     }
 
