@@ -126,7 +126,7 @@ impl SlackNotifier {
                     if !status.success() {
                         let att = AttachmentBuilder::new("")
                             .color("danger")
-                            .text(format!("*{}:* failed!", bm.name))
+                            .title(format!("{} failed!", bm.name))
                             .build()
                             .unwrap();
                         attachments.push(att);
