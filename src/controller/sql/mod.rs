@@ -6,20 +6,20 @@ mod query_utils;
 pub mod security;
 pub mod reuse;
 
-use flow::Migration;
 use core::NodeIndex;
-use mir::reuse as mir_reuse;
 use dataflow::prelude::DataType;
+use controller::Migration;
+use controller::mir_to_flow::mir_query_to_flow_parts;
 use nom_sql::parser as sql_parser;
 use nom_sql::{ArithmeticBase, Column, SqlQuery};
-use nom_sql::SelectStatement;
+use nom_sql::{CompoundSelectOperator, CompoundSelectStatement, SelectStatement};
 use self::mir::{MirNodeRef, SqlToMirConverter};
-use mir::query::{MirQuery, QueryFlowParts};
 use self::reuse::{ReuseConfig, ReuseConfigType};
-use sql::query_graph::{to_query_graph, QueryGraph};
 use self::security::UniverseId;
-use sql::query_signature::Signature;
-use mir_to_flow::mir_query_to_flow_parts;
+use self::query_graph::{to_query_graph, QueryGraph};
+use self::query_signature::Signature;
+use mir::query::{MirQuery, QueryFlowParts};
+use mir::reuse as mir_reuse;
 
 use slog;
 use std::collections::HashMap;
@@ -391,13 +391,77 @@ impl SqlIncorporator {
         qfp
     }
 
+    fn add_compound_query(
+        &mut self,
+        query_name: &str,
+        query: &CompoundSelectStatement,
+        mut mig: &mut Migration,
+    ) -> Result<QueryFlowParts, String> {
+        let subqueries: Vec<MirQuery> = query
+            .selects
+            .iter()
+            .enumerate()
+            .map(|(i, sq)| {
+                self.add_select_query(&format!("{}_csq_{}", query_name, i), &sq.1, mig)
+                    .1
+                    .unwrap()
+            })
+            .collect();
+
+        let mut combined_mir_query = self.mir_converter.compound_query_to_mir(
+            query_name,
+            subqueries.iter().collect(),
+            CompoundSelectOperator::Union,
+            &query.order,
+            &query.limit,
+        );
+
+        Ok(mir_query_to_flow_parts(&mut combined_mir_query, &mut mig))
+    }
+
+    /// Returns tuple of `QueryFlowParts` and an optional new `MirQuery`. The latter is only
+    /// present if a new `MirQuery` was added.
+    fn add_select_query(
+        &mut self,
+        query_name: &str,
+        sq: &SelectStatement,
+        mut mig: &mut Migration,
+    ) -> (QueryFlowParts, Option<MirQuery>) {
+        let (qg, reuse) = self.consider_query_graph(&query_name, sq);
+        match reuse {
+            QueryGraphReuse::ExactMatch(mn) => {
+                let flow_node = mn.borrow().flow_node.as_ref().unwrap().address();
+                let qfp = QueryFlowParts {
+                    name: String::from(mn.borrow().name()),
+                    new_nodes: vec![],
+                    reused_nodes: vec![flow_node],
+                    query_leaf: flow_node,
+                };
+                (qfp, None)
+            }
+            QueryGraphReuse::ExtendExisting(mqs) => {
+                let qfp = self.extend_existing_query(&query_name, sq, qg, mqs, mig);
+                (qfp, None)
+            }
+            QueryGraphReuse::ReaderOntoExisting(mn, project_columns, params) => {
+                let qfp =
+                    self.add_leaf_to_existing_query(&query_name, &params, mn, project_columns, mig);
+                (qfp, None)
+            }
+            QueryGraphReuse::None => {
+                let (qfp, mir) = self.add_query_via_mir(&query_name, sq, qg, mig);
+                (qfp, Some(mir))
+            }
+        }
+    }
+
     fn add_query_via_mir(
         &mut self,
         query_name: &str,
         query: &SelectStatement,
         qg: QueryGraph,
         mut mig: &mut Migration,
-    ) -> QueryFlowParts {
+    ) -> (QueryFlowParts, MirQuery) {
         use mir::visualize::GraphViz;
         let universe = mig.universe();
         // no QG-level reuse possible, so we'll build a new query.
@@ -413,6 +477,16 @@ impl SqlIncorporator {
 
         trace!(self.log, "Optimized MIR:\n{}", mir.to_graphviz().unwrap());
 
+        // push it into the flow graph using the migration in `mig`, and obtain `QueryFlowParts`
+        let qfp = mir_query_to_flow_parts(&mut mir, &mut mig);
+
+        // register local state
+        self.register_query(query_name, qg, &mir);
+
+        (qfp, mir)
+    }
+
+    fn register_query(&mut self, query_name: &str, qg: QueryGraph, mir: &MirQuery) {
         // TODO(malte): we currently need to remember these for local state, but should figure out
         // a better plan (see below)
         let fields = mir.leaf
@@ -421,9 +495,6 @@ impl SqlIncorporator {
             .into_iter()
             .map(|c| String::from(c.name.as_str()))
             .collect::<Vec<_>>();
-
-        // push it into the flow graph using the migration in `mig`, and obtain `QueryFlowParts`
-        let qfp = mir_query_to_flow_parts(&mut mir, &mut mig);
 
         // TODO(malte): get rid of duplication and figure out where to track this state
         self.view_schemas.insert(String::from(query_name), fields);
@@ -444,7 +515,7 @@ impl SqlIncorporator {
         reuse_mirs: Vec<(u64, DataType)>,
         mut mig: &mut Migration,
     ) -> QueryFlowParts {
-        use super::mir::reuse::merge_mir_for_queries;
+        use mir::reuse::merge_mir_for_queries;
         use mir::visualize::GraphViz;
         let universe = mig.universe();
 
@@ -510,7 +581,7 @@ impl SqlIncorporator {
     ) -> Result<QueryFlowParts, String> {
         let name = match q {
             SqlQuery::CreateTable(ref ctq) => ctq.table.name.clone(),
-            SqlQuery::Select(_) => format!("q_{}", self.num_queries),
+            SqlQuery::Select(_) | SqlQuery::CompoundSelect(_) => format!("q_{}", self.num_queries),
             _ => panic!("only CREATE TABLE and SELECT queries can be added to the graph!"),
         };
         self.nodes_for_named_query(q, name, mig)
@@ -525,7 +596,6 @@ impl SqlIncorporator {
         use sql::passes::negation_removal::NegationRemoval;
         use sql::passes::subqueries::SubQueries;
         use sql::query_utils::ReferredTables;
-
         // need to increment here so that each subquery has a unique name.
         // (subqueries call recursively into `nodes_for_named_query` via `add_parsed_query` below,
         // so we will end up incrementing this for every subquery.
@@ -535,9 +605,10 @@ impl SqlIncorporator {
         // to existing views in the graph
         let mut fq = q.clone();
         for sq in fq.extract_subqueries() {
-            use sql::passes::subqueries::{field_with_table_name, query_from_condition_base,
+            use self::passes::subqueries::{field_with_table_name, query_from_condition_base,
                                           Subquery};
             use nom_sql::{JoinRightSide, Table};
+                                           Subquery};
             match sq {
                 Subquery::InComparison(cond_base) => {
                     let (sq, column) = query_from_condition_base(&cond_base);
@@ -573,13 +644,13 @@ impl SqlIncorporator {
             // does, we will amend or reuse it; if it does not, we create it.
             SqlQuery::CreateTable(_) => (),
             // other kinds of queries *do* require their referred tables to exist!
-            ref q @ SqlQuery::Select(_) | ref q @ SqlQuery::Insert(_) => {
-                for t in &q.referred_tables() {
-                    if !self.view_schemas.contains_key(&t.name) {
-                        panic!("query refers to unknown table \"{}\"", t.name);
-                    }
+            ref q @ SqlQuery::CompoundSelect(_) |
+            ref q @ SqlQuery::Select(_) |
+            ref q @ SqlQuery::Insert(_) => for t in &q.referred_tables() {
+                if !self.view_schemas.contains_key(&t.name) {
+                    return Err(format!("query refers to unknown table \"{}\"", t.name));
                 }
-            }
+            },
         }
 
         // Run some standard rewrite passes on the query. This makes the later work easier,
@@ -630,7 +701,13 @@ impl SqlIncorporator {
                     }
                     QueryGraphReuse::None => self.add_query_via_mir(&query_name, sq, qg, mig),
                 }
+            SqlQuery::CompoundSelect(ref csq) => {
+                // NOTE(malte): We can't currently reuse complete compound select queries, since
+                // our reuse logic operates on `SqlQuery` structures. Their subqueries do get
+                // reused, however.
+                self.add_compound_query(&query_name, csq, mig).unwrap()
             }
+            SqlQuery::Select(ref sq) => self.add_select_query(&query_name, sq, mig).0,
             ref q @ SqlQuery::CreateTable { .. } => self.add_base_via_mir(&query_name, q, mig),
             ref q @ _ => panic!("unhandled query type in recipe: {:?}", q),
         };
@@ -703,7 +780,7 @@ impl<'a> ToFlowParts for &'a str {
 mod tests {
     use nom_sql::Column;
     use dataflow::prelude::*;
-    use flow::{ControllerBuilder, Migration};
+    use controller::{ControllerBuilder, Migration};
     use Blender;
     use super::{SqlIncorporator, ToFlowParts};
     use nom_sql::FunctionExpression;
@@ -711,7 +788,7 @@ mod tests {
     /// Helper to grab a reference to a named view.
     fn get_node<'a>(inc: &SqlIncorporator, mig: &'a Migration, name: &str) -> &'a Node {
         let na = inc.get_flow_node_address(name, 0)
-            .expect(&format!("No node named \"{}\" at v0", name));
+            .expect(&format!("No node named \"{}\" exists", name));
         mig.graph().node_weight(na).unwrap()
     }
 
@@ -719,7 +796,7 @@ mod tests {
     /// Note that the argument slices must be ordered in the same way as &str and &Column are
     /// ordered by `Ord`.
     fn query_id_hash(relations: &[&str], attrs: &[&Column], columns: &[&Column]) -> u64 {
-        use sql::query_graph::OutputColumn;
+        use controller::sql::query_graph::OutputColumn;
         use std::hash::{Hash, Hasher};
         use std::collections::hash_map::DefaultHasher;
 
@@ -1366,6 +1443,35 @@ mod tests {
             let new_leaf_view = get_node(&inc, mig, &q.unwrap().name);
             assert_eq!(new_leaf_view.fields(), &["name", "title"]);
             assert_eq!(new_leaf_view.description(), format!("π[1, 4]"));
+        });
+    }
+
+    #[test]
+    fn it_incorporates_compound_selection() {
+        use logger_pls;
+
+        // set up graph
+        let mut g = ControllerBuilder::default().build_inner();
+        let mut inc = SqlIncorporator::new(logger_pls());
+        g.migrate(|mig| {
+            assert!(
+                inc.add_query("CREATE TABLE users (id int, name varchar(40));", None, mig)
+                    .is_ok()
+            );
+
+            let res = inc.add_query(
+                "SELECT users.id, users.name FROM users WHERE users.id = 32 \
+                 UNION \
+                 SELECT users.id, users.name FROM users WHERE users.id = 42 AND users.name = 'bob';",
+                None,
+                mig,
+            );
+            println!("{:?}", res);
+            assert!(res.is_ok());
+
+            let union_view = get_node(&inc, mig, &format!("{}_union", res.unwrap().name));
+            assert_eq!(union_view.fields(), &["id", "name"]);
+            assert_eq!(union_view.description(), format!("3:[0, 1] ⋃ 7:[0, 1]"));
         });
     }
 }

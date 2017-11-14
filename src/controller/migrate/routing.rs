@@ -8,7 +8,7 @@
 
 use dataflow::prelude::*;
 use dataflow::node;
-use flow::domain_handle::DomainHandle;
+use controller::domain_handle::DomainHandle;
 use petgraph;
 use petgraph::graph::NodeIndex;
 use std::collections::{HashMap, HashSet};

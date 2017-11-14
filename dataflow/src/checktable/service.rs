@@ -29,6 +29,7 @@ pub struct TimestampReply {
 
 service! {
     rpc apply_batch(request: TimestampRequest) -> Option<TimestampReply>;
+    rpc recover(base: NodeIndex) -> (i64, Option<Box<HashMap<domain::Index, i64>>>);
     rpc claim_replay_timestamp(tag: Tag) -> (i64, Option<Box<HashMap<domain::Index, i64>>>);
     rpc track(token_generator: TokenGenerator);
     rpc perform_migration(deps: HashMap<domain::Index, (IngressFromBase, EgressForBase)>)
@@ -105,5 +106,10 @@ impl FutureService for CheckTableServer {
     type ValidateTokenFut = Result<bool, Never>;
     fn validate_token(&self, token: Token) -> Self::ValidateTokenFut {
         Ok(self.checktable.lock().unwrap().validate_token(&token))
+    }
+
+    type RecoverFut = Result<(i64, Option<Box<HashMap<domain::Index, i64>>>), Never>;
+    fn recover(&self, base: NodeIndex) -> Self::RecoverFut {
+        Ok(self.checktable.lock().unwrap().recover(base))
     }
 }

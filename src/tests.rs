@@ -1,3 +1,4 @@
+extern crate glob;
 
 use core::{DataType, Datas};
 use dataflow::DomainBuilder;
@@ -12,6 +13,7 @@ use dataflow::ops::grouped::concat::{GroupConcat, TextComponent};
 use dataflow::ops::grouped::extremum::{Extremum, ExtremumOperator};
 use dataflow::ops::identity::Identity;
 use dataflow::ops::join::{Join, JoinSource, JoinType};
+use dataflow::ops::join::JoinSource::*;
 use dataflow::ops::latest::Latest;
 use dataflow::ops::project::Project;
 use dataflow::ops::topk::TopK;
@@ -19,30 +21,64 @@ use dataflow::ops::union::Union;
 use dataflow::payload::PacketEvent;
 use dataflow::prelude::*;
 use dataflow::{DurabilityMode, PersistenceParameters};
-use flow::ControllerBuilder;
-use flow::coordination::{CoordinationMessage, CoordinationPayload};
-use flow::{Blender, Getter, Migration, Mutator, MutatorBuilder, MutatorError, ReadQuery,
-           ReadReply, RemoteGetter, RemoteGetterBuilder};
-use recipe::{ActivationResult, Recipe};
-use sql::reuse::ReuseConfigType;
-use sql::{SqlIncorporator, ToFlowParts};
+use controller::ControllerBuilder;
+use coordination::{CoordinationMessage, CoordinationPayload};
+use controller::{Blender, Getter, Migration, Mutator, MutatorBuilder, MutatorError, ReadQuery,
+                 ReadReply, RemoteGetter, RemoteGetterBuilder};
+use controller::recipe::{ActivationResult, Recipe};
+use controller::sql::reuse::ReuseConfigType;
+use controller::sql::{SqlIncorporator, ToFlowParts};
 
-use std::time;
+use std::time::{Duration, SystemTime, UNIX_EPOCH};
 use std::thread;
 use std::sync::mpsc;
 use std::env;
-
+use std::fs;
 use std::collections::HashMap;
 
 const DEFAULT_SETTLE_TIME_MS: u64 = 100;
 
-fn get_settle_time() -> time::Duration {
+// Suffixes the given log prefix with a timestamp, ensuring that
+// subsequent test runs do not reuse log files in the case of failures.
+fn get_log_name(prefix: &str) -> String {
+    let current_time = SystemTime::now().duration_since(UNIX_EPOCH).unwrap();
+    format!(
+        "{}-{}-{}",
+        prefix,
+        current_time.as_secs(),
+        current_time.subsec_nanos()
+    )
+}
+
+// Ensures correct handling of log file names, by deleting used log files in Drop.
+struct LogName {
+    name: String,
+}
+
+impl LogName {
+    fn new(prefix: &str) -> LogName {
+        let name = get_log_name(prefix);
+        LogName { name }
+    }
+}
+
+// Removes the log files matching the glob ./{log_name}-*.json.
+// Used to clean up after recovery tests, where a persistent log is created.
+impl Drop for LogName {
+    fn drop(&mut self) {
+        for log_path in glob::glob(&format!("./{}-*.json", self.name)).unwrap() {
+            fs::remove_file(log_path.unwrap()).unwrap();
+        }
+    }
+}
+
+fn get_settle_time() -> Duration {
     let settle_time: u64 = match env::var("SETTLE_TIME") {
         Ok(value) => value.parse().unwrap(),
         Err(_) => DEFAULT_SETTLE_TIME_MS,
     };
 
-    time::Duration::from_millis(settle_time)
+    Duration::from_millis(settle_time)
 }
 
 // Sleeps for either DEFAULT_SETTLE_TIME_MS milliseconds, or
@@ -58,7 +94,8 @@ fn it_works_basic() {
     let pparams = PersistenceParameters::new(
         DurabilityMode::DeleteOnExit,
         128,
-        time::Duration::from_millis(1),
+        Duration::from_millis(1),
+        Some(get_log_name("it_works_basic")),
     );
     g.with_persistence_options(pparams);
     let (a, b, c) = g.migrate(|mig| {
@@ -292,11 +329,10 @@ fn it_works_deletion() {
     );
 
     // delete first value
-    use StreamUpdate::*;
     muta.delete(vec![2.into()]).unwrap();
     assert_eq!(
         cq.recv_timeout(get_settle_time()),
-        Ok(vec![DeleteRow(vec![1.into(), 2.into()])])
+        Ok(vec![StreamUpdate::DeleteRow(vec![1.into(), 2.into()])])
     );
 }
 
@@ -374,6 +410,181 @@ fn it_works_with_arithmetic_aliases() {
     let result = getter.lookup(&cid.into(), true).unwrap();
     assert_eq!(result.len(), 1);
     assert_eq!(result[0][1], 100.into());
+}
+
+#[test]
+fn it_recovers_persisted_logs() {
+    let log_name = LogName::new("it_recovers_persisted_logs");
+    let setup = || {
+        let mut g = ControllerBuilder::default().build_inner();
+        let pparams = PersistenceParameters::new(
+            DurabilityMode::Permanent,
+            128,
+            Duration::from_millis(1),
+            Some(log_name.name.clone()),
+        );
+        g.with_persistence_options(pparams);
+
+        let sql = "
+            CREATE TABLE Car (id int, price int, PRIMARY KEY(id));
+            CarPrice: SELECT price FROM Car WHERE id = ?;
+        ";
+
+        let recipe = g.migrate(|mig| {
+            let mut recipe = Recipe::from_str(&sql, None).unwrap();
+            recipe.activate(mig, false).unwrap();
+            recipe
+        });
+
+        (g, recipe)
+    };
+
+    {
+        let (g, recipe) = setup();
+        let mut mutator = g.get_mutator(recipe.node_addr_for("Car").unwrap());
+
+        for i in 1..10 {
+            let price = i * 10;
+            mutator.put(vec![i.into(), price.into()]).unwrap();
+        }
+
+        // Let writes propagate:
+        sleep();
+    }
+
+    let (mut g, recipe) = setup();
+    let mut getter = g.get_getter(recipe.node_addr_for("CarPrice").unwrap())
+        .unwrap();
+
+    // Make sure that the new graph is empty:
+    assert_eq!(getter.lookup(&1.into(), true).unwrap().len(), 0);
+
+    // Recover and let the writes propagate:
+    g.recover();
+    sleep();
+
+    for i in 1..10 {
+        let price = i * 10;
+        let result = getter.lookup(&i.into(), true).unwrap();
+        assert_eq!(result.len(), 1);
+        assert_eq!(result[0][0], price.into());
+    }
+}
+
+#[test]
+fn it_recovers_persisted_logs_w_multiple_nodes() {
+    let log_name = LogName::new("it_recovers_persisted_logs_w_multiple_nodes");
+    let tables = vec!["A", "B", "C"];
+    let setup = || {
+        let mut g = ControllerBuilder::default().build_inner();
+        let pparams = PersistenceParameters::new(
+            DurabilityMode::Permanent,
+            128,
+            Duration::from_millis(1),
+            Some(log_name.name.clone()),
+        );
+        g.with_persistence_options(pparams);
+
+        let sql = "
+            CREATE TABLE A (id int, PRIMARY KEY(id));
+            CREATE TABLE B (id int, PRIMARY KEY(id));
+            CREATE TABLE C (id int, PRIMARY KEY(id));
+
+            AID: SELECT id FROM A WHERE id = ?;
+            BID: SELECT id FROM B WHERE id = ?;
+            CID: SELECT id FROM C WHERE id = ?;
+        ";
+
+
+        let recipe = g.migrate(|mig| {
+            let mut recipe = Recipe::from_str(&sql, None).unwrap();
+            recipe.activate(mig, false).unwrap();
+            recipe
+        });
+
+        (g, recipe)
+    };
+
+    {
+        let (g, recipe) = setup();
+        for (i, table) in tables.iter().enumerate() {
+            let mut mutator = g.get_mutator(recipe.node_addr_for(table).unwrap());
+            mutator.put(vec![(i as i32).into()]).unwrap();
+        }
+
+        // Let writes propagate:
+        sleep();
+    }
+
+    let (mut g, recipe) = setup();
+    // Recover and let the writes propagate:
+    g.recover();
+    sleep();
+
+    for (i, table) in tables.iter().enumerate() {
+        let id = i as i32;
+        let mut getter = g.get_getter(recipe.node_addr_for(&format!("{}ID", table)).unwrap())
+            .unwrap();
+        let result = getter.lookup(&id.into(), true).unwrap();
+        assert_eq!(result.len(), 1);
+        assert_eq!(result[0][0], id.into());
+    }
+}
+
+#[test]
+fn it_recovers_persisted_logs_w_transactions() {
+    let log_name = LogName::new("it_recovers_persisted_logs_w_transactions");
+    let setup = || {
+        let mut g = ControllerBuilder::default().build_inner();
+        let pparams = PersistenceParameters::new(
+            DurabilityMode::Permanent,
+            128,
+            Duration::from_millis(1),
+            Some(log_name.name.clone()),
+        );
+        g.with_persistence_options(pparams);
+
+        let a = g.migrate(|mig| {
+            let a = mig.add_transactional_base("a", &["a", "b"], Base::default());
+            mig.maintain_anonymous(a, 0);
+            a
+        });
+
+        (g, a)
+    };
+
+    {
+        let (g, a) = setup();
+        let mut mutator = g.get_mutator(a);
+
+        for i in 1..10 {
+            let b = i * 10;
+            mutator
+                .transactional_put(vec![i.into(), b.into()], Token::empty())
+                .unwrap();
+        }
+
+        // Let writes propagate:
+        sleep();
+    }
+
+    let (mut g, a) = setup();
+    let mut getter = g.get_getter(a).unwrap();
+
+    // Make sure that the new graph is empty:
+    assert_eq!(getter.transactional_lookup(&1.into()).unwrap().0.len(), 0);
+
+    // Recover and let the writes propagate:
+    g.recover();
+    sleep();
+
+    for i in 1..10 {
+        let b = i * 10;
+        let (result, _token) = getter.transactional_lookup(&i.into()).unwrap();
+        assert_eq!(result.len(), 1);
+        assert_eq!(result[0][0], i.into());
+        assert_eq!(result[0][1], b.into());
+    }
 }
 
 #[test]
@@ -521,8 +732,6 @@ fn it_works_with_function_arithmetic() {
 
 #[test]
 fn votes() {
-    use {Aggregation, Base, Join, JoinType, Union};
-
     // set up graph
     let mut g = ControllerBuilder::default().build_inner();
     let (article1, article2, vote, article, vc, end) = g.migrate(|mig| {
@@ -550,7 +759,6 @@ fn votes() {
         mig.maintain_anonymous(vc, 0);
 
         // add final join using first field from article and first from vc
-        use JoinSource::*;
         let j = Join::new(article, vc, JoinType::Inner, vec![B(0, 0), L(1), R(1)]);
         let end = mig.add_ingredient("end", &["id", "title", "votes"], j);
         mig.maintain_anonymous(end, 0);
@@ -627,8 +835,6 @@ fn votes() {
 
 #[test]
 fn transactional_vote() {
-    use {Aggregation, Base, Identity, Join, JoinType, Union};
-
     // set up graph
     let mut g = ControllerBuilder::default();
     g.disable_partial(); // because end_votes forces full below partial
@@ -660,7 +866,6 @@ fn transactional_vote() {
         mig.maintain_anonymous(vc, 0);
 
         // add final join using first field from article and first from vc
-        use JoinSource::*;
         let j = Join::new(article, vc, JoinType::Inner, vec![B(0, 0), L(1), R(1)]);
         let end = mig.add_ingredient("end", &["id", "title", "votes"], j);
         let end_title = mig.add_ingredient("end2", &["id", "title", "votes"], Identity::new(end));
@@ -1079,8 +1284,6 @@ fn replay_during_replay() {
 
     // add our joins
     let (u, target) = g.migrate(|mig| {
-        use {Join, JoinType};
-        use JoinSource::*;
         // u = u1 * u2
         let j = Join::new(u1, u2, JoinType::Inner, vec![B(0, 0), R(1)]);
         let u = mig.add_ingredient("u", &["u", "a"], j);
@@ -1453,7 +1656,6 @@ fn state_replay_migration_stream() {
     let (out, b) = g.migrate(|mig| {
         // add a new base and a join
         let b = mig.add_ingredient("b", &["x", "z"], Base::default());
-        use JoinSource::*;
         let j = Join::new(a, b, JoinType::Inner, vec![B(0, 0), L(1), R(1)]);
         let j = mig.add_ingredient("j", &["x", "y", "z"], j);
 
@@ -1528,7 +1730,6 @@ fn migration_depends_on_unchanged_domain() {
 }
 
 fn do_full_vote_migration(old_puts_after: bool) {
-    use {Aggregation, Base, Blender, DataType, Join, JoinType};
     let mut g = ControllerBuilder::default().build_inner();
     let (article, vote, vc, end) = g.migrate(|mig| {
         // migrate
@@ -1547,7 +1748,6 @@ fn do_full_vote_migration(old_puts_after: bool) {
         );
 
         // add final join using first field from article and first from vc
-        use JoinSource::*;
         let j = Join::new(article, vc, JoinType::Left, vec![B(0, 0), L(1), R(1)]);
         let end = mig.add_ingredient("awvc", &["id", "title", "votes"], j);
 
@@ -1597,7 +1797,6 @@ fn do_full_vote_migration(old_puts_after: bool) {
         );
 
         // join vote count and rsum (and in theory, sum them)
-        use JoinSource::*;
         let j = Join::new(rs, vc, JoinType::Left, vec![B(0, 0), L(1), R(1)]);
         let total = mig.add_ingredient("total", &["id", "ratings", "votes"], j);
 
@@ -1655,7 +1854,6 @@ fn full_vote_migration_new_and_old() {
 
 #[test]
 fn live_writes() {
-    use {Aggregation, Blender, DataType};
     let mut g = ControllerBuilder::default().build_inner();
     let (vote, vc) = g.migrate(|mig| {
         // migrate
@@ -1752,7 +1950,6 @@ fn state_replay_migration_query() {
 
     let out = g.migrate(|mig| {
         // add join and a reader node
-        use JoinSource::*;
         let j = Join::new(a, b, JoinType::Inner, vec![B(0, 0), L(1), R(1)]);
         let j = mig.add_ingredient("j", &["x", "y", "z"], j);
 
@@ -1799,7 +1996,7 @@ fn recipe_activates() {
         assert!(r.activate(mig, false).is_ok());
     });
     // one base node
-    assert_eq!(g.inputs(()).len(), 1);
+    assert_eq!(g.inputs().len(), 1);
 }
 
 #[test]
@@ -1815,7 +2012,7 @@ fn recipe_activates_and_migrates() {
         assert!(r.activate(mig, false).is_ok());
     });
     // one base node
-    assert_eq!(g.inputs(()).len(), 1);
+    assert_eq!(g.inputs().len(), 1);
 
     let r_copy = r.clone();
 
@@ -1829,9 +2026,9 @@ fn recipe_activates_and_migrates() {
         assert!(r1.activate(mig, false).is_ok());
     });
     // still one base node
-    assert_eq!(g.inputs(()).len(), 1);
+    assert_eq!(g.inputs().len(), 1);
     // two leaf nodes
-    assert_eq!(g.outputs(()).len(), 2);
+    assert_eq!(g.outputs().len(), 2);
 }
 
 #[test]
@@ -1848,7 +2045,7 @@ fn recipe_activates_and_migrates_with_join() {
         assert!(r.activate(mig, false).is_ok());
     });
     // two base nodes
-    assert_eq!(g.inputs(()).len(), 2);
+    assert_eq!(g.inputs().len(), 2);
 
     let r_copy = r.clone();
 
@@ -1861,9 +2058,9 @@ fn recipe_activates_and_migrates_with_join() {
         assert!(r1.activate(mig, false).is_ok());
     });
     // still two base nodes
-    assert_eq!(g.inputs(()).len(), 2);
+    assert_eq!(g.inputs().len(), 2);
     // one leaf node
-    assert_eq!(g.outputs(()).len(), 1);
+    assert_eq!(g.outputs().len(), 1);
 }
 
 #[test]

@@ -7,7 +7,7 @@
 //!  - State must be replayed for materializations in other domains that need it
 
 use dataflow::prelude::*;
-use flow;
+use controller;
 
 use std::collections::{HashMap, HashSet};
 
@@ -18,7 +18,7 @@ use slog::Logger;
 
 pub fn inform(
     log: &Logger,
-    controller: &mut flow::ControllerInner,
+    controller: &mut controller::ControllerInner,
     nodes: HashMap<DomainIndex, Vec<(NodeIndex, bool)>>,
     ts: i64,
     prevs: Box<HashMap<DomainIndex, i64>>,

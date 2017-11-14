@@ -4,7 +4,7 @@ use nom_sql::ConditionExpression::*;
 use std::collections::HashSet;
 use std::hash::{Hash, Hasher};
 
-use sql::query_graph::{OutputColumn, QueryGraph, QueryGraphEdge};
+use controller::sql::query_graph::{OutputColumn, QueryGraph, QueryGraphEdge};
 
 pub trait Signature {
     fn signature(&self) -> QuerySignature;
@@ -178,7 +178,7 @@ mod tests {
 
     #[test]
     fn it_generalizes() {
-        use sql::query_graph::to_query_graph;
+        use controller::sql::query_graph::to_query_graph;
         use nom_sql::parser::{parse_query, SqlQuery};
 
         let qa =

@@ -10,7 +10,7 @@ use dataflow::ops::join::{Join, JoinType};
 use dataflow::ops::latest::Latest;
 use dataflow::ops::project::{Project, ProjectExpression, ProjectExpressionBase};
 use dataflow::ops;
-use flow::Migration;
+use controller::Migration;
 
 pub fn mir_query_to_flow_parts(mir_query: &mut MirQuery, mig: &mut Migration) -> QueryFlowParts {
     use std::collections::VecDeque;

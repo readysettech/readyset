@@ -1,7 +1,7 @@
 use dataflow::prelude::*;
 use dataflow::payload::{EgressForBase, IngressFromBase};
 use dataflow;
-use flow::domain_handle::DomainHandle;
+use controller::domain_handle::DomainHandle;
 use petgraph;
 use std::borrow::Borrow;
 use std::collections::{HashMap, HashSet};

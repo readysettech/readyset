@@ -1,7 +1,9 @@
 extern crate distributary;
 
-use std::{thread, time};
 use distributary::ControllerBuilder;
+
+use std::thread;
+use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 fn main() {
     // inline recipe definition
@@ -17,9 +19,21 @@ fn main() {
                             FROM Article, VoteCount \
                             WHERE Article.aid = VoteCount.aid AND Article.aid = ?;";
 
+    let persistence_params = distributary::PersistenceParameters::new(
+        distributary::DurabilityMode::Permanent,
+        512,
+        Duration::from_millis(1),
+        Some(String::from("example")),
+    );
+
     // set up Soup via recipe
-    let blender = ControllerBuilder::default().build();
+    let mut builder = ControllerBuilder::default();
+    builder.set_persistence(persistence_params);
+
+    let mut blender = builder.build();
     blender.install_recipe(sql.to_owned());
+    blender.recover();
+    thread::sleep(Duration::from_millis(1000));
 
     // Get mutators and getter.
     let inputs = blender.inputs();
@@ -29,21 +43,27 @@ fn main() {
     let mut awvc = blender.get_getter(outputs["ArticleWithVoteCount"]).unwrap();
 
     println!("Creating article...");
-    article
-        .put(vec![
-            1.into(),
-            "test title".into(),
-            "http://csail.mit.edu".into(),
-        ])
-        .unwrap();
+    let aid = 1;
+    // Make sure the article exists:
+    if awvc.lookup(&aid.into(), true).unwrap().is_empty() {
+        println!("Creating new article...");
+        let title = "test title";
+        let url = "http://pdos.csail.mit.edu";
+        article
+            .put(vec![aid.into(), title.into(), url.into()])
+            .unwrap();
+    }
 
-    println!("Casting votes...");
-    vote.put(vec![1.into(), 42.into()]).unwrap();
-    vote.put(vec![1.into(), 43.into()]).unwrap();
-    vote.put(vec![1.into(), 44.into()]).unwrap();
+    // Then create a new vote:
+    println!("Casting vote...");
+    let uid = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .unwrap()
+        .as_secs() as i64;
+    vote.put(vec![aid.into(), uid.into()]).unwrap();
 
     println!("Finished writing! Let's wait for things to propagate...");
-    thread::sleep(time::Duration::from_millis(1000));
+    thread::sleep(Duration::from_millis(1000));
 
     println!("Reading...");
     println!("{:#?}", awvc.lookup(&1.into(), true))

@@ -5,6 +5,8 @@ use std::thread;
 use std::time;
 use std::collections::hash_map::Entry;
 use std::rc::Rc;
+use std::io::{BufRead, BufReader, ErrorKind};
+use std::fs::File;
 
 use std::net::SocketAddr;
 
@@ -18,6 +20,8 @@ use transactions;
 use persistence;
 use debug;
 use checktable;
+use serde_json;
+use itertools::Itertools;
 use slog::Logger;
 use timekeeper::{RealTime, SimpleTracker, ThreadTime, Timer, TimerSet};
 use tarpc::sync::client::{self, ClientExt};
@@ -30,6 +34,7 @@ pub struct Config {
 }
 
 const BATCH_SIZE: usize = 256;
+const RECOVERY_BATCH_SIZE: usize = 512;
 
 const NANOS_PER_SEC: u64 = 1_000_000_000;
 macro_rules! dur_to_ns {
@@ -803,6 +808,9 @@ impl Domain {
             Packet::ReplayPiece { .. } => {
                 self.handle_replay(m);
             }
+            Packet::StartRecovery { .. } => {
+                self.handle_recovery();
+            }
             consumed => {
                 match consumed {
                     // workaround #16223
@@ -1564,6 +1572,81 @@ impl Domain {
         if let Some(m) = m {
             self.handle_replay(m);
         }
+    }
+
+    fn handle_recovery(&mut self) {
+        let checktable = self.transaction_state.get_checktable();
+        let node_info: Vec<_> = self.nodes
+            .iter()
+            .map(|(index, node)| {
+                let n = node.borrow();
+                (index, n.global_addr(), n.is_transactional())
+            })
+            .collect();
+
+        for (local_addr, global_addr, is_transactional) in node_info {
+            let path = self.persistence_parameters.log_path(
+                &local_addr,
+                self.index,
+                self.shard.unwrap_or(0),
+            );
+
+            let file = match File::open(&path) {
+                Ok(f) => f,
+                Err(ref e) if e.kind() == ErrorKind::NotFound => {
+                    warn!(
+                        self.log,
+                        "No log file found for node {}, starting out empty",
+                        local_addr
+                    );
+
+                    continue;
+                }
+                Err(e) => panic!("Could not open log file {:?}: {}", path, e),
+            };
+
+            BufReader::new(file)
+                .lines()
+                .filter_map(|line| {
+                    let line = line
+                        .expect(&format!("Failed to read line from log file: {:?}", path));
+                    let entries: Result<Vec<Records>, _> = serde_json::from_str(&line);
+                    entries.ok()
+                })
+                // Parsing each individual line gives us an iterator over Vec<Records>.
+                // We're interested in chunking each record, so let's flat_map twice:
+                // Iter<Vec<Records>> -> Iter<Records> -> Iter<Record>
+                .flat_map(|r| r)
+                .flat_map(|r| r)
+                // Merge individual records into batches of RECOVERY_BATCH_SIZE:
+                .chunks(RECOVERY_BATCH_SIZE)
+                .into_iter()
+                // Then create Packet objects from the data:
+                .map(|chunk| {
+                    let data: Records = chunk.collect();
+                    let link = Link::new(local_addr, local_addr);
+                    if is_transactional {
+                        let (ts, prevs) = checktable.recover(global_addr).unwrap();
+                        Packet::Transaction {
+                            link,
+                            data,
+                            tracer: None,
+                            state: TransactionState::Committed(ts, global_addr, prevs),
+                        }
+                    } else {
+                        Packet::Message {
+                            link,
+                            data,
+                            tracer: None,
+                        }
+                    }
+                })
+                .for_each(|packet| self.handle(box packet));
+        }
+
+        self.control_reply_tx
+            .send(ControlReplyPacket::ack())
+            .unwrap();
     }
 
     fn handle_replay(&mut self, m: Box<Packet>) {

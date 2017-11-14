@@ -1,5 +1,5 @@
 use dataflow::prelude::*;
-use flow::domain_handle::DomainInputHandle;
+use controller::domain_handle::DomainInputHandle;
 use dataflow::checktable;
 
 use std::net::SocketAddr;

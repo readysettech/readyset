@@ -1,4 +1,3 @@
-
 use buf_redux::BufWriter;
 use buf_redux::strategy::WhenFull;
 
@@ -40,6 +39,8 @@ pub struct Parameters {
     pub flush_timeout: time::Duration,
     /// Whether the output files should be deleted when the GroupCommitQueue is dropped.
     pub mode: DurabilityMode,
+    /// Filename prefix for persistent log entries.
+    pub log_prefix: String,
 }
 
 impl Default for Parameters {
@@ -48,6 +49,7 @@ impl Default for Parameters {
             queue_capacity: 256,
             flush_timeout: time::Duration::from_millis(1),
             mode: DurabilityMode::MemoryOnly,
+            log_prefix: String::from("soup"),
         }
     }
 }
@@ -66,12 +68,36 @@ impl Parameters {
     /// `queue_capacity` indicates the number of packets that should be buffered until
     /// flushing, and `flush_timeout` indicates the length of time to wait before flushing
     /// anyway.
-    pub fn new(mode: DurabilityMode, queue_capacity: usize, flush_timeout: time::Duration) -> Self {
+    pub fn new(
+        mode: DurabilityMode,
+        queue_capacity: usize,
+        flush_timeout: time::Duration,
+        log_prefix: Option<String>,
+    ) -> Self {
         Self {
             queue_capacity,
             flush_timeout,
             mode,
+            log_prefix: log_prefix.unwrap_or(String::from("soup")),
         }
+    }
+
+    /// The path that would be used for the given domain/shard pair's logs.
+    pub fn log_path(
+        &self,
+        node: &LocalNodeIndex,
+        domain_index: domain::Index,
+        domain_shard: usize,
+    ) -> PathBuf {
+        let filename = format!(
+            "{}-log-{}_{}-{}.json",
+            self.log_prefix,
+            domain_index.index(),
+            domain_shard,
+            node.id()
+        );
+
+        PathBuf::from(&filename)
     }
 }
 
@@ -90,10 +116,8 @@ pub struct GroupCommitQueueSet {
 
     domain_index: domain::Index,
     domain_shard: usize,
-    timeout: time::Duration,
-    capacity: usize,
-    durability_mode: DurabilityMode,
 
+    params: Parameters,
     checktable: Rc<checktable::CheckTableClient>,
 }
 
@@ -114,36 +138,24 @@ impl GroupCommitQueueSet {
 
             domain_index,
             domain_shard,
-            timeout: params.flush_timeout,
-            capacity: params.queue_capacity,
-            durability_mode: params.mode.clone(),
+            params: params.clone(),
             transaction_reply_txs: HashMap::new(),
             checktable,
         }
     }
 
-    fn create_file(&self, node: &LocalNodeIndex) -> (PathBuf, BufWriter<File, WhenFull>) {
-        let filename = format!(
-            "soup-log-{}_{}-{}.json",
-            self.domain_index.index(),
-            self.domain_shard,
-            node.id()
-        );
-
-        // TODO(jmftrindade): Current semantics is to overwrite an existing log.
-        // Once we have recovery code, we obviously do not want to overwrite this
-        // log before recovering.
+    fn get_or_create_file(&self, node: &LocalNodeIndex) -> (PathBuf, BufWriter<File, WhenFull>) {
+        let path = self.params
+            .log_path(node, self.domain_index, self.domain_shard);
         let file = OpenOptions::new()
-            .read(false)
-            .append(false)
-            .write(true)
+            .append(true)
             .create(true)
-            .open(PathBuf::from(&filename))
+            .open(&path)
             .unwrap();
 
         (
-            PathBuf::from(filename),
-            BufWriter::with_capacity(self.capacity * 1024, file),
+            path,
+            BufWriter::with_capacity(self.params.queue_capacity * 1024, file),
         )
     }
 
@@ -173,7 +185,7 @@ impl GroupCommitQueueSet {
     pub fn flush_if_necessary(&mut self, nodes: &DomainNodes) -> Option<Box<Packet>> {
         let mut needs_flush = None;
         for (node, wait_start) in self.wait_start.iter() {
-            if wait_start.elapsed() >= self.timeout {
+            if wait_start.elapsed() >= self.params.flush_timeout {
                 needs_flush = Some(node);
                 break;
             }
@@ -188,10 +200,10 @@ impl GroupCommitQueueSet {
         node: &LocalNodeIndex,
         nodes: &DomainNodes,
     ) -> Option<Box<Packet>> {
-        match self.durability_mode {
+        match self.params.mode {
             DurabilityMode::DeleteOnExit | DurabilityMode::Permanent => {
                 if !self.files.contains_key(node) {
-                    let file = self.create_file(node);
+                    let file = self.get_or_create_file(node);
                     self.files.insert(node.clone(), file);
                 }
 
@@ -206,6 +218,9 @@ impl GroupCommitQueueSet {
                         })
                         .collect();
                     serde_json::to_writer(&mut file, &data_to_flush).unwrap();
+                    // Separate log flushes with a newline so that the
+                    // file can be easily parsed later on:
+                    writeln!(&mut file, "").unwrap();
                 }
 
                 file.flush().unwrap();
@@ -229,11 +244,11 @@ impl GroupCommitQueueSet {
         let node = Self::packet_destination(&p).unwrap();
         if !self.pending_packets.contains_key(&node) {
             self.pending_packets
-                .insert(node.clone(), Vec::with_capacity(self.capacity));
+                .insert(node.clone(), Vec::with_capacity(self.params.queue_capacity));
         }
 
         self.pending_packets[&node].push(p);
-        if self.pending_packets[&node].len() >= self.capacity {
+        if self.pending_packets[&node].len() >= self.params.queue_capacity {
             return self.flush_internal(&node, nodes);
         } else if !self.wait_start.contains_key(&node) {
             self.wait_start.insert(node, time::Instant::now());
@@ -246,7 +261,8 @@ impl GroupCommitQueueSet {
         self.wait_start
             .values()
             .map(|i| {
-                self.timeout
+                self.params
+                    .flush_timeout
                     .checked_sub(i.elapsed())
                     .unwrap_or(time::Duration::from_millis(0))
             })
@@ -446,7 +462,7 @@ impl GroupCommitQueueSet {
 
 impl Drop for GroupCommitQueueSet {
     fn drop(&mut self) {
-        if let DurabilityMode::DeleteOnExit = self.durability_mode {
+        if let DurabilityMode::DeleteOnExit = self.params.mode {
             for &(ref filename, _) in self.files.values() {
                 fs::remove_file(filename).unwrap();
             }

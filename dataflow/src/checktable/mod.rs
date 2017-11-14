@@ -285,6 +285,29 @@ impl CheckTable {
         }
     }
 
+    // Reserve a timestamp for the given base node, and update each column to said timestamp.
+    // This should be called for each batch of recovery updates.
+    pub fn recover(&mut self, base: NodeIndex) -> (i64, Option<Box<HashMap<domain::Index, i64>>>) {
+        // Take timestamp
+        let ts = self.next_timestamp;
+        self.next_timestamp += 1;
+
+        // Compute the previous timestamp that each domain will see before getting this one
+        let prev_times = self.compute_previous_timestamps(Some(base));
+
+        // Update checktables
+        self.last_base = Some(base);
+        self.toplevel.insert(base, ts);
+
+        let t = &mut self.granular.entry(base).or_default();
+        for (_column, g) in t.iter_mut() {
+            assert!(g.0.is_empty(), "checktable should be empty before recovery");
+            g.1 = ts;
+        }
+
+        (ts, prev_times)
+    }
+
     pub fn apply_unconditional(
         &mut self,
         base: NodeIndex,
