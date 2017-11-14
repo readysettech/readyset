@@ -1380,11 +1380,9 @@ mod tests {
 
     #[test]
     fn it_incorporates_compound_selection() {
-        use logger_pls;
-
         // set up graph
         let mut g = ControllerBuilder::default().build_inner();
-        let mut inc = SqlIncorporator::new(logger_pls());
+        let mut inc = SqlIncorporator::default();
         g.migrate(|mig| {
             assert!(
                 inc.add_query("CREATE TABLE users (id int, name varchar(40));", None, mig)
