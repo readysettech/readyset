@@ -292,6 +292,9 @@ pub fn main() {
     {
         let branches = ws.branch_heads();
         for (b, c) in branches.iter() {
+            if b != "origin/master" {
+                continue;
+            }
             println!(
                 "tasting HEAD of {}: {} / {}",
                 b,
