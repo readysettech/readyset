@@ -203,6 +203,10 @@ where
         self.unacked = 0;
     }
 
+    pub fn is_empty(&self) -> bool {
+        self.stream.is_empty()
+    }
+
     pub fn try_recv(&mut self) -> Result<T, TryRecvError> {
         if self.poisoned {
             return Err(TryRecvError::Disconnected);

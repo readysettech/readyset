@@ -1,4 +1,5 @@
 #![feature(custom_attribute)]
+#![feature(bufreader_is_empty)]
 
 extern crate bincode;
 extern crate bufstream;

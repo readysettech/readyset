@@ -62,6 +62,7 @@ pub type DomainConfig = domain::Config;
 
 pub use persistence::DurabilityMode;
 pub use domain::DomainBuilder;
+pub use payload::Packet;
 
 #[derive(Copy, Clone, PartialEq, Eq, Debug, Serialize, Deserialize)]
 pub enum Sharding {

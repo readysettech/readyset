@@ -327,6 +327,7 @@ extern crate evmap;
 extern crate fnv;
 extern crate futures;
 extern crate hyper;
+extern crate slab;
 extern crate vec_map;
 
 extern crate itertools;
