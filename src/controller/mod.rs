@@ -291,6 +291,7 @@ impl ControllerInner {
                             "outputs" => json::to_string(&self.outputs()).unwrap(),
                             "recover" => json::to_string(&self.recover()).unwrap(),
                             "graphviz" => json::to_string(&self.graphviz()).unwrap(),
+                            "aliases" => json::to_string(&self.aliases()).unwrap(),
                             "get_statistics" => json::to_string(&self.get_statistics()).unwrap(),
                             "mutator_builder" => json::to_string(
                                 &self.mutator_builder(json::from_str(&body).unwrap()),
@@ -757,6 +758,10 @@ impl ControllerInner {
             assert!(new.activate(mig, false).is_ok());
         });
         self.recipe = new;
+    }
+
+    pub fn aliases(&self) -> Vec<String> {
+        self.recipe.aliases().into_iter().map(String::from).collect()
     }
 
     #[cfg(test)]
@@ -1535,6 +1540,11 @@ impl Blender {
     /// graphviz description of the dataflow graph
     pub fn graphviz(&self) -> String {
         self.rpc("graphviz", &()).unwrap()
+    }
+
+    /// Get query aliases
+    pub fn aliases(&self) -> Vec<String> {
+        self.rpc("aliases", &()).unwrap()
     }
 
     /// Set the `Logger` to use for internal log messages.
