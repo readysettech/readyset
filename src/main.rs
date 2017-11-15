@@ -361,7 +361,12 @@ pub fn main() {
                 let notify_pending = |push: &Push, commit: &Commit| {
                     // github status notification
                     if gn.is_some() {
-                        gn.as_ref().unwrap().notify_pending(&push, &commit).unwrap();
+                        match gn.as_ref().unwrap().notify_pending(&push, &commit) {
+                            Ok(_) => (),
+                            Err(e) => {
+                                println!("failed to deliver GitHub status notification: {:?}", e)
+                            }
+                        }
                     }
                 };
 
