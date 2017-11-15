@@ -28,6 +28,11 @@ pub enum ReadQuery {
         /// Keys to read with
         keys: Vec<DataType>,
     },
+    /// Size of reader
+    Size {
+        /// Where to read from
+        target: (NodeIndex, usize),
+    },
 }
 
 /// The contents of a specific key
@@ -37,6 +42,8 @@ pub enum ReadReply {
     Normal(Vec<Result<Datas, ()>>),
     /// Read and got checktable tokens
     WithToken(Vec<Result<(Datas, checktable::Token), ()>>),
+    /// Size of reader
+    Size(usize),
 }
 
 /// Serializeable version of a `RemoteGetter`.
@@ -66,6 +73,19 @@ pub struct RemoteGetter {
 }
 
 impl RemoteGetter {
+    /// Query the size of the reader
+    pub fn len(&mut self) -> usize {
+        let reply = self.shards[0]
+                .send(&ReadQuery::Size {
+                    target: (self.node, 0),
+                })
+                .unwrap();
+        match reply {
+            ReadReply::Size(size) => size,
+            _ => unreachable!(),
+        }
+    }
+
     /// Query for the results for the given keys, optionally blocking if it is not yet available.
     pub fn multi_lookup(&mut self, keys: Vec<DataType>, block: bool) -> Vec<Result<Datas, ()>> {
         if self.shards.len() == 1 {

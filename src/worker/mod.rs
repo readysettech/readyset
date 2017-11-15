@@ -51,6 +51,22 @@ impl Worker {
             RpcPollEvent::ResumePolling(_) => ProcessResult::KeepPolling,
             RpcPollEvent::Timeout => unreachable!(),
             RpcPollEvent::Process(
+                ReadQuery::Size {
+                    target,
+                },
+                reply,
+            ) => {
+                *reply = Some(ReadReply::Size({
+                    let &mut (ref mut reader, _) =
+                        readers_cache.entry(target.clone()).or_insert_with(
+                            || readers.lock().unwrap().get(&target).unwrap().clone(),
+                        );
+
+                    reader.len()
+                }));
+                ProcessResult::KeepPolling
+            },
+            RpcPollEvent::Process(
                 ReadQuery::Normal {
                     target,
                     keys,

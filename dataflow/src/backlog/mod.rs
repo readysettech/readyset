@@ -178,8 +178,7 @@ impl SingleReadHandle {
         self.handle.meta_get_and(key, &mut then).ok_or(())
     }
 
-    #[allow(dead_code)]
-    pub(crate) fn len(&self) -> usize {
+    pub fn len(&self) -> usize {
         self.handle.len()
     }
 }
