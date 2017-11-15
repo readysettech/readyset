@@ -294,7 +294,8 @@ pub fn taste_commit(
                 .iter()
                 .map(|b| {
                     let (status, res) =
-                        benchmark(&ws.path, &cfg, b, commit.id, branch_history.get(&b.name), timeout);
+                        benchmark(&ws.path, &cfg, b, commit.id, branch_history.get(&b.name),
+                                  timeout);
                     branch_history.insert(b.name.clone(), res.clone());
                     (b.clone(), status, res)
                 })
