@@ -341,7 +341,7 @@ impl SqlIncorporator {
         // Note that we don't need to optimize the MIR here, because the query is trivial.
         let qfp = mir_query_to_flow_parts(&mut mir, &mut mig);
 
-        self.register_query(query_name, None, &mir);
+        self.register_query(query_name, None, &mir, mig.universe());
 
         qfp
     }
@@ -372,7 +372,7 @@ impl SqlIncorporator {
         // push it into the flow graph using the migration in `mig`, and obtain `QueryFlowParts`
         let qfp = mir_query_to_flow_parts(&mut mir, &mut mig);
 
-        self.register_query(query_name, None, &mir);
+        self.register_query(query_name, None, &mir, mig.universe());
 
         qfp
     }
@@ -404,7 +404,7 @@ impl SqlIncorporator {
 
         let qfp = mir_query_to_flow_parts(&mut combined_mir_query, &mut mig);
 
-        self.register_query(query_name, None, &combined_mir_query);
+        self.register_query(query_name, None, &combined_mir_query, mig.universe());
 
         Ok(qfp)
     }
@@ -492,9 +492,9 @@ impl SqlIncorporator {
         // We made a new query, so store the query graph and the corresponding leaf MIR node.
         // TODO(malte): we currently store nothing if there is no QG (e.g., for compound queries).
         // This means we cannot reuse these queries.
-        let qg_hash = qg.signature().hash;
         match qg {
             Some(qg) => {
+                let qg_hash = qg.signature().hash;
                 self.query_graphs
                     .insert(qg_hash, qg);
                 self.mir_queries
