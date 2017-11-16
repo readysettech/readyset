@@ -255,7 +255,13 @@ impl SqlToMirConverter {
         let leaf_node = MirNode::new(
             name,
             self.schema_version,
-            columns,
+            columns
+                .into_iter()
+                .map(|mut c| {
+                    c.table = Some(String::from(name));
+                    c
+                })
+                .collect(),
             MirNodeType::Leaf {
                 node: final_node.clone(),
                 keys: vec![],
