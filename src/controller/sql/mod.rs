@@ -474,7 +474,7 @@ impl SqlIncorporator {
             Some(qg) => {
                 self.query_graphs
                     .insert(qg.signature().hash, (qg, mir.clone()));
-            },
+            }
             None => (),
         }
     }
