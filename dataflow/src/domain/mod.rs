@@ -1,10 +1,8 @@
 use petgraph::graph::NodeIndex;
 use std::collections::{HashMap, HashSet, VecDeque};
 use std::sync::{Arc, Mutex};
-use std::thread;
 use std::time;
 use std::collections::hash_map::Entry;
-use std::rc::Rc;
 use std::io::{BufRead, BufReader, ErrorKind};
 use std::fs::File;
 
@@ -12,7 +10,7 @@ use std::net::SocketAddr;
 
 use Readers;
 use channel::TcpSender;
-use channel::poll::{KeepPolling, PollEvent, PollingLoop, StopPolling};
+use channel::poll::{PollEvent, ProcessResult};
 use prelude::*;
 use payload::{ControlReplyPacket, ReplayPieceContext, ReplayTransactionState, TransactionState};
 use statistics;
@@ -24,7 +22,6 @@ use serde_json;
 use itertools::Itertools;
 use slog::Logger;
 use timekeeper::{RealTime, SimpleTracker, ThreadTime, Timer, TimerSet};
-use tarpc::sync::client::{self, ClientExt};
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct Config {
@@ -145,8 +142,6 @@ pub struct DomainBuilder {
     pub ts: i64,
     /// The socket address at which this domain receives control messages.
     pub control_addr: SocketAddr,
-    /// The socket address over which this domain communicates with the checktable service.
-    pub checktable_addr: SocketAddr,
     /// The socket address for debug interactions with this domain.
     pub debug_addr: Option<SocketAddr>,
     /// Configuration parameters for the domain.
@@ -155,13 +150,12 @@ pub struct DomainBuilder {
 
 impl DomainBuilder {
     /// Starts up the domain represented by this `DomainBuilder`.
-    pub fn boot(
+    pub fn build(
         self,
         log: Logger,
         readers: Readers,
         channel_coordinator: Arc<ChannelCoordinator>,
-        listen_addr: SocketAddr,
-    ) -> (thread::JoinHandle<()>, SocketAddr) {
+    ) -> Domain {
         // initially, all nodes are not ready
         let not_ready = self.nodes
             .values()
@@ -179,77 +173,60 @@ impl DomainBuilder {
             .map(|addr| TcpSender::connect(addr, None).unwrap());
         let mut control_reply_tx = TcpSender::connect(&self.control_addr, None).unwrap();
 
-        // Create polling loop and tell the controller what port we are listening on.
-        let polling_loop = PollingLoop::<Packet>::new(listen_addr);
-        // We extract this here because `listen_addr` may not specify a port and rely on
-        // auto-assignment
-        let addr = polling_loop.get_listener_addr().unwrap();
-        control_reply_tx
-            .send(ControlReplyPacket::Booted(shard.unwrap_or(0), addr.clone()))
-            .unwrap();
+        // TODO
+        // info!(log, "booting domain"; "nodes" => self.nodes.iter().count());
+        // let name = match shard {
+        //     Some(shard) => format!("domain{}.{}", self.index.0, shard),
+        //     None => format!("domain{}", self.index.0),
+        // };
+        // thread::Builder::new().name(name)
+        let transaction_state = transactions::DomainState::new(self.index, self.ts);
+        let group_commit_queues = persistence::GroupCommitQueueSet::new(
+            self.index,
+            shard.unwrap_or(0),
+            &self.persistence_parameters,
+        );
 
-        info!(log, "booting domain"; "nodes" => self.nodes.iter().count());
-        let name = match shard {
-            Some(shard) => format!("domain{}.{}", self.index.0, shard),
-            None => format!("domain{}", self.index.0),
-        };
+        Domain {
+            index: self.index,
+            shard,
+            nshards: self.nshards,
+            transaction_state,
+            persistence_parameters: self.persistence_parameters,
+            nodes: self.nodes,
+            state: StateMap::default(),
+            log,
+            not_ready,
+            mode: DomainMode::Forwarding,
+            waiting: Default::default(),
+            reader_triggered: Default::default(),
+            replay_paths: Default::default(),
 
-        let jh = thread::Builder::new()
-            .name(name)
-            .spawn(move || {
-                let checktable = Rc::new(
-                    checktable::CheckTableClient::connect(
-                        self.checktable_addr,
-                        client::Options::default(),
-                    ).unwrap(),
-                );
+            ingress_inject: Default::default(),
 
-                Domain {
-                    index: self.index,
-                    shard,
-                    nshards: self.nshards,
-                    transaction_state: transactions::DomainState::new(
-                        self.index,
-                        checktable,
-                        self.ts,
-                    ),
-                    persistence_parameters: self.persistence_parameters,
-                    nodes: self.nodes,
-                    state: StateMap::default(),
-                    log,
-                    not_ready,
-                    mode: DomainMode::Forwarding,
-                    waiting: Default::default(),
-                    reader_triggered: Default::default(),
-                    replay_paths: Default::default(),
+            readers,
+            inject: None,
+            _debug_tx: debug_tx,
+            control_reply_tx,
+            channel_coordinator,
 
-                    ingress_inject: Default::default(),
+            buffered_replay_requests: Default::default(),
+            has_buffered_replay_requests: false,
+            replay_batch_size: self.config.replay_batch_size,
+            replay_batch_timeout: self.config.replay_batch_timeout,
 
-                    addr,
-                    readers,
-                    inject: None,
-                    _debug_tx: debug_tx,
-                    control_reply_tx,
-                    channel_coordinator,
+            concurrent_replays: 0,
+            max_concurrent_replays: self.config.concurrent_replays,
+            replay_request_queue: Default::default(),
 
-                    buffered_replay_requests: Default::default(),
-                    has_buffered_replay_requests: false,
-                    replay_batch_size: self.config.replay_batch_size,
-                    replay_batch_timeout: self.config.replay_batch_timeout,
+            group_commit_queues,
 
-                    concurrent_replays: 0,
-                    max_concurrent_replays: self.config.concurrent_replays,
-                    replay_request_queue: Default::default(),
-
-                    total_time: Timer::new(),
-                    total_ptime: Timer::new(),
-                    wait_time: Timer::new(),
-                    process_times: TimerSet::new(),
-                    process_ptimes: TimerSet::new(),
-                }.run(polling_loop)
-            })
-            .unwrap();
-        (jh, addr)
+            total_time: Timer::new(),
+            total_ptime: Timer::new(),
+            wait_time: Timer::new(),
+            process_times: TimerSet::new(),
+            process_ptimes: TimerSet::new(),
+        }
     }
 }
 
@@ -278,7 +255,6 @@ pub struct Domain {
     max_concurrent_replays: usize,
     replay_request_queue: VecDeque<(Tag, Vec<DataType>)>,
 
-    addr: SocketAddr,
     readers: Readers,
     inject: Option<Box<Packet>>,
     _debug_tx: Option<TcpSender<debug::DebugEvent>>,
@@ -289,6 +265,8 @@ pub struct Domain {
     has_buffered_replay_requests: bool,
     replay_batch_timeout: time::Duration,
     replay_batch_size: usize,
+
+    group_commit_queues: persistence::GroupCommitQueueSet,
 
     total_time: Timer<SimpleTracker, RealTime>,
     total_ptime: Timer<SimpleTracker, ThreadTime>,
@@ -1130,7 +1108,7 @@ impl Domain {
                         if !state.is_empty() {
                             let log = self.log.new(o!());
                             let nshards = self.nshards;
-                            let domain_addr = self.addr;
+                            let domain_addr = unimplemented!();
 
                             let added_cols = self.ingress_inject.get(&from).cloned();
                             let default = {
@@ -1575,7 +1553,6 @@ impl Domain {
     }
 
     fn handle_recovery(&mut self) {
-        let checktable = self.transaction_state.get_checktable();
         let node_info: Vec<_> = self.nodes
             .iter()
             .map(|(index, node)| {
@@ -1626,7 +1603,7 @@ impl Domain {
                     let data: Records = chunk.collect();
                     let link = Link::new(local_addr, local_addr);
                     if is_transactional {
-                        let (ts, prevs) = checktable.recover(global_addr).unwrap();
+                        let (ts, prevs) = checktable::with_checktable(|ct| ct.recover(global_addr).unwrap());
                         Packet::Transaction {
                             link,
                             data,
@@ -2279,20 +2256,22 @@ impl Domain {
         }
     }
 
-    pub fn run(mut self, mut polling_loop: PollingLoop<Packet>) {
-        let mut group_commit_queues = persistence::GroupCommitQueueSet::new(
-            self.index,
-            self.shard.unwrap_or(0),
-            &self.persistence_parameters,
-            self.transaction_state.get_checktable().clone(),
-        );
+    pub fn id(&self) -> (Index, usize) {
+        (self.index, self.shard.unwrap_or(0))
+    }
 
-        // Run polling loop.
-        self.total_time.start();
-        self.total_ptime.start();
-        polling_loop.run_polling_loop(|event| match event {
+    pub fn booted(&mut self, addr: SocketAddr) {
+        self.control_reply_tx
+            .send(ControlReplyPacket::Booted(self.shard.unwrap_or(0), addr))
+            .unwrap();
+    }
+
+    pub fn on_event(&mut self, event: PollEvent<Box<Packet>>) -> ProcessResult {
+        //self.total_time.start();
+        //self.total_ptime.start();
+        match event {
             PollEvent::ResumePolling(timeout) => {
-                *timeout = group_commit_queues.duration_until_flush().or_else(|| {
+                *timeout = self.group_commit_queues.duration_until_flush().or_else(|| {
                     let now = time::Instant::now();
                     self.buffered_replay_requests
                         .iter()
@@ -2303,20 +2282,22 @@ impl Domain {
                         })
                         .min()
                 });
-                KeepPolling
+                ProcessResult::KeepPolling
             }
-            PollEvent::Process(packet) => {
-                let packet = packet.make_boxed_normal();
+            PollEvent::Process(mut packet) => {
+                if let Some(local) = packet.extract_local() {
+                    packet = local;
+                }
                 if let Packet::Quit = *packet {
-                    return StopPolling;
+                    return ProcessResult::StopPolling;
                 }
 
                 // TODO: Initialize tracer here, and when flushing group commit
                 // queue.
-                if group_commit_queues.should_append(&packet, &self.nodes) {
+                if self.group_commit_queues.should_append(&packet, &self.nodes) {
                     debug_assert!(packet.is_regular());
                     packet.trace(PacketEvent::ExitInputChannel);
-                    let merged_packet = group_commit_queues.append(packet, &self.nodes);
+                    let merged_packet = self.group_commit_queues.append(packet, &self.nodes);
                     if let Some(packet) = merged_packet {
                         self.handle(packet);
                     }
@@ -2328,10 +2309,10 @@ impl Domain {
                     self.handle(p);
                 }
 
-                KeepPolling
+                ProcessResult::KeepPolling
             }
             PollEvent::Timeout => {
-                if let Some(m) = group_commit_queues.flush_if_necessary(&self.nodes) {
+                if let Some(m) = self.group_commit_queues.flush_if_necessary(&self.nodes) {
                     self.handle(m);
                     while let Some(p) = self.inject.take() {
                         self.handle(p);
@@ -2339,8 +2320,8 @@ impl Domain {
                 } else if self.has_buffered_replay_requests {
                     self.handle(box Packet::Spin);
                 }
-                KeepPolling
+                ProcessResult::KeepPolling
             }
-        });
+        }
     }
 }

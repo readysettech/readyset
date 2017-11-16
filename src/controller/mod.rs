@@ -96,6 +96,7 @@ pub struct ControllerBuilder {
     nworkers: usize,
     internal_port: u16,
     external_port: u16,
+    checktable_port: u16,
     log: slog::Logger,
 }
 impl Default for ControllerBuilder {
@@ -114,6 +115,7 @@ impl Default for ControllerBuilder {
             heartbeat_every: Duration::from_secs(1),
             healthcheck_every: Duration::from_secs(10),
             internal_port: if cfg!(test) { 0 } else { 8000 },
+            checktable_port: if cfg!(test) { 0 } else { 8500 },
             external_port: if cfg!(test) { 0 } else { 9000 },
             nworkers: 0,
             log,
@@ -457,7 +459,7 @@ impl ControllerInner {
             true,
         ));
 
-        let addr = SocketAddr::new(builder.listen_addr.clone(), 0);
+        let addr = SocketAddr::new(builder.listen_addr.clone(), builder.checktable_port);
         let checktable_addr = checktable::service::CheckTableServer::start(addr.clone());
         let checktable =
             checktable::CheckTableClient::connect(checktable_addr, client::Options::default())
@@ -1343,7 +1345,6 @@ impl<'a> Migration<'a> {
                 nodes,
                 &mainline.persistence,
                 &mainline.listen_addr,
-                &mainline.checktable_addr,
                 &mainline.channel_coordinator,
                 &mainline.debug_channel,
                 &mut placer,

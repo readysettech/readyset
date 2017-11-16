@@ -1,6 +1,5 @@
 use petgraph::graph::NodeIndex;
 use std::collections::BinaryHeap;
-use std::rc::Rc;
 
 use std::cmp::Ordering;
 
@@ -67,7 +66,6 @@ pub enum Event {
 pub struct DomainState {
     domain_index: domain::Index,
 
-    checktable: Rc<checktable::CheckTableClient>,
     buffer: BinaryHeap<BufferEntry>,
 
     next_transaction: Bundle,
@@ -84,14 +82,9 @@ pub struct DomainState {
 }
 
 impl DomainState {
-    pub fn new(
-        domain_index: domain::Index,
-        checktable: Rc<checktable::CheckTableClient>,
-        ts: i64,
-    ) -> Self {
+    pub fn new(domain_index: domain::Index, ts: i64) -> Self {
         Self {
             domain_index,
-            checktable,
             buffer: BinaryHeap::new(),
             next_transaction: Bundle::Empty,
             ingress_from_base: Vec::new(),
@@ -309,7 +302,8 @@ impl DomainState {
     }
 
     pub fn schedule_replay(&mut self, tag: Tag, key: Vec<DataType>) {
-        let (ts, prevs) = self.checktable.claim_replay_timestamp(tag.clone()).unwrap();
+        let (ts, prevs) =
+            checktable::with_checktable(|ct| ct.claim_replay_timestamp(tag.clone()).unwrap());
 
         let prev_ts = if self.ts == ts - 1 {
             ts - 1
@@ -344,9 +338,5 @@ impl DomainState {
                 transaction: BufferedTransaction::SeedReplay(tag, key, rts),
             });
         }
-    }
-
-    pub fn get_checktable(&self) -> Rc<checktable::CheckTableClient> {
-        self.checktable.clone()
     }
 }

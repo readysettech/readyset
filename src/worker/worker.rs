@@ -1,190 +1,178 @@
 use std;
 use std::io;
+use std::thread;
 use std::net::{self, SocketAddr};
 use std::time::Duration;
 use std::collections::HashMap;
 use std::sync::{mpsc, Arc, Mutex, TryLockError};
 
+use ferris::CopyWheel as TimerWheel;
+use ferris::{Resolution, Wheel};
 use slab::Slab;
 use vec_map::VecMap;
 use mio::{self, Events, Poll, PollOpt, Ready, Token};
+use mio::unix::EventedFd;
 use mio::net::{TcpListener, TcpStream};
 
 use channel::{TcpReceiver, TcpSender};
-use dataflow::Packet;
+use channel::poll::{PollEvent, ProcessResult};
+use dataflow::{self, Domain, Packet};
 
 pub struct NewReplica {
-    inner: Replica,
-    inputs: Vec<TcpStream>,
-    outputs: Vec<(ReplicaIndex, net::TcpStream)>,
+    pub inner: Replica,
+    pub listener: TcpListener,
+    pub outputs: Vec<(ReplicaIndex, net::TcpStream)>,
 }
 
-pub struct WorkerDelta {
-    replicas: Vec<NewReplica>,
-    inputs: Vec<(ReplicaIndex, TcpStream)>,
-}
-
-type Replica = ();
-type ReplicaIndex = ();
+type Replica = Domain;
+type ReplicaIndex = (dataflow::Index, usize);
 type EnqueuedSend = (ReplicaIndex, Box<Packet>);
 
 struct ReplicaContext {
     /// A map from socket token to `TcpReceiver`.
     receivers: VecMap<TcpReceiver<Box<Packet>>>,
+    listener: Option<TcpListener>,
     replica: Replica,
     outputs: HashMap<ReplicaIndex, TcpSender<Packet>>,
 }
 
 #[derive(Clone)]
-struct WorkerDeltaInner {
-    /// New replicas that should be added to the replica Slab.
-    ///
-    /// Note that these *must* be added in order so that the replica tokens are correctly mapped.
-    new_replicas: Vec<(ReplicaIndex, Arc<Mutex<ReplicaContext>>)>,
+struct NewReplicaInternal {
+    ri: ReplicaIndex,
+    rc: Arc<Mutex<ReplicaContext>>,
+    rit: usize,
+}
 
-    /// New socket tokens, and the replica token they map to.
-    new_socket_tokens: Vec<usize>,
-
-    ack: mpsc::SyncSender<()>,
+use std::os::unix::io::RawFd;
+#[derive(Clone)]
+struct SocketContext {
+    rit: usize,
+    listening: bool,
+    fd: RawFd,
 }
 
 struct SharedWorkerState {
     /// A mapping from socket token to replica token.
-    sockets: Slab<usize>,
+    sockets: Slab<SocketContext>,
     /// A mapping from replica index token to the context associated with that replica.
     replicas: Slab<Arc<Mutex<ReplicaContext>>>,
     /// A mapping from replica index to replica token.
     revmap: HashMap<ReplicaIndex, usize>,
+    /// The "true" mapping from socket token to replica token.
+    ///
+    /// This is lazily pulled in by workers when they miss in `sockets`.
+    truth: Arc<Mutex<Slab<SocketContext>>>,
 }
 
-// can be replaced with derive(Default) with next release of Slab
-impl Default for SharedWorkerState {
-    fn default() -> Self {
+impl SharedWorkerState {
+    fn new(truth: Arc<Mutex<Slab<SocketContext>>>) -> Self {
         SharedWorkerState {
             sockets: Slab::new(),
             replicas: Slab::new(),
             revmap: Default::default(),
+            truth,
         }
     }
 }
 
 pub struct WorkerPool {
-    workers: Vec<Worker>,
+    workers: Vec<thread::JoinHandle<()>>,
     poll: Arc<Poll>,
-    notify: Vec<mpsc::SyncSender<WorkerDeltaInner>>,
+    notify: Vec<mpsc::Sender<NewReplicaInternal>>,
     wstate: SharedWorkerState,
+    checktable_addr: SocketAddr,
 }
 
 impl WorkerPool {
-    pub fn new(n: usize) -> io::Result<Self> {
+    pub fn new(n: usize, controller_addr: &str) -> io::Result<Self> {
+        use std::net::ToSocketAddrs;
+        let mut checktable_addr = controller_addr.to_socket_addrs().unwrap().next().unwrap();
+        checktable_addr.set_port(8500);
+
         let poll = Arc::new(Poll::new()?);
-        let (notify_tx, notify_rx): (_, Vec<_>) = (0..n).map(|_| mpsc::sync_channel(1)).unzip();
+        let (notify_tx, notify_rx): (_, Vec<_>) = (0..n).map(|_| mpsc::channel()).unzip();
+        let truth = Arc::new(Mutex::new(Slab::new()));
         let workers = notify_rx
             .into_iter()
             .map(|notify| {
-                Worker {
-                    shared: Default::default(),
+                let w = Worker {
+                    shared: SharedWorkerState::new(truth.clone()),
                     all: poll.clone(),
                     notify,
-                }
+                };
+                let checktable_addr = checktable_addr.clone();
+                thread::spawn(move || w.run(checktable_addr))
             })
             .collect();
 
-        Ok(WorkerPool {
+        let mut pool = WorkerPool {
             workers,
             poll,
             notify: notify_tx,
-            wstate: Default::default(),
-        })
+            wstate: SharedWorkerState::new(truth),
+            checktable_addr,
+        };
+        Ok(pool)
     }
 
-    pub fn run(mut self, more: mpsc::Receiver<WorkerDelta>) {
-        use std::thread;
-        let jhs: Vec<_> = self.workers
-            .into_iter()
-            .map(|worker| thread::spawn(move || worker.run()))
-            .collect();
+    pub fn add_replica(&mut self, replica: NewReplica) {
+        let NewReplica {
+            inner,
+            listener,
+            outputs,
+        } = replica;
+        let ri = inner.id();
+        let addr = listener.local_addr().unwrap();
 
-        for delta in more {
-            let (ack_tx, ack_rx) = mpsc::sync_channel(self.notify.len());
-            let mut notify = WorkerDeltaInner {
-                new_replicas: Default::default(),
-                new_socket_tokens: Default::default(),
-                ack: ack_tx,
-            };
+        let mut rc = ReplicaContext {
+            receivers: VecMap::new(),
+            replica: inner,
+            outputs: HashMap::new(),
+            listener: None,
+        };
 
-            let mut poll_more = VecMap::new();
-            for replica in delta.replicas {
-                let ri = replica.inner.id();
-
-                let mut rc = ReplicaContext {
-                    receivers: VecMap::new(),
-                    replica: replica.inner,
-                    outputs: HashMap::new(),
-                };
-
-                // Hook up outputs
-                for (target, tx) in replica.outputs {
-                    rc.outputs.insert(target, TcpSender::new(tx, None).unwrap());
-                }
-
-                // Prepare for workers
-                let r = Arc::new(Mutex::new(rc));
-                let rit = self.wstate.replicas.insert(r.clone());
-                self.wstate.revmap.insert(ri, rit);
-
-                // Keep track of new sockets to listen on (but don't listen yet!)
-                {
-                    let mut rxs = Vec::with_capacity(replica.inputs.len());
-                    let mut r = r.lock().unwrap();
-                    for rx in replica.inputs {
-                        let token = self.wstate.sockets.insert(rit);
-                        notify.new_socket_tokens.push(rit);
-                        rxs.push((token, rx));
-                    }
-                    poll_more.insert(rit, rxs);
-                }
-
-                notify.new_replicas.push((ri, r));
-            }
-
-            for (ri, rx) in delta.inputs {
-                let rit = self.wstate.revmap[&ri];
-                let token = self.wstate.sockets.insert(rit);
-                notify.new_socket_tokens.push(rit);
-                poll_more
-                    .entry(rit)
-                    .or_insert_with(Vec::default)
-                    .push((token, rx))
-            }
-
-            // Notify all workers about new replicas and sockets
-            for tx in &mut self.notify {
-                tx.send(notify.clone());
-            }
-            // Wait for all senders to ack (drop) WorkerDeltaInner
-            ack_rx.recv().is_err();
-
-            // Update Poll so workers start getting events for new connections
-            for (rit, rxs) in poll_more {
-                let r = self.wstate.replicas.get_mut(rit).unwrap();
-                let mut r = r.lock().unwrap();
-                for (token, rx) in rxs {
-                    self.poll
-                        .register(
-                            &rx,
-                            Token(token),
-                            Ready::readable(),
-                            PollOpt::edge() | PollOpt::oneshot(),
-                        )
-                        .unwrap();
-                    let tcp = TcpReceiver::new(rx);
-                    r.receivers.insert(token, tcp);
-                }
-            }
+        // Hook up outputs
+        for (target, tx) in outputs {
+            rc.outputs.insert(target, TcpSender::new(tx, None).unwrap());
         }
 
-        for jh in jhs {
+        // Prepare for workers
+        let rc = Arc::new(Mutex::new(rc));
+        let rit = self.wstate.replicas.insert(rc.clone());
+        self.wstate.revmap.insert(ri, rit);
+
+        // Keep track of new socket to listen on
+        use std::os::unix::io::AsRawFd;
+        let token = self.wstate.truth.lock().unwrap().insert(SocketContext {
+            rit,
+            fd: listener.as_raw_fd(),
+            listening: true,
+        });
+
+        // Notify all workers about new replicas and sockets
+        let notify = NewReplicaInternal { ri, rc, rit };
+        for tx in &mut self.notify {
+            tx.send(notify.clone());
+        }
+
+        // Update Poll so workers start notifications about connections to the new replica
+        let r = self.wstate.replicas.get_mut(rit).unwrap();
+        let mut r = r.lock().unwrap();
+        self.poll
+            .register(
+                &listener,
+                Token(token),
+                Ready::readable(),
+                PollOpt::level() | PollOpt::oneshot(),
+            )
+            .unwrap();
+        r.listener = Some(listener);
+        r.replica.booted(addr);
+    }
+
+    pub fn wait(&mut self) {
+        self.notify.clear();
+        for jh in self.workers.drain(..) {
             jh.join().unwrap();
         }
     }
@@ -193,59 +181,129 @@ impl WorkerPool {
 pub struct Worker {
     shared: SharedWorkerState,
     all: Arc<Poll>,
-    notify: mpsc::Receiver<WorkerDeltaInner>,
+    notify: mpsc::Receiver<NewReplicaInternal>,
 }
 
 impl Worker {
-    pub fn run(mut self) -> ! {
+    pub fn run(mut self, checktable_addr: SocketAddr) {
         // we want to only process a single domain, otherwise we might hold on to work that another
         // worker could be doing. and that'd be silly.
         let mut events = Events::with_capacity(1);
+        let mut timers = TimerWheel::new(vec![Resolution::Ms, Resolution::TenMs]);
+        let mut durtmp = None;
+
+        dataflow::connect_thread_checktable(checktable_addr);
 
         loop {
-            if let Ok(delta) = self.notify.try_recv() {
-                for (ri, r) in delta.new_replicas {
-                    let rit = self.shared.replicas.insert(r);
-                    self.shared.revmap.insert(ri, rit);
+            for rit in timers.expire() {
+                // NOTE: try_lock is okay, because if another worker is handling it, the timeout is
+                // also being dealt with.
+                if let Ok(mut context) = self.shared.replicas[rit].try_lock() {
+                    match context.replica.on_event(PollEvent::Timeout) {
+                        ProcessResult::KeepPolling => {
+                            // FIXME: this could return a bunch of things to be sent
+                        }
+                        ProcessResult::StopPolling => unreachable!(),
+                    }
                 }
-                for rit in delta.new_socket_tokens {
-                    // NOTE: main thread is responsible for registering token with Poll
-                    self.shared.sockets.insert(rit);
-                }
-                // ack to main thread
-                drop(delta.ack);
             }
 
             self.all.poll(&mut events, None).expect("OS poll failed");
-            let context = events
+            let token = events
                 .get(0)
                 .map(|e| e.token())
-                .map(|Token(token)| {
-                    (
-                        token,
-                        *self.shared
-                            .sockets
-                            .get(token)
-                            .expect("got event for unknown token"),
-                    )
-                })
-                .map(|(token, rit)| {
-                    (
-                        token,
-                        self.shared
-                            .replicas
-                            .get(rit)
-                            .expect("token resolves to unknown replica"),
-                    )
-                })
-                .and_then(|(token, domain)| match domain.try_lock() {
-                    Ok(d) => Some((token, d)),
-                    Err(TryLockError::WouldBlock) => None,
-                    Err(TryLockError::Poisoned(e)) => panic!("found poisoned lock: {}", e),
-                });
+                .map(|Token(token)| token)
+                .unwrap();
+
+            if !self.shared.sockets.contains(token) {
+                // unknown socket -- we need to update our cached state
+                {
+                    let truth = self.shared.truth.lock().unwrap();
+                    self.shared.sockets = (*truth).clone();
+                }
+
+                // also learn about new replicas while we're at it
+                while let Ok(added) = self.notify.try_recv() {
+                    // register replica
+                    let rit = self.shared.replicas.insert(added.rc);
+
+                    // register
+                    assert_eq!(rit, added.rit);
+                    self.shared.revmap.insert(added.ri, rit);
+                }
+
+                // if this is a listening socket, we know the main thread doesn't register it with
+                // the Poll until it holds the lock, so for us to receive this event, and then get
+                // the lock, the main thread *must* have added it.
+                //
+                // if this is a read socket,
+                assert!(self.shared.sockets.contains(token));
+            }
+
+            let sc = self.shared
+                .sockets
+                .get(token)
+                .expect("got event for unknown token");
+            let replica = self.shared
+                .replicas
+                .get(sc.rit)
+                .expect("token resolves to unknown replica");
+
+            if sc.listening {
+                // listening socket -- we need to accept a new connection
+                let mut replica = replica.lock().unwrap();
+                if let Ok((stream, _src)) = replica.listener.as_mut().unwrap().accept() {
+                    // NOTE: we're taking two locks at the same time here! we need to be sure that
+                    // anything that holds the `truth` lock will eventually relinquish it.
+                    //
+                    //   a) add_replica immediately relinquishes
+                    //   b) cloning truth (above) immediately relinquishes
+                    //   c) we immediately relinquish
+                    //
+                    // so we should be safe from deadlocks
+                    use std::os::unix::io::AsRawFd;
+                    let token = self.shared.truth.lock().unwrap().insert(SocketContext {
+                        rit: sc.rit,
+                        fd: stream.as_raw_fd(),
+                        listening: false,
+                    });
+
+                    self.all
+                        .register(
+                            &stream,
+                            Token(token),
+                            Ready::readable(),
+                            PollOpt::level() | PollOpt::oneshot(),
+                        )
+                        .unwrap();
+                    let tcp = TcpReceiver::new(stream);
+                    replica.receivers.insert(token, tcp);
+                }
+
+                continue;
+            }
+
+            let context = match replica.try_lock() {
+                Ok(r) => Some(r),
+                Err(TryLockError::WouldBlock) => {
+                    // this can happen with oneshot if there is more than one input to a
+                    // replica, and both receive data. not entirely clear what the best thing
+                    // to do here is. we can either block on the lock, or release the socket
+                    // again (which will cause another epoll to be woken up since we're
+                    // level-triggered).
+                    self.all.reregister(
+                        &EventedFd(&sc.fd),
+                        Token(token),
+                        Ready::readable(),
+                        PollOpt::level() | PollOpt::oneshot(),
+                    );
+                    None
+                }
+                Err(TryLockError::Poisoned(e)) => panic!("found poisoned lock: {}", e),
+            };
 
             let mut next = None;
-            if let Some((token, mut context)) = context {
+            if let Some(mut context) = context {
                 let ReplicaContext {
                     ref mut outputs,
                     ref mut replica,
@@ -260,7 +318,13 @@ impl Worker {
 
                 let mut packet = channel.try_recv().ok();
                 while let Some(m) = packet.take() {
-                    let output = self.process(replica, m);
+                    let output = match self.process(replica, m) {
+                        Some(o) => o,
+                        None => {
+                            // told to exit?
+                            return;
+                        }
+                    };
 
                     // if there is at least one more *complete* Packet in `channel` then we should
                     // send everything in `output` and process the next Packet. however, if there
@@ -284,6 +348,16 @@ impl Worker {
                     }
                 }
 
+                // Register timeout for replica
+                replica.on_event(PollEvent::ResumePolling(&mut durtmp));
+                if let Some(timeout) = durtmp.take() {
+                    use time;
+                    // https://github.com/andrewjstone/ferris/issues/2
+                    timers.start(sc.rit, time::Duration::from_std(timeout).unwrap());
+                } else {
+                    timers.stop(sc.rit);
+                }
+
                 // we have a packet we can handle directly!
                 // NOTE: this deadlocks *hard* if you have A-B-A
                 while let Some((ri, m)) = next.take() {
@@ -295,7 +369,14 @@ impl Worker {
                     match rc.try_lock() {
                         Ok(mut context) => {
                             // no other thread is operating on the target domain, so we can do it
-                            let output = self.process(replica, m);
+                            let output = match self.process(replica, m) {
+                                Some(o) => o,
+                                None => {
+                                    // told to exit?
+                                    return;
+                                }
+                            };
+
                             for (ri, m) in output {
                                 if next.is_none() && self.is_local(&ri) {
                                     next = Some((ri, m));
@@ -306,6 +387,18 @@ impl Worker {
                                 // XXX: unwrap
                                 // NOTE: uses shadowed ri
                                 outputs.get_mut(&ri).unwrap().send_ref(&m).unwrap();
+                            }
+
+                            // Register timeout for replica
+                            context
+                                .replica
+                                .on_event(PollEvent::ResumePolling(&mut durtmp));
+                            if let Some(timeout) = durtmp.take() {
+                                use time;
+                                // https://github.com/andrewjstone/ferris/issues/2
+                                timers.start(rit, time::Duration::from_std(timeout).unwrap());
+                            } else {
+                                timers.stop(rit);
                             }
                         }
                         Err(e) => {
@@ -325,7 +418,13 @@ impl Worker {
         false
     }
 
-    fn process(&self, domain: &mut Replica, packet: Box<Packet>) -> Vec<EnqueuedSend> {
-        unimplemented!()
+    fn process(&self, domain: &mut Replica, packet: Box<Packet>) -> Option<Vec<EnqueuedSend>> {
+        match domain.on_event(PollEvent::Process(packet)) {
+            ProcessResult::KeepPolling => {
+                // FIXME: in theory this should return a bunch of things to be sent
+                None
+            }
+            ProcessResult::StopPolling => None,
+        }
     }
 }

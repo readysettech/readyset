@@ -10,7 +10,6 @@ use std::path::PathBuf;
 use std::time;
 use std::collections::HashMap;
 use std::net::SocketAddr;
-use std::rc::Rc;
 
 use debug::DebugEventType;
 use domain;
@@ -118,17 +117,11 @@ pub struct GroupCommitQueueSet {
     domain_shard: usize,
 
     params: Parameters,
-    checktable: Rc<checktable::CheckTableClient>,
 }
 
 impl GroupCommitQueueSet {
     /// Create a new `GroupCommitQueue`.
-    pub fn new(
-        domain_index: domain::Index,
-        domain_shard: usize,
-        params: &Parameters,
-        checktable: Rc<checktable::CheckTableClient>,
-    ) -> Self {
+    pub fn new(domain_index: domain::Index, domain_shard: usize, params: &Parameters) -> Self {
         assert!(params.queue_capacity > 0);
 
         Self {
@@ -140,7 +133,6 @@ impl GroupCommitQueueSet {
             domain_shard,
             params: params.clone(),
             transaction_reply_txs: HashMap::new(),
-            checktable,
         }
     }
 
@@ -233,7 +225,6 @@ impl GroupCommitQueueSet {
         Self::merge_packets(
             &mut self.pending_packets[node],
             nodes,
-            &self.checktable,
             &mut self.transaction_reply_txs,
         )
     }
@@ -344,7 +335,6 @@ impl GroupCommitQueueSet {
     fn merge_transactional_packets(
         packets: &mut Vec<Box<Packet>>,
         nodes: &DomainNodes,
-        checktable: &Rc<checktable::CheckTableClient>,
         transaction_reply_txs: &mut HashMap<SocketAddr, TcpSender<Result<i64, ()>>>,
     ) -> Option<Box<Packet>> {
         let mut send_reply = |addr: SocketAddr, reply| {
@@ -387,7 +377,7 @@ impl GroupCommitQueueSet {
                 .collect();
 
             let request = checktable::service::TimestampRequest { transactions, base };
-            match checktable.apply_batch(request).unwrap() {
+            match checktable::with_checktable(|ct| ct.apply_batch(request).unwrap()) {
                 None => {
                     for packet in packets.drain(..) {
                         if let (box Packet::Transaction {
@@ -443,7 +433,6 @@ impl GroupCommitQueueSet {
     fn merge_packets(
         packets: &mut Vec<Box<Packet>>,
         nodes: &DomainNodes,
-        checktable: &Rc<checktable::CheckTableClient>,
         transaction_reply_txs: &mut HashMap<SocketAddr, TcpSender<Result<i64, ()>>>,
     ) -> Option<Box<Packet>> {
         if packets.is_empty() {
@@ -453,7 +442,7 @@ impl GroupCommitQueueSet {
         match packets[0] {
             box Packet::Message { .. } => Self::merge_committed_packets(packets.drain(..), None),
             box Packet::Transaction { .. } => {
-                Self::merge_transactional_packets(packets, nodes, checktable, transaction_reply_txs)
+                Self::merge_transactional_packets(packets, nodes, transaction_reply_txs)
             }
             _ => unreachable!(),
         }

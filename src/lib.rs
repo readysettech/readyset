@@ -324,10 +324,12 @@ extern crate slog_term;
 extern crate arccstr;
 extern crate arrayvec;
 extern crate evmap;
+extern crate ferris;
 extern crate fnv;
 extern crate futures;
 extern crate hyper;
 extern crate slab;
+extern crate time;
 extern crate vec_map;
 
 extern crate itertools;

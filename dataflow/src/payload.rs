@@ -421,10 +421,12 @@ impl Packet {
     }
 
     /// If self is `Packet::Local` then replace with the packet pointed to.
-    pub fn make_boxed_normal(self) -> Box<Self> {
-        match self {
-            Packet::Local(LocalPacket(ptr)) => unsafe { Box::from_raw(ptr) },
-            s => box s,
+    pub fn extract_local(&mut self) -> Option<Box<Self>> {
+        if let Packet::Local(LocalPacket(ptr)) = *self {
+            *self = Packet::Spin;
+            Some(unsafe { Box::from_raw(ptr) })
+        } else {
+            None
         }
     }
 
