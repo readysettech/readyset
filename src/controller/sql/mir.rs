@@ -237,13 +237,18 @@ impl SqlToMirConverter {
 
         let columns: Vec<Column> = final_node.borrow().columns().iter().cloned().collect();
         if limit.is_some() {
+            let topk_name = format!("{}_topk", name);
             let topk_node = self.make_topk_node(
-                &format!("{}_topk", name),
+                &topk_name,
                 final_node,
                 columns.iter().collect(),
                 order,
                 limit.as_ref().unwrap(),
             );
+            let node_id = (topk_name, self.schema_version);
+            if !self.nodes.contains_key(&node_id) {
+                self.nodes.insert(node_id, topk_node.clone());
+            }
             final_node = topk_node;
         }
 
@@ -258,6 +263,12 @@ impl SqlToMirConverter {
             vec![final_node.clone()],
             vec![],
         );
+        self.current
+            .insert(String::from(leaf_node.borrow().name()), self.schema_version);
+        let node_id = (String::from(name), self.schema_version);
+        if !self.nodes.contains_key(&node_id) {
+            self.nodes.insert(node_id, leaf_node.clone());
+        }
 
         MirQuery {
             name: String::from(name),
