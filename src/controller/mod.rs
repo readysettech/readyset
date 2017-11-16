@@ -168,6 +168,11 @@ impl ControllerBuilder {
         ControllerInner::from_builder(self)
     }
 
+    /// Set the logger that the derived controller should use. By default, it uses `slog::Discard`.
+    pub fn log_with(&mut self, log: slog::Logger) {
+        self.log = log;
+    }
+
     /// Build a controller, and return a Blender to provide access to it.
     pub fn build(self) -> Blender {
         // TODO(fintelia): Don't hard code addresses in this function.
@@ -783,11 +788,16 @@ impl ControllerInner {
     }
 
     pub fn install_recipe(&mut self, r_txt: String) {
-        let mut r = Recipe::from_str(&r_txt, None).unwrap();
+        let mut r = Recipe::from_str(&r_txt, Some(self.log.clone())).unwrap();
+        let old = self.recipe.clone();
+        let mut new = old.replace(r).unwrap();
         self.migrate(|mig| {
-            assert!(r.activate(mig, false).is_ok());
+            match new.activate(mig, false) {
+                Ok(_) => (),
+                Err(e) => panic!("failed to install recipe: {:?}", e),
+            }
         });
-        self.recipe = r;
+        self.recipe = new;
     }
 
     pub fn install_recipe_with_policies(&mut self, (r, p): (String, String)) {

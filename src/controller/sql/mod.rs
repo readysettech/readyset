@@ -341,20 +341,7 @@ impl SqlIncorporator {
         // Note that we don't need to optimize the MIR here, because the query is trivial.
         let qfp = mir_query_to_flow_parts(&mut mir, &mut mig);
 
-        // TODO(malte): we currently need to remember these for local state, but should figure out
-        // a better plan (see below)
-        let fields = mir.leaf
-            .borrow()
-            .columns()
-            .into_iter()
-            .map(|c| String::from(c.name.as_str()))
-            .collect::<Vec<_>>();
-
-        // TODO(malte): get rid of duplication and figure out where to track this state
-        self.view_schemas.insert(String::from(query_name), fields);
-
-        // We made a new query, so store the query graph and the corresponding leaf MIR query
-        //self.query_graphs.insert(qg.signature().hash, (qg, mir));
+        self.register_query(query_name, None, &mir);
 
         qfp
     }
@@ -385,8 +372,7 @@ impl SqlIncorporator {
         // push it into the flow graph using the migration in `mig`, and obtain `QueryFlowParts`
         let qfp = mir_query_to_flow_parts(&mut mir, &mut mig);
 
-        // TODO(malte): get rid of duplication and figure out where to track this state
-        self.view_schemas.insert(String::from(query_name), fields);
+        self.register_query(query_name, None, &mir);
 
         qfp
     }
@@ -416,7 +402,11 @@ impl SqlIncorporator {
             &query.limit,
         );
 
-        Ok(mir_query_to_flow_parts(&mut combined_mir_query, &mut mig))
+        let qfp = mir_query_to_flow_parts(&mut combined_mir_query, &mut mig);
+
+        self.register_query(query_name, None, &combined_mir_query);
+
+        Ok(qfp)
     }
 
     /// Returns tuple of `QueryFlowParts` and an optional new `MirQuery`. The latter is only
@@ -481,12 +471,12 @@ impl SqlIncorporator {
         let qfp = mir_query_to_flow_parts(&mut mir, &mut mig);
 
         // register local state
-        self.register_query(query_name, qg, &mir, universe);
+        self.register_query(query_name, Some(qg), &mir, universe);
 
         (qfp, mir)
     }
 
-    fn register_query(&mut self, query_name: &str, qg: QueryGraph, mir: &MirQuery, universe: DataType) {
+    fn register_query(&mut self, query_name: &str, qg: Option<QueryGraph>, mir: &MirQuery, universe: DataType) {
         // TODO(malte): we currently need to remember these for local state, but should figure out
         // a better plan (see below)
         let fields = mir.leaf
@@ -499,10 +489,19 @@ impl SqlIncorporator {
         // TODO(malte): get rid of duplication and figure out where to track this state
         self.view_schemas.insert(String::from(query_name), fields);
 
-        // We made a new query, so store the query graph and the corresponding leaf MIR node
+        // We made a new query, so store the query graph and the corresponding leaf MIR node.
+        // TODO(malte): we currently store nothing if there is no QG (e.g., for compound queries).
+        // This means we cannot reuse these queries.
         let qg_hash = qg.signature().hash;
-        self.query_graphs.insert(qg_hash, qg);
-        self.mir_queries.insert((qg_hash, universe), mir.clone());
+        match qg {
+            Some(qg) => {
+                self.query_graphs
+                    .insert(qg_hash, qg);
+                self.mir_queries
+                    .insert((qg_hash, universe), mir.clone());
+            },
+            None => (),
+        }
     }
 
     fn extend_existing_query(
@@ -1446,11 +1445,9 @@ mod tests {
 
     #[test]
     fn it_incorporates_compound_selection() {
-        use logger_pls;
-
         // set up graph
         let mut g = ControllerBuilder::default().build_inner();
-        let mut inc = SqlIncorporator::new(logger_pls());
+        let mut inc = SqlIncorporator::default();
         g.migrate(|mig| {
             assert!(
                 inc.add_query("CREATE TABLE users (id int, name varchar(40));", None, mig)
@@ -1458,9 +1455,11 @@ mod tests {
             );
 
             let res = inc.add_query(
-                "SELECT users.id, users.name FROM users WHERE users.id = 32 \
+                "SELECT users.id, users.name FROM users \
+                 WHERE users.id = 32 \
                  UNION \
-                 SELECT users.id, users.name FROM users WHERE users.id = 42 AND users.name = 'bob';",
+                 SELECT users.id, users.name FROM users \
+                 WHERE users.id = 42 AND users.name = 'bob';",
                 None,
                 mig,
             );
