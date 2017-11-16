@@ -754,7 +754,10 @@ impl ControllerInner {
         let old = self.recipe.clone();
         let mut new = old.replace(r).unwrap();
         self.migrate(|mig| {
-            assert!(new.activate(mig, false).is_ok());
+            match new.activate(mig, false) {
+                Ok(_) => (),
+                Err(e) => panic!("failed to install recipe: {:?}", e),
+            }
         });
         self.recipe = new;
     }
