@@ -755,7 +755,7 @@ impl ControllerInner {
     }
 
     pub fn install_recipe(&mut self, r_txt: String) {
-        let mut r = Recipe::from_str(&r_txt, None).unwrap();
+        let mut r = Recipe::from_str(&r_txt, Some(self.log.clone())).unwrap();
         let old = self.recipe.clone();
         let mut new = old.replace(r).unwrap();
         self.migrate(|mig| {
