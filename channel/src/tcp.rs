@@ -112,13 +112,13 @@ impl<T: Serialize> TcpSender<T> {
 pub enum TryRecvError {
     Empty,
     Disconnected,
-    DeserializationError,
+    DeserializationError(bincode::Error),
 }
 
 #[derive(Debug)]
 pub enum RecvError {
     Disconnected,
-    DeserializationError,
+    DeserializationError(bincode::Error),
 }
 
 #[derive(Default)]
@@ -251,9 +251,9 @@ where
                 self.poisoned = true;
                 Err(TryRecvError::Disconnected)
             }
-            Err(ReceiveError::DeserializationError(_)) => {
+            Err(ReceiveError::DeserializationError(e)) => {
                 self.poisoned = true;
-                Err(TryRecvError::DeserializationError)
+                Err(TryRecvError::DeserializationError(e))
             }
         }
     }
@@ -263,7 +263,9 @@ where
             return match self.try_recv() {
                 Err(TryRecvError::Empty) => continue,
                 Err(TryRecvError::Disconnected) => Err(RecvError::Disconnected),
-                Err(TryRecvError::DeserializationError) => Err(RecvError::DeserializationError),
+                Err(TryRecvError::DeserializationError(e)) => {
+                    Err(RecvError::DeserializationError(e))
+                }
                 Ok(t) => Ok(t),
             };
         }

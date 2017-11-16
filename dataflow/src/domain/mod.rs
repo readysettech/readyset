@@ -172,15 +172,8 @@ impl DomainBuilder {
         let debug_tx = self.debug_addr
             .as_ref()
             .map(|addr| TcpSender::connect(addr, None).unwrap());
-        let mut control_reply_tx = TcpSender::connect(&self.control_addr, None).unwrap();
+        let control_reply_tx = TcpSender::connect(&self.control_addr, None).unwrap();
 
-        // TODO
-        // info!(log, "booting domain"; "nodes" => self.nodes.iter().count());
-        // let name = match shard {
-        //     Some(shard) => format!("domain{}.{}", self.index.0, shard),
-        //     None => format!("domain{}", self.index.0),
-        // };
-        // thread::Builder::new().name(name)
         let transaction_state = transactions::DomainState::new(self.index, self.ts);
         let group_commit_queues = persistence::GroupCommitQueueSet::new(
             self.index,
@@ -2265,6 +2258,7 @@ impl Domain {
     }
 
     pub fn booted(&mut self, addr: SocketAddr) {
+        info!(self.log, "booted domain"; "nodes" => self.nodes.len());
         self.control_reply_tx
             .send(ControlReplyPacket::Booted(self.shard.unwrap_or(0), addr))
             .unwrap();

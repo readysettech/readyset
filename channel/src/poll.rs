@@ -210,7 +210,7 @@ where
                                 break;
                             }
                             Err(TryRecvError::Empty) => break,
-                            Err(TryRecvError::DeserializationError) => unreachable!(),
+                            Err(TryRecvError::DeserializationError(e)) => panic!("{}", e),
                         }
                     }
                 } else if token < MAX_RPC {
@@ -248,7 +248,7 @@ where
                             self.inner.remove_rpc_endpoint(endpoint);
                         }
                         Err(TryRecvError::Empty) => {}
-                        Err(TryRecvError::DeserializationError) => unreachable!(),
+                        Err(TryRecvError::DeserializationError(e)) => panic!("{}", e),
                     }
                 } else {
                     unreachable!();

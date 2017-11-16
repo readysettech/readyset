@@ -237,6 +237,9 @@ pub struct ControllerInner {
     deps: HashMap<DomainIndex, (IngressFromBase, EgressForBase)>,
     remap: HashMap<DomainIndex, HashMap<NodeIndex, IndexPair>>,
 
+    /// Local worker pool used for tests
+    local_pool: Option<::worker::worker::WorkerPool>,
+
     heartbeat_every: Duration,
     healthcheck_every: Duration,
     last_checked_workers: Instant,
@@ -502,6 +505,8 @@ impl ControllerInner {
             read_listen_addr,
             read_addrs: HashMap::default(),
             workers: HashMap::default(),
+
+            local_pool: None,
 
             last_checked_workers: Instant::now(),
         }
@@ -1345,7 +1350,9 @@ impl<'a> Migration<'a> {
                 nodes,
                 &mainline.persistence,
                 &mainline.listen_addr,
+                &mainline.checktable_addr,
                 &mainline.channel_coordinator,
+                &mut mainline.local_pool,
                 &mainline.debug_channel,
                 &mut placer,
                 &mut workers,
@@ -1442,8 +1449,8 @@ impl Drop for ControllerInner {
             // don't unwrap, because given domain may already have terminated
             drop(d.send(box payload::Packet::Quit));
         }
-        for (_, mut d) in self.domains.drain() {
-            d.wait();
+        if let Some(ref mut local_pool) = self.local_pool {
+            local_pool.wait();
         }
     }
 }

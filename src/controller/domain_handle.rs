@@ -114,9 +114,6 @@ pub struct DomainHandle {
 
     // Which worker each shard is assigned to, if any.
     assignments: Vec<Option<WorkerIdentifier>>,
-
-    // used for tests
-    pool: Option<::worker::worker::WorkerPool>,
 }
 
 impl DomainHandle {
@@ -130,7 +127,9 @@ impl DomainHandle {
         nodes: Vec<(NodeIndex, bool)>,
         persistence_params: &PersistenceParameters,
         listen_addr: &IpAddr,
+        checktable_addr: &SocketAddr,
         channel_coordinator: &Arc<ChannelCoordinator>,
+        local_pool: &mut Option<::worker::worker::WorkerPool>,
         debug_addr: &Option<SocketAddr>,
         placer: &'a mut Box<Iterator<Item = (WorkerIdentifier, WorkerEndpoint)>>,
         workers: &'a mut Vec<WorkerEndpoint>,
@@ -146,7 +145,6 @@ impl DomainHandle {
             dataflow::SHARDS
         };
 
-        let mut pool = None;
         let mut txs = Vec::new();
         let mut cr_rxs = Vec::new();
         let mut assignments = Vec::new();
@@ -209,15 +207,13 @@ impl DomainHandle {
                         domain.build(logger, readers.clone(), channel_coordinator.clone(), addr);
 
                     let listener = ::mio::net::TcpListener::from_listener(listener, &addr).unwrap();
-                    if pool.is_none() {
-                        pool = Some(
-                            ::worker::worker::WorkerPool::new(
-                                1,
-                                control_listener.local_addr().unwrap(),
-                            ).unwrap(),
+                    if local_pool.is_none() {
+                        *local_pool = Some(
+                            ::worker::worker::WorkerPool::new(1, log, checktable_addr).unwrap(),
                         );
                     }
-                    pool.as_mut()
+                    local_pool
+                        .as_mut()
                         .unwrap()
                         .add_replica(::worker::worker::NewReplica {
                             inner: d,
@@ -273,7 +269,6 @@ impl DomainHandle {
 
         DomainHandle {
             _idx: idx,
-            pool,
             cr_poll,
             txs,
             assignments,
@@ -297,12 +292,6 @@ impl DomainHandle {
             })
             .map(|nd| (*nd.local_addr(), cell::RefCell::new(nd)))
             .collect()
-    }
-
-    pub fn wait(&mut self) {
-        if let Some(ref mut pool) = self.pool {
-            pool.wait();
-        }
     }
 
     pub fn send(&mut self, p: Box<Packet>) -> Result<(), tcp::SendError> {

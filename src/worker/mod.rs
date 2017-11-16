@@ -134,7 +134,9 @@ impl Worker {
         thread::spawn(move || Self::serve_reads(read_polling_loop, readers_clone));
         println!("Listening for reads on {:?}", read_listen_addr);
 
-        let pool = worker::WorkerPool::new(workers, controller).unwrap();
+        let mut checktable_addr: SocketAddr = controller.parse().unwrap();
+        checktable_addr.set_port(8500);
+        let pool = worker::WorkerPool::new(workers, &log, checktable_addr).unwrap();
 
         Worker {
             log: log,

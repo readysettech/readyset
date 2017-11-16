@@ -36,7 +36,7 @@ use std::env;
 use std::fs;
 use std::collections::HashMap;
 
-const DEFAULT_SETTLE_TIME_MS: u64 = 100;
+const DEFAULT_SETTLE_TIME_MS: u64 = 2000;
 
 // Suffixes the given log prefix with a timestamp, ensuring that
 // subsequent test runs do not reuse log files in the case of failures.
@@ -91,6 +91,7 @@ fn sleep() {
 fn it_works_basic() {
     // set up graph
     let mut g = ControllerBuilder::default().build_inner();
+    g.log_with(::logger_pls());
     let pparams = PersistenceParameters::new(
         DurabilityMode::DeleteOnExit,
         128,

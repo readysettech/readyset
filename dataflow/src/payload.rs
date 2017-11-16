@@ -464,7 +464,17 @@ impl fmt::Debug for Packet {
                 tag.id(),
                 data.len()
             ),
-            _ => write!(f, "Packet::Control"),
+            Packet::Local(ref lp) => {
+                use std::mem;
+                let lp = unsafe { Box::from_raw(lp.0) };
+                let s = write!(f, "local {:?}", lp)?;
+                mem::forget(lp);
+                Ok(s)
+            }
+            ref p => {
+                use std::mem;
+                write!(f, "Packet::Control({:?})", mem::discriminant(p))
+            }
         }
     }
 }
