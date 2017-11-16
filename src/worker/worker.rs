@@ -102,7 +102,10 @@ impl WorkerPool {
                     notify,
                 };
                 let checktable_addr = checktable_addr.clone();
-                thread::spawn(move || w.run(checktable_addr))
+                thread::Builder::new()
+                    .name(format!("worker{}", i + 1))
+                    .spawn(move || w.run(checktable_addr))
+                    .unwrap()
             })
             .collect();
 
@@ -196,6 +199,7 @@ impl Worker {
         let mut events = Events::with_capacity(1);
         let mut timers = VecMap::<Instant>::new();
         let mut durtmp = None;
+        let mut force_new_truth = false;
 
         dataflow::connect_thread_checktable(checktable_addr);
 
@@ -257,12 +261,15 @@ impl Worker {
 
             let token = events
                 .get(0)
-                .map(|e| e.token())
+                .map(|e| {
+                    assert!(e.readiness().is_readable());
+                    e.token()
+                })
                 .map(|Token(token)| token)
                 .unwrap();
             trace!(self.log, "worker polled"; "token" => token);
 
-            if !self.shared.sockets.contains(token) {
+            if !self.shared.sockets.contains(token) || force_new_truth {
                 // unknown socket -- we need to update our cached state
                 {
                     let truth = self.shared.truth.lock().unwrap();
@@ -283,9 +290,8 @@ impl Worker {
                 // if this is a listening socket, we know the main thread doesn't register it with
                 // the Poll until it holds the lock, so for us to receive this event, and then get
                 // the lock, the main thread *must* have added it.
-                //
-                // if this is a read socket,
                 assert!(self.shared.sockets.contains(token));
+                force_new_truth = false;
             }
 
             let sc = self.shared
@@ -317,7 +323,8 @@ impl Worker {
                     //
                     //   a) add_replica immediately relinquishes
                     //   b) cloning truth (above) immediately relinquishes
-                    //   c) we immediately relinquish
+                    //   c) on disconnect, we take locks in same order, and immediately release
+                    //   d) we immediately relinquish
                     //
                     // so we should be safe from deadlocks
                     use std::os::unix::io::AsRawFd;
@@ -362,6 +369,9 @@ impl Worker {
             // track if we can handle a local output directly
             let mut next = None;
 
+            // unless the connection is dropped, we want to rearm the socket
+            let mut rearm = true;
+
             {
                 // deref guard explicitly so that we can field borrows are tracked separately. if we
                 // didn't do this, the first thing that borrows from context would borrow *all* of
@@ -369,22 +379,53 @@ impl Worker {
                 let context = &mut *context;
 
                 // we're responsible for running the given domain, and we have its lock
-                let channel = context
-                    .receivers
-                    .get_mut(token)
-                    .expect("target replica does not have receiver for registered token");
-
-                let mut packet = match channel.try_recv() {
-                    Ok(p) => Some(p),
-                    Err(TryRecvError::Empty) => None,
-                    Err(TryRecvError::Disconnected) => {
-                        // that probably means we should exit?
-                        return;
+                use vec_map::Entry;
+                let mut channel = match context.receivers.entry(token) {
+                    Entry::Vacant(_) => {
+                        // this means our `truth` is out of date and a token has been reused. let's
+                        // update our truth, and try again. we could add lots of complicated log to
+                        // do that right here, but let's just retry instead:
+                        force_new_truth = true;
+                        ready();
+                        continue;
                     }
-                    Err(TryRecvError::DeserializationError(e)) => panic!("{}", e),
+                    Entry::Occupied(mut e) => e,
                 };
 
-                while let Some(m) = packet.take() {
+                loop {
+                    let mut m = match channel.get_mut().try_recv() {
+                        Ok(p) => p,
+                        Err(TryRecvError::Empty) => break,
+                        Err(TryRecvError::Disconnected) => {
+                            // how can this even happen?
+                            // mutator that goes away maybe?
+                            // in any case, we can unregister the socket.
+                            debug!(self.log, "worker dropped lost connection"; "token" => token);
+                            let rx = channel.remove();
+
+                            // no deadlock for same reason as adding a socket to poll
+                            self.shared.truth.lock().unwrap().remove(token);
+
+                            // dropping rx will automatically deregister the socket (in theory)
+                            //
+                            // see
+                            // https://github.com/carllerche/mio/issues/351#issuecomment-183746183
+                            // and
+                            // https://docs.rs/mio/0.6.11/mio/struct.Poll.html#method.deregister
+                            //
+                            // however, there is no harm in explicitly deregistering it as well
+                            self.all.deregister(rx.get_ref()).is_err();
+                            rearm = false;
+                            drop(rx);
+
+                            // we might have processed some packets before we got Disconnected, and
+                            // maybe even a `next`, so we can't just continue the outer polling
+                            // loop here unfortunately.
+                            break;
+                        }
+                        Err(TryRecvError::DeserializationError(e)) => panic!("{}", e),
+                    };
+
                     let output = match self.process(&mut context.replica, m) {
                         Some(o) => o,
                         None => {
@@ -399,7 +440,7 @@ impl Worker {
                     // destination in `output`, send the others, and then process that packet
                     // immediately to save some syscalls and a trip through the network stack..
                     for (ri, m) in output {
-                        if channel.is_empty() && next.is_none() && self.is_local(&ri) {
+                        if channel.get().is_empty() && next.is_none() && self.is_local(&ri) {
                             next = Some((ri, m));
                             continue;
                         }
@@ -409,9 +450,8 @@ impl Worker {
                         context.outputs.get_mut(&ri).unwrap().send_ref(&m).unwrap();
                     }
 
-                    if !channel.is_empty() {
-                        assert!(next.is_none());
-                        packet = channel.try_recv().ok();
+                    if channel.get().is_empty() {
+                        break;
                     }
                 }
 
@@ -476,8 +516,11 @@ impl Worker {
             }
 
             drop(context);
-            // we've released the replica, so it's safe to let other workers handle events
-            ready();
+
+            if rearm {
+                // we've released the replica, so it's safe to let other workers handle events
+                ready();
+            }
         }
     }
 

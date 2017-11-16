@@ -91,7 +91,6 @@ fn sleep() {
 fn it_works_basic() {
     // set up graph
     let mut g = ControllerBuilder::default().build_inner();
-    g.log_with(::logger_pls());
     let pparams = PersistenceParameters::new(
         DurabilityMode::DeleteOnExit,
         128,

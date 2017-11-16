@@ -183,6 +183,10 @@ where
         }
     }
 
+    pub fn get_ref(&self) -> &mio::net::TcpStream {
+        self.stream.get_ref().get_ref()
+    }
+
     pub fn listen(addr: &SocketAddr) -> Result<Self, io::Error> {
         let listener = mio::net::TcpListener::bind(addr)?;
         Ok(Self::new(listener.accept()?.0))
