@@ -52,13 +52,17 @@ named!(compound_op<&[u8], CompoundSelectOperator>,
 /// Parse compound selection
 named!(pub compound_selection<&[u8], CompoundSelectStatement>,
     complete!(chain!(
-        first_select: nested_selection ~
+        first_select: delimited!(opt!(tag!("(")), nested_selection, opt!(tag!(")"))) ~
         other_selects: many1!(
             complete!(
                 chain!(multispace? ~
                        op: compound_op ~
                        multispace ~
+                       tag!("(")? ~
+                       multispace? ~
                        select: nested_selection ~
+                       multispace? ~
+                       tag!(")")?,
                        || {
                            (Some(op), select)
                        }
@@ -91,7 +95,9 @@ mod tests {
     #[test]
     fn union() {
         let qstr = "SELECT id, 1 FROM Vote UNION SELECT id, stars from Rating;";
+        let qstr2 = "(SELECT id, 1 FROM Vote) UNION (SELECT id, stars from Rating);";
         let res = compound_selection(qstr.as_bytes());
+        let res2 = compound_selection(qstr2.as_bytes());
 
         let first_select = SelectStatement {
             tables: vec![Table::from("Vote")],
@@ -119,6 +125,7 @@ mod tests {
         };
 
         assert_eq!(res.unwrap().1, expected);
+        assert_eq!(res2.unwrap().1, expected);
     }
 
     #[test]
