@@ -247,7 +247,7 @@ impl Recipe {
             let qfp = self.inc
                 .as_mut()
                 .unwrap()
-                .add_parsed_query(q, n.clone(), mig)?;
+                .add_parsed_query(q, n.clone(), true, mig)?;
 
             // we currently use a domain per query
             // let d = mig.add_domain();
