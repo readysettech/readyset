@@ -15,7 +15,7 @@ use dataflow::prelude::*;
 use controller::{ReadQuery, ReadReply};
 use coordination::{CoordinationMessage, CoordinationPayload};
 
-mod worker;
+pub mod worker;
 
 /// Workers are responsible for running domains, and serving reads to any materializations contained
 /// within them.

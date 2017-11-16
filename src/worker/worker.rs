@@ -1,7 +1,7 @@
 use std;
 use std::io;
 use std::thread;
-use std::net::{self, SocketAddr};
+use std::net::{self, SocketAddr, ToSocketAddrs};
 use std::time::Duration;
 use std::collections::HashMap;
 use std::sync::{mpsc, Arc, Mutex, TryLockError};
@@ -84,8 +84,7 @@ pub struct WorkerPool {
 }
 
 impl WorkerPool {
-    pub fn new(n: usize, controller_addr: &str) -> io::Result<Self> {
-        use std::net::ToSocketAddrs;
+    pub fn new<A: ToSocketAddrs>(n: usize, controller_addr: A) -> io::Result<Self> {
         let mut checktable_addr = controller_addr.to_socket_addrs().unwrap().next().unwrap();
         checktable_addr.set_port(8500);
 

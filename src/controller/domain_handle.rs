@@ -115,8 +115,8 @@ pub struct DomainHandle {
     // Which worker each shard is assigned to, if any.
     assignments: Vec<Option<WorkerIdentifier>>,
 
-    // used during booting
-    threads: Vec<thread::JoinHandle<()>>,
+    // used for tests
+    pool: Option<::worker::worker::WorkerPool>,
 }
 
 impl DomainHandle {
@@ -146,11 +146,13 @@ impl DomainHandle {
             dataflow::SHARDS
         };
 
+        let mut pool = None;
         let mut txs = Vec::new();
         let mut cr_rxs = Vec::new();
-        let mut threads = Vec::new();
         let mut assignments = Vec::new();
         let mut nodes = Some(Self::build_descriptors(graph, nodes));
+
+        let mut all_local = true;
 
         for i in 0..num_shards {
             let logger = if num_shards == 1 {
@@ -179,24 +181,52 @@ impl DomainHandle {
             };
 
             // TODO(malte): simple round-robin placement for the moment
-            let (identifier, endpoint) = placer.next().unwrap();
+            match placer.next() {
+                Some((identifier, endpoint)) => {
+                    all_local = false;
 
-            // send domain to worker
-            let mut w = endpoint.lock().unwrap();
-            debug!(
-                log,
-                "sending domain {}.{} to worker {:?}",
-                domain.index.index(),
-                domain.shard,
-                w.peer_addr()
-            );
-            let src = w.local_addr().unwrap();
-            w.send(CoordinationMessage {
-                source: src,
-                payload: CoordinationPayload::AssignDomain(domain),
-            }).unwrap();
+                    // send domain to worker
+                    let mut w = endpoint.lock().unwrap();
+                    debug!(
+                        log,
+                        "sending domain {}.{} to worker {:?}",
+                        domain.index.index(),
+                        domain.shard,
+                        w.peer_addr()
+                    );
+                    let src = w.local_addr().unwrap();
+                    w.send(CoordinationMessage {
+                        source: src,
+                        payload: CoordinationPayload::AssignDomain(domain),
+                    }).unwrap();
 
-            assignments.push(Some(identifier));
+                    assignments.push(Some(identifier));
+                }
+                None => {
+                    let listener = ::std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+                    let addr = listener.local_addr().unwrap();
+                    let d =
+                        domain.build(logger, readers.clone(), channel_coordinator.clone(), addr);
+
+                    let listener = ::mio::net::TcpListener::from_listener(listener, &addr).unwrap();
+                    if pool.is_none() {
+                        pool = Some(
+                            ::worker::worker::WorkerPool::new(
+                                1,
+                                control_listener.local_addr().unwrap(),
+                            ).unwrap(),
+                        );
+                    }
+                    pool.as_mut()
+                        .unwrap()
+                        .add_replica(::worker::worker::NewReplica {
+                            inner: d,
+                            listener: listener,
+                            outputs: vec![/* TODO */],
+                        });
+                    assignments.push(None);
+                }
+            }
 
             let stream =
                 mio::net::TcpStream::from_stream(control_listener.accept().unwrap().0).unwrap();
@@ -207,7 +237,7 @@ impl DomainHandle {
         cr_poll.run_polling_loop(|event| match event {
             PollEvent::ResumePolling(_) => KeepPolling,
             PollEvent::Process(ControlReplyPacket::Booted(shard, addr)) => {
-                channel_coordinator.insert_addr((idx, shard), addr.clone(), false);
+                channel_coordinator.insert_addr((idx, shard), addr.clone(), all_local);
                 txs.push(channel_coordinator.get_tx(&(idx, shard)).unwrap());
 
                 // TODO(malte): this is a hack, and not an especially neat one. In response to a
@@ -243,7 +273,7 @@ impl DomainHandle {
 
         DomainHandle {
             _idx: idx,
-            threads,
+            pool,
             cr_poll,
             txs,
             assignments,
@@ -270,8 +300,8 @@ impl DomainHandle {
     }
 
     pub fn wait(&mut self) {
-        for t in self.threads.drain(..) {
-            t.join().unwrap();
+        if let Some(ref mut pool) = self.pool {
+            pool.wait();
         }
     }
 
