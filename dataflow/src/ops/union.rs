@@ -1,4 +1,4 @@
-use std::collections::{HashMap, HashSet};
+use std::collections::{HashMap, HashSet, BTreeMap};
 
 use prelude::*;
 
@@ -9,9 +9,9 @@ enum Emit {
         emit: HashMap<IndexPair, Vec<usize>>,
 
         // generated
-        emit_l: HashMap<LocalNodeIndex, Vec<usize>>,
+        emit_l: BTreeMap<LocalNodeIndex, Vec<usize>>,
         cols: HashMap<IndexPair, usize>,
-        cols_l: HashMap<LocalNodeIndex, usize>,
+        cols_l: BTreeMap<LocalNodeIndex, usize>,
     },
 }
 
@@ -71,9 +71,9 @@ impl Union {
         Union {
             emit: Emit::Project {
                 emit,
-                emit_l: HashMap::new(),
+                emit_l: BTreeMap::new(),
                 cols: HashMap::new(),
-                cols_l: HashMap::new(),
+                cols_l: BTreeMap::new(),
             },
             required: parents,
             replay_key: None,
