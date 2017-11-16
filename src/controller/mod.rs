@@ -167,6 +167,11 @@ impl ControllerBuilder {
         ControllerInner::from_builder(self)
     }
 
+    /// Set the logger that the derived controller should use. By default, it uses `slog::Discard`.
+    pub fn log_with(&mut self, log: slog::Logger) {
+        self.log = log;
+    }
+
     /// Build a controller, and return a Blender to provide access to it.
     pub fn build(self) -> Blender {
         // TODO(fintelia): Don't hard code addresses in this function.
