@@ -1405,9 +1405,10 @@ mod tests {
             println!("{:?}", res);
             assert!(res.is_ok());
 
-            let union_view = get_node(&inc, mig, &format!("{}_union", res.unwrap().name));
+            // the leaf of this query (node above the reader) is a union
+            let union_view = get_node(&inc, mig, &res.unwrap().name);
             assert_eq!(union_view.fields(), &["id", "name"]);
-            assert_eq!(union_view.description(), format!("3:[0, 1] ⋃ 7:[0, 1]"));
+            assert_eq!(union_view.description(), format!("3:[0, 1] ⋃ 6:[0, 1]"));
         });
     }
 }
