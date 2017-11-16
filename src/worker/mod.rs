@@ -231,19 +231,20 @@ impl Worker {
     }
 
     fn handle_domain_assign(&mut self, d: DomainBuilder) -> Result<(), channel::tcp::SendError> {
+        let addr = SocketAddr::new(self.listen_addr.parse().unwrap(), 0);
+        let listener = ::std::net::TcpListener::bind(addr).unwrap();
+        let addr = listener.local_addr().unwrap();
+
         let idx = d.index;
         let shard = d.shard;
         let d = d.build(
             self.log.clone(),
             self.readers.clone(),
             self.channel_coordinator.clone(),
+            addr,
         );
 
-        let addr = SocketAddr::new(self.listen_addr.parse().unwrap(), 0);
-        let listener = ::std::net::TcpListener::bind(addr).unwrap();
-        let addr = listener.local_addr().unwrap();
         let listener = ::mio::net::TcpListener::from_listener(listener, &addr).unwrap();
-
         self.pool.add_replica(worker::NewReplica {
             inner: d,
             listener: listener,

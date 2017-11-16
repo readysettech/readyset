@@ -155,6 +155,7 @@ impl DomainBuilder {
         log: Logger,
         readers: Readers,
         channel_coordinator: Arc<ChannelCoordinator>,
+        addr: SocketAddr,
     ) -> Domain {
         // initially, all nodes are not ready
         let not_ready = self.nodes
@@ -191,6 +192,8 @@ impl DomainBuilder {
             index: self.index,
             shard,
             nshards: self.nshards,
+            domain_addr: addr,
+
             transaction_state,
             persistence_parameters: self.persistence_parameters,
             nodes: self.nodes,
@@ -234,6 +237,7 @@ pub struct Domain {
     index: Index,
     shard: Option<usize>,
     nshards: usize,
+    domain_addr: SocketAddr,
 
     nodes: DomainNodes,
     state: StateMap,
@@ -1108,7 +1112,7 @@ impl Domain {
                         if !state.is_empty() {
                             let log = self.log.new(o!());
                             let nshards = self.nshards;
-                            let domain_addr = unimplemented!();
+                            let domain_addr = self.domain_addr;
 
                             let added_cols = self.ingress_inject.get(&from).cloned();
                             let default = {
