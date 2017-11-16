@@ -42,7 +42,7 @@ pub enum ReadReply {
     Normal(Vec<Result<Datas, ()>>),
     /// Read and got checktable tokens
     WithToken(Vec<Result<(Datas, checktable::Token), ()>>),
-    /// Size of reader
+    /// Number of rows in the reader
     Size(usize),
 }
 
@@ -73,7 +73,7 @@ pub struct RemoteGetter {
 }
 
 impl RemoteGetter {
-    /// Query the size of the reader
+    /// Query the number of rows in the reader
     pub fn len(&mut self) -> usize {
         let reply = self.shards[0]
                 .send(&ReadQuery::Size {

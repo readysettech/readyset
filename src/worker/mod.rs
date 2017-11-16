@@ -62,7 +62,7 @@ impl Worker {
                             || readers.lock().unwrap().get(&target).unwrap().clone(),
                         );
 
-                    reader.len()
+                    reader.nrows()
                 }));
                 ProcessResult::KeepPolling
             },

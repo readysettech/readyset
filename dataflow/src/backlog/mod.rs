@@ -178,8 +178,15 @@ impl SingleReadHandle {
         self.handle.meta_get_and(key, &mut then).ok_or(())
     }
 
+    #[allow(dead_code)]
     pub fn len(&self) -> usize {
         self.handle.len()
+    }
+
+    pub fn nrows(&self) -> usize {
+        let mut nrows = 0;
+        self.handle.for_each(|_, v| nrows += v.len());
+        nrows
     }
 }
 
