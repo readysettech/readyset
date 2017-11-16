@@ -1402,7 +1402,6 @@ mod tests {
                 None,
                 mig,
             );
-            println!("{:?}", res);
             assert!(res.is_ok());
 
             // the leaf of this query (node above the reader) is a union
