@@ -127,7 +127,8 @@ impl Worker {
         let read_polling_loop =
             RpcPollingLoop::new(SocketAddr::new(listen_addr.parse().unwrap(), 0));
         let read_listen_addr = read_polling_loop.get_listener_addr().unwrap();
-        thread::spawn(move || Self::serve_reads(read_polling_loop, readers_clone));
+        let builder = thread::Builder::new().name("wrkr-reads".to_owned());
+        builder.spawn(move || Self::serve_reads(read_polling_loop, readers_clone));
         println!("Listening for reads on {:?}", read_listen_addr);
 
         Worker {

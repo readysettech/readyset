@@ -45,7 +45,8 @@ pub struct CheckTableServer {
 impl CheckTableServer {
     pub fn start(listen_addr: SocketAddr) -> SocketAddr {
         let (tx, rx) = mpsc::channel();
-        thread::spawn(move || {
+        let builder = thread::Builder::new().name("checktable".to_owned());
+        builder.spawn(move || {
             let server = CheckTableServer {
                 checktable: Arc::new(Mutex::new(CheckTable::new())),
             };
