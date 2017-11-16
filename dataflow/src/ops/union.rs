@@ -9,9 +9,9 @@ enum Emit {
         emit: HashMap<IndexPair, Vec<usize>>,
 
         // generated
-        emit_l: Map<Vec<usize>>,
+        emit_l: HashMap<LocalNodeIndex, Vec<usize>>,
         cols: HashMap<IndexPair, usize>,
-        cols_l: Map<usize>,
+        cols_l: HashMap<LocalNodeIndex, usize>,
     },
 }
 
@@ -29,7 +29,7 @@ enum FullWait {
 #[derive(Debug, Serialize, Deserialize)]
 pub struct Union {
     emit: Emit,
-    replay_key: Option<Map<usize>>,
+    replay_key: Option<HashMap<LocalNodeIndex, usize>>,
     replay_pieces: HashMap<DataType, Map<Records>>,
 
     required: usize,
@@ -71,9 +71,9 @@ impl Union {
         Union {
             emit: Emit::Project {
                 emit,
-                emit_l: Map::new(),
+                emit_l: HashMap::new(),
                 cols: HashMap::new(),
-                cols_l: Map::new(),
+                cols_l: HashMap::new(),
             },
             required: parents,
             replay_key: None,
@@ -419,7 +419,7 @@ impl Ingredient for Union {
                             self.replay_key = Some(
                                 emit_l
                                     .iter()
-                                    .map(|(src, emit)| (src, emit[key_col]))
+                                    .map(|(src, emit)| (*src, emit[key_col]))
                                     .collect(),
                             );
                         }
