@@ -5,10 +5,11 @@ use std::net::{self, SocketAddr, ToSocketAddrs};
 use std::time::{Duration, Instant};
 use std::collections::HashMap;
 use std::sync::{mpsc, Arc, Mutex, TryLockError};
+use std::os::unix::io::AsRawFd;
 
 use slab::Slab;
 use vec_map::VecMap;
-use mio::{self, Events, Poll, PollOpt, Ready, Token};
+use mio::{self, Evented, Events, Poll, PollOpt, Ready, Token};
 use mio::unix::EventedFd;
 use mio::net::{TcpListener, TcpStream};
 use slog::Logger;
@@ -148,7 +149,6 @@ impl WorkerPool {
         self.wstate.revmap.insert(ri, rit);
 
         // Keep track of new socket to listen on
-        use std::os::unix::io::AsRawFd;
         let token = self.wstate.truth.lock().unwrap().insert(SocketContext {
             rit,
             fd: listener.as_raw_fd(),
@@ -199,7 +199,7 @@ impl Worker {
         let mut events = Events::with_capacity(1);
         let mut timers = VecMap::<Instant>::new();
         let mut durtmp = None;
-        let mut force_new_truth = false;
+        let mut force_refresh_truth = false;
 
         dataflow::connect_thread_checktable(checktable_addr);
 
@@ -269,12 +269,20 @@ impl Worker {
                 .unwrap();
             trace!(self.log, "worker polled"; "token" => token);
 
-            if !self.shared.sockets.contains(token) || force_new_truth {
+            let refresh_truth = |shared: &mut SharedWorkerState| {
+                let truth = shared.truth.lock().unwrap();
+                shared.sockets = (*truth).clone();
+            };
+
+            if force_refresh_truth
+                || self.shared
+                    .sockets
+                    .get(token)
+                    .and_then(|sc| self.shared.replicas.get(sc.rit))
+                    .is_none()
+            {
                 // unknown socket -- we need to update our cached state
-                {
-                    let truth = self.shared.truth.lock().unwrap();
-                    self.shared.sockets = (*truth).clone();
-                }
+                refresh_truth(&mut self.shared);
                 debug!(self.log, "worker updated their notion of truth");
 
                 // also learn about new replicas while we're at it
@@ -286,12 +294,7 @@ impl Worker {
                     assert_eq!(rit, added.rit);
                     self.shared.revmap.insert(added.ri, rit);
                 }
-
-                // if this is a listening socket, we know the main thread doesn't register it with
-                // the Poll until it holds the lock, so for us to receive this event, and then get
-                // the lock, the main thread *must* have added it.
-                assert!(self.shared.sockets.contains(token));
-                force_new_truth = false;
+                force_refresh_truth = false;
             }
 
             let sc = self.shared
@@ -302,12 +305,13 @@ impl Worker {
                 .replicas
                 .get(sc.rit)
                 .expect("token resolves to unknown replica");
+
             trace!(self.log, "worker handling replica event"; "replica" => sc.rit);
 
             let all = &self.all;
-            let ready = || {
+            let ready = |e: &Evented| {
                 all.reregister(
-                    &EventedFd(&sc.fd),
+                    e,
                     Token(token),
                     Ready::readable(),
                     PollOpt::level() | PollOpt::oneshot(),
@@ -348,7 +352,7 @@ impl Worker {
                     replica.receivers.insert(token, tcp);
                 }
 
-                ready();
+                ready(replica.listener.as_ref().unwrap());
                 continue;
             }
 
@@ -360,7 +364,15 @@ impl Worker {
                     // to do here is. we can either block on the lock, or release the socket
                     // again (which will cause another epoll to be woken up since we're
                     // level-triggered).
-                    ready();
+                    //
+                    // in either case, we need to figure out what stream to re-register. we can't
+                    // trust the cached sc.fd, since the token *might* have been remapped (same as
+                    // the Entry::Vacant case below), so we must get the fd right from the truth.
+                    ready(&EventedFd(&self.shared.truth.lock().unwrap()[token].fd));
+
+                    // XXX: NLL would let us directly refresh truth here, which would save us one
+                    // lock acquisition, but we don't have NLL yet :(
+                    force_refresh_truth = true;
                     continue;
                 }
                 Err(TryLockError::Poisoned(e)) => panic!("found poisoned lock: {}", e),
@@ -372,7 +384,7 @@ impl Worker {
             // unless the connection is dropped, we want to rearm the socket
             let mut rearm = true;
 
-            {
+            let fd = {
                 // deref guard explicitly so that we can field borrows are tracked separately. if we
                 // didn't do this, the first thing that borrows from context would borrow *all* of
                 // context.
@@ -382,15 +394,26 @@ impl Worker {
                 use vec_map::Entry;
                 let mut channel = match context.receivers.entry(token) {
                     Entry::Vacant(_) => {
-                        // this means our `truth` is out of date and a token has been reused. let's
-                        // update our truth, and try again. we could add lots of complicated log to
-                        // do that right here, but let's just retry instead:
-                        force_new_truth = true;
-                        ready();
+                        // this means our `truth` is out of date and a token has been reused. we need
+                        // to update our truth, and try again. but how do we re-register this stream so
+                        // that it'll get returned to a thread later with an updated mapping? we can't
+                        // safely use sc.fd, because clearly that mapping is for an old assignment for
+                        // `token` (it pointed us to the wrong domain!). since we know we are the only
+                        // thread currently working with this `token` (EPOLL_ONESHOT guarantees that),
+                        // we know that it can't *currently* be remapped by another thread, so if we
+                        // read from the truth, we know we'll get the right value.
+                        ready(&EventedFd(&self.shared.truth.lock().unwrap()[token].fd));
+
+                        // XXX: NLL would let us directly refresh truth here, which would save us one
+                        // lock acquisition, but we don't have NLL yet :(
+                        force_refresh_truth = true;
                         continue;
                     }
                     Entry::Occupied(mut e) => e,
                 };
+
+                // we *still* can't trust sc.fd.
+                let fd = channel.get().get_ref().as_raw_fd();
 
                 loop {
                     let mut m = match channel.get_mut().try_recv() {
@@ -430,6 +453,8 @@ impl Worker {
                         Some(o) => o,
                         None => {
                             // told to exit?
+                            ready(&EventedFd(&fd));
+                            warn!(self.log, "worker told to exit");
                             return;
                         }
                     };
@@ -480,6 +505,8 @@ impl Worker {
                                 Some(o) => o,
                                 None => {
                                     // told to exit?
+                                    ready(&EventedFd(&fd));
+                                    warn!(self.log, "worker told to exit");
                                     return;
                                 }
                             };
@@ -513,13 +540,13 @@ impl Worker {
                         }
                     }
                 }
-            }
+
+                fd
+            };
 
             drop(context);
-
             if rearm {
-                // we've released the replica, so it's safe to let other workers handle events
-                ready();
+                ready(&EventedFd(&fd));
             }
         }
     }
