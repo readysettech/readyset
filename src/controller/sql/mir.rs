@@ -237,20 +237,31 @@ impl SqlToMirConverter {
 
         let columns: Vec<Column> = final_node.borrow().columns().iter().cloned().collect();
         if limit.is_some() {
+            let topk_name = format!("{}_topk", name);
             let topk_node = self.make_topk_node(
-                &format!("{}_topk", name),
+                &topk_name,
                 final_node,
                 columns.iter().collect(),
                 order,
                 limit.as_ref().unwrap(),
             );
+            let node_id = (topk_name, self.schema_version);
+            if !self.nodes.contains_key(&node_id) {
+                self.nodes.insert(node_id, topk_node.clone());
+            }
             final_node = topk_node;
         }
 
         let leaf_node = MirNode::new(
             name,
             self.schema_version,
-            columns,
+            columns
+                .into_iter()
+                .map(|mut c| {
+                    c.table = Some(String::from(name));
+                    c
+                })
+                .collect(),
             MirNodeType::Leaf {
                 node: final_node.clone(),
                 keys: vec![],
@@ -258,6 +269,12 @@ impl SqlToMirConverter {
             vec![final_node.clone()],
             vec![],
         );
+        self.current
+            .insert(String::from(leaf_node.borrow().name()), self.schema_version);
+        let node_id = (String::from(name), self.schema_version);
+        if !self.nodes.contains_key(&node_id) {
+            self.nodes.insert(node_id, leaf_node.clone());
+        }
 
         MirQuery {
             name: String::from(name),
@@ -312,8 +329,9 @@ impl SqlToMirConverter {
         name: &str,
         sq: &SelectStatement,
         qg: &QueryGraph,
+        is_leaf: bool,
     ) -> MirQuery {
-        let nodes = self.make_nodes_for_selection(&name, sq, qg);
+        let nodes = self.make_nodes_for_selection(&name, sq, qg, is_leaf);
         let mut roots = Vec::new();
         let mut leaves = Vec::new();
         for mn in nodes.into_iter() {
@@ -1002,6 +1020,7 @@ impl SqlToMirConverter {
         name: &str,
         st: &SelectStatement,
         qg: &QueryGraph,
+        is_leaf: bool,
     ) -> Vec<MirNodeRef> {
         use std::collections::HashMap;
 
@@ -1425,29 +1444,31 @@ impl SqlToMirConverter {
             );
             nodes_added.push(leaf_project_node.clone());
 
-            // We always materialize leaves of queries (at least currently), so add a
-            // `MaterializedLeaf` node keyed on the query parameters.
-            let query_params = qg.parameters();
-            let columns = leaf_project_node
-                .borrow()
-                .columns()
-                .iter()
-                .cloned()
-                .map(|c| sanitize_leaf_column(c, name))
-                .collect();
+            if is_leaf {
+                // We are supposed to add a `MaterializedLeaf` node keyed on the query
+                // parameters. For purely internal views (e.g., subqueries), this is not set.
+                let query_params = qg.parameters();
+                let columns = leaf_project_node
+                    .borrow()
+                    .columns()
+                    .iter()
+                    .cloned()
+                    .map(|c| sanitize_leaf_column(c, name))
+                    .collect();
 
-            let leaf_node = MirNode::new(
-                name,
-                self.schema_version,
-                columns,
-                MirNodeType::Leaf {
-                    node: leaf_project_node.clone(),
-                    keys: query_params.into_iter().cloned().collect(),
-                },
-                vec![leaf_project_node.clone()],
-                vec![],
-            );
-            nodes_added.push(leaf_node);
+                let leaf_node = MirNode::new(
+                    name,
+                    self.schema_version,
+                    columns,
+                    MirNodeType::Leaf {
+                        node: leaf_project_node.clone(),
+                        keys: query_params.into_iter().cloned().collect(),
+                    },
+                    vec![leaf_project_node.clone()],
+                    vec![],
+                );
+                nodes_added.push(leaf_node);
+            }
 
             debug!(
                 self.log,
