@@ -330,6 +330,20 @@ impl Worker {
                 .get(sc.rit)
                 .expect("token resolves to unknown replica");
 
+            let mut resume_polling = |replica: &mut Replica| {
+                let mut sends = Vec::new();
+                replica.on_event(PollEvent::ResumePolling(&mut durtmp), &mut sends);
+                if let Some(timeout) = durtmp.take() {
+                    timers.insert(sc.rit, Instant::now() + timeout);
+                } else {
+                    timers.remove(sc.rit);
+                }
+                if !sends.is_empty() {
+                    // ResumePolling is not allowed to send packets
+                    unimplemented!();
+                }
+            };
+
             trace!(self.log, "worker handling replica event"; "replica" => sc.rit);
 
             let all = &self.all;
@@ -409,27 +423,28 @@ impl Worker {
             let mut rearm = true;
 
             let fd = {
-                // deref guard explicitly so that we can field borrows are tracked separately. if we
-                // didn't do this, the first thing that borrows from context would borrow *all* of
-                // context.
+                // deref guard explicitly so that we can field borrows are tracked separately.
+                // if we didn't do this, the first thing that borrows from context would borrow
+                // *all* of context.
                 let context = &mut *context;
 
                 // we're responsible for running the given domain, and we have its lock
                 use vec_map::Entry;
                 let mut channel = match context.receivers.entry(token) {
                     Entry::Vacant(_) => {
-                        // this means our `truth` is out of date and a token has been reused. we need
-                        // to update our truth, and try again. but how do we re-register this stream so
-                        // that it'll get returned to a thread later with an updated mapping? we can't
-                        // safely use sc.fd, because clearly that mapping is for an old assignment for
-                        // `token` (it pointed us to the wrong domain!). since we know we are the only
-                        // thread currently working with this `token` (EPOLL_ONESHOT guarantees that),
-                        // we know that it can't *currently* be remapped by another thread, so if we
+                        // this means our `truth` is out of date and a token has been reused.
+                        // we need to update our truth, and try again. but how do we
+                        // re-register this stream so that it'll get returned to a thread later
+                        // with an updated mapping? we can't safely use sc.fd, because clearly
+                        // that mapping is for an old assignment for `token` (it pointed us to
+                        // the wrong domain!). since we know we are the only thread currently
+                        // working with this `token` (EPOLL_ONESHOT guarantees that), we know
+                        // that it can't *currently* be remapped by another thread, so if we
                         // read from the truth, we know we'll get the right value.
                         ready(&EventedFd(&self.shared.truth.lock().unwrap()[token].fd));
 
-                        // XXX: NLL would let us directly refresh truth here, which would save us one
-                        // lock acquisition, but we don't have NLL yet :(
+                        // XXX: NLL would let us directly refresh truth here, which would save
+                        // us one lock acquisition, but we don't have NLL yet :(
                         force_refresh_truth = true;
                         continue;
                     }
@@ -465,9 +480,9 @@ impl Worker {
                             rearm = false;
                             drop(rx);
 
-                            // we might have processed some packets before we got Disconnected, and
-                            // maybe even a `next`, so we can't just continue the outer polling
-                            // loop here unfortunately.
+                            // we might have processed some packets before we got Disconnected,
+                            // and maybe even a `next`, so we can't just continue the outer
+                            // polling loop here unfortunately.
                             break;
                         }
                         Err(TryRecvError::DeserializationError(e)) => panic!("{}", e),
@@ -484,17 +499,41 @@ impl Worker {
                     // what if another worker picks up target domain lock, and processes the
                     // message we sent that comes *after* next? out-of-order...
 
-                    // if there is at least one more *complete* Packet in `channel` then we should
-                    // send everything in `output` and process the next Packet. however, if there
-                    // are no complete Packets in `channel`, we should instead look for a local
-                    // destination in `output`, send the others, and then process that packet
-                    // immediately to save some syscalls and a trip through the network stack..
+                    // if there is at least one more *complete* Packet in `channel` then we
+                    // should send everything in `output` and process the next Packet. however,
+                    // if there are no complete Packets in `channel`, we should instead look
+                    // for a local destination in `output`, send the others, and then process
+                    // that packet immediately to save some syscalls and a trip through the
+                    // network stack..
+                    let last = channel.get().is_empty();
+                    let mut give_up_next = false;
                     for (ri, m) in sends.drain(..) {
-                        if channel.get().is_empty() && next.is_none() && self.is_local(&ri) {
-                            // we have to take the *first* packet, not the last, otherwise we might
-                            // process out-of-order.
+                        if last && next.is_none() && !give_up_next && self.is_local(&ri) {
+                            // we have to take the *first* packet, not the last, otherwise we
+                            // might process out-of-order.
                             next = Some((ri, m));
                             continue;
+                        }
+
+                        if next.as_ref()
+                            .map(|&(ref nri, _)| nri == &ri)
+                            .unwrap_or(false)
+                        {
+                            // second packet for that replica.
+                            //
+                            // it is *not* safe for us to handle `next` without a TCP send,
+                            // because some other thread could come along and take the lock for
+                            // the target replica the *moment* we send `m`, and process it.
+                            // Since `m` comes *after* `next`, that would result in
+                            // out-of-order delivery, which is not okay. So we must give up on
+                            // next here.
+                            let (ri, m) = next.take().unwrap();
+                            send(&mut context.outputs, ri, m).unwrap();
+
+                            // we must *also* ensure that we don't then pick up a `next` again.
+                            // in theory this could be okay if the next `next`'s ri is not this
+                            // ri, but checking that is annoying, so TODO.
+                            give_up_next = true;
                         }
 
                         // deliver this packet to its destination TCP queue
@@ -502,80 +541,102 @@ impl Worker {
                         send(&mut context.outputs, ri, m).unwrap();
                     }
 
-                    if channel.get().is_empty() {
+                    if last {
                         break;
-                    }
-                }
-
-                // Register timeout for replica
-                let mut resume_polling = |replica: &mut Replica| {
-                    let mut sends = Vec::new();
-                    replica.on_event(PollEvent::ResumePolling(&mut durtmp), &mut sends);
-                    if let Some(timeout) = durtmp.take() {
-                        timers.insert(sc.rit, Instant::now() + timeout);
-                    } else {
-                        timers.remove(sc.rit);
-                    }
-                    if !sends.is_empty() {
-                        // ResumePolling is not allowed to send packets
-                        unimplemented!();
-                    }
-                };
-                resume_polling(&mut context.replica);
-
-                // we have a packet we can handle directly!
-                while let Some((ri, m)) = next.take() {
-                    let rit = self.shared.revmap[&ri];
-                    let rc = self.shared
-                        .replicas
-                        .get(rit)
-                        .expect("packet is for unknown replica");
-                    match rc.try_lock() {
-                        Ok(mut context) => {
-                            // no other thread is operating on the target domain, so we can do it
-                            if !self.process(&mut context.replica, m, &mut sends) {
-                                // told to exit?
-                                ready(&EventedFd(&fd));
-                                warn!(self.log, "worker told to exit");
-                                return;
-                            }
-
-                            for (ri, m) in sends.drain(..) {
-                                if next.is_none() && self.is_local(&ri) {
-                                    next = Some((ri, m));
-                                    continue;
-                                }
-
-                                // deliver this packet to its destination TCP queue
-                                // XXX: unwrap
-                                // NOTE: uses shadowed ri
-                                send(&mut context.outputs, ri, m).unwrap();
-                            }
-
-                            // Register timeout for replica
-                            resume_polling(&mut context.replica);
-                        }
-                        Err(e) => {
-                            // we couldn't get the lock, so we push it on the TCP queue for later
-                            // XXX: unwrap
-                            send(&mut context.outputs, ri, m).unwrap();
-                        }
                     }
                 }
 
                 fd
             };
 
-            drop(context);
-            if rearm {
+            // Register timeout for replica
+            resume_polling(&mut context.replica);
+
+            // we have a packet we can handle directly!
+            let mut give_up_next = true; // XXX: disallow nested carry for now
+            let mut context_of_next_origin = context;
+            let mut carry = 0;
+            while let Some((ri, m)) = next.take() {
+                carry += 1;
+                assert!(sends.is_empty());
+                let rit = self.shared.revmap[&ri];
+                let rc = self.shared
+                    .replicas
+                    .get(rit)
+                    .expect("packet is for unknown replica");
+                match rc.try_lock() {
+                    Ok(mut context) => {
+                        // no other thread is operating on the target domain, so we can do it
+                        if !self.process(&mut context.replica, m, &mut sends) {
+                            // told to exit?
+                            ready(&EventedFd(&fd));
+                            warn!(self.log, "worker told to exit");
+                            return;
+                        }
+
+                        for (ri, m) in sends.drain(..) {
+                            if next.is_none() && !give_up_next && self.is_local(&ri) {
+                                next = Some((ri, m));
+                                continue;
+                            }
+
+                            if next.as_ref()
+                                .map(|&(ref nri, _)| nri == &ri)
+                                .unwrap_or(false)
+                            {
+                                // second packet for that replica.
+                                // we have the same race as in the primary delivery loop above
+                                let (ri, m) = next.take().unwrap();
+                                send(&mut context.outputs, ri, m).unwrap();
+                                give_up_next = true;
+                            }
+
+
+                            // deliver this packet to its destination TCP queue
+                            // XXX: unwrap
+                            send(&mut context.outputs, ri, m).unwrap();
+                        }
+
+                        // Register timeout for replica
+                        resume_polling(&mut context.replica);
+
+                        // We can't give up the lock on `context` yet, because then another
+                        // thread could swoop in, take the lock on this replica, process a
+                        // packet, and send some packet (that should come after `next`) to the
+                        // same replica as `next` is going to. if a worker then takes the lock
+                        // for the target of `next`, it will see the queued packet, and process
+                        // it, before we process `next`, which is OOO!
+                        //
+                        // it *is* safe at this point to release the lock for the *previous*
+                        // context, because we have now processed all of its outputs.
+                        context_of_next_origin = context;
+                    }
+                    Err(e) => {
+                        // we couldn't get the lock, so we push it on the TCP queue for later
+                        // NOTE: this is only okay because we know that only a single send to
+                        // ri happened, so we won't cause an out-of-order delivery.
+                        // XXX: unwrap
+                        send(&mut context_of_next_origin.outputs, ri, m).unwrap();
+                    }
+                }
+
+                if carry == 1 {
+                    // we're no longer holding the lock for the replica we originally polled from,
+                    // so we can let other workers handle it.
+                    ready(&EventedFd(&fd));
+                }
+            }
+
+            drop(context_of_next_origin);
+            if carry == 0 {
+                // there were no next()'s to ready the original socket
                 ready(&EventedFd(&fd));
             }
         }
     }
 
     fn is_local(&self, ri: &ReplicaIndex) -> bool {
-        //self.shared.revmap.contains_key(ri)
-        false
+        self.shared.revmap.contains_key(ri)
     }
 
     // returns true if processing should continue

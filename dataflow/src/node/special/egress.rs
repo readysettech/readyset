@@ -1,8 +1,6 @@
 use std::collections::HashMap;
 use prelude::*;
 
-/// Holds a transmit handle for an egress node. This struct appears Serializeable, but because it
-/// contains a STcpSender, it will actually panic if serialized.
 #[derive(Serialize, Deserialize)]
 struct EgressTx {
     node: NodeIndex,
