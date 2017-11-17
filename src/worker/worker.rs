@@ -330,20 +330,6 @@ impl Worker {
                 .get(sc.rit)
                 .expect("token resolves to unknown replica");
 
-            let mut resume_polling = |replica: &mut Replica| {
-                let mut sends = Vec::new();
-                replica.on_event(PollEvent::ResumePolling(&mut durtmp), &mut sends);
-                if let Some(timeout) = durtmp.take() {
-                    timers.insert(sc.rit, Instant::now() + timeout);
-                } else {
-                    timers.remove(sc.rit);
-                }
-                if !sends.is_empty() {
-                    // ResumePolling is not allowed to send packets
-                    unimplemented!();
-                }
-            };
-
             trace!(self.log, "worker handling replica event"; "replica" => sc.rit);
 
             let all = &self.all;
@@ -421,6 +407,20 @@ impl Worker {
 
             // unless the connection is dropped, we want to rearm the socket
             let mut rearm = true;
+
+            let mut resume_polling = |rit: usize, replica: &mut Replica| {
+                let mut sends = Vec::new();
+                replica.on_event(PollEvent::ResumePolling(&mut durtmp), &mut sends);
+                if let Some(timeout) = durtmp.take() {
+                    timers.insert(rit, Instant::now() + timeout);
+                } else {
+                    timers.remove(rit);
+                }
+                if !sends.is_empty() {
+                    // ResumePolling is not allowed to send packets
+                    unimplemented!();
+                }
+            };
 
             let fd = {
                 // deref guard explicitly so that we can field borrows are tracked separately.
@@ -550,7 +550,7 @@ impl Worker {
             };
 
             // Register timeout for replica
-            resume_polling(&mut context.replica);
+            resume_polling(sc.rit, &mut context.replica);
 
             // we have a packet we can handle directly!
             let mut give_up_next = true; // XXX: disallow nested carry for now
@@ -598,7 +598,7 @@ impl Worker {
                         }
 
                         // Register timeout for replica
-                        resume_polling(&mut context.replica);
+                        resume_polling(rit, &mut context.replica);
 
                         // We can't give up the lock on `context` yet, because then another
                         // thread could swoop in, take the lock on this replica, process a
