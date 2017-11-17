@@ -403,6 +403,13 @@ impl Worker {
             };
 
             // track if we can handle a local output directly
+            // XXX: MAJOR PROBLUM:
+            //
+            //  what if we decided *not* to use `next` to a given replica in the previous iteration
+            //  over this replica, and then in this replica, we *do* decide to use `next`? Now the
+            //  message from the previous iteration is (potentially) sitting in the input queue for
+            //  the target replica, and yet we're directly executing this (following) packet. Not
+            //  good. Not good at all.
             let mut next = None;
 
             // unless the connection is dropped, we want to rearm the socket
@@ -553,7 +560,7 @@ impl Worker {
             resume_polling(sc.rit, &mut context.replica);
 
             // we have a packet we can handle directly!
-            let mut give_up_next = true; // XXX: disallow nested carry for now
+            let mut give_up_next = false;
             let mut context_of_next_origin = context;
             let mut carry = 0;
             while let Some((ri, m)) = next.take() {
@@ -636,7 +643,8 @@ impl Worker {
     }
 
     fn is_local(&self, ri: &ReplicaIndex) -> bool {
-        self.shared.revmap.contains_key(ri)
+        // self.shared.revmap.contains_key(ri)
+        false
     }
 
     // returns true if processing should continue
