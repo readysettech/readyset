@@ -7,6 +7,7 @@ use std::collections::HashMap;
 use std::sync::{mpsc, Arc, Mutex, TryLockError};
 use std::os::unix::io::AsRawFd;
 
+use fnv::FnvHashMap;
 use slab::Slab;
 use vec_map::VecMap;
 use mio::{self, Evented, Events, Poll, PollOpt, Ready, Token};
@@ -14,27 +15,27 @@ use mio::unix::EventedFd;
 use mio::net::{TcpListener, TcpStream};
 use slog::Logger;
 
-use channel::{TcpReceiver, TcpSender};
+use channel::{self, TcpReceiver, TcpSender};
 use channel::poll::{PollEvent, ProcessResult};
-use channel::tcp::TryRecvError;
+use channel::tcp::{SendError, TryRecvError};
 use dataflow::{self, Domain, Packet};
 
 pub struct NewReplica {
     pub inner: Replica,
     pub listener: TcpListener,
-    pub outputs: Vec<(ReplicaIndex, net::TcpStream)>,
 }
 
 type Replica = Domain;
 type ReplicaIndex = (dataflow::Index, usize);
 type EnqueuedSend = (ReplicaIndex, Box<Packet>);
+type ChannelCoordinator = channel::ChannelCoordinator<ReplicaIndex>;
 
 struct ReplicaContext {
     /// A map from socket token to `TcpReceiver`.
     receivers: VecMap<TcpReceiver<Box<Packet>>>,
     listener: Option<TcpListener>,
     replica: Replica,
-    outputs: HashMap<ReplicaIndex, TcpSender<Packet>>,
+    outputs: FnvHashMap<ReplicaIndex, (TcpSender<Packet>, bool)>,
 }
 
 #[derive(Clone)]
@@ -58,7 +59,7 @@ struct SharedWorkerState {
     /// A mapping from replica index token to the context associated with that replica.
     replicas: Slab<Arc<Mutex<ReplicaContext>>>,
     /// A mapping from replica index to replica token.
-    revmap: HashMap<ReplicaIndex, usize>,
+    revmap: FnvHashMap<ReplicaIndex, usize>,
     /// The "true" mapping from socket token to replica token.
     ///
     /// This is lazily pulled in by workers when they miss in `sockets`.
@@ -86,7 +87,12 @@ pub struct WorkerPool {
 }
 
 impl WorkerPool {
-    pub fn new<A: ToSocketAddrs>(n: usize, log: &Logger, checktable_addr: A) -> io::Result<Self> {
+    pub fn new<A: ToSocketAddrs>(
+        n: usize,
+        log: &Logger,
+        checktable_addr: A,
+        channel_coordinator: Arc<ChannelCoordinator>,
+    ) -> io::Result<Self> {
         let checktable_addr = checktable_addr.to_socket_addrs().unwrap().next().unwrap();
 
         let poll = Arc::new(Poll::new()?);
@@ -100,6 +106,7 @@ impl WorkerPool {
                     shared: SharedWorkerState::new(truth.clone()),
                     log: log.new(o!("worker" => i)),
                     all: poll.clone(),
+                    channel_coordinator: channel_coordinator.clone(),
                     notify,
                 };
                 let checktable_addr = checktable_addr.clone();
@@ -122,25 +129,16 @@ impl WorkerPool {
     }
 
     pub fn add_replica(&mut self, replica: NewReplica) {
-        let NewReplica {
-            inner,
-            listener,
-            outputs,
-        } = replica;
+        let NewReplica { inner, listener } = replica;
         let ri = inner.id();
         let addr = listener.local_addr().unwrap();
 
         let mut rc = ReplicaContext {
             receivers: VecMap::new(),
             replica: inner,
-            outputs: HashMap::new(),
+            outputs: Default::default(),
             listener: None,
         };
-
-        // Hook up outputs
-        for (target, tx) in outputs {
-            rc.outputs.insert(target, TcpSender::new(tx, None).unwrap());
-        }
 
         // Prepare for workers
         let rc = Arc::new(Mutex::new(rc));
@@ -190,6 +188,7 @@ pub struct Worker {
     all: Arc<Poll>,
     log: Logger,
     notify: mpsc::Receiver<NewReplicaInternal>,
+    channel_coordinator: Arc<ChannelCoordinator>,
 }
 
 impl Worker {
@@ -200,8 +199,27 @@ impl Worker {
         let mut timers = VecMap::<Instant>::new();
         let mut durtmp = None;
         let mut force_refresh_truth = false;
+        let mut sends = Vec::new();
 
         dataflow::connect_thread_checktable(checktable_addr);
+
+        let cc = &self.channel_coordinator;
+        let send = |outputs: &mut FnvHashMap<ReplicaIndex, (TcpSender<Packet>, bool)>,
+                    ri: ReplicaIndex,
+                    mut m: Box<Packet>|
+         -> Result<(), SendError> {
+            let &mut (ref mut tx, is_local) = outputs.entry(ri).or_insert_with(|| {
+                let mut tx = None;
+                while tx.is_none() {
+                    tx = cc.get_tx(&ri);
+                }
+                tx.unwrap()
+            });
+            if is_local {
+                m = m.make_local();
+            }
+            tx.send_ref(&m)
+        };
 
         loop {
             // have any timers expired?
@@ -216,9 +234,15 @@ impl Worker {
                         // NOTE: try_lock is okay, because if another worker is handling it, the
                         // timeout is also being dealt with.
                         if let Ok(mut context) = rc.try_lock() {
-                            match context.replica.on_event(PollEvent::Timeout) {
+                            match context.replica.on_event(PollEvent::Timeout, &mut sends) {
                                 ProcessResult::KeepPolling => {
                                     // FIXME: this could return a bunch of things to be sent
+                                    for (ri, m) in sends.drain(..) {
+                                        // TODO: handle one local packet without sending
+                                        // deliver this packet to its destination TCP queue
+                                        // XXX: unwrap
+                                        send(&mut context.outputs, ri, m).unwrap();
+                                    }
                                 }
                                 ProcessResult::StopPolling => unreachable!(),
                             }
@@ -449,30 +473,33 @@ impl Worker {
                         Err(TryRecvError::DeserializationError(e)) => panic!("{}", e),
                     };
 
-                    let output = match self.process(&mut context.replica, m) {
-                        Some(o) => o,
-                        None => {
-                            // told to exit?
-                            ready(&EventedFd(&fd));
-                            warn!(self.log, "worker told to exit");
-                            return;
-                        }
-                    };
+                    if !self.process(&mut context.replica, m, &mut sends) {
+                        // told to exit?
+                        ready(&EventedFd(&fd));
+                        warn!(self.log, "worker told to exit");
+                        return;
+                    }
+
+                    // XXX: MAJOR PROBLUM
+                    // what if another worker picks up target domain lock, and processes the
+                    // message we sent that comes *after* next? out-of-order...
 
                     // if there is at least one more *complete* Packet in `channel` then we should
                     // send everything in `output` and process the next Packet. however, if there
                     // are no complete Packets in `channel`, we should instead look for a local
                     // destination in `output`, send the others, and then process that packet
                     // immediately to save some syscalls and a trip through the network stack..
-                    for (ri, m) in output {
+                    for (ri, m) in sends.drain(..) {
                         if channel.get().is_empty() && next.is_none() && self.is_local(&ri) {
+                            // we have to take the *first* packet, not the last, otherwise we might
+                            // process out-of-order.
                             next = Some((ri, m));
                             continue;
                         }
 
                         // deliver this packet to its destination TCP queue
                         // XXX: unwrap
-                        context.outputs.get_mut(&ri).unwrap().send_ref(&m).unwrap();
+                        send(&mut context.outputs, ri, m).unwrap();
                     }
 
                     if channel.get().is_empty() {
@@ -481,17 +508,22 @@ impl Worker {
                 }
 
                 // Register timeout for replica
-                context
-                    .replica
-                    .on_event(PollEvent::ResumePolling(&mut durtmp));
-                if let Some(timeout) = durtmp.take() {
-                    timers.insert(sc.rit, Instant::now() + timeout);
-                } else {
-                    timers.remove(sc.rit);
-                }
+                let mut resume_polling = |replica: &mut Replica| {
+                    let mut sends = Vec::new();
+                    replica.on_event(PollEvent::ResumePolling(&mut durtmp), &mut sends);
+                    if let Some(timeout) = durtmp.take() {
+                        timers.insert(sc.rit, Instant::now() + timeout);
+                    } else {
+                        timers.remove(sc.rit);
+                    }
+                    if !sends.is_empty() {
+                        // ResumePolling is not allowed to send packets
+                        unimplemented!();
+                    }
+                };
+                resume_polling(&mut context.replica);
 
                 // we have a packet we can handle directly!
-                // NOTE: this deadlocks *hard* if you have A-B-A
                 while let Some((ri, m)) = next.take() {
                     let rit = self.shared.revmap[&ri];
                     let rc = self.shared
@@ -501,17 +533,14 @@ impl Worker {
                     match rc.try_lock() {
                         Ok(mut context) => {
                             // no other thread is operating on the target domain, so we can do it
-                            let output = match self.process(&mut context.replica, m) {
-                                Some(o) => o,
-                                None => {
-                                    // told to exit?
-                                    ready(&EventedFd(&fd));
-                                    warn!(self.log, "worker told to exit");
-                                    return;
-                                }
-                            };
+                            if !self.process(&mut context.replica, m, &mut sends) {
+                                // told to exit?
+                                ready(&EventedFd(&fd));
+                                warn!(self.log, "worker told to exit");
+                                return;
+                            }
 
-                            for (ri, m) in output {
+                            for (ri, m) in sends.drain(..) {
                                 if next.is_none() && self.is_local(&ri) {
                                     next = Some((ri, m));
                                     continue;
@@ -520,23 +549,16 @@ impl Worker {
                                 // deliver this packet to its destination TCP queue
                                 // XXX: unwrap
                                 // NOTE: uses shadowed ri
-                                context.outputs.get_mut(&ri).unwrap().send_ref(&m).unwrap();
+                                send(&mut context.outputs, ri, m).unwrap();
                             }
 
                             // Register timeout for replica
-                            context
-                                .replica
-                                .on_event(PollEvent::ResumePolling(&mut durtmp));
-                            if let Some(timeout) = durtmp.take() {
-                                timers.insert(sc.rit, Instant::now() + timeout);
-                            } else {
-                                timers.remove(sc.rit);
-                            }
+                            resume_polling(&mut context.replica);
                         }
                         Err(e) => {
                             // we couldn't get the lock, so we push it on the TCP queue for later
                             // XXX: unwrap
-                            context.outputs.get_mut(&ri).unwrap().send_ref(&m).unwrap();
+                            send(&mut context.outputs, ri, m).unwrap();
                         }
                     }
                 }
@@ -552,18 +574,20 @@ impl Worker {
     }
 
     fn is_local(&self, ri: &ReplicaIndex) -> bool {
-        // TODO
-        // false will never give *incorrect* behavior, just lower performance, so no rush
+        //self.shared.revmap.contains_key(ri)
         false
     }
 
-    fn process(&self, domain: &mut Replica, packet: Box<Packet>) -> Option<Vec<EnqueuedSend>> {
-        match domain.on_event(PollEvent::Process(packet)) {
-            ProcessResult::KeepPolling => {
-                // FIXME: in theory this should return a bunch of things to be sent
-                Some(vec![])
-            }
-            ProcessResult::StopPolling => None,
+    // returns true if processing should continue
+    fn process(
+        &self,
+        domain: &mut Replica,
+        packet: Box<Packet>,
+        sends: &mut Vec<EnqueuedSend>,
+    ) -> bool {
+        match domain.on_event(PollEvent::Process(packet), sends) {
+            ProcessResult::KeepPolling => true,
+            ProcessResult::StopPolling => false,
         }
     }
 }

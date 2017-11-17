@@ -1,12 +1,11 @@
 use prelude::*;
 use payload;
 use vec_map::VecMap;
-use channel::{STcpSender, TcpSender};
 use std::collections::HashSet;
 
 #[derive(Serialize, Deserialize)]
 pub struct Sharder {
-    txs: Vec<(LocalNodeIndex, STcpSender<Box<Packet>>, bool)>,
+    txs: Vec<(LocalNodeIndex, ReplicaAddr)>,
     sharded: VecMap<Box<Packet>>,
     shard_by: usize,
 }
@@ -42,15 +41,11 @@ impl Sharder {
         }
     }
 
-    pub fn add_sharded_child(
-        &mut self,
-        dst: LocalNodeIndex,
-        txs: Vec<(TcpSender<Box<Packet>>, bool)>,
-    ) {
+    pub fn add_sharded_child(&mut self, dst: LocalNodeIndex, txs: Vec<ReplicaAddr>) {
         assert_eq!(self.txs.len(), 0);
         // TODO: add support for "shared" sharder?
         for tx in txs {
-            self.txs.push((dst, STcpSender(tx.0), tx.1));
+            self.txs.push((dst, tx));
         }
     }
 
@@ -73,6 +68,7 @@ impl Sharder {
         m: &mut Option<Box<Packet>>,
         index: LocalNodeIndex,
         is_sharded: bool,
+        output: &mut Vec<(ReplicaAddr, Box<Packet>)>,
     ) {
         // we need to shard the records inside `m` by their key,
         let mut m = m.take().unwrap();
@@ -141,15 +137,10 @@ impl Sharder {
                 }
 
                 for (shard, mut p) in shards {
-                    let tx = &mut self.txs[shard];
+                    let tx = &self.txs[shard];
                     m.link_mut().src = index;
                     m.link_mut().dst = tx.0;
-                    if tx.2 {
-                        p = p.make_local();
-                    }
-                    if tx.1.send(p).is_err() {
-                        // we must be shutting down...
-                    }
+                    output.push((tx.1, p));
                 }
                 return;
             }
@@ -203,17 +194,11 @@ impl Sharder {
             *nshards = self.sharded.len();
         }
 
-        for (i, &mut (dst, ref mut tx, is_local)) in self.txs.iter_mut().enumerate() {
+        for (i, &mut (dst, addr)) in self.txs.iter_mut().enumerate() {
             if let Some(mut shard) = self.sharded.remove(i) {
                 shard.link_mut().src = index.into();
                 shard.link_mut().dst = dst;
-                if is_local {
-                    shard = shard.make_local();
-                }
-                if tx.send(shard).is_err() {
-                    // we must be shutting down...
-                    break;
-                }
+                output.push((addr, shard));
             }
         }
     }

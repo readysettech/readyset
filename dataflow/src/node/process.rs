@@ -12,6 +12,7 @@ impl Node {
         nodes: &DomainNodes,
         on_shard: Option<usize>,
         swap: bool,
+        output: &mut Vec<(ReplicaAddr, Box<Packet>)>,
     ) -> Vec<Miss> {
         m.as_mut().unwrap().trace(PacketEvent::Process);
 
@@ -31,11 +32,11 @@ impl Node {
             }
             NodeType::Egress(None) => unreachable!(),
             NodeType::Egress(Some(ref mut e)) => {
-                e.process(m, on_shard.unwrap_or(0));
+                e.process(m, on_shard.unwrap_or(0), output);
                 vec![]
             }
             NodeType::Sharder(ref mut s) => {
-                s.process(m, addr, on_shard.is_some());
+                s.process(m, addr, on_shard.is_some(), output);
                 vec![]
             }
             NodeType::Internal(ref mut i) => {

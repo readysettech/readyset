@@ -1,6 +1,5 @@
 use std::collections::HashMap;
 use prelude::*;
-use channel::{STcpSender, TcpSender};
 
 /// Holds a transmit handle for an egress node. This struct appears Serializeable, but because it
 /// contains a STcpSender, it will actually panic if serialized.
@@ -8,8 +7,7 @@ use channel::{STcpSender, TcpSender};
 struct EgressTx {
     node: NodeIndex,
     local: LocalNodeIndex,
-    sender: STcpSender<Box<Packet>>,
-    is_local: bool,
+    dest: ReplicaAddr,
 }
 
 #[derive(Serialize, Deserialize)]
@@ -39,29 +37,24 @@ impl Default for Egress {
 }
 
 impl Egress {
-    pub fn add_tx(
-        &mut self,
-        dst_g: NodeIndex,
-        dst_l: LocalNodeIndex,
-        tx: TcpSender<Box<Packet>>,
-        is_local: bool,
-    ) {
+    pub fn add_tx(&mut self, dst_g: NodeIndex, dst_l: LocalNodeIndex, addr: ReplicaAddr) {
         self.txs.push(EgressTx {
             node: dst_g,
             local: dst_l,
-            sender: STcpSender(tx),
-            is_local,
+            dest: addr,
         });
-
-        // Sort txs so that the local connections come last. This simplifies the logic in process.
-        self.txs.sort_by_key(|tx| tx.is_local);
     }
 
     pub fn add_tag(&mut self, tag: Tag, dst: NodeIndex) {
         self.tags.insert(tag, dst);
     }
 
-    pub fn process(&mut self, m: &mut Option<Box<Packet>>, shard: usize) {
+    pub fn process(
+        &mut self,
+        m: &mut Option<Box<Packet>>,
+        shard: usize,
+        output: &mut Vec<(ReplicaAddr, Box<Packet>)>,
+    ) {
         let &mut Self {
             ref mut txs,
             ref tags,
@@ -81,46 +74,33 @@ impl Egress {
         });
 
         for (txi, ref mut tx) in txs.iter_mut().enumerate() {
-            if !tx.is_local {
-                let m = m.as_mut().unwrap();
-                m.link_mut().src = unsafe { LocalNodeIndex::make(shard as u32) };
-                m.link_mut().dst = tx.local;
-                if tx.sender.send_ref(m).is_err() {
-                    break;
-                }
-            } else {
-                let mut take = txi == txn;
-                if let Some(replay_to) = replay_to.as_ref() {
-                    if *replay_to == tx.node {
-                        take = true;
-                    } else {
-                        continue;
-                    }
-                }
-
-                // Avoid cloning if this is last send
-                let mut m = if take {
-                    m.take().unwrap()
+            let mut take = txi == txn;
+            if let Some(replay_to) = replay_to.as_ref() {
+                if *replay_to == tx.node {
+                    take = true;
                 } else {
-                    // we know this is a data (not a replay)
-                    // because, a replay will force a take
-                    m.as_ref().map(|m| box m.clone_data()).unwrap()
-                };
-
-                // src is usually ignored and overwritten by ingress
-                // *except* if the ingress is marked as a shard merger
-                // in which case it wants to know about the shard
-                m.link_mut().src = unsafe { LocalNodeIndex::make(shard as u32) };
-                m.link_mut().dst = tx.local;
-
-                if tx.sender.send(m.make_local()).is_err() {
-                    // we must be shutting down...
-                    break;
+                    continue;
                 }
+            }
 
-                if take {
-                    break;
-                }
+            // Avoid cloning if this is last send
+            let mut m = if take {
+                m.take().unwrap()
+            } else {
+                // we know this is a data (not a replay)
+                // because, a replay will force a take
+                m.as_ref().map(|m| box m.clone_data()).unwrap()
+            };
+
+            // src is usually ignored and overwritten by ingress
+            // *except* if the ingress is marked as a shard merger
+            // in which case it wants to know about the shard
+            m.link_mut().src = unsafe { LocalNodeIndex::make(shard as u32) };
+            m.link_mut().dst = tx.local;
+
+            output.push((tx.dest, m));
+            if take {
+                break;
             }
         }
     }

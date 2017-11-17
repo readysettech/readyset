@@ -36,7 +36,7 @@ use std::env;
 use std::fs;
 use std::collections::HashMap;
 
-const DEFAULT_SETTLE_TIME_MS: u64 = 2000;
+const DEFAULT_SETTLE_TIME_MS: u64 = 200;
 
 // Suffixes the given log prefix with a timestamp, ensuring that
 // subsequent test runs do not reuse log files in the case of failures.

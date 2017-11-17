@@ -137,7 +137,9 @@ impl Worker {
 
         let mut checktable_addr: SocketAddr = controller.parse().unwrap();
         checktable_addr.set_port(8500);
-        let pool = worker::WorkerPool::new(workers, &log, checktable_addr).unwrap();
+
+        let cc = Arc::new(ChannelCoordinator::new());
+        let pool = worker::WorkerPool::new(workers, &log, checktable_addr, cc.clone()).unwrap();
 
         Worker {
             log: log,
@@ -152,7 +154,7 @@ impl Worker {
 
             receiver: None,
             sender: None,
-            channel_coordinator: Arc::new(ChannelCoordinator::new()),
+            channel_coordinator: cc,
             readers,
 
             heartbeat_every: heartbeat_every,
@@ -251,7 +253,6 @@ impl Worker {
         self.pool.add_replica(worker::NewReplica {
             inner: d,
             listener: listener,
-            outputs: vec![/* TODO */],
         });
 
         // need to register the domain with the local channel coordinator

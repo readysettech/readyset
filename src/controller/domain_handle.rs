@@ -209,7 +209,12 @@ impl DomainHandle {
                     let listener = ::mio::net::TcpListener::from_listener(listener, &addr).unwrap();
                     if local_pool.is_none() {
                         *local_pool = Some(
-                            ::worker::worker::WorkerPool::new(1, log, checktable_addr).unwrap(),
+                            ::worker::worker::WorkerPool::new(
+                                1,
+                                log,
+                                checktable_addr,
+                                channel_coordinator.clone(),
+                            ).unwrap(),
                         );
                     }
                     local_pool
@@ -218,7 +223,6 @@ impl DomainHandle {
                         .add_replica(::worker::worker::NewReplica {
                             inner: d,
                             listener: listener,
-                            outputs: vec![/* TODO */],
                         });
                     assignments.push(None);
                 }
