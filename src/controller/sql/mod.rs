@@ -474,7 +474,7 @@ impl SqlIncorporator {
             Some(qg) => {
                 self.query_graphs
                     .insert(qg.signature().hash, (qg, mir.clone()));
-            },
+            }
             None => (),
         }
     }
@@ -618,6 +618,8 @@ impl SqlIncorporator {
             // other kinds of queries *do* require their referred tables to exist!
             ref q @ SqlQuery::CompoundSelect(_) |
             ref q @ SqlQuery::Select(_) |
+            ref q @ SqlQuery::Update(_) |
+            ref q @ SqlQuery::Delete(_) |
             ref q @ SqlQuery::Insert(_) => for t in &q.referred_tables() {
                 if !self.view_schemas.contains_key(&t.name) {
                     return Err(format!("query refers to unknown table \"{}\"", t.name));
@@ -1309,7 +1311,7 @@ mod tests {
 
             // leaf view node
             let edge = get_node(&inc, mig, &res.unwrap().name);
-            assert_eq!(edge.fields(), &["name", "literal"]);
+            assert_eq!(edge.fields(), &["name", "1"]);
             assert_eq!(edge.description(), format!("π[1, lit: 1]"));
         });
     }
@@ -1325,13 +1327,20 @@ mod tests {
                     .is_ok()
             );
 
-            let res = inc.add_query("SELECT 2 * users.age FROM users;", None, mig);
+            let res = inc.add_query(
+                "SELECT 2 * users.age, 2 * 10 as twenty FROM users;",
+                None,
+                mig,
+            );
             assert!(res.is_ok());
 
             // leaf view node
             let edge = get_node(&inc, mig, &res.unwrap().name);
-            assert_eq!(edge.fields(), &["arithmetic"]);
-            assert_eq!(edge.description(), format!("π[(lit: 2) * 1]"));
+            assert_eq!(edge.fields(), &["2 * users.age", "twenty"]);
+            assert_eq!(
+                edge.description(),
+                format!("π[(lit: 2) * 1, (lit: 2) * (lit: 10)]")
+            );
         });
     }
 

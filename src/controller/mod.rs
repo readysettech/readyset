@@ -769,11 +769,9 @@ impl ControllerInner {
         let mut r = Recipe::from_str(&r_txt, Some(self.log.clone())).unwrap();
         let old = self.recipe.clone();
         let mut new = old.replace(r).unwrap();
-        self.migrate(|mig| {
-            match new.activate(mig, false) {
-                Ok(_) => (),
-                Err(e) => panic!("failed to install recipe: {:?}", e),
-            }
+        self.migrate(|mig| match new.activate(mig, false) {
+            Ok(_) => (),
+            Err(e) => panic!("failed to install recipe: {:?}", e),
         });
         self.recipe = new;
     }

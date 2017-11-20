@@ -2,19 +2,16 @@
 #![feature(conservative_impl_trait)]
 #![feature(entry_or_default)]
 #![feature(try_from)]
+#![deny(unused_extern_crates)]
 
 extern crate arccstr;
-extern crate backtrace;
-extern crate channel;
 extern crate chrono;
 extern crate fnv;
 extern crate nom_sql;
 extern crate petgraph;
-extern crate regex;
 extern crate serde;
 #[macro_use]
 extern crate serde_derive;
-extern crate vec_map;
 
 pub mod addressing;
 pub mod data;
