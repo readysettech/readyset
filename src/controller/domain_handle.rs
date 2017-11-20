@@ -210,7 +210,7 @@ impl DomainHandle {
                     if local_pool.is_none() {
                         *local_pool = Some(
                             ::worker::worker::WorkerPool::new(
-                                1,
+                                2,
                                 log,
                                 checktable_addr,
                                 channel_coordinator.clone(),

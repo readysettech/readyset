@@ -153,7 +153,7 @@ fn main() {
                 &config.addr,
                 config.port,
                 Duration::from_millis(config.heartbeat_freq),
-                1,
+                2,
                 log.clone(),
             );
             loop {
