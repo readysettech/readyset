@@ -530,10 +530,6 @@ impl Worker {
                         return;
                     }
 
-                    // XXX: MAJOR PROBLUM
-                    // what if another worker picks up target domain lock, and processes the
-                    // message we sent that comes *after* next? out-of-order...
-
                     // if there is at least one more *complete* Packet in `channel` then we
                     // should send everything in `output` and process the next Packet. however,
                     // if there are no complete Packets in `channel`, we should instead look
