@@ -1456,8 +1456,11 @@ impl<'a> Migration<'a> {
 impl Drop for ControllerInner {
     fn drop(&mut self) {
         for (_, d) in &mut self.domains {
-            // don't unwrap, because given domain may already have terminated
-            drop(d.send(box payload::Packet::Quit));
+            // XXX: this is a terrible ugly hack to ensure that all workers exit
+            for _ in 0..100 {
+                // don't unwrap, because given domain may already have terminated
+                drop(d.send(box payload::Packet::Quit));
+            }
         }
         if let Some(ref mut local_pool) = self.local_pool {
             local_pool.wait();
