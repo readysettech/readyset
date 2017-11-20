@@ -1,4 +1,5 @@
 #![feature(custom_attribute)]
+#![deny(unused_extern_crates)]
 
 extern crate bincode;
 extern crate bufstream;
