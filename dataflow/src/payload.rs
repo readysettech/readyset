@@ -273,6 +273,9 @@ pub enum Packet {
     /// The packet is being sent locally, so a pointer is sent to avoid
     /// serialization/deserialization costs.
     Local(LocalPacket),
+
+    /// Notify downstream replica what our index is
+    Hey(domain::Index, usize),
 }
 
 impl Packet {
