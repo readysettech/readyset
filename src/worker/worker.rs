@@ -460,11 +460,20 @@ impl Worker {
                         // working with this `token` (EPOLL_ONESHOT guarantees that), we know
                         // that it can't *currently* be remapped by another thread, so if we
                         // read from the truth, we know we'll get the right value.
-                        ready(&EventedFd(&self.shared.truth.lock().unwrap()[token].fd));
-
-                        // XXX: NLL would let us directly refresh truth here, which would save
-                        // us one lock acquisition, but we don't have NLL yet :(
-                        force_refresh_truth = true;
+                        if let Some(fd) =
+                            self.shared.truth.lock().unwrap().get(token).map(|sc| sc.fd)
+                        {
+                            ready(&EventedFd(&fd));
+                            // XXX: NLL would let us directly refresh truth here, which would save
+                            // us one lock acquisition, but we don't have NLL yet :(
+                            force_refresh_truth = true;
+                        } else {
+                            // NOTE: this *shouldn't* be possible. it means we're notified about a
+                            // token that does not exist. however, in certain cases, it seems like
+                            // mio noneless wakes us up right after we deregister a token, so we
+                            // need to not fail. we should *not* re-arm any fd though.
+                            // unreachable!();
+                        }
                         continue;
                     }
                     Entry::Occupied(mut e) => e,
