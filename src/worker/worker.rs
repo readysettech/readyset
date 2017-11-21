@@ -484,9 +484,6 @@ impl Worker {
                             debug!(self.log, "worker dropped lost connection"; "token" => token);
                             let rx = channel.remove();
 
-                            // no deadlock for same reason as adding a socket to poll
-                            self.shared.truth.lock().unwrap().remove(token);
-
                             // dropping rx will automatically deregister the socket (in theory)
                             //
                             // see
@@ -495,13 +492,18 @@ impl Worker {
                             // https://docs.rs/mio/0.6.11/mio/struct.Poll.html#method.deregister
                             //
                             // however, there is no harm in explicitly deregistering it as well
+                            // NOTE: we *must* deregister before freeing `token`, because otherwise
+                            // another connection can take (and register) `token`. This isn't a
+                            // problem as far as file descriptors go, but mio may get confused.
                             self.all.deregister(rx.0.get_ref()).is_err();
-                            rearm = false;
-                            drop(rx);
+
+                            // no deadlock for same reason as adding a socket to poll
+                            self.shared.truth.lock().unwrap().remove(token);
 
                             // we might have processed some packets before we got Disconnected,
                             // and maybe even a `next`, so we can't just continue the outer
                             // polling loop here unfortunately.
+                            rearm = false;
                             break;
                         }
                         Err(TryRecvError::DeserializationError(e)) => panic!("{}", e),
@@ -525,7 +527,9 @@ impl Worker {
 
                     if !self.process(&mut context.replica, m, &mut sends) {
                         // told to exit?
-                        ready(&EventedFd(&fd));
+                        if rearm {
+                            ready(&EventedFd(&fd));
+                        }
                         warn!(self.log, "worker told to exit");
                         return;
                     }
@@ -590,7 +594,6 @@ impl Worker {
             let mut context_of_next_origin = context;
             let mut carry = 0;
             while let Some((ri, m)) = next.take() {
-                carry += 1;
                 assert!(sends.is_empty());
                 let rit = self.shared.revmap[&ri];
                 let rc = self.shared
@@ -599,6 +602,8 @@ impl Worker {
                     .expect("packet is for unknown replica");
                 match rc.try_lock() {
                     Ok(mut context) => {
+                        carry += 1;
+
                         // ensure we haven't sent any packets in past iterations to this replica
                         // that have not yet been processed (and that logically preceede `next`).
                         if context_of_next_origin.sent_to_local.get(&ri)
@@ -611,9 +616,6 @@ impl Worker {
                                 .or_insert(0)
                                 .add_assign(1);
                             send(&from_ri, &mut context_of_next_origin.outputs, ri, m).unwrap();
-                            if carry == 1 {
-                                ready(&EventedFd(&fd));
-                            }
                             break;
                         }
 
@@ -626,7 +628,9 @@ impl Worker {
                         // no other thread is operating on the target domain, so we can do it
                         if !self.process(&mut context.replica, m, &mut sends) {
                             // told to exit?
-                            ready(&EventedFd(&fd));
+                            if rearm {
+                                ready(&EventedFd(&fd));
+                            }
                             warn!(self.log, "worker told to exit");
                             return;
                         }
@@ -669,6 +673,13 @@ impl Worker {
                         // it *is* safe at this point to release the lock for the *previous*
                         // context, because we have now processed all of its outputs.
                         context_of_next_origin = context;
+
+                        // we need to ready the fd for the original replica so that another thread
+                        // will be notified if there's more work for it.
+                        if carry == 1 && rearm {
+                            ready(&EventedFd(&fd));
+                            rearm = false;
+                        }
                     }
                     Err(e) => {
                         // we couldn't get the lock, so we push it on the TCP queue for later
@@ -683,17 +694,12 @@ impl Worker {
                         send(&from_ri, &mut context_of_next_origin.outputs, ri, m).unwrap();
                     }
                 }
-
-                if carry == 1 {
-                    // we're no longer holding the lock for the replica we originally polled from,
-                    // so we can let other workers handle it.
-                    ready(&EventedFd(&fd));
-                }
             }
 
             drop(context_of_next_origin);
-            if carry == 0 {
-                // there were no next()'s to ready the original socket
+            if rearm {
+                // there were no next()'s to ready the original socket, or we failed to handle it
+                // make sure to mark it as ready for other workers.
                 ready(&EventedFd(&fd));
             }
         }
