@@ -106,6 +106,11 @@ impl Connection {
         }
     }
 
+    /// Do a non-blocking read at the indicated path.
+    pub fn read_nonblocking(&self, path: &str) -> Option<Vec<u8>> {
+        self.zk.get_data(path, false).ok().map(|d| d.0)
+    }
+
     /// Store the data at the indicated path.
     pub fn write(&self, path: &str, data: Vec<u8>) {
         self.zk.set_data(path, data, None).unwrap();

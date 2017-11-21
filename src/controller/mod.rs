@@ -25,6 +25,7 @@ use mio::net::TcpListener;
 use petgraph;
 use petgraph::visit::Bfs;
 use petgraph::graph::NodeIndex;
+use rustful::StatusCode;
 use serde::Serialize;
 use serde::de::DeserializeOwned;
 use serde_json;
@@ -1327,35 +1328,30 @@ pub struct ControllerHandle {
     local: Option<(Sender<ControlEvent>, JoinHandle<()>)>,
 }
 impl ControllerHandle {
-    fn rpc<Q: Serialize, R: DeserializeOwned>(
-        &mut self,
-        path: &str,
-        request: &Q,
-    ) -> Result<R, Box<Error>> {
+    fn rpc<Q: Serialize, R: DeserializeOwned>(&mut self, path: &str, request: &Q) -> R {
         use hyper;
-
-        if self.url.is_none() {
-            let descriptor: ControllerDescriptor =
-                serde_json::from_slice(&self.connection.get_leader().1).unwrap();
-            self.url = Some(format!("http://{}", descriptor.external_addr));
-        }
 
         let mut core = Core::new().unwrap();
         let client = Client::new(&core.handle());
-        let url = format!("{}/{}", self.url.as_ref().unwrap(), path);
+        loop {
+            if self.url.is_none() {
+                let descriptor: ControllerDescriptor =
+                    serde_json::from_slice(&self.connection.get_leader().1).unwrap();
+                self.url = Some(format!("http://{}", descriptor.external_addr));
+            }
+            let url = format!("{}/{}", self.url.as_ref().unwrap(), path);
 
-        let mut r = hyper::Request::new(hyper::Method::Post, url.parse().unwrap());
-        r.set_body(serde_json::to_string(request).unwrap());
+            let mut r = hyper::Request::new(hyper::Method::Post, url.parse().unwrap());
+            r.set_body(serde_json::to_string(request).unwrap());
+            let res = core.run(client.request(r)).unwrap();
+            if res.status() != hyper::StatusCode::Ok {
+                self.url = None;
+                continue;
+            }
 
-        let work = client.request(r).and_then(|res| {
-            res.body().concat2().and_then(move |body| {
-                let reply: R = serde_json::from_slice(&body)
-                    .map_err(|e| ::std::io::Error::new(::std::io::ErrorKind::Other, e))
-                    .unwrap();
-                Ok(reply)
-            })
-        });
-        Ok(core.run(work).unwrap())
+            let body = core.run(res.body().concat2()).unwrap();
+            return serde_json::from_slice(&body).unwrap();
+        }
     }
 
     /// Get a Vec of all known input nodes.
@@ -1363,7 +1359,7 @@ impl ControllerHandle {
     /// Input nodes are here all nodes of type `Base`. The addresses returned by this function will
     /// all have been returned as a key in the map from `commit` at some point in the past.
     pub fn inputs(&mut self) -> BTreeMap<String, NodeIndex> {
-        self.rpc("inputs", &()).unwrap()
+        self.rpc("inputs", &())
     }
 
     /// Get a Vec of to all known output nodes.
@@ -1371,13 +1367,13 @@ impl ControllerHandle {
     /// Output nodes here refers to nodes of type `Reader`, which is the nodes created in response
     /// to calling `.maintain` or `.stream` for a node during a migration.
     pub fn outputs(&mut self) -> BTreeMap<String, NodeIndex> {
-        self.rpc("outputs", &()).unwrap()
+        self.rpc("outputs", &())
     }
 
     /// Obtain a `RemoteGetterBuilder` that can be sent to a client and then used to query a given
     /// (already maintained) reader node.
     pub fn get_getter_builder(&mut self, node: NodeIndex) -> Option<RemoteGetterBuilder> {
-        self.rpc("getter_builder", &node).unwrap()
+        self.rpc("getter_builder", &node)
     }
 
     /// Obtain a `RemoteGetter`.
@@ -1388,7 +1384,7 @@ impl ControllerHandle {
     /// Obtain a MutatorBuild that can be used to construct a Mutator to perform writes and deletes
     /// from the given base node.
     pub fn get_mutator_builder(&mut self, base: NodeIndex) -> Result<MutatorBuilder, Box<Error>> {
-        self.rpc("mutator_builder", &base)
+        Ok(self.rpc("mutator_builder", &base))
     }
 
     /// Obtain a Mutator
@@ -1400,26 +1396,23 @@ impl ControllerHandle {
     /// Initiaties log recovery by sending a
     /// StartRecovery packet to each base node domain.
     pub fn recover(&mut self) {
-        self.rpc("recover", &()).unwrap()
+        self.rpc("recover", &())
     }
 
     /// Get statistics about the time spent processing different parts of the graph.
     pub fn get_statistics(&mut self) -> GraphStats {
-        self.rpc("get_statistics", &()).unwrap()
+        self.rpc("get_statistics", &())
     }
 
     /// Install a new recipe on the controller.
     pub fn install_recipe(&mut self, new_recipe: String) {
-        self.rpc("install_recipe", &new_recipe).unwrap()
+        self.rpc("install_recipe", &new_recipe)
     }
 
     /// graphviz description of the dataflow graph
     pub fn graphviz(&mut self) -> String {
-        self.rpc("graphviz", &()).unwrap()
+        self.rpc("graphviz", &())
     }
-
-    /// Set the `Logger` to use for internal log messages.
-    pub fn log_with(&mut self, _: slog::Logger) {}
 }
 impl Drop for ControllerHandle {
     fn drop(&mut self) {
@@ -1446,8 +1439,8 @@ struct ControllerDescriptor {
 
 enum ControlEvent {
     ControllerMessage(CoordinationMessage),
-    ExternalGet(String, String, Sender<String>),
-    ExternalPost(String, String, Sender<String>),
+    ExternalGet(String, String, Sender<Result<String, StatusCode>>),
+    ExternalPost(String, String, Sender<Result<String, StatusCode>>),
     WonLeaderElection(Epoch),
     LostLeadership(Epoch),
     Shutdown,
@@ -1473,8 +1466,11 @@ impl Controller {
         let (event_tx, event_rx) = mpsc::channel();
         let internal = Self::listen_internal(event_tx.clone(), SocketAddr::new(listen_address, 0));
         let checktable = CheckTableServer::start(SocketAddr::new(listen_address, 0));
-        let external =
-            Self::listen_external(event_tx.clone(), SocketAddr::new(listen_address, 9000));
+        let external = Self::listen_external(
+            event_tx.clone(),
+            SocketAddr::new(listen_address, 9000),
+            connection.clone(),
+        );
 
         let descriptor = ControllerDescriptor {
             external_addr: external.addr,
@@ -1484,8 +1480,6 @@ impl Controller {
         let campaign = Self::campaign(event_tx.clone(), connection.clone(), descriptor);
 
         let event_tx2 = event_tx.clone();
-        let connection2 = connection.clone();
-
         let (tx, rx) = mpsc::channel();
         let builder = thread::Builder::new().name("srv-main".to_owned());
         let join_handle = builder
@@ -1499,23 +1493,19 @@ impl Controller {
                     campaign,
                 };
                 tx.send(()).unwrap();
-                inner.main_loop(event_rx, connection)
+                inner.main_loop(event_rx)
             })
             .unwrap();
 
         let _ = rx.recv().unwrap();
         ControllerHandle {
             url: None,
-            connection: connection2,
+            connection,
             local: Some((event_tx2, join_handle)),
         }
     }
 
-    fn main_loop(
-        &mut self,
-        receiver: Receiver<ControlEvent>,
-        connection: Arc<consensus::Connection>,
-    ) {
+    fn main_loop(&mut self, receiver: Receiver<ControlEvent>) {
         for event in receiver {
             match event {
                 ControlEvent::ControllerMessage(msg) => if let Some(ref mut inner) = self.inner {
@@ -1523,12 +1513,16 @@ impl Controller {
                 },
                 ControlEvent::ExternalGet(path, body, reply_tx) => {
                     if let Some(ref mut inner) = self.inner {
-                        reply_tx.send(inner.external_get(path, body)).unwrap()
+                        reply_tx.send(Ok(inner.external_get(path, body))).unwrap()
+                    } else {
+                        reply_tx.send(Err(StatusCode::NotFound)).unwrap();
                     }
                 }
                 ControlEvent::ExternalPost(path, body, reply_tx) => {
                     if let Some(ref mut inner) = self.inner {
-                        reply_tx.send(inner.external_post(path, body)).unwrap()
+                        reply_tx.send(Ok(inner.external_post(path, body))).unwrap()
+                    } else {
+                        reply_tx.send(Err(StatusCode::NotFound)).unwrap();
                     }
                 }
                 ControlEvent::WonLeaderElection(new_epoch) => {
@@ -1548,9 +1542,14 @@ impl Controller {
     }
 
     /// Listen for messages from clients.
-    fn listen_external(event_tx: Sender<ControlEvent>, addr: SocketAddr) -> ServingThread {
-        use rustful::{Context, Handler, HttpError, Response, Server, TreeRouter};
+    fn listen_external(
+        event_tx: Sender<ControlEvent>,
+        addr: SocketAddr,
+        connection: Arc<consensus::Connection>,
+    ) -> ServingThread {
+        use rustful::{Context, Handler, HttpError, Response, Server, StatusCode, TreeRouter};
         use rustful::header::ContentType;
+        let connection2 = connection.clone();
         let handlers = insert_routes!{
             TreeRouter::new() => {
                 "graph.html" => Get: Box::new(move |ctx: Context, mut res: Response| {
@@ -1573,42 +1572,53 @@ impl Controller {
                     res.headers_mut().set(ContentType::plaintext());
                     res.send(include_str!("js/worker.js"));
                 }) as Box<Handler>,
+                "zookeeper/:path" => Get: Box::new(move |mut ctx: Context, mut res: Response| {
+                    // TODO: This only catches paths that are directly below the root (ie don't
+                    // contain a slash). Ideally only paths below zookeeper/ should be handled by
+                    // this function.
+                    let path = ctx.variables.get("path").unwrap().to_string();
+                    match connection.read_nonblocking(&format!("/{}", &path)) {
+                        Some(data) => res.send(data),
+                        None => {
+                            res.set_status(StatusCode::NotFound);
+                            res.send(format!("Node does not exist: {}", path));
+                        }
+                    }
+                }) as Box<Handler>,
                 ":path" => Post: Box::new(move |mut ctx: Context, mut res: Response| {
                     let mut body = String::new();
                     ctx.body.read_to_string(&mut body);
-                    loop {
-                        let body = body.clone();
-                        let (tx, rx) = mpsc::channel();
-                        let path = ctx.variables.get("path").unwrap().to_string();
-                        let etx = ctx.global.get::<Arc<Mutex<Sender<ControlEvent>>>>().unwrap();
-                        {
-                            let event_tx = etx.lock().unwrap();
-                            event_tx.send(ControlEvent::ExternalPost(path, body, tx)).unwrap();
+                    let (tx, rx) = mpsc::channel();
+                    let path = ctx.variables.get("path").unwrap().to_string();
+                    let etx = ctx.global.get::<Arc<Mutex<Sender<ControlEvent>>>>().unwrap();
+                    {
+                        let event_tx = etx.lock().unwrap();
+                        event_tx.send(ControlEvent::ExternalPost(path, body, tx)).unwrap();
+                    }
+                    match rx.recv().unwrap() {
+                        Ok(reply) => res.send(reply),
+                        Err(status_code) => {
+                            res.set_status(status_code);
+                            res.send("");
                         }
-                        if let Ok(reply) = rx.recv() {
-                            res.send(reply);
-                            break;
-                        }
-                        thread::sleep(Duration::from_millis(100));
                     }
                 }) as Box<Handler>,
                 ":path" => Get: Box::new(move |mut ctx: Context, mut res: Response| {
                     let mut body = String::new();
                     ctx.body.read_to_string(&mut body);
-                    loop {
-                        let body = body.clone();
-                        let (tx, rx) = mpsc::channel();
-                        let path = ctx.variables.get("path").unwrap().to_string();
-                        let etx = ctx.global.get::<Arc<Mutex<Sender<ControlEvent>>>>().unwrap();
-                        {
-                            let event_tx = etx.lock().unwrap();
-                            event_tx.send(ControlEvent::ExternalGet(path, body, tx)).unwrap();
+                    let (tx, rx) = mpsc::channel();
+                    let path = ctx.variables.get("path").unwrap().to_string();
+                    let etx = ctx.global.get::<Arc<Mutex<Sender<ControlEvent>>>>().unwrap();
+                    {
+                        let event_tx = etx.lock().unwrap();
+                        event_tx.send(ControlEvent::ExternalGet(path, body, tx)).unwrap();
+                    }
+                    match rx.recv().unwrap() {
+                        Ok(reply) => res.send(reply),
+                        Err(status_code) => {
+                            res.set_status(status_code);
+                            res.send("");
                         }
-                        if let Ok(reply) = rx.recv() {
-                            res.send(reply);
-                            break;
-                        }
-                        thread::sleep(Duration::from_millis(100));
                     }
                 }) as Box<Handler>,
             }
@@ -1626,7 +1636,7 @@ impl Controller {
 
         if let Err(HttpError::Io(ref e)) = listen {
             if e.kind() == ErrorKind::AddrInUse && addr.port() != 0 {
-                return Self::listen_external(event_tx, SocketAddr::new(addr.ip(), 0));
+                return Self::listen_external(event_tx, SocketAddr::new(addr.ip(), 0), connection2);
             }
         }
         let listen = listen.unwrap();
