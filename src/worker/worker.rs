@@ -470,7 +470,7 @@ impl Worker {
                         } else {
                             // NOTE: this *shouldn't* be possible. it means we're notified about a
                             // token that does not exist. however, in certain cases, it seems like
-                            // mio noneless wakes us up right after we deregister a token, so we
+                            // mio nonetheless wakes us up right after we deregister a token, so we
                             // need to not fail. we should *not* re-arm any fd though.
                             // unreachable!();
                         }
