@@ -1,7 +1,9 @@
 use channel::poll::{PollEvent, PollingLoop, ProcessResult, RpcPollEvent, RpcPollingLoop};
 use channel::tcp::TcpSender;
 use channel;
+use consensus::{self, Epoch};
 use dataflow::prelude::*;
+use dataflow::checktable::service::CheckTableServer;
 use dataflow::{backlog, checktable, node, payload, DomainConfig, PersistenceParameters, Readers};
 use dataflow::ops::base::Base;
 use dataflow::statistics::GraphStats;
@@ -9,12 +11,13 @@ use worker::Worker;
 
 use std::collections::{BTreeMap, HashMap, HashSet};
 use std::error::Error;
-use std::io::{Read, Write};
+use std::io::{self, ErrorKind, Read, Write};
 use std::net::{IpAddr, SocketAddr};
-use std::time::{Duration, Instant};
+use std::thread::{self, JoinHandle};
+use std::time::{self, Duration, Instant};
 use std::sync::{Arc, Barrier, Mutex};
 use std::sync::mpsc::{self, Receiver, Sender};
-use std::{fmt, io, thread, time};
+use std::fmt;
 
 use futures::{Future, Stream};
 use hyper::Client;
@@ -77,13 +80,6 @@ impl WorkerStatus {
     }
 }
 
-
-enum ControlEvent {
-    WorkerCoordination(CoordinationMessage),
-    ExternalGet(String, String, Sender<String>),
-    ExternalPost(String, String, Sender<String>),
-}
-
 /// Used to construct a controller.
 pub struct ControllerBuilder {
     sharding_enabled: bool,
@@ -93,9 +89,7 @@ pub struct ControllerBuilder {
     listen_addr: IpAddr,
     heartbeat_every: Duration,
     healthcheck_every: Duration,
-    nworkers: usize,
-    internal_port: u16,
-    external_port: u16,
+    checktable_addr: Option<SocketAddr>,
     log: slog::Logger,
 }
 impl Default for ControllerBuilder {
@@ -113,9 +107,7 @@ impl Default for ControllerBuilder {
             listen_addr: "127.0.0.1".parse().unwrap(),
             heartbeat_every: Duration::from_secs(1),
             healthcheck_every: Duration::from_secs(10),
-            internal_port: if cfg!(test) { 0 } else { 8000 },
-            external_port: if cfg!(test) { 0 } else { 9000 },
-            nworkers: 0,
+            checktable_addr: None,
             log,
         }
     }
@@ -156,14 +148,14 @@ impl ControllerBuilder {
         self.sharding_enabled = false;
     }
 
-    /// Set how many workers the controller should wait for before starting. More workers can join
-    /// later, but they won't be assigned any of the initial domains.
-    pub fn set_nworkers(&mut self, workers: usize) {
-        self.nworkers = workers;
+    /// Set the address of the checktable
+    pub fn set_checktable_addr(&mut self, addr: SocketAddr) {
+        self.checktable_addr = Some(addr);
     }
 
     #[cfg(test)]
-    pub fn build_inner(self) -> ControllerInner {
+    pub fn build_inner(mut self) -> ControllerInner {
+        self.checktable_addr = Some(CheckTableServer::start("127.0.0.1:0".parse().unwrap()));
         ControllerInner::from_builder(self)
     }
 
@@ -172,33 +164,13 @@ impl ControllerBuilder {
         self.log = log;
     }
 
-    /// Build a controller, and return a Blender to provide access to it.
-    pub fn build(self) -> Blender {
-        // TODO(fintelia): Don't hard code addresses in this function.
-        let internal_addr = SocketAddr::new("127.0.0.1".parse().unwrap(), self.internal_port);
-        let external_addr = SocketAddr::new("127.0.0.1".parse().unwrap(), self.external_port);
-        let nworkers = self.nworkers;
+    /// Build a controller, and return a ControllerHandle to provide access to it.
+    pub fn build(self) -> ControllerHandle {
+        unreachable!();
 
-        let (tx, rx) = mpsc::channel();
-
-        let addr = ControllerInner::listen_external(tx.clone(), external_addr);
-        ControllerInner::listen_internal(tx, internal_addr);
-
-        let (worker_ready_tx, worker_ready_rx) = mpsc::channel();
-
-        let builder = thread::Builder::new().name("ctrl-inner".to_owned());
-        builder.spawn(move || {
-            ControllerInner::from_builder(self).main_loop(rx, worker_ready_tx, nworkers);
-        });
-
-        // Wait for enough workers to join.
-        if nworkers > 0 {
-            let _ = worker_ready_rx.recv();
-        }
-
-        Blender {
-            url: format!("http://{}", addr),
-        }
+        // ControllerHandle {
+        //     url: format!("http://{}", addr),
+        // }
     }
 }
 
@@ -249,161 +221,51 @@ pub struct ControllerInner {
 }
 
 impl ControllerInner {
-    fn main_loop(
-        mut self,
-        receiver: mpsc::Receiver<ControlEvent>,
-        worker_ready_tx: mpsc::Sender<()>,
-        nworkers: usize,
-    ) {
-        let mut workers_arrived = false;
-        for event in receiver {
-            match event {
-                ControlEvent::WorkerCoordination(msg) => {
-                    trace!(self.log, "Received {:?}", msg);
-                    let process = match msg.payload {
-                        CoordinationPayload::Register {
-                            ref addr,
-                            ref read_listen_addr,
-                        } => self.handle_register(&msg, addr, read_listen_addr.clone()),
-                        CoordinationPayload::Heartbeat => self.handle_heartbeat(&msg),
-                        CoordinationPayload::DomainBooted(ref domain, ref addr) => Ok(()),
-                        _ => unimplemented!(),
-                    };
-                    match process {
-                        Ok(_) => (),
-                        Err(e) => error!(self.log, "failed to handle message {:?}: {:?}", msg, e),
-                    }
+    pub fn coordination_message(&mut self, msg: CoordinationMessage) {
+        trace!(self.log, "Received {:?}", msg);
+        let process = match msg.payload {
+            CoordinationPayload::Register {
+                ref addr,
+                ref read_listen_addr,
+            } => self.handle_register(&msg, addr, read_listen_addr.clone()),
+            CoordinationPayload::Heartbeat => self.handle_heartbeat(&msg),
+            CoordinationPayload::DomainBooted(ref domain, ref addr) => Ok(()),
+            _ => unimplemented!(),
+        };
+        match process {
+            Ok(_) => (),
+            Err(e) => error!(self.log, "failed to handle message {:?}: {:?}", msg, e),
+        }
 
-                    self.check_worker_liveness();
+        self.check_worker_liveness();
+    }
 
-                    if !workers_arrived && self.workers.len() == nworkers {
-                        workers_arrived = true;
-                        worker_ready_tx.send(());
-                    }
-                }
-                ControlEvent::ExternalGet(path, body, reply_tx) => {
-                    reply_tx
-                        .send(match path.as_ref() {
-                            "graph" => self.graphviz(),
-                            _ => "NOT FOUND".to_owned(),
-                        })
-                        .unwrap();
-                }
-                ControlEvent::ExternalPost(path, body, reply_tx) => {
-                    use serde_json as json;
-                    reply_tx
-                        .send(match path.as_ref() {
-                            "inputs" => json::to_string(&self.inputs()).unwrap(),
-                            "outputs" => json::to_string(&self.outputs()).unwrap(),
-                            "recover" => json::to_string(&self.recover()).unwrap(),
-                            "graphviz" => json::to_string(&self.graphviz()).unwrap(),
-                            "get_statistics" => json::to_string(&self.get_statistics()).unwrap(),
-                            "mutator_builder" => json::to_string(
-                                &self.mutator_builder(json::from_str(&body).unwrap()),
-                            ).unwrap(),
-                            "getter_builder" => json::to_string(
-                                &self.getter_builder(json::from_str(&body).unwrap()),
-                            ).unwrap(),
-                            "install_recipe" => json::to_string(
-                                &self.install_recipe(json::from_str(&body).unwrap()),
-                            ).unwrap(),
-                            _ => "NOT FOUND".to_owned(),
-                        })
-                        .unwrap();
-                }
-            }
+    pub fn external_get(&mut self, path: String, body: String) -> String {
+        match path.as_ref() {
+            "graph" => self.graphviz(),
+            _ => "NOT FOUND".to_owned(),
         }
     }
 
-    /// Listen for messages from clients.
-    fn listen_external(event_tx: Sender<ControlEvent>, addr: SocketAddr) -> SocketAddr {
-        use rustful::{Context, Handler, Response, Server, TreeRouter};
-        use rustful::header::ContentType;
-        let handlers = insert_routes!{
-            TreeRouter::new() => {
-                "graph.html" => Get: Box::new(move |ctx: Context, mut res: Response| {
-                    res.headers_mut().set(ContentType::html());
-                    res.send(include_str!("graph.html"));
-                }) as Box<Handler>,
-                "graph.html" => Get: Box::new(move |_ctx: Context, mut res: Response| {
-                    res.headers_mut().set(ContentType::html());
-                    res.send(include_str!("graph.html"));
-                }) as Box<Handler>,
-                "js/dot-checker.js" => Get: Box::new(move |_ctx: Context, mut res: Response| {
-                    res.headers_mut().set(ContentType::plaintext());
-                    res.send(include_str!("js/dot-checker.js"));
-                }) as Box<Handler>,
-                "js/layout-worker.js" => Get: Box::new(move |_ctx: Context, mut res: Response| {
-                    res.headers_mut().set(ContentType::plaintext());
-                    res.send(include_str!("js/layout-worker.js"));
-                }) as Box<Handler>,
-                "js/renderer.js" => Get: Box::new(move |_ctx: Context, mut res: Response| {
-                    res.headers_mut().set(ContentType::plaintext());
-                    res.send(include_str!("js/renderer.js"));
-                }) as Box<Handler>,
-                "js/worker.js" => Get: Box::new(move |_ctx: Context, mut res: Response| {
-                    res.headers_mut().set(ContentType::plaintext());
-                    res.send(include_str!("js/worker.js"));
-                }) as Box<Handler>,
-                ":path" => Post: Box::new(move |mut ctx: Context, mut res: Response| {
-                    let (tx, rx) = mpsc::channel();
-                    let path = ctx.variables.get("path").unwrap().to_string();
-                    let mut body = String::new();
-                    ctx.body.read_to_string(&mut body);
-                    let event_tx = ctx.global.get::<Arc<Mutex<Sender<ControlEvent>>>>().unwrap();
-                    {
-                        let event_tx = event_tx.lock().unwrap();
-                        event_tx.send(ControlEvent::ExternalPost(path, body, tx)).unwrap();
-                    }
-                    res.send(rx.recv().unwrap());
-                }) as Box<Handler>,
-                ":path" => Get: Box::new(move |mut ctx: Context, mut res: Response| {
-                    let (tx, rx) = mpsc::channel();
-                    let path = ctx.variables.get("path").unwrap().to_string();
-                    let mut body = String::new();
-                    ctx.body.read_to_string(&mut body);
-                    let event_tx = ctx.global.get::<Arc<Mutex<Sender<ControlEvent>>>>().unwrap();
-                    {
-                        let event_tx = event_tx.lock().unwrap();
-                        event_tx.send(ControlEvent::ExternalGet(path, body, tx)).unwrap();
-                    }
-                    res.send(rx.recv().unwrap());
-                }) as Box<Handler>,
+    pub fn external_post(&mut self, path: String, body: String) -> String {
+        use serde_json as json;
+        match path.as_ref() {
+            "inputs" => json::to_string(&self.inputs()).unwrap(),
+            "outputs" => json::to_string(&self.outputs()).unwrap(),
+            "recover" => json::to_string(&self.recover()).unwrap(),
+            "graphviz" => json::to_string(&self.graphviz()).unwrap(),
+            "get_statistics" => json::to_string(&self.get_statistics()).unwrap(),
+            "mutator_builder" => {
+                json::to_string(&self.mutator_builder(json::from_str(&body).unwrap())).unwrap()
             }
-        };
-
-        let listen = Server {
-            handlers,
-            host: addr.into(),
-            server: "netsoup".to_owned(),
-            threads: Some(1),
-            content_type: "application/json".parse().unwrap(),
-            global: Box::new(Arc::new(Mutex::new(event_tx))).into(),
-            ..Server::default()
-        }.run()
-            .unwrap();
-
-        // Bit of a dance to return socket while keeping the server running in another thread.
-        let socket = listen.socket.clone();
-        let builder = thread::Builder::new().name("srv-ext".to_owned());
-        builder.spawn(move || drop(listen));
-        socket
-    }
-
-    /// Listen for messages from workers.
-    fn listen_internal(event_tx: Sender<ControlEvent>, addr: SocketAddr) {
-        let builder = thread::Builder::new().name("srv-int".to_owned());
-        builder.spawn(move || {
-            let mut pl: PollingLoop<CoordinationMessage> = PollingLoop::new(addr);
-            pl.run_polling_loop(|e| {
-                if let PollEvent::Process(msg) = e {
-                    if !event_tx.send(ControlEvent::WorkerCoordination(msg)).is_ok() {
-                        return ProcessResult::StopPolling;
-                    }
-                }
-                ProcessResult::KeepPolling
-            });
-        });
+            "getter_builder" => {
+                json::to_string(&self.getter_builder(json::from_str(&body).unwrap())).unwrap()
+            }
+            "install_recipe" => {
+                json::to_string(&self.install_recipe(json::from_str(&body).unwrap())).unwrap()
+            }
+            _ => "NOT FOUND".to_owned(),
+        }
     }
 
     fn handle_register(
@@ -465,14 +327,15 @@ impl ControllerInner {
             true,
         ));
 
-        let addr = SocketAddr::new(builder.listen_addr.clone(), 0);
-        let checktable_addr = checktable::service::CheckTableServer::start(addr.clone());
-        let checktable =
-            checktable::CheckTableClient::connect(checktable_addr, client::Options::default())
-                .unwrap();
+        let checktable_addr = builder.checktable_addr.unwrap();
+        let checktable = checktable::CheckTableClient::connect(
+            checktable_addr.clone(),
+            client::Options::default(),
+        ).unwrap();
 
         let readers: Readers = Arc::default();
         let readers_clone = readers.clone();
+        let addr = SocketAddr::new(builder.listen_addr.clone(), 0);
         let read_polling_loop = RpcPollingLoop::new(addr.clone());
         let read_listen_addr = read_polling_loop.get_listener_addr().unwrap();
         let thread_builder = thread::Builder::new().name("wrkr-reads".to_owned());
@@ -1457,11 +1320,12 @@ impl Drop for ControllerInner {
     }
 }
 
-/// `Blender` is a handle to a Controller.
-pub struct Blender {
+/// `ControllerHandle` is a handle to a Controller.
+pub struct ControllerHandle {
     url: String,
+    local: Option<(Sender<ControlEvent>, JoinHandle<()>)>,
 }
-impl Blender {
+impl ControllerHandle {
     fn rpc<Q: Serialize, R: DeserializeOwned>(
         &self,
         path: &str,
@@ -1550,6 +1414,256 @@ impl Blender {
     /// Set the `Logger` to use for internal log messages.
     pub fn log_with(&mut self, _: slog::Logger) {}
 }
+impl Drop for ControllerHandle {
+    fn drop(&mut self) {
+        if let Some((sender, join_handle)) = self.local.take() {
+            let _ = sender.send(ControlEvent::Shutdown);
+            join_handle.join();
+        }
+    }
+}
+
+pub struct ServingThread {
+    addr: SocketAddr,
+    join_handle: JoinHandle<()>,
+}
+
+enum ControlEvent {
+    ControllerMessage(CoordinationMessage),
+    ExternalGet(String, String, Sender<String>),
+    ExternalPost(String, String, Sender<String>),
+    WonLeaderElection(Epoch),
+    LostLeadership(Epoch),
+    Shutdown,
+}
+
+/// Runs the soup instance.
+pub struct Controller {
+    current_epoch: Option<Epoch>,
+    inner: Option<ControllerInner>,
+
+    internal: ServingThread,
+    external: ServingThread,
+    checktable: SocketAddr,
+    campaign: JoinHandle<()>,
+}
+
+impl Controller {
+    /// Start up a new `Controller` and return a handle to it. Dropping the handle will stop the
+    /// controller.
+    pub fn start(listen_address: IpAddr, connection: consensus::Connection) -> ControllerHandle {
+        let (event_tx, event_rx) = mpsc::channel();
+        let internal = Self::listen_internal(event_tx.clone(), SocketAddr::new(listen_address, 0));
+        let checktable = CheckTableServer::start(SocketAddr::new(listen_address, 0));
+        let campaign = Self::campaign(event_tx.clone(), connection);
+
+        let external =
+            Self::listen_external(event_tx.clone(), SocketAddr::new(listen_address, 9000));
+
+        let event_tx2 = event_tx.clone();
+        let url = format!("http://{}", external.addr);
+
+        let (tx, rx) = mpsc::channel();
+        let builder = thread::Builder::new().name("srv-main".to_owned());
+        let join_handle = builder
+            .spawn(move || {
+                let mut inner = Self {
+                    current_epoch: None,
+                    inner: None,
+                    internal,
+                    external,
+                    checktable,
+                    campaign,
+                };
+                tx.send(()).unwrap();
+                inner.main_loop(event_rx)
+            })
+            .unwrap();
+
+        let _ = rx.recv().unwrap();
+        ControllerHandle {
+            url,
+            local: Some((event_tx2, join_handle)),
+        }
+    }
+
+    fn main_loop(&mut self, receiver: Receiver<ControlEvent>) {
+        for event in receiver {
+            match event {
+                ControlEvent::ControllerMessage(msg) => if let Some(ref mut inner) = self.inner {
+                    inner.coordination_message(msg)
+                },
+                ControlEvent::ExternalGet(path, body, reply_tx) => {
+                    if let Some(ref mut inner) = self.inner {
+                        reply_tx.send(inner.external_get(path, body)).unwrap()
+                    }
+                }
+                ControlEvent::ExternalPost(path, body, reply_tx) => {
+                    if let Some(ref mut inner) = self.inner {
+                        reply_tx.send(inner.external_post(path, body)).unwrap()
+                    }
+                }
+                ControlEvent::WonLeaderElection(new_epoch) => {
+                    self.current_epoch = Some(new_epoch);
+
+                    let mut builder = ControllerBuilder::default();
+                    builder.set_checktable_addr(self.checktable);
+                    self.inner = Some(ControllerInner::from_builder(builder));
+                }
+                ControlEvent::LostLeadership(new_epoch) => {
+                    self.current_epoch = Some(new_epoch);
+                    self.inner = None;
+                }
+                ControlEvent::Shutdown => return,
+            }
+        }
+    }
+
+    /// Listen for messages from clients.
+    fn listen_external(event_tx: Sender<ControlEvent>, addr: SocketAddr) -> ServingThread {
+        use rustful::{Context, Handler, HttpError, Response, Server, TreeRouter};
+        use rustful::header::ContentType;
+        let handlers = insert_routes!{
+            TreeRouter::new() => {
+                "graph.html" => Get: Box::new(move |ctx: Context, mut res: Response| {
+                    res.headers_mut().set(ContentType::html());
+                    res.send(include_str!("graph.html"));
+                }) as Box<Handler>,
+                "js/dot-checker.js" => Get: Box::new(move |_ctx: Context, mut res: Response| {
+                    res.headers_mut().set(ContentType::plaintext());
+                    res.send(include_str!("js/dot-checker.js"));
+                }) as Box<Handler>,
+                "js/layout-worker.js" => Get: Box::new(move |_ctx: Context, mut res: Response| {
+                    res.headers_mut().set(ContentType::plaintext());
+                    res.send(include_str!("js/layout-worker.js"));
+                }) as Box<Handler>,
+                "js/renderer.js" => Get: Box::new(move |_ctx: Context, mut res: Response| {
+                    res.headers_mut().set(ContentType::plaintext());
+                    res.send(include_str!("js/renderer.js"));
+                }) as Box<Handler>,
+                "js/worker.js" => Get: Box::new(move |_ctx: Context, mut res: Response| {
+                    res.headers_mut().set(ContentType::plaintext());
+                    res.send(include_str!("js/worker.js"));
+                }) as Box<Handler>,
+                ":path" => Post: Box::new(move |mut ctx: Context, mut res: Response| {
+                    let mut body = String::new();
+                    ctx.body.read_to_string(&mut body);
+                    loop {
+                        let body = body.clone();
+                        let (tx, rx) = mpsc::channel();
+                        let path = ctx.variables.get("path").unwrap().to_string();
+                        let etx = ctx.global.get::<Arc<Mutex<Sender<ControlEvent>>>>().unwrap();
+                        {
+                            let event_tx = etx.lock().unwrap();
+                            event_tx.send(ControlEvent::ExternalPost(path, body, tx)).unwrap();
+                        }
+                        if let Ok(reply) = rx.recv() {
+                            res.send(reply);
+                            break;
+                        }
+                        thread::sleep(Duration::from_millis(100));
+                    }
+                }) as Box<Handler>,
+                ":path" => Get: Box::new(move |mut ctx: Context, mut res: Response| {
+                    let mut body = String::new();
+                    ctx.body.read_to_string(&mut body);
+                    loop {
+                        let body = body.clone();
+                        let (tx, rx) = mpsc::channel();
+                        let path = ctx.variables.get("path").unwrap().to_string();
+                        let etx = ctx.global.get::<Arc<Mutex<Sender<ControlEvent>>>>().unwrap();
+                        {
+                            let event_tx = etx.lock().unwrap();
+                            event_tx.send(ControlEvent::ExternalGet(path, body, tx)).unwrap();
+                        }
+                        if let Ok(reply) = rx.recv() {
+                            res.send(reply);
+                            break;
+                        }
+                        thread::sleep(Duration::from_millis(100));
+                    }
+                }) as Box<Handler>,
+            }
+        };
+
+        let listen = Server {
+            handlers,
+            host: addr.into(),
+            server: "netsoup".to_owned(),
+            threads: Some(1),
+            content_type: "application/json".parse().unwrap(),
+            global: Box::new(Arc::new(Mutex::new(event_tx.clone()))).into(),
+            ..Server::default()
+        }.run();
+
+        if let Err(HttpError::Io(ref e)) = listen {
+            if e.kind() == ErrorKind::AddrInUse && addr.port() != 0 {
+                return Self::listen_external(event_tx, SocketAddr::new(addr.ip(), 0));
+            }
+        }
+        let listen = listen.unwrap();
+
+        // Bit of a dance to return socket while keeping the server running in another thread.
+        let addr = listen.socket.clone();
+        let builder = thread::Builder::new().name("srv-ext".to_owned());
+        let join_handle = builder.spawn(move || drop(listen)).unwrap();
+        ServingThread { addr, join_handle }
+    }
+
+    /// Listen for messages from workers.
+    fn listen_internal(event_tx: Sender<ControlEvent>, addr: SocketAddr) -> ServingThread {
+        let mut pl: PollingLoop<CoordinationMessage> = PollingLoop::new(addr);
+        let addr = pl.get_listener_addr().unwrap();
+        let builder = thread::Builder::new().name("srv-int".to_owned());
+        let join_handle = builder
+            .spawn(move || {
+                pl.run_polling_loop(|e| {
+                    if let PollEvent::Process(msg) = e {
+                        if !event_tx.send(ControlEvent::ControllerMessage(msg)).is_ok() {
+                            return ProcessResult::StopPolling;
+                        }
+                    }
+                    ProcessResult::KeepPolling
+                });
+            })
+            .unwrap();
+
+        ServingThread { addr, join_handle }
+    }
+
+    fn campaign(
+        event_tx: Sender<ControlEvent>,
+        mut connection: consensus::Connection,
+    ) -> JoinHandle<()> {
+        let builder = thread::Builder::new().name("srv-zk".to_owned());
+        builder
+            .spawn(move || {
+                loop {
+                    // become leader
+                    let current_epoch = match connection.become_leader(Vec::new()) {
+                        Some(epoch) => epoch,
+                        None => continue,
+                    };
+                    if !event_tx
+                        .send(ControlEvent::WonLeaderElection(current_epoch))
+                        .is_ok()
+                    {
+                        return;
+                    }
+
+                    // watch for overthrow
+                    let new_epoch = connection.await_new_epoch(current_epoch);
+                    if !event_tx
+                        .send(ControlEvent::LostLeadership(new_epoch))
+                        .is_ok()
+                    {
+                        return;
+                    }
+                }
+            })
+            .unwrap()
+    }
+}
 
 #[cfg(test)]
 mod tests {
@@ -1559,22 +1673,20 @@ mod tests {
     #[test]
     fn it_works_default() {
         // Controller gets dropped. It doesn't have Domains, so we don't see any dropped.
-        ControllerBuilder::default().build();
+        let connection = consensus::Connection::new("127.0.0.1:2181/it_works_default");
+        let c = Controller::start("127.0.0.1".parse().unwrap(), connection);
+        thread::sleep(Duration::from_secs(1));
     }
 
     // Controller with a few domains drops them once it leaves the scope.
     #[test]
     fn it_works_blender_with_migration() {
-        // use Recipe;
-
         let r_txt = "CREATE TABLE a (x int, y int, z int);\n
                      CREATE TABLE b (r int, s int);\n";
-        // let mut r = Recipe::from_str(r_txt, None).unwrap();
 
-        let c = ControllerBuilder::default().build();
+        let connection =
+            consensus::Connection::new("127.0.0.1:2181/it_works_blender_with_migration");
+        let c = Controller::start("127.0.0.1".parse().unwrap(), connection);
         c.install_recipe(r_txt.to_owned());
-        // b.migrate(|mig| {
-        //     assert!(r.activate(mig, false).is_ok());
-        // });
     }
 }

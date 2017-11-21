@@ -61,9 +61,9 @@
 //! At a high level, Soup consists of a couple of main components that can generally be understood
 //! in isolation, even though they interact heavily during standard operation.
 //!
-//!  - `flow::Blender`, which "owns" the data flow graph, and provides methods for inspecting it.
-//!    `Blender` is principally used to start a `Migration` that adds new queries to the system, or
-//!    removes old ones.
+//!  - `flow::ControllerHandle`, which "owns" the data flow graph, and provides methods for
+//!    inspecting it.  `ControllerHandle` is principally used to start a `Migration` that adds new
+//!    queries to the system, or removes old ones.
 //!  - `flow::Migration`, which handles all the plumbing needed to hook in new queries into an
 //!    existing Soup graph. This includes spinning up new `Domain`s where appropriate, and to set
 //!    up channels between different domains when the data flow graph has inter-domain
@@ -356,6 +356,7 @@ extern crate tarpc;
 extern crate tokio_core;
 
 extern crate channel;
+extern crate consensus;
 extern crate core;
 extern crate dataflow;
 extern crate mir;
@@ -374,8 +375,8 @@ pub use dataflow::debug::{DebugEvent, DebugEventType};
 pub use dataflow::prelude::DomainIndex;
 pub use dataflow::{DurabilityMode, PersistenceParameters};
 
-pub use controller::{Blender, ControllerBuilder, Mutator, MutatorBuilder, MutatorError, ReadQuery,
-                     ReadReply, RemoteGetter, RemoteGetterBuilder};
+pub use controller::{Controller, ControllerBuilder, ControllerHandle, Mutator, MutatorBuilder, MutatorError,
+                     ReadQuery, ReadReply, RemoteGetter, RemoteGetterBuilder};
 pub use worker::Worker;
 
 /// Just give me a damn terminal logger

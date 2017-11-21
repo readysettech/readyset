@@ -720,7 +720,6 @@ mod tests {
     use nom_sql::Column;
     use dataflow::prelude::*;
     use controller::{ControllerBuilder, Migration};
-    use Blender;
     use super::{SqlIncorporator, ToFlowParts};
     use nom_sql::FunctionExpression;
 

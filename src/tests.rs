@@ -23,8 +23,8 @@ use dataflow::prelude::*;
 use dataflow::{DurabilityMode, PersistenceParameters};
 use controller::ControllerBuilder;
 use coordination::{CoordinationMessage, CoordinationPayload};
-use controller::{Blender, Getter, Migration, Mutator, MutatorBuilder, MutatorError, ReadQuery,
-                 ReadReply, RemoteGetter, RemoteGetterBuilder};
+use controller::{Getter, Migration, Mutator, MutatorBuilder, MutatorError, ReadQuery, ReadReply,
+                 RemoteGetter, RemoteGetterBuilder};
 use controller::recipe::{ActivationResult, Recipe};
 use controller::sql::reuse::ReuseConfigType;
 use controller::sql::{SqlIncorporator, ToFlowParts};

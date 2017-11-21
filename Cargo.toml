@@ -4,7 +4,7 @@ version = "0.1.0"
 authors = ["Jon Gjengset <jon@thesquareplanet.com>"]
 
 [workspace]
-members = ["benchmarks", "channel", "core", "mir"]
+members = ["benchmarks", "consensus", "channel", "core", "mir"]
 
 [features]
 web = ["rustful"]
@@ -54,6 +54,7 @@ nom_sql = { git = "https://github.com/ms705/nom-sql.git", rev = "fe7cdaa360c86bd
 
 # local deps
 channel = { path = "channel" }
+consensus = { path = "consensus" }
 core = { path = "core" }
 dataflow = { path = "dataflow" }
 mir = { path = "mir" }
@@ -93,3 +94,7 @@ name = "basic-recipe"
 [[bin]]
 name = "worker"
 path = "src/worker/main.rs"
+
+[[bin]]
+name = "controller"
+path = "src/controller/main.rs"
