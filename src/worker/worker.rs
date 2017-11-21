@@ -607,7 +607,7 @@ impl Worker {
                         // ensure we haven't sent any packets in past iterations to this replica
                         // that have not yet been processed (and that logically preceede `next`).
                         if context_of_next_origin.sent_to_local.get(&ri)
-                            == context.recvd_from_local.get(&from_ri)
+                            != context.recvd_from_local.get(&from_ri)
                         {
                             // there are, so we can't handle `next` directly after all
                             context_of_next_origin
@@ -619,6 +619,12 @@ impl Worker {
                             break;
                         }
 
+                        // record the fact that we "sent" and "received" this packet.
+                        context_of_next_origin
+                            .sent_to_local
+                            .entry(ri)
+                            .or_insert(0)
+                            .add_assign(1);
                         context
                             .recvd_from_local
                             .entry(from_ri)
