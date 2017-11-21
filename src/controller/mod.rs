@@ -1322,20 +1322,27 @@ impl Drop for ControllerInner {
 
 /// `ControllerHandle` is a handle to a Controller.
 pub struct ControllerHandle {
-    url: String,
+    url: Option<String>,
+    connection: Arc<consensus::Connection>,
     local: Option<(Sender<ControlEvent>, JoinHandle<()>)>,
 }
 impl ControllerHandle {
     fn rpc<Q: Serialize, R: DeserializeOwned>(
-        &self,
+        &mut self,
         path: &str,
         request: &Q,
     ) -> Result<R, Box<Error>> {
         use hyper;
 
+        if self.url.is_none() {
+            let descriptor: ControllerDescriptor =
+                serde_json::from_slice(&self.connection.get_leader().1).unwrap();
+            self.url = Some(format!("http://{}", descriptor.external_addr));
+        }
+
         let mut core = Core::new().unwrap();
         let client = Client::new(&core.handle());
-        let url = format!("{}/{}", self.url, path);
+        let url = format!("{}/{}", self.url.as_ref().unwrap(), path);
 
         let mut r = hyper::Request::new(hyper::Method::Post, url.parse().unwrap());
         r.set_body(serde_json::to_string(request).unwrap());
@@ -1355,7 +1362,7 @@ impl ControllerHandle {
     ///
     /// Input nodes are here all nodes of type `Base`. The addresses returned by this function will
     /// all have been returned as a key in the map from `commit` at some point in the past.
-    pub fn inputs(&self) -> BTreeMap<String, NodeIndex> {
+    pub fn inputs(&mut self) -> BTreeMap<String, NodeIndex> {
         self.rpc("inputs", &()).unwrap()
     }
 
@@ -1363,29 +1370,29 @@ impl ControllerHandle {
     ///
     /// Output nodes here refers to nodes of type `Reader`, which is the nodes created in response
     /// to calling `.maintain` or `.stream` for a node during a migration.
-    pub fn outputs(&self) -> BTreeMap<String, NodeIndex> {
+    pub fn outputs(&mut self) -> BTreeMap<String, NodeIndex> {
         self.rpc("outputs", &()).unwrap()
     }
 
     /// Obtain a `RemoteGetterBuilder` that can be sent to a client and then used to query a given
     /// (already maintained) reader node.
-    pub fn get_getter_builder(&self, node: NodeIndex) -> Option<RemoteGetterBuilder> {
+    pub fn get_getter_builder(&mut self, node: NodeIndex) -> Option<RemoteGetterBuilder> {
         self.rpc("getter_builder", &node).unwrap()
     }
 
     /// Obtain a `RemoteGetter`.
-    pub fn get_getter(&self, node: NodeIndex) -> Option<RemoteGetter> {
+    pub fn get_getter(&mut self, node: NodeIndex) -> Option<RemoteGetter> {
         self.get_getter_builder(node).map(|g| g.build())
     }
 
     /// Obtain a MutatorBuild that can be used to construct a Mutator to perform writes and deletes
     /// from the given base node.
-    pub fn get_mutator_builder(&self, base: NodeIndex) -> Result<MutatorBuilder, Box<Error>> {
+    pub fn get_mutator_builder(&mut self, base: NodeIndex) -> Result<MutatorBuilder, Box<Error>> {
         self.rpc("mutator_builder", &base)
     }
 
     /// Obtain a Mutator
-    pub fn get_mutator(&self, base: NodeIndex) -> Result<Mutator, Box<Error>> {
+    pub fn get_mutator(&mut self, base: NodeIndex) -> Result<Mutator, Box<Error>> {
         self.get_mutator_builder(base)
             .map(|m| m.build("127.0.0.1:0".parse().unwrap()))
     }
@@ -1402,12 +1409,12 @@ impl ControllerHandle {
     }
 
     /// Install a new recipe on the controller.
-    pub fn install_recipe(&self, new_recipe: String) {
+    pub fn install_recipe(&mut self, new_recipe: String) {
         self.rpc("install_recipe", &new_recipe).unwrap()
     }
 
     /// graphviz description of the dataflow graph
-    pub fn graphviz(&self) -> String {
+    pub fn graphviz(&mut self) -> String {
         self.rpc("graphviz", &()).unwrap()
     }
 
@@ -1426,6 +1433,15 @@ impl Drop for ControllerHandle {
 pub struct ServingThread {
     addr: SocketAddr,
     join_handle: JoinHandle<()>,
+}
+
+/// Describes a running controller instance. A serialized version of this struct is stored in
+/// ZooKeeper so that clients can reach the currently active controller.
+#[derive(Serialize, Deserialize)]
+struct ControllerDescriptor {
+    external_addr: SocketAddr,
+    internal_addr: SocketAddr,
+    checktable_addr: SocketAddr,
 }
 
 enum ControlEvent {
@@ -1452,16 +1468,23 @@ impl Controller {
     /// Start up a new `Controller` and return a handle to it. Dropping the handle will stop the
     /// controller.
     pub fn start(listen_address: IpAddr, connection: consensus::Connection) -> ControllerHandle {
+        let connection = Arc::new(connection);
+
         let (event_tx, event_rx) = mpsc::channel();
         let internal = Self::listen_internal(event_tx.clone(), SocketAddr::new(listen_address, 0));
         let checktable = CheckTableServer::start(SocketAddr::new(listen_address, 0));
-        let campaign = Self::campaign(event_tx.clone(), connection);
-
         let external =
             Self::listen_external(event_tx.clone(), SocketAddr::new(listen_address, 9000));
 
+        let descriptor = ControllerDescriptor {
+            external_addr: external.addr,
+            internal_addr: internal.addr,
+            checktable_addr: checktable,
+        };
+        let campaign = Self::campaign(event_tx.clone(), connection.clone(), descriptor);
+
         let event_tx2 = event_tx.clone();
-        let url = format!("http://{}", external.addr);
+        let connection2 = connection.clone();
 
         let (tx, rx) = mpsc::channel();
         let builder = thread::Builder::new().name("srv-main".to_owned());
@@ -1476,18 +1499,23 @@ impl Controller {
                     campaign,
                 };
                 tx.send(()).unwrap();
-                inner.main_loop(event_rx)
+                inner.main_loop(event_rx, connection)
             })
             .unwrap();
 
         let _ = rx.recv().unwrap();
         ControllerHandle {
-            url,
+            url: None,
+            connection: connection2,
             local: Some((event_tx2, join_handle)),
         }
     }
 
-    fn main_loop(&mut self, receiver: Receiver<ControlEvent>) {
+    fn main_loop(
+        &mut self,
+        receiver: Receiver<ControlEvent>,
+        connection: Arc<consensus::Connection>,
+    ) {
         for event in receiver {
             match event {
                 ControlEvent::ControllerMessage(msg) => if let Some(ref mut inner) = self.inner {
@@ -1633,14 +1661,16 @@ impl Controller {
 
     fn campaign(
         event_tx: Sender<ControlEvent>,
-        mut connection: consensus::Connection,
+        mut connection: Arc<consensus::Connection>,
+        descriptor: ControllerDescriptor,
     ) -> JoinHandle<()> {
+        let descriptor = serde_json::to_vec(&descriptor).unwrap();
         let builder = thread::Builder::new().name("srv-zk".to_owned());
         builder
             .spawn(move || {
                 loop {
                     // become leader
-                    let current_epoch = match connection.become_leader(Vec::new()) {
+                    let current_epoch = match connection.become_leader(descriptor.clone()) {
                         Some(epoch) => epoch,
                         None => continue,
                     };
@@ -1686,7 +1716,7 @@ mod tests {
 
         let connection =
             consensus::Connection::new("127.0.0.1:2181/it_works_blender_with_migration");
-        let c = Controller::start("127.0.0.1".parse().unwrap(), connection);
+        let mut c = Controller::start("127.0.0.1".parse().unwrap(), connection);
         c.install_recipe(r_txt.to_owned());
     }
 }

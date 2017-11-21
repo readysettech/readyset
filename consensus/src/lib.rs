@@ -53,7 +53,7 @@ impl Connection {
 
     /// Attempt to become the leader, returning the epoch of that this instance is leader for. If
     /// there is already another leader, return None.
-    pub fn become_leader(&mut self, payload_data: Vec<u8>) -> Option<Epoch> {
+    pub fn become_leader(&self, payload_data: Vec<u8>) -> Option<Epoch> {
         let create = self.zk.create(
             CONTROLLER_KEY,
             payload_data,
@@ -69,7 +69,7 @@ impl Connection {
     }
 
     /// Get the current epoch of the current leader, or return None if there is no leader.
-    pub fn get_epoch(&mut self) -> Option<Epoch> {
+    pub fn get_epoch(&self) -> Option<Epoch> {
         self.zk
             .exists(CONTROLLER_KEY, false)
             .ok()
@@ -77,16 +77,23 @@ impl Connection {
             .map(|stat| Epoch(stat.czxid))
     }
 
-    /// Returns the epoch and payload data for the current leader, or None if there is no leader.
-    pub fn get_leader(&mut self) -> Option<(Epoch, Vec<u8>)> {
-        self.zk
-            .get_data(CONTROLLER_KEY, false)
-            .ok()
-            .map(|(data, stat)| (Epoch(stat.czxid), data))
+    /// Returns the epoch and payload data for the current leader, blocking if there is not
+    /// currently as leader.
+    pub fn get_leader(&self) -> (Epoch, Vec<u8>) {
+        loop {
+            if let Ok((data, stat)) = self.zk.get_data(CONTROLLER_KEY, false) {
+                return (Epoch(stat.czxid), data);
+            }
+
+            let (watcher, rx) = ChannelWatcher::new();
+            if !self.zk.exists_w(CONTROLLER_KEY, watcher).is_ok() {
+                let _ = rx.recv();
+            }
+        }
     }
 
     /// Does a read of the node at the given path, blocking until it exists.
-    pub fn read(&mut self, path: &str) -> Vec<u8> {
+    pub fn read(&self, path: &str) -> Vec<u8> {
         loop {
             if let Ok((data, _)) = self.zk.get_data(path, false) {
                 return data;
@@ -100,13 +107,13 @@ impl Connection {
     }
 
     /// Store the data at the indicated path.
-    pub fn write(&mut self, path: &str, data: Vec<u8>) {
+    pub fn write(&self, path: &str, data: Vec<u8>) {
         self.zk.set_data(path, data, None).unwrap();
     }
 
     /// Wait until it is no longer the epoch indicated in `current_epoch`, and then return the new
     /// epoch.
-    pub fn await_new_epoch(&mut self, current_epoch: Epoch) -> Epoch {
+    pub fn await_new_epoch(&self, current_epoch: Epoch) -> Epoch {
         loop {
             let (watcher, rx) = ChannelWatcher::new();
             match self.zk.exists_w(CONTROLLER_KEY, watcher) {
