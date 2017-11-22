@@ -472,6 +472,53 @@ fn it_recovers_persisted_logs() {
 }
 
 #[test]
+fn mutator_churn() {
+    let mut g = ControllerBuilder::default().build_inner();
+    let (vote, vc) = g.migrate(|mig| {
+        // migrate
+
+        // add vote base table
+        let vote = mig.add_ingredient("vote", &["user", "id"], Base::default());
+
+        // add vote count
+        let vc = mig.add_ingredient(
+            "votecount",
+            &["id", "votes"],
+            Aggregation::COUNT.over(vote, 0, &[1]),
+        );
+
+        mig.maintain_anonymous(vc, 0);
+        (vote, vc)
+    });
+
+    let mut vc_state = g.get_getter(vc).unwrap();
+
+    let ids = 1000;
+    let votes = 7;
+
+    // continuously write to vote with new mutators
+    let user: DataType = 0.into();
+    for _ in 0..votes {
+        for i in 0..ids {
+            g.get_mutator(vote)
+                .put(vec![user.clone(), i.into()])
+                .unwrap();
+        }
+    }
+
+    // allow the system to catch up with the last writes
+    sleep();
+
+    // check that all writes happened the right number of times
+    for i in 0..ids {
+        assert_eq!(
+            vc_state.lookup(&i.into(), true),
+            Ok(vec![vec![i.into(), votes.into()]])
+        );
+    }
+}
+
+#[test]
 fn it_recovers_persisted_logs_w_multiple_nodes() {
     let log_name = LogName::new("it_recovers_persisted_logs_w_multiple_nodes");
     let tables = vec!["A", "B", "C"];
