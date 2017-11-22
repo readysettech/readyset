@@ -123,11 +123,12 @@ impl SqlIncorporator {
         &mut self,
         query: SqlQuery,
         name: Option<String>,
+        is_leaf: bool,
         mig: &mut Migration,
     ) -> Result<QueryFlowParts, String> {
         match name {
-            None => self.nodes_for_query(query, mig),
-            Some(n) => self.nodes_for_named_query(query, n, mig),
+            None => self.nodes_for_query(query, is_leaf, mig),
+            Some(n) => self.nodes_for_named_query(query, n, is_leaf, mig),
         }
     }
 
@@ -388,7 +389,7 @@ impl SqlIncorporator {
             .iter()
             .enumerate()
             .map(|(i, sq)| {
-                self.add_select_query(&format!("{}_csq_{}", query_name, i), &sq.1, mig)
+                self.add_select_query(&format!("{}_csq_{}", query_name, i), &sq.1, false, mig)
                     .1
                     .unwrap()
             })
@@ -415,6 +416,7 @@ impl SqlIncorporator {
         &mut self,
         query_name: &str,
         sq: &SelectStatement,
+        is_leaf: bool,
         mut mig: &mut Migration,
     ) -> (QueryFlowParts, Option<MirQuery>) {
         let (qg, reuse) = self.consider_query_graph(&query_name, mig.universe(), sq);
@@ -430,7 +432,7 @@ impl SqlIncorporator {
                 (qfp, None)
             }
             QueryGraphReuse::ExtendExisting(mqs) => {
-                let qfp = self.extend_existing_query(&query_name, sq, qg, mqs, mig);
+                let qfp = self.extend_existing_query(&query_name, sq, qg, mqs, is_leaf, mig);
                 (qfp, None)
             }
             QueryGraphReuse::ReaderOntoExisting(mn, project_columns, params) => {
@@ -439,7 +441,7 @@ impl SqlIncorporator {
                 (qfp, None)
             }
             QueryGraphReuse::None => {
-                let (qfp, mir) = self.add_query_via_mir(&query_name, sq, qg, mig);
+                let (qfp, mir) = self.add_query_via_mir(&query_name, sq, qg, is_leaf, mig);
                 (qfp, Some(mir))
             }
         }
@@ -450,15 +452,15 @@ impl SqlIncorporator {
         query_name: &str,
         query: &SelectStatement,
         qg: QueryGraph,
+        is_leaf: bool,
         mut mig: &mut Migration,
     ) -> (QueryFlowParts, MirQuery) {
         use mir::visualize::GraphViz;
         let universe = mig.universe();
         // no QG-level reuse possible, so we'll build a new query.
         // first, compute the MIR representation of the SQL query
-        let mut mir =
-            self.mir_converter
-                .named_query_to_mir(query_name, query, &qg, universe.clone());
+        let mut mir = self.mir_converter
+            .named_query_to_mir(query_name, query, &qg, is_leaf, universe.clone());
 
         trace!(self.log, "Unoptimized MIR:\n{}", mir.to_graphviz().unwrap());
 
@@ -510,6 +512,7 @@ impl SqlIncorporator {
         query: &SelectStatement,
         qg: QueryGraph,
         reuse_mirs: Vec<(u64, DataType)>,
+        is_leaf: bool,
         mut mig: &mut Migration,
     ) -> QueryFlowParts {
         use mir::reuse::merge_mir_for_queries;
@@ -518,9 +521,9 @@ impl SqlIncorporator {
 
         // no QG-level reuse possible, so we'll build a new query.
         // first, compute the MIR representation of the SQL query
-        let new_query_mir =
-            self.mir_converter
-                .named_query_to_mir(query_name, query, &qg, universe.clone());
+        let new_query_mir = self.mir_converter
+            .named_query_to_mir(query_name, query, &qg, is_leaf, universe.clone());
+
         // TODO(malte): should we run the MIR-level optimizations here?
         let new_opt_mir = new_query_mir.optimize();
 
@@ -574,6 +577,7 @@ impl SqlIncorporator {
     fn nodes_for_query(
         &mut self,
         q: SqlQuery,
+        is_leaf: bool,
         mig: &mut Migration,
     ) -> Result<QueryFlowParts, String> {
         let name = match q {
@@ -581,7 +585,7 @@ impl SqlIncorporator {
             SqlQuery::Select(_) | SqlQuery::CompoundSelect(_) => format!("q_{}", self.num_queries),
             _ => panic!("only CREATE TABLE and SELECT queries can be added to the graph!"),
         };
-        self.nodes_for_named_query(q, name, mig)
+        self.nodes_for_named_query(q, name, is_leaf, mig)
     }
 
     /// Runs some standard rewrite passes on the query.
@@ -593,6 +597,7 @@ impl SqlIncorporator {
         use controller::sql::passes::negation_removal::NegationRemoval;
         use controller::sql::passes::subqueries::SubQueries;
         use controller::sql::query_utils::ReferredTables;
+
         // need to increment here so that each subquery has a unique name.
         // (subqueries call recursively into `nodes_for_named_query` via `add_parsed_query` below,
         // so we will end up incrementing this for every subquery.
@@ -609,7 +614,7 @@ impl SqlIncorporator {
                 Subquery::InComparison(cond_base) => {
                     let (sq, column) = query_from_condition_base(&cond_base);
 
-                    let qfp = self.add_parsed_query(sq, None, mig)
+                    let qfp = self.add_parsed_query(sq, None, false, mig)
                         .expect("failed to add subquery");
                     *cond_base = field_with_table_name(qfp.name.clone(), column);
                 }
@@ -619,6 +624,7 @@ impl SqlIncorporator {
                             let qfp = self.add_parsed_query(
                                 SqlQuery::Select(ns.clone()),
                                 alias.clone(),
+                                false,
                                 mig,
                             ).expect("failed to add subquery in join");
                             JoinRightSide::Table(Table {
@@ -642,6 +648,8 @@ impl SqlIncorporator {
             // other kinds of queries *do* require their referred tables to exist!
             ref q @ SqlQuery::CompoundSelect(_) |
             ref q @ SqlQuery::Select(_) |
+            ref q @ SqlQuery::Update(_) |
+            ref q @ SqlQuery::Delete(_) |
             ref q @ SqlQuery::Insert(_) => for t in &q.referred_tables() {
                 if !self.view_schemas.contains_key(&t.name) {
                     panic!("query refers to unknown table \"{}\"", t.name);
@@ -662,49 +670,24 @@ impl SqlIncorporator {
         &mut self,
         q: SqlQuery,
         query_name: String,
+        is_leaf: bool,
         mig: &mut Migration,
     ) -> Result<QueryFlowParts, String> {
-        self.num_queries += 1;
+        // self.num_queries += 1;
+
         let q = self.rewrite_query(q, mig);
 
         // TODO(larat): extend existing should handle policy nodes
         // if this is a selection, we compute its `QueryGraph` and consider the existing ones we
         // hold for reuse or extension
         let qfp = match q {
-            SqlQuery::Select(ref sq) => {
-                let (qg, reuse) = self.consider_query_graph(&query_name, mig.universe(), sq);
-                match reuse {
-                    QueryGraphReuse::ExactMatch(mn) => {
-                        let flow_node = mn.borrow().flow_node.as_ref().unwrap().address();
-                        QueryFlowParts {
-                            name: String::from(mn.borrow().name()),
-                            new_nodes: vec![],
-                            reused_nodes: vec![flow_node],
-                            query_leaf: flow_node,
-                        }
-                    }
-                    QueryGraphReuse::ExtendExisting(mqs) => {
-                        self.extend_existing_query(&query_name, sq, qg, mqs, mig)
-                    }
-                    QueryGraphReuse::ReaderOntoExisting(mn, project_columns, params) => {
-                        self.add_leaf_to_existing_query(
-                            &query_name,
-                            &params,
-                            mn,
-                            project_columns,
-                            mig,
-                        )
-                    }
-                    QueryGraphReuse::None => self.add_query_via_mir(&query_name, sq, qg, mig).0,
-                }
-            }
             SqlQuery::CompoundSelect(ref csq) => {
                 // NOTE(malte): We can't currently reuse complete compound select queries, since
                 // our reuse logic operates on `SqlQuery` structures. Their subqueries do get
                 // reused, however.
                 self.add_compound_query(&query_name, csq, mig).unwrap()
             }
-            SqlQuery::Select(ref sq) => self.add_select_query(&query_name, sq, mig).0,
+            SqlQuery::Select(ref sq) => self.add_select_query(&query_name, sq, true, mig).0,
             ref q @ SqlQuery::CreateTable { .. } => self.add_base_via_mir(&query_name, q, mig),
             ref q @ _ => panic!("unhandled query type in recipe: {:?}", q),
         };
@@ -767,7 +750,7 @@ impl<'a> ToFlowParts for &'a str {
 
         // if ok, manufacture a node for the query structure we got
         match parsed_query {
-            Ok(q) => inc.add_parsed_query(q, name, mig),
+            Ok(q) => inc.add_parsed_query(q, name, true, mig),
             Err(e) => Err(String::from(e)),
         }
     }
@@ -1370,7 +1353,7 @@ mod tests {
 
             // leaf view node
             let edge = get_node(&inc, mig, &res.unwrap().name);
-            assert_eq!(edge.fields(), &["name", "literal"]);
+            assert_eq!(edge.fields(), &["name", "1"]);
             assert_eq!(edge.description(), format!("π[1, lit: 1]"));
         });
     }
@@ -1386,13 +1369,20 @@ mod tests {
                     .is_ok()
             );
 
-            let res = inc.add_query("SELECT 2 * users.age FROM users;", None, mig);
+            let res = inc.add_query(
+                "SELECT 2 * users.age, 2 * 10 as twenty FROM users;",
+                None,
+                mig,
+            );
             assert!(res.is_ok());
 
             // leaf view node
             let edge = get_node(&inc, mig, &res.unwrap().name);
-            assert_eq!(edge.fields(), &["arithmetic"]);
-            assert_eq!(edge.description(), format!("π[(lit: 2) * 1]"));
+            assert_eq!(edge.fields(), &["2 * users.age", "twenty"]);
+            assert_eq!(
+                edge.description(),
+                format!("π[(lit: 2) * 1, (lit: 2) * (lit: 10)]")
+            );
         });
     }
 
@@ -1463,12 +1453,12 @@ mod tests {
                 None,
                 mig,
             );
-            println!("{:?}", res);
             assert!(res.is_ok());
 
-            let union_view = get_node(&inc, mig, &format!("{}_union", res.unwrap().name));
+            // the leaf of this query (node above the reader) is a union
+            let union_view = get_node(&inc, mig, &res.unwrap().name);
             assert_eq!(union_view.fields(), &["id", "name"]);
-            assert_eq!(union_view.description(), format!("3:[0, 1] ⋃ 7:[0, 1]"));
+            assert_eq!(union_view.description(), format!("3:[0, 1] ⋃ 6:[0, 1]"));
         });
     }
 }

@@ -30,7 +30,9 @@ pub enum ReplayContext {
         key_col: usize,
         keys: HashSet<Vec<prelude::DataType>>,
     },
-    Full { last: bool },
+    Full {
+        last: bool,
+    },
 }
 
 impl ReplayContext {

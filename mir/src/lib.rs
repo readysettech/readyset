@@ -1,11 +1,11 @@
-#[macro_use]
-extern crate slog;
-
-extern crate nom_sql;
-extern crate regex;
+#![deny(unused_extern_crates)]
 
 extern crate core;
 extern crate dataflow;
+extern crate nom_sql;
+extern crate regex;
+#[macro_use]
+extern crate slog;
 
 use std::rc::Rc;
 use std::cell::RefCell;

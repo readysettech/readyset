@@ -72,7 +72,9 @@ pub enum ReplayPieceContext {
         for_keys: HashSet<Vec<DataType>>,
         ignore: bool,
     },
-    Regular { last: bool },
+    Regular {
+        last: bool,
+    },
 }
 
 #[derive(Clone, Serialize, Deserialize)]
@@ -161,7 +163,10 @@ pub enum Packet {
     },
 
     /// Drops an existing column from a `Base` node.
-    DropBaseColumn { node: LocalNodeIndex, column: usize },
+    DropBaseColumn {
+        node: LocalNodeIndex,
+        column: usize,
+    },
 
     /// Update Egress node.
     UpdateEgress {
@@ -193,7 +198,9 @@ pub enum Packet {
     },
 
     /// Probe for the number of records in the given node's state
-    StateSizeProbe { node: LocalNodeIndex },
+    StateSizeProbe {
+        node: LocalNodeIndex,
+    },
 
     /// Inform domain about a new replay path.
     SetupReplayPath {
@@ -205,10 +212,16 @@ pub enum Packet {
     },
 
     /// Ask domain (nicely) to replay a particular key.
-    RequestPartialReplay { tag: Tag, key: Vec<DataType> },
+    RequestPartialReplay {
+        tag: Tag,
+        key: Vec<DataType>,
+    },
 
     /// Instruct domain to replay the state of a particular node along an existing replay path.
-    StartReplay { tag: Tag, from: LocalNodeIndex },
+    StartReplay {
+        tag: Tag,
+        from: LocalNodeIndex,
+    },
 
     /// Sent to instruct a domain that a particular node should be considered ready to process
     /// updates.
@@ -233,7 +246,10 @@ pub enum Packet {
     ///
     /// This allows a migration to ensure all transactions happen strictly *before* or *after* a
     /// migration in timestamp order.
-    StartMigration { at: i64, prev_ts: i64 },
+    StartMigration {
+        at: i64,
+        prev_ts: i64,
+    },
 
     /// Notify a domain about a completion timestamp for an ongoing migration.
     ///

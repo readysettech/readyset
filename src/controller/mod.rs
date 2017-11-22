@@ -187,7 +187,8 @@ impl ControllerBuilder {
 
         let (worker_ready_tx, worker_ready_rx) = mpsc::channel();
 
-        thread::spawn(move || {
+        let builder = thread::Builder::new().name("ctrl-inner".to_owned());
+        builder.spawn(move || {
             ControllerInner::from_builder(self).main_loop(rx, worker_ready_tx, nworkers);
         });
 
@@ -394,13 +395,15 @@ impl ControllerInner {
 
         // Bit of a dance to return socket while keeping the server running in another thread.
         let socket = listen.socket.clone();
-        thread::spawn(move || drop(listen));
+        let builder = thread::Builder::new().name("srv-ext".to_owned());
+        builder.spawn(move || drop(listen));
         socket
     }
 
     /// Listen for messages from workers.
     fn listen_internal(event_tx: Sender<ControlEvent>, addr: SocketAddr) {
-        thread::spawn(move || {
+        let builder = thread::Builder::new().name("srv-int".to_owned());
+        builder.spawn(move || {
             let mut pl: PollingLoop<CoordinationMessage> = PollingLoop::new(addr);
             pl.run_polling_loop(|e| {
                 if let PollEvent::Process(msg) = e {
@@ -482,7 +485,8 @@ impl ControllerInner {
         let readers_clone = readers.clone();
         let read_polling_loop = RpcPollingLoop::new(addr.clone());
         let read_listen_addr = read_polling_loop.get_listener_addr().unwrap();
-        thread::spawn(move || {
+        let thread_builder = thread::Builder::new().name("wrkr-reads".to_owned());
+        thread_builder.spawn(move || {
             Worker::serve_reads(read_polling_loop, readers_clone)
         });
 
@@ -791,11 +795,9 @@ impl ControllerInner {
         let mut r = Recipe::from_str(&r_txt, Some(self.log.clone())).unwrap();
         let old = self.recipe.clone();
         let mut new = old.replace(r).unwrap();
-        self.migrate(|mig| {
-            match new.activate(mig, false) {
-                Ok(_) => (),
-                Err(e) => panic!("failed to install recipe: {:?}", e),
-            }
+        self.migrate(|mig| match new.activate(mig, false) {
+            Ok(_) => (),
+            Err(e) => panic!("failed to install recipe: {:?}", e),
         });
         self.recipe = new;
     }

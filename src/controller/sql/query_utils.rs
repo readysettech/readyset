@@ -17,6 +17,7 @@ impl ReferredTables for SqlQuery {
                     acc
                 },
             ),
+            _ => unreachable!(),
         }
     }
 }

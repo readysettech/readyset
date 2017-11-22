@@ -313,52 +313,33 @@
 #![feature(plugin, use_extern_macros)]
 #![plugin(tarpc_plugins)]
 #![allow(unused)]
+#![deny(unused_extern_crates)]
 
-#[cfg(debug_assertions)]
-extern crate backtrace;
-
-#[macro_use]
-extern crate slog;
-extern crate slog_term;
-
-extern crate arccstr;
 extern crate arrayvec;
-extern crate evmap;
-extern crate fnv;
+extern crate channel;
+extern crate core;
+extern crate dataflow;
 extern crate futures;
 extern crate hyper;
-extern crate vec_map;
-
-extern crate itertools;
+extern crate mio;
+extern crate mir;
 extern crate nom_sql;
 extern crate petgraph;
-extern crate regex;
-extern crate timekeeper;
-
 #[macro_use]
 #[cfg(feature = "web")]
 extern crate rustful;
-
-extern crate bincode;
-extern crate bufstream;
-
 extern crate serde;
 #[macro_use]
 extern crate serde_derive;
 #[macro_use]
 extern crate serde_json;
-
-extern crate buf_redux;
-extern crate chrono;
-extern crate mio;
+#[macro_use]
+extern crate slog;
+extern crate slog_term;
 #[macro_use]
 extern crate tarpc;
 extern crate tokio_core;
-
-extern crate channel;
-extern crate core;
-extern crate dataflow;
-extern crate mir;
+extern crate vec_map;
 
 mod security;
 mod controller;

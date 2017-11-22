@@ -266,7 +266,7 @@ impl Recipe {
             let qfp = self.inc
                 .as_mut()
                 .unwrap()
-                .add_parsed_query(q, new_name, mig)?;
+                .add_parsed_query(q, new_name, true, mig)?;
 
             // If the user provided us with a query name, use that.
             // If not, use the name internally used by the QFP.
@@ -329,7 +329,7 @@ impl Recipe {
             let qfp = self.inc
                 .as_mut()
                 .unwrap()
-                .add_parsed_query(q, n.clone(), mig)?;
+                .add_parsed_query(q, n.clone(), true, mig)?;
 
             // we currently use a domain per query
             // let d = mig.add_domain();
