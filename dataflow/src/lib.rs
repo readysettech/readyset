@@ -7,6 +7,7 @@
 #![deny(unused_extern_crates)]
 
 extern crate arrayvec;
+#[allow(unused_extern_crates)]
 extern crate backtrace;
 extern crate buf_redux;
 extern crate channel;
