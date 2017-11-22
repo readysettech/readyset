@@ -1437,11 +1437,25 @@ struct ControllerDescriptor {
     checktable_addr: SocketAddr,
 }
 
+#[derive(Serialize, Deserialize)]
+struct ControllerState {
+    epoch: Epoch,
+    recipe: String,
+}
+impl ControllerState {
+    pub fn new(epoch: Epoch) -> Self {
+        Self {
+            epoch,
+            recipe: String::new(),
+        }
+    }
+}
+
 enum ControlEvent {
     ControllerMessage(CoordinationMessage),
     ExternalGet(String, String, Sender<Result<String, StatusCode>>),
     ExternalPost(String, String, Sender<Result<String, StatusCode>>),
-    WonLeaderElection(Epoch),
+    WonLeaderElection(ControllerState),
     LostLeadership(Epoch),
     Shutdown,
 }
@@ -1525,8 +1539,8 @@ impl Controller {
                         reply_tx.send(Err(StatusCode::NotFound)).unwrap();
                     }
                 }
-                ControlEvent::WonLeaderElection(new_epoch) => {
-                    self.current_epoch = Some(new_epoch);
+                ControlEvent::WonLeaderElection(state) => {
+                    self.current_epoch = Some(state.epoch);
 
                     let mut builder = ControllerBuilder::default();
                     builder.set_checktable_addr(self.checktable);
@@ -1684,8 +1698,22 @@ impl Controller {
                         Some(epoch) => epoch,
                         None => continue,
                     };
+                    let state = connection.read_modify_write(
+                        "/state",
+                        |state: Option<ControllerState>| match state {
+                            None => Ok(ControllerState::new(current_epoch)),
+                            Some(ref state) if state.epoch > current_epoch => Err(()),
+                            Some(mut state) => {
+                                state.epoch = current_epoch;
+                                Ok(state)
+                            }
+                        },
+                    );
+                    if state.is_err() {
+                        continue;
+                    }
                     if !event_tx
-                        .send(ControlEvent::WonLeaderElection(current_epoch))
+                        .send(ControlEvent::WonLeaderElection(state.unwrap()))
                         .is_ok()
                     {
                         return;

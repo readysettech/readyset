@@ -1,14 +1,21 @@
+#[macro_use]
+extern crate serde_derive;
+
+extern crate serde;
+extern crate serde_json;
 extern crate zookeeper;
 
 use std::process;
 use std::sync::mpsc::{self, Receiver, Sender};
 use std::time::Duration;
 
+use serde::Serialize;
+use serde::de::DeserializeOwned;
 use zookeeper::{Acl, CreateMode, KeeperState, WatchedEvent, Watcher, ZkError, ZooKeeper};
 
 const CONTROLLER_KEY: &'static str = "/controller";
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
 pub struct Epoch(i64);
 
 struct EventWatcher;
@@ -114,6 +121,53 @@ impl Connection {
     /// Store the data at the indicated path.
     pub fn write(&self, path: &str, data: Vec<u8>) {
         self.zk.set_data(path, data, None).unwrap();
+    }
+
+    /// Repeatedly attempts to do a read modify write operation. Each attempt consists of a read of
+    /// the indicated node, a call to `f` with the data read (or None if the node did not exist),
+    /// and finally a write back to the node if it hasn't changed from when it was originally
+    /// written. The process aborts when a write succeeds or a call to `f` returns `Err`. In either
+    /// case, returns the last value produced by `f`.
+    pub fn read_modify_write<F, P, E>(&self, path: &str, mut f: F) -> Result<P, E>
+    where
+        F: FnMut(Option<P>) -> Result<P, E>,
+        P: Serialize + DeserializeOwned,
+    {
+        loop {
+            match self.zk.get_data(path, false) {
+                Ok((data, stat)) => {
+                    let p = serde_json::from_slice(&data).unwrap();
+                    let result = f(Some(p));
+                    if result.is_err()
+                        || self.zk
+                            .set_data(
+                                path,
+                                serde_json::to_vec(result.as_ref().ok().unwrap()).unwrap(),
+                                Some(stat.version),
+                            )
+                            .is_ok()
+                    {
+                        return result;
+                    }
+                }
+                Err(ZkError::NoNode) => {
+                    let result = f(None);
+                    if result.is_err()
+                        || self.zk
+                            .create(
+                                path,
+                                serde_json::to_vec(result.as_ref().ok().unwrap()).unwrap(),
+                                Acl::open_unsafe().clone(),
+                                CreateMode::Persistent,
+                            )
+                            .is_ok()
+                    {
+                        return result;
+                    }
+                }
+                Err(e) => panic!("{}", e),
+            }
+        }
     }
 
     /// Wait until it is no longer the epoch indicated in `current_epoch`, and then return the new
