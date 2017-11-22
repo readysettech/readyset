@@ -207,16 +207,6 @@ impl DomainHandle {
                         domain.build(logger, readers.clone(), channel_coordinator.clone(), addr);
 
                     let listener = ::mio::net::TcpListener::from_listener(listener, &addr).unwrap();
-                    if local_pool.is_none() {
-                        *local_pool = Some(
-                            ::worker::worker::WorkerPool::new(
-                                2,
-                                log,
-                                checktable_addr,
-                                channel_coordinator.clone(),
-                            ).unwrap(),
-                        );
-                    }
                     local_pool
                         .as_mut()
                         .unwrap()

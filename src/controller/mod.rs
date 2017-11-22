@@ -94,6 +94,7 @@ pub struct ControllerBuilder {
     heartbeat_every: Duration,
     healthcheck_every: Duration,
     nworkers: usize,
+    local_workers: usize,
     internal_port: u16,
     external_port: u16,
     checktable_port: u16,
@@ -118,6 +119,7 @@ impl Default for ControllerBuilder {
             checktable_port: if cfg!(test) { 0 } else { 8500 },
             external_port: if cfg!(test) { 0 } else { 9000 },
             nworkers: 0,
+            local_workers: 0,
             log,
         }
     }
@@ -162,6 +164,11 @@ impl ControllerBuilder {
     /// later, but they won't be assigned any of the initial domains.
     pub fn set_nworkers(&mut self, workers: usize) {
         self.nworkers = workers;
+    }
+
+    /// Set the number of worker threads to spin up in local mode (when nworkers == 0).
+    pub fn set_local_workers(&mut self, workers: usize) {
+        self.local_workers = workers;
     }
 
     #[cfg(test)]
@@ -486,6 +493,21 @@ impl ControllerInner {
             Worker::serve_reads(read_polling_loop, readers_clone)
         });
 
+        let cc = Arc::new(ChannelCoordinator::new());
+        assert!((builder.nworkers == 0) ^ (builder.local_workers == 0));
+        let local_pool = if builder.nworkers == 0 {
+            Some(
+                ::worker::worker::WorkerPool::new(
+                    builder.local_workers,
+                    &builder.log,
+                    checktable_addr,
+                    cc.clone(),
+                ).unwrap(),
+            )
+        } else {
+            None
+        };
+
         ControllerInner {
             ingredients: g,
             source: source,
@@ -503,7 +525,7 @@ impl ControllerInner {
             log: builder.log,
 
             domains: Default::default(),
-            channel_coordinator: Arc::new(ChannelCoordinator::new()),
+            channel_coordinator: cc,
             debug_channel: None,
 
             recipe: Recipe::blank(None),
@@ -516,7 +538,7 @@ impl ControllerInner {
             read_addrs: HashMap::default(),
             workers: HashMap::default(),
 
-            local_pool: None,
+            local_pool,
 
             last_checked_workers: Instant::now(),
         }
