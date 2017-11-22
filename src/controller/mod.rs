@@ -470,12 +470,13 @@ impl ControllerInner {
             true,
         ));
 
-        let addr = SocketAddr::new(builder.listen_addr.clone(), builder.checktable_port);
-        let checktable_addr = checktable::service::CheckTableServer::start(addr.clone());
+        let checktable_addr = SocketAddr::new(builder.listen_addr.clone(), builder.checktable_port);
+        let checktable_addr = checktable::service::CheckTableServer::start(checktable_addr.clone());
         let checktable =
             checktable::CheckTableClient::connect(checktable_addr, client::Options::default())
                 .unwrap();
 
+        let addr = SocketAddr::new(builder.listen_addr.clone(), 0);
         let readers: Readers = Arc::default();
         let readers_clone = readers.clone();
         let read_polling_loop = RpcPollingLoop::new(addr.clone());
