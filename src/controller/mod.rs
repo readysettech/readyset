@@ -119,6 +119,9 @@ impl Default for ControllerBuilder {
             checktable_port: if cfg!(test) { 0 } else { 8500 },
             external_port: if cfg!(test) { 0 } else { 9000 },
             nworkers: 0,
+            #[cfg(test)]
+            local_workers: 2,
+            #[cfg(not(test))]
             local_workers: 0,
             log,
         }
