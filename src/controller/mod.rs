@@ -19,13 +19,14 @@ use std::sync::{Arc, Barrier, Mutex};
 use std::sync::mpsc::{self, Receiver, Sender};
 use std::fmt;
 
-use futures::{Future, Stream};
-use hyper::Client;
+use futures::{self, Future, Stream};
+use hyper::{self, Client, Method, StatusCode};
+use hyper::header::{ContentLength, ContentType};
+use hyper::server::{Http, Request, Response, Service};
 use mio::net::TcpListener;
 use petgraph;
 use petgraph::visit::Bfs;
 use petgraph::graph::NodeIndex;
-use rustful::StatusCode;
 use serde::Serialize;
 use serde::de::DeserializeOwned;
 use serde_json;
@@ -241,32 +242,33 @@ impl ControllerInner {
         self.check_worker_liveness();
     }
 
-    pub fn external_get(&mut self, path: String, body: String) -> String {
-        match path.as_ref() {
-            "graph" => self.graphviz(),
-            _ => "NOT FOUND".to_owned(),
-        }
-    }
-
-    pub fn external_post(&mut self, path: String, body: String) -> String {
+    pub fn external_request(
+        &mut self,
+        method: Method,
+        path: String,
+        body: Vec<u8>,
+    ) -> Result<String, StatusCode> {
         use serde_json as json;
-        match path.as_ref() {
-            "inputs" => json::to_string(&self.inputs()).unwrap(),
-            "outputs" => json::to_string(&self.outputs()).unwrap(),
-            "recover" => json::to_string(&self.recover()).unwrap(),
-            "graphviz" => json::to_string(&self.graphviz()).unwrap(),
-            "get_statistics" => json::to_string(&self.get_statistics()).unwrap(),
-            "mutator_builder" => {
-                json::to_string(&self.mutator_builder(json::from_str(&body).unwrap())).unwrap()
+        use hyper::Method::*;
+
+        Ok(match (method, path.as_ref()) {
+            (Get, "/graph") => self.graphviz(),
+            (Post, "/inputs") => json::to_string(&self.inputs()).unwrap(),
+            (Post, "/outputs") => json::to_string(&self.outputs()).unwrap(),
+            (Post, "/recover") => json::to_string(&self.recover()).unwrap(),
+            (Post, "/graphviz") => json::to_string(&self.graphviz()).unwrap(),
+            (Post, "/get_statistics") => json::to_string(&self.get_statistics()).unwrap(),
+            (Post, "/mutator_builder") => {
+                json::to_string(&self.mutator_builder(json::from_slice(&body).unwrap())).unwrap()
             }
-            "getter_builder" => {
-                json::to_string(&self.getter_builder(json::from_str(&body).unwrap())).unwrap()
+            (Post, "/getter_builder") => {
+                json::to_string(&self.getter_builder(json::from_slice(&body).unwrap())).unwrap()
             }
-            "install_recipe" => {
-                json::to_string(&self.install_recipe(json::from_str(&body).unwrap())).unwrap()
+            (Post, "/install_recipe") => {
+                json::to_string(&self.install_recipe(json::from_slice(&body).unwrap())).unwrap()
             }
-            _ => "NOT FOUND".to_owned(),
-        }
+            _ => return Err(StatusCode::NotFound),
+        })
     }
 
     fn handle_register(
@@ -1329,8 +1331,6 @@ pub struct ControllerHandle {
 }
 impl ControllerHandle {
     fn rpc<Q: Serialize, R: DeserializeOwned>(&mut self, path: &str, request: &Q) -> R {
-        use hyper;
-
         let mut core = Core::new().unwrap();
         let client = Client::new(&core.handle());
         loop {
@@ -1426,6 +1426,7 @@ impl Drop for ControllerHandle {
 pub struct ServingThread {
     addr: SocketAddr,
     join_handle: JoinHandle<()>,
+    stop: Option<Box<FnOnce() + Send>>,
 }
 
 /// Describes a running controller instance. A serialized version of this struct is stored in
@@ -1453,8 +1454,12 @@ impl ControllerState {
 
 enum ControlEvent {
     ControllerMessage(CoordinationMessage),
-    ExternalGet(String, String, Sender<Result<String, StatusCode>>),
-    ExternalPost(String, String, Sender<Result<String, StatusCode>>),
+    ExternalRequest(
+        Method,
+        String,
+        Vec<u8>,
+        futures::sync::oneshot::Sender<Result<String, StatusCode>>,
+    ),
     WonLeaderElection(ControllerState),
     LostLeadership(Epoch),
     Shutdown,
@@ -1525,16 +1530,11 @@ impl Controller {
                 ControlEvent::ControllerMessage(msg) => if let Some(ref mut inner) = self.inner {
                     inner.coordination_message(msg)
                 },
-                ControlEvent::ExternalGet(path, body, reply_tx) => {
+                ControlEvent::ExternalRequest(method, path, body, reply_tx) => {
                     if let Some(ref mut inner) = self.inner {
-                        reply_tx.send(Ok(inner.external_get(path, body))).unwrap()
-                    } else {
-                        reply_tx.send(Err(StatusCode::NotFound)).unwrap();
-                    }
-                }
-                ControlEvent::ExternalPost(path, body, reply_tx) => {
-                    if let Some(ref mut inner) = self.inner {
-                        reply_tx.send(Ok(inner.external_post(path, body))).unwrap()
+                        reply_tx
+                            .send(inner.external_request(method, path, body))
+                            .unwrap()
                     } else {
                         reply_tx.send(Err(StatusCode::NotFound)).unwrap();
                     }
@@ -1555,99 +1555,93 @@ impl Controller {
         }
     }
 
-    /// Listen for messages from clients.
     fn listen_external(
         event_tx: Sender<ControlEvent>,
         addr: SocketAddr,
         connection: Arc<consensus::Connection>,
     ) -> ServingThread {
-        use rustful::{Context, Handler, HttpError, Response, Server, StatusCode, TreeRouter};
-        use rustful::header::ContentType;
-        let connection2 = connection.clone();
-        let handlers = insert_routes!{
-            TreeRouter::new() => {
-                "graph.html" => Get: Box::new(move |ctx: Context, mut res: Response| {
-                    res.headers_mut().set(ContentType::html());
-                    res.send(include_str!("graph.html"));
-                }) as Box<Handler>,
-                "js/layout-worker.js" => Get: Box::new(move |_ctx: Context, mut res: Response| {
-                    res.send("importScripts('https://cdn.rawgit.com/mstefaniuk/graph-viz-d3-js/\
-                              cf2160ee3ca39b843b081d5231d5d51f1a901617/dist/layout-worker.js');");
-                }) as Box<Handler>,
-                "zookeeper/:path" => Get: Box::new(move |mut ctx: Context, mut res: Response| {
-                    // TODO: This only catches paths that are directly below the root (ie don't
-                    // contain a slash). Ideally only paths below zookeeper/ should be handled by
-                    // this function.
-                    let path = ctx.variables.get("path").unwrap().to_string();
-                    match connection.read_nonblocking(&format!("/{}", &path)) {
-                        Some(data) => res.send(data),
-                        None => {
-                            res.set_status(StatusCode::NotFound);
-                            res.send(format!("Node does not exist: {}", path));
-                        }
-                    }
-                }) as Box<Handler>,
-                ":path" => Post: Box::new(move |mut ctx: Context, mut res: Response| {
-                    let mut body = String::new();
-                    ctx.body.read_to_string(&mut body);
-                    let (tx, rx) = mpsc::channel();
-                    let path = ctx.variables.get("path").unwrap().to_string();
-                    let etx = ctx.global.get::<Arc<Mutex<Sender<ControlEvent>>>>().unwrap();
-                    {
-                        let event_tx = etx.lock().unwrap();
-                        event_tx.send(ControlEvent::ExternalPost(path, body, tx)).unwrap();
-                    }
-                    match rx.recv().unwrap() {
-                        Ok(reply) => res.send(reply),
-                        Err(status_code) => {
-                            res.set_status(status_code);
-                            res.send("");
-                        }
-                    }
-                }) as Box<Handler>,
-                ":path" => Get: Box::new(move |mut ctx: Context, mut res: Response| {
-                    let mut body = String::new();
-                    ctx.body.read_to_string(&mut body);
-                    let (tx, rx) = mpsc::channel();
-                    let path = ctx.variables.get("path").unwrap().to_string();
-                    let etx = ctx.global.get::<Arc<Mutex<Sender<ControlEvent>>>>().unwrap();
-                    {
-                        let event_tx = etx.lock().unwrap();
-                        event_tx.send(ControlEvent::ExternalGet(path, body, tx)).unwrap();
-                    }
-                    match rx.recv().unwrap() {
-                        Ok(reply) => res.send(reply),
-                        Err(status_code) => {
-                            res.set_status(status_code);
-                            res.send("");
-                        }
-                    }
-                }) as Box<Handler>,
-            }
-        };
+        struct ExternalServer(Sender<ControlEvent>, Arc<consensus::Connection>);
+        impl Service for ExternalServer {
+            type Request = Request;
+            type Response = Response;
+            type Error = hyper::Error;
+            type Future = Box<Future<Item = Self::Response, Error = Self::Error>>;
 
-        let listen = Server {
-            handlers,
-            host: addr.into(),
-            server: "netsoup".to_owned(),
-            threads: Some(1),
-            content_type: "application/json".parse().unwrap(),
-            global: Box::new(Arc::new(Mutex::new(event_tx.clone()))).into(),
-            ..Server::default()
-        }.run();
-
-        if let Err(HttpError::Io(ref e)) = listen {
-            if e.kind() == ErrorKind::AddrInUse && addr.port() != 0 {
-                return Self::listen_external(event_tx, SocketAddr::new(addr.ip(), 0), connection2);
+            fn call(&self, req: Request) -> Self::Future {
+                let mut res = Response::new();
+                match (req.method(), req.path()) {
+                    (&Method::Get, "/graph.html") => {
+                        res.headers_mut().set(ContentType::html());
+                        res.set_body(include_str!("graph.html"));
+                        Box::new(futures::future::ok(res))
+                    }
+                    (&Method::Get, "/js/layout-worker.js") => {
+                        res.set_body(
+                            "importScripts('https://cdn.rawgit.com/mstefaniuk/graph-viz-d3-js/\
+                             cf2160ee3ca39b843b081d5231d5d51f1a901617/dist/layout-worker.js');",
+                        );
+                        Box::new(futures::future::ok(res))
+                    }
+                    (&Method::Get, path) if path.starts_with("/zookeeper/") => {
+                        match self.1.read_nonblocking(&format!("/{}", &path[11..])) {
+                            Some(data) => {
+                                res.headers_mut().set(ContentType::json());
+                                res.set_body(data);
+                            }
+                            None => res.set_status(StatusCode::NotFound),
+                        }
+                        Box::new(futures::future::ok(res))
+                    }
+                    (method, path) => {
+                        let path = path.to_owned();
+                        let method = method.clone();
+                        let event_tx = self.0.clone();
+                        Box::new(res.body().concat2().and_then(move |body| {
+                            let body: Vec<u8> = body.iter().cloned().collect();
+                            let (tx, rx) = futures::sync::oneshot::channel();
+                            let _ = event_tx
+                                .send(ControlEvent::ExternalRequest(method, path, body, tx));
+                            rx.and_then(|reply| {
+                                let mut res = Response::new();
+                                match reply {
+                                    Ok(reply) => res.set_body(reply),
+                                    Err(status_code) => {
+                                        res.set_status(status_code);
+                                    }
+                                }
+                                Box::new(futures::future::ok(res))
+                            }).or_else(|futures::Canceled| {
+                                    let mut res = Response::new();
+                                    res.set_status(StatusCode::NotFound);
+                                    Box::new(futures::future::ok(res))
+                                })
+                        }))
+                    }
+                }
             }
         }
-        let listen = listen.unwrap();
 
-        // Bit of a dance to return socket while keeping the server running in another thread.
-        let addr = listen.socket.clone();
+        let (tx, rx) = mpsc::channel();
+        let (done_tx, done_rx) = futures::sync::oneshot::channel();
         let builder = thread::Builder::new().name("srv-ext".to_owned());
-        let join_handle = builder.spawn(move || drop(listen)).unwrap();
-        ServingThread { addr, join_handle }
+        let join_handle = builder
+            .spawn(move || {
+                let server = Http::new()
+                    .bind(&addr, move || {
+                        Ok(ExternalServer(event_tx.clone(), connection.clone()))
+                    })
+                    .unwrap();
+                let addr = server.local_addr().unwrap();
+                tx.send(addr).unwrap();
+                server.run_until(done_rx.map_err(|_| ()));
+            })
+            .unwrap();
+
+        ServingThread {
+            addr: rx.recv().unwrap(),
+            join_handle,
+            stop: Some(Box::new(|| drop(done_tx))),
+        }
     }
 
     /// Listen for messages from workers.
@@ -1668,7 +1662,11 @@ impl Controller {
             })
             .unwrap();
 
-        ServingThread { addr, join_handle }
+        ServingThread {
+            addr,
+            join_handle,
+            stop: None,
+        }
     }
 
     fn campaign(

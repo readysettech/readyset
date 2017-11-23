@@ -326,9 +326,6 @@ extern crate mio;
 extern crate mir;
 extern crate nom_sql;
 extern crate petgraph;
-#[macro_use]
-#[cfg(feature = "web")]
-extern crate rustful;
 extern crate serde;
 #[macro_use]
 extern crate serde_derive;
