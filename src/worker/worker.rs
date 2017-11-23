@@ -324,7 +324,7 @@ impl Worker {
             {
                 // unknown socket -- we need to update our cached state
                 refresh_truth(&mut self.shared);
-                debug!(self.log, "worker updated their notion of truth"; "forced" => force_refresh_truth);
+                trace!(self.log, "worker updated their notion of truth"; "forced" => force_refresh_truth);
 
                 // also learn about new replicas while we're at it
                 while let Ok(added) = self.notify.try_recv() {
