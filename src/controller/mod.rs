@@ -325,25 +325,9 @@ impl ControllerInner {
                     res.headers_mut().set(ContentType::html());
                     res.send(include_str!("graph.html"));
                 }) as Box<Handler>,
-                "graph.html" => Get: Box::new(move |_ctx: Context, mut res: Response| {
-                    res.headers_mut().set(ContentType::html());
-                    res.send(include_str!("graph.html"));
-                }) as Box<Handler>,
-                "js/dot-checker.js" => Get: Box::new(move |_ctx: Context, mut res: Response| {
-                    res.headers_mut().set(ContentType::plaintext());
-                    res.send(include_str!("js/dot-checker.js"));
-                }) as Box<Handler>,
                 "js/layout-worker.js" => Get: Box::new(move |_ctx: Context, mut res: Response| {
-                    res.headers_mut().set(ContentType::plaintext());
-                    res.send(include_str!("js/layout-worker.js"));
-                }) as Box<Handler>,
-                "js/renderer.js" => Get: Box::new(move |_ctx: Context, mut res: Response| {
-                    res.headers_mut().set(ContentType::plaintext());
-                    res.send(include_str!("js/renderer.js"));
-                }) as Box<Handler>,
-                "js/worker.js" => Get: Box::new(move |_ctx: Context, mut res: Response| {
-                    res.headers_mut().set(ContentType::plaintext());
-                    res.send(include_str!("js/worker.js"));
+                    res.send("importScripts('https://cdn.rawgit.com/mstefaniuk/graph-viz-d3-js/\
+                              cf2160ee3ca39b843b081d5231d5d51f1a901617/dist/layout-worker.js');");
                 }) as Box<Handler>,
                 ":path" => Post: Box::new(move |mut ctx: Context, mut res: Response| {
                     let (tx, rx) = mpsc::channel();
