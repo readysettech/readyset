@@ -1,20 +1,20 @@
-use channel::poll::{PollEvent, PollingLoop, ProcessResult, RpcPollEvent, RpcPollingLoop};
+use channel::poll::{PollEvent, PollingLoop, ProcessResult, RpcPollingLoop};
 use channel::tcp::TcpSender;
 use channel;
 use dataflow::prelude::*;
-use dataflow::{backlog, checktable, node, payload, DomainConfig, PersistenceParameters, Readers};
+use dataflow::{checktable, node, payload, DomainConfig, PersistenceParameters, Readers};
 use dataflow::ops::base::Base;
 use dataflow::statistics::GraphStats;
 use worker::Worker;
 
 use std::collections::{BTreeMap, HashMap, HashSet};
 use std::error::Error;
-use std::io::{Read, Write};
+use std::io::Read;
 use std::net::{IpAddr, SocketAddr};
 use std::time::{Duration, Instant};
-use std::sync::{Arc, Barrier, Mutex};
-use std::sync::mpsc::{self, Receiver, Sender};
-use std::{fmt, io, thread, time};
+use std::sync::{Arc, Mutex};
+use std::sync::mpsc::{self, Sender};
+use std::{io, thread, time};
 
 use futures::{Future, Stream};
 use hyper::Client;
@@ -187,9 +187,11 @@ impl ControllerBuilder {
         let (worker_ready_tx, worker_ready_rx) = mpsc::channel();
 
         let builder = thread::Builder::new().name("ctrl-inner".to_owned());
-        builder.spawn(move || {
-            ControllerInner::from_builder(self).main_loop(rx, worker_ready_tx, nworkers);
-        });
+        builder
+            .spawn(move || {
+                ControllerInner::from_builder(self).main_loop(rx, worker_ready_tx, nworkers);
+            })
+            .unwrap();
 
         // Wait for enough workers to join.
         if nworkers > 0 {
@@ -266,7 +268,7 @@ impl ControllerInner {
                             ref read_listen_addr,
                         } => self.handle_register(&msg, addr, read_listen_addr.clone()),
                         CoordinationPayload::Heartbeat => self.handle_heartbeat(&msg),
-                        CoordinationPayload::DomainBooted(ref domain, ref addr) => Ok(()),
+                        CoordinationPayload::DomainBooted(ref _domain, ref _addr) => Ok(()),
                         _ => unimplemented!(),
                     };
                     match process {
@@ -278,10 +280,10 @@ impl ControllerInner {
 
                     if !workers_arrived && self.workers.len() == nworkers {
                         workers_arrived = true;
-                        worker_ready_tx.send(());
+                        worker_ready_tx.send(()).unwrap();
                     }
                 }
-                ControlEvent::ExternalGet(path, body, reply_tx) => {
+                ControlEvent::ExternalGet(path, _body, reply_tx) => {
                     reply_tx
                         .send(match path.as_ref() {
                             "graph" => self.graphviz(),
@@ -321,19 +323,19 @@ impl ControllerInner {
         use rustful::header::ContentType;
         let handlers = insert_routes!{
             TreeRouter::new() => {
-                "graph.html" => Get: Box::new(move |ctx: Context, mut res: Response| {
+                "graph.html" => Get: Box::new(move |_ctx: Context, mut res: Response| {
                     res.headers_mut().set(ContentType::html());
                     res.send(include_str!("graph.html"));
                 }) as Box<Handler>,
-                "js/layout-worker.js" => Get: Box::new(move |_ctx: Context, mut res: Response| {
+                "js/layout-worker.js" => Get: Box::new(move |_ctx: Context, res: Response| {
                     res.send("importScripts('https://cdn.rawgit.com/mstefaniuk/graph-viz-d3-js/\
                               cf2160ee3ca39b843b081d5231d5d51f1a901617/dist/layout-worker.js');");
                 }) as Box<Handler>,
-                ":path" => Post: Box::new(move |mut ctx: Context, mut res: Response| {
+                ":path" => Post: Box::new(move |mut ctx: Context, res: Response| {
                     let (tx, rx) = mpsc::channel();
                     let path = ctx.variables.get("path").unwrap().to_string();
                     let mut body = String::new();
-                    ctx.body.read_to_string(&mut body);
+                    ctx.body.read_to_string(&mut body).unwrap();
                     let event_tx = ctx.global.get::<Arc<Mutex<Sender<ControlEvent>>>>().unwrap();
                     {
                         let event_tx = event_tx.lock().unwrap();
@@ -341,11 +343,11 @@ impl ControllerInner {
                     }
                     res.send(rx.recv().unwrap());
                 }) as Box<Handler>,
-                ":path" => Get: Box::new(move |mut ctx: Context, mut res: Response| {
+                ":path" => Get: Box::new(move |mut ctx: Context, res: Response| {
                     let (tx, rx) = mpsc::channel();
                     let path = ctx.variables.get("path").unwrap().to_string();
                     let mut body = String::new();
-                    ctx.body.read_to_string(&mut body);
+                    ctx.body.read_to_string(&mut body).unwrap();
                     let event_tx = ctx.global.get::<Arc<Mutex<Sender<ControlEvent>>>>().unwrap();
                     {
                         let event_tx = event_tx.lock().unwrap();
@@ -370,24 +372,26 @@ impl ControllerInner {
         // Bit of a dance to return socket while keeping the server running in another thread.
         let socket = listen.socket.clone();
         let builder = thread::Builder::new().name("srv-ext".to_owned());
-        builder.spawn(move || drop(listen));
+        builder.spawn(move || drop(listen)).unwrap();
         socket
     }
 
     /// Listen for messages from workers.
     fn listen_internal(event_tx: Sender<ControlEvent>, addr: SocketAddr) {
         let builder = thread::Builder::new().name("srv-int".to_owned());
-        builder.spawn(move || {
-            let mut pl: PollingLoop<CoordinationMessage> = PollingLoop::new(addr);
-            pl.run_polling_loop(|e| {
-                if let PollEvent::Process(msg) = e {
-                    if !event_tx.send(ControlEvent::WorkerCoordination(msg)).is_ok() {
-                        return ProcessResult::StopPolling;
+        builder
+            .spawn(move || {
+                let mut pl: PollingLoop<CoordinationMessage> = PollingLoop::new(addr);
+                pl.run_polling_loop(|e| {
+                    if let PollEvent::Process(msg) = e {
+                        if !event_tx.send(ControlEvent::WorkerCoordination(msg)).is_ok() {
+                            return ProcessResult::StopPolling;
+                        }
                     }
-                }
-                ProcessResult::KeepPolling
-            });
-        });
+                    ProcessResult::KeepPolling
+                });
+            })
+            .unwrap();
     }
 
     fn handle_register(
@@ -460,9 +464,11 @@ impl ControllerInner {
         let read_polling_loop = RpcPollingLoop::new(addr.clone());
         let read_listen_addr = read_polling_loop.get_listener_addr().unwrap();
         let thread_builder = thread::Builder::new().name("wrkr-reads".to_owned());
-        thread_builder.spawn(move || {
-            Worker::serve_reads(read_polling_loop, readers_clone)
-        });
+        thread_builder
+            .spawn(move || {
+                Worker::serve_reads(read_polling_loop, readers_clone)
+            })
+            .unwrap();
 
         ControllerInner {
             ingredients: g,
@@ -500,56 +506,13 @@ impl ControllerInner {
 
     /// Use a debug channel. This function may only be called once because the receiving end it
     /// returned.
+    #[allow(unused)]
     pub fn create_debug_channel(&mut self) -> TcpListener {
         assert!(self.debug_channel.is_none());
         let addr: SocketAddr = "127.0.0.1:0".parse().unwrap();
         let listener = TcpListener::bind(&addr).unwrap();
         self.debug_channel = Some(listener.local_addr().unwrap());
         listener
-    }
-
-    /// Controls the persistence mode, and parameters related to persistence.
-    ///
-    /// Three modes are available:
-    ///
-    ///  1. `DurabilityMode::Permanent`: all writes to base nodes should be written to disk.
-    ///  2. `DurabilityMode::DeleteOnExit`: all writes are written to disk, but the log is
-    ///     deleted once the `Controller` is dropped. Useful for tests.
-    ///  3. `DurabilityMode::MemoryOnly`: no writes to disk, store all writes in memory.
-    ///     Useful for baseline numbers.
-    ///
-    /// `queue_capacity` indicates the number of packets that should be buffered until
-    /// flushing, and `flush_timeout` indicates the length of time to wait before flushing
-    /// anyway.
-    ///
-    /// Must be called before any domains have been created.
-    pub fn with_persistence_options(&mut self, params: PersistenceParameters) {
-        assert_eq!(self.ndomains, 0);
-        self.persistence = params;
-    }
-
-    /// Set the `Logger` to use for internal log messages.
-    ///
-    /// By default, all log messages are discarded.
-    pub fn log_with(&mut self, log: slog::Logger) {
-        self.log = log;
-        self.materializations.set_logger(&self.log);
-    }
-
-    /// Start setting up a new `Migration`.
-    #[deprecated]
-    pub fn start_migration(&mut self) -> Migration {
-        info!(self.log, "starting migration");
-        let miglog = self.log.new(o!());
-        Migration {
-            mainline: self,
-            added: Default::default(),
-            columns: Default::default(),
-            readers: Default::default(),
-
-            start: time::Instant::now(),
-            log: miglog,
-        }
     }
 
     /// Perform a new query schema migration.
@@ -586,6 +549,7 @@ impl ControllerInner {
     }
 
     /// Get a boxed function which can be used to validate tokens.
+    #[allow(unused)]
     pub fn get_validator(&self) -> Box<Fn(&checktable::Token) -> bool> {
         let checktable =
             checktable::CheckTableClient::connect(self.checktable_addr, client::Options::default())
@@ -743,7 +707,7 @@ impl ControllerInner {
     }
 
     pub fn install_recipe(&mut self, r_txt: String) {
-        let mut r = Recipe::from_str(&r_txt, Some(self.log.clone())).unwrap();
+        let r = Recipe::from_str(&r_txt, Some(self.log.clone())).unwrap();
         let old = self.recipe.clone();
         let mut new = old.replace(r).unwrap();
         self.migrate(|mig| match new.activate(mig, false) {
@@ -1061,6 +1025,7 @@ impl<'a> Migration<'a> {
     /// As new updates are processed by the given node, its outputs will be streamed to the
     /// returned channel. Node that this channel is *not* bounded, and thus a receiver that is
     /// slower than the system as a hole will accumulate a large buffer over time.
+    #[allow(unused)]
     pub fn stream(&mut self, n: NodeIndex) -> mpsc::Receiver<Vec<node::StreamUpdate>> {
         self.ensure_reader_for(n, None);
         let (tx, rx) = mpsc::channel();

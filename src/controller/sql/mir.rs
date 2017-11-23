@@ -7,8 +7,8 @@ pub use mir::FlowNode;
 use dataflow::ops::join::JoinType;
 
 use nom_sql::{ArithmeticExpression, Column, ColumnSpecification, CompoundSelectOperator,
-              CompoundSelectStatement, ConditionBase, ConditionExpression, ConditionTree, Literal,
-              Operator, SqlQuery, TableKey};
+              ConditionBase, ConditionExpression, ConditionTree, Literal, Operator, SqlQuery,
+              TableKey};
 use nom_sql::{LimitClause, OrderClause, SelectStatement};
 use controller::sql::query_graph::{JoinRef, OutputColumn, QueryGraph, QueryGraphEdge};
 use controller::sql::query_signature::Signature;
@@ -22,12 +22,12 @@ fn target_columns_from_computed_column(computed_col: &Column) -> &Column {
     use nom_sql::FunctionExpression::*;
 
     match *computed_col.function.as_ref().unwrap().deref() {
-        Avg(ref col, _) |
-        Count(ref col, _) |
-        GroupConcat(ref col, _) |
-        Max(ref col) |
-        Min(ref col) |
-        Sum(ref col, _) => col,
+        Avg(ref col, _)
+        | Count(ref col, _)
+        | GroupConcat(ref col, _)
+        | Max(ref col)
+        | Min(ref col)
+        | Sum(ref col, _) => col,
         CountStar => {
             // see comment re COUNT(*) rewriting in make_aggregation_node
             panic!("COUNT(*) should have been rewritten earlier!")

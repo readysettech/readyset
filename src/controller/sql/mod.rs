@@ -81,11 +81,13 @@ impl SqlIncorporator {
     }
 
     /// Disable node reuse for future migrations.
+    #[allow(unused)]
     pub fn disable_reuse(&mut self) {
         self.reuse_type = ReuseConfigType::NoReuse;
     }
 
     /// Disable node reuse for future migrations.
+    #[allow(unused)]
     pub fn enable_reuse(&mut self, reuse_type: ReuseConfigType) {
         self.reuse_type = reuse_type;
     }
@@ -98,6 +100,7 @@ impl SqlIncorporator {
     ///
     /// The return value is a tuple containing the query name (specified or computing) and a `Vec`
     /// of `NodeIndex`es representing the nodes added to support the query.
+    #[allow(unused)]
     pub fn add_query(
         &mut self,
         query: &str,
@@ -133,6 +136,7 @@ impl SqlIncorporator {
     }
 
     /// Retrieves the flow node associated with a given query's leaf view.
+    #[allow(unused)]
     pub fn get_query_address(&self, name: &str) -> Option<NodeIndex> {
         self.mir_converter.get_leaf(name)
     }
@@ -340,7 +344,7 @@ impl SqlIncorporator {
 
         // TODO(malte): we currently need to remember these for local state, but should figure out
         // a better plan (see below)
-        let fields = mir.leaf
+        let _fields = mir.leaf
             .borrow()
             .columns()
             .into_iter()
@@ -394,7 +398,7 @@ impl SqlIncorporator {
         query_name: &str,
         sq: &SelectStatement,
         is_leaf: bool,
-        mut mig: &mut Migration,
+        mig: &mut Migration,
     ) -> (QueryFlowParts, Option<MirQuery>) {
         let (qg, reuse) = self.consider_query_graph(&query_name, sq);
         match reuse {
@@ -557,7 +561,7 @@ impl SqlIncorporator {
         &mut self,
         q: SqlQuery,
         query_name: String,
-        is_leaf: bool,
+        _is_leaf: bool,
         mig: &mut Migration,
     ) -> Result<QueryFlowParts, String> {
         use nom_sql::{JoinRightSide, Table};
