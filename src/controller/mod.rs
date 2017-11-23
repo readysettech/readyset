@@ -1570,21 +1570,9 @@ impl Controller {
                     res.headers_mut().set(ContentType::html());
                     res.send(include_str!("graph.html"));
                 }) as Box<Handler>,
-                "js/dot-checker.js" => Get: Box::new(move |_ctx: Context, mut res: Response| {
-                    res.headers_mut().set(ContentType::plaintext());
-                    res.send(include_str!("js/dot-checker.js"));
-                }) as Box<Handler>,
                 "js/layout-worker.js" => Get: Box::new(move |_ctx: Context, mut res: Response| {
-                    res.headers_mut().set(ContentType::plaintext());
-                    res.send(include_str!("js/layout-worker.js"));
-                }) as Box<Handler>,
-                "js/renderer.js" => Get: Box::new(move |_ctx: Context, mut res: Response| {
-                    res.headers_mut().set(ContentType::plaintext());
-                    res.send(include_str!("js/renderer.js"));
-                }) as Box<Handler>,
-                "js/worker.js" => Get: Box::new(move |_ctx: Context, mut res: Response| {
-                    res.headers_mut().set(ContentType::plaintext());
-                    res.send(include_str!("js/worker.js"));
+                    res.send("importScripts('https://cdn.rawgit.com/mstefaniuk/graph-viz-d3-js/\
+                              cf2160ee3ca39b843b081d5231d5d51f1a901617/dist/layout-worker.js');");
                 }) as Box<Handler>,
                 "zookeeper/:path" => Get: Box::new(move |mut ctx: Context, mut res: Response| {
                     // TODO: This only catches paths that are directly below the root (ie don't
@@ -1742,7 +1730,10 @@ mod tests {
     fn it_works_default() {
         // Controller gets dropped. It doesn't have Domains, so we don't see any dropped.
         let connection = consensus::Connection::new("127.0.0.1:2181/it_works_default");
-        let c = Controller::start("127.0.0.1".parse().unwrap(), connection);
+        {
+            let c = Controller::start("127.0.0.1".parse().unwrap(), connection);
+            thread::sleep(Duration::from_secs(1));
+        }
         thread::sleep(Duration::from_secs(1));
     }
 

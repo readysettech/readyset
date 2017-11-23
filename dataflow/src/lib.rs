@@ -4,30 +4,28 @@
 #![feature(entry_or_default)]
 #![feature(plugin, use_extern_macros)]
 #![plugin(tarpc_plugins)]
+#![deny(unused_extern_crates)]
 
-#[macro_use]
-extern crate serde_derive;
-#[macro_use]
-extern crate slog;
-#[macro_use]
-extern crate tarpc;
-
-extern crate arccstr;
 extern crate arrayvec;
+#[allow(unused_extern_crates)]
 extern crate backtrace;
 extern crate buf_redux;
 extern crate channel;
-extern crate chrono;
 extern crate core;
 extern crate evmap;
 extern crate fnv;
 extern crate itertools;
-extern crate mio;
 extern crate nom_sql;
 extern crate petgraph;
 extern crate regex;
 extern crate serde;
+#[macro_use]
+extern crate serde_derive;
 extern crate serde_json;
+#[macro_use]
+extern crate slog;
+#[macro_use]
+extern crate tarpc;
 extern crate timekeeper;
 extern crate tokio_core;
 extern crate vec_map;

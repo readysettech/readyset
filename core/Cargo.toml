@@ -6,18 +6,12 @@ authors = ["The Distributary Developers"]
 [dependencies]
 arccstr = "1.0.2"
 fnv = "1.0.5"
-regex = "0.2.2"
 serde_derive = "1.0.8"
 
 # need features
-backtrace = { version = "0.3.2", features = ["serialize-serde"] }
 chrono = { version = "0.4.0", features = ["serde"] }
 serde = { version = "1.0.8", features = ["rc"] }
 
 # git deps
 petgraph = { git = "https://github.com/fintelia/petgraph", branch = "serde", features = ["serde"] }
 nom_sql = { git = "https://github.com/ms705/nom-sql.git", rev = "fe7cdaa360c86bd4202e4065bc125ba5642439d2" }
-vec_map = { version = "0.8.0", features = ["eders"] }
-
-# local deps
-channel = { path = "../channel" }

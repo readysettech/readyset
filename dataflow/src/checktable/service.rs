@@ -46,18 +46,20 @@ impl CheckTableServer {
     pub fn start(listen_addr: SocketAddr) -> SocketAddr {
         let (tx, rx) = mpsc::channel();
         let builder = thread::Builder::new().name("checktable".to_owned());
-        builder.spawn(move || {
-            let server = CheckTableServer {
-                checktable: Arc::new(Mutex::new(CheckTable::new())),
-            };
+        builder
+            .spawn(move || {
+                let server = CheckTableServer {
+                    checktable: Arc::new(Mutex::new(CheckTable::new())),
+                };
 
-            let mut reactor = reactor::Core::new().unwrap();
-            let (handle, server) = server
-                .listen(listen_addr, &reactor.handle(), server::Options::default())
-                .unwrap();
-            tx.send(handle.addr()).unwrap();
-            reactor.run(server)
-        });
+                let mut reactor = reactor::Core::new().unwrap();
+                let (handle, server) = server
+                    .listen(listen_addr, &reactor.handle(), server::Options::default())
+                    .unwrap();
+                tx.send(handle.addr()).unwrap();
+                reactor.run(server)
+            })
+            .unwrap();
         rx.recv().unwrap()
     }
 }
