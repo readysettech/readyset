@@ -324,7 +324,7 @@ impl Worker {
             {
                 // unknown socket -- we need to update our cached state
                 refresh_truth(&mut self.shared);
-                debug!(self.log, "worker updated their notion of truth");
+                debug!(self.log, "worker updated their notion of truth"; "forced" => force_refresh_truth);
 
                 // also learn about new replicas while we're at it
                 while let Ok(added) = self.notify.try_recv() {
@@ -410,10 +410,6 @@ impl Worker {
                     // trust the cached sc.fd, since the token *might* have been remapped (same as
                     // the Entry::Vacant case below), so we must get the fd right from the truth.
                     ready(&EventedFd(&self.shared.truth.lock().unwrap()[token].fd));
-
-                    // XXX: NLL would let us directly refresh truth here, which would save us one
-                    // lock acquisition, but we don't have NLL yet :(
-                    force_refresh_truth = true;
                     continue;
                 }
                 Err(TryLockError::Poisoned(e)) => panic!("found poisoned lock: {}", e),
