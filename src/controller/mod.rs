@@ -22,7 +22,7 @@ use std::fmt;
 use futures::{self, Future, Stream};
 use hyper::{self, Client, Method, StatusCode};
 use hyper::header::{ContentLength, ContentType};
-use hyper::server::{Http, Request, Response, Service};
+use hyper::server::{Http, NewService, Request, Response, Service};
 use mio::net::TcpListener;
 use petgraph;
 use petgraph::visit::Bfs;
@@ -1342,7 +1342,7 @@ impl ControllerHandle {
             let url = format!("{}/{}", self.url.as_ref().unwrap(), path);
 
             let mut r = hyper::Request::new(hyper::Method::Post, url.parse().unwrap());
-            r.set_body(serde_json::to_string(request).unwrap());
+            r.set_body(serde_json::to_vec(request).unwrap());
             let res = core.run(client.request(r)).unwrap();
             if res.status() != hyper::StatusCode::Ok {
                 self.url = None;
@@ -1423,10 +1423,16 @@ impl Drop for ControllerHandle {
     }
 }
 
-pub struct ServingThread {
+struct ServingThread {
     addr: SocketAddr,
     join_handle: JoinHandle<()>,
-    stop: Option<Box<FnOnce() + Send>>,
+    stop: Box<Drop + Send>,
+}
+impl ServingThread {
+    fn stop(self) {
+        drop(self.stop);
+        self.join_handle.join().unwrap();
+    }
 }
 
 /// Describes a running controller instance. A serialized version of this struct is stored in
@@ -1524,7 +1530,7 @@ impl Controller {
         }
     }
 
-    fn main_loop(&mut self, receiver: Receiver<ControlEvent>) {
+    fn main_loop(mut self, receiver: Receiver<ControlEvent>) {
         for event in receiver {
             match event {
                 ControlEvent::ControllerMessage(msg) => if let Some(ref mut inner) = self.inner {
@@ -1541,7 +1547,6 @@ impl Controller {
                 }
                 ControlEvent::WonLeaderElection(state) => {
                     self.current_epoch = Some(state.epoch);
-
                     let mut builder = ControllerBuilder::default();
                     builder.set_checktable_addr(self.checktable);
                     self.inner = Some(ControllerInner::from_builder(builder));
@@ -1550,9 +1555,11 @@ impl Controller {
                     self.current_epoch = Some(new_epoch);
                     self.inner = None;
                 }
-                ControlEvent::Shutdown => return,
+                ControlEvent::Shutdown => break,
             }
         }
+        self.external.stop();
+        self.internal.stop();
     }
 
     fn listen_external(
@@ -1560,6 +1567,7 @@ impl Controller {
         addr: SocketAddr,
         connection: Arc<consensus::Connection>,
     ) -> ServingThread {
+        #[derive(Clone)]
         struct ExternalServer(Sender<ControlEvent>, Arc<consensus::Connection>);
         impl Service for ExternalServer {
             type Request = Request;
@@ -1569,20 +1577,20 @@ impl Controller {
 
             fn call(&self, req: Request) -> Self::Future {
                 let mut res = Response::new();
-                match (req.method(), req.path()) {
-                    (&Method::Get, "/graph.html") => {
+                match (req.method().clone(), req.path().to_owned().as_ref()) {
+                    (Method::Get, "/graph.html") => {
                         res.headers_mut().set(ContentType::html());
                         res.set_body(include_str!("graph.html"));
                         Box::new(futures::future::ok(res))
                     }
-                    (&Method::Get, "/js/layout-worker.js") => {
+                    (Method::Get, "/js/layout-worker.js") => {
                         res.set_body(
                             "importScripts('https://cdn.rawgit.com/mstefaniuk/graph-viz-d3-js/\
                              cf2160ee3ca39b843b081d5231d5d51f1a901617/dist/layout-worker.js');",
                         );
                         Box::new(futures::future::ok(res))
                     }
-                    (&Method::Get, path) if path.starts_with("/zookeeper/") => {
+                    (Method::Get, path) if path.starts_with("/zookeeper/") => {
                         match self.1.read_nonblocking(&format!("/{}", &path[11..])) {
                             Some(data) => {
                                 res.headers_mut().set(ContentType::json());
@@ -1594,9 +1602,8 @@ impl Controller {
                     }
                     (method, path) => {
                         let path = path.to_owned();
-                        let method = method.clone();
                         let event_tx = self.0.clone();
-                        Box::new(res.body().concat2().and_then(move |body| {
+                        Box::new(req.body().concat2().and_then(move |body| {
                             let body: Vec<u8> = body.iter().cloned().collect();
                             let (tx, rx) = futures::sync::oneshot::channel();
                             let _ = event_tx
@@ -1620,17 +1627,35 @@ impl Controller {
                 }
             }
         }
+        impl NewService for ExternalServer {
+            type Request = Request;
+            type Response = Response;
+            type Error = hyper::Error;
+            type Instance = Self;
+            fn new_service(&self) -> Result<Self::Instance, io::Error> {
+                Ok(self.clone())
+            }
+        }
 
         let (tx, rx) = mpsc::channel();
         let (done_tx, done_rx) = futures::sync::oneshot::channel();
         let builder = thread::Builder::new().name("srv-ext".to_owned());
         let join_handle = builder
             .spawn(move || {
-                let server = Http::new()
-                    .bind(&addr, move || {
-                        Ok(ExternalServer(event_tx.clone(), connection.clone()))
-                    })
-                    .unwrap();
+                let service = ExternalServer(event_tx, connection);
+                let server = Http::new().bind(&addr, service.clone());
+                let server = match server {
+                    Ok(s) => s,
+                    Err(hyper::Error::Io(ref e))
+                        if e.kind() == ErrorKind::AddrInUse && addr.port() != 0 =>
+                    {
+                        Http::new()
+                            .bind(&SocketAddr::new(addr.ip(), 0), service)
+                            .unwrap()
+                    }
+                    Err(e) => panic!("{}", e),
+                };
+
                 let addr = server.local_addr().unwrap();
                 tx.send(addr).unwrap();
                 server.run_until(done_rx.map_err(|_| ()));
@@ -1640,22 +1665,34 @@ impl Controller {
         ServingThread {
             addr: rx.recv().unwrap(),
             join_handle,
-            stop: Some(Box::new(|| drop(done_tx))),
+            stop: Box::new(done_tx),
         }
     }
 
     /// Listen for messages from workers.
     fn listen_internal(event_tx: Sender<ControlEvent>, addr: SocketAddr) -> ServingThread {
+        let mut done = Arc::new(());
+        let done2 = done.clone();
         let mut pl: PollingLoop<CoordinationMessage> = PollingLoop::new(addr);
         let addr = pl.get_listener_addr().unwrap();
         let builder = thread::Builder::new().name("srv-int".to_owned());
         let join_handle = builder
             .spawn(move || {
-                pl.run_polling_loop(|e| {
-                    if let PollEvent::Process(msg) = e {
-                        if !event_tx.send(ControlEvent::ControllerMessage(msg)).is_ok() {
-                            return ProcessResult::StopPolling;
+                pl.run_polling_loop(move |e| {
+                    if Arc::get_mut(&mut done).is_some() {
+                        return ProcessResult::StopPolling;
+                    }
+
+                    match e {
+                        PollEvent::ResumePolling(timeout) => {
+                            *timeout = Some(Duration::from_millis(100));
                         }
+                        PollEvent::Process(msg) => {
+                            if event_tx.send(ControlEvent::ControllerMessage(msg)).is_err() {
+                                return ProcessResult::StopPolling;
+                            }
+                        }
+                        PollEvent::Timeout => {}
                     }
                     ProcessResult::KeepPolling
                 });
@@ -1665,7 +1702,7 @@ impl Controller {
         ServingThread {
             addr,
             join_handle,
-            stop: None,
+            stop: Box::new(done2),
         }
     }
 
