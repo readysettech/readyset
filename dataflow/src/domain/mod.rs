@@ -275,6 +275,67 @@ pub struct Domain {
 }
 
 impl Domain {
+    fn find_tags_and_replay(
+        &mut self,
+        miss_key: Vec<DataType>,
+        miss_column: usize,
+        miss_in: LocalNodeIndex,
+        sends: &mut EnqueuedSends,
+    ) {
+        let mut found = false;
+        let tags: Vec<Tag> = self.replay_paths.keys().cloned().collect();
+        for tag in tags {
+            if let TriggerEndpoint::Start(..) = self.replay_paths[&tag].trigger {
+                continue;
+            }
+            {
+                let p = self.replay_paths[&tag].path.last().unwrap();
+                if p.node != miss_in {
+                    continue;
+                }
+                assert!(p.partial_key.is_some());
+                if p.partial_key.unwrap() != miss_column {
+                    continue;
+                }
+            }
+
+            // send a message to the source domain(s) responsible
+            // for the chosen tag so they'll start replay.
+            let key = miss_key.clone(); // :(
+            if let TriggerEndpoint::Local(..) = self.replay_paths[&tag].trigger {
+                if self.already_requested(&tag, &key[..]) {
+                    return;
+                }
+
+                trace!(self.log,
+                       "got replay request";
+                       "tag" => tag.id(),
+                       "key" => format!("{:?}", key)
+                );
+                self.seed_replay(tag, &key[..], None, sends);
+                found = true;
+                continue;
+            }
+
+            // NOTE: due to max_concurrent_replays, it may be that we only replay from *some* of
+            // these ancestors now, and some later. this will cause more of the replay to be
+            // buffered up at the union above us, but that's probably fine.
+            self.request_partial_replay(tag, key);
+            found = true;
+            continue;
+        }
+
+        if !found {
+            unreachable!(format!(
+                "no tag found to fill missing value {:?} in {}.{:?}",
+                miss_key,
+                miss_in,
+                miss_column
+            ));
+        }
+
+    }
+
     fn on_replay_miss(
         &mut self,
         miss_in: LocalNodeIndex,
@@ -322,58 +383,8 @@ impl Domain {
             return;
         }
 
-        let mut found = false;
-        let tags: Vec<Tag> = self.replay_paths.keys().cloned().collect();
-        for tag in tags {
-            if let TriggerEndpoint::Start(..) = self.replay_paths[&tag].trigger {
-                continue;
-            }
-            {
-                let p = self.replay_paths[&tag].path.last().unwrap();
-                if p.node != miss_in {
-                    continue;
-                }
-                assert!(p.partial_key.is_some());
-                assert_eq!(miss_columns.len(), 1);
-                if p.partial_key.unwrap() != miss_columns[0] {
-                    continue;
-                }
-            }
-
-            // send a message to the source domain(s) responsible
-            // for the chosen tag so they'll start replay.
-            let key = miss_key.clone(); // :(
-            if let TriggerEndpoint::Local(..) = self.replay_paths[&tag].trigger {
-                if self.already_requested(&tag, &key[..]) {
-                    return;
-                }
-
-                trace!(self.log,
-                       "got replay request";
-                       "tag" => tag.id(),
-                       "key" => format!("{:?}", key)
-                );
-                self.seed_replay(tag, &key[..], None, sends);
-                found = true;
-                continue;
-            }
-
-            // NOTE: due to max_concurrent_replays, it may be that we only replay from *some* of
-            // these ancestors now, and some later. this will cause more of the replay to be
-            // buffered up at the union above us, but that's probably fine.
-            self.request_partial_replay(tag, key);
-            found = true;
-            continue;
-        }
-
-        if !found {
-            unreachable!(format!(
-                "no tag found to fill missing value {:?} in {}.{:?}",
-                miss_key,
-                miss_in,
-                miss_columns
-            ));
-        }
+        assert_eq!(miss_columns.len(), 1);
+        self.find_tags_and_replay(miss_key, miss_columns[0], miss_in, sends);
     }
 
     fn send_partial_replay_request(&mut self, tag: Tag, key: Vec<DataType>) {
@@ -907,8 +918,7 @@ impl Domain {
                             InitialState::PartialGlobal {
                                 gid,
                                 cols,
-                                key,
-                                tag,
+                                key: key_col,
                                 trigger_domain: (trigger_domain, shards),
                             } => {
                                 use backlog;
@@ -922,7 +932,7 @@ impl Domain {
                                         .collect::<Vec<_>>(),
                                 );
                                 let (r_part, w_part) =
-                                    backlog::new_partial(cols, key, move |key| {
+                                    backlog::new_partial(cols, key_col, move |key| {
                                         let mut txs = txs.lock().unwrap();
                                         let tx = if txs.len() == 1 {
                                             &mut txs[0]
@@ -930,10 +940,13 @@ impl Domain {
                                             let n = txs.len();
                                             &mut txs[::shard_by(key, n)]
                                         };
-                                        let mut m = box Packet::RequestPartialReplay {
+
+                                        let mut m = box Packet::RequestReaderReplay {
                                             key: vec![key.clone()],
-                                            tag: tag,
+                                            col: key_col,
+                                            node: node,
                                         };
+
                                         if tx.1 {
                                             m = m.make_local();
                                         }
@@ -1033,6 +1046,9 @@ impl Domain {
                                 trigger,
                             },
                         );
+                    }
+                    Packet::RequestReaderReplay { key, col, node } => {
+                        self.find_tags_and_replay(key, col, node, sends);
                     }
                     Packet::RequestPartialReplay { tag, key } => {
                         if !self.already_requested(&tag, &key) {

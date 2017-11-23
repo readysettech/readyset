@@ -56,7 +56,6 @@ pub enum InitialState {
         gid: petgraph::graph::NodeIndex,
         cols: usize,
         key: usize,
-        tag: Tag,
         trigger_domain: (domain::Index, usize),
     },
     Global {
@@ -214,6 +213,13 @@ pub enum Packet {
     /// Ask domain (nicely) to replay a particular key.
     RequestPartialReplay {
         tag: Tag,
+        key: Vec<DataType>,
+    },
+
+    /// Ask domain (nicely) to replay a particular key.
+    RequestReaderReplay {
+        node: LocalNodeIndex,
+        col: usize,
         key: Vec<DataType>,
     },
 
