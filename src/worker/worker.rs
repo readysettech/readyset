@@ -640,6 +640,29 @@ impl Worker {
                             .or_insert(0)
                             .add_assign(1);
 
+                        // We can't give up the lock on `context` for a while, because then another
+                        // thread could swoop in, take the lock on this replica, process a
+                        // packet, and send some packet (that should come after `next`) to the
+                        // same replica as `next` is going to. if a worker then takes the lock
+                        // for the target of `next`, it will see the queued packet, and process
+                        // it, before we process `next`, which is OOO!
+                        //
+                        // it *is* safe at this point to release the lock for the *previous*
+                        // context, because we now guarantee that we'll handle `next`, so if
+                        // another thread takes that context and produces some packets, they'll be
+                        // processed strictly later.
+                        context_of_next_origin = context;
+
+                        // just a little aliasing trick to avoid using the long name below
+                        let mut context = context_of_next_origin;
+
+                        // we need to ready the fd for the original replica so that another thread
+                        // will be notified if there's more work for it.
+                        if carry == 1 && rearm {
+                            ready(&EventedFd(&fd));
+                            rearm = false;
+                        }
+
                         // no other thread is operating on the target domain, so we can do it
                         if !self.process(&mut context.replica, m, &mut sends) {
                             // told to exit?
@@ -677,24 +700,7 @@ impl Worker {
 
                         // Register timeout for replica
                         resume_polling(rit, &mut context.replica);
-
-                        // We can't give up the lock on `context` yet, because then another
-                        // thread could swoop in, take the lock on this replica, process a
-                        // packet, and send some packet (that should come after `next`) to the
-                        // same replica as `next` is going to. if a worker then takes the lock
-                        // for the target of `next`, it will see the queued packet, and process
-                        // it, before we process `next`, which is OOO!
-                        //
-                        // it *is* safe at this point to release the lock for the *previous*
-                        // context, because we have now processed all of its outputs.
                         context_of_next_origin = context;
-
-                        // we need to ready the fd for the original replica so that another thread
-                        // will be notified if there's more work for it.
-                        if carry == 1 && rearm {
-                            ready(&EventedFd(&fd));
-                            rearm = false;
-                        }
                     }
                     Err(e) => {
                         // we couldn't get the lock, so we push it on the TCP queue for later
