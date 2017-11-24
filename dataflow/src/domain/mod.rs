@@ -1052,22 +1052,13 @@ impl Domain {
                     }
                     Packet::RequestPartialReplay { tag, key } => {
                         if !self.already_requested(&tag, &key) {
-                            if let ReplayPath {
-                                trigger: TriggerEndpoint::End(..),
-                                ..
-                            } = self.replay_paths[&tag]
-                            {
-                                // request came in from reader -- forward
-                                self.request_partial_replay(tag, key);
-                                return;
-                            } else {
-                                trace!(self.log,
+                            trace!(
+                                self.log,
                                "got replay request";
                                "tag" => tag.id(),
                                "key" => format!("{:?}", key)
-                        );
-                                self.seed_replay(tag, &key[..], None, sends);
-                            }
+                            );
+                            self.seed_replay(tag, &key[..], None, sends);
                         }
                     }
                     Packet::StartReplay { tag, from } => {
