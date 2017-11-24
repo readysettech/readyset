@@ -420,6 +420,7 @@ impl Worker {
                         ready(&EventedFd(&fd));
                     } else {
                         // spurious wakeup from mio for old (deregistered) token
+                        debug!(self.log, "failed spurious wakeup for unknown token"; "token" => token);
                     }
                     continue;
                 }
@@ -480,6 +481,7 @@ impl Worker {
                             // mio nonetheless wakes us up right after we deregister a token, so we
                             // need to not fail. we should *not* re-arm any fd though.
                             // unreachable!();
+                            debug!(self.log, "spurious wakeup for unknown channel token"; "token" => token);
                         }
                         continue;
                     }
