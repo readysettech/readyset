@@ -338,10 +338,16 @@ impl Worker {
                 force_refresh_truth = false;
             }
 
-            let sc = self.shared
-                .sockets
-                .get(token)
-                .expect("got event for unknown token");
+            let sc = match self.shared.sockets.get(token) {
+                Some(sc) => sc,
+                None => {
+                    // got event for unknown token
+                    // normally, this should be an error, but mio seems to sometimes give us
+                    // spurious wakeups for old tokens. so, we just ignore the wakeup instead.
+                    debug!(self.log, "spurious wakeup for unknown token"; "token" => token);
+                    continue;
+                }
+            };
             let replica = self.shared
                 .replicas
                 .get(sc.rit)
@@ -409,7 +415,12 @@ impl Worker {
                     // in either case, we need to figure out what stream to re-register. we can't
                     // trust the cached sc.fd, since the token *might* have been remapped (same as
                     // the Entry::Vacant case below), so we must get the fd right from the truth.
-                    ready(&EventedFd(&self.shared.truth.lock().unwrap()[token].fd));
+                    // XXX
+                    if let Some(fd) = self.shared.truth.lock().unwrap().get(token).map(|sc| sc.fd) {
+                        ready(&EventedFd(&fd));
+                    } else {
+                        // spurious wakeup from mio for old (deregistered) token
+                    }
                     continue;
                 }
                 Err(TryLockError::Poisoned(e)) => panic!("found poisoned lock: {}", e),
