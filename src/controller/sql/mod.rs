@@ -552,7 +552,7 @@ impl SqlIncorporator {
         &mut self,
         q: SqlQuery,
         query_name: String,
-        _is_leaf: bool,
+        is_leaf: bool,
         mig: &mut Migration,
     ) -> Result<QueryFlowParts, String> {
         use nom_sql::{JoinRightSide, Table};
@@ -641,7 +641,7 @@ impl SqlIncorporator {
                 // reused, however.
                 self.add_compound_query(&query_name, csq, mig).unwrap()
             }
-            SqlQuery::Select(ref sq) => self.add_select_query(&query_name, sq, true, mig).0,
+            SqlQuery::Select(ref sq) => self.add_select_query(&query_name, sq, is_leaf, mig).0,
             ref q @ SqlQuery::CreateTable { .. } => self.add_base_via_mir(&query_name, q, mig),
             ref q @ _ => panic!("unhandled query type in recipe: {:?}", q),
         };
