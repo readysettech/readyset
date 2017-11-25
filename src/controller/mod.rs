@@ -515,6 +515,34 @@ impl ControllerInner {
         listener
     }
 
+    /// Controls the persistence mode, and parameters related to persistence.
+    ///
+    /// Three modes are available:
+    ///
+    ///  1. `DurabilityMode::Permanent`: all writes to base nodes should be written to disk.
+    ///  2. `DurabilityMode::DeleteOnExit`: all writes are written to disk, but the log is
+    ///     deleted once the `Controller` is dropped. Useful for tests.
+    ///  3. `DurabilityMode::MemoryOnly`: no writes to disk, store all writes in memory.
+    ///     Useful for baseline numbers.
+    ///
+    /// `queue_capacity` indicates the number of packets that should be buffered until
+    /// flushing, and `flush_timeout` indicates the length of time to wait before flushing
+    /// anyway.
+    ///
+    /// Must be called before any domains have been created.
+    pub fn with_persistence_options(&mut self, params: PersistenceParameters) {
+        assert_eq!(self.ndomains, 0);
+        self.persistence = params;
+    }
+
+    /// Set the `Logger` to use for internal log messages.
+    ///
+    /// By default, all log messages are discarded.
+    pub fn log_with(&mut self, log: slog::Logger) {
+        self.log = log;
+        self.materializations.set_logger(&self.log);
+    }
+
     /// Perform a new query schema migration.
     pub fn migrate<F, T>(&mut self, f: F) -> T
     where
