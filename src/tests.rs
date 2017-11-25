@@ -1547,10 +1547,13 @@ fn transactional_migration() {
     sleep();
 
     // check that c got them
-    assert_eq!(
-        cq.transactional_lookup(&3.into()).unwrap().0,
-        vec![vec![3.into(), 5.into()], vec![3.into(), 6.into()]]
-    );
+    let res = cq.transactional_lookup(&3.into()).unwrap().0;
+
+    assert_eq!(res.len(), 2);
+    assert!(res.contains(&vec![3.into(), 5.into()]));
+
+    assert!(res.contains(&vec![3.into(), 6.into()]));
+
 }
 
 #[test]

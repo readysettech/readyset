@@ -344,16 +344,6 @@ impl Materializations {
                     keys::provenance_of(graph, ni, index, &mut *on_join)
                 };
 
-                // TODO: if a reader has no materialized views between it and a union, we will end
-                // up in this case. we *can* solve that case by requesting replays across all the
-                // tagged paths through the union, but since we at this point in the code don't yet
-                // know about those paths, that's a bit inconvenient. we might be able to move this
-                // entire block below the main loop somehow (?), but for now:
-                if graph[ni].is_reader() && paths.len() != 1 {
-                    able = false;
-                    break;
-                }
-
                 for path in paths {
                     for (ni, col) in path.into_iter().skip(1) {
                         if col.is_none() {
