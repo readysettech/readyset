@@ -342,15 +342,6 @@ impl SqlIncorporator {
 
         // no optimization, because standalone base nodes can't be optimized
 
-        // TODO(malte): we currently need to remember these for local state, but should figure out
-        // a better plan (see below)
-        let _fields = mir.leaf
-            .borrow()
-            .columns()
-            .into_iter()
-            .map(|c| String::from(c.name.as_str()))
-            .collect::<Vec<_>>();
-
         // push it into the flow graph using the migration in `mig`, and obtain `QueryFlowParts`
         let qfp = mir_query_to_flow_parts(&mut mir, &mut mig);
 
