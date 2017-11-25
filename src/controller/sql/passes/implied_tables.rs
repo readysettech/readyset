@@ -139,12 +139,12 @@ fn rewrite_selection(
                         // columns, but we have to peek inside the function to expand implied
                         // tables in its specification
                         match (*f).as_mut() {
-                            &mut Avg(ref mut fe, _) |
-                            &mut Count(ref mut fe, _) |
-                            &mut Sum(ref mut fe, _) |
-                            &mut Min(ref mut fe) |
-                            &mut Max(ref mut fe) |
-                            &mut GroupConcat(ref mut fe, _) => {
+                            &mut Avg(ref mut fe, _)
+                            | &mut Count(ref mut fe, _)
+                            | &mut Sum(ref mut fe, _)
+                            | &mut Min(ref mut fe)
+                            | &mut Max(ref mut fe)
+                            | &mut GroupConcat(ref mut fe, _) => {
                                 fe.table = find_table(fe, tables_in_query);
                                 None
                             }

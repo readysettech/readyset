@@ -22,12 +22,12 @@ fn target_columns_from_computed_column(computed_col: &Column) -> &Column {
     use nom_sql::FunctionExpression::*;
 
     match *computed_col.function.as_ref().unwrap().deref() {
-        Avg(ref col, _) |
-        Count(ref col, _) |
-        GroupConcat(ref col, _) |
-        Max(ref col) |
-        Min(ref col) |
-        Sum(ref col, _) => col,
+        Avg(ref col, _)
+        | Count(ref col, _)
+        | GroupConcat(ref col, _)
+        | Max(ref col)
+        | Min(ref col)
+        | Sum(ref col, _) => col,
         CountStar => {
             // see comment re COUNT(*) rewriting in make_aggregation_node
             panic!("COUNT(*) should have been rewritten earlier!")

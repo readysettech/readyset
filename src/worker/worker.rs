@@ -324,7 +324,9 @@ impl Worker {
             {
                 // unknown socket -- we need to update our cached state
                 refresh_truth(&mut self.shared);
-                trace!(self.log, "worker updated their notion of truth"; "forced" => force_refresh_truth);
+                trace!(self.log,
+                       "worker updated their notion of truth";
+                       "forced" => force_refresh_truth);
 
                 // also learn about new replicas while we're at it
                 while let Ok(added) = self.notify.try_recv() {
@@ -420,7 +422,9 @@ impl Worker {
                         ready(&EventedFd(&fd));
                     } else {
                         // spurious wakeup from mio for old (deregistered) token
-                        debug!(self.log, "failed spurious wakeup for unknown token"; "token" => token);
+                        debug!(self.log,
+                               "failed spurious wakeup for unknown token";
+                               "token" => token);
                     }
                     continue;
                 }
@@ -481,7 +485,9 @@ impl Worker {
                             // mio nonetheless wakes us up right after we deregister a token, so we
                             // need to not fail. we should *not* re-arm any fd though.
                             // unreachable!();
-                            debug!(self.log, "spurious wakeup for unknown channel token"; "token" => token);
+                            debug!(self.log,
+                                   "spurious wakeup for unknown channel token";
+                                   "token" => token);
                         }
                         continue;
                     }

@@ -1553,7 +1553,6 @@ fn transactional_migration() {
     assert!(res.contains(&vec![3.into(), 5.into()]));
 
     assert!(res.contains(&vec![3.into(), 6.into()]));
-
 }
 
 #[test]

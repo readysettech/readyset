@@ -333,7 +333,6 @@ impl Domain {
                 miss_column
             ));
         }
-
     }
 
     fn on_replay_miss(
@@ -745,8 +744,8 @@ impl Domain {
                 trigger: TriggerEndpoint::End(..),
                 ref path,
                 ..
-            } |
-            &ReplayPath {
+            }
+            | &ReplayPath {
                 trigger: TriggerEndpoint::Local(..),
                 ref path,
                 ..
@@ -793,10 +792,10 @@ impl Domain {
             Packet::Message { .. } => {
                 self.dispatch_(m, true, sends);
             }
-            Packet::Transaction { .. } |
-            Packet::StartMigration { .. } |
-            Packet::CompleteMigration { .. } |
-            Packet::ReplayPiece {
+            Packet::Transaction { .. }
+            | Packet::StartMigration { .. }
+            | Packet::CompleteMigration { .. }
+            | Packet::ReplayPiece {
                 transaction_state: Some(_),
                 ..
             } => {
@@ -1483,8 +1482,8 @@ impl Domain {
                 trigger: TriggerEndpoint::Start(ref cols),
                 ref path,
                 ..
-            } |
-            ReplayPath {
+            }
+            | ReplayPath {
                 source: Some(source),
                 trigger: TriggerEndpoint::Local(ref cols),
                 ref path,
@@ -1612,7 +1611,9 @@ impl Domain {
                     let data: Records = chunk.collect();
                     let link = Link::new(local_addr, local_addr);
                     if is_transactional {
-                        let (ts, prevs) = checktable::with_checktable(|ct| ct.recover(global_addr).unwrap());
+                        let (ts, prevs) = checktable::with_checktable(|ct| {
+                            ct.recover(global_addr).unwrap()
+                        });
                         Packet::Transaction {
                             link,
                             data,

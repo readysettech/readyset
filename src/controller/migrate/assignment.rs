@@ -73,9 +73,9 @@ pub fn assign(
                         // base nodes start new domains
                         next_domain()
                     }
-                    NodeOperator::Sum(..) |
-                    NodeOperator::Extremum(..) |
-                    NodeOperator::Concat(..) => {
+                    NodeOperator::Sum(..)
+                    | NodeOperator::Extremum(..)
+                    | NodeOperator::Concat(..) => {
                         // aggregation
                         next_domain()
                     }

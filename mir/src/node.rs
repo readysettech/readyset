@@ -280,9 +280,9 @@ impl MirNode {
 
         // + any parent columns referenced internally by the operator
         match self.inner {
-            MirNodeType::Aggregation { ref on, .. } |
-            MirNodeType::Extremum { ref on, .. } |
-            MirNodeType::GroupConcat { ref on, .. } => {
+            MirNodeType::Aggregation { ref on, .. }
+            | MirNodeType::Extremum { ref on, .. }
+            | MirNodeType::GroupConcat { ref on, .. } => {
                 // need the "over" column
                 if !columns.contains(on) {
                     columns.push(on.clone());
@@ -421,8 +421,8 @@ impl MirNodeType {
             }
             MirNodeType::Join {
                 ref mut project, ..
-            } |
-            MirNodeType::LeftJoin {
+            }
+            | MirNodeType::LeftJoin {
                 ref mut project, ..
             } => {
                 project.push(c);

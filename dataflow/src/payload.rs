@@ -317,9 +317,9 @@ impl Packet {
         F: FnOnce(&mut Records),
     {
         match *self {
-            Packet::Message { ref mut data, .. } |
-            Packet::Transaction { ref mut data, .. } |
-            Packet::ReplayPiece { ref mut data, .. } => {
+            Packet::Message { ref mut data, .. }
+            | Packet::Transaction { ref mut data, .. }
+            | Packet::ReplayPiece { ref mut data, .. } => {
                 map(data);
             }
             _ => {
@@ -420,8 +420,8 @@ impl Packet {
             Packet::Message {
                 tracer: Some((tag, Some(ref sender))),
                 ..
-            } |
-            Packet::Transaction {
+            }
+            | Packet::Transaction {
                 tracer: Some((tag, Some(ref sender))),
                 ..
             } => {
