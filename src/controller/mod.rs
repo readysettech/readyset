@@ -95,8 +95,10 @@ pub struct ControllerBuilder {
     heartbeat_every: Duration,
     healthcheck_every: Duration,
     nworkers: usize,
+    local_workers: usize,
     internal_port: u16,
     external_port: u16,
+    checktable_port: u16,
     log: slog::Logger,
 }
 impl Default for ControllerBuilder {
@@ -115,8 +117,13 @@ impl Default for ControllerBuilder {
             heartbeat_every: Duration::from_secs(1),
             healthcheck_every: Duration::from_secs(10),
             internal_port: if cfg!(test) { 0 } else { 8000 },
+            checktable_port: if cfg!(test) { 0 } else { 8500 },
             external_port: if cfg!(test) { 0 } else { 9000 },
             nworkers: 0,
+            #[cfg(test)]
+            local_workers: 2,
+            #[cfg(not(test))]
+            local_workers: 0,
             log,
         }
     }
@@ -161,6 +168,11 @@ impl ControllerBuilder {
     /// later, but they won't be assigned any of the initial domains.
     pub fn set_nworkers(&mut self, workers: usize) {
         self.nworkers = workers;
+    }
+
+    /// Set the number of worker threads to spin up in local mode (when nworkers == 0).
+    pub fn set_local_workers(&mut self, workers: usize) {
+        self.local_workers = workers;
     }
 
     #[cfg(test)]
@@ -241,6 +253,9 @@ pub struct ControllerInner {
     /// State between migrations
     deps: HashMap<DomainIndex, (IngressFromBase, EgressForBase)>,
     remap: HashMap<DomainIndex, HashMap<NodeIndex, IndexPair>>,
+
+    /// Local worker pool used for tests
+    local_pool: Option<::worker::worker::WorkerPool>,
 
     heartbeat_every: Duration,
     healthcheck_every: Duration,
@@ -335,25 +350,9 @@ impl ControllerInner {
                     res.headers_mut().set(ContentType::html());
                     res.send(include_str!("graph.html"));
                 }) as Box<Handler>,
-                "graph.html" => Get: Box::new(move |_ctx: Context, mut res: Response| {
-                    res.headers_mut().set(ContentType::html());
-                    res.send(include_str!("graph.html"));
-                }) as Box<Handler>,
-                "js/dot-checker.js" => Get: Box::new(move |_ctx: Context, mut res: Response| {
-                    res.headers_mut().set(ContentType::plaintext());
-                    res.send(include_str!("js/dot-checker.js"));
-                }) as Box<Handler>,
                 "js/layout-worker.js" => Get: Box::new(move |_ctx: Context, mut res: Response| {
-                    res.headers_mut().set(ContentType::plaintext());
-                    res.send(include_str!("js/layout-worker.js"));
-                }) as Box<Handler>,
-                "js/renderer.js" => Get: Box::new(move |_ctx: Context, mut res: Response| {
-                    res.headers_mut().set(ContentType::plaintext());
-                    res.send(include_str!("js/renderer.js"));
-                }) as Box<Handler>,
-                "js/worker.js" => Get: Box::new(move |_ctx: Context, mut res: Response| {
-                    res.headers_mut().set(ContentType::plaintext());
-                    res.send(include_str!("js/worker.js"));
+                    res.send("importScripts('https://cdn.rawgit.com/mstefaniuk/graph-viz-d3-js/\
+                              cf2160ee3ca39b843b081d5231d5d51f1a901617/dist/layout-worker.js');");
                 }) as Box<Handler>,
                 ":path" => Post: Box::new(move |mut ctx: Context, mut res: Response| {
                     let (tx, rx) = mpsc::channel();
@@ -475,12 +474,13 @@ impl ControllerInner {
             true,
         ));
 
-        let addr = SocketAddr::new(builder.listen_addr.clone(), 0);
-        let checktable_addr = checktable::service::CheckTableServer::start(addr.clone());
+        let checktable_addr = SocketAddr::new(builder.listen_addr.clone(), builder.checktable_port);
+        let checktable_addr = checktable::service::CheckTableServer::start(checktable_addr.clone());
         let checktable =
             checktable::CheckTableClient::connect(checktable_addr, client::Options::default())
                 .unwrap();
 
+        let addr = SocketAddr::new(builder.listen_addr.clone(), 0);
         let readers: Readers = Arc::default();
         let readers_clone = readers.clone();
         let read_polling_loop = RpcPollingLoop::new(addr.clone());
@@ -489,6 +489,21 @@ impl ControllerInner {
         thread_builder.spawn(move || {
             Worker::serve_reads(read_polling_loop, readers_clone)
         });
+
+        let cc = Arc::new(ChannelCoordinator::new());
+        assert!((builder.nworkers == 0) ^ (builder.local_workers == 0));
+        let local_pool = if builder.nworkers == 0 {
+            Some(
+                ::worker::worker::WorkerPool::new(
+                    builder.local_workers,
+                    &builder.log,
+                    checktable_addr,
+                    cc.clone(),
+                ).unwrap(),
+            )
+        } else {
+            None
+        };
 
         ControllerInner {
             ingredients: g,
@@ -507,7 +522,7 @@ impl ControllerInner {
             log: builder.log,
 
             domains: Default::default(),
-            channel_coordinator: Arc::new(ChannelCoordinator::new()),
+            channel_coordinator: cc,
             debug_channel: None,
 
             recipe: Recipe::blank(None),
@@ -519,6 +534,8 @@ impl ControllerInner {
             read_listen_addr,
             read_addrs: HashMap::default(),
             workers: HashMap::default(),
+
+            local_pool,
 
             last_checked_workers: Instant::now(),
         }
@@ -1436,6 +1453,7 @@ impl<'a> Migration<'a> {
                 &mainline.listen_addr,
                 &mainline.checktable_addr,
                 &mainline.channel_coordinator,
+                &mut mainline.local_pool,
                 &mainline.debug_channel,
                 &mut placer,
                 &mut workers,
@@ -1529,11 +1547,14 @@ impl<'a> Migration<'a> {
 impl Drop for ControllerInner {
     fn drop(&mut self) {
         for (_, d) in &mut self.domains {
-            // don't unwrap, because given domain may already have terminated
-            drop(d.send(box payload::Packet::Quit));
+            // XXX: this is a terrible ugly hack to ensure that all workers exit
+            for _ in 0..100 {
+                // don't unwrap, because given domain may already have terminated
+                drop(d.send(box payload::Packet::Quit));
+            }
         }
-        for (_, mut d) in self.domains.drain() {
-            d.wait();
+        if let Some(ref mut local_pool) = self.local_pool {
+            local_pool.wait();
         }
     }
 }

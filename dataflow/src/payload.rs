@@ -56,7 +56,6 @@ pub enum InitialState {
         gid: petgraph::graph::NodeIndex,
         cols: usize,
         key: usize,
-        tag: Tag,
         trigger_domain: (domain::Index, usize),
     },
     Global {
@@ -171,7 +170,7 @@ pub enum Packet {
     /// Update Egress node.
     UpdateEgress {
         node: LocalNodeIndex,
-        new_tx: Option<(NodeIndex, LocalNodeIndex, (domain::Index, usize))>,
+        new_tx: Option<(NodeIndex, LocalNodeIndex, ReplicaAddr)>,
         new_tag: Option<(Tag, NodeIndex)>,
     },
 
@@ -180,7 +179,7 @@ pub enum Packet {
     /// Note that this *must* be done *before* the sharder starts being used!
     UpdateSharder {
         node: LocalNodeIndex,
-        new_txs: (LocalNodeIndex, Vec<(domain::Index, usize)>),
+        new_txs: (LocalNodeIndex, Vec<ReplicaAddr>),
     },
 
     /// Add a streamer to an existing reader node.
@@ -214,6 +213,13 @@ pub enum Packet {
     /// Ask domain (nicely) to replay a particular key.
     RequestPartialReplay {
         tag: Tag,
+        key: Vec<DataType>,
+    },
+
+    /// Ask domain (nicely) to replay a particular key.
+    RequestReaderReplay {
+        node: LocalNodeIndex,
+        col: usize,
         key: Vec<DataType>,
     },
 
@@ -273,6 +279,9 @@ pub enum Packet {
     /// The packet is being sent locally, so a pointer is sent to avoid
     /// serialization/deserialization costs.
     Local(LocalPacket),
+
+    /// Notify downstream replica what our index is
+    Hey(domain::Index, usize),
 }
 
 impl Packet {
@@ -437,10 +446,12 @@ impl Packet {
     }
 
     /// If self is `Packet::Local` then replace with the packet pointed to.
-    pub fn make_boxed_normal(self) -> Box<Self> {
-        match self {
-            Packet::Local(LocalPacket(ptr)) => unsafe { Box::from_raw(ptr) },
-            s => box s,
+    pub fn extract_local(&mut self) -> Option<Box<Self>> {
+        if let Packet::Local(LocalPacket(ptr)) = *self {
+            *self = Packet::Spin;
+            Some(unsafe { Box::from_raw(ptr) })
+        } else {
+            None
         }
     }
 
@@ -478,7 +489,17 @@ impl fmt::Debug for Packet {
                 tag.id(),
                 data.len()
             ),
-            _ => write!(f, "Packet::Control"),
+            Packet::Local(ref lp) => {
+                use std::mem;
+                let lp = unsafe { Box::from_raw(lp.0) };
+                let s = write!(f, "local {:?}", lp)?;
+                mem::forget(lp);
+                Ok(s)
+            }
+            ref p => {
+                use std::mem;
+                write!(f, "Packet::Control({:?})", mem::discriminant(p))
+            }
         }
     }
 }

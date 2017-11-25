@@ -3,7 +3,7 @@ use std::collections::HashMap;
 use std::net::SocketAddr;
 use std::time::{Duration, Instant};
 use std::thread::{self, JoinHandle};
-use std::sync::{Arc, Mutex};
+use std::sync::{mpsc, Arc, Mutex};
 
 use channel::{self, TcpSender};
 use channel::poll::{PollEvent, PollingLoop, ProcessResult, RpcPollEvent, RpcPollingLoop};
@@ -15,10 +15,14 @@ use dataflow::prelude::*;
 use controller::{ReadQuery, ReadReply};
 use coordination::{CoordinationMessage, CoordinationPayload};
 
+pub mod worker;
+
 /// Workers are responsible for running domains, and serving reads to any materializations contained
 /// within them.
 pub struct Worker {
     log: Logger,
+
+    pool: worker::WorkerPool,
 
     // Controller connection
     controller_addr: String,
@@ -31,7 +35,6 @@ pub struct Worker {
     receiver: Option<PollingLoop<CoordinationMessage>>,
     sender: Option<TcpSender<CoordinationMessage>>,
     channel_coordinator: Arc<ChannelCoordinator>,
-    domain_threads: Vec<JoinHandle<()>>,
     readers: Readers,
 
     // liveness
@@ -135,6 +138,7 @@ impl Worker {
         listen_addr: &str,
         port: u16,
         heartbeat_every: Duration,
+        workers: usize,
         log: Logger,
     ) -> Worker {
         let readers = Arc::new(Mutex::new(HashMap::new()));
@@ -147,8 +151,16 @@ impl Worker {
         builder.spawn(move || Self::serve_reads(read_polling_loop, readers_clone));
         println!("Listening for reads on {:?}", read_listen_addr);
 
+        let mut checktable_addr: SocketAddr = controller.parse().unwrap();
+        checktable_addr.set_port(8500);
+
+        let cc = Arc::new(ChannelCoordinator::new());
+        let pool = worker::WorkerPool::new(workers, &log, checktable_addr, cc.clone()).unwrap();
+
         Worker {
             log: log,
+
+            pool,
 
             listen_addr: String::from(listen_addr),
             listen_port: port,
@@ -158,8 +170,7 @@ impl Worker {
 
             receiver: None,
             sender: None,
-            channel_coordinator: Arc::new(ChannelCoordinator::new()),
-            domain_threads: Vec::new(),
+            channel_coordinator: cc,
             readers,
 
             heartbeat_every: heartbeat_every,
@@ -241,15 +252,24 @@ impl Worker {
     }
 
     fn handle_domain_assign(&mut self, d: DomainBuilder) -> Result<(), channel::tcp::SendError> {
+        let addr = SocketAddr::new(self.listen_addr.parse().unwrap(), 0);
+        let listener = ::std::net::TcpListener::bind(addr).unwrap();
+        let addr = listener.local_addr().unwrap();
+
         let idx = d.index;
         let shard = d.shard;
-        let (jh, addr) = d.boot(
+        let d = d.build(
             self.log.clone(),
             self.readers.clone(),
             self.channel_coordinator.clone(),
-            SocketAddr::new(self.listen_addr.parse().unwrap(), 0),
+            addr,
         );
-        self.domain_threads.push(jh);
+
+        let listener = ::mio::net::TcpListener::from_listener(listener, &addr).unwrap();
+        self.pool.add_replica(worker::NewReplica {
+            inner: d,
+            listener: listener,
+        });
 
         // need to register the domain with the local channel coordinator
         self.channel_coordinator
@@ -325,9 +345,6 @@ impl Worker {
 
 impl Drop for Worker {
     fn drop(&mut self) {
-        // wait for all domains to exit
-        for t in self.domain_threads.drain(..) {
-            t.join().unwrap();
-        }
+        self.pool.wait()
     }
 }

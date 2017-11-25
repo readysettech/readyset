@@ -19,6 +19,22 @@ pub mod service;
 pub use self::service::SyncClient as CheckTableClient;
 pub use self::service::TransactionId;
 
+use std::net::SocketAddr;
+use std::cell::RefCell;
+thread_local!(static CHECKTABLE: RefCell<Option<CheckTableClient>> = RefCell::new(None));
+pub fn connect_thread_checktable(addr: SocketAddr) {
+    CHECKTABLE.with(|ct| {
+        use tarpc::sync::client::{self, ClientExt};
+        *ct.borrow_mut() =
+            Some(CheckTableClient::connect(addr, client::Options::default()).unwrap());
+    });
+}
+pub fn with_checktable<F, R>(f: F) -> R
+where
+    F: FnOnce(&mut CheckTableClient) -> R,
+{
+    CHECKTABLE.with(|ct| f(ct.borrow_mut().as_mut().unwrap()))
+}
 
 #[derive(Clone, Debug, Eq, PartialEq, Hash, Serialize, Deserialize)]
 enum Conflict {

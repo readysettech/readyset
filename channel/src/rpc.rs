@@ -112,9 +112,9 @@ where
                 self.poisoned = true;
                 Err(TryRecvError::Disconnected)
             }
-            Err(ReceiveError::DeserializationError(_)) => {
+            Err(ReceiveError::DeserializationError(e)) => {
                 self.poisoned = true;
-                Err(TryRecvError::DeserializationError)
+                Err(TryRecvError::DeserializationError(e))
             }
         }
     }

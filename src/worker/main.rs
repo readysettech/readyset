@@ -17,6 +17,7 @@ struct Config {
     pub hostname: String,
     pub addr: String,
     pub port: u16,
+    pub workers: usize,
     pub controller: Option<String>,
     pub heartbeat_freq: u64,
     pub healthcheck_freq: u64,
@@ -44,6 +45,14 @@ fn parse_args(_log: &Logger) -> Config {
                 .takes_value(true)
                 .value_name("HOST-OR-IP:PORT")
                 .help("Network location of the controller to connect to."),
+        )
+        .arg(
+            Arg::with_name("workers")
+                .short("w")
+                .long("workers")
+                .takes_value(true)
+                .default_value("1")
+                .help("Number of worker threads to spin up"),
         )
         .arg(
             Arg::with_name("heartbeat_frequency")
@@ -96,6 +105,7 @@ fn parse_args(_log: &Logger) -> Config {
         },
         addr: String::from(matches.value_of("listen_addr").unwrap()),
         port: value_t_or_exit!(matches, "port", u16),
+        workers: value_t_or_exit!(matches, "workers", usize),
         controller: match matches.value_of("mode") {
             Some("controller") => None,
             Some("worker") => Some(String::from(matches.value_of("controller").unwrap())),
@@ -153,6 +163,7 @@ fn main() {
                 &config.addr,
                 config.port,
                 Duration::from_millis(config.heartbeat_freq),
+                config.workers,
                 log.clone(),
             );
             loop {

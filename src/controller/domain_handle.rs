@@ -114,9 +114,6 @@ pub struct DomainHandle {
 
     // Which worker each shard is assigned to, if any.
     assignments: Vec<Option<WorkerIdentifier>>,
-
-    // used during booting
-    threads: Vec<thread::JoinHandle<()>>,
 }
 
 impl DomainHandle {
@@ -132,6 +129,7 @@ impl DomainHandle {
         listen_addr: &IpAddr,
         checktable_addr: &SocketAddr,
         channel_coordinator: &Arc<ChannelCoordinator>,
+        local_pool: &mut Option<::worker::worker::WorkerPool>,
         debug_addr: &Option<SocketAddr>,
         placer: &'a mut Box<Iterator<Item = (WorkerIdentifier, WorkerEndpoint)>>,
         workers: &'a mut Vec<WorkerEndpoint>,
@@ -149,7 +147,6 @@ impl DomainHandle {
 
         let mut txs = Vec::new();
         let mut cr_rxs = Vec::new();
-        let mut threads = Vec::new();
         let mut assignments = Vec::new();
         let mut nodes = Some(Self::build_descriptors(graph, nodes));
 
@@ -178,7 +175,6 @@ impl DomainHandle {
                 persistence_parameters: persistence_params.clone(),
                 ts,
                 control_addr: control_listener.local_addr().unwrap(),
-                checktable_addr: checktable_addr.clone(),
                 debug_addr: debug_addr.clone(),
             };
 
@@ -205,13 +201,19 @@ impl DomainHandle {
                     assignments.push(Some(identifier));
                 }
                 None => {
-                    let (jh, _) = domain.boot(
-                        logger,
-                        readers.clone(),
-                        channel_coordinator.clone(),
-                        "127.0.0.1:0".parse().unwrap(),
-                    );
-                    threads.push(jh);
+                    let listener = ::std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+                    let addr = listener.local_addr().unwrap();
+                    let d =
+                        domain.build(logger, readers.clone(), channel_coordinator.clone(), addr);
+
+                    let listener = ::mio::net::TcpListener::from_listener(listener, &addr).unwrap();
+                    local_pool
+                        .as_mut()
+                        .unwrap()
+                        .add_replica(::worker::worker::NewReplica {
+                            inner: d,
+                            listener: listener,
+                        });
                     assignments.push(None);
                 }
             }
@@ -261,7 +263,6 @@ impl DomainHandle {
 
         DomainHandle {
             _idx: idx,
-            threads,
             cr_poll,
             txs,
             assignments,
@@ -285,12 +286,6 @@ impl DomainHandle {
             })
             .map(|nd| (*nd.local_addr(), cell::RefCell::new(nd)))
             .collect()
-    }
-
-    pub fn wait(&mut self) {
-        for t in self.threads.drain(..) {
-            t.join().unwrap();
-        }
     }
 
     pub fn send(&mut self, p: Box<Packet>) -> Result<(), tcp::SendError> {

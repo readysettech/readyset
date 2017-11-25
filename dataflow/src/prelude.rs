@@ -18,6 +18,7 @@ pub use Sharding;
 // domain local state
 pub type DomainNodes = ::core::local::Map<cell::RefCell<Node>>;
 pub type DomainIndex = domain::Index;
+pub type ReplicaAddr = (domain::Index, usize);
 
 // channel related types
 use channel;

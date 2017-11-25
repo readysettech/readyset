@@ -36,7 +36,7 @@ use std::env;
 use std::fs;
 use std::collections::HashMap;
 
-const DEFAULT_SETTLE_TIME_MS: u64 = 100;
+const DEFAULT_SETTLE_TIME_MS: u64 = 200;
 
 // Suffixes the given log prefix with a timestamp, ensuring that
 // subsequent test runs do not reuse log files in the case of failures.
@@ -468,6 +468,53 @@ fn it_recovers_persisted_logs() {
         let result = getter.lookup(&i.into(), true).unwrap();
         assert_eq!(result.len(), 1);
         assert_eq!(result[0][0], price.into());
+    }
+}
+
+#[test]
+fn mutator_churn() {
+    let mut g = ControllerBuilder::default().build_inner();
+    let (vote, vc) = g.migrate(|mig| {
+        // migrate
+
+        // add vote base table
+        let vote = mig.add_ingredient("vote", &["user", "id"], Base::default());
+
+        // add vote count
+        let vc = mig.add_ingredient(
+            "votecount",
+            &["id", "votes"],
+            Aggregation::COUNT.over(vote, 0, &[1]),
+        );
+
+        mig.maintain_anonymous(vc, 0);
+        (vote, vc)
+    });
+
+    let mut vc_state = g.get_getter(vc).unwrap();
+
+    let ids = 1000;
+    let votes = 7;
+
+    // continuously write to vote with new mutators
+    let user: DataType = 0.into();
+    for _ in 0..votes {
+        for i in 0..ids {
+            g.get_mutator(vote)
+                .put(vec![user.clone(), i.into()])
+                .unwrap();
+        }
+    }
+
+    // allow the system to catch up with the last writes
+    sleep();
+
+    // check that all writes happened the right number of times
+    for i in 0..ids {
+        assert_eq!(
+            vc_state.lookup(&i.into(), true),
+            Ok(vec![vec![i.into(), votes.into()]])
+        );
     }
 }
 
@@ -1500,10 +1547,13 @@ fn transactional_migration() {
     sleep();
 
     // check that c got them
-    assert_eq!(
-        cq.transactional_lookup(&3.into()).unwrap().0,
-        vec![vec![3.into(), 5.into()], vec![3.into(), 6.into()]]
-    );
+    let res = cq.transactional_lookup(&3.into()).unwrap().0;
+
+    assert_eq!(res.len(), 2);
+    assert!(res.contains(&vec![3.into(), 5.into()]));
+
+    assert!(res.contains(&vec![3.into(), 6.into()]));
+
 }
 
 #[test]
