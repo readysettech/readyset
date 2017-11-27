@@ -51,7 +51,12 @@ impl Node {
                     None => String::from("none"),
                     Some(k) => format!("{}", k),
                 };
-                s.push_str(&format!("{{ {} | (reader / key: {}) }}", addr, key))
+                s.push_str(&format!(
+                    "{{ {} / {} | (reader / ⚷: {}) }}",
+                    addr,
+                    Self::escape(self.name()),
+                    key
+                ))
             }
             NodeType::Internal(ref i) => {
                 s.push_str(&format!("{{"));
