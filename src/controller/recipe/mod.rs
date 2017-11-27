@@ -357,6 +357,7 @@ impl Recipe {
         for l in lines {
             if !l.ends_with(";") {
                 q.push_str(l);
+                q.push_str(" ");
             } else {
                 // end of query
                 q.push_str(l);
