@@ -181,6 +181,7 @@ impl ControllerBuilder {
 
     /// Set the logger that the derived controller should use. By default, it uses `slog::Discard`.
     pub fn log_with(&mut self, log: slog::Logger) {
+        self.materializations.set_logger(&log);
         self.log = log;
     }
 
@@ -509,13 +510,13 @@ impl ControllerInner {
             listen_addr: builder.listen_addr,
             heartbeat_every: builder.heartbeat_every,
             healthcheck_every: builder.healthcheck_every,
+            recipe: Recipe::blank(Some(builder.log.clone())),
             log: builder.log,
 
             domains: Default::default(),
             channel_coordinator: cc,
             debug_channel: None,
 
-            recipe: Recipe::blank(None),
 
             deps: HashMap::default(),
             remap: HashMap::default(),
