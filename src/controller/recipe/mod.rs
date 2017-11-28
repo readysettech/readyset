@@ -5,7 +5,7 @@ use controller::sql::reuse::ReuseConfigType;
 use controller::sql::SqlIncorporator;
 use core::NodeIndex;
 
-use security::Policy;
+use controller::security::policy::Policy;
 
 use slog;
 use std::collections::HashMap;

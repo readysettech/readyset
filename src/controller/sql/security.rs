@@ -2,7 +2,7 @@ use dataflow::prelude::DataType;
 use controller::Migration;
 use std::collections::HashMap;
 use nom_sql::SqlQuery;
-use security::Policy;
+use controller::security::policy::Policy;
 use controller::sql::{QueryFlowParts, SqlIncorporator};
 use controller::sql::query_graph::{to_query_graph, QueryGraph};
 use std::collections::hash_map::Entry;

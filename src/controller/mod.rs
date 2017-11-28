@@ -38,6 +38,7 @@ pub mod migrate;
 
 pub(crate) mod recipe;
 pub(crate) mod sql;
+pub(crate) mod security;
 
 mod getter;
 mod mir_to_flow;
