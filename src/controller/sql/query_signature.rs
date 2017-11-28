@@ -106,8 +106,8 @@ impl Signature for QueryGraph {
         }
         for e in self.edges.values() {
             match *e {
-                QueryGraphEdge::Join(ref join_predicates) |
-                QueryGraphEdge::LeftJoin(ref join_predicates) => for p in join_predicates {
+                QueryGraphEdge::Join(ref join_predicates)
+                | QueryGraphEdge::LeftJoin(ref join_predicates) => for p in join_predicates {
                     for c in &p.contained_columns() {
                         attrs_vec.push(c);
                         attrs.insert(c);

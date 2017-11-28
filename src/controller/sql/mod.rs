@@ -646,11 +646,11 @@ impl SqlIncorporator {
             // does, we will amend or reuse it; if it does not, we create it.
             SqlQuery::CreateTable(_) => (),
             // other kinds of queries *do* require their referred tables to exist!
-            ref q @ SqlQuery::CompoundSelect(_) |
-            ref q @ SqlQuery::Select(_) |
-            ref q @ SqlQuery::Update(_) |
-            ref q @ SqlQuery::Delete(_) |
-            ref q @ SqlQuery::Insert(_) => for t in &q.referred_tables() {
+            ref q @ SqlQuery::CompoundSelect(_)
+            | ref q @ SqlQuery::Select(_)
+            | ref q @ SqlQuery::Update(_)
+            | ref q @ SqlQuery::Delete(_)
+            | ref q @ SqlQuery::Insert(_) => for t in &q.referred_tables() {
                 if !self.view_schemas.contains_key(&t.name) {
                     panic!("query refers to unknown table \"{}\"", t.name);
                 }

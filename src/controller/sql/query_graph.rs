@@ -36,13 +36,13 @@ impl Ord for OutputColumn {
                 ref name,
                 ref table,
                 ..
-            }) |
-            OutputColumn::Data(Column {
+            })
+            | OutputColumn::Data(Column {
                 ref name,
                 ref table,
                 ..
-            }) |
-            OutputColumn::Literal(LiteralColumn {
+            })
+            | OutputColumn::Literal(LiteralColumn {
                 ref name,
                 ref table,
                 ..
@@ -51,13 +51,13 @@ impl Ord for OutputColumn {
                     name: ref other_name,
                     table: ref other_table,
                     ..
-                }) |
-                OutputColumn::Data(Column {
+                })
+                | OutputColumn::Data(Column {
                     name: ref other_name,
                     table: ref other_table,
                     ..
-                }) |
-                OutputColumn::Literal(LiteralColumn {
+                })
+                | OutputColumn::Literal(LiteralColumn {
                     name: ref other_name,
                     table: ref other_table,
                     ..
@@ -81,13 +81,13 @@ impl PartialOrd for OutputColumn {
                 ref name,
                 ref table,
                 ..
-            }) |
-            OutputColumn::Data(Column {
+            })
+            | OutputColumn::Data(Column {
                 ref name,
                 ref table,
                 ..
-            }) |
-            OutputColumn::Literal(LiteralColumn {
+            })
+            | OutputColumn::Literal(LiteralColumn {
                 ref name,
                 ref table,
                 ..
@@ -96,13 +96,13 @@ impl PartialOrd for OutputColumn {
                     name: ref other_name,
                     table: ref other_table,
                     ..
-                }) |
-                OutputColumn::Data(Column {
+                })
+                | OutputColumn::Data(Column {
                     name: ref other_name,
                     table: ref other_table,
                     ..
-                }) |
-                OutputColumn::Literal(LiteralColumn {
+                })
+                | OutputColumn::Literal(LiteralColumn {
                     name: ref other_name,
                     table: ref other_table,
                     ..

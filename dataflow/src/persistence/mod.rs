@@ -204,8 +204,8 @@ impl GroupCommitQueueSet {
                     let data_to_flush: Vec<_> = self.pending_packets[&node]
                         .iter()
                         .map(|p| match **p {
-                            Packet::Transaction { ref data, .. } |
-                            Packet::Message { ref data, .. } => data,
+                            Packet::Transaction { ref data, .. }
+                            | Packet::Message { ref data, .. } => data,
                             _ => unreachable!(),
                         })
                         .collect();
@@ -282,8 +282,8 @@ impl GroupCommitQueueSet {
                     ref link,
                     ref mut data,
                     ref mut tracer,
-                },) |
-                (box Packet::Transaction {
+                },)
+                | (box Packet::Transaction {
                     ref link,
                     ref mut data,
                     ref mut tracer,
