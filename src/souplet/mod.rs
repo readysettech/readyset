@@ -15,11 +15,11 @@ use dataflow::prelude::*;
 use controller::{ReadQuery, ReadReply};
 use coordination::{CoordinationMessage, CoordinationPayload};
 
-pub mod worker;
+use worker;
 
-/// Workers are responsible for running domains, and serving reads to any materializations contained
-/// within them.
-pub struct Worker {
+/// Souplets are responsible for running domains, and serving reads to any materializations
+/// contained within them.
+pub struct Souplet {
     log: Logger,
 
     pool: worker::WorkerPool,
@@ -42,7 +42,7 @@ pub struct Worker {
     last_heartbeat: Option<Instant>,
 }
 
-impl Worker {
+impl Souplet {
     /// Use the given polling loop and readers object to serve reads.
     pub fn serve_reads(mut polling_loop: RpcPollingLoop<ReadQuery, ReadReply>, readers: Readers) {
         let mut readers_cache: HashMap<
@@ -124,7 +124,7 @@ impl Worker {
         heartbeat_every: Duration,
         workers: usize,
         log: Logger,
-    ) -> Worker {
+    ) -> Self {
         let readers = Arc::new(Mutex::new(HashMap::new()));
 
         let readers_clone = readers.clone();
@@ -141,7 +141,7 @@ impl Worker {
         let cc = Arc::new(ChannelCoordinator::new());
         let pool = worker::WorkerPool::new(workers, &log, checktable_addr, cc.clone()).unwrap();
 
-        Worker {
+        Souplet {
             log: log,
 
             pool,
@@ -327,7 +327,7 @@ impl Worker {
     }
 }
 
-impl Drop for Worker {
+impl Drop for Souplet {
     fn drop(&mut self) {
         self.pool.wait()
     }

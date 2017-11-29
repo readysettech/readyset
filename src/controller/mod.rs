@@ -5,7 +5,8 @@ use dataflow::prelude::*;
 use dataflow::{backlog, checktable, node, payload, DomainConfig, PersistenceParameters, Readers};
 use dataflow::ops::base::Base;
 use dataflow::statistics::GraphStats;
-use worker::Worker;
+use souplet::Souplet;
+use worker;
 
 use std::collections::{BTreeMap, HashMap, HashSet};
 use std::error::Error;
@@ -255,7 +256,7 @@ pub struct ControllerInner {
     remap: HashMap<DomainIndex, HashMap<NodeIndex, IndexPair>>,
 
     /// Local worker pool used for tests
-    local_pool: Option<::worker::worker::WorkerPool>,
+    local_pool: Option<worker::WorkerPool>,
 
     heartbeat_every: Duration,
     healthcheck_every: Duration,
@@ -478,14 +479,14 @@ impl ControllerInner {
         let read_listen_addr = read_polling_loop.get_listener_addr().unwrap();
         let thread_builder = thread::Builder::new().name("wrkr-reads".to_owned());
         thread_builder.spawn(move || {
-            Worker::serve_reads(read_polling_loop, readers_clone)
+            Souplet::serve_reads(read_polling_loop, readers_clone)
         });
 
         let cc = Arc::new(ChannelCoordinator::new());
         assert!((builder.nworkers == 0) ^ (builder.local_workers == 0));
         let local_pool = if builder.nworkers == 0 {
             Some(
-                ::worker::worker::WorkerPool::new(
+                worker::WorkerPool::new(
                     builder.local_workers,
                     &builder.log,
                     checktable_addr,
@@ -516,7 +517,6 @@ impl ControllerInner {
             domains: Default::default(),
             channel_coordinator: cc,
             debug_channel: None,
-
 
             deps: HashMap::default(),
             remap: HashMap::default(),

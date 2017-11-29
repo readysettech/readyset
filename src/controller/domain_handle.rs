@@ -15,6 +15,7 @@ use dataflow::statistics::{DomainStats, NodeStats};
 
 use coordination::{CoordinationMessage, CoordinationPayload};
 use controller::{WorkerEndpoint, WorkerIdentifier};
+use worker;
 
 #[derive(Debug)]
 pub enum WaitError {
@@ -129,7 +130,7 @@ impl DomainHandle {
         listen_addr: &IpAddr,
         checktable_addr: &SocketAddr,
         channel_coordinator: &Arc<ChannelCoordinator>,
-        local_pool: &mut Option<::worker::worker::WorkerPool>,
+        local_pool: &mut Option<worker::WorkerPool>,
         debug_addr: &Option<SocketAddr>,
         placer: &'a mut Box<Iterator<Item = (WorkerIdentifier, WorkerEndpoint)>>,
         workers: &'a mut Vec<WorkerEndpoint>,
@@ -210,7 +211,7 @@ impl DomainHandle {
                     local_pool
                         .as_mut()
                         .unwrap()
-                        .add_replica(::worker::worker::NewReplica {
+                        .add_replica(worker::NewReplica {
                             inner: d,
                             listener: listener,
                         });

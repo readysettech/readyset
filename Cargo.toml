@@ -79,5 +79,5 @@ path = "src/lib.rs"
 name = "basic-recipe"
 
 [[bin]]
-name = "worker"
-path = "src/worker/main.rs"
+name = "souplet"
+path = "src/souplet/main.rs"

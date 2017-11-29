@@ -7,7 +7,7 @@ extern crate serde_json;
 extern crate slog;
 extern crate slog_term;
 
-use distributary::Worker;
+use distributary::Souplet;
 
 use slog::Logger;
 use std::thread;
@@ -158,7 +158,7 @@ fn main() {
             unimplemented!()
         }
         Some(c) => {
-            let mut worker = Worker::new(
+            let mut worker = Souplet::new(
                 &c,
                 &config.addr,
                 config.port,
