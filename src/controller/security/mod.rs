@@ -9,6 +9,7 @@ pub mod group;
 use controller::security::policy::Policy;
 use controller::security::group::Group;
 
+#[derive(Clone, Debug)]
 pub struct SecurityConfig {
     groups: Vec<Group>,
     policies: Vec<Policy>,
@@ -21,13 +22,21 @@ impl SecurityConfig {
             Err(e) => panic!(e.to_string()),
         };
 
-        let groups = Group::parse(&format!("{}", config["groups"]));
+        let groups = match config.get("groups") {
+            Some(groups) => Group::parse(&format!("{}", groups)),
+            None => Vec::new()
+        };
+
         let policies = Policy::parse(&format!("{}", config["policies"]));
 
         SecurityConfig {
             groups: groups,
             policies: policies,
         }
+    }
+
+    pub fn policies(&self) -> &[Policy] {
+        self.policies.as_slice()
     }
 }
 

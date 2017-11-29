@@ -11,6 +11,7 @@ enum Action {
 
 #[derive(Clone, Debug, Hash, PartialEq, Serialize, Deserialize)]
 pub struct Policy {
+    pub name: String,
     pub table: String,
     pub predicate: SqlQuery,
     action: Action
@@ -26,6 +27,10 @@ impl Policy {
         config
             .iter()
             .map(|p| {
+                let name = match p.get("name") {
+                    Some(n) => n.as_str().unwrap(),
+                    None => "",
+                };
                 let table = p["table"].as_str().unwrap();
                 let pred = p["predicate"].as_str().unwrap();
 
@@ -33,6 +38,7 @@ impl Policy {
                     sql_parser::parse_query(&format!("select * from {} {};", table, pred)).unwrap();
 
                 Policy {
+                    name: name.to_string(),
                     table: table.to_string(),
                     predicate: sq,
                     action: Action::Allow,

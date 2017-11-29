@@ -325,8 +325,8 @@ impl ControllerInner {
                             "install_recipe" => json::to_string(
                                 &self.install_recipe(json::from_str(&body).unwrap()),
                             ).unwrap(),
-                            "install_recipe_with_policies" => json::to_string(
-                                &self.install_recipe_with_policies(json::from_str(&body).unwrap()),
+                            "set_security_config" => json::to_string(
+                                &self.set_security_config(json::from_str(&body).unwrap()),
                             ).unwrap(),
                             "create_universe" => json::to_string(
                                 &self.create_universe(json::from_str(&body).unwrap()),
@@ -821,14 +821,8 @@ impl ControllerInner {
         self.recipe = new;
     }
 
-    pub fn install_recipe_with_policies(&mut self, (r, p): (String, String)) {
-        let mut r = Recipe::from_str_with_policy(&r, Some(&p), None).unwrap();
-        let old = self.recipe.clone();
-        let mut new = old.replace(r).unwrap();
-        self.migrate(|mig| {
-            assert!(new.activate(mig, false).is_ok());
-        });
-        self.recipe = new;
+    pub fn set_security_config(&mut self, p: String) {
+        self.recipe.set_security_config(&p);
     }
 
     pub fn create_universe(&mut self, context: HashMap<String, DataType>) {
@@ -1647,8 +1641,8 @@ impl Blender {
     }
 
     /// Install a new set of policies on the controller.
-    pub fn install_recipe_with_policies(&self, r: String, p: String) {
-        self.rpc("install_recipe_with_policies", &(r, p)).unwrap()
+    pub fn set_security_config(&self, p: String) {
+        self.rpc("set_security_config", &p).unwrap()
     }
 
     /// Install a new set of policies on the controller.

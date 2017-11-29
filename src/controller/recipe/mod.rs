@@ -5,7 +5,7 @@ use controller::sql::reuse::ReuseConfigType;
 use controller::sql::SqlIncorporator;
 use core::NodeIndex;
 
-use controller::security::policy::Policy;
+use controller::security::SecurityConfig;
 
 use slog;
 use std::collections::HashMap;
@@ -34,8 +34,8 @@ pub struct Recipe {
     expression_order: Vec<QueryID>,
     /// Named read/write expression aliases, mapping to queries in `expressions`.
     aliases: HashMap<String, QueryID>,
-    /// Security policies enforced in the recipe.
-    policies: HashMap<u64, Policy>,
+    /// Security configuration
+    security_config: Option<SecurityConfig>,
 
     /// Recipe revision.
     version: usize,
@@ -89,7 +89,7 @@ impl Recipe {
                 None => slog::Logger::root(slog::Discard, o!()),
                 Some(log) => log,
             },
-            policies: HashMap::default(),
+            security_config: None,
         }
     }
 
@@ -136,37 +136,10 @@ impl Recipe {
         }
     }
 
-    /// Creates a recipe from a set of SQL queries in a string (e.g., read from a file) and from
-    /// a set of security policies in a string.
-    /// Note that the recipe is not backed by a Soup data-flow graph until `activate` is called on
-    /// it.
-    pub fn from_str_with_policy(
-        recipe_text: &str,
-        policy_text: Option<&str>,
-        log: Option<slog::Logger>,
-    ) -> Result<Recipe, String> {
-        let recipe = match Recipe::from_str(recipe_text, log) {
-            Ok(mut r) => {
-                let ps = match policy_text {
-                    Some(pt) => Policy::parse(pt),
-                    None => Vec::default(),
-                };
-
-                let policies = ps.into_iter()
-                    .map(|p| {
-                        let pid: u64 = hash_query(&p.predicate);
-                        (pid, p)
-                    })
-                    .collect::<HashMap<u64, Policy>>();
-
-                r.policies = policies;
-
-                Ok(r)
-            }
-            Err(e) => Err(e),
-        };
-
-        recipe
+    /// Set recipe's security configuration
+    pub fn set_security_config(&mut self, config_text: &str) {
+        let config = SecurityConfig::parse(config_text);
+        self.security_config = Some(config);
     }
 
     /// Creates a recipe from a set of SQL queries in a string (e.g., read from a file).
@@ -231,7 +204,7 @@ impl Recipe {
             expressions: expressions,
             expression_order: expression_order,
             aliases: aliases,
-            policies: HashMap::default(),
+            security_config: None,
             version: 0,
             prior: None,
             inc: Some(inc),
@@ -246,13 +219,15 @@ impl Recipe {
             expressions_added: 0,
             expressions_removed: 0,
         };
-        use controller::sql::security::ManyUniverses;
+        use controller::sql::security::Multiverse;
 
-        let qfp = self.inc
-            .as_mut()
-            .unwrap()
-            .start_universe(&self.policies, mig)?;
-        result.new_nodes.insert(qfp.name.clone(), qfp.query_leaf);
+        if self.security_config.is_some() {
+            let qfp = self.inc
+                .as_mut()
+                .unwrap()
+                .start_universe(&self.security_config.clone().unwrap(), mig)?;
+            result.new_nodes.insert(qfp.name.clone(), qfp.query_leaf);
+        }
 
         for expr in self.expressions.values() {
             let (n, q) = expr.clone();
@@ -407,7 +382,7 @@ impl Recipe {
             log: self.log.clone(),
             // retain the old recipe for future reference
             prior: Some(Box::new(self)),
-            policies: HashMap::default(),
+            security_config: None,
         };
 
         // apply changes
