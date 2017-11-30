@@ -76,7 +76,6 @@ fn rewrite_selection(
 ) -> SelectStatement {
     use nom_sql::FunctionExpression::*;
     use nom_sql::{GroupByClause, OrderClause};
-    use nom_sql::TableKey::*;
 
     // Tries to find a table with a matching column in the `tables_in_query` (information
     // passed as `write_schemas`; this is not something the parser or the expansion pass can
@@ -224,8 +223,6 @@ fn rewrite_selection(
 
 impl ImpliedTableExpansion for SqlQuery {
     fn expand_implied_tables(self, write_schemas: &HashMap<String, Vec<String>>) -> SqlQuery {
-        use nom_sql::FunctionExpression::*;
-        use nom_sql::{GroupByClause, OrderClause};
         use nom_sql::TableKey::*;
 
         match self {
@@ -236,7 +233,7 @@ impl ImpliedTableExpansion for SqlQuery {
                     .collect();
                 SqlQuery::CompoundSelect(csq)
             }
-            SqlQuery::Select(mut sq) => SqlQuery::Select(rewrite_selection(sq, write_schemas)),
+            SqlQuery::Select(sq) => SqlQuery::Select(rewrite_selection(sq, write_schemas)),
             SqlQuery::CreateTable(mut ctq) => {
                 let table = ctq.table.clone();
                 let transform_key = |key_cols: Vec<Column>| {

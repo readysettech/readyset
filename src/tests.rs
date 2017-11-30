@@ -1,33 +1,20 @@
 extern crate glob;
 
-use core::{DataType, Datas};
-use dataflow::DomainBuilder;
-use dataflow::backlog::SingleReadHandle;
-use dataflow::checktable::{Token, TransactionResult};
-use dataflow::debug::{DebugEvent, DebugEventType};
+use core::DataType;
+use dataflow::checktable::Token;
 use dataflow::node::StreamUpdate;
 use dataflow::ops::base::Base;
-use dataflow::ops::filter::{Filter, Operator};
-use dataflow::ops::grouped::aggregate::{Aggregation, Aggregator};
-use dataflow::ops::grouped::concat::{GroupConcat, TextComponent};
-use dataflow::ops::grouped::extremum::{Extremum, ExtremumOperator};
+use dataflow::ops::grouped::aggregate::Aggregation;
 use dataflow::ops::identity::Identity;
 use dataflow::ops::join::{Join, JoinSource, JoinType};
 use dataflow::ops::join::JoinSource::*;
-use dataflow::ops::latest::Latest;
 use dataflow::ops::project::Project;
-use dataflow::ops::topk::TopK;
 use dataflow::ops::union::Union;
-use dataflow::payload::PacketEvent;
 use dataflow::prelude::*;
 use dataflow::{DurabilityMode, PersistenceParameters};
 use controller::ControllerBuilder;
-use coordination::{CoordinationMessage, CoordinationPayload};
-use controller::{Blender, Getter, Migration, Mutator, MutatorBuilder, MutatorError, ReadQuery,
-                 ReadReply, RemoteGetter, RemoteGetterBuilder};
-use controller::recipe::{ActivationResult, Recipe};
-use controller::sql::reuse::ReuseConfigType;
-use controller::sql::{SqlIncorporator, ToFlowParts};
+use controller::recipe::Recipe;
+use controller::sql::SqlIncorporator;
 
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 use std::thread;
@@ -168,7 +155,7 @@ fn it_works_streaming() {
         emits.insert(b, vec![0, 1]);
         let u = Union::new(emits);
         let c = mig.add_ingredient("c", &["a", "b"], u);
-        let mut cq = mig.stream(c);
+        let cq = mig.stream(c);
         (a, b, cq)
     });
 
@@ -203,11 +190,11 @@ fn shared_interdomain_ancestor() {
 
         let u = Union::new(emits.clone());
         let b = mig.add_ingredient("b", &["a", "b"], u);
-        let mut bq = mig.stream(b);
+        let bq = mig.stream(b);
 
         let u = Union::new(emits);
         let c = mig.add_ingredient("c", &["a", "b"], u);
-        let mut cq = mig.stream(c);
+        let cq = mig.stream(c);
         (a, bq, cq)
     });
 
@@ -307,7 +294,7 @@ fn it_works_deletion() {
         emits.insert(b, vec![1, 2]);
         let u = Union::new(emits);
         let c = mig.add_ingredient("c", &["x", "y"], u);
-        let mut cq = mig.stream(c);
+        let cq = mig.stream(c);
         (a, b, cq)
     });
 
@@ -949,9 +936,9 @@ fn transactional_vote() {
 
     let token = articleq.transactional_lookup(&a1).unwrap().1;
 
-    let mut endq_token = endq.transactional_lookup(&a2).unwrap().1;
-    let mut endq_title_token = endq_title.transactional_lookup(&4.into()).unwrap().1;
-    let mut endq_votes_token = endq_votes.transactional_lookup(&0.into()).unwrap().1;
+    let endq_token = endq.transactional_lookup(&a2).unwrap().1;
+    let endq_title_token = endq_title.transactional_lookup(&4.into()).unwrap().1;
+    let endq_votes_token = endq_votes.transactional_lookup(&0.into()).unwrap().1;
 
     // make one article
     assert!(
@@ -995,9 +982,9 @@ fn transactional_vote() {
     token.merge(token2);
     assert!(validate(&token));
 
-    let mut endq_token = endq.transactional_lookup(&a1).unwrap().1;
-    let mut endq_title_token = endq_title.transactional_lookup(&4.into()).unwrap().1;
-    let mut endq_votes_token = endq_votes.transactional_lookup(&0.into()).unwrap().1;
+    let endq_token = endq.transactional_lookup(&a1).unwrap().1;
+    let endq_title_token = endq_title.transactional_lookup(&4.into()).unwrap().1;
+    let endq_votes_token = endq_votes.transactional_lookup(&0.into()).unwrap().1;
 
     // create a vote (user 1 votes for article 1)
     assert!(
@@ -1131,7 +1118,7 @@ fn add_columns() {
     let mut g = ControllerBuilder::default().build_inner();
     let (a, aq) = g.migrate(|mig| {
         let a = mig.add_ingredient("a", &["a", "b"], Base::new(vec![1.into(), 2.into()]));
-        let mut aq = mig.stream(a);
+        let aq = mig.stream(a);
         (a, aq)
     });
     let mut muta = g.get_mutator(a);
@@ -1567,7 +1554,7 @@ fn crossing_migration() {
     let mut muta = g.get_mutator(a);
     let mut mutb = g.get_mutator(b);
 
-    let mut cq = g.migrate(|mig| {
+    let cq = g.migrate(|mig| {
         let mut emits = HashMap::new();
         emits.insert(a, vec![0, 1]);
         emits.insert(b, vec![0, 1]);
@@ -1649,7 +1636,7 @@ fn domain_amend_migration() {
     let mut muta = g.get_mutator(a);
     let mut mutb = g.get_mutator(b);
 
-    let mut cq = g.migrate(|mig| {
+    let cq = g.migrate(|mig| {
         let mut emits = HashMap::new();
         emits.insert(a, vec![0, 1]);
         emits.insert(b, vec![0, 1]);

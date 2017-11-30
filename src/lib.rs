@@ -312,7 +312,6 @@
 #![deny(missing_docs)]
 #![feature(plugin, use_extern_macros)]
 #![plugin(tarpc_plugins)]
-#![allow(unused)]
 #![deny(unused_extern_crates)]
 
 extern crate channel;
@@ -331,13 +330,11 @@ extern crate rustful;
 extern crate serde;
 #[macro_use]
 extern crate serde_derive;
-#[macro_use]
 extern crate serde_json;
 extern crate slab;
 #[macro_use]
 extern crate slog;
 extern crate slog_term;
-#[macro_use]
 extern crate tarpc;
 extern crate tokio_core;
 extern crate vec_map;

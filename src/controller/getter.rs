@@ -178,6 +178,7 @@ pub struct Getter {
     last_ts: i64,
 }
 
+#[allow(unused)]
 impl Getter {
     pub(crate) fn new(
         node: NodeIndex,

@@ -61,6 +61,7 @@ impl Materializations {
         }
     }
 
+    #[allow(unused)]
     pub fn set_logger(&mut self, logger: &Logger) {
         self.log = logger.new(o!());
     }

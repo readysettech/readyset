@@ -62,6 +62,7 @@ fn hash_query(q: &SqlQuery) -> QueryID {
     h.finish()
 }
 
+#[allow(unused)]
 impl Recipe {
     /// Return active aliases for expressions
     pub fn aliases(&self) -> Vec<&str> {

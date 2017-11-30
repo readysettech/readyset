@@ -132,7 +132,9 @@ impl Souplet {
             RpcPollingLoop::new(SocketAddr::new(listen_addr.parse().unwrap(), 0));
         let read_listen_addr = read_polling_loop.get_listener_addr().unwrap();
         let builder = thread::Builder::new().name("wrkr-reads".to_owned());
-        builder.spawn(move || Self::serve_reads(read_polling_loop, readers_clone));
+        builder
+            .spawn(move || Self::serve_reads(read_polling_loop, readers_clone))
+            .unwrap();
         println!("Listening for reads on {:?}", read_listen_addr);
 
         let mut checktable_addr: SocketAddr = controller.parse().unwrap();
