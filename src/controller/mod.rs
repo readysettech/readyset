@@ -105,6 +105,9 @@ impl Default for ControllerBuilder {
     fn default() -> Self {
         let log = slog::Logger::root(slog::Discard, o!());
         Self {
+            #[cfg(test)]
+            sharding: Some(2),
+            #[cfg(not(test))]
             sharding: None,
             domain_config: DomainConfig {
                 concurrent_replays: 512,
