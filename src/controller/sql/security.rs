@@ -26,6 +26,14 @@ pub trait Multiverse {
         fields: Vec<&String>,
         mig: &mut Migration
     ) -> Result<QueryFlowParts, String>;
+
+    fn add_user_group(
+        &mut self,
+        name: String,
+        user_context: String,
+        group_membership: String,
+        mig: &mut Migration,
+    ) -> Result<QueryFlowParts, String>;
 }
 
 impl Multiverse for SqlIncorporator {
@@ -40,10 +48,17 @@ impl Multiverse for SqlIncorporator {
 
         info!(self.log, "Starting user universe {}", uid);
 
-        let name = format!("UserContext_{}", uid);
+        let uc_name = format!("UserContext_{}", uid);
         let fields: Vec<_> = context.keys().collect();
 
-        let res = self.add_base(name, fields, mig);
+        let res = self.add_base(uc_name.clone(), fields, mig);
+
+        // Then, create the UserGroup views.
+        for group in config.groups() {
+            let name = format!("{}_{}", group.name(), uid);
+            self.add_user_group(name, uc_name.clone(), group.name(), mig);
+        }
+
 
         // Then, we need to transform policies' predicates into QueryGraphs.
         // We do this in a per-universe base, instead of once per policy,
@@ -76,6 +91,24 @@ impl Multiverse for SqlIncorporator {
         self.mir_converter.set_policies(policies_qg);
 
         res
+    }
+
+    fn add_user_group(
+        &mut self,
+        name: String,
+        user_context: String,
+        group_membership: String,
+        mig: &mut Migration,
+    ) -> Result<QueryFlowParts, String> {
+        let mut s = String::new();
+        s.push_str(&format!("select uid, gid FROM {}, {} WHERE {}.id = {}.uid;",
+                        user_context,
+                        group_membership,
+                        user_context,
+                        group_membership
+                    ));
+
+        self.add_query(&s, Some(name), mig)
     }
 
     fn add_base(

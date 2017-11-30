@@ -303,9 +303,9 @@ impl Recipe {
                 let qfp = self.inc
                     .as_mut()
                     .unwrap()
-                    .add_parsed_query(group.membership(), None, true, mig)?;
+                    .add_parsed_query(group.membership(), Some(group.name()), true, mig)?;
 
-                result.new_nodes.insert(qfp.name.clone(), qfp.query_leaf);
+                result.new_nodes.insert(group.name(), qfp.query_leaf);
             }
 
             self.security_config = Some(config);
