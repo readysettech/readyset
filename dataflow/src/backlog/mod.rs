@@ -1,7 +1,6 @@
 use core::{DataType, Record};
 use fnv::FnvBuildHasher;
 use evmap;
-use arrayvec::ArrayVec;
 
 use std::sync::Arc;
 
@@ -186,7 +185,7 @@ impl SingleReadHandle {
 
 #[derive(Clone)]
 pub enum ReadHandle {
-    Sharded(ArrayVec<[Option<SingleReadHandle>; ::SHARDS]>),
+    Sharded(Vec<Option<SingleReadHandle>>),
     Singleton(Option<SingleReadHandle>),
 }
 
