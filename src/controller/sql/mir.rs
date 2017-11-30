@@ -1455,7 +1455,7 @@ impl SqlToMirConverter {
             } else {
                 String::from(name)
             };
-            let mut leaf_project_node = self.make_project_node(
+            let leaf_project_node = self.make_project_node(
                 &ident,
                 final_node,
                 projected_columns,
