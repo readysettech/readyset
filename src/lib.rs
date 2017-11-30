@@ -315,7 +315,6 @@
 #![allow(unused)]
 #![deny(unused_extern_crates)]
 
-extern crate arrayvec;
 extern crate channel;
 extern crate core;
 extern crate dataflow;

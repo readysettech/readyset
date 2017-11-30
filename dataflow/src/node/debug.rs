@@ -20,7 +20,7 @@ impl Node {
     pub fn describe(&self, idx: NodeIndex) -> String {
         let mut s = String::new();
         let border = match self.sharded_by {
-            Sharding::ByColumn(_) | Sharding::Random => "filled,dashed",
+            Sharding::ByColumn(_, _) | Sharding::Random(_) => "filled,dashed",
             _ => "filled",
         };
         s.push_str(&format!(

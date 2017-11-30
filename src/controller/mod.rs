@@ -87,7 +87,7 @@ enum ControlEvent {
 
 /// Used to construct a controller.
 pub struct ControllerBuilder {
-    sharding_enabled: bool,
+    sharding: Option<usize>,
     domain_config: DomainConfig,
     persistence: PersistenceParameters,
     materializations: migrate::materialization::Materializations,
@@ -105,7 +105,7 @@ impl Default for ControllerBuilder {
     fn default() -> Self {
         let log = slog::Logger::root(slog::Discard, o!());
         Self {
-            sharding_enabled: true,
+            sharding: None,
             domain_config: DomainConfig {
                 concurrent_replays: 512,
                 replay_batch_timeout: time::Duration::from_millis(1),
@@ -159,9 +159,9 @@ impl ControllerBuilder {
         self.materializations.disable_partial();
     }
 
-    /// Disable sharding for all subsequent migrations
-    pub fn disable_sharding(&mut self) {
-        self.sharding_enabled = false;
+    /// Enable sharding for all subsequent migrations
+    pub fn enable_sharding(&mut self, shards: usize) {
+        self.sharding = Some(shards);
     }
 
     /// Set how many workers the controller should wait for before starting. More workers can join
@@ -228,7 +228,7 @@ pub struct ControllerInner {
     ndomains: usize,
     checktable: checktable::CheckTableClient,
     checktable_addr: SocketAddr,
-    sharding_enabled: bool,
+    sharding: Option<usize>,
 
     domain_config: DomainConfig,
 
@@ -504,7 +504,7 @@ impl ControllerInner {
             checktable,
             checktable_addr,
 
-            sharding_enabled: builder.sharding_enabled,
+            sharding: builder.sharding,
             materializations: builder.materializations,
             domain_config: builder.domain_config,
             persistence: builder.persistence,
@@ -720,7 +720,7 @@ impl ControllerInner {
             .unwrap_or_else(Vec::new);
         let mut is_primary = false;
         if key.is_empty() {
-            if let Sharding::ByColumn(col) = self.ingredients[base].sharded_by() {
+            if let Sharding::ByColumn(col, _) = self.ingredients[base].sharded_by() {
                 key = vec![col];
             }
         } else {
@@ -1147,8 +1147,14 @@ impl<'a> Migration<'a> {
         }
 
         // Shard the graph as desired
-        let mut swapped0 = if mainline.sharding_enabled {
-            migrate::sharding::shard(&log, &mut mainline.ingredients, mainline.source, &mut new)
+        let mut swapped0 = if let Some(shards) = mainline.sharding {
+            migrate::sharding::shard(
+                &log,
+                &mut mainline.ingredients,
+                mainline.source,
+                &mut new,
+                shards,
+            )
         } else {
             HashMap::default()
         };
