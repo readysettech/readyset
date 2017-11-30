@@ -8,11 +8,10 @@ members = ["benchmarks", "channel", "core", "mir"]
 
 [features]
 web = ["rustful"]
-default = ["web"]
+default = ["web", "carry_local"]
 profiling = ["timekeeper/default"]
 binaries = ["default"]
 generate_mysql_tests = ["default"]
-carry_local = ["default"]
 
 [dependencies]
 clap = "2.25.0"
