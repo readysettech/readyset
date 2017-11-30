@@ -342,8 +342,7 @@ fn it_works_with_sql_recipe() {
     let mut getter = g.get_getter(count_index).unwrap();
     let brands = vec!["Volvo", "Volvo", "Volkswagen"];
     for (i, &brand) in brands.iter().enumerate() {
-        let id = i as i32;
-        mutator.put(vec![id.into(), brand.into()]).unwrap();
+        mutator.put(vec![i.into(), brand.into()]).unwrap();
     }
 
     // Let writes propagate:
@@ -542,7 +541,7 @@ fn it_recovers_persisted_logs_w_multiple_nodes() {
         let (g, recipe) = setup();
         for (i, table) in tables.iter().enumerate() {
             let mut mutator = g.get_mutator(recipe.node_addr_for(table).unwrap());
-            mutator.put(vec![(i as i32).into()]).unwrap();
+            mutator.put(vec![i.into()]).unwrap();
         }
 
         // Let writes propagate:
@@ -555,12 +554,11 @@ fn it_recovers_persisted_logs_w_multiple_nodes() {
     sleep();
 
     for (i, table) in tables.iter().enumerate() {
-        let id = i as i32;
         let mut getter = g.get_getter(recipe.node_addr_for(&format!("{}ID", table)).unwrap())
             .unwrap();
-        let result = getter.lookup(&id.into(), true).unwrap();
+        let result = getter.lookup(&i.into(), true).unwrap();
         assert_eq!(result.len(), 1);
-        assert_eq!(result[0][0], id.into());
+        assert_eq!(result[0][0], i.into());
     }
 }
 
@@ -749,7 +747,7 @@ fn it_works_with_function_arithmetic() {
     let mut getter = g.get_getter(query_index).unwrap();
     let max_price = 20;
     for (i, price) in (10..max_price + 1).enumerate() {
-        let id = (i + 1) as i32;
+        let id = i + 1;
         mutator.put(vec![id.into(), price.into()]).unwrap();
     }
 
