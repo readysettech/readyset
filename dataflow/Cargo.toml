@@ -5,7 +5,7 @@ authors = ["The Distributary Developers"]
 
 [dependencies]
 buf_redux = "0.6.1"
-evmap = "1.0.0"
+evmap = "2.0.1"
 fnv = "1.0.5"
 itertools = "0.7.2"
 regex = "0.2.2"
