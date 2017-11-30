@@ -1,9 +1,7 @@
-use std;
 use std::io;
 use std::thread;
-use std::net::{self, SocketAddr, ToSocketAddrs};
+use std::net::{SocketAddr, ToSocketAddrs};
 use std::time::{Duration, Instant};
-use std::collections::HashMap;
 use std::sync::{mpsc, Arc, Mutex, TryLockError};
 use std::os::unix::io::AsRawFd;
 use std::ops::AddAssign;
@@ -11,9 +9,9 @@ use std::ops::AddAssign;
 use fnv::FnvHashMap;
 use slab::Slab;
 use vec_map::VecMap;
-use mio::{self, Evented, Events, Poll, PollOpt, Ready, Token};
+use mio::{Evented, Events, Poll, PollOpt, Ready, Token};
 use mio::unix::EventedFd;
-use mio::net::{TcpListener, TcpStream};
+use mio::net::TcpListener;
 use slog::Logger;
 
 use channel::{self, TcpReceiver, TcpSender};
@@ -92,7 +90,6 @@ pub struct WorkerPool {
     notify: Vec<mpsc::Sender<NewReplicaInternal>>,
     wstate: SharedWorkerState,
     log: Logger,
-    checktable_addr: SocketAddr,
 }
 
 impl WorkerPool {
@@ -126,15 +123,13 @@ impl WorkerPool {
             })
             .collect();
 
-        let mut pool = WorkerPool {
+        Ok(WorkerPool {
             workers,
             poll,
             notify: notify_tx,
             wstate: SharedWorkerState::new(truth),
-            checktable_addr,
             log: log.new(o!()),
-        };
-        Ok(pool)
+        })
     }
 
     pub fn add_replica(&mut self, replica: NewReplica) {
@@ -142,7 +137,7 @@ impl WorkerPool {
         let ri = inner.id();
         let addr = listener.local_addr().unwrap();
 
-        let mut rc = ReplicaContext {
+        let rc = ReplicaContext {
             receivers: VecMap::new(),
             replica: inner,
             outputs: Default::default(),
@@ -171,7 +166,7 @@ impl WorkerPool {
         // Notify all workers about new replicas and sockets
         let notify = NewReplicaInternal { ri, rc, rit };
         for tx in &mut self.notify {
-            tx.send(notify.clone());
+            tx.send(notify.clone()).unwrap();
         }
 
         // Update Poll so workers start notifications about connections to the new replica
@@ -230,7 +225,7 @@ impl Worker {
                 }
                 let (mut tx, is_local) = tx.unwrap();
                 if is_local {
-                    tx.send_ref(&Packet::Hey(me.0, me.1));
+                    tx.send_ref(&Packet::Hey(me.0, me.1)).unwrap();
                 }
                 (tx, is_local)
             });
@@ -406,7 +401,7 @@ impl Worker {
                     replica.receivers.insert(token, (tcp, None));
                 }
 
-                ready(replica.listener.as_ref().unwrap());
+                ready(replica.listener.as_ref().unwrap()).unwrap();
                 continue;
             }
 
@@ -424,7 +419,7 @@ impl Worker {
                     // the Entry::Vacant case below), so we must get the fd right from the truth.
                     // XXX
                     if let Some(fd) = self.shared.truth.lock().unwrap().get(token).map(|sc| sc.fd) {
-                        ready(&EventedFd(&fd));
+                        ready(&EventedFd(&fd)).unwrap();
                     } else {
                         // spurious wakeup from mio for old (deregistered) token
                         debug!(self.log,
@@ -481,7 +476,7 @@ impl Worker {
                         if let Some(fd) =
                             self.shared.truth.lock().unwrap().get(token).map(|sc| sc.fd)
                         {
-                            ready(&EventedFd(&fd));
+                            ready(&EventedFd(&fd)).unwrap();
                             // XXX: NLL would let us directly refresh truth here, which would save
                             // us one lock acquisition, but we don't have NLL yet :(
                             force_refresh_truth = true;
@@ -560,7 +555,7 @@ impl Worker {
                     if !self.process(&mut context.replica, m, &mut sends) {
                         // told to exit?
                         if rearm {
-                            ready(&EventedFd(&fd));
+                            ready(&EventedFd(&fd)).unwrap();
                         }
                         warn!(self.log, "worker told to exit");
                         return;
@@ -686,7 +681,7 @@ impl Worker {
                         // we need to ready the fd for the original replica so that another thread
                         // will be notified if there's more work for it.
                         if carry == 1 && rearm {
-                            ready(&EventedFd(&fd));
+                            ready(&EventedFd(&fd)).unwrap();
                             rearm = false;
                         }
 
@@ -694,7 +689,7 @@ impl Worker {
                         if !self.process(&mut context.replica, m, &mut sends) {
                             // told to exit?
                             if rearm {
-                                ready(&EventedFd(&fd));
+                                ready(&EventedFd(&fd)).unwrap();
                             }
                             warn!(self.log, "worker told to exit");
                             return;
@@ -729,7 +724,7 @@ impl Worker {
                         resume_polling(rit, &mut context.replica);
                         context_of_next_origin = context;
                     }
-                    Err(e) => {
+                    Err(_) => {
                         // we couldn't get the lock, so we push it on the TCP queue for later
                         // NOTE: this is only okay because we know that only a single send to
                         // ri happened, so we won't cause an out-of-order delivery.
@@ -748,7 +743,7 @@ impl Worker {
             if rearm {
                 // there were no next()'s to ready the original socket, or we failed to handle it
                 // make sure to mark it as ready for other workers.
-                ready(&EventedFd(&fd));
+                ready(&EventedFd(&fd)).unwrap();
             }
         }
     }
