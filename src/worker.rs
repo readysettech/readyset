@@ -40,8 +40,10 @@ struct ReplicaContext {
     outputs: FnvHashMap<ReplicaIndex, (TcpSender<Packet>, bool)>,
 
     /// Number of packets received from each *local* replica
+    #[cfg(feature = "carry_local")]
     recvd_from_local: FnvHashMap<ReplicaIndex, usize>,
     /// Number of packets sent to each *local* replica
+    #[cfg(feature = "carry_local")]
     sent_to_local: FnvHashMap<ReplicaIndex, usize>,
 }
 
@@ -146,7 +148,9 @@ impl WorkerPool {
             outputs: Default::default(),
             listener: None,
 
+            #[cfg(feature = "carry_local")]
             recvd_from_local: Default::default(),
+            #[cfg(feature = "carry_local")]
             sent_to_local: Default::default(),
         };
 
@@ -254,10 +258,11 @@ impl Worker {
                                     // FIXME: this could return a bunch of things to be sent
                                     let from_ri = context.replica.id();
                                     for (ri, m) in sends.drain(..) {
-                                        // TODO: handle one local packet without sending
+                                        // TODO: handle one local packet without sending here too?
+                                        #[cfg(feature = "carry_local")]
+                                        context.sent_to_local.entry(ri).or_insert(0).add_assign(1);
                                         // deliver this packet to its destination TCP queue
                                         // XXX: unwrap
-                                        context.sent_to_local.entry(ri).or_insert(0).add_assign(1);
                                         send(&from_ri, &mut context.outputs, ri, m).unwrap();
                                     }
                                 }
@@ -432,6 +437,7 @@ impl Worker {
             };
 
             // track if we can handle a local output directly
+            #[cfg(feature = "carry_local")]
             let mut next = None;
 
             // unless the connection is dropped, we want to rearm the socket
@@ -536,11 +542,13 @@ impl Worker {
                     if let Packet::Hey(di, shard) = *m {
                         let ri = (di, shard);
                         channel.get_mut().1 = Some(ri);
+                        #[cfg(feature = "carry_local")]
                         context.recvd_from_local.insert(ri, 0);
                         continue;
                     }
 
                     if let Some(ri) = channel.get().1.as_ref() {
+                        #[cfg(feature = "carry_local")]
                         context
                             .recvd_from_local
                             .get_mut(ri)
@@ -567,38 +575,41 @@ impl Worker {
                     let last = channel.get().0.is_empty();
                     let mut give_up_next = false;
                     for (ri, m) in sends.drain(..) {
-                        if last && next.is_none() && !give_up_next && self.is_local(&ri) {
-                            // we have to take the *first* packet, not the last, otherwise we
-                            // might process out-of-order.
-                            next = Some((ri, m));
-                            continue;
-                        }
-
-                        if next.as_ref()
-                            .map(|&(ref nri, _)| nri == &ri)
-                            .unwrap_or(false)
+                        #[cfg(feature = "carry_local")]
                         {
-                            // second packet for that replica.
-                            //
-                            // it is *not* safe for us to handle `next` without a TCP send,
-                            // because some other thread could come along and take the lock for
-                            // the target replica the *moment* we send `m`, and process it.
-                            // Since `m` comes *after* `next`, that would result in
-                            // out-of-order delivery, which is not okay. So we must give up on
-                            // next here.
-                            let (ri, m) = next.take().unwrap();
+                            if last && next.is_none() && !give_up_next && self.is_local(&ri) {
+                                // we have to take the *first* packet, not the last, otherwise we
+                                // might process out-of-order.
+                                next = Some((ri, m));
+                                continue;
+                            }
+
+                            if next.as_ref()
+                                .map(|&(ref nri, _)| nri == &ri)
+                                .unwrap_or(false)
+                            {
+                                // second packet for that replica.
+                                //
+                                // it is *not* safe for us to handle `next` without a TCP send,
+                                // because some other thread could come along and take the lock for
+                                // the target replica the *moment* we send `m`, and process it.
+                                // Since `m` comes *after* `next`, that would result in
+                                // out-of-order delivery, which is not okay. So we must give up on
+                                // next here.
+                                let (ri, m) = next.take().unwrap();
+                                context.sent_to_local.entry(ri).or_insert(0).add_assign(1);
+                                send(&from_ri, &mut context.outputs, ri, m).unwrap();
+
+                                // we must *also* ensure that we don't then pick up a `next` again.
+                                // in theory this could be okay if the next `next`'s ri is not this
+                                // ri, but checking that is annoying, so TODO.
+                                give_up_next = true;
+                            }
+
+                            // deliver this packet to its destination TCP queue
                             context.sent_to_local.entry(ri).or_insert(0).add_assign(1);
-                            send(&from_ri, &mut context.outputs, ri, m).unwrap();
-
-                            // we must *also* ensure that we don't then pick up a `next` again.
-                            // in theory this could be okay if the next `next`'s ri is not this
-                            // ri, but checking that is annoying, so TODO.
-                            give_up_next = true;
                         }
-
-                        // deliver this packet to its destination TCP queue
                         // XXX: unwrap
-                        context.sent_to_local.entry(ri).or_insert(0).add_assign(1);
                         send(&from_ri, &mut context.outputs, ri, m).unwrap();
                     }
 
@@ -617,6 +628,7 @@ impl Worker {
             let mut give_up_next = false;
             let mut context_of_next_origin = context;
             let mut carry = 0;
+            #[cfg(feature = "carry_local")]
             while let Some((ri, m)) = next.take() {
                 assert!(sends.is_empty());
                 let rit = self.shared.revmap[&ri];
@@ -708,8 +720,8 @@ impl Worker {
                             }
 
                             // deliver this packet to its destination TCP queue
-                            // XXX: unwrap
                             context.sent_to_local.entry(ri).or_insert(0).add_assign(1);
+                            // XXX: unwrap
                             send(&from_ri, &mut context.outputs, ri, m).unwrap();
                         }
 
@@ -721,12 +733,12 @@ impl Worker {
                         // we couldn't get the lock, so we push it on the TCP queue for later
                         // NOTE: this is only okay because we know that only a single send to
                         // ri happened, so we won't cause an out-of-order delivery.
-                        // XXX: unwrap
                         context_of_next_origin
                             .sent_to_local
                             .entry(ri)
                             .or_insert(0)
                             .add_assign(1);
+                        // XXX: unwrap
                         send(&from_ri, &mut context_of_next_origin.outputs, ri, m).unwrap();
                     }
                 }
