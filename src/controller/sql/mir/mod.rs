@@ -73,6 +73,8 @@ pub struct SqlToMirConverter {
     log: slog::Logger,
     nodes: HashMap<(String, usize), MirNodeRef>,
     schema_version: usize,
+
+    /// Set of policies to use during a migration.
     policies: HashMap<(DataType, String), Vec<QueryGraph>>,
 }
 

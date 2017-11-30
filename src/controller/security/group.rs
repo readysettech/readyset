@@ -33,6 +33,14 @@ impl Group {
             })
             .collect()
     }
+
+    pub fn membership(&self) -> SqlQuery {
+        self.membership.clone()
+    }
+
+    pub fn name(&self) -> String {
+        self.name.clone()
+    }
 }
 
 mod tests {

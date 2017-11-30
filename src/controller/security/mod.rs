@@ -38,6 +38,10 @@ impl SecurityConfig {
     pub fn policies(&self) -> &[Policy] {
         self.policies.as_slice()
     }
+
+    pub fn groups(&self) -> &[Group] {
+        self.groups.as_slice()
+    }
 }
 
 

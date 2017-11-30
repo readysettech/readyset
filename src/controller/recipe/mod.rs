@@ -225,7 +225,7 @@ impl Recipe {
             let qfp = self.inc
                 .as_mut()
                 .unwrap()
-                .start_universe(&self.security_config.clone().unwrap(), mig)?;
+                .prepare_universe(&self.security_config.clone().unwrap(), mig)?;
             result.new_nodes.insert(qfp.name.clone(), qfp.query_leaf);
         }
 
@@ -293,6 +293,23 @@ impl Recipe {
             .as_mut()
             .unwrap()
             .set_transactional(transactional_base_nodes);
+
+        // create nodes to enforce security configuration
+        if self.security_config.is_some() {
+            info!(self.log, "Found a security configuration, bootstrapping groups...");
+            let config = self.security_config.take().unwrap();
+            for group in config.groups() {
+                info!(self.log, "Creating membership view for group {}", group.name());
+                let qfp = self.inc
+                    .as_mut()
+                    .unwrap()
+                    .add_parsed_query(group.membership(), None, true, mig)?;
+
+                result.new_nodes.insert(qfp.name.clone(), qfp.query_leaf);
+            }
+
+            self.security_config = Some(config);
+        }
 
         // add new queries to the Soup graph carried by `mig`, and reflect state in the
         // incorporator in `inc`. `NodeIndex`es for new nodes are collected in `new_nodes` to be
@@ -473,6 +490,8 @@ impl Recipe {
         new.version = self.version + 1;
         // retain the old incorporator but move it to the new recipe
         let prior_inc = self.inc.take();
+        // retain security configuration
+        new.security_config = self.security_config.take();
         // retain the old recipe for future reference
         new.prior = Some(Box::new(self));
         // retain the previous `SqlIncorporator` state

@@ -11,8 +11,10 @@ use std::collections::hash_map::Entry;
 pub type UniverseId = DataType;
 
 pub trait Multiverse {
-    /// Bootstraps a new security universe
-    fn start_universe(
+    /// Prepare a new security universe.
+    /// It creates universe-specific nodes like UserContext and UserGroups and
+    /// it derives universe-specific policies from the security configuration.
+    fn prepare_universe(
         &mut self,
         config: &SecurityConfig,
         mig: &mut Migration,
@@ -27,12 +29,12 @@ pub trait Multiverse {
 }
 
 impl Multiverse for SqlIncorporator {
-    fn start_universe(
+    fn prepare_universe(
         &mut self,
         config: &SecurityConfig,
         mig: &mut Migration,
     ) -> Result<QueryFlowParts, String> {
-        // First, create a UserContext base node.
+        // First, create the UserContext base node.
         let uid = mig.universe();
         let context = mig.context();
 
@@ -48,7 +50,6 @@ impl Multiverse for SqlIncorporator {
         // because predicates can have nested subqueries, which will trigger
         // a view creation and these views might be unique to each universe
         // e.g. if they reference UserContext.
-
         self.mir_converter.clear_policies(&uid);
         let mut policies_qg: HashMap<(DataType, String), Vec<QueryGraph>> = HashMap::new();
         for policy in config.policies() {
