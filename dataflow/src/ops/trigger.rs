@@ -2,17 +2,51 @@ use std::collections::HashMap;
 
 use prelude::*;
 
+use hyper::Client;
+use tokio_core::reactor::Core;
+use serde::Serialize;
+use serde::de::DeserializeOwned;
+use serde_json;
+use std::error::Error;
+use futures::{Future, Stream};
+
 /// Applies the identity operation to the view. Since the identity does nothing,
 /// it is the simplest possible operation. Primary intended as a reference
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Trigger {
     src: IndexPair,
+    url: String,
 }
 
 impl Trigger {
     /// Construct a new Trigger operator.
-    pub fn new(src: NodeIndex) -> Trigger {
-        Trigger { src: src.into() }
+    pub fn new(src: NodeIndex, url: String) -> Trigger {
+        Trigger { src: src.into(), url: url }
+    }
+
+    fn rpc<Q: Serialize, R: DeserializeOwned>(
+        &self,
+        path: &str,
+        request: &Q,
+    ) -> Result<R, Box<Error>> {
+        use hyper;
+
+        let mut core = Core::new().unwrap();
+        let client = Client::new(&core.handle());
+        let url = format!("{}/{}", self.url, path);
+
+        let mut r = hyper::Request::new(hyper::Method::Post, url.parse().unwrap());
+        r.set_body(serde_json::to_string(request).unwrap());
+
+        let work = client.request(r).and_then(|res| {
+            res.body().concat2().and_then(move |body| {
+                let reply: R = serde_json::from_slice(&body)
+                    .map_err(|e| ::std::io::Error::new(::std::io::ErrorKind::Other, e))
+                    .unwrap();
+                Ok(reply)
+            })
+        });
+        Ok(core.run(work).unwrap())
     }
 }
 
@@ -73,7 +107,7 @@ mod tests {
         let mut g = ops::test::MockGraph::new();
         let s = g.add_base("source", &["x", "y", "z"]);
         g.set_op(
-            "identity",
+            "trigger",
             &["x", "y", "z"],
             Trigger::new(s.as_global()),
             materialized,

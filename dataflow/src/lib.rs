@@ -29,6 +29,8 @@ extern crate tarpc;
 extern crate timekeeper;
 extern crate tokio_core;
 extern crate vec_map;
+extern crate hyper;
+extern crate futures;
 
 pub mod backlog;
 pub mod checktable;

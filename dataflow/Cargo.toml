@@ -17,6 +17,8 @@ tarpc = "0.9.0"
 tarpc-plugins = "0.2.0"
 tokio-core = "0.1.8"
 vec_map = { version = "0.8.0", features = ["eders"] }
+hyper = "0.11.6"
+futures = "0.1.16"
 
 # need features
 backtrace = { version = "0.3.2", features = ["serialize-serde"] }
