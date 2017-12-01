@@ -1,6 +1,5 @@
 use dataflow::prelude::*;
 use dataflow::payload::{EgressForBase, IngressFromBase};
-use dataflow;
 use controller::domain_handle::DomainHandle;
 use petgraph;
 use std::borrow::Borrow;

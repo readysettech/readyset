@@ -2,8 +2,8 @@ use slog::Logger;
 use std::collections::HashMap;
 use std::net::SocketAddr;
 use std::time::{Duration, Instant};
-use std::thread::{self, JoinHandle};
-use std::sync::{mpsc, Arc, Mutex};
+use std::thread;
+use std::sync::{Arc, Mutex};
 
 use channel::{self, TcpSender};
 use channel::poll::{PollEvent, PollingLoop, ProcessResult, RpcPollEvent, RpcPollingLoop};

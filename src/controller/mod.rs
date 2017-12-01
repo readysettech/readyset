@@ -485,9 +485,11 @@ impl ControllerInner {
         let read_polling_loop = RpcPollingLoop::new(addr.clone());
         let read_listen_addr = read_polling_loop.get_listener_addr().unwrap();
         let thread_builder = thread::Builder::new().name("wrkr-reads".to_owned());
-        thread_builder.spawn(move || {
-            Souplet::serve_reads(read_polling_loop, readers_clone)
-        }).unwrap();
+        thread_builder
+            .spawn(move || {
+                Souplet::serve_reads(read_polling_loop, readers_clone)
+            })
+            .unwrap();
 
         let cc = Arc::new(ChannelCoordinator::new());
         assert!((builder.nworkers == 0) ^ (builder.local_workers == 0));
@@ -565,6 +567,7 @@ impl ControllerInner {
     /// anyway.
     ///
     /// Must be called before any domains have been created.
+    #[allow(unused)]
     pub fn with_persistence_options(&mut self, params: PersistenceParameters) {
         assert_eq!(self.ndomains, 0);
         self.persistence = params;
@@ -573,6 +576,7 @@ impl ControllerInner {
     /// Set the `Logger` to use for internal log messages.
     ///
     /// By default, all log messages are discarded.
+    #[allow(unused)]
     pub fn log_with(&mut self, log: slog::Logger) {
         self.log = log;
         self.materializations.set_logger(&self.log);
@@ -1371,7 +1375,6 @@ impl<'a> Migration<'a> {
                 nodes,
                 &mainline.persistence,
                 &mainline.listen_addr,
-                &mainline.checktable_addr,
                 &mainline.channel_coordinator,
                 &mut mainline.local_pool,
                 &mainline.debug_channel,

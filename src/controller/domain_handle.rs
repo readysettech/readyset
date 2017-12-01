@@ -1,4 +1,4 @@
-use std::{self, cell, io, thread};
+use std::{self, cell, io};
 use std::collections::HashMap;
 use std::net::{IpAddr, SocketAddr};
 use std::sync::Arc;
@@ -128,7 +128,6 @@ impl DomainHandle {
         nodes: Vec<(NodeIndex, bool)>,
         persistence_params: &PersistenceParameters,
         listen_addr: &IpAddr,
-        checktable_addr: &SocketAddr,
         channel_coordinator: &Arc<ChannelCoordinator>,
         local_pool: &mut Option<worker::WorkerPool>,
         debug_addr: &Option<SocketAddr>,

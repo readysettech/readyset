@@ -1,5 +1,5 @@
 use dataflow::prelude::*;
-use dataflow::{self, node};
+use dataflow::node;
 use petgraph::graph::NodeIndex;
 use std::collections::{HashMap, HashSet};
 use slog::Logger;
@@ -566,7 +566,7 @@ fn reshard(
             n.mark_as_shard_merger(true);
             n
         }
-        Sharding::ByColumn(c, shards) => {
+        Sharding::ByColumn(c, _) => {
             use dataflow::node;
             let mut n = graph[src].mirror(node::special::Sharder::new(c));
             n.shard_by(graph[src].sharded_by());
