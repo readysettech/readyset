@@ -10,7 +10,6 @@ use dataflow::ops::join::{Join, JoinSource, JoinType};
 use dataflow::ops::join::JoinSource::*;
 use dataflow::ops::project::Project;
 use dataflow::ops::union::Union;
-use dataflow::prelude::*;
 use dataflow::{DurabilityMode, PersistenceParameters};
 use controller::ControllerBuilder;
 use controller::recipe::Recipe;
