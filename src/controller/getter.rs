@@ -4,7 +4,6 @@ use dataflow::prelude::*;
 use dataflow::backlog::{self, ReadHandle};
 use dataflow::{self, checktable, Readers};
 
-use std::sync::Arc;
 use std::net::SocketAddr;
 
 /// A request to read a specific key.
@@ -236,7 +235,7 @@ impl Getter {
     /// `DataType::deep_clone` to avoid contention on internally de-duplicated strings!
     pub fn lookup_map<F, T>(&self, q: &DataType, mut f: F, block: bool) -> Result<Option<T>, ()>
     where
-        F: FnMut(&[Arc<Vec<DataType>>]) -> T,
+        F: FnMut(&[Vec<DataType>]) -> T,
     {
         self.handle.find_and(q, |rs| f(&rs[..]), block).map(|r| r.0)
     }

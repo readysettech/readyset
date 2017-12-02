@@ -43,7 +43,7 @@ fn new_inner(
 }
 
 pub struct WriteHandle {
-    handle: evmap::WriteHandle<DataType, Arc<Vec<DataType>>, i64, FnvBuildHasher>,
+    handle: evmap::WriteHandle<DataType, Vec<DataType>, i64, FnvBuildHasher>,
     partial: bool,
     cols: usize,
     key: usize,
@@ -66,13 +66,13 @@ impl WriteHandle {
             let key = r[self.key].clone();
             match r {
                 Record::Positive(r) => {
-                    self.handle.insert(key, Arc::new(r));
+                    self.handle.insert(key, r);
                 }
                 Record::Negative(r) => {
                     // TODO: evmap will remove the empty vec for a key if we remove the last
                     // record. this means that future lookups will fail, and cause a replay, which
                     // will produce an empty result. this will work, but is somewhat inefficient.
-                    self.handle.remove(key, Arc::new(r));
+                    self.handle.remove(key, r);
                 }
                 Record::DeleteRequest(..) => unreachable!(),
             }
@@ -93,7 +93,7 @@ impl WriteHandle {
 
     pub fn try_find_and<F, T>(&self, key: &DataType, mut then: F) -> Result<(Option<T>, i64), ()>
     where
-        F: FnMut(&[Arc<Vec<DataType>>]) -> T,
+        F: FnMut(&[Vec<DataType>]) -> T,
     {
         self.handle.meta_get_and(key, &mut then).ok_or(())
     }
@@ -114,7 +114,7 @@ impl WriteHandle {
 /// Handle to get the state of a single shard of a reader.
 #[derive(Clone)]
 pub struct SingleReadHandle {
-    handle: evmap::ReadHandle<DataType, Arc<Vec<DataType>>, i64, FnvBuildHasher>,
+    handle: evmap::ReadHandle<DataType, Vec<DataType>, i64, FnvBuildHasher>,
     trigger: Option<Arc<Fn(&DataType) + Send + Sync>>,
     key: usize,
 }
@@ -136,7 +136,7 @@ impl SingleReadHandle {
         block: bool,
     ) -> Result<(Option<T>, i64), ()>
     where
-        F: FnMut(&[Arc<Vec<DataType>>]) -> T,
+        F: FnMut(&[Vec<DataType>]) -> T,
     {
         match self.try_find_and(key, &mut then) {
             Ok((None, ts)) if self.trigger.is_some() => {
@@ -172,7 +172,7 @@ impl SingleReadHandle {
         mut then: F,
     ) -> Result<(Option<T>, i64), ()>
     where
-        F: FnMut(&[Arc<Vec<DataType>>]) -> T,
+        F: FnMut(&[Vec<DataType>]) -> T,
     {
         self.handle.meta_get_and(key, &mut then).ok_or(())
     }
@@ -206,7 +206,7 @@ impl ReadHandle {
         block: bool,
     ) -> Result<(Option<T>, i64), ()>
     where
-        F: FnMut(&[Arc<Vec<DataType>>]) -> T,
+        F: FnMut(&[Vec<DataType>]) -> T,
     {
         match *self {
             ReadHandle::Sharded(ref shards) => shards[::shard_by(key, shards.len())]
@@ -220,7 +220,7 @@ impl ReadHandle {
     #[allow(dead_code)]
     pub fn try_find_and<F, T>(&self, key: &DataType, then: F) -> Result<(Option<T>, i64), ()>
     where
-        F: FnMut(&[Arc<Vec<DataType>>]) -> T,
+        F: FnMut(&[Vec<DataType>]) -> T,
     {
         match *self {
             ReadHandle::Sharded(ref shards) => shards[::shard_by(key, shards.len())]
