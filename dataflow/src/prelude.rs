@@ -7,7 +7,7 @@ pub use processing::{Ingredient, Miss, ProcessingResult, RawProcessingResult, Re
 pub use ops::NodeOperator;
 
 // graph types
-pub use node::Node;
+pub use node::{MaterializationStatus, Node};
 pub type Edge = ();
 pub type Graph = petgraph::Graph<Node, Edge>;
 

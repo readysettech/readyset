@@ -17,7 +17,11 @@ impl fmt::Debug for Node {
 }
 
 impl Node {
-    pub fn describe(&self, idx: NodeIndex) -> String {
+    pub fn describe(
+        &self,
+        idx: NodeIndex,
+        materialization_status: Option<MaterializationStatus>,
+    ) -> String {
         let mut s = String::new();
         let border = match self.sharded_by {
             Sharding::ByColumn(_, _) | Sharding::Random(_) => "filled,dashed",
@@ -32,6 +36,12 @@ impl Node {
                 .unwrap_or("white".into())
         ));
 
+        let materialized = match materialization_status {
+            None => "",
+            Some(MaterializationStatus::Partial) => "| ◑",
+            Some(MaterializationStatus::Full) => "| ⬤",
+        };
+
         let addr = match self.index {
             Some(ref idx) => if idx.has_local() {
                 format!("{} / {}", idx.as_global().index(), **idx)
@@ -40,10 +50,15 @@ impl Node {
             },
             None => format!("{} / -", idx.index()),
         };
+
         match self.inner {
             NodeType::Source => s.push_str("(source)"),
             NodeType::Dropped => s.push_str("✗"),
-            NodeType::Ingress => s.push_str(&format!("{{ {} | (ingress) }}", addr)),
+            NodeType::Ingress => s.push_str(&format!(
+                "{{ {{ {} {} }} | (ingress) }}",
+                addr,
+                materialized
+            )),
             NodeType::Egress { .. } => s.push_str(&format!("{{ {} | (egress) }}", addr)),
             NodeType::Sharder { .. } => s.push_str(&format!("{{ {} | (sharder) }}", addr)),
             NodeType::Reader(ref r) => {
@@ -52,10 +67,11 @@ impl Node {
                     Some(k) => format!("{}", k),
                 };
                 s.push_str(&format!(
-                    "{{ {} / {} | (reader / ⚷: {}) }}",
+                    "{{ {{ {} / {} {} }} | (reader / ⚷: {}) }}",
                     addr,
                     Self::escape(self.name()),
-                    key
+                    materialized,
+                    key,
                 ))
             }
             NodeType::Internal(ref i) => {
@@ -63,10 +79,11 @@ impl Node {
 
                 // Output node name and description. First row.
                 s.push_str(&format!(
-                    "{{ {} / {} | {} }}",
+                    "{{ {} / {} | {} {} }}",
                     addr,
                     Self::escape(self.name()),
-                    Self::escape(&i.description())
+                    Self::escape(&i.description()),
+                    materialized
                 ));
 
                 // Output node outputs. Second row.

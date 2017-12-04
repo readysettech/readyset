@@ -808,9 +808,11 @@ impl ControllerInner {
 
         // node descriptions.
         for index in self.ingredients.node_indices() {
+            let node = &self.ingredients[index];
+            let materialization_status = self.materializations.get_status(&index, node);
             indentln(&mut s);
             s.push_str(&format!("{}", index.index()));
-            s.push_str(&self.ingredients[index].describe(index));
+            s.push_str(&node.describe(index, materialization_status));
         }
 
         // edges.

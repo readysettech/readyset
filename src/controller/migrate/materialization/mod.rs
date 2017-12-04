@@ -404,6 +404,21 @@ impl Materializations {
         assert!(replay_obligations.is_empty());
     }
 
+    /// Retrieves the materialization status of a given node, or None
+    /// if the node isn't materialized.
+    pub fn get_status(&self, index: &NodeIndex, node: &Node) -> Option<MaterializationStatus> {
+        let is_materialized = self.have.contains_key(index)
+            || node.with_reader(|r| r.is_materialized()).unwrap_or(false);
+
+        if !is_materialized {
+            None
+        } else if self.partial.contains(index) {
+            Some(MaterializationStatus::Partial)
+        } else {
+            Some(MaterializationStatus::Full)
+        }
+    }
+
     /// Commit to all materialization decisions since the last time `commit` was called.
     ///
     /// This includes setting up replay paths, adding new indices to existing materializations, and

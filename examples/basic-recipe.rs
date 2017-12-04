@@ -35,6 +35,8 @@ fn main() {
 
     let mut blender = builder.build();
     blender.install_recipe(sql.to_owned());
+    println!("{}", blender.graphviz());
+
     blender.recover();
     thread::sleep(Duration::from_millis(1000));
 
