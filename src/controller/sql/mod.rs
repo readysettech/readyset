@@ -354,6 +354,7 @@ impl SqlIncorporator {
         &mut self,
         query_name: &str,
         query: &CompoundSelectStatement,
+        is_leaf: bool,
         mut mig: &mut Migration,
     ) -> Result<QueryFlowParts, String> {
         let subqueries: Vec<MirQuery> = query
@@ -373,6 +374,7 @@ impl SqlIncorporator {
             CompoundSelectOperator::Union,
             &query.order,
             &query.limit,
+            is_leaf,
         );
 
         let qfp = mir_query_to_flow_parts(&mut combined_mir_query, &mut mig);
@@ -639,7 +641,8 @@ impl SqlIncorporator {
                 // NOTE(malte): We can't currently reuse complete compound select queries, since
                 // our reuse logic operates on `SqlQuery` structures. Their subqueries do get
                 // reused, however.
-                self.add_compound_query(&query_name, csq, mig).unwrap()
+                self.add_compound_query(&query_name, csq, is_leaf, mig)
+                    .unwrap()
             }
             SqlQuery::Select(ref sq) => self.add_select_query(&query_name, sq, is_leaf, mig).0,
             ref q @ SqlQuery::CreateTable { .. } => self.add_base_via_mir(&query_name, q, mig),
