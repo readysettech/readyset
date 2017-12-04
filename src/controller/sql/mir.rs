@@ -242,17 +242,25 @@ impl SqlToMirConverter {
             self.nodes.insert(node_id, final_node.clone());
         }
 
+        // we use these columns for intermediate nodes
         let columns: Vec<Column> = final_node.borrow().columns().iter().cloned().collect();
+        // we use these columns for whichever node ends up being the leaf
+        let sanitized_columns: Vec<Column> = columns
+            .clone()
+            .into_iter()
+            .map(|c| sanitize_leaf_column(c, name))
+            .collect();
+
         if limit.is_some() {
-            let topk_name = if !has_leaf {
-                String::from(name)
+            let (topk_name, topk_columns) = if !has_leaf {
+                (String::from(name), sanitized_columns.iter().collect())
             } else {
-                format!("{}_topk", name)
+                (format!("{}_topk", name), columns.iter().collect())
             };
             let topk_node = self.make_topk_node(
                 &topk_name,
                 final_node,
-                columns.iter().collect(),
+                topk_columns,
                 order,
                 limit.as_ref().unwrap(),
             );
@@ -267,11 +275,7 @@ impl SqlToMirConverter {
             MirNode::new(
                 name,
                 self.schema_version,
-                columns
-                    .clone()
-                    .into_iter()
-                    .map(|c| sanitize_leaf_column(c, name))
-                    .collect(),
+                sanitized_columns,
                 MirNodeType::Leaf {
                     node: final_node.clone(),
                     keys: vec![],
