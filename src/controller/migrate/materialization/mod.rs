@@ -406,16 +406,16 @@ impl Materializations {
 
     /// Retrieves the materialization status of a given node, or None
     /// if the node isn't materialized.
-    pub fn get_status(&self, index: &NodeIndex, node: &Node) -> Option<MaterializationStatus> {
+    pub fn get_status(&self, index: &NodeIndex, node: &Node) -> MaterializationStatus {
         let is_materialized = self.have.contains_key(index)
             || node.with_reader(|r| r.is_materialized()).unwrap_or(false);
 
         if !is_materialized {
-            None
+            MaterializationStatus::Not
         } else if self.partial.contains(index) {
-            Some(MaterializationStatus::Partial)
+            MaterializationStatus::Partial
         } else {
-            Some(MaterializationStatus::Full)
+            MaterializationStatus::Full
         }
     }
 

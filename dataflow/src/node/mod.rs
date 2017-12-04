@@ -18,6 +18,7 @@ mod debug;
 
 #[derive(Debug)]
 pub enum MaterializationStatus {
+    Not,
     Full,
     Partial,
 }
