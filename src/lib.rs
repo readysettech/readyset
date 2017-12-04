@@ -336,6 +336,7 @@ extern crate slab;
 extern crate slog;
 extern crate slog_term;
 extern crate tarpc;
+extern crate timer_heap;
 extern crate tokio_core;
 extern crate vec_map;
 

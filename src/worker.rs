@@ -1,7 +1,7 @@
 use std::io;
 use std::thread;
 use std::net::{SocketAddr, ToSocketAddrs};
-use std::time::{Duration, Instant};
+use std::time::Duration;
 use std::sync::{mpsc, Arc, Mutex, TryLockError};
 use std::os::unix::io::AsRawFd;
 use std::ops::AddAssign;
@@ -13,6 +13,7 @@ use mio::{Evented, Events, Poll, PollOpt, Ready, Token};
 use mio::unix::EventedFd;
 use mio::net::TcpListener;
 use slog::Logger;
+use timer_heap::{TimerHeap, TimerType};
 
 use channel::{self, TcpReceiver, TcpSender};
 use channel::poll::{PollEvent, ProcessResult};
@@ -205,7 +206,7 @@ impl Worker {
         // we want to only process a single domain, otherwise we might hold on to work that another
         // worker could be doing. and that'd be silly.
         let mut events = Events::with_capacity(1);
-        let mut timers = VecMap::<Instant>::new();
+        let mut timers = TimerHeap::new();
         let mut durtmp = None;
         let mut force_refresh_truth = false;
         let mut sends = Vec::new();
@@ -237,51 +238,35 @@ impl Worker {
 
         loop {
             // have any timers expired?
-            let now = Instant::now();
-            let mut next = None;
-            for (rit, rc) in &self.shared.replicas {
-                use vec_map::Entry;
-                if let Entry::Occupied(mut timeout) = timers.entry(rit) {
-                    if timeout.get() <= &now {
-                        timeout.remove();
+            for rit in timers.expired() {
+                // NOTE: try_lock is okay, because if another worker is handling it, the
+                // timeout is also being dealt with.
+                let rc = if let Some(rc) = self.shared.replicas.get(rit) {
+                    rc
+                } else {
+                    continue;
+                };
 
-                        // NOTE: try_lock is okay, because if another worker is handling it, the
-                        // timeout is also being dealt with.
-                        if let Ok(mut context) = rc.try_lock() {
-                            match context.replica.on_event(PollEvent::Timeout, &mut sends) {
-                                ProcessResult::KeepPolling => {
-                                    // FIXME: this could return a bunch of things to be sent
-                                    let from_ri = context.replica.id();
-                                    for (ri, m) in sends.drain(..) {
-                                        // TODO: handle one local packet without sending here too?
-                                        #[cfg(feature = "carry_local")]
-                                        context.sent_to_local.entry(ri).or_insert(0).add_assign(1);
-                                        // deliver this packet to its destination TCP queue
-                                        // XXX: unwrap
-                                        send(&from_ri, &mut context.outputs, ri, m).unwrap();
-                                    }
-                                }
-                                ProcessResult::StopPolling => unreachable!(),
+                if let Ok(mut context) = rc.try_lock() {
+                    match context.replica.on_event(PollEvent::Timeout, &mut sends) {
+                        ProcessResult::KeepPolling => {
+                            // FIXME: this could return a bunch of things to be sent
+                            let from_ri = context.replica.id();
+                            for (ri, m) in sends.drain(..) {
+                                // TODO: handle one local packet without sending here too?
+                                #[cfg(feature = "carry_local")]
+                                context.sent_to_local.entry(ri).or_insert(0).add_assign(1);
+                                // deliver this packet to its destination TCP queue
+                                // XXX: unwrap
+                                send(&from_ri, &mut context.outputs, ri, m).unwrap();
                             }
                         }
-                    } else {
-                        let dur = timeout.get().duration_since(now);
-                        if dur.as_secs() != 0 && next.is_none() {
-                            // ensure we wake up in the next second
-                            next = Some(Duration::new(1, 0));
-                            continue;
-                        }
-
-                        if let Some(ref mut next) = next {
-                            use std::cmp::min;
-                            *next = min(*next, dur);
-                        } else {
-                            next = Some(dur);
-                        }
+                        ProcessResult::StopPolling => unreachable!(),
                     }
                 }
             }
 
+            let next = timers.time_remaining().map(Duration::from_millis);
             if let Err(e) = self.all.poll(&mut events, next) {
                 if e.kind() == io::ErrorKind::Interrupted {
                     // spurious wakeup
@@ -443,10 +428,10 @@ impl Worker {
             let mut resume_polling = |rit: usize, replica: &mut Replica| {
                 let mut sends = Vec::new();
                 replica.on_event(PollEvent::ResumePolling(&mut durtmp), &mut sends);
+                // https://github.com/andrewjstone/timer_heap/issues/3
+                timers.remove(rit);
                 if let Some(timeout) = durtmp.take() {
-                    timers.insert(rit, Instant::now() + timeout);
-                } else {
-                    timers.remove(rit);
+                    timers.insert(rit, timeout, TimerType::Oneshot).unwrap();
                 }
                 if !sends.is_empty() {
                     // ResumePolling is not allowed to send packets
