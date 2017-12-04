@@ -377,7 +377,7 @@ impl Recipe {
                 if r.len() == 2 {
                     // named query
                     let q = r[1];
-                    let (is_leaf, name) = if r[0].starts_with("QUERY ") {
+                    let (is_leaf, name) = if r[0].to_lowercase().starts_with("query ") {
                         (true, Some(String::from(&r[0][6..])))
                     } else {
                         (false, Some(String::from(r[0])))
