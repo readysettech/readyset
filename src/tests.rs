@@ -327,7 +327,7 @@ fn it_works_with_sql_recipe() {
     let mut g = ControllerBuilder::default().build_inner();
     let sql = "
         CREATE TABLE Car (id int, brand varchar(255), PRIMARY KEY(id));
-        CountCars: SELECT COUNT(*) FROM Car WHERE brand = ?;
+        QUERY CountCars: SELECT COUNT(*) FROM Car WHERE brand = ?;
     ";
 
     let recipe = g.migrate(|mig| {
@@ -361,7 +361,7 @@ fn it_works_with_arithmetic_aliases() {
     let sql = "
         CREATE TABLE Car (cid int, pid int, brand varchar(255), PRIMARY KEY(cid));
         CREATE TABLE Price (pid int, cent_price int, PRIMARY KEY(pid));
-        CarPrice: SELECT cid, ActualPrice.price FROM Car \
+        QUERY CarPrice: SELECT cid, ActualPrice.price FROM Car \
             JOIN (SELECT pid, cent_price / 100 AS price FROM Price) AS ActualPrice \
             ON Car.pid = ActualPrice.pid WHERE cid = ?;
     ";
@@ -413,7 +413,7 @@ fn it_recovers_persisted_logs() {
 
         let sql = "
             CREATE TABLE Car (id int, price int, PRIMARY KEY(id));
-            CarPrice: SELECT price FROM Car WHERE id = ?;
+            QUERY CarPrice: SELECT price FROM Car WHERE id = ?;
         ";
 
         let recipe = g.migrate(|mig| {
@@ -523,9 +523,9 @@ fn it_recovers_persisted_logs_w_multiple_nodes() {
             CREATE TABLE B (id int, PRIMARY KEY(id));
             CREATE TABLE C (id int, PRIMARY KEY(id));
 
-            AID: SELECT id FROM A WHERE id = ?;
-            BID: SELECT id FROM B WHERE id = ?;
-            CID: SELECT id FROM C WHERE id = ?;
+            QUERY AID: SELECT id FROM A WHERE id = ?;
+            QUERY BID: SELECT id FROM B WHERE id = ?;
+            QUERY CID: SELECT id FROM C WHERE id = ?;
         ";
 
 
@@ -625,7 +625,7 @@ fn it_works_with_simple_arithmetic() {
     let mut g = ControllerBuilder::default().build_inner();
     let sql = "
         CREATE TABLE Car (id int, price int, PRIMARY KEY(id));
-        CarPrice: SELECT 2 * price FROM Car WHERE id = ?;
+        QUERY CarPrice: SELECT 2 * price FROM Car WHERE id = ?;
     ";
 
     let recipe = g.migrate(|mig| {
@@ -656,7 +656,7 @@ fn it_works_with_multiple_arithmetic_expressions() {
     let mut g = ControllerBuilder::default().build_inner();
     let sql = "
         CREATE TABLE Car (id int, price int, PRIMARY KEY(id));
-        CarPrice: SELECT 10 * 10, 2 * price, 10 * price, FROM Car WHERE id = ?;
+        QUERY CarPrice: SELECT 10 * 10, 2 * price, 10 * price, FROM Car WHERE id = ?;
     ";
 
     let recipe = g.migrate(|mig| {
@@ -691,7 +691,7 @@ fn it_works_with_join_arithmetic() {
         CREATE TABLE Car (car_id int, price_id int, PRIMARY KEY(car_id));
         CREATE TABLE Price (price_id int, price int, PRIMARY KEY(price_id));
         CREATE TABLE Sales (sales_id int, price_id int, fraction float, PRIMARY KEY(sales_id));
-        CarPrice: SELECT price * fraction FROM Car \
+        QUERY CarPrice: SELECT price * fraction FROM Car \
                   JOIN Price ON Car.price_id = Price.price_id \
                   JOIN Sales ON Price.price_id = Sales.price_id \
                   WHERE car_id = ?;
@@ -734,7 +734,7 @@ fn it_works_with_function_arithmetic() {
     let mut g = ControllerBuilder::default().build_inner();
     let sql = "
         CREATE TABLE Bread (id int, price int, PRIMARY KEY(id));
-        Price: SELECT 2 * MAX(price) FROM Bread;
+        QUERY Price: SELECT 2 * MAX(price) FROM Bread;
     ";
 
     let recipe = g.migrate(|mig| {
@@ -2051,8 +2051,8 @@ fn recipe_activates_and_migrates() {
 
     let r_copy = r.clone();
 
-    let r1_txt = "SELECT a FROM b;\n
-                  SELECT a, c FROM b WHERE a = 42;";
+    let r1_txt = "QUERY qa: SELECT a FROM b;\n
+                  QUERY qb: SELECT a, c FROM b WHERE a = 42;";
     let mut r1 = r.extend(r1_txt).unwrap();
     assert_eq!(r1.version(), 1);
     assert_eq!(r1.expressions().len(), 3);
@@ -2084,7 +2084,7 @@ fn recipe_activates_and_migrates_with_join() {
 
     let r_copy = r.clone();
 
-    let r1_txt = "SELECT y, s FROM a, b WHERE a.x = b.r;";
+    let r1_txt = "QUERY q: SELECT y, s FROM a, b WHERE a.x = b.r;";
     let mut r1 = r.extend(r1_txt).unwrap();
     assert_eq!(r1.version(), 1);
     assert_eq!(r1.expressions().len(), 3);
