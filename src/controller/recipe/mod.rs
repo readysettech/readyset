@@ -302,12 +302,12 @@ impl Recipe {
         if self.security_config.is_some() {
             info!(self.log, "Found a security configuration, bootstrapping groups...");
             let config = self.security_config.take().unwrap();
-            for group in config.groups() {
+            for group in config.groups.values() {
                 info!(self.log, "Creating membership view for group {}", group.name());
                 let qfp = self.inc
                     .as_mut()
                     .unwrap()
-                    .add_parsed_query(group.membership(), Some(group.name()), true, mig)?;
+                    .add_parsed_query(group.membership(), Some(group.name()), false, mig)?;
 
                 result.new_nodes.insert(group.name(), qfp.query_leaf);
             }

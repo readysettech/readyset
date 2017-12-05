@@ -15,15 +15,16 @@ pub trait Multiverse {
     fn prepare_universe(
         &mut self,
         config: &SecurityConfig,
+        group: Option<String>,
         mig: &mut Migration,
-    ) -> Result<QueryFlowParts, String>;
+    ) -> Vec<QueryFlowParts>;
 
     fn add_base(
         &mut self,
         name: String,
         fields: Vec<&String>,
         mig: &mut Migration
-    ) -> Result<QueryFlowParts, String>;
+    ) -> QueryFlowParts;
 
     fn add_user_group(
         &mut self,
@@ -31,30 +32,45 @@ pub trait Multiverse {
         user_context: String,
         group_membership: String,
         mig: &mut Migration,
-    ) -> Result<QueryFlowParts, String>;
+    ) -> QueryFlowParts;
 }
 
 impl Multiverse for SqlIncorporator {
     fn prepare_universe(
         &mut self,
         config: &SecurityConfig,
+        group: Option<String>,
         mig: &mut Migration,
-    ) -> Result<QueryFlowParts, String> {
+    ) -> Vec<QueryFlowParts> {
         // First, create the UserContext base node.
+
+        let universe_policies;
         let uid = mig.universe();
-        let context = mig.context();
+        let mut qfps = Vec::new();
+        if group.is_none() {
+            info!(self.log, "Starting user universe {}", uid);
+            let context = mig.context();
 
-        info!(self.log, "Starting user universe {}", uid);
+            let uc_name = format!("UserContext_{}", uid);
+            let fields: Vec<_> = context.keys().collect();
 
-        let uc_name = format!("UserContext_{}", uid);
-        let fields: Vec<_> = context.keys().collect();
+            let base = self.add_base(uc_name.clone(), fields, mig);
+            qfps.push(base);
 
-        let res = self.add_base(uc_name.clone(), fields, mig);
+            // Then, create the UserGroup views.
+            for group in config.groups.values() {
+                let name = format!("{}_{}", group.name(), uid);
+                let group = self.add_user_group(name, uc_name.clone(), group.name(), mig);
+                qfps.push(group);
+            }
 
-        // Then, create the UserGroup views.
-        for group in config.groups() {
-            let name = format!("{}_{}", group.name(), uid);
-            self.add_user_group(name, uc_name.clone(), group.name(), mig);
+            universe_policies = config.policies();
+
+        } else {
+            info!(self.log, "Starting group universe {}", uid);
+            let group_name = group.unwrap();
+
+            universe_policies = config.get_group_policies(group_name);
         }
 
 
@@ -65,7 +81,7 @@ impl Multiverse for SqlIncorporator {
         // e.g. if they reference UserContext.
         self.mir_converter.clear_policies(&uid);
         let mut policies_qg: HashMap<(DataType, String), Vec<QueryGraph>> = HashMap::new();
-        for policy in config.policies() {
+        for policy in universe_policies {
             trace!(self.log, "Adding policy {:?}", policy.name);
             let predicate = self.rewrite_query(policy.predicate.clone(), mig);
             let st = match predicate {
@@ -88,7 +104,7 @@ impl Multiverse for SqlIncorporator {
 
         self.mir_converter.set_policies(policies_qg);
 
-        res
+        qfps
     }
 
     fn add_user_group(
@@ -97,7 +113,7 @@ impl Multiverse for SqlIncorporator {
         user_context: String,
         group_membership: String,
         mig: &mut Migration,
-    ) -> Result<QueryFlowParts, String> {
+    ) -> QueryFlowParts {
         let mut s = String::new();
         s.push_str(&format!("select uid, gid FROM {}, {} WHERE {}.id = {}.uid;",
                         user_context,
@@ -106,7 +122,7 @@ impl Multiverse for SqlIncorporator {
                         group_membership
                     ));
 
-        self.add_query(&s, Some(name), mig)
+        self.add_query(&s, Some(name), mig).unwrap()
     }
 
     fn add_base(
@@ -114,7 +130,7 @@ impl Multiverse for SqlIncorporator {
         name: String,
         fields: Vec<&String>,
         mig: &mut Migration
-    ) -> Result<QueryFlowParts, String> {
+    ) -> QueryFlowParts {
         // Unfortunately, we can't add the base directly to the graph, because we needd
         // it to be recorded in the MIR level, so other queries can reference it.
         let mut s = String::new();
@@ -126,6 +142,6 @@ impl Multiverse for SqlIncorporator {
         s.push_str("\n");
         s.push_str(") ENGINE=MyISAM DEFAULT CHARSET=utf8;");
 
-        self.add_query(&s, Some(name), mig)
+        self.add_query(&s, Some(name), mig).unwrap()
     }
 }

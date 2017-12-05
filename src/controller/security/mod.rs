@@ -1,5 +1,6 @@
 use serde_json;
 use serde_json::Value;
+use std::collections::HashMap;
 
 pub mod policy;
 pub mod group;
@@ -9,7 +10,7 @@ use controller::security::group::Group;
 
 #[derive(Clone, Debug)]
 pub struct SecurityConfig {
-    groups: Vec<Group>,
+    pub groups: HashMap<String, Group>,
     policies: Vec<Policy>,
 }
 
@@ -25,10 +26,14 @@ impl SecurityConfig {
             None => Vec::new()
         };
 
+        let groups_map = groups.iter().map(|g|
+            (g.name(), g.clone())
+        ).collect();
+
         let policies = Policy::parse(&format!("{}", config["policies"]));
 
         SecurityConfig {
-            groups: groups,
+            groups: groups_map,
             policies: policies,
         }
     }
@@ -37,8 +42,8 @@ impl SecurityConfig {
         self.policies.as_slice()
     }
 
-    pub fn groups(&self) -> &[Group] {
-        self.groups.as_slice()
+    pub fn get_group_policies(&self, group_name: String) -> &[Policy]{
+        self.groups[&group_name].policies()
     }
 }
 

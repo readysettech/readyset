@@ -41,6 +41,10 @@ impl Group {
     pub fn name(&self) -> String {
         self.name.clone()
     }
+
+    pub fn policies(&self) -> &[Policy] {
+        self.policies.as_slice()
+    }
 }
 
 mod tests {
