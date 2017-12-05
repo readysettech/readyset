@@ -38,8 +38,8 @@ impl Node {
 
         let materialized = match materialization_status {
             MaterializationStatus::Not => "",
-            MaterializationStatus::Partial => "| ◑",
-            MaterializationStatus::Full => "| ⬤",
+            MaterializationStatus::Partial => "| ▓",
+            MaterializationStatus::Full => "| █",
         };
 
         let addr = match self.index {
