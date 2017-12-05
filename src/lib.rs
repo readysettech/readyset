@@ -347,6 +347,8 @@ mod worker;
 #[cfg(test)]
 mod tests;
 
+pub use consensus::{LocalAuthority, ZookeeperAuthority};
+
 pub use core::{DataType, Datas, NodeIndex};
 
 pub use dataflow::checktable::{Token, TransactionResult};

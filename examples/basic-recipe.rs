@@ -30,7 +30,7 @@ fn main() {
     let mut builder = ControllerBuilder::default();
     builder.set_persistence(persistence_params);
 
-    let mut blender = builder.build();
+    let mut blender = builder.build_local();
     blender.install_recipe(sql.to_owned());
     blender.recover();
     thread::sleep(Duration::from_millis(1000));

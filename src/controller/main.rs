@@ -1,12 +1,12 @@
 extern crate clap;
-extern crate distributary;
 extern crate consensus;
+extern crate distributary;
 
 use std::thread;
 use std::time::Duration;
 
-use consensus::Connection;
-use distributary::Controller;
+use consensus::ZookeeperAuthority;
+use distributary::ControllerBuilder;
 
 fn main() {
     use clap::{App, Arg};
@@ -34,8 +34,10 @@ fn main() {
     let listen_addr = matches.value_of("address").unwrap().parse().unwrap();
     let zookeeper_addr = matches.value_of("zookeeper").unwrap();
 
-    let connection = Connection::new(&zookeeper_addr);
-    let _handle = Controller::start(listen_addr, connection);
+    let authority = ZookeeperAuthority::new(&zookeeper_addr);
+    let mut builder = ControllerBuilder::default();
+    builder.set_listen_addr(listen_addr);
+    let _handle = builder.build(authority);
 
     loop {
         thread::sleep(Duration::from_secs(5));

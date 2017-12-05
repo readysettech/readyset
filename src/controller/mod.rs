@@ -1,7 +1,7 @@
 use channel::poll::{PollEvent, PollingLoop, ProcessResult, RpcPollEvent, RpcPollingLoop};
 use channel::tcp::TcpSender;
 use channel;
-use consensus::{self, Epoch};
+use consensus::{self, Authority, Epoch, LocalAuthority};
 use dataflow::prelude::*;
 use dataflow::checktable::service::CheckTableServer;
 use dataflow::{backlog, checktable, node, payload, DomainConfig, PersistenceParameters, Readers};
@@ -12,6 +12,7 @@ use worker::Worker;
 use std::collections::{BTreeMap, HashMap, HashSet};
 use std::error::Error;
 use std::io::{self, ErrorKind, Read, Write};
+use std::marker::PhantomData;
 use std::net::{IpAddr, SocketAddr};
 use std::thread::{self, JoinHandle};
 use std::time::{self, Duration, Instant};
@@ -84,33 +85,16 @@ impl WorkerStatus {
 
 /// Used to construct a controller.
 pub struct ControllerBuilder {
-    sharding_enabled: bool,
-    domain_config: DomainConfig,
-    persistence: PersistenceParameters,
-    materializations: migrate::materialization::Materializations,
+    config: ControllerConfig,
     listen_addr: IpAddr,
-    heartbeat_every: Duration,
-    healthcheck_every: Duration,
-    checktable_addr: Option<SocketAddr>,
     log: slog::Logger,
 }
 impl Default for ControllerBuilder {
     fn default() -> Self {
-        let log = slog::Logger::root(slog::Discard, o!());
         Self {
-            sharding_enabled: true,
-            domain_config: DomainConfig {
-                concurrent_replays: 512,
-                replay_batch_timeout: time::Duration::from_millis(1),
-                replay_batch_size: 32,
-            },
-            persistence: Default::default(),
-            materializations: migrate::materialization::Materializations::new(&log),
+            config: ControllerConfig::default(),
             listen_addr: "127.0.0.1".parse().unwrap(),
-            heartbeat_every: Duration::from_secs(1),
-            healthcheck_every: Duration::from_secs(10),
-            checktable_addr: None,
-            log,
+            log: slog::Logger::root(slog::Discard, o!()),
         }
     }
 }
@@ -121,44 +105,49 @@ impl ControllerBuilder {
     /// Note that this number *must* be greater than the width (in terms of number of ancestors) of
     /// the widest union in the graph, otherwise a deadlock will occur.
     pub fn set_max_concurrent_replay(&mut self, n: usize) {
-        self.domain_config.concurrent_replays = n;
+        self.config.domain_config.concurrent_replays = n;
     }
 
     /// Set the maximum number of partial replay responses that can be aggregated into a single
     /// replay batch.
     pub fn set_partial_replay_batch_size(&mut self, n: usize) {
-        self.domain_config.replay_batch_size = n;
+        self.config.domain_config.replay_batch_size = n;
     }
 
     /// Set the longest time a partial replay response can be delayed.
     pub fn set_partial_replay_batch_timeout(&mut self, t: time::Duration) {
-        self.domain_config.replay_batch_timeout = t;
+        self.config.domain_config.replay_batch_timeout = t;
     }
 
     /// Set the persistence parameters used by the system.
     pub fn set_persistence(&mut self, p: PersistenceParameters) {
-        self.persistence = p;
+        self.config.persistence = p;
     }
 
     /// Disable partial materialization for all subsequent migrations
     pub fn disable_partial(&mut self) {
-        self.materializations.disable_partial();
+        self.config.partial_enabled = false;
     }
 
     /// Disable sharding for all subsequent migrations
     pub fn disable_sharding(&mut self) {
-        self.sharding_enabled = false;
+        self.config.sharding_enabled = false;
     }
 
-    /// Set the address of the checktable
-    pub fn set_checktable_addr(&mut self, addr: SocketAddr) {
-        self.checktable_addr = Some(addr);
+    /// Set the IP address that the controller should use for listening.
+    pub fn set_listen_addr(&mut self, listen_addr: IpAddr) {
+        self.listen_addr = listen_addr;
     }
 
     #[cfg(test)]
     pub fn build_inner(mut self) -> ControllerInner {
-        self.checktable_addr = Some(CheckTableServer::start("127.0.0.1:0".parse().unwrap()));
-        ControllerInner::from_builder(self)
+        let checktable_addr = CheckTableServer::start(SocketAddr::new(self.listen_addr, 0));
+        let initial_state = ControllerState {
+            config: self.config,
+            recipe: String::new(),
+            epoch: LocalAuthority::get_epoch(),
+        };
+        ControllerInner::new(self.listen_addr, checktable_addr, self.log, initial_state)
     }
 
     /// Set the logger that the derived controller should use. By default, it uses `slog::Discard`.
@@ -166,13 +155,14 @@ impl ControllerBuilder {
         self.log = log;
     }
 
-    /// Build a controller, and return a ControllerHandle to provide access to it.
-    pub fn build(self) -> ControllerHandle {
-        unreachable!();
+    /// Build a controller and return a handle to it.
+    pub fn build<A: Authority + 'static>(self, authority: A) -> ControllerHandle<A> {
+        Controller::start(authority, self.listen_addr, self.config, self.log)
+    }
 
-        // ControllerHandle {
-        //     url: format!("http://{}", addr),
-        // }
+    /// Build a local controller, and return a ControllerHandle to provide access to it.
+    pub fn build_local(self) -> ControllerHandle<LocalAuthority> {
+        self.build(LocalAuthority::new())
     }
 }
 
@@ -320,8 +310,13 @@ impl ControllerInner {
         Ok(())
     }
 
-    /// Construct `Controller` with a specified listening interface
-    pub fn from_builder(builder: ControllerBuilder) -> Self {
+    /// Construct `ControllerInner` with a specified listening interface
+    fn new(
+        listen_addr: IpAddr,
+        checktable_addr: SocketAddr,
+        log: slog::Logger,
+        state: ControllerState,
+    ) -> Self {
         let mut g = petgraph::Graph::new();
         let source = g.add_node(node::Node::new(
             "source",
@@ -330,15 +325,13 @@ impl ControllerInner {
             true,
         ));
 
-        let checktable_addr = builder.checktable_addr.unwrap();
-        let checktable = checktable::CheckTableClient::connect(
-            checktable_addr.clone(),
-            client::Options::default(),
-        ).unwrap();
+        let checktable =
+            checktable::CheckTableClient::connect(checktable_addr, client::Options::default())
+                .unwrap();
 
         let readers: Readers = Arc::default();
         let readers_clone = readers.clone();
-        let addr = SocketAddr::new(builder.listen_addr.clone(), 0);
+        let addr = SocketAddr::new(listen_addr, 0);
         let read_polling_loop = RpcPollingLoop::new(addr.clone());
         let read_listen_addr = read_polling_loop.get_listener_addr().unwrap();
         let thread_builder = thread::Builder::new().name("wrkr-reads".to_owned());
@@ -346,21 +339,26 @@ impl ControllerInner {
             Worker::serve_reads(read_polling_loop, readers_clone)
         });
 
+        let mut materializations = migrate::materialization::Materializations::new(&log);
+        if !state.config.partial_enabled {
+            materializations.disable_partial()
+        }
+
         ControllerInner {
             ingredients: g,
             source: source,
             ndomains: 0,
             checktable,
             checktable_addr,
+            listen_addr,
 
-            sharding_enabled: builder.sharding_enabled,
-            materializations: builder.materializations,
-            domain_config: builder.domain_config,
-            persistence: builder.persistence,
-            listen_addr: builder.listen_addr,
-            heartbeat_every: builder.heartbeat_every,
-            healthcheck_every: builder.healthcheck_every,
-            log: builder.log,
+            materializations,
+            sharding_enabled: state.config.sharding_enabled,
+            domain_config: state.config.domain_config,
+            persistence: state.config.persistence,
+            heartbeat_every: state.config.heartbeat_every,
+            healthcheck_every: state.config.healthcheck_every,
+            log,
 
             domains: Default::default(),
             channel_coordinator: Arc::new(ChannelCoordinator::new()),
@@ -1324,19 +1322,19 @@ impl Drop for ControllerInner {
 }
 
 /// `ControllerHandle` is a handle to a Controller.
-pub struct ControllerHandle {
+pub struct ControllerHandle<A: Authority> {
     url: Option<String>,
-    connection: Arc<consensus::Connection>,
+    authority: Arc<A>,
     local: Option<(Sender<ControlEvent>, JoinHandle<()>)>,
 }
-impl ControllerHandle {
+impl<A: Authority> ControllerHandle<A> {
     fn rpc<Q: Serialize, R: DeserializeOwned>(&mut self, path: &str, request: &Q) -> R {
         let mut core = Core::new().unwrap();
         let client = Client::new(&core.handle());
         loop {
             if self.url.is_none() {
                 let descriptor: ControllerDescriptor =
-                    serde_json::from_slice(&self.connection.get_leader().1).unwrap();
+                    serde_json::from_slice(&self.authority.get_leader().1).unwrap();
                 self.url = Some(format!("http://{}", descriptor.external_addr));
             }
             let url = format!("{}/{}", self.url.as_ref().unwrap(), path);
@@ -1414,7 +1412,7 @@ impl ControllerHandle {
         self.rpc("graphviz", &())
     }
 }
-impl Drop for ControllerHandle {
+impl<A: Authority> Drop for ControllerHandle<A> {
     fn drop(&mut self) {
         if let Some((sender, join_handle)) = self.local.take() {
             let _ = sender.send(ControlEvent::Shutdown);
@@ -1444,18 +1442,37 @@ struct ControllerDescriptor {
     checktable_addr: SocketAddr,
 }
 
-#[derive(Serialize, Deserialize)]
-struct ControllerState {
-    epoch: Epoch,
-    recipe: String,
+#[derive(Clone, Serialize, Deserialize)]
+struct ControllerConfig {
+    sharding_enabled: bool,
+    partial_enabled: bool,
+    domain_config: DomainConfig,
+    persistence: PersistenceParameters,
+    heartbeat_every: Duration,
+    healthcheck_every: Duration,
 }
-impl ControllerState {
-    pub fn new(epoch: Epoch) -> Self {
+impl Default for ControllerConfig {
+    fn default() -> Self {
         Self {
-            epoch,
-            recipe: String::new(),
+            sharding_enabled: true,
+            partial_enabled: true,
+            domain_config: DomainConfig {
+                concurrent_replays: 512,
+                replay_batch_timeout: time::Duration::from_millis(1),
+                replay_batch_size: 32,
+            },
+            persistence: Default::default(),
+            heartbeat_every: Duration::from_secs(1),
+            healthcheck_every: Duration::from_secs(10),
         }
     }
+}
+
+#[derive(Clone, Serialize, Deserialize)]
+struct ControllerState {
+    config: ControllerConfig,
+    epoch: Epoch,
+    recipe: String,
 }
 
 enum ControlEvent {
@@ -1472,29 +1489,38 @@ enum ControlEvent {
 }
 
 /// Runs the soup instance.
-pub struct Controller {
+pub struct Controller<A: Authority + 'static> {
     current_epoch: Option<Epoch>,
     inner: Option<ControllerInner>,
+    log: slog::Logger,
 
+    listen_addr: IpAddr,
     internal: ServingThread,
     external: ServingThread,
     checktable: SocketAddr,
     campaign: JoinHandle<()>,
+
+    phantom: PhantomData<A>,
 }
 
-impl Controller {
+impl<A: Authority + 'static> Controller<A> {
     /// Start up a new `Controller` and return a handle to it. Dropping the handle will stop the
     /// controller.
-    pub fn start(listen_address: IpAddr, connection: consensus::Connection) -> ControllerHandle {
-        let connection = Arc::new(connection);
+    fn start(
+        authority: A,
+        listen_addr: IpAddr,
+        config: ControllerConfig,
+        log: slog::Logger,
+    ) -> ControllerHandle<A> {
+        let authority = Arc::new(authority);
 
         let (event_tx, event_rx) = mpsc::channel();
-        let internal = Self::listen_internal(event_tx.clone(), SocketAddr::new(listen_address, 0));
-        let checktable = CheckTableServer::start(SocketAddr::new(listen_address, 0));
+        let internal = Self::listen_internal(event_tx.clone(), SocketAddr::new(listen_addr, 0));
+        let checktable = CheckTableServer::start(SocketAddr::new(listen_addr, 0));
         let external = Self::listen_external(
             event_tx.clone(),
-            SocketAddr::new(listen_address, 9000),
-            connection.clone(),
+            SocketAddr::new(listen_addr, 9000),
+            authority.clone(),
         );
 
         let descriptor = ControllerDescriptor {
@@ -1502,30 +1528,33 @@ impl Controller {
             internal_addr: internal.addr,
             checktable_addr: checktable,
         };
-        let campaign = Self::campaign(event_tx.clone(), connection.clone(), descriptor);
+        let campaign = Self::campaign(event_tx.clone(), authority.clone(), descriptor, config);
 
         let event_tx2 = event_tx.clone();
         let (tx, rx) = mpsc::channel();
         let builder = thread::Builder::new().name("srv-main".to_owned());
         let join_handle = builder
             .spawn(move || {
-                let mut inner = Self {
+                let mut controller = Self {
                     current_epoch: None,
                     inner: None,
+                    log,
                     internal,
                     external,
                     checktable,
                     campaign,
+                    listen_addr,
+                    phantom: PhantomData,
                 };
                 tx.send(()).unwrap();
-                inner.main_loop(event_rx)
+                controller.main_loop(event_rx)
             })
             .unwrap();
 
         let _ = rx.recv().unwrap();
         ControllerHandle {
             url: None,
-            connection,
+            authority,
             local: Some((event_tx2, join_handle)),
         }
     }
@@ -1547,9 +1576,12 @@ impl Controller {
                 }
                 ControlEvent::WonLeaderElection(state) => {
                     self.current_epoch = Some(state.epoch);
-                    let mut builder = ControllerBuilder::default();
-                    builder.set_checktable_addr(self.checktable);
-                    self.inner = Some(ControllerInner::from_builder(builder));
+                    self.inner = Some(ControllerInner::new(
+                        self.listen_addr,
+                        self.checktable,
+                        self.log.clone(),
+                        state,
+                    ));
                 }
                 ControlEvent::LostLeadership(new_epoch) => {
                     self.current_epoch = Some(new_epoch);
@@ -1565,11 +1597,16 @@ impl Controller {
     fn listen_external(
         event_tx: Sender<ControlEvent>,
         addr: SocketAddr,
-        connection: Arc<consensus::Connection>,
+        authority: Arc<A>,
     ) -> ServingThread {
-        #[derive(Clone)]
-        struct ExternalServer(Sender<ControlEvent>, Arc<consensus::Connection>);
-        impl Service for ExternalServer {
+        struct ExternalServer<A: Authority>(Sender<ControlEvent>, Arc<A>);
+        impl<A: Authority> Clone for ExternalServer<A> {
+            // Needed due to #26925
+            fn clone(&self) -> Self {
+                ExternalServer(self.0.clone(), self.1.clone())
+            }
+        }
+        impl<A: Authority> Service for ExternalServer<A> {
             type Request = Request;
             type Response = Response;
             type Error = hyper::Error;
@@ -1591,7 +1628,7 @@ impl Controller {
                         Box::new(futures::future::ok(res))
                     }
                     (Method::Get, path) if path.starts_with("/zookeeper/") => {
-                        match self.1.read_nonblocking(&format!("/{}", &path[11..])) {
+                        match self.1.try_read(&format!("/{}", &path[11..])) {
                             Some(data) => {
                                 res.headers_mut().set(ContentType::json());
                                 res.set_body(data);
@@ -1627,7 +1664,7 @@ impl Controller {
                 }
             }
         }
-        impl NewService for ExternalServer {
+        impl<A: Authority> NewService for ExternalServer<A> {
             type Request = Request;
             type Response = Response;
             type Error = hyper::Error;
@@ -1642,7 +1679,7 @@ impl Controller {
         let builder = thread::Builder::new().name("srv-ext".to_owned());
         let join_handle = builder
             .spawn(move || {
-                let service = ExternalServer(event_tx, connection);
+                let service = ExternalServer(event_tx, authority);
                 let server = Http::new().bind(&addr, service.clone());
                 let server = match server {
                     Ok(s) => s,
@@ -1708,8 +1745,9 @@ impl Controller {
 
     fn campaign(
         event_tx: Sender<ControlEvent>,
-        mut connection: Arc<consensus::Connection>,
+        mut authority: Arc<A>,
         descriptor: ControllerDescriptor,
+        config: ControllerConfig,
     ) -> JoinHandle<()> {
         let descriptor = serde_json::to_vec(&descriptor).unwrap();
         let builder = thread::Builder::new().name("srv-zk".to_owned());
@@ -1717,14 +1755,19 @@ impl Controller {
             .spawn(move || {
                 loop {
                     // become leader
-                    let current_epoch = match connection.become_leader(descriptor.clone()) {
+                    let current_epoch = match authority.become_leader(descriptor.clone()) {
                         Some(epoch) => epoch,
                         None => continue,
                     };
-                    let state = connection.read_modify_write(
+                    let initial_state = ControllerState {
+                        config: config.clone(),
+                        epoch: current_epoch,
+                        recipe: String::new(),
+                    };
+                    let state = authority.read_modify_write(
                         "/state",
                         |state: Option<ControllerState>| match state {
-                            None => Ok(ControllerState::new(current_epoch)),
+                            None => Ok(initial_state.clone()),
                             Some(ref state) if state.epoch > current_epoch => Err(()),
                             Some(mut state) => {
                                 state.epoch = current_epoch;
@@ -1743,7 +1786,7 @@ impl Controller {
                     }
 
                     // watch for overthrow
-                    let new_epoch = connection.await_new_epoch(current_epoch);
+                    let new_epoch = authority.await_new_epoch(current_epoch);
                     if !event_tx
                         .send(ControlEvent::LostLeadership(new_epoch))
                         .is_ok()
@@ -1759,14 +1802,15 @@ impl Controller {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use consensus::ZookeeperAuthority;
 
     // Controller without any domains gets dropped once it leaves the scope.
     #[test]
     fn it_works_default() {
         // Controller gets dropped. It doesn't have Domains, so we don't see any dropped.
-        let connection = consensus::Connection::new("127.0.0.1:2181/it_works_default");
+        let authority = ZookeeperAuthority::new("127.0.0.1:2181/it_works_default");
         {
-            let c = Controller::start("127.0.0.1".parse().unwrap(), connection);
+            let c = ControllerBuilder::default().build(authority);
             thread::sleep(Duration::from_secs(1));
         }
         thread::sleep(Duration::from_secs(1));
@@ -1778,9 +1822,8 @@ mod tests {
         let r_txt = "CREATE TABLE a (x int, y int, z int);\n
                      CREATE TABLE b (r int, s int);\n";
 
-        let connection =
-            consensus::Connection::new("127.0.0.1:2181/it_works_blender_with_migration");
-        let mut c = Controller::start("127.0.0.1".parse().unwrap(), connection);
+        let authority = ZookeeperAuthority::new("127.0.0.1:2181/it_works_blender_with_migration");
+        let mut c = ControllerBuilder::default().build(authority);
         c.install_recipe(r_txt.to_owned());
     }
 }
