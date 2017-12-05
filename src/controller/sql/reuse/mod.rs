@@ -1,6 +1,5 @@
 use nom_sql::Table;
 use controller::sql::query_graph::QueryGraph;
-use mir::query::MirQuery;
 
 use std::vec::Vec;
 use std::collections::HashMap;

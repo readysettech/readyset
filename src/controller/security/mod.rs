@@ -1,7 +1,5 @@
 use serde_json;
 use serde_json::Value;
-use nom_sql::parser as sql_parser;
-use nom_sql::SqlQuery;
 
 pub mod policy;
 pub mod group;

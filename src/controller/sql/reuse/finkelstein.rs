@@ -2,7 +2,6 @@ use controller::sql::reuse::helpers::predicate_implication::complex_predicate_im
 use controller::sql::reuse::{ReuseConfiguration, ReuseType};
 use controller::sql::query_graph::{QueryGraph, QueryGraphEdge};
 use controller::sql::query_signature::Signature;
-use mir::query::MirQuery;
 
 use std::vec::Vec;
 use std::collections::HashMap;

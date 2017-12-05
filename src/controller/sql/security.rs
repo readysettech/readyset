@@ -1,12 +1,10 @@
 use dataflow::prelude::DataType;
-use dataflow::ops::base::Base;
 use controller::Migration;
 use std::collections::HashMap;
 use nom_sql::SqlQuery;
 use controller::security::SecurityConfig;
 use controller::sql::{QueryFlowParts, SqlIncorporator};
 use controller::sql::query_graph::{to_query_graph, QueryGraph};
-use std::collections::hash_map::Entry;
 
 pub type UniverseId = DataType;
 
