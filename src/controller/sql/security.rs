@@ -5,6 +5,7 @@ use nom_sql::SqlQuery;
 use controller::security::SecurityConfig;
 use controller::sql::{QueryFlowParts, SqlIncorporator};
 use controller::sql::query_graph::{to_query_graph, QueryGraph};
+use nom_sql::parser as sql_parser;
 
 pub type UniverseId = DataType;
 
@@ -115,14 +116,14 @@ impl Multiverse for SqlIncorporator {
         mig: &mut Migration,
     ) -> QueryFlowParts {
         let mut s = String::new();
-        s.push_str(&format!("select uid, gid FROM {}, {} WHERE {}.id = {}.uid;",
+        s.push_str(&format!("select uid, gid FROM {}, {} WHERE id = uid;",
                         user_context,
                         group_membership,
-                        user_context,
-                        group_membership
                     ));
 
-        self.add_query(&s, Some(name), mig).unwrap()
+        let parsed_query = sql_parser::parse_query(&s).unwrap();
+
+        self.add_parsed_query(parsed_query, Some(name), false, mig).unwrap()
     }
 
     fn add_base(
@@ -142,6 +143,8 @@ impl Multiverse for SqlIncorporator {
         s.push_str("\n");
         s.push_str(") ENGINE=MyISAM DEFAULT CHARSET=utf8;");
 
-        self.add_query(&s, Some(name), mig).unwrap()
+        let parsed_query = sql_parser::parse_query(&s).unwrap();
+
+        self.add_parsed_query(parsed_query, Some(name), false, mig).unwrap()
     }
 }

@@ -841,6 +841,7 @@ impl SqlToMirConverter {
                 project: fields.clone(),
             },
         };
+        trace!(self.log, "Added join node {:?}", inner);
         MirNode::new(
             name,
             self.schema_version,

@@ -560,11 +560,12 @@ pub(crate) fn make_join_node(
     // at this point in the codebase, so the `r2.a = r1.b` will join on the wrong `a` column.
     let left_join_col_id = projected_cols_left
         .iter()
-        .position(|lc| lc == on_left.first().unwrap())
+        .position(|lc| lc.name == on_left.first().unwrap().name)
         .unwrap();
+
     let right_join_col_id = projected_cols_right
         .iter()
-        .position(|rc| rc == on_right.first().unwrap())
+        .position(|rc| rc.name == on_right.first().unwrap().name)
         .unwrap();
 
     let join_config = projected_cols_left
