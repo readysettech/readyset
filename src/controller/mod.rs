@@ -46,6 +46,7 @@ use coordination::{CoordinationMessage, CoordinationPayload};
 
 pub use self::mutator::{Mutator, MutatorBuilder, MutatorError};
 pub use self::getter::{Getter, ReadQuery, ReadReply, RemoteGetter, RemoteGetterBuilder};
+pub(crate) use self::getter::LocalOrNot;
 use self::payload::{EgressForBase, IngressFromBase};
 use self::recipe::Recipe;
 

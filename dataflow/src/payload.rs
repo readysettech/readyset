@@ -278,7 +278,7 @@ pub enum Packet {
 
     /// The packet is being sent locally, so a pointer is sent to avoid
     /// serialization/deserialization costs.
-    Local(LocalPacket),
+    Local(LocalBypass<Packet>),
 
     /// Notify downstream replica what our index is
     Hey(domain::Index, usize),
@@ -447,16 +447,20 @@ impl Packet {
 
     /// If self is `Packet::Local` then replace with the packet pointed to.
     pub fn extract_local(&mut self) -> Option<Box<Self>> {
-        if let Packet::Local(LocalPacket(ptr)) = *self {
-            *self = Packet::Spin;
-            Some(unsafe { Box::from_raw(ptr) })
+        if let Packet::Local(..) = *self {
+            use std::mem;
+            if let Packet::Local(local) = mem::replace(self, Packet::Spin) {
+                Some(unsafe { local.take() })
+            } else {
+                unreachable!();
+            }
         } else {
             None
         }
     }
 
     pub fn make_local(self: Box<Self>) -> Box<Self> {
-        Box::new(Packet::Local(LocalPacket(Box::into_raw(self))))
+        Box::new(Packet::Local(LocalBypass::make(self)))
     }
 }
 
@@ -529,10 +533,20 @@ impl ControlReplyPacket {
 }
 
 
-pub struct LocalPacket(*mut Packet);
+pub struct LocalBypass<T>(*mut T);
 
-unsafe impl Send for LocalPacket {}
-impl Serialize for LocalPacket {
+impl<T> LocalBypass<T> {
+    pub fn make(t: Box<T>) -> Self {
+        LocalBypass(Box::into_raw(t))
+    }
+
+    pub unsafe fn take(self) -> Box<T> {
+        Box::from_raw(self.0)
+    }
+}
+
+unsafe impl<T> Send for LocalBypass<T> {}
+impl<T> Serialize for LocalBypass<T> {
     fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
     where
         S: Serializer,
@@ -540,16 +554,16 @@ impl Serialize for LocalPacket {
         (self.0 as usize).serialize(serializer)
     }
 }
-impl<'de> Deserialize<'de> for LocalPacket {
+impl<'de, T> Deserialize<'de> for LocalBypass<T> {
     fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
     where
         D: Deserializer<'de>,
     {
-        usize::deserialize(deserializer).map(|p| LocalPacket(p as *mut Packet))
+        usize::deserialize(deserializer).map(|p| LocalBypass(p as *mut T))
     }
 }
-impl Clone for LocalPacket {
-    fn clone(&self) -> LocalPacket {
+impl<T> Clone for LocalBypass<T> {
+    fn clone(&self) -> LocalBypass<T> {
         panic!("LocalPacket cannot be cloned");
     }
 }

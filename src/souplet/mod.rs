@@ -12,7 +12,7 @@ use dataflow::checktable::TokenGenerator;
 use dataflow::backlog::SingleReadHandle;
 use dataflow::prelude::*;
 
-use controller::{ReadQuery, ReadReply};
+use controller::{LocalOrNot, ReadQuery, ReadReply};
 use coordination::{CoordinationMessage, CoordinationPayload};
 
 use worker;
@@ -44,7 +44,10 @@ pub struct Souplet {
 
 impl Souplet {
     /// Use the given polling loop and readers object to serve reads.
-    pub fn serve_reads(mut polling_loop: RpcPollingLoop<ReadQuery, ReadReply>, readers: Readers) {
+    pub(crate) fn serve_reads(
+        mut polling_loop: RpcPollingLoop<LocalOrNot<ReadQuery>, LocalOrNot<ReadReply>>,
+        readers: Readers,
+    ) {
         let mut readers_cache: HashMap<
             (NodeIndex, usize),
             (SingleReadHandle, Option<TokenGenerator>),
@@ -53,62 +56,68 @@ impl Souplet {
         polling_loop.run_polling_loop(|event| match event {
             RpcPollEvent::ResumePolling(_) => ProcessResult::KeepPolling,
             RpcPollEvent::Timeout => unreachable!(),
-            RpcPollEvent::Process(
-                ReadQuery::Normal {
-                    target,
-                    keys,
-                    block,
-                },
-                reply,
-            ) => {
-                *reply = Some(ReadReply::Normal(
-                    keys.iter()
-                        .map(|key| {
-                            let &mut (ref mut reader, _) =
-                                readers_cache.entry(target.clone()).or_insert_with(
-                                    || readers.lock().unwrap().get(&target).unwrap().clone(),
-                                );
+            RpcPollEvent::Process(m, reply) => {
+                let is_local = m.is_local();
+                *reply = Some(LocalOrNot::make(
+                    match unsafe { m.take() } {
+                        ReadQuery::Normal {
+                            target,
+                            keys,
+                            block,
+                        } => ReadReply::Normal(
+                            keys.iter()
+                                .map(|key| {
+                                    let &mut (ref mut reader, _) =
+                                        readers_cache.entry(target.clone()).or_insert_with(|| {
+                                            readers.lock().unwrap().get(&target).unwrap().clone()
+                                        });
 
-                            reader
-                                .find_and(
-                                    key,
-                                    |rs| {
-                                        rs.into_iter()
-                                            .map(|r| r.iter().map(|v| v.deep_clone()).collect())
-                                            .collect()
-                                    },
-                                    block,
-                                )
-                                .map(|r| r.0)
-                                .map(|r| r.unwrap_or_else(Vec::new))
-                        })
-                        .collect(),
-                ));
-                ProcessResult::KeepPolling
-            }
-            RpcPollEvent::Process(ReadQuery::WithToken { target, keys }, reply) => {
-                *reply = Some(ReadReply::WithToken(
-                    keys.into_iter()
-                        .map(|key| {
-                            let &mut (ref mut reader, ref mut generator) =
-                                readers_cache.entry(target.clone()).or_insert_with(
-                                    || readers.lock().unwrap().get(&target).unwrap().clone(),
-                                );
+                                    reader
+                                        .find_and(
+                                            key,
+                                            |rs| {
+                                                rs.into_iter()
+                                                    .map(|r| {
+                                                        r.iter().map(|v| v.deep_clone()).collect()
+                                                    })
+                                                    .collect()
+                                            },
+                                            block,
+                                        )
+                                        .map(|r| r.0)
+                                        .map(|r| r.unwrap_or_else(Vec::new))
+                                })
+                                .collect(),
+                        ),
+                        ReadQuery::WithToken { target, keys } => ReadReply::WithToken(
+                            keys.into_iter()
+                                .map(|key| {
+                                    let &mut (ref mut reader, ref mut generator) =
+                                        readers_cache.entry(target.clone()).or_insert_with(|| {
+                                            readers.lock().unwrap().get(&target).unwrap().clone()
+                                        });
 
-                            reader
-                                .find_and(
-                                    &key,
-                                    |rs| {
-                                        rs.into_iter()
-                                            .map(|r| r.iter().map(|v| v.deep_clone()).collect())
-                                            .collect()
-                                    },
-                                    true,
-                                )
-                                .map(|r| (r.0.unwrap_or_else(Vec::new), r.1))
-                                .map(|r| (r.0, generator.as_ref().unwrap().generate(r.1, key)))
-                        })
-                        .collect(),
+                                    reader
+                                        .find_and(
+                                            &key,
+                                            |rs| {
+                                                rs.into_iter()
+                                                    .map(|r| {
+                                                        r.iter().map(|v| v.deep_clone()).collect()
+                                                    })
+                                                    .collect()
+                                            },
+                                            true,
+                                        )
+                                        .map(|r| (r.0.unwrap_or_else(Vec::new), r.1))
+                                        .map(|r| {
+                                            (r.0, generator.as_ref().unwrap().generate(r.1, key))
+                                        })
+                                })
+                                .collect(),
+                        ),
+                    },
+                    is_local,
                 ));
                 ProcessResult::KeepPolling
             }
