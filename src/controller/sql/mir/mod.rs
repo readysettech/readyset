@@ -144,7 +144,7 @@ impl SqlToMirConverter {
         let mut filters = vec![None; num_columns];
 
         let f = Some((ct.operator.clone(), DataType::from(r)));
-        match columns.iter().rposition(|c| *c == l) {
+        match columns.iter().rposition(|c| *c.name == l.name) {
             None => {
                 // Might occur if the column doesn't exist in the parent; e.g., for aggregations.
                 // We assume that the column is appended at the end.
@@ -635,6 +635,7 @@ impl SqlToMirConverter {
 
     fn make_union_from_same_base(&self, name: &str, ancestors: Vec<MirNodeRef>, columns: Vec<Column>, is_leaf: bool) -> MirNodeRef {
         assert!(ancestors.len() > 1, "union must have more than 1 ancestors");
+        trace!(self.log, "Added union node wiht columns {:?}", columns);
         let columns: Vec<Column> = columns.into_iter()
                         .map(|c| {
                             if is_leaf {
@@ -663,7 +664,7 @@ impl SqlToMirConverter {
         let mut fields = parent.borrow().columns().iter().cloned().collect();
 
         let filter = self.to_conditions(cond, &mut fields, &parent);
-
+        trace!(self.log, "Added filter node {} with condition {:?}", name, filter);
         MirNode::new(
             name,
             self.schema_version,

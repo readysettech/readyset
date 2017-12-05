@@ -226,7 +226,7 @@ impl MirNode {
             // otherwise, just look up in the column set
             _ => match self.columns
                 .iter()
-                .position(|cc| cc.name == c.name && cc.table == c.table)
+                .position(|cc| cc.name == c.name)
             {
                 None => {
                     panic!("tried to look up non-existent column {:?}", c.name);
