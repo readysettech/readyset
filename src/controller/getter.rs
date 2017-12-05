@@ -71,7 +71,7 @@ pub enum ReadReply {
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct RemoteGetterBuilder {
     pub(crate) node: NodeIndex,
-    pub(crate) shards: Vec<SocketAddr>,
+    pub(crate) shards: Vec<(SocketAddr, bool)>,
 }
 
 impl RemoteGetterBuilder {
@@ -81,7 +81,9 @@ impl RemoteGetterBuilder {
             node: self.node,
             shards: self.shards
                 .iter()
-                .map(|addr| RpcClient::connect(addr).unwrap())
+                .map(|&(ref addr, is_local)| {
+                    RpcClient::connect(addr, is_local).unwrap()
+                })
                 .collect(),
         }
     }
@@ -97,8 +99,9 @@ impl RemoteGetter {
     /// Query for the results for the given keys, optionally blocking if it is not yet available.
     pub fn multi_lookup(&mut self, keys: Vec<DataType>, block: bool) -> Vec<Result<Datas, ()>> {
         if self.shards.len() == 1 {
-            let is_local = false;
-            let reply = self.shards[0]
+            let shard = &mut self.shards[0];
+            let is_local = shard.is_local();
+            let reply = shard
                 .send(&LocalOrNot::make(
                     ReadQuery::Normal {
                         target: (self.node, 0),
@@ -122,12 +125,13 @@ impl RemoteGetter {
             shard_queries
                 .into_iter()
                 .enumerate()
-                .flat_map(|(shard, keys)| {
-                    let is_local = false;
-                    let reply = self.shards[shard]
+                .flat_map(|(shardi, keys)| {
+                    let shard = &mut self.shards[shardi];
+                    let is_local = shard.is_local();
+                    let reply = shard
                         .send(&LocalOrNot::make(
                             ReadQuery::Normal {
-                                target: (self.node, shard),
+                                target: (self.node, shardi),
                                 keys,
                                 block,
                             },
@@ -150,8 +154,9 @@ impl RemoteGetter {
         keys: Vec<DataType>,
     ) -> Vec<Result<(Datas, checktable::Token), ()>> {
         if self.shards.len() == 1 {
-            let is_local = false;
-            let reply = self.shards[0]
+            let shard = &mut self.shards[0];
+            let is_local = shard.is_local();
+            let reply = shard
                 .send(&LocalOrNot::make(
                     ReadQuery::WithToken {
                         target: (self.node, 0),
@@ -174,12 +179,13 @@ impl RemoteGetter {
             shard_queries
                 .into_iter()
                 .enumerate()
-                .flat_map(|(shard, keys)| {
-                    let is_local = false;
-                    let reply = self.shards[shard]
+                .flat_map(|(shardi, keys)| {
+                    let shard = &mut self.shards[shardi];
+                    let is_local = shard.is_local();
+                    let reply = shard
                         .send(&LocalOrNot::make(
                             ReadQuery::WithToken {
-                                target: (self.node, shard),
+                                target: (self.node, shardi),
                                 keys,
                             },
                             is_local,
