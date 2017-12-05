@@ -29,7 +29,7 @@ pub struct ActivationResult {
 #[derive(Clone, Debug)]
 pub struct Recipe {
     /// SQL queries represented in the recipe. Value tuple is (name, query).
-    expressions: HashMap<QueryID, (Option<String>, SqlQuery)>,
+    expressions: HashMap<QueryID, (Option<String>, SqlQuery, bool)>,
     /// Addition order for the recipe expressions
     expression_order: Vec<QueryID>,
     /// Named read/write expression aliases, mapping to queries in `expressions`.
@@ -66,6 +66,7 @@ fn hash_query(q: &SqlQuery) -> QueryID {
     h.finish()
 }
 
+#[allow(unused)]
 impl Recipe {
     /// Return active aliases for expressions
     pub fn aliases(&self) -> Vec<&str> {
@@ -119,7 +120,7 @@ impl Recipe {
                 let na = match self.aliases.get(name) {
                     None => inc.get_query_address(name),
                     Some(ref qid) => {
-                        let (ref internal_qn, _) = self.expressions[qid];
+                        let (ref internal_qn, _, _) = self.expressions[qid];
                         inc.get_query_address(internal_qn.as_ref().unwrap())
                     }
                 };
@@ -166,12 +167,15 @@ impl Recipe {
     /// Creates a recipe from a set of pre-parsed `SqlQuery` structures.
     /// Note that the recipe is not backed by a Soup data-flow graph until `activate` is called on
     /// it.
-    pub fn from_queries(qs: Vec<(Option<String>, SqlQuery)>, log: Option<slog::Logger>) -> Recipe {
+    pub fn from_queries(
+        qs: Vec<(Option<String>, SqlQuery, bool)>,
+        log: Option<slog::Logger>,
+    ) -> Recipe {
         let mut aliases = HashMap::default();
         let mut expression_order = Vec::new();
         let mut duplicates = 0;
         let expressions = qs.into_iter()
-            .map(|(n, q)| {
+            .map(|(n, q, is_leaf)| {
                 let qid = hash_query(&q);
                 if !expression_order.contains(&qid) {
                     expression_order.push(qid);
@@ -184,9 +188,9 @@ impl Recipe {
                         aliases.insert(name.clone(), qid);
                     }
                 }
-                (qid.into(), (n, q))
+                (qid.into(), (n, q, is_leaf))
             })
-            .collect::<HashMap<QueryID, (Option<String>, SqlQuery)>>();
+            .collect::<HashMap<QueryID, (Option<String>, SqlQuery, bool)>>();
 
         let inc = match log {
             None => SqlIncorporator::default(),
@@ -230,7 +234,7 @@ impl Recipe {
         }
 
         for expr in self.expressions.values() {
-            let (n, q) = expr.clone();
+            let (n, q, is_leaf) = expr.clone();
             // add the universe-specific query
             // don't use query name to avoid conflict with global queries
             let new_name = match n {
@@ -241,7 +245,7 @@ impl Recipe {
             let qfp = self.inc
                 .as_mut()
                 .unwrap()
-                .add_parsed_query(q, new_name, true, mig)?;
+                .add_parsed_query(q, new_name, is_leaf, mig)?;
 
             // If the user provided us with a query name, use that.
             // If not, use the name internally used by the QFP.
@@ -315,13 +319,13 @@ impl Recipe {
         // incorporator in `inc`. `NodeIndex`es for new nodes are collected in `new_nodes` to be
         // returned to the caller (who may use them to obtain mutators and getters)
         for qid in added {
-            let (n, q) = self.expressions[&qid].clone();
+            let (n, q, is_leaf) = self.expressions[&qid].clone();
 
             // add the query
             let qfp = self.inc
                 .as_mut()
                 .unwrap()
-                .add_parsed_query(q, n.clone(), true, mig)?;
+                .add_parsed_query(q, n.clone(), is_leaf, mig)?;
 
             // we currently use a domain per query
             // let d = mig.add_domain();
@@ -373,7 +377,7 @@ impl Recipe {
     pub fn expressions(&self) -> Vec<(Option<&String>, &SqlQuery)> {
         self.expressions
             .values()
-            .map(|&(ref n, ref q)| (n.as_ref(), q))
+            .map(|&(ref n, ref q, _)| (n.as_ref(), q))
             .collect()
     }
 
@@ -415,7 +419,7 @@ impl Recipe {
         Ok(new)
     }
 
-    fn parse(recipe_text: &str) -> Result<Vec<(Option<String>, SqlQuery)>, String> {
+    fn parse(recipe_text: &str) -> Result<Vec<(Option<String>, SqlQuery, bool)>, String> {
         let lines: Vec<&str> = recipe_text
             .lines()
             .filter(|l| !l.is_empty() && !l.starts_with("#"))
@@ -448,12 +452,16 @@ impl Recipe {
                 if r.len() == 2 {
                     // named query
                     let q = r[1];
-                    let name = Some(String::from(r[0]));
-                    (name, q.clone(), sql_parser::parse_query(q))
+                    let (is_leaf, name) = if r[0].to_lowercase().starts_with("query ") {
+                        (true, Some(String::from(&r[0][6..])))
+                    } else {
+                        (false, Some(String::from(r[0])))
+                    };
+                    (name, q.clone(), sql_parser::parse_query(q), is_leaf)
                 } else {
                     // unnamed query
                     let q = r[0];
-                    (None, q.clone(), sql_parser::parse_query(q))
+                    (None, q.clone(), sql_parser::parse_query(q), false)
                 }
             })
             .collect::<Vec<_>>();
@@ -471,7 +479,7 @@ impl Recipe {
         Ok(
             parsed_queries
                 .into_iter()
-                .map(|t| (t.0, t.2.unwrap()))
+                .map(|t| (t.0, t.2.unwrap(), t.3))
                 .collect::<Vec<_>>(),
         )
     }
@@ -526,7 +534,7 @@ mod tests {
         let q0_id = hash_query(&q0);
         let q1_id = hash_query(&q1);
 
-        let pq_a = vec![(None, q0.clone()), (None, q1.clone())];
+        let pq_a = vec![(None, q0.clone(), true), (None, q1.clone(), true)];
         let r1 = Recipe::from_queries(pq_a, None);
 
         // delta from empty recipe
@@ -544,7 +552,7 @@ mod tests {
         // bring on a new query set
         let q2 = sql_parser::parse_query("SELECT c FROM b;").unwrap();
         let q2_id = hash_query(&q2);
-        let pq_b = vec![(None, q0), (None, q2.clone())];
+        let pq_b = vec![(None, q0, true), (None, q2.clone(), true)];
         let r2 = Recipe::from_queries(pq_b, None);
 
         // delta should show addition and removal

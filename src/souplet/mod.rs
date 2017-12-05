@@ -2,8 +2,8 @@ use slog::Logger;
 use std::collections::HashMap;
 use std::net::SocketAddr;
 use std::time::{Duration, Instant};
-use std::thread::{self, JoinHandle};
-use std::sync::{mpsc, Arc, Mutex};
+use std::thread;
+use std::sync::{Arc, Mutex};
 
 use channel::{self, TcpSender};
 use channel::poll::{PollEvent, PollingLoop, ProcessResult, RpcPollEvent, RpcPollingLoop};
@@ -15,11 +15,11 @@ use dataflow::prelude::*;
 use controller::{ReadQuery, ReadReply};
 use coordination::{CoordinationMessage, CoordinationPayload};
 
-pub mod worker;
+use worker;
 
-/// Workers are responsible for running domains, and serving reads to any materializations contained
-/// within them.
-pub struct Worker {
+/// Souplets are responsible for running domains, and serving reads to any materializations
+/// contained within them.
+pub struct Souplet {
     log: Logger,
 
     pool: worker::WorkerPool,
@@ -42,7 +42,7 @@ pub struct Worker {
     last_heartbeat: Option<Instant>,
 }
 
-impl Worker {
+impl Souplet {
     /// Use the given polling loop and readers object to serve reads.
     pub fn serve_reads(mut polling_loop: RpcPollingLoop<ReadQuery, ReadReply>, readers: Readers) {
         let mut readers_cache: HashMap<
@@ -140,7 +140,7 @@ impl Worker {
         heartbeat_every: Duration,
         workers: usize,
         log: Logger,
-    ) -> Worker {
+    ) -> Self {
         let readers = Arc::new(Mutex::new(HashMap::new()));
 
         let readers_clone = readers.clone();
@@ -148,7 +148,9 @@ impl Worker {
             RpcPollingLoop::new(SocketAddr::new(listen_addr.parse().unwrap(), 0));
         let read_listen_addr = read_polling_loop.get_listener_addr().unwrap();
         let builder = thread::Builder::new().name("wrkr-reads".to_owned());
-        builder.spawn(move || Self::serve_reads(read_polling_loop, readers_clone));
+        builder
+            .spawn(move || Self::serve_reads(read_polling_loop, readers_clone))
+            .unwrap();
         println!("Listening for reads on {:?}", read_listen_addr);
 
         let mut checktable_addr: SocketAddr = controller.parse().unwrap();
@@ -157,7 +159,7 @@ impl Worker {
         let cc = Arc::new(ChannelCoordinator::new());
         let pool = worker::WorkerPool::new(workers, &log, checktable_addr, cc.clone()).unwrap();
 
-        Worker {
+        Souplet {
             log: log,
 
             pool,
@@ -343,7 +345,7 @@ impl Worker {
     }
 }
 
-impl Drop for Worker {
+impl Drop for Souplet {
     fn drop(&mut self) {
         self.pool.wait()
     }

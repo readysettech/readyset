@@ -1,33 +1,19 @@
 extern crate glob;
 
-use core::{DataType, Datas};
-use dataflow::DomainBuilder;
-use dataflow::backlog::SingleReadHandle;
-use dataflow::checktable::{Token, TransactionResult};
-use dataflow::debug::{DebugEvent, DebugEventType};
+use core::DataType;
+use dataflow::checktable::Token;
 use dataflow::node::StreamUpdate;
 use dataflow::ops::base::Base;
-use dataflow::ops::filter::{Filter, Operator};
-use dataflow::ops::grouped::aggregate::{Aggregation, Aggregator};
-use dataflow::ops::grouped::concat::{GroupConcat, TextComponent};
-use dataflow::ops::grouped::extremum::{Extremum, ExtremumOperator};
+use dataflow::ops::grouped::aggregate::Aggregation;
 use dataflow::ops::identity::Identity;
 use dataflow::ops::join::{Join, JoinSource, JoinType};
 use dataflow::ops::join::JoinSource::*;
-use dataflow::ops::latest::Latest;
 use dataflow::ops::project::Project;
-use dataflow::ops::topk::TopK;
 use dataflow::ops::union::Union;
-use dataflow::payload::PacketEvent;
-use dataflow::prelude::*;
 use dataflow::{DurabilityMode, PersistenceParameters};
 use controller::ControllerBuilder;
-use coordination::{CoordinationMessage, CoordinationPayload};
-use controller::{Blender, Getter, Migration, Mutator, MutatorBuilder, MutatorError, ReadQuery,
-                 ReadReply, RemoteGetter, RemoteGetterBuilder};
-use controller::recipe::{ActivationResult, Recipe};
-use controller::sql::reuse::ReuseConfigType;
-use controller::sql::{SqlIncorporator, ToFlowParts};
+use controller::recipe::Recipe;
+use controller::sql::SqlIncorporator;
 
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 use std::thread;
@@ -168,7 +154,7 @@ fn it_works_streaming() {
         emits.insert(b, vec![0, 1]);
         let u = Union::new(emits);
         let c = mig.add_ingredient("c", &["a", "b"], u);
-        let mut cq = mig.stream(c);
+        let cq = mig.stream(c);
         (a, b, cq)
     });
 
@@ -203,11 +189,11 @@ fn shared_interdomain_ancestor() {
 
         let u = Union::new(emits.clone());
         let b = mig.add_ingredient("b", &["a", "b"], u);
-        let mut bq = mig.stream(b);
+        let bq = mig.stream(b);
 
         let u = Union::new(emits);
         let c = mig.add_ingredient("c", &["a", "b"], u);
-        let mut cq = mig.stream(c);
+        let cq = mig.stream(c);
         (a, bq, cq)
     });
 
@@ -307,7 +293,7 @@ fn it_works_deletion() {
         emits.insert(b, vec![1, 2]);
         let u = Union::new(emits);
         let c = mig.add_ingredient("c", &["x", "y"], u);
-        let mut cq = mig.stream(c);
+        let cq = mig.stream(c);
         (a, b, cq)
     });
 
@@ -341,7 +327,7 @@ fn it_works_with_sql_recipe() {
     let mut g = ControllerBuilder::default().build_inner();
     let sql = "
         CREATE TABLE Car (id int, brand varchar(255), PRIMARY KEY(id));
-        CountCars: SELECT COUNT(*) FROM Car WHERE brand = ?;
+        QUERY CountCars: SELECT COUNT(*) FROM Car WHERE brand = ?;
     ";
 
     let recipe = g.migrate(|mig| {
@@ -356,8 +342,7 @@ fn it_works_with_sql_recipe() {
     let mut getter = g.get_getter(count_index).unwrap();
     let brands = vec!["Volvo", "Volvo", "Volkswagen"];
     for (i, &brand) in brands.iter().enumerate() {
-        let id = i as i32;
-        mutator.put(vec![id.into(), brand.into()]).unwrap();
+        mutator.put(vec![i.into(), brand.into()]).unwrap();
     }
 
     // Let writes propagate:
@@ -375,7 +360,7 @@ fn it_works_with_arithmetic_aliases() {
     let sql = "
         CREATE TABLE Car (cid int, pid int, brand varchar(255), PRIMARY KEY(cid));
         CREATE TABLE Price (pid int, cent_price int, PRIMARY KEY(pid));
-        CarPrice: SELECT cid, ActualPrice.price FROM Car \
+        QUERY CarPrice: SELECT cid, ActualPrice.price FROM Car \
             JOIN (SELECT pid, cent_price / 100 AS price FROM Price) AS ActualPrice \
             ON Car.pid = ActualPrice.pid WHERE cid = ?;
     ";
@@ -427,7 +412,7 @@ fn it_recovers_persisted_logs() {
 
         let sql = "
             CREATE TABLE Car (id int, price int, PRIMARY KEY(id));
-            CarPrice: SELECT price FROM Car WHERE id = ?;
+            QUERY CarPrice: SELECT price FROM Car WHERE id = ?;
         ";
 
         let recipe = g.migrate(|mig| {
@@ -537,9 +522,9 @@ fn it_recovers_persisted_logs_w_multiple_nodes() {
             CREATE TABLE B (id int, PRIMARY KEY(id));
             CREATE TABLE C (id int, PRIMARY KEY(id));
 
-            AID: SELECT id FROM A WHERE id = ?;
-            BID: SELECT id FROM B WHERE id = ?;
-            CID: SELECT id FROM C WHERE id = ?;
+            QUERY AID: SELECT id FROM A WHERE id = ?;
+            QUERY BID: SELECT id FROM B WHERE id = ?;
+            QUERY CID: SELECT id FROM C WHERE id = ?;
         ";
 
 
@@ -556,7 +541,7 @@ fn it_recovers_persisted_logs_w_multiple_nodes() {
         let (g, recipe) = setup();
         for (i, table) in tables.iter().enumerate() {
             let mut mutator = g.get_mutator(recipe.node_addr_for(table).unwrap());
-            mutator.put(vec![(i as i32).into()]).unwrap();
+            mutator.put(vec![i.into()]).unwrap();
         }
 
         // Let writes propagate:
@@ -569,12 +554,11 @@ fn it_recovers_persisted_logs_w_multiple_nodes() {
     sleep();
 
     for (i, table) in tables.iter().enumerate() {
-        let id = i as i32;
         let mut getter = g.get_getter(recipe.node_addr_for(&format!("{}ID", table)).unwrap())
             .unwrap();
-        let result = getter.lookup(&id.into(), true).unwrap();
+        let result = getter.lookup(&i.into(), true).unwrap();
         assert_eq!(result.len(), 1);
-        assert_eq!(result[0][0], id.into());
+        assert_eq!(result[0][0], i.into());
     }
 }
 
@@ -639,7 +623,7 @@ fn it_works_with_simple_arithmetic() {
     let mut g = ControllerBuilder::default().build_inner();
     let sql = "
         CREATE TABLE Car (id int, price int, PRIMARY KEY(id));
-        CarPrice: SELECT 2 * price FROM Car WHERE id = ?;
+        QUERY CarPrice: SELECT 2 * price FROM Car WHERE id = ?;
     ";
 
     let recipe = g.migrate(|mig| {
@@ -670,7 +654,7 @@ fn it_works_with_multiple_arithmetic_expressions() {
     let mut g = ControllerBuilder::default().build_inner();
     let sql = "
         CREATE TABLE Car (id int, price int, PRIMARY KEY(id));
-        CarPrice: SELECT 10 * 10, 2 * price, 10 * price, FROM Car WHERE id = ?;
+        QUERY CarPrice: SELECT 10 * 10, 2 * price, 10 * price, FROM Car WHERE id = ?;
     ";
 
     let recipe = g.migrate(|mig| {
@@ -705,7 +689,7 @@ fn it_works_with_join_arithmetic() {
         CREATE TABLE Car (car_id int, price_id int, PRIMARY KEY(car_id));
         CREATE TABLE Price (price_id int, price int, PRIMARY KEY(price_id));
         CREATE TABLE Sales (sales_id int, price_id int, fraction float, PRIMARY KEY(sales_id));
-        CarPrice: SELECT price * fraction FROM Car \
+        QUERY CarPrice: SELECT price * fraction FROM Car \
                   JOIN Price ON Car.price_id = Price.price_id \
                   JOIN Sales ON Price.price_id = Sales.price_id \
                   WHERE car_id = ?;
@@ -748,7 +732,7 @@ fn it_works_with_function_arithmetic() {
     let mut g = ControllerBuilder::default().build_inner();
     let sql = "
         CREATE TABLE Bread (id int, price int, PRIMARY KEY(id));
-        Price: SELECT 2 * MAX(price) FROM Bread;
+        QUERY Price: SELECT 2 * MAX(price) FROM Bread;
     ";
 
     let recipe = g.migrate(|mig| {
@@ -763,7 +747,7 @@ fn it_works_with_function_arithmetic() {
     let mut getter = g.get_getter(query_index).unwrap();
     let max_price = 20;
     for (i, price) in (10..max_price + 1).enumerate() {
-        let id = (i + 1) as i32;
+        let id = i + 1;
         mutator.put(vec![id.into(), price.into()]).unwrap();
     }
 
@@ -949,9 +933,9 @@ fn transactional_vote() {
 
     let token = articleq.transactional_lookup(&a1).unwrap().1;
 
-    let mut endq_token = endq.transactional_lookup(&a2).unwrap().1;
-    let mut endq_title_token = endq_title.transactional_lookup(&4.into()).unwrap().1;
-    let mut endq_votes_token = endq_votes.transactional_lookup(&0.into()).unwrap().1;
+    let endq_token = endq.transactional_lookup(&a2).unwrap().1;
+    let endq_title_token = endq_title.transactional_lookup(&4.into()).unwrap().1;
+    let endq_votes_token = endq_votes.transactional_lookup(&0.into()).unwrap().1;
 
     // make one article
     assert!(
@@ -995,9 +979,9 @@ fn transactional_vote() {
     token.merge(token2);
     assert!(validate(&token));
 
-    let mut endq_token = endq.transactional_lookup(&a1).unwrap().1;
-    let mut endq_title_token = endq_title.transactional_lookup(&4.into()).unwrap().1;
-    let mut endq_votes_token = endq_votes.transactional_lookup(&0.into()).unwrap().1;
+    let endq_token = endq.transactional_lookup(&a1).unwrap().1;
+    let endq_title_token = endq_title.transactional_lookup(&4.into()).unwrap().1;
+    let endq_votes_token = endq_votes.transactional_lookup(&0.into()).unwrap().1;
 
     // create a vote (user 1 votes for article 1)
     assert!(
@@ -1131,7 +1115,7 @@ fn add_columns() {
     let mut g = ControllerBuilder::default().build_inner();
     let (a, aq) = g.migrate(|mig| {
         let a = mig.add_ingredient("a", &["a", "b"], Base::new(vec![1.into(), 2.into()]));
-        let mut aq = mig.stream(a);
+        let aq = mig.stream(a);
         (a, aq)
     });
     let mut muta = g.get_mutator(a);
@@ -1567,7 +1551,7 @@ fn crossing_migration() {
     let mut muta = g.get_mutator(a);
     let mut mutb = g.get_mutator(b);
 
-    let mut cq = g.migrate(|mig| {
+    let cq = g.migrate(|mig| {
         let mut emits = HashMap::new();
         emits.insert(a, vec![0, 1]);
         emits.insert(b, vec![0, 1]);
@@ -1649,7 +1633,7 @@ fn domain_amend_migration() {
     let mut muta = g.get_mutator(a);
     let mut mutb = g.get_mutator(b);
 
-    let mut cq = g.migrate(|mig| {
+    let cq = g.migrate(|mig| {
         let mut emits = HashMap::new();
         emits.insert(a, vec![0, 1]);
         emits.insert(b, vec![0, 1]);
@@ -2065,8 +2049,8 @@ fn recipe_activates_and_migrates() {
 
     let r_copy = r.clone();
 
-    let r1_txt = "SELECT a FROM b;\n
-                  SELECT a, c FROM b WHERE a = 42;";
+    let r1_txt = "QUERY qa: SELECT a FROM b;\n
+                  QUERY qb: SELECT a, c FROM b WHERE a = 42;";
     let mut r1 = r.extend(r1_txt).unwrap();
     assert_eq!(r1.version(), 1);
     assert_eq!(r1.expressions().len(), 3);
@@ -2098,7 +2082,7 @@ fn recipe_activates_and_migrates_with_join() {
 
     let r_copy = r.clone();
 
-    let r1_txt = "SELECT y, s FROM a, b WHERE a.x = b.r;";
+    let r1_txt = "QUERY q: SELECT y, s FROM a, b WHERE a.x = b.r;";
     let mut r1 = r.extend(r1_txt).unwrap();
     assert_eq!(r1.version(), 1);
     assert_eq!(r1.expressions().len(), 3);

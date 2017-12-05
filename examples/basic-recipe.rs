@@ -15,7 +15,8 @@ fn main() {
                # read queries
                VoteCount: SELECT Vote.aid, COUNT(uid) AS votes \
                             FROM Vote GROUP BY Vote.aid;
-               ArticleWithVoteCount: SELECT Article.aid, title, url, VoteCount.votes AS votes \
+               QUERY ArticleWithVoteCount: \
+                            SELECT Article.aid, title, url, VoteCount.votes AS votes \
                             FROM Article, VoteCount \
                             WHERE Article.aid = VoteCount.aid AND Article.aid = ?;";
 

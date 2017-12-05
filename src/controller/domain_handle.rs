@@ -1,4 +1,4 @@
-use std::{self, cell, io, thread};
+use std::{self, cell, io};
 use std::collections::HashMap;
 use std::net::{IpAddr, SocketAddr};
 use std::sync::Arc;
@@ -15,6 +15,7 @@ use dataflow::statistics::{DomainStats, NodeStats};
 
 use coordination::{CoordinationMessage, CoordinationPayload};
 use controller::{WorkerEndpoint, WorkerIdentifier};
+use worker;
 
 #[derive(Debug)]
 pub enum WaitError {
@@ -127,9 +128,8 @@ impl DomainHandle {
         nodes: Vec<(NodeIndex, bool)>,
         persistence_params: &PersistenceParameters,
         listen_addr: &IpAddr,
-        checktable_addr: &SocketAddr,
         channel_coordinator: &Arc<ChannelCoordinator>,
-        local_pool: &mut Option<::worker::worker::WorkerPool>,
+        local_pool: &mut Option<worker::WorkerPool>,
         debug_addr: &Option<SocketAddr>,
         placer: &'a mut Box<Iterator<Item = (WorkerIdentifier, WorkerEndpoint)>>,
         workers: &'a mut Vec<WorkerEndpoint>,
@@ -139,11 +139,7 @@ impl DomainHandle {
         // the code currently relies on the fact that the domains that are sharded by the same key
         // *also* have the same number of shards. if this no longer holds, we actually need to do a
         // shuffle, otherwise writes will end up on the wrong shard. keep that in mind.
-        let num_shards = if sharded_by.is_none() {
-            1
-        } else {
-            dataflow::SHARDS
-        };
+        let num_shards = sharded_by.shards();
 
         let mut txs = Vec::new();
         let mut cr_rxs = Vec::new();
@@ -210,7 +206,7 @@ impl DomainHandle {
                     local_pool
                         .as_mut()
                         .unwrap()
-                        .add_replica(::worker::worker::NewReplica {
+                        .add_replica(worker::NewReplica {
                             inner: d,
                             listener: listener,
                         });

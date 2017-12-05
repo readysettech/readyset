@@ -122,6 +122,12 @@ impl From<i32> for DataType {
     }
 }
 
+impl From<usize> for DataType {
+    fn from(s: usize) -> Self {
+        DataType::Int(s as i32)
+    }
+}
+
 impl From<f64> for DataType {
     fn from(f: f64) -> Self {
         if !f.is_finite() {

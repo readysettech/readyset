@@ -6,7 +6,6 @@
 #![plugin(tarpc_plugins)]
 #![deny(unused_extern_crates)]
 
-extern crate arrayvec;
 #[allow(unused_extern_crates)]
 extern crate backtrace;
 extern crate buf_redux;
@@ -46,9 +45,6 @@ mod persistence;
 mod processing;
 mod transactions;
 
-/// The number of domain threads to spin up for each sharded subtree of the data-flow graph.
-pub const SHARDS: usize = 2;
-
 use std::sync::{Arc, Mutex};
 use std::collections::HashMap;
 
@@ -69,8 +65,8 @@ pub use checktable::connect_thread_checktable;
 pub enum Sharding {
     None,
     ForcedNone,
-    Random,
-    ByColumn(usize),
+    Random(usize),
+    ByColumn(usize, usize),
 }
 
 impl Sharding {
@@ -78,6 +74,13 @@ impl Sharding {
         match *self {
             Sharding::None | Sharding::ForcedNone => true,
             _ => false,
+        }
+    }
+
+    pub fn shards(&self) -> usize {
+        match *self {
+            Sharding::None | Sharding::ForcedNone => 1,
+            Sharding::Random(shards) | Sharding::ByColumn(_, shards) => shards,
         }
     }
 }

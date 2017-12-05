@@ -13,6 +13,7 @@ pub trait SecurityBoundary {
         universe: DataType,
         node_for_rel: &mut HashMap<&str, MirNodeRef>,
         prev_node: Option<MirNodeRef>,
+        is_leaf: bool,
     ) -> Vec<MirNodeRef>;
 
     fn make_security_nodes(
@@ -21,6 +22,7 @@ pub trait SecurityBoundary {
         base_node: &MirNodeRef,
         universe_id: DataType,
         node_for_rel: HashMap<&str, MirNodeRef>,
+        is_leaf: bool,
     ) -> Vec<MirNodeRef>;
 }
 
@@ -32,6 +34,7 @@ impl SecurityBoundary for SqlToMirConverter {
         prev_node: &MirNodeRef,
         universe_id: DataType,
         node_for_rel: HashMap<&str, MirNodeRef>,
+        is_leaf: bool,
     ) -> Vec<MirNodeRef> {
         use std::cmp::Ordering;
         let policies = match self.policies.get(&(universe_id.clone(), String::from(rel))) {
@@ -188,7 +191,7 @@ impl SecurityBoundary for SqlToMirConverter {
 
         if last_policy_nodes.len() > 1 {
             let final_node =
-                self.make_union_from_same_base(&format!("sp_union_u{}", universe_id), last_policy_nodes, output_cols);
+                self.make_union_from_same_base(&format!("sp_union_u{}", universe_id), last_policy_nodes, output_cols, is_leaf);
 
             security_nodes.push(final_node);
         }
@@ -201,6 +204,7 @@ impl SecurityBoundary for SqlToMirConverter {
         universe: DataType,
         node_for_rel: &mut HashMap<&str, MirNodeRef>,
         prev_node: Option<MirNodeRef>,
+        is_leaf: bool,
     ) -> Vec<MirNodeRef> {
         let mut security_nodes: Vec<MirNodeRef> = Vec::new();
         if universe == "global".into() {
@@ -211,7 +215,7 @@ impl SecurityBoundary for SqlToMirConverter {
 
         for (rel, _) in &node_for_rel.clone() {
             let nodes =
-                self.make_security_nodes(*rel, &prev_node, universe.clone(), node_for_rel.clone());
+                self.make_security_nodes(*rel, &prev_node, universe.clone(), node_for_rel.clone(), is_leaf);
             debug!(
                 self.log,
                 "Created {} security nodes for table {}",

@@ -1,5 +1,5 @@
 use dataflow::prelude::*;
-use dataflow::{self, node};
+use dataflow::node;
 use petgraph::graph::NodeIndex;
 use std::collections::{HashMap, HashSet};
 use slog::Logger;
@@ -11,6 +11,7 @@ pub fn shard(
     graph: &mut Graph,
     source: NodeIndex,
     new: &mut HashSet<NodeIndex>,
+    sharding_factor: usize,
 ) -> HashMap<(NodeIndex, NodeIndex), NodeIndex> {
     let mut topo_list = Vec::with_capacity(new.len());
     let mut topo = petgraph::visit::Topo::new(&*graph);
@@ -50,13 +51,13 @@ pub fn shard(
             let s = graph[node]
                 .with_reader(|r| r.key())
                 .unwrap()
-                .map(Sharding::ByColumn)
+                .map(|c| Sharding::ByColumn(c, sharding_factor))
                 .unwrap_or(Sharding::ForcedNone);
             if s.is_none() {
                 info!(log, "de-sharding prior to stream-only reader"; "node" => ?node);
             } else {
                 info!(log, "sharding reader"; "node" => ?node);
-                graph[node].with_reader_mut(|r| r.shard(dataflow::SHARDS));
+                graph[node].with_reader_mut(|r| r.shard(sharding_factor));
             }
 
             if s != input_shardings[&ni] {
@@ -148,7 +149,7 @@ pub fn shard(
                     graph
                         .node_weight_mut(node)
                         .unwrap()
-                        .shard_by(Sharding::ByColumn(want_sharding));
+                        .shard_by(Sharding::ByColumn(want_sharding, sharding_factor));
                     continue;
                 }
                 Some(want_sharding_input) => {
@@ -186,13 +187,13 @@ pub fn shard(
 
                     if ok {
                         // we can shard ourselves and our inputs by a single column!
-                        let s = Sharding::ByColumn(want_sharding);
+                        let s = Sharding::ByColumn(want_sharding, sharding_factor);
                         info!(log, "sharding node doing self-lookup";
                               "node" => ?node,
                               "sharding" => ?s);
 
                         for (ni, col) in want_sharding_input {
-                            let need_sharding = Sharding::ByColumn(col);
+                            let need_sharding = Sharding::ByColumn(col, sharding_factor);
                             if input_shardings[&ni] != need_sharding {
                                 // input is sharded by different key -- need shuffle
                                 reshard(log, new, &mut swaps, graph, ni, node, need_sharding);
@@ -239,7 +240,7 @@ pub fn shard(
                 // the output of the union is also sharded by that key. this is sufficiently common
                 // that we want to make sure we don't accidentally shuffle in those cases.
                 for &(ni, src) in &srcs {
-                    if input_shardings[&ni] != Sharding::ByColumn(src) {
+                    if input_shardings[&ni] != Sharding::ByColumn(src, sharding_factor) {
                         // TODO: technically we could revert to Sharding::Random here, which is a
                         // little better than forcing a de-shard, but meh.
                         continue 'outer;
@@ -282,14 +283,14 @@ pub fn shard(
 
             // `col` resolves to the same column we use to lookup in each ancestor,
             // so it's safe for us to shard by `col`!
-            let s = Sharding::ByColumn(col);
+            let s = Sharding::ByColumn(col, sharding_factor);
             info!(log, "sharding node with consistent lookup column";
                       "node" => ?node,
                       "sharding" => ?s);
 
             // we have to ensure that each input is also sharded by that key
             for &(ni, src) in &srcs {
-                let need_sharding = Sharding::ByColumn(src);
+                let need_sharding = Sharding::ByColumn(src, sharding_factor);
                 if input_shardings[&ni] != need_sharding {
                     reshard(log, new, &mut swaps, graph, ni, node, need_sharding);
                     input_shardings.insert(ni, need_sharding);
@@ -338,7 +339,7 @@ pub fn shard(
 
             // and that its children must be sharded somehow (otherwise what is the sharder doing?)
             let col = graph[n].with_sharder(|s| s.sharded_by()).unwrap();
-            let by = Sharding::ByColumn(col);
+            let by = Sharding::ByColumn(col, sharding_factor);
 
             // we can only push sharding above newly created nodes that are not already sharded.
             if !new.contains(&p) || graph[p].sharded_by() != Sharding::None {
@@ -433,7 +434,7 @@ pub fn shard(
                     // TODO: we *could* insert a de-shard here
                     continue 'sharders;
                 }
-                let csharding = Sharding::ByColumn(col.unwrap());
+                let csharding = Sharding::ByColumn(col.unwrap(), sharding_factor);
 
                 if csharding == by {
                     // sharding by the same key, which is now unnecessary.
@@ -559,19 +560,19 @@ fn reshard(
         Sharding::None | Sharding::ForcedNone => {
             // NOTE: this *must* be a union so that we correctly buffer partial replays
             let n: NodeOperator =
-                ops::union::Union::new_deshard(src.into(), dataflow::SHARDS).into();
+                ops::union::Union::new_deshard(src.into(), graph[src].sharded_by().shards()).into();
             let mut n = graph[src].mirror(n);
             n.shard_by(to);
             n.mark_as_shard_merger(true);
             n
         }
-        Sharding::ByColumn(c) => {
+        Sharding::ByColumn(c, _) => {
             use dataflow::node;
             let mut n = graph[src].mirror(node::special::Sharder::new(c));
             n.shard_by(graph[src].sharded_by());
             n
         }
-        Sharding::Random => unreachable!(),
+        Sharding::Random(_) => unreachable!(),
     };
     let node = graph.add_node(node);
     error!(log, "told to shuffle";
