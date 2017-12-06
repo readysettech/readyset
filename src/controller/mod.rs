@@ -12,7 +12,7 @@ use worker;
 
 use std::collections::{BTreeMap, HashMap, HashSet};
 use std::error::Error;
-use std::io::{ErrorKind};
+use std::io::ErrorKind;
 use std::marker::PhantomData;
 use std::net::{IpAddr, SocketAddr};
 use std::time::{Duration, Instant};
@@ -352,9 +352,7 @@ impl ControllerInner {
         let read_listen_addr = read_polling_loop.get_listener_addr().unwrap();
         let thread_builder = thread::Builder::new().name("wrkr-reads".to_owned());
         thread_builder
-            .spawn(move || {
-                Souplet::serve_reads(read_polling_loop, readers_clone)
-            })
+            .spawn(move || Souplet::serve_reads(read_polling_loop, readers_clone))
             .unwrap();
 
 
@@ -493,9 +491,7 @@ impl ControllerInner {
         let checktable =
             checktable::CheckTableClient::connect(self.checktable_addr, client::Options::default())
                 .unwrap();
-        Box::new(move |t: &checktable::Token| {
-            checktable.validate_token(t.clone()).unwrap()
-        })
+        Box::new(move |t: &checktable::Token| checktable.validate_token(t.clone()).unwrap())
     }
 
     #[cfg(test)]
@@ -789,9 +785,10 @@ impl<'a> Migration<'a> {
         let b: NodeOperator = b.into();
 
         // add to the graph
-        let ni = self.mainline
-            .ingredients
-            .add_node(node::Node::new(name.to_string(), fields, b, true));
+        let ni =
+            self.mainline
+                .ingredients
+                .add_node(node::Node::new(name.to_string(), fields, b, true));
         info!(self.log,
               "adding new node";
               "node" => ni.index(),
@@ -1200,9 +1197,7 @@ impl<'a> Migration<'a> {
             .node_indices()
             .filter(|&ni| ni != mainline.source)
             .filter(|&ni| !mainline.ingredients[ni].is_dropped())
-            .map(|ni| {
-                (mainline.ingredients[ni].domain(), ni, new.contains(&ni))
-            })
+            .map(|ni| (mainline.ingredients[ni].domain(), ni, new.contains(&ni)))
             .fold(HashMap::new(), |mut dns, (d, ni, new)| {
                 dns.entry(d).or_insert_with(Vec::new).push((ni, new));
                 dns
@@ -1367,7 +1362,7 @@ impl<A: Authority> ControllerHandle<A> {
         loop {
             if self.url.is_none() {
                 let descriptor: ControllerDescriptor =
-                    serde_json::from_slice(&self.authority.get_leader().1).unwrap();
+                    serde_json::from_slice(&self.authority.get_leader().unwrap().1).unwrap();
                 self.url = Some(format!("http://{}", descriptor.external_addr));
             }
             let url = format!("{}/{}", self.url.as_ref().unwrap(), path);
@@ -1537,6 +1532,7 @@ enum ControlEvent {
     WonLeaderElection(ControllerState),
     LostLeadership(Epoch),
     Shutdown,
+    Error(Box<Error + Send + Sync>),
 }
 
 /// Runs the soup instance.
@@ -1636,6 +1632,7 @@ impl<A: Authority + 'static> Controller<A> {
                     self.inner = None;
                 }
                 ControlEvent::Shutdown => break,
+                ControlEvent::Error(e) => panic!("{}", e),
             }
         }
         self.external.stop();
@@ -1677,11 +1674,11 @@ impl<A: Authority + 'static> Controller<A> {
                     }
                     (Method::Get, path) if path.starts_with("/zookeeper/") => {
                         match self.1.try_read(&format!("/{}", &path[11..])) {
-                            Some(data) => {
+                            Ok(Some(data)) => {
                                 res.headers_mut().set(ContentType::json());
                                 res.set_body(data);
                             }
-                            None => res.set_status(StatusCode::NotFound),
+                            _ => res.set_status(StatusCode::NotFound),
                         }
                         Box::new(futures::future::ok(res))
                     }
@@ -1691,8 +1688,12 @@ impl<A: Authority + 'static> Controller<A> {
                         Box::new(req.body().concat2().and_then(move |body| {
                             let body: Vec<u8> = body.iter().cloned().collect();
                             let (tx, rx) = futures::sync::oneshot::channel();
-                            let _ = event_tx
-                                .send(ControlEvent::ExternalRequest(method, path, body, tx));
+                            let _ = event_tx.send(ControlEvent::ExternalRequest(
+                                method,
+                                path,
+                                body,
+                                tx,
+                            ));
                             rx.and_then(|reply| {
                                 let mut res = Response::new();
                                 match reply {
@@ -1798,45 +1799,52 @@ impl<A: Authority + 'static> Controller<A> {
         config: ControllerConfig,
     ) -> JoinHandle<()> {
         let descriptor = serde_json::to_vec(&descriptor).unwrap();
-        let builder = thread::Builder::new().name("srv-zk".to_owned());
-        builder
-            .spawn(move || {
-                loop {
-                    // become leader
-                    let current_epoch = authority.become_leader(descriptor.clone());
-                    let state = authority.read_modify_write(
-                        "/state",
-                        |state: Option<ControllerState>| match state {
-                            None => Ok(ControllerState {
-                                config: config.clone(),
-                                epoch: current_epoch,
-                                recipe: (),
-                            }),
-                            Some(ref state) if state.epoch > current_epoch => Err(()),
-                            Some(mut state) => {
-                                state.epoch = current_epoch;
-                                Ok(state)
-                            }
-                        },
-                    );
-                    if state.is_err() {
-                        continue;
-                    }
-                    if !event_tx
-                        .send(ControlEvent::WonLeaderElection(state.unwrap()))
-                        .is_ok()
-                    {
-                        return;
-                    }
+        let campaign_inner = move |event_tx: Sender<ControlEvent>| -> Result<(), Box<Error + Send + Sync>>{
+            loop {
+                // become leader
+                let current_epoch = authority.become_leader(descriptor.clone())?;
+                let state = authority.read_modify_write(
+                    "/state",
+                    |state: Option<ControllerState>| match state {
+                        None => Ok(ControllerState {
+                            config: config.clone(),
+                            epoch: current_epoch,
+                            recipe: (),
+                        }),
+                        Some(ref state) if state.epoch > current_epoch => Err(()),
+                        Some(mut state) => {
+                            state.epoch = current_epoch;
+                            Ok(state)
+                        }
+                    },
+                )?;
+                if state.is_err() {
+                    continue;
+                }
+                if !event_tx
+                    .send(ControlEvent::WonLeaderElection(state.unwrap()))
+                    .is_ok()
+                {
+                    break;
+                }
 
-                    // watch for overthrow
-                    let new_epoch = authority.await_new_epoch(current_epoch);
-                    if !event_tx
-                        .send(ControlEvent::LostLeadership(new_epoch))
-                        .is_ok()
-                    {
-                        return;
-                    }
+                // watch for overthrow
+                let new_epoch = authority.await_new_epoch(current_epoch)?;
+                if !event_tx
+                    .send(ControlEvent::LostLeadership(new_epoch))
+                    .is_ok()
+                {
+                    break
+                }
+            }
+            Ok(())
+        };
+
+        thread::Builder::new()
+            .name("srv-zk".to_owned())
+            .spawn(move || {
+                if let Err(e) = campaign_inner(event_tx.clone()) {
+                    let _ = event_tx.send(ControlEvent::Error(e));
                 }
             })
             .unwrap()
