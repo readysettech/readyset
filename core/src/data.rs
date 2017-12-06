@@ -330,7 +330,7 @@ impl fmt::Display for DataType {
             DataType::None => write!(f, "*"),
             DataType::Text(..) | DataType::TinyText(..) => {
                 let text: Cow<str> = self.into();
-                write!(f, "\"{}\"", text)
+                write!(f, "{}", text)
             }
             DataType::Int(n) => write!(f, "{}", n),
             DataType::BigInt(n) => write!(f, "{}", n),

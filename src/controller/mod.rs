@@ -622,12 +622,14 @@ impl ControllerInner {
     {
         info!(self.log, "starting migration");
         let miglog = self.log.new(o!());
+        let mut context = HashMap::new();
+        context.insert(String::from("id"), "global".into());
         let mut m = Migration {
             mainline: self,
             added: Default::default(),
             columns: Default::default(),
             readers: Default::default(),
-            context: Default::default(),
+            context: context,
             start: time::Instant::now(),
             log: miglog,
         };

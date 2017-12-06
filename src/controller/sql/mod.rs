@@ -656,7 +656,7 @@ impl SqlIncorporator {
 
         // Run some standard rewrite passes on the query. This makes the later work easier,
         // as we no longer have to consider complications like aliases.
-        fq.expand_table_aliases(mig.universe())
+        fq.expand_table_aliases(mig.context())
             .remove_negation()
             .expand_stars(&self.view_schemas)
             .expand_implied_tables(&self.view_schemas)

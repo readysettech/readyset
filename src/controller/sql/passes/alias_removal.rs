@@ -6,7 +6,7 @@ use std::collections::HashMap;
 use dataflow::prelude::DataType;
 
 pub trait AliasRemoval {
-    fn expand_table_aliases(self, universe_id: DataType) -> SqlQuery;
+    fn expand_table_aliases(self, context: HashMap<String, DataType>) -> SqlQuery;
 }
 
 fn rewrite_conditional(
@@ -65,7 +65,7 @@ fn rewrite_conditional(
 }
 
 impl AliasRemoval for SqlQuery {
-    fn expand_table_aliases(self, universe_id: DataType) -> SqlQuery {
+    fn expand_table_aliases(self, context: HashMap<String, DataType>) -> SqlQuery {
         let mut table_aliases = HashMap::new();
 
         match self {
@@ -76,8 +76,12 @@ impl AliasRemoval for SqlQuery {
                         table_aliases.insert(alias.to_string(), name.to_string());
                     };
 
-                    // Add alias from `UserContext` to `UserContext_{:uid}`
-                    add_alias("UserContext", &format!("UserContext_{}", universe_id));
+                    // Add alias for universe context tables
+                    let universe_id = context.get("id").unwrap();
+                    match context.get("group") {
+                        Some(g) => add_alias("GroupContext", &format!("GroupContext_{}_{}", g, universe_id)),
+                        None => add_alias("UserContext", &format!("UserContext_{}", universe_id)),
+                    }
 
                     for t in &sq.tables {
                         match t.alias {
@@ -158,6 +162,7 @@ mod tests {
     use nom_sql::SelectStatement;
     use nom_sql::{Column, FieldExpression, SqlQuery, Table};
     use super::AliasRemoval;
+    use std::collections::HashMap;
 
     #[test]
     fn it_removes_aliases() {
@@ -179,7 +184,9 @@ mod tests {
             })),
             ..Default::default()
         };
-        let res = SqlQuery::Select(q).expand_table_aliases("global".into());
+        let mut context = HashMap::new();
+        context.insert(String::from("id"), "global".into());
+        let res = SqlQuery::Select(q).expand_table_aliases(context);
         // Table alias removed in field list
         match res {
             SqlQuery::Select(tq) => {

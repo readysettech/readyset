@@ -44,11 +44,9 @@ impl Multiverse for SqlIncorporator {
         mig: &mut Migration,
     ) -> Vec<QueryFlowParts> {
         // First, create the UserContext base node.
-
-        let universe_policies;
         let uid = mig.universe();
         let mut qfps = Vec::new();
-        if group.is_none() {
+        let universe_policies = if group.is_none() {
             info!(self.log, "Starting user universe {}", uid);
             let context = mig.context();
 
@@ -65,15 +63,22 @@ impl Multiverse for SqlIncorporator {
                 qfps.push(group);
             }
 
-            universe_policies = config.policies();
+            config.policies()
 
         } else {
             info!(self.log, "Starting group universe {}", uid);
             let group_name = group.unwrap();
+            let context = mig.context();
 
-            universe_policies = config.get_group_policies(group_name);
-        }
+            let uc_name = format!("GroupContext_{}_{}", group_name, uid);
+            let fields: Vec<_> = context.keys().collect();
 
+            let base = self.add_base(uc_name.clone(), fields, mig);
+            qfps.push(base);
+
+
+            config.get_group_policies(group_name)
+        };
 
         // Then, we need to transform policies' predicates into QueryGraphs.
         // We do this in a per-universe base, instead of once per policy,
