@@ -59,7 +59,9 @@ pub type PersistenceParameters = persistence::Parameters;
 pub type DomainConfig = domain::Config;
 
 pub use persistence::DurabilityMode;
-pub use domain::DomainBuilder;
+pub use domain::{Domain, DomainBuilder, Index};
+pub use payload::Packet;
+pub use checktable::connect_thread_checktable;
 
 #[derive(Copy, Clone, PartialEq, Eq, Debug, Serialize, Deserialize)]
 pub enum Sharding {

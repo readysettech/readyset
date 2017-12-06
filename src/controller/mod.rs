@@ -146,6 +146,11 @@ impl ControllerBuilder {
         self.listen_addr = listen_addr;
     }
 
+    /// Set the number of worker threads to spin up in local mode (when nworkers == 0).
+    pub fn set_local_workers(&mut self, workers: usize) {
+        self.config.local_workers = workers;
+    }
+
     #[cfg(test)]
     pub fn build_inner(mut self) -> ControllerInner {
         let checktable_addr = CheckTableServer::start(SocketAddr::new(self.listen_addr, 0));
@@ -211,6 +216,9 @@ pub struct ControllerInner {
     /// State between migrations
     deps: HashMap<DomainIndex, (IngressFromBase, EgressForBase)>,
     remap: HashMap<DomainIndex, HashMap<NodeIndex, IndexPair>>,
+
+    /// Local worker pool used for tests
+    local_pool: Option<::worker::worker::WorkerPool>,
 
     heartbeat_every: Duration,
     healthcheck_every: Duration,
@@ -336,6 +344,7 @@ impl ControllerInner {
             checktable::CheckTableClient::connect(checktable_addr, client::Options::default())
                 .unwrap();
 
+        let addr = SocketAddr::new(listen_addr.clone(), 0);
         let readers: Readers = Arc::default();
         let readers_clone = readers.clone();
         let addr = SocketAddr::new(listen_addr, 0);
@@ -346,10 +355,26 @@ impl ControllerInner {
             Worker::serve_reads(read_polling_loop, readers_clone)
         });
 
+
         let mut materializations = migrate::materialization::Materializations::new(&log);
         if !state.config.partial_enabled {
             materializations.disable_partial()
         }
+
+        let cc = Arc::new(ChannelCoordinator::new());
+        assert!((state.config.nworkers == 0) ^ (state.config.local_workers == 0));
+        let local_pool = if state.config.nworkers == 0 {
+            Some(
+                ::worker::worker::WorkerPool::new(
+                    state.config.local_workers,
+                    &log,
+                    checktable_addr,
+                    cc.clone(),
+                ).unwrap(),
+            )
+        } else {
+            None
+        };
 
         ControllerInner {
             ingredients: g,
@@ -368,7 +393,7 @@ impl ControllerInner {
             log,
 
             domains: Default::default(),
-            channel_coordinator: Arc::new(ChannelCoordinator::new()),
+            channel_coordinator: cc,
             debug_channel: None,
 
             recipe: Recipe::blank(None),
@@ -380,6 +405,8 @@ impl ControllerInner {
             read_listen_addr,
             read_addrs: HashMap::default(),
             workers: HashMap::default(),
+
+            local_pool,
 
             last_checked_workers: Instant::now(),
         }
@@ -1226,6 +1253,7 @@ impl<'a> Migration<'a> {
                 &mainline.listen_addr,
                 &mainline.checktable_addr,
                 &mainline.channel_coordinator,
+                &mut mainline.local_pool,
                 &mainline.debug_channel,
                 &mut placer,
                 &mut workers,
@@ -1319,11 +1347,14 @@ impl<'a> Migration<'a> {
 impl Drop for ControllerInner {
     fn drop(&mut self) {
         for (_, d) in &mut self.domains {
-            // don't unwrap, because given domain may already have terminated
-            drop(d.send(box payload::Packet::Quit));
+            // XXX: this is a terrible ugly hack to ensure that all workers exit
+            for _ in 0..100 {
+                // don't unwrap, because given domain may already have terminated
+                drop(d.send(box payload::Packet::Quit));
+            }
         }
-        for (_, mut d) in self.domains.drain() {
-            d.wait();
+        if let Some(ref mut local_pool) = self.local_pool {
+            local_pool.wait();
         }
     }
 }
@@ -1465,6 +1496,7 @@ struct ControllerConfig {
     persistence: PersistenceParameters,
     heartbeat_every: Duration,
     healthcheck_every: Duration,
+    local_workers: usize,
     nworkers: usize,
 }
 impl Default for ControllerConfig {
@@ -1480,6 +1512,10 @@ impl Default for ControllerConfig {
             persistence: Default::default(),
             heartbeat_every: Duration::from_secs(1),
             healthcheck_every: Duration::from_secs(10),
+            #[cfg(test)]
+            local_workers: 2,
+            #[cfg(not(test))]
+            local_workers: 0,
             nworkers: 0,
         }
     }

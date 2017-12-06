@@ -112,13 +112,13 @@ impl<T: Serialize> TcpSender<T> {
 pub enum TryRecvError {
     Empty,
     Disconnected,
-    DeserializationError,
+    DeserializationError(bincode::Error),
 }
 
 #[derive(Debug)]
 pub enum RecvError {
     Disconnected,
-    DeserializationError,
+    DeserializationError(bincode::Error),
 }
 
 #[derive(Default)]
@@ -183,6 +183,10 @@ where
         }
     }
 
+    pub fn get_ref(&self) -> &mio::net::TcpStream {
+        self.stream.get_ref().get_ref()
+    }
+
     pub fn listen(addr: &SocketAddr) -> Result<Self, io::Error> {
         let listener = mio::net::TcpListener::bind(addr)?;
         Ok(Self::new(listener.accept()?.0))
@@ -201,6 +205,10 @@ where
             Err(_) => self.poisoned = true,
         }
         self.unacked = 0;
+    }
+
+    pub fn is_empty(&self) -> bool {
+        self.stream.is_empty()
     }
 
     pub fn try_recv(&mut self) -> Result<T, TryRecvError> {
@@ -247,9 +255,9 @@ where
                 self.poisoned = true;
                 Err(TryRecvError::Disconnected)
             }
-            Err(ReceiveError::DeserializationError(_)) => {
+            Err(ReceiveError::DeserializationError(e)) => {
                 self.poisoned = true;
-                Err(TryRecvError::DeserializationError)
+                Err(TryRecvError::DeserializationError(e))
             }
         }
     }
@@ -259,7 +267,9 @@ where
             return match self.try_recv() {
                 Err(TryRecvError::Empty) => continue,
                 Err(TryRecvError::Disconnected) => Err(RecvError::Disconnected),
-                Err(TryRecvError::DeserializationError) => Err(RecvError::DeserializationError),
+                Err(TryRecvError::DeserializationError(e)) => {
+                    Err(RecvError::DeserializationError(e))
+                }
                 Ok(t) => Ok(t),
             };
         }

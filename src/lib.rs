@@ -321,6 +321,7 @@ extern crate channel;
 extern crate consensus;
 extern crate core;
 extern crate dataflow;
+extern crate fnv;
 extern crate futures;
 extern crate hyper;
 extern crate mio;
@@ -333,6 +334,7 @@ extern crate serde;
 extern crate serde_derive;
 #[macro_use]
 extern crate serde_json;
+extern crate slab;
 #[macro_use]
 extern crate slog;
 extern crate slog_term;

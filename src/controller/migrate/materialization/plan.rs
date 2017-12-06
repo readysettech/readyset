@@ -308,17 +308,9 @@ impl<'a> Plan<'a> {
         let s = self.graph[self.node]
             .with_reader(|r| {
                 if self.partial {
-                    // we only currently support replay to readers with a single path. supporting
-                    // multiple paths (i.e., through unions) would require that the clients know to
-                    // request replays for all paths. instead of thinking whether that's possible
-                    // now, we'll just leave this restriction in place for the time being.
-                    assert_eq!(self.tags.len(), 1);
                     assert!(r.is_materialized());
 
-                    let first_index = self.tags.iter().next().unwrap().1;
-                    assert_eq!(first_index.len(), 1);
-                    let tag = &first_index[0];
-                    let last_domain = tag.1;
+                    let last_domain = self.graph[self.node].domain();
                     let num_shards = self.domains[&last_domain].shards();
 
                     // since we're partially materializing a reader node,
@@ -327,7 +319,6 @@ impl<'a> Plan<'a> {
                         gid: self.node,
                         cols: self.graph[self.node].fields().len(),
                         key: r.key().unwrap(),
-                        tag: tag.0,
                         trigger_domain: (last_domain, num_shards),
                     }
                 } else {
