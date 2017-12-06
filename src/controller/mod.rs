@@ -1449,7 +1449,7 @@ impl<A: Authority> Drop for ControllerHandle<A> {
     fn drop(&mut self) {
         if let Some((sender, join_handle)) = self.local.take() {
             let _ = sender.send(ControlEvent::Shutdown);
-            join_handle.join().unwrap();
+            let _ = join_handle.join();
         }
     }
 }
