@@ -1,6 +1,5 @@
 use dataflow::prelude::*;
 use dataflow::payload::{EgressForBase, IngressFromBase};
-use dataflow;
 use controller::domain_handle::DomainHandle;
 use petgraph;
 use std::borrow::Borrow;
@@ -27,7 +26,7 @@ fn count_base_ingress(
                 .filter(|&&ingress| has_path.contains(&(base, *ingress)))
                 .map(|&&ingress| {
                     if graph[ingress].is_shard_merger() {
-                        dataflow::SHARDS
+                        graph[source].sharded_by().shards()
                     } else {
                         1
                     }

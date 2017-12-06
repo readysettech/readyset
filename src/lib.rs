@@ -313,10 +313,8 @@
 #![deny(missing_docs)]
 #![feature(plugin, use_extern_macros)]
 #![plugin(tarpc_plugins)]
-#![allow(unused)]
 #![deny(unused_extern_crates)]
 
-extern crate arrayvec;
 extern crate channel;
 extern crate consensus;
 extern crate core;
@@ -332,20 +330,20 @@ extern crate rand;
 extern crate serde;
 #[macro_use]
 extern crate serde_derive;
-#[macro_use]
 extern crate serde_json;
 extern crate slab;
 #[macro_use]
 extern crate slog;
 extern crate slog_term;
-#[macro_use]
 extern crate tarpc;
+extern crate timer_heap;
 extern crate tokio_core;
 extern crate vec_map;
 
 
 mod controller;
 mod coordination;
+mod souplet;
 mod worker;
 
 #[cfg(test)]
@@ -362,7 +360,7 @@ pub use dataflow::{DurabilityMode, PersistenceParameters};
 
 pub use controller::{Controller, ControllerBuilder, ControllerHandle, Mutator, MutatorBuilder,
                      MutatorError, ReadQuery, ReadReply, RemoteGetter, RemoteGetterBuilder};
-pub use worker::Worker;
+pub use souplet::Souplet;
 
 /// Just give me a damn terminal logger
 pub fn logger_pls() -> slog::Logger {

@@ -61,6 +61,7 @@ impl Materializations {
         }
     }
 
+    #[allow(unused)]
     pub fn set_logger(&mut self, logger: &Logger) {
         self.log = logger.new(o!());
     }
@@ -560,6 +561,18 @@ impl Materializations {
         domains: &mut HashMap<DomainIndex, DomainHandle>,
     ) {
         let n = &graph[ni];
+        let mut has_state = !index_on.is_empty();
+
+        if has_state {
+            if self.partial.contains(&ni) {
+                debug!(self.log, "new partially-materialized node: {:?}", n);
+            } else {
+                debug!(self.log, "new fullly-materalized node: {:?}", n);
+            }
+        } else {
+            debug!(self.log, "new stateless node: {:?}", n);
+        }
+
         if graph
             .neighbors_directed(ni, petgraph::EdgeDirection::Incoming)
             .filter(|&ni| !graph[ni].is_source())
@@ -592,7 +605,7 @@ impl Materializations {
         // if this node doesn't need to be materialized, then we're done. note that this check
         // needs to happen *after* the empty parents check so that we keep tracking whether or not
         // nodes are empty.
-        let mut has_state = !index_on.is_empty();
+        has_state = !index_on.is_empty();
         n.with_reader(|r| {
             if r.is_materialized() {
                 has_state = true;

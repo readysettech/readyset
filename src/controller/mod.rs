@@ -1,28 +1,29 @@
-use channel::poll::{PollEvent, PollingLoop, ProcessResult, RpcPollEvent, RpcPollingLoop};
+use channel::poll::{PollEvent, PollingLoop, ProcessResult, RpcPollingLoop};
 use channel::tcp::TcpSender;
 use channel;
-use consensus::{self, Authority, Epoch, LocalAuthority};
+use consensus::{Authority, Epoch, LocalAuthority};
 use dataflow::prelude::*;
 use dataflow::checktable::service::CheckTableServer;
-use dataflow::{backlog, checktable, node, payload, DomainConfig, PersistenceParameters, Readers};
+use dataflow::{checktable, node, payload, DomainConfig, PersistenceParameters, Readers};
 use dataflow::ops::base::Base;
 use dataflow::statistics::GraphStats;
-use worker::Worker;
+use souplet::Souplet;
+use worker;
 
 use std::collections::{BTreeMap, HashMap, HashSet};
 use std::error::Error;
-use std::io::{self, ErrorKind, Read, Write};
+use std::io::{ErrorKind};
 use std::marker::PhantomData;
 use std::net::{IpAddr, SocketAddr};
+use std::time::{Duration, Instant};
 use std::thread::{self, JoinHandle};
-use std::time::{self, Duration, Instant};
-use std::sync::{Arc, Barrier, Mutex};
+use std::sync::{Arc, Mutex};
 use std::sync::mpsc::{self, Receiver, Sender};
-use std::fmt;
+use std::{io, time};
 
 use futures::{self, Future, Stream};
 use hyper::{self, Client, Method, StatusCode};
-use hyper::header::{ContentLength, ContentType};
+use hyper::header::ContentType;
 use hyper::server::{Http, NewService, Request, Response, Service};
 use mio::net::TcpListener;
 use petgraph;
@@ -130,9 +131,9 @@ impl ControllerBuilder {
         self.config.partial_enabled = false;
     }
 
-    /// Disable sharding for all subsequent migrations
-    pub fn disable_sharding(&mut self) {
-        self.config.sharding_enabled = false;
+    /// Enable sharding for all subsequent migrations
+    pub fn enable_sharding(&mut self, shards: usize) {
+        self.config.sharding = Some(shards);
     }
 
     /// Set how many workers the controller should wait for before starting. More workers can join
@@ -152,7 +153,7 @@ impl ControllerBuilder {
     }
 
     #[cfg(test)]
-    pub fn build_inner(mut self) -> ControllerInner {
+    pub fn build_inner(self) -> ControllerInner {
         let checktable_addr = CheckTableServer::start(SocketAddr::new(self.listen_addr, 0));
         let initial_state = ControllerState {
             config: self.config,
@@ -190,7 +191,7 @@ pub struct ControllerInner {
     ndomains: usize,
     checktable: checktable::CheckTableClient,
     checktable_addr: SocketAddr,
-    sharding_enabled: bool,
+    sharding: Option<usize>,
 
     domain_config: DomainConfig,
 
@@ -218,7 +219,7 @@ pub struct ControllerInner {
     remap: HashMap<DomainIndex, HashMap<NodeIndex, IndexPair>>,
 
     /// Local worker pool used for tests
-    local_pool: Option<::worker::worker::WorkerPool>,
+    local_pool: Option<worker::WorkerPool>,
 
     heartbeat_every: Duration,
     healthcheck_every: Duration,
@@ -236,7 +237,7 @@ impl ControllerInner {
                 ref read_listen_addr,
             } => self.handle_register(&msg, addr, read_listen_addr.clone()),
             CoordinationPayload::Heartbeat => self.handle_heartbeat(&msg),
-            CoordinationPayload::DomainBooted(ref domain, ref addr) => Ok(()),
+            CoordinationPayload::DomainBooted(..) => Ok(()),
             _ => unimplemented!(),
         };
         match process {
@@ -344,16 +345,17 @@ impl ControllerInner {
             checktable::CheckTableClient::connect(checktable_addr, client::Options::default())
                 .unwrap();
 
-        let addr = SocketAddr::new(listen_addr.clone(), 0);
         let readers: Readers = Arc::default();
         let readers_clone = readers.clone();
         let addr = SocketAddr::new(listen_addr, 0);
         let read_polling_loop = RpcPollingLoop::new(addr.clone());
         let read_listen_addr = read_polling_loop.get_listener_addr().unwrap();
         let thread_builder = thread::Builder::new().name("wrkr-reads".to_owned());
-        thread_builder.spawn(move || {
-            Worker::serve_reads(read_polling_loop, readers_clone)
-        });
+        thread_builder
+            .spawn(move || {
+                Souplet::serve_reads(read_polling_loop, readers_clone)
+            })
+            .unwrap();
 
 
         let mut materializations = migrate::materialization::Materializations::new(&log);
@@ -365,7 +367,7 @@ impl ControllerInner {
         assert!((state.config.nworkers == 0) ^ (state.config.local_workers == 0));
         let local_pool = if state.config.nworkers == 0 {
             Some(
-                ::worker::worker::WorkerPool::new(
+                worker::WorkerPool::new(
                     state.config.local_workers,
                     &log,
                     checktable_addr,
@@ -385,18 +387,17 @@ impl ControllerInner {
             listen_addr,
 
             materializations,
-            sharding_enabled: state.config.sharding_enabled,
+            sharding: state.config.sharding,
             domain_config: state.config.domain_config,
             persistence: state.config.persistence,
             heartbeat_every: state.config.heartbeat_every,
             healthcheck_every: state.config.healthcheck_every,
+            recipe: Recipe::blank(Some(log.clone())),
             log,
 
             domains: Default::default(),
             channel_coordinator: cc,
             debug_channel: None,
-
-            recipe: Recipe::blank(None),
 
             deps: HashMap::default(),
             remap: HashMap::default(),
@@ -414,6 +415,7 @@ impl ControllerInner {
 
     /// Use a debug channel. This function may only be called once because the receiving end it
     /// returned.
+    #[allow(unused)]
     pub fn create_debug_channel(&mut self) -> TcpListener {
         assert!(self.debug_channel.is_none());
         let addr: SocketAddr = "127.0.0.1:0".parse().unwrap();
@@ -437,6 +439,7 @@ impl ControllerInner {
     /// anyway.
     ///
     /// Must be called before any domains have been created.
+    #[allow(unused)]
     pub fn with_persistence_options(&mut self, params: PersistenceParameters) {
         assert_eq!(self.ndomains, 0);
         self.persistence = params;
@@ -445,25 +448,10 @@ impl ControllerInner {
     /// Set the `Logger` to use for internal log messages.
     ///
     /// By default, all log messages are discarded.
+    #[allow(unused)]
     pub fn log_with(&mut self, log: slog::Logger) {
         self.log = log;
         self.materializations.set_logger(&self.log);
-    }
-
-    /// Start setting up a new `Migration`.
-    #[deprecated]
-    pub fn start_migration(&mut self) -> Migration {
-        info!(self.log, "starting migration");
-        let miglog = self.log.new(o!());
-        Migration {
-            mainline: self,
-            added: Default::default(),
-            columns: Default::default(),
-            readers: Default::default(),
-
-            start: time::Instant::now(),
-            log: miglog,
-        }
     }
 
     /// Perform a new query schema migration.
@@ -500,6 +488,7 @@ impl ControllerInner {
     }
 
     /// Get a boxed function which can be used to validate tokens.
+    #[allow(unused)]
     pub fn get_validator(&self) -> Box<Fn(&checktable::Token) -> bool> {
         let checktable =
             checktable::CheckTableClient::connect(self.checktable_addr, client::Options::default())
@@ -600,7 +589,7 @@ impl ControllerInner {
             .unwrap_or_else(Vec::new);
         let mut is_primary = false;
         if key.is_empty() {
-            if let Sharding::ByColumn(col) = self.ingredients[base].sharded_by() {
+            if let Sharding::ByColumn(col, _) = self.ingredients[base].sharded_by() {
                 key = vec![col];
             }
         } else {
@@ -657,7 +646,7 @@ impl ControllerInner {
     }
 
     pub fn install_recipe(&mut self, r_txt: String) {
-        let mut r = Recipe::from_str(&r_txt, Some(self.log.clone())).unwrap();
+        let r = Recipe::from_str(&r_txt, Some(self.log.clone())).unwrap();
         let old = self.recipe.clone();
         let mut new = old.replace(r).unwrap();
         self.migrate(|mig| match new.activate(mig, false) {
@@ -975,6 +964,7 @@ impl<'a> Migration<'a> {
     /// As new updates are processed by the given node, its outputs will be streamed to the
     /// returned channel. Node that this channel is *not* bounded, and thus a receiver that is
     /// slower than the system as a hole will accumulate a large buffer over time.
+    #[allow(unused)]
     pub fn stream(&mut self, n: NodeIndex) -> mpsc::Receiver<Vec<node::StreamUpdate>> {
         self.ensure_reader_for(n, None);
         let (tx, rx) = mpsc::channel();
@@ -1027,8 +1017,14 @@ impl<'a> Migration<'a> {
         }
 
         // Shard the graph as desired
-        let mut swapped0 = if mainline.sharding_enabled {
-            migrate::sharding::shard(&log, &mut mainline.ingredients, mainline.source, &mut new)
+        let mut swapped0 = if let Some(shards) = mainline.sharding {
+            migrate::sharding::shard(
+                &log,
+                &mut mainline.ingredients,
+                mainline.source,
+                &mut new,
+                shards,
+            )
         } else {
             HashMap::default()
         };
@@ -1251,7 +1247,6 @@ impl<'a> Migration<'a> {
                 nodes,
                 &mainline.persistence,
                 &mainline.listen_addr,
-                &mainline.checktable_addr,
                 &mainline.channel_coordinator,
                 &mut mainline.local_pool,
                 &mainline.debug_channel,
@@ -1490,7 +1485,7 @@ struct ControllerDescriptor {
 
 #[derive(Clone, Serialize, Deserialize)]
 struct ControllerConfig {
-    sharding_enabled: bool,
+    sharding: Option<usize>,
     partial_enabled: bool,
     domain_config: DomainConfig,
     persistence: PersistenceParameters,
@@ -1502,7 +1497,10 @@ struct ControllerConfig {
 impl Default for ControllerConfig {
     fn default() -> Self {
         Self {
-            sharding_enabled: true,
+            #[cfg(test)]
+            sharding: Some(2),
+            #[cfg(not(test))]
+            sharding: None,
             partial_enabled: true,
             domain_config: DomainConfig {
                 concurrent_replays: 512,
@@ -1551,7 +1549,7 @@ pub struct Controller<A: Authority + 'static> {
     internal: ServingThread,
     external: ServingThread,
     checktable: SocketAddr,
-    campaign: JoinHandle<()>,
+    _campaign: JoinHandle<()>,
 
     phantom: PhantomData<A>,
 }
@@ -1587,14 +1585,14 @@ impl<A: Authority + 'static> Controller<A> {
         let builder = thread::Builder::new().name("srv-main".to_owned());
         let join_handle = builder
             .spawn(move || {
-                let mut controller = Self {
+                let controller = Self {
                     current_epoch: None,
                     inner: None,
                     log,
                     internal,
                     external,
                     checktable,
-                    campaign,
+                    _campaign: campaign,
                     listen_addr,
                     phantom: PhantomData,
                 };
@@ -1745,7 +1743,7 @@ impl<A: Authority + 'static> Controller<A> {
 
                 let addr = server.local_addr().unwrap();
                 tx.send(addr).unwrap();
-                server.run_until(done_rx.map_err(|_| ()));
+                server.run_until(done_rx.map_err(|_| ())).unwrap();
             })
             .unwrap();
 
@@ -1795,7 +1793,7 @@ impl<A: Authority + 'static> Controller<A> {
 
     fn campaign(
         event_tx: Sender<ControlEvent>,
-        mut authority: Arc<A>,
+        authority: Arc<A>,
         descriptor: ControllerDescriptor,
         config: ControllerConfig,
     ) -> JoinHandle<()> {
@@ -1852,12 +1850,13 @@ mod tests {
 
     // Controller without any domains gets dropped once it leaves the scope.
     #[test]
+    #[ignore]
     #[allow_fail]
     fn it_works_default() {
         // Controller gets dropped. It doesn't have Domains, so we don't see any dropped.
         let authority = ZookeeperAuthority::new("127.0.0.1:2181/it_works_default");
         {
-            let c = ControllerBuilder::default().build(authority);
+            let _c = ControllerBuilder::default().build(authority);
             thread::sleep(Duration::from_millis(100));
         }
         thread::sleep(Duration::from_millis(100));
@@ -1877,10 +1876,11 @@ mod tests {
 
     // Controller without any domains gets dropped once it leaves the scope.
     #[test]
+    #[ignore]
     fn it_works_default_local() {
         // Controller gets dropped. It doesn't have Domains, so we don't see any dropped.
         {
-            let c = ControllerBuilder::default().build_local();
+            let _c = ControllerBuilder::default().build_local();
             thread::sleep(Duration::from_millis(100));
         }
         thread::sleep(Duration::from_millis(100));

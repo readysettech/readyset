@@ -81,11 +81,13 @@ impl SqlIncorporator {
     }
 
     /// Disable node reuse for future migrations.
+    #[allow(unused)]
     pub fn disable_reuse(&mut self) {
         self.reuse_type = ReuseConfigType::NoReuse;
     }
 
     /// Disable node reuse for future migrations.
+    #[allow(unused)]
     pub fn enable_reuse(&mut self, reuse_type: ReuseConfigType) {
         self.reuse_type = reuse_type;
     }
@@ -98,6 +100,7 @@ impl SqlIncorporator {
     ///
     /// The return value is a tuple containing the query name (specified or computing) and a `Vec`
     /// of `NodeIndex`es representing the nodes added to support the query.
+    #[allow(unused)]
     pub fn add_query(
         &mut self,
         query: &str,
@@ -133,6 +136,7 @@ impl SqlIncorporator {
     }
 
     /// Retrieves the flow node associated with a given query's leaf view.
+    #[allow(unused)]
     pub fn get_query_address(&self, name: &str) -> Option<NodeIndex> {
         self.mir_converter.get_leaf(name)
     }
@@ -338,15 +342,6 @@ impl SqlIncorporator {
 
         // no optimization, because standalone base nodes can't be optimized
 
-        // TODO(malte): we currently need to remember these for local state, but should figure out
-        // a better plan (see below)
-        let fields = mir.leaf
-            .borrow()
-            .columns()
-            .into_iter()
-            .map(|c| String::from(c.name.as_str()))
-            .collect::<Vec<_>>();
-
         // push it into the flow graph using the migration in `mig`, and obtain `QueryFlowParts`
         let qfp = mir_query_to_flow_parts(&mut mir, &mut mig);
 
@@ -359,6 +354,7 @@ impl SqlIncorporator {
         &mut self,
         query_name: &str,
         query: &CompoundSelectStatement,
+        is_leaf: bool,
         mut mig: &mut Migration,
     ) -> Result<QueryFlowParts, String> {
         let subqueries: Vec<MirQuery> = query
@@ -378,6 +374,7 @@ impl SqlIncorporator {
             CompoundSelectOperator::Union,
             &query.order,
             &query.limit,
+            is_leaf,
         );
 
         let qfp = mir_query_to_flow_parts(&mut combined_mir_query, &mut mig);
@@ -394,7 +391,7 @@ impl SqlIncorporator {
         query_name: &str,
         sq: &SelectStatement,
         is_leaf: bool,
-        mut mig: &mut Migration,
+        mig: &mut Migration,
     ) -> (QueryFlowParts, Option<MirQuery>) {
         let (qg, reuse) = self.consider_query_graph(&query_name, sq);
         match reuse {
@@ -644,9 +641,10 @@ impl SqlIncorporator {
                 // NOTE(malte): We can't currently reuse complete compound select queries, since
                 // our reuse logic operates on `SqlQuery` structures. Their subqueries do get
                 // reused, however.
-                self.add_compound_query(&query_name, csq, mig).unwrap()
+                self.add_compound_query(&query_name, csq, is_leaf, mig)
+                    .unwrap()
             }
-            SqlQuery::Select(ref sq) => self.add_select_query(&query_name, sq, true, mig).0,
+            SqlQuery::Select(ref sq) => self.add_select_query(&query_name, sq, is_leaf, mig).0,
             ref q @ SqlQuery::CreateTable { .. } => self.add_base_via_mir(&query_name, q, mig),
             ref q @ _ => panic!("unhandled query type in recipe: {:?}", q),
         };

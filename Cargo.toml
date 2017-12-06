@@ -7,13 +7,13 @@ authors = ["Jon Gjengset <jon@thesquareplanet.com>"]
 members = ["benchmarks", "consensus", "channel", "core", "mir"]
 
 [features]
-default = []
+default = ["carry_local"]
 profiling = ["timekeeper/default"]
 binaries = ["default"]
 generate_mysql_tests = ["default"]
+carry_local = []
 
 [dependencies]
-arrayvec = "0.4.0"
 clap = "2.25.0"
 fnv = "1.0.5"
 futures = "0.1.16"
@@ -33,6 +33,7 @@ tokio-core = "0.1.8"
 slab = "0.4"
 
 vec_map = { version = "0.8.0", features = ["eders"] }
+timer_heap = "0.1.1"
 serde = { version = "1.0.8", features = ["rc"] }
 
 # git deps
@@ -74,9 +75,9 @@ path = "src/lib.rs"
 name = "basic-recipe"
 
 [[bin]]
-name = "worker"
-path = "src/worker/main.rs"
-
-[[bin]]
 name = "controller"
 path = "src/controller/main.rs"
+
+[[bin]]
+name = "souplet"
+path = "src/souplet/main.rs"
