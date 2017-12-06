@@ -47,6 +47,7 @@ impl Authority for LocalAuthority {
             }
         }
 
+        // There is already another leader, so never return.
         loop {
             thread::park();
         }
@@ -61,6 +62,7 @@ impl Authority for LocalAuthority {
     }
 
     fn await_new_epoch(&self, _: Epoch) -> Epoch {
+        // Epochs never change with a LocalAuthority, so this function should never return.
         loop {
             thread::park();
         }
