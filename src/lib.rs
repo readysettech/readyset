@@ -303,6 +303,7 @@
 //! The materialized state will be updated by `single::process`, and `Domain::boot` will stop
 //! propagating the `Update` since there are no descendant views.
 //!
+#![feature(allow_fail)]
 #![feature(optin_builtin_traits)]
 #![feature(try_from)]
 #![feature(box_patterns)]
@@ -326,6 +327,7 @@ extern crate mio;
 extern crate mir;
 extern crate nom_sql;
 extern crate petgraph;
+extern crate rand;
 extern crate serde;
 #[macro_use]
 extern crate serde_derive;
@@ -356,8 +358,8 @@ pub use dataflow::debug::{DebugEvent, DebugEventType};
 pub use dataflow::prelude::DomainIndex;
 pub use dataflow::{DurabilityMode, PersistenceParameters};
 
-pub use controller::{Controller, ControllerBuilder, ControllerHandle, Mutator, MutatorBuilder, MutatorError,
-                     ReadQuery, ReadReply, RemoteGetter, RemoteGetterBuilder};
+pub use controller::{Controller, ControllerBuilder, ControllerHandle, Mutator, MutatorBuilder,
+                     MutatorError, ReadQuery, ReadReply, RemoteGetter, RemoteGetterBuilder};
 pub use worker::Worker;
 
 /// Just give me a damn terminal logger

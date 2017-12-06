@@ -27,28 +27,6 @@ pub struct TimestampReply {
     pub prevs: Option<Box<HashMap<domain::Index, i64>>>,
 }
 
-#[derive(Serialize, Deserialize)]
-pub enum ChecktableRequest {
-    ApplyBatch(TransactionBatch, NodeIndex),
-    Recover(NodeIndex),
-    ClaimReplayTimestamp(Tag),
-    Track(TokenGenerator),
-    PerformMigration(HashMap<domain::Index, (IngressFromBase, EgressForBase)>),
-    AddReplyPaths(HashMap<ReplayPath, Vec<domain::Index>>),
-    ValidateToken(Token),
-}
-
-#[derive(Serialize, Deserialize)]
-pub enum ChecktableReply {
-    ApplyBatch(Option<TimestampReply>),
-    Recover(i64, Option<Box<HashMap<domain::Index, i64>>>),
-    ClaimReplayTimestamp(i64, Option<Box<HashMap<domain::Index, i64>>>),
-    Track,
-    PerformMigration(i64, i64, Option<Box<HashMap<domain::Index, i64>>>),
-    AddReplayPaths,
-    ValidateToken(bool),
-}
-
 service! {
     rpc apply_batch(request: TimestampRequest) -> Option<TimestampReply>;
     rpc recover(base: NodeIndex) -> (i64, Option<Box<HashMap<domain::Index, i64>>>);

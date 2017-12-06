@@ -1,6 +1,5 @@
 use std::collections::BTreeMap;
 use std::sync::{Condvar, Mutex};
-use std::time::Duration;
 use std::thread;
 
 use serde::Serialize;
@@ -38,14 +37,18 @@ impl LocalAuthority {
     }
 }
 impl Authority for LocalAuthority {
-    fn become_leader(&self, payload_data: Vec<u8>) -> Option<Epoch> {
-        let mut inner = self.inner.lock().unwrap();
-        if !inner.keys.contains_key(CONTROLLER_KEY) {
-            inner.keys.insert(CONTROLLER_KEY.to_owned(), payload_data);
-            self.cv.notify_all();
-            Some(ONLY_EPOCH)
-        } else {
-            None
+    fn become_leader(&self, payload_data: Vec<u8>) -> Epoch {
+        {
+            let mut inner = self.inner.lock().unwrap();
+            if !inner.keys.contains_key(CONTROLLER_KEY) {
+                inner.keys.insert(CONTROLLER_KEY.to_owned(), payload_data);
+                self.cv.notify_all();
+                return ONLY_EPOCH;
+            }
+        }
+
+        loop {
+            thread::park();
         }
     }
 
@@ -59,7 +62,7 @@ impl Authority for LocalAuthority {
 
     fn await_new_epoch(&self, _: Epoch) -> Epoch {
         loop {
-            thread::sleep(Duration::from_secs(1000));
+            thread::park();
         }
     }
 
@@ -92,6 +95,7 @@ impl Authority for LocalAuthority {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::time::Duration;
     use std::sync::Arc;
 
     #[test]
@@ -107,9 +111,13 @@ mod tests {
             Ok(12)
         );
         assert_eq!(authority.try_read("/a"), Some("12".bytes().collect()));
-        assert_eq!(authority.become_leader(vec![15]), Some(Epoch(1)));
+        assert_eq!(authority.become_leader(vec![15]), Epoch(1));
         assert_eq!(authority.get_leader(), (Epoch(1), vec![15]));
-        assert_eq!(authority.become_leader(vec![20]), None);
+        {
+            let authority = authority.clone();
+            thread::spawn(move || authority.become_leader(vec![20]));
+        }
+        thread::sleep(Duration::from_millis(100));
         assert_eq!(authority.get_leader(), (Epoch(1), vec![15]));
     }
 }

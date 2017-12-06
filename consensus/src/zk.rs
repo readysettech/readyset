@@ -1,6 +1,6 @@
 use std::process;
-use std::sync::mpsc::{self, Receiver, Sender};
 use std::time::Duration;
+use std::thread::{self, Thread};
 
 use serde::Serialize;
 use serde::de::DeserializeOwned;
@@ -21,16 +21,16 @@ impl Watcher for EventWatcher {
     }
 }
 
-struct ChannelWatcher(Sender<()>);
-impl ChannelWatcher {
-    pub fn new() -> (Self, Receiver<()>) {
-        let (tx, rx) = mpsc::channel();
-        (ChannelWatcher(tx), rx)
+/// Watcher which unparks the thread that created it upon triggering.
+struct UnparkWatcher(Thread);
+impl UnparkWatcher {
+    pub fn new() -> Self {
+        UnparkWatcher(thread::current())
     }
 }
-impl Watcher for ChannelWatcher {
+impl Watcher for UnparkWatcher {
     fn handle(&self, _: WatchedEvent) {
-        let _ = self.0.send(());
+        self.0.unpark();
     }
 }
 
@@ -53,19 +53,30 @@ impl ZookeeperAuthority {
 }
 
 impl Authority for ZookeeperAuthority {
-    fn become_leader(&self, payload_data: Vec<u8>) -> Option<Epoch> {
-        let create = self.zk.create(
-            CONTROLLER_KEY,
-            payload_data,
-            Acl::open_unsafe().clone(),
-            CreateMode::Ephemeral,
-        );
-        if let Ok(path) = create {
-            if let Ok(Some(stat)) = self.zk.exists(&path, false) {
-                return Some(Epoch(stat.czxid));
+    fn become_leader(&self, payload_data: Vec<u8>) -> Epoch {
+        loop {
+            if let Some(epoch) = self.zk
+                .create(
+                    CONTROLLER_KEY,
+                    payload_data.clone(),
+                    Acl::open_unsafe().clone(),
+                    CreateMode::Ephemeral,
+                )
+                .and_then(|path| self.zk.get_data(&path, false))
+                .ok()
+                .filter(|&(ref current_data, _)| *current_data == payload_data)
+                .map(|(_, stat)| Epoch(stat.czxid))
+            {
+                return epoch;
+            }
+
+            if self.zk
+                .exists_w(CONTROLLER_KEY, UnparkWatcher::new())
+                .is_ok()
+            {
+                thread::park();
             }
         }
-        return None;
     }
 
     fn get_leader(&self) -> (Epoch, Vec<u8>) {
@@ -74,21 +85,20 @@ impl Authority for ZookeeperAuthority {
                 return (Epoch(stat.czxid), data);
             }
 
-            let (watcher, rx) = ChannelWatcher::new();
-            if !self.zk.exists_w(CONTROLLER_KEY, watcher).is_ok() {
-                let _ = rx.recv();
+            if self.zk
+                .exists_w(CONTROLLER_KEY, UnparkWatcher::new())
+                .is_err()
+            {
+                thread::park();
             }
         }
     }
 
     fn await_new_epoch(&self, current_epoch: Epoch) -> Epoch {
         loop {
-            let (watcher, rx) = ChannelWatcher::new();
-            match self.zk.exists_w(CONTROLLER_KEY, watcher) {
+            match self.zk.exists_w(CONTROLLER_KEY, UnparkWatcher::new()) {
                 Ok(ref stat) if stat.czxid > current_epoch.0 => return Epoch(stat.czxid),
-                Ok(_) | Err(ZkError::NoNode) => {
-                    let _ = rx.recv();
-                }
+                Ok(_) | Err(ZkError::NoNode) => thread::park(),
                 Err(e) => panic!("{}", e),
             }
         }
@@ -144,9 +154,11 @@ impl Authority for ZookeeperAuthority {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::time::Duration;
     use std::sync::Arc;
 
     #[test]
+    #[allow_fail]
     fn it_works() {
         let authority = Arc::new(ZookeeperAuthority::new("127.0.0.1:2181/concensus_it_works"));
         assert!(authority.try_read(CONTROLLER_KEY).is_none());
@@ -155,9 +167,13 @@ mod tests {
             Ok(12)
         );
         assert_eq!(authority.try_read("/a"), Some("12".bytes().collect()));
-        assert!(authority.become_leader(vec![15]).is_some());
+        authority.become_leader(vec![15]);
         assert_eq!(authority.get_leader().1, vec![15]);
-        assert_eq!(authority.become_leader(vec![20]), None);
+        {
+            let authority = authority.clone();
+            thread::spawn(move || authority.become_leader(vec![20]));
+        }
+        thread::sleep(Duration::from_millis(100));
         assert_eq!(authority.get_leader().1, vec![15]);
     }
 }

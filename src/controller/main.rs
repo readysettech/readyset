@@ -2,9 +2,6 @@ extern crate clap;
 extern crate consensus;
 extern crate distributary;
 
-use std::thread;
-use std::time::Duration;
-
 use consensus::ZookeeperAuthority;
 use distributary::ControllerBuilder;
 
@@ -37,9 +34,5 @@ fn main() {
     let authority = ZookeeperAuthority::new(&zookeeper_addr);
     let mut builder = ControllerBuilder::default();
     builder.set_listen_addr(listen_addr);
-    let _handle = builder.build(authority);
-
-    loop {
-        thread::sleep(Duration::from_secs(5));
-    }
+    builder.build(authority).wait();
 }
