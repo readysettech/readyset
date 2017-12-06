@@ -5,48 +5,64 @@ use prelude::*;
 use hyper::Client;
 use tokio_core::reactor::Core;
 use serde::Serialize;
-use serde::de::DeserializeOwned;
 use serde_json;
-use std::error::Error;
-use futures::{Future, Stream};
+use std::thread;
 
 /// Applies the identity operation to the view. Since the identity does nothing,
 /// it is the simplest possible operation. Primary intended as a reference
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Trigger {
     src: IndexPair,
-    url: String,
+    trigger: TriggerType,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub enum TriggerType {
+    // url to the blender, group name
+    GroupCreation{ url: String, group: String },
 }
 
 impl Trigger {
     /// Construct a new Trigger operator.
-    pub fn new(src: NodeIndex, url: String) -> Trigger {
-        Trigger { src: src.into(), url: url }
+    pub fn new(src: NodeIndex, trigger: TriggerType) -> Trigger {
+        Trigger { src: src.into(), trigger: trigger }
     }
 
-    fn rpc<Q: Serialize, R: DeserializeOwned>(
+    fn rpc<Q: Serialize>(
         &self,
         path: &str,
-        request: &Q,
-    ) -> Result<R, Box<Error>> {
+        request: Q,
+        url: &String,
+    ) where Q: Send {
         use hyper;
-
-        let mut core = Core::new().unwrap();
-        let client = Client::new(&core.handle());
-        let url = format!("{}/{}", self.url, path);
-
+        let url = format!("{}/{}", url, path);
         let mut r = hyper::Request::new(hyper::Method::Post, url.parse().unwrap());
-        r.set_body(serde_json::to_string(request).unwrap());
+        r.set_body(serde_json::to_string(&request).unwrap());
 
-        let work = client.request(r).and_then(|res| {
-            res.body().concat2().and_then(move |body| {
-                let reply: R = serde_json::from_slice(&body)
-                    .map_err(|e| ::std::io::Error::new(::std::io::ErrorKind::Other, e))
-                    .unwrap();
-                Ok(reply)
-            })
+        thread::spawn(move || {
+            let mut core = Core::new().unwrap();
+            let client = Client::new(&core.handle());
+            let work = client.request(r);
+
+            core.run(work).unwrap();
         });
-        Ok(core.run(work).unwrap())
+    }
+
+    fn trigger(&self, row: &Record) {
+        match self.trigger {
+            TriggerType::GroupCreation{ ref url, ref group } => {
+                let gid = match *row {
+                    Record::Positive(ref v) => v[1].clone(),
+                    _ => return,
+                };
+
+                let mut group_context: HashMap<String, DataType> = HashMap::new();
+                group_context.insert(String::from("id"), gid);
+                group_context.insert(String::from("group"), group.clone().into());
+
+                self.rpc("create_universe", group_context, url);
+            }
+        }
     }
 }
 
@@ -67,13 +83,26 @@ impl Ingredient for Trigger {
 
     fn on_input(
         &mut self,
-        _: LocalNodeIndex,
+        from: LocalNodeIndex,
         rs: Records,
         _: &mut Tracer,
         _: Option<usize>,
         _: &DomainNodes,
         _: &StateMap,
     ) -> ProcessingResult {
+        debug_assert_eq!(from, *self.src);
+
+        if rs.is_empty() {
+            return ProcessingResult {
+                results: rs,
+                misses: vec![],
+            };
+        }
+
+        for r in rs.iter() {
+            self.trigger(r);
+        }
+
         ProcessingResult {
             results: rs,
             misses: Vec::new(),
@@ -89,7 +118,7 @@ impl Ingredient for Trigger {
     }
 
     fn description(&self) -> String {
-        "≡".into()
+        "T".into()
     }
 
     fn parent_columns(&self, column: usize) -> Vec<(NodeIndex, Option<usize>)> {

@@ -3,6 +3,8 @@ use nom_sql::SqlQuery;
 use controller::Migration;
 use controller::sql::reuse::ReuseConfigType;
 use controller::sql::SqlIncorporator;
+use dataflow::ops::trigger::Trigger;
+use dataflow::ops::trigger::TriggerType;
 use core::NodeIndex;
 
 use controller::security::SecurityConfig;
@@ -138,8 +140,9 @@ impl Recipe {
     }
 
     /// Set recipe's security configuration
-    pub fn set_security_config(&mut self, config_text: &str) {
-        let config = SecurityConfig::parse(config_text);
+    pub fn set_security_config(&mut self, config_text: &str, url: String) {
+        let mut config = SecurityConfig::parse(config_text);
+        config.url = url;
         self.security_config = Some(config);
     }
 
@@ -217,54 +220,6 @@ impl Recipe {
     }
 
     /// Creates a new security universe
-    pub fn create_group(&mut self, group_name: String, mig: &mut Migration) -> Result<ActivationResult, String> {
-        use controller::sql::security::Multiverse;
-
-        let mut result = ActivationResult {
-            new_nodes: HashMap::default(),
-            expressions_added: 0,
-            expressions_removed: 0,
-        };
-
-        if self.security_config.is_some() {
-            let qfps = self.inc
-                .as_mut()
-                .unwrap()
-                .prepare_universe(&self.security_config.clone().unwrap(), Some(group_name), mig);
-
-            for qfp in qfps {
-                result.new_nodes.insert(qfp.name.clone(), qfp.query_leaf);
-            }
-        }
-
-        for expr in self.expressions.values() {
-            let (n, q, is_leaf) = expr.clone();
-            // add the universe-specific query
-            // don't use query name to avoid conflict with global queries
-            let new_name = match n {
-                Some(ref name) => Some(format!("{}_u{}", name, mig.universe())),
-                None => None,
-            };
-
-            let qfp = self.inc
-                .as_mut()
-                .unwrap()
-                .add_parsed_query(q, new_name, is_leaf, mig)?;
-
-            // If the user provided us with a query name, use that.
-            // If not, use the name internally used by the QFP.
-            let query_name = match n {
-                Some(name) => name,
-                None => qfp.name.clone(),
-            };
-
-            result.new_nodes.insert(query_name, qfp.query_leaf);
-        }
-
-        Ok(result)
-    }
-
-    /// Creates a new security universe
     pub fn create_universe(&mut self, mig: &mut Migration) -> Result<ActivationResult, String> {
         use controller::sql::security::Multiverse;
 
@@ -275,10 +230,11 @@ impl Recipe {
         };
 
         if self.security_config.is_some() {
+            let group = mig.context().get("group").map(|g| g.clone().into());
             let qfps = self.inc
                 .as_mut()
                 .unwrap()
-                .prepare_universe(&self.security_config.clone().unwrap(), None, mig);
+                .prepare_universe(&self.security_config.clone().unwrap(), group, mig);
 
             for qfp in qfps {
                 result.new_nodes.insert(qfp.name.clone(), qfp.query_leaf);
@@ -360,6 +316,11 @@ impl Recipe {
                     .as_mut()
                     .unwrap()
                     .add_parsed_query(group.membership(), Some(group.name()), false, mig)?;
+
+                /// Add trigger node below group membership views
+                let group_creation = TriggerType::GroupCreation { url: config.url.clone(), group: group.name() };
+                let trigger = Trigger::new(qfp.query_leaf,  group_creation);
+                mig.add_ingredient(&format!("{}-trigger", group.name()), &["uid", "gid"], trigger);
 
                 result.new_nodes.insert(group.name(), qfp.query_leaf);
             }

@@ -599,7 +599,7 @@ impl ControllerInner {
     where
         F: FnOnce(&mut Migration) -> T,
     {
-        info!(self.log, "adding a new soup universe");
+        info!(self.log, "starting migration: new soup universe");
         let miglog = self.log.new(o!());
         let mut m = Migration {
             mainline: self,
@@ -817,8 +817,10 @@ impl ControllerInner {
         self.recipe = new;
     }
 
-    pub fn set_security_config(&mut self, p: String) {
-        self.recipe.set_security_config(&p);
+    pub fn set_security_config(&mut self, config: (String, String)) {
+        let p = config.0;
+        let url = config.1;
+        self.recipe.set_security_config(&p, url);
     }
 
     pub fn create_universe(&mut self, context: HashMap<String, DataType>) {
@@ -1644,7 +1646,7 @@ impl Blender {
 
     /// Install a new set of policies on the controller.
     pub fn set_security_config(&self, p: String) {
-        self.rpc("set_security_config", &p).unwrap()
+        self.rpc("set_security_config", &(p, self.url.clone())).unwrap()
     }
 
     /// Install a new set of policies on the controller.
