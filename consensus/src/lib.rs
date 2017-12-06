@@ -22,7 +22,9 @@ const CONTROLLER_KEY: &'static str = "/controller";
 pub struct Epoch(i64);
 
 pub trait Authority: Send + Sync {
-    /// Attempt to become leader, blocking until this is possible. Returns leader epoch upon sucess.
+    /// Attempt to become leader, blocking until this is possible. Returns leader epoch upon
+    /// sucess. The payload_data must be unique among all possible leaders to avoid confusion about
+    /// which was elected.
     fn become_leader(&self, payload_data: Vec<u8>) -> Epoch;
 
     /// Returns the epoch and payload data for the current leader, blocking if there is not
