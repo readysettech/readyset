@@ -74,7 +74,7 @@ impl Authority for ZookeeperAuthority {
                 .exists_w(CONTROLLER_KEY, UnparkWatcher::new())
                 .is_ok()
             {
-                thread::park();
+                thread::park_timeout(Duration::from_secs(60));
             }
         }
     }
@@ -89,7 +89,7 @@ impl Authority for ZookeeperAuthority {
                 .exists_w(CONTROLLER_KEY, UnparkWatcher::new())
                 .is_err()
             {
-                thread::park();
+                thread::park_timeout(Duration::from_secs(60));
             }
         }
     }
@@ -98,7 +98,7 @@ impl Authority for ZookeeperAuthority {
         loop {
             match self.zk.exists_w(CONTROLLER_KEY, UnparkWatcher::new()) {
                 Ok(ref stat) if stat.czxid > current_epoch.0 => return Epoch(stat.czxid),
-                Ok(_) | Err(ZkError::NoNode) => thread::park(),
+                Ok(_) | Err(ZkError::NoNode) => thread::park_timeout(Duration::from_secs(60)),
                 Err(e) => panic!("{}", e),
             }
         }
