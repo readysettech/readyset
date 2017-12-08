@@ -33,7 +33,7 @@ fn main() {
     builder.set_local_workers(2);
     builder.set_persistence(persistence_params);
 
-    let mut blender = builder.build();
+    let mut blender = builder.build_local();
     blender.install_recipe(sql.to_owned());
     println!("{}", blender.graphviz());
 

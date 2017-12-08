@@ -61,9 +61,9 @@
 //! At a high level, Soup consists of a couple of main components that can generally be understood
 //! in isolation, even though they interact heavily during standard operation.
 //!
-//!  - `flow::Blender`, which "owns" the data flow graph, and provides methods for inspecting it.
-//!    `Blender` is principally used to start a `Migration` that adds new queries to the system, or
-//!    removes old ones.
+//!  - `flow::ControllerHandle`, which "owns" the data flow graph, and provides methods for
+//!    inspecting it.  `ControllerHandle` is principally used to start a `Migration` that adds new
+//!    queries to the system, or removes old ones.
 //!  - `flow::Migration`, which handles all the plumbing needed to hook in new queries into an
 //!    existing Soup graph. This includes spinning up new `Domain`s where appropriate, and to set
 //!    up channels between different domains when the data flow graph has inter-domain
@@ -303,6 +303,7 @@
 //! The materialized state will be updated by `single::process`, and `Domain::boot` will stop
 //! propagating the `Update` since there are no descendant views.
 //!
+#![feature(allow_fail)]
 #![feature(optin_builtin_traits)]
 #![feature(try_from)]
 #![feature(box_patterns)]
@@ -315,6 +316,7 @@
 #![deny(unused_extern_crates)]
 
 extern crate channel;
+extern crate consensus;
 extern crate core;
 extern crate dataflow;
 extern crate fnv;
@@ -324,9 +326,7 @@ extern crate mio;
 extern crate mir;
 extern crate nom_sql;
 extern crate petgraph;
-#[macro_use]
-#[cfg(feature = "web")]
-extern crate rustful;
+extern crate rand;
 extern crate serde;
 #[macro_use]
 extern crate serde_derive;
@@ -340,6 +340,7 @@ extern crate timer_heap;
 extern crate tokio_core;
 extern crate vec_map;
 
+
 mod controller;
 mod coordination;
 mod souplet;
@@ -348,6 +349,8 @@ mod worker;
 #[cfg(test)]
 mod tests;
 
+pub use consensus::{LocalAuthority, ZookeeperAuthority};
+
 pub use core::{DataType, Datas, NodeIndex};
 
 pub use dataflow::checktable::{Token, TransactionResult};
@@ -355,8 +358,8 @@ pub use dataflow::debug::{DebugEvent, DebugEventType};
 pub use dataflow::prelude::DomainIndex;
 pub use dataflow::{DurabilityMode, PersistenceParameters};
 
-pub use controller::{Blender, ControllerBuilder, Mutator, MutatorBuilder, MutatorError, ReadQuery,
-                     ReadReply, RemoteGetter, RemoteGetterBuilder};
+pub use controller::{Controller, ControllerBuilder, ControllerHandle, Mutator, MutatorBuilder,
+                     MutatorError, ReadQuery, ReadReply, RemoteGetter, RemoteGetterBuilder};
 pub use souplet::Souplet;
 
 /// Just give me a damn terminal logger
