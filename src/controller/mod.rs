@@ -1,7 +1,9 @@
 use channel::poll::{PollEvent, PollingLoop, ProcessResult};
 use channel::tcp::TcpSender;
 use channel;
+use consensus::{Authority, Epoch, LocalAuthority};
 use dataflow::prelude::*;
+use dataflow::checktable::service::CheckTableServer;
 use dataflow::{checktable, node, payload, DomainConfig, PersistenceParameters, Readers};
 use dataflow::ops::base::Base;
 use dataflow::statistics::GraphStats;
@@ -10,19 +12,24 @@ use worker;
 
 use std::collections::{BTreeMap, HashMap, HashSet};
 use std::error::Error;
-use std::io::Read;
+use std::io::ErrorKind;
+use std::marker::PhantomData;
 use std::net::{IpAddr, SocketAddr};
 use std::time::{Duration, Instant};
+use std::thread::{self, JoinHandle};
 use std::sync::{Arc, Mutex};
-use std::sync::mpsc::{self, Sender};
-use std::{io, thread, time};
+use std::sync::mpsc::{self, Receiver, Sender};
+use std::{io, time};
 
-use futures::{Future, Stream};
-use hyper::Client;
+use futures::{self, Future, Stream};
+use hyper::{self, Client, Method, StatusCode};
+use hyper::header::ContentType;
+use hyper::server::{Http, NewService, Request, Response, Service};
 use mio::net::TcpListener;
 use petgraph;
 use petgraph::visit::Bfs;
 use petgraph::graph::NodeIndex;
+use rand;
 use serde::Serialize;
 use serde::de::DeserializeOwned;
 use serde_json;
@@ -79,56 +86,18 @@ impl WorkerStatus {
     }
 }
 
-
-enum ControlEvent {
-    WorkerCoordination(CoordinationMessage),
-    ExternalGet(String, String, Sender<String>),
-    ExternalPost(String, String, Sender<String>),
-}
-
 /// Used to construct a controller.
 pub struct ControllerBuilder {
-    sharding: Option<usize>,
-    domain_config: DomainConfig,
-    persistence: PersistenceParameters,
-    materializations: migrate::materialization::Materializations,
+    config: ControllerConfig,
     listen_addr: IpAddr,
-    heartbeat_every: Duration,
-    healthcheck_every: Duration,
-    nworkers: usize,
-    local_workers: usize,
-    internal_port: u16,
-    external_port: u16,
-    checktable_port: u16,
     log: slog::Logger,
 }
 impl Default for ControllerBuilder {
     fn default() -> Self {
-        let log = slog::Logger::root(slog::Discard, o!());
         Self {
-            #[cfg(test)]
-            sharding: Some(2),
-            #[cfg(not(test))]
-            sharding: None,
-            domain_config: DomainConfig {
-                concurrent_replays: 512,
-                replay_batch_timeout: time::Duration::from_millis(1),
-                replay_batch_size: 32,
-            },
-            persistence: Default::default(),
-            materializations: migrate::materialization::Materializations::new(&log),
+            config: ControllerConfig::default(),
             listen_addr: "127.0.0.1".parse().unwrap(),
-            heartbeat_every: Duration::from_secs(1),
-            healthcheck_every: Duration::from_secs(10),
-            internal_port: if cfg!(test) { 0 } else { 8000 },
-            checktable_port: if cfg!(test) { 0 } else { 8500 },
-            external_port: if cfg!(test) { 0 } else { 9000 },
-            nworkers: 0,
-            #[cfg(test)]
-            local_workers: 2,
-            #[cfg(not(test))]
-            local_workers: 0,
-            log,
+            log: slog::Logger::root(slog::Discard, o!()),
         }
     }
 }
@@ -139,86 +108,75 @@ impl ControllerBuilder {
     /// Note that this number *must* be greater than the width (in terms of number of ancestors) of
     /// the widest union in the graph, otherwise a deadlock will occur.
     pub fn set_max_concurrent_replay(&mut self, n: usize) {
-        self.domain_config.concurrent_replays = n;
+        self.config.domain_config.concurrent_replays = n;
     }
 
     /// Set the maximum number of partial replay responses that can be aggregated into a single
     /// replay batch.
     pub fn set_partial_replay_batch_size(&mut self, n: usize) {
-        self.domain_config.replay_batch_size = n;
+        self.config.domain_config.replay_batch_size = n;
     }
 
     /// Set the longest time a partial replay response can be delayed.
     pub fn set_partial_replay_batch_timeout(&mut self, t: time::Duration) {
-        self.domain_config.replay_batch_timeout = t;
+        self.config.domain_config.replay_batch_timeout = t;
     }
 
     /// Set the persistence parameters used by the system.
     pub fn set_persistence(&mut self, p: PersistenceParameters) {
-        self.persistence = p;
+        self.config.persistence = p;
     }
 
     /// Disable partial materialization for all subsequent migrations
     pub fn disable_partial(&mut self) {
-        self.materializations.disable_partial();
+        self.config.partial_enabled = false;
     }
 
     /// Enable sharding for all subsequent migrations
     pub fn enable_sharding(&mut self, shards: usize) {
-        self.sharding = Some(shards);
+        self.config.sharding = Some(shards);
     }
 
     /// Set how many workers the controller should wait for before starting. More workers can join
     /// later, but they won't be assigned any of the initial domains.
     pub fn set_nworkers(&mut self, workers: usize) {
-        self.nworkers = workers;
+        self.config.nworkers = workers;
+    }
+
+    /// Set the IP address that the controller should use for listening.
+    pub fn set_listen_addr(&mut self, listen_addr: IpAddr) {
+        self.listen_addr = listen_addr;
     }
 
     /// Set the number of worker threads to spin up in local mode (when nworkers == 0).
     pub fn set_local_workers(&mut self, workers: usize) {
-        self.local_workers = workers;
+        self.config.local_workers = workers;
     }
 
     #[cfg(test)]
     pub fn build_inner(self) -> ControllerInner {
-        ControllerInner::from_builder(self)
+        let checktable_addr = CheckTableServer::start(SocketAddr::new(self.listen_addr, 0));
+        let initial_state = ControllerState {
+            config: self.config,
+            recipe: (),
+            epoch: LocalAuthority::get_epoch(),
+        };
+        ControllerInner::new(self.listen_addr, checktable_addr, self.log, initial_state)
     }
 
     /// Set the logger that the derived controller should use. By default, it uses `slog::Discard`.
     pub fn log_with(&mut self, log: slog::Logger) {
-        self.materializations.set_logger(&log);
         self.log = log;
     }
 
-    /// Build a controller, and return a Blender to provide access to it.
-    pub fn build(self) -> Blender {
-        // TODO(fintelia): Don't hard code addresses in this function.
-        let internal_addr = SocketAddr::new("127.0.0.1".parse().unwrap(), self.internal_port);
-        let external_addr = SocketAddr::new("127.0.0.1".parse().unwrap(), self.external_port);
-        let nworkers = self.nworkers;
+    /// Build a controller and return a handle to it.
+    pub fn build<A: Authority + 'static>(self, authority: A) -> ControllerHandle<A> {
+        Controller::start(authority, self.listen_addr, self.config, self.log)
+    }
 
-        let (tx, rx) = mpsc::channel();
-
-        let addr = ControllerInner::listen_external(tx.clone(), external_addr);
-        ControllerInner::listen_internal(tx, internal_addr);
-
-        let (worker_ready_tx, worker_ready_rx) = mpsc::channel();
-
-        let builder = thread::Builder::new().name("ctrl-inner".to_owned());
-        builder
-            .spawn(move || {
-                ControllerInner::from_builder(self).main_loop(rx, worker_ready_tx, nworkers);
-            })
-            .unwrap();
-
-        // Wait for enough workers to join.
-        if nworkers > 0 {
-            let _ = worker_ready_rx.recv();
-        }
-
-        Blender {
-            url: format!("http://{}", addr),
-        }
+    /// Build a local controller, and return a ControllerHandle to provide access to it.
+    pub fn build_local(self) -> ControllerHandle<LocalAuthority> {
+        self.build(LocalAuthority::new())
     }
 }
 
@@ -272,147 +230,52 @@ pub struct ControllerInner {
 }
 
 impl ControllerInner {
-    fn main_loop(
-        mut self,
-        receiver: mpsc::Receiver<ControlEvent>,
-        worker_ready_tx: mpsc::Sender<()>,
-        nworkers: usize,
-    ) {
-        let mut workers_arrived = false;
-        for event in receiver {
-            match event {
-                ControlEvent::WorkerCoordination(msg) => {
-                    trace!(self.log, "Received {:?}", msg);
-                    let process = match msg.payload {
-                        CoordinationPayload::Register {
-                            ref addr,
-                            ref read_listen_addr,
-                        } => self.handle_register(&msg, addr, read_listen_addr.clone()),
-                        CoordinationPayload::Heartbeat => self.handle_heartbeat(&msg),
-                        CoordinationPayload::DomainBooted(ref _domain, ref _addr) => Ok(()),
-                        _ => unimplemented!(),
-                    };
-                    match process {
-                        Ok(_) => (),
-                        Err(e) => error!(self.log, "failed to handle message {:?}: {:?}", msg, e),
-                    }
-
-                    self.check_worker_liveness();
-
-                    if !workers_arrived && self.workers.len() == nworkers {
-                        workers_arrived = true;
-                        worker_ready_tx.send(()).unwrap();
-                    }
-                }
-                ControlEvent::ExternalGet(path, _body, reply_tx) => {
-                    reply_tx
-                        .send(match path.as_ref() {
-                            "graph" => self.graphviz(),
-                            _ => "NOT FOUND".to_owned(),
-                        })
-                        .unwrap();
-                }
-                ControlEvent::ExternalPost(path, body, reply_tx) => {
-                    use serde_json as json;
-                    reply_tx
-                        .send(match path.as_ref() {
-                            "inputs" => json::to_string(&self.inputs()).unwrap(),
-                            "outputs" => json::to_string(&self.outputs()).unwrap(),
-                            "recover" => json::to_string(&self.recover()).unwrap(),
-                            "graphviz" => json::to_string(&self.graphviz()).unwrap(),
-                            "get_statistics" => json::to_string(&self.get_statistics()).unwrap(),
-                            "mutator_builder" => json::to_string(
-                                &self.mutator_builder(json::from_str(&body).unwrap()),
-                            ).unwrap(),
-                            "getter_builder" => json::to_string(
-                                &self.getter_builder(json::from_str(&body).unwrap()),
-                            ).unwrap(),
-                            "install_recipe" => json::to_string(
-                                &self.install_recipe(json::from_str(&body).unwrap()),
-                            ).unwrap(),
-                            _ => "NOT FOUND".to_owned(),
-                        })
-                        .unwrap();
-                }
-            }
-        }
-    }
-
-    /// Listen for messages from clients.
-    fn listen_external(event_tx: Sender<ControlEvent>, addr: SocketAddr) -> SocketAddr {
-        use rustful::{Context, Handler, Response, Server, TreeRouter};
-        use rustful::header::ContentType;
-        let handlers = insert_routes!{
-            TreeRouter::new() => {
-                "graph.html" => Get: Box::new(move |_ctx: Context, mut res: Response| {
-                    res.headers_mut().set(ContentType::html());
-                    res.send(include_str!("graph.html"));
-                }) as Box<Handler>,
-                "js/layout-worker.js" => Get: Box::new(move |_ctx: Context, res: Response| {
-                    res.send("importScripts('https://cdn.rawgit.com/mstefaniuk/graph-viz-d3-js/\
-                              cf2160ee3ca39b843b081d5231d5d51f1a901617/dist/layout-worker.js');");
-                }) as Box<Handler>,
-                ":path" => Post: Box::new(move |mut ctx: Context, res: Response| {
-                    let (tx, rx) = mpsc::channel();
-                    let path = ctx.variables.get("path").unwrap().to_string();
-                    let mut body = String::new();
-                    ctx.body.read_to_string(&mut body).unwrap();
-                    let event_tx = ctx.global.get::<Arc<Mutex<Sender<ControlEvent>>>>().unwrap();
-                    {
-                        let event_tx = event_tx.lock().unwrap();
-                        event_tx.send(ControlEvent::ExternalPost(path, body, tx)).unwrap();
-                    }
-                    res.send(rx.recv().unwrap());
-                }) as Box<Handler>,
-                ":path" => Get: Box::new(move |mut ctx: Context, res: Response| {
-                    let (tx, rx) = mpsc::channel();
-                    let path = ctx.variables.get("path").unwrap().to_string();
-                    let mut body = String::new();
-                    ctx.body.read_to_string(&mut body).unwrap();
-                    let event_tx = ctx.global.get::<Arc<Mutex<Sender<ControlEvent>>>>().unwrap();
-                    {
-                        let event_tx = event_tx.lock().unwrap();
-                        event_tx.send(ControlEvent::ExternalGet(path, body, tx)).unwrap();
-                    }
-                    res.send(rx.recv().unwrap());
-                }) as Box<Handler>,
-            }
+    pub fn coordination_message(&mut self, msg: CoordinationMessage) {
+        trace!(self.log, "Received {:?}", msg);
+        let process = match msg.payload {
+            CoordinationPayload::Register {
+                ref addr,
+                ref read_listen_addr,
+            } => self.handle_register(&msg, addr, read_listen_addr.clone()),
+            CoordinationPayload::Heartbeat => self.handle_heartbeat(&msg),
+            CoordinationPayload::DomainBooted(..) => Ok(()),
+            _ => unimplemented!(),
         };
+        match process {
+            Ok(_) => (),
+            Err(e) => error!(self.log, "failed to handle message {:?}: {:?}", msg, e),
+        }
 
-        let listen = Server {
-            handlers,
-            host: addr.into(),
-            server: "netsoup".to_owned(),
-            threads: Some(1),
-            content_type: "application/json".parse().unwrap(),
-            global: Box::new(Arc::new(Mutex::new(event_tx))).into(),
-            ..Server::default()
-        }.run()
-            .unwrap();
-
-        // Bit of a dance to return socket while keeping the server running in another thread.
-        let socket = listen.socket.clone();
-        let builder = thread::Builder::new().name("srv-ext".to_owned());
-        builder.spawn(move || drop(listen)).unwrap();
-        socket
+        self.check_worker_liveness();
     }
 
-    /// Listen for messages from workers.
-    fn listen_internal(event_tx: Sender<ControlEvent>, addr: SocketAddr) {
-        let builder = thread::Builder::new().name("srv-int".to_owned());
-        builder
-            .spawn(move || {
-                let mut pl: PollingLoop<CoordinationMessage> = PollingLoop::new(addr);
-                pl.run_polling_loop(|e| {
-                    if let PollEvent::Process(msg) = e {
-                        if !event_tx.send(ControlEvent::WorkerCoordination(msg)).is_ok() {
-                            return ProcessResult::StopPolling;
-                        }
-                    }
-                    ProcessResult::KeepPolling
-                });
-            })
-            .unwrap();
+    pub fn external_request(
+        &mut self,
+        method: Method,
+        path: String,
+        body: Vec<u8>,
+    ) -> Result<String, StatusCode> {
+        use serde_json as json;
+        use hyper::Method::*;
+
+        Ok(match (method, path.as_ref()) {
+            (Get, "/graph") => self.graphviz(),
+            (Post, "/inputs") => json::to_string(&self.inputs()).unwrap(),
+            (Post, "/outputs") => json::to_string(&self.outputs()).unwrap(),
+            (Post, "/recover") => json::to_string(&self.recover()).unwrap(),
+            (Post, "/graphviz") => json::to_string(&self.graphviz()).unwrap(),
+            (Post, "/get_statistics") => json::to_string(&self.get_statistics()).unwrap(),
+            (Post, "/mutator_builder") => {
+                json::to_string(&self.mutator_builder(json::from_slice(&body).unwrap())).unwrap()
+            }
+            (Post, "/getter_builder") => {
+                json::to_string(&self.getter_builder(json::from_slice(&body).unwrap())).unwrap()
+            }
+            (Post, "/install_recipe") => {
+                json::to_string(&self.install_recipe(json::from_slice(&body).unwrap())).unwrap()
+            }
+            _ => return Err(StatusCode::NotFound),
+        })
     }
 
     fn handle_register(
@@ -464,8 +327,13 @@ impl ControllerInner {
         Ok(())
     }
 
-    /// Construct `Controller` with a specified listening interface
-    pub fn from_builder(builder: ControllerBuilder) -> Self {
+    /// Construct `ControllerInner` with a specified listening interface
+    fn new(
+        listen_addr: IpAddr,
+        checktable_addr: SocketAddr,
+        log: slog::Logger,
+        state: ControllerState,
+    ) -> Self {
         let mut g = petgraph::Graph::new();
         let source = g.add_node(node::Node::new(
             "source",
@@ -474,28 +342,32 @@ impl ControllerInner {
             true,
         ));
 
-        let checktable_addr = SocketAddr::new(builder.listen_addr.clone(), builder.checktable_port);
-        let checktable_addr = checktable::service::CheckTableServer::start(checktable_addr.clone());
         let checktable =
             checktable::CheckTableClient::connect(checktable_addr, client::Options::default())
                 .unwrap();
 
         let readers: Readers = Arc::default();
         let readers_clone = readers.clone();
-        let listener = TcpListener::bind(&SocketAddr::new(builder.listen_addr.clone(), 0)).unwrap();
+        let listener = TcpListener::bind(&SocketAddr::new(listen_addr, 0)).unwrap();
         let read_listen_addr = listener.local_addr().unwrap();
         let thread_builder = thread::Builder::new().name("read-dispatcher".to_owned());
         thread_builder
             .spawn(move || readers::serve(listener, readers_clone, 1))
             .unwrap();
 
+
+        let mut materializations = migrate::materialization::Materializations::new(&log);
+        if !state.config.partial_enabled {
+            materializations.disable_partial()
+        }
+
         let cc = Arc::new(ChannelCoordinator::new());
-        assert!((builder.nworkers == 0) ^ (builder.local_workers == 0));
-        let local_pool = if builder.nworkers == 0 {
+        assert!((state.config.nworkers == 0) ^ (state.config.local_workers == 0));
+        let local_pool = if state.config.nworkers == 0 {
             Some(
                 worker::WorkerPool::new(
-                    builder.local_workers,
-                    &builder.log,
+                    state.config.local_workers,
+                    &log,
                     checktable_addr,
                     cc.clone(),
                 ).unwrap(),
@@ -510,16 +382,16 @@ impl ControllerInner {
             ndomains: 0,
             checktable,
             checktable_addr,
+            listen_addr,
 
-            sharding: builder.sharding,
-            materializations: builder.materializations,
-            domain_config: builder.domain_config,
-            persistence: builder.persistence,
-            listen_addr: builder.listen_addr,
-            heartbeat_every: builder.heartbeat_every,
-            healthcheck_every: builder.healthcheck_every,
-            recipe: Recipe::blank(Some(builder.log.clone())),
-            log: builder.log,
+            materializations,
+            sharding: state.config.sharding,
+            domain_config: state.config.domain_config,
+            persistence: state.config.persistence,
+            heartbeat_every: state.config.heartbeat_every,
+            healthcheck_every: state.config.healthcheck_every,
+            recipe: Recipe::blank(Some(log.clone())),
+            log,
 
             domains: Default::default(),
             channel_coordinator: cc,
@@ -619,9 +491,7 @@ impl ControllerInner {
         let checktable =
             checktable::CheckTableClient::connect(self.checktable_addr, client::Options::default())
                 .unwrap();
-        Box::new(move |t: &checktable::Token| {
-            checktable.validate_token(t.clone()).unwrap()
-        })
+        Box::new(move |t: &checktable::Token| checktable.validate_token(t.clone()).unwrap())
     }
 
     #[cfg(test)]
@@ -924,9 +794,10 @@ impl<'a> Migration<'a> {
         let b: NodeOperator = b.into();
 
         // add to the graph
-        let ni = self.mainline
-            .ingredients
-            .add_node(node::Node::new(name.to_string(), fields, b, true));
+        let ni =
+            self.mainline
+                .ingredients
+                .add_node(node::Node::new(name.to_string(), fields, b, true));
         info!(self.log,
               "adding new node";
               "node" => ni.index(),
@@ -1335,9 +1206,7 @@ impl<'a> Migration<'a> {
             .node_indices()
             .filter(|&ni| ni != mainline.source)
             .filter(|&ni| !mainline.ingredients[ni].is_dropped())
-            .map(|ni| {
-                (mainline.ingredients[ni].domain(), ni, new.contains(&ni))
-            })
+            .map(|ni| (mainline.ingredients[ni].domain(), ni, new.contains(&ni)))
             .fold(HashMap::new(), |mut dns, (d, ni, new)| {
                 dns.entry(d).or_insert_with(Vec::new).push((ni, new));
                 dns
@@ -1489,71 +1358,72 @@ impl Drop for ControllerInner {
     }
 }
 
-/// `Blender` is a handle to a Controller.
-pub struct Blender {
-    url: String,
+/// `ControllerHandle` is a handle to a Controller.
+pub struct ControllerHandle<A: Authority> {
+    url: Option<String>,
+    authority: Arc<A>,
+    local: Option<(Sender<ControlEvent>, JoinHandle<()>)>,
 }
-impl Blender {
-    fn rpc<Q: Serialize, R: DeserializeOwned>(
-        &self,
-        path: &str,
-        request: &Q,
-    ) -> Result<R, Box<Error>> {
-        use hyper;
-
+impl<A: Authority> ControllerHandle<A> {
+    fn rpc<Q: Serialize, R: DeserializeOwned>(&mut self, path: &str, request: &Q) -> R {
         let mut core = Core::new().unwrap();
         let client = Client::new(&core.handle());
-        let url = format!("{}/{}", self.url, path);
+        loop {
+            if self.url.is_none() {
+                let descriptor: ControllerDescriptor =
+                    serde_json::from_slice(&self.authority.get_leader().unwrap().1).unwrap();
+                self.url = Some(format!("http://{}", descriptor.external_addr));
+            }
+            let url = format!("{}/{}", self.url.as_ref().unwrap(), path);
 
-        let mut r = hyper::Request::new(hyper::Method::Post, url.parse().unwrap());
-        r.set_body(serde_json::to_string(request).unwrap());
+            let mut r = hyper::Request::new(hyper::Method::Post, url.parse().unwrap());
+            r.set_body(serde_json::to_vec(request).unwrap());
+            let res = core.run(client.request(r)).unwrap();
+            if res.status() != hyper::StatusCode::Ok {
+                self.url = None;
+                continue;
+            }
 
-        let work = client.request(r).and_then(|res| {
-            res.body().concat2().and_then(move |body| {
-                let reply: R = serde_json::from_slice(&body)
-                    .map_err(|e| ::std::io::Error::new(::std::io::ErrorKind::Other, e))
-                    .unwrap();
-                Ok(reply)
-            })
-        });
-        Ok(core.run(work).unwrap())
+            let body = core.run(res.body().concat2()).unwrap();
+            return serde_json::from_slice(&body).unwrap();
+        }
     }
 
     /// Get a Vec of all known input nodes.
     ///
     /// Input nodes are here all nodes of type `Base`. The addresses returned by this function will
     /// all have been returned as a key in the map from `commit` at some point in the past.
-    pub fn inputs(&self) -> BTreeMap<String, NodeIndex> {
-        self.rpc("inputs", &()).unwrap()
+    pub fn inputs(&mut self) -> BTreeMap<String, NodeIndex> {
+        self.rpc("inputs", &())
     }
 
     /// Get a Vec of to all known output nodes.
     ///
     /// Output nodes here refers to nodes of type `Reader`, which is the nodes created in response
     /// to calling `.maintain` or `.stream` for a node during a migration.
-    pub fn outputs(&self) -> BTreeMap<String, NodeIndex> {
-        self.rpc("outputs", &()).unwrap()
+    pub fn outputs(&mut self) -> BTreeMap<String, NodeIndex> {
+        self.rpc("outputs", &())
     }
 
     /// Obtain a `RemoteGetterBuilder` that can be sent to a client and then used to query a given
     /// (already maintained) reader node.
-    pub fn get_getter_builder(&self, node: NodeIndex) -> Option<RemoteGetterBuilder> {
-        self.rpc("getter_builder", &node).unwrap()
+    pub fn get_getter_builder(&mut self, node: NodeIndex) -> Option<RemoteGetterBuilder> {
+        self.rpc("getter_builder", &node)
     }
 
     /// Obtain a `RemoteGetter`.
-    pub fn get_getter(&self, node: NodeIndex) -> Option<RemoteGetter> {
+    pub fn get_getter(&mut self, node: NodeIndex) -> Option<RemoteGetter> {
         self.get_getter_builder(node).map(|g| g.build())
     }
 
     /// Obtain a MutatorBuild that can be used to construct a Mutator to perform writes and deletes
     /// from the given base node.
-    pub fn get_mutator_builder(&self, base: NodeIndex) -> Result<MutatorBuilder, Box<Error>> {
-        self.rpc("mutator_builder", &base)
+    pub fn get_mutator_builder(&mut self, base: NodeIndex) -> Result<MutatorBuilder, Box<Error>> {
+        Ok(self.rpc("mutator_builder", &base))
     }
 
     /// Obtain a Mutator
-    pub fn get_mutator(&self, base: NodeIndex) -> Result<Mutator, Box<Error>> {
+    pub fn get_mutator(&mut self, base: NodeIndex) -> Result<Mutator, Box<Error>> {
         self.get_mutator_builder(base)
             .map(|m| m.build("127.0.0.1:0".parse().unwrap()))
     }
@@ -1561,52 +1431,485 @@ impl Blender {
     /// Initiaties log recovery by sending a
     /// StartRecovery packet to each base node domain.
     pub fn recover(&mut self) {
-        self.rpc("recover", &()).unwrap()
+        self.rpc("recover", &())
     }
 
     /// Get statistics about the time spent processing different parts of the graph.
     pub fn get_statistics(&mut self) -> GraphStats {
-        self.rpc("get_statistics", &()).unwrap()
+        self.rpc("get_statistics", &())
     }
 
     /// Install a new recipe on the controller.
-    pub fn install_recipe(&self, new_recipe: String) {
-        self.rpc("install_recipe", &new_recipe).unwrap()
+    pub fn install_recipe(&mut self, new_recipe: String) {
+        self.rpc("install_recipe", &new_recipe)
     }
 
     /// graphviz description of the dataflow graph
-    pub fn graphviz(&self) -> String {
-        self.rpc("graphviz", &()).unwrap()
+    pub fn graphviz(&mut self) -> String {
+        self.rpc("graphviz", &())
     }
 
-    /// Set the `Logger` to use for internal log messages.
-    pub fn log_with(&mut self, _: slog::Logger) {}
+    /// Wait for associated local controller to exit.
+    pub fn wait(mut self) {
+        self.local.take().unwrap().1.join().unwrap()
+    }
+}
+impl<A: Authority> Drop for ControllerHandle<A> {
+    fn drop(&mut self) {
+        if let Some((sender, join_handle)) = self.local.take() {
+            let _ = sender.send(ControlEvent::Shutdown);
+            let _ = join_handle.join();
+        }
+    }
+}
+
+/// Wrapper around the state of a thread serving network requests. Both tracks the address that the
+/// thread is listening on and provides a way to stop it.
+struct ServingThread {
+    addr: SocketAddr,
+    join_handle: JoinHandle<()>,
+    stop: Box<Drop + Send>,
+}
+impl ServingThread {
+    fn stop(self) {
+        drop(self.stop);
+        self.join_handle.join().unwrap();
+    }
+}
+
+/// Describes a running controller instance. A serialized version of this struct is stored in
+/// ZooKeeper so that clients can reach the currently active controller.
+#[derive(Serialize, Deserialize)]
+struct ControllerDescriptor {
+    external_addr: SocketAddr,
+    internal_addr: SocketAddr,
+    checktable_addr: SocketAddr,
+    nonce: u64,
+}
+
+#[derive(Clone, Serialize, Deserialize)]
+struct ControllerConfig {
+    sharding: Option<usize>,
+    partial_enabled: bool,
+    domain_config: DomainConfig,
+    persistence: PersistenceParameters,
+    heartbeat_every: Duration,
+    healthcheck_every: Duration,
+    local_workers: usize,
+    nworkers: usize,
+}
+impl Default for ControllerConfig {
+    fn default() -> Self {
+        Self {
+            #[cfg(test)]
+            sharding: Some(2),
+            #[cfg(not(test))]
+            sharding: None,
+            partial_enabled: true,
+            domain_config: DomainConfig {
+                concurrent_replays: 512,
+                replay_batch_timeout: time::Duration::from_millis(1),
+                replay_batch_size: 32,
+            },
+            persistence: Default::default(),
+            heartbeat_every: Duration::from_secs(1),
+            healthcheck_every: Duration::from_secs(10),
+            #[cfg(test)]
+            local_workers: 2,
+            #[cfg(not(test))]
+            local_workers: 0,
+            nworkers: 0,
+        }
+    }
+}
+
+#[derive(Clone, Serialize, Deserialize)]
+struct ControllerState {
+    config: ControllerConfig,
+    epoch: Epoch,
+    recipe: (), // TODO: store all relevant state here.
+}
+
+enum ControlEvent {
+    ControllerMessage(CoordinationMessage),
+    ExternalRequest(
+        Method,
+        String,
+        Vec<u8>,
+        futures::sync::oneshot::Sender<Result<String, StatusCode>>,
+    ),
+    WonLeaderElection(ControllerState),
+    LostLeadership(Epoch),
+    Shutdown,
+    Error(Box<Error + Send + Sync>),
+}
+
+/// Runs the soup instance.
+pub struct Controller<A: Authority + 'static> {
+    current_epoch: Option<Epoch>,
+    inner: Option<ControllerInner>,
+    log: slog::Logger,
+
+    listen_addr: IpAddr,
+    internal: ServingThread,
+    external: ServingThread,
+    checktable: SocketAddr,
+    _campaign: JoinHandle<()>,
+
+    phantom: PhantomData<A>,
+}
+
+impl<A: Authority + 'static> Controller<A> {
+    /// Start up a new `Controller` and return a handle to it. Dropping the handle will stop the
+    /// controller.
+    fn start(
+        authority: A,
+        listen_addr: IpAddr,
+        config: ControllerConfig,
+        log: slog::Logger,
+    ) -> ControllerHandle<A> {
+        let authority = Arc::new(authority);
+
+        let (event_tx, event_rx) = mpsc::channel();
+        let internal = Self::listen_internal(event_tx.clone(), SocketAddr::new(listen_addr, 0));
+        let checktable = CheckTableServer::start(SocketAddr::new(listen_addr, 0));
+        let external = Self::listen_external(
+            event_tx.clone(),
+            SocketAddr::new(listen_addr, 9000),
+            authority.clone(),
+        );
+
+        let descriptor = ControllerDescriptor {
+            external_addr: external.addr,
+            internal_addr: internal.addr,
+            checktable_addr: checktable,
+            nonce: rand::random(),
+        };
+        let campaign = Self::campaign(event_tx.clone(), authority.clone(), descriptor, config);
+
+        let builder = thread::Builder::new().name("srv-main".to_owned());
+        let join_handle = builder
+            .spawn(move || {
+                let controller = Self {
+                    current_epoch: None,
+                    inner: None,
+                    log,
+                    internal,
+                    external,
+                    checktable,
+                    _campaign: campaign,
+                    listen_addr,
+                    phantom: PhantomData,
+                };
+                controller.main_loop(event_rx)
+            })
+            .unwrap();
+
+        ControllerHandle {
+            url: None,
+            authority,
+            local: Some((event_tx, join_handle)),
+        }
+    }
+
+    fn main_loop(mut self, receiver: Receiver<ControlEvent>) {
+        for event in receiver {
+            match event {
+                ControlEvent::ControllerMessage(msg) => if let Some(ref mut inner) = self.inner {
+                    inner.coordination_message(msg)
+                },
+                ControlEvent::ExternalRequest(method, path, body, reply_tx) => {
+                    if let Some(ref mut inner) = self.inner {
+                        reply_tx
+                            .send(inner.external_request(method, path, body))
+                            .unwrap()
+                    } else {
+                        reply_tx.send(Err(StatusCode::NotFound)).unwrap();
+                    }
+                }
+                ControlEvent::WonLeaderElection(state) => {
+                    self.current_epoch = Some(state.epoch);
+                    self.inner = Some(ControllerInner::new(
+                        self.listen_addr,
+                        self.checktable,
+                        self.log.clone(),
+                        state,
+                    ));
+                }
+                ControlEvent::LostLeadership(new_epoch) => {
+                    self.current_epoch = Some(new_epoch);
+                    self.inner = None;
+                }
+                ControlEvent::Shutdown => break,
+                ControlEvent::Error(e) => panic!("{}", e),
+            }
+        }
+        self.external.stop();
+        self.internal.stop();
+    }
+
+    fn listen_external(
+        event_tx: Sender<ControlEvent>,
+        addr: SocketAddr,
+        authority: Arc<A>,
+    ) -> ServingThread {
+        struct ExternalServer<A: Authority>(Sender<ControlEvent>, Arc<A>);
+        impl<A: Authority> Clone for ExternalServer<A> {
+            // Needed due to #26925
+            fn clone(&self) -> Self {
+                ExternalServer(self.0.clone(), self.1.clone())
+            }
+        }
+        impl<A: Authority> Service for ExternalServer<A> {
+            type Request = Request;
+            type Response = Response;
+            type Error = hyper::Error;
+            type Future = Box<Future<Item = Self::Response, Error = Self::Error>>;
+
+            fn call(&self, req: Request) -> Self::Future {
+                let mut res = Response::new();
+                match (req.method().clone(), req.path().to_owned().as_ref()) {
+                    (Method::Get, "/graph.html") => {
+                        res.headers_mut().set(ContentType::html());
+                        res.set_body(include_str!("graph.html"));
+                        Box::new(futures::future::ok(res))
+                    }
+                    (Method::Get, "/js/layout-worker.js") => {
+                        res.set_body(
+                            "importScripts('https://cdn.rawgit.com/mstefaniuk/graph-viz-d3-js/\
+                             cf2160ee3ca39b843b081d5231d5d51f1a901617/dist/layout-worker.js');",
+                        );
+                        Box::new(futures::future::ok(res))
+                    }
+                    (Method::Get, path) if path.starts_with("/zookeeper/") => {
+                        match self.1.try_read(&format!("/{}", &path[11..])) {
+                            Ok(Some(data)) => {
+                                res.headers_mut().set(ContentType::json());
+                                res.set_body(data);
+                            }
+                            _ => res.set_status(StatusCode::NotFound),
+                        }
+                        Box::new(futures::future::ok(res))
+                    }
+                    (method, path) => {
+                        let path = path.to_owned();
+                        let event_tx = self.0.clone();
+                        Box::new(req.body().concat2().and_then(move |body| {
+                            let body: Vec<u8> = body.iter().cloned().collect();
+                            let (tx, rx) = futures::sync::oneshot::channel();
+                            let _ = event_tx.send(ControlEvent::ExternalRequest(
+                                method,
+                                path,
+                                body,
+                                tx,
+                            ));
+                            rx.and_then(|reply| {
+                                let mut res = Response::new();
+                                match reply {
+                                    Ok(reply) => res.set_body(reply),
+                                    Err(status_code) => {
+                                        res.set_status(status_code);
+                                    }
+                                }
+                                Box::new(futures::future::ok(res))
+                            }).or_else(|futures::Canceled| {
+                                    let mut res = Response::new();
+                                    res.set_status(StatusCode::NotFound);
+                                    Box::new(futures::future::ok(res))
+                                })
+                        }))
+                    }
+                }
+            }
+        }
+        impl<A: Authority> NewService for ExternalServer<A> {
+            type Request = Request;
+            type Response = Response;
+            type Error = hyper::Error;
+            type Instance = Self;
+            fn new_service(&self) -> Result<Self::Instance, io::Error> {
+                Ok(self.clone())
+            }
+        }
+
+        let (tx, rx) = mpsc::channel();
+        let (done_tx, done_rx) = futures::sync::oneshot::channel();
+        let builder = thread::Builder::new().name("srv-ext".to_owned());
+        let join_handle = builder
+            .spawn(move || {
+                let service = ExternalServer(event_tx, authority);
+                let server = Http::new().bind(&addr, service.clone());
+                let server = match server {
+                    Ok(s) => s,
+                    Err(hyper::Error::Io(ref e))
+                        if e.kind() == ErrorKind::AddrInUse && addr.port() != 0 =>
+                    {
+                        Http::new()
+                            .bind(&SocketAddr::new(addr.ip(), 0), service)
+                            .unwrap()
+                    }
+                    Err(e) => panic!("{}", e),
+                };
+
+                let addr = server.local_addr().unwrap();
+                tx.send(addr).unwrap();
+                server.run_until(done_rx.map_err(|_| ())).unwrap();
+            })
+            .unwrap();
+
+        ServingThread {
+            addr: rx.recv().unwrap(),
+            join_handle,
+            stop: Box::new(done_tx),
+        }
+    }
+
+    /// Listen for messages from workers.
+    fn listen_internal(event_tx: Sender<ControlEvent>, addr: SocketAddr) -> ServingThread {
+        let mut done = Arc::new(());
+        let done2 = done.clone();
+        let mut pl: PollingLoop<CoordinationMessage> = PollingLoop::new(addr);
+        let addr = pl.get_listener_addr().unwrap();
+        let builder = thread::Builder::new().name("srv-int".to_owned());
+        let join_handle = builder
+            .spawn(move || {
+                pl.run_polling_loop(move |e| {
+                    if Arc::get_mut(&mut done).is_some() {
+                        return ProcessResult::StopPolling;
+                    }
+
+                    match e {
+                        PollEvent::ResumePolling(timeout) => {
+                            *timeout = Some(Duration::from_millis(100));
+                        }
+                        PollEvent::Process(msg) => {
+                            if event_tx.send(ControlEvent::ControllerMessage(msg)).is_err() {
+                                return ProcessResult::StopPolling;
+                            }
+                        }
+                        PollEvent::Timeout => {}
+                    }
+                    ProcessResult::KeepPolling
+                });
+            })
+            .unwrap();
+
+        ServingThread {
+            addr,
+            join_handle,
+            stop: Box::new(done2),
+        }
+    }
+
+    fn campaign(
+        event_tx: Sender<ControlEvent>,
+        authority: Arc<A>,
+        descriptor: ControllerDescriptor,
+        config: ControllerConfig,
+    ) -> JoinHandle<()> {
+        let descriptor = serde_json::to_vec(&descriptor).unwrap();
+        let campaign_inner = move |event_tx: Sender<ControlEvent>| -> Result<(), Box<Error + Send + Sync>>{
+            loop {
+                // become leader
+                let current_epoch = authority.become_leader(descriptor.clone())?;
+                let state = authority.read_modify_write(
+                    "/state",
+                    |state: Option<ControllerState>| match state {
+                        None => Ok(ControllerState {
+                            config: config.clone(),
+                            epoch: current_epoch,
+                            recipe: (),
+                        }),
+                        Some(ref state) if state.epoch > current_epoch => Err(()),
+                        Some(mut state) => {
+                            state.epoch = current_epoch;
+                            Ok(state)
+                        }
+                    },
+                )?;
+                if state.is_err() {
+                    continue;
+                }
+                if !event_tx
+                    .send(ControlEvent::WonLeaderElection(state.unwrap()))
+                    .is_ok()
+                {
+                    break;
+                }
+
+                // watch for overthrow
+                let new_epoch = authority.await_new_epoch(current_epoch)?;
+                if !event_tx
+                    .send(ControlEvent::LostLeadership(new_epoch))
+                    .is_ok()
+                {
+                    break
+                }
+            }
+            Ok(())
+        };
+
+        thread::Builder::new()
+            .name("srv-zk".to_owned())
+            .spawn(move || {
+                if let Err(e) = campaign_inner(event_tx.clone()) {
+                    let _ = event_tx.send(ControlEvent::Error(e));
+                }
+            })
+            .unwrap()
+    }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use consensus::ZookeeperAuthority;
 
     // Controller without any domains gets dropped once it leaves the scope.
     #[test]
+    #[ignore]
+    #[allow_fail]
     fn it_works_default() {
         // Controller gets dropped. It doesn't have Domains, so we don't see any dropped.
-        ControllerBuilder::default().build();
+        let authority = ZookeeperAuthority::new("127.0.0.1:2181/it_works_default");
+        {
+            let _c = ControllerBuilder::default().build(authority);
+            thread::sleep(Duration::from_millis(100));
+        }
+        thread::sleep(Duration::from_millis(100));
     }
 
     // Controller with a few domains drops them once it leaves the scope.
     #[test]
+    #[allow_fail]
     fn it_works_blender_with_migration() {
-        // use Recipe;
-
         let r_txt = "CREATE TABLE a (x int, y int, z int);\n
                      CREATE TABLE b (r int, s int);\n";
-        // let mut r = Recipe::from_str(r_txt, None).unwrap();
 
-        let c = ControllerBuilder::default().build();
+        let authority = ZookeeperAuthority::new("127.0.0.1:2181/it_works_blender_with_migration");
+        let mut c = ControllerBuilder::default().build(authority);
         c.install_recipe(r_txt.to_owned());
-        // b.migrate(|mig| {
-        //     assert!(r.activate(mig, false).is_ok());
-        // });
+    }
+
+    // Controller without any domains gets dropped once it leaves the scope.
+    #[test]
+    #[ignore]
+    fn it_works_default_local() {
+        // Controller gets dropped. It doesn't have Domains, so we don't see any dropped.
+        {
+            let _c = ControllerBuilder::default().build_local();
+            thread::sleep(Duration::from_millis(100));
+        }
+        thread::sleep(Duration::from_millis(100));
+    }
+
+    // Controller with a few domains drops them once it leaves the scope.
+    #[test]
+    fn it_works_blender_with_migration_local() {
+        let r_txt = "CREATE TABLE a (x int, y int, z int);\n
+                     CREATE TABLE b (r int, s int);\n";
+
+        let mut c = ControllerBuilder::default().build_local();
+        c.install_recipe(r_txt.to_owned());
     }
 }

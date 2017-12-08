@@ -277,7 +277,7 @@ fn check_query(
         .chain(Some(query_name.to_owned() + ": " + &query.select_query))
         .collect();
 
-    let g = ControllerBuilder::default().build();
+    let mut g = ControllerBuilder::default().build_local();
     g.install_recipe(queries.join("\n"));
     let inputs = g.inputs();
     let outputs = g.outputs();
