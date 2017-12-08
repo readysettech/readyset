@@ -46,6 +46,7 @@ use coordination::{CoordinationMessage, CoordinationPayload};
 
 pub use self::mutator::{Mutator, MutatorBuilder, MutatorError};
 pub use self::getter::{Getter, ReadQuery, ReadReply, RemoteGetter, RemoteGetterBuilder};
+pub(crate) use self::getter::LocalOrNot;
 use self::payload::{EgressForBase, IngressFromBase};
 use self::recipe::Recipe;
 
@@ -696,6 +697,13 @@ impl ControllerInner {
                 .map(|i| match self.domains[&domain].assignment(i) {
                     Some(worker) => self.read_addrs[&worker].clone(),
                     None => self.read_listen_addr.clone(),
+                })
+                .map(|a| {
+                    // NOTE: this is where we decide whether assignments are local or not (and
+                    // hence whether we should use LocalBypass). currently, we assume that either
+                    // *all* assignments are local, or *none* are. this is likely to change, at
+                    // which point this has to change too.
+                    (a, self.local_pool.is_some())
                 })
                 .collect();
 
