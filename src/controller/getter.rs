@@ -125,6 +125,7 @@ impl RemoteGetter {
             shard_queries
                 .into_iter()
                 .enumerate()
+                .filter(|&(_, ref keys)| !keys.is_empty())
                 .flat_map(|(shardi, keys)| {
                     let shard = &mut self.shards[shardi];
                     let is_local = shard.is_local();
