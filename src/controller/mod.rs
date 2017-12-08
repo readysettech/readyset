@@ -1,11 +1,11 @@
-use channel::poll::{PollEvent, PollingLoop, ProcessResult, RpcPollingLoop};
+use channel::poll::{PollEvent, PollingLoop, ProcessResult};
 use channel::tcp::TcpSender;
 use channel;
 use dataflow::prelude::*;
 use dataflow::{checktable, node, payload, DomainConfig, PersistenceParameters, Readers};
 use dataflow::ops::base::Base;
 use dataflow::statistics::GraphStats;
-use souplet::Souplet;
+use souplet::readers;
 use worker;
 
 use std::collections::{BTreeMap, HashMap, HashSet};
@@ -480,16 +480,13 @@ impl ControllerInner {
             checktable::CheckTableClient::connect(checktable_addr, client::Options::default())
                 .unwrap();
 
-        let addr = SocketAddr::new(builder.listen_addr.clone(), 0);
         let readers: Readers = Arc::default();
         let readers_clone = readers.clone();
-        let read_polling_loop = RpcPollingLoop::new(addr.clone());
-        let read_listen_addr = read_polling_loop.get_listener_addr().unwrap();
-        let thread_builder = thread::Builder::new().name("wrkr-reads".to_owned());
+        let listener = TcpListener::bind(&SocketAddr::new(builder.listen_addr.clone(), 0)).unwrap();
+        let read_listen_addr = listener.local_addr().unwrap();
+        let thread_builder = thread::Builder::new().name("read-dispatcher".to_owned());
         thread_builder
-            .spawn(move || {
-                Souplet::serve_reads(read_polling_loop, readers_clone)
-            })
+            .spawn(move || readers::serve(listener, readers_clone, 1))
             .unwrap();
 
         let cc = Arc::new(ChannelCoordinator::new());

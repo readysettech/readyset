@@ -324,6 +324,7 @@ extern crate mio;
 extern crate mir;
 extern crate nom_sql;
 extern crate petgraph;
+extern crate rayon;
 #[macro_use]
 #[cfg(feature = "web")]
 extern crate rustful;
