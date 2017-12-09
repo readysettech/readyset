@@ -7,7 +7,7 @@ use dataflow::{self, checktable, LocalBypass, Readers};
 use std::net::SocketAddr;
 
 /// A request to read a specific key.
-#[derive(Serialize, Deserialize)]
+#[derive(Serialize, Deserialize, Debug)]
 pub enum ReadQuery {
     /// Read normally
     Normal {
@@ -59,7 +59,7 @@ impl<T> LocalOrNot<T> {
 }
 
 /// The contents of a specific key
-#[derive(Serialize, Deserialize)]
+#[derive(Serialize, Deserialize, Debug)]
 pub enum ReadReply {
     /// Read normally
     Normal(Vec<Result<Datas, ()>>),
