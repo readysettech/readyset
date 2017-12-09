@@ -282,7 +282,6 @@ pub fn mir_node_to_flow_parts(mir_node: &mut MirNode, mig: &mut Migration) -> Fl
     }
 }
 
-
 pub(crate) fn adapt_base_node(
     over_node: MirNodeRef,
     mig: &mut Migration,
@@ -382,11 +381,7 @@ pub(crate) fn make_base_node(
     };
 
     if transactional {
-        FlowNode::New(mig.add_transactional_base(
-            name,
-            column_names.as_slice(),
-            base,
-        ))
+        FlowNode::New(mig.add_transactional_base(name, column_names.as_slice(), base))
     } else {
         FlowNode::New(mig.add_ingredient(name, column_names.as_slice(), base))
     }
@@ -491,7 +486,6 @@ pub(crate) fn make_grouped_node(
     };
     FlowNode::New(na)
 }
-
 
 pub(crate) fn make_identity_node(
     name: &str,

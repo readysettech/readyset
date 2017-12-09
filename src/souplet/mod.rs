@@ -181,9 +181,10 @@ impl Souplet {
         let local_addr = match self.receiver {
             Some(ref r) => r.get_listener_addr().unwrap(),
             None => {
-                let listener = TcpListener::bind(&SocketAddr::from_str(
-                    &format!("{}:{}", self.listen_addr, self.listen_port),
-                ).unwrap())
+                let listener = TcpListener::bind(&SocketAddr::from_str(&format!(
+                    "{}:{}",
+                    self.listen_addr, self.listen_port
+                )).unwrap())
                     .unwrap();
                 let addr = listener.local_addr().unwrap();
                 self.receiver = Some(PollingLoop::from_listener(listener));

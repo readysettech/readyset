@@ -7,7 +7,6 @@ use mir::query::MirQuery;
 use std::vec::Vec;
 use std::collections::HashMap;
 
-
 /// Implementation of reuse algorithm with relaxed constraints.
 /// While Finkelstein checks if queries are compatible for direct extension,
 /// this algorithm considers the possibility of reuse of internal views.

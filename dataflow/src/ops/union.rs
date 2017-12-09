@@ -251,9 +251,14 @@ impl Ingredient for Union {
 
                 if self.replay_key.is_none() || self.replay_pieces.is_empty() {
                     // no replay going on, so we're done.
-                    return RawProcessingResult::Regular(
-                        self.on_input(from, rs, tracer, None, n, s),
-                    );
+                    return RawProcessingResult::Regular(self.on_input(
+                        from,
+                        rs,
+                        tracer,
+                        None,
+                        n,
+                        s,
+                    ));
                 }
 
                 // partial replays are flowing through us, and at least one piece is being waited
@@ -433,7 +438,6 @@ impl Ingredient for Union {
                         hm
                     },
                 );
-
 
                 // we're going to pull a little hack here for the sake of performance.
                 // (heard that before...)

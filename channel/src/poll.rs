@@ -222,9 +222,10 @@ where
                         .try_recv()
                     {
                         Ok(message) => {
-                            stop = process_event(
-                                GeneralizedPollEvent::ProcessRpc(message, &mut reply),
-                            );
+                            stop = process_event(GeneralizedPollEvent::ProcessRpc(
+                                message,
+                                &mut reply,
+                            ));
                             if let Some(reply) = reply {
                                 match self.inner.rpc_endpoints[endpoint]
                                     .as_mut()

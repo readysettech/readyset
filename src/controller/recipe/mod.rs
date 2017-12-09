@@ -122,8 +122,7 @@ impl Recipe {
                 match na {
                     None => Err(format!(
                         "No query endpoint for \"{}\" exists at v{}.",
-                        name,
-                        self.version
+                        name, self.version
                     )),
                     Some(na) => Ok(na),
                 }
@@ -140,9 +139,7 @@ impl Recipe {
         let lines: Vec<String> = recipe_text
             .lines()
             .map(str::trim)
-            .filter(|l| {
-                !l.is_empty() && !l.starts_with('#') && !l.starts_with("--")
-            })
+            .filter(|l| !l.is_empty() && !l.starts_with('#') && !l.starts_with("--"))
             .map(String::from)
             .collect();
         let cleaned_recipe_text = lines.join("\n");
@@ -401,12 +398,10 @@ impl Recipe {
             return Err(format!("Failed to parse recipe!"));
         }
 
-        Ok(
-            parsed_queries
-                .into_iter()
-                .map(|t| (t.0, t.2.unwrap(), t.3))
-                .collect::<Vec<_>>(),
-        )
+        Ok(parsed_queries
+            .into_iter()
+            .map(|t| (t.0, t.2.unwrap(), t.3))
+            .collect::<Vec<_>>())
     }
 
     /// Returns the predecessor from which this `Recipe` was migrated to.

@@ -56,8 +56,7 @@ impl Node {
             NodeType::Dropped => s.push_str("✗"),
             NodeType::Ingress => s.push_str(&format!(
                 "{{ {{ {} {} }} | (ingress) }}",
-                addr,
-                materialized
+                addr, materialized
             )),
             NodeType::Egress { .. } => s.push_str(&format!("{{ {} | (egress) }}", addr)),
             NodeType::Sharder { .. } => s.push_str(&format!("{{ {} | (sharder) }}", addr)),

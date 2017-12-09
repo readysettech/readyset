@@ -56,7 +56,6 @@ impl<'de, T> Deserialize<'de> for ChannelSender<T> {
     }
 }
 
-
 impl<T> ChannelSender<T> {
     pub fn send(&self, t: T) -> Result<(), SendError<T>> {
         match *self {
@@ -147,9 +146,7 @@ impl<K: Eq + Hash + Clone> ChannelCoordinator<K> {
         size: Option<u32>,
     ) -> Option<(TcpSender<T>, bool)> {
         let val = { self.inner.lock().unwrap().addrs.get(key).cloned() };
-        val.and_then(|(addr, local)| {
-            TcpSender::connect(&addr, size).ok().map(|s| (s, local))
-        })
+        val.and_then(|(addr, local)| TcpSender::connect(&addr, size).ok().map(|s| (s, local)))
     }
 
     pub fn get_tx<T: Serialize>(&self, key: &K) -> Option<(TcpSender<T>, bool)> {

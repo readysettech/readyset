@@ -57,7 +57,6 @@ pub(crate) use self::getter::LocalOrNot;
 use self::payload::{EgressForBase, IngressFromBase};
 use self::recipe::Recipe;
 
-
 pub type WorkerIdentifier = SocketAddr;
 pub type WorkerEndpoint = Arc<Mutex<TcpSender<CoordinationMessage>>>;
 
@@ -286,9 +285,7 @@ impl ControllerInner {
     ) -> Result<(), io::Error> {
         info!(
             self.log,
-            "new worker registered from {:?}, which listens on {:?}",
-            msg.source,
-            remote
+            "new worker registered from {:?}, which listens on {:?}", msg.source, remote
         );
 
         let sender = Arc::new(Mutex::new(TcpSender::connect(remote, None)?));
@@ -310,7 +307,6 @@ impl ControllerInner {
             self.last_checked_workers = Instant::now();
         }
     }
-
 
     fn handle_heartbeat(&mut self, msg: &CoordinationMessage) -> Result<(), io::Error> {
         match self.workers.get_mut(&msg.source) {
@@ -355,7 +351,6 @@ impl ControllerInner {
         thread_builder
             .spawn(move || Souplet::serve_reads(read_polling_loop, readers_clone))
             .unwrap();
-
 
         let mut materializations = migrate::materialization::Materializations::new(&log);
         if !state.config.partial_enabled {
@@ -599,7 +594,6 @@ impl ControllerInner {
         } else {
             is_primary = true;
         }
-
 
         let txs = (0..self.domains[&node.domain()].shards())
             .map(|i| {
@@ -989,7 +983,6 @@ impl<'a> Migration<'a> {
             Err(tx) => tx,
         };
 
-
         // Otherwise, send a message to the reader's domain to have it add the streamer.
         let reader = &self.mainline.ingredients[self.readers[&n]];
         self.mainline
@@ -1261,7 +1254,6 @@ impl<'a> Migration<'a> {
             );
             mainline.domains.insert(domain, d);
         }
-
 
         // Add any new nodes to existing domains (they'll also ignore all updates for now)
         debug!(log, "mutating existing domains");
@@ -1714,10 +1706,10 @@ impl<A: Authority + 'static> Controller<A> {
                                 }
                                 Box::new(futures::future::ok(res))
                             }).or_else(|futures::Canceled| {
-                                    let mut res = Response::new();
-                                    res.set_status(StatusCode::NotFound);
-                                    Box::new(futures::future::ok(res))
-                                })
+                                let mut res = Response::new();
+                                res.set_status(StatusCode::NotFound);
+                                Box::new(futures::future::ok(res))
+                            })
                         }))
                     }
                 }
@@ -1809,46 +1801,47 @@ impl<A: Authority + 'static> Controller<A> {
         config: ControllerConfig,
     ) -> JoinHandle<()> {
         let descriptor = serde_json::to_vec(&descriptor).unwrap();
-        let campaign_inner = move |event_tx: Sender<ControlEvent>| -> Result<(), Box<Error + Send + Sync>>{
-            loop {
-                // become leader
-                let current_epoch = authority.become_leader(descriptor.clone())?;
-                let state = authority.read_modify_write(
-                    "/state",
-                    |state: Option<ControllerState>| match state {
-                        None => Ok(ControllerState {
-                            config: config.clone(),
-                            epoch: current_epoch,
-                            recipe: (),
-                        }),
-                        Some(ref state) if state.epoch > current_epoch => Err(()),
-                        Some(mut state) => {
-                            state.epoch = current_epoch;
-                            Ok(state)
-                        }
-                    },
-                )?;
-                if state.is_err() {
-                    continue;
-                }
-                if !event_tx
-                    .send(ControlEvent::WonLeaderElection(state.unwrap()))
-                    .is_ok()
-                {
-                    break;
-                }
+        let campaign_inner =
+            move |event_tx: Sender<ControlEvent>| -> Result<(), Box<Error + Send + Sync>> {
+                loop {
+                    // become leader
+                    let current_epoch = authority.become_leader(descriptor.clone())?;
+                    let state = authority.read_modify_write(
+                        "/state",
+                        |state: Option<ControllerState>| match state {
+                            None => Ok(ControllerState {
+                                config: config.clone(),
+                                epoch: current_epoch,
+                                recipe: (),
+                            }),
+                            Some(ref state) if state.epoch > current_epoch => Err(()),
+                            Some(mut state) => {
+                                state.epoch = current_epoch;
+                                Ok(state)
+                            }
+                        },
+                    )?;
+                    if state.is_err() {
+                        continue;
+                    }
+                    if !event_tx
+                        .send(ControlEvent::WonLeaderElection(state.unwrap()))
+                        .is_ok()
+                    {
+                        break;
+                    }
 
-                // watch for overthrow
-                let new_epoch = authority.await_new_epoch(current_epoch)?;
-                if !event_tx
-                    .send(ControlEvent::LostLeadership(new_epoch))
-                    .is_ok()
-                {
-                    break
+                    // watch for overthrow
+                    let new_epoch = authority.await_new_epoch(current_epoch)?;
+                    if !event_tx
+                        .send(ControlEvent::LostLeadership(new_epoch))
+                        .is_ok()
+                    {
+                        break;
+                    }
                 }
-            }
-            Ok(())
-        };
+                Ok(())
+            };
 
         thread::Builder::new()
             .name("srv-zk".to_owned())

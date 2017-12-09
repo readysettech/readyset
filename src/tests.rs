@@ -527,7 +527,6 @@ fn it_recovers_persisted_logs_w_multiple_nodes() {
             QUERY CID: SELECT id FROM C WHERE id = ?;
         ";
 
-
         let recipe = g.migrate(|mig| {
             let mut recipe = Recipe::from_str(&sql, None).unwrap();
             recipe.activate(mig, false).unwrap();
@@ -851,9 +850,8 @@ fn votes() {
     // check that article 1 appears in the join view with a vote count of one
     let res = endq.lookup(&a1, true).unwrap();
     assert!(
-        res.iter().any(|r| {
-            r[0] == a1.clone() && r[1] == 2.into() && r[2] == 1.into()
-        }),
+        res.iter()
+            .any(|r| { r[0] == a1.clone() && r[1] == 2.into() && r[2] == 1.into() }),
         "no entry for [1,2,1|2] in {:?}",
         res
     );
@@ -1006,9 +1004,8 @@ fn transactional_vote() {
     let res = endq.transactional_lookup(&a1).unwrap().0;
     assert_eq!(res.len(), 1);
     assert!(
-        res.iter().any(|r| {
-            r[0] == a1.clone() && r[1] == 2.into() && r[2] == 1.into()
-        }),
+        res.iter()
+            .any(|r| { r[0] == a1.clone() && r[1] == 2.into() && r[2] == 1.into() }),
         "no entry for [1,2,1|2] in {:?}",
         res
     );
@@ -1399,9 +1396,7 @@ fn replay_during_replay() {
 fn full_aggregation_with_bogokey() {
     // set up graph
     let mut g = ControllerBuilder::default().build_inner();
-    let base = g.migrate(|mig| {
-        mig.add_ingredient("base", &["x"], Base::new(vec![1.into()]))
-    });
+    let base = g.migrate(|mig| mig.add_ingredient("base", &["x"], Base::new(vec![1.into()])));
 
     // add an aggregation over the base with a bogo key.
     // in other words, the aggregation is across all rows.

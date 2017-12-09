@@ -114,7 +114,11 @@ impl Authority for ZookeeperAuthority {
         }
     }
 
-    fn read_modify_write<F, P, E>(&self, path: &str, mut f: F) -> Result<Result<P, E>, Box<Error + Send + Sync>>
+    fn read_modify_write<F, P, E>(
+        &self,
+        path: &str,
+        mut f: F,
+    ) -> Result<Result<P, E>, Box<Error + Send + Sync>>
     where
         F: FnMut(Option<P>) -> Result<P, E>,
         P: Serialize + DeserializeOwned,

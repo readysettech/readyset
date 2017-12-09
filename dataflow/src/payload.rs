@@ -532,7 +532,6 @@ impl ControlReplyPacket {
     }
 }
 
-
 pub struct LocalBypass<T>(*mut T);
 
 impl<T> LocalBypass<T> {

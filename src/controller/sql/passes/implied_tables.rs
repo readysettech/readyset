@@ -60,8 +60,7 @@ fn set_table(mut f: Column, table: &Table) -> Column {
         None => match f.function {
             Some(ref mut f) => panic!(
                 "set_table({}) invoked on computed column {:?}",
-                table.name,
-                f
+                table.name, f
             ),
             None => Some(table.name.clone()),
         },
@@ -157,7 +156,6 @@ fn rewrite_selection(
         };
         f
     };
-
 
     let mut tables: Vec<Table> = sq.tables.clone();
     // tables mentioned in JOINs are also available for expansion

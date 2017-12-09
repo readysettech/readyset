@@ -46,7 +46,11 @@ pub trait Authority: Send + Sync {
     /// and finally a write back to the node if it hasn't changed from when it was originally
     /// written. The process aborts when a write succeeds or a call to `f` returns `Err`. In either
     /// case, returns the last value produced by `f`.
-    fn read_modify_write<F, P, E>(&self, key: &str, f: F) -> Result<Result<P, E>, Box<Error + Send + Sync>>
+    fn read_modify_write<F, P, E>(
+        &self,
+        key: &str,
+        f: F,
+    ) -> Result<Result<P, E>, Box<Error + Send + Sync>>
     where
         F: FnMut(Option<P>) -> Result<P, E>,
         P: Serialize + DeserializeOwned;

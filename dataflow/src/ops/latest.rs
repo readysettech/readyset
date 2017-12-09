@@ -285,7 +285,6 @@ mod tests {
         assert_eq!(idx[&me], (vec![1], true));
     }
 
-
     #[test]
     fn it_resolves() {
         let c = setup(1, false);
