@@ -853,17 +853,17 @@ impl SqlToMirConverter {
                     } else {
                         c.table.clone()
                     },
-                    alias: Some(a.clone()),
+                    alias: None,
                     function: c.function.clone(),
                 },
                 None => {
-                    let mut c = c.clone();
                     // if this is the leaf node of a query, it represents a view, so we rewrite the
                     // table name here.
                     if is_leaf {
-                        c.table = Some(String::from(name))
+                        sanitize_leaf_column(c.clone(), name)
+                    } else {
+                        c.clone()
                     }
-                    c
                 }
             })
             .chain(names.into_iter().map(|n| {
