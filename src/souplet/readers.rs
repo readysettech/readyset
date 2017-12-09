@@ -88,7 +88,7 @@ pub(crate) fn serve(
             continue;
         }
 
-        for e in &events {
+        'events: for e in &events {
             assert!(e.readiness().is_readable());
             let Token(t) = e.token();
 
@@ -117,7 +117,7 @@ pub(crate) fn serve(
                         // connection was dropped
                         conns_tokens.remove(tok);
                         if tok == t {
-                            unimplemented!();
+                            continue 'events;
                         }
                     }
                 }
