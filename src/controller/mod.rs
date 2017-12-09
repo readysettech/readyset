@@ -18,6 +18,7 @@ use std::net::{IpAddr, SocketAddr};
 use std::time::{Duration, Instant};
 use std::thread::{self, JoinHandle};
 use std::sync::{Arc, Mutex};
+use std::sync::atomic;
 use std::sync::mpsc::{self, Receiver, Sender};
 use std::{io, time};
 
@@ -209,6 +210,7 @@ pub struct ControllerInner {
 
     listen_addr: IpAddr,
     read_listen_addr: SocketAddr,
+    reader_exit: Arc<atomic::AtomicBool>,
     readers: Readers,
 
     /// Map from worker address to the address the worker is listening on for reads.
@@ -347,13 +349,17 @@ impl ControllerInner {
                 .unwrap();
 
         let readers: Readers = Arc::default();
-        let readers_clone = readers.clone();
         let listener = TcpListener::bind(&SocketAddr::new(listen_addr, 0)).unwrap();
         let read_listen_addr = listener.local_addr().unwrap();
         let thread_builder = thread::Builder::new().name("read-dispatcher".to_owned());
-        thread_builder
-            .spawn(move || readers::serve(listener, readers_clone, 1))
-            .unwrap();
+        let reader_exit = Arc::new(atomic::AtomicBool::new(false));
+        {
+            let readers = readers.clone();
+            let reader_exit = reader_exit.clone();
+            thread_builder
+                .spawn(move || readers::serve(listener, readers, 1, reader_exit))
+                .unwrap();
+        }
 
 
         let mut materializations = migrate::materialization::Materializations::new(&log);
@@ -402,6 +408,7 @@ impl ControllerInner {
 
             readers,
             read_listen_addr,
+            reader_exit,
             read_addrs: HashMap::default(),
             workers: HashMap::default(),
 
@@ -1345,6 +1352,7 @@ impl<'a> Migration<'a> {
 
 impl Drop for ControllerInner {
     fn drop(&mut self) {
+        self.reader_exit.store(true, atomic::Ordering::SeqCst);
         for (_, d) in &mut self.domains {
             // XXX: this is a terrible ugly hack to ensure that all workers exit
             for _ in 0..100 {

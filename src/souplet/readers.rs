@@ -8,11 +8,12 @@ use dataflow::prelude::*;
 use std::io;
 use std::sync::{Arc, Mutex};
 use std::cell::RefCell;
+use std::time::Duration;
 use rayon;
 use mio::{Events, Poll, PollOpt, Ready, Token};
 use slab::Slab;
 use vec_map::VecMap;
-use std::sync::mpsc;
+use std::sync::{atomic, mpsc};
 
 use controller::{LocalOrNot, ReadQuery, ReadReply};
 
@@ -34,7 +35,12 @@ thread_local! {
 }
 
 /// Use the given polling loop and readers object to serve reads.
-pub(crate) fn serve(listener: ::mio::net::TcpListener, readers: Readers, pool_size: usize) {
+pub(crate) fn serve(
+    listener: ::mio::net::TcpListener,
+    readers: Readers,
+    pool_size: usize,
+    exit: Arc<atomic::AtomicBool>,
+) {
     let mut conns_tokens: Slab<()> = Slab::new();
     let mut conns: VecMap<Rpc> = Default::default();
 
@@ -63,8 +69,8 @@ pub(crate) fn serve(listener: ::mio::net::TcpListener, readers: Readers, pool_si
         .unwrap();
 
     let mut events = Events::with_capacity(10);
-    loop {
-        if let Err(e) = poll.poll(&mut events, None) {
+    while !exit.load(atomic::Ordering::SeqCst) {
+        if let Err(e) = poll.poll(&mut events, Some(Duration::from_secs(1))) {
             if e.kind() == io::ErrorKind::Interrupted {
                 // spurious wakeup
                 continue;

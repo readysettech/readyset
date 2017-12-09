@@ -4,7 +4,7 @@ use std::net::SocketAddr;
 use mio::net::TcpListener;
 use std::time::{Duration, Instant};
 use std::thread;
-use std::sync::{Arc, Mutex};
+use std::sync::{atomic, Arc, Mutex};
 
 use channel::{self, TcpSender};
 use channel::poll::{PollEvent, PollingLoop, ProcessResult};
@@ -31,6 +31,7 @@ pub struct Souplet {
 
     // Read RPC handling
     read_listen_addr: SocketAddr,
+    reader_exit: Arc<atomic::AtomicBool>,
 
     receiver: Option<PollingLoop<CoordinationMessage>>,
     sender: Option<TcpSender<CoordinationMessage>>,
@@ -54,15 +55,18 @@ impl Souplet {
     ) -> Self {
         let readers = Arc::new(Mutex::new(HashMap::new()));
 
-        let readers_clone = readers.clone();
-
         let listener =
             TcpListener::bind(&SocketAddr::new(listen_addr.parse().unwrap(), 0)).unwrap();
         let read_listen_addr = listener.local_addr().unwrap();
         let builder = thread::Builder::new().name("read-dispatcher".to_owned());
-        builder
-            .spawn(move || readers::serve(listener, readers_clone, 1))
-            .unwrap();
+        let reader_exit = Arc::new(atomic::AtomicBool::new(false));
+        {
+            let readers = readers.clone();
+            let reader_exit = reader_exit.clone();
+            builder
+                .spawn(move || readers::serve(listener, readers, 1, reader_exit))
+                .unwrap();
+        }
         println!("Listening for reads on {:?}", read_listen_addr);
 
         let mut checktable_addr: SocketAddr = controller.parse().unwrap();
@@ -81,6 +85,7 @@ impl Souplet {
             controller_addr: String::from(controller),
 
             read_listen_addr,
+            reader_exit,
 
             receiver: None,
             sender: None,
@@ -259,6 +264,7 @@ impl Souplet {
 
 impl Drop for Souplet {
     fn drop(&mut self) {
+        self.reader_exit.store(true, atomic::Ordering::SeqCst);
         self.pool.wait()
     }
 }
