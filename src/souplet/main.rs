@@ -18,6 +18,7 @@ struct Config {
     pub addr: String,
     pub port: u16,
     pub workers: usize,
+    pub readers: usize,
     pub controller: Option<String>,
     pub heartbeat_freq: u64,
     pub healthcheck_freq: u64,
@@ -53,6 +54,14 @@ fn parse_args(_log: &Logger) -> Config {
                 .takes_value(true)
                 .default_value("1")
                 .help("Number of worker threads to spin up"),
+        )
+        .arg(
+            Arg::with_name("readers")
+                .short("r")
+                .long("readers")
+                .takes_value(true)
+                .default_value("1")
+                .help("Number of reader threads to spin up"),
         )
         .arg(
             Arg::with_name("heartbeat_frequency")
@@ -106,6 +115,7 @@ fn parse_args(_log: &Logger) -> Config {
         addr: String::from(matches.value_of("listen_addr").unwrap()),
         port: value_t_or_exit!(matches, "port", u16),
         workers: value_t_or_exit!(matches, "workers", usize),
+        readers: value_t_or_exit!(matches, "readers", usize),
         controller: match matches.value_of("mode") {
             Some("controller") => None,
             Some("worker") => Some(String::from(matches.value_of("controller").unwrap())),
@@ -164,6 +174,7 @@ fn main() {
                 config.port,
                 Duration::from_millis(config.heartbeat_freq),
                 config.workers,
+                config.readers,
                 log.clone(),
             );
             loop {

@@ -51,6 +51,7 @@ impl Souplet {
         port: u16,
         heartbeat_every: Duration,
         workers: usize,
+        nreaders: usize,
         log: Logger,
     ) -> Self {
         let readers = Arc::new(Mutex::new(HashMap::new()));
@@ -64,7 +65,7 @@ impl Souplet {
             let readers = readers.clone();
             let reader_exit = reader_exit.clone();
             builder
-                .spawn(move || readers::serve(listener, readers, 1, reader_exit))
+                .spawn(move || readers::serve(listener, readers, nreaders, reader_exit))
                 .unwrap();
         }
         println!("Listening for reads on {:?}", read_listen_addr);

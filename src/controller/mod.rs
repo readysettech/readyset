@@ -143,6 +143,11 @@ impl ControllerBuilder {
         self.config.nworkers = workers;
     }
 
+    /// Set how many threads should be set up when operating in local mode.
+    pub fn set_local_read_threads(&mut self, n: usize) {
+        self.config.nreaders = n;
+    }
+
     /// Set the IP address that the controller should use for listening.
     pub fn set_listen_addr(&mut self, listen_addr: IpAddr) {
         self.listen_addr = listen_addr;
@@ -345,6 +350,7 @@ impl ControllerInner {
                 .unwrap();
 
         let readers: Readers = Arc::default();
+        let nreaders = state.config.nreaders;
         let listener = TcpListener::bind(&SocketAddr::new(listen_addr, 0)).unwrap();
         let read_listen_addr = listener.local_addr().unwrap();
         let thread_builder = thread::Builder::new().name("read-dispatcher".to_owned());
@@ -353,7 +359,7 @@ impl ControllerInner {
             let readers = readers.clone();
             let reader_exit = reader_exit.clone();
             thread_builder
-                .spawn(move || readers::serve(listener, readers, 1, reader_exit))
+                .spawn(move || readers::serve(listener, readers, nreaders, reader_exit))
                 .unwrap();
         }
 
@@ -1497,6 +1503,7 @@ struct ControllerConfig {
     healthcheck_every: Duration,
     local_workers: usize,
     nworkers: usize,
+    nreaders: usize,
 }
 impl Default for ControllerConfig {
     fn default() -> Self {
@@ -1519,6 +1526,7 @@ impl Default for ControllerConfig {
             #[cfg(not(test))]
             local_workers: 0,
             nworkers: 0,
+            nreaders: 1,
         }
     }
 }
