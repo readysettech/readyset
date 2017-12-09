@@ -142,11 +142,11 @@ fn handle_conn(token: usize, mut conn: Rpc) {
                 Err(TryRecvError::Empty) => break,
                 Err(TryRecvError::DeserializationError(..)) => {
                     // XXX
-                    tx.send((token, None)).unwrap();
+                    tx.send((token, None)).is_ok();
                     return;
                 }
                 Err(TryRecvError::Disconnected) => {
-                    tx.send((token, None)).unwrap();
+                    tx.send((token, None)).is_ok();
                     return;
                 }
             }
@@ -168,7 +168,7 @@ fn handle_conn(token: usize, mut conn: Rpc) {
                 .unwrap()
         });
 
-        tx.send((token, Some(conn))).unwrap();
+        tx.send((token, Some(conn))).is_ok();
     });
 }
 
