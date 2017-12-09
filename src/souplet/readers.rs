@@ -50,7 +50,7 @@ pub(crate) fn serve(
         &listener,
         Token(listen_token),
         Ready::readable(),
-        PollOpt::level() | PollOpt::oneshot(),
+        PollOpt::level(),
     ).unwrap();
 
     let (tx, rx) = mpsc::channel();
