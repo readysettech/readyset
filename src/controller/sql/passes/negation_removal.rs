@@ -81,8 +81,8 @@ mod tests {
 
     #[test]
     fn it_normalizes() {
-        let mut expr = ConditionExpression::NegationOp(
-            Box::new(ConditionExpression::LogicalOp(ConditionTree {
+        let mut expr = ConditionExpression::NegationOp(Box::new(ConditionExpression::LogicalOp(
+            ConditionTree {
                 operator: Operator::And,
                 left: Box::new(ConditionExpression::ComparisonOp(ConditionTree {
                     operator: Operator::Less,
@@ -94,8 +94,8 @@ mod tests {
                     left: Box::new(ConditionExpression::Base(ConditionBase::Field("c".into()))),
                     right: Box::new(ConditionExpression::Base(ConditionBase::Field("b".into()))),
                 })),
-            })),
-        );
+            },
+        )));
 
         let target = ConditionExpression::LogicalOp(ConditionTree {
             operator: Operator::Or,

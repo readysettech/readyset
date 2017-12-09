@@ -74,18 +74,20 @@ impl Authority for LocalAuthority {
         Ok(inner.keys.get(path).cloned())
     }
 
-    fn read_modify_write<F, P, E>(&self, path: &str, mut f: F) -> Result<Result<P, E>, Box<Error + Send + Sync>>
+    fn read_modify_write<F, P, E>(
+        &self,
+        path: &str,
+        mut f: F,
+    ) -> Result<Result<P, E>, Box<Error + Send + Sync>>
     where
         F: FnMut(Option<P>) -> Result<P, E>,
         P: Serialize + DeserializeOwned,
     {
         let mut inner = self.inner.lock().unwrap();
-        let r = f(
-            inner
-                .keys
-                .get(path)
-                .map(|data| serde_json::from_slice(data).unwrap()),
-        );
+        let r = f(inner
+            .keys
+            .get(path)
+            .map(|data| serde_json::from_slice(data).unwrap()));
         if let Ok(ref p) = r {
             inner
                 .keys

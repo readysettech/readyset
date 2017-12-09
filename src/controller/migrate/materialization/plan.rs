@@ -215,7 +215,6 @@ impl<'a> Plan<'a> {
                     }
                 }
 
-
                 if let Some(ref key) = partial {
                     // for partial materializations, nodes need to know how to trigger replays
                     if let box Packet::SetupReplayPath {
@@ -334,9 +333,7 @@ impl<'a> Plan<'a> {
                 if self.partial {
                     let indices = self.tags
                         .drain()
-                        .map(|(k, paths)| {
-                            (k, paths.into_iter().map(|(tag, _)| tag).collect())
-                        })
+                        .map(|(k, paths)| (k, paths.into_iter().map(|(tag, _)| tag).collect()))
                         .collect();
                     InitialState::PartialLocal(indices)
                 } else {

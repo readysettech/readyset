@@ -81,9 +81,7 @@ impl RemoteGetterBuilder {
             node: self.node,
             shards: self.shards
                 .iter()
-                .map(|&(ref addr, is_local)| {
-                    RpcClient::connect(addr, is_local).unwrap()
-                })
+                .map(|&(ref addr, is_local)| RpcClient::connect(addr, is_local).unwrap())
                 .collect(),
         }
     }

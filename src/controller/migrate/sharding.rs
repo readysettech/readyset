@@ -232,7 +232,6 @@ pub fn shard(
                 continue;
             }
 
-
             if need_sharding.is_empty() {
                 // a node that doesn't need any sharding, yet has multiple parents. must be a
                 // union. if this single output column (which resolves to a column in all our
@@ -511,9 +510,7 @@ pub fn shard(
     // arriving at the second sharding, and the merged sharder will ensure that nshards is set
     // correctly.
     let sharded_sharders: Vec<_> = new.iter()
-        .filter(|&&n| {
-            graph[n].is_sharder() && !graph[n].sharded_by().is_none()
-        })
+        .filter(|&&n| graph[n].is_sharder() && !graph[n].sharded_by().is_none())
         .cloned()
         .collect();
     for n in sharded_sharders {

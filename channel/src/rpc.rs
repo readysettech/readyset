@@ -20,7 +20,6 @@ pub struct RpcClient<Q, R> {
     is_local: bool,
 }
 
-
 impl<Q: Serialize, R> RpcClient<Q, R>
 where
     for<'de> R: Deserialize<'de>,

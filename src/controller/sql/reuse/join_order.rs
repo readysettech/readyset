@@ -125,7 +125,6 @@ fn from_join_ref<'a>(jref: &JoinRef, qg: &'a QueryGraph) -> &'a ConditionTree {
     }
 }
 
-
 pub fn reorder_joins(qg: &mut QueryGraph, reuse_candidates: &Vec<(ReuseType, (u64, &QueryGraph))>) {
     let mut join_chains = Vec::new();
     // For each reuse candidate, let's find the common join
