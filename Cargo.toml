@@ -33,7 +33,7 @@ tokio-core = "0.1.8"
 slab = "0.4"
 
 vec_map = { version = "0.8.0", features = ["eders"] }
-timer_heap = "0.1.1"
+timer_heap = "0.2.0"
 serde = { version = "1.0.8", features = ["rc"] }
 
 # git deps
