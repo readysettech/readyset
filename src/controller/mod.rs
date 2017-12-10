@@ -1358,6 +1358,16 @@ pub struct ControllerHandle<A: Authority> {
     local: Option<(Sender<ControlEvent>, JoinHandle<()>)>,
 }
 impl<A: Authority> ControllerHandle<A> {
+    /// Creates a `ControllerHandle` that bootstraps a connection to Soup via the configuration
+    /// stored in the `Authority` passed as an argument.
+    pub fn new(authority: A) -> Self {
+        ControllerHandle {
+            url: None,
+            authority: Arc::new(authority),
+            local: None,
+        }
+    }
+
     fn rpc<Q: Serialize, R: DeserializeOwned>(&mut self, path: &str, request: &Q) -> R {
         let mut core = Core::new().unwrap();
         let client = Client::new(&core.handle());
