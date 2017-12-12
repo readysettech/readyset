@@ -31,23 +31,27 @@ fn main() {
             Arg::with_name("local_workers")
                 .long("local-workers")
                 .takes_value(true)
-                .default_value("1")
+                .value_name("COUNT")
+                .conflicts_with("remote_workers")
+                .required_unless("remote_workers")
                 .help("Number of local workers."),
         )
         .arg(
-            Arg::with_name("workers")
+            Arg::with_name("remote_workers")
                 .short("w")
-                .long("workers")
+                .long("remote-workers")
                 .takes_value(true)
-                .default_value("0")
+                .value_name("COUNT")
+                .conflicts_with("local_workers")
+                .required_unless("local_workers")
                 .help("Number of workers we expect to connect."),
         )
         .get_matches();
 
     let listen_addr = matches.value_of("address").unwrap().parse().unwrap();
     let zookeeper_addr = matches.value_of("zookeeper").unwrap();
-    let local_workers = value_t_or_exit!(matches, "local_workers", usize);
-    let remote_workers = value_t_or_exit!(matches, "workers", usize);
+    let local_workers = value_t!(matches, "local_workers", usize).unwrap_or(0);
+    let remote_workers = value_t!(matches, "remote_workers", usize).unwrap_or(0);
 
     let authority = ZookeeperAuthority::new(&zookeeper_addr);
     let mut builder = ControllerBuilder::default();
