@@ -1,109 +1,112 @@
+extern crate mysql;
 #[macro_use]
 extern crate nom;
 
-const U24_MAX: usize = 16777215;
+use mysql::consts::{CapabilityFlags, Command as CommandByte};
+
+mod packet;
+
+pub use packet::packet;
+
+#[derive(Debug)]
+pub struct ClientHandshake<'a> {
+    capabilities: mysql::consts::CapabilityFlags,
+    maxps: u32,
+    collation: u16,
+    username: &'a [u8],
+}
 
 named!(
-    fullpacket<(u8, &[u8])>,
+    pub client_handshake<ClientHandshake>,
     do_parse!(
-        tag!(&[0xff, 0xff, 0xff]) >> seq: take!(1) >> bytes: take!(U24_MAX) >> (seq[0], bytes)
+        cap: apply!(nom::le_u32,) >>
+        maxps: apply!(nom::le_u32,) >>
+        collation: take!(1) >>
+        take!(23) >>
+        username: take_until!(&b"\0"[..]) >>
+        tag!(b"\0") >> //rustfmt
+        (ClientHandshake {
+            capabilities: CapabilityFlags::from_bits_truncate(cap),
+            maxps,
+            collation: u16::from(collation[0]),
+            username,
+        })
+    )
+);
+
+#[derive(Debug, PartialEq, Eq)]
+pub enum Command<'a> {
+    Query(&'a [u8]),
+    Init(&'a [u8]),
+}
+
+named!(
+    pub command<Command>,
+    alt!(
+        preceded!(tag!(&[CommandByte::COM_QUERY as u8]), apply!(nom::rest,)) => { |sql| Command::Query(sql) } |
+        preceded!(tag!(&[CommandByte::COM_INIT_DB as u8]), apply!(nom::rest,)) => { |db| Command::Init(db) }
     )
 );
 
 named!(
-    onepacket<(u8, &[u8])>,
-    map!(length_bytes!(map!(nom::le_u24, |i| i + 1)), |b| {
-        (b[0], &b[1..])
-    })
-);
-
-named!(
-    pub packet<(u8, Vec<&[u8]>)>,
-    do_parse!(
-        full:
-            fold_many0!(
-                fullpacket,
-                (0, Vec::new()),
-                |(seq, mut bufs): (u8, Vec<_>), (nseq, buf)| {
-                    if !bufs.is_empty() {
-                        assert_eq!(nseq, seq + 1);
-                    }
-                    bufs.push(buf);
-                    (nseq, bufs)
-                }
-            ) >> last: onepacket >> ({
-            if !full.1.is_empty() {
-                assert_eq!(last.0, full.0 + 1);
-            }
-            let mut buffs = full.1;
-            let seq = last.0;
-            if !last.1.is_empty() {
-                buffs.push(last.1);
-            }
-            (seq, buffs)
-        })
+    pub lenencint<Option<i64>>,
+    alt!(
+        tag!(&[0xFB]) => { |_| None } |
+        preceded!(tag!(&[0xFC]), apply!(nom::le_i16,)) => { |i| Some(i64::from(i)) } |
+        preceded!(tag!(&[0xFD]), apply!(nom::le_i24,)) => { |i| Some(i64::from(i)) } |
+        preceded!(tag!(&[0xFC]), apply!(nom::le_i64,)) => { |i| Some(i) } |
+        take!(1) => { |i: &[u8]| Some(i64::from(i[0])) }
     )
 );
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use mysql::consts::{CapabilityFlags, UTF8_GENERAL_CI};
 
     #[test]
-    fn test_one_ping() {
-        assert_eq!(
-            onepacket(&[0x01, 0, 0, 0, 0x10]).unwrap().1,
-            (0, &[0x10][..])
+    fn it_parses_handshake() {
+        let data = &[
+            0x25, 0x00, 0x00, 0x01, 0x85, 0xa6, 0x3f, 0x20, 0x00, 0x00, 0x00, 0x01, 0x21, 0x00,
+            0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+            0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x6a, 0x6f, 0x6e, 0x00, 0x00,
+        ];
+        let (_, p) = packet(&data[..]).unwrap();
+        let (_, handshake) = client_handshake(&p.1).unwrap();
+        println!("{:?}", handshake);
+        assert!(
+            handshake
+                .capabilities
+                .contains(CapabilityFlags::CLIENT_LONG_PASSWORD)
         );
-    }
-
-    #[test]
-    fn test_ping() {
-        assert_eq!(
-            packet(&[0x01, 0, 0, 0, 0x10]).unwrap().1,
-            (0, vec![&[0x10][..]])
+        assert!(
+            handshake
+                .capabilities
+                .contains(CapabilityFlags::CLIENT_MULTI_RESULTS)
         );
+        assert!(!handshake
+            .capabilities
+            .contains(CapabilityFlags::CLIENT_CONNECT_WITH_DB));
+        assert!(!handshake
+            .capabilities
+            .contains(CapabilityFlags::CLIENT_DEPRECATE_EOF));
+        assert_eq!(handshake.collation, UTF8_GENERAL_CI);
+        assert_eq!(handshake.username, &b"jon"[..]);
+        assert_eq!(handshake.maxps, 16777216);
     }
 
     #[test]
-    fn test_long_exact() {
-        let mut data = Vec::new();
-        data.push(0xff);
-        data.push(0xff);
-        data.push(0xff);
-        data.push(0);
-        data.extend(&[0; U24_MAX][..]);
-        data.push(0x00);
-        data.push(0x00);
-        data.push(0x00);
-        data.push(1);
-
-        let (rest, p) = packet(&data[..]).unwrap();
-        assert!(rest.is_empty());
-        assert_eq!(p.0, 1);
-        assert_eq!(p.1.len(), 1);
-        assert_eq!(p.1[0], &[0; U24_MAX][..]);
-    }
-
-    #[test]
-    fn test_long_more() {
-        let mut data = Vec::new();
-        data.push(0xff);
-        data.push(0xff);
-        data.push(0xff);
-        data.push(0);
-        data.extend(&[0; U24_MAX][..]);
-        data.push(0x01);
-        data.push(0x00);
-        data.push(0x00);
-        data.push(1);
-        data.push(0x10);
-
-        let (rest, p) = packet(&data[..]).unwrap();
-        assert!(rest.is_empty());
-        assert_eq!(p.0, 1);
-        assert_eq!(p.1.len(), 2);
-        assert_eq!(p.1[0], &[0; U24_MAX][..]);
-        assert_eq!(p.1[1], &[0x10][..]);
+    fn it_parses_request() {
+        let data = &[
+            0x21, 0x00, 0x00, 0x00, 0x03, 0x73, 0x65, 0x6c, 0x65, 0x63, 0x74, 0x20, 0x40, 0x40,
+            0x76, 0x65, 0x72, 0x73, 0x69, 0x6f, 0x6e, 0x5f, 0x63, 0x6f, 0x6d, 0x6d, 0x65, 0x6e,
+            0x74, 0x20, 0x6c, 0x69, 0x6d, 0x69, 0x74, 0x20, 0x31,
+        ];
+        let (_, p) = packet(&data[..]).unwrap();
+        let (_, cmd) = command(&p.1).unwrap();
+        assert_eq!(
+            cmd,
+            Command::Query(&b"select @@version_comment limit 1"[..])
+        );
     }
 }
