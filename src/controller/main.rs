@@ -1,3 +1,4 @@
+#[macro_use]
 extern crate clap;
 extern crate consensus;
 extern crate distributary;
@@ -45,14 +46,14 @@ fn main() {
 
     let listen_addr = matches.value_of("address").unwrap().parse().unwrap();
     let zookeeper_addr = matches.value_of("zookeeper").unwrap();
-    let local_workers = value_t_or_exit!(usize, args, "local_workers");
-    let remote_workers = value_t_or_exit!(usize, args, "workers");
+    let local_workers = value_t_or_exit!(matches, "local_workers", usize);
+    let remote_workers = value_t_or_exit!(matches, "workers", usize);
 
     let authority = ZookeeperAuthority::new(&zookeeper_addr);
     let mut builder = ControllerBuilder::default();
     builder.set_listen_addr(listen_addr);
     builder.set_local_workers(local_workers);
-    builder.set_nworkers(workers);
+    builder.set_nworkers(remote_workers);
 
     builder.build(authority).wait();
 }
