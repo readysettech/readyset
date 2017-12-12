@@ -135,7 +135,8 @@ where
 #[cfg(test)]
 mod tests {
     use super::*;
-    use mysql::consts::{CapabilityFlags, UTF8_GENERAL_CI};
+    use myc::constants::{CapabilityFlags, UTF8_GENERAL_CI};
+    use std::io::Cursor;
 
     #[test]
     fn it_parses_handshake() {
@@ -144,8 +145,10 @@ mod tests {
             0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
             0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x6a, 0x6f, 0x6e, 0x00, 0x00,
         ];
-        let (_, p) = packet(&data[..]).unwrap();
-        let (_, handshake) = client_handshake(&p.1).unwrap();
+        let r = Cursor::new(&data[..]);
+        let mut pr = PacketReader::new(r);
+        let (_, p) = pr.next().unwrap().unwrap();
+        let (_, handshake) = client_handshake(&p).unwrap();
         println!("{:?}", handshake);
         assert!(
             handshake
@@ -175,8 +178,10 @@ mod tests {
             0x76, 0x65, 0x72, 0x73, 0x69, 0x6f, 0x6e, 0x5f, 0x63, 0x6f, 0x6d, 0x6d, 0x65, 0x6e,
             0x74, 0x20, 0x6c, 0x69, 0x6d, 0x69, 0x74, 0x20, 0x31,
         ];
-        let (_, p) = packet(&data[..]).unwrap();
-        let (_, cmd) = command(&p.1).unwrap();
+        let r = Cursor::new(&data[..]);
+        let mut pr = PacketReader::new(r);
+        let (_, p) = pr.next().unwrap().unwrap();
+        let (_, cmd) = command(&p).unwrap();
         assert_eq!(
             cmd,
             Command::Query(&b"select @@version_comment limit 1"[..])
