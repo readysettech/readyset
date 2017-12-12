@@ -4,7 +4,7 @@ version = "0.1.0"
 authors = ["Jon Gjengset <jon@thesquareplanet.com>"]
 
 [dependencies]
-nom = "4.0.0-alpha1"
+nom = { version = "4.0.0-alpha1", features = ["nightly"] }
+mysql = "12.0.4"
 
 [dev-dependencies]
-#mysql = "12.0.4"
