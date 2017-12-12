@@ -6,12 +6,20 @@ use std::io::prelude::*;
 use std::io::BufWriter;
 use std::thread;
 use std::net;
+use std::iter;
 
 fn main() {
     thread::spawn(server);
 
     let mut db = mysql::Conn::new("mysql://localhost:3306").unwrap();
     assert_eq!(db.ping(), true);
+    let row = db.query("SELECT a, b FROM foo")
+        .unwrap()
+        .next()
+        .unwrap()
+        .unwrap();
+    assert_eq!(row.get::<i32, _>(0), Some(1024));
+    println!("ALL GOOD");
 }
 
 fn server() {
@@ -59,10 +67,6 @@ fn server() {
         println!("ready for client requests");
         while let Ok(Some((seq, packet))) = r.next() {
             w.set_seq(seq + 1);
-            for b in &*packet {
-                print!("0x{:02X} ", b);
-            }
-            println!("");
             match msql_proto::command(&packet) {
                 Ok((_, msql_proto::Command::Query(q))) => {
                     if q.starts_with(b"SELECT @@") {
@@ -70,7 +74,6 @@ fn server() {
                         println!("query var {}", ::std::str::from_utf8(var).unwrap());
                         match var {
                             b"max_allowed_packet" => {
-                                use std::iter;
                                 msql_proto::start_resultset_text(
                                     iter::once(msql_proto::Column {
                                         schema: "",
@@ -94,7 +97,23 @@ fn server() {
                         }
                     } else {
                         println!("query {}", ::std::str::from_utf8(q).unwrap());
-                        ok(&mut w);
+                        msql_proto::start_resultset_text(
+                            iter::once(msql_proto::Column {
+                                schema: "",
+                                table_alias: "",
+                                table: "",
+                                column_alias: "a",
+                                column: "",
+                                coltype: mysql::consts::ColumnType::MYSQL_TYPE_LONG,
+                                colflags: mysql::consts::ColumnFlags::empty(),
+                            }),
+                            &mut w,
+                        ).unwrap();
+                        msql_proto::write_resultset_text(
+                            iter::once(iter::once(mysql::Value::Int(1024))),
+                            &mut w,
+                        ).unwrap();
+                        w.flush().unwrap();
                     }
                 }
                 Ok((_, msql_proto::Command::Init(db))) => {
