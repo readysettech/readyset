@@ -13,12 +13,12 @@
 //! all commands with a "no results" reply:
 //!
 //! ```
-//! # extern crate msql_proto;
+//! # extern crate msql_srv;
 //! extern crate mysql;
 //! # use std::io;
 //! # use std::net;
 //! # use std::thread;
-//! use msql_proto::*;
+//! use msql_srv::*;
 //!
 //! struct Backend;
 //! impl<W: io::Write> MysqlShim<W> for Backend {

@@ -1,5 +1,5 @@
 [package]
-name = "msql-proto"
+name = "msql-srv"
 version = "0.1.0"
 authors = ["Jon Gjengset <jon@thesquareplanet.com>"]
 
