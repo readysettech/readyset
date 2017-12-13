@@ -22,7 +22,7 @@ impl<Q, P, E> MysqlShim<net::TcpStream> for TestingShim<Q, P, E>
 where
     Q: FnMut(&str, QueryResultWriter<net::TcpStream>) -> io::Result<()>,
     P: FnMut(&str) -> u32,
-    E: FnMut(u32, Vec<myc::value::Value>, QueryResultWriter<net::TcpStream>) -> io::Result<()>,
+    E: FnMut(u32, Vec<msql_proto::Value>, QueryResultWriter<net::TcpStream>) -> io::Result<()>,
 {
     fn param_info(&self, _: u32) -> &[Column] {
         &self.params[..]
@@ -34,13 +34,13 @@ where
         info: StatementMetaWriter<net::TcpStream>,
     ) -> io::Result<()> {
         let id = (self.on_p)(query);
-        info.write(id, &self.params, &self.columns)
+        info.reply(id, &self.params, &self.columns)
     }
 
     fn on_execute(
         &mut self,
         id: u32,
-        params: Vec<myc::value::Value>,
+        params: Vec<msql_proto::Value>,
         results: QueryResultWriter<net::TcpStream>,
     ) -> io::Result<()> {
         (self.on_e)(id, params, results)
@@ -63,7 +63,7 @@ where
     P: 'static + Send + FnMut(&str) -> u32,
     E: 'static
         + Send
-        + FnMut(u32, Vec<myc::value::Value>, QueryResultWriter<net::TcpStream>) -> io::Result<()>,
+        + FnMut(u32, Vec<msql_proto::Value>, QueryResultWriter<net::TcpStream>) -> io::Result<()>,
 {
     fn new(on_q: Q, on_p: P, on_e: E) -> Self {
         TestingShim {
@@ -93,8 +93,7 @@ where
         let port = listener.local_addr().unwrap().port();
         let jh = thread::spawn(move || {
             let (s, _) = listener.accept().unwrap();
-            let srv = MysqlIntermediary::from_stream(self, s).unwrap();
-            srv.run().unwrap();
+            MysqlIntermediary::run_on_tcp(self, s).unwrap();
         });
 
         let mut db = mysql::Conn::new(&format!("mysql://127.0.0.1:{}", port)).unwrap();
@@ -128,11 +127,8 @@ fn it_queries() {
         |_, w| {
             let cols = &[
                 Column {
-                    schema: String::new(),
-                    table_alias: String::new(),
                     table: String::new(),
-                    column_alias: "a".to_owned(),
-                    column: String::new(),
+                    column: "a".to_owned(),
                     coltype: mysql::consts::ColumnType::MYSQL_TYPE_SHORT,
                     colflags: mysql::consts::ColumnFlags::empty(),
                 },
@@ -157,11 +153,8 @@ fn it_queries() {
 fn it_prepares() {
     let cols = vec![
         Column {
-            schema: String::new(),
-            table_alias: String::new(),
             table: String::new(),
-            column_alias: "a".to_owned(),
-            column: String::new(),
+            column: "a".to_owned(),
             coltype: mysql::consts::ColumnType::MYSQL_TYPE_SHORT,
             colflags: mysql::consts::ColumnFlags::empty(),
         },
@@ -169,11 +162,8 @@ fn it_prepares() {
     let cols2 = cols.clone();
     let params = vec![
         Column {
-            schema: String::new(),
-            table_alias: String::new(),
             table: String::new(),
-            column_alias: "c".to_owned(),
-            column: String::new(),
+            column: "c".to_owned(),
             coltype: mysql::consts::ColumnType::MYSQL_TYPE_SHORT,
             colflags: mysql::consts::ColumnFlags::empty(),
         },
@@ -187,7 +177,7 @@ fn it_prepares() {
         },
         move |stmt, params, w| {
             assert_eq!(stmt, 41);
-            assert_eq!(params, vec![mysql::Value::Int(42)]);
+            assert_eq!(params, vec![msql_proto::Value::Int(42)]);
 
             let mut w = w.start(&cols)?;
             w.write_row(iter::once(1024i16))?;

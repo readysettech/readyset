@@ -9,6 +9,69 @@ use value::ToMysqlValue;
 use myc::io::WriteMysqlExt;
 use myc::constants::{ColumnFlags, StatusFlags};
 
+/// Convenience type for responding to a client `PREPARE` command.
+///
+/// This type should not be dropped without calling `reply`.
+#[must_use]
+pub struct StatementMetaWriter<'a, W: Write + 'a> {
+    pub(crate) writer: &'a mut PacketWriter<W>,
+}
+
+impl<'a, W: Write + 'a> StatementMetaWriter<'a, W> {
+    /// Reply to the client with the given meta-information.
+    ///
+    /// `id` is a statement identifier that the client should supply when it later wants to execute
+    /// this statement. `params` is a set of `Column` descriptors for the parameters the client
+    /// must provide when executing the prepared statement. `columns` is a set of `Column`
+    /// descriptors for the values that will be returned in each row then the statement is later
+    /// executed.
+    pub fn reply<PI, CI>(self, id: u32, params: PI, columns: CI) -> io::Result<()>
+    where
+        PI: IntoIterator<Item = &'a Column>,
+        CI: IntoIterator<Item = &'a Column>,
+        <PI as IntoIterator>::IntoIter: ExactSizeIterator,
+        <CI as IntoIterator>::IntoIter: ExactSizeIterator,
+    {
+        writers::write_prepare_ok(id, params, columns, self.writer)
+    }
+}
+
+/// Convenience type for providing query results to clients.
+///
+/// This type should not be dropped without calling either `start` or `completed`.
+#[must_use]
+pub struct QueryResultWriter<'a, W: Write + 'a> {
+    // XXX: specialization instead?
+    pub(crate) is_bin: bool,
+    pub(crate) writer: &'a mut PacketWriter<W>,
+}
+
+impl<'a, W: Write> QueryResultWriter<'a, W> {
+    /// Start a resultset response to the client that conforms to the given `columns`.
+    ///
+    /// See `RowWriter`.
+    pub fn start(self, columns: &'a [Column]) -> io::Result<RowWriter<'a, W>> {
+        RowWriter::new(self.writer, columns, self.is_bin)
+    }
+
+    /// Send an empty resultset response to the client indicating that `rows` rows were affected by
+    /// the query. `last_insert_id` may be given to communiate an identifier for a client's most
+    /// recent insertion.
+    pub fn completed(self, rows: u64, last_insert_id: u64) -> io::Result<()> {
+        self.writer.write_u8(0x00)?; // OK packet type
+        self.writer.write_lenenc_int(rows)?;
+        self.writer.write_lenenc_int(last_insert_id)?;
+        self.writer.write_all(&[0x00, 0x00])?; // no server status
+        self.writer.write_all(&[0x00, 0x00])?; // no warnings
+        Ok(())
+    }
+}
+
+/// Convenience type for sending rows of a resultset to a client.
+///
+/// This type *may* be dropped without calling `write_row` or `finish`. However, in this case, the
+/// program may panic if an I/O error occurs when sending the end-of-records marker to the client.
+/// To avoid this, call `finish` explicitly.
 #[must_use]
 pub struct RowWriter<'a, W: Write + 'a> {
     // XXX: specialization instead?
@@ -48,6 +111,11 @@ where
         })
     }
 
+    /// Write a single row as a part of this resultset.
+    ///
+    /// Note that the row *must* conform to the column specification provided to
+    /// `QueryResultWriter::start`. If it does not, this method will return an error indicating
+    /// that an invalid value type or specification was provided.
     pub fn write_row<I, E>(&mut self, row: I) -> io::Result<()>
     where
         I: IntoIterator<Item = E>,
@@ -60,8 +128,17 @@ where
             // leave space for nullmap
             self.data.resize(self.bitmap_len, 0);
 
+            let mut cols = 0;
             for (i, v) in row.into_iter().enumerate() {
-                let c = self.columns[i].borrow();
+                let c = self.columns
+                    .get(i)
+                    .ok_or_else(|| {
+                        io::Error::new(
+                            io::ErrorKind::InvalidData,
+                            "row has more columns than specification",
+                        )
+                    })?
+                    .borrow();
                 if v.is_null() {
                     if c.colflags.contains(ColumnFlags::NOT_NULL_FLAG) {
                         return Err(io::Error::new(
@@ -74,6 +151,14 @@ where
                 } else {
                     v.to_mysql_bin(&mut self.data, c)?;
                 }
+                cols += 1;
+            }
+
+            if cols != self.columns.len() {
+                return Err(io::Error::new(
+                    io::ErrorKind::InvalidData,
+                    "row has fewer columns than specification",
+                ));
             }
 
             for (i, b) in self.nullmap.blocks().enumerate() {
@@ -99,6 +184,7 @@ impl<'a, W: Write + 'a> RowWriter<'a, W> {
         writers::write_eof_packet(self.writer, StatusFlags::empty())
     }
 
+    /// End this resultset response, and indicate to the client that no more rows are coming.
     pub fn finish(mut self) -> io::Result<()> {
         self.finish_inner()
     }
@@ -109,27 +195,5 @@ impl<'a, W: Write + 'a> Drop for RowWriter<'a, W> {
         if !self.finished {
             self.finish_inner().unwrap();
         }
-    }
-}
-
-#[must_use]
-pub struct QueryResultWriter<'a, W: Write + 'a> {
-    // XXX: specialization instead?
-    pub(crate) is_bin: bool,
-    pub(crate) writer: &'a mut PacketWriter<W>,
-}
-
-impl<'a, W: Write> QueryResultWriter<'a, W> {
-    pub fn start(self, columns: &'a [Column]) -> io::Result<RowWriter<'a, W>> {
-        RowWriter::new(self.writer, columns, self.is_bin)
-    }
-
-    pub fn completed(self, rows: u64, last_insert_id: u64) -> io::Result<()> {
-        self.writer.write_u8(0x00)?; // OK packet type
-        self.writer.write_lenenc_int(rows)?;
-        self.writer.write_lenenc_int(last_insert_id)?;
-        self.writer.write_all(&[0x00, 0x00])?; // no server status
-        self.writer.write_all(&[0x00, 0x00])?; // no warnings
-        Ok(())
     }
 }

@@ -54,11 +54,11 @@ where
         let c = c.borrow();
         use myc::constants::UTF8_GENERAL_CI;
         w.write_lenenc_str(b"def")?;
-        w.write_lenenc_str(c.schema.as_bytes())?;
-        w.write_lenenc_str(c.table_alias.as_bytes())?;
+        w.write_lenenc_str(b"")?;
         w.write_lenenc_str(c.table.as_bytes())?;
-        w.write_lenenc_str(c.column_alias.as_bytes())?;
+        w.write_lenenc_str(b"")?;
         w.write_lenenc_str(c.column.as_bytes())?;
+        w.write_lenenc_str(b"")?;
         w.write_lenenc_int(0xC)?;
         w.write_u16::<LittleEndian>(UTF8_GENERAL_CI)?;
         w.write_u32::<LittleEndian>(1024)?;
