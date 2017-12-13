@@ -18,7 +18,7 @@ impl<W: Write> Write for PacketWriter<W> {
         self.to_write.extend(&buf[..left]);
 
         if self.to_write.len() == U24_MAX {
-            self.flush()?;
+            self.end_packet()?;
         }
         Ok(left)
     }

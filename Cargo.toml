@@ -6,6 +6,7 @@ authors = ["Jon Gjengset <jon@thesquareplanet.com>"]
 [dependencies]
 nom = { version = "4.0.0-alpha1", features = ["nightly"] }
 mysql_common = "0.4"
+bit-vec = "0.4.4"
 byteorder = "1"
 
 [dev-dependencies]
