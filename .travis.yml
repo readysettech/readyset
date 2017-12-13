@@ -14,8 +14,8 @@ matrix:
   allow_failures:
     - rust: nightly
 after_success: |
-  if [[ "$TRAVIS_RUST_VERSION" == stable ]]; then
+  if [[ "$TRAVIS_RUST_VERSION" == nightly ]]; then
     bash <(curl https://raw.githubusercontent.com/xd009642/tarpaulin/master/travis-install.sh)
-    cargo tarpaulin --out Xml --features tls --forward
+    cargo tarpaulin --out Xml
     bash <(curl -s https://codecov.io/bash)
   fi
