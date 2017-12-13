@@ -75,7 +75,7 @@ where
                         let var = &q[b"SELECT @@".len()..];
                         match var {
                             b"max_allowed_packet" => {
-                                msql_proto::start_resultset_text(
+                                msql_proto::column_definitions(
                                     iter::once(msql_proto::Column {
                                         schema: "",
                                         table_alias: "",
@@ -88,7 +88,7 @@ where
                                     }),
                                     &mut w,
                                 ).unwrap();
-                                msql_proto::write_resultset_text(
+                                msql_proto::write_resultset_rows_text(
                                     iter::once(iter::once(mysql::Value::UInt(1024))),
                                     &mut w,
                                 ).unwrap();
@@ -104,7 +104,6 @@ where
                     }
                 }
                 msql_proto::Command::Quit => {
-                    ok(&mut w);
                     break;
                 }
                 _ => {}
@@ -152,7 +151,7 @@ fn it_queries() {
         },
         |w, cmd| {
             if let msql_proto::Command::Query(_) = cmd {
-                msql_proto::start_resultset_text(
+                msql_proto::column_definitions(
                     iter::once(msql_proto::Column {
                         schema: "",
                         table_alias: "",
@@ -164,12 +163,71 @@ fn it_queries() {
                     }),
                     w,
                 ).unwrap();
-                msql_proto::write_resultset_text(
+                msql_proto::write_resultset_rows_text(
                     iter::once(iter::once(mysql::Value::Int(1024))),
                     w,
                 ).unwrap();
                 w.flush().unwrap();
             } else {
+                unreachable!();
+            }
+        },
+    );
+}
+
+#[test]
+fn it_prepares() {
+    let col = msql_proto::Column {
+        schema: "",
+        table_alias: "",
+        table: "",
+        column_alias: "c",
+        column: "",
+        coltype: mysql::consts::ColumnType::MYSQL_TYPE_LONG,
+        colflags: mysql::consts::ColumnFlags::empty(),
+    };
+    test_with_server(
+        |db| {
+            let row = db.prep_exec("SELECT a FROM b WHERE c = ?", (42,))
+                .unwrap()
+                .next()
+                .unwrap()
+                .unwrap();
+            assert_eq!(row.get::<i32, _>(0), Some(42));
+        },
+        move |w, cmd| match cmd {
+            msql_proto::Command::Prepare(_) => {
+                msql_proto::write_prepare_ok(
+                    42,
+                    iter::once(msql_proto::Column {
+                        schema: "",
+                        table_alias: "",
+                        table: "",
+                        column_alias: "a",
+                        column: "",
+                        coltype: mysql::consts::ColumnType::MYSQL_TYPE_LONG,
+                        colflags: mysql::consts::ColumnFlags::empty(),
+                    }),
+                    iter::once(&col),
+                    w,
+                ).unwrap();
+                w.flush().unwrap();
+            }
+            msql_proto::Command::Execute { stmt, .. } => {
+                assert_eq!(stmt, 42);
+                msql_proto::column_definitions(iter::once(&col), w).unwrap();
+                msql_proto::write_resultset_rows_bin(
+                    iter::once(iter::once(mysql::Value::Int(42))),
+                    &[&col],
+                    w,
+                ).unwrap();
+                w.flush().unwrap();
+            }
+            msql_proto::Command::Close(stmt) => {
+                assert_eq!(stmt, 42);
+                ok(w);
+            }
+            _ => {
                 unreachable!();
             }
         },
