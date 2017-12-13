@@ -4,12 +4,9 @@ use Column;
 use myc;
 
 use std::borrow::Borrow;
-pub fn parse_params<'a, C>(
-    mut input: &'a [u8],
-    ptypes: &[C],
-) -> IResult<&'a [u8], Vec<myc::value::Value>>
+pub fn parse<'a, C>(mut input: &'a [u8], ptypes: &[C]) -> IResult<&'a [u8], Vec<myc::value::Value>>
 where
-    C: Borrow<Column<'a>>,
+    C: Borrow<Column>,
 {
     if ptypes.is_empty() {
         assert!(input.is_empty());

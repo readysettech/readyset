@@ -1,237 +1,206 @@
 extern crate msql_proto;
 extern crate mysql;
+extern crate mysql_common as myc;
 extern crate nom;
 
-use std::io::prelude::*;
-use std::io::BufWriter;
 use std::thread;
 use std::net;
 use std::iter;
+use std::io;
 
-use msql_proto::PacketWriter;
+use msql_proto::{Column, MysqlIntermediary, MysqlShim, QueryResultWriter, StatementMetaWriter};
 
-fn test_with_server<C, S: Send>(c: C, s: S)
-where
-    C: FnOnce(&mut mysql::Conn) -> (),
-    S: 'static + FnMut(&mut PacketWriter<BufWriter<net::TcpStream>>, msql_proto::Command) -> (),
-{
-    let listener = net::TcpListener::bind("127.0.0.1:0").unwrap();
-    let port = listener.local_addr().unwrap().port();
-    let jh = thread::spawn(move || server(listener, s));
-
-    let mut db = mysql::Conn::new(&format!("mysql://127.0.0.1:{}", port)).unwrap();
-    c(&mut db);
-    drop(db);
-    jh.join().unwrap();
+struct TestingShim<Q, P, E> {
+    columns: Vec<Column>,
+    params: Vec<Column>,
+    on_q: Q,
+    on_p: P,
+    on_e: E,
 }
 
-fn ok<W: Write>(w: &mut msql_proto::PacketWriter<W>) {
-    w.write_all(&[0x00]).unwrap(); // OK packet type
-    w.write_all(&[0x00]).unwrap(); // 0 rows (with lenenc encoding)
-    w.write_all(&[0x00]).unwrap(); // no inserted rows
-    w.write_all(&[0x00, 0x00]).unwrap(); // no server status
-    w.write_all(&[0x00, 0x00]).unwrap(); // no warnings
-    w.flush().unwrap();
+impl<Q, P, E> MysqlShim<net::TcpStream> for TestingShim<Q, P, E>
+where
+    Q: FnMut(&str, QueryResultWriter<net::TcpStream>) -> io::Result<()>,
+    P: FnMut(&str) -> u32,
+    E: FnMut(u32, Vec<myc::value::Value>, QueryResultWriter<net::TcpStream>) -> io::Result<()>,
+{
+    fn param_info(&self, _: u32) -> &[Column] {
+        &self.params[..]
+    }
+
+    fn on_prepare(
+        &mut self,
+        query: &str,
+        info: StatementMetaWriter<net::TcpStream>,
+    ) -> io::Result<()> {
+        let id = (self.on_p)(query);
+        info.write(id, &self.params, &self.columns)
+    }
+
+    fn on_execute(
+        &mut self,
+        id: u32,
+        params: Vec<myc::value::Value>,
+        results: QueryResultWriter<net::TcpStream>,
+    ) -> io::Result<()> {
+        (self.on_e)(id, params, results)
+    }
+
+    fn on_close(&mut self, _: u32) {}
+
+    fn on_query(
+        &mut self,
+        query: &str,
+        results: QueryResultWriter<net::TcpStream>,
+    ) -> io::Result<()> {
+        (self.on_q)(query, results)
+    }
 }
 
-fn server<S>(l: net::TcpListener, mut serve: S)
+impl<Q, P, E> TestingShim<Q, P, E>
 where
-    S: FnMut(&mut PacketWriter<BufWriter<net::TcpStream>>, msql_proto::Command) -> (),
+    Q: 'static + Send + FnMut(&str, QueryResultWriter<net::TcpStream>) -> io::Result<()>,
+    P: 'static + Send + FnMut(&str) -> u32,
+    E: 'static
+        + Send
+        + FnMut(u32, Vec<myc::value::Value>, QueryResultWriter<net::TcpStream>) -> io::Result<()>,
 {
-    if let Ok((s, _)) = l.accept() {
-        let r = s;
-        let w = r.try_clone().unwrap();
-        let mut r = msql_proto::PacketReader::new(r);
-        let mut w = msql_proto::PacketWriter::new(BufWriter::new(w));
-
-        w.write_all(&[10]).unwrap(); // protocol 10
-        w.write_all(&b"0.0.1-alpha-msql-proxy\0"[..]).unwrap();
-        w.write_all(&[0x08, 0x00, 0x00, 0x00]).unwrap(); // connection ID
-        w.write_all(&b";X,po_k}\0"[..]).unwrap(); // auth seed
-        w.write_all(&[0x00, 0x42]).unwrap(); // just 4.1 proto
-        w.write_all(&[0x21]).unwrap(); // UTF8_GENERAL_CI
-        w.write_all(&[0x00, 0x00]).unwrap(); // status flags
-        w.write_all(&[0x00, 0x00]).unwrap(); // extended capabilities
-        w.write_all(&[0x00]).unwrap(); // no plugins
-        w.write_all(&[0x00; 6][..]).unwrap(); // filler
-        w.write_all(&[0x00; 4][..]).unwrap(); // filler
-        w.write_all(&b">o6^Wz!/kM}N\0"[..]).unwrap(); // 4.1+ servers must extend salt
-        w.flush().unwrap();;
-
-        {
-            let (seq, handshake) = r.next().unwrap().unwrap();
-            let _handshake = msql_proto::client_handshake(&handshake).unwrap().1;
-            w.set_seq(seq + 1);
+    fn new(on_q: Q, on_p: P, on_e: E) -> Self {
+        TestingShim {
+            columns: Vec::new(),
+            params: Vec::new(),
+            on_q,
+            on_p,
+            on_e,
         }
+    }
 
-        ok(&mut w);
+    fn with_params(mut self, p: Vec<Column>) -> Self {
+        self.params = p;
+        self
+    }
 
-        while let Ok(Some((seq, packet))) = r.next() {
-            w.set_seq(seq + 1);
-            let cmd = msql_proto::command(&packet).unwrap().1;
-            match cmd {
-                msql_proto::Command::Query(ref q) => {
-                    if q.starts_with(b"SELECT @@") {
-                        let var = &q[b"SELECT @@".len()..];
-                        match var {
-                            b"max_allowed_packet" => {
-                                msql_proto::column_definitions(
-                                    iter::once(msql_proto::Column {
-                                        schema: "",
-                                        table_alias: "",
-                                        table: "",
-                                        column_alias: "@@max_allowed_packet",
-                                        column: "",
-                                        coltype: mysql::consts::ColumnType::MYSQL_TYPE_LONGLONG,
-                                        colflags: mysql::consts::ColumnFlags::UNSIGNED_FLAG
-                                            | mysql::consts::ColumnFlags::BINARY_FLAG,
-                                    }),
-                                    &mut w,
-                                ).unwrap();
-                                msql_proto::write_resultset_rows_text(
-                                    iter::once(iter::once(mysql::Value::UInt(1024))),
-                                    &mut w,
-                                ).unwrap();
-                                w.flush().unwrap();
-                                continue;
-                            }
-                            b"socket" => {
-                                ok(&mut w);
-                                continue;
-                            }
-                            _ => {}
-                        }
-                    }
-                }
-                msql_proto::Command::Quit => {
-                    break;
-                }
-                _ => {}
-            }
+    fn with_columns(mut self, c: Vec<Column>) -> Self {
+        self.columns = c;
+        self
+    }
 
-            serve(&mut w, cmd);
-        }
+    fn test<C>(self, c: C)
+    where
+        C: FnOnce(&mut mysql::Conn) -> (),
+    {
+        let listener = net::TcpListener::bind("127.0.0.1:0").unwrap();
+        let port = listener.local_addr().unwrap().port();
+        let jh = thread::spawn(move || {
+            let (s, _) = listener.accept().unwrap();
+            let srv = MysqlIntermediary::from_stream(self, s).unwrap();
+            srv.run().unwrap();
+        });
+
+        let mut db = mysql::Conn::new(&format!("mysql://127.0.0.1:{}", port)).unwrap();
+        c(&mut db);
+        drop(db);
+        jh.join().unwrap();
     }
 }
 
 #[test]
 fn it_connects() {
-    test_with_server(
-        |_| {},
-        |_, _| {
-            unreachable!();
-        },
-    );
+    TestingShim::new(
+        |_, _| unreachable!(),
+        |_| unreachable!(),
+        |_, _, _| unreachable!(),
+    ).test(|_| {})
 }
 
 #[test]
 fn it_pings() {
-    test_with_server(
-        |db| assert_eq!(db.ping(), true),
-        |w, cmd| {
-            if let msql_proto::Command::Ping = cmd {
-                ok(w);
-            } else {
-                unreachable!();
-            }
-        },
-    );
+    TestingShim::new(
+        |_, _| unreachable!(),
+        |_| unreachable!(),
+        |_, _, _| unreachable!(),
+    ).test(|db| assert_eq!(db.ping(), true))
 }
 
 #[test]
 fn it_queries() {
-    test_with_server(
-        |db| {
-            let row = db.query("SELECT a, b FROM foo")
-                .unwrap()
-                .next()
-                .unwrap()
-                .unwrap();
-            assert_eq!(row.get::<i32, _>(0), Some(1024));
+    TestingShim::new(
+        |_, w| {
+            let cols = &[
+                Column {
+                    schema: String::new(),
+                    table_alias: String::new(),
+                    table: String::new(),
+                    column_alias: "a".to_owned(),
+                    column: String::new(),
+                    coltype: mysql::consts::ColumnType::MYSQL_TYPE_SHORT,
+                    colflags: mysql::consts::ColumnFlags::empty(),
+                },
+            ];
+            let mut w = w.start(cols)?;
+            w.write_row(iter::once(1024i16))?;
+            w.finish()
         },
-        |w, cmd| {
-            if let msql_proto::Command::Query(_) = cmd {
-                msql_proto::column_definitions(
-                    iter::once(msql_proto::Column {
-                        schema: "",
-                        table_alias: "",
-                        table: "",
-                        column_alias: "a",
-                        column: "",
-                        coltype: mysql::consts::ColumnType::MYSQL_TYPE_LONG,
-                        colflags: mysql::consts::ColumnFlags::empty(),
-                    }),
-                    w,
-                ).unwrap();
-                msql_proto::write_resultset_rows_text(
-                    iter::once(iter::once(mysql::Value::Int(1024))),
-                    w,
-                ).unwrap();
-                w.flush().unwrap();
-            } else {
-                unreachable!();
-            }
-        },
-    );
+        |_| unreachable!(),
+        |_, _, _| unreachable!(),
+    ).test(|db| {
+        let row = db.query("SELECT a, b FROM foo")
+            .unwrap()
+            .next()
+            .unwrap()
+            .unwrap();
+        assert_eq!(row.get::<i16, _>(0), Some(1024));
+    })
 }
 
 #[test]
 fn it_prepares() {
-    let col = msql_proto::Column {
-        schema: "",
-        table_alias: "",
-        table: "",
-        column_alias: "c",
-        column: "",
-        coltype: mysql::consts::ColumnType::MYSQL_TYPE_LONG,
-        colflags: mysql::consts::ColumnFlags::empty(),
-    };
-    test_with_server(
-        |db| {
-            let row = db.prep_exec("SELECT a FROM b WHERE c = ?", (42,))
+    let cols = vec![
+        Column {
+            schema: String::new(),
+            table_alias: String::new(),
+            table: String::new(),
+            column_alias: "a".to_owned(),
+            column: String::new(),
+            coltype: mysql::consts::ColumnType::MYSQL_TYPE_SHORT,
+            colflags: mysql::consts::ColumnFlags::empty(),
+        },
+    ];
+    let cols2 = cols.clone();
+    let params = vec![
+        Column {
+            schema: String::new(),
+            table_alias: String::new(),
+            table: String::new(),
+            column_alias: "c".to_owned(),
+            column: String::new(),
+            coltype: mysql::consts::ColumnType::MYSQL_TYPE_SHORT,
+            colflags: mysql::consts::ColumnFlags::empty(),
+        },
+    ];
+
+    TestingShim::new(
+        |_, _| unreachable!(),
+        |q| {
+            assert_eq!(q, "SELECT a FROM b WHERE c = ?");
+            41
+        },
+        move |stmt, params, w| {
+            assert_eq!(stmt, 41);
+            assert_eq!(params, vec![mysql::Value::Int(42)]);
+
+            let mut w = w.start(&cols)?;
+            w.write_row(iter::once(1024i16))?;
+            w.finish()
+        },
+    ).with_params(params)
+        .with_columns(cols2)
+        .test(|db| {
+            let row = db.prep_exec("SELECT a FROM b WHERE c = ?", (42i16,))
                 .unwrap()
                 .next()
                 .unwrap()
                 .unwrap();
-            assert_eq!(row.get::<i32, _>(0), Some(42));
-        },
-        move |w, cmd| match cmd {
-            msql_proto::Command::Prepare(_) => {
-                msql_proto::write_prepare_ok(
-                    42,
-                    iter::once(msql_proto::Column {
-                        schema: "",
-                        table_alias: "",
-                        table: "",
-                        column_alias: "a",
-                        column: "",
-                        coltype: mysql::consts::ColumnType::MYSQL_TYPE_LONG,
-                        colflags: mysql::consts::ColumnFlags::empty(),
-                    }),
-                    iter::once(&col),
-                    w,
-                ).unwrap();
-                w.flush().unwrap();
-            }
-            msql_proto::Command::Execute { stmt, params } => {
-                assert_eq!(stmt, 42);
-                let params = msql_proto::parse_params(params, &[&col]).unwrap().1;
-                assert_eq!(params, vec![mysql::Value::Int(42)]);
-                msql_proto::column_definitions(iter::once(&col), w).unwrap();
-                msql_proto::write_resultset_rows_bin(
-                    iter::once(iter::once(mysql::Value::Int(42))),
-                    &[&col],
-                    w,
-                ).unwrap();
-                w.flush().unwrap();
-            }
-            msql_proto::Command::Close(stmt) => {
-                assert_eq!(stmt, 42);
-                ok(w);
-            }
-            _ => {
-                unreachable!();
-            }
-        },
-    );
+            assert_eq!(row.get::<i16, _>(0), Some(1024i16));
+        })
 }
