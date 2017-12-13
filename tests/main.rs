@@ -1,4 +1,4 @@
-extern crate msql_proto;
+extern crate msql_srv;
 extern crate mysql;
 extern crate mysql_common as myc;
 extern crate nom;
@@ -8,7 +8,7 @@ use std::net;
 use std::iter;
 use std::io;
 
-use msql_proto::{Column, MysqlIntermediary, MysqlShim, QueryResultWriter, StatementMetaWriter};
+use msql_srv::{Column, MysqlIntermediary, MysqlShim, QueryResultWriter, StatementMetaWriter};
 
 struct TestingShim<Q, P, E> {
     columns: Vec<Column>,
@@ -22,7 +22,7 @@ impl<Q, P, E> MysqlShim<net::TcpStream> for TestingShim<Q, P, E>
 where
     Q: FnMut(&str, QueryResultWriter<net::TcpStream>) -> io::Result<()>,
     P: FnMut(&str) -> u32,
-    E: FnMut(u32, Vec<msql_proto::Value>, QueryResultWriter<net::TcpStream>) -> io::Result<()>,
+    E: FnMut(u32, Vec<msql_srv::Value>, QueryResultWriter<net::TcpStream>) -> io::Result<()>,
 {
     fn param_info(&self, _: u32) -> &[Column] {
         &self.params[..]
@@ -40,7 +40,7 @@ where
     fn on_execute(
         &mut self,
         id: u32,
-        params: Vec<msql_proto::Value>,
+        params: Vec<msql_srv::Value>,
         results: QueryResultWriter<net::TcpStream>,
     ) -> io::Result<()> {
         (self.on_e)(id, params, results)
@@ -63,7 +63,7 @@ where
     P: 'static + Send + FnMut(&str) -> u32,
     E: 'static
         + Send
-        + FnMut(u32, Vec<msql_proto::Value>, QueryResultWriter<net::TcpStream>) -> io::Result<()>,
+        + FnMut(u32, Vec<msql_srv::Value>, QueryResultWriter<net::TcpStream>) -> io::Result<()>,
 {
     fn new(on_q: Q, on_p: P, on_e: E) -> Self {
         TestingShim {
@@ -177,7 +177,7 @@ fn it_prepares() {
         },
         move |stmt, params, w| {
             assert_eq!(stmt, 41);
-            assert_eq!(params, vec![msql_proto::Value::Int(42)]);
+            assert_eq!(params, vec![msql_srv::Value::Int(42)]);
 
             let mut w = w.start(&cols)?;
             w.write_row(iter::once(1024i16))?;
