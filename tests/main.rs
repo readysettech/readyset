@@ -213,8 +213,10 @@ fn it_prepares() {
                 ).unwrap();
                 w.flush().unwrap();
             }
-            msql_proto::Command::Execute { stmt, .. } => {
+            msql_proto::Command::Execute { stmt, params } => {
                 assert_eq!(stmt, 42);
+                let params = msql_proto::parse_params(params, &[&col]).unwrap().1;
+                assert_eq!(params, vec![mysql::Value::Int(42)]);
                 msql_proto::column_definitions(iter::once(&col), w).unwrap();
                 msql_proto::write_resultset_rows_bin(
                     iter::once(iter::once(mysql::Value::Int(42))),
