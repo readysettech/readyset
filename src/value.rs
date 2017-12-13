@@ -332,6 +332,24 @@ impl ToMysqlValue for f64 {
     }
 }
 
+impl ToMysqlValue for String {
+    fn to_mysql_text<W: Write>(&self, w: &mut W) -> io::Result<()> {
+        self.as_bytes().to_mysql_text(w)
+    }
+    fn to_mysql_bin<W: Write>(&self, w: &mut W, c: &Column) -> io::Result<()> {
+        self.as_bytes().to_mysql_bin(w, c)
+    }
+}
+
+impl ToMysqlValue for str {
+    fn to_mysql_text<W: Write>(&self, w: &mut W) -> io::Result<()> {
+        self.as_bytes().to_mysql_text(w)
+    }
+    fn to_mysql_bin<W: Write>(&self, w: &mut W, c: &Column) -> io::Result<()> {
+        self.as_bytes().to_mysql_bin(w, c)
+    }
+}
+
 impl ToMysqlValue for [u8] {
     fn to_mysql_text<W: Write>(&self, w: &mut W) -> io::Result<()> {
         w.write_lenenc_str(self).map(|_| ())
@@ -361,7 +379,7 @@ use chrono::{Datelike, NaiveDate, NaiveDateTime, Timelike};
 impl ToMysqlValue for NaiveDate {
     fn to_mysql_text<W: Write>(&self, w: &mut W) -> io::Result<()> {
         w.write_lenenc_str(
-            format!("'{:04}-{:02}-{:02}'", self.year(), self.month(), self.day()).as_bytes(),
+            format!("{:04}-{:02}-{:02}", self.year(), self.month(), self.day()).as_bytes(),
         ).map(|_| ())
     }
     fn to_mysql_bin<W: Write>(&self, w: &mut W, c: &Column) -> io::Result<()> {
@@ -384,7 +402,7 @@ impl ToMysqlValue for NaiveDateTime {
         if us != 0 {
             w.write_lenenc_str(
                 format!(
-                    "'{:04}-{:02}-{:02} {:02}:{:02}:{:02}.{:06}'",
+                    "{:04}-{:02}-{:02} {:02}:{:02}:{:02}.{:06}",
                     self.year(),
                     self.month(),
                     self.day(),
@@ -397,7 +415,7 @@ impl ToMysqlValue for NaiveDateTime {
         } else {
             w.write_lenenc_str(
                 format!(
-                    "'{:04}-{:02}-{:02} {:02}:{:02}:{:02}'",
+                    "{:04}-{:02}-{:02} {:02}:{:02}:{:02}",
                     self.year(),
                     self.month(),
                     self.day(),
@@ -439,17 +457,18 @@ use std::time::Duration;
 impl ToMysqlValue for Duration {
     fn to_mysql_text<W: Write>(&self, w: &mut W) -> io::Result<()> {
         let s = self.as_secs();
-        let d = s / (24 * 3600);
+        //let d = s / (24 * 3600);
         // assert!(d <= 34);
-        let h = (s % (24 * 3600)) / 3600;
+        //let h = (s % (24 * 3600)) / 3600;
+        let h = s / 3600;
         let m = (s % 3600) / 60;
         let s = s % 60;
         let us = self.subsec_nanos() / 1_000;
         if us != 0 {
-            w.write_lenenc_str(format!("'{} {:02}:{:02}:{:02}.{:06}'", d, h, m, s, us).as_bytes())
+            w.write_lenenc_str(format!("{:02}:{:02}:{:02}.{:06}", h, m, s, us).as_bytes())
                 .map(|_| ())
         } else {
-            w.write_lenenc_str(format!("'{} {:02}:{:02}:{:02}'", d, h, m, s).as_bytes())
+            w.write_lenenc_str(format!("{:02}:{:02}:{:02}", h, m, s).as_bytes())
                 .map(|_| ())
         }
     }
@@ -483,5 +502,203 @@ impl ToMysqlValue for Duration {
             }
             _ => Err(bad(self, c)),
         }
+    }
+}
+
+#[cfg(test)]
+#[allow(unused_imports)]
+mod tests {
+    use myc::value;
+    use myc::value::convert::from_value;
+    use {Column, ColumnFlags, ColumnType};
+    use super::ToMysqlValue;
+    use chrono::{self, TimeZone};
+    use std::time;
+
+    mod roundtrip_text {
+        use super::*;
+
+        macro_rules! rt {
+            ($name:ident, $t:ty, $v:expr) => {
+                #[test]
+                fn $name() {
+                    let mut data = Vec::new();
+                    let v: $t = $v;
+                    v.to_mysql_text(&mut data).unwrap();
+                    println!("{}", ::std::str::from_utf8(&data).unwrap());
+                    assert_eq!(
+                        from_value::<$t>(value::read_text_value(&mut &data[..]).unwrap()),
+                        v
+                    );
+                }
+            }
+        }
+
+        rt!(u8_one, u8, 1);
+        rt!(i8_one, i8, 1);
+        rt!(u16_one, u16, 1);
+        rt!(i16_one, i16, 1);
+        rt!(u32_one, u32, 1);
+        rt!(i32_one, i32, 1);
+        rt!(u64_one, u64, 1);
+        rt!(i64_one, i64, 1);
+        rt!(f32_one, f32, 1.0);
+        rt!(f64_one, f64, 1.0);
+
+        rt!(u8_max, u8, u8::max_value());
+        rt!(i8_max, i8, i8::max_value());
+        rt!(u16_max, u16, u16::max_value());
+        rt!(i16_max, i16, i16::max_value());
+        rt!(u32_max, u32, u32::max_value());
+        rt!(i32_max, i32, i32::max_value());
+        rt!(u64_max, u64, u64::max_value());
+        rt!(i64_max, i64, i64::max_value());
+
+        rt!(
+            time,
+            chrono::NaiveDate,
+            chrono::Local::today().naive_local()
+        );
+        rt!(
+            datetime,
+            chrono::NaiveDateTime,
+            chrono::Utc.ymd(1989, 12, 7).and_hms(8, 0, 4).naive_utc()
+        );
+        rt!(dur, time::Duration, time::Duration::from_secs(1893));
+        rt!(bytes, Vec<u8>, vec![0x42, 0x00, 0x1a]);
+        rt!(string, String, "foobar".to_owned());
+    }
+
+    mod roundtrip_bin {
+        use super::*;
+
+        macro_rules! rt {
+            ($name:ident, $t:ty, $v:expr, $ct:expr) => {
+                rt!($name, $t, $v, $ct, false);
+            };
+            ($name:ident, $t:ty, $v:expr, $ct:expr, $sig:expr) => {
+                #[test]
+                fn $name() {
+                    let mut data = Vec::new();
+                    let mut col = Column {
+                        table: String::new(),
+                        column: String::new(),
+                        coltype: $ct,
+                        colflags: ColumnFlags::empty(),
+                    };
+
+                    if !$sig {
+                        col.colflags.insert(ColumnFlags::UNSIGNED_FLAG);
+                    }
+
+                    let v: $t = $v;
+                    v.to_mysql_bin(&mut data, &col).unwrap();
+                    assert_eq!(
+                        from_value::<$t>(value::read_bin_value(&mut &data[..], $ct, !$sig).unwrap()),
+                        v
+                    );
+                }
+            }
+        }
+
+        rt!(u8_one, u8, 1, ColumnType::MYSQL_TYPE_TINY, false);
+        rt!(i8_one, i8, 1, ColumnType::MYSQL_TYPE_TINY, true);
+        rt!(u16_one, u16, 1, ColumnType::MYSQL_TYPE_SHORT, false);
+        rt!(i16_one, i16, 1, ColumnType::MYSQL_TYPE_SHORT, true);
+        rt!(u32_one, u32, 1, ColumnType::MYSQL_TYPE_LONG, false);
+        rt!(i32_one, i32, 1, ColumnType::MYSQL_TYPE_LONG, true);
+        rt!(u64_one, u64, 1, ColumnType::MYSQL_TYPE_LONGLONG, false);
+        rt!(i64_one, i64, 1, ColumnType::MYSQL_TYPE_LONGLONG, true);
+
+        rt!(f32_one, f32, 1.0, ColumnType::MYSQL_TYPE_FLOAT, false);
+        rt!(f64_one, f64, 1.0, ColumnType::MYSQL_TYPE_DOUBLE, false);
+
+        rt!(
+            u8_max,
+            u8,
+            u8::max_value(),
+            ColumnType::MYSQL_TYPE_TINY,
+            false
+        );
+        rt!(
+            i8_max,
+            i8,
+            i8::max_value(),
+            ColumnType::MYSQL_TYPE_TINY,
+            true
+        );
+        rt!(
+            u16_max,
+            u16,
+            u16::max_value(),
+            ColumnType::MYSQL_TYPE_SHORT,
+            false
+        );
+        rt!(
+            i16_max,
+            i16,
+            i16::max_value(),
+            ColumnType::MYSQL_TYPE_SHORT,
+            true
+        );
+        rt!(
+            u32_max,
+            u32,
+            u32::max_value(),
+            ColumnType::MYSQL_TYPE_LONG,
+            false
+        );
+        rt!(
+            i32_max,
+            i32,
+            i32::max_value(),
+            ColumnType::MYSQL_TYPE_LONG,
+            true
+        );
+        rt!(
+            u64_max,
+            u64,
+            u64::max_value(),
+            ColumnType::MYSQL_TYPE_LONGLONG,
+            false
+        );
+        rt!(
+            i64_max,
+            i64,
+            i64::max_value(),
+            ColumnType::MYSQL_TYPE_LONGLONG,
+            true
+        );
+
+        rt!(
+            time,
+            chrono::NaiveDate,
+            chrono::Local::today().naive_local(),
+            ColumnType::MYSQL_TYPE_DATE
+        );
+        rt!(
+            datetime,
+            chrono::NaiveDateTime,
+            chrono::Utc.ymd(1989, 12, 7).and_hms(8, 0, 4).naive_utc(),
+            ColumnType::MYSQL_TYPE_DATETIME
+        );
+        rt!(
+            dur,
+            time::Duration,
+            time::Duration::from_secs(1893),
+            ColumnType::MYSQL_TYPE_TIME
+        );
+        rt!(
+            bytes,
+            Vec<u8>,
+            vec![0x42, 0x00, 0x1a],
+            ColumnType::MYSQL_TYPE_BLOB
+        );
+        rt!(
+            string,
+            String,
+            "foobar".to_owned(),
+            ColumnType::MYSQL_TYPE_STRING
+        );
     }
 }
