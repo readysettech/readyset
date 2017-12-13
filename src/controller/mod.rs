@@ -4,6 +4,11 @@ use consensus::{Authority, Epoch};
 use dataflow::checktable::service::CheckTableServer;
 use dataflow::{DomainConfig, PersistenceParameters};
 
+use controller::domain_handle::DomainHandle;
+use controller::inner::ControllerInner;
+use controller::recipe::Recipe;
+use coordination::CoordinationMessage;
+
 use std::error::Error;
 use std::io::ErrorKind;
 use std::marker::PhantomData;
@@ -37,20 +42,15 @@ mod inner;
 mod mir_to_flow;
 mod mutator;
 
-use self::domain_handle::DomainHandle;
-use coordination::CoordinationMessage;
-use self::inner::ControllerInner;
+pub use controller::builder::ControllerBuilder;
+pub use controller::handle::ControllerHandle;
+pub use controller::migrate::Migration;
+pub use controller::mutator::{Mutator, MutatorBuilder, MutatorError};
+pub use controller::getter::{Getter, ReadQuery, ReadReply, RemoteGetter, RemoteGetterBuilder};
+pub(crate) use controller::getter::LocalOrNot;
 
-pub use self::builder::ControllerBuilder;
-pub use self::handle::ControllerHandle;
-pub use self::migrate::Migration;
-pub use self::mutator::{Mutator, MutatorBuilder, MutatorError};
-pub use self::getter::{Getter, ReadQuery, ReadReply, RemoteGetter, RemoteGetterBuilder};
-pub(crate) use self::getter::LocalOrNot;
-use self::recipe::Recipe;
-
-pub type WorkerIdentifier = SocketAddr;
-pub type WorkerEndpoint = Arc<Mutex<TcpSender<CoordinationMessage>>>;
+type WorkerIdentifier = SocketAddr;
+type WorkerEndpoint = Arc<Mutex<TcpSender<CoordinationMessage>>>;
 
 #[derive(Clone)]
 struct WorkerStatus {
