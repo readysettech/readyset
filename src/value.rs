@@ -4,9 +4,15 @@ use myc::constants::{ColumnFlags, ColumnType};
 use byteorder::{LittleEndian, WriteBytesExt};
 use Column;
 
+/// Implementors of this trait can be sent as a single resultset value to a MySQL/MariaDB client.
 pub trait ToMysqlValue {
+    /// Encode value using the text-based protocol.
     fn to_mysql_text<W: Write>(&self, w: &mut W) -> io::Result<()>;
+
+    /// Encode value using the binary protocol.
     fn to_mysql_bin<W: Write>(&self, w: &mut W, c: &Column) -> io::Result<()>;
+
+    /// Is this value NULL?
     fn is_null(&self) -> bool {
         false
     }
