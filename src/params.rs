@@ -1,58 +1,99 @@
-use nom::IResult;
 use Column;
+use std::borrow::Borrow;
 use myc;
 
-use std::borrow::Borrow;
-pub fn parse<'a, C>(mut input: &'a [u8], ptypes: &[C]) -> IResult<&'a [u8], Vec<myc::value::Value>>
-where
-    C: Borrow<Column>,
-{
-    if ptypes.is_empty() {
-        assert!(input.is_empty());
-        return Ok((input, Vec::new()));
+/// A `ParamParser` decodes query parameters included in a client's `EXECUTE` command given
+/// type information for the expected parameters.
+///
+/// Users should invoke [`iter`](struct.ParamParser.html#method.iter) method to iterate over the
+/// provided parameters.
+pub struct ParamParser<'a>(pub(crate) &'a [u8]);
+
+impl<'a> ParamParser<'a> {
+    /// Produces an iterator over the parameters supplied by the client given the expected types of
+    /// those parameters.
+    ///
+    /// This method may be called multiple times to generate multiple independent iterators, but
+    /// beware that this will also parse the underlying client byte-stream again.
+    pub fn iter<I, E>(&self, types: I) -> Params<'a, <I as IntoIterator>::IntoIter>
+    where
+        I: IntoIterator<Item = E>,
+        E: Borrow<Column>,
+    {
+        Params {
+            input: self.0,
+            nullmap: None,
+            typmap: None,
+            types: types.into_iter(),
+            col: 0,
+        }
     }
+}
 
-    let nullmap_len = (ptypes.len() + 7) / 8;
-    let nullmap = &input[..nullmap_len];
+/// An iterator over parameters provided by a client in an `EXECUTE` command.
+pub struct Params<'a, I> {
+    input: &'a [u8],
+    nullmap: Option<&'a [u8]>,
+    typmap: Option<&'a [u8]>,
+    types: I,
+    col: usize,
+}
 
-    let ptypes2 = if input[nullmap_len] != 0x00 {
-        input = &input[(nullmap_len + 1)..];
-        let ps: Vec<_> = (0..ptypes.len())
-            .map(|i| {
+impl<'a, I, E> Iterator for Params<'a, I>
+where
+    I: Iterator<Item = E> + ExactSizeIterator,
+    E: Borrow<Column>,
+{
+    type Item = myc::value::Value;
+    fn next(&mut self) -> Option<Self::Item> {
+        if self.nullmap.is_none() {
+            let nullmap_len = (self.types.len() + 7) / 8;
+            let (nullmap, rest) = self.input.split_at(nullmap_len);
+            self.nullmap = Some(nullmap);
+            self.input = rest;
+
+            if !rest.is_empty() && rest[0] != 0x00 {
+                let (typmap, rest) = rest[1..].split_at(2 * self.types.len());
+                self.typmap = Some(typmap);
+                self.input = rest;
+            }
+        }
+
+        let pt = self.types.next()?;
+
+        // https://web.archive.org/web/20170404144156/https://dev.mysql.com/doc/internals/en/null-bitmap.html
+        // NULL-bitmap-byte = ((field-pos + offset) / 8)
+        // NULL-bitmap-bit  = ((field-pos + offset) % 8)
+        if let Some(ref nullmap) = self.nullmap {
+            let byte = self.col / 8;
+            if byte >= nullmap.len() {
+                return None;
+            }
+            if (nullmap[byte] & 1u8 << (self.col % 8)) != 0 {
+                self.col += 1;
+                return Some(myc::value::Value::NULL);
+            }
+        } else {
+            unreachable!();
+        }
+
+        let pt = self.typmap
+            .map(|typmap| {
                 (
-                    myc::constants::ColumnType::from(input[2 * i]),
-                    (input[2 * i + 1] & 128) != 0,
+                    myc::constants::ColumnType::from(typmap[2 * self.col]),
+                    (typmap[2 * self.col + 1] & 128) != 0,
                 )
             })
-            .collect();
-        input = &input[(2 * ptypes.len())..];
-        Some(ps)
-    } else {
-        None
-    };
-
-    let ps = ptypes
-        .iter()
-        .enumerate()
-        .map(|(i, c)| {
-            let c = c.borrow();
-
-            // https://web.archive.org/web/20170404144156/https://dev.mysql.com/doc/internals/en/null-bitmap.html
-            // NULL-bitmap-byte = ((field-pos + offset) / 8)
-            // NULL-bitmap-bit  = ((field-pos + offset) % 8)
-            if (nullmap[i / 8] & 1u8 << (i % 8)) != 0 {
-                return myc::value::Value::NULL;
-            }
-
-            let (ct, unsigned) = ptypes2.as_ref().map(|p| p[i]).unwrap_or_else(move || {
+            .unwrap_or_else(move || {
+                let pt = pt.borrow();
                 (
-                    c.coltype,
-                    c.colflags
+                    pt.coltype,
+                    pt.colflags
                         .contains(myc::constants::ColumnFlags::UNSIGNED_FLAG),
                 )
             });
-            myc::value::read_bin_value(&mut input, ct, unsigned).unwrap()
-        })
-        .collect();
-    Ok((input, ps))
+
+        self.col += 1;
+        Some(myc::value::read_bin_value(&mut self.input, pt.0, pt.1).unwrap())
+    }
 }

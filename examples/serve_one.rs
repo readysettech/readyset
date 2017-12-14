@@ -15,17 +15,13 @@ use msql_srv::*;
 
 struct Backend;
 impl<W: io::Write> MysqlShim<W> for Backend {
-    fn param_info(&self, _: u32) -> &[Column] {
-        &[]
-    }
-
     fn on_prepare(&mut self, _: &str, info: StatementMetaWriter<W>) -> io::Result<()> {
         info.reply(42, &[], &[])
     }
     fn on_execute(
         &mut self,
         _: u32,
-        _: Vec<Value>,
+        _: msql_srv::ParamParser,
         results: QueryResultWriter<W>,
     ) -> io::Result<()> {
         results.completed(0, 0)
