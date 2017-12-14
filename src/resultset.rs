@@ -10,7 +10,8 @@ use myc::constants::{ColumnFlags, StatusFlags};
 
 /// Convenience type for responding to a client `PREPARE` command.
 ///
-/// This type should not be dropped without calling `reply`.
+/// This type should not be dropped without calling
+/// [`reply`](struct.StatementMetaWriter.html#method.reply).
 #[must_use]
 pub struct StatementMetaWriter<'a, W: Write + 'a> {
     pub(crate) writer: &'a mut PacketWriter<W>,
@@ -20,10 +21,10 @@ impl<'a, W: Write + 'a> StatementMetaWriter<'a, W> {
     /// Reply to the client with the given meta-information.
     ///
     /// `id` is a statement identifier that the client should supply when it later wants to execute
-    /// this statement. `params` is a set of `Column` descriptors for the parameters the client
-    /// must provide when executing the prepared statement. `columns` is a set of `Column`
-    /// descriptors for the values that will be returned in each row then the statement is later
-    /// executed.
+    /// this statement. `params` is a set of [`Column`](struct.Column.html) descriptors for the
+    /// parameters the client must provide when executing the prepared statement. `columns` is a
+    /// second set of [`Column`](struct.Column.html) descriptors for the values that will be
+    /// returned in each row then the statement is later executed.
     pub fn reply<PI, CI>(self, id: u32, params: PI, columns: CI) -> io::Result<()>
     where
         PI: IntoIterator<Item = &'a Column>,
@@ -37,7 +38,9 @@ impl<'a, W: Write + 'a> StatementMetaWriter<'a, W> {
 
 /// Convenience type for providing query results to clients.
 ///
-/// This type should not be dropped without calling either `start` or `completed`.
+/// This type should not be dropped without calling either
+/// [`start`](struct.QueryResultWriter.html#method.start) or
+/// [`completed`](struct.QueryResultWriter.html#method.completed).
 #[must_use]
 pub struct QueryResultWriter<'a, W: Write + 'a> {
     // XXX: specialization instead?
@@ -48,7 +51,7 @@ pub struct QueryResultWriter<'a, W: Write + 'a> {
 impl<'a, W: Write> QueryResultWriter<'a, W> {
     /// Start a resultset response to the client that conforms to the given `columns`.
     ///
-    /// See `RowWriter`.
+    /// See [`RowWriter`](struct.RowWriter.html).
     pub fn start(self, columns: &'a [Column]) -> io::Result<RowWriter<'a, W>> {
         RowWriter::new(self.writer, columns, self.is_bin)
     }
@@ -68,9 +71,16 @@ impl<'a, W: Write> QueryResultWriter<'a, W> {
 
 /// Convenience type for sending rows of a resultset to a client.
 ///
-/// This type *may* be dropped without calling `write_row` or `finish`. However, in this case, the
-/// program may panic if an I/O error occurs when sending the end-of-records marker to the client.
-/// To avoid this, call `finish` explicitly.
+/// Rows can either be written out one column at a time (using
+/// [`write_col`](struct.RowWriter.html#method.write_col) and
+/// [`end_row`](struct.RowWriter.html#method.end_row)), or one row at a time (using
+/// [`write_row`](struct.RowWriter.html#method.write_row)).
+///
+/// This type *may* be dropped without calling
+/// [`write_row`](struct.RowWriter.html#method.write_row) or
+/// [`finish`](struct.RowWriter.html#method.finish). However, in this case, the program may panic
+/// if an I/O error occurs when sending the end-of-records marker to the client. To avoid this,
+/// call [`finish`](struct.RowWriter.html#method.finish) explicitly.
 #[must_use]
 pub struct RowWriter<'a, W: Write + 'a> {
     // XXX: specialization instead?
@@ -109,13 +119,15 @@ where
 
     /// Write a value to the next column of the current row as a part of this resultset.
     ///
-    /// If you do not call `end_row` after the last row, any errors that occur when writing out the
-    /// last row will be returned by `finish`. If you do not call `finish` either, any errors will
-    /// cause a panic when the `RowWriter` is dropped.
+    /// If you do not call [`end_row`](struct.RowWriter.html#method.end_row) after the last row,
+    /// any errors that occur when writing out the last row will be returned by
+    /// [`finish`](struct.RowWriter.html#method.finish). If you do not call `finish` either, any
+    /// errors will cause a panic when the `RowWriter` is dropped.
     ///
     /// Note that the row *must* conform to the column specification provided to
-    /// `QueryResultWriter::start`. If it does not, this method will return an error indicating
-    /// that an invalid value type or specification was provided.
+    /// [`QueryResultWriter::start`](struct.QueryResultWriter.html#method.start). If it does not,
+    /// this method will return an error indicating that an invalid value type or specification was
+    /// provided.
     pub fn write_col<T>(&mut self, v: T) -> io::Result<()>
     where
         T: ToMysqlValue,
@@ -180,8 +192,9 @@ where
     /// Write a single row as a part of this resultset.
     ///
     /// Note that the row *must* conform to the column specification provided to
-    /// `QueryResultWriter::start`. If it does not, this method will return an error indicating
-    /// that an invalid value type or specification was provided.
+    /// [`QueryResultWriter::start`](struct.QueryResultWriter.html#method.start). If it does not,
+    /// this method will return an error indicating that an invalid value type or specification was
+    /// provided.
     pub fn write_row<I, E>(&mut self, row: I) -> io::Result<()>
     where
         I: IntoIterator<Item = E>,
