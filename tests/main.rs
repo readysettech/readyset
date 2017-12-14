@@ -93,13 +93,13 @@ where
         let port = listener.local_addr().unwrap().port();
         let jh = thread::spawn(move || {
             let (s, _) = listener.accept().unwrap();
-            MysqlIntermediary::run_on_tcp(self, s).unwrap();
+            MysqlIntermediary::run_on_tcp(self, s)
         });
 
         let mut db = mysql::Conn::new(&format!("mysql://127.0.0.1:{}", port)).unwrap();
         c(&mut db);
         drop(db);
-        jh.join().unwrap();
+        jh.join().unwrap().unwrap();
     }
 }
 
