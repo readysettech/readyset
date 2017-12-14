@@ -62,7 +62,6 @@
 #![feature(try_from)]
 #![deny(missing_docs)]
 
-extern crate bit_vec;
 extern crate byteorder;
 extern crate chrono;
 extern crate mysql_common as myc;

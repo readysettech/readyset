@@ -2,7 +2,6 @@ use std::io::{self, Write};
 use packet::PacketWriter;
 use writers;
 use Column;
-use bit_vec::BitVec;
 use std::borrow::Borrow;
 use byteorder::WriteBytesExt;
 use value::ToMysqlValue;
@@ -77,7 +76,6 @@ pub struct RowWriter<'a, W: Write + 'a> {
     // XXX: specialization instead?
     is_bin: bool,
     writer: &'a mut PacketWriter<W>,
-    nullmap: BitVec<u8>,
     bitmap_len: usize,
     data: Vec<u8>,
     columns: &'a [Column],
@@ -96,15 +94,11 @@ where
     ) -> io::Result<RowWriter<'a, W>> {
         writers::column_definitions(columns, writer)?;
 
-        let mut nullmap = BitVec::<u8>::default();
-        nullmap.grow(columns.len() + 9, false);
-        let bitmap_len = nullmap.blocks().count();
-
+        let bitmap_len = (columns.len() + 7 + 2) / 8;
         Ok(RowWriter {
             is_bin: is_bin,
             writer: writer,
             columns: columns,
-            nullmap,
             bitmap_len,
             data: Vec::new(),
             finished: false,
@@ -122,8 +116,7 @@ where
         E: ToMysqlValue,
     {
         if self.is_bin {
-            //self.writer.write_u8(0x00)?;
-            self.nullmap.clear();
+            self.writer.write_u8(0x00)?;
 
             // leave space for nullmap
             self.data.resize(self.bitmap_len, 0);
@@ -146,7 +139,10 @@ where
                             "given NULL value for NOT NULL column",
                         ));
                     } else {
-                        self.nullmap.set(i + 2, true);
+                        // https://web.archive.org/web/20170404144156/https://dev.mysql.com/doc/internals/en/null-bitmap.html
+                        // NULL-bitmap-byte = ((field-pos + offset) / 8)
+                        // NULL-bitmap-bit  = ((field-pos + offset) % 8)
+                        self.data[(i + 2) / 8] |= 1u8 << ((i + 2) % 8);
                     }
                 } else {
                     v.to_mysql_bin(&mut self.data, c)?;
@@ -159,10 +155,6 @@ where
                     io::ErrorKind::InvalidData,
                     "row has fewer columns than specification",
                 ));
-            }
-
-            for (i, b) in self.nullmap.blocks().enumerate() {
-                self.data[i] = b;
             }
 
             self.writer.write_all(&self.data[..])?;

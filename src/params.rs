@@ -1,4 +1,3 @@
-use bit_vec::BitVec;
 use nom::IResult;
 use Column;
 use myc;
@@ -14,7 +13,7 @@ where
     }
 
     let nullmap_len = (ptypes.len() + 7) / 8;
-    let nullmap = BitVec::from_bytes(&input[..nullmap_len]);
+    let nullmap = &input[..nullmap_len];
 
     let ptypes2 = if input[nullmap_len] != 0x00 {
         input = &input[(nullmap_len + 1)..];
@@ -37,7 +36,11 @@ where
         .enumerate()
         .map(|(i, c)| {
             let c = c.borrow();
-            if nullmap[i] {
+
+            // https://web.archive.org/web/20170404144156/https://dev.mysql.com/doc/internals/en/null-bitmap.html
+            // NULL-bitmap-byte = ((field-pos + offset) / 8)
+            // NULL-bitmap-bit  = ((field-pos + offset) % 8)
+            if (nullmap[i / 8] & 1u8 << (i % 8)) != 0 {
                 return myc::value::Value::NULL;
             }
 

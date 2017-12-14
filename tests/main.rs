@@ -122,6 +122,59 @@ fn it_pings() {
 }
 
 #[test]
+fn empty_response() {
+    TestingShim::new(
+        |_, w| w.completed(0, 0),
+        |_| unreachable!(),
+        |_, _, _| unreachable!(),
+    ).test(|db| {
+        assert_eq!(db.query("SELECT a, b FROM foo").unwrap().count(), 0);
+    })
+}
+
+#[test]
+#[ignore]
+fn empty_on_drop() {
+    // NOTE: ignored for now as it's unclear if the MySQL spec allows giving no rows if you first
+    // start a resultset response.
+    TestingShim::new(
+        |_, w| w.start(&[]).map(|_| ()),
+        |_| unreachable!(),
+        |_, _, _| unreachable!(),
+    ).test(|db| {
+        assert_eq!(db.query("SELECT a, b FROM foo").unwrap().count(), 0);
+    })
+}
+
+#[test]
+fn it_queries_nulls() {
+    TestingShim::new(
+        |_, w| {
+            let cols = &[
+                Column {
+                    table: String::new(),
+                    column: "a".to_owned(),
+                    coltype: mysql::consts::ColumnType::MYSQL_TYPE_SHORT,
+                    colflags: mysql::consts::ColumnFlags::empty(),
+                },
+            ];
+            let mut w = w.start(cols)?;
+            w.write_row(iter::once(None::<i16>))?;
+            w.finish()
+        },
+        |_| unreachable!(),
+        |_, _, _| unreachable!(),
+    ).test(|db| {
+        let row = db.query("SELECT a, b FROM foo")
+            .unwrap()
+            .next()
+            .unwrap()
+            .unwrap();
+        assert_eq!(row.as_ref(0), Some(&msql_srv::Value::NULL));
+    })
+}
+
+#[test]
 fn it_queries() {
     TestingShim::new(
         |_, w| {
@@ -192,5 +245,134 @@ fn it_prepares() {
                 .unwrap()
                 .unwrap();
             assert_eq!(row.get::<i16, _>(0), Some(1024i16));
+        })
+}
+
+#[test]
+fn prepared_empty() {
+    let cols = vec![
+        Column {
+            table: String::new(),
+            column: "a".to_owned(),
+            coltype: mysql::consts::ColumnType::MYSQL_TYPE_SHORT,
+            colflags: mysql::consts::ColumnFlags::empty(),
+        },
+    ];
+    let cols2 = cols.clone();
+    let params = vec![
+        Column {
+            table: String::new(),
+            column: "c".to_owned(),
+            coltype: mysql::consts::ColumnType::MYSQL_TYPE_SHORT,
+            colflags: mysql::consts::ColumnFlags::empty(),
+        },
+    ];
+
+    TestingShim::new(
+        |_, _| unreachable!(),
+        |_| 0,
+        move |_, params, w| {
+            assert!(!params.is_empty());
+            w.completed(0, 0)
+        },
+    ).with_params(params)
+        .with_columns(cols2)
+        .test(|db| {
+            assert_eq!(
+                db.prep_exec("SELECT a FROM b WHERE c = ?", (42i16,))
+                    .unwrap()
+                    .count(),
+                0
+            );
+        })
+}
+
+#[test]
+fn prepared_no_params() {
+    let cols = vec![
+        Column {
+            table: String::new(),
+            column: "a".to_owned(),
+            coltype: mysql::consts::ColumnType::MYSQL_TYPE_SHORT,
+            colflags: mysql::consts::ColumnFlags::empty(),
+        },
+    ];
+    let cols2 = cols.clone();
+    let params = vec![];
+
+    TestingShim::new(
+        |_, _| unreachable!(),
+        |_| 0,
+        move |_, params, w| {
+            assert!(params.is_empty());
+            let mut w = w.start(&cols)?;
+            w.write_row(iter::once(1024i16))?;
+            w.finish()
+        },
+    ).with_params(params)
+        .with_columns(cols2)
+        .test(|db| {
+            let row = db.prep_exec("foo", ()).unwrap().next().unwrap().unwrap();
+            assert_eq!(row.get::<i16, _>(0), Some(1024i16));
+        })
+}
+
+#[test]
+fn prepared_nulls() {
+    let cols = vec![
+        Column {
+            table: String::new(),
+            column: "a".to_owned(),
+            coltype: mysql::consts::ColumnType::MYSQL_TYPE_SHORT,
+            colflags: mysql::consts::ColumnFlags::empty(),
+        },
+        Column {
+            table: String::new(),
+            column: "b".to_owned(),
+            coltype: mysql::consts::ColumnType::MYSQL_TYPE_SHORT,
+            colflags: mysql::consts::ColumnFlags::empty(),
+        },
+    ];
+    let cols2 = cols.clone();
+    let params = vec![
+        Column {
+            table: String::new(),
+            column: "c".to_owned(),
+            coltype: mysql::consts::ColumnType::MYSQL_TYPE_SHORT,
+            colflags: mysql::consts::ColumnFlags::empty(),
+        },
+        Column {
+            table: String::new(),
+            column: "d".to_owned(),
+            coltype: mysql::consts::ColumnType::MYSQL_TYPE_SHORT,
+            colflags: mysql::consts::ColumnFlags::empty(),
+        },
+    ];
+
+    TestingShim::new(
+        |_, _| unreachable!(),
+        |_| 0,
+        move |_, params, w| {
+            assert_eq!(
+                params,
+                vec![msql_srv::Value::NULL, msql_srv::Value::Int(42)]
+            );
+
+            let mut w = w.start(&cols)?;
+            w.write_row(vec![None::<i16>, Some(42)])?;
+            w.finish()
+        },
+    ).with_params(params)
+        .with_columns(cols2)
+        .test(|db| {
+            let row = db.prep_exec(
+                "SELECT a, b FROM x WHERE c = ? AND d = ?",
+                (msql_srv::Value::NULL, 42),
+            ).unwrap()
+                .next()
+                .unwrap()
+                .unwrap();
+            assert_eq!(row.as_ref(0), Some(&msql_srv::Value::NULL));
+            assert_eq!(row.get::<i16, _>(1), Some(42));
         })
 }
