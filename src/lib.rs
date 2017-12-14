@@ -22,15 +22,13 @@
 //!
 //! struct Backend;
 //! impl<W: io::Write> MysqlShim<W> for Backend {
-//!     fn param_info(&self, stmt: u32) -> &[Column] { &[] }
-//!
 //!     fn on_prepare(&mut self, _: &str, info: StatementMetaWriter<W>) -> io::Result<()> {
 //!         info.reply(42, &[], &[])
 //!     }
 //!     fn on_execute(
 //!         &mut self,
 //!         _: u32,
-//!         _: Vec<Value>,
+//!         _: ParamParser,
 //!         results: QueryResultWriter<W>,
 //!     ) -> io::Result<()> {
 //!         results.completed(0, 0)
@@ -106,15 +104,10 @@ pub struct Column {
 pub use value::ToMysqlValue;
 pub use resultset::{QueryResultWriter, RowWriter, StatementMetaWriter};
 pub use errorcodes::ErrorKind;
+pub use params::{ParamParser, Params};
 
 /// Implementors of this trait can be used to drive a MySQL-compatible database backend.
 pub trait MysqlShim<W: Write> {
-    /// Retrieve information about the parameters associated with a previously prepared statement.
-    ///
-    /// This is needed to correctly parse the parameters provided by the client when executing a
-    /// prepared statement.
-    fn param_info(&self, stmt: u32) -> &[Column];
-
     /// Called when the client issues a request to prepare `query` for later execution.
     ///
     /// The provided [`StatementMetaWriter`](struct.StatementMetaWriter.html) should be used to
@@ -130,7 +123,7 @@ pub trait MysqlShim<W: Write> {
     fn on_execute(
         &mut self,
         id: u32,
-        params: Vec<Value>,
+        params: ParamParser,
         results: QueryResultWriter<W>,
     ) -> io::Result<()>;
 
@@ -274,20 +267,14 @@ impl<B: MysqlShim<W>, R: Read, W: Write> MysqlIntermediary<B, R, W> {
                     )?;
                 }
                 Command::Execute { stmt, params } => {
-                    let params = params::parse(params, self.shim.param_info(stmt))
-                        .map_err(|e| {
-                            io::Error::new(io::ErrorKind::InvalidInput, format!("{:?}", e))
-                        })?
-                        .1;
+                    let params = params::ParamParser(params);
 
-                    {
-                        let w = QueryResultWriter {
-                            is_bin: true,
-                            writer: &mut self.writer,
-                        };
+                    let w = QueryResultWriter {
+                        is_bin: true,
+                        writer: &mut self.writer,
+                    };
 
-                        self.shim.on_execute(stmt, params, w)?;
-                    }
+                    self.shim.on_execute(stmt, params, w)?;
                 }
                 Command::Close(stmt) => {
                     self.shim.on_close(stmt);

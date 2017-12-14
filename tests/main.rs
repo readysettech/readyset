@@ -7,7 +7,7 @@ use std::thread;
 use std::net;
 use std::io;
 
-use msql_srv::{Column, ErrorKind, MysqlIntermediary, MysqlShim, QueryResultWriter,
+use msql_srv::{Column, ErrorKind, MysqlIntermediary, MysqlShim, ParamParser, QueryResultWriter,
                StatementMetaWriter};
 
 struct TestingShim<Q, P, E> {
@@ -24,10 +24,6 @@ where
     P: FnMut(&str) -> u32,
     E: FnMut(u32, Vec<msql_srv::Value>, QueryResultWriter<net::TcpStream>) -> io::Result<()>,
 {
-    fn param_info(&self, _: u32) -> &[Column] {
-        &self.params[..]
-    }
-
     fn on_prepare(
         &mut self,
         query: &str,
@@ -40,10 +36,10 @@ where
     fn on_execute(
         &mut self,
         id: u32,
-        params: Vec<msql_srv::Value>,
+        params: ParamParser,
         results: QueryResultWriter<net::TcpStream>,
     ) -> io::Result<()> {
-        (self.on_e)(id, params, results)
+        (self.on_e)(id, params.iter(&self.params[..]).collect(), results)
     }
 
     fn on_close(&mut self, _: u32) {}
