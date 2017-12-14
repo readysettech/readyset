@@ -1,2 +1,3 @@
 ignore:
   - "src/errorcodes.rs" # generated file
+  - "examples" # no tests
