@@ -81,6 +81,7 @@ mod params;
 mod value;
 mod resultset;
 mod writers;
+mod errorcodes;
 
 /// Meta-information abot a single column, used either to describe a prepared statement parameter
 /// or an output column.
@@ -104,6 +105,7 @@ pub struct Column {
 
 pub use value::ToMysqlValue;
 pub use resultset::{QueryResultWriter, RowWriter, StatementMetaWriter};
+pub use errorcodes::ErrorKind;
 
 /// Implementors of this trait can be used to drive a MySQL-compatible database backend.
 pub trait MysqlShim<W: Write> {

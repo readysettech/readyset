@@ -1,7 +1,7 @@
 use std::io::{self, Write};
 use packet::PacketWriter;
 use writers;
-use Column;
+use {Column, ErrorKind};
 use std::borrow::Borrow;
 use byteorder::WriteBytesExt;
 use value::ToMysqlValue;
@@ -11,7 +11,8 @@ use myc::constants::{ColumnFlags, StatusFlags};
 /// Convenience type for responding to a client `PREPARE` command.
 ///
 /// This type should not be dropped without calling
-/// [`reply`](struct.StatementMetaWriter.html#method.reply).
+/// [`reply`](struct.StatementMetaWriter.html#method.reply) or
+/// [`error`](struct.StatementMetaWriter.html#method.error).
 #[must_use]
 pub struct StatementMetaWriter<'a, W: Write + 'a> {
     pub(crate) writer: &'a mut PacketWriter<W>,
@@ -34,13 +35,22 @@ impl<'a, W: Write + 'a> StatementMetaWriter<'a, W> {
     {
         writers::write_prepare_ok(id, params, columns, self.writer)
     }
+
+    /// Reply to the client's `PREPARE` with an error.
+    pub fn error<E>(self, kind: ErrorKind, msg: &E) -> io::Result<()>
+    where
+        E: Borrow<[u8]> + ?Sized,
+    {
+        writers::write_err(kind, msg.borrow(), self.writer)
+    }
 }
 
 /// Convenience type for providing query results to clients.
 ///
-/// This type should not be dropped without calling either
-/// [`start`](struct.QueryResultWriter.html#method.start) or
-/// [`completed`](struct.QueryResultWriter.html#method.completed).
+/// This type should not be dropped without calling
+/// [`start`](struct.QueryResultWriter.html#method.start),
+/// [`completed`](struct.QueryResultWriter.html#method.completed), or
+/// [`error`](struct.QueryResultWriter.html#method.error).
 #[must_use]
 pub struct QueryResultWriter<'a, W: Write + 'a> {
     // XXX: specialization instead?
@@ -66,6 +76,14 @@ impl<'a, W: Write> QueryResultWriter<'a, W> {
         self.writer.write_all(&[0x00, 0x00])?; // no server status
         self.writer.write_all(&[0x00, 0x00])?; // no warnings
         Ok(())
+    }
+
+    /// Reply to the client's query with an error.
+    pub fn error<E>(self, kind: ErrorKind, msg: &E) -> io::Result<()>
+    where
+        E: Borrow<[u8]> + ?Sized,
+    {
+        writers::write_err(kind, msg.borrow(), self.writer)
     }
 }
 

@@ -7,7 +7,8 @@ use std::thread;
 use std::net;
 use std::io;
 
-use msql_srv::{Column, MysqlIntermediary, MysqlShim, QueryResultWriter, StatementMetaWriter};
+use msql_srv::{Column, ErrorKind, MysqlIntermediary, MysqlShim, QueryResultWriter,
+               StatementMetaWriter};
 
 struct TestingShim<Q, P, E> {
     columns: Vec<Column>,
@@ -128,6 +129,29 @@ fn empty_response() {
         |_, _, _| unreachable!(),
     ).test(|db| {
         assert_eq!(db.query("SELECT a, b FROM foo").unwrap().count(), 0);
+    })
+}
+
+#[test]
+fn error_response() {
+    let err = (ErrorKind::ER_NO, "clearly not");
+    TestingShim::new(
+        move |_, w| w.error(err.0, err.1.as_bytes()),
+        |_| unreachable!(),
+        |_, _, _| unreachable!(),
+    ).test(|db| {
+        if let mysql::Error::MySqlError(e) = db.query("SELECT a, b FROM foo").unwrap_err() {
+            assert_eq!(
+                e,
+                mysql::error::MySqlError {
+                    state: String::from_utf8(err.0.sqlstate().to_vec()).unwrap(),
+                    message: err.1.to_owned(),
+                    code: err.0 as u16,
+                }
+            );
+        } else {
+            unreachable!();
+        }
     })
 }
 
