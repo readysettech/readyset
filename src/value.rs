@@ -60,49 +60,62 @@ where
     }
 }
 
+// NOTE: these rules can all go away when TryFrom stabilizes
+// NOTE: yes, I know the = / => distinction is ugly
+macro_rules! like_try_into {
+    ($self:ident, $source:ty = $target:ty, $w:ident, $m:ident, $c:ident) => {{
+        let min = <$target>::min_value() as $source;
+        let max = <$target>::max_value() as $source;
+        if *$self <= max && *$self >= min {
+            $w.$m(*$self as $target)
+        } else {
+            Err(bad($self, $c))
+        }
+    }};
+    ($self:ident, $source:ty => $target:ty, $w:ident, $m:ident, $c:ident) => {{
+        let min = <$target>::min_value() as $source;
+        let max = <$target>::max_value() as $source;
+        if *$self <= max && *$self >= min {
+            $w.$m::<LittleEndian>(*$self as $target)
+        } else {
+            Err(bad($self, $c))
+        }
+    }}
+}
+
 macro_rules! forgiving_numeric {
     ($t:ty) => {
         impl ToMysqlValue for $t {
             mysql_text_trivial!();
             fn to_mysql_bin<W: Write>(&self, w: &mut W, c: &Column) -> io::Result<()> {
-                use std::convert::TryInto;
-
                 let signed = !c.colflags.contains(ColumnFlags::UNSIGNED_FLAG);
                 match c.coltype {
                     ColumnType::MYSQL_TYPE_LONGLONG => {
                         if signed {
-                            let x: i64 = (*self).try_into().map_err(|_| bad(self, c))?;
-                            w.write_i64::<LittleEndian>(x)
+                            like_try_into!(self, $t => i64, w, write_i64, c)
                         } else {
-                            let x: u64 = (*self).try_into().map_err(|_| bad(self, c))?;
-                            w.write_u64::<LittleEndian>(x)
+                            like_try_into!(self, $t => u64, w, write_u64, c)
                         }
                     }
                     ColumnType::MYSQL_TYPE_LONG | ColumnType::MYSQL_TYPE_INT24 => {
                         if signed {
-                            let x: i32 = (*self).try_into().map_err(|_| bad(self, c))?;
-                            w.write_i32::<LittleEndian>(x)
+                            like_try_into!(self, $t => i32, w, write_i32, c)
                         } else {
-                            let x: u32 = (*self).try_into().map_err(|_| bad(self, c))?;
-                            w.write_u32::<LittleEndian>(x)
+                            like_try_into!(self, $t => u32, w, write_u32, c)
                         }
                     }
                     ColumnType::MYSQL_TYPE_SHORT | ColumnType::MYSQL_TYPE_YEAR => {
                         if signed {
-                            let x: i16 = (*self).try_into().map_err(|_| bad(self, c))?;
-                            w.write_i16::<LittleEndian>(x)
+                            like_try_into!(self, $t => i16, w, write_i16, c)
                         } else {
-                            let x: u16 = (*self).try_into().map_err(|_| bad(self, c))?;
-                            w.write_u16::<LittleEndian>(x)
+                            like_try_into!(self, $t => u16, w, write_u16, c)
                         }
                     }
                     ColumnType::MYSQL_TYPE_TINY => {
                         if signed {
-                            let x: i8 = (*self).try_into().map_err(|_| bad(self, c))?;
-                            w.write_i8(x)
+                            like_try_into!(self, $t = i8, w, write_i8, c)
                         } else {
-                            let x: u8 = (*self).try_into().map_err(|_| bad(self, c))?;
-                            w.write_u8(x)
+                            like_try_into!(self, $t = u8, w, write_u8, c)
                         }
                     }
                     _ => Err(bad(self, c)),
