@@ -42,13 +42,13 @@ where
         if let Some(ref v) = *self {
             v.to_mysql_text(w)
         } else {
-            w.write_lenenc_str(b"NULL").map(|_| ())
+            w.write_u8(0xFB)
         }
     }
 
-    fn to_mysql_bin<W: Write>(&self, w: &mut W, _: &Column) -> io::Result<()> {
+    fn to_mysql_bin<W: Write>(&self, w: &mut W, ct: &Column) -> io::Result<()> {
         if let Some(ref v) = *self {
-            v.to_mysql_text(w)
+            v.to_mysql_bin(w, ct)
         } else {
             // should be handled by NULL map
             unreachable!();
@@ -525,7 +525,6 @@ mod tests {
                     let mut data = Vec::new();
                     let v: $t = $v;
                     v.to_mysql_text(&mut data).unwrap();
-                    println!("{}", ::std::str::from_utf8(&data).unwrap());
                     assert_eq!(
                         from_value::<$t>(value::read_text_value(&mut &data[..]).unwrap()),
                         v
@@ -553,6 +552,9 @@ mod tests {
         rt!(i32_max, i32, i32::max_value());
         rt!(u64_max, u64, u64::max_value());
         rt!(i64_max, i64, i64::max_value());
+
+        rt!(opt_none, Option<u8>, None);
+        rt!(opt_some, Option<u8>, Some(1));
 
         rt!(
             time,
@@ -669,6 +671,8 @@ mod tests {
             ColumnType::MYSQL_TYPE_LONGLONG,
             true
         );
+
+        rt!(opt_some, Option<u8>, Some(1), ColumnType::MYSQL_TYPE_TINY);
 
         rt!(
             time,

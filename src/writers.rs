@@ -41,15 +41,20 @@ where
     w.write_u16::<LittleEndian>(0)?; // number of warnings
     w.end_packet()?;
 
-    write_column_definitions(pi, w)?;
-    write_column_definitions(ci, w)
+    write_column_definitions(pi, w, true)?;
+    write_column_definitions(ci, w, true)
 }
 
-pub(crate) fn write_column_definitions<'a, I, W>(i: I, w: &mut PacketWriter<W>) -> io::Result<()>
+pub(crate) fn write_column_definitions<'a, I, W>(
+    i: I,
+    w: &mut PacketWriter<W>,
+    only_eof_on_nonempty: bool,
+) -> io::Result<()>
 where
     I: IntoIterator<Item = &'a Column>,
     W: Write,
 {
+    let mut empty = true;
     for c in i {
         let c = c.borrow();
         use myc::constants::UTF8_GENERAL_CI;
@@ -66,8 +71,14 @@ where
         w.write_u16::<LittleEndian>(c.colflags.bits())?;
         w.write_all(&[0x00])?;
         w.end_packet()?;
+        empty = false;
     }
-    write_eof_packet(w, StatusFlags::empty())
+
+    if empty && only_eof_on_nonempty {
+        Ok(())
+    } else {
+        write_eof_packet(w, StatusFlags::empty())
+    }
 }
 
 pub(crate) fn column_definitions<'a, I, W>(i: I, w: &mut PacketWriter<W>) -> io::Result<()>
@@ -79,5 +90,5 @@ where
     let i = i.into_iter();
     w.write_lenenc_int(i.len() as u64)?;
     w.end_packet()?;
-    write_column_definitions(i, w)
+    write_column_definitions(i, w, false)
 }
