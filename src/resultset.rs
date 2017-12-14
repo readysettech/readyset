@@ -79,6 +79,7 @@ pub struct RowWriter<'a, W: Write + 'a> {
     bitmap_len: usize,
     data: Vec<u8>,
     columns: &'a [Column],
+    col: usize,
 
     finished: bool,
 }
@@ -102,7 +103,78 @@ where
             bitmap_len,
             data: Vec::new(),
             finished: false,
+            col: 0,
         })
+    }
+
+    /// Write a value to the next column of the current row as a part of this resultset.
+    ///
+    /// If you do not call `end_row` after the last row, any errors that occur when writing out the
+    /// last row will be returned by `finish`. If you do not call `finish` either, any errors will
+    /// cause a panic when the `RowWriter` is dropped.
+    ///
+    /// Note that the row *must* conform to the column specification provided to
+    /// `QueryResultWriter::start`. If it does not, this method will return an error indicating
+    /// that an invalid value type or specification was provided.
+    pub fn write_col<T>(&mut self, v: T) -> io::Result<()>
+    where
+        T: ToMysqlValue,
+    {
+        if self.is_bin {
+            if self.col == 0 {
+                self.writer.write_u8(0x00)?;
+
+                // leave space for nullmap
+                self.data.resize(self.bitmap_len, 0);
+            }
+
+            let c = self.columns
+                .get(self.col)
+                .ok_or_else(|| {
+                    io::Error::new(
+                        io::ErrorKind::InvalidData,
+                        "row has more columns than specification",
+                    )
+                })?
+                .borrow();
+            if v.is_null() {
+                if c.colflags.contains(ColumnFlags::NOT_NULL_FLAG) {
+                    return Err(io::Error::new(
+                        io::ErrorKind::InvalidData,
+                        "given NULL value for NOT NULL column",
+                    ));
+                } else {
+                    // https://web.archive.org/web/20170404144156/https://dev.mysql.com/doc/internals/en/null-bitmap.html
+                    // NULL-bitmap-byte = ((field-pos + offset) / 8)
+                    // NULL-bitmap-bit  = ((field-pos + offset) % 8)
+                    self.data[(self.col + 2) / 8] |= 1u8 << ((self.col + 2) % 8);
+                }
+            } else {
+                v.to_mysql_bin(&mut self.data, c)?;
+            }
+        } else {
+            v.to_mysql_text(self.writer)?;
+        }
+        self.col += 1;
+        Ok(())
+    }
+
+    /// Indicate that no more column data will be written for the current row.
+    pub fn end_row(&mut self) -> io::Result<()> {
+        if self.col != self.columns.len() {
+            return Err(io::Error::new(
+                io::ErrorKind::InvalidData,
+                "row has fewer columns than specification",
+            ));
+        }
+
+        if self.is_bin {
+            self.writer.write_all(&self.data[..])?;
+            self.data.clear();
+        }
+        self.col = 0;
+
+        Ok(())
     }
 
     /// Write a single row as a part of this resultset.
@@ -115,62 +187,19 @@ where
         I: IntoIterator<Item = E>,
         E: ToMysqlValue,
     {
-        if self.is_bin {
-            self.writer.write_u8(0x00)?;
-
-            // leave space for nullmap
-            self.data.resize(self.bitmap_len, 0);
-
-            let mut cols = 0;
-            for (i, v) in row.into_iter().enumerate() {
-                let c = self.columns
-                    .get(i)
-                    .ok_or_else(|| {
-                        io::Error::new(
-                            io::ErrorKind::InvalidData,
-                            "row has more columns than specification",
-                        )
-                    })?
-                    .borrow();
-                if v.is_null() {
-                    if c.colflags.contains(ColumnFlags::NOT_NULL_FLAG) {
-                        return Err(io::Error::new(
-                            io::ErrorKind::InvalidData,
-                            "given NULL value for NOT NULL column",
-                        ));
-                    } else {
-                        // https://web.archive.org/web/20170404144156/https://dev.mysql.com/doc/internals/en/null-bitmap.html
-                        // NULL-bitmap-byte = ((field-pos + offset) / 8)
-                        // NULL-bitmap-bit  = ((field-pos + offset) % 8)
-                        self.data[(i + 2) / 8] |= 1u8 << ((i + 2) % 8);
-                    }
-                } else {
-                    v.to_mysql_bin(&mut self.data, c)?;
-                }
-                cols += 1;
-            }
-
-            if cols != self.columns.len() {
-                return Err(io::Error::new(
-                    io::ErrorKind::InvalidData,
-                    "row has fewer columns than specification",
-                ));
-            }
-
-            self.writer.write_all(&self.data[..])?;
-            self.data.clear();
-        } else {
-            for v in row {
-                v.to_mysql_text(self.writer)?;
-            }
+        for v in row {
+            self.write_col(v)?;
         }
-
-        Ok(())
+        self.end_row()
     }
 }
 
 impl<'a, W: Write + 'a> RowWriter<'a, W> {
     fn finish_inner(&mut self) -> io::Result<()> {
+        if self.col != 0 {
+            self.end_row()?;
+        }
+
         self.finished = true;
         self.writer.end_packet()?;
         writers::write_eof_packet(self.writer, StatusFlags::empty())

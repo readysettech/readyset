@@ -5,7 +5,6 @@ extern crate nom;
 
 use std::thread;
 use std::net;
-use std::iter;
 use std::io;
 
 use msql_srv::{Column, MysqlIntermediary, MysqlShim, QueryResultWriter, StatementMetaWriter};
@@ -159,7 +158,7 @@ fn it_queries_nulls() {
                 },
             ];
             let mut w = w.start(cols)?;
-            w.write_row(iter::once(None::<i16>))?;
+            w.write_col(None::<i16>)?;
             w.finish()
         },
         |_| unreachable!(),
@@ -187,7 +186,7 @@ fn it_queries() {
                 },
             ];
             let mut w = w.start(cols)?;
-            w.write_row(iter::once(1024i16))?;
+            w.write_col(1024i16)?;
             w.finish()
         },
         |_| unreachable!(),
@@ -233,7 +232,7 @@ fn it_prepares() {
             assert_eq!(params, vec![msql_srv::Value::Int(42)]);
 
             let mut w = w.start(&cols)?;
-            w.write_row(iter::once(1024i16))?;
+            w.write_col(1024i16)?;
             w.finish()
         },
     ).with_params(params)
@@ -306,7 +305,7 @@ fn prepared_no_params() {
         move |_, params, w| {
             assert!(params.is_empty());
             let mut w = w.start(&cols)?;
-            w.write_row(iter::once(1024i16))?;
+            w.write_col(1024i16)?;
             w.finish()
         },
     ).with_params(params)
