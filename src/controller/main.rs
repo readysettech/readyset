@@ -46,6 +46,13 @@ fn main() {
                 .required_unless("local_workers")
                 .help("Number of workers we expect to connect."),
         )
+        .arg(
+            Arg::with_name("verbose")
+                .short("v")
+                .long("verbose")
+                .takes_value(false)
+                .help("Verbose log output.")
+        )
         .get_matches();
 
     let listen_addr = matches.value_of("address").unwrap().parse().unwrap();
@@ -58,6 +65,10 @@ fn main() {
     builder.set_listen_addr(listen_addr);
     builder.set_local_workers(local_workers);
     builder.set_nworkers(remote_workers);
+
+    if matches.is_present("verbose") {
+        builder.log_with(distributary::logger_pls());
+    }
 
     builder.build(authority).wait();
 }
