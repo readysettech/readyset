@@ -1,6 +1,6 @@
 use std::io::{self, Write};
 use packet::PacketWriter;
-use Column;
+use {Column, ErrorKind};
 use byteorder::{LittleEndian, WriteBytesExt};
 use myc::io::WriteMysqlExt;
 use myc::constants::StatusFlags;
@@ -11,6 +11,15 @@ pub(crate) fn write_eof_packet<W: Write>(
 ) -> io::Result<()> {
     w.write_all(&[0xFE, 0x00, 0x00])?;
     w.write_u16::<LittleEndian>(s.bits())?;
+    w.end_packet()
+}
+
+pub fn write_err<W: Write>(err: ErrorKind, msg: &[u8], w: &mut PacketWriter<W>) -> io::Result<()> {
+    w.write_u8(0xFF)?;
+    w.write_u16::<LittleEndian>(err as u16)?;
+    w.write_u8(b'#')?;
+    w.write_all(err.sqlstate())?;
+    w.write_all(msg)?;
     w.end_packet()
 }
 
