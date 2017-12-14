@@ -1,3 +1,4 @@
-ignore:
-  - "src/errorcodes.rs" # generated file
-  - "examples" # no tests
+coverage:
+  ignore:
+    - "src/errorcodes.rs" # generated file
+    - "examples" # no tests
