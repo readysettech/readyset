@@ -555,11 +555,19 @@ pub(crate) fn make_join_node(
     let left_join_col_id = projected_cols_left
         .iter()
         .position(|lc| lc == on_left.first().unwrap())
-        .unwrap();
+        .expect(&format!(
+            "missing left-side join column {:?} in {:?}",
+            on_left.first().unwrap(),
+            projected_cols_left
+        ));
     let right_join_col_id = projected_cols_right
         .iter()
         .position(|rc| rc == on_right.first().unwrap())
-        .unwrap();
+        .expect(&format!(
+            "missing right-side join column {:?} in {:?}",
+            on_left.first().unwrap(),
+            projected_cols_left
+        ));
 
     let join_config = projected_cols_left
         .iter()
