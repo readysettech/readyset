@@ -5,7 +5,6 @@ use {Column, ErrorKind};
 use std::borrow::Borrow;
 use byteorder::WriteBytesExt;
 use value::ToMysqlValue;
-use myc::io::WriteMysqlExt;
 use myc::constants::{ColumnFlags, StatusFlags};
 
 /// Convenience type for responding to a client `PREPARE` command.
@@ -70,12 +69,7 @@ impl<'a, W: Write> QueryResultWriter<'a, W> {
     /// the query. `last_insert_id` may be given to communiate an identifier for a client's most
     /// recent insertion.
     pub fn completed(self, rows: u64, last_insert_id: u64) -> io::Result<()> {
-        self.writer.write_u8(0x00)?; // OK packet type
-        self.writer.write_lenenc_int(rows)?;
-        self.writer.write_lenenc_int(last_insert_id)?;
-        self.writer.write_all(&[0x00, 0x00])?; // no server status
-        self.writer.write_all(&[0x00, 0x00])?; // no warnings
-        Ok(())
+        writers::write_ok_packet(self.writer, rows, last_insert_id)
     }
 
     /// Reply to the client's query with an error.

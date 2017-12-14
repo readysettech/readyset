@@ -208,7 +208,8 @@ impl<B: MysqlShim<W>, R: Read, W: Write> MysqlIntermediary<B, R, W> {
             self.writer.set_seq(seq + 1);
         }
 
-        ok(&mut self.writer)
+        writers::write_ok_packet(&mut self.writer, 0, 0)?;
+        self.writer.flush()
     }
 
     fn run(mut self) -> io::Result<()> {
@@ -256,26 +257,21 @@ impl<B: MysqlShim<W>, R: Read, W: Write> MysqlIntermediary<B, R, W> {
                         }
                     };
 
-                    self.writer.flush()?;
-
                     if skip {
+                        self.writer.flush()?;
                         continue;
                     }
                 }
                 Command::Prepare(q) => {
-                    {
-                        let w = StatementMetaWriter {
-                            writer: &mut self.writer,
-                        };
+                    let w = StatementMetaWriter {
+                        writer: &mut self.writer,
+                    };
 
-                        self.shim.on_prepare(
-                            ::std::str::from_utf8(q)
-                                .map_err(|e| io::Error::new(io::ErrorKind::InvalidData, e))?,
-                            w,
-                        )?;
-                    }
-
-                    self.writer.flush()?;
+                    self.shim.on_prepare(
+                        ::std::str::from_utf8(q)
+                            .map_err(|e| io::Error::new(io::ErrorKind::InvalidData, e))?,
+                        w,
+                    )?;
                 }
                 Command::Execute { stmt, params } => {
                     let params = params::parse(params, self.shim.param_info(stmt))
@@ -292,29 +288,19 @@ impl<B: MysqlShim<W>, R: Read, W: Write> MysqlIntermediary<B, R, W> {
 
                         self.shim.on_execute(stmt, params, w)?;
                     }
-                    self.writer.flush()?;
                 }
                 Command::Close(stmt) => {
                     self.shim.on_close(stmt);
-                    ok(&mut self.writer)?;
+                    // NOTE: spec dictates no response from server
                 }
                 Command::Init(_) | Command::Ping => {
-                    ok(&mut self.writer)?;
+                    writers::write_ok_packet(&mut self.writer, 0, 0)?;
                 }
                 Command::Quit => {
                     break;
                 }
             }
         }
-        Ok(())
+        self.writer.flush()
     }
-}
-
-fn ok<W: Write>(w: &mut packet::PacketWriter<W>) -> io::Result<()> {
-    w.write_all(&[0x00])?; // OK packet type
-    w.write_all(&[0x00])?; // 0 rows (with lenenc encoding)
-    w.write_all(&[0x00])?; // no inserted rows
-    w.write_all(&[0x00, 0x00])?; // no server status
-    w.write_all(&[0x00, 0x00])?; // no warnings
-    w.flush()
 }
