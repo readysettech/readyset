@@ -59,7 +59,6 @@
 //!     jh.join().unwrap();
 //! }
 //! ```
-#![feature(try_from)]
 #![deny(missing_docs)]
 
 extern crate byteorder;

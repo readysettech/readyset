@@ -1,6 +1,6 @@
 [package]
 name = "msql-srv"
-version = "0.2.1"
+version = "0.2.2"
 
 description = "Vindings for emulating a MySQL/MariaDB server"
 readme = "README.md"
@@ -22,7 +22,7 @@ appveyor = { repository = "jonhoo/msql-srv", branch = "master", service = "githu
 codecov = { repository = "jonhoo/msql-srv", branch = "master", service = "github" }
 
 [dependencies]
-nom = { version = "4.0.0-alpha1", features = ["nightly"] }
+nom = "4.0.0-alpha1"
 mysql_common = "0.4"
 byteorder = "1"
 chrono = "0.4"
