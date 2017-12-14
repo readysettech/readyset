@@ -223,7 +223,7 @@ impl<B: MysqlShim<W>, R: Read, W: Write> MysqlIntermediary<B, R, W> {
                             writer: &mut self.writer,
                         };
 
-                        if q.starts_with(b"SELECT @@") {
+                        if q.starts_with(b"SELECT @@") || q.starts_with(b"select @@") {
                             let var = &q[b"SELECT @@".len()..];
                             match var {
                                 b"max_allowed_packet" => {
