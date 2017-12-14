@@ -60,6 +60,8 @@ pub struct QueryResultWriter<'a, W: Write + 'a> {
 impl<'a, W: Write> QueryResultWriter<'a, W> {
     /// Start a resultset response to the client that conforms to the given `columns`.
     ///
+    /// Note that if no columns are emitted, any written rows are ignored.
+    ///
     /// See [`RowWriter`](struct.RowWriter.html).
     pub fn start(self, columns: &'a [Column]) -> io::Result<RowWriter<'a, W>> {
         RowWriter::new(self.writer, columns, self.is_bin)
@@ -101,7 +103,9 @@ pub struct RowWriter<'a, W: Write + 'a> {
     bitmap_len: usize,
     data: Vec<u8>,
     columns: &'a [Column],
+
     col: usize,
+    wrote_any: bool,
 
     finished: bool,
 }
@@ -115,8 +119,6 @@ where
         columns: &'a [Column],
         is_bin: bool,
     ) -> io::Result<RowWriter<'a, W>> {
-        writers::column_definitions(columns, writer)?;
-
         let bitmap_len = (columns.len() + 7 + 2) / 8;
         Ok(RowWriter {
             is_bin: is_bin,
@@ -124,9 +126,22 @@ where
             columns: columns,
             bitmap_len,
             data: Vec::new(),
-            finished: false,
+
+            wrote_any: false,
             col: 0,
+
+            finished: false,
         })
+    }
+
+    #[inline]
+    fn start(&mut self) -> io::Result<()> {
+        if !self.columns.is_empty() && !self.wrote_any {
+            self.wrote_any = true;
+            writers::column_definitions(self.columns, self.writer)
+        } else {
+            Ok(())
+        }
     }
 
     /// Write a value to the next column of the current row as a part of this resultset.
@@ -144,6 +159,11 @@ where
     where
         T: ToMysqlValue,
     {
+        self.start()?;
+        if self.columns.is_empty() {
+            return Ok(());
+        }
+
         if self.is_bin {
             if self.col == 0 {
                 self.writer.write_u8(0x00)?;
@@ -185,6 +205,10 @@ where
 
     /// Indicate that no more column data will be written for the current row.
     pub fn end_row(&mut self) -> io::Result<()> {
+        if !self.wrote_any {
+            return Ok(());
+        }
+
         if self.col != self.columns.len() {
             return Err(io::Error::new(
                 io::ErrorKind::InvalidData,
@@ -221,13 +245,19 @@ where
 
 impl<'a, W: Write + 'a> RowWriter<'a, W> {
     fn finish_inner(&mut self) -> io::Result<()> {
+        self.finished = true;
+
         if self.col != 0 {
             self.end_row()?;
         }
 
-        self.finished = true;
-        self.writer.end_packet()?;
-        writers::write_eof_packet(self.writer, StatusFlags::empty())
+        if self.wrote_any {
+            // we wrote out at least one row
+            self.writer.end_packet()?;
+            writers::write_eof_packet(self.writer, StatusFlags::empty())
+        } else {
+            writers::write_ok_packet(self.writer, 0, 0)
+        }
     }
 
     /// End this resultset response, and indicate to the client that no more rows are coming.

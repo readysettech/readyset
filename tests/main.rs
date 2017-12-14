@@ -133,6 +133,47 @@ fn empty_response() {
 }
 
 #[test]
+fn no_rows() {
+    let cols = [
+        Column {
+            table: String::new(),
+            column: "a".to_owned(),
+            coltype: mysql::consts::ColumnType::MYSQL_TYPE_SHORT,
+            colflags: mysql::consts::ColumnFlags::empty(),
+        },
+    ];
+    TestingShim::new(
+        move |_, w| w.start(&cols[..])?.finish(),
+        |_| unreachable!(),
+        |_, _, _| unreachable!(),
+    ).test(|db| {
+        assert_eq!(db.query("SELECT a, b FROM foo").unwrap().count(), 0);
+    })
+}
+
+#[test]
+fn no_columns() {
+    TestingShim::new(
+        move |_, w| w.start(&[])?.finish(),
+        |_| unreachable!(),
+        |_, _, _| unreachable!(),
+    ).test(|db| {
+        assert_eq!(db.query("SELECT a, b FROM foo").unwrap().count(), 0);
+    })
+}
+
+#[test]
+fn no_columns_but_rows() {
+    TestingShim::new(
+        move |_, w| w.start(&[])?.write_col(42).map(|_| ()),
+        |_| unreachable!(),
+        |_, _, _| unreachable!(),
+    ).test(|db| {
+        assert_eq!(db.query("SELECT a, b FROM foo").unwrap().count(), 0);
+    })
+}
+
+#[test]
 fn error_response() {
     let err = (ErrorKind::ER_NO, "clearly not");
     TestingShim::new(
@@ -156,12 +197,17 @@ fn error_response() {
 }
 
 #[test]
-#[ignore]
 fn empty_on_drop() {
-    // NOTE: ignored for now as it's unclear if the MySQL spec allows giving no rows if you first
-    // start a resultset response.
+    let cols = [
+        Column {
+            table: String::new(),
+            column: "a".to_owned(),
+            coltype: mysql::consts::ColumnType::MYSQL_TYPE_SHORT,
+            colflags: mysql::consts::ColumnFlags::empty(),
+        },
+    ];
     TestingShim::new(
-        |_, w| w.start(&[]).map(|_| ()),
+        move |_, w| w.start(&cols[..]).map(|_| ()),
         |_| unreachable!(),
         |_, _, _| unreachable!(),
     ).test(|db| {
@@ -398,4 +444,47 @@ fn prepared_nulls() {
             assert_eq!(row.as_ref(0), Some(&msql_srv::Value::NULL));
             assert_eq!(row.get::<i16, _>(1), Some(42));
         })
+}
+
+#[test]
+fn prepared_no_rows() {
+    let cols = vec![
+        Column {
+            table: String::new(),
+            column: "a".to_owned(),
+            coltype: mysql::consts::ColumnType::MYSQL_TYPE_SHORT,
+            colflags: mysql::consts::ColumnFlags::empty(),
+        },
+    ];
+    let cols2 = cols.clone();
+    TestingShim::new(
+        |_, _| unreachable!(),
+        |_| 0,
+        move |_, _, w| w.start(&cols[..])?.finish(),
+    ).with_columns(cols2)
+        .test(|db| {
+            assert_eq!(db.prep_exec("SELECT a, b FROM foo", ()).unwrap().count(), 0);
+        })
+}
+
+#[test]
+fn prepared_no_cols_but_rows() {
+    TestingShim::new(
+        |_, _| unreachable!(),
+        |_| 0,
+        move |_, _, w| w.start(&[])?.write_col(42).map(|_| ()),
+    ).test(|db| {
+        assert_eq!(db.prep_exec("SELECT a, b FROM foo", ()).unwrap().count(), 0);
+    })
+}
+
+#[test]
+fn prepared_no_cols() {
+    TestingShim::new(
+        |_, _| unreachable!(),
+        |_| 0,
+        move |_, _, w| w.start(&[])?.finish(),
+    ).test(|db| {
+        assert_eq!(db.prep_exec("SELECT a, b FROM foo", ()).unwrap().count(), 0);
+    })
 }
