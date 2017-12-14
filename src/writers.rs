@@ -14,6 +14,19 @@ pub(crate) fn write_eof_packet<W: Write>(
     w.end_packet()
 }
 
+pub(crate) fn write_ok_packet<W: Write>(
+    w: &mut PacketWriter<W>,
+    rows: u64,
+    last_insert_id: u64,
+) -> io::Result<()> {
+    w.write_u8(0x00)?; // OK packet type
+    w.write_lenenc_int(rows)?;
+    w.write_lenenc_int(last_insert_id)?;
+    w.write_all(&[0x00, 0x00])?; // no server status
+    w.write_all(&[0x00, 0x00])?; // no warnings
+    w.end_packet()
+}
+
 pub fn write_err<W: Write>(err: ErrorKind, msg: &[u8], w: &mut PacketWriter<W>) -> io::Result<()> {
     w.write_u8(0xFF)?;
     w.write_u16::<LittleEndian>(err as u16)?;
