@@ -7,7 +7,7 @@ readme = "README.md"
 
 authors = ["Jon Gjengset <jon@thesquareplanet.com>"]
 
-documentation = "https://docs.rs/msql_srv"
+documentation = "https://docs.rs/msql-srv"
 homepage = "https://github.com/jonhoo/msql-srv"
 repository = "https://github.com/jonhoo/msql-srv.git"
 
