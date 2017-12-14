@@ -605,14 +605,69 @@ mod tests {
 
         rt!(u8_one, u8, 1, ColumnType::MYSQL_TYPE_TINY, false);
         rt!(i8_one, i8, 1, ColumnType::MYSQL_TYPE_TINY, true);
+        rt!(u8_one_short, u8, 1, ColumnType::MYSQL_TYPE_SHORT, false);
+        rt!(i8_one_short, i8, 1, ColumnType::MYSQL_TYPE_SHORT, true);
+        rt!(u8_one_long, u8, 1, ColumnType::MYSQL_TYPE_LONG, false);
+        rt!(i8_one_long, i8, 1, ColumnType::MYSQL_TYPE_LONG, true);
+        rt!(
+            u8_one_longlong,
+            u8,
+            1,
+            ColumnType::MYSQL_TYPE_LONGLONG,
+            false
+        );
+        rt!(
+            i8_one_longlong,
+            i8,
+            1,
+            ColumnType::MYSQL_TYPE_LONGLONG,
+            true
+        );
         rt!(u16_one, u16, 1, ColumnType::MYSQL_TYPE_SHORT, false);
         rt!(i16_one, i16, 1, ColumnType::MYSQL_TYPE_SHORT, true);
-        rt!(u32_one, u32, 1, ColumnType::MYSQL_TYPE_LONG, false);
-        rt!(i32_one, i32, 1, ColumnType::MYSQL_TYPE_LONG, true);
+        rt!(u16_one_long, u16, 1, ColumnType::MYSQL_TYPE_LONG, false);
+        rt!(i16_one_long, i16, 1, ColumnType::MYSQL_TYPE_LONG, true);
+        rt!(
+            u16_one_longlong,
+            u16,
+            1,
+            ColumnType::MYSQL_TYPE_LONGLONG,
+            false
+        );
+        rt!(
+            i16_one_longlong,
+            i16,
+            1,
+            ColumnType::MYSQL_TYPE_LONGLONG,
+            true
+        );
+        rt!(u32_one_long, u32, 1, ColumnType::MYSQL_TYPE_LONG, false);
+        rt!(i32_one_long, i32, 1, ColumnType::MYSQL_TYPE_LONG, true);
+        rt!(
+            u32_one_longlong,
+            u32,
+            1,
+            ColumnType::MYSQL_TYPE_LONGLONG,
+            false
+        );
+        rt!(
+            i32_one_longlong,
+            i32,
+            1,
+            ColumnType::MYSQL_TYPE_LONGLONG,
+            true
+        );
         rt!(u64_one, u64, 1, ColumnType::MYSQL_TYPE_LONGLONG, false);
         rt!(i64_one, i64, 1, ColumnType::MYSQL_TYPE_LONGLONG, true);
 
         rt!(f32_one, f32, 1.0, ColumnType::MYSQL_TYPE_FLOAT, false);
+        rt!(
+            f32_one_double,
+            f32,
+            1.0,
+            ColumnType::MYSQL_TYPE_DOUBLE,
+            false
+        );
         rt!(f64_one, f64, 1.0, ColumnType::MYSQL_TYPE_DOUBLE, false);
 
         rt!(
