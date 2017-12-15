@@ -1,5 +1,5 @@
-use Column;
 use std::borrow::Borrow;
+use {Column, Value};
 use myc;
 
 /// A `ParamParser` decodes query parameters included in a client's `EXECUTE` command given
@@ -44,7 +44,7 @@ where
     I: Iterator<Item = E> + ExactSizeIterator,
     E: Borrow<Column>,
 {
-    type Item = myc::value::Value;
+    type Item = Value<'a>;
     fn next(&mut self) -> Option<Self::Item> {
         if self.nullmap.is_none() {
             let nullmap_len = (self.types.len() + 7) / 8;
@@ -71,7 +71,7 @@ where
             }
             if (nullmap[byte] & 1u8 << (self.col % 8)) != 0 {
                 self.col += 1;
-                return Some(myc::value::Value::NULL);
+                return Some(Value::null());
             }
         } else {
             unreachable!();
@@ -94,6 +94,6 @@ where
             });
 
         self.col += 1;
-        Some(myc::value::read_bin_value(&mut self.input, pt.0, pt.1).unwrap())
+        Some(Value::parse_from(&mut self.input, pt.0, pt.1).unwrap())
     }
 }

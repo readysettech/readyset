@@ -71,7 +71,6 @@ use std::io;
 use std::iter;
 
 pub use myc::constants::{ColumnFlags, ColumnType};
-pub use myc::value::Value;
 
 mod packet;
 mod commands;
@@ -101,7 +100,7 @@ pub struct Column {
     pub colflags: ColumnFlags,
 }
 
-pub use value::ToMysqlValue;
+pub use value::{ToMysqlValue, Value};
 pub use resultset::{QueryResultWriter, RowWriter, StatementMetaWriter};
 pub use errorcodes::ErrorKind;
 pub use params::{ParamParser, Params};
