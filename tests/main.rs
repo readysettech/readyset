@@ -235,7 +235,7 @@ fn it_queries_nulls() {
             .next()
             .unwrap()
             .unwrap();
-        assert_eq!(row.as_ref(0), Some(&msql_srv::Value::NULL));
+        assert_eq!(row.as_ref(0), Some(&mysql::Value::NULL));
     })
 }
 
@@ -295,7 +295,8 @@ fn it_prepares() {
         },
         move |stmt, params, w| {
             assert_eq!(stmt, 41);
-            assert_eq!(params, vec![msql_srv::Value::Int(42)]);
+            assert_eq!(params.len(), 1);
+            assert_eq!(Into::<i8>::into(params[0]), 42i8);
 
             let mut w = w.start(&cols)?;
             w.write_col(1024i16)?;
@@ -418,10 +419,9 @@ fn prepared_nulls() {
         |_, _| unreachable!(),
         |_| 0,
         move |_, params, w| {
-            assert_eq!(
-                params,
-                vec![msql_srv::Value::NULL, msql_srv::Value::Int(42)]
-            );
+            assert_eq!(params.len(), 2);
+            assert!(params[0].is_null());
+            assert_eq!(Into::<i8>::into(params[1]), 42i8);
 
             let mut w = w.start(&cols)?;
             w.write_row(vec![None::<i16>, Some(42)])?;
@@ -432,12 +432,12 @@ fn prepared_nulls() {
         .test(|db| {
             let row = db.prep_exec(
                 "SELECT a, b FROM x WHERE c = ? AND d = ?",
-                (msql_srv::Value::NULL, 42),
+                (mysql::Value::NULL, 42),
             ).unwrap()
                 .next()
                 .unwrap()
                 .unwrap();
-            assert_eq!(row.as_ref(0), Some(&msql_srv::Value::NULL));
+            assert_eq!(row.as_ref(0), Some(&mysql::Value::NULL));
             assert_eq!(row.get::<i16, _>(1), Some(42));
         })
 }
