@@ -1,6 +1,6 @@
 [package]
 name = "msql-srv"
-version = "0.5.0"
+version = "0.5.1"
 
 description = "Vindings for emulating a MySQL/MariaDB server"
 readme = "README.md"
