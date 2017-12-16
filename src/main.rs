@@ -49,10 +49,6 @@ impl SoupBackend {
 }
 
 impl<W: io::Write> MysqlShim<W> for SoupBackend {
-    fn param_info(&self, stmt: u32) -> &[Column] {
-        &[]
-    }
-
     fn on_prepare(&mut self, query: &str, info: StatementMetaWriter<W>) -> io::Result<()> {
         println!("prepare: {}", query);
         info.reply(42, &[], &[])
@@ -61,7 +57,7 @@ impl<W: io::Write> MysqlShim<W> for SoupBackend {
     fn on_execute(
         &mut self,
         id: u32,
-        _: Vec<Value>,
+        _: ParamParser,
         results: QueryResultWriter<W>,
     ) -> io::Result<()> {
         println!("exec: {}", id);
