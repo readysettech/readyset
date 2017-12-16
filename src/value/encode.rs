@@ -389,6 +389,24 @@ impl ToMysqlValue for [u8] {
     }
 }
 
+impl ToMysqlValue for Vec<u8> {
+    fn to_mysql_text<W: Write>(&self, w: &mut W) -> io::Result<()> {
+        (&self[..]).to_mysql_text(w)
+    }
+    fn to_mysql_bin<W: Write>(&self, w: &mut W, c: &Column) -> io::Result<()> {
+        (&self[..]).to_mysql_bin(w, c)
+    }
+}
+
+impl<'a> ToMysqlValue for &'a [u8] {
+    fn to_mysql_text<W: Write>(&self, w: &mut W) -> io::Result<()> {
+        (*self).to_mysql_text(w)
+    }
+    fn to_mysql_bin<W: Write>(&self, w: &mut W, c: &Column) -> io::Result<()> {
+        (*self).to_mysql_bin(w, c)
+    }
+}
+
 use chrono::{Datelike, NaiveDate, NaiveDateTime, Timelike};
 impl ToMysqlValue for NaiveDate {
     fn to_mysql_text<W: Write>(&self, w: &mut W) -> io::Result<()> {
