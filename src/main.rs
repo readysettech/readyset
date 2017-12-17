@@ -3,7 +3,7 @@ extern crate msql_srv;
 #[macro_use]
 extern crate slog;
 
-use distributary::{ControllerHandle, Mutator, RemoteGetter, ZookeeperAuthority};
+use distributary::{ControllerHandle, Mutator, RemoteGetter, RpcError, ZookeeperAuthority};
 use msql_srv::*;
 use std::{io, net};
 use std::collections::BTreeMap;
@@ -69,9 +69,17 @@ impl<W: io::Write> MysqlShim<W> for SoupBackend {
     fn on_query(&mut self, query: &str, results: QueryResultWriter<W>) -> io::Result<()> {
         debug!(self.log, "query: {}", query);
 
-        self.soup.install_recipe(format!("{};", query));
-
-        results.completed(0, 0)
+        match self.soup.install_recipe(format!("{};", query)) {
+            // TODO(malte): should return proper completion indication (depends on type of query)
+            Ok(_) => results.completed(0, 0),
+            Err(e) => {
+                // XXX(malte): implement Error for RpcError
+                let msg = match e {
+                    RpcError::Other(msg) => msg,
+                };
+                Err(io::Error::new(io::ErrorKind::Other, msg))
+            }
+        }
     }
 }
 
