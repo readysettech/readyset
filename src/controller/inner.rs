@@ -79,6 +79,7 @@ pub struct ControllerInner {
 /// Serializable error type for RPC that can fail.
 #[derive(Debug, Deserialize, Serialize)]
 pub enum RpcError {
+    /// Generic error message vessel.
     Other(String),
 }
 

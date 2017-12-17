@@ -44,6 +44,7 @@ mod mutator;
 
 pub use controller::builder::ControllerBuilder;
 pub use controller::handle::ControllerHandle;
+pub use controller::inner::RpcError;
 pub use controller::migrate::Migration;
 pub use controller::mutator::{Mutator, MutatorBuilder, MutatorError};
 pub use controller::getter::{Getter, ReadQuery, ReadReply, RemoteGetter, RemoteGetterBuilder};
