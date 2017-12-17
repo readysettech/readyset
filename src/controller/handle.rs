@@ -16,6 +16,7 @@ use serde_json;
 use tokio_core::reactor::Core;
 
 use controller::{ControlEvent, ControllerDescriptor};
+use controller::inner::RpcError;
 use controller::getter::{RemoteGetter, RemoteGetterBuilder};
 use controller::mutator::{Mutator, MutatorBuilder};
 
@@ -111,7 +112,7 @@ impl<A: Authority> ControllerHandle<A> {
     }
 
     /// Install a new recipe on the controller.
-    pub fn install_recipe(&mut self, new_recipe: String) {
+    pub fn install_recipe(&mut self, new_recipe: String) -> Result<(), RpcError> {
         self.rpc("install_recipe", &new_recipe)
     }
 

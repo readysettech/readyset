@@ -76,6 +76,12 @@ pub struct ControllerInner {
     log: slog::Logger,
 }
 
+/// Serializable error type for RPC that can fail.
+#[derive(Debug, Deserialize, Serialize)]
+pub enum RpcError {
+    Other(String),
+}
+
 impl ControllerInner {
     pub fn coordination_message(&mut self, msg: CoordinationMessage) {
         trace!(self.log, "Received {:?}", msg);
@@ -491,7 +497,7 @@ impl ControllerInner {
         GraphStats { domains: domains }
     }
 
-    pub fn install_recipe(&mut self, r_txt: String) {
+    pub fn install_recipe(&mut self, r_txt: String) -> Result<(), RpcError> {
         match Recipe::from_str(&r_txt, Some(self.log.clone())) {
             Ok(r) => {
                 let old = self.recipe.clone();
@@ -501,8 +507,13 @@ impl ControllerInner {
                     Err(e) => panic!("failed to install recipe: {:?}", e),
                 });
                 self.recipe = new;
+
+                Ok(())
             }
-            Err(e) => crit!(self.log, "failed to parse recipe: {:?}", e),
+            Err(e) => {
+                crit!(self.log, "failed to parse recipe: {:?}", e);
+                Err(RpcError::Other("failed to parse recipe".to_owned()))
+            }
         }
     }
 
