@@ -359,7 +359,8 @@ pub use dataflow::prelude::DomainIndex;
 pub use dataflow::{DurabilityMode, PersistenceParameters};
 
 pub use controller::{Controller, ControllerBuilder, ControllerHandle, Mutator, MutatorBuilder,
-                     MutatorError, ReadQuery, ReadReply, RemoteGetter, RemoteGetterBuilder};
+                     MutatorError, ReadQuery, ReadReply, RemoteGetter, RemoteGetterBuilder,
+                     RpcError};
 pub use souplet::Souplet;
 
 /// Just give me a damn terminal logger

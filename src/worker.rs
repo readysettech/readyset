@@ -428,10 +428,10 @@ impl Worker {
             let mut resume_polling = |rit: usize, replica: &mut Replica| {
                 let mut sends = Vec::new();
                 replica.on_event(PollEvent::ResumePolling(&mut durtmp), &mut sends);
-                // https://github.com/andrewjstone/timer_heap/issues/3
-                timers.remove(rit);
                 if let Some(timeout) = durtmp.take() {
-                    timers.insert(rit, timeout, TimerType::Oneshot).unwrap();
+                    timers.upsert(rit, timeout, TimerType::Oneshot);
+                } else {
+                    timers.remove(rit);
                 }
                 if !sends.is_empty() {
                     // ResumePolling is not allowed to send packets
