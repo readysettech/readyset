@@ -327,6 +327,7 @@ extern crate mir;
 extern crate nom_sql;
 extern crate petgraph;
 extern crate rand;
+extern crate rayon;
 extern crate serde;
 #[macro_use]
 extern crate serde_derive;

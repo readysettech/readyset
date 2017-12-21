@@ -1,4 +1,3 @@
-use channel::poll::{RpcPollingLoop};
 use channel::tcp::TcpSender;
 use dataflow::{checktable, node, payload, DomainConfig, PersistenceParameters, Readers};
 use dataflow::payload::{EgressForBase, IngressFromBase};
@@ -9,7 +8,7 @@ use std::collections::{BTreeMap, HashMap};
 use std::net::{IpAddr, SocketAddr};
 use std::time::{Duration, Instant};
 use std::thread::{self};
-use std::sync::{Arc, Mutex};
+use std::sync::{Arc, Mutex, atomic};
 use std::{io, time};
 
 use coordination::{CoordinationMessage, CoordinationPayload};
@@ -17,7 +16,7 @@ use controller::{ControllerState, DomainHandle, Migration, Recipe, RemoteGetterB
                  WorkerIdentifier, WorkerStatus};
 use controller::migrate::materialization::Materializations;
 use controller::mutator::MutatorBuilder;
-use souplet::Souplet;
+use souplet::readers;
 use worker;
 
 use hyper::{Method, StatusCode};
@@ -56,6 +55,7 @@ pub struct ControllerInner {
 
     pub(super) listen_addr: IpAddr,
     read_listen_addr: SocketAddr,
+    pub(super) reader_exit: Arc<atomic::AtomicBool>,
     pub(super) readers: Readers,
 
     /// Map from worker address to the address the worker is listening on for reads.
@@ -198,14 +198,18 @@ impl ControllerInner {
                 .unwrap();
 
         let readers: Readers = Arc::default();
-        let readers_clone = readers.clone();
-        let addr = SocketAddr::new(listen_addr, 0);
-        let read_polling_loop = RpcPollingLoop::new(addr.clone());
-        let read_listen_addr = read_polling_loop.get_listener_addr().unwrap();
-        let thread_builder = thread::Builder::new().name("wrkr-reads".to_owned());
-        thread_builder
-            .spawn(move || Souplet::serve_reads(read_polling_loop, readers_clone))
-            .unwrap();
+        let nreaders = state.config.nreaders;
+        let listener = TcpListener::bind(&SocketAddr::new(listen_addr, 0)).unwrap();
+        let read_listen_addr = listener.local_addr().unwrap();
+        let thread_builder = thread::Builder::new().name("read-dispatcher".to_owned());
+        let reader_exit = Arc::new(atomic::AtomicBool::new(false));
+        {
+            let readers = readers.clone();
+            let reader_exit = reader_exit.clone();
+            thread_builder
+                .spawn(move || readers::serve(listener, readers, nreaders, reader_exit))
+                .unwrap();
+        }
 
         let mut materializations = Materializations::new(&log);
         if !state.config.partial_enabled {
@@ -253,6 +257,7 @@ impl ControllerInner {
 
             readers,
             read_listen_addr,
+            reader_exit,
             read_addrs: HashMap::default(),
             workers: HashMap::default(),
 
@@ -569,6 +574,7 @@ impl ControllerInner {
 
 impl Drop for ControllerInner {
     fn drop(&mut self) {
+        self.reader_exit.store(true, atomic::Ordering::SeqCst);
         for (_, d) in &mut self.domains {
             // XXX: this is a terrible ugly hack to ensure that all workers exit
             for _ in 0..100 {

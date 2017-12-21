@@ -104,6 +104,7 @@ struct ControllerConfig {
     healthcheck_every: Duration,
     local_workers: usize,
     nworkers: usize,
+    nreaders: usize,
 }
 impl Default for ControllerConfig {
     fn default() -> Self {
@@ -126,6 +127,7 @@ impl Default for ControllerConfig {
             #[cfg(not(test))]
             local_workers: 0,
             nworkers: 0,
+            nreaders: 1,
         }
     }
 }

@@ -66,6 +66,11 @@ impl ControllerBuilder {
         self.config.nworkers = workers;
     }
 
+    /// Set how many threads should be set up when operating in local mode.
+    pub fn set_local_read_threads(&mut self, n: usize) {
+        self.config.nreaders = n;
+    }
+
     /// Set the IP address that the controller should use for listening.
     pub fn set_listen_addr(&mut self, listen_addr: IpAddr) {
         self.listen_addr = listen_addr;

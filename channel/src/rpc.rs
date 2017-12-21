@@ -151,6 +151,10 @@ where
 
         Ok(())
     }
+
+    pub fn get_ref(&self) -> &mio::net::TcpStream {
+        self.stream.get_ref().get_ref()
+    }
 }
 
 impl<Q, R> Evented for RpcServiceEndpoint<Q, R> {
