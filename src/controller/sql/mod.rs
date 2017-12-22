@@ -556,9 +556,7 @@ impl SqlIncorporator {
 
         info!(
             self.log,
-            "Reused {} nodes for {}",
-            num_reused_nodes,
-            query_name
+            "Reused {} nodes for {}", num_reused_nodes, query_name
         );
 
         // We made a new query, so store the query graph and the corresponding leaf MIR node
@@ -702,9 +700,7 @@ impl SqlIncorporator {
         assert!(new_version > self.schema_version);
         info!(
             self.log,
-            "Schema version advanced from {} to {}",
-            self.schema_version,
-            new_version
+            "Schema version advanced from {} to {}", self.schema_version, new_version
         );
         self.schema_version = new_version;
         self.mir_converter.upgrade_schema(new_version);
@@ -845,13 +841,11 @@ mod tests {
             assert_eq!(get_node(&inc, mig, "users").description(), "B");
 
             // Establish a base write type for "articles"
-            assert!(
-                inc.add_query(
-                    "CREATE TABLE articles (id int, author int, title varchar(255));",
-                    None,
-                    mig
-                ).is_ok()
-            );
+            assert!(inc.add_query(
+                "CREATE TABLE articles (id int, author int, title varchar(255));",
+                None,
+                mig
+            ).is_ok());
             // Should have source and "users" base table node
             assert_eq!(mig.graph().node_count(), 3);
             assert_eq!(get_node(&inc, mig, "articles").name(), "articles");
@@ -1051,13 +1045,11 @@ mod tests {
         let mut inc = SqlIncorporator::default();
         g.migrate(|mig| {
             // Establish a base write type
-            assert!(
-                inc.add_query(
-                    "CREATE TABLE users (id int, name varchar(40), address varchar(40));",
-                    None,
-                    mig
-                ).is_ok()
-            );
+            assert!(inc.add_query(
+                "CREATE TABLE users (id int, name varchar(40), address varchar(40));",
+                None,
+                mig
+            ).is_ok());
             // Should have source and "users" base table node
             assert_eq!(mig.graph().node_count(), 2);
             assert_eq!(get_node(&inc, mig, "users").name(), "users");
@@ -1230,13 +1222,11 @@ mod tests {
                 inc.add_query("CREATE TABLE votes (aid int, uid int);", None, mig)
                     .is_ok()
             );
-            assert!(
-                inc.add_query(
-                    "CREATE TABLE articles (aid int, title varchar(255), author int);",
-                    None,
-                    mig
-                ).is_ok()
-            );
+            assert!(inc.add_query(
+                "CREATE TABLE articles (aid int, title varchar(255), author int);",
+                None,
+                mig
+            ).is_ok());
 
             // Try an explicit multi-way-join
             let q = "SELECT users.name, articles.title, votes.uid \
@@ -1283,13 +1273,11 @@ mod tests {
                 inc.add_query("CREATE TABLE votes (aid int, uid int);", None, mig)
                     .is_ok()
             );
-            assert!(
-                inc.add_query(
-                    "CREATE TABLE articles (aid int, title varchar(255), author int);",
-                    None,
-                    mig
-                ).is_ok()
-            );
+            assert!(inc.add_query(
+                "CREATE TABLE articles (aid int, title varchar(255), author int);",
+                None,
+                mig
+            ).is_ok());
 
             // Try an implicit multi-way-join
             let q = "SELECT users.name, articles.title, votes.uid \
@@ -1391,13 +1379,11 @@ mod tests {
                 inc.add_query("CREATE TABLE users (id int, name varchar(40));", None, mig)
                     .is_ok()
             );
-            assert!(
-                inc.add_query(
-                    "CREATE TABLE articles (id int, author int, title varchar(255));",
-                    None,
-                    mig
-                ).is_ok()
-            );
+            assert!(inc.add_query(
+                "CREATE TABLE articles (id int, author int, title varchar(255));",
+                None,
+                mig
+            ).is_ok());
 
             let q = "SELECT nested_users.name, articles.title \
                      FROM articles \

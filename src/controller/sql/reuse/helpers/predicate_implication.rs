@@ -246,7 +246,6 @@ mod tests {
             operator: Operator::Or,
         });
 
-
         assert!(complex_predicate_implies(&cp2, &cp1));
         assert!(!complex_predicate_implies(&cp1, &cp2));
         assert!(complex_predicate_implies(&cp2, &cp3));
@@ -300,7 +299,6 @@ mod tests {
             operator: Operator::And,
         });
 
-
         assert!(complex_predicate_implies(&cp1, &cp2));
         assert!(!complex_predicate_implies(&cp2, &cp1));
         assert!(complex_predicate_implies(&cp3, &cp2));
@@ -330,7 +328,6 @@ mod tests {
             operator: Operator::Or,
         });
 
-
         assert!(complex_predicate_implies(&pa, &cp1));
         assert!(complex_predicate_implies(&pb, &cp1));
         assert!(!complex_predicate_implies(&cp1, &pa));
@@ -359,7 +356,6 @@ mod tests {
             right: Box::new(pb.clone()),
             operator: Operator::And,
         });
-
 
         assert!(!complex_predicate_implies(&pa, &cp1));
         assert!(!complex_predicate_implies(&pb, &cp1));

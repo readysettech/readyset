@@ -151,7 +151,6 @@ mod tests {
         assert_eq!(res, expected);
     }
 
-
     #[test]
     fn it_works_with_complex_queries() {
         // select users.name, articles.title, votes.uid \

@@ -516,7 +516,11 @@ impl Ingredient for Join {
         let emit = self.emit
             .iter()
             .map(|&(from_left, col)| {
-                let src = if from_left { self.left } else { self.right };
+                let src = if from_left {
+                    self.left
+                } else {
+                    self.right
+                };
                 format!("{}:{}", src.as_global().index(), col)
             })
             .collect::<Vec<_>>()
@@ -549,7 +553,11 @@ impl Ingredient for Join {
         } else {
             vec![
                 (
-                    if pcol.0 { &self.left } else { &self.right }.as_global(),
+                    if pcol.0 {
+                        &self.left
+                    } else {
+                        &self.right
+                    }.as_global(),
                     Some(pcol.1),
                 ),
             ]

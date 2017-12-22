@@ -19,7 +19,6 @@ pub struct Base {
     unmodified: bool,
 }
 
-
 impl Base {
     /// Create a non-durable base node operator.
     pub fn new(defaults: Vec<DataType>) -> Self {

@@ -11,7 +11,6 @@ use domain;
 
 use checktable;
 
-
 enum BufferedTransaction {
     Transaction(NodeIndex, Box<Packet>),
     MigrationStart,
@@ -144,8 +143,7 @@ impl DomainState {
                             if count == 0 {
                                 println!(
                                     "{:?} got transaction from base {:?}, which it shouldn't",
-                                    self.domain_index,
-                                    base
+                                    self.domain_index, base
                                 );
                                 unreachable!();
                             }

@@ -17,24 +17,29 @@ pub struct RpcClient<Q, R> {
     poisoned: bool,
     phantom: PhantomData<Q>,
     phantom2: PhantomData<R>,
+    is_local: bool,
 }
-
 
 impl<Q: Serialize, R> RpcClient<Q, R>
 where
     for<'de> R: Deserialize<'de>,
 {
-    pub fn new(stream: std::net::TcpStream) -> Result<Self, io::Error> {
+    pub fn new(stream: std::net::TcpStream, is_local: bool) -> Result<Self, io::Error> {
         Ok(Self {
             stream: BufStream::new(stream),
             poisoned: false,
             phantom: PhantomData,
             phantom2: PhantomData,
+            is_local,
         })
     }
 
-    pub fn connect(addr: &SocketAddr) -> Result<Self, io::Error> {
-        Self::new(std::net::TcpStream::connect(addr)?)
+    pub fn is_local(&self) -> bool {
+        self.is_local
+    }
+
+    pub fn connect(addr: &SocketAddr, is_local: bool) -> Result<Self, io::Error> {
+        Self::new(std::net::TcpStream::connect(addr)?, is_local)
     }
 
     pub fn local_addr(&self) -> io::Result<SocketAddr> {
@@ -145,6 +150,10 @@ where
         }
 
         Ok(())
+    }
+
+    pub fn get_ref(&self) -> &mio::net::TcpStream {
+        self.stream.get_ref().get_ref()
     }
 }
 

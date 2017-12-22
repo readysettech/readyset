@@ -53,7 +53,6 @@ impl fmt::Display for ProjectExpression {
     }
 }
 
-
 /// Permutes or omits columns from its source node, or adds additional literal value columns.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Project {

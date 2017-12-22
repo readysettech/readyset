@@ -328,9 +328,7 @@ impl Domain {
         if !found {
             unreachable!(format!(
                 "no tag found to fill missing value {:?} in {}.{:?}",
-                miss_key,
-                miss_in,
-                miss_column
+                miss_key, miss_in, miss_column
             ));
         }
     }
@@ -1345,14 +1343,14 @@ impl Domain {
                     .expect("migration replay path started with non-materialized node");
 
                 let mut rs = Vec::new();
-                let (keys, misses): (HashSet<_>, _) = keys.into_iter().partition(|key| {
-                    match state.lookup(&cols[..], &KeyType::Single(&key[0])) {
-                        LookupResult::Some(res) => {
-                            rs.extend(res.into_iter().map(|r| self.seed_row(source, r)));
-                            true
-                        }
-                        LookupResult::Missing => false,
+                let (keys, misses): (HashSet<_>, _) = keys.into_iter().partition(|key| match state
+                    .lookup(&cols[..], &KeyType::Single(&key[0]))
+                {
+                    LookupResult::Some(res) => {
+                        rs.extend(res.into_iter().map(|r| self.seed_row(source, r)));
+                        true
                     }
+                    LookupResult::Missing => false,
                 });
 
                 let m = if !keys.is_empty() {
@@ -1581,8 +1579,7 @@ impl Domain {
                 Err(ref e) if e.kind() == ErrorKind::NotFound => {
                     warn!(
                         self.log,
-                        "No log file found for node {}, starting out empty",
-                        local_addr
+                        "No log file found for node {}, starting out empty", local_addr
                     );
 
                     continue;

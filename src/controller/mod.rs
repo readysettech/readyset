@@ -1,34 +1,32 @@
-use channel::poll::{PollEvent, PollingLoop, ProcessResult, RpcPollingLoop};
+use channel::poll::{PollEvent, PollingLoop, ProcessResult};
 use channel::tcp::TcpSender;
-use channel;
-use dataflow::prelude::*;
-use dataflow::{checktable, node, payload, DomainConfig, PersistenceParameters, Readers};
-use dataflow::ops::base::Base;
-use dataflow::statistics::GraphStats;
-use souplet::Souplet;
-use worker;
+use consensus::{Authority, Epoch};
+use dataflow::checktable::service::CheckTableServer;
+use dataflow::{DomainConfig, PersistenceParameters};
 
-use std::collections::{BTreeMap, HashMap, HashSet};
+use controller::domain_handle::DomainHandle;
+use controller::inner::ControllerInner;
+use controller::recipe::Recipe;
+use coordination::CoordinationMessage;
+
 use std::error::Error;
-use std::io::Read;
+use std::io::ErrorKind;
+use std::marker::PhantomData;
 use std::net::{IpAddr, SocketAddr};
 use std::time::{Duration, Instant};
+use std::thread::{self, JoinHandle};
 use std::sync::{Arc, Mutex};
-use std::sync::mpsc::{self, Sender};
-use std::{io, thread, time};
+use std::sync::mpsc::{self, Receiver, Sender};
+use std::{io, time};
 
-use futures::{Future, Stream};
-use hyper::Client;
-use mio::net::TcpListener;
-use petgraph;
-use petgraph::visit::Bfs;
-use petgraph::graph::NodeIndex;
+use futures::{self, Future, Stream};
+use hyper::{self, Method, StatusCode};
+use hyper::header::ContentType;
+use hyper::server::{Http, NewService, Request, Response, Service};
+use rand;
 use serde::Serialize;
-use serde::de::DeserializeOwned;
 use serde_json;
 use slog;
-use tarpc::sync::client::{self, ClientExt};
-use tokio_core::reactor::Core;
 
 use self::recipe::Recipe;
 use self::sql::reuse::ReuseConfigType;
@@ -41,27 +39,23 @@ pub(crate) mod recipe;
 pub(crate) mod sql;
 pub(crate) mod security;
 
+mod builder;
 mod getter;
+mod handle;
+mod inner;
 mod mir_to_flow;
 mod mutator;
 
-use self::domain_handle::DomainHandle;
-use coordination::{CoordinationMessage, CoordinationPayload};
+pub use controller::builder::ControllerBuilder;
+pub use controller::handle::ControllerHandle;
+pub use controller::inner::RpcError;
+pub use controller::migrate::Migration;
+pub use controller::mutator::{Mutator, MutatorBuilder, MutatorError};
+pub use controller::getter::{Getter, ReadQuery, ReadReply, RemoteGetter, RemoteGetterBuilder};
+pub(crate) use controller::getter::LocalOrNot;
 
-pub use self::mutator::{Mutator, MutatorBuilder, MutatorError};
-pub use self::getter::{Getter, ReadQuery, ReadReply, RemoteGetter, RemoteGetterBuilder};
-use self::payload::{EgressForBase, IngressFromBase};
-
-pub type WorkerIdentifier = SocketAddr;
-pub type WorkerEndpoint = Arc<Mutex<TcpSender<CoordinationMessage>>>;
-
-const NANOS_PER_SEC: u64 = 1_000_000_000;
-macro_rules! dur_to_ns {
-    ($d:expr) => {{
-        let d = $d;
-        d.as_secs() * NANOS_PER_SEC + d.subsec_nanos() as u64
-    }}
-}
+type WorkerIdentifier = SocketAddr;
+type WorkerEndpoint = Arc<Mutex<TcpSender<CoordinationMessage>>>;
 
 #[derive(Clone)]
 struct WorkerStatus {
@@ -80,1635 +74,457 @@ impl WorkerStatus {
     }
 }
 
-
-enum ControlEvent {
-    WorkerCoordination(CoordinationMessage),
-    ExternalGet(String, String, Sender<String>),
-    ExternalPost(String, String, Sender<String>),
+/// Wrapper around the state of a thread serving network requests. Both tracks the address that the
+/// thread is listening on and provides a way to stop it.
+struct ServingThread {
+    addr: SocketAddr,
+    join_handle: JoinHandle<()>,
+    stop: Box<Drop + Send>,
+}
+impl ServingThread {
+    fn stop(self) {
+        drop(self.stop);
+        self.join_handle.join().unwrap();
+    }
 }
 
-/// Used to construct a controller.
-pub struct ControllerBuilder {
+/// Describes a running controller instance. A serialized version of this struct is stored in
+/// ZooKeeper so that clients can reach the currently active controller.
+#[derive(Serialize, Deserialize)]
+struct ControllerDescriptor {
+    external_addr: SocketAddr,
+    internal_addr: SocketAddr,
+    checktable_addr: SocketAddr,
+    nonce: u64,
+}
+
+#[derive(Clone, Serialize, Deserialize)]
+struct ControllerConfig {
     sharding: Option<usize>,
+    partial_enabled: bool,
     domain_config: DomainConfig,
     persistence: PersistenceParameters,
-    materializations: migrate::materialization::Materializations,
-    listen_addr: IpAddr,
     heartbeat_every: Duration,
     healthcheck_every: Duration,
-    nworkers: usize,
     local_workers: usize,
-    internal_port: u16,
-    external_port: u16,
-    checktable_port: u16,
-    log: slog::Logger,
+    nworkers: usize,
+    nreaders: usize,
 }
-impl Default for ControllerBuilder {
+impl Default for ControllerConfig {
     fn default() -> Self {
-        let log = slog::Logger::root(slog::Discard, o!());
         Self {
             #[cfg(test)]
             sharding: Some(2),
             #[cfg(not(test))]
             sharding: None,
+            partial_enabled: true,
             domain_config: DomainConfig {
                 concurrent_replays: 512,
                 replay_batch_timeout: time::Duration::from_millis(1),
                 replay_batch_size: 32,
             },
             persistence: Default::default(),
-            materializations: migrate::materialization::Materializations::new(&log),
-            listen_addr: "127.0.0.1".parse().unwrap(),
             heartbeat_every: Duration::from_secs(1),
             healthcheck_every: Duration::from_secs(10),
-            internal_port: if cfg!(test) { 0 } else { 8000 },
-            checktable_port: if cfg!(test) { 0 } else { 8500 },
-            external_port: if cfg!(test) { 0 } else { 9000 },
-            nworkers: 0,
             #[cfg(test)]
             local_workers: 2,
             #[cfg(not(test))]
             local_workers: 0,
-            log,
+            nworkers: 0,
+            nreaders: 1,
         }
     }
 }
-impl ControllerBuilder {
-    /// Set the maximum number of concurrent partial replay requests a domain can have outstanding
-    /// at any given time.
-    ///
-    /// Note that this number *must* be greater than the width (in terms of number of ancestors) of
-    /// the widest union in the graph, otherwise a deadlock will occur.
-    pub fn set_max_concurrent_replay(&mut self, n: usize) {
-        self.domain_config.concurrent_replays = n;
-    }
 
-    /// Set the maximum number of partial replay responses that can be aggregated into a single
-    /// replay batch.
-    pub fn set_partial_replay_batch_size(&mut self, n: usize) {
-        self.domain_config.replay_batch_size = n;
-    }
+#[derive(Clone, Serialize, Deserialize)]
+struct ControllerState {
+    config: ControllerConfig,
+    epoch: Epoch,
+    recipe: (), // TODO: store all relevant state here.
+}
 
-    /// Set the longest time a partial replay response can be delayed.
-    pub fn set_partial_replay_batch_timeout(&mut self, t: time::Duration) {
-        self.domain_config.replay_batch_timeout = t;
-    }
+enum ControlEvent {
+    ControllerMessage(CoordinationMessage),
+    ExternalRequest(
+        Method,
+        String,
+        Vec<u8>,
+        futures::sync::oneshot::Sender<Result<String, StatusCode>>,
+    ),
+    WonLeaderElection(ControllerState),
+    LostLeadership(Epoch),
+    Shutdown,
+    Error(Box<Error + Send + Sync>),
+}
 
-    /// Set the persistence parameters used by the system.
-    pub fn set_persistence(&mut self, p: PersistenceParameters) {
-        self.persistence = p;
-    }
+/// Runs the soup instance.
+pub struct Controller<A: Authority + 'static> {
+    current_epoch: Option<Epoch>,
+    inner: Option<ControllerInner>,
+    log: slog::Logger,
 
-    /// Disable partial materialization for all subsequent migrations
-    pub fn disable_partial(&mut self) {
-        self.materializations.disable_partial();
-    }
+    listen_addr: IpAddr,
+    internal: ServingThread,
+    external: ServingThread,
+    checktable: SocketAddr,
+    _campaign: JoinHandle<()>,
 
-    /// Enable sharding for all subsequent migrations
-    pub fn enable_sharding(&mut self, shards: usize) {
-        self.sharding = Some(shards);
-    }
+    phantom: PhantomData<A>,
+}
 
-    /// Set how many workers the controller should wait for before starting. More workers can join
-    /// later, but they won't be assigned any of the initial domains.
-    pub fn set_nworkers(&mut self, workers: usize) {
-        self.nworkers = workers;
-    }
+impl<A: Authority + 'static> Controller<A> {
+    /// Start up a new `Controller` and return a handle to it. Dropping the handle will stop the
+    /// controller.
+    fn start(
+        authority: A,
+        listen_addr: IpAddr,
+        config: ControllerConfig,
+        log: slog::Logger,
+    ) -> ControllerHandle<A> {
+        let authority = Arc::new(authority);
 
-    /// Set the number of worker threads to spin up in local mode (when nworkers == 0).
-    pub fn set_local_workers(&mut self, workers: usize) {
-        self.local_workers = workers;
-    }
+        let (event_tx, event_rx) = mpsc::channel();
+        let internal = Self::listen_internal(event_tx.clone(), SocketAddr::new(listen_addr, 0));
+        let checktable = CheckTableServer::start(SocketAddr::new(listen_addr, 0));
+        let external = Self::listen_external(
+            event_tx.clone(),
+            SocketAddr::new(listen_addr, 9000),
+            authority.clone(),
+        );
 
-    #[cfg(test)]
-    pub fn build_inner(self) -> ControllerInner {
-        ControllerInner::from_builder(self)
-    }
+        let descriptor = ControllerDescriptor {
+            external_addr: external.addr,
+            internal_addr: internal.addr,
+            checktable_addr: checktable,
+            nonce: rand::random(),
+        };
+        let campaign = Self::campaign(event_tx.clone(), authority.clone(), descriptor, config);
 
-    /// Set the logger that the derived controller should use. By default, it uses `slog::Discard`.
-    pub fn log_with(&mut self, log: slog::Logger) {
-        self.materializations.set_logger(&log);
-        self.log = log;
-    }
-
-    /// Build a controller, and return a Blender to provide access to it.
-    pub fn build(self) -> Blender {
-        // TODO(fintelia): Don't hard code addresses in this function.
-        let internal_addr = SocketAddr::new("127.0.0.1".parse().unwrap(), self.internal_port);
-        let external_addr = SocketAddr::new("127.0.0.1".parse().unwrap(), self.external_port);
-        let nworkers = self.nworkers;
-
-        let (tx, rx) = mpsc::channel();
-
-        let addr = ControllerInner::listen_external(tx.clone(), external_addr);
-        ControllerInner::listen_internal(tx, internal_addr);
-
-        let (worker_ready_tx, worker_ready_rx) = mpsc::channel();
-
-        let builder = thread::Builder::new().name("ctrl-inner".to_owned());
-        builder
+        let builder = thread::Builder::new().name("srv-main".to_owned());
+        let join_handle = builder
             .spawn(move || {
-                ControllerInner::from_builder(self).main_loop(rx, worker_ready_tx, nworkers);
+                let controller = Self {
+                    current_epoch: None,
+                    inner: None,
+                    log,
+                    internal,
+                    external,
+                    checktable,
+                    _campaign: campaign,
+                    listen_addr,
+                    phantom: PhantomData,
+                };
+                controller.main_loop(event_rx)
             })
             .unwrap();
 
-        // Wait for enough workers to join.
-        if nworkers > 0 {
-            let _ = worker_ready_rx.recv();
-        }
-
-        Blender {
-            url: format!("http://{}", addr),
+        ControllerHandle {
+            url: None,
+            authority,
+            local: Some((event_tx, join_handle)),
         }
     }
-}
 
-/// `Controller` is the core component of the alternate Soup implementation.
-///
-/// It keeps track of the structure of the underlying data flow graph and its domains. `Controller`
-/// does not allow direct manipulation of the graph. Instead, changes must be instigated through a
-/// `Migration`, which can be performed using `ControllerInner::migrate`. Only one `Migration` can
-/// occur at any given point in time.
-pub struct ControllerInner {
-    ingredients: petgraph::Graph<node::Node, Edge>,
-    source: NodeIndex,
-    ndomains: usize,
-    checktable: checktable::CheckTableClient,
-    checktable_addr: SocketAddr,
-    sharding: Option<usize>,
-
-    domain_config: DomainConfig,
-
-    /// Parameters for persistence code.
-    persistence: PersistenceParameters,
-    materializations: migrate::materialization::Materializations,
-
-    /// Current recipe
-    recipe: Recipe,
-
-    domains: HashMap<DomainIndex, DomainHandle>,
-    channel_coordinator: Arc<ChannelCoordinator>,
-    debug_channel: Option<SocketAddr>,
-
-    listen_addr: IpAddr,
-    read_listen_addr: SocketAddr,
-    readers: Readers,
-
-    /// Map from worker address to the address the worker is listening on for reads.
-    read_addrs: HashMap<WorkerIdentifier, SocketAddr>,
-    workers: HashMap<WorkerIdentifier, WorkerStatus>,
-
-    /// State between migrations
-    deps: HashMap<DomainIndex, (IngressFromBase, EgressForBase)>,
-    remap: HashMap<DomainIndex, HashMap<NodeIndex, IndexPair>>,
-
-    /// Local worker pool used for tests
-    local_pool: Option<worker::WorkerPool>,
-
-    heartbeat_every: Duration,
-    healthcheck_every: Duration,
-    last_checked_workers: Instant,
-
-    log: slog::Logger,
-}
-
-impl ControllerInner {
-    fn main_loop(
-        mut self,
-        receiver: mpsc::Receiver<ControlEvent>,
-        worker_ready_tx: mpsc::Sender<()>,
-        nworkers: usize,
-    ) {
-        let mut workers_arrived = false;
+    fn main_loop(mut self, receiver: Receiver<ControlEvent>) {
         for event in receiver {
             match event {
-                ControlEvent::WorkerCoordination(msg) => {
-                    trace!(self.log, "Received {:?}", msg);
-                    let process = match msg.payload {
-                        CoordinationPayload::Register {
-                            ref addr,
-                            ref read_listen_addr,
-                        } => self.handle_register(&msg, addr, read_listen_addr.clone()),
-                        CoordinationPayload::Heartbeat => self.handle_heartbeat(&msg),
-                        CoordinationPayload::DomainBooted(ref _domain, ref _addr) => Ok(()),
-                        _ => unimplemented!(),
-                    };
-                    match process {
-                        Ok(_) => (),
-                        Err(e) => error!(self.log, "failed to handle message {:?}: {:?}", msg, e),
-                    }
-
-                    self.check_worker_liveness();
-
-                    if !workers_arrived && self.workers.len() == nworkers {
-                        workers_arrived = true;
-                        worker_ready_tx.send(()).unwrap();
+                ControlEvent::ControllerMessage(msg) => if let Some(ref mut inner) = self.inner {
+                    inner.coordination_message(msg)
+                },
+                ControlEvent::ExternalRequest(method, path, body, reply_tx) => {
+                    if let Some(ref mut inner) = self.inner {
+                        reply_tx
+                            .send(inner.external_request(method, path, body))
+                            .unwrap()
+                    } else {
+                        reply_tx.send(Err(StatusCode::NotFound)).unwrap();
                     }
                 }
-                ControlEvent::ExternalGet(path, _body, reply_tx) => {
-                    reply_tx
-                        .send(match path.as_ref() {
-                            "graph" => self.graphviz(),
-                            _ => "NOT FOUND".to_owned(),
-                        })
-                        .unwrap();
+                ControlEvent::WonLeaderElection(state) => {
+                    self.current_epoch = Some(state.epoch);
+                    self.inner = Some(ControllerInner::new(
+                        self.listen_addr,
+                        self.checktable,
+                        self.log.clone(),
+                        state,
+                    ));
                 }
-                ControlEvent::ExternalPost(path, body, reply_tx) => {
-                    use serde_json as json;
-                    reply_tx
-                        .send(match path.as_ref() {
-                            "inputs" => json::to_string(&self.inputs()).unwrap(),
-                            "outputs" => json::to_string(&self.outputs()).unwrap(),
-                            "recover" => json::to_string(&self.recover()).unwrap(),
-                            "graphviz" => json::to_string(&self.graphviz()).unwrap(),
-                            "get_statistics" => json::to_string(&self.get_statistics()).unwrap(),
-                            "mutator_builder" => json::to_string(
-                                &self.mutator_builder(json::from_str(&body).unwrap()),
-                            ).unwrap(),
-                            "getter_builder" => json::to_string(
-                                &self.getter_builder(json::from_str(&body).unwrap()),
-                            ).unwrap(),
-                            "install_recipe" => json::to_string(
-                                &self.install_recipe(json::from_str(&body).unwrap()),
-                            ).unwrap(),
-                            "set_security_config" => json::to_string(
-                                &self.set_security_config(json::from_str(&body).unwrap()),
-                            ).unwrap(),
-                            "create_universe" => json::to_string(
-                                &self.create_universe(json::from_str(&body).unwrap()),
-                            ).unwrap(),
-                            "enable_reuse" => json::to_string(
-                                &self.enable_reuse(json::from_str(&body).unwrap()),
-                            ).unwrap(),
-                            _ => "NOT FOUND".to_owned(),
-                        })
-                        .unwrap();
+
+                ControlEvent::LostLeadership(new_epoch) => {
+                    self.current_epoch = Some(new_epoch);
+                    self.inner = None;
+                }
+                ControlEvent::Shutdown => break,
+                ControlEvent::Error(e) => panic!("{}", e),
+            }
+        }
+        self.external.stop();
+        self.internal.stop();
+    }
+
+    fn listen_external(
+        event_tx: Sender<ControlEvent>,
+        addr: SocketAddr,
+        authority: Arc<A>,
+    ) -> ServingThread {
+        struct ExternalServer<A: Authority>(Sender<ControlEvent>, Arc<A>);
+        impl<A: Authority> Clone for ExternalServer<A> {
+            // Needed due to #26925
+            fn clone(&self) -> Self {
+                ExternalServer(self.0.clone(), self.1.clone())
+            }
+        }
+        impl<A: Authority> Service for ExternalServer<A> {
+            type Request = Request;
+            type Response = Response;
+            type Error = hyper::Error;
+            type Future = Box<Future<Item = Self::Response, Error = Self::Error>>;
+
+            fn call(&self, req: Request) -> Self::Future {
+                let mut res = Response::new();
+                match (req.method().clone(), req.path().to_owned().as_ref()) {
+                    (Method::Get, "/graph.html") => {
+                        res.headers_mut().set(ContentType::html());
+                        res.set_body(include_str!("graph.html"));
+                        Box::new(futures::future::ok(res))
+                    }
+                    (Method::Get, "/js/layout-worker.js") => {
+                        res.set_body(
+                            "importScripts('https://cdn.rawgit.com/mstefaniuk/graph-viz-d3-js/\
+                             cf2160ee3ca39b843b081d5231d5d51f1a901617/dist/layout-worker.js');",
+                        );
+                        Box::new(futures::future::ok(res))
+                    }
+                    (Method::Get, path) if path.starts_with("/zookeeper/") => {
+                        match self.1.try_read(&format!("/{}", &path[11..])) {
+                            Ok(Some(data)) => {
+                                res.headers_mut().set(ContentType::json());
+                                res.set_body(data);
+                            }
+                            _ => res.set_status(StatusCode::NotFound),
+                        }
+                        Box::new(futures::future::ok(res))
+                    }
+                    (method, path) => {
+                        let path = path.to_owned();
+                        let event_tx = self.0.clone();
+                        Box::new(req.body().concat2().and_then(move |body| {
+                            let body: Vec<u8> = body.iter().cloned().collect();
+                            let (tx, rx) = futures::sync::oneshot::channel();
+                            let _ = event_tx.send(ControlEvent::ExternalRequest(
+                                method,
+                                path,
+                                body,
+                                tx,
+                            ));
+                            rx.and_then(|reply| {
+                                let mut res = Response::new();
+                                match reply {
+                                    Ok(reply) => res.set_body(reply),
+                                    Err(status_code) => {
+                                        res.set_status(status_code);
+                                    }
+                                }
+                                Box::new(futures::future::ok(res))
+                            }).or_else(|futures::Canceled| {
+                                let mut res = Response::new();
+                                res.set_status(StatusCode::NotFound);
+                                Box::new(futures::future::ok(res))
+                            })
+                        }))
+                    }
                 }
             }
         }
-    }
-
-    /// Listen for messages from clients.
-    fn listen_external(event_tx: Sender<ControlEvent>, addr: SocketAddr) -> SocketAddr {
-        use rustful::{Context, Handler, Response, Server, TreeRouter};
-        use rustful::header::ContentType;
-        let handlers = insert_routes!{
-            TreeRouter::new() => {
-                "graph.html" => Get: Box::new(move |_ctx: Context, mut res: Response| {
-                    res.headers_mut().set(ContentType::html());
-                    res.send(include_str!("graph.html"));
-                }) as Box<Handler>,
-                "js/layout-worker.js" => Get: Box::new(move |_ctx: Context, res: Response| {
-                    res.send("importScripts('https://cdn.rawgit.com/mstefaniuk/graph-viz-d3-js/\
-                              cf2160ee3ca39b843b081d5231d5d51f1a901617/dist/layout-worker.js');");
-                }) as Box<Handler>,
-                ":path" => Post: Box::new(move |mut ctx: Context, res: Response| {
-                    let (tx, rx) = mpsc::channel();
-                    let path = ctx.variables.get("path").unwrap().to_string();
-                    let mut body = String::new();
-                    ctx.body.read_to_string(&mut body).unwrap();
-                    let event_tx = ctx.global.get::<Arc<Mutex<Sender<ControlEvent>>>>().unwrap();
-                    {
-                        let event_tx = event_tx.lock().unwrap();
-                        event_tx.send(ControlEvent::ExternalPost(path, body, tx)).unwrap();
-                    }
-                    res.send(rx.recv().unwrap());
-                }) as Box<Handler>,
-                ":path" => Get: Box::new(move |mut ctx: Context, res: Response| {
-                    let (tx, rx) = mpsc::channel();
-                    let path = ctx.variables.get("path").unwrap().to_string();
-                    let mut body = String::new();
-                    ctx.body.read_to_string(&mut body).unwrap();
-                    let event_tx = ctx.global.get::<Arc<Mutex<Sender<ControlEvent>>>>().unwrap();
-                    {
-                        let event_tx = event_tx.lock().unwrap();
-                        event_tx.send(ControlEvent::ExternalGet(path, body, tx)).unwrap();
-                    }
-                    res.send(rx.recv().unwrap());
-                }) as Box<Handler>,
+        impl<A: Authority> NewService for ExternalServer<A> {
+            type Request = Request;
+            type Response = Response;
+            type Error = hyper::Error;
+            type Instance = Self;
+            fn new_service(&self) -> Result<Self::Instance, io::Error> {
+                Ok(self.clone())
             }
-        };
+        }
 
-        let listen = Server {
-            handlers,
-            host: addr.into(),
-            server: "netsoup".to_owned(),
-            threads: Some(1),
-            content_type: "application/json".parse().unwrap(),
-            global: Box::new(Arc::new(Mutex::new(event_tx))).into(),
-            ..Server::default()
-        }.run()
+        let (tx, rx) = mpsc::channel();
+        let (done_tx, done_rx) = futures::sync::oneshot::channel();
+        let builder = thread::Builder::new().name("srv-ext".to_owned());
+        let join_handle = builder
+            .spawn(move || {
+                let service = ExternalServer(event_tx, authority);
+                let server = Http::new().bind(&addr, service.clone());
+                let server = match server {
+                    Ok(s) => s,
+                    Err(hyper::Error::Io(ref e))
+                        if e.kind() == ErrorKind::AddrInUse && addr.port() != 0 =>
+                    {
+                        Http::new()
+                            .bind(&SocketAddr::new(addr.ip(), 0), service)
+                            .unwrap()
+                    }
+                    Err(e) => panic!("{}", e),
+                };
+
+                let addr = server.local_addr().unwrap();
+                tx.send(addr).unwrap();
+                server.run_until(done_rx.map_err(|_| ())).unwrap();
+            })
             .unwrap();
 
-        // Bit of a dance to return socket while keeping the server running in another thread.
-        let socket = listen.socket.clone();
-        let builder = thread::Builder::new().name("srv-ext".to_owned());
-        builder.spawn(move || drop(listen)).unwrap();
-        socket
+        ServingThread {
+            addr: rx.recv().unwrap(),
+            join_handle,
+            stop: Box::new(done_tx),
+        }
     }
 
     /// Listen for messages from workers.
-    fn listen_internal(event_tx: Sender<ControlEvent>, addr: SocketAddr) {
+    fn listen_internal(event_tx: Sender<ControlEvent>, addr: SocketAddr) -> ServingThread {
+        let mut done = Arc::new(());
+        let done2 = done.clone();
+        let mut pl: PollingLoop<CoordinationMessage> = PollingLoop::new(addr);
+        let addr = pl.get_listener_addr().unwrap();
         let builder = thread::Builder::new().name("srv-int".to_owned());
-        builder
+        let join_handle = builder
             .spawn(move || {
-                let mut pl: PollingLoop<CoordinationMessage> = PollingLoop::new(addr);
-                pl.run_polling_loop(|e| {
-                    if let PollEvent::Process(msg) = e {
-                        if !event_tx.send(ControlEvent::WorkerCoordination(msg)).is_ok() {
-                            return ProcessResult::StopPolling;
+                pl.run_polling_loop(move |e| {
+                    if Arc::get_mut(&mut done).is_some() {
+                        return ProcessResult::StopPolling;
+                    }
+
+                    match e {
+                        PollEvent::ResumePolling(timeout) => {
+                            *timeout = Some(Duration::from_millis(100));
                         }
+                        PollEvent::Process(msg) => {
+                            if event_tx.send(ControlEvent::ControllerMessage(msg)).is_err() {
+                                return ProcessResult::StopPolling;
+                            }
+                        }
+                        PollEvent::Timeout => {}
                     }
                     ProcessResult::KeepPolling
                 });
             })
             .unwrap();
+
+        ServingThread {
+            addr,
+            join_handle,
+            stop: Box::new(done2),
+        }
     }
 
-    fn handle_register(
-        &mut self,
-        msg: &CoordinationMessage,
-        remote: &SocketAddr,
-        read_listen_addr: SocketAddr,
-    ) -> Result<(), io::Error> {
-        info!(
-            self.log,
-            "new worker registered from {:?}, which listens on {:?}",
-            msg.source,
-            remote
-        );
+    fn campaign(
+        event_tx: Sender<ControlEvent>,
+        authority: Arc<A>,
+        descriptor: ControllerDescriptor,
+        config: ControllerConfig,
+    ) -> JoinHandle<()> {
+        let descriptor = serde_json::to_vec(&descriptor).unwrap();
+        let campaign_inner =
+            move |event_tx: Sender<ControlEvent>| -> Result<(), Box<Error + Send + Sync>> {
+                loop {
+                    // become leader
+                    let current_epoch = authority.become_leader(descriptor.clone())?;
+                    let state = authority.read_modify_write(
+                        "/state",
+                        |state: Option<ControllerState>| match state {
+                            None => Ok(ControllerState {
+                                config: config.clone(),
+                                epoch: current_epoch,
+                                recipe: (),
+                            }),
+                            Some(ref state) if state.epoch > current_epoch => Err(()),
+                            Some(mut state) => {
+                                state.epoch = current_epoch;
+                                Ok(state)
+                            }
+                        },
+                    )?;
+                    if state.is_err() {
+                        continue;
+                    }
+                    if !event_tx
+                        .send(ControlEvent::WonLeaderElection(state.unwrap()))
+                        .is_ok()
+                    {
+                        break;
+                    }
 
-        let sender = Arc::new(Mutex::new(TcpSender::connect(remote, None)?));
-        let ws = WorkerStatus::new(sender.clone());
-        self.workers.insert(msg.source.clone(), ws);
-        self.read_addrs.insert(msg.source.clone(), read_listen_addr);
-
-        Ok(())
-    }
-
-    fn check_worker_liveness(&mut self) {
-        if self.last_checked_workers.elapsed() > self.healthcheck_every {
-            for (addr, ws) in self.workers.iter_mut() {
-                if ws.healthy && ws.last_heartbeat.elapsed() > self.heartbeat_every * 3 {
-                    warn!(self.log, "worker at {:?} has failed!", addr);
-                    ws.healthy = false;
+                    // watch for overthrow
+                    let new_epoch = authority.await_new_epoch(current_epoch)?;
+                    if !event_tx
+                        .send(ControlEvent::LostLeadership(new_epoch))
+                        .is_ok()
+                    {
+                        break;
+                    }
                 }
-            }
-            self.last_checked_workers = Instant::now();
-        }
-    }
+                Ok(())
+            };
 
-
-    fn handle_heartbeat(&mut self, msg: &CoordinationMessage) -> Result<(), io::Error> {
-        match self.workers.get_mut(&msg.source) {
-            None => crit!(
-                self.log,
-                "got heartbeat for unknown worker {:?}",
-                msg.source
-            ),
-            Some(ref mut ws) => {
-                ws.last_heartbeat = Instant::now();
-            }
-        }
-
-        Ok(())
-    }
-
-    /// Construct `Controller` with a specified listening interface
-    pub fn from_builder(builder: ControllerBuilder) -> Self {
-        let mut g = petgraph::Graph::new();
-        let source = g.add_node(node::Node::new(
-            "source",
-            &["because-type-inference"],
-            node::special::Source,
-            true,
-        ));
-
-        let checktable_addr = SocketAddr::new(builder.listen_addr.clone(), builder.checktable_port);
-        let checktable_addr = checktable::service::CheckTableServer::start(checktable_addr.clone());
-        let checktable =
-            checktable::CheckTableClient::connect(checktable_addr, client::Options::default())
-                .unwrap();
-
-        let addr = SocketAddr::new(builder.listen_addr.clone(), 0);
-        let readers: Readers = Arc::default();
-        let readers_clone = readers.clone();
-        let read_polling_loop = RpcPollingLoop::new(addr.clone());
-        let read_listen_addr = read_polling_loop.get_listener_addr().unwrap();
-        let thread_builder = thread::Builder::new().name("wrkr-reads".to_owned());
-        thread_builder
+        thread::Builder::new()
+            .name("srv-zk".to_owned())
             .spawn(move || {
-                Souplet::serve_reads(read_polling_loop, readers_clone)
-            })
-            .unwrap();
-
-        let cc = Arc::new(ChannelCoordinator::new());
-        assert!((builder.nworkers == 0) ^ (builder.local_workers == 0));
-        let local_pool = if builder.nworkers == 0 {
-            Some(
-                worker::WorkerPool::new(
-                    builder.local_workers,
-                    &builder.log,
-                    checktable_addr,
-                    cc.clone(),
-                ).unwrap(),
-            )
-        } else {
-            None
-        };
-
-        ControllerInner {
-            ingredients: g,
-            source: source,
-            ndomains: 0,
-            checktable,
-            checktable_addr,
-
-            sharding: builder.sharding,
-            materializations: builder.materializations,
-            domain_config: builder.domain_config,
-            persistence: builder.persistence,
-            listen_addr: builder.listen_addr,
-            heartbeat_every: builder.heartbeat_every,
-            healthcheck_every: builder.healthcheck_every,
-            recipe: Recipe::blank(Some(builder.log.clone())),
-            log: builder.log,
-
-            domains: Default::default(),
-            channel_coordinator: cc,
-            debug_channel: None,
-
-            deps: HashMap::default(),
-            remap: HashMap::default(),
-
-            readers,
-            read_listen_addr,
-            read_addrs: HashMap::default(),
-            workers: HashMap::default(),
-
-            local_pool,
-
-            last_checked_workers: Instant::now(),
-        }
-    }
-
-    /// Use a debug channel. This function may only be called once because the receiving end it
-    /// returned.
-    #[allow(unused)]
-    pub fn create_debug_channel(&mut self) -> TcpListener {
-        assert!(self.debug_channel.is_none());
-        let addr: SocketAddr = "127.0.0.1:0".parse().unwrap();
-        let listener = TcpListener::bind(&addr).unwrap();
-        self.debug_channel = Some(listener.local_addr().unwrap());
-        listener
-    }
-
-    /// Controls the persistence mode, and parameters related to persistence.
-    ///
-    /// Three modes are available:
-    ///
-    ///  1. `DurabilityMode::Permanent`: all writes to base nodes should be written to disk.
-    ///  2. `DurabilityMode::DeleteOnExit`: all writes are written to disk, but the log is
-    ///     deleted once the `Controller` is dropped. Useful for tests.
-    ///  3. `DurabilityMode::MemoryOnly`: no writes to disk, store all writes in memory.
-    ///     Useful for baseline numbers.
-    ///
-    /// `queue_capacity` indicates the number of packets that should be buffered until
-    /// flushing, and `flush_timeout` indicates the length of time to wait before flushing
-    /// anyway.
-    ///
-    /// Must be called before any domains have been created.
-    #[allow(unused)]
-    pub fn with_persistence_options(&mut self, params: PersistenceParameters) {
-        assert_eq!(self.ndomains, 0);
-        self.persistence = params;
-    }
-
-    /// Set the `Logger` to use for internal log messages.
-    ///
-    /// By default, all log messages are discarded.
-    #[allow(unused)]
-    pub fn log_with(&mut self, log: slog::Logger) {
-        self.log = log;
-        self.materializations.set_logger(&self.log);
-    }
-
-    /// Adds a new user universe.
-    /// User universes automatically enforce security policies.
-    pub fn add_universe<F, T>(&mut self, context: HashMap<String, DataType>, f: F) -> T
-    where
-        F: FnOnce(&mut Migration) -> T,
-    {
-        info!(self.log, "starting migration: new soup universe");
-        let miglog = self.log.new(o!());
-        let mut m = Migration {
-            mainline: self,
-            added: Default::default(),
-            columns: Default::default(),
-            readers: Default::default(),
-            context: context,
-            start: time::Instant::now(),
-            log: miglog,
-        };
-        let r = f(&mut m);
-        m.commit();
-        r
-    }
-
-    /// Perform a new query schema migration.
-    pub fn migrate<F, T>(&mut self, f: F) -> T
-    where
-        F: FnOnce(&mut Migration) -> T,
-    {
-        info!(self.log, "starting migration");
-        let miglog = self.log.new(o!());
-        let mut context = HashMap::new();
-        context.insert(String::from("id"), "global".into());
-        let mut m = Migration {
-            mainline: self,
-            added: Default::default(),
-            columns: Default::default(),
-            readers: Default::default(),
-            context: context,
-            start: time::Instant::now(),
-            log: miglog,
-        };
-        let r = f(&mut m);
-        m.commit();
-        r
-    }
-
-    /// Initiaties log recovery by sending a
-    /// StartRecovery packet to each base node domain.
-    pub fn recover(&mut self) {
-        info!(self.log, "Recovering from log");
-        for (_name, index) in self.inputs().iter() {
-            let node = &self.ingredients[*index];
-            let domain = self.domains.get_mut(&node.domain()).unwrap();
-            domain.send(box payload::Packet::StartRecovery).unwrap();
-            domain.wait_for_ack().unwrap();
-        }
-    }
-
-    /// Get a boxed function which can be used to validate tokens.
-    #[allow(unused)]
-    pub fn get_validator(&self) -> Box<Fn(&checktable::Token) -> bool> {
-        let checktable =
-            checktable::CheckTableClient::connect(self.checktable_addr, client::Options::default())
-                .unwrap();
-        Box::new(move |t: &checktable::Token| {
-            checktable.validate_token(t.clone()).unwrap()
-        })
-    }
-
-    #[cfg(test)]
-    pub fn graph(&self) -> &Graph {
-        &self.ingredients
-    }
-
-    /// Get a Vec of all known input nodes.
-    ///
-    /// Input nodes are here all nodes of type `Base`. The addresses returned by this function will
-    /// all have been returned as a key in the map from `commit` at some point in the past.
-    pub fn inputs(&self) -> BTreeMap<String, NodeIndex> {
-        self.ingredients
-            .neighbors_directed(self.source, petgraph::EdgeDirection::Outgoing)
-            .map(|n| {
-                let base = &self.ingredients[n];
-                assert!(base.is_internal());
-                assert!(base.get_base().is_some());
-                (base.name().to_owned(), n.into())
-            })
-            .collect()
-    }
-
-    /// Get a Vec of all known output nodes.
-    ///
-    /// Output nodes here refers to nodes of type `Reader`, which is the nodes created in response
-    /// to calling `.maintain` or `.stream` for a node during a migration.
-    pub fn outputs(&self) -> BTreeMap<String, NodeIndex> {
-        self.ingredients
-            .externals(petgraph::EdgeDirection::Outgoing)
-            .filter_map(|n| {
-                let name = self.ingredients[n].name().to_owned();
-                self.ingredients[n].with_reader(|r| {
-                    // we want to give the the node address that is being materialized not that of
-                    // the reader node itself.
-                    (name, r.is_for())
-                })
-            })
-            .collect()
-    }
-
-    fn find_getter_for(&self, node: NodeIndex) -> Option<NodeIndex> {
-        // reader should be a child of the given node. however, due to sharding, it may not be an
-        // *immediate* child. furthermore, once we go beyond depth 1, we may accidentally hit an
-        // *unrelated* reader node. to account for this, readers keep track of what node they are
-        // "for", and we simply search for the appropriate reader by that metric. since we know
-        // that the reader must be relatively close, a BFS search is the way to go.
-        // presumably only
-        let mut bfs = Bfs::new(&self.ingredients, node);
-        let mut reader = None;
-        while let Some(child) = bfs.next(&self.ingredients) {
-            if self.ingredients[child]
-                .with_reader(|r| r.is_for() == node)
-                .unwrap_or(false)
-            {
-                reader = Some(child);
-                break;
-            }
-        }
-
-        reader
-    }
-
-    /// Obtain a `RemoteGetterBuilder` that can be sent to a client and then used to query a given
-    /// (already maintained) reader node.
-    pub fn getter_builder(&self, node: NodeIndex) -> Option<RemoteGetterBuilder> {
-        self.find_getter_for(node).map(|r| {
-            let domain = self.ingredients[r].domain();
-            let shards = (0..self.domains[&domain].shards())
-                .map(|i| match self.domains[&domain].assignment(i) {
-                    Some(worker) => self.read_addrs[&worker].clone(),
-                    None => self.read_listen_addr.clone(),
-                })
-                .collect();
-
-            RemoteGetterBuilder { node: r, shards }
-        })
-    }
-
-    /// Obtain a MutatorBuild that can be used to construct a Mutator to perform writes and deletes
-    /// from the given base node.
-    pub fn mutator_builder(&self, base: NodeIndex) -> MutatorBuilder {
-        let node = &self.ingredients[base];
-
-        trace!(self.log, "creating mutator"; "for" => base.index());
-
-        let mut key = self.ingredients[base]
-            .suggest_indexes(base)
-            .remove(&base)
-            .map(|(c, _)| c)
-            .unwrap_or_else(Vec::new);
-        let mut is_primary = false;
-        if key.is_empty() {
-            if let Sharding::ByColumn(col, _) = self.ingredients[base].sharded_by() {
-                key = vec![col];
-            }
-        } else {
-            is_primary = true;
-        }
-
-
-        let txs = (0..self.domains[&node.domain()].shards())
-            .map(|i| {
-                self.channel_coordinator
-                    .get_addr(&(node.domain(), i))
-                    .unwrap()
-            })
-            .collect();
-
-        let num_fields = node.fields().len();
-        let base_operator = node.get_base()
-            .expect("asked to get mutator for non-base node");
-        MutatorBuilder {
-            txs,
-            addr: (*node.local_addr()).into(),
-            key: key,
-            key_is_primary: is_primary,
-            transactional: self.ingredients[base].is_transactional(),
-            dropped: base_operator.get_dropped(),
-            expected_columns: num_fields - base_operator.get_dropped().len(),
-            is_local: true,
-        }
-    }
-
-    /// Get statistics about the time spent processing different parts of the graph.
-    pub fn get_statistics(&mut self) -> GraphStats {
-        // TODO: request stats from domains in parallel.
-        let domains = self.domains
-            .iter_mut()
-            .flat_map(|(di, s)| {
-                s.send(box payload::Packet::GetStatistics).unwrap();
-                s.wait_for_statistics()
-                    .unwrap()
-                    .into_iter()
-                    .enumerate()
-                    .map(move |(i, (domain_stats, node_stats))| {
-                        let node_map = node_stats
-                            .into_iter()
-                            .map(|(ni, ns)| (ni.into(), ns))
-                            .collect();
-
-                        ((di.clone(), i), (domain_stats, node_map))
-                    })
-            })
-            .collect();
-
-        GraphStats { domains: domains }
-    }
-
-    pub fn install_recipe(&mut self, r_txt: String) {
-        let r = Recipe::from_str(&r_txt, Some(self.log.clone())).unwrap();
-        let old = self.recipe.clone();
-        let mut new = old.replace(r).unwrap();
-        self.migrate(|mig| match new.activate(mig, false) {
-            Ok(_) => (),
-            Err(e) => panic!("failed to install recipe: {:?}", e),
-        });
-        self.recipe = new;
-    }
-
-    pub fn set_security_config(&mut self, config: (String, String)) {
-        let p = config.0;
-        let url = config.1;
-        self.recipe.set_security_config(&p, url);
-    }
-
-    pub fn create_universe(&mut self, context: HashMap<String, DataType>) {
-        let log = self.log.clone();
-        let mut r = self.recipe.clone();
-        let groups = self.recipe.security_groups();
-        let outs = self.outputs();
-
-        let mut universe_groups = HashMap::new();
-
-        if context.get("group").is_none() {
-            for g in groups {
-                let uid = context.get("id").expect("Universe context must have id");
-                let membership = outs[&g];
-                let mut getter = self.get_getter(membership).unwrap();
-                let my_groups: Vec<DataType> = getter.lookup(uid, true).unwrap().iter().map(|v| v[1].clone()).collect();
-                universe_groups.insert(g, my_groups);
-            }
-        }
-
-        self.add_universe(context, |mut mig| {
-            r.next();
-            match r.create_universe(&mut mig, universe_groups) {
-                Ok(ar) => {
-                    info!(log, "{} expressions added", ar.expressions_added);
-                    info!(log, "{} expressions removed", ar.expressions_removed);
-                }
-                Err(e) => panic!("failed to activate recipe: {}", e),
-            };
-
-        });
-        self.recipe = r;
-    }
-
-    pub fn enable_reuse(&mut self, reuse_type: ReuseConfigType) {
-        self.recipe.enable_reuse(reuse_type);
-    }
-
-    #[cfg(test)]
-    pub fn get_mutator(&self, base: NodeIndex) -> Mutator {
-        self.mutator_builder(base)
-            .build("127.0.0.1:0".parse().unwrap())
-    }
-
-    pub fn get_getter(&self, node: NodeIndex) -> Option<RemoteGetter> {
-        self.getter_builder(node).map(|g| g.build())
-    }
-
-    pub fn graphviz(&self) -> String {
-        let mut s = String::new();
-
-        let indentln = |s: &mut String| s.push_str("    ");
-
-        // header.
-        s.push_str("digraph {{\n");
-
-        // global formatting.
-        indentln(&mut s);
-        s.push_str("node [shape=record, fontsize=10]\n");
-
-        // node descriptions.
-        for index in self.ingredients.node_indices() {
-            indentln(&mut s);
-            s.push_str(&format!("{}", index.index()));
-            s.push_str(&self.ingredients[index].describe(index));
-        }
-
-        // edges.
-        for (_, edge) in self.ingredients.raw_edges().iter().enumerate() {
-            indentln(&mut s);
-            s.push_str(&format!(
-                "{} -> {}",
-                edge.source().index(),
-                edge.target().index()
-            ));
-            s.push_str("\n");
-        }
-
-        // footer.
-        s.push_str("}}");
-
-        s
-    }
-}
-
-#[derive(Clone)]
-enum ColumnChange {
-    Add(String, DataType),
-    Drop(usize),
-}
-
-/// A `Migration` encapsulates a number of changes to the Soup data flow graph.
-///
-/// Only one `Migration` can be in effect at any point in time. No changes are made to the running
-/// graph until the `Migration` is committed (using `Migration::commit`).
-pub struct Migration<'a> {
-    mainline: &'a mut ControllerInner,
-    added: Vec<NodeIndex>,
-    columns: Vec<(NodeIndex, ColumnChange)>,
-    readers: HashMap<NodeIndex, NodeIndex>,
-
-    /// Additional migration information provided by the client
-    context: HashMap<String, DataType>,
-
-    start: time::Instant,
-    log: slog::Logger,
-}
-
-impl<'a> Migration<'a> {
-    /// Add the given `Ingredient` to the Soup.
-    ///
-    /// The returned identifier can later be used to refer to the added ingredient.
-    /// Edges in the data flow graph are automatically added based on the ingredient's reported
-    /// `ancestors`.
-    pub fn add_ingredient<S1, FS, S2, I>(&mut self, name: S1, fields: FS, mut i: I) -> NodeIndex
-    where
-        S1: ToString,
-        S2: ToString,
-        FS: IntoIterator<Item = S2>,
-        I: Ingredient + Into<NodeOperator>,
-    {
-        i.on_connected(&self.mainline.ingredients);
-        let parents = i.ancestors();
-
-        let transactional = !parents.is_empty()
-            && parents
-                .iter()
-                .all(|&p| self.mainline.ingredients[p].is_transactional());
-
-        // add to the graph
-        let ni = self.mainline.ingredients.add_node(node::Node::new(
-            name.to_string(),
-            fields,
-            i.into(),
-            transactional,
-        ));
-        info!(self.log,
-              "adding new node";
-              "node" => ni.index(),
-              "type" => format!("{:?}", self.mainline.ingredients[ni])
-        );
-
-        // keep track of the fact that it's new
-        self.added.push(ni);
-        // insert it into the graph
-        if parents.is_empty() {
-            self.mainline
-                .ingredients
-                .add_edge(self.mainline.source, ni, ());
-        } else {
-            for parent in parents {
-                self.mainline.ingredients.add_edge(parent, ni, ());
-            }
-        }
-        // and tell the caller its id
-        ni.into()
-    }
-
-    /// Returns the context of this migration
-    pub fn context(&self) -> HashMap<String, DataType> {
-        self.context.clone()
-    }
-
-    /// Returns the universe in which this migration is operating in.
-    /// If not specified, assumes `global` universe.
-    pub fn universe(&self) -> DataType {
-        match self.context.get("id") {
-            Some(id) => id.clone(),
-            None => "global".into(),
-        }
-    }
-
-    /// Add a transactional base node to the graph
-    pub fn add_transactional_base<S1, FS, S2>(
-        &mut self,
-        name: S1,
-        fields: FS,
-        mut b: Base,
-    ) -> NodeIndex
-    where
-        S1: ToString,
-        S2: ToString,
-        FS: IntoIterator<Item = S2>,
-    {
-        b.on_connected(&self.mainline.ingredients);
-        let b: NodeOperator = b.into();
-
-        // add to the graph
-        let ni = self.mainline
-            .ingredients
-            .add_node(node::Node::new(name.to_string(), fields, b, true));
-        info!(self.log,
-              "adding new node";
-              "node" => ni.index(),
-              "type" => format!("{:?}", self.mainline.ingredients[ni])
-        );
-
-        // keep track of the fact that it's new
-        self.added.push(ni);
-        // insert it into the graph
-        self.mainline
-            .ingredients
-            .add_edge(self.mainline.source, ni, ());
-        // and tell the caller its id
-        ni.into()
-    }
-
-    /// Add a new column to a base node.
-    ///
-    /// Note that a default value must be provided such that old writes can be converted into this
-    /// new type.
-    pub fn add_column<S: ToString>(
-        &mut self,
-        node: NodeIndex,
-        field: S,
-        default: DataType,
-    ) -> usize {
-        // not allowed to add columns to new nodes
-        assert!(!self.added.iter().any(|&ni| ni == node));
-
-        let field = field.to_string();
-        let base = &mut self.mainline.ingredients[node];
-        assert!(base.is_internal() && base.get_base().is_some());
-
-        // we need to tell the base about its new column and its default, so that old writes that
-        // do not have it get the additional value added to them.
-        let col_i1 = base.add_column(&field);
-        // we can't rely on DerefMut, since it disallows mutating Taken nodes
-        {
-            let col_i2 = base.inner_mut()
-                .get_base_mut()
-                .unwrap()
-                .add_column(default.clone());
-            assert_eq!(col_i1, col_i2);
-        }
-
-        // also eventually propagate to domain clone
-        self.columns.push((node, ColumnChange::Add(field, default)));
-
-        col_i1
-    }
-
-    /// Drop a column from a base node.
-    pub fn drop_column(&mut self, node: NodeIndex, column: usize) {
-        // not allowed to drop columns from new nodes
-        assert!(!self.added.iter().any(|&ni| ni == node));
-
-        let base = &mut self.mainline.ingredients[node];
-        assert!(base.is_internal() && base.get_base().is_some());
-
-        // we need to tell the base about the dropped column, so that old writes that contain that
-        // column will have it filled in with default values (this is done in Mutator).
-        // we can't rely on DerefMut, since it disallows mutating Taken nodes
-        base.inner_mut().get_base_mut().unwrap().drop_column(column);
-
-        // also eventually propagate to domain clone
-        self.columns.push((node, ColumnChange::Drop(column)));
-    }
-
-    #[cfg(test)]
-    pub fn graph(&self) -> &Graph {
-        self.mainline.graph()
-    }
-
-    fn ensure_reader_for(&mut self, n: NodeIndex, name: Option<String>) {
-        if !self.readers.contains_key(&n) {
-            // make a reader
-            let r = node::special::Reader::new(n);
-            let r = if let Some(name) = name {
-                self.mainline.ingredients[n].named_mirror(r, name)
-            } else {
-                self.mainline.ingredients[n].mirror(r)
-            };
-            let r = self.mainline.ingredients.add_node(r);
-            self.mainline.ingredients.add_edge(n, r, ());
-            self.readers.insert(n, r);
-        }
-    }
-
-    fn ensure_token_generator(&mut self, n: NodeIndex, key: usize) {
-        let ri = self.readers[&n];
-        if self.mainline.ingredients[ri]
-            .with_reader(|r| r.token_generator().is_some())
-            .expect("tried to add token generator to non-reader node")
-        {
-            return;
-        }
-
-        // A map from base node to the column in that base node whose value must match the value of
-        // this node's column to cause a conflict. Is None for a given base node if any write to
-        // that base node might cause a conflict.
-        let base_columns: Vec<(_, Option<_>)> =
-            keys::provenance_of(&self.mainline.ingredients, n, key, |_, _, _| None)
-                .into_iter()
-                .map(|path| {
-                    // we want the base node corresponding to each path
-                    path.into_iter().last().unwrap()
-                })
-                .collect();
-
-        let coarse_parents = base_columns
-            .iter()
-            .filter_map(|&(ni, o)| if o.is_none() { Some(ni) } else { None })
-            .collect();
-
-        let granular_parents = base_columns
-            .into_iter()
-            .filter_map(|(ni, o)| {
-                if o.is_some() {
-                    Some((ni, o.unwrap()))
-                } else {
-                    None
+                if let Err(e) = campaign_inner(event_tx.clone()) {
+                    let _ = event_tx.send(ControlEvent::Error(e));
                 }
             })
-            .collect();
-
-        let token_generator = checktable::TokenGenerator::new(coarse_parents, granular_parents);
-        self.mainline
-            .checktable
-            .track(token_generator.clone())
-            .unwrap();
-
-        self.mainline.ingredients[ri].with_reader_mut(|r| {
-            r.set_token_generator(token_generator);
-        });
-    }
-
-    /// Set up the given node such that its output can be efficiently queried.
-    ///
-    /// To query into the maintained state, use `ControllerInner::get_getter` or
-    /// `ControllerInner::get_transactional_getter`
-    #[cfg(test)]
-    pub fn maintain_anonymous(&mut self, n: NodeIndex, key: usize) {
-        self.ensure_reader_for(n, None);
-        if self.mainline.ingredients[n].is_transactional() {
-            self.ensure_token_generator(n, key);
-        }
-
-        let ri = self.readers[&n];
-
-        self.mainline.ingredients[ri].with_reader_mut(|r| r.set_key(key));
-    }
-
-    /// Set up the given node such that its output can be efficiently queried.
-    ///
-    /// To query into the maintained state, use `ControllerInner::get_getter` or
-    /// `ControllerInner::get_transactional_getter`
-    pub fn maintain(&mut self, name: String, n: NodeIndex, key: usize) {
-        self.ensure_reader_for(n, Some(name));
-        if self.mainline.ingredients[n].is_transactional() {
-            self.ensure_token_generator(n, key);
-        }
-
-        let ri = self.readers[&n];
-
-        self.mainline.ingredients[ri].with_reader_mut(|r| r.set_key(key));
-    }
-
-    /// Obtain a channel that is fed by the output stream of the given node.
-    ///
-    /// As new updates are processed by the given node, its outputs will be streamed to the
-    /// returned channel. Node that this channel is *not* bounded, and thus a receiver that is
-    /// slower than the system as a hole will accumulate a large buffer over time.
-    #[allow(unused)]
-    pub fn stream(&mut self, n: NodeIndex) -> mpsc::Receiver<Vec<node::StreamUpdate>> {
-        self.ensure_reader_for(n, None);
-        let (tx, rx) = mpsc::channel();
-        let mut tx = channel::StreamSender::from_local(tx);
-
-        // If the reader hasn't been incorporated into the graph yet, just add the streamer
-        // directly.
-        let ri = self.readers[&n];
-        let mut res = None;
-        self.mainline.ingredients[ri].with_reader_mut(|r| {
-            res = Some(r.add_streamer(tx));
-        });
-        tx = match res.unwrap() {
-            Ok(_) => return rx,
-            Err(tx) => tx,
-        };
-
-
-        // Otherwise, send a message to the reader's domain to have it add the streamer.
-        let reader = &self.mainline.ingredients[self.readers[&n]];
-        self.mainline
-            .domains
-            .get_mut(&reader.domain())
             .unwrap()
-            .send(box payload::Packet::AddStreamer {
-                node: *reader.local_addr(),
-                new_streamer: tx,
-            })
-            .unwrap();
-
-        rx
-    }
-
-    /// Commit the changes introduced by this `Migration` to the master `Soup`.
-    ///
-    /// This will spin up an execution thread for each new thread domain, and hook those new
-    /// domains into the larger Soup graph. The returned map contains entry points through which
-    /// new updates should be sent to introduce them into the Soup.
-    pub fn commit(self) {
-        info!(self.log, "finalizing migration"; "#nodes" => self.added.len());
-
-        let log = self.log;
-        let start = self.start;
-        let mut mainline = self.mainline;
-        let mut new: HashSet<_> = self.added.into_iter().collect();
-
-        // Readers are nodes too.
-        for (_parent, reader) in self.readers {
-            new.insert(reader);
-        }
-
-        // Shard the graph as desired
-        let mut swapped0 = if let Some(shards) = mainline.sharding {
-            migrate::sharding::shard(
-                &log,
-                &mut mainline.ingredients,
-                mainline.source,
-                &mut new,
-                shards,
-            )
-        } else {
-            HashMap::default()
-        };
-
-        // Assign domains
-        migrate::assignment::assign(
-            &log,
-            &mut mainline.ingredients,
-            mainline.source,
-            &new,
-            &mut mainline.ndomains,
-        );
-
-        // Set up ingress and egress nodes
-        let swapped1 =
-            migrate::routing::add(&log, &mut mainline.ingredients, mainline.source, &mut new);
-
-        // Merge the swap lists
-        for ((dst, src), instead) in swapped1 {
-            use std::collections::hash_map::Entry;
-            match swapped0.entry((dst, src)) {
-                Entry::Occupied(mut instead0) => {
-                    if &instead != instead0.get() {
-                        // This can happen if sharding decides to add a Sharder *under* a node,
-                        // and routing decides to add an ingress/egress pair between that node
-                        // and the Sharder. It's perfectly okay, but we should prefer the
-                        // "bottommost" swap to take place (i.e., the node that is *now*
-                        // closest to the dst node). This *should* be the sharding node, unless
-                        // routing added an ingress *under* the Sharder. We resolve the
-                        // collision by looking at which translation currently has an adge from
-                        // `src`, and then picking the *other*, since that must then be node
-                        // below.
-                        if mainline.ingredients.find_edge(src, instead).is_some() {
-                            // src -> instead -> instead0 -> [children]
-                            // from [children]'s perspective, we should use instead0 for from, so
-                            // we can just ignore the `instead` swap.
-                        } else {
-                            // src -> instead0 -> instead -> [children]
-                            // from [children]'s perspective, we should use instead for src, so we
-                            // need to prefer the `instead` swap.
-                            *instead0.get_mut() = instead;
-                        }
-                    }
-                }
-                Entry::Vacant(hole) => {
-                    hole.insert(instead);
-                }
-            }
-
-            // we may also already have swapped the parents of some node *to* `src`. in
-            // swapped0. we want to change that mapping as well, since lookups in swapped
-            // aren't recursive.
-            for (_, instead0) in swapped0.iter_mut() {
-                if *instead0 == src {
-                    *instead0 = instead;
-                }
-            }
-        }
-        let swapped = swapped0;
-        let mut sorted_new = new.iter().collect::<Vec<_>>();
-        sorted_new.sort();
-
-        // Find all nodes for domains that have changed
-        let changed_domains: HashSet<DomainIndex> = sorted_new
-            .iter()
-            .filter(|&&&ni| !mainline.ingredients[ni].is_dropped())
-            .map(|&&ni| mainline.ingredients[ni].domain())
-            .collect();
-
-        let mut domain_new_nodes = sorted_new
-            .iter()
-            .filter(|&&&ni| ni != mainline.source)
-            .filter(|&&&ni| !mainline.ingredients[ni].is_dropped())
-            .map(|&&ni| (mainline.ingredients[ni].domain(), ni))
-            .fold(HashMap::new(), |mut dns, (d, ni)| {
-                dns.entry(d).or_insert_with(Vec::new).push(ni);
-                dns
-            });
-
-        // Assign local addresses to all new nodes, and initialize them
-        for (domain, nodes) in &mut domain_new_nodes {
-            // Number of pre-existing nodes
-            let mut nnodes = mainline.remap.get(domain).map(HashMap::len).unwrap_or(0);
-
-            if nodes.is_empty() {
-                // Nothing to do here
-                continue;
-            }
-
-            let log = log.new(o!("domain" => domain.index()));
-
-            // Give local addresses to every (new) node
-            for &ni in nodes.iter() {
-                debug!(log,
-                       "assigning local index";
-                       "type" => format!("{:?}", mainline.ingredients[ni]),
-                       "node" => ni.index(),
-                       "local" => nnodes
-                );
-
-                let mut ip: IndexPair = ni.into();
-                ip.set_local(unsafe { LocalNodeIndex::make(nnodes as u32) });
-                mainline.ingredients[ni].set_finalized_addr(ip);
-                mainline
-                    .remap
-                    .entry(*domain)
-                    .or_insert_with(HashMap::new)
-                    .insert(ni, ip);
-                nnodes += 1;
-            }
-
-            // Initialize each new node
-            for &ni in nodes.iter() {
-                if mainline.ingredients[ni].is_internal() {
-                    // Figure out all the remappings that have happened
-                    // NOTE: this has to be *per node*, since a shared parent may be remapped
-                    // differently to different children (due to sharding for example). we just
-                    // allocate it once though.
-                    let mut remap = mainline.remap[domain].clone();
-
-                    // Parents in other domains have been swapped for ingress nodes.
-                    // Those ingress nodes' indices are now local.
-                    for (&(dst, src), &instead) in &swapped {
-                        if dst != ni {
-                            // ignore mappings for other nodes
-                            continue;
-                        }
-
-                        let old = remap.insert(src, mainline.remap[domain][&instead]);
-                        assert_eq!(old, None);
-                    }
-
-                    trace!(log, "initializing new node"; "node" => ni.index());
-                    mainline
-                        .ingredients
-                        .node_weight_mut(ni)
-                        .unwrap()
-                        .on_commit(&remap);
-                }
-            }
-        }
-
-        // at this point, we've hooked up the graph such that, for any given domain, the graph
-        // looks like this:
-        //
-        //      o (egress)
-        //     +.\......................
-        //     :  o (ingress)
-        //     :  |
-        //     :  o-------------+
-        //     :  |             |
-        //     :  o             o
-        //     :  |             |
-        //     :  o (egress)    o (egress)
-        //     +..|...........+.|..........
-        //     :  o (ingress) : o (ingress)
-        //     :  |\          :  \
-        //     :  | \         :   o
-        //
-        // etc.
-        // println!("{}", mainline);
-
-        let new_deps = migrate::transactions::analyze_changes(
-            &mainline.ingredients,
-            mainline.source,
-            domain_new_nodes,
-        );
-
-        migrate::transactions::merge_deps(&mainline.ingredients, &mut mainline.deps, new_deps);
-
-        let mut uninformed_domain_nodes = mainline
-            .ingredients
-            .node_indices()
-            .filter(|&ni| ni != mainline.source)
-            .filter(|&ni| !mainline.ingredients[ni].is_dropped())
-            .map(|ni| {
-                (mainline.ingredients[ni].domain(), ni, new.contains(&ni))
-            })
-            .fold(HashMap::new(), |mut dns, (d, ni, new)| {
-                dns.entry(d).or_insert_with(Vec::new).push((ni, new));
-                dns
-            });
-
-        let (start_ts, end_ts, prevs) = mainline
-            .checktable
-            .perform_migration(mainline.deps.clone())
-            .unwrap();
-
-        info!(log, "migration claimed timestamp range"; "start" => start_ts, "end" => end_ts);
-
-        let mut workers: Vec<_> = mainline
-            .workers
-            .values()
-            .map(|w| w.sender.clone())
-            .collect();
-        let placer_workers: Vec<_> = mainline
-            .workers
-            .iter()
-            .map(|(id, status)| (id.clone(), status.sender.clone()))
-            .collect();
-        let mut placer: Box<Iterator<Item = (WorkerIdentifier, WorkerEndpoint)>> =
-            Box::new(placer_workers.into_iter().cycle());
-
-        // Boot up new domains (they'll ignore all updates for now)
-        debug!(log, "booting new domains");
-        for domain in changed_domains {
-            if mainline.domains.contains_key(&domain) {
-                // this is not a new domain
-                continue;
-            }
-
-            let nodes = uninformed_domain_nodes.remove(&domain).unwrap();
-            let d = DomainHandle::new(
-                domain,
-                mainline.ingredients[nodes[0].0].sharded_by(),
-                &log,
-                &mut mainline.ingredients,
-                &mainline.readers,
-                &mainline.domain_config,
-                nodes,
-                &mainline.persistence,
-                &mainline.listen_addr,
-                &mainline.channel_coordinator,
-                &mut mainline.local_pool,
-                &mainline.debug_channel,
-                &mut placer,
-                &mut workers,
-                start_ts,
-            );
-            mainline.domains.insert(domain, d);
-        }
-
-
-        // Add any new nodes to existing domains (they'll also ignore all updates for now)
-        debug!(log, "mutating existing domains");
-        migrate::augmentation::inform(
-            &log,
-            &mut mainline,
-            uninformed_domain_nodes,
-            start_ts,
-            prevs.unwrap(),
-        );
-
-        // Tell all base nodes and base ingress children about newly added columns
-        for (ni, change) in self.columns {
-            let mut inform = if let ColumnChange::Add(..) = change {
-                // we need to inform all of the base's children too,
-                // so that they know to add columns to existing records when replaying
-                mainline
-                    .ingredients
-                    .neighbors_directed(ni, petgraph::EdgeDirection::Outgoing)
-                    .filter(|&eni| mainline.ingredients[eni].is_egress())
-                    .flat_map(|eni| {
-                        // find ingresses under this egress
-                        mainline
-                            .ingredients
-                            .neighbors_directed(eni, petgraph::EdgeDirection::Outgoing)
-                    })
-                    .collect()
-            } else {
-                // ingress nodes don't need to know about deleted columns, because those are only
-                // relevant when new writes enter the graph.
-                Vec::new()
-            };
-            inform.push(ni);
-
-            for ni in inform {
-                let n = &mainline.ingredients[ni];
-                let m = match change.clone() {
-                    ColumnChange::Add(field, default) => box payload::Packet::AddBaseColumn {
-                        node: *n.local_addr(),
-                        field: field,
-                        default: default,
-                    },
-                    ColumnChange::Drop(column) => box payload::Packet::DropBaseColumn {
-                        node: *n.local_addr(),
-                        column: column,
-                    },
-                };
-
-                let domain = mainline.domains.get_mut(&n.domain()).unwrap();
-
-                domain.send(m).unwrap();
-                domain.wait_for_ack().unwrap();
-            }
-        }
-
-        // Set up inter-domain connections
-        // NOTE: once we do this, we are making existing domains block on new domains!
-        info!(log, "bringing up inter-domain connections");
-        migrate::routing::connect(&log, &mut mainline.ingredients, &mut mainline.domains, &new);
-
-        // And now, the last piece of the puzzle -- set up materializations
-        info!(log, "initializing new materializations");
-        mainline
-            .materializations
-            .commit(&mainline.ingredients, &new, &mut mainline.domains);
-
-        info!(log, "finalizing migration");
-
-        // Ideally this should happen as part of checktable::perform_migration(), but we don't know
-        // the replay paths then. It is harmless to do now since we know the new replay paths won't
-        // request timestamps until after the migration in finished.
-        mainline
-            .checktable
-            .add_replay_paths(mainline.materializations.domains_on_path.clone())
-            .unwrap();
-
-        migrate::transactions::finalize(mainline.deps.clone(), &log, &mut mainline.domains, end_ts);
-
-        warn!(log, "migration completed"; "ms" => dur_to_ns!(start.elapsed()) / 1_000_000);
-    }
-}
-
-impl Drop for ControllerInner {
-    fn drop(&mut self) {
-        for (_, d) in &mut self.domains {
-            // XXX: this is a terrible ugly hack to ensure that all workers exit
-            for _ in 0..100 {
-                // don't unwrap, because given domain may already have terminated
-                drop(d.send(box payload::Packet::Quit));
-            }
-        }
-        if let Some(ref mut local_pool) = self.local_pool {
-            local_pool.wait();
-        }
-    }
-}
-
-/// `Blender` is a handle to a Controller.
-pub struct Blender {
-    url: String,
-}
-impl Blender {
-    fn rpc<Q: Serialize, R: DeserializeOwned>(
-        &self,
-        path: &str,
-        request: &Q,
-    ) -> Result<R, Box<Error>> {
-        use hyper;
-
-        let mut core = Core::new().unwrap();
-        let client = Client::new(&core.handle());
-        let url = format!("{}/{}", self.url, path);
-
-        let mut r = hyper::Request::new(hyper::Method::Post, url.parse().unwrap());
-        r.set_body(serde_json::to_string(request).unwrap());
-
-        let work = client.request(r).and_then(|res| {
-            res.body().concat2().and_then(move |body| {
-                let reply: R = serde_json::from_slice(&body)
-                    .map_err(|e| ::std::io::Error::new(::std::io::ErrorKind::Other, e))
-                    .unwrap();
-                Ok(reply)
-            })
-        });
-        Ok(core.run(work).unwrap())
-    }
-
-    /// Get a Vec of all known input nodes.
-    ///
-    /// Input nodes are here all nodes of type `Base`. The addresses returned by this function will
-    /// all have been returned as a key in the map from `commit` at some point in the past.
-    pub fn inputs(&self) -> BTreeMap<String, NodeIndex> {
-        self.rpc("inputs", &()).unwrap()
-    }
-
-    /// Get a Vec of to all known output nodes.
-    ///
-    /// Output nodes here refers to nodes of type `Reader`, which is the nodes created in response
-    /// to calling `.maintain` or `.stream` for a node during a migration.
-    pub fn outputs(&self) -> BTreeMap<String, NodeIndex> {
-        self.rpc("outputs", &()).unwrap()
-    }
-
-    /// Obtain a `RemoteGetterBuilder` that can be sent to a client and then used to query a given
-    /// (already maintained) reader node.
-    pub fn get_getter_builder(&self, node: NodeIndex) -> Option<RemoteGetterBuilder> {
-        self.rpc("getter_builder", &node).unwrap()
-    }
-
-    /// Obtain a `RemoteGetter`.
-    pub fn get_getter(&self, node: NodeIndex) -> Option<RemoteGetter> {
-        self.get_getter_builder(node).map(|g| g.build())
-    }
-
-    /// Obtain a MutatorBuild that can be used to construct a Mutator to perform writes and deletes
-    /// from the given base node.
-    pub fn get_mutator_builder(&self, base: NodeIndex) -> Result<MutatorBuilder, Box<Error>> {
-        self.rpc("mutator_builder", &base)
-    }
-
-    /// Obtain a Mutator
-    pub fn get_mutator(&self, base: NodeIndex) -> Result<Mutator, Box<Error>> {
-        self.get_mutator_builder(base)
-            .map(|m| m.build("127.0.0.1:0".parse().unwrap()))
-    }
-
-    /// Initiaties log recovery by sending a
-    /// StartRecovery packet to each base node domain.
-    pub fn recover(&mut self) {
-        self.rpc("recover", &()).unwrap()
-    }
-
-    /// Get statistics about the time spent processing different parts of the graph.
-    pub fn get_statistics(&mut self) -> GraphStats {
-        self.rpc("get_statistics", &()).unwrap()
-    }
-
-    /// Install a new recipe on the controller.
-    pub fn install_recipe(&self, new_recipe: String) {
-        self.rpc("install_recipe", &new_recipe).unwrap()
-    }
-
-    /// Install a new set of policies on the controller.
-    pub fn set_security_config(&self, p: String) {
-        self.rpc("set_security_config", &(p, self.url.clone())).unwrap()
-    }
-
-    /// Install a new set of policies on the controller.
-    pub fn create_universe(&self, context: HashMap<String, DataType>) {
-        self.rpc("create_universe", &context).unwrap()
-    }
-
-    /// graphviz description of the dataflow graph
-    pub fn graphviz(&self) -> String {
-        self.rpc("graphviz", &()).unwrap()
-    }
-
-    /// Set the `Logger` to use for internal log messages.
-    pub fn log_with(&mut self, _: slog::Logger) {}
-
-    /// Enable reuse type
-    pub fn enable_reuse(&self, reuse_type: ReuseConfigType) {
-        self.rpc("enable_reuse", &reuse_type).unwrap()
     }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use consensus::ZookeeperAuthority;
 
     // Controller without any domains gets dropped once it leaves the scope.
     #[test]
+    #[ignore]
+    #[allow_fail]
     fn it_works_default() {
         // Controller gets dropped. It doesn't have Domains, so we don't see any dropped.
-        ControllerBuilder::default().build();
+        let authority = ZookeeperAuthority::new("127.0.0.1:2181/it_works_default");
+        {
+            let _c = ControllerBuilder::default().build(authority);
+            thread::sleep(Duration::from_millis(100));
+        }
+        thread::sleep(Duration::from_millis(100));
     }
 
     // Controller with a few domains drops them once it leaves the scope.
     #[test]
+    #[allow_fail]
     fn it_works_blender_with_migration() {
-        // use Recipe;
-
         let r_txt = "CREATE TABLE a (x int, y int, z int);\n
                      CREATE TABLE b (r int, s int);\n";
-        // let mut r = Recipe::from_str(r_txt, None).unwrap();
 
-        let c = ControllerBuilder::default().build();
+        let authority = ZookeeperAuthority::new("127.0.0.1:2181/it_works_blender_with_migration");
+        let mut c = ControllerBuilder::default().build(authority);
         c.install_recipe(r_txt.to_owned());
-        // b.migrate(|mig| {
-        //     assert!(r.activate(mig, false).is_ok());
-        // });
+    }
+
+    // Controller without any domains gets dropped once it leaves the scope.
+    #[test]
+    #[ignore]
+    fn it_works_default_local() {
+        // Controller gets dropped. It doesn't have Domains, so we don't see any dropped.
+        {
+            let _c = ControllerBuilder::default().build_local();
+            thread::sleep(Duration::from_millis(100));
+        }
+        thread::sleep(Duration::from_millis(100));
+    }
+
+    // Controller with a few domains drops them once it leaves the scope.
+    #[test]
+    fn it_works_blender_with_migration_local() {
+        let r_txt = "CREATE TABLE a (x int, y int, z int);\n
+                     CREATE TABLE b (r int, s int);\n";
+
+        let mut c = ControllerBuilder::default().build_local();
+        c.install_recipe(r_txt.to_owned());
     }
 }

@@ -153,9 +153,10 @@ impl MirNode {
     }
 
     pub fn remove_ancestor(&mut self, a: MirNodeRef) {
-        match self.ancestors.iter().position(|x| {
-            x.borrow().versioned_name() == a.borrow().versioned_name()
-        }) {
+        match self.ancestors
+            .iter()
+            .position(|x| x.borrow().versioned_name() == a.borrow().versioned_name())
+        {
             None => (),
             Some(idx) => {
                 self.ancestors.remove(idx);
@@ -168,9 +169,10 @@ impl MirNode {
     }
 
     pub fn remove_child(&mut self, a: MirNodeRef) {
-        match self.children.iter().position(|x| {
-            x.borrow().versioned_name() == a.borrow().versioned_name()
-        }) {
+        match self.children
+            .iter()
+            .position(|x| x.borrow().versioned_name() == a.borrow().versioned_name())
+        {
             None => (),
             Some(idx) => {
                 self.children.remove(idx);
@@ -215,8 +217,7 @@ impl MirNode {
             } => match column_specs.iter().rposition(|cs| cs.0.column == *c) {
                 None => panic!(
                     "tried to look up non-existent column {:?} in {}",
-                    c,
-                    self.name
+                    c, self.name
                 ),
                 Some(id) => column_specs[id]
                     .1

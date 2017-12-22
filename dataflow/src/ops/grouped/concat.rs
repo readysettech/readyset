@@ -223,9 +223,7 @@ impl GroupedOperation for GroupConcat {
 
         format!(
             "||([{}], \"{}\") γ[{}]",
-            fields,
-            self.separator,
-            group_cols
+            fields, self.separator, group_cols
         )
     }
 }

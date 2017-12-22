@@ -16,6 +16,13 @@ pub use self::ntype::NodeType;
 
 mod debug;
 
+#[derive(Debug)]
+pub enum MaterializationStatus {
+    Not,
+    Full,
+    Partial,
+}
+
 #[derive(Clone, Serialize, Deserialize)]
 pub struct Node {
     name: String,

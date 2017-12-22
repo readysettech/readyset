@@ -109,7 +109,6 @@ impl Hash for DataType {
     }
 }
 
-
 impl From<i64> for DataType {
     fn from(s: i64) -> Self {
         DataType::BigInt(s)

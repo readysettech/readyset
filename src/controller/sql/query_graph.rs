@@ -543,8 +543,7 @@ pub fn to_query_graph(st: &SelectStatement) -> Result<QueryGraph, String> {
                 // statement
                 panic!(
                     "predicate(s) {:?} on relation {} that is not in query graph",
-                    preds,
-                    rel
+                    preds, rel
                 );
             } else {
                 qg.relations.get_mut(&rel).unwrap().predicates.extend(preds);

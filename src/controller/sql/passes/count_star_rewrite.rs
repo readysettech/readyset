@@ -1,7 +1,6 @@
 use nom_sql::{Column, ConditionBase, ConditionExpression, ConditionTree, FieldExpression,
               SqlQuery, Table};
 
-
 use std::collections::HashMap;
 
 pub trait CountStarRewrite {
@@ -43,7 +42,6 @@ fn extract_condition_columns(ce: &ConditionExpression) -> Vec<Column> {
         ConditionExpression::Base(_) => unreachable!(),
     }
 }
-
 
 impl CountStarRewrite for SqlQuery {
     fn rewrite_count_star(self, write_schemas: &HashMap<String, Vec<String>>) -> SqlQuery {
@@ -142,9 +140,10 @@ mod tests {
                             name: String::from("count(all)"),
                             alias: None,
                             table: None,
-                            function: Some(Box::new(
-                                FunctionExpression::Count(Column::from("users.id"), false),
-                            )),
+                            function: Some(Box::new(FunctionExpression::Count(
+                                Column::from("users.id"),
+                                false,
+                            ))),
                         }),
                     ]
                 );
@@ -179,9 +178,10 @@ mod tests {
                             name: String::from("count(all)"),
                             alias: None,
                             table: None,
-                            function: Some(Box::new(
-                                FunctionExpression::Count(Column::from("users.name"), false),
-                            )),
+                            function: Some(Box::new(FunctionExpression::Count(
+                                Column::from("users.name"),
+                                false,
+                            ))),
                         }),
                     ]
                 );
