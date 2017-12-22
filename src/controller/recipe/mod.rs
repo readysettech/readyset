@@ -3,6 +3,7 @@ use nom_sql::SqlQuery;
 use controller::Migration;
 use controller::sql::reuse::ReuseConfigType;
 use controller::sql::SqlIncorporator;
+use dataflow::prelude::DataType;
 use dataflow::ops::trigger::Trigger;
 use dataflow::ops::trigger::TriggerType;
 use core::NodeIndex;
@@ -70,6 +71,14 @@ fn hash_query(q: &SqlQuery) -> QueryID {
 
 #[allow(unused)]
 impl Recipe {
+    /// Return security groups in the recipe
+    pub fn security_groups(&self) -> Vec<String> {
+        match self.security_config {
+            Some(ref config) => config.groups.keys().cloned().collect(),
+            None => vec![]
+        }
+    }
+
     /// Return active aliases for expressions
     pub fn aliases(&self) -> Vec<&str> {
         self.aliases.keys().map(String::as_str).collect()
@@ -220,7 +229,7 @@ impl Recipe {
     }
 
     /// Creates a new security universe
-    pub fn create_universe(&mut self, mig: &mut Migration) -> Result<ActivationResult, String> {
+    pub fn create_universe(&mut self, mig: &mut Migration, universe_groups: HashMap<String, Vec<DataType>>) -> Result<ActivationResult, String> {
         use controller::sql::security::Multiverse;
 
         let mut result = ActivationResult {
@@ -229,12 +238,12 @@ impl Recipe {
             expressions_removed: 0,
         };
 
+        let group = mig.context().get("group").map(|g| g.clone().into());
         if self.security_config.is_some() {
-            let group = mig.context().get("group").map(|g| g.clone().into());
             let qfps = self.inc
                 .as_mut()
                 .unwrap()
-                .prepare_universe(&self.security_config.clone().unwrap(), group, mig);
+                .prepare_universe(&self.security_config.clone().unwrap(), group.clone(), universe_groups, mig);
 
             for qfp in qfps {
                 result.new_nodes.insert(qfp.name.clone(), qfp.query_leaf);
@@ -243,11 +252,22 @@ impl Recipe {
 
         for expr in self.expressions.values() {
             let (n, q, is_leaf) = expr.clone();
+
             // add the universe-specific query
             // don't use query name to avoid conflict with global queries
-            let new_name = match n {
-                Some(ref name) => Some(format!("{}_u{}", name, mig.universe())),
-                None => None,
+            let new_name = if n.is_some() {
+                match group {
+                    Some(ref g) => Some(format!("{}_{}{}", n.clone().unwrap(), g, mig.universe())),
+                    None => Some(format!("{}_u{}", n.clone().unwrap(), mig.universe())),
+                }
+            } else {
+                None
+            };
+
+            let is_leaf = if group.is_some() {
+                false
+            } else {
+                is_leaf
             };
 
             let qfp = self.inc
@@ -315,7 +335,7 @@ impl Recipe {
                 let qfp = self.inc
                     .as_mut()
                     .unwrap()
-                    .add_parsed_query(group.membership(), Some(group.name()), false, mig)?;
+                    .add_parsed_query(group.membership(), Some(group.name()), true, mig)?;
 
                 /// Add trigger node below group membership views
                 let group_creation = TriggerType::GroupCreation { url: config.url.clone(), group: group.name() };

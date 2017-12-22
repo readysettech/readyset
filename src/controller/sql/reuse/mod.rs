@@ -5,7 +5,8 @@ use std::vec::Vec;
 use std::collections::HashMap;
 
 use controller::sql::reuse::join_order::reorder_joins;
-use controller::sql::security::UniverseId;
+
+use dataflow::prelude::DataType;
 
 mod finkelstein;
 mod relaxed;
@@ -61,7 +62,7 @@ impl ReuseConfig {
     }
 
     // Return which universes are available for reuse opportunities
-    pub fn reuse_universes(&self, universe: UniverseId) -> Vec<UniverseId> {
+    pub fn reuse_universes(&self, universe: DataType) -> Vec<DataType> {
         if universe == "global".into() {
             vec![universe.clone()]
         } else {

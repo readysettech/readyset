@@ -19,6 +19,8 @@ use std::collections::{HashMap, HashSet};
 use std::ops::Deref;
 use std::vec::Vec;
 
+use controller::sql::security::Universe;
+
 mod security;
 
 fn target_columns_from_computed_column(computed_col: &Column) -> &Column {
@@ -75,8 +77,8 @@ pub struct SqlToMirConverter {
     nodes: HashMap<(String, usize), MirNodeRef>,
     schema_version: usize,
 
-    /// Set of policies to use during a migration.
-    policies: HashMap<(DataType, String), Vec<QueryGraph>>,
+    /// Universe in which the conversion is happening
+    universe: Universe,
 }
 
 impl Default for SqlToMirConverter {
@@ -87,7 +89,7 @@ impl Default for SqlToMirConverter {
             log: slog::Logger::root(slog::Discard, o!()),
             nodes: HashMap::default(),
             schema_version: 0,
-            policies: HashMap::default(),
+            universe: Universe::default(),
         }
     }
 }
@@ -100,14 +102,32 @@ impl SqlToMirConverter {
         }
     }
 
-    /// Sets the policies for a given graph.
-    /// Policies are set upon universe creation and don't change.
-    pub fn set_policies(&mut self, policies: HashMap<(DataType, String), Vec<QueryGraph>>) {
-        self.policies = policies;
+    /// Set universe in which the conversion will happen.
+    /// We need this, because different universes will have different
+    /// security policies and therefore different nodes that are not
+    /// represent in the the query graph
+    pub fn set_universe(&mut self, universe: Universe) {
+        self.universe = universe;
     }
 
-    pub fn clear_policies(&mut self, universe_id: &DataType) {
-        self.policies.retain(|ref k, _| k.0 != *universe_id);
+    fn get_view(&self, view_name: &str) -> MirNodeRef {
+        let latest_existing = self.current.get(view_name);
+        match latest_existing {
+            None => panic!("Query refers to unknown view \"{}\"", view_name),
+            Some(v) => {
+                let existing = self.nodes.get(&(String::from(view_name), *v));
+                match existing {
+                    None => {
+                        panic!(
+                            "Inconsistency: view \"{}\" does not exist at v{}",
+                            view_name,
+                            v
+                        );
+                    }
+                    Some(bmn) => MirNode::reuse(bmn.clone(), self.schema_version),
+                }
+            }
+        }
     }
 
     /// Converts a condition tree stored in the `ConditionExpr` returned by the SQL parser
@@ -249,7 +269,7 @@ impl SqlToMirConverter {
         let mut final_node = match op {
             CompoundSelectOperator::Union => self.make_union_node(
                 &union_name,
-                sqs.iter().map(|mq| mq.leaf.clone()).collect(),
+                &sqs.iter().map(|mq| mq.leaf.clone()).collect(),
                 !has_leaf,
             ),
             _ => unimplemented!(),
@@ -591,7 +611,7 @@ impl SqlToMirConverter {
         }
     }
 
-    fn make_union_node(&self, name: &str, ancestors: Vec<MirNodeRef>, is_leaf: bool) -> MirNodeRef {
+    fn make_union_node(&self, name: &str, ancestors: &Vec<MirNodeRef>, is_leaf: bool) -> MirNodeRef {
         let mut emit: Vec<Vec<Column>> = Vec::new();
         assert!(ancestors.len() > 1, "union must have more than 1 ancestors");
 
@@ -1603,28 +1623,65 @@ impl SqlToMirConverter {
                 })
                 .collect();
 
-            let ident = if has_leaf {
+
+            let mut ancestors = self.universe.member_of.iter().fold(vec![], |mut acc, (gname, gids)| {
+                let group_views: Vec<MirNodeRef> = gids.iter().map(|gid| {
+                    // This is a little annoying, but because of the way we name universe queries,
+                    // we need to strip the view name of the _u{uid} suffix
+                    let root: String = if !uformat.is_empty() {
+                        let sz = name.len() - uformat.len();
+                        name.chars().take(sz).collect()
+                    } else {
+                        String::from(name)
+                    };
+                    let view_name = format!("{}_{}{}", root, gname, gid);
+                    self.get_view(&view_name)
+                }).collect();
+
+                trace!(self.log, "group views {:?}", group_views);
+                acc.extend(group_views);
+                acc
+            });
+
+            let ident = if has_leaf || !ancestors.is_empty() {
                 format!("q_{:x}_n{}{}", qg.signature().hash, new_node_count, uformat)
             } else {
                 String::from(name)
+
             };
 
-            let leaf_project_node = self.make_project_node(
+            let project_node = self.make_project_node(
                 &ident,
                 final_node,
                 projected_columns,
                 projected_arithmetic,
                 projected_literals,
-                !has_leaf,
+                ancestors.is_empty() && !has_leaf,
             );
 
-            nodes_added.push(leaf_project_node.clone());
+            nodes_added.push(project_node.clone());
+            new_node_count += 1;
+
+            let leaf_node = if !ancestors.is_empty() {
+                let ident = if has_leaf{
+                    format!("q_{:x}_n{}{}", qg.signature().hash, new_node_count, uformat)
+                } else {
+                    String::from(name)
+                };
+
+                ancestors.push(project_node);
+                self.make_union_node(&ident, &ancestors, has_leaf)
+            } else {
+                project_node
+            };
+
+            nodes_added.extend(ancestors);
 
             if has_leaf {
                 // We are supposed to add a `MaterializedLeaf` node keyed on the query
                 // parameters. For purely internal views (e.g., subqueries), this is not set.
                 let query_params = qg.parameters();
-                let columns = leaf_project_node
+                let columns = leaf_node
                     .borrow()
                     .columns()
                     .iter()
@@ -1637,10 +1694,10 @@ impl SqlToMirConverter {
                     self.schema_version,
                     columns,
                     MirNodeType::Leaf {
-                        node: leaf_project_node.clone(),
+                        node: leaf_node.clone(),
                         keys: query_params.into_iter().cloned().collect(),
                     },
-                    vec![leaf_project_node.clone()],
+                    vec![leaf_node.clone()],
                     vec![],
                 );
                 nodes_added.push(leaf_node);

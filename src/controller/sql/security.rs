@@ -7,7 +7,24 @@ use controller::sql::{QueryFlowParts, SqlIncorporator};
 use controller::sql::query_graph::{to_query_graph, QueryGraph};
 use nom_sql::parser as sql_parser;
 
-pub type UniverseId = DataType;
+#[derive(Clone, Debug)]
+pub struct Universe {
+    pub id: DataType,
+    pub from_group: Option<String>,
+    pub member_of: HashMap<String, Vec<DataType>>,
+    pub policies: HashMap<(DataType, String), Vec<QueryGraph>>,
+}
+
+impl Universe {
+    pub fn default() -> Universe {
+        Universe {
+            id: "".into(),
+            from_group: None,
+            member_of: HashMap::default(),
+            policies: HashMap::default(),
+        }
+    }
+}
 
 pub trait Multiverse {
     /// Prepare a new security universe.
@@ -17,22 +34,15 @@ pub trait Multiverse {
         &mut self,
         config: &SecurityConfig,
         group: Option<String>,
+        universe_groups: HashMap<String, Vec<DataType>>,
         mig: &mut Migration,
     ) -> Vec<QueryFlowParts>;
 
     fn add_base(
         &mut self,
         name: String,
-        fields: Vec<&String>,
+        fields: &mut Vec<&String>,
         mig: &mut Migration
-    ) -> QueryFlowParts;
-
-    fn add_user_group(
-        &mut self,
-        name: String,
-        user_context: String,
-        group_membership: String,
-        mig: &mut Migration,
     ) -> QueryFlowParts;
 }
 
@@ -41,51 +51,43 @@ impl Multiverse for SqlIncorporator {
         &mut self,
         config: &SecurityConfig,
         group: Option<String>,
+        universe_groups: HashMap<String, Vec<DataType>>,
         mig: &mut Migration,
     ) -> Vec<QueryFlowParts> {
-        // First, create the UserContext base node.
-        let uid = mig.universe();
         let mut qfps = Vec::new();
-        let universe_policies = if group.is_none() {
-            info!(self.log, "Starting user universe {}", uid);
-            let context = mig.context();
 
-            let uc_name = format!("UserContext_{}", uid);
-            let fields: Vec<_> = context.keys().collect();
-
-            let base = self.add_base(uc_name.clone(), fields, mig);
-            qfps.push(base);
-
-            // Then, create the UserGroup views.
-            for group in config.groups.values() {
-                let name = format!("{}_{}", group.name(), uid);
-                let group = self.add_user_group(name, uc_name.clone(), group.name(), mig);
-                qfps.push(group);
-            }
-
-            config.policies()
-
-        } else {
-            info!(self.log, "Starting group universe {}", uid);
-            let group_name = group.unwrap();
-            let context = mig.context();
-
-            let uc_name = format!("GroupContext_{}_{}", group_name, uid);
-            let fields: Vec<_> = context.keys().collect();
-
-            let base = self.add_base(uc_name.clone(), fields, mig);
-            qfps.push(base);
-
-
-            config.get_group_policies(group_name)
+        let mut universe = Universe {
+            id: mig.universe(),
+            from_group: group.clone(),
+            member_of: universe_groups,
+            policies: HashMap::new(),
         };
+
+        // Create the UserContext base node.
+        let context = mig.context();
+        let mut fields: Vec<_> = context.keys().collect();
+
+        let (uc_name, universe_policies) = if group.is_none() {
+            info!(self.log, "Starting user universe {}", universe.id);
+            let uc_name = format!("UserContext_{}", universe.id);
+
+            (uc_name, config.policies())
+        } else {
+            info!(self.log, "Starting group universe {}", universe.id);
+            let group_name = group.unwrap();
+            let uc_name = format!("GroupContext_{}_{}", group_name, universe.id);
+
+            (uc_name, config.get_group_policies(group_name))
+        };
+
+        let base = self.add_base(uc_name.clone(), &mut fields, mig);
+        qfps.push(base);
 
         // Then, we need to transform policies' predicates into QueryGraphs.
         // We do this in a per-universe base, instead of once per policy,
         // because predicates can have nested subqueries, which will trigger
         // a view creation and these views might be unique to each universe
         // e.g. if they reference UserContext.
-        self.mir_converter.clear_policies(&uid);
         let mut policies_qg: HashMap<(DataType, String), Vec<QueryGraph>> = HashMap::new();
         for policy in universe_policies {
             trace!(self.log, "Adding policy {:?}", policy.name);
@@ -104,41 +106,29 @@ impl Multiverse for SqlIncorporator {
                 Err(e) => panic!(e),
             };
 
-            let e = policies_qg.entry((uid.clone(), policy.table.clone())).or_insert_with(Vec::new);
+            let e = policies_qg.entry((universe.id.clone(), policy.table.clone())).or_insert_with(Vec::new);
             e.push(qg);
         }
 
-        self.mir_converter.set_policies(policies_qg);
+        universe.policies = policies_qg;
+
+        self.mir_converter.set_universe(universe);
 
         qfps
-    }
-
-    fn add_user_group(
-        &mut self,
-        name: String,
-        user_context: String,
-        group_membership: String,
-        mig: &mut Migration,
-    ) -> QueryFlowParts {
-        let mut s = String::new();
-        s.push_str(&format!("select uid, gid FROM {}, {} WHERE id = uid;",
-                        user_context,
-                        group_membership,
-                    ));
-
-        let parsed_query = sql_parser::parse_query(&s).unwrap();
-
-        self.add_parsed_query(parsed_query, Some(name), false, mig).unwrap()
     }
 
     fn add_base(
         &mut self,
         name: String,
-        fields: Vec<&String>,
+        fields: &mut Vec<&String>,
         mig: &mut Migration
     ) -> QueryFlowParts {
         // Unfortunately, we can't add the base directly to the graph, because we needd
         // it to be recorded in the MIR level, so other queries can reference it.
+
+        fields.sort();
+        fields.dedup();
+
         let mut s = String::new();
         s.push_str(&format!("CREATE TABLE `{}` (", name));
         for k in fields {

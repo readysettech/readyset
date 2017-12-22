@@ -828,9 +828,24 @@ impl ControllerInner {
     pub fn create_universe(&mut self, context: HashMap<String, DataType>) {
         let log = self.log.clone();
         let mut r = self.recipe.clone();
+        let groups = self.recipe.security_groups();
+        let outs = self.outputs();
+
+        let mut universe_groups = HashMap::new();
+
+        if context.get("group").is_none() {
+            for g in groups {
+                let uid = context.get("id").expect("Universe context must have id");
+                let membership = outs[&g];
+                let mut getter = self.get_getter(membership).unwrap();
+                let my_groups: Vec<DataType> = getter.lookup(uid, true).unwrap().iter().map(|v| v[1].clone()).collect();
+                universe_groups.insert(g, my_groups);
+            }
+        }
+
         self.add_universe(context, |mut mig| {
             r.next();
-            match r.create_universe(&mut mig) {
+            match r.create_universe(&mut mig, universe_groups) {
                 Ok(ar) => {
                     info!(log, "{} expressions added", ar.expressions_added);
                     info!(log, "{} expressions removed", ar.expressions_removed);
@@ -851,7 +866,7 @@ impl ControllerInner {
         self.mutator_builder(base)
             .build("127.0.0.1:0".parse().unwrap())
     }
-    #[cfg(test)]
+
     pub fn get_getter(&self, node: NodeIndex) -> Option<RemoteGetter> {
         self.getter_builder(node).map(|g| g.build())
     }

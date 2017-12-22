@@ -37,7 +37,8 @@ impl SecurityBoundary for SqlToMirConverter {
         is_leaf: bool,
     ) -> Vec<MirNodeRef> {
         use std::cmp::Ordering;
-        let policies = match self.policies.get(&(universe_id.clone(), String::from(rel))) {
+
+        let policies = match self.universe.policies.get(&(universe_id.clone(), String::from(rel))) {
             Some(p) => p.clone(),
             // no policies associated with this base node
             None => return Vec::new(),

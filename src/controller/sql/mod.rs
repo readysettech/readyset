@@ -15,7 +15,6 @@ use nom_sql::{ArithmeticBase, Column, SqlQuery};
 use nom_sql::{CompoundSelectOperator, CompoundSelectStatement, SelectStatement};
 use self::mir::{MirNodeRef, SqlToMirConverter};
 use self::reuse::{ReuseConfig, ReuseConfigType};
-use self::security::UniverseId;
 use self::query_graph::{to_query_graph, QueryGraph};
 use self::query_signature::Signature;
 use mir::query::{MirQuery, QueryFlowParts};
@@ -45,7 +44,7 @@ pub struct SqlIncorporator {
     leaf_addresses: HashMap<String, NodeIndex>,
     num_queries: usize,
     query_graphs: HashMap<u64, QueryGraph>,
-    mir_queries: HashMap<(u64, UniverseId), MirQuery>,
+    mir_queries: HashMap<(u64, DataType), MirQuery>,
     schema_version: usize,
     view_schemas: HashMap<String, Vec<String>>,
     transactional: bool,
