@@ -67,6 +67,9 @@ pub struct Migration<'a> {
 
     pub(super) start: Instant,
     pub(super) log: slog::Logger,
+
+    /// Additional migration information provided by the client
+    pub(super) context: HashMap<String, DataType>,
 }
 
 impl<'a> Migration<'a> {
@@ -117,6 +120,20 @@ impl<'a> Migration<'a> {
         }
         // and tell the caller its id
         ni.into()
+    }
+
+    /// Returns the context of this migration
+    pub fn context(&self) -> HashMap<String, DataType> {
+        self.context.clone()
+    }
+
+    /// Returns the universe in which this migration is operating in.
+    /// If not specified, assumes `global` universe.
+    pub fn universe(&self) -> DataType {
+        match self.context.get("id") {
+            Some(id) => id.clone(),
+            None => "global".into(),
+        }
     }
 
     /// Add a transactional base node to the graph

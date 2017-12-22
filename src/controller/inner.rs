@@ -16,6 +16,7 @@ use controller::{ControllerState, DomainHandle, Migration, Recipe, RemoteGetterB
                  WorkerIdentifier, WorkerStatus};
 use controller::migrate::materialization::Materializations;
 use controller::mutator::MutatorBuilder;
+use controller::sql::reuse::ReuseConfigType;
 use souplet::readers;
 use worker;
 
@@ -351,7 +352,7 @@ impl ControllerInner {
             added: Default::default(),
             columns: Default::default(),
             readers: Default::default(),
-
+            context: Default::default(),
             start: time::Instant::now(),
             log: miglog,
         };
@@ -538,10 +539,7 @@ impl ControllerInner {
         self.recipe.enable_reuse(reuse_type);
     }
 
-    pub fn create_universe(
-        &mut self,
-        context: HashMap<String, DataType>
-    ) -> Result<(), RpcError>{
+    pub fn create_universe(&mut self, context: HashMap<String, DataType>) {
         let log = self.log.clone();
         let mut r = self.recipe.clone();
         let groups = self.recipe.security_groups();
@@ -568,7 +566,7 @@ impl ControllerInner {
                     Ok(())
                 }
                 Err(e) => {
-                    crit!(self.log, "failed to create universe: {:?}", e);
+                    crit!(log, "failed to create universe: {:?}", e);
                     Err(RpcError::Other("failed to create universe".to_owned()))
                 }
             };

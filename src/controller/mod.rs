@@ -28,8 +28,6 @@ use serde::Serialize;
 use serde_json;
 use slog;
 
-use self::recipe::Recipe;
-use self::sql::reuse::ReuseConfigType;
 
 pub mod domain_handle;
 pub mod keys;

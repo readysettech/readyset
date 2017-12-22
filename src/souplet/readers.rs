@@ -176,6 +176,23 @@ fn handle_message(m: LocalOrNot<ReadQuery>, conn: &mut Rpc) {
     let is_local = m.is_local();
     conn.send(&LocalOrNot::make(
         match unsafe { m.take() } {
+            ReadQuery::Size {
+                target,
+            } => ReadReply::Size({
+                READERS.with(|readers_cache| {
+                    let mut readers_cache = readers_cache.borrow_mut();
+                    let &mut (ref mut reader, _) =
+                        readers_cache.entry(target.clone()).or_insert_with(|| {
+                            ALL_READERS.with(|readers| {
+                                let readers = readers.borrow();
+                                let readers = readers.as_ref().unwrap().lock().unwrap();
+                                readers.get(&target).unwrap().clone()
+                            })
+                        });
+
+                    reader.len()
+                })
+            }),
             ReadQuery::Normal {
                 target,
                 keys,

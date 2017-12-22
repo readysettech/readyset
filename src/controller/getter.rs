@@ -103,12 +103,17 @@ pub struct RemoteGetter {
 impl RemoteGetter {
     /// Query the number of rows in the reader
     pub fn len(&mut self) -> usize {
-        let reply = self.shards[0]
-                .send(&ReadQuery::Size {
-                    target: (self.node, 0),
-                })
+        let shard = &mut self.shards[0];
+        let is_local = shard.is_local();
+        let reply = shard
+                .send(&LocalOrNot::make(
+                        ReadQuery::Size {
+                            target: (self.node, 0),
+                        },
+                        is_local,
+                ))
                 .unwrap();
-        match reply {
+        match unsafe { reply.take() } {
             ReadReply::Size(size) => size,
             _ => unreachable!(),
         }

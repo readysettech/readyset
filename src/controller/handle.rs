@@ -2,7 +2,7 @@ use consensus::{Authority};
 use dataflow::prelude::*;
 use dataflow::statistics::GraphStats;
 
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, HashMap};
 use std::error::Error;
 use std::sync::Arc;
 use std::sync::mpsc::Sender;
@@ -19,6 +19,7 @@ use controller::{ControlEvent, ControllerDescriptor};
 use controller::inner::RpcError;
 use controller::getter::{RemoteGetter, RemoteGetterBuilder};
 use controller::mutator::{Mutator, MutatorBuilder};
+use controller::sql::reuse::ReuseConfigType;
 
 /// `ControllerHandle` is a handle to a Controller.
 pub struct ControllerHandle<A: Authority> {
@@ -124,6 +125,26 @@ impl<A: Authority> ControllerHandle<A> {
     /// Wait for associated local controller to exit.
     pub fn wait(mut self) {
         self.local.take().unwrap().1.join().unwrap()
+    }
+
+    /// Enable reuse type
+    pub fn enable_reuse(&mut self, reuse_type: ReuseConfigType) {
+        self.rpc("enable_reuse", &reuse_type)
+    }
+
+    /// Install a new set of policies on the controller.
+    pub fn set_security_config(&mut self, p: String) {
+        let url = match self.url {
+            Some(ref url) => url.clone(),
+            None => panic!("url not defined"),
+        };
+
+        self.rpc("set_security_config", &(p, url))
+    }
+
+    /// Install a new set of policies on the controller.
+    pub fn create_universe(&mut self, context: HashMap<String, DataType>) {
+        self.rpc("create_universe", &context)
     }
 }
 impl<A: Authority> Drop for ControllerHandle<A> {
