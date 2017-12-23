@@ -77,10 +77,12 @@ impl AliasRemoval for SqlQuery {
                     };
 
                     // Add alias for universe context tables
-                    let universe_id = context.get("id").unwrap();
-                    match context.get("group") {
-                        Some(g) => add_alias("GroupContext", &format!("GroupContext_{}_{}", g, universe_id)),
-                        None => add_alias("UserContext", &format!("UserContext_{}", universe_id)),
+                    if context.get("id").is_some() {
+                        let universe_id = context.get("id").unwrap();
+                        match context.get("group") {
+                            Some(g) => add_alias("GroupContext", &format!("GroupContext_{}_{}", g, universe_id)),
+                            None => add_alias("UserContext", &format!("UserContext_{}", universe_id)),
+                        }
                     }
 
                     for t in &sq.tables {
