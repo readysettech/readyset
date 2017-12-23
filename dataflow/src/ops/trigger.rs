@@ -12,8 +12,10 @@ use std::thread;
 /// it is the simplest possible operation. Primary intended as a reference
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Trigger {
+    us: Option<IndexPair>,
     src: IndexPair,
     trigger: TriggerType,
+    key: Vec<usize>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -24,8 +26,14 @@ pub enum TriggerType {
 
 impl Trigger {
     /// Construct a new Trigger operator.
-    pub fn new(src: NodeIndex, trigger: TriggerType) -> Trigger {
-        Trigger { src: src.into(), trigger: trigger }
+    pub fn new(src: NodeIndex, trigger: TriggerType, key: Vec<usize>) -> Trigger {
+        assert_eq!(key.len(), 1);
+        Trigger {
+            us: None,
+            src: src.into(),
+            trigger: trigger,
+            key: key,
+        }
     }
 
     fn rpc<Q: Serialize>(
@@ -48,14 +56,9 @@ impl Trigger {
         });
     }
 
-    fn trigger(&self, row: &Record) {
+    fn trigger(&self, gid: DataType) {
         match self.trigger {
             TriggerType::GroupCreation{ ref url, ref group } => {
-                let gid = match *row {
-                    Record::Positive(ref v) => v[1].clone(),
-                    _ => return,
-                };
-
                 let mut group_context: HashMap<String, DataType> = HashMap::new();
                 group_context.insert(String::from("id"), gid);
                 group_context.insert(String::from("group"), group.clone().into());
@@ -77,8 +80,9 @@ impl Ingredient for Trigger {
 
     fn on_connected(&mut self, _: &Graph) {}
 
-    fn on_commit(&mut self, _: NodeIndex, remap: &HashMap<NodeIndex, IndexPair>) {
+    fn on_commit(&mut self, us: NodeIndex, remap: &HashMap<NodeIndex, IndexPair>) {
         self.src.remap(remap);
+        self.us = Some(remap[&us]);
     }
 
     fn on_input(
@@ -88,19 +92,33 @@ impl Ingredient for Trigger {
         _: &mut Tracer,
         _: Option<usize>,
         _: &DomainNodes,
-        _: &StateMap,
+        state: &StateMap,
     ) -> ProcessingResult {
         debug_assert_eq!(from, *self.src);
 
-        if rs.is_empty() {
-            return ProcessingResult {
-                results: rs,
-                misses: vec![],
-            };
-        }
+        let us = self.us.unwrap();
+        let db = state
+            .get(&*us)
+            .expect("trigger must have its own state materialized");
 
-        for r in rs.iter() {
-            self.trigger(r);
+        let mut trigger_keys: Vec<DataType> = rs
+            .iter()
+            .map(|r| r[self.key[0]].clone())
+            .collect();
+
+        // sort and dedup to trigger just once for each key
+        trigger_keys.sort();
+        trigger_keys.dedup();
+
+        for k in trigger_keys {
+            match db.lookup(&[self.key[0]], &KeyType::Single(&k)) {
+                LookupResult::Some(rs) => {
+                    if rs.len() == 0 {
+                        self.trigger(k);
+                    }
+                }
+                LookupResult::Missing => unimplemented!(),
+            }
         }
 
         ProcessingResult {
@@ -109,8 +127,9 @@ impl Ingredient for Trigger {
         }
     }
 
-    fn suggest_indexes(&self, _: NodeIndex) -> HashMap<NodeIndex, (Vec<usize>, bool)> {
-        HashMap::new()
+    fn suggest_indexes(&self, this: NodeIndex) -> HashMap<NodeIndex, (Vec<usize>, bool)> {
+        // index all key columns
+        Some((this, (self.key.clone(), true))).into_iter().collect()
     }
 
     fn resolve(&self, col: usize) -> Option<Vec<(NodeIndex, usize)>> {

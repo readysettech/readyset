@@ -336,7 +336,7 @@ impl Recipe {
 
                 /// Add trigger node below group membership views
                 let group_creation = TriggerType::GroupCreation { url: config.url.clone(), group: group.name() };
-                let trigger = Trigger::new(qfp.query_leaf,  group_creation);
+                let trigger = Trigger::new(qfp.query_leaf,  group_creation, vec![1]);
                 mig.add_ingredient(&format!("{}-trigger", group.name()), &["uid", "gid"], trigger);
 
                 result.new_nodes.insert(group.name(), qfp.query_leaf);
