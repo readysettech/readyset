@@ -134,8 +134,8 @@ fn no_rows() {
         Column {
             table: String::new(),
             column: "a".to_owned(),
-            coltype: mysql::consts::ColumnType::MYSQL_TYPE_SHORT,
-            colflags: mysql::consts::ColumnFlags::empty(),
+            coltype: myc::constants::ColumnType::MYSQL_TYPE_SHORT,
+            colflags: myc::constants::ColumnFlags::empty(),
         },
     ];
     TestingShim::new(
@@ -198,8 +198,8 @@ fn empty_on_drop() {
         Column {
             table: String::new(),
             column: "a".to_owned(),
-            coltype: mysql::consts::ColumnType::MYSQL_TYPE_SHORT,
-            colflags: mysql::consts::ColumnFlags::empty(),
+            coltype: myc::constants::ColumnType::MYSQL_TYPE_SHORT,
+            colflags: myc::constants::ColumnFlags::empty(),
         },
     ];
     TestingShim::new(
@@ -219,8 +219,8 @@ fn it_queries_nulls() {
                 Column {
                     table: String::new(),
                     column: "a".to_owned(),
-                    coltype: mysql::consts::ColumnType::MYSQL_TYPE_SHORT,
-                    colflags: mysql::consts::ColumnFlags::empty(),
+                    coltype: myc::constants::ColumnType::MYSQL_TYPE_SHORT,
+                    colflags: myc::constants::ColumnFlags::empty(),
                 },
             ];
             let mut w = w.start(cols)?;
@@ -247,8 +247,8 @@ fn it_queries() {
                 Column {
                     table: String::new(),
                     column: "a".to_owned(),
-                    coltype: mysql::consts::ColumnType::MYSQL_TYPE_SHORT,
-                    colflags: mysql::consts::ColumnFlags::empty(),
+                    coltype: myc::constants::ColumnType::MYSQL_TYPE_SHORT,
+                    colflags: myc::constants::ColumnFlags::empty(),
                 },
             ];
             let mut w = w.start(cols)?;
@@ -273,8 +273,8 @@ fn it_prepares() {
         Column {
             table: String::new(),
             column: "a".to_owned(),
-            coltype: mysql::consts::ColumnType::MYSQL_TYPE_SHORT,
-            colflags: mysql::consts::ColumnFlags::empty(),
+            coltype: myc::constants::ColumnType::MYSQL_TYPE_SHORT,
+            colflags: myc::constants::ColumnFlags::empty(),
         },
     ];
     let cols2 = cols.clone();
@@ -282,8 +282,8 @@ fn it_prepares() {
         Column {
             table: String::new(),
             column: "c".to_owned(),
-            coltype: mysql::consts::ColumnType::MYSQL_TYPE_SHORT,
-            colflags: mysql::consts::ColumnFlags::empty(),
+            coltype: myc::constants::ColumnType::MYSQL_TYPE_SHORT,
+            colflags: myc::constants::ColumnFlags::empty(),
         },
     ];
 
@@ -320,8 +320,8 @@ fn prepared_empty() {
         Column {
             table: String::new(),
             column: "a".to_owned(),
-            coltype: mysql::consts::ColumnType::MYSQL_TYPE_SHORT,
-            colflags: mysql::consts::ColumnFlags::empty(),
+            coltype: myc::constants::ColumnType::MYSQL_TYPE_SHORT,
+            colflags: myc::constants::ColumnFlags::empty(),
         },
     ];
     let cols2 = cols.clone();
@@ -329,8 +329,8 @@ fn prepared_empty() {
         Column {
             table: String::new(),
             column: "c".to_owned(),
-            coltype: mysql::consts::ColumnType::MYSQL_TYPE_SHORT,
-            colflags: mysql::consts::ColumnFlags::empty(),
+            coltype: myc::constants::ColumnType::MYSQL_TYPE_SHORT,
+            colflags: myc::constants::ColumnFlags::empty(),
         },
     ];
 
@@ -359,8 +359,8 @@ fn prepared_no_params() {
         Column {
             table: String::new(),
             column: "a".to_owned(),
-            coltype: mysql::consts::ColumnType::MYSQL_TYPE_SHORT,
-            colflags: mysql::consts::ColumnFlags::empty(),
+            coltype: myc::constants::ColumnType::MYSQL_TYPE_SHORT,
+            colflags: myc::constants::ColumnFlags::empty(),
         },
     ];
     let cols2 = cols.clone();
@@ -389,14 +389,14 @@ fn prepared_nulls() {
         Column {
             table: String::new(),
             column: "a".to_owned(),
-            coltype: mysql::consts::ColumnType::MYSQL_TYPE_SHORT,
-            colflags: mysql::consts::ColumnFlags::empty(),
+            coltype: myc::constants::ColumnType::MYSQL_TYPE_SHORT,
+            colflags: myc::constants::ColumnFlags::empty(),
         },
         Column {
             table: String::new(),
             column: "b".to_owned(),
-            coltype: mysql::consts::ColumnType::MYSQL_TYPE_SHORT,
-            colflags: mysql::consts::ColumnFlags::empty(),
+            coltype: myc::constants::ColumnType::MYSQL_TYPE_SHORT,
+            colflags: myc::constants::ColumnFlags::empty(),
         },
     ];
     let cols2 = cols.clone();
@@ -404,14 +404,14 @@ fn prepared_nulls() {
         Column {
             table: String::new(),
             column: "c".to_owned(),
-            coltype: mysql::consts::ColumnType::MYSQL_TYPE_SHORT,
-            colflags: mysql::consts::ColumnFlags::empty(),
+            coltype: myc::constants::ColumnType::MYSQL_TYPE_SHORT,
+            colflags: myc::constants::ColumnFlags::empty(),
         },
         Column {
             table: String::new(),
             column: "d".to_owned(),
-            coltype: mysql::consts::ColumnType::MYSQL_TYPE_SHORT,
-            colflags: mysql::consts::ColumnFlags::empty(),
+            coltype: myc::constants::ColumnType::MYSQL_TYPE_SHORT,
+            colflags: myc::constants::ColumnFlags::empty(),
         },
     ];
 
@@ -448,8 +448,8 @@ fn prepared_no_rows() {
         Column {
             table: String::new(),
             column: "a".to_owned(),
-            coltype: mysql::consts::ColumnType::MYSQL_TYPE_SHORT,
-            colflags: mysql::consts::ColumnFlags::empty(),
+            coltype: myc::constants::ColumnType::MYSQL_TYPE_SHORT,
+            colflags: myc::constants::ColumnFlags::empty(),
         },
     ];
     let cols2 = cols.clone();
