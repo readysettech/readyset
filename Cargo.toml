@@ -23,7 +23,7 @@ codecov = { repository = "jonhoo/msql-srv", branch = "master", service = "github
 
 [dependencies]
 nom = "4.0.0-alpha1"
-mysql_common = "0.4"
+mysql_common = "0.5"
 byteorder = "1"
 chrono = "0.4"
 
