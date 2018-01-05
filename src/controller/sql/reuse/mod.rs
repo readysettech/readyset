@@ -5,6 +5,7 @@ use std::vec::Vec;
 use std::collections::HashMap;
 
 use controller::sql::reuse::join_order::reorder_joins;
+use controller::sql::UniverseId;
 
 use dataflow::prelude::DataType;
 
@@ -62,12 +63,21 @@ impl ReuseConfig {
     }
 
     // Return which universes are available for reuse opportunities
-    pub fn reuse_universes(&self, universe: DataType) -> Vec<DataType> {
-        if universe == "global".into() {
-            vec![universe.clone()]
-        } else {
-            vec!["global".into(), universe.clone()]
+    pub fn reuse_universes(&self, universe: UniverseId, universes: &HashMap<Option<DataType>, Vec<UniverseId>>) -> Vec<UniverseId> {
+        let global = ("global".into(), None);
+        let mut reuse_universes = vec![global, universe.clone()];
+        let (_, group) = universe;
+
+        // Find one universe that belongs to the same group
+        match universes.get(&group) {
+            Some(ref uids) => {
+                let grouped = uids.first().unwrap().clone();
+                reuse_universes.push(grouped);
+            }
+            None => ()
         }
+
+        reuse_universes
     }
 
     pub fn new(reuse_type: ReuseConfigType) -> ReuseConfig {

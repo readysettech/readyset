@@ -235,12 +235,11 @@ impl Recipe {
             expressions_removed: 0,
         };
 
-        let group = mig.context().get("group").map(|g| g.clone().into());
         if self.security_config.is_some() {
             let qfps = self.inc
                 .as_mut()
                 .unwrap()
-                .prepare_universe(&self.security_config.clone().unwrap(), group.clone(), universe_groups, mig);
+                .prepare_universe(&self.security_config.clone().unwrap(), universe_groups, mig);
 
             for qfp in qfps {
                 result.new_nodes.insert(qfp.name.clone(), qfp.query_leaf);
@@ -252,10 +251,11 @@ impl Recipe {
 
             // add the universe-specific query
             // don't use query name to avoid conflict with global queries
+            let (id, group) = mig.universe();
             let new_name = if n.is_some() {
                 match group {
-                    Some(ref g) => Some(format!("{}_{}{}", n.clone().unwrap(), g, mig.universe())),
-                    None => Some(format!("{}_u{}", n.clone().unwrap(), mig.universe())),
+                    Some(ref g) => Some(format!("{}_{}{}", n.clone().unwrap(), g, id)),
+                    None => Some(format!("{}_u{}", n.clone().unwrap(), id)),
                 }
             } else {
                 None

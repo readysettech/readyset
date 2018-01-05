@@ -20,6 +20,7 @@ use std::ops::Deref;
 use std::vec::Vec;
 
 use controller::sql::security::Universe;
+use controller::sql::UniverseId;
 
 mod security;
 
@@ -385,7 +386,7 @@ impl SqlToMirConverter {
         sq: &SelectStatement,
         qg: &QueryGraph,
         has_leaf: bool,
-        universe: DataType,
+        universe: UniverseId,
     ) -> MirQuery {
         let nodes = self.make_nodes_for_selection(&name, sq, qg, has_leaf, universe);
         let mut roots = Vec::new();
@@ -1166,17 +1167,19 @@ impl SqlToMirConverter {
         st: &SelectStatement,
         qg: &QueryGraph,
         has_leaf: bool,
-        universe: DataType,
+        universe: UniverseId,
     ) -> Vec<MirNodeRef> {
         use std::collections::HashMap;
 
         let mut nodes_added: Vec<MirNodeRef>;
         let mut new_node_count = 0;
 
-        let uformat = if universe == "global".into() {
+        let (uid, _) = universe.clone();
+
+        let uformat = if uid == "global".into() {
             String::from("")
         } else {
-            format!("_u{}", universe)
+            format!("_u{}", uid)
         };
 
         // Canonical operator order: B-J-G-F-P-R

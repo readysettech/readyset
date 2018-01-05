@@ -25,10 +25,12 @@ use std::collections::HashMap;
 use std::str;
 use std::vec::Vec;
 
+pub type UniverseId = (DataType, Option<DataType>);
+
 #[derive(Clone, Debug)]
 enum QueryGraphReuse {
     ExactMatch(MirNodeRef),
-    ExtendExisting(Vec<(u64, DataType)>),
+    ExtendExisting(Vec<(u64, UniverseId)>),
     /// (node, columns to re-project if necessary, parameters)
     ReaderOntoExisting(MirNodeRef, Option<Vec<Column>>, Vec<Column>),
     None,
@@ -44,11 +46,15 @@ pub struct SqlIncorporator {
     leaf_addresses: HashMap<String, NodeIndex>,
     num_queries: usize,
     query_graphs: HashMap<u64, QueryGraph>,
-    mir_queries: HashMap<(u64, DataType), MirQuery>,
+    mir_queries: HashMap<(u64, UniverseId), MirQuery>,
     schema_version: usize,
     view_schemas: HashMap<String, Vec<String>>,
     transactional: bool,
     reuse_type: ReuseConfigType,
+
+    /// Active universes mapped to the group they belong to.
+    /// If an user universe, mapped to None.
+    universes: HashMap<Option<DataType>, Vec<UniverseId>>,
 }
 
 impl Default for SqlIncorporator {
@@ -64,6 +70,7 @@ impl Default for SqlIncorporator {
             view_schemas: HashMap::default(),
             transactional: false,
             reuse_type: ReuseConfigType::Finkelstein,
+            universes: HashMap::default(),
         }
     }
 }
@@ -148,7 +155,7 @@ impl SqlIncorporator {
     fn consider_query_graph(
         &mut self,
         query_name: &str,
-        universe: DataType,
+        universe: UniverseId,
         st: &SelectStatement,
     ) -> (QueryGraph, QueryGraphReuse) {
         debug!(self.log, "Making QG for \"{}\"", query_name);
@@ -184,7 +191,7 @@ impl SqlIncorporator {
                     // in exactly the same order
                     info!(
                         self.log,
-                        "An exact match for query \"{}\" already exists in universe \"{}\", reusing it",
+                        "An exact match for query \"{}\" already exists in universe \"{:?}\", reusing it",
                         query_name,
                         universe,
                     );
@@ -302,7 +309,7 @@ impl SqlIncorporator {
             );
 
             let mut mir_queries = Vec::new();
-            for uid in reuse_config.reuse_universes(universe) {
+            for uid in reuse_config.reuse_universes(universe, &self.universes) {
                 let mqs: Vec<_> = reuse_candidates
                     .iter()
                     .map(|c| {
@@ -474,7 +481,7 @@ impl SqlIncorporator {
         (qfp, mir)
     }
 
-    fn register_query(&mut self, query_name: &str, qg: Option<QueryGraph>, mir: &MirQuery, universe: DataType) {
+    fn register_query(&mut self, query_name: &str, qg: Option<QueryGraph>, mir: &MirQuery, universe: UniverseId) {
         // TODO(malte): we currently need to remember these for local state, but should figure out
         // a better plan (see below)
         let fields = mir.leaf
@@ -507,7 +514,7 @@ impl SqlIncorporator {
         query_name: &str,
         query: &SelectStatement,
         qg: QueryGraph,
-        reuse_mirs: Vec<(u64, DataType)>,
+        reuse_mirs: Vec<(u64, UniverseId)>,
         is_leaf: bool,
         mut mig: &mut Migration,
     ) -> QueryFlowParts {

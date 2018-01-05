@@ -1,16 +1,16 @@
 use mir::MirNodeRef;
 use mir::node::MirNode;
 use dataflow::ops::join::JoinType;
+use controller::sql::UniverseId;
 use controller::sql::mir::SqlToMirConverter;
 use controller::sql::query_graph::QueryGraphEdge;
 use std::collections::{HashMap, HashSet};
-use dataflow::prelude::DataType;
 use controller::sql::query_signature::Signature;
 
 pub trait SecurityBoundary {
     fn make_security_boundary(
         &self,
-        universe: DataType,
+        universe: UniverseId,
         node_for_rel: &mut HashMap<&str, MirNodeRef>,
         prev_node: Option<MirNodeRef>,
         is_leaf: bool,
@@ -20,7 +20,7 @@ pub trait SecurityBoundary {
         &self,
         rel: &str,
         base_node: &MirNodeRef,
-        universe_id: DataType,
+        universe_id: UniverseId,
         node_for_rel: HashMap<&str, MirNodeRef>,
         is_leaf: bool,
     ) -> Vec<MirNodeRef>;
@@ -32,13 +32,13 @@ impl SecurityBoundary for SqlToMirConverter {
         &self,
         rel: &str,
         prev_node: &MirNodeRef,
-        universe_id: DataType,
+        universe_id: UniverseId,
         node_for_rel: HashMap<&str, MirNodeRef>,
         is_leaf: bool,
     ) -> Vec<MirNodeRef> {
         use std::cmp::Ordering;
 
-        let policies = match self.universe.policies.get(&(universe_id.clone(), String::from(rel))) {
+        let policies = match self.universe.policies.get(&String::from(rel)) {
             Some(p) => p.clone(),
             // no policies associated with this base node
             None => return Vec::new(),
@@ -192,7 +192,7 @@ impl SecurityBoundary for SqlToMirConverter {
 
         if last_policy_nodes.len() > 1 {
             let final_node =
-                self.make_union_from_same_base(&format!("sp_union_u{}", universe_id), last_policy_nodes, output_cols, is_leaf);
+                self.make_union_from_same_base(&format!("sp_union_u{}", universe_id.0), last_policy_nodes, output_cols, is_leaf);
 
             security_nodes.push(final_node);
         }
@@ -202,13 +202,13 @@ impl SecurityBoundary for SqlToMirConverter {
 
     fn make_security_boundary(
         &self,
-        universe: DataType,
+        universe: UniverseId,
         node_for_rel: &mut HashMap<&str, MirNodeRef>,
         prev_node: Option<MirNodeRef>,
         is_leaf: bool,
     ) -> Vec<MirNodeRef> {
         let mut security_nodes: Vec<MirNodeRef> = Vec::new();
-        if universe == "global".into() {
+        if universe.0 == "global".into() {
             return security_nodes;
         }
 

@@ -10,9 +10,9 @@ use nom_sql::parser as sql_parser;
 #[derive(Clone, Debug)]
 pub struct Universe {
     pub id: DataType,
-    pub from_group: Option<String>,
+    pub from_group: Option<DataType>,
     pub member_of: HashMap<String, Vec<DataType>>,
-    pub policies: HashMap<(DataType, String), Vec<QueryGraph>>,
+    pub policies: HashMap<String, Vec<QueryGraph>>,
 }
 
 impl Universe {
@@ -33,7 +33,6 @@ pub trait Multiverse {
     fn prepare_universe(
         &mut self,
         config: &SecurityConfig,
-        group: Option<String>,
         universe_groups: HashMap<String, Vec<DataType>>,
         mig: &mut Migration,
     ) -> Vec<QueryFlowParts>;
@@ -50,14 +49,14 @@ impl Multiverse for SqlIncorporator {
     fn prepare_universe(
         &mut self,
         config: &SecurityConfig,
-        group: Option<String>,
         universe_groups: HashMap<String, Vec<DataType>>,
         mig: &mut Migration,
     ) -> Vec<QueryFlowParts> {
         let mut qfps = Vec::new();
 
+        let (id, group) = mig.universe();
         let mut universe = Universe {
-            id: mig.universe(),
+            id: id.clone(),
             from_group: group.clone(),
             member_of: universe_groups,
             policies: HashMap::new(),
@@ -74,7 +73,7 @@ impl Multiverse for SqlIncorporator {
             (uc_name, config.policies())
         } else {
             info!(self.log, "Starting group universe {}", universe.id);
-            let group_name = group.unwrap();
+            let group_name = group.clone().unwrap().into();
             let uc_name = format!("GroupContext_{}_{}", group_name, universe.id);
 
             (uc_name, config.get_group_policies(group_name))
@@ -88,7 +87,7 @@ impl Multiverse for SqlIncorporator {
         // because predicates can have nested subqueries, which will trigger
         // a view creation and these views might be unique to each universe
         // e.g. if they reference UserContext.
-        let mut policies_qg: HashMap<(DataType, String), Vec<QueryGraph>> = HashMap::new();
+        let mut policies_qg: HashMap<String, Vec<QueryGraph>> = HashMap::new();
         for policy in universe_policies {
             trace!(self.log, "Adding policy {:?}", policy.name);
             let predicate = self.rewrite_query(policy.predicate.clone(), mig);
@@ -106,11 +105,14 @@ impl Multiverse for SqlIncorporator {
                 Err(e) => panic!(e),
             };
 
-            let e = policies_qg.entry((universe.id.clone(), policy.table.clone())).or_insert_with(Vec::new);
+            let e = policies_qg.entry(policy.table.clone()).or_insert_with(Vec::new);
             e.push(qg);
         }
 
         universe.policies = policies_qg;
+
+        let e = self.universes.entry(group.clone()).or_insert_with(Vec::new);
+        e.push((id, group));
 
         self.mir_converter.set_universe(universe);
 
