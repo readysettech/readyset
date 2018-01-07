@@ -569,7 +569,7 @@ impl ControllerInner {
                     crit!(log, "failed to create universe: {:?}", e);
                     Err(RpcError::Other("failed to create universe".to_owned()))
                 }
-            };
+            }.unwrap();
 
         });
         self.recipe = r;
