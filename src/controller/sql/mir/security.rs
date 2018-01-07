@@ -1,15 +1,12 @@
 use mir::MirNodeRef;
-use mir::node::MirNode;
-use dataflow::ops::join::JoinType;
 use controller::sql::UniverseId;
 use controller::sql::mir::SqlToMirConverter;
-use controller::sql::query_graph::QueryGraphEdge;
-use std::collections::{HashMap, HashSet};
+use std::collections::HashMap;
 use controller::sql::query_signature::Signature;
 
 pub trait SecurityBoundary {
     fn make_security_boundary(
-        &self,
+        &mut self,
         universe: UniverseId,
         node_for_rel: &mut HashMap<&str, MirNodeRef>,
         prev_node: Option<MirNodeRef>,
@@ -17,7 +14,7 @@ pub trait SecurityBoundary {
     ) -> Vec<MirNodeRef>;
 
     fn make_security_nodes(
-        &self,
+        &mut self,
         rel: &str,
         base_node: &MirNodeRef,
         universe_id: UniverseId,
@@ -29,15 +26,13 @@ pub trait SecurityBoundary {
 impl SecurityBoundary for SqlToMirConverter {
     // TODO(larat): this is basically make_selection_nodes
     fn make_security_nodes(
-        &self,
+        &mut self,
         rel: &str,
         prev_node: &MirNodeRef,
         universe_id: UniverseId,
         node_for_rel: HashMap<&str, MirNodeRef>,
         is_leaf: bool,
     ) -> Vec<MirNodeRef> {
-        use std::cmp::Ordering;
-
         let policies = match self.universe.policies.get(&String::from(rel)) {
             Some(p) => p.clone(),
             // no policies associated with this base node
@@ -61,16 +56,11 @@ impl SecurityBoundary for SqlToMirConverter {
         for qg in policies.iter() {
             let mut prev_node = Some(prev_node.clone());
             let mut base_nodes: Vec<MirNodeRef> = Vec::new();
-            let mut join_nodes: Vec<MirNodeRef> = Vec::new();
             let mut filter_nodes: Vec<MirNodeRef> = Vec::new();
-            let mut joined_tables = HashSet::new();
 
             let mut sorted_rels: Vec<&str> = qg.relations.keys().map(String::as_str).collect();
 
             sorted_rels.sort();
-
-            let mut sorted_edges: Vec<(&(String, String), &QueryGraphEdge)> =
-                qg.edges.iter().collect();
 
             // all base nodes should be present in local_node_for_rel, except for UserContext
             // if policy uses UserContext, add it to local_node_for_rel
@@ -83,69 +73,27 @@ impl SecurityBoundary for SqlToMirConverter {
                     continue;
                 }
 
-                let latest_existing = self.current.get(*rel);
-                let view_for_rel = match latest_existing {
-                    None => panic!("Policy refers to unknown view \"{}\"", rel),
-                    Some(v) => {
-                        let existing = self.nodes.get(&(String::from(*rel), *v));
-                        match existing {
-                            None => {
-                                panic!(
-                                    "Inconsistency: base node \"{}\" does not exist at v{}",
-                                    *rel,
-                                    v
-                                );
-                            }
-                            Some(bmn) => MirNode::reuse(bmn.clone(), self.schema_version),
-                        }
-                    }
-                };
+                let view_for_rel = self.get_view(rel);
 
                 local_node_for_rel.insert(*rel, view_for_rel.clone());
                 base_nodes.push(view_for_rel.clone());
             }
 
-            // Sort the edges to ensure deterministic join order.
-            sorted_edges.sort_by(|&(a, _), &(b, _)| {
-                let src_ord = a.0.cmp(&b.0);
-                if src_ord == Ordering::Equal {
-                    a.1.cmp(&b.1)
-                } else {
-                    src_ord
-                }
-            });
+            use controller::sql::mir::join::make_joins;
+            let join_nodes = make_joins(
+                self,
+                &format!("sp_{:x}", qg.signature().hash),
+                qg,
+                &local_node_for_rel,
+                node_count
+            );
 
-            // handles joins against UserContext table
-            for &(&(ref src, ref dst), edge) in &sorted_edges {
-                let (join_type, jps) = match *edge {
-                    QueryGraphEdge::LeftJoin(ref jps) => (JoinType::Left, jps),
-                    QueryGraphEdge::Join(ref jps) => (JoinType::Inner, jps),
-                    _ => continue,
-                };
+            node_count += join_nodes.len();
 
-                for jp in jps.iter() {
-                    let (left_node, right_node) = self.pick_join_columns(
-                        src,
-                        dst,
-                        prev_node,
-                        &joined_tables,
-                        &local_node_for_rel,
-                    );
-                    let jn = self.make_join_node(
-                        &format!("sp_{:x}_n{:x}", qg.signature().hash, node_count),
-                        jp,
-                        left_node,
-                        right_node,
-                        join_type.clone(),
-                    );
-                    join_nodes.push(jn.clone());
-                    prev_node = Some(jn);
-
-                    joined_tables.insert(src);
-                    joined_tables.insert(dst);
-                    node_count += 1;
-                }
-            }
+            prev_node = match join_nodes.last() {
+                Some(n) => Some(n.clone()),
+                None => prev_node,
+            };
 
             // handles predicate nodes
             for rel in &sorted_rels {
@@ -201,7 +149,7 @@ impl SecurityBoundary for SqlToMirConverter {
     }
 
     fn make_security_boundary(
-        &self,
+        &mut self,
         universe: UniverseId,
         node_for_rel: &mut HashMap<&str, MirNodeRef>,
         prev_node: Option<MirNodeRef>,

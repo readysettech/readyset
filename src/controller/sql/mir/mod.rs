@@ -10,7 +10,7 @@ use nom_sql::{ArithmeticExpression, Column, ColumnSpecification, CompoundSelectO
               ConditionBase, ConditionExpression, ConditionTree, Literal, Operator, SqlQuery,
               TableKey};
 use nom_sql::{LimitClause, OrderClause, SelectStatement};
-use controller::sql::query_graph::{OutputColumn, QueryGraph, QueryGraphEdge};
+use controller::sql::query_graph::{OutputColumn, QueryGraph};
 use controller::sql::query_signature::Signature;
 
 use slog;
@@ -1087,40 +1087,6 @@ impl SqlToMirConverter {
         }
 
         predicates_above_group_by_nodes
-    }
-
-    fn pick_join_columns(
-        &self,
-        src: &String,
-        dst: &String,
-        prev_node: Option<MirNodeRef>,
-        joined_tables: &HashSet<&String>,
-        node_for_rel: &HashMap<&str, MirNodeRef>,
-    ) -> (MirNodeRef, MirNodeRef) {
-        let left_node;
-        let right_node;
-        if joined_tables.contains(src) && joined_tables.contains(dst) {
-            // We have already handled *both* tables that are part of the join.
-            // This should never occur, because their join predicates must be
-            // associated with the same query graph edge.
-            unreachable!();
-        } else if joined_tables.contains(src) {
-            // join left against previous join, right against base
-            left_node = prev_node.as_ref().unwrap().clone();
-            right_node = node_for_rel[dst.as_str()].clone();
-        } else if joined_tables.contains(dst) {
-            // join right against previous join, left against base
-            left_node = node_for_rel[src.as_str()].clone();
-            right_node = prev_node.as_ref().unwrap().clone();
-        } else {
-            // We've seen neither of these tables before
-            // If we already have a join in prev_ni, we must assume that some
-            // future join will bring these unrelated join arms together.
-            // TODO(malte): make that actually work out...
-            left_node = node_for_rel[src.as_str()].clone();
-            right_node = node_for_rel[dst.as_str()].clone();
-        }
-        (left_node, right_node)
     }
 
     /// Returns list of nodes added
