@@ -24,23 +24,7 @@ use controller::sql::UniverseId;
 
 mod security;
 mod join;
-
-fn target_columns_from_computed_column(computed_col: &Column) -> &Column {
-    use nom_sql::FunctionExpression::*;
-
-    match *computed_col.function.as_ref().unwrap().deref() {
-        Avg(ref col, _)
-        | Count(ref col, _)
-        | GroupConcat(ref col, _)
-        | Max(ref col)
-        | Min(ref col)
-        | Sum(ref col, _) => col,
-        CountStar => {
-            // see comment re COUNT(*) rewriting in make_aggregation_node
-            panic!("COUNT(*) should have been rewritten earlier!")
-        }
-    }
-}
+mod grouped;
 
 fn sanitize_leaf_column(mut c: Column, view_name: &str) -> Column {
     c.table = Some(view_name.to_string());
@@ -858,10 +842,8 @@ impl SqlToMirConverter {
         &mut self,
         name: &str,
         parent: MirNodeRef,
-        computed_col: &Column,
+        fn_col: &Column,
     ) -> MirNodeRef {
-        let fn_col = target_columns_from_computed_column(computed_col);
-
         self.make_project_node(
             name,
             parent,
@@ -1152,6 +1134,8 @@ impl SqlToMirConverter {
     ) -> Vec<MirNodeRef> {
         use std::collections::HashMap;
         use controller::sql::mir::join::make_joins;
+        use controller::sql::mir::grouped::make_predicates_above_grouped;
+        use controller::sql::mir::grouped::make_grouped;
 
         let mut nodes_added: Vec<MirNodeRef>;
         let mut new_node_count = 0;
@@ -1217,12 +1201,7 @@ impl SqlToMirConverter {
             // if we need to reorder predicates before group_by nodes.
             let mut column_to_predicates: HashMap<Column, Vec<&ConditionExpression>> =
                 HashMap::new();
-            let mut predicate_nodes = Vec::new();
 
-            // TODO(larat): remove redundant code.
-            let mut sorted_rels: Vec<&String> = qg.relations.keys().collect();
-            let mut created_predicates = Vec::new();
-            sorted_rels.sort();
             for rel in &sorted_rels {
                 if *rel == "computed_columns" {
                     continue;
@@ -1239,169 +1218,26 @@ impl SqlToMirConverter {
             }
 
             // 3. Add function and grouped nodes
-            let mut func_nodes: Vec<MirNodeRef> = Vec::new();
-            let mut predicates_above_group_by_nodes = Vec::new();
-            match qg.relations.get("computed_columns") {
-                None => (),
-                Some(computed_cols_cgn) => {
-                    let gb_edges: Vec<_> = qg.edges
-                        .values()
-                        .filter(|e| match **e {
-                            QueryGraphEdge::Join(_) | QueryGraphEdge::LeftJoin(_) => false,
-                            QueryGraphEdge::GroupBy(_) => true,
-                        })
-                        .collect();
+            let (created_predicates, predicates_above_group_by_nodes) = make_predicates_above_grouped(
+                self,
+                &format!( "q_{:x}_{}", qg.signature().hash, uformat),
+                &qg,
+                &node_for_rel,
+                new_node_count,
+                &column_to_predicates,
+                &mut prev_node,
+            );
 
-                    // move predicates above grouped_by nodes
-                    for ccol in &computed_cols_cgn.columns {
-                        let over_col = target_columns_from_computed_column(ccol);
-                        let over_table = over_col.table.as_ref().unwrap().as_str();
+            let mut func_nodes: Vec<MirNodeRef> = make_grouped(
+                self,
+                &format!( "q_{:x}_{}", qg.signature().hash, uformat),
+                &qg,
+                &node_for_rel,
+                new_node_count,
+                &mut prev_node,
+            );
 
-                        if column_to_predicates.contains_key(&over_col) {
-                            let parent = match prev_node {
-                                Some(p) => p,
-                                None => node_for_rel[over_table].clone(),
-                            };
-
-                            let new_mpns = self.predicates_above_group_by(
-                                &format!(
-                                    "q_{:x}_n{}{}",
-                                    qg.signature().hash,
-                                    new_node_count,
-                                    uformat
-                                ),
-                                &column_to_predicates,
-                                over_col.clone(),
-                                parent,
-                                &mut created_predicates,
-                            );
-
-                            new_node_count += predicates_above_group_by_nodes.len();
-                            prev_node = Some(new_mpns.last().unwrap().clone());
-                            predicates_above_group_by_nodes.extend(new_mpns);
-                        }
-                    }
-
-                    if !gb_edges.is_empty() {
-                        // Function columns with GROUP BY clause
-                        for fn_col in &computed_cols_cgn.columns {
-                            let mut gb_cols: Vec<&Column> = Vec::new();
-
-                            for e in &gb_edges {
-                                match **e {
-                                    QueryGraphEdge::GroupBy(ref gbc) => {
-                                        let table =
-                                            gbc.into_iter().next().unwrap().table.as_ref().unwrap();
-                                        assert!(
-                                            gbc.into_iter()
-                                                .all(|c| c.table.as_ref().unwrap() == table)
-                                        );
-                                        gb_cols.extend(gbc);
-                                    }
-                                    _ => unreachable!(),
-                                }
-                            }
-
-                            // we must also push parameter columns through the group by
-                            let over_col = target_columns_from_computed_column(fn_col);
-                            let over_table = over_col.table.as_ref().unwrap().as_str();
-                            // get any parameter columns that aren't also in the group-by
-                            // column set
-                            let param_cols: Vec<_> =
-                                qg.relations.values().fold(vec![], |acc, rel| {
-                                    acc.into_iter()
-                                        .chain(
-                                            rel.parameters
-                                                .iter()
-                                                .filter(|ref c| !gb_cols.contains(c)),
-                                        )
-                                        .collect()
-                                });
-                            // combine
-                            let gb_and_param_cols: Vec<_> =
-                                gb_cols.into_iter().chain(param_cols.into_iter()).collect();
-
-                            let parent_node = match prev_node {
-                                // If no explicit parent node is specified, we extract
-                                // the base node from the "over" column's specification
-                                None => node_for_rel[over_table].clone(),
-                                // We have an explicit parent node (likely a projection
-                                // helper), so use that
-                                Some(node) => node,
-                            };
-
-                            let n = self.make_function_node(
-                                &format!(
-                                    "q_{:x}_n{}{}",
-                                    qg.signature().hash,
-                                    new_node_count,
-                                    uformat
-                                ),
-                                fn_col,
-                                gb_and_param_cols,
-                                parent_node,
-                            );
-                            prev_node = Some(n.clone());
-                            func_nodes.push(n);
-                            new_node_count += 1;
-                        }
-                    } else {
-                        // Function columns without GROUP BY
-                        for computed_col in &computed_cols_cgn.columns {
-                            let agg_node_name = &format!(
-                                "q_{:x}_n{}{}",
-                                qg.signature().hash,
-                                new_node_count,
-                                uformat
-                            );
-
-                            let over_col = target_columns_from_computed_column(computed_col);
-                            let over_table = over_col.table.as_ref().unwrap().as_str();
-
-                            let ref proj_cols_from_target_table =
-                                qg.relations.get(over_table).as_ref().unwrap().columns;
-
-                            let parent_node = match prev_node {
-                                Some(ref node) => node.clone(),
-                                None => node_for_rel[over_table].clone(),
-                            };
-
-                            let (group_cols, parent_node) =
-                                if proj_cols_from_target_table.is_empty() {
-                                    // slightly messy hack: if there are no group columns and the
-                                    // table on which we compute has no projected columns in the
-                                    // output, we make one up a group column by adding an extra
-                                    // projection node
-                                    let proj_name = format!("{}_prj_hlpr", agg_node_name);
-                                    let proj = self.make_projection_helper(
-                                        &proj_name,
-                                        parent_node,
-                                        computed_col,
-                                    );
-
-                                    func_nodes.push(proj.clone());
-                                    new_node_count += 1;
-
-                                    let bogo_group_col =
-                                        Column::from(format!("{}.grp", proj_name).as_str());
-                                    (vec![bogo_group_col], proj)
-                                } else {
-                                    (proj_cols_from_target_table.clone(), parent_node)
-                                };
-                            let n = self.make_function_node(
-                                agg_node_name,
-                                computed_col,
-                                group_cols.iter().collect(),
-                                parent_node,
-                            );
-                            prev_node = Some(n.clone());
-                            func_nodes.push(n);
-                            new_node_count += 1;
-                        }
-                    }
-                }
-            }
-
+            let mut predicate_nodes = Vec::new();
             // 4. Generate the necessary filter node for each relation node in the query graph.
 
             // Need to iterate over relations in a deterministic order, as otherwise nodes will be
@@ -1424,7 +1260,7 @@ impl SqlToMirConverter {
                         }
 
                         let parent = match prev_node {
-                            None => node_for_rel[rel.as_str()].clone(),
+                            None => node_for_rel[rel].clone(),
                             Some(pn) => pn,
                         };
 
@@ -1455,7 +1291,7 @@ impl SqlToMirConverter {
             } else {
                 // no join, filter, or function node --> base node is parent
                 assert_eq!(sorted_rels.len(), 1);
-                node_for_rel[sorted_rels.last().unwrap().as_str()].clone()
+                node_for_rel[sorted_rels.last().unwrap()].clone()
             };
 
             // 6. Potentially insert TopK node below the final node
