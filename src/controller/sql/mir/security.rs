@@ -53,6 +53,11 @@ impl SecurityBoundary for SqlToMirConverter {
         let mut security_nodes = Vec::new();
         let mut last_policy_nodes = Vec::new();
 
+        // Policies are created in parallel and later union'ed
+        // Differently from normal queries, the policies order filters
+        // before joins, since we can always reuse filter, but if a policy
+        // joins against a context view, we are unable to reuse ir (context
+        // views are universe-specific).
         for qg in policies.iter() {
             let mut prev_node = Some(prev_node.clone());
             let mut base_nodes: Vec<MirNodeRef> = Vec::new();
@@ -62,8 +67,8 @@ impl SecurityBoundary for SqlToMirConverter {
 
             sorted_rels.sort();
 
-            // all base nodes should be present in local_node_for_rel, except for UserContext
-            // if policy uses UserContext, add it to local_node_for_rel
+            // all base nodes should be present in local_node_for_rel, except for context views
+            // if policy uses a context view, add it to local_node_for_rel
             for rel in &sorted_rels {
                 if *rel == "computed_columns" {
                     continue;
@@ -80,20 +85,6 @@ impl SecurityBoundary for SqlToMirConverter {
             }
 
             use controller::sql::mir::join::make_joins;
-            let join_nodes = make_joins(
-                self,
-                &format!("sp_{:x}", qg.signature().hash),
-                qg,
-                &local_node_for_rel,
-                node_count
-            );
-
-            node_count += join_nodes.len();
-
-            prev_node = match join_nodes.last() {
-                Some(n) => Some(n.clone()),
-                None => prev_node,
-            };
 
             // handles predicate nodes
             for rel in &sorted_rels {
@@ -124,12 +115,25 @@ impl SecurityBoundary for SqlToMirConverter {
                     );
                     filter_nodes.extend(new_nodes);
                 }
+
+                // update local node relations so joins know which views to join
+                local_node_for_rel.insert(*rel, prev_node.clone().unwrap());
             }
+
+            let join_nodes = make_joins(
+                self,
+                &format!("sp_{:x}", qg.signature().hash),
+                qg,
+                &local_node_for_rel,
+                node_count
+            );
+
+            node_count += join_nodes.len();
 
             let policy_nodes: Vec<_> = base_nodes
                 .into_iter()
-                .chain(join_nodes.into_iter())
                 .chain(filter_nodes.into_iter())
+                .chain(join_nodes.into_iter())
                 .collect();
 
             assert!(policy_nodes.len() > 0, "no nodes where created for policy");
