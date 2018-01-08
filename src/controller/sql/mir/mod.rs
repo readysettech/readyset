@@ -1153,16 +1153,6 @@ impl SqlToMirConverter {
                 }
             };
 
-            // TODO(larat): push this downwards the graph
-            use controller::sql::mir::security::SecurityBoundary;
-            let policy_nodes =
-                self.make_security_boundary(universe.clone(), &mut node_for_rel, prev_node.clone(), has_leaf);
-
-            prev_node = match policy_nodes.last() {
-                Some(n) => Some(n.clone()),
-                None => prev_node.clone(),
-            };
-
             // 2. Get columns used by each predicate. This will be used to check
             // if we need to reorder predicates before group_by nodes.
             let mut column_to_predicates: HashMap<Column, Vec<&ConditionExpression>> =
@@ -1183,7 +1173,7 @@ impl SqlToMirConverter {
                 }
             }
 
-            // 3. Add function and grouped nodes
+            // 2.5 Reorder some predicates before group by nodes
             let (created_predicates, predicates_above_group_by_nodes) = make_predicates_above_grouped(
                 self,
                 &format!( "q_{:x}{}", qg.signature().hash, uformat),
@@ -1196,6 +1186,17 @@ impl SqlToMirConverter {
 
             new_node_count += predicates_above_group_by_nodes.len();
 
+            // Create security boundary
+            use controller::sql::mir::security::SecurityBoundary;
+            let policy_nodes =
+                self.make_security_boundary(universe.clone(), &mut node_for_rel, prev_node.clone(), has_leaf);
+
+            prev_node = match policy_nodes.last() {
+                Some(n) => Some(n.clone()),
+                None => prev_node.clone(),
+            };
+
+            // 3. Add function and grouped nodes
             let mut func_nodes: Vec<MirNodeRef> = make_grouped(
                 self,
                 &format!( "q_{:x}{}", qg.signature().hash, uformat),
