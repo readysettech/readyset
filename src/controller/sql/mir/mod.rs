@@ -1137,7 +1137,7 @@ impl SqlToMirConverter {
 
             let join_nodes = make_joins(
                 self,
-                &format!("q_{:x}_{}", qg.signature().hash, uformat),
+                &format!("q_{:x}{}", qg.signature().hash, uformat),
                 qg,
                 &node_for_rel,
                 new_node_count
@@ -1186,7 +1186,7 @@ impl SqlToMirConverter {
             // 3. Add function and grouped nodes
             let (created_predicates, predicates_above_group_by_nodes) = make_predicates_above_grouped(
                 self,
-                &format!( "q_{:x}_{}", qg.signature().hash, uformat),
+                &format!( "q_{:x}{}", qg.signature().hash, uformat),
                 &qg,
                 &node_for_rel,
                 new_node_count,
@@ -1198,7 +1198,7 @@ impl SqlToMirConverter {
 
             let mut func_nodes: Vec<MirNodeRef> = make_grouped(
                 self,
-                &format!( "q_{:x}_{}", qg.signature().hash, uformat),
+                &format!( "q_{:x}{}", qg.signature().hash, uformat),
                 &qg,
                 &node_for_rel,
                 new_node_count,
