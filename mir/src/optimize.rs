@@ -10,10 +10,11 @@ pub fn optimize(q: MirQuery) -> MirQuery {
     q
 }
 
-pub fn optimize_post_reuse(q: &mut MirQuery) {
-    find_and_merge_filter_chains(q);
+pub fn optimize_post_reuse(_q: &mut MirQuery) {
+    // find_and_merge_filter_chains(q);
 }
 
+#[allow(dead_code)]
 fn find_and_merge_filter_chains(q: &MirQuery) {
     let mut chained_filters = Vec::new();
     // depth first search

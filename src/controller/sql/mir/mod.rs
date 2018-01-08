@@ -1188,148 +1188,8 @@ impl SqlToMirConverter {
 
             // Create security boundary
             use controller::sql::mir::security::SecurityBoundary;
-            let policy_nodes =
-                self.make_security_boundary(universe.clone(), &mut node_for_rel, prev_node.clone(), has_leaf);
-
-            prev_node = match policy_nodes.last() {
-                Some(n) => Some(n.clone()),
-                None => prev_node.clone(),
-            };
-
-            // 3. Add function and grouped nodes
-            let mut func_nodes: Vec<MirNodeRef> = make_grouped(
-                self,
-                &format!( "q_{:x}{}", qg.signature().hash, uformat),
-                &qg,
-                &node_for_rel,
-                new_node_count,
-                &mut prev_node,
-            );
-
-            new_node_count += func_nodes.len();
-
-            let mut predicate_nodes = Vec::new();
-            // 4. Generate the necessary filter node for each relation node in the query graph.
-
-            // Need to iterate over relations in a deterministic order, as otherwise nodes will be
-            // added in a different order every time, which will yield different node identifiers
-            // and make it difficult for applications to check what's going on.
-            for rel in &sorted_rels {
-                let qgn = &qg.relations[*rel];
-                // we've already handled computed columns
-                if *rel == "computed_columns" {
-                    continue;
-                }
-
-                // the following conditional is required to avoid "empty" nodes (without any
-                // projected columns) that are required as inputs to joins
-                if !qgn.predicates.is_empty() {
-                    // add a predicate chain for each query graph node's predicates
-                    for (i, ref p) in qgn.predicates.iter().enumerate() {
-                        if created_predicates.contains(p) {
-                            continue;
-                        }
-
-                        let parent = match prev_node {
-                            None => node_for_rel[rel].clone(),
-                            Some(pn) => pn,
-                        };
-
-                        let fns = self.make_predicate_nodes(
-                            &format!(
-                                "q_{:x}_n{}_p{}{}",
-                                qg.signature().hash,
-                                new_node_count,
-                                i,
-                                uformat
-                            ),
-                            parent,
-                            p,
-                            0,
-                        );
-
-                        assert!(fns.len() > 0);
-                        new_node_count += fns.len();
-                        prev_node = Some(fns.iter().last().unwrap().clone());
-                        predicate_nodes.extend(fns);
-                    }
-                }
-            }
-
-            // 5. Get the final node
-            let mut final_node: MirNodeRef = if prev_node.is_some() {
-                prev_node.unwrap().clone()
-            } else {
-                // no join, filter, or function node --> base node is parent
-                assert_eq!(sorted_rels.len(), 1);
-                node_for_rel[sorted_rels.last().unwrap()].clone()
-            };
-
-            // 6. Potentially insert TopK node below the final node
-            if let Some(ref limit) = st.limit {
-                let group_by = qg.parameters();
-
-                let node = self.make_topk_node(
-                    &format!("q_{:x}_n{}{}", qg.signature().hash, new_node_count, uformat),
-                    final_node,
-                    group_by,
-                    &st.order,
-                    limit,
-                );
-                func_nodes.push(node.clone());
-                final_node = node;
-                new_node_count += 1;
-            }
-
-            // should have counted all nodes added, except for the base nodes (which reuse)
-            debug_assert_eq!(
-                new_node_count,
-                join_nodes.len() + func_nodes.len() + predicate_nodes.len()
-            );
-            // we're now done with the query, so remember all the nodes we've added so far
-            nodes_added = base_nodes
-                .into_iter()
-                .chain(policy_nodes.into_iter())
-                .chain(join_nodes.into_iter())
-                .chain(predicates_above_group_by_nodes.into_iter())
-                .chain(func_nodes.into_iter())
-                .chain(predicate_nodes.into_iter())
-                .collect();
-
-            // 5. Generate leaf views that expose the query result
-            let mut projected_columns: Vec<&Column> = qg.columns
-                .iter()
-                .filter_map(|oc| match *oc {
-                    OutputColumn::Arithmetic(_) => None,
-                    OutputColumn::Data(ref c) => Some(c),
-                    OutputColumn::Literal(_) => None,
-                })
-                .collect();
-            for pc in qg.parameters() {
-                if !projected_columns.contains(&pc) {
-                    projected_columns.push(pc);
-                }
-            }
-            let projected_arithmetic: Vec<(String, ArithmeticExpression)> = qg.columns
-                .iter()
-                .filter_map(|oc| match *oc {
-                    OutputColumn::Arithmetic(ref ac) => {
-                        Some((ac.name.clone(), ac.expression.clone()))
-                    }
-                    OutputColumn::Data(_) => None,
-                    OutputColumn::Literal(_) => None,
-                })
-                .collect();
-            let projected_literals: Vec<(String, DataType)> = qg.columns
-                .iter()
-                .filter_map(|oc| match *oc {
-                    OutputColumn::Arithmetic(_) => None,
-                    OutputColumn::Data(_) => None,
-                    OutputColumn::Literal(ref lc) => {
-                        Some((lc.name.clone(), DataType::from(&lc.value)))
-                    }
-                })
-                .collect();
+            let (last_policy_nodes, policy_nodes) =
+                self.make_security_boundary(universe.clone(), &mut node_for_rel, prev_node.clone());
 
 
             let mut ancestors = self.universe.member_of.iter().fold(vec![], |mut acc, (gname, gids)| {
@@ -1351,36 +1211,174 @@ impl SqlToMirConverter {
                 acc
             });
 
-            let ident = if has_leaf || !ancestors.is_empty() {
-                format!("q_{:x}_n{}{}", qg.signature().hash, new_node_count, uformat)
-            } else {
-                String::from(name)
+            nodes_added = base_nodes
+                    .into_iter()
+                    .chain(join_nodes.into_iter())
+                    .chain(predicates_above_group_by_nodes.into_iter())
+                    .chain(policy_nodes.into_iter())
+                    .collect();
 
-            };
 
-            let project_node = self.make_project_node(
-                &ident,
-                final_node,
-                projected_columns,
-                projected_arithmetic,
-                projected_literals,
-                ancestors.is_empty() && !has_leaf,
-            );
+            // For each policy chain, create a version of the query
+            // All query versions, including group queries will be reconciled at the end
+            for n in last_policy_nodes.iter() {
+                prev_node = Some(n.clone());
 
-            nodes_added.push(project_node.clone());
-            new_node_count += 1;
+                // 3. Add function and grouped nodes
+                let mut func_nodes: Vec<MirNodeRef> = make_grouped(
+                    self,
+                    &format!( "q_{:x}{}", qg.signature().hash, uformat),
+                    &qg,
+                    &node_for_rel,
+                    new_node_count,
+                    &mut prev_node,
+                );
 
-            let leaf_node = if !ancestors.is_empty() {
+                new_node_count += func_nodes.len();
+
+                let mut predicate_nodes = Vec::new();
+                // 4. Generate the necessary filter node for each relation node in the query graph.
+
+                // Need to iterate over relations in a deterministic order, as otherwise nodes will be
+                // added in a different order every time, which will yield different node identifiers
+                // and make it difficult for applications to check what's going on.
+                for rel in &sorted_rels {
+                    let qgn = &qg.relations[*rel];
+                    // we've already handled computed columns
+                    if *rel == "computed_columns" {
+                        continue;
+                    }
+
+                    // the following conditional is required to avoid "empty" nodes (without any
+                    // projected columns) that are required as inputs to joins
+                    if !qgn.predicates.is_empty() {
+                        // add a predicate chain for each query graph node's predicates
+                        for (i, ref p) in qgn.predicates.iter().enumerate() {
+                            if created_predicates.contains(p) {
+                                continue;
+                            }
+
+                            let parent = match prev_node {
+                                None => node_for_rel[rel].clone(),
+                                Some(pn) => pn,
+                            };
+
+                            let fns = self.make_predicate_nodes(
+                                &format!(
+                                    "q_{:x}_n{}_p{}{}",
+                                    qg.signature().hash,
+                                    new_node_count,
+                                    i,
+                                    uformat
+                                ),
+                                parent,
+                                p,
+                                0,
+                            );
+
+                            assert!(fns.len() > 0);
+                            new_node_count += fns.len();
+                            prev_node = Some(fns.iter().last().unwrap().clone());
+                            predicate_nodes.extend(fns);
+                        }
+                    }
+                }
+
+                // 5. Get the final node
+                let mut final_node: MirNodeRef = if prev_node.is_some() {
+                    prev_node.unwrap().clone()
+                } else {
+                    // no join, filter, or function node --> base node is parent
+                    assert_eq!(sorted_rels.len(), 1);
+                    node_for_rel[sorted_rels.last().unwrap()].clone()
+                };
+
+                // 6. Potentially insert TopK node below the final node
+                if let Some(ref limit) = st.limit {
+                    let group_by = qg.parameters();
+
+                    let node = self.make_topk_node(
+                        &format!("q_{:x}_n{}{}", qg.signature().hash, new_node_count, uformat),
+                        final_node,
+                        group_by,
+                        &st.order,
+                        limit,
+                    );
+                    func_nodes.push(node.clone());
+                    final_node = node;
+                    new_node_count += 1;
+                }
+
+                // we're now done with the query, so remember all the nodes we've added so far
+                nodes_added.extend(func_nodes);
+                nodes_added.extend(predicate_nodes);
+
+                // 5. Generate leaf views that expose the query result
+                let mut projected_columns: Vec<&Column> = qg.columns
+                    .iter()
+                    .filter_map(|oc| match *oc {
+                        OutputColumn::Arithmetic(_) => None,
+                        OutputColumn::Data(ref c) => Some(c),
+                        OutputColumn::Literal(_) => None,
+                    })
+                    .collect();
+                for pc in qg.parameters() {
+                    if !projected_columns.contains(&pc) {
+                        projected_columns.push(pc);
+                    }
+                }
+                let projected_arithmetic: Vec<(String, ArithmeticExpression)> = qg.columns
+                    .iter()
+                    .filter_map(|oc| match *oc {
+                        OutputColumn::Arithmetic(ref ac) => {
+                            Some((ac.name.clone(), ac.expression.clone()))
+                        }
+                        OutputColumn::Data(_) => None,
+                        OutputColumn::Literal(_) => None,
+                    })
+                    .collect();
+                let projected_literals: Vec<(String, DataType)> = qg.columns
+                    .iter()
+                    .filter_map(|oc| match *oc {
+                        OutputColumn::Arithmetic(_) => None,
+                        OutputColumn::Data(_) => None,
+                        OutputColumn::Literal(ref lc) => {
+                            Some((lc.name.clone(), DataType::from(&lc.value)))
+                        }
+                    })
+                    .collect();
+
+                let ident = if has_leaf || !ancestors.is_empty() || last_policy_nodes.len() > 1 {
+                    format!("q_{:x}_n{}{}", qg.signature().hash, new_node_count, uformat)
+                } else {
+                    String::from(name)
+
+                };
+
+                let project_node = self.make_project_node(
+                    &ident,
+                    final_node,
+                    projected_columns,
+                    projected_arithmetic,
+                    projected_literals,
+                    ancestors.is_empty() && !has_leaf,
+                );
+
+                new_node_count += 1;
+
+                ancestors.push(project_node);
+            }
+
+            let leaf_node = if ancestors.len() > 1 {
                 let ident = if has_leaf{
                     format!("q_{:x}_n{}{}", qg.signature().hash, new_node_count, uformat)
                 } else {
                     String::from(name)
                 };
 
-                ancestors.push(project_node);
                 self.make_union_node(&ident, &ancestors, has_leaf)
             } else {
-                project_node
+                ancestors.last().unwrap().clone()
             };
 
             nodes_added.extend(ancestors);
