@@ -1194,6 +1194,8 @@ impl SqlToMirConverter {
                 &mut prev_node,
             );
 
+            new_node_count += predicates_above_group_by_nodes.len();
+
             let mut func_nodes: Vec<MirNodeRef> = make_grouped(
                 self,
                 &format!( "q_{:x}_{}", qg.signature().hash, uformat),
@@ -1202,6 +1204,8 @@ impl SqlToMirConverter {
                 new_node_count,
                 &mut prev_node,
             );
+
+            new_node_count += func_nodes.len();
 
             let mut predicate_nodes = Vec::new();
             // 4. Generate the necessary filter node for each relation node in the query graph.
