@@ -430,7 +430,11 @@ impl MirNodeType {
             MirNodeType::Project { ref mut emit, .. } => {
                 emit.push(c);
             }
-            MirNodeType::Union { .. } => unimplemented!(),
+            MirNodeType::Union { ref mut emit } => {
+               for e in emit.iter_mut() {
+                   e.push(c.clone());
+               }
+            }
             MirNodeType::TopK {
                 ref mut group_by, ..
             } => {

@@ -4,6 +4,8 @@ use nom_sql::{Column, ConditionExpression};
 use std::collections::HashMap;
 use mir::MirNodeRef;
 use std::ops::Deref;
+use nom_sql::FunctionExpression;
+use nom_sql::FunctionExpression::*;
 
 fn target_columns_from_computed_column(computed_col: &Column) -> &Column {
     use nom_sql::FunctionExpression::*;
@@ -75,6 +77,7 @@ pub fn make_grouped(
     node_for_rel: &HashMap<&str, MirNodeRef>,
     node_count: usize,
     prev_node: &mut Option<MirNodeRef>,
+    is_reconcile: bool,
 ) -> Vec<MirNodeRef> {
     let mut func_nodes: Vec<MirNodeRef> = Vec::new();
     let mut node_count = node_count;
@@ -90,10 +93,34 @@ pub fn make_grouped(
                 })
                 .collect();
 
-            for computed_col in &computed_cols_cgn.columns {
+            for computed_col in computed_cols_cgn.columns.iter() {
+
+                let computed_col = if is_reconcile {
+                    let func = computed_col.function.as_ref().unwrap();
+                    let new_func = match *func.deref() {
+                        Sum(ref col, b) => FunctionExpression::Sum(Column::from(format!("{}.sum({})", col.clone().table.unwrap(), col.name).as_ref()), b),
+                        Count(ref col, b) => FunctionExpression::Sum(Column::from(format!("{}.count({})", col.clone().table.unwrap(), col.name).as_ref()), b),
+                        Max(ref col) => FunctionExpression::Max(Column::from(format!("{}.max({})", col.clone().table.unwrap(), col.name).as_ref())),
+                        Min(ref col) => FunctionExpression::Min(Column::from(format!("{}.min({})", col.clone().table.unwrap(), col.name).as_ref())),
+                        _ => unimplemented!(),
+                    };
+
+                    let new_fn_col = Column {
+                        function: Some(Box::new(new_func)),
+                        name: computed_col.name.clone(),
+                        alias: computed_col.alias.clone(),
+                        table: computed_col.table.clone()
+                    };
+
+                    new_fn_col
+                } else {
+                    computed_col.clone()
+                };
+
                 // We must also push parameter columns through the group by
-                let over_col = target_columns_from_computed_column(computed_col);
+                let over_col = target_columns_from_computed_column(&computed_col);
                 let over_table = over_col.table.as_ref().unwrap().as_str();
+
 
                 let parent_node = match *prev_node {
                     // If no explicit parent node is specified, we extract
@@ -154,7 +181,7 @@ pub fn make_grouped(
                             // output, we make one up a group column by adding an extra
                             // projection node
                             let proj_name = format!("{}_prj_hlpr", name);
-                            let fn_col = target_columns_from_computed_column(computed_col);
+                            let fn_col = target_columns_from_computed_column(&computed_col);
 
                             let proj = mir_converter.make_projection_helper(
                                 &proj_name,
@@ -177,7 +204,7 @@ pub fn make_grouped(
 
                 let n = mir_converter.make_function_node(
                     name,
-                    computed_col,
+                    &computed_col,
                     group_cols.iter().collect(),
                     parent_node,
                 );

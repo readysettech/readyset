@@ -3,8 +3,18 @@ use controller::sql::UniverseId;
 use controller::sql::mir::SqlToMirConverter;
 use std::collections::HashMap;
 use controller::sql::query_signature::Signature;
+use controller::sql::query_graph::QueryGraph;
 
 pub trait SecurityBoundary {
+    fn reconcile(
+        &mut self,
+        name: &str,
+        qg: &QueryGraph,
+        ancestors: &Vec<MirNodeRef>,
+        node_count: usize,
+        has_leaf: bool,
+    ) -> Vec<MirNodeRef>;
+
     fn make_security_boundary(
         &mut self,
         universe: UniverseId,
@@ -14,6 +24,47 @@ pub trait SecurityBoundary {
 }
 
 impl SecurityBoundary for SqlToMirConverter {
+    fn reconcile(
+        &mut self,
+        name: &str,
+        qg: &QueryGraph,
+        ancestors: &Vec<MirNodeRef>,
+        node_count: usize,
+        has_leaf: bool,
+        ) -> Vec<MirNodeRef> {
+        use controller::sql::mir::grouped::make_grouped;
+
+        let mut nodes_added = Vec::new();
+        let mut node_count = node_count;
+
+        // First, union the results from all ancestors
+        let union = self.make_union_node(&format!("{}_n{}", name, node_count), &ancestors, has_leaf);
+        nodes_added.push(union.clone());
+        node_count += 1;
+
+        // If query DOESN'T have any computed columns, we are done.
+        if qg.relations.get("computed_columns").is_none() {
+            return nodes_added;
+        }
+
+        // If query has computed columns, we need to reconcile grouped
+        // results. This means grouping and aggregation the results one
+        // more time.
+        let grouped = make_grouped(
+            self,
+            name,
+            &qg,
+            &HashMap::new(), // we only care about this, if no parent node is specified.
+            node_count,
+            &mut Some(union),
+            true
+        );
+
+        nodes_added.extend(grouped);
+
+
+        nodes_added
+    }
     // TODO(larat): this is basically make_selection_nodes
     fn make_security_boundary(
         &mut self,

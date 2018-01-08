@@ -588,31 +588,38 @@ impl SqlToMirConverter {
             .columns()
             .iter()
             .cloned()
-            .map(|c| {
-                if is_leaf {
-                    sanitize_leaf_column(c, name)
-                } else {
-                    c
-                }
-            })
             .collect();
 
-        assert!(
-            ancestors
-                .iter()
-                .all(|a| a.borrow().columns().len() == ucols.len()),
-            "all ancestors columns must have the same size"
-        );
+        // Find columns present in all ancestors
+        let mut cols = HashSet::new();
+        for c in ucols {
+            if ancestors.iter().all(|a| a.borrow().columns().iter().any(|ac| ac.name == c.name)) {
+                cols.insert(c.name.clone());
+            }
+        }
 
         for ancestor in ancestors.iter() {
-            let cols: Vec<Column> = ancestor.borrow().columns().iter().cloned().collect();
+            let cols: Vec<Column> = ancestor.borrow().columns().iter().filter(|c| cols.contains(&c.name)).map(|c| {
+                if is_leaf {
+                    sanitize_leaf_column(c.clone(), name)
+                } else {
+                    c.clone()
+                }
+            }).collect();
             emit.push(cols.clone());
         }
+
+        assert!(
+            emit
+                .iter()
+                .all(|e| e.len() == cols.len()),
+            "all ancestors columns must have the same size"
+        );
 
         MirNode::new(
             name,
             self.schema_version,
-            ucols,
+            emit.first().unwrap().clone(),
             MirNodeType::Union { emit },
             ancestors.clone(),
             vec![],
@@ -1216,8 +1223,8 @@ impl SqlToMirConverter {
                     .chain(join_nodes.into_iter())
                     .chain(predicates_above_group_by_nodes.into_iter())
                     .chain(policy_nodes.into_iter())
+                    .chain(ancestors.clone().into_iter())
                     .collect();
-
 
             // For each policy chain, create a version of the query
             // All query versions, including group queries will be reconciled at the end
@@ -1232,6 +1239,7 @@ impl SqlToMirConverter {
                     &node_for_rel,
                     new_node_count,
                     &mut prev_node,
+                    false
                 );
 
                 new_node_count += func_nodes.len();
@@ -1313,75 +1321,82 @@ impl SqlToMirConverter {
                 nodes_added.extend(func_nodes);
                 nodes_added.extend(predicate_nodes);
 
-                // 5. Generate leaf views that expose the query result
-                let mut projected_columns: Vec<&Column> = qg.columns
-                    .iter()
-                    .filter_map(|oc| match *oc {
-                        OutputColumn::Arithmetic(_) => None,
-                        OutputColumn::Data(ref c) => Some(c),
-                        OutputColumn::Literal(_) => None,
-                    })
-                    .collect();
-                for pc in qg.parameters() {
-                    if !projected_columns.contains(&pc) {
-                        projected_columns.push(pc);
-                    }
-                }
-                let projected_arithmetic: Vec<(String, ArithmeticExpression)> = qg.columns
-                    .iter()
-                    .filter_map(|oc| match *oc {
-                        OutputColumn::Arithmetic(ref ac) => {
-                            Some((ac.name.clone(), ac.expression.clone()))
-                        }
-                        OutputColumn::Data(_) => None,
-                        OutputColumn::Literal(_) => None,
-                    })
-                    .collect();
-                let projected_literals: Vec<(String, DataType)> = qg.columns
-                    .iter()
-                    .filter_map(|oc| match *oc {
-                        OutputColumn::Arithmetic(_) => None,
-                        OutputColumn::Data(_) => None,
-                        OutputColumn::Literal(ref lc) => {
-                            Some((lc.name.clone(), DataType::from(&lc.value)))
-                        }
-                    })
-                    .collect();
-
-                let ident = if has_leaf || !ancestors.is_empty() || last_policy_nodes.len() > 1 {
-                    format!("q_{:x}_n{}{}", qg.signature().hash, new_node_count, uformat)
-                } else {
-                    String::from(name)
-
-                };
-
-                let project_node = self.make_project_node(
-                    &ident,
-                    final_node,
-                    projected_columns,
-                    projected_arithmetic,
-                    projected_literals,
-                    ancestors.is_empty() && !has_leaf,
-                );
-
-                new_node_count += 1;
-
-                ancestors.push(project_node);
+                ancestors.push(final_node);
             }
 
-            let leaf_node = if ancestors.len() > 1 {
-                let ident = if has_leaf{
-                    format!("q_{:x}_n{}{}", qg.signature().hash, new_node_count, uformat)
-                } else {
-                    String::from(name)
-                };
+            let final_node = if ancestors.len() > 1 {
+                // If we have multiple queries, reconcile them.
+                let nodes = self.reconcile(&format!("q_{:x}{}", qg.signature().hash, uformat), &qg, &ancestors, new_node_count, has_leaf);
+                new_node_count += nodes.len();
+                nodes_added.extend(nodes.clone());
 
-                self.make_union_node(&ident, &ancestors, has_leaf)
+                nodes.last().unwrap().clone()
             } else {
                 ancestors.last().unwrap().clone()
             };
 
-            nodes_added.extend(ancestors);
+
+            let final_node_cols: Vec<Column> = final_node.borrow().columns().iter().cloned().collect();
+            // 5. Generate leaf views that expose the query result
+            let mut projected_columns: Vec<&Column> = if universe.1.is_none() {
+                qg.columns
+                .iter()
+                .filter_map(|oc| match *oc {
+                    OutputColumn::Arithmetic(_) => None,
+                    OutputColumn::Data(ref c) => Some(c),
+                    OutputColumn::Literal(_) => None,
+                })
+                .collect()
+            } else {
+                // If we are creating a query for a group universe, we project
+                // all columns in the final node. When a user universe that
+                // belongs to this group, the proper projection and leaf node
+                // will be added.
+                final_node_cols.iter().collect()
+            };
+
+            for pc in qg.parameters() {
+                if !projected_columns.contains(&pc) {
+                    projected_columns.push(pc);
+                }
+            }
+            let projected_arithmetic: Vec<(String, ArithmeticExpression)> = qg.columns
+                .iter()
+                .filter_map(|oc| match *oc {
+                    OutputColumn::Arithmetic(ref ac) => {
+                        Some((ac.name.clone(), ac.expression.clone()))
+                    }
+                    OutputColumn::Data(_) => None,
+                    OutputColumn::Literal(_) => None,
+                })
+                .collect();
+            let projected_literals: Vec<(String, DataType)> = qg.columns
+                .iter()
+                .filter_map(|oc| match *oc {
+                    OutputColumn::Arithmetic(_) => None,
+                    OutputColumn::Data(_) => None,
+                    OutputColumn::Literal(ref lc) => {
+                        Some((lc.name.clone(), DataType::from(&lc.value)))
+                    }
+                })
+                .collect();
+
+            let ident = if has_leaf {
+                format!("q_{:x}_n{}{}", qg.signature().hash, new_node_count, uformat)
+            } else {
+                String::from(name)
+            };
+
+            let leaf_node = self.make_project_node(
+                &ident,
+                final_node,
+                projected_columns,
+                projected_arithmetic,
+                projected_literals,
+                !has_leaf,
+            );
+
+            nodes_added.push(leaf_node.clone());
 
             if has_leaf {
                 // We are supposed to add a `MaterializedLeaf` node keyed on the query
