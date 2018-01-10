@@ -103,6 +103,9 @@ impl SecurityBoundary for SqlToMirConverter {
             }
         }
 
+        if last_security_nodes.is_empty() {
+            last_security_nodes.push(prev_node.clone());
+        }
 
         (last_security_nodes, security_nodes)
     }
