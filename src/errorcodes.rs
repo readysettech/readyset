@@ -7,6 +7,7 @@ extern crate select;
 use std::io::Read;
 use select::document::Document;
 use select::predicate::{Child, Class, Name};
+use std::collections::HashMap;
 
 fn main() {
     let mut resp = reqwest::get("https://mariadb.com/kb/en/library/mariadb-error-codes/").unwrap();
@@ -98,8 +99,23 @@ fn main() {
     println!("    /// See also https://mariadb.com/kb/en/library/sqlstate/");
     println!("    pub fn sqlstate(&self) -> &'static [u8; 5] {{");
     println!("        match *self {{");
+    let mut group = HashMap::new();
     for &(_, ref sqlstate, ref name, _) in &es {
-        println!("            ErrorKind::{} => b\"{}\",", name, sqlstate);
+        group.entry(sqlstate).or_insert_with(Vec::new).push(name);
+    }
+    for (sqlstate, names) in group {
+        let n = names.len();
+        for (i, name) in names.into_iter().enumerate() {
+            print!("            ");
+            if i != 0 {
+                print!("| ");
+            }
+            print!("ErrorKind::{}", name);
+            if i == n - 1 {
+                print!(" => b\"{}\",", sqlstate);
+            }
+            println!("");
+        }
     }
     println!("        }}");
     println!("    }}");
@@ -2802,894 +2818,884 @@ impl ErrorKind {
     /// See also https://mariadb.com/kb/en/library/sqlstate/
     pub fn sqlstate(&self) -> &'static [u8; 5] {
         match *self {
-            ErrorKind::ER_HASHCHK => b"HY000",
-            ErrorKind::ER_NISAMCHK => b"HY000",
-            ErrorKind::ER_NO => b"HY000",
-            ErrorKind::ER_YES => b"HY000",
-            ErrorKind::ER_CANT_CREATE_FILE => b"HY000",
-            ErrorKind::ER_CANT_CREATE_TABLE => b"HY000",
-            ErrorKind::ER_CANT_CREATE_DB => b"HY000",
-            ErrorKind::ER_DB_CREATE_EXISTS => b"HY000",
-            ErrorKind::ER_DB_DROP_EXISTS => b"HY000",
-            ErrorKind::ER_DB_DROP_DELETE => b"HY000",
-            ErrorKind::ER_DB_DROP_RMDIR => b"HY000",
-            ErrorKind::ER_CANT_DELETE_FILE => b"HY000",
-            ErrorKind::ER_CANT_FIND_SYSTEM_REC => b"HY000",
-            ErrorKind::ER_CANT_GET_STAT => b"HY000",
-            ErrorKind::ER_CANT_GET_WD => b"HY000",
-            ErrorKind::ER_CANT_LOCK => b"HY000",
-            ErrorKind::ER_CANT_OPEN_FILE => b"HY000",
-            ErrorKind::ER_FILE_NOT_FOUND => b"HY000",
-            ErrorKind::ER_CANT_READ_DIR => b"HY000",
-            ErrorKind::ER_CANT_SET_WD => b"HY000",
-            ErrorKind::ER_CHECKREAD => b"HY000",
-            ErrorKind::ER_DISK_FULL => b"HY000",
-            ErrorKind::ER_DUP_KEY => b"23000",
-            ErrorKind::ER_ERROR_ON_CLOSE => b"HY000",
-            ErrorKind::ER_ERROR_ON_READ => b"HY000",
-            ErrorKind::ER_ERROR_ON_RENAME => b"HY000",
-            ErrorKind::ER_ERROR_ON_WRITE => b"HY000",
-            ErrorKind::ER_FILE_USED => b"HY000",
-            ErrorKind::ER_FILSORT_ABORT => b"HY000",
-            ErrorKind::ER_FORM_NOT_FOUND => b"HY000",
-            ErrorKind::ER_GET_ERRN => b"HY000",
-            ErrorKind::ER_ILLEGAL_HA => b"HY000",
-            ErrorKind::ER_KEY_NOT_FOUND => b"HY000",
-            ErrorKind::ER_NOT_FORM_FILE => b"HY000",
-            ErrorKind::ER_NOT_KEYFILE => b"HY000",
-            ErrorKind::ER_OLD_KEYFILE => b"HY000",
-            ErrorKind::ER_OPEN_AS_READONLY => b"HY000",
-            ErrorKind::ER_OUTOFMEMORY => b"HY001",
-            ErrorKind::ER_OUT_OF_SORTMEMORY => b"HY001",
-            ErrorKind::ER_UNEXPECTED_EOF => b"HY000",
-            ErrorKind::ER_CON_COUNT_ERROR => b"08004",
-            ErrorKind::ER_OUT_OF_RESOURCES => b"HY000",
-            ErrorKind::ER_BAD_HOST_ERROR => b"08S01",
-            ErrorKind::ER_HANDSHAKE_ERROR => b"08S01",
-            ErrorKind::ER_DBACCESS_DENIED_ERROR => b"42000",
-            ErrorKind::ER_ACCESS_DENIED_ERROR => b"28000",
+            ErrorKind::ER_BAD_HOST_ERROR
+            | ErrorKind::ER_HANDSHAKE_ERROR
+            | ErrorKind::ER_UNKNOWN_COM_ERROR
+            | ErrorKind::ER_SERVER_SHUTDOWN
+            | ErrorKind::ER_FORCING_CLOSE
+            | ErrorKind::ER_IPSOCK_ERROR
+            | ErrorKind::ER_ABORTING_CONNECTION
+            | ErrorKind::ER_NET_PACKET_TOO_LARGE
+            | ErrorKind::ER_NET_READ_ERROR_FROM_PIPE
+            | ErrorKind::ER_NET_FCNTL_ERROR
+            | ErrorKind::ER_NET_PACKETS_OUT_OF_ORDER
+            | ErrorKind::ER_NET_UNCOMPRESS_ERROR
+            | ErrorKind::ER_NET_READ_ERROR
+            | ErrorKind::ER_NET_READ_INTERRUPTED
+            | ErrorKind::ER_NET_ERROR_ON_WRITE
+            | ErrorKind::ER_NET_WRITE_INTERRUPTED
+            | ErrorKind::ER_NEW_ABORTING_CONNECTION
+            | ErrorKind::ER_MASTER_NET_READ
+            | ErrorKind::ER_MASTER_NET_WRITE
+            | ErrorKind::ER_CONNECT_TO_MASTER => b"08S01",
             ErrorKind::ER_NO_DB_ERROR => b"3D000",
-            ErrorKind::ER_UNKNOWN_COM_ERROR => b"08S01",
-            ErrorKind::ER_BAD_NULL_ERROR => b"23000",
-            ErrorKind::ER_BAD_DB_ERROR => b"42000",
-            ErrorKind::ER_TABLE_EXISTS_ERROR => b"42S01",
-            ErrorKind::ER_BAD_TABLE_ERROR => b"42S02",
-            ErrorKind::ER_NON_UNIQ_ERROR => b"23000",
-            ErrorKind::ER_SERVER_SHUTDOWN => b"08S01",
-            ErrorKind::ER_BAD_FIELD_ERROR => b"42S22",
-            ErrorKind::ER_WRONG_FIELD_WITH_GROUP => b"42000",
-            ErrorKind::ER_WRONG_GROUP_FIELD => b"42000",
-            ErrorKind::ER_WRONG_SUM_SELECT => b"42000",
-            ErrorKind::ER_WRONG_VALUE_COUNT => b"21S01",
-            ErrorKind::ER_TOO_LONG_IDENT => b"42000",
-            ErrorKind::ER_DUP_FIELDNAME => b"42S21",
-            ErrorKind::ER_DUP_KEYNAME => b"42000",
-            ErrorKind::ER_DUP_ENTRY => b"23000",
-            ErrorKind::ER_WRONG_FIELD_SPEC => b"42000",
-            ErrorKind::ER_PARSE_ERROR => b"42000",
-            ErrorKind::ER_EMPTY_QUERY => b"42000",
-            ErrorKind::ER_NONUNIQ_TABLE => b"42000",
-            ErrorKind::ER_INVALID_DEFAULT => b"42000",
-            ErrorKind::ER_MULTIPLE_PRI_KEY => b"42000",
-            ErrorKind::ER_TOO_MANY_KEYS => b"42000",
-            ErrorKind::ER_TOO_MANY_KEY_PARTS => b"42000",
-            ErrorKind::ER_TOO_LONG_KEY => b"42000",
-            ErrorKind::ER_KEY_COLUMN_DOES_NOT_EXITS => b"42000",
-            ErrorKind::ER_BLOB_USED_AS_KEY => b"42000",
-            ErrorKind::ER_TOO_BIG_FIELDLENGTH => b"42000",
-            ErrorKind::ER_WRONG_AUTO_KEY => b"42000",
-            ErrorKind::ER_READY => b"HY000",
-            ErrorKind::ER_NORMAL_SHUTDOWN => b"HY000",
-            ErrorKind::ER_GOT_SIGNAL => b"HY000",
-            ErrorKind::ER_SHUTDOWN_COMPLETE => b"HY000",
-            ErrorKind::ER_FORCING_CLOSE => b"08S01",
-            ErrorKind::ER_IPSOCK_ERROR => b"08S01",
-            ErrorKind::ER_NO_SUCH_INDEX => b"42S12",
-            ErrorKind::ER_WRONG_FIELD_TERMINATORS => b"42000",
-            ErrorKind::ER_BLOBS_AND_NO_TERMINATED => b"42000",
-            ErrorKind::ER_TEXTFILE_NOT_READABLE => b"HY000",
-            ErrorKind::ER_FILE_EXISTS_ERROR => b"HY000",
-            ErrorKind::ER_LOAD_INF => b"HY000",
-            ErrorKind::ER_ALTER_INF => b"HY000",
-            ErrorKind::ER_WRONG_SUB_KEY => b"HY000",
-            ErrorKind::ER_CANT_REMOVE_ALL_FIELDS => b"42000",
-            ErrorKind::ER_CANT_DROP_FIELD_OR_KEY => b"42000",
-            ErrorKind::ER_INSERT_INF => b"HY000",
-            ErrorKind::ER_UPDATE_TABLE_USED => b"HY000",
-            ErrorKind::ER_NO_SUCH_THREAD => b"HY000",
-            ErrorKind::ER_KILL_DENIED_ERROR => b"HY000",
-            ErrorKind::ER_NO_TABLES_USED => b"HY000",
-            ErrorKind::ER_TOO_BIG_SET => b"HY000",
-            ErrorKind::ER_NO_UNIQUE_LOGFILE => b"HY000",
-            ErrorKind::ER_TABLE_NOT_LOCKED_FOR_WRITE => b"HY000",
-            ErrorKind::ER_TABLE_NOT_LOCKED => b"HY000",
-            ErrorKind::ER_BLOB_CANT_HAVE_DEFAULT => b"42000",
-            ErrorKind::ER_WRONG_DB_NAME => b"42000",
-            ErrorKind::ER_WRONG_TABLE_NAME => b"42000",
-            ErrorKind::ER_TOO_BIG_SELECT => b"42000",
-            ErrorKind::ER_UNKNOWN_ERROR => b"HY000",
-            ErrorKind::ER_UNKNOWN_PROCEDURE => b"42000",
-            ErrorKind::ER_WRONG_PARAMCOUNT_TO_PROCEDURE => b"42000",
-            ErrorKind::ER_WRONG_PARAMETERS_TO_PROCEDURE => b"HY000",
-            ErrorKind::ER_UNKNOWN_TABLE => b"42S02",
-            ErrorKind::ER_FIELD_SPECIFIED_TWICE => b"42000",
-            ErrorKind::ER_INVALID_GROUP_FUNC_USE => b"HY000",
-            ErrorKind::ER_UNSUPPORTED_EXTENSION => b"42000",
-            ErrorKind::ER_TABLE_MUST_HAVE_COLUMNS => b"42000",
-            ErrorKind::ER_RECORD_FILE_FULL => b"HY000",
-            ErrorKind::ER_UNKNOWN_CHARACTER_SET => b"42000",
-            ErrorKind::ER_TOO_MANY_TABLES => b"HY000",
-            ErrorKind::ER_TOO_MANY_FIELDS => b"HY000",
-            ErrorKind::ER_TOO_BIG_ROWSIZE => b"42000",
-            ErrorKind::ER_STACK_OVERRUN => b"HY000",
-            ErrorKind::ER_WRONG_OUTER_JOIN => b"42000",
-            ErrorKind::ER_NULL_COLUMN_IN_INDEX => b"42000",
-            ErrorKind::ER_CANT_FIND_UDF => b"HY000",
-            ErrorKind::ER_CANT_INITIALIZE_UDF => b"HY000",
-            ErrorKind::ER_UDF_NO_PATHS => b"HY000",
-            ErrorKind::ER_UDF_EXISTS => b"HY000",
-            ErrorKind::ER_CANT_OPEN_LIBRARY => b"HY000",
-            ErrorKind::ER_CANT_FIND_DL_ENTRY => b"HY000",
-            ErrorKind::ER_FUNCTION_NOT_DEFINED => b"HY000",
-            ErrorKind::ER_HOST_IS_BLOCKED => b"HY000",
-            ErrorKind::ER_HOST_NOT_PRIVILEGED => b"HY000",
-            ErrorKind::ER_PASSWORD_ANONYMOUS_USER => b"42000",
-            ErrorKind::ER_PASSWORD_NOT_ALLOWED => b"42000",
-            ErrorKind::ER_PASSWORD_NO_MATCH => b"42000",
-            ErrorKind::ER_UPDATE_INF => b"HY000",
-            ErrorKind::ER_CANT_CREATE_THREAD => b"HY000",
-            ErrorKind::ER_WRONG_VALUE_COUNT_ON_ROW => b"21S01",
-            ErrorKind::ER_CANT_REOPEN_TABLE => b"HY000",
-            ErrorKind::ER_INVALID_USE_OF_NULL => b"22004",
-            ErrorKind::ER_REGEXP_ERROR => b"42000",
-            ErrorKind::ER_MIX_OF_GROUP_FUNC_AND_FIELDS => b"42000",
-            ErrorKind::ER_NONEXISTING_GRANT => b"42000",
-            ErrorKind::ER_TABLEACCESS_DENIED_ERROR => b"42000",
-            ErrorKind::ER_COLUMNACCESS_DENIED_ERROR => b"42000",
-            ErrorKind::ER_ILLEGAL_GRANT_FOR_TABLE => b"42000",
-            ErrorKind::ER_GRANT_WRONG_HOST_OR_USER => b"42000",
-            ErrorKind::ER_NO_SUCH_TABLE => b"42S02",
-            ErrorKind::ER_NONEXISTING_TABLE_GRANT => b"42000",
-            ErrorKind::ER_NOT_ALLOWED_COMMAND => b"42000",
-            ErrorKind::ER_SYNTAX_ERROR => b"42000",
-            ErrorKind::ER_DELAYED_CANT_CHANGE_LOCK => b"HY000",
-            ErrorKind::ER_TOO_MANY_DELAYED_THREADS => b"HY000",
-            ErrorKind::ER_ABORTING_CONNECTION => b"08S01",
-            ErrorKind::ER_NET_PACKET_TOO_LARGE => b"08S01",
-            ErrorKind::ER_NET_READ_ERROR_FROM_PIPE => b"08S01",
-            ErrorKind::ER_NET_FCNTL_ERROR => b"08S01",
-            ErrorKind::ER_NET_PACKETS_OUT_OF_ORDER => b"08S01",
-            ErrorKind::ER_NET_UNCOMPRESS_ERROR => b"08S01",
-            ErrorKind::ER_NET_READ_ERROR => b"08S01",
-            ErrorKind::ER_NET_READ_INTERRUPTED => b"08S01",
-            ErrorKind::ER_NET_ERROR_ON_WRITE => b"08S01",
-            ErrorKind::ER_NET_WRITE_INTERRUPTED => b"08S01",
-            ErrorKind::ER_TOO_LONG_STRING => b"42000",
-            ErrorKind::ER_TABLE_CANT_HANDLE_BLOB => b"42000",
-            ErrorKind::ER_TABLE_CANT_HANDLE_AUTO_INCREMENT => b"42000",
-            ErrorKind::ER_DELAYED_INSERT_TABLE_LOCKED => b"HY000",
-            ErrorKind::ER_WRONG_COLUMN_NAME => b"42000",
-            ErrorKind::ER_WRONG_KEY_COLUMN => b"42000",
-            ErrorKind::ER_WRONG_MRG_TABLE => b"HY000",
-            ErrorKind::ER_DUP_UNIQUE => b"23000",
-            ErrorKind::ER_BLOB_KEY_WITHOUT_LENGTH => b"42000",
-            ErrorKind::ER_PRIMARY_CANT_HAVE_NULL => b"42000",
-            ErrorKind::ER_TOO_MANY_ROWS => b"42000",
-            ErrorKind::ER_REQUIRES_PRIMARY_KEY => b"42000",
-            ErrorKind::ER_NO_RAID_COMPILED => b"HY000",
-            ErrorKind::ER_UPDATE_WITHOUT_KEY_IN_SAFE_MODE => b"HY000",
-            ErrorKind::ER_KEY_DOES_NOT_EXITS => b"42000",
-            ErrorKind::ER_CHECK_NO_SUCH_TABLE => b"42000",
-            ErrorKind::ER_CHECK_NOT_IMPLEMENTED => b"42000",
-            ErrorKind::ER_CANT_DO_THIS_DURING_AN_TRANSACTION => b"25000",
-            ErrorKind::ER_ERROR_DURING_COMMIT => b"HY000",
-            ErrorKind::ER_ERROR_DURING_ROLLBACK => b"HY000",
-            ErrorKind::ER_ERROR_DURING_FLUSH_LOGS => b"HY000",
-            ErrorKind::ER_ERROR_DURING_CHECKPOINT => b"HY000",
-            ErrorKind::ER_NEW_ABORTING_CONNECTION => b"08S01",
-            ErrorKind::ER_DUMP_NOT_IMPLEMENTED => b"HY000",
-            ErrorKind::ER_FLUSH_MASTER_BINLOG_CLOSED => b"HY000",
-            ErrorKind::ER_INDEX_REBUILD => b"HY000",
-            ErrorKind::ER_MASTER => b"HY000",
-            ErrorKind::ER_MASTER_NET_READ => b"08S01",
-            ErrorKind::ER_MASTER_NET_WRITE => b"08S01",
-            ErrorKind::ER_FT_MATCHING_KEY_NOT_FOUND => b"HY000",
-            ErrorKind::ER_LOCK_OR_ACTIVE_TRANSACTION => b"HY000",
-            ErrorKind::ER_UNKNOWN_SYSTEM_VARIABLE => b"HY000",
-            ErrorKind::ER_CRASHED_ON_USAGE => b"HY000",
-            ErrorKind::ER_CRASHED_ON_REPAIR => b"HY000",
-            ErrorKind::ER_WARNING_NOT_COMPLETE_ROLLBACK => b"HY000",
-            ErrorKind::ER_TRANS_CACHE_FULL => b"HY000",
-            ErrorKind::ER_SLAVE_MUST_STOP => b"HY000",
-            ErrorKind::ER_SLAVE_NOT_RUNNING => b"HY000",
-            ErrorKind::ER_BAD_SLAVE => b"HY000",
-            ErrorKind::ER_MASTER_INF => b"HY000",
-            ErrorKind::ER_SLAVE_THREAD => b"HY000",
-            ErrorKind::ER_TOO_MANY_USER_CONNECTIONS => b"42000",
-            ErrorKind::ER_SET_CONSTANTS_ONLY => b"HY000",
-            ErrorKind::ER_LOCK_WAIT_TIMEOUT => b"HY000",
-            ErrorKind::ER_LOCK_TABLE_FULL => b"HY000",
-            ErrorKind::ER_READ_ONLY_TRANSACTION => b"25000",
-            ErrorKind::ER_DROP_DB_WITH_READ_LOCK => b"HY000",
-            ErrorKind::ER_CREATE_DB_WITH_READ_LOCK => b"HY000",
-            ErrorKind::ER_WRONG_ARGUMENTS => b"HY000",
-            ErrorKind::ER_NO_PERMISSION_TO_CREATE_USER => b"42000",
-            ErrorKind::ER_UNION_TABLES_IN_DIFFERENT_DIR => b"HY000",
-            ErrorKind::ER_LOCK_DEADLOCK => b"40001",
-            ErrorKind::ER_TABLE_CANT_HANDLE_FT => b"HY000",
-            ErrorKind::ER_CANNOT_ADD_FOREIGN => b"HY000",
-            ErrorKind::ER_NO_REFERENCED_ROW => b"23000",
-            ErrorKind::ER_ROW_IS_REFERENCED => b"23000",
-            ErrorKind::ER_CONNECT_TO_MASTER => b"08S01",
-            ErrorKind::ER_QUERY_ON_MASTER => b"HY000",
-            ErrorKind::ER_ERROR_WHEN_EXECUTING_COMMAND => b"HY000",
-            ErrorKind::ER_WRONG_USAGE => b"HY000",
-            ErrorKind::ER_WRONG_NUMBER_OF_COLUMNS_IN_SELECT => b"21000",
-            ErrorKind::ER_CANT_UPDATE_WITH_READLOCK => b"HY000",
-            ErrorKind::ER_MIXING_NOT_ALLOWED => b"HY000",
-            ErrorKind::ER_DUP_ARGUMENT => b"HY000",
-            ErrorKind::ER_USER_LIMIT_REACHED => b"42000",
-            ErrorKind::ER_SPECIFIC_ACCESS_DENIED_ERROR => b"42000",
-            ErrorKind::ER_LOCAL_VARIABLE => b"HY000",
-            ErrorKind::ER_GLOBAL_VARIABLE => b"HY000",
-            ErrorKind::ER_NO_DEFAULT => b"42000",
-            ErrorKind::ER_WRONG_VALUE_FOR_VAR => b"42000",
-            ErrorKind::ER_WRONG_TYPE_FOR_VAR => b"42000",
-            ErrorKind::ER_VAR_CANT_BE_READ => b"HY000",
-            ErrorKind::ER_CANT_USE_OPTION_HERE => b"42000",
-            ErrorKind::ER_NOT_SUPPORTED_YET => b"42000",
-            ErrorKind::ER_MASTER_FATAL_ERROR_READING_BINLOG => b"HY000",
-            ErrorKind::ER_SLAVE_IGNORED_TABLE => b"HY000",
-            ErrorKind::ER_INCORRECT_GLOBAL_LOCAL_VAR => b"HY000",
-            ErrorKind::ER_WRONG_FK_DEF => b"42000",
-            ErrorKind::ER_KEY_REF_DO_NOT_MATCH_TABLE_REF => b"HY000",
-            ErrorKind::ER_OPERAND_COLUMNS => b"21000",
-            ErrorKind::ER_SUBQUERY_NO_1_ROW => b"21000",
-            ErrorKind::ER_UNKNOWN_STMT_HANDLER => b"HY000",
-            ErrorKind::ER_CORRUPT_HELP_DB => b"HY000",
-            ErrorKind::ER_CYCLIC_REFERENCE => b"HY000",
-            ErrorKind::ER_AUTO_CONVERT => b"HY000",
-            ErrorKind::ER_ILLEGAL_REFERENCE => b"42S22",
-            ErrorKind::ER_DERIVED_MUST_HAVE_ALIAS => b"42000",
-            ErrorKind::ER_SELECT_REDUCED => b"01000",
-            ErrorKind::ER_TABLENAME_NOT_ALLOWED_HERE => b"42000",
-            ErrorKind::ER_NOT_SUPPORTED_AUTH_MODE => b"08004",
-            ErrorKind::ER_SPATIAL_CANT_HAVE_NULL => b"42000",
-            ErrorKind::ER_COLLATION_CHARSET_MISMATCH => b"42000",
-            ErrorKind::ER_SLAVE_WAS_RUNNING => b"HY000",
-            ErrorKind::ER_SLAVE_WAS_NOT_RUNNING => b"HY000",
-            ErrorKind::ER_TOO_BIG_FOR_UNCOMPRESS => b"HY000",
-            ErrorKind::ER_ZLIB_Z_MEM_ERROR => b"HY000",
-            ErrorKind::ER_ZLIB_Z_BUF_ERROR => b"HY000",
-            ErrorKind::ER_ZLIB_Z_DATA_ERROR => b"HY000",
-            ErrorKind::ER_CUT_VALUE_GROUP_CONCAT => b"HY000",
-            ErrorKind::ER_WARN_TOO_FEW_RECORDS => b"01000",
-            ErrorKind::ER_WARN_TOO_MANY_RECORDS => b"01000",
-            ErrorKind::ER_WARN_NULL_TO_NOTNULL => b"22004",
-            ErrorKind::ER_WARN_DATA_OUT_OF_RANGE => b"22003",
-            ErrorKind::WARN_DATA_TRUNCATED => b"01000",
-            ErrorKind::ER_WARN_USING_OTHER_HANDLER => b"HY000",
-            ErrorKind::ER_CANT_AGGREGATE_2COLLATIONS => b"HY000",
-            ErrorKind::ER_DROP_USER => b"HY000",
-            ErrorKind::ER_REVOKE_GRANTS => b"HY000",
-            ErrorKind::ER_CANT_AGGREGATE_3COLLATIONS => b"HY000",
-            ErrorKind::ER_CANT_AGGREGATE_NCOLLATIONS => b"HY000",
-            ErrorKind::ER_VARIABLE_IS_NOT_STRUCT => b"HY000",
-            ErrorKind::ER_UNKNOWN_COLLATION => b"HY000",
-            ErrorKind::ER_SLAVE_IGNORED_SSL_PARAMS => b"HY000",
-            ErrorKind::ER_SERVER_IS_IN_SECURE_AUTH_MODE => b"HY000",
-            ErrorKind::ER_WARN_FIELD_RESOLVED => b"HY000",
-            ErrorKind::ER_BAD_SLAVE_UNTIL_COND => b"HY000",
-            ErrorKind::ER_MISSING_SKIP_SLAVE => b"HY000",
-            ErrorKind::ER_UNTIL_COND_IGNORED => b"HY000",
-            ErrorKind::ER_WRONG_NAME_FOR_INDEX => b"42000",
-            ErrorKind::ER_WRONG_NAME_FOR_CATALOG => b"42000",
-            ErrorKind::ER_WARN_QC_RESIZE => b"HY000",
-            ErrorKind::ER_BAD_FT_COLUMN => b"HY000",
-            ErrorKind::ER_UNKNOWN_KEY_CACHE => b"HY000",
-            ErrorKind::ER_WARN_HOSTNAME_WONT_WORK => b"HY000",
-            ErrorKind::ER_UNKNOWN_STORAGE_ENGINE => b"42000",
-            ErrorKind::ER_WARN_DEPRECATED_SYNTAX => b"HY000",
-            ErrorKind::ER_NON_UPDATABLE_TABLE => b"HY000",
-            ErrorKind::ER_FEATURE_DISABLED => b"HY000",
-            ErrorKind::ER_OPTION_PREVENTS_STATEMENT => b"HY000",
-            ErrorKind::ER_DUPLICATED_VALUE_IN_TYPE => b"HY000",
-            ErrorKind::ER_TRUNCATED_WRONG_VALUE => b"22007",
-            ErrorKind::ER_TOO_MUCH_AUTO_TIMESTAMP_COLS => b"HY000",
-            ErrorKind::ER_INVALID_ON_UPDATE => b"HY000",
-            ErrorKind::ER_UNSUPPORTED_PS => b"HY000",
-            ErrorKind::ER_GET_ERRMSG => b"HY000",
-            ErrorKind::ER_GET_TEMPORARY_ERRMSG => b"HY000",
-            ErrorKind::ER_UNKNOWN_TIME_ZONE => b"HY000",
-            ErrorKind::ER_WARN_INVALID_TIMESTAMP => b"HY000",
-            ErrorKind::ER_INVALID_CHARACTER_STRING => b"HY000",
-            ErrorKind::ER_WARN_ALLOWED_PACKET_OVERFLOWED => b"HY000",
-            ErrorKind::ER_CONFLICTING_DECLARATIONS => b"HY000",
-            ErrorKind::ER_SP_NO_RECURSIVE_CREATE => b"2F003",
-            ErrorKind::ER_SP_ALREADY_EXISTS => b"42000",
-            ErrorKind::ER_SP_DOES_NOT_EXIST => b"42000",
-            ErrorKind::ER_SP_DROP_FAILED => b"HY000",
-            ErrorKind::ER_SP_STORE_FAILED => b"HY000",
-            ErrorKind::ER_SP_LILABEL_MISMATCH => b"42000",
-            ErrorKind::ER_SP_LABEL_REDEFINE => b"42000",
-            ErrorKind::ER_SP_LABEL_MISMATCH => b"42000",
-            ErrorKind::ER_SP_UNINIT_VAR => b"01000",
-            ErrorKind::ER_SP_BADSELECT => b"0A000",
-            ErrorKind::ER_SP_BADRETURN => b"42000",
-            ErrorKind::ER_SP_BADSTATEMENT => b"0A000",
-            ErrorKind::ER_UPDATE_LOG_DEPRECATED_IGNORED => b"42000",
-            ErrorKind::ER_UPDATE_LOG_DEPRECATED_TRANSLATED => b"42000",
-            ErrorKind::ER_QUERY_INTERRUPTED => b"70100",
-            ErrorKind::ER_SP_WRONG_NO_OF_ARGS => b"42000",
-            ErrorKind::ER_SP_COND_MISMATCH => b"42000",
-            ErrorKind::ER_SP_NORETURN => b"42000",
-            ErrorKind::ER_SP_NORETURNEND => b"2F005",
-            ErrorKind::ER_SP_BAD_CURSOR_QUERY => b"42000",
-            ErrorKind::ER_SP_BAD_CURSOR_SELECT => b"42000",
-            ErrorKind::ER_SP_CURSOR_MISMATCH => b"42000",
-            ErrorKind::ER_SP_CURSOR_ALREADY_OPEN => b"24000",
-            ErrorKind::ER_SP_CURSOR_NOT_OPEN => b"24000",
-            ErrorKind::ER_SP_UNDECLARED_VAR => b"42000",
-            ErrorKind::ER_SP_WRONG_NO_OF_FETCH_ARGS => b"HY000",
-            ErrorKind::ER_SP_FETCH_NO_DATA => b"02000",
-            ErrorKind::ER_SP_DUP_PARAM => b"42000",
-            ErrorKind::ER_SP_DUP_VAR => b"42000",
-            ErrorKind::ER_SP_DUP_COND => b"42000",
-            ErrorKind::ER_SP_DUP_CURS => b"42000",
-            ErrorKind::ER_SP_CANT_ALTER => b"HY000",
-            ErrorKind::ER_SP_SUBSELECT_NYI => b"0A000",
-            ErrorKind::ER_STMT_NOT_ALLOWED_IN_SF_OR_TRG => b"0A000",
-            ErrorKind::ER_SP_VARCOND_AFTER_CURSHNDLR => b"42000",
-            ErrorKind::ER_SP_CURSOR_AFTER_HANDLER => b"42000",
-            ErrorKind::ER_SP_CASE_NOT_FOUND => b"20000",
-            ErrorKind::ER_FPARSER_TOO_BIG_FILE => b"HY000",
-            ErrorKind::ER_FPARSER_BAD_HEADER => b"HY000",
-            ErrorKind::ER_FPARSER_EOF_IN_COMMENT => b"HY000",
-            ErrorKind::ER_FPARSER_ERROR_IN_PARAMETER => b"HY000",
-            ErrorKind::ER_FPARSER_EOF_IN_UNKNOWN_PARAMETER => b"HY000",
-            ErrorKind::ER_VIEW_NO_EXPLAIN => b"HY000",
-            ErrorKind::ER_FRM_UNKNOWN_TYPE => b"HY000",
-            ErrorKind::ER_WRONG_OBJECT => b"HY000",
-            ErrorKind::ER_NONUPDATEABLE_COLUMN => b"HY000",
-            ErrorKind::ER_VIEW_SELECT_DERIVED => b"HY000",
-            ErrorKind::ER_VIEW_SELECT_CLAUSE => b"HY000",
-            ErrorKind::ER_VIEW_SELECT_VARIABLE => b"HY000",
-            ErrorKind::ER_VIEW_SELECT_TMPTABLE => b"HY000",
-            ErrorKind::ER_VIEW_WRONG_LIST => b"HY000",
-            ErrorKind::ER_WARN_VIEW_MERGE => b"HY000",
-            ErrorKind::ER_WARN_VIEW_WITHOUT_KEY => b"HY000",
-            ErrorKind::ER_VIEW_INVALID => b"HY000",
-            ErrorKind::ER_SP_NO_DROP_SP => b"HY000",
-            ErrorKind::ER_SP_GOTO_IN_HNDLR => b"HY000",
-            ErrorKind::ER_TRG_ALREADY_EXISTS => b"HY000",
-            ErrorKind::ER_TRG_DOES_NOT_EXIST => b"HY000",
-            ErrorKind::ER_TRG_ON_VIEW_OR_TEMP_TABLE => b"HY000",
-            ErrorKind::ER_TRG_CANT_CHANGE_ROW => b"HY000",
-            ErrorKind::ER_TRG_NO_SUCH_ROW_IN_TRG => b"HY000",
-            ErrorKind::ER_NO_DEFAULT_FOR_FIELD => b"HY000",
-            ErrorKind::ER_DIVISION_BY_ZER => b"22012",
-            ErrorKind::ER_TRUNCATED_WRONG_VALUE_FOR_FIELD => b"HY000",
-            ErrorKind::ER_ILLEGAL_VALUE_FOR_TYPE => b"22007",
-            ErrorKind::ER_VIEW_NONUPD_CHECK => b"HY000",
-            ErrorKind::ER_VIEW_CHECK_FAILED => b"HY000",
-            ErrorKind::ER_PROCACCESS_DENIED_ERROR => b"42000",
-            ErrorKind::ER_RELAY_LOG_FAIL => b"HY000",
-            ErrorKind::ER_PASSWD_LENGTH => b"HY000",
-            ErrorKind::ER_UNKNOWN_TARGET_BINLOG => b"HY000",
-            ErrorKind::ER_IO_ERR_LOG_INDEX_READ => b"HY000",
-            ErrorKind::ER_BINLOG_PURGE_PROHIBITED => b"HY000",
-            ErrorKind::ER_FSEEK_FAIL => b"HY000",
-            ErrorKind::ER_BINLOG_PURGE_FATAL_ERR => b"HY000",
-            ErrorKind::ER_LOG_IN_USE => b"HY000",
-            ErrorKind::ER_LOG_PURGE_UNKNOWN_ERR => b"HY000",
-            ErrorKind::ER_RELAY_LOG_INIT => b"HY000",
-            ErrorKind::ER_NO_BINARY_LOGGING => b"HY000",
-            ErrorKind::ER_RESERVED_SYNTAX => b"HY000",
-            ErrorKind::ER_WSAS_FAILED => b"HY000",
-            ErrorKind::ER_DIFF_GROUPS_PROC => b"HY000",
-            ErrorKind::ER_NO_GROUP_FOR_PROC => b"HY000",
-            ErrorKind::ER_ORDER_WITH_PROC => b"HY000",
-            ErrorKind::ER_LOGGING_PROHIBIT_CHANGING_OF => b"HY000",
-            ErrorKind::ER_NO_FILE_MAPPING => b"HY000",
-            ErrorKind::ER_WRONG_MAGIC => b"HY000",
-            ErrorKind::ER_PS_MANY_PARAM => b"HY000",
-            ErrorKind::ER_KEY_PART_0 => b"HY000",
-            ErrorKind::ER_VIEW_CHECKSUM => b"HY000",
-            ErrorKind::ER_VIEW_MULTIUPDATE => b"HY000",
-            ErrorKind::ER_VIEW_NO_INSERT_FIELD_LIST => b"HY000",
-            ErrorKind::ER_VIEW_DELETE_MERGE_VIEW => b"HY000",
-            ErrorKind::ER_CANNOT_USER => b"HY000",
-            ErrorKind::ER_XAER_NOTA => b"XAE04",
-            ErrorKind::ER_XAER_INVAL => b"XAE05",
-            ErrorKind::ER_XAER_RMFAIL => b"XAE07",
-            ErrorKind::ER_XAER_OUTSIDE => b"XAE09",
-            ErrorKind::ER_XAER_RMERR => b"XAE03",
-            ErrorKind::ER_XA_RBROLLBACK => b"XA100",
-            ErrorKind::ER_NONEXISTING_PROC_GRANT => b"42000",
-            ErrorKind::ER_PROC_AUTO_GRANT_FAIL => b"HY000",
-            ErrorKind::ER_PROC_AUTO_REVOKE_FAIL => b"HY000",
-            ErrorKind::ER_DATA_TOO_LONG => b"22001",
-            ErrorKind::ER_SP_BAD_SQLSTATE => b"42000",
-            ErrorKind::ER_STARTUP => b"HY000",
-            ErrorKind::ER_LOAD_FROM_FIXED_SIZE_ROWS_TO_VAR => b"HY000",
-            ErrorKind::ER_CANT_CREATE_USER_WITH_GRANT => b"42000",
-            ErrorKind::ER_WRONG_VALUE_FOR_TYPE => b"HY000",
-            ErrorKind::ER_TABLE_DEF_CHANGED => b"HY000",
-            ErrorKind::ER_SP_DUP_HANDLER => b"42000",
-            ErrorKind::ER_SP_NOT_VAR_ARG => b"42000",
-            ErrorKind::ER_SP_NO_RETSET => b"0A000",
-            ErrorKind::ER_CANT_CREATE_GEOMETRY_OBJECT => b"22003",
-            ErrorKind::ER_FAILED_ROUTINE_BREAK_BINLOG => b"HY000",
-            ErrorKind::ER_BINLOG_UNSAFE_ROUTINE => b"HY000",
-            ErrorKind::ER_BINLOG_CREATE_ROUTINE_NEED_SUPER => b"HY000",
-            ErrorKind::ER_EXEC_STMT_WITH_OPEN_CURSOR => b"HY000",
-            ErrorKind::ER_STMT_HAS_NO_OPEN_CURSOR => b"HY000",
-            ErrorKind::ER_COMMIT_NOT_ALLOWED_IN_SF_OR_TRG => b"HY000",
-            ErrorKind::ER_NO_DEFAULT_FOR_VIEW_FIELD => b"HY000",
-            ErrorKind::ER_SP_NO_RECURSION => b"HY000",
-            ErrorKind::ER_TOO_BIG_SCALE => b"42000",
-            ErrorKind::ER_TOO_BIG_PRECISION => b"42000",
-            ErrorKind::ER_M_BIGGER_THAN_D => b"42000",
-            ErrorKind::ER_WRONG_LOCK_OF_SYSTEM_TABLE => b"HY000",
-            ErrorKind::ER_CONNECT_TO_FOREIGN_DATA_SOURCE => b"HY000",
-            ErrorKind::ER_QUERY_ON_FOREIGN_DATA_SOURCE => b"HY000",
-            ErrorKind::ER_FOREIGN_DATA_SOURCE_DOESNT_EXIST => b"HY000",
-            ErrorKind::ER_FOREIGN_DATA_STRING_INVALID_CANT_CREATE => b"HY000",
-            ErrorKind::ER_FOREIGN_DATA_STRING_INVALID => b"HY000",
-            ErrorKind::ER_CANT_CREATE_FEDERATED_TABLE => b"HY000",
-            ErrorKind::ER_TRG_IN_WRONG_SCHEMA => b"HY000",
-            ErrorKind::ER_STACK_OVERRUN_NEED_MORE => b"HY000",
-            ErrorKind::ER_TOO_LONG_BODY => b"42000",
-            ErrorKind::ER_WARN_CANT_DROP_DEFAULT_KEYCACHE => b"HY000",
-            ErrorKind::ER_TOO_BIG_DISPLAYWIDTH => b"42000",
-            ErrorKind::ER_XAER_DUPID => b"XAE08",
-            ErrorKind::ER_DATETIME_FUNCTION_OVERFLOW => b"22008",
-            ErrorKind::ER_CANT_UPDATE_USED_TABLE_IN_SF_OR_TRG => b"HY000",
-            ErrorKind::ER_VIEW_PREVENT_UPDATE => b"HY000",
-            ErrorKind::ER_PS_NO_RECURSION => b"HY000",
-            ErrorKind::ER_SP_CANT_SET_AUTOCOMMIT => b"HY000",
-            ErrorKind::ER_MALFORMED_DEFINER => b"HY000",
-            ErrorKind::ER_VIEW_FRM_NO_USER => b"HY000",
-            ErrorKind::ER_VIEW_OTHER_USER => b"HY000",
-            ErrorKind::ER_NO_SUCH_USER => b"HY000",
-            ErrorKind::ER_FORBID_SCHEMA_CHANGE => b"HY000",
-            ErrorKind::ER_ROW_IS_REFERENCED_2 => b"23000",
-            ErrorKind::ER_NO_REFERENCED_ROW_2 => b"23000",
-            ErrorKind::ER_SP_BAD_VAR_SHADOW => b"42000",
-            ErrorKind::ER_TRG_NO_DEFINER => b"HY000",
-            ErrorKind::ER_OLD_FILE_FORMAT => b"HY000",
-            ErrorKind::ER_SP_RECURSION_LIMIT => b"HY000",
-            ErrorKind::ER_SP_PROC_TABLE_CORRUPT => b"HY000",
-            ErrorKind::ER_SP_WRONG_NAME => b"42000",
-            ErrorKind::ER_TABLE_NEEDS_UPGRADE => b"HY000",
-            ErrorKind::ER_SP_NO_AGGREGATE => b"42000",
-            ErrorKind::ER_MAX_PREPARED_STMT_COUNT_REACHED => b"42000",
-            ErrorKind::ER_VIEW_RECURSIVE => b"HY000",
-            ErrorKind::ER_NON_GROUPING_FIELD_USED => b"42000",
-            ErrorKind::ER_TABLE_CANT_HANDLE_SPKEYS => b"HY000",
-            ErrorKind::ER_NO_TRIGGERS_ON_SYSTEM_SCHEMA => b"HY000",
-            ErrorKind::ER_REMOVED_SPACES => b"HY000",
-            ErrorKind::ER_AUTOINC_READ_FAILED => b"HY000",
-            ErrorKind::ER_USERNAME => b"HY000",
-            ErrorKind::ER_HOSTNAME => b"HY000",
-            ErrorKind::ER_WRONG_STRING_LENGTH => b"HY000",
-            ErrorKind::ER_NON_INSERTABLE_TABLE => b"HY000",
-            ErrorKind::ER_ADMIN_WRONG_MRG_TABLE => b"HY000",
-            ErrorKind::ER_TOO_HIGH_LEVEL_OF_NESTING_FOR_SELECT => b"HY000",
-            ErrorKind::ER_NAME_BECOMES_EMPTY => b"HY000",
-            ErrorKind::ER_AMBIGUOUS_FIELD_TERM => b"HY000",
-            ErrorKind::ER_FOREIGN_SERVER_EXISTS => b"HY000",
-            ErrorKind::ER_FOREIGN_SERVER_DOESNT_EXIST => b"HY000",
-            ErrorKind::ER_ILLEGAL_HA_CREATE_OPTION => b"HY000",
-            ErrorKind::ER_PARTITION_REQUIRES_VALUES_ERROR => b"HY000",
-            ErrorKind::ER_PARTITION_WRONG_VALUES_ERROR => b"HY000",
-            ErrorKind::ER_PARTITION_MAXVALUE_ERROR => b"HY000",
-            ErrorKind::ER_PARTITION_SUBPARTITION_ERROR => b"HY000",
-            ErrorKind::ER_PARTITION_SUBPART_MIX_ERROR => b"HY000",
-            ErrorKind::ER_PARTITION_WRONG_NO_PART_ERROR => b"HY000",
-            ErrorKind::ER_PARTITION_WRONG_NO_SUBPART_ERROR => b"HY000",
-            ErrorKind::ER_WRONG_EXPR_IN_PARTITION_FUNC_ERROR => b"HY000",
-            ErrorKind::ER_NO_CONST_EXPR_IN_RANGE_OR_LIST_ERROR => b"HY000",
-            ErrorKind::ER_FIELD_NOT_FOUND_PART_ERROR => b"HY000",
-            ErrorKind::ER_LIST_OF_FIELDS_ONLY_IN_HASH_ERROR => b"HY000",
-            ErrorKind::ER_INCONSISTENT_PARTITION_INFO_ERROR => b"HY000",
-            ErrorKind::ER_PARTITION_FUNC_NOT_ALLOWED_ERROR => b"HY000",
-            ErrorKind::ER_PARTITIONS_MUST_BE_DEFINED_ERROR => b"HY000",
-            ErrorKind::ER_RANGE_NOT_INCREASING_ERROR => b"HY000",
-            ErrorKind::ER_INCONSISTENT_TYPE_OF_FUNCTIONS_ERROR => b"HY000",
-            ErrorKind::ER_MULTIPLE_DEF_CONST_IN_LIST_PART_ERROR => b"HY000",
-            ErrorKind::ER_PARTITION_ENTRY_ERROR => b"HY000",
-            ErrorKind::ER_MIX_HANDLER_ERROR => b"HY000",
-            ErrorKind::ER_PARTITION_NOT_DEFINED_ERROR => b"HY000",
-            ErrorKind::ER_TOO_MANY_PARTITIONS_ERROR => b"HY000",
-            ErrorKind::ER_SUBPARTITION_ERROR => b"HY000",
-            ErrorKind::ER_CANT_CREATE_HANDLER_FILE => b"HY000",
-            ErrorKind::ER_BLOB_FIELD_IN_PART_FUNC_ERROR => b"HY000",
-            ErrorKind::ER_UNIQUE_KEY_NEED_ALL_FIELDS_IN_PF => b"HY000",
-            ErrorKind::ER_NO_PARTS_ERROR => b"HY000",
-            ErrorKind::ER_PARTITION_MGMT_ON_NONPARTITIONED => b"HY000",
-            ErrorKind::ER_FOREIGN_KEY_ON_PARTITIONED => b"HY000",
-            ErrorKind::ER_DROP_PARTITION_NON_EXISTENT => b"HY000",
-            ErrorKind::ER_DROP_LAST_PARTITION => b"HY000",
-            ErrorKind::ER_COALESCE_ONLY_ON_HASH_PARTITION => b"HY000",
-            ErrorKind::ER_REORG_HASH_ONLY_ON_SAME_N => b"HY000",
-            ErrorKind::ER_REORG_NO_PARAM_ERROR => b"HY000",
-            ErrorKind::ER_ONLY_ON_RANGE_LIST_PARTITION => b"HY000",
-            ErrorKind::ER_ADD_PARTITION_SUBPART_ERROR => b"HY000",
-            ErrorKind::ER_ADD_PARTITION_NO_NEW_PARTITION => b"HY000",
-            ErrorKind::ER_COALESCE_PARTITION_NO_PARTITION => b"HY000",
-            ErrorKind::ER_REORG_PARTITION_NOT_EXIST => b"HY000",
-            ErrorKind::ER_SAME_NAME_PARTITION => b"HY000",
-            ErrorKind::ER_NO_BINLOG_ERROR => b"HY000",
-            ErrorKind::ER_CONSECUTIVE_REORG_PARTITIONS => b"HY000",
-            ErrorKind::ER_REORG_OUTSIDE_RANGE => b"HY000",
-            ErrorKind::ER_PARTITION_FUNCTION_FAILURE => b"HY000",
-            ErrorKind::ER_PART_STATE_ERROR => b"HY000",
-            ErrorKind::ER_LIMITED_PART_RANGE => b"HY000",
-            ErrorKind::ER_PLUGIN_IS_NOT_LOADED => b"HY000",
-            ErrorKind::ER_WRONG_VALUE => b"HY000",
-            ErrorKind::ER_NO_PARTITION_FOR_GIVEN_VALUE => b"HY000",
-            ErrorKind::ER_FILEGROUP_OPTION_ONLY_ONCE => b"HY000",
-            ErrorKind::ER_CREATE_FILEGROUP_FAILED => b"HY000",
-            ErrorKind::ER_DROP_FILEGROUP_FAILED => b"HY000",
-            ErrorKind::ER_TABLESPACE_AUTO_EXTEND_ERROR => b"HY000",
-            ErrorKind::ER_WRONG_SIZE_NUMBER => b"HY000",
-            ErrorKind::ER_SIZE_OVERFLOW_ERROR => b"HY000",
-            ErrorKind::ER_ALTER_FILEGROUP_FAILED => b"HY000",
-            ErrorKind::ER_BINLOG_ROW_LOGGING_FAILED => b"HY000",
-            ErrorKind::ER_BINLOG_ROW_WRONG_TABLE_DEF => b"HY000",
-            ErrorKind::ER_BINLOG_ROW_RBR_TO_SBR => b"HY000",
-            ErrorKind::ER_EVENT_ALREADY_EXISTS => b"HY000",
-            ErrorKind::ER_EVENT_STORE_FAILED => b"HY000",
-            ErrorKind::ER_EVENT_DOES_NOT_EXIST => b"HY000",
-            ErrorKind::ER_EVENT_CANT_ALTER => b"HY000",
-            ErrorKind::ER_EVENT_DROP_FAILED => b"HY000",
-            ErrorKind::ER_EVENT_INTERVAL_NOT_POSITIVE_OR_TOO_BIG => b"HY000",
-            ErrorKind::ER_EVENT_ENDS_BEFORE_STARTS => b"HY000",
-            ErrorKind::ER_EVENT_EXEC_TIME_IN_THE_PAST => b"HY000",
-            ErrorKind::ER_EVENT_OPEN_TABLE_FAILED => b"HY000",
-            ErrorKind::ER_EVENT_NEITHER_M_EXPR_NOR_M_AT => b"HY000",
-            ErrorKind::ER_COL_COUNT_DOESNT_MATCH_CORRUPTED => b"HY000",
-            ErrorKind::ER_CANNOT_LOAD_FROM_TABLE => b"HY000",
-            ErrorKind::ER_EVENT_CANNOT_DELETE => b"HY000",
-            ErrorKind::ER_EVENT_COMPILE_ERROR => b"HY000",
-            ErrorKind::ER_EVENT_SAME_NAME => b"HY000",
-            ErrorKind::ER_EVENT_DATA_TOO_LONG => b"HY000",
-            ErrorKind::ER_DROP_INDEX_FK => b"HY000",
-            ErrorKind::ER_WARN_DEPRECATED_SYNTAX_WITH_VER => b"HY000",
-            ErrorKind::ER_CANT_WRITE_LOCK_LOG_TABLE => b"HY000",
-            ErrorKind::ER_CANT_LOCK_LOG_TABLE => b"HY000",
-            ErrorKind::ER_FOREIGN_DUPLICATE_KEY => b"23000",
-            ErrorKind::ER_COL_COUNT_DOESNT_MATCH_PLEASE_UPDATE => b"HY000",
-            ErrorKind::ER_TEMP_TABLE_PREVENTS_SWITCH_OUT_OF_RBR => b"HY000",
-            ErrorKind::ER_STORED_FUNCTION_PREVENTS_SWITCH_BINLOG_FORMAT => b"HY000",
-            ErrorKind::ER_NDB_CANT_SWITCH_BINLOG_FORMAT => b"HY000",
-            ErrorKind::ER_PARTITION_NO_TEMPORARY => b"HY000",
-            ErrorKind::ER_PARTITION_CONST_DOMAIN_ERROR => b"HY000",
-            ErrorKind::ER_PARTITION_FUNCTION_IS_NOT_ALLOWED => b"HY000",
-            ErrorKind::ER_DDL_LOG_ERROR => b"HY000",
-            ErrorKind::ER_NULL_IN_VALUES_LESS_THAN => b"HY000",
-            ErrorKind::ER_WRONG_PARTITION_NAME => b"HY000",
-            ErrorKind::ER_CANT_CHANGE_TX_ISOLATION => b"25001",
-            ErrorKind::ER_DUP_ENTRY_AUTOINCREMENT_CASE => b"HY000",
-            ErrorKind::ER_EVENT_MODIFY_QUEUE_ERROR => b"HY000",
-            ErrorKind::ER_EVENT_SET_VAR_ERROR => b"HY000",
-            ErrorKind::ER_PARTITION_MERGE_ERROR => b"HY000",
-            ErrorKind::ER_CANT_ACTIVATE_LOG => b"HY000",
-            ErrorKind::ER_RBR_NOT_AVAILABLE => b"HY000",
-            ErrorKind::ER_BASE64_DECODE_ERROR => b"HY000",
-            ErrorKind::ER_EVENT_RECURSION_FORBIDDEN => b"HY000",
-            ErrorKind::ER_EVENTS_DB_ERROR => b"HY000",
-            ErrorKind::ER_ONLY_INTEGERS_ALLOWED => b"HY000",
-            ErrorKind::ER_UNSUPORTED_LOG_ENGINE => b"HY000",
-            ErrorKind::ER_BAD_LOG_STATEMENT => b"HY000",
-            ErrorKind::ER_CANT_RENAME_LOG_TABLE => b"HY000",
-            ErrorKind::ER_WRONG_PARAMCOUNT_TO_NATIVE_FCT => b"42000",
-            ErrorKind::ER_WRONG_PARAMETERS_TO_NATIVE_FCT => b"42000",
-            ErrorKind::ER_WRONG_PARAMETERS_TO_STORED_FCT => b"42000",
-            ErrorKind::ER_NATIVE_FCT_NAME_COLLISION => b"HY000",
-            ErrorKind::ER_DUP_ENTRY_WITH_KEY_NAME => b"23000",
-            ErrorKind::ER_BINLOG_PURGE_EMFILE => b"HY000",
-            ErrorKind::ER_EVENT_CANNOT_CREATE_IN_THE_PAST => b"HY000",
-            ErrorKind::ER_EVENT_CANNOT_ALTER_IN_THE_PAST => b"HY000",
-            ErrorKind::ER_SLAVE_INCIDENT => b"HY000",
-            ErrorKind::ER_NO_PARTITION_FOR_GIVEN_VALUE_SILENT => b"HY000",
-            ErrorKind::ER_BINLOG_UNSAFE_STATEMENT => b"HY000",
-            ErrorKind::ER_SLAVE_FATAL_ERROR => b"HY000",
-            ErrorKind::ER_SLAVE_RELAY_LOG_READ_FAILURE => b"HY000",
-            ErrorKind::ER_SLAVE_RELAY_LOG_WRITE_FAILURE => b"HY000",
-            ErrorKind::ER_SLAVE_CREATE_EVENT_FAILURE => b"HY000",
-            ErrorKind::ER_SLAVE_MASTER_COM_FAILURE => b"HY000",
-            ErrorKind::ER_BINLOG_LOGGING_IMPOSSIBLE => b"HY000",
-            ErrorKind::ER_VIEW_NO_CREATION_CTX => b"HY000",
-            ErrorKind::ER_VIEW_INVALID_CREATION_CTX => b"HY000",
-            ErrorKind::ER_SR_INVALID_CREATION_CTX => b"HY000",
-            ErrorKind::ER_TRG_CORRUPTED_FILE => b"HY000",
-            ErrorKind::ER_TRG_NO_CREATION_CTX => b"HY000",
-            ErrorKind::ER_TRG_INVALID_CREATION_CTX => b"HY000",
-            ErrorKind::ER_EVENT_INVALID_CREATION_CTX => b"HY000",
-            ErrorKind::ER_TRG_CANT_OPEN_TABLE => b"HY000",
-            ErrorKind::ER_CANT_CREATE_SROUTINE => b"HY000",
-            ErrorKind::ER_UNUSED_11 => b"HY000",
-            ErrorKind::ER_NO_FORMAT_DESCRIPTION_EVENT_BEFORE_BINLOG_STATEMENT => b"HY000",
-            ErrorKind::ER_SLAVE_CORRUPT_EVENT => b"HY000",
-            ErrorKind::ER_LOAD_DATA_INVALID_COLUMN => b"HY000",
-            ErrorKind::ER_LOG_PURGE_NO_FILE => b"HY000",
-            ErrorKind::ER_XA_RBTIMEOUT => b"XA106",
-            ErrorKind::ER_XA_RBDEADLOCK => b"XA102",
-            ErrorKind::ER_NEED_REPREPARE => b"HY000",
-            ErrorKind::ER_DELAYED_NOT_SUPPORTED => b"HY000",
-            ErrorKind::WARN_NO_MASTER_INF => b"HY000",
-            ErrorKind::WARN_OPTION_IGNORED => b"HY000",
-            ErrorKind::WARN_PLUGIN_DELETE_BUILTIN => b"HY000",
-            ErrorKind::WARN_PLUGIN_BUSY => b"HY000",
-            ErrorKind::ER_VARIABLE_IS_READONLY => b"HY000",
-            ErrorKind::ER_WARN_ENGINE_TRANSACTION_ROLLBACK => b"HY000",
-            ErrorKind::ER_SLAVE_HEARTBEAT_FAILURE => b"HY000",
-            ErrorKind::ER_SLAVE_HEARTBEAT_VALUE_OUT_OF_RANGE => b"HY000",
-            ErrorKind::ER_NDB_REPLICATION_SCHEMA_ERROR => b"HY000",
-            ErrorKind::ER_CONFLICT_FN_PARSE_ERROR => b"HY000",
-            ErrorKind::ER_EXCEPTIONS_WRITE_ERROR => b"HY000",
-            ErrorKind::ER_TOO_LONG_TABLE_COMMENT => b"HY000",
-            ErrorKind::ER_TOO_LONG_FIELD_COMMENT => b"HY000",
-            ErrorKind::ER_FUNC_INEXISTENT_NAME_COLLISION => b"42000",
-            ErrorKind::ER_DATABASE_NAME => b"HY000",
-            ErrorKind::ER_TABLE_NAME => b"HY000",
-            ErrorKind::ER_PARTITION_NAME => b"HY000",
-            ErrorKind::ER_SUBPARTITION_NAME => b"HY000",
-            ErrorKind::ER_TEMPORARY_NAME => b"HY000",
-            ErrorKind::ER_RENAMED_NAME => b"HY000",
-            ErrorKind::ER_TOO_MANY_CONCURRENT_TRXS => b"HY000",
-            ErrorKind::WARN_NON_ASCII_SEPARATOR_NOT_IMPLEMENTED => b"HY000",
-            ErrorKind::ER_DEBUG_SYNC_TIMEOUT => b"HY000",
-            ErrorKind::ER_DEBUG_SYNC_HIT_LIMIT => b"HY000",
-            ErrorKind::ER_DUP_SIGNAL_SET => b"42000",
-            ErrorKind::ER_SIGNAL_WARN => b"01000",
-            ErrorKind::ER_SIGNAL_NOT_FOUND => b"02000",
-            ErrorKind::ER_SIGNAL_EXCEPTION => b"HY000",
-            ErrorKind::ER_RESIGNAL_WITHOUT_ACTIVE_HANDLER => b"0K000",
-            ErrorKind::ER_SIGNAL_BAD_CONDITION_TYPE => b"HY000",
-            ErrorKind::WARN_COND_ITEM_TRUNCATED => b"HY000",
-            ErrorKind::ER_COND_ITEM_TOO_LONG => b"HY000",
-            ErrorKind::ER_UNKNOWN_LOCALE => b"HY000",
-            ErrorKind::ER_SLAVE_IGNORE_SERVER_IDS => b"HY000",
-            ErrorKind::ER_QUERY_CACHE_DISABLED => b"HY000",
-            ErrorKind::ER_SAME_NAME_PARTITION_FIELD => b"HY000",
-            ErrorKind::ER_PARTITION_COLUMN_LIST_ERROR => b"HY000",
-            ErrorKind::ER_WRONG_TYPE_COLUMN_VALUE_ERROR => b"HY000",
-            ErrorKind::ER_TOO_MANY_PARTITION_FUNC_FIELDS_ERROR => b"HY000",
-            ErrorKind::ER_MAXVALUE_IN_VALUES_IN => b"HY000",
-            ErrorKind::ER_TOO_MANY_VALUES_ERROR => b"HY000",
-            ErrorKind::ER_ROW_SINGLE_PARTITION_FIELD_ERROR => b"HY000",
-            ErrorKind::ER_FIELD_TYPE_NOT_ALLOWED_AS_PARTITION_FIELD => b"HY000",
-            ErrorKind::ER_PARTITION_FIELDS_TOO_LONG => b"HY000",
-            ErrorKind::ER_BINLOG_ROW_ENGINE_AND_STMT_ENGINE => b"HY000",
-            ErrorKind::ER_BINLOG_ROW_MODE_AND_STMT_ENGINE => b"HY000",
-            ErrorKind::ER_BINLOG_UNSAFE_AND_STMT_ENGINE => b"HY000",
-            ErrorKind::ER_BINLOG_ROW_INJECTION_AND_STMT_ENGINE => b"HY000",
-            ErrorKind::ER_BINLOG_STMT_MODE_AND_ROW_ENGINE => b"HY000",
-            ErrorKind::ER_BINLOG_ROW_INJECTION_AND_STMT_MODE => b"HY000",
-            ErrorKind::ER_BINLOG_MULTIPLE_ENGINES_AND_SELF_LOGGING_ENGINE => b"HY000",
-            ErrorKind::ER_BINLOG_UNSAFE_LIMIT => b"HY000",
-            ErrorKind::ER_BINLOG_UNSAFE_INSERT_DELAYED => b"HY000",
-            ErrorKind::ER_BINLOG_UNSAFE_SYSTEM_TABLE => b"HY000",
-            ErrorKind::ER_BINLOG_UNSAFE_AUTOINC_COLUMNS => b"HY000",
-            ErrorKind::ER_BINLOG_UNSAFE_UDF => b"HY000",
-            ErrorKind::ER_BINLOG_UNSAFE_SYSTEM_VARIABLE => b"HY000",
-            ErrorKind::ER_BINLOG_UNSAFE_SYSTEM_FUNCTION => b"HY000",
-            ErrorKind::ER_BINLOG_UNSAFE_NONTRANS_AFTER_TRANS => b"HY000",
-            ErrorKind::ER_MESSAGE_AND_STATEMENT => b"HY000",
-            ErrorKind::ER_SLAVE_CONVERSION_FAILED => b"HY000",
-            ErrorKind::ER_SLAVE_CANT_CREATE_CONVERSION => b"HY000",
-            ErrorKind::ER_INSIDE_TRANSACTION_PREVENTS_SWITCH_BINLOG_FORMAT => b"HY000",
-            ErrorKind::ER_PATH_LENGTH => b"HY000",
-            ErrorKind::ER_WARN_DEPRECATED_SYNTAX_NO_REPLACEMENT => b"HY000",
-            ErrorKind::ER_WRONG_NATIVE_TABLE_STRUCTURE => b"HY000",
-            ErrorKind::ER_WRONG_PERFSCHEMA_USAGE => b"HY000",
-            ErrorKind::ER_WARN_I_S_SKIPPED_TABLE => b"HY000",
-            ErrorKind::ER_INSIDE_TRANSACTION_PREVENTS_SWITCH_BINLOG_DIRECT => b"HY000",
-            ErrorKind::ER_STORED_FUNCTION_PREVENTS_SWITCH_BINLOG_DIRECT => b"HY000",
-            ErrorKind::ER_SPATIAL_MUST_HAVE_GEOM_COL => b"42000",
-            ErrorKind::ER_TOO_LONG_INDEX_COMMENT => b"HY000",
-            ErrorKind::ER_LOCK_ABORTED => b"HY000",
-            ErrorKind::ER_DATA_OUT_OF_RANGE => b"22003",
-            ErrorKind::ER_WRONG_SPVAR_TYPE_IN_LIMIT => b"HY000",
-            ErrorKind::ER_BINLOG_UNSAFE_MULTIPLE_ENGINES_AND_SELF_LOGGING_ENGINE => b"HY000",
-            ErrorKind::ER_BINLOG_UNSAFE_MIXED_STATEMENT => b"HY000",
-            ErrorKind::ER_INSIDE_TRANSACTION_PREVENTS_SWITCH_SQL_LOG_BIN => b"HY000",
-            ErrorKind::ER_STORED_FUNCTION_PREVENTS_SWITCH_SQL_LOG_BIN => b"HY000",
-            ErrorKind::ER_FAILED_READ_FROM_PAR_FILE => b"HY000",
-            ErrorKind::ER_VALUES_IS_NOT_INT_TYPE_ERROR => b"HY000",
-            ErrorKind::ER_ACCESS_DENIED_NO_PASSWORD_ERROR => b"28000",
-            ErrorKind::ER_SET_PASSWORD_AUTH_PLUGIN => b"HY000",
-            ErrorKind::ER_GRANT_PLUGIN_USER_EXISTS => b"HY000",
-            ErrorKind::ER_TRUNCATE_ILLEGAL_FK => b"42000",
-            ErrorKind::ER_PLUGIN_IS_PERMANENT => b"HY000",
-            ErrorKind::ER_SLAVE_HEARTBEAT_VALUE_OUT_OF_RANGE_MIN => b"HY000",
-            ErrorKind::ER_SLAVE_HEARTBEAT_VALUE_OUT_OF_RANGE_MAX => b"HY000",
-            ErrorKind::ER_STMT_CACHE_FULL => b"HY000",
-            ErrorKind::ER_MULTI_UPDATE_KEY_CONFLICT => b"HY000",
-            ErrorKind::ER_TABLE_NEEDS_REBUILD => b"HY000",
-            ErrorKind::WARN_OPTION_BELOW_LIMIT => b"HY000",
-            ErrorKind::ER_INDEX_COLUMN_TOO_LONG => b"HY000",
-            ErrorKind::ER_ERROR_IN_TRIGGER_BODY => b"HY000",
-            ErrorKind::ER_ERROR_IN_UNKNOWN_TRIGGER_BODY => b"HY000",
-            ErrorKind::ER_INDEX_CORRUPT => b"HY000",
-            ErrorKind::ER_UNDO_RECORD_TOO_BIG => b"HY000",
-            ErrorKind::ER_BINLOG_UNSAFE_INSERT_IGNORE_SELECT => b"HY000",
-            ErrorKind::ER_BINLOG_UNSAFE_INSERT_SELECT_UPDATE => b"HY000",
-            ErrorKind::ER_BINLOG_UNSAFE_REPLACE_SELECT => b"HY000",
-            ErrorKind::ER_BINLOG_UNSAFE_CREATE_IGNORE_SELECT => b"HY000",
-            ErrorKind::ER_BINLOG_UNSAFE_CREATE_REPLACE_SELECT => b"HY000",
-            ErrorKind::ER_BINLOG_UNSAFE_UPDATE_IGNORE => b"HY000",
-            ErrorKind::ER_PLUGIN_NO_UNINSTALL => b"HY000",
-            ErrorKind::ER_PLUGIN_NO_INSTALL => b"HY000",
-            ErrorKind::ER_BINLOG_UNSAFE_WRITE_AUTOINC_SELECT => b"HY000",
-            ErrorKind::ER_BINLOG_UNSAFE_CREATE_SELECT_AUTOINC => b"HY000",
-            ErrorKind::ER_BINLOG_UNSAFE_INSERT_TWO_KEYS => b"HY000",
-            ErrorKind::ER_TABLE_IN_FK_CHECK => b"HY000",
-            ErrorKind::ER_UNSUPPORTED_ENGINE => b"HY000",
-            ErrorKind::ER_BINLOG_UNSAFE_AUTOINC_NOT_FIRST => b"HY000",
-            ErrorKind::ER_CANNOT_LOAD_FROM_TABLE_V2 => b"HY000",
-            ErrorKind::ER_MASTER_DELAY_VALUE_OUT_OF_RANGE => b"HY000",
-            ErrorKind::ER_ONLY_FD_AND_RBR_EVENTS_ALLOWED_IN_BINLOG_STATEMENT => b"HY000",
-            ErrorKind::ER_PARTITION_EXCHANGE_DIFFERENT_OPTION => b"HY000",
-            ErrorKind::ER_PARTITION_EXCHANGE_PART_TABLE => b"HY000",
-            ErrorKind::ER_PARTITION_EXCHANGE_TEMP_TABLE => b"HY000",
-            ErrorKind::ER_PARTITION_INSTEAD_OF_SUBPARTITION => b"HY000",
-            ErrorKind::ER_UNKNOWN_PARTITION => b"HY000",
-            ErrorKind::ER_TABLES_DIFFERENT_METADATA => b"HY000",
-            ErrorKind::ER_ROW_DOES_NOT_MATCH_PARTITION => b"HY000",
-            ErrorKind::ER_BINLOG_CACHE_SIZE_GREATER_THAN_MAX => b"HY000",
-            ErrorKind::ER_WARN_INDEX_NOT_APPLICABLE => b"HY000",
-            ErrorKind::ER_PARTITION_EXCHANGE_FOREIGN_KEY => b"HY000",
-            ErrorKind::ER_NO_SUCH_KEY_VALUE => b"HY000",
-            ErrorKind::ER_RPL_INFO_DATA_TOO_LONG => b"HY000",
-            ErrorKind::ER_NETWORK_READ_EVENT_CHECKSUM_FAILURE => b"HY000",
-            ErrorKind::ER_BINLOG_READ_EVENT_CHECKSUM_FAILURE => b"HY000",
-            ErrorKind::ER_BINLOG_STMT_CACHE_SIZE_GREATER_THAN_MAX => b"HY000",
-            ErrorKind::ER_CANT_UPDATE_TABLE_IN_CREATE_TABLE_SELECT => b"HY000",
-            ErrorKind::ER_PARTITION_CLAUSE_ON_NONPARTITIONED => b"HY000",
-            ErrorKind::ER_ROW_DOES_NOT_MATCH_GIVEN_PARTITION_SET => b"HY000",
-            ErrorKind::ER_NO_SUCH_PARTITION_UNUSED => b"HY000",
-            ErrorKind::ER_CHANGE_RPL_INFO_REPOSITORY_FAILURE => b"HY000",
-            ErrorKind::ER_WARNING_NOT_COMPLETE_ROLLBACK_WITH_CREATED_TEMP_TABLE => b"HY000",
-            ErrorKind::ER_WARNING_NOT_COMPLETE_ROLLBACK_WITH_DROPPED_TEMP_TABLE => b"HY000",
-            ErrorKind::ER_MTS_FEATURE_IS_NOT_SUPPORTED => b"HY000",
-            ErrorKind::ER_MTS_UPDATED_DBS_GREATER_MAX => b"HY000",
-            ErrorKind::ER_MTS_CANT_PARALLEL => b"HY000",
-            ErrorKind::ER_MTS_INCONSISTENT_DATA => b"HY000",
-            ErrorKind::ER_FULLTEXT_NOT_SUPPORTED_WITH_PARTITIONING => b"HY000",
             ErrorKind::ER_DA_INVALID_CONDITION_NUMBER => b"35000",
-            ErrorKind::ER_INSECURE_PLAIN_TEXT => b"HY000",
-            ErrorKind::ER_INSECURE_CHANGE_MASTER => b"HY000",
-            ErrorKind::ER_FOREIGN_DUPLICATE_KEY_WITH_CHILD_INFO => b"23000",
-            ErrorKind::ER_FOREIGN_DUPLICATE_KEY_WITHOUT_CHILD_INFO => b"23000",
-            ErrorKind::ER_SQLTHREAD_WITH_SECURE_SLAVE => b"HY000",
-            ErrorKind::ER_TABLE_HAS_NO_FT => b"HY000",
-            ErrorKind::ER_VARIABLE_NOT_SETTABLE_IN_SF_OR_TRIGGER => b"HY000",
-            ErrorKind::ER_VARIABLE_NOT_SETTABLE_IN_TRANSACTION => b"HY000",
-            ErrorKind::ER_GTID_NEXT_IS_NOT_IN_GTID_NEXT_LIST => b"HY000",
-            ErrorKind::ER_CANT_CHANGE_GTID_NEXT_IN_TRANSACTION_WHEN_GTID_NEXT_LIST_IS_NULL => {
-                b"HY000"
-            }
-            ErrorKind::ER_SET_STATEMENT_CANNOT_INVOKE_FUNCTION => b"HY000",
-            ErrorKind::ER_GTID_NEXT_CANT_BE_AUTOMATIC_IF_GTID_NEXT_LIST_IS_NON_NULL => b"HY000",
-            ErrorKind::ER_SKIPPING_LOGGED_TRANSACTION => b"HY000",
-            ErrorKind::ER_MALFORMED_GTID_SET_SPECIFICATION => b"HY000",
-            ErrorKind::ER_MALFORMED_GTID_SET_ENCODING => b"HY000",
-            ErrorKind::ER_MALFORMED_GTID_SPECIFICATION => b"HY000",
-            ErrorKind::ER_GNO_EXHAUSTED => b"HY000",
-            ErrorKind::ER_BAD_SLAVE_AUTO_POSITION => b"HY000",
-            ErrorKind::ER_AUTO_POSITION_REQUIRES_GTID_MODE_ON => b"HY000",
-            ErrorKind::ER_CANT_DO_IMPLICIT_COMMIT_IN_TRX_WHEN_GTID_NEXT_IS_SET => b"HY000",
-            ErrorKind::ER_GTID_MODE_2_OR_3_REQUIRES_DISABLE_GTID_UNSAFE_STATEMENTS_ON => b"HY000",
-            ErrorKind::ER_GTID_MODE_REQUIRES_BINLOG => b"HY000",
-            ErrorKind::ER_CANT_SET_GTID_NEXT_TO_GTID_WHEN_GTID_MODE_IS_OFF => b"HY000",
-            ErrorKind::ER_CANT_SET_GTID_NEXT_TO_ANONYMOUS_WHEN_GTID_MODE_IS_ON => b"HY000",
-            ErrorKind::ER_CANT_SET_GTID_NEXT_LIST_TO_NON_NULL_WHEN_GTID_MODE_IS_OFF => b"HY000",
-            ErrorKind::ER_FOUND_GTID_EVENT_WHEN_GTID_MODE_IS_OFF => b"HY000",
-            ErrorKind::ER_GTID_UNSAFE_NON_TRANSACTIONAL_TABLE => b"HY000",
-            ErrorKind::ER_GTID_UNSAFE_CREATE_SELECT => b"HY000",
-            ErrorKind::ER_GTID_UNSAFE_CREATE_DROP_TEMPORARY_TABLE_IN_TRANSACTION => b"HY000",
-            ErrorKind::ER_GTID_MODE_CAN_ONLY_CHANGE_ONE_STEP_AT_A_TIME => b"HY000",
-            ErrorKind::ER_MASTER_HAS_PURGED_REQUIRED_GTIDS => b"HY000",
-            ErrorKind::ER_CANT_SET_GTID_NEXT_WHEN_OWNING_GTID => b"HY000",
-            ErrorKind::ER_UNKNOWN_EXPLAIN_FORMAT => b"HY000",
+            ErrorKind::ER_TABLE_EXISTS_ERROR => b"42S01",
+            ErrorKind::ER_SP_FETCH_NO_DATA | ErrorKind::ER_SIGNAL_NOT_FOUND => b"02000",
+            ErrorKind::ER_BAD_TABLE_ERROR
+            | ErrorKind::ER_UNKNOWN_TABLE
+            | ErrorKind::ER_NO_SUCH_TABLE => b"42S02",
+            ErrorKind::ER_TRUNCATED_WRONG_VALUE | ErrorKind::ER_ILLEGAL_VALUE_FOR_TYPE => b"22007",
+            ErrorKind::ER_XA_RBTIMEOUT => b"XA106",
+            ErrorKind::ER_XAER_DUPID => b"XAE08",
+            ErrorKind::ER_XA_RBDEADLOCK => b"XA102",
+            ErrorKind::ER_XAER_OUTSIDE => b"XAE09",
+            ErrorKind::ER_DATETIME_FUNCTION_OVERFLOW => b"22008",
+            ErrorKind::ER_WARN_DATA_OUT_OF_RANGE
+            | ErrorKind::ER_CANT_CREATE_GEOMETRY_OBJECT
+            | ErrorKind::ER_DATA_OUT_OF_RANGE => b"22003",
+            ErrorKind::ER_CANT_DO_THIS_DURING_AN_TRANSACTION
+            | ErrorKind::ER_READ_ONLY_TRANSACTION => b"25000",
+            ErrorKind::ER_OUTOFMEMORY | ErrorKind::ER_OUT_OF_SORTMEMORY => b"HY001",
+            ErrorKind::ER_SP_NO_RECURSIVE_CREATE => b"2F003",
+            ErrorKind::ER_DUP_KEY
+            | ErrorKind::ER_BAD_NULL_ERROR
+            | ErrorKind::ER_NON_UNIQ_ERROR
+            | ErrorKind::ER_DUP_ENTRY
+            | ErrorKind::ER_DUP_UNIQUE
+            | ErrorKind::ER_NO_REFERENCED_ROW
+            | ErrorKind::ER_ROW_IS_REFERENCED
+            | ErrorKind::ER_ROW_IS_REFERENCED_2
+            | ErrorKind::ER_NO_REFERENCED_ROW_2
+            | ErrorKind::ER_FOREIGN_DUPLICATE_KEY
+            | ErrorKind::ER_DUP_ENTRY_WITH_KEY_NAME
+            | ErrorKind::ER_FOREIGN_DUPLICATE_KEY_WITH_CHILD_INFO
+            | ErrorKind::ER_FOREIGN_DUPLICATE_KEY_WITHOUT_CHILD_INFO
+            | ErrorKind::ER_DUP_UNKNOWN_IN_INDEX => b"23000",
+            ErrorKind::ER_DUP_FIELDNAME => b"42S21",
+            ErrorKind::ER_SELECT_REDUCED
+            | ErrorKind::ER_WARN_TOO_FEW_RECORDS
+            | ErrorKind::ER_WARN_TOO_MANY_RECORDS
+            | ErrorKind::WARN_DATA_TRUNCATED
+            | ErrorKind::ER_SP_UNINIT_VAR
+            | ErrorKind::ER_SIGNAL_WARN => b"01000",
+            ErrorKind::ER_XAER_RMERR => b"XAE03",
+            ErrorKind::ER_XAER_RMFAIL => b"XAE07",
+            ErrorKind::ER_NO_SUCH_INDEX => b"42S12",
             ErrorKind::ER_CANT_EXECUTE_IN_READ_ONLY_TRANSACTION => b"25006",
-            ErrorKind::ER_TOO_LONG_TABLE_PARTITION_COMMENT => b"HY000",
-            ErrorKind::ER_SLAVE_CONFIGURATION => b"HY000",
-            ErrorKind::ER_INNODB_FT_LIMIT => b"HY000",
-            ErrorKind::ER_INNODB_NO_FT_TEMP_TABLE => b"HY000",
-            ErrorKind::ER_INNODB_FT_WRONG_DOCID_COLUMN => b"HY000",
-            ErrorKind::ER_INNODB_FT_WRONG_DOCID_INDEX => b"HY000",
-            ErrorKind::ER_INNODB_ONLINE_LOG_TOO_BIG => b"HY000",
-            ErrorKind::ER_UNKNOWN_ALTER_ALGORITHM => b"HY000",
-            ErrorKind::ER_UNKNOWN_ALTER_LOCK => b"HY000",
-            ErrorKind::ER_MTS_CHANGE_MASTER_CANT_RUN_WITH_GAPS => b"HY000",
-            ErrorKind::ER_MTS_RECOVERY_FAILURE => b"HY000",
-            ErrorKind::ER_MTS_RESET_WORKERS => b"HY000",
-            ErrorKind::ER_COL_COUNT_DOESNT_MATCH_CORRUPTED_V2 => b"HY000",
-            ErrorKind::ER_SLAVE_SILENT_RETRY_TRANSACTION => b"HY000",
-            ErrorKind::ER_DISCARD_FK_CHECKS_RUNNING => b"HY000",
-            ErrorKind::ER_TABLE_SCHEMA_MISMATCH => b"HY000",
-            ErrorKind::ER_TABLE_IN_SYSTEM_TABLESPACE => b"HY000",
-            ErrorKind::ER_IO_READ_ERROR => b"HY000",
-            ErrorKind::ER_IO_WRITE_ERROR => b"HY000",
-            ErrorKind::ER_TABLESPACE_MISSING => b"HY000",
-            ErrorKind::ER_TABLESPACE_EXISTS => b"HY000",
-            ErrorKind::ER_TABLESPACE_DISCARDED => b"HY000",
-            ErrorKind::ER_INTERNAL_ERROR => b"HY000",
-            ErrorKind::ER_INNODB_IMPORT_ERROR => b"HY000",
-            ErrorKind::ER_INNODB_INDEX_CORRUPT => b"HY000",
-            ErrorKind::ER_INVALID_YEAR_COLUMN_LENGTH => b"HY000",
-            ErrorKind::ER_NOT_VALID_PASSWORD => b"HY000",
-            ErrorKind::ER_MUST_CHANGE_PASSWORD => b"HY000",
-            ErrorKind::ER_FK_NO_INDEX_CHILD => b"HY000",
-            ErrorKind::ER_FK_NO_INDEX_PARENT => b"HY000",
-            ErrorKind::ER_FK_FAIL_ADD_SYSTEM => b"HY000",
-            ErrorKind::ER_FK_CANNOT_OPEN_PARENT => b"HY000",
-            ErrorKind::ER_FK_INCORRECT_OPTION => b"HY000",
-            ErrorKind::ER_FK_DUP_NAME => b"HY000",
-            ErrorKind::ER_PASSWORD_FORMAT => b"HY000",
-            ErrorKind::ER_FK_COLUMN_CANNOT_DROP => b"HY000",
-            ErrorKind::ER_FK_COLUMN_CANNOT_DROP_CHILD => b"HY000",
-            ErrorKind::ER_FK_COLUMN_NOT_NULL => b"HY000",
-            ErrorKind::ER_DUP_INDEX => b"HY000",
-            ErrorKind::ER_FK_COLUMN_CANNOT_CHANGE => b"HY000",
-            ErrorKind::ER_FK_COLUMN_CANNOT_CHANGE_CHILD => b"HY000",
-            ErrorKind::ER_FK_CANNOT_DELETE_PARENT => b"HY000",
-            ErrorKind::ER_MALFORMED_PACKET => b"HY000",
-            ErrorKind::ER_READ_ONLY_MODE => b"HY000",
-            ErrorKind::ER_GTID_NEXT_TYPE_UNDEFINED_GROUP => b"HY000",
-            ErrorKind::ER_VARIABLE_NOT_SETTABLE_IN_SP => b"HY000",
-            ErrorKind::ER_CANT_SET_GTID_PURGED_WHEN_GTID_MODE_IS_OFF => b"HY000",
-            ErrorKind::ER_CANT_SET_GTID_PURGED_WHEN_GTID_EXECUTED_IS_NOT_EMPTY => b"HY000",
-            ErrorKind::ER_CANT_SET_GTID_PURGED_WHEN_OWNED_GTIDS_IS_NOT_EMPTY => b"HY000",
-            ErrorKind::ER_GTID_PURGED_WAS_CHANGED => b"HY000",
-            ErrorKind::ER_GTID_EXECUTED_WAS_CHANGED => b"HY000",
-            ErrorKind::ER_BINLOG_STMT_MODE_AND_NO_REPL_TABLES => b"HY000",
-            ErrorKind::ER_ALTER_OPERATION_NOT_SUPPORTED => b"0A000",
-            ErrorKind::ER_ALTER_OPERATION_NOT_SUPPORTED_REASON => b"0A000",
-            ErrorKind::ER_ALTER_OPERATION_NOT_SUPPORTED_REASON_COPY => b"HY000",
-            ErrorKind::ER_ALTER_OPERATION_NOT_SUPPORTED_REASON_PARTITION => b"HY000",
-            ErrorKind::ER_ALTER_OPERATION_NOT_SUPPORTED_REASON_FK_RENAME => b"HY000",
-            ErrorKind::ER_ALTER_OPERATION_NOT_SUPPORTED_REASON_COLUMN_TYPE => b"HY000",
-            ErrorKind::ER_ALTER_OPERATION_NOT_SUPPORTED_REASON_FK_CHECK => b"HY000",
-            ErrorKind::ER_ALTER_OPERATION_NOT_SUPPORTED_REASON_IGNORE => b"HY000",
-            ErrorKind::ER_ALTER_OPERATION_NOT_SUPPORTED_REASON_NOPK => b"HY000",
-            ErrorKind::ER_ALTER_OPERATION_NOT_SUPPORTED_REASON_AUTOINC => b"HY000",
-            ErrorKind::ER_ALTER_OPERATION_NOT_SUPPORTED_REASON_HIDDEN_FTS => b"HY000",
-            ErrorKind::ER_ALTER_OPERATION_NOT_SUPPORTED_REASON_CHANGE_FTS => b"HY000",
-            ErrorKind::ER_ALTER_OPERATION_NOT_SUPPORTED_REASON_FTS => b"HY000",
-            ErrorKind::ER_SQL_SLAVE_SKIP_COUNTER_NOT_SETTABLE_IN_GTID_MODE => b"HY000",
-            ErrorKind::ER_DUP_UNKNOWN_IN_INDEX => b"23000",
-            ErrorKind::ER_IDENT_CAUSES_TOO_LONG_PATH => b"HY000",
-            ErrorKind::ER_ALTER_OPERATION_NOT_SUPPORTED_REASON_NOT_NULL => b"HY000",
-            ErrorKind::ER_MUST_CHANGE_PASSWORD_LOGIN => b"HY000",
-            ErrorKind::ER_ROW_IN_WRONG_PARTITION => b"HY000",
-            ErrorKind::ER_MTS_EVENT_BIGGER_PENDING_JOBS_SIZE_MAX => b"HY000",
-            ErrorKind::ER_INNODB_NO_FT_USES_PARSER => b"HY000",
-            ErrorKind::ER_BINLOG_LOGICAL_CORRUPTION => b"HY000",
-            ErrorKind::ER_WARN_PURGE_LOG_IN_USE => b"HY000",
-            ErrorKind::ER_WARN_PURGE_LOG_IS_ACTIVE => b"HY000",
-            ErrorKind::ER_AUTO_INCREMENT_CONFLICT => b"HY000",
-            ErrorKind::WARN_ON_BLOCKHOLE_IN_RBR => b"HY000",
-            ErrorKind::ER_SLAVE_MI_INIT_REPOSITORY => b"HY000",
-            ErrorKind::ER_SLAVE_RLI_INIT_REPOSITORY => b"HY000",
-            ErrorKind::ER_ACCESS_DENIED_CHANGE_USER_ERROR => b"28000",
-            ErrorKind::ER_INNODB_READ_ONLY => b"HY000",
-            ErrorKind::ER_STOP_SLAVE_SQL_THREAD_TIMEOUT => b"HY000",
-            ErrorKind::ER_STOP_SLAVE_IO_THREAD_TIMEOUT => b"HY000",
-            ErrorKind::ER_TABLE_CORRUPT => b"HY000",
-            ErrorKind::ER_TEMP_FILE_WRITE_FAILURE => b"HY000",
-            ErrorKind::ER_INNODB_FT_AUX_NOT_HEX_ID => b"HY000",
-            ErrorKind::ER_OLD_TEMPORALS_UPGRADED => b"HY000",
-            ErrorKind::ER_INNODB_FORCED_RECOVERY => b"HY000",
-            ErrorKind::ER_AES_INVALID_IV => b"HY000",
-            ErrorKind::ER_PLUGIN_CANNOT_BE_UNINSTALLED => b"HY000",
-            ErrorKind::ER_GTID_UNSAFE_BINLOG_SPLITTABLE_STATEMENT_AND_GTID_GROUP => b"HY000",
-            ErrorKind::ER_SLAVE_HAS_MORE_GTIDS_THAN_MASTER => b"HY000",
+            ErrorKind::ER_SP_BADSELECT
+            | ErrorKind::ER_SP_BADSTATEMENT
+            | ErrorKind::ER_SP_SUBSELECT_NYI
+            | ErrorKind::ER_STMT_NOT_ALLOWED_IN_SF_OR_TRG
+            | ErrorKind::ER_SP_NO_RETSET
+            | ErrorKind::ER_ALTER_OPERATION_NOT_SUPPORTED
+            | ErrorKind::ER_ALTER_OPERATION_NOT_SUPPORTED_REASON => b"0A000",
+            ErrorKind::ER_WRONG_VALUE_COUNT | ErrorKind::ER_WRONG_VALUE_COUNT_ON_ROW => b"21S01",
+            ErrorKind::ER_ACCESS_DENIED_ERROR
+            | ErrorKind::ER_ACCESS_DENIED_NO_PASSWORD_ERROR
+            | ErrorKind::ER_ACCESS_DENIED_CHANGE_USER_ERROR => b"28000",
+            ErrorKind::ER_SP_CURSOR_ALREADY_OPEN | ErrorKind::ER_SP_CURSOR_NOT_OPEN => b"24000",
+            ErrorKind::ER_QUERY_INTERRUPTED => b"70100",
+            ErrorKind::ER_SP_NORETURNEND => b"2F005",
+            ErrorKind::ER_CON_COUNT_ERROR | ErrorKind::ER_NOT_SUPPORTED_AUTH_MODE => b"08004",
+            ErrorKind::ER_DBACCESS_DENIED_ERROR
+            | ErrorKind::ER_BAD_DB_ERROR
+            | ErrorKind::ER_WRONG_FIELD_WITH_GROUP
+            | ErrorKind::ER_WRONG_GROUP_FIELD
+            | ErrorKind::ER_WRONG_SUM_SELECT
+            | ErrorKind::ER_TOO_LONG_IDENT
+            | ErrorKind::ER_DUP_KEYNAME
+            | ErrorKind::ER_WRONG_FIELD_SPEC
+            | ErrorKind::ER_PARSE_ERROR
+            | ErrorKind::ER_EMPTY_QUERY
+            | ErrorKind::ER_NONUNIQ_TABLE
+            | ErrorKind::ER_INVALID_DEFAULT
+            | ErrorKind::ER_MULTIPLE_PRI_KEY
+            | ErrorKind::ER_TOO_MANY_KEYS
+            | ErrorKind::ER_TOO_MANY_KEY_PARTS
+            | ErrorKind::ER_TOO_LONG_KEY
+            | ErrorKind::ER_KEY_COLUMN_DOES_NOT_EXITS
+            | ErrorKind::ER_BLOB_USED_AS_KEY
+            | ErrorKind::ER_TOO_BIG_FIELDLENGTH
+            | ErrorKind::ER_WRONG_AUTO_KEY
+            | ErrorKind::ER_WRONG_FIELD_TERMINATORS
+            | ErrorKind::ER_BLOBS_AND_NO_TERMINATED
+            | ErrorKind::ER_CANT_REMOVE_ALL_FIELDS
+            | ErrorKind::ER_CANT_DROP_FIELD_OR_KEY
+            | ErrorKind::ER_BLOB_CANT_HAVE_DEFAULT
+            | ErrorKind::ER_WRONG_DB_NAME
+            | ErrorKind::ER_WRONG_TABLE_NAME
+            | ErrorKind::ER_TOO_BIG_SELECT
+            | ErrorKind::ER_UNKNOWN_PROCEDURE
+            | ErrorKind::ER_WRONG_PARAMCOUNT_TO_PROCEDURE
+            | ErrorKind::ER_FIELD_SPECIFIED_TWICE
+            | ErrorKind::ER_UNSUPPORTED_EXTENSION
+            | ErrorKind::ER_TABLE_MUST_HAVE_COLUMNS
+            | ErrorKind::ER_UNKNOWN_CHARACTER_SET
+            | ErrorKind::ER_TOO_BIG_ROWSIZE
+            | ErrorKind::ER_WRONG_OUTER_JOIN
+            | ErrorKind::ER_NULL_COLUMN_IN_INDEX
+            | ErrorKind::ER_PASSWORD_ANONYMOUS_USER
+            | ErrorKind::ER_PASSWORD_NOT_ALLOWED
+            | ErrorKind::ER_PASSWORD_NO_MATCH
+            | ErrorKind::ER_REGEXP_ERROR
+            | ErrorKind::ER_MIX_OF_GROUP_FUNC_AND_FIELDS
+            | ErrorKind::ER_NONEXISTING_GRANT
+            | ErrorKind::ER_TABLEACCESS_DENIED_ERROR
+            | ErrorKind::ER_COLUMNACCESS_DENIED_ERROR
+            | ErrorKind::ER_ILLEGAL_GRANT_FOR_TABLE
+            | ErrorKind::ER_GRANT_WRONG_HOST_OR_USER
+            | ErrorKind::ER_NONEXISTING_TABLE_GRANT
+            | ErrorKind::ER_NOT_ALLOWED_COMMAND
+            | ErrorKind::ER_SYNTAX_ERROR
+            | ErrorKind::ER_TOO_LONG_STRING
+            | ErrorKind::ER_TABLE_CANT_HANDLE_BLOB
+            | ErrorKind::ER_TABLE_CANT_HANDLE_AUTO_INCREMENT
+            | ErrorKind::ER_WRONG_COLUMN_NAME
+            | ErrorKind::ER_WRONG_KEY_COLUMN
+            | ErrorKind::ER_BLOB_KEY_WITHOUT_LENGTH
+            | ErrorKind::ER_PRIMARY_CANT_HAVE_NULL
+            | ErrorKind::ER_TOO_MANY_ROWS
+            | ErrorKind::ER_REQUIRES_PRIMARY_KEY
+            | ErrorKind::ER_KEY_DOES_NOT_EXITS
+            | ErrorKind::ER_CHECK_NO_SUCH_TABLE
+            | ErrorKind::ER_CHECK_NOT_IMPLEMENTED
+            | ErrorKind::ER_TOO_MANY_USER_CONNECTIONS
+            | ErrorKind::ER_NO_PERMISSION_TO_CREATE_USER
+            | ErrorKind::ER_USER_LIMIT_REACHED
+            | ErrorKind::ER_SPECIFIC_ACCESS_DENIED_ERROR
+            | ErrorKind::ER_NO_DEFAULT
+            | ErrorKind::ER_WRONG_VALUE_FOR_VAR
+            | ErrorKind::ER_WRONG_TYPE_FOR_VAR
+            | ErrorKind::ER_CANT_USE_OPTION_HERE
+            | ErrorKind::ER_NOT_SUPPORTED_YET
+            | ErrorKind::ER_WRONG_FK_DEF
+            | ErrorKind::ER_DERIVED_MUST_HAVE_ALIAS
+            | ErrorKind::ER_TABLENAME_NOT_ALLOWED_HERE
+            | ErrorKind::ER_SPATIAL_CANT_HAVE_NULL
+            | ErrorKind::ER_COLLATION_CHARSET_MISMATCH
+            | ErrorKind::ER_WRONG_NAME_FOR_INDEX
+            | ErrorKind::ER_WRONG_NAME_FOR_CATALOG
+            | ErrorKind::ER_UNKNOWN_STORAGE_ENGINE
+            | ErrorKind::ER_SP_ALREADY_EXISTS
+            | ErrorKind::ER_SP_DOES_NOT_EXIST
+            | ErrorKind::ER_SP_LILABEL_MISMATCH
+            | ErrorKind::ER_SP_LABEL_REDEFINE
+            | ErrorKind::ER_SP_LABEL_MISMATCH
+            | ErrorKind::ER_SP_BADRETURN
+            | ErrorKind::ER_UPDATE_LOG_DEPRECATED_IGNORED
+            | ErrorKind::ER_UPDATE_LOG_DEPRECATED_TRANSLATED
+            | ErrorKind::ER_SP_WRONG_NO_OF_ARGS
+            | ErrorKind::ER_SP_COND_MISMATCH
+            | ErrorKind::ER_SP_NORETURN
+            | ErrorKind::ER_SP_BAD_CURSOR_QUERY
+            | ErrorKind::ER_SP_BAD_CURSOR_SELECT
+            | ErrorKind::ER_SP_CURSOR_MISMATCH
+            | ErrorKind::ER_SP_UNDECLARED_VAR
+            | ErrorKind::ER_SP_DUP_PARAM
+            | ErrorKind::ER_SP_DUP_VAR
+            | ErrorKind::ER_SP_DUP_COND
+            | ErrorKind::ER_SP_DUP_CURS
+            | ErrorKind::ER_SP_VARCOND_AFTER_CURSHNDLR
+            | ErrorKind::ER_SP_CURSOR_AFTER_HANDLER
+            | ErrorKind::ER_PROCACCESS_DENIED_ERROR
+            | ErrorKind::ER_NONEXISTING_PROC_GRANT
+            | ErrorKind::ER_SP_BAD_SQLSTATE
+            | ErrorKind::ER_CANT_CREATE_USER_WITH_GRANT
+            | ErrorKind::ER_SP_DUP_HANDLER
+            | ErrorKind::ER_SP_NOT_VAR_ARG
+            | ErrorKind::ER_TOO_BIG_SCALE
+            | ErrorKind::ER_TOO_BIG_PRECISION
+            | ErrorKind::ER_M_BIGGER_THAN_D
+            | ErrorKind::ER_TOO_LONG_BODY
+            | ErrorKind::ER_TOO_BIG_DISPLAYWIDTH
+            | ErrorKind::ER_SP_BAD_VAR_SHADOW
+            | ErrorKind::ER_SP_WRONG_NAME
+            | ErrorKind::ER_SP_NO_AGGREGATE
+            | ErrorKind::ER_MAX_PREPARED_STMT_COUNT_REACHED
+            | ErrorKind::ER_NON_GROUPING_FIELD_USED
+            | ErrorKind::ER_WRONG_PARAMCOUNT_TO_NATIVE_FCT
+            | ErrorKind::ER_WRONG_PARAMETERS_TO_NATIVE_FCT
+            | ErrorKind::ER_WRONG_PARAMETERS_TO_STORED_FCT
+            | ErrorKind::ER_FUNC_INEXISTENT_NAME_COLLISION
+            | ErrorKind::ER_DUP_SIGNAL_SET
+            | ErrorKind::ER_SPATIAL_MUST_HAVE_GEOM_COL
+            | ErrorKind::ER_TRUNCATE_ILLEGAL_FK => b"42000",
+            ErrorKind::ER_RESIGNAL_WITHOUT_ACTIVE_HANDLER => b"0K000",
+            ErrorKind::ER_CANT_CHANGE_TX_ISOLATION => b"25001",
+            ErrorKind::ER_INVALID_USE_OF_NULL | ErrorKind::ER_WARN_NULL_TO_NOTNULL => b"22004",
+            ErrorKind::ER_SP_CASE_NOT_FOUND => b"20000",
+            ErrorKind::ER_DIVISION_BY_ZER => b"22012",
+            ErrorKind::ER_BAD_FIELD_ERROR | ErrorKind::ER_ILLEGAL_REFERENCE => b"42S22",
+            ErrorKind::ER_XAER_INVAL => b"XAE05",
+            ErrorKind::ER_HASHCHK
+            | ErrorKind::ER_NISAMCHK
+            | ErrorKind::ER_NO
+            | ErrorKind::ER_YES
+            | ErrorKind::ER_CANT_CREATE_FILE
+            | ErrorKind::ER_CANT_CREATE_TABLE
+            | ErrorKind::ER_CANT_CREATE_DB
+            | ErrorKind::ER_DB_CREATE_EXISTS
+            | ErrorKind::ER_DB_DROP_EXISTS
+            | ErrorKind::ER_DB_DROP_DELETE
+            | ErrorKind::ER_DB_DROP_RMDIR
+            | ErrorKind::ER_CANT_DELETE_FILE
+            | ErrorKind::ER_CANT_FIND_SYSTEM_REC
+            | ErrorKind::ER_CANT_GET_STAT
+            | ErrorKind::ER_CANT_GET_WD
+            | ErrorKind::ER_CANT_LOCK
+            | ErrorKind::ER_CANT_OPEN_FILE
+            | ErrorKind::ER_FILE_NOT_FOUND
+            | ErrorKind::ER_CANT_READ_DIR
+            | ErrorKind::ER_CANT_SET_WD
+            | ErrorKind::ER_CHECKREAD
+            | ErrorKind::ER_DISK_FULL
+            | ErrorKind::ER_ERROR_ON_CLOSE
+            | ErrorKind::ER_ERROR_ON_READ
+            | ErrorKind::ER_ERROR_ON_RENAME
+            | ErrorKind::ER_ERROR_ON_WRITE
+            | ErrorKind::ER_FILE_USED
+            | ErrorKind::ER_FILSORT_ABORT
+            | ErrorKind::ER_FORM_NOT_FOUND
+            | ErrorKind::ER_GET_ERRN
+            | ErrorKind::ER_ILLEGAL_HA
+            | ErrorKind::ER_KEY_NOT_FOUND
+            | ErrorKind::ER_NOT_FORM_FILE
+            | ErrorKind::ER_NOT_KEYFILE
+            | ErrorKind::ER_OLD_KEYFILE
+            | ErrorKind::ER_OPEN_AS_READONLY
+            | ErrorKind::ER_UNEXPECTED_EOF
+            | ErrorKind::ER_OUT_OF_RESOURCES
+            | ErrorKind::ER_READY
+            | ErrorKind::ER_NORMAL_SHUTDOWN
+            | ErrorKind::ER_GOT_SIGNAL
+            | ErrorKind::ER_SHUTDOWN_COMPLETE
+            | ErrorKind::ER_TEXTFILE_NOT_READABLE
+            | ErrorKind::ER_FILE_EXISTS_ERROR
+            | ErrorKind::ER_LOAD_INF
+            | ErrorKind::ER_ALTER_INF
+            | ErrorKind::ER_WRONG_SUB_KEY
+            | ErrorKind::ER_INSERT_INF
+            | ErrorKind::ER_UPDATE_TABLE_USED
+            | ErrorKind::ER_NO_SUCH_THREAD
+            | ErrorKind::ER_KILL_DENIED_ERROR
+            | ErrorKind::ER_NO_TABLES_USED
+            | ErrorKind::ER_TOO_BIG_SET
+            | ErrorKind::ER_NO_UNIQUE_LOGFILE
+            | ErrorKind::ER_TABLE_NOT_LOCKED_FOR_WRITE
+            | ErrorKind::ER_TABLE_NOT_LOCKED
+            | ErrorKind::ER_UNKNOWN_ERROR
+            | ErrorKind::ER_WRONG_PARAMETERS_TO_PROCEDURE
+            | ErrorKind::ER_INVALID_GROUP_FUNC_USE
+            | ErrorKind::ER_RECORD_FILE_FULL
+            | ErrorKind::ER_TOO_MANY_TABLES
+            | ErrorKind::ER_TOO_MANY_FIELDS
+            | ErrorKind::ER_STACK_OVERRUN
+            | ErrorKind::ER_CANT_FIND_UDF
+            | ErrorKind::ER_CANT_INITIALIZE_UDF
+            | ErrorKind::ER_UDF_NO_PATHS
+            | ErrorKind::ER_UDF_EXISTS
+            | ErrorKind::ER_CANT_OPEN_LIBRARY
+            | ErrorKind::ER_CANT_FIND_DL_ENTRY
+            | ErrorKind::ER_FUNCTION_NOT_DEFINED
+            | ErrorKind::ER_HOST_IS_BLOCKED
+            | ErrorKind::ER_HOST_NOT_PRIVILEGED
+            | ErrorKind::ER_UPDATE_INF
+            | ErrorKind::ER_CANT_CREATE_THREAD
+            | ErrorKind::ER_CANT_REOPEN_TABLE
+            | ErrorKind::ER_DELAYED_CANT_CHANGE_LOCK
+            | ErrorKind::ER_TOO_MANY_DELAYED_THREADS
+            | ErrorKind::ER_DELAYED_INSERT_TABLE_LOCKED
+            | ErrorKind::ER_WRONG_MRG_TABLE
+            | ErrorKind::ER_NO_RAID_COMPILED
+            | ErrorKind::ER_UPDATE_WITHOUT_KEY_IN_SAFE_MODE
+            | ErrorKind::ER_ERROR_DURING_COMMIT
+            | ErrorKind::ER_ERROR_DURING_ROLLBACK
+            | ErrorKind::ER_ERROR_DURING_FLUSH_LOGS
+            | ErrorKind::ER_ERROR_DURING_CHECKPOINT
+            | ErrorKind::ER_DUMP_NOT_IMPLEMENTED
+            | ErrorKind::ER_FLUSH_MASTER_BINLOG_CLOSED
+            | ErrorKind::ER_INDEX_REBUILD
+            | ErrorKind::ER_MASTER
+            | ErrorKind::ER_FT_MATCHING_KEY_NOT_FOUND
+            | ErrorKind::ER_LOCK_OR_ACTIVE_TRANSACTION
+            | ErrorKind::ER_UNKNOWN_SYSTEM_VARIABLE
+            | ErrorKind::ER_CRASHED_ON_USAGE
+            | ErrorKind::ER_CRASHED_ON_REPAIR
+            | ErrorKind::ER_WARNING_NOT_COMPLETE_ROLLBACK
+            | ErrorKind::ER_TRANS_CACHE_FULL
+            | ErrorKind::ER_SLAVE_MUST_STOP
+            | ErrorKind::ER_SLAVE_NOT_RUNNING
+            | ErrorKind::ER_BAD_SLAVE
+            | ErrorKind::ER_MASTER_INF
+            | ErrorKind::ER_SLAVE_THREAD
+            | ErrorKind::ER_SET_CONSTANTS_ONLY
+            | ErrorKind::ER_LOCK_WAIT_TIMEOUT
+            | ErrorKind::ER_LOCK_TABLE_FULL
+            | ErrorKind::ER_DROP_DB_WITH_READ_LOCK
+            | ErrorKind::ER_CREATE_DB_WITH_READ_LOCK
+            | ErrorKind::ER_WRONG_ARGUMENTS
+            | ErrorKind::ER_UNION_TABLES_IN_DIFFERENT_DIR
+            | ErrorKind::ER_TABLE_CANT_HANDLE_FT
+            | ErrorKind::ER_CANNOT_ADD_FOREIGN
+            | ErrorKind::ER_QUERY_ON_MASTER
+            | ErrorKind::ER_ERROR_WHEN_EXECUTING_COMMAND
+            | ErrorKind::ER_WRONG_USAGE
+            | ErrorKind::ER_CANT_UPDATE_WITH_READLOCK
+            | ErrorKind::ER_MIXING_NOT_ALLOWED
+            | ErrorKind::ER_DUP_ARGUMENT
+            | ErrorKind::ER_LOCAL_VARIABLE
+            | ErrorKind::ER_GLOBAL_VARIABLE
+            | ErrorKind::ER_VAR_CANT_BE_READ
+            | ErrorKind::ER_MASTER_FATAL_ERROR_READING_BINLOG
+            | ErrorKind::ER_SLAVE_IGNORED_TABLE
+            | ErrorKind::ER_INCORRECT_GLOBAL_LOCAL_VAR
+            | ErrorKind::ER_KEY_REF_DO_NOT_MATCH_TABLE_REF
+            | ErrorKind::ER_UNKNOWN_STMT_HANDLER
+            | ErrorKind::ER_CORRUPT_HELP_DB
+            | ErrorKind::ER_CYCLIC_REFERENCE
+            | ErrorKind::ER_AUTO_CONVERT
+            | ErrorKind::ER_SLAVE_WAS_RUNNING
+            | ErrorKind::ER_SLAVE_WAS_NOT_RUNNING
+            | ErrorKind::ER_TOO_BIG_FOR_UNCOMPRESS
+            | ErrorKind::ER_ZLIB_Z_MEM_ERROR
+            | ErrorKind::ER_ZLIB_Z_BUF_ERROR
+            | ErrorKind::ER_ZLIB_Z_DATA_ERROR
+            | ErrorKind::ER_CUT_VALUE_GROUP_CONCAT
+            | ErrorKind::ER_WARN_USING_OTHER_HANDLER
+            | ErrorKind::ER_CANT_AGGREGATE_2COLLATIONS
+            | ErrorKind::ER_DROP_USER
+            | ErrorKind::ER_REVOKE_GRANTS
+            | ErrorKind::ER_CANT_AGGREGATE_3COLLATIONS
+            | ErrorKind::ER_CANT_AGGREGATE_NCOLLATIONS
+            | ErrorKind::ER_VARIABLE_IS_NOT_STRUCT
+            | ErrorKind::ER_UNKNOWN_COLLATION
+            | ErrorKind::ER_SLAVE_IGNORED_SSL_PARAMS
+            | ErrorKind::ER_SERVER_IS_IN_SECURE_AUTH_MODE
+            | ErrorKind::ER_WARN_FIELD_RESOLVED
+            | ErrorKind::ER_BAD_SLAVE_UNTIL_COND
+            | ErrorKind::ER_MISSING_SKIP_SLAVE
+            | ErrorKind::ER_UNTIL_COND_IGNORED
+            | ErrorKind::ER_WARN_QC_RESIZE
+            | ErrorKind::ER_BAD_FT_COLUMN
+            | ErrorKind::ER_UNKNOWN_KEY_CACHE
+            | ErrorKind::ER_WARN_HOSTNAME_WONT_WORK
+            | ErrorKind::ER_WARN_DEPRECATED_SYNTAX
+            | ErrorKind::ER_NON_UPDATABLE_TABLE
+            | ErrorKind::ER_FEATURE_DISABLED
+            | ErrorKind::ER_OPTION_PREVENTS_STATEMENT
+            | ErrorKind::ER_DUPLICATED_VALUE_IN_TYPE
+            | ErrorKind::ER_TOO_MUCH_AUTO_TIMESTAMP_COLS
+            | ErrorKind::ER_INVALID_ON_UPDATE
+            | ErrorKind::ER_UNSUPPORTED_PS
+            | ErrorKind::ER_GET_ERRMSG
+            | ErrorKind::ER_GET_TEMPORARY_ERRMSG
+            | ErrorKind::ER_UNKNOWN_TIME_ZONE
+            | ErrorKind::ER_WARN_INVALID_TIMESTAMP
+            | ErrorKind::ER_INVALID_CHARACTER_STRING
+            | ErrorKind::ER_WARN_ALLOWED_PACKET_OVERFLOWED
+            | ErrorKind::ER_CONFLICTING_DECLARATIONS
+            | ErrorKind::ER_SP_DROP_FAILED
+            | ErrorKind::ER_SP_STORE_FAILED
+            | ErrorKind::ER_SP_WRONG_NO_OF_FETCH_ARGS
+            | ErrorKind::ER_SP_CANT_ALTER
+            | ErrorKind::ER_FPARSER_TOO_BIG_FILE
+            | ErrorKind::ER_FPARSER_BAD_HEADER
+            | ErrorKind::ER_FPARSER_EOF_IN_COMMENT
+            | ErrorKind::ER_FPARSER_ERROR_IN_PARAMETER
+            | ErrorKind::ER_FPARSER_EOF_IN_UNKNOWN_PARAMETER
+            | ErrorKind::ER_VIEW_NO_EXPLAIN
+            | ErrorKind::ER_FRM_UNKNOWN_TYPE
+            | ErrorKind::ER_WRONG_OBJECT
+            | ErrorKind::ER_NONUPDATEABLE_COLUMN
+            | ErrorKind::ER_VIEW_SELECT_DERIVED
+            | ErrorKind::ER_VIEW_SELECT_CLAUSE
+            | ErrorKind::ER_VIEW_SELECT_VARIABLE
+            | ErrorKind::ER_VIEW_SELECT_TMPTABLE
+            | ErrorKind::ER_VIEW_WRONG_LIST
+            | ErrorKind::ER_WARN_VIEW_MERGE
+            | ErrorKind::ER_WARN_VIEW_WITHOUT_KEY
+            | ErrorKind::ER_VIEW_INVALID
+            | ErrorKind::ER_SP_NO_DROP_SP
+            | ErrorKind::ER_SP_GOTO_IN_HNDLR
+            | ErrorKind::ER_TRG_ALREADY_EXISTS
+            | ErrorKind::ER_TRG_DOES_NOT_EXIST
+            | ErrorKind::ER_TRG_ON_VIEW_OR_TEMP_TABLE
+            | ErrorKind::ER_TRG_CANT_CHANGE_ROW
+            | ErrorKind::ER_TRG_NO_SUCH_ROW_IN_TRG
+            | ErrorKind::ER_NO_DEFAULT_FOR_FIELD
+            | ErrorKind::ER_TRUNCATED_WRONG_VALUE_FOR_FIELD
+            | ErrorKind::ER_VIEW_NONUPD_CHECK
+            | ErrorKind::ER_VIEW_CHECK_FAILED
+            | ErrorKind::ER_RELAY_LOG_FAIL
+            | ErrorKind::ER_PASSWD_LENGTH
+            | ErrorKind::ER_UNKNOWN_TARGET_BINLOG
+            | ErrorKind::ER_IO_ERR_LOG_INDEX_READ
+            | ErrorKind::ER_BINLOG_PURGE_PROHIBITED
+            | ErrorKind::ER_FSEEK_FAIL
+            | ErrorKind::ER_BINLOG_PURGE_FATAL_ERR
+            | ErrorKind::ER_LOG_IN_USE
+            | ErrorKind::ER_LOG_PURGE_UNKNOWN_ERR
+            | ErrorKind::ER_RELAY_LOG_INIT
+            | ErrorKind::ER_NO_BINARY_LOGGING
+            | ErrorKind::ER_RESERVED_SYNTAX
+            | ErrorKind::ER_WSAS_FAILED
+            | ErrorKind::ER_DIFF_GROUPS_PROC
+            | ErrorKind::ER_NO_GROUP_FOR_PROC
+            | ErrorKind::ER_ORDER_WITH_PROC
+            | ErrorKind::ER_LOGGING_PROHIBIT_CHANGING_OF
+            | ErrorKind::ER_NO_FILE_MAPPING
+            | ErrorKind::ER_WRONG_MAGIC
+            | ErrorKind::ER_PS_MANY_PARAM
+            | ErrorKind::ER_KEY_PART_0
+            | ErrorKind::ER_VIEW_CHECKSUM
+            | ErrorKind::ER_VIEW_MULTIUPDATE
+            | ErrorKind::ER_VIEW_NO_INSERT_FIELD_LIST
+            | ErrorKind::ER_VIEW_DELETE_MERGE_VIEW
+            | ErrorKind::ER_CANNOT_USER
+            | ErrorKind::ER_PROC_AUTO_GRANT_FAIL
+            | ErrorKind::ER_PROC_AUTO_REVOKE_FAIL
+            | ErrorKind::ER_STARTUP
+            | ErrorKind::ER_LOAD_FROM_FIXED_SIZE_ROWS_TO_VAR
+            | ErrorKind::ER_WRONG_VALUE_FOR_TYPE
+            | ErrorKind::ER_TABLE_DEF_CHANGED
+            | ErrorKind::ER_FAILED_ROUTINE_BREAK_BINLOG
+            | ErrorKind::ER_BINLOG_UNSAFE_ROUTINE
+            | ErrorKind::ER_BINLOG_CREATE_ROUTINE_NEED_SUPER
+            | ErrorKind::ER_EXEC_STMT_WITH_OPEN_CURSOR
+            | ErrorKind::ER_STMT_HAS_NO_OPEN_CURSOR
+            | ErrorKind::ER_COMMIT_NOT_ALLOWED_IN_SF_OR_TRG
+            | ErrorKind::ER_NO_DEFAULT_FOR_VIEW_FIELD
+            | ErrorKind::ER_SP_NO_RECURSION
+            | ErrorKind::ER_WRONG_LOCK_OF_SYSTEM_TABLE
+            | ErrorKind::ER_CONNECT_TO_FOREIGN_DATA_SOURCE
+            | ErrorKind::ER_QUERY_ON_FOREIGN_DATA_SOURCE
+            | ErrorKind::ER_FOREIGN_DATA_SOURCE_DOESNT_EXIST
+            | ErrorKind::ER_FOREIGN_DATA_STRING_INVALID_CANT_CREATE
+            | ErrorKind::ER_FOREIGN_DATA_STRING_INVALID
+            | ErrorKind::ER_CANT_CREATE_FEDERATED_TABLE
+            | ErrorKind::ER_TRG_IN_WRONG_SCHEMA
+            | ErrorKind::ER_STACK_OVERRUN_NEED_MORE
+            | ErrorKind::ER_WARN_CANT_DROP_DEFAULT_KEYCACHE
+            | ErrorKind::ER_CANT_UPDATE_USED_TABLE_IN_SF_OR_TRG
+            | ErrorKind::ER_VIEW_PREVENT_UPDATE
+            | ErrorKind::ER_PS_NO_RECURSION
+            | ErrorKind::ER_SP_CANT_SET_AUTOCOMMIT
+            | ErrorKind::ER_MALFORMED_DEFINER
+            | ErrorKind::ER_VIEW_FRM_NO_USER
+            | ErrorKind::ER_VIEW_OTHER_USER
+            | ErrorKind::ER_NO_SUCH_USER
+            | ErrorKind::ER_FORBID_SCHEMA_CHANGE
+            | ErrorKind::ER_TRG_NO_DEFINER
+            | ErrorKind::ER_OLD_FILE_FORMAT
+            | ErrorKind::ER_SP_RECURSION_LIMIT
+            | ErrorKind::ER_SP_PROC_TABLE_CORRUPT
+            | ErrorKind::ER_TABLE_NEEDS_UPGRADE
+            | ErrorKind::ER_VIEW_RECURSIVE
+            | ErrorKind::ER_TABLE_CANT_HANDLE_SPKEYS
+            | ErrorKind::ER_NO_TRIGGERS_ON_SYSTEM_SCHEMA
+            | ErrorKind::ER_REMOVED_SPACES
+            | ErrorKind::ER_AUTOINC_READ_FAILED
+            | ErrorKind::ER_USERNAME
+            | ErrorKind::ER_HOSTNAME
+            | ErrorKind::ER_WRONG_STRING_LENGTH
+            | ErrorKind::ER_NON_INSERTABLE_TABLE
+            | ErrorKind::ER_ADMIN_WRONG_MRG_TABLE
+            | ErrorKind::ER_TOO_HIGH_LEVEL_OF_NESTING_FOR_SELECT
+            | ErrorKind::ER_NAME_BECOMES_EMPTY
+            | ErrorKind::ER_AMBIGUOUS_FIELD_TERM
+            | ErrorKind::ER_FOREIGN_SERVER_EXISTS
+            | ErrorKind::ER_FOREIGN_SERVER_DOESNT_EXIST
+            | ErrorKind::ER_ILLEGAL_HA_CREATE_OPTION
+            | ErrorKind::ER_PARTITION_REQUIRES_VALUES_ERROR
+            | ErrorKind::ER_PARTITION_WRONG_VALUES_ERROR
+            | ErrorKind::ER_PARTITION_MAXVALUE_ERROR
+            | ErrorKind::ER_PARTITION_SUBPARTITION_ERROR
+            | ErrorKind::ER_PARTITION_SUBPART_MIX_ERROR
+            | ErrorKind::ER_PARTITION_WRONG_NO_PART_ERROR
+            | ErrorKind::ER_PARTITION_WRONG_NO_SUBPART_ERROR
+            | ErrorKind::ER_WRONG_EXPR_IN_PARTITION_FUNC_ERROR
+            | ErrorKind::ER_NO_CONST_EXPR_IN_RANGE_OR_LIST_ERROR
+            | ErrorKind::ER_FIELD_NOT_FOUND_PART_ERROR
+            | ErrorKind::ER_LIST_OF_FIELDS_ONLY_IN_HASH_ERROR
+            | ErrorKind::ER_INCONSISTENT_PARTITION_INFO_ERROR
+            | ErrorKind::ER_PARTITION_FUNC_NOT_ALLOWED_ERROR
+            | ErrorKind::ER_PARTITIONS_MUST_BE_DEFINED_ERROR
+            | ErrorKind::ER_RANGE_NOT_INCREASING_ERROR
+            | ErrorKind::ER_INCONSISTENT_TYPE_OF_FUNCTIONS_ERROR
+            | ErrorKind::ER_MULTIPLE_DEF_CONST_IN_LIST_PART_ERROR
+            | ErrorKind::ER_PARTITION_ENTRY_ERROR
+            | ErrorKind::ER_MIX_HANDLER_ERROR
+            | ErrorKind::ER_PARTITION_NOT_DEFINED_ERROR
+            | ErrorKind::ER_TOO_MANY_PARTITIONS_ERROR
+            | ErrorKind::ER_SUBPARTITION_ERROR
+            | ErrorKind::ER_CANT_CREATE_HANDLER_FILE
+            | ErrorKind::ER_BLOB_FIELD_IN_PART_FUNC_ERROR
+            | ErrorKind::ER_UNIQUE_KEY_NEED_ALL_FIELDS_IN_PF
+            | ErrorKind::ER_NO_PARTS_ERROR
+            | ErrorKind::ER_PARTITION_MGMT_ON_NONPARTITIONED
+            | ErrorKind::ER_FOREIGN_KEY_ON_PARTITIONED
+            | ErrorKind::ER_DROP_PARTITION_NON_EXISTENT
+            | ErrorKind::ER_DROP_LAST_PARTITION
+            | ErrorKind::ER_COALESCE_ONLY_ON_HASH_PARTITION
+            | ErrorKind::ER_REORG_HASH_ONLY_ON_SAME_N
+            | ErrorKind::ER_REORG_NO_PARAM_ERROR
+            | ErrorKind::ER_ONLY_ON_RANGE_LIST_PARTITION
+            | ErrorKind::ER_ADD_PARTITION_SUBPART_ERROR
+            | ErrorKind::ER_ADD_PARTITION_NO_NEW_PARTITION
+            | ErrorKind::ER_COALESCE_PARTITION_NO_PARTITION
+            | ErrorKind::ER_REORG_PARTITION_NOT_EXIST
+            | ErrorKind::ER_SAME_NAME_PARTITION
+            | ErrorKind::ER_NO_BINLOG_ERROR
+            | ErrorKind::ER_CONSECUTIVE_REORG_PARTITIONS
+            | ErrorKind::ER_REORG_OUTSIDE_RANGE
+            | ErrorKind::ER_PARTITION_FUNCTION_FAILURE
+            | ErrorKind::ER_PART_STATE_ERROR
+            | ErrorKind::ER_LIMITED_PART_RANGE
+            | ErrorKind::ER_PLUGIN_IS_NOT_LOADED
+            | ErrorKind::ER_WRONG_VALUE
+            | ErrorKind::ER_NO_PARTITION_FOR_GIVEN_VALUE
+            | ErrorKind::ER_FILEGROUP_OPTION_ONLY_ONCE
+            | ErrorKind::ER_CREATE_FILEGROUP_FAILED
+            | ErrorKind::ER_DROP_FILEGROUP_FAILED
+            | ErrorKind::ER_TABLESPACE_AUTO_EXTEND_ERROR
+            | ErrorKind::ER_WRONG_SIZE_NUMBER
+            | ErrorKind::ER_SIZE_OVERFLOW_ERROR
+            | ErrorKind::ER_ALTER_FILEGROUP_FAILED
+            | ErrorKind::ER_BINLOG_ROW_LOGGING_FAILED
+            | ErrorKind::ER_BINLOG_ROW_WRONG_TABLE_DEF
+            | ErrorKind::ER_BINLOG_ROW_RBR_TO_SBR
+            | ErrorKind::ER_EVENT_ALREADY_EXISTS
+            | ErrorKind::ER_EVENT_STORE_FAILED
+            | ErrorKind::ER_EVENT_DOES_NOT_EXIST
+            | ErrorKind::ER_EVENT_CANT_ALTER
+            | ErrorKind::ER_EVENT_DROP_FAILED
+            | ErrorKind::ER_EVENT_INTERVAL_NOT_POSITIVE_OR_TOO_BIG
+            | ErrorKind::ER_EVENT_ENDS_BEFORE_STARTS
+            | ErrorKind::ER_EVENT_EXEC_TIME_IN_THE_PAST
+            | ErrorKind::ER_EVENT_OPEN_TABLE_FAILED
+            | ErrorKind::ER_EVENT_NEITHER_M_EXPR_NOR_M_AT
+            | ErrorKind::ER_COL_COUNT_DOESNT_MATCH_CORRUPTED
+            | ErrorKind::ER_CANNOT_LOAD_FROM_TABLE
+            | ErrorKind::ER_EVENT_CANNOT_DELETE
+            | ErrorKind::ER_EVENT_COMPILE_ERROR
+            | ErrorKind::ER_EVENT_SAME_NAME
+            | ErrorKind::ER_EVENT_DATA_TOO_LONG
+            | ErrorKind::ER_DROP_INDEX_FK
+            | ErrorKind::ER_WARN_DEPRECATED_SYNTAX_WITH_VER
+            | ErrorKind::ER_CANT_WRITE_LOCK_LOG_TABLE
+            | ErrorKind::ER_CANT_LOCK_LOG_TABLE
+            | ErrorKind::ER_COL_COUNT_DOESNT_MATCH_PLEASE_UPDATE
+            | ErrorKind::ER_TEMP_TABLE_PREVENTS_SWITCH_OUT_OF_RBR
+            | ErrorKind::ER_STORED_FUNCTION_PREVENTS_SWITCH_BINLOG_FORMAT
+            | ErrorKind::ER_NDB_CANT_SWITCH_BINLOG_FORMAT
+            | ErrorKind::ER_PARTITION_NO_TEMPORARY
+            | ErrorKind::ER_PARTITION_CONST_DOMAIN_ERROR
+            | ErrorKind::ER_PARTITION_FUNCTION_IS_NOT_ALLOWED
+            | ErrorKind::ER_DDL_LOG_ERROR
+            | ErrorKind::ER_NULL_IN_VALUES_LESS_THAN
+            | ErrorKind::ER_WRONG_PARTITION_NAME
+            | ErrorKind::ER_DUP_ENTRY_AUTOINCREMENT_CASE
+            | ErrorKind::ER_EVENT_MODIFY_QUEUE_ERROR
+            | ErrorKind::ER_EVENT_SET_VAR_ERROR
+            | ErrorKind::ER_PARTITION_MERGE_ERROR
+            | ErrorKind::ER_CANT_ACTIVATE_LOG
+            | ErrorKind::ER_RBR_NOT_AVAILABLE
+            | ErrorKind::ER_BASE64_DECODE_ERROR
+            | ErrorKind::ER_EVENT_RECURSION_FORBIDDEN
+            | ErrorKind::ER_EVENTS_DB_ERROR
+            | ErrorKind::ER_ONLY_INTEGERS_ALLOWED
+            | ErrorKind::ER_UNSUPORTED_LOG_ENGINE
+            | ErrorKind::ER_BAD_LOG_STATEMENT
+            | ErrorKind::ER_CANT_RENAME_LOG_TABLE
+            | ErrorKind::ER_NATIVE_FCT_NAME_COLLISION
+            | ErrorKind::ER_BINLOG_PURGE_EMFILE
+            | ErrorKind::ER_EVENT_CANNOT_CREATE_IN_THE_PAST
+            | ErrorKind::ER_EVENT_CANNOT_ALTER_IN_THE_PAST
+            | ErrorKind::ER_SLAVE_INCIDENT
+            | ErrorKind::ER_NO_PARTITION_FOR_GIVEN_VALUE_SILENT
+            | ErrorKind::ER_BINLOG_UNSAFE_STATEMENT
+            | ErrorKind::ER_SLAVE_FATAL_ERROR
+            | ErrorKind::ER_SLAVE_RELAY_LOG_READ_FAILURE
+            | ErrorKind::ER_SLAVE_RELAY_LOG_WRITE_FAILURE
+            | ErrorKind::ER_SLAVE_CREATE_EVENT_FAILURE
+            | ErrorKind::ER_SLAVE_MASTER_COM_FAILURE
+            | ErrorKind::ER_BINLOG_LOGGING_IMPOSSIBLE
+            | ErrorKind::ER_VIEW_NO_CREATION_CTX
+            | ErrorKind::ER_VIEW_INVALID_CREATION_CTX
+            | ErrorKind::ER_SR_INVALID_CREATION_CTX
+            | ErrorKind::ER_TRG_CORRUPTED_FILE
+            | ErrorKind::ER_TRG_NO_CREATION_CTX
+            | ErrorKind::ER_TRG_INVALID_CREATION_CTX
+            | ErrorKind::ER_EVENT_INVALID_CREATION_CTX
+            | ErrorKind::ER_TRG_CANT_OPEN_TABLE
+            | ErrorKind::ER_CANT_CREATE_SROUTINE
+            | ErrorKind::ER_UNUSED_11
+            | ErrorKind::ER_NO_FORMAT_DESCRIPTION_EVENT_BEFORE_BINLOG_STATEMENT
+            | ErrorKind::ER_SLAVE_CORRUPT_EVENT
+            | ErrorKind::ER_LOAD_DATA_INVALID_COLUMN
+            | ErrorKind::ER_LOG_PURGE_NO_FILE
+            | ErrorKind::ER_NEED_REPREPARE
+            | ErrorKind::ER_DELAYED_NOT_SUPPORTED
+            | ErrorKind::WARN_NO_MASTER_INF
+            | ErrorKind::WARN_OPTION_IGNORED
+            | ErrorKind::WARN_PLUGIN_DELETE_BUILTIN
+            | ErrorKind::WARN_PLUGIN_BUSY
+            | ErrorKind::ER_VARIABLE_IS_READONLY
+            | ErrorKind::ER_WARN_ENGINE_TRANSACTION_ROLLBACK
+            | ErrorKind::ER_SLAVE_HEARTBEAT_FAILURE
+            | ErrorKind::ER_SLAVE_HEARTBEAT_VALUE_OUT_OF_RANGE
+            | ErrorKind::ER_NDB_REPLICATION_SCHEMA_ERROR
+            | ErrorKind::ER_CONFLICT_FN_PARSE_ERROR
+            | ErrorKind::ER_EXCEPTIONS_WRITE_ERROR
+            | ErrorKind::ER_TOO_LONG_TABLE_COMMENT
+            | ErrorKind::ER_TOO_LONG_FIELD_COMMENT
+            | ErrorKind::ER_DATABASE_NAME
+            | ErrorKind::ER_TABLE_NAME
+            | ErrorKind::ER_PARTITION_NAME
+            | ErrorKind::ER_SUBPARTITION_NAME
+            | ErrorKind::ER_TEMPORARY_NAME
+            | ErrorKind::ER_RENAMED_NAME
+            | ErrorKind::ER_TOO_MANY_CONCURRENT_TRXS
+            | ErrorKind::WARN_NON_ASCII_SEPARATOR_NOT_IMPLEMENTED
+            | ErrorKind::ER_DEBUG_SYNC_TIMEOUT
+            | ErrorKind::ER_DEBUG_SYNC_HIT_LIMIT
+            | ErrorKind::ER_SIGNAL_EXCEPTION
+            | ErrorKind::ER_SIGNAL_BAD_CONDITION_TYPE
+            | ErrorKind::WARN_COND_ITEM_TRUNCATED
+            | ErrorKind::ER_COND_ITEM_TOO_LONG
+            | ErrorKind::ER_UNKNOWN_LOCALE
+            | ErrorKind::ER_SLAVE_IGNORE_SERVER_IDS
+            | ErrorKind::ER_QUERY_CACHE_DISABLED
+            | ErrorKind::ER_SAME_NAME_PARTITION_FIELD
+            | ErrorKind::ER_PARTITION_COLUMN_LIST_ERROR
+            | ErrorKind::ER_WRONG_TYPE_COLUMN_VALUE_ERROR
+            | ErrorKind::ER_TOO_MANY_PARTITION_FUNC_FIELDS_ERROR
+            | ErrorKind::ER_MAXVALUE_IN_VALUES_IN
+            | ErrorKind::ER_TOO_MANY_VALUES_ERROR
+            | ErrorKind::ER_ROW_SINGLE_PARTITION_FIELD_ERROR
+            | ErrorKind::ER_FIELD_TYPE_NOT_ALLOWED_AS_PARTITION_FIELD
+            | ErrorKind::ER_PARTITION_FIELDS_TOO_LONG
+            | ErrorKind::ER_BINLOG_ROW_ENGINE_AND_STMT_ENGINE
+            | ErrorKind::ER_BINLOG_ROW_MODE_AND_STMT_ENGINE
+            | ErrorKind::ER_BINLOG_UNSAFE_AND_STMT_ENGINE
+            | ErrorKind::ER_BINLOG_ROW_INJECTION_AND_STMT_ENGINE
+            | ErrorKind::ER_BINLOG_STMT_MODE_AND_ROW_ENGINE
+            | ErrorKind::ER_BINLOG_ROW_INJECTION_AND_STMT_MODE
+            | ErrorKind::ER_BINLOG_MULTIPLE_ENGINES_AND_SELF_LOGGING_ENGINE
+            | ErrorKind::ER_BINLOG_UNSAFE_LIMIT
+            | ErrorKind::ER_BINLOG_UNSAFE_INSERT_DELAYED
+            | ErrorKind::ER_BINLOG_UNSAFE_SYSTEM_TABLE
+            | ErrorKind::ER_BINLOG_UNSAFE_AUTOINC_COLUMNS
+            | ErrorKind::ER_BINLOG_UNSAFE_UDF
+            | ErrorKind::ER_BINLOG_UNSAFE_SYSTEM_VARIABLE
+            | ErrorKind::ER_BINLOG_UNSAFE_SYSTEM_FUNCTION
+            | ErrorKind::ER_BINLOG_UNSAFE_NONTRANS_AFTER_TRANS
+            | ErrorKind::ER_MESSAGE_AND_STATEMENT
+            | ErrorKind::ER_SLAVE_CONVERSION_FAILED
+            | ErrorKind::ER_SLAVE_CANT_CREATE_CONVERSION
+            | ErrorKind::ER_INSIDE_TRANSACTION_PREVENTS_SWITCH_BINLOG_FORMAT
+            | ErrorKind::ER_PATH_LENGTH
+            | ErrorKind::ER_WARN_DEPRECATED_SYNTAX_NO_REPLACEMENT
+            | ErrorKind::ER_WRONG_NATIVE_TABLE_STRUCTURE
+            | ErrorKind::ER_WRONG_PERFSCHEMA_USAGE
+            | ErrorKind::ER_WARN_I_S_SKIPPED_TABLE
+            | ErrorKind::ER_INSIDE_TRANSACTION_PREVENTS_SWITCH_BINLOG_DIRECT
+            | ErrorKind::ER_STORED_FUNCTION_PREVENTS_SWITCH_BINLOG_DIRECT
+            | ErrorKind::ER_TOO_LONG_INDEX_COMMENT
+            | ErrorKind::ER_LOCK_ABORTED
+            | ErrorKind::ER_WRONG_SPVAR_TYPE_IN_LIMIT
+            | ErrorKind::ER_BINLOG_UNSAFE_MULTIPLE_ENGINES_AND_SELF_LOGGING_ENGINE
+            | ErrorKind::ER_BINLOG_UNSAFE_MIXED_STATEMENT
+            | ErrorKind::ER_INSIDE_TRANSACTION_PREVENTS_SWITCH_SQL_LOG_BIN
+            | ErrorKind::ER_STORED_FUNCTION_PREVENTS_SWITCH_SQL_LOG_BIN
+            | ErrorKind::ER_FAILED_READ_FROM_PAR_FILE
+            | ErrorKind::ER_VALUES_IS_NOT_INT_TYPE_ERROR
+            | ErrorKind::ER_SET_PASSWORD_AUTH_PLUGIN
+            | ErrorKind::ER_GRANT_PLUGIN_USER_EXISTS
+            | ErrorKind::ER_PLUGIN_IS_PERMANENT
+            | ErrorKind::ER_SLAVE_HEARTBEAT_VALUE_OUT_OF_RANGE_MIN
+            | ErrorKind::ER_SLAVE_HEARTBEAT_VALUE_OUT_OF_RANGE_MAX
+            | ErrorKind::ER_STMT_CACHE_FULL
+            | ErrorKind::ER_MULTI_UPDATE_KEY_CONFLICT
+            | ErrorKind::ER_TABLE_NEEDS_REBUILD
+            | ErrorKind::WARN_OPTION_BELOW_LIMIT
+            | ErrorKind::ER_INDEX_COLUMN_TOO_LONG
+            | ErrorKind::ER_ERROR_IN_TRIGGER_BODY
+            | ErrorKind::ER_ERROR_IN_UNKNOWN_TRIGGER_BODY
+            | ErrorKind::ER_INDEX_CORRUPT
+            | ErrorKind::ER_UNDO_RECORD_TOO_BIG
+            | ErrorKind::ER_BINLOG_UNSAFE_INSERT_IGNORE_SELECT
+            | ErrorKind::ER_BINLOG_UNSAFE_INSERT_SELECT_UPDATE
+            | ErrorKind::ER_BINLOG_UNSAFE_REPLACE_SELECT
+            | ErrorKind::ER_BINLOG_UNSAFE_CREATE_IGNORE_SELECT
+            | ErrorKind::ER_BINLOG_UNSAFE_CREATE_REPLACE_SELECT
+            | ErrorKind::ER_BINLOG_UNSAFE_UPDATE_IGNORE
+            | ErrorKind::ER_PLUGIN_NO_UNINSTALL
+            | ErrorKind::ER_PLUGIN_NO_INSTALL
+            | ErrorKind::ER_BINLOG_UNSAFE_WRITE_AUTOINC_SELECT
+            | ErrorKind::ER_BINLOG_UNSAFE_CREATE_SELECT_AUTOINC
+            | ErrorKind::ER_BINLOG_UNSAFE_INSERT_TWO_KEYS
+            | ErrorKind::ER_TABLE_IN_FK_CHECK
+            | ErrorKind::ER_UNSUPPORTED_ENGINE
+            | ErrorKind::ER_BINLOG_UNSAFE_AUTOINC_NOT_FIRST
+            | ErrorKind::ER_CANNOT_LOAD_FROM_TABLE_V2
+            | ErrorKind::ER_MASTER_DELAY_VALUE_OUT_OF_RANGE
+            | ErrorKind::ER_ONLY_FD_AND_RBR_EVENTS_ALLOWED_IN_BINLOG_STATEMENT
+            | ErrorKind::ER_PARTITION_EXCHANGE_DIFFERENT_OPTION
+            | ErrorKind::ER_PARTITION_EXCHANGE_PART_TABLE
+            | ErrorKind::ER_PARTITION_EXCHANGE_TEMP_TABLE
+            | ErrorKind::ER_PARTITION_INSTEAD_OF_SUBPARTITION
+            | ErrorKind::ER_UNKNOWN_PARTITION
+            | ErrorKind::ER_TABLES_DIFFERENT_METADATA
+            | ErrorKind::ER_ROW_DOES_NOT_MATCH_PARTITION
+            | ErrorKind::ER_BINLOG_CACHE_SIZE_GREATER_THAN_MAX
+            | ErrorKind::ER_WARN_INDEX_NOT_APPLICABLE
+            | ErrorKind::ER_PARTITION_EXCHANGE_FOREIGN_KEY
+            | ErrorKind::ER_NO_SUCH_KEY_VALUE
+            | ErrorKind::ER_RPL_INFO_DATA_TOO_LONG
+            | ErrorKind::ER_NETWORK_READ_EVENT_CHECKSUM_FAILURE
+            | ErrorKind::ER_BINLOG_READ_EVENT_CHECKSUM_FAILURE
+            | ErrorKind::ER_BINLOG_STMT_CACHE_SIZE_GREATER_THAN_MAX
+            | ErrorKind::ER_CANT_UPDATE_TABLE_IN_CREATE_TABLE_SELECT
+            | ErrorKind::ER_PARTITION_CLAUSE_ON_NONPARTITIONED
+            | ErrorKind::ER_ROW_DOES_NOT_MATCH_GIVEN_PARTITION_SET
+            | ErrorKind::ER_NO_SUCH_PARTITION_UNUSED
+            | ErrorKind::ER_CHANGE_RPL_INFO_REPOSITORY_FAILURE
+            | ErrorKind::ER_WARNING_NOT_COMPLETE_ROLLBACK_WITH_CREATED_TEMP_TABLE
+            | ErrorKind::ER_WARNING_NOT_COMPLETE_ROLLBACK_WITH_DROPPED_TEMP_TABLE
+            | ErrorKind::ER_MTS_FEATURE_IS_NOT_SUPPORTED
+            | ErrorKind::ER_MTS_UPDATED_DBS_GREATER_MAX
+            | ErrorKind::ER_MTS_CANT_PARALLEL
+            | ErrorKind::ER_MTS_INCONSISTENT_DATA
+            | ErrorKind::ER_FULLTEXT_NOT_SUPPORTED_WITH_PARTITIONING
+            | ErrorKind::ER_INSECURE_PLAIN_TEXT
+            | ErrorKind::ER_INSECURE_CHANGE_MASTER
+            | ErrorKind::ER_SQLTHREAD_WITH_SECURE_SLAVE
+            | ErrorKind::ER_TABLE_HAS_NO_FT
+            | ErrorKind::ER_VARIABLE_NOT_SETTABLE_IN_SF_OR_TRIGGER
+            | ErrorKind::ER_VARIABLE_NOT_SETTABLE_IN_TRANSACTION
+            | ErrorKind::ER_GTID_NEXT_IS_NOT_IN_GTID_NEXT_LIST
+            | ErrorKind::ER_CANT_CHANGE_GTID_NEXT_IN_TRANSACTION_WHEN_GTID_NEXT_LIST_IS_NULL
+            | ErrorKind::ER_SET_STATEMENT_CANNOT_INVOKE_FUNCTION
+            | ErrorKind::ER_GTID_NEXT_CANT_BE_AUTOMATIC_IF_GTID_NEXT_LIST_IS_NON_NULL
+            | ErrorKind::ER_SKIPPING_LOGGED_TRANSACTION
+            | ErrorKind::ER_MALFORMED_GTID_SET_SPECIFICATION
+            | ErrorKind::ER_MALFORMED_GTID_SET_ENCODING
+            | ErrorKind::ER_MALFORMED_GTID_SPECIFICATION
+            | ErrorKind::ER_GNO_EXHAUSTED
+            | ErrorKind::ER_BAD_SLAVE_AUTO_POSITION
+            | ErrorKind::ER_AUTO_POSITION_REQUIRES_GTID_MODE_ON
+            | ErrorKind::ER_CANT_DO_IMPLICIT_COMMIT_IN_TRX_WHEN_GTID_NEXT_IS_SET
+            | ErrorKind::ER_GTID_MODE_2_OR_3_REQUIRES_DISABLE_GTID_UNSAFE_STATEMENTS_ON
+            | ErrorKind::ER_GTID_MODE_REQUIRES_BINLOG
+            | ErrorKind::ER_CANT_SET_GTID_NEXT_TO_GTID_WHEN_GTID_MODE_IS_OFF
+            | ErrorKind::ER_CANT_SET_GTID_NEXT_TO_ANONYMOUS_WHEN_GTID_MODE_IS_ON
+            | ErrorKind::ER_CANT_SET_GTID_NEXT_LIST_TO_NON_NULL_WHEN_GTID_MODE_IS_OFF
+            | ErrorKind::ER_FOUND_GTID_EVENT_WHEN_GTID_MODE_IS_OFF
+            | ErrorKind::ER_GTID_UNSAFE_NON_TRANSACTIONAL_TABLE
+            | ErrorKind::ER_GTID_UNSAFE_CREATE_SELECT
+            | ErrorKind::ER_GTID_UNSAFE_CREATE_DROP_TEMPORARY_TABLE_IN_TRANSACTION
+            | ErrorKind::ER_GTID_MODE_CAN_ONLY_CHANGE_ONE_STEP_AT_A_TIME
+            | ErrorKind::ER_MASTER_HAS_PURGED_REQUIRED_GTIDS
+            | ErrorKind::ER_CANT_SET_GTID_NEXT_WHEN_OWNING_GTID
+            | ErrorKind::ER_UNKNOWN_EXPLAIN_FORMAT
+            | ErrorKind::ER_TOO_LONG_TABLE_PARTITION_COMMENT
+            | ErrorKind::ER_SLAVE_CONFIGURATION
+            | ErrorKind::ER_INNODB_FT_LIMIT
+            | ErrorKind::ER_INNODB_NO_FT_TEMP_TABLE
+            | ErrorKind::ER_INNODB_FT_WRONG_DOCID_COLUMN
+            | ErrorKind::ER_INNODB_FT_WRONG_DOCID_INDEX
+            | ErrorKind::ER_INNODB_ONLINE_LOG_TOO_BIG
+            | ErrorKind::ER_UNKNOWN_ALTER_ALGORITHM
+            | ErrorKind::ER_UNKNOWN_ALTER_LOCK
+            | ErrorKind::ER_MTS_CHANGE_MASTER_CANT_RUN_WITH_GAPS
+            | ErrorKind::ER_MTS_RECOVERY_FAILURE
+            | ErrorKind::ER_MTS_RESET_WORKERS
+            | ErrorKind::ER_COL_COUNT_DOESNT_MATCH_CORRUPTED_V2
+            | ErrorKind::ER_SLAVE_SILENT_RETRY_TRANSACTION
+            | ErrorKind::ER_DISCARD_FK_CHECKS_RUNNING
+            | ErrorKind::ER_TABLE_SCHEMA_MISMATCH
+            | ErrorKind::ER_TABLE_IN_SYSTEM_TABLESPACE
+            | ErrorKind::ER_IO_READ_ERROR
+            | ErrorKind::ER_IO_WRITE_ERROR
+            | ErrorKind::ER_TABLESPACE_MISSING
+            | ErrorKind::ER_TABLESPACE_EXISTS
+            | ErrorKind::ER_TABLESPACE_DISCARDED
+            | ErrorKind::ER_INTERNAL_ERROR
+            | ErrorKind::ER_INNODB_IMPORT_ERROR
+            | ErrorKind::ER_INNODB_INDEX_CORRUPT
+            | ErrorKind::ER_INVALID_YEAR_COLUMN_LENGTH
+            | ErrorKind::ER_NOT_VALID_PASSWORD
+            | ErrorKind::ER_MUST_CHANGE_PASSWORD
+            | ErrorKind::ER_FK_NO_INDEX_CHILD
+            | ErrorKind::ER_FK_NO_INDEX_PARENT
+            | ErrorKind::ER_FK_FAIL_ADD_SYSTEM
+            | ErrorKind::ER_FK_CANNOT_OPEN_PARENT
+            | ErrorKind::ER_FK_INCORRECT_OPTION
+            | ErrorKind::ER_FK_DUP_NAME
+            | ErrorKind::ER_PASSWORD_FORMAT
+            | ErrorKind::ER_FK_COLUMN_CANNOT_DROP
+            | ErrorKind::ER_FK_COLUMN_CANNOT_DROP_CHILD
+            | ErrorKind::ER_FK_COLUMN_NOT_NULL
+            | ErrorKind::ER_DUP_INDEX
+            | ErrorKind::ER_FK_COLUMN_CANNOT_CHANGE
+            | ErrorKind::ER_FK_COLUMN_CANNOT_CHANGE_CHILD
+            | ErrorKind::ER_FK_CANNOT_DELETE_PARENT
+            | ErrorKind::ER_MALFORMED_PACKET
+            | ErrorKind::ER_READ_ONLY_MODE
+            | ErrorKind::ER_GTID_NEXT_TYPE_UNDEFINED_GROUP
+            | ErrorKind::ER_VARIABLE_NOT_SETTABLE_IN_SP
+            | ErrorKind::ER_CANT_SET_GTID_PURGED_WHEN_GTID_MODE_IS_OFF
+            | ErrorKind::ER_CANT_SET_GTID_PURGED_WHEN_GTID_EXECUTED_IS_NOT_EMPTY
+            | ErrorKind::ER_CANT_SET_GTID_PURGED_WHEN_OWNED_GTIDS_IS_NOT_EMPTY
+            | ErrorKind::ER_GTID_PURGED_WAS_CHANGED
+            | ErrorKind::ER_GTID_EXECUTED_WAS_CHANGED
+            | ErrorKind::ER_BINLOG_STMT_MODE_AND_NO_REPL_TABLES
+            | ErrorKind::ER_ALTER_OPERATION_NOT_SUPPORTED_REASON_COPY
+            | ErrorKind::ER_ALTER_OPERATION_NOT_SUPPORTED_REASON_PARTITION
+            | ErrorKind::ER_ALTER_OPERATION_NOT_SUPPORTED_REASON_FK_RENAME
+            | ErrorKind::ER_ALTER_OPERATION_NOT_SUPPORTED_REASON_COLUMN_TYPE
+            | ErrorKind::ER_ALTER_OPERATION_NOT_SUPPORTED_REASON_FK_CHECK
+            | ErrorKind::ER_ALTER_OPERATION_NOT_SUPPORTED_REASON_IGNORE
+            | ErrorKind::ER_ALTER_OPERATION_NOT_SUPPORTED_REASON_NOPK
+            | ErrorKind::ER_ALTER_OPERATION_NOT_SUPPORTED_REASON_AUTOINC
+            | ErrorKind::ER_ALTER_OPERATION_NOT_SUPPORTED_REASON_HIDDEN_FTS
+            | ErrorKind::ER_ALTER_OPERATION_NOT_SUPPORTED_REASON_CHANGE_FTS
+            | ErrorKind::ER_ALTER_OPERATION_NOT_SUPPORTED_REASON_FTS
+            | ErrorKind::ER_SQL_SLAVE_SKIP_COUNTER_NOT_SETTABLE_IN_GTID_MODE
+            | ErrorKind::ER_IDENT_CAUSES_TOO_LONG_PATH
+            | ErrorKind::ER_ALTER_OPERATION_NOT_SUPPORTED_REASON_NOT_NULL
+            | ErrorKind::ER_MUST_CHANGE_PASSWORD_LOGIN
+            | ErrorKind::ER_ROW_IN_WRONG_PARTITION
+            | ErrorKind::ER_MTS_EVENT_BIGGER_PENDING_JOBS_SIZE_MAX
+            | ErrorKind::ER_INNODB_NO_FT_USES_PARSER
+            | ErrorKind::ER_BINLOG_LOGICAL_CORRUPTION
+            | ErrorKind::ER_WARN_PURGE_LOG_IN_USE
+            | ErrorKind::ER_WARN_PURGE_LOG_IS_ACTIVE
+            | ErrorKind::ER_AUTO_INCREMENT_CONFLICT
+            | ErrorKind::WARN_ON_BLOCKHOLE_IN_RBR
+            | ErrorKind::ER_SLAVE_MI_INIT_REPOSITORY
+            | ErrorKind::ER_SLAVE_RLI_INIT_REPOSITORY
+            | ErrorKind::ER_INNODB_READ_ONLY
+            | ErrorKind::ER_STOP_SLAVE_SQL_THREAD_TIMEOUT
+            | ErrorKind::ER_STOP_SLAVE_IO_THREAD_TIMEOUT
+            | ErrorKind::ER_TABLE_CORRUPT
+            | ErrorKind::ER_TEMP_FILE_WRITE_FAILURE
+            | ErrorKind::ER_INNODB_FT_AUX_NOT_HEX_ID
+            | ErrorKind::ER_OLD_TEMPORALS_UPGRADED
+            | ErrorKind::ER_INNODB_FORCED_RECOVERY
+            | ErrorKind::ER_AES_INVALID_IV
+            | ErrorKind::ER_PLUGIN_CANNOT_BE_UNINSTALLED
+            | ErrorKind::ER_GTID_UNSAFE_BINLOG_SPLITTABLE_STATEMENT_AND_GTID_GROUP
+            | ErrorKind::ER_SLAVE_HAS_MORE_GTIDS_THAN_MASTER => b"HY000",
+            ErrorKind::ER_XAER_NOTA => b"XAE04",
+            ErrorKind::ER_XA_RBROLLBACK => b"XA100",
+            ErrorKind::ER_DATA_TOO_LONG => b"22001",
+            ErrorKind::ER_LOCK_DEADLOCK => b"40001",
+            ErrorKind::ER_WRONG_NUMBER_OF_COLUMNS_IN_SELECT
+            | ErrorKind::ER_OPERAND_COLUMNS
+            | ErrorKind::ER_SUBQUERY_NO_1_ROW => b"21000",
         }
     }
 }
