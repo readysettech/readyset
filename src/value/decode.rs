@@ -79,23 +79,27 @@ impl<'a> ValueInner<'a> {
             }
             ColumnType::MYSQL_TYPE_TINY => {
                 if unsigned {
-                    Ok(ValueInner::UInt(input.read_u8()? as u64))
+                    Ok(ValueInner::UInt(u64::from(input.read_u8()?)))
                 } else {
-                    Ok(ValueInner::Int(input.read_i8()? as i64))
+                    Ok(ValueInner::Int(i64::from(input.read_i8()?)))
                 }
             }
             ColumnType::MYSQL_TYPE_SHORT | ColumnType::MYSQL_TYPE_YEAR => {
                 if unsigned {
-                    Ok(ValueInner::UInt(input.read_u16::<LittleEndian>()? as u64))
+                    Ok(ValueInner::UInt(u64::from(input
+                        .read_u16::<LittleEndian>()?)))
                 } else {
-                    Ok(ValueInner::Int(input.read_i16::<LittleEndian>()? as i64))
+                    Ok(ValueInner::Int(i64::from(input
+                        .read_i16::<LittleEndian>()?)))
                 }
             }
             ColumnType::MYSQL_TYPE_LONG | ColumnType::MYSQL_TYPE_INT24 => {
                 if unsigned {
-                    Ok(ValueInner::UInt(input.read_u32::<LittleEndian>()? as u64))
+                    Ok(ValueInner::UInt(u64::from(input
+                        .read_u32::<LittleEndian>()?)))
                 } else {
-                    Ok(ValueInner::Int(input.read_i32::<LittleEndian>()? as i64))
+                    Ok(ValueInner::Int(i64::from(input
+                        .read_i32::<LittleEndian>()?)))
                 }
             }
             ColumnType::MYSQL_TYPE_LONGLONG => {
@@ -108,7 +112,7 @@ impl<'a> ValueInner<'a> {
             ColumnType::MYSQL_TYPE_FLOAT => {
                 let f = input.read_f32::<LittleEndian>()?;
                 println!("read {}", f);
-                Ok(ValueInner::Double(f as f64))
+                Ok(ValueInner::Double(f64::from(f)))
             }
             ColumnType::MYSQL_TYPE_DOUBLE => {
                 Ok(ValueInner::Double(input.read_f64::<LittleEndian>()?))
@@ -223,10 +227,10 @@ impl<'a> Into<Duration> for Value<'a> {
                 unimplemented!();
             }
 
-            let days = v.read_u32::<LittleEndian>().unwrap() as u64;
-            let hours = v.read_u8().unwrap() as u64;
-            let minutes = v.read_u8().unwrap() as u64;
-            let seconds = v.read_u8().unwrap() as u64;
+            let days = u64::from(v.read_u32::<LittleEndian>().unwrap());
+            let hours = u64::from(v.read_u8().unwrap());
+            let minutes = u64::from(v.read_u8().unwrap());
+            let seconds = u64::from(v.read_u8().unwrap());
             let micros = if v.len() == 12 {
                 v.read_u32::<LittleEndian>().unwrap()
             } else {
