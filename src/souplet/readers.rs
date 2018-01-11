@@ -68,7 +68,7 @@ pub(crate) fn serve(
         .build()
         .unwrap();
 
-    let mut events = Events::with_capacity(10);
+    let mut events = Events::with_capacity(32);
     while !exit.load(atomic::Ordering::SeqCst) {
         if let Err(e) = poll.poll(&mut events, Some(Duration::from_secs(1))) {
             if e.kind() == io::ErrorKind::Interrupted {
