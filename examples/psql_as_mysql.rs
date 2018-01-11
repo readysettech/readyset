@@ -1,5 +1,5 @@
 //! This example implements a (simple) proxy that allows connecting to PostgreSQL as though it were
-//! a MySQL database. To try this out, start a PostreSQL database at localhost:5432, and then run
+//! a MySQL database. To try this out, start a PostgreSQL database at localhost:5432, and then run
 //! this example. Notice that `main` does *not* use PostgreSQL bindings, just MySQL ones!
 
 extern crate msql_srv;
@@ -250,9 +250,9 @@ fn answer_rows<W: io::Write>(
                 .collect();
 
             let mut writer = results.start(&cols)?;
-            for row in rows.into_iter() {
-                for c in 0..cols.len() {
-                    match cols[c].coltype {
+            for row in &rows {
+                for (c, col) in cols.iter().enumerate() {
+                    match col.coltype {
                         ColumnType::MYSQL_TYPE_SHORT => writer.write_col(row.get::<_, i16>(c))?,
                         ColumnType::MYSQL_TYPE_LONG => writer.write_col(row.get::<_, i32>(c))?,
                         ColumnType::MYSQL_TYPE_LONGLONG => writer.write_col(row.get::<_, i64>(c))?,
@@ -275,7 +275,7 @@ fn answer_rows<W: io::Write>(
 
 /// Convert a PostgreSQL data type and translate it into the corresponding MySQL type
 fn p2mt(t: &postgres::types::Type) -> msql_srv::ColumnType {
-    if let &postgres::types::Kind::Simple = t.kind() {
+    if let postgres::types::Kind::Simple = *t.kind() {
         match postgres::types::Type::from_oid(t.oid()) {
             Some(postgres::types::INT2) => msql_srv::ColumnType::MYSQL_TYPE_SHORT,
             Some(postgres::types::INT4) => msql_srv::ColumnType::MYSQL_TYPE_LONG,

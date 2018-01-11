@@ -3,7 +3,7 @@ use std::io::prelude::*;
 use std::io;
 use byteorder::{ByteOrder, LittleEndian};
 
-const U24_MAX: usize = 16777215;
+const U24_MAX: usize = 16_777_215;
 
 pub struct PacketWriter<W> {
     to_write: Vec<u8>,
@@ -81,7 +81,7 @@ impl<R> PacketReader<R> {
 }
 
 impl<R: Read> PacketReader<R> {
-    pub fn next<'a>(&'a mut self) -> io::Result<Option<(u8, Packet<'a>)>> {
+    pub fn next(&mut self) -> io::Result<Option<(u8, Packet)>> {
         self.start = self.bytes.len() - self.remaining;
 
         loop {
@@ -99,8 +99,7 @@ impl<R: Read> PacketReader<R> {
                         self.remaining = rest.len();
                         return Ok(Some(p));
                     }
-                    Err(nom::Err::Incomplete(_)) => {}
-                    Err(nom::Err::Error(_)) => {}
+                    Err(nom::Err::Incomplete(_)) | Err(nom::Err::Error(_)) => {}
                     Err(nom::Err::Failure(ctx)) => {
                         return Err(io::Error::new(
                             io::ErrorKind::InvalidData,
@@ -177,7 +176,7 @@ impl<'a> Packet<'a> {
 impl<'a> AsRef<[u8]> for Packet<'a> {
     fn as_ref(&self) -> &[u8] {
         if self.1.is_empty() {
-            &self.0
+            self.0
         } else {
             &*self.1
         }

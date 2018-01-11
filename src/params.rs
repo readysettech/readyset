@@ -64,7 +64,7 @@ where
         // https://web.archive.org/web/20170404144156/https://dev.mysql.com/doc/internals/en/null-bitmap.html
         // NULL-bitmap-byte = ((field-pos + offset) / 8)
         // NULL-bitmap-bit  = ((field-pos + offset) % 8)
-        if let Some(ref nullmap) = self.nullmap {
+        if let Some(nullmap) = self.nullmap {
             let byte = self.col / 8;
             if byte >= nullmap.len() {
                 return None;

@@ -136,23 +136,23 @@ impl ToMysqlValue for u8 {
         match c.coltype {
             ColumnType::MYSQL_TYPE_LONGLONG => {
                 if signed {
-                    w.write_i64::<LittleEndian>(*self as i64)
+                    w.write_i64::<LittleEndian>(i64::from(*self))
                 } else {
-                    w.write_u64::<LittleEndian>(*self as u64)
+                    w.write_u64::<LittleEndian>(u64::from(*self))
                 }
             }
             ColumnType::MYSQL_TYPE_LONG | ColumnType::MYSQL_TYPE_INT24 => {
                 if signed {
-                    w.write_i32::<LittleEndian>(*self as i32)
+                    w.write_i32::<LittleEndian>(i32::from(*self))
                 } else {
-                    w.write_u32::<LittleEndian>(*self as u32)
+                    w.write_u32::<LittleEndian>(u32::from(*self))
                 }
             }
             ColumnType::MYSQL_TYPE_SHORT | ColumnType::MYSQL_TYPE_YEAR => {
                 if signed {
-                    w.write_i16::<LittleEndian>(*self as i16)
+                    w.write_i16::<LittleEndian>(i16::from(*self))
                 } else {
-                    w.write_u16::<LittleEndian>(*self as u16)
+                    w.write_u16::<LittleEndian>(u16::from(*self))
                 }
             }
             ColumnType::MYSQL_TYPE_TINY => {
@@ -171,21 +171,21 @@ impl ToMysqlValue for i8 {
         match c.coltype {
             ColumnType::MYSQL_TYPE_LONGLONG => {
                 if signed {
-                    w.write_i64::<LittleEndian>(*self as i64)
+                    w.write_i64::<LittleEndian>(i64::from(*self))
                 } else {
                     w.write_u64::<LittleEndian>(*self as u64)
                 }
             }
             ColumnType::MYSQL_TYPE_LONG | ColumnType::MYSQL_TYPE_INT24 => {
                 if signed {
-                    w.write_i32::<LittleEndian>(*self as i32)
+                    w.write_i32::<LittleEndian>(i32::from(*self))
                 } else {
                     w.write_u32::<LittleEndian>(*self as u32)
                 }
             }
             ColumnType::MYSQL_TYPE_SHORT | ColumnType::MYSQL_TYPE_YEAR => {
                 if signed {
-                    w.write_i16::<LittleEndian>(*self as i16)
+                    w.write_i16::<LittleEndian>(i16::from(*self))
                 } else {
                     w.write_u16::<LittleEndian>(*self as u16)
                 }
@@ -206,16 +206,16 @@ impl ToMysqlValue for u16 {
         match c.coltype {
             ColumnType::MYSQL_TYPE_LONGLONG => {
                 if signed {
-                    w.write_i64::<LittleEndian>(*self as i64)
+                    w.write_i64::<LittleEndian>(i64::from(*self))
                 } else {
-                    w.write_u64::<LittleEndian>(*self as u64)
+                    w.write_u64::<LittleEndian>(u64::from(*self))
                 }
             }
             ColumnType::MYSQL_TYPE_LONG | ColumnType::MYSQL_TYPE_INT24 => {
                 if signed {
-                    w.write_i32::<LittleEndian>(*self as i32)
+                    w.write_i32::<LittleEndian>(i32::from(*self))
                 } else {
-                    w.write_u32::<LittleEndian>(*self as u32)
+                    w.write_u32::<LittleEndian>(u32::from(*self))
                 }
             }
             ColumnType::MYSQL_TYPE_SHORT | ColumnType::MYSQL_TYPE_YEAR => {
@@ -234,14 +234,14 @@ impl ToMysqlValue for i16 {
         match c.coltype {
             ColumnType::MYSQL_TYPE_LONGLONG => {
                 if signed {
-                    w.write_i64::<LittleEndian>(*self as i64)
+                    w.write_i64::<LittleEndian>(i64::from(*self))
                 } else {
                     w.write_u64::<LittleEndian>(*self as u64)
                 }
             }
             ColumnType::MYSQL_TYPE_LONG | ColumnType::MYSQL_TYPE_INT24 => {
                 if signed {
-                    w.write_i32::<LittleEndian>(*self as i32)
+                    w.write_i32::<LittleEndian>(i32::from(*self))
                 } else {
                     w.write_u32::<LittleEndian>(*self as u32)
                 }
@@ -262,9 +262,9 @@ impl ToMysqlValue for u32 {
         match c.coltype {
             ColumnType::MYSQL_TYPE_LONGLONG => {
                 if signed {
-                    w.write_i64::<LittleEndian>(*self as i64)
+                    w.write_i64::<LittleEndian>(i64::from(*self))
                 } else {
-                    w.write_u64::<LittleEndian>(*self as u64)
+                    w.write_u64::<LittleEndian>(u64::from(*self))
                 }
             }
             ColumnType::MYSQL_TYPE_LONG | ColumnType::MYSQL_TYPE_INT24 => {
@@ -283,7 +283,7 @@ impl ToMysqlValue for i32 {
         match c.coltype {
             ColumnType::MYSQL_TYPE_LONGLONG => {
                 if signed {
-                    w.write_i64::<LittleEndian>(*self as i64)
+                    w.write_i64::<LittleEndian>(i64::from(*self))
                 } else {
                     w.write_u64::<LittleEndian>(*self as u64)
                 }
@@ -329,8 +329,8 @@ impl ToMysqlValue for f32 {
     mysql_text_trivial!();
     fn to_mysql_bin<W: Write>(&self, w: &mut W, c: &Column) -> io::Result<()> {
         match c.coltype {
-            ColumnType::MYSQL_TYPE_DOUBLE => w.write_f64::<LittleEndian>(*self as f64),
-            ColumnType::MYSQL_TYPE_FLOAT => w.write_f32::<LittleEndian>(*self as f32),
+            ColumnType::MYSQL_TYPE_DOUBLE => w.write_f64::<LittleEndian>(f64::from(*self)),
+            ColumnType::MYSQL_TYPE_FLOAT => w.write_f32::<LittleEndian>(*self),
             _ => Err(bad(self, c)),
         }
     }
@@ -340,7 +340,7 @@ impl ToMysqlValue for f64 {
     mysql_text_trivial!();
     fn to_mysql_bin<W: Write>(&self, w: &mut W, c: &Column) -> io::Result<()> {
         match c.coltype {
-            ColumnType::MYSQL_TYPE_DOUBLE => w.write_f64::<LittleEndian>(*self as f64),
+            ColumnType::MYSQL_TYPE_DOUBLE => w.write_f64::<LittleEndian>(*self),
             _ => Err(bad(self, c)),
         }
     }
