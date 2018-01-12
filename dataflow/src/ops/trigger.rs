@@ -61,6 +61,10 @@ impl Trigger {
     }
 
     fn trigger(&self, gids: Vec<DataType>) {
+        if gids.is_empty() {
+            return
+        }
+
         match self.trigger {
             TriggerType::GroupCreation{ ref url, ref group } => {
                 let contexts = gids.iter().map(|gid| {
