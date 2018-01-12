@@ -208,6 +208,16 @@ impl Into<i64> for DataType {
     }
 }
 
+impl Into<i32> for DataType {
+    fn into(self) -> i32 {
+        if let DataType::Int(s) = self {
+            s
+        } else {
+            unreachable!();
+        }
+    }
+}
+
 impl<'a> Into<f64> for &'a DataType {
     fn into(self) -> f64 {
         match self {
