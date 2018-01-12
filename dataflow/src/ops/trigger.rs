@@ -39,31 +39,38 @@ impl Trigger {
     fn rpc<Q: Serialize>(
         &self,
         path: &str,
-        request: Q,
+        requests: Vec<Q>,
         url: &String,
     ) where Q: Send {
         use hyper;
         let url = format!("{}/{}", url, path);
-        let mut r = hyper::Request::new(hyper::Method::Post, url.parse().unwrap());
-        r.set_body(serde_json::to_string(&request).unwrap());
+        let requests: Vec<hyper::Request> = requests.iter().map(|req| {
+            let mut r = hyper::Request::new(hyper::Method::Post, url.clone().parse().unwrap());
+            r.set_body(serde_json::to_string(&req).unwrap());
+            r
+        }).collect();
 
         thread::spawn(move || {
             let mut core = Core::new().unwrap();
             let client = Client::new(&core.handle());
-            let work = client.request(r);
-
-            core.run(work).unwrap();
+            for r in requests {
+                let work = client.request(r);
+                core.run(work).unwrap();
+            }
         });
     }
 
-    fn trigger(&self, gid: DataType) {
+    fn trigger(&self, gids: Vec<DataType>) {
         match self.trigger {
             TriggerType::GroupCreation{ ref url, ref group } => {
-                let mut group_context: HashMap<String, DataType> = HashMap::new();
-                group_context.insert(String::from("id"), gid);
-                group_context.insert(String::from("group"), group.clone().into());
+                let contexts = gids.iter().map(|gid| {
+                    let mut group_context: HashMap<String, DataType> = HashMap::new();
+                    group_context.insert(String::from("id"), gid.clone());
+                    group_context.insert(String::from("group"), group.clone().into());
+                    group_context
+                }).collect();
 
-                self.rpc("create_universe", group_context, url);
+                self.rpc("create_universe", contexts, url);
             }
         }
     }
@@ -110,16 +117,20 @@ impl Ingredient for Trigger {
         trigger_keys.sort();
         trigger_keys.dedup();
 
-        for k in trigger_keys {
+        let keys = trigger_keys.iter().filter_map(|k| {
             match db.lookup(&[self.key[0]], &KeyType::Single(&k)) {
                 LookupResult::Some(rs) => {
                     if rs.len() == 0 {
-                        self.trigger(k);
+                        Some(k)
+                    } else {
+                        None
                     }
                 }
                 LookupResult::Missing => unimplemented!(),
             }
-        }
+        }).cloned().collect();
+
+        self.trigger(keys);
 
         ProcessingResult {
             results: rs,
