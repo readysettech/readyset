@@ -200,6 +200,9 @@ impl Ingredient for NodeOperator {
     fn is_selective(&self) -> bool {
         impl_ingredient_fn_ref!(self, is_selective,)
     }
+    fn must_materialize(&self) -> bool {
+        impl_ingredient_fn_ref!(self, must_materialize,)
+    }
 }
 
 #[cfg(test)]

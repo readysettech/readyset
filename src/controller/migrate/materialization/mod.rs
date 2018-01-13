@@ -304,6 +304,10 @@ impl Materializations {
                 able = false;
             }
 
+            if graph[ni].is_internal() && graph[ni].must_materialize() {
+                able = false;
+            }
+
             // we are already fully materialized, so can't be made partial
             if !new.contains(&ni) && self.have.contains_key(&ni) && !self.partial.contains(&ni) {
                 able = false;

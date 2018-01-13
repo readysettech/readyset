@@ -208,4 +208,9 @@ where
     fn is_selective(&self) -> bool {
         false
     }
+
+    /// Returns true if this operator should always materialize its state
+    fn must_materialize(&self) -> bool {
+        false
+    }
 }

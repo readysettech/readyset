@@ -158,6 +158,10 @@ impl Ingredient for Trigger {
     fn parent_columns(&self, column: usize) -> Vec<(NodeIndex, Option<usize>)> {
         vec![(self.src.as_global(), Some(column))]
     }
+
+    fn must_materialize(&self) -> bool {
+        true
+    }
 }
 
 #[cfg(test)]
