@@ -26,7 +26,16 @@ fn count_base_ingress(
                 .filter(|&&ingress| has_path.contains(&(base, *ingress)))
                 .map(|&&ingress| {
                     if graph[ingress].is_shard_merger() {
-                        graph[source].sharded_by().shards()
+                        let egress = graph
+                            .neighbors_directed(ingress, petgraph::EdgeDirection::Incoming)
+                            .next()
+                            .unwrap();
+
+                        if graph[egress].domain() == graph[base].domain() {
+                            1
+                        } else {
+                            graph[egress].sharded_by().shards()
+                        }
                     } else {
                         1
                     }
