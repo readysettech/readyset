@@ -25,7 +25,9 @@ pub struct MutatorBuilder {
     pub(crate) dropped: VecMap<DataType>,
     pub(crate) expected_columns: usize,
 
-    #[serde(skip)] pub(crate) is_local: bool,
+    // skip so that serde will set value to default (which is false) when serializing
+    #[serde(skip)]
+    pub(crate) is_local: bool,
 }
 
 impl MutatorBuilder {
