@@ -6,28 +6,18 @@ use dataflow::checktable::TokenGenerator;
 use dataflow::backlog::SingleReadHandle;
 use dataflow::prelude::*;
 use std::io;
-use std::sync::{Arc, Mutex};
+use std::thread;
+use std::sync::Arc;
 use std::cell::RefCell;
 use std::time::Duration;
-use rayon;
-use mio::{Events, Poll, PollOpt, Ready, Token};
-use slab::Slab;
-use vec_map::VecMap;
-use std::sync::{atomic, mpsc};
+use mio_pool;
+use std::sync::atomic;
 
 use controller::{LocalOrNot, ReadQuery, ReadReply};
 
 type Rpc = RpcServiceEndpoint<LocalOrNot<ReadQuery>, LocalOrNot<ReadReply>>;
 
 thread_local! {
-    static POLL: RefCell<Option<Arc<Poll>>> = Default::default();
-    static TX: RefCell<Option<mpsc::Sender<
-        (
-            usize,
-            Option<Rpc>,
-        ),
-    >>> = Default::default();
-    static ALL_READERS: RefCell<Option<Readers>> = Default::default();
     static READERS: RefCell<HashMap<
         (NodeIndex, usize),
         (SingleReadHandle, Option<TokenGenerator>),
@@ -41,138 +31,29 @@ pub(crate) fn serve(
     pool_size: usize,
     exit: Arc<atomic::AtomicBool>,
 ) {
-    let mut conns_tokens: Slab<()> = Slab::new();
-    let mut conns: VecMap<Rpc> = Default::default();
-
-    let poll = Arc::new(Poll::new().unwrap());
-    let listen_token = conns_tokens.insert(());
-    poll.register(
-        &listener,
-        Token(listen_token),
-        Ready::readable(),
-        PollOpt::level(),
-    ).unwrap();
-
-    let (tx, rx) = mpsc::channel();
-    let pool_poll = poll.clone();
-    let tx = Arc::new(Mutex::new(tx));
-    let pool = rayon::Configuration::new()
-        .num_threads(pool_size)
-        .thread_name(|i| format!("reader{}", i))
-        .start_handler(move |_| {
-            let tx = tx.lock().unwrap().clone();
-            ALL_READERS.with(|s| *s.borrow_mut() = Some(readers.clone()));
-            POLL.with(|s| *s.borrow_mut() = Some(pool_poll.clone()));
-            TX.with(|s| *s.borrow_mut() = Some(tx));
-        })
-        .build()
-        .unwrap();
-
-    let mut events = Events::with_capacity(32);
-    while !exit.load(atomic::Ordering::SeqCst) {
-        if let Err(e) = poll.poll(&mut events, Some(Duration::from_secs(1))) {
-            if e.kind() == io::ErrorKind::Interrupted {
-                // spurious wakeup
-                continue;
-            } else if e.kind() == io::ErrorKind::TimedOut {
-                // need to re-check timers
-                // *should* be handled by mio and return Ok() with no events
-                continue;
-            } else {
-                panic!("{}", e);
-            }
-        }
-
-        if events.is_empty() {
-            // we must have timed out -- check timers
-            continue;
-        }
-
-        'events: for e in &events {
-            assert!(e.readiness().is_readable());
-            let Token(t) = e.token();
-
-            if t == listen_token {
-                while let Ok((stream, _src)) = listener.accept() {
-                    let token = conns_tokens.insert(());
-                    poll.register(
-                        &stream,
-                        Token(token),
-                        Ready::readable(),
-                        PollOpt::level() | PollOpt::oneshot(),
-                    ).unwrap();
-
-                    let rpc = RpcServiceEndpoint::new(stream);
-                    conns.insert(token, rpc);
-                }
-            } else {
-                while !conns.contains_key(t) {
-                    // worker must have re-registered this connection
-                    // which means it must also have returned it on rx
-                    let (tok, rse) = rx.recv().unwrap();
-
-                    if let Some(rse) = rse {
-                        conns.insert(tok, rse);
-                    } else {
-                        // connection was dropped
-                        conns_tokens.remove(tok);
-                        if tok == t {
-                            continue 'events;
-                        }
-                    }
-                }
-
-                let conn = conns.remove(t).unwrap();
-                pool.spawn(move || handle_conn(t, conn));
-            }
-        }
-    }
-}
-
-fn handle_conn(token: usize, mut conn: Rpc) {
-    TX.with(|tx| {
-        let mut tx = tx.borrow_mut();
-        let tx = tx.as_mut().unwrap();
-
-        loop {
+    let pool = mio_pool::PoolBuilder::from(listener).unwrap();
+    let h = pool.with_state(readers.clone())
+        .with_adapter(RpcServiceEndpoint::new)
+        .run(pool_size, |conn: &mut Rpc, s: &mut Readers| loop {
             match conn.try_recv() {
                 Ok(m) => {
-                    handle_message(m, &mut conn);
+                    handle_message(m, conn, s);
                 }
-                Err(TryRecvError::Empty) => break,
-                Err(TryRecvError::DeserializationError(..)) => {
-                    // XXX
-                    tx.send((token, None)).is_ok();
-                    return;
+                Err(TryRecvError::Empty) => break Ok(false),
+                Err(TryRecvError::DeserializationError(e)) => {
+                    return Err(io::Error::new(io::ErrorKind::InvalidData, e));
                 }
-                Err(TryRecvError::Disconnected) => {
-                    tx.send((token, None)).is_ok();
-                    return;
-                }
+                Err(TryRecvError::Disconnected) => break Ok(true),
             }
-        }
-
-        // re-register the socket so we get events for it again. it'd be better if we send before
-        // we re-register, but we can't do that since we give up the stream (and thus can't produce
-        // an Evented to give to reregister)
-        POLL.with(|poll| {
-            poll.borrow()
-                .as_ref()
-                .unwrap()
-                .reregister(
-                    conn.get_ref(),
-                    Token(token),
-                    Ready::readable(),
-                    PollOpt::level() | PollOpt::oneshot(),
-                )
-                .unwrap()
         });
 
-        tx.send((token, Some(conn))).is_ok();
-    });
+    while false == exit.load(atomic::Ordering::SeqCst) {
+        thread::sleep(Duration::from_millis(500));
+    }
+    h.finish();
 }
 
-fn handle_message(m: LocalOrNot<ReadQuery>, conn: &mut Rpc) {
+fn handle_message(m: LocalOrNot<ReadQuery>, conn: &mut Rpc, s: &mut Readers) {
     let is_local = m.is_local();
     conn.send(&LocalOrNot::make(
         match unsafe { m.take() } {
@@ -187,11 +68,8 @@ fn handle_message(m: LocalOrNot<ReadQuery>, conn: &mut Rpc) {
                             let mut readers_cache = readers_cache.borrow_mut();
                             let &mut (ref mut reader, _) =
                                 readers_cache.entry(target.clone()).or_insert_with(|| {
-                                    ALL_READERS.with(|readers| {
-                                        let readers = readers.borrow();
-                                        let readers = readers.as_ref().unwrap().lock().unwrap();
-                                        readers.get(&target).unwrap().clone()
-                                    })
+                                    let readers = s.lock().unwrap();
+                                    readers.get(&target).unwrap().clone()
                                 });
 
                             reader
@@ -217,11 +95,8 @@ fn handle_message(m: LocalOrNot<ReadQuery>, conn: &mut Rpc) {
                             let mut readers_cache = readers_cache.borrow_mut();
                             let &mut (ref mut reader, ref mut generator) =
                                 readers_cache.entry(target.clone()).or_insert_with(|| {
-                                    ALL_READERS.with(|readers| {
-                                        let readers = readers.borrow();
-                                        let readers = readers.as_ref().unwrap().lock().unwrap();
-                                        readers.get(&target).unwrap().clone()
-                                    })
+                                    let readers = s.lock().unwrap();
+                                    readers.get(&target).unwrap().clone()
                                 });
 
                             reader

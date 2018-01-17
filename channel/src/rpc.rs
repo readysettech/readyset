@@ -157,6 +157,17 @@ where
     }
 }
 
+#[cfg(unix)]
+mod unix_ext {
+    use super::RpcServiceEndpoint;
+    use std::os::unix::io::{AsRawFd, RawFd};
+    impl<Q, R> AsRawFd for RpcServiceEndpoint<Q, R> {
+        fn as_raw_fd(&self) -> RawFd {
+            self.stream.get_ref().get_ref().as_raw_fd()
+        }
+    }
+}
+
 impl<Q, R> Evented for RpcServiceEndpoint<Q, R> {
     fn register(
         &self,
