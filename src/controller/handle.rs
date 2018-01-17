@@ -1,4 +1,4 @@
-use consensus::{Authority};
+use consensus::Authority;
 use dataflow::prelude::*;
 use dataflow::statistics::GraphStats;
 
@@ -80,7 +80,13 @@ impl<A: Authority> ControllerHandle<A> {
     /// Obtain a `RemoteGetterBuilder` that can be sent to a client and then used to query a given
     /// (already maintained) reader node.
     pub fn get_getter_builder(&mut self, node: NodeIndex) -> Option<RemoteGetterBuilder> {
-        self.rpc("getter_builder", &node)
+        let rgb: Option<RemoteGetterBuilder> = self.rpc("getter_builder", &node);
+        rgb.map(|mut rgb| {
+            for &mut (_, ref mut is_local) in &mut rgb.shards {
+                *is_local &= self.local.is_some();
+            }
+            rgb
+        })
     }
 
     /// Obtain a `RemoteGetter`.
