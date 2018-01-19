@@ -103,7 +103,7 @@ impl<A: Authority> ControllerHandle<A> {
     /// Obtain a Mutator
     pub fn get_mutator(&mut self, base: NodeIndex) -> Result<Mutator, Box<Error>> {
         self.get_mutator_builder(base)
-            .map(|m| m.build("127.0.0.1:0".parse().unwrap()))
+            .map(|m| m.build("0.0.0.0:0".parse().unwrap()))
     }
 
     /// Initiaties log recovery by sending a
