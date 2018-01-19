@@ -199,7 +199,9 @@ impl DomainHandle {
                     assignments.push(Some(identifier));
                 }
                 None => {
-                    let listener = ::std::net::TcpListener::bind("0.0.0.0:0").unwrap();
+                    let listener =
+                        ::std::net::TcpListener::bind(SocketAddr::new(listen_addr.clone(), 0))
+                            .unwrap();
                     let addr = listener.local_addr().unwrap();
                     let d =
                         domain.build(logger, readers.clone(), channel_coordinator.clone(), addr);
