@@ -47,6 +47,13 @@ fn main() {
                 .help("Number of workers we expect to connect."),
         )
         .arg(
+            Arg::with_name("shards")
+                .long("shards")
+                .takes_value(true)
+                .default_value("0")
+                .help("Shard the graph this many ways (0 = disable sharding)."),
+        )
+        .arg(
             Arg::with_name("verbose")
                 .short("v")
                 .long("verbose")
@@ -59,12 +66,17 @@ fn main() {
     let zookeeper_addr = matches.value_of("zookeeper").unwrap();
     let local_workers = value_t!(matches, "local_workers", usize).unwrap_or(0);
     let remote_workers = value_t!(matches, "remote_workers", usize).unwrap_or(0);
+    let sharding = match value_t_or_exit!(matches, "shards", usize) {
+        0 => None,
+        x => Some(x),
+    };
 
     let authority = ZookeeperAuthority::new(&zookeeper_addr);
     let mut builder = ControllerBuilder::default();
     builder.set_listen_addr(listen_addr);
     builder.set_local_workers(local_workers);
     builder.set_nworkers(remote_workers);
+    builder.set_sharding(sharding);
 
     if matches.is_present("verbose") {
         builder.log_with(distributary::logger_pls());
