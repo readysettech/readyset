@@ -7,8 +7,8 @@ use dataflow::statistics::GraphStats;
 use std::collections::{BTreeMap, HashMap};
 use std::net::{IpAddr, SocketAddr};
 use std::time::{Duration, Instant};
-use std::thread::{self};
-use std::sync::{Arc, Mutex, atomic};
+use std::thread;
+use std::sync::{atomic, Arc, Mutex};
 use std::{io, time};
 
 use coordination::{CoordinationMessage, CoordinationPayload};

@@ -1,4 +1,4 @@
-use consensus::{Authority};
+use consensus::Authority;
 use dataflow::prelude::*;
 use dataflow::statistics::GraphStats;
 
