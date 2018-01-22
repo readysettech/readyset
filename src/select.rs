@@ -53,7 +53,6 @@ pub struct SelectStatement {
     pub limit: Option<LimitClause>,
 }
 
-
 impl fmt::Display for SelectStatement {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         write!(f, "SELECT ")?;
@@ -503,7 +502,6 @@ mod tests {
         assert_eq!(res2.unwrap().1.order, Some(expected_ord2));
         assert_eq!(res3.unwrap().1.order, Some(expected_ord3));
     }
-
 
     #[test]
     fn table_alias() {

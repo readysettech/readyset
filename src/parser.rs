@@ -127,7 +127,8 @@ mod tests {
         let qstring1 = "SELECT * FROM users AS u";
         let qstring2 = "SELECT name, password FROM users AS u";
         let qstring3 = "SELECT name, password FROM users AS u WHERE user_id = '1'";
-        let qstring4 = "SELECT name, password FROM users AS u WHERE user = 'aaa' AND password = 'xxx'";
+        let qstring4 =
+            "SELECT name, password FROM users AS u WHERE user = 'aaa' AND password = 'xxx'";
         let qstring5 = "SELECT name * 2 AS double_name FROM users";
 
         let res0 = parse_query(qstring0);
@@ -180,7 +181,8 @@ mod tests {
         let qstring0 = "select name, password from users as u where user='aaa' and password= 'xxx'";
         let qstring1 = "select name, password from users as u where user=? and password =?";
 
-        let expected0 = "SELECT name, password FROM users AS u WHERE user = 'aaa' AND password = 'xxx'";
+        let expected0 =
+            "SELECT name, password FROM users AS u WHERE user = 'aaa' AND password = 'xxx'";
         let expected1 = "SELECT name, password FROM users AS u WHERE user = ? AND password = ?";
 
         let res0 = parse_query(qstring0);

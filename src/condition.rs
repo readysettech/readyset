@@ -46,16 +46,16 @@ impl<'a> ConditionTree {
                 ConditionExpression::Base(ConditionBase::Field(ref c)) => {
                     s.insert(c);
                 }
-                ConditionExpression::LogicalOp(ref ct) |
-                ConditionExpression::ComparisonOp(ref ct) => q.push_back(ct),
+                ConditionExpression::LogicalOp(ref ct)
+                | ConditionExpression::ComparisonOp(ref ct) => q.push_back(ct),
                 _ => (),
             }
             match *ct.right.as_ref() {
                 ConditionExpression::Base(ConditionBase::Field(ref c)) => {
                     s.insert(c);
                 }
-                ConditionExpression::LogicalOp(ref ct) |
-                ConditionExpression::ComparisonOp(ref ct) => q.push_back(ct),
+                ConditionExpression::LogicalOp(ref ct)
+                | ConditionExpression::ComparisonOp(ref ct) => q.push_back(ct),
                 _ => (),
             }
         }
@@ -89,7 +89,6 @@ impl fmt::Display for ConditionExpression {
         }
     }
 }
-
 
 /// Parse a conditional expression into a condition tree structure
 named!(pub condition_expr<&[u8], ConditionExpression>,
@@ -172,7 +171,6 @@ named!(boolean_primary<&[u8], ConditionExpression>,
         }
     )
 );
-
 
 named!(predicate<&[u8], ConditionExpression>,
     delimited!(

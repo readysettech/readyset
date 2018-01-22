@@ -25,7 +25,6 @@ impl fmt::Display for DeleteStatement {
     }
 }
 
-
 named!(pub deletion<&[u8], DeleteStatement>,
     chain!(
         caseless_tag!("delete") ~

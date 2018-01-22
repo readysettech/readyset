@@ -8,7 +8,6 @@ use table::Table;
 use column::Column;
 use select::where_clause;
 
-
 #[derive(Clone, Debug, Default, Hash, PartialEq, Serialize, Deserialize)]
 pub struct UpdateStatement {
     pub table: Table,
@@ -25,9 +24,7 @@ impl fmt::Display for UpdateStatement {
             "SET {}",
             self.fields
                 .iter()
-                .map(|&(ref col, ref literal)| {
-                    format!("{} = {}", col, literal.to_string())
-                })
+                .map(|&(ref col, ref literal)| format!("{} = {}", col, literal.to_string()))
                 .collect::<Vec<_>>()
                 .join(", ")
         )?;
@@ -38,7 +35,6 @@ impl fmt::Display for UpdateStatement {
         Ok(())
     }
 }
-
 
 named!(pub updating<&[u8], UpdateStatement>,
     chain!(
