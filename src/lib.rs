@@ -17,6 +17,7 @@ pub use self::compound_select::{CompoundSelectOperator, CompoundSelectStatement}
 pub use self::select::{GroupByClause, JoinClause, LimitClause, OrderClause, OrderType,
                        SelectStatement};
 pub use self::table::Table;
+pub use self::set::SetStatement;
 
 pub mod parser;
 
