@@ -35,3 +35,4 @@ mod compound_select;
 mod table;
 mod delete;
 mod update;
+mod set;
