@@ -8,6 +8,7 @@ use compound_select::{compound_selection, CompoundSelectStatement};
 use select::{selection, SelectStatement};
 use delete::{deletion, DeleteStatement};
 use update::{updating, UpdateStatement};
+use set::{set, SetStatement};
 
 #[derive(Clone, Debug, Hash, PartialEq, Serialize, Deserialize)]
 pub enum SqlQuery {
@@ -17,6 +18,7 @@ pub enum SqlQuery {
     Select(SelectStatement),
     Delete(DeleteStatement),
     Update(UpdateStatement),
+    Set(SetStatement),
 }
 
 impl fmt::Display for SqlQuery {
@@ -27,6 +29,7 @@ impl fmt::Display for SqlQuery {
             SqlQuery::CreateTable(ref create) => write!(f, "{}", create),
             SqlQuery::Delete(ref delete) => write!(f, "{}", delete),
             SqlQuery::Update(ref update) => write!(f, "{}", update),
+            SqlQuery::Set(ref set) => write!(f, "{}", set),
             _ => unimplemented!(),
         }
     }
@@ -67,8 +70,14 @@ pub fn parse_query(input: &str) -> Result<SqlQuery, &str> {
         IResult::Done(_, o) => return Ok(SqlQuery::Delete(o)),
         _ => (),
     };
+
     match updating(&q_bytes) {
         IResult::Done(_, o) => return Ok(SqlQuery::Update(o)),
+        _ => (),
+    };
+
+    match set(&q_bytes) {
+        IResult::Done(_, o) => return Ok(SqlQuery::Set(o)),
         _ => (),
     };
 
