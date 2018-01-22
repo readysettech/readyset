@@ -126,6 +126,10 @@ named!(pub type_identifier<&[u8], SqlType>,
               || { SqlType::Blob }
           )
         | chain!(
+              caseless_tag!("datetime"),
+              || { SqlType::DateTime }
+          )
+        | chain!(
               caseless_tag!("date"),
               || { SqlType::Date }
           )
@@ -140,6 +144,10 @@ named!(pub type_identifier<&[u8], SqlType>,
               || { SqlType::Text }
           )
         | chain!(
+              caseless_tag!("longtext"),
+              || { SqlType::Longtext }
+          )
+        | chain!(
               caseless_tag!("char") ~
               len: delimited!(tag!("("), digit, tag!(")")) ~
               multispace? ~
@@ -147,7 +155,7 @@ named!(pub type_identifier<&[u8], SqlType>,
               || { SqlType::Char(len_as_u16(len)) }
           )
         | chain!(
-              caseless_tag!("int") ~
+              alt_complete!(caseless_tag!("integer") | caseless_tag!("int") | caseless_tag!("smallint")) ~
               len: opt!(delimited!(tag!("("), digit, tag!(")"))) ~
               multispace? ~
               _signed: opt!(alt_complete!(caseless_tag!("unsigned") | caseless_tag!("signed"))),
