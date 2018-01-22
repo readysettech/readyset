@@ -25,8 +25,10 @@ pub enum SqlType {
     Real,
     Tinytext,
     Mediumtext,
+    Longtext,
     Text,
     Date,
+    DateTime,
     Timestamp,
     Varbinary(u16),
 }
@@ -48,8 +50,10 @@ impl fmt::Display for SqlType {
             SqlType::Real => write!(f, "REAL"),
             SqlType::Tinytext => write!(f, "TINYTEXT"),
             SqlType::Mediumtext => write!(f, "MEDIUMTEXT"),
+            SqlType::Longtext => write!(f, "LONGTEXT"),
             SqlType::Text => write!(f, "TEXT"),
             SqlType::Date => write!(f, "DATE"),
+            SqlType::DateTime => write!(f, "DATETIME"),
             SqlType::Timestamp => write!(f, "TIMESTAMP"),
             SqlType::Varbinary(len) => write!(f, "VARBINARY({})", len),
         }
