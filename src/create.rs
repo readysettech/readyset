@@ -306,6 +306,12 @@ named!(pub column_constraint<&[u8], ColumnConstraint>,
               multispace?,
               || { ColumnConstraint::DefaultValue(def) }
           )
+        | chain!(
+              multispace? ~
+              caseless_tag!("primary key") ~
+              multispace?,
+              || { ColumnConstraint::PrimaryKey }
+          )
     )
 );
 

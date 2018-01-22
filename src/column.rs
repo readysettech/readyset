@@ -115,6 +115,7 @@ pub enum ColumnConstraint {
     NotNull,
     DefaultValue(Literal),
     AutoIncrement,
+    PrimaryKey,
 }
 
 impl fmt::Display for ColumnConstraint {
@@ -125,6 +126,7 @@ impl fmt::Display for ColumnConstraint {
                 write!(f, "DEFAULT {}", literal.to_string())
             }
             ColumnConstraint::AutoIncrement => write!(f, "AUTOINCREMENT"),
+            ColumnConstraint::PrimaryKey => write!(f, "PRIMARY KEY"),
         }
     }
 }
