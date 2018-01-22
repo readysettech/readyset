@@ -533,4 +533,64 @@ mod tests {
             }
         );
     }
+
+    #[test]
+    fn django_create() {
+        let qstring = "CREATE TABLE `django_admin_log` (
+                       `id` integer AUTO_INCREMENT NOT NULL PRIMARY KEY,
+                       `action_time` datetime NOT NULL,
+                       `user_id` integer NOT NULL,
+                       `content_type_id` integer,
+                       `object_id` longtext,
+                       `object_repr` varchar(200) NOT NULL,
+                       `action_flag` smallint UNSIGNED NOT NULL,
+                       `change_message` longtext NOT NULL)";
+        let res = creation(qstring.as_bytes());
+        assert_eq!(
+            res.unwrap().1,
+            CreateTableStatement {
+                table: Table::from("django_admin_log"),
+                fields: vec![
+                    ColumnSpecification::with_constraints(
+                        Column::from("id"),
+                        SqlType::Int(32),
+                        vec![
+                            ColumnConstraint::AutoIncrement,
+                            ColumnConstraint::NotNull,
+                            ColumnConstraint::PrimaryKey,
+                        ],
+                    ),
+                    ColumnSpecification::with_constraints(
+                        Column::from("action_time"),
+                        SqlType::DateTime,
+                        vec![ColumnConstraint::NotNull],
+                    ),
+                    ColumnSpecification::with_constraints(
+                        Column::from("user_id"),
+                        SqlType::Int(32),
+                        vec![ColumnConstraint::NotNull],
+                    ),
+                    ColumnSpecification::new(Column::from("content_type_id"), SqlType::Int(32)),
+                    ColumnSpecification::new(Column::from("object_id"), SqlType::Longtext),
+                    ColumnSpecification::with_constraints(
+                        Column::from("object_repr"),
+                        SqlType::Varchar(200),
+                        vec![ColumnConstraint::NotNull],
+                    ),
+                    ColumnSpecification::with_constraints(
+                        Column::from("action_flag"),
+                        SqlType::Int(32),
+                        vec![ColumnConstraint::NotNull],
+                    ),
+                    ColumnSpecification::with_constraints(
+                        Column::from("change_message"),
+                        SqlType::Longtext,
+                        vec![ColumnConstraint::NotNull],
+                    ),
+                ],
+                ..Default::default()
+            }
+        );
+    }
+
 }
