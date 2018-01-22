@@ -125,6 +125,9 @@ impl ControllerInner {
             (Post, "/getter_builder") => {
                 json::to_string(&self.getter_builder(json::from_slice(&body).unwrap())).unwrap()
             }
+            (Post, "/extend_recipe") => {
+                json::to_string(&self.extend_recipe(json::from_slice(&body).unwrap())).unwrap()
+            }
             (Post, "/install_recipe") => {
                 json::to_string(&self.install_recipe(json::from_slice(&body).unwrap())).unwrap()
             }
@@ -501,6 +504,24 @@ impl ControllerInner {
             .collect();
 
         GraphStats { domains: domains }
+    }
+
+    pub fn extend_recipe(&mut self, add_txt: String) -> Result<(), RpcError> {
+        let new = self.recipe.clone();
+        match new.extend(&add_txt) {
+            Ok(mut r) => {
+                self.migrate(|mig| match r.activate(mig, false) {
+                    Ok(_) => (),
+                    Err(e) => panic!("failed to extend recipe: {:?}", e),
+                });
+
+                Ok(())
+            }
+            Err(e) => {
+                crit!(self.log, "failed to extend recipe: {:?}", e);
+                Err(RpcError::Other("failed to extend recipe".to_owned()))
+            }
+        }
     }
 
     pub fn install_recipe(&mut self, r_txt: String) -> Result<(), RpcError> {

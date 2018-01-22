@@ -111,6 +111,11 @@ impl<A: Authority> ControllerHandle<A> {
         self.rpc("get_statistics", &())
     }
 
+    /// Extend the existing recipe on the controller by adding a new query.
+    pub fn extend_recipe(&mut self, recipe_addition: String) -> Result<(), RpcError> {
+        self.rpc("extend_recipe", &recipe_addition)
+    }
+
     /// Install a new recipe on the controller.
     pub fn install_recipe(&mut self, new_recipe: String) -> Result<(), RpcError> {
         self.rpc("install_recipe", &new_recipe)
