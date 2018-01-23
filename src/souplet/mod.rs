@@ -106,15 +106,6 @@ impl<A: Authority> Souplet<A> {
             }
         };
 
-        self.pool = Some(
-            worker::WorkerPool::new(
-                self.nworkers,
-                &self.log,
-                descriptor.checktable_addr,
-                self.channel_coordinator.clone(),
-            ).unwrap(),
-        );
-
         loop {
             match TcpSender::connect(&descriptor.internal_addr, None) {
                 Ok(s) => {
@@ -128,7 +119,7 @@ impl<A: Authority> Souplet<A> {
                     });
 
                     match self.sender.as_mut().unwrap().send(msg) {
-                        Ok(_) => self.handle(),
+                        Ok(_) => self.handle(descriptor.checktable_addr),
                         Err(e) => error!(self.log, "failed to register with controller: {:?}", e),
                     }
                 }
@@ -142,7 +133,17 @@ impl<A: Authority> Souplet<A> {
 
     /// Main worker loop: waits for instructions from controller, and occasionally heartbeats to
     /// tell the controller that we're still here
-    fn handle(&mut self) {
+    fn handle(&mut self, checktable_addr: SocketAddr) {
+        // now that we're connected to a leader, we can start the pool
+        self.pool = Some(
+            worker::WorkerPool::new(
+                self.nworkers,
+                &self.log,
+                checktable_addr,
+                self.channel_coordinator.clone(),
+            ).unwrap(),
+        );
+
         // needed to make the borrow checker happy, replaced later
         let mut receiver = self.receiver.take();
 
