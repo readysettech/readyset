@@ -93,24 +93,23 @@ impl<A: Authority> Souplet<A> {
 
     /// Run the worker.
     pub fn run(&mut self) {
-        let leader = self.authority.get_leader().unwrap();
-        let descriptor: ControllerDescriptor = serde_json::from_slice(&leader.1).unwrap();
-
-        let local_addr = match self.receiver {
-            Some(ref r) => r.get_listener_addr().unwrap(),
-            None => {
-                let listener = TcpListener::bind(&self.listen_addr).unwrap();
-                let addr = listener.local_addr().unwrap();
-                self.receiver = Some(PollingLoop::from_listener(listener));
-                addr
-            }
-        };
-
         loop {
+            let leader = self.authority.get_leader().unwrap();
+            let descriptor: ControllerDescriptor = serde_json::from_slice(&leader.1).unwrap();
             match TcpSender::connect(&descriptor.internal_addr, None) {
                 Ok(s) => {
                     self.sender = Some(s);
                     self.last_heartbeat = Some(Instant::now());
+
+                    let local_addr = match self.receiver {
+                        Some(ref r) => r.get_listener_addr().unwrap(),
+                        None => {
+                            let listener = TcpListener::bind(&self.listen_addr).unwrap();
+                            let addr = listener.local_addr().unwrap();
+                            self.receiver = Some(PollingLoop::from_listener(listener));
+                            addr
+                        }
+                    };
 
                     // say hello
                     let msg = self.wrap_payload(CoordinationPayload::Register {
@@ -119,7 +118,10 @@ impl<A: Authority> Souplet<A> {
                     });
 
                     match self.sender.as_mut().unwrap().send(msg) {
-                        Ok(_) => self.handle(descriptor.checktable_addr),
+                        Ok(_) => {
+                            self.handle(descriptor.checktable_addr);
+                            break;
+                        }
                         Err(e) => error!(self.log, "failed to register with controller: {:?}", e),
                     }
                 }
