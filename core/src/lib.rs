@@ -13,6 +13,10 @@ extern crate serde;
 #[macro_use]
 extern crate serde_derive;
 
+#[cfg(any(feature = "web", test))]
+#[macro_use]
+extern crate serde_json;
+
 pub mod addressing;
 pub mod data;
 pub mod local;
