@@ -7,5 +7,4 @@ env:
   - SETTLE_TIME=2000
 script:
   - cargo check --all
-  - cargo test --verbose
-  - cargo test --verbose --manifest-path dataflow/Cargo.toml
+  - cargo test --verbose --all
