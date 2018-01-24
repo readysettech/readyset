@@ -8,3 +8,4 @@ env:
 script:
   - cargo check --all
   - cargo test --verbose
+  - cargo test --verbose --manifest-path dataflow/Cargo.toml
