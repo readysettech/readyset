@@ -18,20 +18,18 @@ impl fmt::Display for SetStatement {
 }
 
 named!(pub set<&[u8], SetStatement>,
-    chain!(
-        tag_no_case!("set") ~
-        multispace ~
-        var: map_res!(sql_identifier, str::from_utf8) ~
-        multispace? ~
-        tag_no_case!("=") ~
-        multispace? ~
-        val: literal,
-        || {
-            SetStatement {
-                variable: String::from(var),
-                value: val,
-            }
-        }
+    do_parse!(
+        tag_no_case!("set") >>
+        multispace >>
+        var: map_res!(sql_identifier, str::from_utf8) >>
+        multispace? >>
+        tag_no_case!("=") >>
+        multispace? >>
+        val: literal >>
+        (SetStatement {
+            variable: String::from(var),
+            value: val,
+        })
     )
 );
 

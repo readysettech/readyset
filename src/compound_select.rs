@@ -22,8 +22,8 @@ pub struct CompoundSelectStatement {
 /// Parse compound operator
 named!(compound_op<&[u8], CompoundSelectOperator>,
     alt_complete!(
-          chain!(
-              tag_no_case!("union") ~
+          do_parse!(
+              tag_no_case!("union") >>
               distinct: opt!(
                   preceded!(multispace,
                             alt_complete!(  map!(tag_no_case!("all"), |_| { false })
@@ -50,28 +50,26 @@ named!(compound_op<&[u8], CompoundSelectOperator>,
 
 /// Parse compound selection
 named!(pub compound_selection<&[u8], CompoundSelectStatement>,
-    complete!(chain!(
-        first_select: delimited!(opt!(tag!("(")), nested_selection, opt!(tag!(")"))) ~
+    complete!(do_parse!(
+        first_select: delimited!(opt!(tag!("(")), nested_selection, opt!(tag!(")"))) >>
         other_selects: many1!(
             complete!(
-                chain!(multispace? ~
-                       op: compound_op ~
-                       multispace ~
-                       tag!("(")? ~
-                       multispace? ~
-                       select: nested_selection ~
-                       multispace? ~
-                       tag!(")")?,
-                       || {
-                           (Some(op), select)
-                       }
+                do_parse!(multispace? >>
+                       op: compound_op >>
+                       multispace >>
+                       tag!("(")? >>
+                       multispace? >>
+                       select: nested_selection >>
+                       multispace? >>
+                       tag!(")")? >>
+                       (Some(op), select)
                 )
             )
-        ) ~
-        multispace? ~
-        order: order_clause? ~
-        limit: limit_clause?,
-        || {
+        ) >>
+        multispace? >>
+        order: order_clause? >>
+        limit: limit_clause? >>
+        ({
             let mut v = vec![(None, first_select)];
             v.extend(other_selects);
 
@@ -80,7 +78,7 @@ named!(pub compound_selection<&[u8], CompoundSelectStatement>,
                 order: order,
                 limit: limit,
             }
-        }
+        })
     ))
 );
 

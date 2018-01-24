@@ -36,22 +36,20 @@ impl fmt::Display for UpdateStatement {
 }
 
 named!(pub updating<&[u8], UpdateStatement>,
-    chain!(
-        tag_no_case!("update") ~
-        multispace ~
-        table: table_reference ~
-        multispace ~
-        tag_no_case!("set") ~
-        multispace ~
-        fields: field_value_list ~
-        cond: opt!(where_clause) ~
-        || {
-            UpdateStatement {
-                table: table,
-                fields: fields,
-                where_clause: cond,
-            }
-        }
+    do_parse!(
+        tag_no_case!("update") >>
+        multispace >>
+        table: table_reference >>
+        multispace >>
+        tag_no_case!("set") >>
+        multispace >>
+        fields: field_value_list >>
+        cond: opt!(where_clause) >>
+        (UpdateStatement {
+            table: table,
+            fields: fields,
+            where_clause: cond,
+        })
     )
 );
 

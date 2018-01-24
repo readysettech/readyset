@@ -55,113 +55,113 @@ fn len_as_u16(len: &[u8]) -> u16 {
 /// A SQL type specifier.
 named!(pub type_identifier<&[u8], SqlType>,
     alt_complete!(
-          chain!(
-              tag_no_case!("mediumtext"),
-              || { SqlType::Mediumtext }
+          do_parse!(
+              tag_no_case!("mediumtext") >>
+              (SqlType::Mediumtext)
           )
-        | chain!(
-              tag_no_case!("timestamp") ~
-              _len: opt!(delimited!(tag!("("), digit, tag!(")"))) ~
-              multispace?,
-              || { SqlType::Timestamp }
+        | do_parse!(
+              tag_no_case!("timestamp") >>
+              _len: opt!(delimited!(tag!("("), digit, tag!(")"))) >>
+              multispace? >>
+              (SqlType::Timestamp)
           )
-        | chain!(
-              tag_no_case!("varbinary") ~
-              len: delimited!(tag!("("), digit, tag!(")")) ~
-              multispace?,
-              || { SqlType::Varbinary(len_as_u16(len)) }
+        | do_parse!(
+              tag_no_case!("varbinary") >>
+              len: delimited!(tag!("("), digit, tag!(")")) >>
+              multispace? >>
+              (SqlType::Varbinary(len_as_u16(len)))
           )
-        | chain!(
-              tag_no_case!("mediumblob"),
-              || { SqlType::Mediumblob }
+        | do_parse!(
+              tag_no_case!("mediumblob") >>
+              (SqlType::Mediumblob)
           )
-        | chain!(
-              tag_no_case!("longblob"),
-              || { SqlType::Longblob }
+        | do_parse!(
+              tag_no_case!("longblob") >>
+              (SqlType::Longblob)
           )
-        | chain!(
-              tag_no_case!("tinyblob"),
-              || { SqlType::Tinyblob }
+        | do_parse!(
+              tag_no_case!("tinyblob") >>
+              (SqlType::Tinyblob)
           )
-        | chain!(
-              tag_no_case!("tinytext"),
-              || { SqlType::Tinytext }
+        | do_parse!(
+              tag_no_case!("tinytext") >>
+              (SqlType::Tinytext)
           )
-        | chain!(
-              tag_no_case!("varchar") ~
-              len: delimited!(tag!("("), digit, tag!(")")) ~
-              multispace? ~
-              _binary: opt!(tag_no_case!("binary")),
-              || { SqlType::Varchar(len_as_u16(len)) }
+        | do_parse!(
+              tag_no_case!("varchar") >>
+              len: delimited!(tag!("("), digit, tag!(")")) >>
+              multispace? >>
+              _binary: opt!(tag_no_case!("binary")) >>
+              (SqlType::Varchar(len_as_u16(len)))
           )
-        | chain!(
-              tag_no_case!("tinyint") ~
-              len: delimited!(tag!("("), digit, tag!(")")) ~
-              multispace? ~
-              _signed: opt!(alt_complete!(tag_no_case!("unsigned") | tag_no_case!("signed"))),
-              || { SqlType::Tinyint(len_as_u16(len)) }
+        | do_parse!(
+              tag_no_case!("tinyint") >>
+              len: delimited!(tag!("("), digit, tag!(")")) >>
+              multispace? >>
+              _signed: opt!(alt_complete!(tag_no_case!("unsigned") | tag_no_case!("signed"))) >>
+              (SqlType::Tinyint(len_as_u16(len)))
           )
-        | chain!(
-              tag_no_case!("bigint") ~
-              len: delimited!(tag!("("), digit, tag!(")")) ~
-              multispace? ~
-              _signed: opt!(alt_complete!(tag_no_case!("unsigned") | tag_no_case!("signed"))),
-              || { SqlType::Bigint(len_as_u16(len)) }
+        | do_parse!(
+              tag_no_case!("bigint") >>
+              len: delimited!(tag!("("), digit, tag!(")")) >>
+              multispace? >>
+              _signed: opt!(alt_complete!(tag_no_case!("unsigned") | tag_no_case!("signed"))) >>
+              (SqlType::Bigint(len_as_u16(len)))
           )
-        | chain!(
-              tag_no_case!("double") ~
-              multispace? ~
-              _signed: opt!(alt_complete!(tag_no_case!("unsigned") | tag_no_case!("signed"))),
-              || { SqlType::Double }
+        | do_parse!(
+              tag_no_case!("double") >>
+              multispace? >>
+              _signed: opt!(alt_complete!(tag_no_case!("unsigned") | tag_no_case!("signed"))) >>
+              (SqlType::Double)
           )
-        | chain!(
-              tag_no_case!("float") ~
-              multispace? ~
-              _signed: opt!(alt_complete!(tag_no_case!("unsigned") | tag_no_case!("signed"))),
-              || { SqlType::Float }
+        | do_parse!(
+              tag_no_case!("float") >>
+              multispace? >>
+              _signed: opt!(alt_complete!(tag_no_case!("unsigned") | tag_no_case!("signed"))) >>
+              (SqlType::Float)
           )
-        | chain!(
-              tag_no_case!("blob"),
-              || { SqlType::Blob }
+        | do_parse!(
+              tag_no_case!("blob") >>
+              (SqlType::Blob)
           )
-        | chain!(
+        | do_parse!(
               tag_no_case!("datetime"),
-              || { SqlType::DateTime }
+              (SqlType::DateTime)
           )
-        | chain!(
-              tag_no_case!("date"),
-              || { SqlType::Date }
+        | do_parse!(
+              tag_no_case!("date") >>
+              (SqlType::Date)
           )
-        | chain!(
-              tag_no_case!("real") ~
-              multispace? ~
-              _signed: opt!(alt_complete!(tag_no_case!("unsigned") | tag_no_case!("signed"))),
-              || { SqlType::Real }
+        | do_parse!(
+              tag_no_case!("real") >>
+              multispace? >>
+              _signed: opt!(alt_complete!(tag_no_case!("unsigned") | tag_no_case!("signed"))) >>
+              (SqlType::Real)
           )
-        | chain!(
-              tag_no_case!("text"),
-              || { SqlType::Text }
+        | do_parse!(
+              tag_no_case!("text") >>
+              (SqlType::Text)
           )
-        | chain!(
-              tag_no_case!("longtext"),
-              || { SqlType::Longtext }
+        | do_parse!(
+              tag_no_case!("longtext") >>
+              (SqlType::Longtext)
           )
-        | chain!(
-              tag_no_case!("char") ~
-              len: delimited!(tag!("("), digit, tag!(")")) ~
-              multispace? ~
-              _binary: opt!(tag_no_case!("binary")),
-              || { SqlType::Char(len_as_u16(len)) }
+        | do_parse!(
+              tag_no_case!("char") >>
+              len: delimited!(tag!("("), digit, tag!(")")) >>
+              multispace? >>
+              _binary: opt!(tag_no_case!("binary")) >>
+              (SqlType::Char(len_as_u16(len)))
           )
-        | chain!(
-              alt_complete!(tag_no_case!("integer") | tag_no_case!("int") | tag_no_case!("smallint")) ~
-              len: opt!(delimited!(tag!("("), digit, tag!(")"))) ~
-              multispace? ~
-              _signed: opt!(alt_complete!(tag_no_case!("unsigned") | tag_no_case!("signed"))),
-              || { SqlType::Int(match len {
+        | do_parse!(
+              alt_complete!(tag_no_case!("integer") | tag_no_case!("int") | tag_no_case!("smallint")) >>
+              len: opt!(delimited!(tag!("("), digit, tag!(")"))) >>
+              multispace? >>
+              _signed: opt!(alt_complete!(tag_no_case!("unsigned") | tag_no_case!("signed"))) >>
+              (SqlType::Int(match len {
                   Some(len) => len_as_u16(len),
                   None => 32 as u16,
-              }) }
+              }))
           )
     )
 );
@@ -169,60 +169,56 @@ named!(pub type_identifier<&[u8], SqlType>,
 /// Parse rule for an individual key specification.
 named!(pub key_specification<&[u8], TableKey>,
     alt_complete!(
-          chain!(
-              tag_no_case!("fulltext key") ~
-              multispace? ~
-              name: opt!(sql_identifier) ~
-              multispace? ~
-              columns: delimited!(tag!("("), field_list, tag!(")")),
-              || {
-                  match name {
-                      Some(name) => {
-                          let n = String::from(str::from_utf8(name).unwrap());
-                          TableKey::FulltextKey(Some(n), columns)
-                      },
-                      None => TableKey::FulltextKey(None, columns),
-                  }
-              }
+          do_parse!(
+              tag_no_case!("fulltext key") >>
+              multispace? >>
+              name: opt!(sql_identifier) >>
+              multispace? >>
+              columns: delimited!(tag!("("), field_list, tag!(")")) >>
+              (match name {
+                  Some(name) => {
+                      let n = String::from(str::from_utf8(name).unwrap());
+                      TableKey::FulltextKey(Some(n), columns)
+                  },
+                  None => TableKey::FulltextKey(None, columns),
+              })
           )
-        | chain!(
-              tag_no_case!("primary key") ~
-              multispace? ~
-              columns: delimited!(tag!("("), field_list, tag!(")")) ~
-              opt!(complete!(chain!(
-                          multispace ~
-                          tag_no_case!("autoincrement"),
-                          || { }
+        | do_parse!(
+              tag_no_case!("primary key") >>
+              multispace? >>
+              columns: delimited!(tag!("("), field_list, tag!(")")) >>
+              opt!(complete!(do_parse!(
+                          multispace >>
+                          tag_no_case!("autoincrement") >>
+                          ()
                    ))
-              ),
-              || { TableKey::PrimaryKey(columns) }
+              ) >>
+              (TableKey::PrimaryKey(columns))
           )
-        | chain!(
-              tag_no_case!("unique key") ~
-              multispace? ~
-              name: opt!(sql_identifier) ~
-              multispace? ~
-              columns: delimited!(tag!("("), field_list, tag!(")")),
-              || {
-                  match name {
-                      Some(name) => {
-                          let n = String::from(str::from_utf8(name).unwrap());
-                          TableKey::UniqueKey(Some(n), columns)
-                      },
-                      None => TableKey::UniqueKey(None, columns),
-                  }
-              }
+        | do_parse!(
+              tag_no_case!("unique key") >>
+              multispace? >>
+              name: opt!(sql_identifier) >>
+              multispace? >>
+              columns: delimited!(tag!("("), field_list, tag!(")")) >>
+              (match name {
+                  Some(name) => {
+                      let n = String::from(str::from_utf8(name).unwrap());
+                      TableKey::UniqueKey(Some(n), columns)
+                  },
+                  None => TableKey::UniqueKey(None, columns),
+              })
           )
-        | chain!(
-              tag_no_case!("key") ~
-              multispace? ~
-              name: sql_identifier ~
-              multispace? ~
-              columns: delimited!(tag!("("), field_list, tag!(")")),
-              || {
+        | do_parse!(
+              tag_no_case!("key") >>
+              multispace? >>
+              name: sql_identifier >>
+              multispace? >>
+              columns: delimited!(tag!("("), field_list, tag!(")")) >>
+              ({
                   let n = String::from(str::from_utf8(name).unwrap());
                   TableKey::Key(n, columns)
-              }
+              })
           )
     )
 );
@@ -230,17 +226,17 @@ named!(pub key_specification<&[u8], TableKey>,
 /// Parse rule for a comma-separated list.
 named!(pub key_specification_list<&[u8], Vec<TableKey>>,
        many1!(
-           complete!(chain!(
-               key: key_specification ~
+           complete!(do_parse!(
+               key: key_specification >>
                opt!(
-                   complete!(chain!(
-                       multispace? ~
-                       tag!(",") ~
-                       multispace?,
-                       || {}
+                   complete!(do_parse!(
+                       multispace? >>
+                       tag!(",") >>
+                       multispace? >>
+                       ()
                    ))
-               ),
-               || { key }
+               ) >>
+               (key)
            ))
        )
 );
@@ -248,24 +244,24 @@ named!(pub key_specification_list<&[u8], Vec<TableKey>>,
 /// Parse rule for a comma-separated list.
 named!(pub field_specification_list<&[u8], Vec<ColumnSpecification> >,
        many1!(
-           complete!(chain!(
-               identifier: column_identifier_no_alias ~
-               fieldtype: opt!(complete!(chain!(multispace ~
-                                      ti: type_identifier ~
-                                      multispace?,
-                                      || { ti }
+           complete!(do_parse!(
+               identifier: column_identifier_no_alias >>
+               fieldtype: opt!(complete!(do_parse!(multispace >>
+                                      ti: type_identifier >>
+                                      multispace? >>
+                                      (ti)
                                ))
-               ) ~
-               constraints: many0!(column_constraint) ~
+               ) >>
+               constraints: many0!(column_constraint) >>
                opt!(
-                   complete!(chain!(
-                       multispace? ~
-                       tag!(",") ~
-                       multispace?,
-                       || {}
+                   complete!(do_parse!(
+                       multispace? >>
+                       tag!(",") >>
+                       multispace? >>
+                       ()
                    ))
                ),
-               || {
+               ({
                    let t = match fieldtype {
                        None => SqlType::Text,
                        Some(ref t) => t.clone(),
@@ -275,7 +271,7 @@ named!(pub field_specification_list<&[u8], Vec<ColumnSpecification> >,
                        sql_type: t,
                        constraints: constraints,
                    }
-               }
+               })
            ))
        )
 );
@@ -283,41 +279,41 @@ named!(pub field_specification_list<&[u8], Vec<ColumnSpecification> >,
 /// Parse rule for a column definition contraint.
 named!(pub column_constraint<&[u8], ColumnConstraint>,
     alt_complete!(
-          chain!(
-              multispace? ~
-              tag_no_case!("not null") ~
-              multispace?,
+          do_parse!(
+              multispace? >>
+              tag_no_case!("not null") >>
+              multispace? >>
               || { ColumnConstraint::NotNull }
           )
-        | chain!(
-              multispace? ~
-              tag_no_case!("auto_increment") ~
-              multispace?,
+        | do_parse!(
+              multispace? >>
+              tag_no_case!("auto_increment") >>
+              multispace? >>
               || { ColumnConstraint::AutoIncrement }
           )
-        | chain!(
-              multispace? ~
-              tag_no_case!("default") ~
-              multispace ~
+        | do_parse!(
+              multispace? >>
+              tag_no_case!("default") >>
+              multispace >>
               def: alt_complete!(
-                    chain!(s: delimited!(tag!("'"), take_until!("'"), tag!("'")), || {
+                    do_parse!(s: delimited!(tag!("'"), take_until!("'"), tag!("'")) >> (
                         Literal::String(String::from(str::from_utf8(s).unwrap()))
-                    })
-                  | chain!(d: map_res!(digit, str::from_utf8), || {
+                    ))
+                  | do_parse!(d: map_res!(digit, str::from_utf8) > (
                       Literal::Integer(i64::from_str(d).unwrap())
-                    })
-                  | chain!(tag!("''"), || { Literal::String(String::from("")) })
-                  | chain!(tag_no_case!("null"), || { Literal::Null })
-                  | chain!(tag_no_case!("current_timestamp"), || { Literal::CurrentTimestamp })
-              ) ~
-              multispace?,
-              || { ColumnConstraint::DefaultValue(def) }
+                    ))
+                  | do_parse!(tag!("''") >> (Literal::String(String::from(""))))
+                  | do_parse!(tag_no_case!("null") >>  (Literal::Null))
+                  | do_parse!(tag_no_case!("current_timestamp") >> (Literal::CurrentTimestamp))
+              ) >>
+              multispace? >>
+              (ColumnConstraint::DefaultValue(def))
           )
-        | chain!(
-              multispace? ~
-              tag_no_case!("primary key") ~
-              multispace?,
-              || { ColumnConstraint::PrimaryKey }
+        | do_parse!(
+              multispace? >>
+              tag_no_case!("primary key") >>
+              multispace? >>
+              (ColumnConstraint::PrimaryKey)
           )
     )
 );
@@ -325,73 +321,73 @@ named!(pub column_constraint<&[u8], ColumnConstraint>,
 /// Parse rule for a SQL CREATE TABLE query.
 /// TODO(malte): support types, TEMPORARY tables, IF NOT EXISTS, AS stmt
 named!(pub creation<&[u8], CreateTableStatement>,
-    complete!(chain!(
-        tag_no_case!("create") ~
-        multispace ~
-        tag_no_case!("table") ~
-        multispace ~
-        table: table_reference ~
-        multispace ~
-        tag!("(") ~
-        multispace? ~
-        fields: field_specification_list ~
-        multispace? ~
-        keys: opt!(key_specification_list) ~
-        multispace? ~
-        tag!(")") ~
-        multispace? ~
+    complete!(do_parse!(
+        tag_no_case!("create") >>
+        multispace >>
+        tag_no_case!("table") >>
+        multispace >>
+        table: table_reference >>
+        multispace >>
+        tag!("(") >>
+        multispace? >>
+        fields: field_specification_list >>
+        multispace? >>
+        keys: opt!(key_specification_list) >>
+        multispace? >>
+        tag!(")") >>
+        multispace? >>
         // XXX(malte): wrap the two below in a permutation! rule that permits arbitrary ordering
         opt!(
             complete!(
-                chain!(
-                    tag_no_case!("type") ~
-                    multispace? ~
-                    tag!("=") ~
-                    multispace? ~
-                    alphanumeric,
-                    || {}
+                do_parse!(
+                    tag_no_case!("type") >>
+                    multispace? >>
+                    tag!("=") >>
+                    multispace? >>
+                    alphanumeric >>
+                    ()
                 )
             )
-        ) ~
-        multispace? ~
+        ) >>
+        multispace? >>
         opt!(
             complete!(
-                chain!(
-                    tag_no_case!("pack_keys") ~
-                    multispace? ~
-                    tag!("=") ~
-                    multispace? ~
-                    alt_complete!(tag!("0") | tag!("1")),
-                    || {}
+                do_parse!(
+                    tag_no_case!("pack_keys") >>
+                    multispace? >>
+                    tag!("=") >>
+                    multispace? >>
+                    alt_complete!(tag!("0") | tag!("1")) >>
+                    ()
                 )
             )
-        ) ~
-        multispace? ~
+        ) >>
+        multispace? >>
         opt!(
             complete!(
-                chain!(
-                    tag_no_case!("engine") ~
-                    multispace? ~
-                    tag!("=") ~
-                    multispace? ~
-                    alphanumeric,
-                    || {}
+                do_parse!(
+                    tag_no_case!("engine") >>
+                    multispace? >>
+                    tag!("=") >>
+                    multispace? >>
+                    alphanumeric >>
+                    ()
                 )
             )
-        ) ~
-        multispace? ~
+        ) >>
+        multispace? >>
         opt!(
             complete!(
-                chain!(
-                    tag_no_case!("default charset") ~
-                    multispace? ~
-                    tag!("=") ~
-                    multispace? ~
-                    alt_complete!(tag!("utf8")),
-                    || {}
+                do_parse!(
+                    tag_no_case!("default charset") >>
+                    multispace? >>
+                    tag!("=") >>
+                    multispace? >>
+                    alt_complete!(tag!("utf8")) >>
+                    ()
                 )
             )
-        ) ~
+        ) >>
         statement_terminator,
         || {
             // "table AS alias" isn't legal in CREATE statements

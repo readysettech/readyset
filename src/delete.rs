@@ -25,11 +25,11 @@ impl fmt::Display for DeleteStatement {
 }
 
 named!(pub deletion<&[u8], DeleteStatement>,
-    chain!(
-        tag_no_case!("delete") ~
-        delimited!(opt!(multispace), tag_no_case!("from"), opt!(multispace)) ~
-        table: table_reference ~
-        cond: opt!(where_clause) ~
+    do_parse!(
+        tag_no_case!("delete") >>
+        delimited!(opt!(multispace), tag_no_case!("from"), opt!(multispace)) >>
+        table: table_reference >>
+        cond: opt!(where_clause) >>
         || {
             DeleteStatement {
                 table: table,
