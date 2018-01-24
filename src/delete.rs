@@ -1,5 +1,4 @@
 use nom::multispace;
-use nom::{Err, ErrorKind, IResult, Needed};
 use std::{fmt, str};
 
 use common::table_reference;
@@ -27,8 +26,8 @@ impl fmt::Display for DeleteStatement {
 
 named!(pub deletion<&[u8], DeleteStatement>,
     chain!(
-        caseless_tag!("delete") ~
-        delimited!(opt!(multispace), caseless_tag!("from"), opt!(multispace)) ~
+        tag_no_case!("delete") ~
+        delimited!(opt!(multispace), tag_no_case!("from"), opt!(multispace)) ~
         table: table_reference ~
         cond: opt!(where_clause) ~
         || {

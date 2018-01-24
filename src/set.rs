@@ -1,5 +1,4 @@
 use nom::multispace;
-use nom::{Err, ErrorKind, IResult, Needed};
 use std::{fmt, str};
 
 use common::{literal, sql_identifier, Literal};
@@ -20,11 +19,11 @@ impl fmt::Display for SetStatement {
 
 named!(pub set<&[u8], SetStatement>,
     chain!(
-        caseless_tag!("set") ~
+        tag_no_case!("set") ~
         multispace ~
         var: map_res!(sql_identifier, str::from_utf8) ~
         multispace? ~
-        caseless_tag!("=") ~
+        tag_no_case!("=") ~
         multispace? ~
         val: literal,
         || {

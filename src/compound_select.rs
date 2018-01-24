@@ -1,5 +1,4 @@
 use nom::multispace;
-use nom::{Err, ErrorKind, IResult, Needed};
 use std::str;
 
 use select::{limit_clause, nested_selection, order_clause, LimitClause, OrderClause,
@@ -24,11 +23,11 @@ pub struct CompoundSelectStatement {
 named!(compound_op<&[u8], CompoundSelectOperator>,
     alt_complete!(
           chain!(
-              caseless_tag!("union") ~
+              tag_no_case!("union") ~
               distinct: opt!(
                   preceded!(multispace,
-                            alt_complete!(  map!(caseless_tag!("all"), |_| { false })
-                                          | map!(caseless_tag!("distinct"), |_| { true }))
+                            alt_complete!(  map!(tag_no_case!("all"), |_| { false })
+                                          | map!(tag_no_case!("distinct"), |_| { true }))
                             )),
               || {
                   match distinct {
@@ -44,8 +43,8 @@ named!(compound_op<&[u8], CompoundSelectOperator>,
                   }
               }
           )
-        | map!(caseless_tag!("intersect"), |_| CompoundSelectOperator::Intersect)
-        | map!(caseless_tag!("except"), |_| CompoundSelectOperator::Except)
+        | map!(tag_no_case!("intersect"), |_| CompoundSelectOperator::Intersect)
+        | map!(tag_no_case!("except"), |_| CompoundSelectOperator::Except)
     )
 );
 

@@ -1,5 +1,4 @@
 use nom::multispace;
-use nom::{Err, ErrorKind, IResult, Needed};
 use std::str;
 use std::fmt;
 
@@ -93,13 +92,13 @@ impl fmt::Display for SelectStatement {
 named!(group_by_clause<&[u8], GroupByClause>,
     complete!(chain!(
         multispace? ~
-        caseless_tag!("group by") ~
+        tag_no_case!("group by") ~
         multispace ~
         group_columns: field_list ~
         having_clause: opt!(
             complete!(chain!(
                 multispace? ~
-                caseless_tag!("having") ~
+                tag_no_case!("having") ~
                 multispace? ~
                 ce: condition_expr,
                 || { ce }
@@ -117,13 +116,13 @@ named!(group_by_clause<&[u8], GroupByClause>,
 named!(pub limit_clause<&[u8], LimitClause>,
     complete!(chain!(
         multispace? ~
-        caseless_tag!("limit") ~
+        tag_no_case!("limit") ~
         multispace ~
         limit_val: unsigned_number ~
         offset_val: opt!(
             complete!(chain!(
                 multispace? ~
-                caseless_tag!("offset") ~
+                tag_no_case!("offset") ~
                 multispace ~
                 val: unsigned_number,
                 || { val }
@@ -144,7 +143,7 @@ named!(pub limit_clause<&[u8], LimitClause>,
 named!(join_clause<&[u8], JoinClause>,
     complete!(chain!(
         multispace? ~
-        _natural: opt!(caseless_tag!("natural")) ~
+        _natural: opt!(tag_no_case!("natural")) ~
         multispace? ~
         op: join_operator ~
         multispace ~
@@ -152,7 +151,7 @@ named!(join_clause<&[u8], JoinClause>,
         multispace ~
         constraint: alt_complete!(
               chain!(
-                  caseless_tag!("using") ~
+                  tag_no_case!("using") ~
                   multispace ~
                   fields: delimited!(tag!("("), field_list, tag!(")")),
                   || {
@@ -160,7 +159,7 @@ named!(join_clause<&[u8], JoinClause>,
                   }
               )
             | chain!(
-                  caseless_tag!("on") ~
+                  tag_no_case!("on") ~
                   multispace ~
                   cond: alt_complete!(delimited!(tag!("("), condition_expr, tag!(")"))
                                       | condition_expr),
@@ -213,7 +212,7 @@ named!(join_rhs<&[u8], JoinRightSide>,
 named!(pub order_clause<&[u8], OrderClause>,
     complete!(chain!(
         multispace? ~
-        caseless_tag!("order by") ~
+        tag_no_case!("order by") ~
         multispace ~
         order_expr: many0!(
             chain!(
@@ -222,8 +221,8 @@ named!(pub order_clause<&[u8], OrderClause>,
                     complete!(chain!(
                         multispace? ~
                             ordering: alt_complete!(
-                                map!(caseless_tag!("desc"), |_| OrderType::OrderDescending)
-                                    | map!(caseless_tag!("asc"), |_| OrderType::OrderAscending)
+                                map!(tag_no_case!("desc"), |_| OrderType::OrderDescending)
+                                    | map!(tag_no_case!("asc"), |_| OrderType::OrderAscending)
                             ),
                         || { ordering }
                     ))
@@ -254,7 +253,7 @@ named!(pub order_clause<&[u8], OrderClause>,
 named!(pub where_clause<&[u8], ConditionExpression>,
     complete!(chain!(
         multispace? ~
-        caseless_tag!("where") ~
+        tag_no_case!("where") ~
         multispace ~
         cond: condition_expr,
         || { cond }
@@ -272,12 +271,12 @@ named!(pub selection<&[u8], SelectStatement>,
 
 named!(pub nested_selection<&[u8], SelectStatement>,
     chain!(
-        caseless_tag!("select") ~
+        tag_no_case!("select") ~
         multispace ~
-        distinct: opt!(caseless_tag!("distinct")) ~
+        distinct: opt!(tag_no_case!("distinct")) ~
         multispace? ~
         fields: field_definition_expr ~
-        delimited!(opt!(multispace), caseless_tag!("from"), opt!(multispace)) ~
+        delimited!(opt!(multispace), tag_no_case!("from"), opt!(multispace)) ~
         tables: table_list ~
         join: many0!(join_clause) ~
         cond: opt!(where_clause) ~

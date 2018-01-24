@@ -1,5 +1,4 @@
 use nom::{alphanumeric, digit, multispace};
-use nom::{Err, ErrorKind, IResult, Needed};
 use std::str;
 use std::str::FromStr;
 use std::fmt;
@@ -57,108 +56,108 @@ fn len_as_u16(len: &[u8]) -> u16 {
 named!(pub type_identifier<&[u8], SqlType>,
     alt_complete!(
           chain!(
-              caseless_tag!("mediumtext"),
+              tag_no_case!("mediumtext"),
               || { SqlType::Mediumtext }
           )
         | chain!(
-              caseless_tag!("timestamp") ~
+              tag_no_case!("timestamp") ~
               _len: opt!(delimited!(tag!("("), digit, tag!(")"))) ~
               multispace?,
               || { SqlType::Timestamp }
           )
         | chain!(
-              caseless_tag!("varbinary") ~
+              tag_no_case!("varbinary") ~
               len: delimited!(tag!("("), digit, tag!(")")) ~
               multispace?,
               || { SqlType::Varbinary(len_as_u16(len)) }
           )
         | chain!(
-              caseless_tag!("mediumblob"),
+              tag_no_case!("mediumblob"),
               || { SqlType::Mediumblob }
           )
         | chain!(
-              caseless_tag!("longblob"),
+              tag_no_case!("longblob"),
               || { SqlType::Longblob }
           )
         | chain!(
-              caseless_tag!("tinyblob"),
+              tag_no_case!("tinyblob"),
               || { SqlType::Tinyblob }
           )
         | chain!(
-              caseless_tag!("tinytext"),
+              tag_no_case!("tinytext"),
               || { SqlType::Tinytext }
           )
         | chain!(
-              caseless_tag!("varchar") ~
+              tag_no_case!("varchar") ~
               len: delimited!(tag!("("), digit, tag!(")")) ~
               multispace? ~
-              _binary: opt!(caseless_tag!("binary")),
+              _binary: opt!(tag_no_case!("binary")),
               || { SqlType::Varchar(len_as_u16(len)) }
           )
         | chain!(
-              caseless_tag!("tinyint") ~
+              tag_no_case!("tinyint") ~
               len: delimited!(tag!("("), digit, tag!(")")) ~
               multispace? ~
-              _signed: opt!(alt_complete!(caseless_tag!("unsigned") | caseless_tag!("signed"))),
+              _signed: opt!(alt_complete!(tag_no_case!("unsigned") | tag_no_case!("signed"))),
               || { SqlType::Tinyint(len_as_u16(len)) }
           )
         | chain!(
-              caseless_tag!("bigint") ~
+              tag_no_case!("bigint") ~
               len: delimited!(tag!("("), digit, tag!(")")) ~
               multispace? ~
-              _signed: opt!(alt_complete!(caseless_tag!("unsigned") | caseless_tag!("signed"))),
+              _signed: opt!(alt_complete!(tag_no_case!("unsigned") | tag_no_case!("signed"))),
               || { SqlType::Bigint(len_as_u16(len)) }
           )
         | chain!(
-              caseless_tag!("double") ~
+              tag_no_case!("double") ~
               multispace? ~
-              _signed: opt!(alt_complete!(caseless_tag!("unsigned") | caseless_tag!("signed"))),
+              _signed: opt!(alt_complete!(tag_no_case!("unsigned") | tag_no_case!("signed"))),
               || { SqlType::Double }
           )
         | chain!(
-              caseless_tag!("float") ~
+              tag_no_case!("float") ~
               multispace? ~
-              _signed: opt!(alt_complete!(caseless_tag!("unsigned") | caseless_tag!("signed"))),
+              _signed: opt!(alt_complete!(tag_no_case!("unsigned") | tag_no_case!("signed"))),
               || { SqlType::Float }
           )
         | chain!(
-              caseless_tag!("blob"),
+              tag_no_case!("blob"),
               || { SqlType::Blob }
           )
         | chain!(
-              caseless_tag!("datetime"),
+              tag_no_case!("datetime"),
               || { SqlType::DateTime }
           )
         | chain!(
-              caseless_tag!("date"),
+              tag_no_case!("date"),
               || { SqlType::Date }
           )
         | chain!(
-              caseless_tag!("real") ~
+              tag_no_case!("real") ~
               multispace? ~
-              _signed: opt!(alt_complete!(caseless_tag!("unsigned") | caseless_tag!("signed"))),
+              _signed: opt!(alt_complete!(tag_no_case!("unsigned") | tag_no_case!("signed"))),
               || { SqlType::Real }
           )
         | chain!(
-              caseless_tag!("text"),
+              tag_no_case!("text"),
               || { SqlType::Text }
           )
         | chain!(
-              caseless_tag!("longtext"),
+              tag_no_case!("longtext"),
               || { SqlType::Longtext }
           )
         | chain!(
-              caseless_tag!("char") ~
+              tag_no_case!("char") ~
               len: delimited!(tag!("("), digit, tag!(")")) ~
               multispace? ~
-              _binary: opt!(caseless_tag!("binary")),
+              _binary: opt!(tag_no_case!("binary")),
               || { SqlType::Char(len_as_u16(len)) }
           )
         | chain!(
-              alt_complete!(caseless_tag!("integer") | caseless_tag!("int") | caseless_tag!("smallint")) ~
+              alt_complete!(tag_no_case!("integer") | tag_no_case!("int") | tag_no_case!("smallint")) ~
               len: opt!(delimited!(tag!("("), digit, tag!(")"))) ~
               multispace? ~
-              _signed: opt!(alt_complete!(caseless_tag!("unsigned") | caseless_tag!("signed"))),
+              _signed: opt!(alt_complete!(tag_no_case!("unsigned") | tag_no_case!("signed"))),
               || { SqlType::Int(match len {
                   Some(len) => len_as_u16(len),
                   None => 32 as u16,
@@ -171,7 +170,7 @@ named!(pub type_identifier<&[u8], SqlType>,
 named!(pub key_specification<&[u8], TableKey>,
     alt_complete!(
           chain!(
-              caseless_tag!("fulltext key") ~
+              tag_no_case!("fulltext key") ~
               multispace? ~
               name: opt!(sql_identifier) ~
               multispace? ~
@@ -187,19 +186,19 @@ named!(pub key_specification<&[u8], TableKey>,
               }
           )
         | chain!(
-              caseless_tag!("primary key") ~
+              tag_no_case!("primary key") ~
               multispace? ~
               columns: delimited!(tag!("("), field_list, tag!(")")) ~
               opt!(complete!(chain!(
                           multispace ~
-                          caseless_tag!("autoincrement"),
+                          tag_no_case!("autoincrement"),
                           || { }
                    ))
               ),
               || { TableKey::PrimaryKey(columns) }
           )
         | chain!(
-              caseless_tag!("unique key") ~
+              tag_no_case!("unique key") ~
               multispace? ~
               name: opt!(sql_identifier) ~
               multispace? ~
@@ -215,7 +214,7 @@ named!(pub key_specification<&[u8], TableKey>,
               }
           )
         | chain!(
-              caseless_tag!("key") ~
+              tag_no_case!("key") ~
               multispace? ~
               name: sql_identifier ~
               multispace? ~
@@ -286,19 +285,19 @@ named!(pub column_constraint<&[u8], ColumnConstraint>,
     alt_complete!(
           chain!(
               multispace? ~
-              caseless_tag!("not null") ~
+              tag_no_case!("not null") ~
               multispace?,
               || { ColumnConstraint::NotNull }
           )
         | chain!(
               multispace? ~
-              caseless_tag!("auto_increment") ~
+              tag_no_case!("auto_increment") ~
               multispace?,
               || { ColumnConstraint::AutoIncrement }
           )
         | chain!(
               multispace? ~
-              caseless_tag!("default") ~
+              tag_no_case!("default") ~
               multispace ~
               def: alt_complete!(
                     chain!(s: delimited!(tag!("'"), take_until!("'"), tag!("'")), || {
@@ -308,15 +307,15 @@ named!(pub column_constraint<&[u8], ColumnConstraint>,
                       Literal::Integer(i64::from_str(d).unwrap())
                     })
                   | chain!(tag!("''"), || { Literal::String(String::from("")) })
-                  | chain!(caseless_tag!("null"), || { Literal::Null })
-                  | chain!(caseless_tag!("current_timestamp"), || { Literal::CurrentTimestamp })
+                  | chain!(tag_no_case!("null"), || { Literal::Null })
+                  | chain!(tag_no_case!("current_timestamp"), || { Literal::CurrentTimestamp })
               ) ~
               multispace?,
               || { ColumnConstraint::DefaultValue(def) }
           )
         | chain!(
               multispace? ~
-              caseless_tag!("primary key") ~
+              tag_no_case!("primary key") ~
               multispace?,
               || { ColumnConstraint::PrimaryKey }
           )
@@ -327,9 +326,9 @@ named!(pub column_constraint<&[u8], ColumnConstraint>,
 /// TODO(malte): support types, TEMPORARY tables, IF NOT EXISTS, AS stmt
 named!(pub creation<&[u8], CreateTableStatement>,
     complete!(chain!(
-        caseless_tag!("create") ~
+        tag_no_case!("create") ~
         multispace ~
-        caseless_tag!("table") ~
+        tag_no_case!("table") ~
         multispace ~
         table: table_reference ~
         multispace ~
@@ -345,7 +344,7 @@ named!(pub creation<&[u8], CreateTableStatement>,
         opt!(
             complete!(
                 chain!(
-                    caseless_tag!("type") ~
+                    tag_no_case!("type") ~
                     multispace? ~
                     tag!("=") ~
                     multispace? ~
@@ -358,7 +357,7 @@ named!(pub creation<&[u8], CreateTableStatement>,
         opt!(
             complete!(
                 chain!(
-                    caseless_tag!("pack_keys") ~
+                    tag_no_case!("pack_keys") ~
                     multispace? ~
                     tag!("=") ~
                     multispace? ~
@@ -371,7 +370,7 @@ named!(pub creation<&[u8], CreateTableStatement>,
         opt!(
             complete!(
                 chain!(
-                    caseless_tag!("engine") ~
+                    tag_no_case!("engine") ~
                     multispace? ~
                     tag!("=") ~
                     multispace? ~
@@ -384,7 +383,7 @@ named!(pub creation<&[u8], CreateTableStatement>,
         opt!(
             complete!(
                 chain!(
-                    caseless_tag!("default charset") ~
+                    tag_no_case!("default charset") ~
                     multispace? ~
                     tag!("=") ~
                     multispace? ~
