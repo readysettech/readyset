@@ -127,13 +127,13 @@ named!(pub limit_clause<&[u8], LimitClause>,
                 (val)
             ))
         ) >>
-    ({LimitClause {
+    (LimitClause {
         limit: limit_val,
         offset: match offset_val {
             None => 0,
             Some(v) => v,
         },
-    )}))
+    })))
 );
 
 /// Parse JOIN clause
@@ -161,11 +161,11 @@ named!(join_clause<&[u8], JoinClause>,
                   (JoinConstraint::On(cond))
               )
         ) >>
-    ({JoinClause {
+    (JoinClause {
         operator: op,
         right: right,
         constraint: constraint,
-    )}))
+    })))
 );
 
 /// Different options for the right hand side of the join operator in a `join_clause`
@@ -177,8 +177,8 @@ named!(join_rhs<&[u8], JoinRightSide>,
               (JoinRightSide::NestedSelect(Box::new(select), alias.map(String::from)))
           ))
         | complete!(do_parse!(
-          nested_join: delimited!(tag!("("), join_clause, tag!(")")) >>
-              (JoinRightSide::NestedJoin(Box::new(nested_join))
+              nested_join: delimited!(tag!("("), join_clause, tag!(")")) >>
+              (JoinRightSide::NestedJoin(Box::new(nested_join)))
           ))
         | complete!(do_parse!(
               table: table_reference >>
@@ -220,14 +220,15 @@ named!(pub order_clause<&[u8], OrderClause>,
                 ) >>
                 (fieldname, ordering.unwrap_or(OrderType::OrderAscending))
             )
-        ),
-    (OrderClause {
-        columns: order_expr,
-        // order: match ordering {
-        //     None => OrderType::OrderAscending,
-        //     Some(ref o) => o.clone(),
-        // },
-    )}))
+        ) >>
+        (OrderClause {
+            columns: order_expr,
+            // order: match ordering {
+            //     None => OrderType::OrderAscending,
+            //     Some(ref o) => o.clone(),
+            // },
+        })
+    ))
 );
 
 /// Parse WHERE clause of a selection

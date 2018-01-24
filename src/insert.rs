@@ -53,7 +53,7 @@ named!(pub insertion<&[u8], InsertStatement>,
                 opt!(multispace) >>
                 tag!(")") >>
                 multispace >>
-                ()
+                (fields)
                 )
             ) >>
         tag_no_case!("values") >>
