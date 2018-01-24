@@ -202,8 +202,8 @@ pub mod test {
     use std::collections::HashMap;
     use std::cell;
 
-    use flow::prelude::*;
-    use flow::node;
+    use prelude::*;
+    use node;
 
     use petgraph::graph::NodeIndex;
 
@@ -219,10 +219,10 @@ pub mod test {
     impl MockGraph {
         pub fn new() -> MockGraph {
             let mut graph = Graph::new();
-            let source = graph.add_node(node::Node::new(
+            let source = graph.add_node(Node::new(
                 "source",
                 &["because-type-inference"],
-                node::special::Source,
+                node::NodeType::Source,
                 true,
             ));
             MockGraph {
@@ -281,7 +281,7 @@ pub mod test {
             assert!(!parents.is_empty(), "node under test should have ancestors");
 
             let i: NodeOperator = i.into();
-            let global = self.graph.add_node(node::Node::new(name, fields, i, false));
+            let global = self.graph.add_node(Node::new(name, fields, i, false));
             let local = unsafe { LocalNodeIndex::make(self.remap.len() as u32) };
             if materialized {
                 self.states.insert(local, State::default());
@@ -423,7 +423,7 @@ pub mod test {
             self.narrow_one::<Record>(d.into(), remember)
         }
 
-        pub fn node(&self) -> cell::Ref<node::Node> {
+        pub fn node(&self) -> cell::Ref<Node> {
             self.nodes[&*self.nut.unwrap()].borrow()
         }
 
