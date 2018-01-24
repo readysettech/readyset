@@ -174,19 +174,24 @@ mod tests {
     #[allow_fail]
     fn it_works() {
         let authority = Arc::new(ZookeeperAuthority::new("127.0.0.1:2181/concensus_it_works"));
-        assert!(authority.try_read(CONTROLLER_KEY).is_none());
+        assert!(authority.try_read(CONTROLLER_KEY).unwrap().is_none());
         assert_eq!(
-            authority.read_modify_write("/a", |_: Option<u32>| -> Result<u32, u32> { Ok(12) }),
+            authority
+                .read_modify_write("/a", |_: Option<u32>| -> Result<u32, u32> { Ok(12) })
+                .unwrap(),
             Ok(12)
         );
-        assert_eq!(authority.try_read("/a"), Some("12".bytes().collect()));
-        authority.become_leader(vec![15]);
-        assert_eq!(authority.get_leader().1, vec![15]);
+        assert_eq!(
+            authority.try_read("/a").unwrap(),
+            Some("12".bytes().collect())
+        );
+        authority.become_leader(vec![15]).unwrap();
+        assert_eq!(authority.get_leader().unwrap().1, vec![15]);
         {
             let authority = authority.clone();
-            thread::spawn(move || authority.become_leader(vec![20]));
+            thread::spawn(move || authority.become_leader(vec![20]).unwrap());
         }
         thread::sleep(Duration::from_millis(100));
-        assert_eq!(authority.get_leader().1, vec![15]);
+        assert_eq!(authority.get_leader().unwrap().1, vec![15]);
     }
 }
