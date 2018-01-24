@@ -22,9 +22,9 @@ named!(pub set<&[u8], SetStatement>,
         tag_no_case!("set") >>
         multispace >>
         var: map_res!(sql_identifier, str::from_utf8) >>
-        multispace? >>
+        opt!(multispace) >>
         tag_no_case!("=") >>
-        multispace? >>
+        opt!(multispace) >>
         val: literal >>
         (SetStatement {
             variable: String::from(var),

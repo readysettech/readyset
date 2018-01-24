@@ -62,13 +62,13 @@ named!(pub type_identifier<&[u8], SqlType>,
         | do_parse!(
               tag_no_case!("timestamp") >>
               _len: opt!(delimited!(tag!("("), digit, tag!(")"))) >>
-              multispace? >>
+              opt!(multispace) >>
               (SqlType::Timestamp)
           )
         | do_parse!(
               tag_no_case!("varbinary") >>
               len: delimited!(tag!("("), digit, tag!(")")) >>
-              multispace? >>
+              opt!(multispace) >>
               (SqlType::Varbinary(len_as_u16(len)))
           )
         | do_parse!(
@@ -90,33 +90,33 @@ named!(pub type_identifier<&[u8], SqlType>,
         | do_parse!(
               tag_no_case!("varchar") >>
               len: delimited!(tag!("("), digit, tag!(")")) >>
-              multispace? >>
+              opt!(multispace) >>
               _binary: opt!(tag_no_case!("binary")) >>
               (SqlType::Varchar(len_as_u16(len)))
           )
         | do_parse!(
               tag_no_case!("tinyint") >>
               len: delimited!(tag!("("), digit, tag!(")")) >>
-              multispace? >>
+              opt!(multispace) >>
               _signed: opt!(alt_complete!(tag_no_case!("unsigned") | tag_no_case!("signed"))) >>
               (SqlType::Tinyint(len_as_u16(len)))
           )
         | do_parse!(
               tag_no_case!("bigint") >>
               len: delimited!(tag!("("), digit, tag!(")")) >>
-              multispace? >>
+              opt!(multispace) >>
               _signed: opt!(alt_complete!(tag_no_case!("unsigned") | tag_no_case!("signed"))) >>
               (SqlType::Bigint(len_as_u16(len)))
           )
         | do_parse!(
               tag_no_case!("double") >>
-              multispace? >>
+              opt!(multispace) >>
               _signed: opt!(alt_complete!(tag_no_case!("unsigned") | tag_no_case!("signed"))) >>
               (SqlType::Double)
           )
         | do_parse!(
               tag_no_case!("float") >>
-              multispace? >>
+              opt!(multispace) >>
               _signed: opt!(alt_complete!(tag_no_case!("unsigned") | tag_no_case!("signed"))) >>
               (SqlType::Float)
           )
@@ -134,7 +134,7 @@ named!(pub type_identifier<&[u8], SqlType>,
           )
         | do_parse!(
               tag_no_case!("real") >>
-              multispace? >>
+              opt!(multispace) >>
               _signed: opt!(alt_complete!(tag_no_case!("unsigned") | tag_no_case!("signed"))) >>
               (SqlType::Real)
           )
@@ -149,14 +149,14 @@ named!(pub type_identifier<&[u8], SqlType>,
         | do_parse!(
               tag_no_case!("char") >>
               len: delimited!(tag!("("), digit, tag!(")")) >>
-              multispace? >>
+              opt!(multispace) >>
               _binary: opt!(tag_no_case!("binary")) >>
               (SqlType::Char(len_as_u16(len)))
           )
         | do_parse!(
               alt_complete!(tag_no_case!("integer") | tag_no_case!("int") | tag_no_case!("smallint")) >>
               len: opt!(delimited!(tag!("("), digit, tag!(")"))) >>
-              multispace? >>
+              opt!(multispace) >>
               _signed: opt!(alt_complete!(tag_no_case!("unsigned") | tag_no_case!("signed"))) >>
               (SqlType::Int(match len {
                   Some(len) => len_as_u16(len),
@@ -171,9 +171,9 @@ named!(pub key_specification<&[u8], TableKey>,
     alt_complete!(
           do_parse!(
               tag_no_case!("fulltext key") >>
-              multispace? >>
+              opt!(multispace) >>
               name: opt!(sql_identifier) >>
-              multispace? >>
+              opt!(multispace) >>
               columns: delimited!(tag!("("), field_list, tag!(")")) >>
               (match name {
                   Some(name) => {
@@ -185,7 +185,7 @@ named!(pub key_specification<&[u8], TableKey>,
           )
         | do_parse!(
               tag_no_case!("primary key") >>
-              multispace? >>
+              opt!(multispace) >>
               columns: delimited!(tag!("("), field_list, tag!(")")) >>
               opt!(complete!(do_parse!(
                           multispace >>
@@ -197,9 +197,9 @@ named!(pub key_specification<&[u8], TableKey>,
           )
         | do_parse!(
               tag_no_case!("unique key") >>
-              multispace? >>
+              opt!(multispace) >>
               name: opt!(sql_identifier) >>
-              multispace? >>
+              opt!(multispace) >>
               columns: delimited!(tag!("("), field_list, tag!(")")) >>
               (match name {
                   Some(name) => {
@@ -211,9 +211,9 @@ named!(pub key_specification<&[u8], TableKey>,
           )
         | do_parse!(
               tag_no_case!("key") >>
-              multispace? >>
+              opt!(multispace) >>
               name: sql_identifier >>
-              multispace? >>
+              opt!(multispace) >>
               columns: delimited!(tag!("("), field_list, tag!(")")) >>
               ({
                   let n = String::from(str::from_utf8(name).unwrap());
@@ -230,9 +230,9 @@ named!(pub key_specification_list<&[u8], Vec<TableKey>>,
                key: key_specification >>
                opt!(
                    complete!(do_parse!(
-                       multispace? >>
+                       opt!(multispace) >>
                        tag!(",") >>
-                       multispace? >>
+                       opt!(multispace) >>
                        ()
                    ))
                ) >>
@@ -248,16 +248,16 @@ named!(pub field_specification_list<&[u8], Vec<ColumnSpecification> >,
                identifier: column_identifier_no_alias >>
                fieldtype: opt!(complete!(do_parse!(multispace >>
                                       ti: type_identifier >>
-                                      multispace? >>
+                                      opt!(multispace) >>
                                       (ti)
                                ))
                ) >>
                constraints: many0!(column_constraint) >>
                opt!(
                    complete!(do_parse!(
-                       multispace? >>
+                       opt!(multispace) >>
                        tag!(",") >>
-                       multispace? >>
+                       opt!(multispace) >>
                        ()
                    ))
                ),
@@ -280,19 +280,19 @@ named!(pub field_specification_list<&[u8], Vec<ColumnSpecification> >,
 named!(pub column_constraint<&[u8], ColumnConstraint>,
     alt_complete!(
           do_parse!(
-              multispace? >>
+              opt!(multispace) >>
               tag_no_case!("not null") >>
-              multispace? >>
+              opt!(multispace) >>
               || { ColumnConstraint::NotNull }
           )
         | do_parse!(
-              multispace? >>
+              opt!(multispace) >>
               tag_no_case!("auto_increment") >>
-              multispace? >>
+              opt!(multispace) >>
               || { ColumnConstraint::AutoIncrement }
           )
         | do_parse!(
-              multispace? >>
+              opt!(multispace) >>
               tag_no_case!("default") >>
               multispace >>
               def: alt_complete!(
@@ -306,13 +306,13 @@ named!(pub column_constraint<&[u8], ColumnConstraint>,
                   | do_parse!(tag_no_case!("null") >>  (Literal::Null))
                   | do_parse!(tag_no_case!("current_timestamp") >> (Literal::CurrentTimestamp))
               ) >>
-              multispace? >>
+              opt!(multispace) >>
               (ColumnConstraint::DefaultValue(def))
           )
         | do_parse!(
-              multispace? >>
+              opt!(multispace) >>
               tag_no_case!("primary key") >>
-              multispace? >>
+              opt!(multispace) >>
               (ColumnConstraint::PrimaryKey)
           )
     )
@@ -329,60 +329,60 @@ named!(pub creation<&[u8], CreateTableStatement>,
         table: table_reference >>
         multispace >>
         tag!("(") >>
-        multispace? >>
+        opt!(multispace) >>
         fields: field_specification_list >>
-        multispace? >>
+        opt!(multispace) >>
         keys: opt!(key_specification_list) >>
-        multispace? >>
+        opt!(multispace) >>
         tag!(")") >>
-        multispace? >>
+        opt!(multispace) >>
         // XXX(malte): wrap the two below in a permutation! rule that permits arbitrary ordering
         opt!(
             complete!(
                 do_parse!(
                     tag_no_case!("type") >>
-                    multispace? >>
+                    opt!(multispace) >>
                     tag!("=") >>
-                    multispace? >>
+                    opt!(multispace) >>
                     alphanumeric >>
                     ()
                 )
             )
         ) >>
-        multispace? >>
+        opt!(multispace) >>
         opt!(
             complete!(
                 do_parse!(
                     tag_no_case!("pack_keys") >>
-                    multispace? >>
+                    opt!(multispace) >>
                     tag!("=") >>
-                    multispace? >>
+                    opt!(multispace) >>
                     alt_complete!(tag!("0") | tag!("1")) >>
                     ()
                 )
             )
         ) >>
-        multispace? >>
+        opt!(multispace) >>
         opt!(
             complete!(
                 do_parse!(
                     tag_no_case!("engine") >>
-                    multispace? >>
+                    opt!(multispace) >>
                     tag!("=") >>
-                    multispace? >>
+                    opt!(multispace) >>
                     alphanumeric >>
                     ()
                 )
             )
         ) >>
-        multispace? >>
+        opt!(multispace) >>
         opt!(
             complete!(
                 do_parse!(
                     tag_no_case!("default charset") >>
-                    multispace? >>
+                    opt!(multispace) >>
                     tag!("=") >>
-                    multispace? >>
+                    opt!(multispace) >>
                     alt_complete!(tag!("utf8")) >>
                     ()
                 )

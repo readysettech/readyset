@@ -45,19 +45,19 @@ named!(pub insertion<&[u8], InsertStatement>,
         tag_no_case!("into") >>
         multispace >>
         table: table_reference >>
-        multispace? >>
+        opt!(multispace) >>
         fields: opt!(do_parse!(
                 tag!("(") >>
-                multispace? >>
+                opt!(multispace) >>
                 fields: field_list >>
-                multispace? >>
+                opt!(multispace) >>
                 tag!(")") >>
                 multispace >>
                 ()
                 )
             ) >>
         tag_no_case!("values") >>
-        multispace? >>
+        opt!(multispace) >>
         tag!("(") >>
         values: value_list >>
         tag!(")") >>

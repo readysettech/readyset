@@ -94,7 +94,7 @@ named!(pub condition_expr<&[u8], ConditionExpression>,
        alt_complete!(
            do_parse!(
                left: and_expr >>
-               multispace? >>
+               opt!(multispace) >>
                tag_no_case!("or") >>
                multispace >>
                right: condition_expr >>
@@ -113,7 +113,7 @@ named!(pub and_expr<&[u8], ConditionExpression>,
        alt_complete!(
            do_parse!(
                left: parenthetical_expr >>
-               multispace? >>
+               opt!(multispace) >>
                tag_no_case!("and") >>
                multispace >>
                right: and_expr >>
@@ -131,9 +131,9 @@ named!(pub and_expr<&[u8], ConditionExpression>,
 named!(pub parenthetical_expr<&[u8], ConditionExpression>,
        alt_complete!(
            delimited!(
-               do_parse!(tag!("(") >> multispace? >> ()),
+               do_parse!(tag!("(") >> opt!(multispace) >> ()),
                condition_expr,
-               do_parse!(multispace? >> tag!(")") >> multispace? >> ())
+               do_parse!(opt!(multispace) >> tag!(")") >> opt!(multispace) >> ())
             )
        |   not_expr)
 );
@@ -152,9 +152,9 @@ named!(pub not_expr<&[u8], ConditionExpression>,
 named!(boolean_primary<&[u8], ConditionExpression>,
     do_parse!(
         left: predicate >>
-        multispace? >>
+        opt!(multispace) >>
         op: binary_comparison_operator >>
-        multispace? >>
+        opt!(multispace) >>
         right: predicate >>
         (ConditionExpression::ComparisonOp(
             ConditionTree {

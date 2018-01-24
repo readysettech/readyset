@@ -297,10 +297,10 @@ named!(pub column_function<&[u8], FunctionExpression>,
                                column: column_identifier_no_alias >>
                                seperator: opt!(
                                    do_parse!(
-                                       multispace? >>
+                                       opt!(multispace) >>
                                        tag_no_case!("separator") >>
                                        sep: delimited!(tag!("'"), opt!(alphanumeric), tag!("'")) >>
-                                       multispace? >>
+                                       opt!(multispace) >>
                                        (sep.unwrap_or("".as_bytes()))
                                    )
                                ) >>
@@ -460,9 +460,9 @@ named!(pub as_alias<&[u8], &str>,
 named!(field_value<&[u8], (Column,Literal) >,
     do_parse!(
         column: column_identifier_no_alias >>
-        multispace? >>
+        opt!(multispace) >>
         tag!("=") >>
-        multispace? >>
+        opt!(multispace) >>
         value: literal >>
         (column, value)
     )
@@ -474,9 +474,9 @@ named!(pub field_value_list<&[u8], Vec<(Column,Literal)> >,
                field_value: field_value >>
                opt!(
                    complete!(do_parse!(
-                       multispace? >>
+                       opt!(multispace) >>
                        tag!(",") >>
-                       multispace? >>
+                       opt!(multispace) >>
                        ()
                    ))
                ) >>
@@ -492,9 +492,9 @@ named!(pub field_list<&[u8], Vec<Column> >,
                fieldname: column_identifier_no_alias >>
                opt!(
                    complete!(do_parse!(
-                       multispace? >>
+                       opt!(multispace) >>
                        tag!(",") >>
-                       multispace? >>
+                       opt!(multispace) >>
                        ()
                    ))
                ) >>
@@ -532,9 +532,9 @@ named!(pub field_definition_expr<&[u8], Vec<FieldExpression>>,
                ) >>
                opt!(
                    complete!(do_parse!(
-                       multispace? >>
+                       opt!(multispace) >>
                        tag!(",") >>
-                       multispace? >>
+                       opt!(multispace) >>
                        ()
                    ))
                ),
@@ -551,9 +551,9 @@ named!(pub table_list<&[u8], Vec<Table> >,
                table: table_reference >>
                opt!(
                    complete!(do_parse!(
-                       multispace? >>
+                       opt!(multispace) >>
                        tag!(",") >>
-                       multispace? >>
+                       opt!(multispace) >>
                        ()
                    ))
                ) >>
@@ -608,9 +608,9 @@ named!(pub value_list<&[u8], Vec<Literal> >,
                val: literal >>
                opt!(
                    complete!(do_parse!(
-                       multispace? >>
+                       opt!(multispace) >>
                        tag!(",") >>
-                       multispace? >>
+                       opt!(multispace) >>
                        ()
                    ))
                ) >>

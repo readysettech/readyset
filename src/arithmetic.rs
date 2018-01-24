@@ -95,9 +95,9 @@ named!(pub arithmetic_base<&[u8], ArithmeticBase>,
 named!(pub arithmetic_expression<&[u8], ArithmeticExpression>,
     complete!(do_parse!(
         left: arithmetic_base >>
-        multispace? >>
+        opt!(multispace) >>
         op: arithmetic_operator >>
-        multispace? >>
+        opt!(multispace) >>
         right: arithmetic_base >>
         alias: opt!(as_alias) >>
         (ArithmeticExpression {

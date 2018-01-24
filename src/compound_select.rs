@@ -54,21 +54,21 @@ named!(pub compound_selection<&[u8], CompoundSelectStatement>,
         first_select: delimited!(opt!(tag!("(")), nested_selection, opt!(tag!(")"))) >>
         other_selects: many1!(
             complete!(
-                do_parse!(multispace? >>
+                do_parse!(opt!(multispace) >>
                        op: compound_op >>
                        multispace >>
-                       tag!("(")? >>
-                       multispace? >>
+                       opt!(tag!("(")) >>
+                       opt!(multispace) >>
                        select: nested_selection >>
-                       multispace? >>
-                       tag!(")")? >>
+                       opt!(multispace) >>
+                       opt!(")") >>
                        (Some(op), select)
                 )
             )
         ) >>
-        multispace? >>
-        order: order_clause? >>
-        limit: limit_clause? >>
+        opt!(multispace) >>
+        order: opt!(order_clause) >>
+        limit: opt!(limit_clause) >>
         ({
             let mut v = vec![(None, first_select)];
             v.extend(other_selects);
