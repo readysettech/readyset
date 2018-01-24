@@ -135,7 +135,11 @@ named!(pub and_expr<&[u8], ConditionExpression>,
 
 named!(pub parenthetical_expr<&[u8], ConditionExpression>,
        alt_complete!(
-           delimited!(tag!("("), condition_expr, chain!(tag!(")") ~ multispace?, ||{}))
+           delimited!(
+               chain!(tag!("(") ~ multispace?, ||{}),
+               condition_expr,
+               chain!(multispace? ~ tag!(")") ~ multispace?, ||{})
+            )
        |   not_expr)
 );
 
@@ -173,47 +177,43 @@ named!(boolean_primary<&[u8], ConditionExpression>,
 );
 
 named!(predicate<&[u8], ConditionExpression>,
-    delimited!(
-        opt!(multispace),
-        alt_complete!(
-                chain!(
-                    tag!("?"),
-                    || {
-                        ConditionExpression::Base(
-                            ConditionBase::Placeholder
-                        )
-                    }
-                )
-            |   chain!(
-                    field: integer_literal,
-                    || {
-                        ConditionExpression::Base(ConditionBase::Literal(field))
-                    }
-                )
-            |   chain!(
-                    field: string_literal,
-                    || {
-                        ConditionExpression::Base(ConditionBase::Literal(field))
-                    }
-                )
-            |   chain!(
-                    field: column_identifier,
-                    || {
-                        ConditionExpression::Base(
-                            ConditionBase::Field(field)
-                        )
-                    }
-                )
-            |   chain!(
-                    select: delimited!(tag!("("), nested_selection, tag!(")")),
-                    || {
-                        ConditionExpression::Base(
-                            ConditionBase::NestedSelect(Box::new(select))
-                        )
-                    }
-                )
-        ),
-        opt!(multispace)
+    alt_complete!(
+            chain!(
+                tag!("?"),
+                || {
+                    ConditionExpression::Base(
+                        ConditionBase::Placeholder
+                    )
+                }
+            )
+        |   chain!(
+                field: integer_literal,
+                || {
+                    ConditionExpression::Base(ConditionBase::Literal(field))
+                }
+            )
+        |   chain!(
+                field: string_literal,
+                || {
+                    ConditionExpression::Base(ConditionBase::Literal(field))
+                }
+            )
+        |   chain!(
+                field: column_identifier,
+                || {
+                    ConditionExpression::Base(
+                        ConditionBase::Field(field)
+                    )
+                }
+            )
+        |   chain!(
+                select: delimited!(tag!("("), nested_selection, tag!(")")),
+                || {
+                    ConditionExpression::Base(
+                        ConditionBase::NestedSelect(Box::new(select))
+                    )
+                }
+            )
     )
 );
 

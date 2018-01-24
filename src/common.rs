@@ -1,4 +1,4 @@
-use nom::{alphanumeric, digit, eof, is_alphanumeric, line_ending, multispace};
+use nom::{alphanumeric, digit, is_alphanumeric, line_ending, multispace};
 use nom::{Err, ErrorKind, IResult, Needed};
 use std::fmt::{self, Display};
 use std::str;
@@ -445,11 +445,11 @@ named!(pub unsigned_number<&[u8], u64>,
 );
 
 /// Parse a terminator that ends a SQL statement.
-named!(pub statement_terminator,
-    delimited!(opt!(multispace),
-               alt_complete!(tag!(";") | line_ending | eof),
-               opt!(multispace)
-    )
+/// TODO(ekmartin): This doesn't seem to always work as it should
+/// with eof!() after upgrading.
+/// TODO(ekmartin): Remove ; from finkelstein and tpcw queries after fixing
+named!(pub statement_terminator<&[u8], &[u8]>,
+    alt_complete!(tag!(";") | eof!() | line_ending)
 );
 
 /// Parse binary comparison operators

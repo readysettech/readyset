@@ -544,7 +544,7 @@ mod tests {
                        `object_id` longtext,
                        `object_repr` varchar(200) NOT NULL,
                        `action_flag` smallint UNSIGNED NOT NULL,
-                       `change_message` longtext NOT NULL)";
+                       `change_message` longtext NOT NULL);";
         let res = creation(qstring.as_bytes());
         assert_eq!(
             res.unwrap().1,
