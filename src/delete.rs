@@ -30,12 +30,12 @@ named!(pub deletion<&[u8], DeleteStatement>,
         delimited!(opt!(multispace), tag_no_case!("from"), opt!(multispace)) >>
         table: table_reference >>
         cond: opt!(where_clause) >>
-        || {
+        ({
             DeleteStatement {
                 table: table,
                 where_clause: cond,
             }
-        }
+        })
     )
 );
 

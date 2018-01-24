@@ -306,8 +306,8 @@ named!(pub column_function<&[u8], FunctionExpression>,
                                ) >>
                                (column, seperator)
                        )),
-                       tag!(")")),
-            || {
+                       tag!(")")) >>
+            ({
                 let (ref col, ref sep) = spec;
                 let sep = match *sep {
                     // default separator is a comma, see MySQL manual §5.7
@@ -316,7 +316,7 @@ named!(pub column_function<&[u8], FunctionExpression>,
                 };
 
                 FunctionExpression::GroupConcat(col.clone(), sep)
-            }
+            })
         )
     )
 );
@@ -325,7 +325,7 @@ named!(pub column_function<&[u8], FunctionExpression>,
 named!(pub column_identifier_no_alias<&[u8], Column>,
     alt_complete!(
         do_parse!(
-            function: column_function >
+            function: column_function >>
             (Column {
                 name: format!("{}", function),
                 alias: None,
@@ -450,7 +450,7 @@ named!(pub as_alias<&[u8], &str>,
     complete!(
         do_parse!(
             multispace >>
-            opt!(do_parse!(tag_no_case!("as") >> multispace, ||{})) >>
+            opt!(do_parse!(tag_no_case!("as") >> multispace >> ())) >>
             alias: map_res!(sql_identifier, str::from_utf8) >>
             (alias)
         )
@@ -537,8 +537,8 @@ named!(pub field_definition_expr<&[u8], Vec<FieldExpression>>,
                        opt!(multispace) >>
                        ()
                    ))
-               ),
-               || { field }
+               ) >>
+               (field)
            )
        )
 );
@@ -593,10 +593,10 @@ named!(pub literal<&[u8], Literal>,
     alt_complete!(
           integer_literal
         | string_literal
-        | do_parse!(tag_no_case!("NULL"), (Literal::Null))
-        | do_parse!(tag_no_case!("CURRENT_TIMESTAMP"), (Literal::CurrentTimestamp))
-        | do_parse!(tag_no_case!("CURRENT_DATE"), (Literal::CurrentDate))
-        | do_parse!(tag_no_case!("CURRENT_TIME"), (Literal::CurrentTime))
+        | do_parse!(tag_no_case!("NULL") >> (Literal::Null))
+        | do_parse!(tag_no_case!("CURRENT_TIMESTAMP") >> (Literal::CurrentTimestamp))
+        | do_parse!(tag_no_case!("CURRENT_DATE") >> (Literal::CurrentDate))
+        | do_parse!(tag_no_case!("CURRENT_TIME") >> (Literal::CurrentTime))
 //        | float_literal
     )
 );

@@ -28,20 +28,18 @@ named!(compound_op<&[u8], CompoundSelectOperator>,
                   preceded!(multispace,
                             alt_complete!(  map!(tag_no_case!("all"), |_| { false })
                                           | map!(tag_no_case!("distinct"), |_| { true }))
-                            )),
-              || {
-                  match distinct {
-                      // DISTINCT is the default in both MySQL and SQLite
-                      None => CompoundSelectOperator::DistinctUnion,
-                      Some(d) => {
-                          if d {
-                              CompoundSelectOperator::DistinctUnion
-                          } else {
-                              CompoundSelectOperator::Union
-                          }
-                      },
-                  }
-              }
+                            )) >>
+              (match distinct {
+                  // DISTINCT is the default in both MySQL and SQLite
+                  None => CompoundSelectOperator::DistinctUnion,
+                  Some(d) => {
+                      if d {
+                          CompoundSelectOperator::DistinctUnion
+                      } else {
+                          CompoundSelectOperator::Union
+                      }
+                  },
+              })
           )
         | map!(tag_no_case!("intersect"), |_| CompoundSelectOperator::Intersect)
         | map!(tag_no_case!("except"), |_| CompoundSelectOperator::Except)
@@ -61,7 +59,7 @@ named!(pub compound_selection<&[u8], CompoundSelectStatement>,
                        opt!(multispace) >>
                        select: nested_selection >>
                        opt!(multispace) >>
-                       opt!(")") >>
+                       opt!(tag!(")")) >>
                        (Some(op), select)
                 )
             )
