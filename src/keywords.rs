@@ -148,12 +148,12 @@ named!(keyword_t_to_z<&[u8], &[u8]>,
 
 /// Matches any SQL reserved keyword
 named!(pub sql_keyword<&[u8], &[u8]>,
-    complete!(chain!(
+    complete!(do_parse!(
         kw: alt_complete!(
               keyword_a_to_c
             | keyword_d_to_i
             | keyword_j_to_s
-            | keyword_t_to_z),
-        || { kw }
+            | keyword_t_to_z) >>
+        (kw)
     ))
 );

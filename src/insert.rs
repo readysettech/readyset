@@ -39,30 +39,30 @@ impl fmt::Display for InsertStatement {
 /// Parse rule for a SQL insert query.
 /// TODO(malte): support REPLACE, multiple parens expr, nested selection, DEFAULT VALUES
 named!(pub insertion<&[u8], InsertStatement>,
-    complete!(chain!(
-        tag_no_case!("insert") ~
-        multispace ~
-        tag_no_case!("into") ~
-        multispace ~
-        table: table_reference ~
-        multispace? ~
-        fields: opt!(chain!(
-                tag!("(") ~
-                multispace? ~
-                fields: field_list ~
-                multispace? ~
-                tag!(")") ~
-                multispace,
-                || { fields }
+    complete!(do_parse!(
+        tag_no_case!("insert") >>
+        multispace >>
+        tag_no_case!("into") >>
+        multispace >>
+        table: table_reference >>
+        multispace? >>
+        fields: opt!(do_parse!(
+                tag!("(") >>
+                multispace? >>
+                fields: field_list >>
+                multispace? >>
+                tag!(")") >>
+                multispace >>
+                ()
                 )
-            ) ~
-        tag_no_case!("values") ~
-        multispace? ~
-        tag!("(") ~
-        values: value_list ~
-        tag!(")") ~
-        statement_terminator,
-        || {
+            ) >>
+        tag_no_case!("values") >>
+        multispace? >>
+        tag!("(") >>
+        values: value_list >>
+        tag!(")") >>
+        statement_terminator >>
+        ({
             // "table AS alias" isn't legal in INSERT statements
             assert!(table.alias.is_none());
             InsertStatement {
@@ -82,7 +82,7 @@ named!(pub insertion<&[u8], InsertStatement>,
                               .collect(),
                 },
             }
-        }
+        })
     ))
 );
 

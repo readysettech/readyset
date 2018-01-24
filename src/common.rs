@@ -248,77 +248,63 @@ pub fn is_sql_identifier(chr: u8) -> bool {
 /// Parses the arguments for an agregation function, and also returns whether the distinct flag is
 /// present.
 named!(pub function_arguments<&[u8], (Column, bool)>,
-       chain!(
-           distinct: opt!(chain!(
-               tag_no_case!("distinct") ~
-               multispace,
-               ||{}
-           )) ~
-           column: column_identifier_no_alias,
-           || {
-               (column, distinct.is_some())
-           }
+       do_parse!(
+           distinct: opt!(do_parse!(
+               tag_no_case!("distinct") >>
+               multispace >>
+               ()
+           )) >>
+           column: column_identifier_no_alias >>
+           (column, distinct.is_some())
        )
 );
 
 named!(pub column_function<&[u8], FunctionExpression>,
     alt_complete!(
-        chain!(
-            tag_no_case!("count(*)"),
-            || {
-                FunctionExpression::CountStar
-            }
+        do_parse!(
+            tag_no_case!("count(*)") >>
+            (FunctionExpression::CountStar)
         )
-    |   chain!(
-            tag_no_case!("count") ~
-            args: delimited!(tag!("("), function_arguments, tag!(")")),
-            || {
-                FunctionExpression::Count(args.0.clone(), args.1)
-            }
+    |   do_parse!(
+            tag_no_case!("count") >>
+            args: delimited!(tag!("("), function_arguments, tag!(")")) >>
+            (FunctionExpression::Count(args.0.clone(), args.1))
         )
-    |   chain!(
-            tag_no_case!("sum") ~
-            args: delimited!(tag!("("), function_arguments, tag!(")")),
-            || {
-                FunctionExpression::Sum(args.0.clone(), args.1)
-            }
+    |   do_parse!(
+            tag_no_case!("sum") >>
+            args: delimited!(tag!("("), function_arguments, tag!(")")) >>
+            (FunctionExpression::Sum(args.0.clone(), args.1))
         )
-    |   chain!(
-            tag_no_case!("avg") ~
-            args: delimited!(tag!("("), function_arguments, tag!(")")),
-            || {
-                FunctionExpression::Avg(args.0.clone(), args.1)
-            }
+    |   do_parse!(
+            tag_no_case!("avg") >>
+            args: delimited!(tag!("("), function_arguments, tag!(")")) >>
+            (FunctionExpression::Avg(args.0.clone(), args.1))
         )
-    |   chain!(
-            tag_no_case!("max") ~
-            args: delimited!(tag!("("), function_arguments, tag!(")")),
-            || {
-                FunctionExpression::Max(args.0.clone())
-            }
+    |   do_parse!(
+            tag_no_case!("max") >>
+            args: delimited!(tag!("("), function_arguments, tag!(")")) >>
+            (FunctionExpression::Max(args.0.clone()))
         )
-    |   chain!(
-            tag_no_case!("min") ~
-            args: delimited!(tag!("("), function_arguments, tag!(")")),
-            || {
-                FunctionExpression::Min(args.0.clone())
-            }
+    |   do_parse!(
+            tag_no_case!("min") >>
+            args: delimited!(tag!("("), function_arguments, tag!(")")) >>
+            (FunctionExpression::Min(args.0.clone()))
         )
-    |   chain!(
-            tag_no_case!("group_concat") ~
+    |   do_parse!(
+            tag_no_case!("group_concat") >>
             spec: delimited!(tag!("("),
-                       complete!(chain!(
-                               column: column_identifier_no_alias ~
+                       complete!(do_parse!(
+                               column: column_identifier_no_alias >>
                                seperator: opt!(
-                                   chain!(
-                                       multispace? ~
-                                       tag_no_case!("separator") ~
-                                       sep: delimited!(tag!("'"), opt!(alphanumeric), tag!("'")) ~
-                                       multispace?,
-                                       || { sep.unwrap_or("".as_bytes()) }
+                                   do_parse!(
+                                       multispace? >>
+                                       tag_no_case!("separator") >>
+                                       sep: delimited!(tag!("'"), opt!(alphanumeric), tag!("'")) >>
+                                       multispace? >>
+                                       (sep.unwrap_or("".as_bytes()))
                                    )
-                               ),
-                               || { (column, seperator) }
+                               ) >>
+                               (column, seperator)
                        )),
                        tag!(")")),
             || {
@@ -338,37 +324,33 @@ named!(pub column_function<&[u8], FunctionExpression>,
 /// Parses a SQL column identifier in the table.column format
 named!(pub column_identifier_no_alias<&[u8], Column>,
     alt_complete!(
-        chain!(
-            function: column_function,
-            || {
-                Column {
-                    name: format!("{}", function),
-                    alias: None,
-                    table: None,
-                    function: Some(Box::new(function)),
-                }
-            }
+        do_parse!(
+            function: column_function >
+            (Column {
+                name: format!("{}", function),
+                alias: None,
+                table: None,
+                function: Some(Box::new(function)),
+            })
         )
-        | chain!(
+        | do_parse!(
             table: opt!(
-                chain!(
-                    tbl_name: map_res!(sql_identifier, str::from_utf8) ~
-                    tag!("."),
-                    || { tbl_name }
+                do_parse!(
+                    tbl_name: map_res!(sql_identifier, str::from_utf8) >>
+                    tag!(".") >>
+                    (tbl_name)
                 )
-            ) ~
-            column: map_res!(sql_identifier, str::from_utf8),
-            || {
-                Column {
-                    name: String::from(column),
-                    alias: None,
-                    table: match table {
-                        None => None,
-                        Some(t) => Some(String::from(t)),
-                    },
-                    function: None,
-                }
-            }
+            ) >>
+            column: map_res!(sql_identifier, str::from_utf8) >>
+            (Column {
+                name: String::from(column),
+                alias: None,
+                table: match table {
+                    None => None,
+                    Some(t) => Some(String::from(t)),
+                },
+                function: None,
+            })
         )
     )
 );
@@ -376,48 +358,44 @@ named!(pub column_identifier_no_alias<&[u8], Column>,
 /// Parses a SQL column identifier in the table.column format
 named!(pub column_identifier<&[u8], Column>,
     alt_complete!(
-        chain!(
-            function: column_function ~
-            alias: opt!(as_alias),
-            || {
-                Column {
-                    name: match alias {
-                        None => format!("{}", function),
-                        Some(a) => String::from(a),
-                    },
-                    alias: match alias {
-                        None => None,
-                        Some(a) => Some(String::from(a)),
-                    },
-                    table: None,
-                    function: Some(Box::new(function)),
-                }
-            }
+        do_parse!(
+            function: column_function >>
+            alias: opt!(as_alias) >>
+            (Column {
+                name: match alias {
+                    None => format!("{}", function),
+                    Some(a) => String::from(a),
+                },
+                alias: match alias {
+                    None => None,
+                    Some(a) => Some(String::from(a)),
+                },
+                table: None,
+                function: Some(Box::new(function)),
+            })
         )
-        | chain!(
+        | do_parse!(
             table: opt!(
-                chain!(
-                    tbl_name: map_res!(sql_identifier, str::from_utf8) ~
-                    tag!("."),
-                    || { tbl_name }
+                do_parse!(
+                    tbl_name: map_res!(sql_identifier, str::from_utf8) >>
+                    tag!(".") >>
+                    (tbl_name)
                 )
-            ) ~
-            column: map_res!(sql_identifier, str::from_utf8) ~
-            alias: opt!(as_alias),
-            || {
-                Column {
-                    name: String::from(column),
-                    alias: match alias {
-                        None => None,
-                        Some(a) => Some(String::from(a)),
-                    },
-                    table: match table {
-                        None => None,
-                        Some(t) => Some(String::from(t)),
-                    },
-                    function: None,
-                }
-            }
+            ) >>
+            column: map_res!(sql_identifier, str::from_utf8) >>
+            alias: opt!(as_alias) >>
+            (Column {
+                name: String::from(column),
+                alias: match alias {
+                    None => None,
+                    Some(a) => Some(String::from(a)),
+                },
+                table: match table {
+                    None => None,
+                    Some(t) => Some(String::from(t)),
+                },
+                function: None,
+            })
         )
     )
 );
@@ -425,10 +403,10 @@ named!(pub column_identifier<&[u8], Column>,
 /// Parses a SQL identifier (alphanumeric and "_").
 named!(pub sql_identifier<&[u8], &[u8]>,
     alt_complete!(
-          chain!(
-                not!(peek!(sql_keyword)) ~
-                ident: take_while1!(is_sql_identifier),
-                || { ident }
+          do_parse!(
+                not!(peek!(sql_keyword)) >>
+                ident: take_while1!(is_sql_identifier) >>
+                (ident)
           )
         | delimited!(tag!("`"), take_while1!(is_sql_identifier), tag!("`"))
         | delimited!(tag!("["), take_while1!(is_sql_identifier), tag!("]"))
@@ -470,39 +448,39 @@ named!(pub binary_comparison_operator<&[u8], Operator>,
 /// Parse rule for AS-based aliases for SQL entities.
 named!(pub as_alias<&[u8], &str>,
     complete!(
-        chain!(
-            multispace ~
-            opt!(chain!(tag_no_case!("as") ~ multispace, ||{})) ~
-            alias: map_res!(sql_identifier, str::from_utf8),
-            || { alias }
+        do_parse!(
+            multispace >>
+            opt!(do_parse!(tag_no_case!("as") >> multispace, ||{})) >>
+            alias: map_res!(sql_identifier, str::from_utf8) >>
+            (alias)
         )
     )
 );
 
 named!(field_value<&[u8], (Column,Literal) >,
-    chain!(
-        column: column_identifier_no_alias ~
-        multispace? ~
-        tag!("=") ~
-        multispace? ~
-        value: literal,
-        || { (column, value) }
+    do_parse!(
+        column: column_identifier_no_alias >>
+        multispace? >>
+        tag!("=") >>
+        multispace? >>
+        value: literal >>
+        (column, value)
     )
 );
 
 named!(pub field_value_list<&[u8], Vec<(Column,Literal)> >,
        many1!(
-           chain!(
-               field_value: field_value ~
+           do_parse!(
+               field_value: field_value >>
                opt!(
-                   complete!(chain!(
-                       multispace? ~
-                       tag!(",") ~
-                       multispace?,
-                       ||{}
+                   complete!(do_parse!(
+                       multispace? >>
+                       tag!(",") >>
+                       multispace? >>
+                       ()
                    ))
-               ),
-               || { field_value }
+               ) >>
+               (field_value)
            )
        )
 );
@@ -510,17 +488,17 @@ named!(pub field_value_list<&[u8], Vec<(Column,Literal)> >,
 /// Parse rule for a comma-separated list of fields without aliases.
 named!(pub field_list<&[u8], Vec<Column> >,
        many0!(
-           chain!(
-               fieldname: column_identifier_no_alias ~
+           do_parse!(
+               fieldname: column_identifier_no_alias >>
                opt!(
-                   complete!(chain!(
-                       multispace? ~
-                       tag!(",") ~
-                       multispace?,
-                       ||{}
+                   complete!(do_parse!(
+                       multispace? >>
+                       tag!(",") >>
+                       multispace? >>
+                       ()
                    ))
-               ),
-               || { fieldname }
+               ) >>
+               (fieldname)
            )
        )
 );
@@ -528,46 +506,36 @@ named!(pub field_list<&[u8], Vec<Column> >,
 /// Parse list of column/field definitions.
 named!(pub field_definition_expr<&[u8], Vec<FieldExpression>>,
        many0!(
-           chain!(
+           do_parse!(
                field: alt_complete!(
-                   chain!(
-                       tag!("*"),
-                       || {
-                           FieldExpression::All
-                       }
+                   do_parse!(
+                       tag!("*") >>
+                       (FieldExpression::All)
                    )
-                 | chain!(
-                     table: table_reference ~
-                     tag!(".*"),
-                     || {
-                         FieldExpression::AllInTable(table.name.clone())
-                     }
+                 | do_parse!(
+                     table: table_reference >>
+                     tag!(".*") >>
+                     (FieldExpression::AllInTable(table.name.clone()))
                  )
-                 | chain!(
-                     expr: arithmetic_expression,
-                     || {
-                         FieldExpression::Arithmetic(expr)
-                     }
+                 | do_parse!(
+                     expr: arithmetic_expression >>
+                     (FieldExpression::Arithmetic(expr))
                  )
-                 | chain!(
-                     literal: literal,
-                     || {
-                         FieldExpression::Literal(literal)
-                     }
+                 | do_parse!(
+                     literal: literal >>
+                     (FieldExpression::Literal(literal))
                  )
-                 | chain!(
-                     column: column_identifier,
-                     || {
-                         FieldExpression::Col(column)
-                     }
+                 | do_parse!(
+                     column: column_identifier >>
+                     (FieldExpression::Col(column))
                  )
-               ) ~
+               ) >>
                opt!(
-                   complete!(chain!(
-                       multispace? ~
-                       tag!(",") ~
-                       multispace?,
-                       ||{}
+                   complete!(do_parse!(
+                       multispace? >>
+                       tag!(",") >>
+                       multispace? >>
+                       ()
                    ))
                ),
                || { field }
@@ -579,44 +547,44 @@ named!(pub field_definition_expr<&[u8], Vec<FieldExpression>>,
 /// XXX(malte): add support for aliases
 named!(pub table_list<&[u8], Vec<Table> >,
        many0!(
-           chain!(
-               table: table_reference ~
+           do_parse!(
+               table: table_reference >>
                opt!(
-                   complete!(chain!(
-                       multispace? ~
-                       tag!(",") ~
-                       multispace?,
-                       || {}
+                   complete!(do_parse!(
+                       multispace? >>
+                       tag!(",") >>
+                       multispace? >>
+                       ()
                    ))
-               ),
-               || { table }
+               ) >>
+               (table)
            )
        )
 );
 
 /// Integer literal value
 named!(pub integer_literal<&[u8], Literal>,
-    chain!(
-        val: digit,
-        || {
+    do_parse!(
+        val: digit >>
+        ({
             let intval = i64::from_str(str::from_utf8(val).unwrap()).unwrap();
             Literal::Integer(intval)
-        }
+        })
     )
 );
 
 /// String literal value
 named!(pub string_literal<&[u8], Literal>,
-    chain!(
+    do_parse!(
         val: alt_complete!(
             delimited!(tag!("\""), opt!(take_until!("\"")), tag!("\""))
             | delimited!(tag!("'"), opt!(take_until!("'")), tag!("'"))
-        ),
-        || {
+        ) >>
+        ({
             let val = val.unwrap_or("".as_bytes());
             let s = String::from(str::from_utf8(val).unwrap());
             Literal::String(s)
-        }
+        })
     )
 );
 
@@ -625,10 +593,10 @@ named!(pub literal<&[u8], Literal>,
     alt_complete!(
           integer_literal
         | string_literal
-        | chain!(tag_no_case!("NULL"), || Literal::Null)
-        | chain!(tag_no_case!("CURRENT_TIMESTAMP"), || Literal::CurrentTimestamp)
-        | chain!(tag_no_case!("CURRENT_DATE"), || Literal::CurrentDate)
-        | chain!(tag_no_case!("CURRENT_TIME"), || Literal::CurrentTime)
+        | do_parse!(tag_no_case!("NULL"), (Literal::Null))
+        | do_parse!(tag_no_case!("CURRENT_TIMESTAMP"), (Literal::CurrentTimestamp))
+        | do_parse!(tag_no_case!("CURRENT_DATE"), (Literal::CurrentDate))
+        | do_parse!(tag_no_case!("CURRENT_TIME"), (Literal::CurrentTime))
 //        | float_literal
     )
 );
@@ -636,17 +604,17 @@ named!(pub literal<&[u8], Literal>,
 /// Parse a list of values (e.g., for INSERT syntax).
 named!(pub value_list<&[u8], Vec<Literal> >,
        many0!(
-           chain!(
-               val: literal ~
+           do_parse!(
+               val: literal >>
                opt!(
-                   complete!(chain!(
-                       multispace? ~
-                       tag!(",") ~
-                       multispace?,
-                       ||{}
+                   complete!(do_parse!(
+                       multispace? >>
+                       tag!(",") >>
+                       multispace? >>
+                       ()
                    ))
-               ),
-               || { val }
+               ) >>
+               (val)
            )
        )
 );
@@ -654,18 +622,16 @@ named!(pub value_list<&[u8], Vec<Literal> >,
 /// Parse a reference to a named table, with an optional alias
 /// TODO(malte): add support for schema.table notation
 named!(pub table_reference<&[u8], Table>,
-    chain!(
-        table: map_res!(sql_identifier, str::from_utf8) ~
-        alias: opt!(as_alias),
-        || {
-            Table {
-                name: String::from(table),
-                alias: match alias {
-                    Some(a) => Some(String::from(a)),
-                    None => None,
-                }
+    do_parse!(
+        table: map_res!(sql_identifier, str::from_utf8) >>
+        alias: opt!(as_alias) >>
+        (Table {
+            name: String::from(table),
+            alias: match alias {
+                Some(a) => Some(String::from(a)),
+                None => None,
             }
-        }
+        })
     )
 );
 
