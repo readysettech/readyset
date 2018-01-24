@@ -368,7 +368,7 @@ mod tests {
             });
         });
 
-        let mut client = RpcClient::<i64, i64>::connect(&addr).unwrap();
+        let mut client = RpcClient::<i64, i64>::connect(&addr, true).unwrap();
         assert_eq!(client.send(&12).unwrap(), 54);
         assert_eq!(client.send(&83).unwrap(), 125);
         assert_eq!(client.send(&0).unwrap(), 42);
@@ -394,9 +394,9 @@ mod tests {
             });
         });
 
-        let mut client = RpcClient::<i64, i64>::connect(&addr).unwrap();
-        let mut client2 = RpcClient::<i64, i64>::connect(&addr).unwrap();
-        let mut client3 = RpcClient::<i64, i64>::connect(&addr).unwrap();
+        let mut client = RpcClient::<i64, i64>::connect(&addr, true).unwrap();
+        let mut client2 = RpcClient::<i64, i64>::connect(&addr, true).unwrap();
+        let mut client3 = RpcClient::<i64, i64>::connect(&addr, true).unwrap();
         assert_eq!(client.send(&12).unwrap(), 54);
         assert_eq!(client2.send(&83).unwrap(), 125);
         assert_eq!(client.send(&0).unwrap(), 42);
@@ -440,8 +440,8 @@ mod tests {
             });
         });
 
-        let mut client = RpcClient::<i64, i64>::connect(&addr).unwrap();
-        let mut client2 = RpcClient::<i64, i64>::connect(&addr2).unwrap();
+        let mut client = RpcClient::<i64, i64>::connect(&addr, true).unwrap();
+        let mut client2 = RpcClient::<i64, i64>::connect(&addr2, true).unwrap();
 
         assert_eq!(client.send(&12).unwrap(), 13);
         assert_eq!(client.send(&83).unwrap(), 84);
