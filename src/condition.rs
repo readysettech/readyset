@@ -1,5 +1,4 @@
 use nom::multispace;
-use nom::{Err, ErrorKind, IResult, Needed};
 use std::collections::{HashSet, VecDeque};
 use std::str;
 use std::fmt;
@@ -96,7 +95,7 @@ named!(pub condition_expr<&[u8], ConditionExpression>,
            chain!(
                left: and_expr ~
                multispace? ~
-               caseless_tag!("or") ~
+               tag_no_case!("or") ~
                multispace ~
                right: condition_expr,
                || {
@@ -117,7 +116,7 @@ named!(pub and_expr<&[u8], ConditionExpression>,
            chain!(
                left: parenthetical_expr ~
                multispace? ~
-               caseless_tag!("and") ~
+               tag_no_case!("and") ~
                multispace ~
                right: and_expr,
                || {
@@ -146,7 +145,7 @@ named!(pub parenthetical_expr<&[u8], ConditionExpression>,
 named!(pub not_expr<&[u8], ConditionExpression>,
        alt_complete!(
            chain!(
-               caseless_tag!("not") ~
+               tag_no_case!("not") ~
                multispace ~
                right: parenthetical_expr,
                || {

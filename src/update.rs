@@ -1,5 +1,4 @@
 use nom::multispace;
-use nom::{Err, ErrorKind, IResult, Needed};
 use std::{fmt, str};
 
 use common::{field_value_list, table_reference, Literal};
@@ -38,11 +37,11 @@ impl fmt::Display for UpdateStatement {
 
 named!(pub updating<&[u8], UpdateStatement>,
     chain!(
-        caseless_tag!("update") ~
+        tag_no_case!("update") ~
         multispace ~
         table: table_reference ~
         multispace ~
-        caseless_tag!("set") ~
+        tag_no_case!("set") ~
         multispace ~
         fields: field_value_list ~
         cond: opt!(where_clause) ~

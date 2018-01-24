@@ -1,5 +1,4 @@
 use nom::{alphanumeric, digit, is_alphanumeric, line_ending, multispace};
-use nom::{Err, ErrorKind, IResult, Needed};
 use std::fmt::{self, Display};
 use std::str;
 use std::str::FromStr;
@@ -251,7 +250,7 @@ pub fn is_sql_identifier(chr: u8) -> bool {
 named!(pub function_arguments<&[u8], (Column, bool)>,
        chain!(
            distinct: opt!(chain!(
-               caseless_tag!("distinct") ~
+               tag_no_case!("distinct") ~
                multispace,
                ||{}
            )) ~
@@ -265,55 +264,55 @@ named!(pub function_arguments<&[u8], (Column, bool)>,
 named!(pub column_function<&[u8], FunctionExpression>,
     alt_complete!(
         chain!(
-            caseless_tag!("count(*)"),
+            tag_no_case!("count(*)"),
             || {
                 FunctionExpression::CountStar
             }
         )
     |   chain!(
-            caseless_tag!("count") ~
+            tag_no_case!("count") ~
             args: delimited!(tag!("("), function_arguments, tag!(")")),
             || {
                 FunctionExpression::Count(args.0.clone(), args.1)
             }
         )
     |   chain!(
-            caseless_tag!("sum") ~
+            tag_no_case!("sum") ~
             args: delimited!(tag!("("), function_arguments, tag!(")")),
             || {
                 FunctionExpression::Sum(args.0.clone(), args.1)
             }
         )
     |   chain!(
-            caseless_tag!("avg") ~
+            tag_no_case!("avg") ~
             args: delimited!(tag!("("), function_arguments, tag!(")")),
             || {
                 FunctionExpression::Avg(args.0.clone(), args.1)
             }
         )
     |   chain!(
-            caseless_tag!("max") ~
+            tag_no_case!("max") ~
             args: delimited!(tag!("("), function_arguments, tag!(")")),
             || {
                 FunctionExpression::Max(args.0.clone())
             }
         )
     |   chain!(
-            caseless_tag!("min") ~
+            tag_no_case!("min") ~
             args: delimited!(tag!("("), function_arguments, tag!(")")),
             || {
                 FunctionExpression::Min(args.0.clone())
             }
         )
     |   chain!(
-            caseless_tag!("group_concat") ~
+            tag_no_case!("group_concat") ~
             spec: delimited!(tag!("("),
                        complete!(chain!(
                                column: column_identifier_no_alias ~
                                seperator: opt!(
                                    chain!(
                                        multispace? ~
-                                       caseless_tag!("separator") ~
+                                       tag_no_case!("separator") ~
                                        sep: delimited!(tag!("'"), opt!(alphanumeric), tag!("'")) ~
                                        multispace?,
                                        || { sep.unwrap_or("".as_bytes()) }
@@ -455,16 +454,16 @@ named!(pub statement_terminator<&[u8], &[u8]>,
 /// Parse binary comparison operators
 named!(pub binary_comparison_operator<&[u8], Operator>,
     alt_complete!(
-           map!(caseless_tag!("not_like"), |_| Operator::NotLike)
-         | map!(caseless_tag!("like"), |_| Operator::Like)
-         | map!(caseless_tag!("!="), |_| Operator::NotEqual)
-         | map!(caseless_tag!("<>"), |_| Operator::NotEqual)
-         | map!(caseless_tag!(">="), |_| Operator::GreaterOrEqual)
-         | map!(caseless_tag!("<="), |_| Operator::LessOrEqual)
-         | map!(caseless_tag!("="), |_| Operator::Equal)
-         | map!(caseless_tag!("<"), |_| Operator::Less)
-         | map!(caseless_tag!(">"), |_| Operator::Greater)
-         | map!(caseless_tag!("in"), |_| Operator::In)
+           map!(tag_no_case!("not_like"), |_| Operator::NotLike)
+         | map!(tag_no_case!("like"), |_| Operator::Like)
+         | map!(tag_no_case!("!="), |_| Operator::NotEqual)
+         | map!(tag_no_case!("<>"), |_| Operator::NotEqual)
+         | map!(tag_no_case!(">="), |_| Operator::GreaterOrEqual)
+         | map!(tag_no_case!("<="), |_| Operator::LessOrEqual)
+         | map!(tag_no_case!("="), |_| Operator::Equal)
+         | map!(tag_no_case!("<"), |_| Operator::Less)
+         | map!(tag_no_case!(">"), |_| Operator::Greater)
+         | map!(tag_no_case!("in"), |_| Operator::In)
     )
 );
 
@@ -473,7 +472,7 @@ named!(pub as_alias<&[u8], &str>,
     complete!(
         chain!(
             multispace ~
-            opt!(chain!(caseless_tag!("as") ~ multispace, ||{})) ~
+            opt!(chain!(tag_no_case!("as") ~ multispace, ||{})) ~
             alias: map_res!(sql_identifier, str::from_utf8),
             || { alias }
         )
@@ -626,10 +625,10 @@ named!(pub literal<&[u8], Literal>,
     alt_complete!(
           integer_literal
         | string_literal
-        | chain!(caseless_tag!("NULL"), || Literal::Null)
-        | chain!(caseless_tag!("CURRENT_TIMESTAMP"), || Literal::CurrentTimestamp)
-        | chain!(caseless_tag!("CURRENT_DATE"), || Literal::CurrentDate)
-        | chain!(caseless_tag!("CURRENT_TIME"), || Literal::CurrentTime)
+        | chain!(tag_no_case!("NULL"), || Literal::Null)
+        | chain!(tag_no_case!("CURRENT_TIMESTAMP"), || Literal::CurrentTimestamp)
+        | chain!(tag_no_case!("CURRENT_DATE"), || Literal::CurrentDate)
+        | chain!(tag_no_case!("CURRENT_TIME"), || Literal::CurrentTime)
 //        | float_literal
     )
 );

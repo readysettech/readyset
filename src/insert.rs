@@ -1,5 +1,4 @@
 use nom::multispace;
-use nom::{Err, ErrorKind, IResult, Needed};
 use std::str;
 use std::fmt;
 
@@ -41,9 +40,9 @@ impl fmt::Display for InsertStatement {
 /// TODO(malte): support REPLACE, multiple parens expr, nested selection, DEFAULT VALUES
 named!(pub insertion<&[u8], InsertStatement>,
     complete!(chain!(
-        caseless_tag!("insert") ~
+        tag_no_case!("insert") ~
         multispace ~
-        caseless_tag!("into") ~
+        tag_no_case!("into") ~
         multispace ~
         table: table_reference ~
         multispace? ~
@@ -57,7 +56,7 @@ named!(pub insertion<&[u8], InsertStatement>,
                 || { fields }
                 )
             ) ~
-        caseless_tag!("values") ~
+        tag_no_case!("values") ~
         multispace? ~
         tag!("(") ~
         values: value_list ~

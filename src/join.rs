@@ -1,4 +1,3 @@
-use nom::{Err, ErrorKind, IResult, Needed};
 use std::str;
 
 use column::Column;
@@ -37,11 +36,11 @@ pub enum JoinConstraint {
 /// Parse binary comparison operators
 named!(pub join_operator<&[u8], JoinOperator>,
         alt_complete!(
-              map!(caseless_tag!("join"), |_| JoinOperator::Join)
-            | map!(caseless_tag!("left join"), |_| JoinOperator::LeftJoin)
-            | map!(caseless_tag!("left outer join"), |_| JoinOperator::LeftOuterJoin)
-            | map!(caseless_tag!("inner join"), |_| JoinOperator::InnerJoin)
-            | map!(caseless_tag!("cross join"), |_| JoinOperator::CrossJoin)
-            | map!(caseless_tag!("straight_join"), |_| JoinOperator::StraightJoin)
+              map!(tag_no_case!("join"), |_| JoinOperator::Join)
+            | map!(tag_no_case!("left join"), |_| JoinOperator::LeftJoin)
+            | map!(tag_no_case!("left outer join"), |_| JoinOperator::LeftOuterJoin)
+            | map!(tag_no_case!("inner join"), |_| JoinOperator::InnerJoin)
+            | map!(tag_no_case!("cross join"), |_| JoinOperator::CrossJoin)
+            | map!(tag_no_case!("straight_join"), |_| JoinOperator::StraightJoin)
         )
 );
