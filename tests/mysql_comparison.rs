@@ -278,7 +278,7 @@ fn check_query(
         .collect();
 
     let mut g = ControllerBuilder::default().build_local();
-    g.install_recipe(queries.join("\n"));
+    g.install_recipe(queries.join("\n")).unwrap();
     let inputs = g.inputs();
     let outputs = g.outputs();
 
