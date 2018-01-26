@@ -576,7 +576,7 @@ mod tests {
         let l = g.add_base("left", &["l0", "l1"]);
         let r = g.add_base("right", &["r0", "r1"]);
 
-        use JoinSource::*;
+        use self::JoinSource::*;
         let j = Join::new(
             l.as_global(),
             r.as_global(),

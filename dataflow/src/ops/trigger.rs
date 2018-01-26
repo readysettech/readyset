@@ -173,10 +173,15 @@ mod tests {
     fn setup(materialized: bool) -> ops::test::MockGraph {
         let mut g = ops::test::MockGraph::new();
         let s = g.add_base("source", &["x", "y", "z"]);
+        let trigger_type = TriggerType::GroupCreation {
+            url: String::from("url"),
+            group: String::from("group"),
+        };
         g.set_op(
             "trigger",
             &["x", "y", "z"],
-            Trigger::new(s.as_global()),
+
+            Trigger::new(s.as_global(), trigger_type, vec![0]),
             materialized,
         );
         g

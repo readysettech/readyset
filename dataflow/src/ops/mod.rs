@@ -12,6 +12,7 @@ pub mod identity;
 pub mod filter;
 pub mod topk;
 pub mod trigger;
+pub mod rewrite;
 
 #[derive(Clone, Serialize, Deserialize)]
 pub enum NodeOperator {
@@ -27,6 +28,7 @@ pub enum NodeOperator {
     Filter(filter::Filter),
     TopK(topk::TopK),
     Trigger(trigger::Trigger),
+    Rewrite(rewrite::Rewrite),
 }
 
 macro_rules! nodeop_from_impl {
@@ -60,6 +62,7 @@ nodeop_from_impl!(NodeOperator::Identity, identity::Identity);
 nodeop_from_impl!(NodeOperator::Filter, filter::Filter);
 nodeop_from_impl!(NodeOperator::TopK, topk::TopK);
 nodeop_from_impl!(NodeOperator::Trigger, trigger::Trigger);
+nodeop_from_impl!(NodeOperator::Rewrite, rewrite::Rewrite);
 
 macro_rules! impl_ingredient_fn_mut {
     ($self:ident, $fn:ident, $( $arg:ident ),* ) => {
@@ -76,6 +79,7 @@ macro_rules! impl_ingredient_fn_mut {
             NodeOperator::Filter(ref mut i) => i.$fn($($arg),*),
             NodeOperator::TopK(ref mut i) => i.$fn($($arg),*),
             NodeOperator::Trigger(ref mut i) => i.$fn($($arg),*),
+            NodeOperator::Rewrite(ref mut i) => i.$fn($($arg),*),
         }
     }
 }
@@ -95,6 +99,7 @@ macro_rules! impl_ingredient_fn_ref {
             NodeOperator::Filter(ref i) => i.$fn($($arg),*),
             NodeOperator::TopK(ref i) => i.$fn($($arg),*),
             NodeOperator::Trigger(ref i) => i.$fn($($arg),*),
+            NodeOperator::Rewrite(ref i) => i.$fn($($arg),*),
         }
     }
 }
@@ -210,8 +215,8 @@ pub mod test {
     use std::collections::HashMap;
     use std::cell;
 
-    use flow::prelude::*;
-    use flow::node;
+    use prelude::*;
+    use node;
 
     use petgraph::graph::NodeIndex;
 
