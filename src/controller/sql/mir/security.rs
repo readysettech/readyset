@@ -117,7 +117,7 @@ fn make_security_nodes(
     prev_node: &MirNodeRef,
     node_for_rel: HashMap<&str, MirNodeRef>,
 ) -> (Vec<MirNodeRef>, Vec<MirNodeRef>) {
-    let policies = match mir_converter.universe.policies.get(&String::from(rel)) {
+    let policies = match mir_converter.universe.row_policies.get(&String::from(rel)) {
         Some(p) => p.clone(),
         // no policies associated with this base node
         None => return (vec![], vec![]),

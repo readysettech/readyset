@@ -12,7 +12,7 @@ pub struct Universe {
     pub id: DataType,
     pub from_group: Option<DataType>,
     pub member_of: HashMap<String, Vec<DataType>>,
-    pub policies: HashMap<String, Vec<QueryGraph>>,
+    pub row_policies: HashMap<String, Vec<QueryGraph>>,
 }
 
 impl Universe {
@@ -21,7 +21,7 @@ impl Universe {
             id: "".into(),
             from_group: None,
             member_of: HashMap::default(),
-            policies: HashMap::default(),
+            row_policies: HashMap::default(),
         }
     }
 }
@@ -59,7 +59,7 @@ impl Multiverse for SqlIncorporator {
             id: id.clone(),
             from_group: group.clone(),
             member_of: universe_groups,
-            policies: HashMap::new(),
+            row_policies: HashMap::new(),
         };
 
         // Create the UserContext base node.
@@ -87,10 +87,14 @@ impl Multiverse for SqlIncorporator {
         // because predicates can have nested subqueries, which will trigger
         // a view creation and these views might be unique to each universe
         // e.g. if they reference UserContext.
-        let mut policies_qg: HashMap<String, Vec<QueryGraph>> = HashMap::new();
+        let mut row_policies_qg: HashMap<String, Vec<QueryGraph>> = HashMap::new();
         for policy in universe_policies {
-            trace!(self.log, "Adding policy {:?}", policy.name);
-            let predicate = self.rewrite_query(policy.predicate.clone(), mig);
+            if !policy.is_row_policy() {
+                continue;
+            }
+
+            trace!(self.log, "Adding row policy {:?}", policy.name());
+            let predicate = self.rewrite_query(policy.predicate(), mig);
             let st = match predicate {
                 SqlQuery::Select(ref st) => st,
                 _ => unreachable!(),
@@ -105,11 +109,11 @@ impl Multiverse for SqlIncorporator {
                 Err(e) => panic!(e),
             };
 
-            let e = policies_qg.entry(policy.table.clone()).or_insert_with(Vec::new);
+            let e = row_policies_qg.entry(policy.table().clone()).or_insert_with(Vec::new);
             e.push(qg);
         }
 
-        universe.policies = policies_qg;
+        universe.row_policies = row_policies_qg;
 
         let e = self.universes.entry(group.clone()).or_insert_with(Vec::new);
         e.push((id, group));
