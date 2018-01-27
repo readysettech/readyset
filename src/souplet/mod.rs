@@ -1,33 +1,35 @@
-use slog::Logger;
 use std::collections::HashMap;
-use std::net::SocketAddr;
-use mio::net::TcpListener;
-use std::time::{Duration, Instant};
-use std::thread;
+use std::net::{IpAddr, SocketAddr};
 use std::sync::{atomic, Arc, Mutex};
+use std::thread;
 
-use channel::{self, TcpSender};
+use mio::net::TcpListener;
+use serde_json;
+use slog::Logger;
+use std::time::{Duration, Instant};
+
 use channel::poll::{PollEvent, PollingLoop, ProcessResult};
-use dataflow::{DomainBuilder, Readers};
+use channel::{self, TcpSender};
+use consensus::Authority;
 use dataflow::prelude::*;
+use dataflow::{DomainBuilder, Readers};
 
+use controller::ControllerDescriptor;
 use coordination::{CoordinationMessage, CoordinationPayload};
-
 use worker;
 
 pub mod readers;
 
 /// Souplets are responsible for running domains, and serving reads to any materializations
 /// contained within them.
-pub struct Souplet {
+pub struct Souplet<A: Authority> {
     log: Logger,
 
-    pool: worker::WorkerPool,
+    pool: Option<worker::WorkerPool>,
 
     // Controller connection
-    controller_addr: String,
-    listen_addr: String,
-    listen_port: u16,
+    authority: A,
+    listen_addr: SocketAddr,
 
     // Read RPC handling
     read_listen_addr: SocketAddr,
@@ -37,27 +39,26 @@ pub struct Souplet {
     sender: Option<TcpSender<CoordinationMessage>>,
     channel_coordinator: Arc<ChannelCoordinator>,
     readers: Readers,
+    nworkers: usize,
 
     // liveness
     heartbeat_every: Duration,
     last_heartbeat: Option<Instant>,
 }
 
-impl Souplet {
+impl<A: Authority> Souplet<A> {
     /// Create a new worker.
     pub fn new(
-        controller: &str,
-        listen_addr: &str,
-        port: u16,
+        authority: A,
+        listen_addr: IpAddr,
         heartbeat_every: Duration,
-        workers: usize,
+        nworkers: usize,
         nreaders: usize,
         log: Logger,
     ) -> Self {
         let readers = Arc::new(Mutex::new(HashMap::new()));
 
-        let listener =
-            TcpListener::bind(&SocketAddr::new(listen_addr.parse().unwrap(), 0)).unwrap();
+        let listener = TcpListener::bind(&SocketAddr::new(listen_addr, 0)).unwrap();
         let read_listen_addr = listener.local_addr().unwrap();
         let builder = thread::Builder::new().name("read-dispatcher".to_owned());
         let reader_exit = Arc::new(atomic::AtomicBool::new(false));
@@ -68,74 +69,83 @@ impl Souplet {
                 .spawn(move || readers::serve(listener, readers, nreaders, reader_exit))
                 .unwrap();
         }
-        println!("Listening for reads on {:?}", read_listen_addr);
-
-        let mut checktable_addr: SocketAddr = controller.parse().unwrap();
-        checktable_addr.set_port(8500);
-
-        let cc = Arc::new(ChannelCoordinator::new());
-        let pool = worker::WorkerPool::new(workers, &log, checktable_addr, cc.clone()).unwrap();
+        info!(log, "Listening for reads on {}", read_listen_addr);
 
         Souplet {
-            log: log,
+            log,
+            pool: None,
 
-            pool,
-
-            listen_addr: String::from(listen_addr),
-            listen_port: port,
-            controller_addr: String::from(controller),
-
+            authority,
+            listen_addr: SocketAddr::new(listen_addr, 0),
             read_listen_addr,
             reader_exit,
 
             receiver: None,
             sender: None,
-            channel_coordinator: cc,
+            channel_coordinator: Arc::new(ChannelCoordinator::new()),
             readers,
+            nworkers,
 
-            heartbeat_every: heartbeat_every,
+            heartbeat_every,
             last_heartbeat: None,
         }
     }
 
-    /// Connect to controller
-    pub fn connect(&mut self) -> Result<(), channel::tcp::SendError> {
-        use mio::net::TcpListener;
-        use std::str::FromStr;
+    /// Run the worker.
+    pub fn run(&mut self) {
+        loop {
+            let leader = self.authority.get_leader().unwrap();
+            let descriptor: ControllerDescriptor = serde_json::from_slice(&leader.1).unwrap();
+            match TcpSender::connect(&descriptor.internal_addr, None) {
+                Ok(s) => {
+                    self.sender = Some(s);
+                    self.last_heartbeat = Some(Instant::now());
 
-        let local_addr = match self.receiver {
-            Some(ref r) => r.get_listener_addr().unwrap(),
-            None => {
-                let listener = TcpListener::bind(&SocketAddr::from_str(&format!(
-                    "{}:{}",
-                    self.listen_addr, self.listen_port
-                )).unwrap())
-                    .unwrap();
-                let addr = listener.local_addr().unwrap();
-                self.receiver = Some(PollingLoop::from_listener(listener));
-                addr
+                    let local_addr = match self.receiver {
+                        Some(ref r) => r.get_listener_addr().unwrap(),
+                        None => {
+                            let listener = TcpListener::bind(&self.listen_addr).unwrap();
+                            let addr = listener.local_addr().unwrap();
+                            self.receiver = Some(PollingLoop::from_listener(listener));
+                            addr
+                        }
+                    };
+
+                    // say hello
+                    let msg = self.wrap_payload(CoordinationPayload::Register {
+                        addr: local_addr,
+                        read_listen_addr: self.read_listen_addr,
+                    });
+
+                    match self.sender.as_mut().unwrap().send(msg) {
+                        Ok(_) => {
+                            self.handle(descriptor.checktable_addr);
+                            break;
+                        }
+                        Err(e) => error!(self.log, "failed to register with controller: {:?}", e),
+                    }
+                }
+                Err(e) => error!(self.log, "failed to connect to controller: {:?}", e),
             }
-        };
 
-        let stream =
-            TcpSender::connect(&SocketAddr::from_str(&self.controller_addr).unwrap(), None);
-        match stream {
-            Ok(s) => {
-                self.sender = Some(s);
-                self.last_heartbeat = Some(Instant::now());
-
-                // say hello
-                self.register(local_addr)?;
-
-                Ok(())
-            }
-            Err(e) => Err(e.into()),
+            // wait for a second in between connection attempts
+            thread::sleep(Duration::from_millis(1000));
         }
     }
 
     /// Main worker loop: waits for instructions from controller, and occasionally heartbeats to
     /// tell the controller that we're still here
-    pub fn handle(&mut self) {
+    fn handle(&mut self, checktable_addr: SocketAddr) {
+        // now that we're connected to a leader, we can start the pool
+        self.pool = Some(
+            worker::WorkerPool::new(
+                self.nworkers,
+                &self.log,
+                checktable_addr,
+                self.channel_coordinator.clone(),
+            ).unwrap(),
+        );
+
         // needed to make the borrow checker happy, replaced later
         let mut receiver = self.receiver.take();
 
@@ -173,8 +183,7 @@ impl Souplet {
     }
 
     fn handle_domain_assign(&mut self, d: DomainBuilder) -> Result<(), channel::tcp::SendError> {
-        let addr = SocketAddr::new(self.listen_addr.parse().unwrap(), 0);
-        let listener = ::std::net::TcpListener::bind(addr).unwrap();
+        let listener = ::std::net::TcpListener::bind(self.listen_addr).unwrap();
         let addr = listener.local_addr().unwrap();
 
         let idx = d.index;
@@ -187,7 +196,7 @@ impl Souplet {
         );
 
         let listener = ::mio::net::TcpListener::from_listener(listener, &addr).unwrap();
-        self.pool.add_replica(worker::NewReplica {
+        self.pool.as_mut().unwrap().add_replica(worker::NewReplica {
             inner: d,
             listener: listener,
         });
@@ -254,19 +263,11 @@ impl Souplet {
         }
         Ok(())
     }
-
-    fn register(&mut self, listen_addr: SocketAddr) -> Result<(), channel::tcp::SendError> {
-        let msg = self.wrap_payload(CoordinationPayload::Register {
-            addr: listen_addr,
-            read_listen_addr: self.read_listen_addr,
-        });
-        self.sender.as_mut().unwrap().send(msg)
-    }
 }
 
-impl Drop for Souplet {
+impl<A: Authority> Drop for Souplet<A> {
     fn drop(&mut self) {
         self.reader_exit.store(true, atomic::Ordering::SeqCst);
-        self.pool.wait()
+        self.pool.as_mut().map(|p| p.wait());
     }
 }

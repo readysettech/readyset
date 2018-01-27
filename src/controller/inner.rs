@@ -5,10 +5,12 @@ use dataflow::prelude::*;
 use dataflow::statistics::GraphStats;
 
 use std::collections::{BTreeMap, HashMap};
+use std::error::Error;
+use std::fmt::{self, Display};
 use std::net::{IpAddr, SocketAddr};
 use std::time::{Duration, Instant};
-use std::thread::{self};
-use std::sync::{Arc, Mutex, atomic};
+use std::thread;
+use std::sync::{atomic, Arc, Mutex};
 use std::{io, time};
 
 use coordination::{CoordinationMessage, CoordinationPayload};
@@ -83,6 +85,20 @@ pub enum RpcError {
     Other(String),
 }
 
+impl Error for RpcError {
+    fn description(&self) -> &str {
+        match *self {
+            RpcError::Other(ref s) => s,
+        }
+    }
+}
+
+impl Display for RpcError {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        write!(f, "{}", self.description())
+    }
+}
+
 impl ControllerInner {
     pub fn coordination_message(&mut self, msg: CoordinationMessage) {
         trace!(self.log, "Received {:?}", msg);
@@ -124,6 +140,9 @@ impl ControllerInner {
             }
             (Post, "/getter_builder") => {
                 json::to_string(&self.getter_builder(json::from_slice(&body).unwrap())).unwrap()
+            }
+            (Post, "/extend_recipe") => {
+                json::to_string(&self.extend_recipe(json::from_slice(&body).unwrap())).unwrap()
             }
             (Post, "/install_recipe") => {
                 json::to_string(&self.install_recipe(json::from_slice(&body).unwrap())).unwrap()
@@ -503,18 +522,40 @@ impl ControllerInner {
         GraphStats { domains: domains }
     }
 
+    fn apply_recipe(&mut self, mut new: Recipe) -> Result<(), RpcError> {
+        let mut err = Ok(());
+        self.migrate(|mig| match new.activate(mig, false) {
+            Ok(_) => (),
+            Err(e) => {
+                err = Err(RpcError::Other(format!("failed to activate recipe: {}", e)));
+            }
+        });
+
+        match err {
+            Ok(_) => self.recipe = new,
+            Err(ref e) => crit!(self.log, "{}", e.description()),
+        }
+
+        err
+    }
+
+    pub fn extend_recipe(&mut self, add_txt: String) -> Result<(), RpcError> {
+        let new = self.recipe.clone();
+        match new.extend(&add_txt) {
+            Ok(new) => self.apply_recipe(new),
+            Err(e) => {
+                crit!(self.log, "failed to extend recipe: {:?}", e);
+                Err(RpcError::Other("failed to extend recipe".to_owned()))
+            }
+        }
+    }
+
     pub fn install_recipe(&mut self, r_txt: String) -> Result<(), RpcError> {
         match Recipe::from_str(&r_txt, Some(self.log.clone())) {
             Ok(r) => {
                 let old = self.recipe.clone();
                 let mut new = old.replace(r).unwrap();
-                self.migrate(|mig| match new.activate(mig, false) {
-                    Ok(_) => (),
-                    Err(e) => panic!("failed to install recipe: {:?}", e),
-                });
-                self.recipe = new;
-
-                Ok(())
+                self.apply_recipe(new)
             }
             Err(e) => {
                 crit!(self.log, "failed to parse recipe: {:?}", e);

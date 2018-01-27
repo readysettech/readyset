@@ -582,7 +582,7 @@ impl Materializations {
             if self.partial.contains(&ni) {
                 debug!(self.log, "new partially-materialized node: {:?}", n);
             } else {
-                debug!(self.log, "new fullly-materalized node: {:?}", n);
+                debug!(self.log, "new fully-materalized node: {:?}", n);
             }
         } else {
             debug!(self.log, "new stateless node: {:?}", n);

@@ -612,6 +612,7 @@ impl SqlIncorporator {
             // other kinds of queries *do* require their referred tables to exist!
             ref q @ SqlQuery::CompoundSelect(_)
             | ref q @ SqlQuery::Select(_)
+            | ref q @ SqlQuery::Set(_)
             | ref q @ SqlQuery::Update(_)
             | ref q @ SqlQuery::Delete(_)
             | ref q @ SqlQuery::Insert(_) => for t in &q.referred_tables() {

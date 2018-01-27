@@ -55,9 +55,9 @@ impl ControllerBuilder {
         self.config.partial_enabled = false;
     }
 
-    /// Enable sharding for all subsequent migrations
-    pub fn enable_sharding(&mut self, shards: usize) {
-        self.config.sharding = Some(shards);
+    /// Set sharding policy for all subsequent migrations; `None` disables
+    pub fn set_sharding(&mut self, shards: Option<usize>) {
+        self.config.sharding = shards;
     }
 
     /// Set how many workers the controller should wait for before starting. More workers can join

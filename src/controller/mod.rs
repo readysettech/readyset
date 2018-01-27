@@ -87,11 +87,11 @@ impl ServingThread {
 /// Describes a running controller instance. A serialized version of this struct is stored in
 /// ZooKeeper so that clients can reach the currently active controller.
 #[derive(Serialize, Deserialize)]
-struct ControllerDescriptor {
-    external_addr: SocketAddr,
-    internal_addr: SocketAddr,
-    checktable_addr: SocketAddr,
-    nonce: u64,
+pub(crate) struct ControllerDescriptor {
+    pub external_addr: SocketAddr,
+    pub internal_addr: SocketAddr,
+    pub checktable_addr: SocketAddr,
+    pub nonce: u64,
 }
 
 #[derive(Clone, Serialize, Deserialize)]
@@ -498,7 +498,7 @@ mod tests {
 
         let authority = ZookeeperAuthority::new("127.0.0.1:2181/it_works_blender_with_migration");
         let mut c = ControllerBuilder::default().build(authority);
-        c.install_recipe(r_txt.to_owned());
+        assert!(c.install_recipe(r_txt.to_owned()).is_ok());
     }
 
     // Controller without any domains gets dropped once it leaves the scope.
@@ -520,6 +520,6 @@ mod tests {
                      CREATE TABLE b (r int, s int);\n";
 
         let mut c = ControllerBuilder::default().build_local();
-        c.install_recipe(r_txt.to_owned());
+        assert!(c.install_recipe(r_txt.to_owned()).is_ok());
     }
 }
