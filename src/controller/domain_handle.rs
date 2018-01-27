@@ -50,7 +50,9 @@ impl DomainInputHandle {
         local: bool,
     ) -> Result<(), tcp::SendError> {
         if self.txs.len() == 1 {
-            p = p.make_local();
+            if local {
+                p = p.make_local();
+            }
             self.txs[0].send(p)
         } else {
             if key.is_empty() {
@@ -197,7 +199,9 @@ impl DomainHandle {
                     assignments.push(Some(identifier));
                 }
                 None => {
-                    let listener = ::std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+                    let listener =
+                        ::std::net::TcpListener::bind(SocketAddr::new(listen_addr.clone(), 0))
+                            .unwrap();
                     let addr = listener.local_addr().unwrap();
                     let d =
                         domain.build(logger, readers.clone(), channel_coordinator.clone(), addr);

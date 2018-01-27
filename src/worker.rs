@@ -286,7 +286,8 @@ impl Worker {
             }
 
             let token = events
-                .get(0)
+                .iter()
+                .next()
                 .map(|e| {
                     assert!(e.readiness().is_readable());
                     e.token()
