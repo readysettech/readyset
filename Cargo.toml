@@ -67,8 +67,6 @@ glob = "0.2.11"
 
 [profile.release]
 debug=true
-# https://github.com/rust-lang/rust/issues/47364
-codegen-units = 1
 
 [lib]
 name = "distributary"
