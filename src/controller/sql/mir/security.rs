@@ -81,7 +81,6 @@ impl SecurityBoundary for SqlToMirConverter {
             return (vec![prev_node], security_nodes);
         }
 
-        assert!(node_for_rel.len() <= 1, "can't support multiple table policies");
         for (rel, _) in &node_for_rel.clone() {
             let (last_nodes, nodes) =
                 make_security_nodes(self, *rel, &prev_node, node_for_rel.clone());
