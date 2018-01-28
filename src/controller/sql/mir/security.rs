@@ -4,6 +4,7 @@ use controller::sql::mir::SqlToMirConverter;
 use std::collections::HashMap;
 use controller::sql::query_signature::Signature;
 use controller::sql::query_graph::QueryGraph;
+use controller::sql::mir::rewrite::make_rewrite_nodes;
 
 pub trait SecurityBoundary {
     fn reconcile(
@@ -80,7 +81,7 @@ impl SecurityBoundary for SqlToMirConverter {
             return (vec![prev_node], security_nodes);
         }
 
-
+        assert!(node_for_rel.len() <= 1, "can't support multiple table policies");
         for (rel, _) in &node_for_rel.clone() {
             let (last_nodes, nodes) =
                 make_security_nodes(self, *rel, &prev_node, node_for_rel.clone());
@@ -113,11 +114,11 @@ impl SecurityBoundary for SqlToMirConverter {
 
 fn make_security_nodes(
     mir_converter: &mut SqlToMirConverter,
-    rel: &str,
+    table: &str,
     prev_node: &MirNodeRef,
     node_for_rel: HashMap<&str, MirNodeRef>,
 ) -> (Vec<MirNodeRef>, Vec<MirNodeRef>) {
-    let policies = match mir_converter.universe.row_policies.get(&String::from(rel)) {
+    let policies = match mir_converter.universe.row_policies.get(&String::from(table)) {
         Some(p) => p.clone(),
         // no policies associated with this base node
         None => return (vec![], vec![]),
@@ -128,9 +129,9 @@ fn make_security_nodes(
 
     debug!(
         mir_converter.log,
-        "Found {} policies for table {}",
+        "Found {} row policies for table {}",
         policies.len(),
-        rel
+        table
     );
 
     let mut security_nodes = Vec::new();
@@ -139,7 +140,7 @@ fn make_security_nodes(
     // Policies are created in parallel and later union'ed
     // Differently from normal queries, the policies order filters
     // before joins, since we can always reuse filter, but if a policy
-    // joins against a context view, we are unable to reuse ir (context
+    // joins against a context view, we are unable to reuse it (context
     // views are universe-specific).
     for qg in policies.iter() {
         let mut prev_node = Some(prev_node.clone());
@@ -213,10 +214,26 @@ fn make_security_nodes(
 
         node_count += join_nodes.len();
 
+        let prev_node = match join_nodes.last() {
+            Some(n) => n.clone(),
+            None => local_node_for_rel[table].clone(),
+        };
+
+        let rewrite_nodes = make_rewrite_nodes(
+            mir_converter,
+            &format!("sp_{:x}", qg.signature().hash),
+            prev_node,
+            table,
+            node_count,
+        );
+
+        node_count += rewrite_nodes.len();
+
         let policy_nodes: Vec<_> = base_nodes
             .into_iter()
             .chain(filter_nodes.into_iter())
             .chain(join_nodes.into_iter())
+            .chain(rewrite_nodes.into_iter())
             .collect();
 
         assert!(policy_nodes.len() > 0, "no nodes where created for policy");

@@ -267,6 +267,21 @@ pub fn mir_node_to_flow_parts(mir_node: &mut MirNode, mig: &mut Migration) -> Fl
                         mig,
                     )
                 }
+                MirNodeType::Rewrite { ref value, ref column, ref key } => {
+                    let src = mir_node.ancestors[0].clone();
+                    let should_rewrite = mir_node.ancestors[1].clone();
+
+                    make_rewrite_node(
+                        &name,
+                        src,
+                        should_rewrite,
+                        mir_node.columns.as_slice(),
+                        value,
+                        column,
+                        key,
+                        mig,
+                    )
+                }
             };
 
             // any new flow nodes have been instantiated by now, so we replace them with
@@ -415,6 +430,30 @@ pub(crate) fn make_union_node(
         ops::union::Union::new(emit_column_id),
     );
 
+    FlowNode::New(node)
+}
+
+pub(crate) fn make_rewrite_node(
+    name: &str,
+    src: MirNodeRef,
+    should_rewrite: MirNodeRef,
+    columns: &[Column],
+    value: &String,
+    rewrite_col: &String,
+    key: &String,
+    mig: &mut Migration,
+) -> FlowNode {
+    let src_na = src.borrow().flow_node_addr().unwrap();
+    let should_rewrite_na = should_rewrite.borrow().flow_node_addr().unwrap();
+    let column_names = columns.iter().map(|c| &c.name).collect::<Vec<_>>();
+    let rewrite_col = column_names.iter().rposition(|c| *c == rewrite_col).unwrap();
+    let key = column_names.iter().rposition(|c| *c == key).unwrap();
+
+    let node = mig.add_ingredient(
+        String::from(name),
+        column_names.as_slice(),
+        ops::rewrite::Rewrite::new(src_na, should_rewrite_na, rewrite_col, value.clone().into(), key),
+    );
     FlowNode::New(node)
 }
 

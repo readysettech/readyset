@@ -1,4 +1,4 @@
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use prelude::*;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -46,6 +46,15 @@ impl Ingredient for Rewrite {
 
     fn ancestors(&self) -> Vec<NodeIndex> {
         vec![self.src.as_global(), self.should_rewrite.as_global()]
+    }
+
+    fn is_join(&self) -> bool {
+        true
+    }
+
+
+    fn must_replay_among(&self) -> Option<HashSet<NodeIndex>> {
+        Some(Some(self.src.as_global()).into_iter().collect())
     }
 
     fn on_connected(&mut self, _: &Graph) {}
@@ -158,12 +167,16 @@ impl Ingredient for Rewrite {
     }
 
     fn resolve(&self, col: usize) -> Option<Vec<(NodeIndex, usize)>> {
-        Some(vec![(self.src.as_global(), col)])
+        // We can't resolve the rewritten column
+        if col == self.rw_col {
+            None
+        } else {
+            Some(vec![(self.src.as_global(), col)])
+        }
     }
 
     fn description(&self) -> String {
-        // TODO: better description
-        "R".into()
+        format!("Rw[{}]", self.rw_col)
     }
 
     fn parent_columns(&self, column: usize) -> Vec<(NodeIndex, Option<usize>)> {

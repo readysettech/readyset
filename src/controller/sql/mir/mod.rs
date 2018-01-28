@@ -22,6 +22,7 @@ use std::vec::Vec;
 use controller::sql::security::Universe;
 use controller::sql::UniverseId;
 
+mod rewrite;
 mod security;
 mod join;
 mod grouped;
@@ -74,6 +75,11 @@ impl SqlToMirConverter {
     /// represent in the the query graph
     pub fn set_universe(&mut self, universe: Universe) {
         self.universe = universe;
+    }
+
+    /// Set the universe to a policy-free universe
+    pub fn clear_universe(&mut self) {
+        self.universe = Universe::default();
     }
 
     fn get_view(&self, view_name: &str) -> MirNodeRef {

@@ -396,6 +396,8 @@ pub enum MirNodeType {
     Reuse { node: MirNodeRef },
     /// leaf (reader) node, keys
     Leaf { node: MirNodeRef, keys: Vec<Column> },
+    /// Rewrite node
+    Rewrite { value: String, column: String, key: String },
 }
 
 impl MirNodeType {
@@ -605,6 +607,12 @@ impl MirNodeType {
             },
             MirNodeType::Union { emit: ref our_emit } => match *other {
                 MirNodeType::Union { ref emit } => emit == our_emit,
+                _ => false,
+            },
+            MirNodeType::Rewrite { value: ref our_value, key: ref our_key, column: ref our_col } => match *other {
+                MirNodeType::Rewrite { ref value, ref key, ref column } => {
+                    (value == our_value && our_key == key && our_col == column)
+                }
                 _ => false,
             },
             _ => unimplemented!(),
@@ -842,6 +850,9 @@ impl Debug for MirNodeType {
 
                 write!(f, "{}", cols)
             }
+            MirNodeType::Rewrite {
+                ref column, ..
+            } => write!(f, "Rw [{}]", column),
         }
     }
 }

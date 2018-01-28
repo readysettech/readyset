@@ -13,6 +13,7 @@ pub struct Universe {
     pub from_group: Option<DataType>,
     pub member_of: HashMap<String, Vec<DataType>>,
     pub row_policies: HashMap<String, Vec<QueryGraph>>,
+    pub rewrite_policies: HashMap<String, Vec<RewritePolicy>>,
 }
 
 impl Universe {
@@ -22,9 +23,20 @@ impl Universe {
             from_group: None,
             member_of: HashMap::default(),
             row_policies: HashMap::default(),
+            rewrite_policies: HashMap::default(),
         }
     }
 }
+
+#[derive(Clone, Debug)]
+pub struct RewritePolicy {
+    pub value: String,
+    pub column: String,
+    pub key: String,
+    pub rewrite_view: String,
+}
+
+
 
 pub trait Multiverse {
     /// Prepare a new security universe.
@@ -54,12 +66,15 @@ impl Multiverse for SqlIncorporator {
     ) -> Vec<QueryFlowParts> {
         let mut qfps = Vec::new();
 
+        self.mir_converter.clear_universe();
+
         let (id, group) = mig.universe();
         let mut universe = Universe {
             id: id.clone(),
             from_group: group.clone(),
             member_of: universe_groups,
             row_policies: HashMap::new(),
+            rewrite_policies: HashMap::new(),
         };
 
         // Create the UserContext base node.
@@ -90,6 +105,18 @@ impl Multiverse for SqlIncorporator {
         let mut row_policies_qg: HashMap<String, Vec<QueryGraph>> = HashMap::new();
         for policy in universe_policies {
             if !policy.is_row_policy() {
+                let qfp = self.add_parsed_query(policy.predicate(), None, false, mig).unwrap();
+                let rewrite_view = qfp.name.clone();
+                let rw_pol = RewritePolicy {
+                    value: policy.value(),
+                    column: policy.column(),
+                    key: policy.key(),
+                    rewrite_view: rewrite_view,
+                };
+
+                let e = universe.rewrite_policies.entry(policy.table().clone()).or_insert_with(Vec::new);
+                e.push(rw_pol);
+                qfps.push(qfp);
                 continue;
             }
 

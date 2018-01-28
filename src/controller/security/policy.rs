@@ -30,6 +30,7 @@ pub struct RewritePolicy {
     pub table: String,
     pub value: String,
     pub column: String,
+    pub key: String,
     pub rewrite_view: SqlQuery,
 }
 
@@ -60,9 +61,33 @@ impl Policy {
 
     pub fn predicate(&self) -> SqlQuery {
         match *self {
-            Policy::Rewrite(_) => panic!("Rewrite policy doesn't have a predicate"),
+            Policy::Rewrite(ref p) => p.rewrite_view.clone(),
             Policy::Allow(ref p) => p.predicate.clone(),
             Policy::Deny(ref p) => p.predicate.clone(),
+        }
+    }
+
+    pub fn value(&self) -> String {
+        match *self {
+            Policy::Rewrite(ref p) => p.value.clone(),
+            Policy::Allow(_) => panic!("Row policy doesn't have value field"),
+            Policy::Deny(_) => panic!("Row policy doesn't have value field"),
+        }
+    }
+
+    pub fn column(&self) -> String {
+        match *self {
+            Policy::Rewrite(ref p) => p.column.clone(),
+            Policy::Allow(_) => panic!("Row policy doesn't have column field"),
+            Policy::Deny(_) => panic!("Row policy doesn't have column field"),
+        }
+    }
+
+    pub fn key(&self) -> String {
+        match *self {
+            Policy::Rewrite(ref p) => p.key.clone(),
+            Policy::Allow(_) => panic!("Row policy doesn't have key field"),
+            Policy::Deny(_) => panic!("Row policy doesn't have key field"),
         }
     }
 
@@ -77,12 +102,12 @@ impl Policy {
             .map(|p| {
                 match p.get("action") {
                     Some(action) =>
-                    match action.to_string().as_ref() {
-                        "rewrite" => Policy::parse_rewrite_policy(p),
-                        "allow" => Policy::parse_row_policy(p, Action::Allow),
-                        "deny" => Policy::parse_row_policy(p, Action::Deny),
-                        _ => panic!("Unsupported policy action"),
-                    }
+                        match action.as_str() {
+                            Some("rewrite") => Policy::parse_rewrite_policy(p),
+                            Some("allow") => Policy::parse_row_policy(p, Action::Allow),
+                            Some("deny") => Policy::parse_row_policy(p, Action::Deny),
+                            _ => panic!("Unsupported policy action {}", action),
+                        }
                     None => Policy::parse_row_policy(p, Action::Allow),
                 }
             })
@@ -124,6 +149,7 @@ impl Policy {
         let rewrite = p["rewrite"].as_str().unwrap();
         let value = p["value"].as_str().unwrap();
         let column = p["column"].as_str().unwrap();
+        let key = p["key"].as_str().unwrap();
 
         let sq =
             sql_parser::parse_query(rewrite).unwrap();
@@ -133,6 +159,7 @@ impl Policy {
             table: table.to_string(),
             value: value.to_string(),
             column: column.to_string(),
+            key: key.to_string(),
             rewrite_view: sq,
         })
     }
