@@ -597,15 +597,21 @@ impl SqlToMirConverter {
             .collect();
 
         // Find columns present in all ancestors
-        let mut cols = HashSet::new();
+        let mut selected_cols = HashSet::new();
         for c in ucols {
             if ancestors.iter().all(|a| a.borrow().columns().iter().any(|ac| ac.name == c.name)) {
-                cols.insert(c.name.clone());
+                selected_cols.insert(c.name.clone());
             }
         }
 
         for ancestor in ancestors.iter() {
-            let cols: Vec<Column> = ancestor.borrow().columns().iter().filter(|c| cols.contains(&c.name)).map(|c| {
+            let mut acols: Vec<Column> = Vec::new();
+            for ac in ancestor.borrow().columns() {
+                if selected_cols.contains(&ac.name) && acols.iter().find(|ref c| ac.name == c.name).is_none() {
+                    acols.push(ac.clone());
+                }
+            }
+            let cols: Vec<Column> = acols.iter().map(|c| {
                 if is_leaf {
                     sanitize_leaf_column(c.clone(), name)
                 } else {
@@ -618,7 +624,7 @@ impl SqlToMirConverter {
         assert!(
             emit
                 .iter()
-                .all(|e| e.len() == cols.len()),
+                .all(|e| e.len() == selected_cols.len()),
             "all ancestors columns must have the same size"
         );
 
@@ -1206,17 +1212,17 @@ impl SqlToMirConverter {
 
 
             let mut ancestors = self.universe.member_of.iter().fold(vec![], |mut acc, (gname, gids)| {
-                let group_views: Vec<MirNodeRef> = gids.iter().map(|gid| {
+                let group_views: Vec<MirNodeRef> = gids.iter().filter_map(|gid| {
                     // This is a little annoying, but because of the way we name universe queries,
                     // we need to strip the view name of the _u{uid} suffix
-                    let root: String = if !uformat.is_empty() {
-                        let sz = name.len() - uformat.len();
-                        name.chars().take(sz).collect()
+                    let root = name.trim_right_matches(&uformat);
+                    if root == name {
+                        None
                     } else {
-                        String::from(name)
-                    };
-                    let view_name = format!("{}_{}{}", root, gname, gid);
-                    self.get_view(&view_name)
+                        let view_name = format!("{}_{}{}", root, gname, gid);
+                        Some(self.get_view(&view_name))
+                    }
+
                 }).collect();
 
                 trace!(self.log, "group views {:?}", group_views);

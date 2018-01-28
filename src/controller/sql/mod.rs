@@ -674,8 +674,6 @@ impl SqlIncorporator {
         is_leaf: bool,
         mig: &mut Migration,
     ) -> Result<QueryFlowParts, String> {
-        // self.num_queries += 1;
-
         let q = self.rewrite_query(q, mig);
 
         // TODO(larat): extend existing should handle policy nodes
