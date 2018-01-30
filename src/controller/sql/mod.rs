@@ -461,6 +461,7 @@ impl SqlIncorporator {
             .collect::<Vec<_>>();
 
         // TODO(malte): get rid of duplication and figure out where to track this state
+        debug!(self.log, "registering query \"{}\"", query_name);
         self.view_schemas.insert(String::from(query_name), fields);
 
         // We made a new query, so store the query graph and the corresponding leaf MIR node.
