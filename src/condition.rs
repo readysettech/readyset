@@ -4,8 +4,8 @@ use std::str;
 use std::fmt;
 
 use column::Column;
-use common::{binary_comparison_operator, column_identifier, integer_literal, string_literal,
-             Literal, Operator};
+use common::{binary_comparison_operator, column_identifier, integer_literal, opt_multispace,
+             string_literal, Literal, Operator};
 
 use select::{nested_selection, SelectStatement};
 
@@ -94,7 +94,7 @@ named!(pub condition_expr<&[u8], ConditionExpression>,
        alt_complete!(
            do_parse!(
                left: and_expr >>
-               opt!(multispace) >>
+               opt_multispace >>
                tag_no_case!("or") >>
                multispace >>
                right: condition_expr >>
@@ -113,7 +113,7 @@ named!(pub and_expr<&[u8], ConditionExpression>,
        alt_complete!(
            do_parse!(
                left: parenthetical_expr >>
-               opt!(multispace) >>
+               opt_multispace >>
                tag_no_case!("and") >>
                multispace >>
                right: and_expr >>
@@ -131,9 +131,9 @@ named!(pub and_expr<&[u8], ConditionExpression>,
 named!(pub parenthetical_expr<&[u8], ConditionExpression>,
        alt_complete!(
            delimited!(
-               do_parse!(tag!("(") >> opt!(multispace) >> ()),
+               do_parse!(tag!("(") >> opt_multispace >> ()),
                condition_expr,
-               do_parse!(opt!(multispace) >> tag!(")") >> opt!(multispace) >> ())
+               do_parse!(opt_multispace >> tag!(")") >> opt_multispace >> ())
             )
        |   not_expr)
 );
@@ -152,9 +152,9 @@ named!(pub not_expr<&[u8], ConditionExpression>,
 named!(boolean_primary<&[u8], ConditionExpression>,
     do_parse!(
         left: predicate >>
-        opt!(multispace) >>
+        opt_multispace >>
         op: binary_comparison_operator >>
-        opt!(multispace) >>
+        opt_multispace >>
         right: predicate >>
         (ConditionExpression::ComparisonOp(
             ConditionTree {

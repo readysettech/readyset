@@ -5,7 +5,7 @@ use std::fmt;
 use column::Column;
 use common::FieldExpression;
 use common::{as_alias, column_identifier_no_alias, field_definition_expr, field_list,
-             statement_terminator, table_list, table_reference, unsigned_number};
+             opt_multispace, statement_terminator, table_list, table_reference, unsigned_number};
 use condition::{condition_expr, ConditionExpression};
 use join::{join_operator, JoinConstraint, JoinOperator, JoinRightSide};
 use table::Table;
@@ -91,15 +91,15 @@ impl fmt::Display for SelectStatement {
 /// Parse GROUP BY clause
 named!(group_by_clause<&[u8], GroupByClause>,
     complete!(do_parse!(
-        opt!(multispace) >>
+        opt_multispace >>
         tag_no_case!("group by") >>
         multispace >>
         group_columns: field_list >>
         having_clause: opt!(
             complete!(do_parse!(
-                opt!(multispace) >>
+                opt_multispace >>
                 tag_no_case!("having") >>
-                opt!(multispace) >>
+                opt_multispace >>
                 ce: condition_expr >>
                 (ce)
             ))
@@ -114,13 +114,13 @@ named!(group_by_clause<&[u8], GroupByClause>,
 /// Parse LIMIT clause
 named!(pub limit_clause<&[u8], LimitClause>,
     complete!(do_parse!(
-        opt!(multispace) >>
+        opt_multispace >>
         tag_no_case!("limit") >>
         multispace >>
         limit_val: unsigned_number >>
         offset_val: opt!(
             complete!(do_parse!(
-                opt!(multispace) >>
+                opt_multispace >>
                 tag_no_case!("offset") >>
                 multispace >>
                 val: unsigned_number >>
@@ -139,9 +139,9 @@ named!(pub limit_clause<&[u8], LimitClause>,
 /// Parse JOIN clause
 named!(join_clause<&[u8], JoinClause>,
     complete!(do_parse!(
-        opt!(multispace) >>
+        opt_multispace >>
         _natural: opt!(tag_no_case!("natural")) >>
-        opt!(multispace) >>
+        opt_multispace >>
         op: join_operator >>
         multispace >>
         right: join_rhs >>
@@ -194,7 +194,7 @@ named!(join_rhs<&[u8], JoinRightSide>,
 /// Parse ORDER BY clause
 named!(pub order_clause<&[u8], OrderClause>,
     complete!(do_parse!(
-        opt!(multispace) >>
+        opt_multispace >>
         tag_no_case!("order by") >>
         multispace >>
         order_expr: many0!(
@@ -202,7 +202,7 @@ named!(pub order_clause<&[u8], OrderClause>,
                 fieldname: column_identifier_no_alias >>
                 ordering: opt!(
                     complete!(do_parse!(
-                        opt!(multispace) >>
+                        opt_multispace >>
                         ordering: alt_complete!(
                             map!(tag_no_case!("desc"), |_| OrderType::OrderDescending)
                                 | map!(tag_no_case!("asc"), |_| OrderType::OrderAscending)
@@ -212,9 +212,9 @@ named!(pub order_clause<&[u8], OrderClause>,
                 ) >>
                 opt!(
                     complete!(do_parse!(
-                        opt!(multispace) >>
+                        opt_multispace >>
                         tag!(",") >>
-                        opt!(multispace) >>
+                        opt_multispace >>
                         ()
                     ))
                 ) >>
@@ -234,7 +234,7 @@ named!(pub order_clause<&[u8], OrderClause>,
 /// Parse WHERE clause of a selection
 named!(pub where_clause<&[u8], ConditionExpression>,
     complete!(do_parse!(
-        opt!(multispace) >>
+        opt_multispace >>
         tag_no_case!("where") >>
         multispace >>
         cond: condition_expr >>
@@ -256,9 +256,9 @@ named!(pub nested_selection<&[u8], SelectStatement>,
         tag_no_case!("select") >>
         multispace >>
         distinct: opt!(tag_no_case!("distinct")) >>
-        opt!(multispace) >>
+        opt_multispace >>
         fields: field_definition_expr >>
-        delimited!(opt!(multispace), tag_no_case!("from"), opt!(multispace)) >>
+        delimited!(opt_multispace, tag_no_case!("from"), opt_multispace) >>
         tables: table_list >>
         join: many0!(join_clause) >>
         cond: opt!(where_clause) >>
