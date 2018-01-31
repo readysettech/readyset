@@ -2,7 +2,8 @@ use nom::multispace;
 use std::str;
 use std::fmt;
 
-use common::{field_list, statement_terminator, table_reference, value_list, Literal};
+use common::{field_list, opt_multispace, statement_terminator, table_reference, value_list,
+             Literal};
 use column::Column;
 use table::Table;
 
@@ -45,19 +46,19 @@ named!(pub insertion<&[u8], InsertStatement>,
         tag_no_case!("into") >>
         multispace >>
         table: table_reference >>
-        opt!(multispace) >>
+        opt_multispace >>
         fields: opt!(do_parse!(
                 tag!("(") >>
-                opt!(multispace) >>
+                opt_multispace >>
                 fields: field_list >>
-                opt!(multispace) >>
+                opt_multispace >>
                 tag!(")") >>
                 multispace >>
                 (fields)
                 )
             ) >>
         tag_no_case!("values") >>
-        opt!(multispace) >>
+        opt_multispace >>
         tag!("(") >>
         values: value_list >>
         tag!(")") >>

@@ -1,6 +1,7 @@
 use nom::multispace;
 use std::str;
 
+use common::opt_multispace;
 use select::{limit_clause, nested_selection, order_clause, LimitClause, OrderClause,
              SelectStatement};
 
@@ -52,19 +53,19 @@ named!(pub compound_selection<&[u8], CompoundSelectStatement>,
         first_select: delimited!(opt!(tag!("(")), nested_selection, opt!(tag!(")"))) >>
         other_selects: many1!(
             complete!(
-                do_parse!(opt!(multispace) >>
+                do_parse!(opt_multispace >>
                        op: compound_op >>
                        multispace >>
                        opt!(tag!("(")) >>
-                       opt!(multispace) >>
+                       opt_multispace >>
                        select: nested_selection >>
-                       opt!(multispace) >>
+                       opt_multispace >>
                        opt!(tag!(")")) >>
                        (Some(op), select)
                 )
             )
         ) >>
-        opt!(multispace) >>
+        opt_multispace >>
         order: opt!(order_clause) >>
         limit: opt!(limit_clause) >>
         ({

@@ -297,10 +297,10 @@ named!(pub column_function<&[u8], FunctionExpression>,
                                column: column_identifier_no_alias >>
                                seperator: opt!(
                                    do_parse!(
-                                       opt!(multispace) >>
+                                       opt_multispace >>
                                        tag_no_case!("separator") >>
                                        sep: delimited!(tag!("'"), opt!(alphanumeric), tag!("'")) >>
-                                       opt!(multispace) >>
+                                       opt_multispace >>
                                        (sep.unwrap_or("".as_bytes()))
                                    )
                                ) >>
@@ -422,11 +422,16 @@ named!(pub unsigned_number<&[u8], u64>,
 );
 
 /// Parse a terminator that ends a SQL statement.
-/// TODO(ekmartin): This doesn't seem to always work as it should
-/// with eof!() after upgrading.
-/// TODO(ekmartin): Remove ; from finkelstein and tpcw queries after fixing
-named!(pub statement_terminator<&[u8], &[u8]>,
-    alt_complete!(tag!(";") | eof!() | line_ending)
+named!(pub statement_terminator,
+    delimited!(
+        opt_multispace,
+        alt_complete!(tag!(";") | line_ending | eof!()),
+        opt_multispace
+    )
+);
+
+named!(pub opt_multispace<&[u8], Option<&[u8]>>,
+       opt!(complete!(multispace))
 );
 
 /// Parse binary comparison operators
@@ -460,9 +465,9 @@ named!(pub as_alias<&[u8], &str>,
 named!(field_value<&[u8], (Column,Literal) >,
     do_parse!(
         column: column_identifier_no_alias >>
-        opt!(multispace) >>
+        opt_multispace >>
         tag!("=") >>
-        opt!(multispace) >>
+        opt_multispace >>
         value: literal >>
         (column, value)
     )
@@ -474,9 +479,9 @@ named!(pub field_value_list<&[u8], Vec<(Column,Literal)> >,
                field_value: field_value >>
                opt!(
                    complete!(do_parse!(
-                       opt!(multispace) >>
+                       opt_multispace >>
                        tag!(",") >>
-                       opt!(multispace) >>
+                       opt_multispace >>
                        ()
                    ))
                ) >>
@@ -492,9 +497,9 @@ named!(pub field_list<&[u8], Vec<Column> >,
                fieldname: column_identifier_no_alias >>
                opt!(
                    complete!(do_parse!(
-                       opt!(multispace) >>
+                       opt_multispace >>
                        tag!(",") >>
-                       opt!(multispace) >>
+                       opt_multispace >>
                        ()
                    ))
                ) >>
@@ -532,9 +537,9 @@ named!(pub field_definition_expr<&[u8], Vec<FieldExpression>>,
                ) >>
                opt!(
                    complete!(do_parse!(
-                       opt!(multispace) >>
+                       opt_multispace >>
                        tag!(",") >>
-                       opt!(multispace) >>
+                       opt_multispace >>
                        ()
                    ))
                ) >>
@@ -551,9 +556,9 @@ named!(pub table_list<&[u8], Vec<Table> >,
                table: table_reference >>
                opt!(
                    complete!(do_parse!(
-                       opt!(multispace) >>
+                       opt_multispace >>
                        tag!(",") >>
-                       opt!(multispace) >>
+                       opt_multispace >>
                        ()
                    ))
                ) >>
@@ -608,9 +613,9 @@ named!(pub value_list<&[u8], Vec<Literal> >,
                val: literal >>
                opt!(
                    complete!(do_parse!(
-                       opt!(multispace) >>
+                       opt_multispace >>
                        tag!(",") >>
-                       opt!(multispace) >>
+                       opt_multispace >>
                        ()
                    ))
                ) >>

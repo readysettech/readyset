@@ -1,7 +1,6 @@
-use nom::multispace;
 use std::{fmt, str};
 
-use common::{as_alias, column_identifier_no_alias, integer_literal, Literal};
+use common::{as_alias, column_identifier_no_alias, integer_literal, opt_multispace, Literal};
 use column::Column;
 
 #[derive(Debug, Clone, Deserialize, Eq, Hash, PartialEq, Serialize)]
@@ -95,9 +94,9 @@ named!(pub arithmetic_base<&[u8], ArithmeticBase>,
 named!(pub arithmetic_expression<&[u8], ArithmeticExpression>,
     complete!(do_parse!(
         left: arithmetic_base >>
-        opt!(multispace) >>
+        opt_multispace >>
         op: arithmetic_operator >>
-        opt!(multispace) >>
+        opt_multispace >>
         right: arithmetic_base >>
         alias: opt!(as_alias) >>
         (ArithmeticExpression {
