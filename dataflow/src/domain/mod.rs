@@ -1561,17 +1561,19 @@ impl Domain {
     fn handle_recovery(&mut self, sends: &mut EnqueuedSends) {
         let node_info: Vec<_> = self.nodes
             .iter()
-            .map(|(index, node)| {
+            .filter_map(|(index, node)| {
                 let n = node.borrow();
-                (index, n.global_addr(), n.is_transactional())
+                if n.is_internal() && n.get_base().is_some() {
+                    Some((index, n.global_addr(), n.is_transactional()))
+                } else {
+                    None
+                }
             })
             .collect();
 
         for (local_addr, global_addr, is_transactional) in node_info {
-            let path = self.persistence_parameters.log_path(
-                &self.nodes[&local_addr].borrow().name(),
-                self.shard.unwrap_or(0),
-            );
+            let path = self.persistence_parameters
+                .log_path(self.nodes[&local_addr].borrow().name(), self.shard.unwrap_or(0));
 
             let file = match File::open(&path) {
                 Ok(f) => f,
