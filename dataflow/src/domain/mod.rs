@@ -1569,8 +1569,7 @@ impl Domain {
 
         for (local_addr, global_addr, is_transactional) in node_info {
             let path = self.persistence_parameters.log_path(
-                &local_addr,
-                self.index,
+                &self.nodes[&local_addr].borrow().name(),
                 self.shard.unwrap_or(0),
             );
 

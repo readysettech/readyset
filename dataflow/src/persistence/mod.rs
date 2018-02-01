@@ -82,21 +82,13 @@ impl Parameters {
     }
 
     /// The path that would be used for the given domain/shard pair's logs.
-    pub fn log_path(
-        &self,
-        node: &LocalNodeIndex,
-        domain_index: domain::Index,
-        domain_shard: usize,
-    ) -> PathBuf {
-        let filename = format!(
-            "{}-log-{}_{}-{}.json",
-            self.log_prefix,
-            domain_index.index(),
-            domain_shard,
-            node.id()
-        );
+    pub fn log_path(&self, table_name: &str, domain_shard: usize) -> PathBuf {
+        assert!(!table_name.contains("-"));
 
-        PathBuf::from(&filename)
+        PathBuf::from(&format!(
+            "{}-log-{}-{}.json",
+            self.log_prefix, table_name, domain_shard,
+        ))
     }
 }
 
@@ -113,7 +105,7 @@ pub struct GroupCommitQueueSet {
 
     transaction_reply_txs: HashMap<SocketAddr, TcpSender<Result<i64, ()>>>,
 
-    domain_index: domain::Index,
+    _domain_index: domain::Index,
     domain_shard: usize,
 
     params: Parameters,
@@ -129,16 +121,20 @@ impl GroupCommitQueueSet {
             wait_start: Map::default(),
             files: Map::default(),
 
-            domain_index,
+            _domain_index: domain_index,
             domain_shard,
             params: params.clone(),
             transaction_reply_txs: HashMap::new(),
         }
     }
 
-    fn get_or_create_file(&self, node: &LocalNodeIndex) -> (PathBuf, BufWriter<File, WhenFull>) {
+    fn get_or_create_file(
+        &self,
+        node: &LocalNodeIndex,
+        nodes: &DomainNodes,
+    ) -> (PathBuf, BufWriter<File, WhenFull>) {
         let path = self.params
-            .log_path(node, self.domain_index, self.domain_shard);
+            .log_path(nodes[node].borrow().name(), self.domain_shard);
         let file = OpenOptions::new()
             .append(true)
             .create(true)
@@ -195,7 +191,7 @@ impl GroupCommitQueueSet {
         match self.params.mode {
             DurabilityMode::DeleteOnExit | DurabilityMode::Permanent => {
                 if !self.files.contains_key(node) {
-                    let file = self.get_or_create_file(node);
+                    let file = self.get_or_create_file(node, nodes);
                     self.files.insert(node.clone(), file);
                 }
 

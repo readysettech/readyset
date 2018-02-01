@@ -29,7 +29,7 @@ const DEFAULT_SETTLE_TIME_MS: u64 = 200;
 fn get_log_name(prefix: &str) -> String {
     let current_time = SystemTime::now().duration_since(UNIX_EPOCH).unwrap();
     format!(
-        "{}-{}-{}",
+        "{}.{}.{}",
         prefix,
         current_time.as_secs(),
         current_time.subsec_nanos()
@@ -851,7 +851,7 @@ fn votes() {
     let res = endq.lookup(&a1, true).unwrap();
     assert!(
         res.iter()
-            .any(|r| { r[0] == a1.clone() && r[1] == 2.into() && r[2] == 1.into() }),
+            .any(|r| r[0] == a1.clone() && r[1] == 2.into() && r[2] == 1.into()),
         "no entry for [1,2,1|2] in {:?}",
         res
     );
@@ -1005,7 +1005,7 @@ fn transactional_vote() {
     assert_eq!(res.len(), 1);
     assert!(
         res.iter()
-            .any(|r| { r[0] == a1.clone() && r[1] == 2.into() && r[2] == 1.into() }),
+            .any(|r| r[0] == a1.clone() && r[1] == 2.into() && r[2] == 1.into()),
         "no entry for [1,2,1|2] in {:?}",
         res
     );
