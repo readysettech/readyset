@@ -1,6 +1,6 @@
 use channel::poll::{PollEvent, PollingLoop, ProcessResult};
 use channel::tcp::TcpSender;
-use consensus::{Authority, Epoch};
+use consensus::{Authority, Epoch, STATE_KEY};
 use dataflow::checktable::service::CheckTableServer;
 use dataflow::{DomainConfig, PersistenceParameters};
 
@@ -95,16 +95,16 @@ pub(crate) struct ControllerDescriptor {
 }
 
 #[derive(Clone, Serialize, Deserialize)]
-struct ControllerConfig {
-    sharding: Option<usize>,
-    partial_enabled: bool,
-    domain_config: DomainConfig,
-    persistence: PersistenceParameters,
-    heartbeat_every: Duration,
-    healthcheck_every: Duration,
-    local_workers: usize,
-    nworkers: usize,
-    nreaders: usize,
+pub(crate) struct ControllerConfig {
+    pub sharding: Option<usize>,
+    pub partial_enabled: bool,
+    pub domain_config: DomainConfig,
+    pub persistence: PersistenceParameters,
+    pub heartbeat_every: Duration,
+    pub healthcheck_every: Duration,
+    pub local_workers: usize,
+    pub nworkers: usize,
+    pub nreaders: usize,
 }
 impl Default for ControllerConfig {
     fn default() -> Self {
@@ -133,10 +133,10 @@ impl Default for ControllerConfig {
 }
 
 #[derive(Clone, Serialize, Deserialize)]
-struct ControllerState {
-    config: ControllerConfig,
-    epoch: Epoch,
-    recipe: (), // TODO: store all relevant state here.
+pub(crate) struct ControllerState {
+    pub config: ControllerConfig,
+    pub epoch: Epoch,
+    pub recipe: (), // TODO: store all relevant state here.
 }
 
 enum ControlEvent {
@@ -423,7 +423,7 @@ impl<A: Authority + 'static> Controller<A> {
                     // become leader
                     let current_epoch = authority.become_leader(descriptor.clone())?;
                     let state = authority.read_modify_write(
-                        "/state",
+                        STATE_KEY,
                         |state: Option<ControllerState>| match state {
                             None => Ok(ControllerState {
                                 config: config.clone(),

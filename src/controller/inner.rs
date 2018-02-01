@@ -106,6 +106,7 @@ impl ControllerInner {
             CoordinationPayload::Register {
                 ref addr,
                 ref read_listen_addr,
+                ..
             } => self.handle_register(&msg, addr, read_listen_addr.clone()),
             CoordinationPayload::Heartbeat => self.handle_heartbeat(&msg),
             CoordinationPayload::DomainBooted(..) => Ok(()),

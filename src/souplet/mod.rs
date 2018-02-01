@@ -1,4 +1,5 @@
 use std::collections::HashMap;
+use std::fs;
 use std::net::{IpAddr, SocketAddr};
 use std::sync::{atomic, Arc, Mutex};
 use std::thread;
@@ -10,11 +11,11 @@ use std::time::{Duration, Instant};
 
 use channel::poll::{PollEvent, PollingLoop, ProcessResult};
 use channel::{self, TcpSender};
-use consensus::Authority;
+use consensus::{Authority, STATE_KEY};
 use dataflow::prelude::*;
 use dataflow::{DomainBuilder, Readers};
 
-use controller::ControllerDescriptor;
+use controller::{ControllerDescriptor, ControllerState};
 use coordination::{CoordinationMessage, CoordinationPayload};
 use worker;
 
@@ -96,6 +97,19 @@ impl<A: Authority> Souplet<A> {
         loop {
             let leader = self.authority.get_leader().unwrap();
             let descriptor: ControllerDescriptor = serde_json::from_slice(&leader.1).unwrap();
+            let state: ControllerState =
+                serde_json::from_slice(&self.authority.try_read(STATE_KEY).unwrap().unwrap())
+                    .unwrap();
+
+            let prefix = format!("{}-log-", state.config.persistence.log_prefix);
+            let log_files: Vec<String> = fs::read_dir(".")
+                .unwrap()
+                .filter_map(|e| e.ok())
+                .filter(|e| e.file_type().ok().map(|t| t.is_file()).unwrap_or(false))
+                .map(|e| e.path().to_string_lossy().into_owned())
+                .filter(|path| path.starts_with(&prefix))
+                .collect();
+
             match TcpSender::connect(&descriptor.internal_addr, None) {
                 Ok(s) => {
                     self.sender = Some(s);
@@ -115,6 +129,7 @@ impl<A: Authority> Souplet<A> {
                     let msg = self.wrap_payload(CoordinationPayload::Register {
                         addr: local_addr,
                         read_listen_addr: self.read_listen_addr,
+                        log_files,
                     });
 
                     match self.sender.as_mut().unwrap().send(msg) {

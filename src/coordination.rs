@@ -21,6 +21,8 @@ pub enum CoordinationPayload {
         addr: SocketAddr,
         /// Address the worker will be listening on to serve reads.
         read_listen_addr: SocketAddr,
+        /// Which log files are stored locally on the worker.
+        log_files: Vec<String>,
     },
     /// Worker going offline.
     Deregister,
