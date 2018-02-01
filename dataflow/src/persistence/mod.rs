@@ -73,11 +73,14 @@ impl Parameters {
         flush_timeout: time::Duration,
         log_prefix: Option<String>,
     ) -> Self {
+        let log_prefix = log_prefix.unwrap_or(String::from("soup"));
+        assert!(!log_prefix.contains("-"));
+
         Self {
             queue_capacity,
             flush_timeout,
             mode,
-            log_prefix: log_prefix.unwrap_or(String::from("soup")),
+            log_prefix,
         }
     }
 
