@@ -1,7 +1,7 @@
 use std::collections::HashMap;
 use std::fs;
 use std::net::{IpAddr, SocketAddr};
-use std::sync::{atomic, Arc, Mutex};
+use std::sync::{Arc, Mutex};
 use std::thread;
 
 use mio::net::TcpListener;
@@ -34,7 +34,7 @@ pub struct Souplet<A: Authority> {
 
     // Read RPC handling
     read_listen_addr: SocketAddr,
-    reader_exit: Arc<atomic::AtomicBool>,
+    reader_exit: Option<Arc<()>>,
 
     receiver: Option<PollingLoop<CoordinationMessage>>,
     sender: Option<TcpSender<CoordinationMessage>>,
@@ -62,7 +62,7 @@ impl<A: Authority> Souplet<A> {
         let listener = TcpListener::bind(&SocketAddr::new(listen_addr, 0)).unwrap();
         let read_listen_addr = listener.local_addr().unwrap();
         let builder = thread::Builder::new().name("read-dispatcher".to_owned());
-        let reader_exit = Arc::new(atomic::AtomicBool::new(false));
+        let reader_exit = Arc::new(());
         {
             let readers = readers.clone();
             let reader_exit = reader_exit.clone();
@@ -79,7 +79,7 @@ impl<A: Authority> Souplet<A> {
             authority,
             listen_addr: SocketAddr::new(listen_addr, 0),
             read_listen_addr,
-            reader_exit,
+            reader_exit: Some(reader_exit),
 
             receiver: None,
             sender: None,
@@ -282,7 +282,7 @@ impl<A: Authority> Souplet<A> {
 
 impl<A: Authority> Drop for Souplet<A> {
     fn drop(&mut self) {
-        self.reader_exit.store(true, atomic::Ordering::SeqCst);
+        drop(self.reader_exit.take());
         self.pool.as_mut().map(|p| p.wait());
     }
 }

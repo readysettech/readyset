@@ -23,6 +23,7 @@ use futures::{self, Future, Stream};
 use hyper::{self, Method, StatusCode};
 use hyper::header::ContentType;
 use hyper::server::{Http, NewService, Request, Response, Service};
+use mio::net::TcpListener;
 use rand;
 use serde::Serialize;
 use serde_json;
@@ -78,6 +79,23 @@ struct ServingThread {
     stop: Box<Drop + Send>,
 }
 impl ServingThread {
+    fn new<F>(addr: SocketAddr, f: F) -> Self
+    where
+        F: FnOnce(TcpListener, Arc<()>) + Send + 'static,
+    {
+        let done = Arc::new(());
+        let done2 = done.clone();
+        let listener = TcpListener::bind(&addr).unwrap();
+        let addr = listener.local_addr().unwrap();
+        let builder = thread::Builder::new().name("souplet".to_owned());
+        let join_handle = builder.spawn(move || f(listener, done)).unwrap();
+
+        ServingThread {
+            addr,
+            join_handle,
+            stop: Box::new(done2),
+        }
+    }
     fn stop(self) {
         drop(self.stop);
         self.join_handle.join().unwrap();
@@ -375,39 +393,27 @@ impl<A: Authority + 'static> Controller<A> {
 
     /// Listen for messages from workers.
     fn listen_internal(event_tx: Sender<ControlEvent>, addr: SocketAddr) -> ServingThread {
-        let mut done = Arc::new(());
-        let done2 = done.clone();
-        let mut pl: PollingLoop<CoordinationMessage> = PollingLoop::new(addr);
-        let addr = pl.get_listener_addr().unwrap();
-        let builder = thread::Builder::new().name("srv-int".to_owned());
-        let join_handle = builder
-            .spawn(move || {
-                pl.run_polling_loop(move |e| {
-                    if Arc::get_mut(&mut done).is_some() {
-                        return ProcessResult::StopPolling;
-                    }
+        ServingThread::new(addr, move |listener, mut done| {
+            let mut pl = PollingLoop::from_listener(listener);
+            pl.run_polling_loop(move |e| {
+                if Arc::get_mut(&mut done).is_some() {
+                    return ProcessResult::StopPolling;
+                }
 
-                    match e {
-                        PollEvent::ResumePolling(timeout) => {
-                            *timeout = Some(Duration::from_millis(100));
-                        }
-                        PollEvent::Process(msg) => {
-                            if event_tx.send(ControlEvent::ControllerMessage(msg)).is_err() {
-                                return ProcessResult::StopPolling;
-                            }
-                        }
-                        PollEvent::Timeout => {}
+                match e {
+                    PollEvent::ResumePolling(timeout) => {
+                        *timeout = Some(Duration::from_millis(100));
                     }
-                    ProcessResult::KeepPolling
-                });
-            })
-            .unwrap();
-
-        ServingThread {
-            addr,
-            join_handle,
-            stop: Box::new(done2),
-        }
+                    PollEvent::Process(msg) => {
+                        if event_tx.send(ControlEvent::ControllerMessage(msg)).is_err() {
+                            return ProcessResult::StopPolling;
+                        }
+                    }
+                    PollEvent::Timeout => {}
+                }
+                ProcessResult::KeepPolling
+            });
+        })
     }
 
     fn campaign(

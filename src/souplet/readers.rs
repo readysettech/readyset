@@ -11,7 +11,6 @@ use std::sync::Arc;
 use std::cell::RefCell;
 use std::time::Duration;
 use mio_pool;
-use std::sync::atomic;
 
 use controller::{LocalOrNot, ReadQuery, ReadReply};
 
@@ -29,7 +28,7 @@ pub(crate) fn serve(
     listener: ::mio::net::TcpListener,
     readers: Readers,
     pool_size: usize,
-    exit: Arc<atomic::AtomicBool>,
+    mut exit: Arc<()>,
 ) {
     let pool = mio_pool::PoolBuilder::from(listener).unwrap();
     let h = pool.with_state(readers.clone())
@@ -47,7 +46,7 @@ pub(crate) fn serve(
             }
         });
 
-    while false == exit.load(atomic::Ordering::SeqCst) {
+    while Arc::get_mut(&mut exit).is_none() {
         thread::sleep(Duration::from_millis(500));
     }
     h.finish();

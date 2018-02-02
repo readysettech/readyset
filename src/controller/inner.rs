@@ -10,7 +10,7 @@ use std::fmt::{self, Display};
 use std::net::{IpAddr, SocketAddr};
 use std::time::{Duration, Instant};
 use std::thread;
-use std::sync::{atomic, Arc, Mutex};
+use std::sync::{Arc, Mutex};
 use std::{io, time};
 
 use coordination::{CoordinationMessage, CoordinationPayload};
@@ -57,7 +57,7 @@ pub struct ControllerInner {
 
     pub(super) listen_addr: IpAddr,
     read_listen_addr: SocketAddr,
-    pub(super) reader_exit: Arc<atomic::AtomicBool>,
+    pub(super) reader_exit: Option<Arc<()>>,
     pub(super) readers: Readers,
 
     /// Map from worker address to the address the worker is listening on for reads.
@@ -222,7 +222,7 @@ impl ControllerInner {
         let listener = TcpListener::bind(&SocketAddr::new(listen_addr, 0)).unwrap();
         let read_listen_addr = listener.local_addr().unwrap();
         let thread_builder = thread::Builder::new().name("read-dispatcher".to_owned());
-        let reader_exit = Arc::new(atomic::AtomicBool::new(false));
+        let reader_exit = Arc::new(());
         {
             let readers = readers.clone();
             let reader_exit = reader_exit.clone();
@@ -277,7 +277,7 @@ impl ControllerInner {
 
             readers,
             read_listen_addr,
-            reader_exit,
+            reader_exit: Some(reader_exit),
             read_addrs: HashMap::default(),
             workers: HashMap::default(),
 
@@ -616,7 +616,7 @@ impl ControllerInner {
 
 impl Drop for ControllerInner {
     fn drop(&mut self) {
-        self.reader_exit.store(true, atomic::Ordering::SeqCst);
+        drop(self.reader_exit.take());
         for (_, d) in &mut self.domains {
             // XXX: this is a terrible ugly hack to ensure that all workers exit
             for _ in 0..100 {
