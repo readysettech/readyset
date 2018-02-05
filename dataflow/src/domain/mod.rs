@@ -25,7 +25,7 @@ use timekeeper::{RealTime, SimpleTracker, ThreadTime, Timer, TimerSet};
 
 type EnqueuedSends = Vec<(ReplicaAddr, Box<Packet>)>;
 
-#[derive(Clone, Debug, Serialize, Deserialize)]
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
 pub struct Config {
     pub concurrent_replays: usize,
     pub replay_batch_timeout: time::Duration,
