@@ -361,6 +361,7 @@ pub use dataflow::{DurabilityMode, PersistenceParameters};
 pub use controller::{Controller, ControllerBuilder, ControllerHandle, Mutator, MutatorBuilder,
                      MutatorError, ReadQuery, ReadReply, RemoteGetter, RemoteGetterBuilder,
                      RpcError};
+pub use controller::recipe::ActivationResult;
 pub use souplet::Souplet;
 
 /// Just give me a damn terminal logger

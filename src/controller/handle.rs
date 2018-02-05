@@ -19,6 +19,7 @@ use controller::{ControlEvent, ControllerDescriptor};
 use controller::inner::RpcError;
 use controller::getter::{RemoteGetter, RemoteGetterBuilder};
 use controller::mutator::{Mutator, MutatorBuilder};
+use controller::recipe::ActivationResult;
 
 /// `ControllerHandle` is a handle to a Controller.
 pub struct ControllerHandle<A: Authority> {
@@ -118,12 +119,12 @@ impl<A: Authority> ControllerHandle<A> {
     }
 
     /// Extend the existing recipe on the controller by adding a new query.
-    pub fn extend_recipe(&mut self, recipe_addition: String) -> Result<(), RpcError> {
+    pub fn extend_recipe(&mut self, recipe_addition: String) -> Result<ActivationResult, RpcError> {
         self.rpc("extend_recipe", &recipe_addition)
     }
 
     /// Install a new recipe on the controller.
-    pub fn install_recipe(&mut self, new_recipe: String) -> Result<(), RpcError> {
+    pub fn install_recipe(&mut self, new_recipe: String) -> Result<ActivationResult, RpcError> {
         self.rpc("install_recipe", &new_recipe)
     }
 
