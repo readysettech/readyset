@@ -1,24 +1,28 @@
+use channel;
 use channel::poll::{PollEvent, PollingLoop, ProcessResult};
 use channel::tcp::TcpSender;
 use consensus::{Authority, Epoch, STATE_KEY};
 use dataflow::checktable::service::CheckTableServer;
-use dataflow::{DomainConfig, PersistenceParameters};
+use dataflow::{DomainBuilder, DomainConfig, PersistenceParameters, Readers};
+use dataflow::prelude::{ChannelCoordinator, DomainIndex};
 
 use controller::domain_handle::DomainHandle;
 use controller::inner::ControllerInner;
 use controller::recipe::Recipe;
-use coordination::CoordinationMessage;
+use coordination::{CoordinationMessage, CoordinationPayload};
+use worker;
 
-use std::error::Error;
-use std::io::ErrorKind;
+use std::collections::HashMap;
+use std::io::{self, ErrorKind};
 use std::marker::PhantomData;
 use std::net::{IpAddr, SocketAddr};
-use std::time::{Duration, Instant};
+use std::time::{self, Duration, Instant};
 use std::thread::{self, JoinHandle};
 use std::sync::{Arc, Mutex};
 use std::sync::mpsc::{self, Receiver, Sender};
-use std::{io, time};
+use std::{fs, process};
 
+use failure::{self, Error};
 use futures::{self, Future, Stream};
 use hyper::{self, Method, StatusCode};
 use hyper::header::ContentType;
@@ -159,6 +163,7 @@ pub(crate) struct ControllerState {
 
 enum ControlEvent {
     ControllerMessage(CoordinationMessage),
+    SoupletMessage(CoordinationPayload),
     ExternalRequest(
         Method,
         String,
@@ -166,9 +171,9 @@ enum ControlEvent {
         futures::sync::oneshot::Sender<Result<String, StatusCode>>,
     ),
     WonLeaderElection(ControllerState),
-    LostLeadership(Epoch),
+    LostLeaderElection(Epoch, ControllerDescriptor, ControllerState),
     Shutdown,
-    Error(Box<Error + Send + Sync>),
+    Error(Error),
 }
 
 /// Runs the soup instance.
@@ -177,9 +182,16 @@ pub struct Controller<A: Authority + 'static> {
     inner: Option<ControllerInner>,
     log: slog::Logger,
 
+    worker_pool: Option<worker::WorkerPool>,
+    channel_coordinator: Arc<ChannelCoordinator>,
+    readers: Readers,
+    souplet_sender: Option<TcpSender<CoordinationMessage>>,
+
     listen_addr: IpAddr,
     internal: ServingThread,
     external: ServingThread,
+    souplet: ServingThread,
+    reads: ServingThread,
     checktable: SocketAddr,
     _campaign: JoinHandle<()>,
 
@@ -205,6 +217,14 @@ impl<A: Authority + 'static> Controller<A> {
             SocketAddr::new(listen_addr, 9000),
             authority.clone(),
         );
+        let souplet = Self::souplet_listen(event_tx.clone(), SocketAddr::new(listen_addr, 0));
+
+        let readers = Arc::new(Mutex::new(HashMap::new()));
+        let reads = Self::reads_listen(
+            SocketAddr::new(listen_addr, 0),
+            readers.clone(),
+            config.nreaders,
+        );
 
         let descriptor = ControllerDescriptor {
             external_addr: external.addr,
@@ -221,9 +241,15 @@ impl<A: Authority + 'static> Controller<A> {
                     current_epoch: None,
                     inner: None,
                     log,
+                    worker_pool: None,
+                    souplet_sender: None,
+                    channel_coordinator: Arc::new(ChannelCoordinator::new()),
+                    readers,
                     internal,
                     external,
                     checktable,
+                    souplet,
+                    reads,
                     _campaign: campaign,
                     listen_addr,
                     phantom: PhantomData,
@@ -245,6 +271,13 @@ impl<A: Authority + 'static> Controller<A> {
                 ControlEvent::ControllerMessage(msg) => if let Some(ref mut inner) = self.inner {
                     inner.coordination_message(msg)
                 },
+                ControlEvent::SoupletMessage(CoordinationPayload::AssignDomain(d)) => {
+                    self.handle_domain_assign(d).unwrap()
+                }
+                ControlEvent::SoupletMessage(CoordinationPayload::DomainBooted(domain, addr)) => {
+                    self.handle_domain_booted(domain, addr).unwrap()
+                }
+                ControlEvent::SoupletMessage(_) => unreachable!(),
                 ControlEvent::ExternalRequest(method, path, body, reply_tx) => {
                     if let Some(ref mut inner) = self.inner {
                         reply_tx
@@ -262,10 +295,14 @@ impl<A: Authority + 'static> Controller<A> {
                         self.log.clone(),
                         state,
                     ));
+                    self.souplet_sender = None;
                 }
-                ControlEvent::LostLeadership(new_epoch) => {
+                ControlEvent::LostLeaderElection(new_epoch, descriptor, state) => {
                     self.current_epoch = Some(new_epoch);
                     self.inner = None;
+                    if let Ok(souplet_sender) = self.souplet_connect(descriptor, state) {
+                        self.souplet_sender = Some(souplet_sender);
+                    }
                 }
                 ControlEvent::Shutdown => break,
                 ControlEvent::Error(e) => panic!("{}", e),
@@ -273,6 +310,8 @@ impl<A: Authority + 'static> Controller<A> {
         }
         self.external.stop();
         self.internal.stop();
+        self.souplet.stop();
+        self.reads.stop();
     }
 
     fn listen_external(
@@ -416,6 +455,36 @@ impl<A: Authority + 'static> Controller<A> {
         })
     }
 
+    fn souplet_listen(event_tx: Sender<ControlEvent>, addr: SocketAddr) -> ServingThread {
+        ServingThread::new(addr, move |listener, mut done| {
+            let mut pl = PollingLoop::from_listener(listener);
+            pl.run_polling_loop(move |e| {
+                if Arc::get_mut(&mut done).is_some() {
+                    return ProcessResult::StopPolling;
+                }
+
+                match e {
+                    PollEvent::ResumePolling(timeout) => {
+                        *timeout = Some(Duration::from_millis(100));
+                    }
+                    PollEvent::Process(msg) => {
+                        if event_tx.send(ControlEvent::SoupletMessage(msg)).is_err() {
+                            return ProcessResult::StopPolling;
+                        }
+                    }
+                    PollEvent::Timeout => {}
+                }
+                ProcessResult::KeepPolling
+            });
+        })
+    }
+
+    fn reads_listen(addr: SocketAddr, readers: Readers, reader_threads: usize) -> ServingThread {
+        ServingThread::new(addr, move |listener, done| {
+            ::souplet::readers::serve(listener, readers, reader_threads, done)
+        })
+    }
+
     fn campaign(
         event_tx: Sender<ControlEvent>,
         authority: Arc<A>,
@@ -423,47 +492,74 @@ impl<A: Authority + 'static> Controller<A> {
         config: ControllerConfig,
     ) -> JoinHandle<()> {
         let descriptor = serde_json::to_vec(&descriptor).unwrap();
-        let campaign_inner =
-            move |event_tx: Sender<ControlEvent>| -> Result<(), Box<Error + Send + Sync>> {
-                loop {
-                    // become leader
-                    let current_epoch = authority.become_leader(descriptor.clone())?;
-                    let state = authority.read_modify_write(
-                        STATE_KEY,
-                        |state: Option<ControllerState>| match state {
-                            None => Ok(ControllerState {
-                                config: config.clone(),
-                                epoch: current_epoch,
-                                recipe: (),
-                            }),
-                            Some(ref state) if state.epoch > current_epoch => Err(()),
-                            Some(mut state) => {
-                                state.epoch = current_epoch;
-                                Ok(state)
-                            }
-                        },
-                    )?;
-                    if state.is_err() {
-                        continue;
-                    }
-                    if !event_tx
-                        .send(ControlEvent::WonLeaderElection(state.unwrap()))
-                        .is_ok()
-                    {
-                        break;
-                    }
-
-                    // watch for overthrow
-                    let new_epoch = authority.await_new_epoch(current_epoch)?;
-                    if !event_tx
-                        .send(ControlEvent::LostLeadership(new_epoch))
-                        .is_ok()
-                    {
-                        break;
-                    }
-                }
+        let campaign_inner = move |event_tx: Sender<ControlEvent>| -> Result<(), Error> {
+            let lost_election = |(e, payload): (Epoch, Vec<u8>)| -> Result<(), Error> {
+                let descriptor: ControllerDescriptor = serde_json::from_slice(&payload[..])?;
+                let state: ControllerState =
+                    serde_json::from_slice(&authority.try_read(STATE_KEY).unwrap().unwrap())
+                        .unwrap();
+                event_tx
+                    .send(ControlEvent::LostLeaderElection(e, descriptor, state))
+                    .map_err(|_| failure::err_msg("ControlEvent send failed"))?;
                 Ok(())
             };
+
+            loop {
+                // WORKER STATE - watch for leadership changes
+                //
+                // If there is currently a leader, then loop until there is a period without a
+                // leader, notifying the main thread every time a leader change occurs.
+                let mut epoch;
+                if let Some(leader) = authority.try_get_leader()? {
+                    epoch = leader.0;
+                    lost_election(leader)?;
+                    while let Some(leader) = authority.await_new_epoch(epoch)? {
+                        epoch = leader.0;
+                        lost_election(leader)?;
+                    }
+                }
+
+                // ELECTION STATE - attempt to become leader
+                //
+                // Becoming leader requires creating an ephemeral key and then doing an atomic
+                // update to another.
+                let epoch = match authority.become_leader(descriptor.clone())? {
+                    Some(epoch) => epoch,
+                    None => continue,
+                };
+                let state = authority.read_modify_write(
+                    STATE_KEY,
+                    |state: Option<ControllerState>| match state {
+                        None => Ok(ControllerState {
+                            config: config.clone(),
+                            epoch,
+                            recipe: (),
+                        }),
+                        Some(ref state) if state.epoch > epoch => Err(()),
+                        Some(mut state) => {
+                            state.epoch = epoch;
+                            Ok(state)
+                        }
+                    },
+                )?;
+                if state.is_err() {
+                    continue;
+                }
+
+                event_tx
+                    .send(ControlEvent::WonLeaderElection(state.unwrap()))
+                    .map_err(|_| failure::err_msg("ControlEvent send failed"))?;
+
+                // LEADER STATE - manage system
+                //
+                // It is not currently possible to safely handle loss of leadership status (and
+                // there is nothing that can currently trigger it), so we simply abort if the
+                // current epoch ends.
+                let _ = authority.await_new_epoch(epoch)?;
+                eprintln!("Lost leadership?! Aborting...");
+                process::abort();
+            }
+        };
 
         thread::Builder::new()
             .name("srv-zk".to_owned())
@@ -473,6 +569,117 @@ impl<A: Authority + 'static> Controller<A> {
                 }
             })
             .unwrap()
+    }
+
+    fn handle_domain_assign(&mut self, d: DomainBuilder) -> Result<(), channel::tcp::SendError> {
+        let listener = ::std::net::TcpListener::bind(SocketAddr::new(self.listen_addr, 0)).unwrap();
+        let addr = listener.local_addr().unwrap();
+
+        let idx = d.index;
+        let shard = d.shard;
+        let d = d.build(
+            self.log.clone(),
+            self.readers.clone(),
+            self.channel_coordinator.clone(),
+            addr,
+        );
+
+        let listener = ::mio::net::TcpListener::from_listener(listener, &addr).unwrap();
+        self.worker_pool
+            .as_mut()
+            .unwrap()
+            .add_replica(worker::NewReplica {
+                inner: d,
+                listener: listener,
+            });
+
+        // need to register the domain with the local channel coordinator
+        self.channel_coordinator
+            .insert_addr((idx, shard), addr, false);
+
+        let source = self.souplet_sender
+            .as_ref()
+            .expect("socket not connected, failed to send")
+            .local_addr()
+            .unwrap();
+
+        match self.souplet_sender
+            .as_mut()
+            .unwrap()
+            .send(CoordinationMessage {
+                source,
+                payload: CoordinationPayload::DomainBooted((idx, shard), addr),
+            }) {
+            Ok(_) => {
+                trace!(
+                    self.log,
+                    "informed controller that domain {}.{} is at {:?}",
+                    idx.index(),
+                    shard,
+                    addr
+                );
+                Ok(())
+            }
+            Err(e) => return Err(e),
+        }
+    }
+
+    fn handle_domain_booted(
+        &mut self,
+        (domain, shard): (DomainIndex, usize),
+        addr: SocketAddr,
+    ) -> Result<(), String> {
+        trace!(
+            self.log,
+            "found that domain {}.{} is at {:?}",
+            domain.index(),
+            shard,
+            addr
+        );
+        self.channel_coordinator
+            .insert_addr((domain, shard), addr, false);
+        Ok(())
+    }
+
+    fn souplet_connect(
+        &mut self,
+        descriptor: ControllerDescriptor,
+        state: ControllerState,
+    ) -> Result<TcpSender<CoordinationMessage>, ()> {
+        loop {
+            let prefix = format!("{}-log-", state.config.persistence.log_prefix);
+            let log_files: Vec<String> = fs::read_dir(".")
+                .unwrap()
+                .filter_map(|e| e.ok())
+                .filter(|e| e.file_type().ok().map(|t| t.is_file()).unwrap_or(false))
+                .map(|e| e.path().to_string_lossy().into_owned())
+                .filter(|path| path.starts_with(&prefix))
+                .collect();
+
+            let mut sender = match TcpSender::connect(&descriptor.internal_addr, None) {
+                Ok(sender) => sender,
+                Err(e) => {
+                    error!(self.log, "failed to connect to controller: {:?}", e);
+                    return Err(());
+                }
+            };
+
+            let msg = CoordinationMessage {
+                source: sender.local_addr().unwrap(),
+                payload: CoordinationPayload::Register {
+                    addr: self.souplet.addr,
+                    read_listen_addr: self.reads.addr,
+                    log_files,
+                },
+            };
+
+            if let Err(e) = sender.send(msg) {
+                error!(self.log, "failed to register with controller: {:?}", e);
+                return Err(());
+            }
+
+            return Ok(sender);
+        }
     }
 }
 

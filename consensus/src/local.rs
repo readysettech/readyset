@@ -1,8 +1,8 @@
 use std::collections::BTreeMap;
-use std::error::Error;
 use std::sync::{Condvar, Mutex};
 use std::thread;
 
+use failure::Error;
 use serde::Serialize;
 use serde::de::DeserializeOwned;
 use serde_json;
@@ -38,23 +38,18 @@ impl LocalAuthority {
     }
 }
 impl Authority for LocalAuthority {
-    fn become_leader(&self, payload_data: Vec<u8>) -> Result<Epoch, Box<Error + Send + Sync>> {
-        {
-            let mut inner = self.inner.lock().unwrap();
-            if !inner.keys.contains_key(CONTROLLER_KEY) {
-                inner.keys.insert(CONTROLLER_KEY.to_owned(), payload_data);
-                self.cv.notify_all();
-                return Ok(ONLY_EPOCH);
-            }
-        }
-
-        // There is already another leader, so never return.
-        loop {
-            thread::park();
+    fn become_leader(&self, payload_data: Vec<u8>) -> Result<Option<Epoch>, Error> {
+        let mut inner = self.inner.lock().unwrap();
+        if !inner.keys.contains_key(CONTROLLER_KEY) {
+            inner.keys.insert(CONTROLLER_KEY.to_owned(), payload_data);
+            self.cv.notify_all();
+            Ok(Some(ONLY_EPOCH))
+        } else {
+            Ok(None)
         }
     }
 
-    fn get_leader(&self) -> Result<(Epoch, Vec<u8>), Box<Error + Send + Sync>> {
+    fn get_leader(&self) -> Result<(Epoch, Vec<u8>), Error> {
         let mut inner = self.inner.lock().unwrap();
         while !inner.keys.contains_key(CONTROLLER_KEY) {
             inner = self.cv.wait(inner).unwrap();
@@ -62,23 +57,38 @@ impl Authority for LocalAuthority {
         Ok((ONLY_EPOCH, inner.keys.get(CONTROLLER_KEY).cloned().unwrap()))
     }
 
-    fn await_new_epoch(&self, _: Epoch) -> Result<Epoch, Box<Error + Send + Sync>> {
+    fn try_get_leader(&self) -> Result<Option<(Epoch, Vec<u8>)>, Error> {
+        Ok(self.inner
+            .lock()
+            .unwrap()
+            .keys
+            .get(CONTROLLER_KEY)
+            .cloned()
+            .map(|payload| (ONLY_EPOCH, payload)))
+    }
+
+    fn await_new_epoch(&self, epoch: Epoch) -> Result<Option<(Epoch, Vec<u8>)>, Error> {
+        assert_eq!(epoch, ONLY_EPOCH);
+
+        {
+            let inner = self.inner.lock().unwrap();
+            if !inner.keys.contains_key(CONTROLLER_KEY) {
+                return Ok(None);
+            }
+        }
+
         // Epochs never change with a LocalAuthority, so this function should never return.
         loop {
             thread::park();
         }
     }
 
-    fn try_read(&self, path: &str) -> Result<Option<Vec<u8>>, Box<Error + Send + Sync>> {
+    fn try_read(&self, path: &str) -> Result<Option<Vec<u8>>, Error> {
         let inner = self.inner.lock().unwrap();
         Ok(inner.keys.get(path).cloned())
     }
 
-    fn read_modify_write<F, P, E>(
-        &self,
-        path: &str,
-        mut f: F,
-    ) -> Result<Result<P, E>, Box<Error + Send + Sync>>
+    fn read_modify_write<F, P, E>(&self, path: &str, mut f: F) -> Result<Result<P, E>, Error>
     where
         F: FnMut(Option<P>) -> Result<P, E>,
         P: Serialize + DeserializeOwned,

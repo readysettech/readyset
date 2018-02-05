@@ -319,6 +319,7 @@ extern crate channel;
 extern crate consensus;
 extern crate core;
 extern crate dataflow;
+extern crate failure;
 extern crate fnv;
 extern crate futures;
 extern crate hyper;

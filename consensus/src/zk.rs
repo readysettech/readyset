@@ -1,12 +1,12 @@
-use std::error::Error;
 use std::process;
 use std::time::Duration;
 use std::thread::{self, Thread};
 
+use failure::Error;
 use serde::Serialize;
 use serde::de::DeserializeOwned;
 use serde_json;
-use zookeeper::{Acl, CreateMode, KeeperState, WatchedEvent, Watcher, ZkError, ZooKeeper};
+use zookeeper::{Acl, CreateMode, KeeperState, Stat, WatchedEvent, Watcher, ZkError, ZooKeeper};
 
 use Authority;
 use Epoch;
@@ -54,71 +54,78 @@ impl ZookeeperAuthority {
 }
 
 impl Authority for ZookeeperAuthority {
-    fn become_leader(&self, payload_data: Vec<u8>) -> Result<Epoch, Box<Error + Send + Sync>> {
-        loop {
-            match self.zk
-                .create(
-                    CONTROLLER_KEY,
-                    payload_data.clone(),
-                    Acl::open_unsafe().clone(),
-                    CreateMode::Ephemeral,
-                )
-                .and_then(|path| self.zk.get_data(&path, false))
-            {
-                Ok((ref current_data, ref stat)) if *current_data == payload_data => {
-                    return Ok(Epoch(stat.czxid));
-                }
-                Ok(_) | Err(ZkError::NoNode) | Err(ZkError::NodeExists) => {}
-                Err(e) => return Err(box e),
-            }
+    fn become_leader(&self, payload_data: Vec<u8>) -> Result<Option<Epoch>, Error> {
+        let path = match self.zk.create(
+            CONTROLLER_KEY,
+            payload_data.clone(),
+            Acl::open_unsafe().clone(),
+            CreateMode::Ephemeral,
+        ) {
+            Ok(path) => path,
+            Err(ZkError::NodeExists) => return Ok(None),
+            Err(e) => bail!(e),
+        };
 
-            match self.zk.exists_w(CONTROLLER_KEY, UnparkWatcher::new()) {
-                Ok(_) => thread::park_timeout(Duration::from_secs(60)),
-                Err(ZkError::NoNode) => {}
-                Err(e) => return Err(box e),
-            }
+        let (ref current_data, ref stat) = self.zk.get_data(&path, false)?;
+        if *current_data == payload_data {
+            Ok(Some(Epoch(stat.czxid)))
+        } else {
+            Ok(None)
         }
     }
 
-    fn get_leader(&self) -> Result<(Epoch, Vec<u8>), Box<Error + Send + Sync>> {
+    fn get_leader(&self) -> Result<(Epoch, Vec<u8>), Error> {
         loop {
             match self.zk.get_data(CONTROLLER_KEY, false) {
                 Ok((data, stat)) => return Ok((Epoch(stat.czxid), data)),
                 Err(ZkError::NoNode) => {}
-                Err(e) => return Err(box e),
+                Err(e) => bail!(e),
             };
 
             match self.zk.exists_w(CONTROLLER_KEY, UnparkWatcher::new()) {
                 Ok(_) => {}
                 Err(ZkError::NoNode) => thread::park_timeout(Duration::from_secs(60)),
-                Err(e) => return Err(box e),
+                Err(e) => bail!(e),
             }
         }
     }
 
-    fn await_new_epoch(&self, current_epoch: Epoch) -> Result<Epoch, Box<Error + Send + Sync>> {
+    fn try_get_leader(&self) -> Result<Option<(Epoch, Vec<u8>)>, Error> {
+        match self.zk.get_data(CONTROLLER_KEY, false) {
+            Ok((data, stat)) => Ok(Some((Epoch(stat.czxid), data))),
+            Err(ZkError::NoNode) => Ok(None),
+            Err(e) => bail!(e),
+        }
+    }
+
+    fn await_new_epoch(&self, current_epoch: Epoch) -> Result<Option<(Epoch, Vec<u8>)>, Error> {
+        let is_new_epoch = |stat: &Stat| stat.czxid > current_epoch.0;
+
         loop {
+            match self.zk.get_data(CONTROLLER_KEY, false) {
+                Ok((_, ref stat)) if !is_new_epoch(stat) => {},
+                Ok((data, stat)) => return Ok(Some((Epoch(stat.czxid), data))),
+                Err(ZkError::NoNode) => return Ok(None),
+                Err(e) => bail!(e),
+            };
+
             match self.zk.exists_w(CONTROLLER_KEY, UnparkWatcher::new()) {
-                Ok(ref stat) if stat.czxid > current_epoch.0 => return Ok(Epoch(stat.czxid)),
+                Ok(ref stat) if is_new_epoch(stat) => {}
                 Ok(_) | Err(ZkError::NoNode) => thread::park_timeout(Duration::from_secs(60)),
-                Err(e) => return Err(box e),
+                Err(e) => bail!(e),
             }
         }
     }
 
-    fn try_read(&self, path: &str) -> Result<Option<Vec<u8>>, Box<Error + Send + Sync>> {
+    fn try_read(&self, path: &str) -> Result<Option<Vec<u8>>, Error> {
         match self.zk.get_data(path, false) {
             Ok((data, _)) => Ok(Some(data)),
             Err(ZkError::NoNode) => Ok(None),
-            Err(e) => Err(box e),
+            Err(e) => bail!(e),
         }
     }
 
-    fn read_modify_write<F, P, E>(
-        &self,
-        path: &str,
-        mut f: F,
-    ) -> Result<Result<P, E>, Box<Error + Send + Sync>>
+    fn read_modify_write<F, P, E>(&self, path: &str, mut f: F) -> Result<Result<P, E>, Error>
     where
         F: FnMut(Option<P>) -> Result<P, E>,
         P: Serialize + DeserializeOwned,
@@ -139,7 +146,7 @@ impl Authority for ZookeeperAuthority {
                     ) {
                         Err(ZkError::NoNode) | Err(ZkError::BadVersion) => continue,
                         Ok(_) => return Ok(result),
-                        Err(e) => return Err(box e),
+                        Err(e) => bail!(e),
                     };
                 }
                 Err(ZkError::NoNode) => {
@@ -155,10 +162,10 @@ impl Authority for ZookeeperAuthority {
                     ) {
                         Err(ZkError::NodeExists) => continue,
                         Ok(_) => return Ok(result),
-                        Err(e) => return Err(box e),
+                        Err(e) => bail!(e),
                     }
                 }
-                Err(e) => return Err(box e),
+                Err(e) => bail!(e),
             }
         }
     }

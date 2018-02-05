@@ -15,6 +15,7 @@ carry_local = []
 
 [dependencies]
 clap = "2.25.0"
+failure = "0.1.1"
 fnv = "1.0.5"
 futures = "0.1.16"
 hostname = "0.1.3"
