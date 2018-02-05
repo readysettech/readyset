@@ -8,3 +8,7 @@ env:
 script:
   - cargo check --all --all-targets
   - cargo test --verbose --all
+addons:
+  apt:
+    packages:
+    - libhwloc-dev
