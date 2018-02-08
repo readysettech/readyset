@@ -1,5 +1,6 @@
-#![feature(custom_attribute)]
 #![feature(bufreader_is_empty)]
+#![feature(custom_attribute)]
+#![feature(try_from)]
 #![deny(unused_extern_crates)]
 
 extern crate bincode;
@@ -26,7 +27,7 @@ pub mod tcp;
 pub mod poll;
 pub mod rpc;
 
-pub use tcp::{channel, sync_channel, TcpReceiver, TcpSender};
+pub use tcp::{channel, TcpReceiver, TcpSender};
 
 #[derive(Debug)]
 pub enum ChannelSender<T> {
@@ -66,10 +67,6 @@ impl<T> ChannelSender<T> {
 
     pub fn from_local(local: mpsc::Sender<T>) -> Self {
         ChannelSender::Local(local)
-    }
-
-    pub fn from_sync(sync: mpsc::SyncSender<T>) -> Self {
-        ChannelSender::LocalSync(sync)
     }
 }
 
@@ -140,25 +137,21 @@ impl<K: Eq + Hash + Clone> ChannelCoordinator<K> {
         self.inner.lock().unwrap().addrs.get(key).map(|a| a.1)
     }
 
-    fn get_sized_tx<T: Serialize>(
-        &self,
-        key: &K,
-        size: Option<u32>,
-    ) -> Option<(TcpSender<T>, bool)> {
-        let val = { self.inner.lock().unwrap().addrs.get(key).cloned() };
-        val.and_then(|(addr, local)| TcpSender::connect(&addr, size).ok().map(|s| (s, local)))
-    }
-
     pub fn get_tx<T: Serialize>(&self, key: &K) -> Option<(TcpSender<T>, bool)> {
-        self.get_sized_tx(key, None)
+        let val = {
+            self.inner.lock().unwrap().addrs.get(key).cloned()
+        };
+        val.and_then(|(addr, local)| {
+            TcpSender::connect(&addr).ok().map(|s| (s, local))
+        })
     }
 
     pub fn get_input_tx<T: Serialize>(&self, key: &K) -> Option<(TcpSender<T>, bool)> {
-        self.get_sized_tx(key, None)
+        self.get_tx(key)
     }
 
     pub fn get_unbounded_tx<T: Serialize>(&self, key: &K) -> Option<(TcpSender<T>, bool)> {
-        self.get_sized_tx(key, None)
+        self.get_tx(key)
     }
 }
 

@@ -110,7 +110,7 @@ impl<A: Authority> Souplet<A> {
                 .filter(|path| path.starts_with(&prefix))
                 .collect();
 
-            match TcpSender::connect(&descriptor.internal_addr, None) {
+            match TcpSender::connect(&descriptor.internal_addr) {
                 Ok(s) => {
                     self.sender = Some(s);
                     self.last_heartbeat = Some(Instant::now());
