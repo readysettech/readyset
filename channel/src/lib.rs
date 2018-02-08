@@ -1,5 +1,6 @@
-#![feature(custom_attribute)]
 #![feature(bufreader_is_empty)]
+#![feature(custom_attribute)]
+#![feature(try_from)]
 #![deny(unused_extern_crates)]
 
 extern crate bincode;
