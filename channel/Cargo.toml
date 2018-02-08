@@ -10,3 +10,4 @@ byteorder = "1.0.0"
 mio = "0.6.9"
 serde = { version = "1.0.8", features = ["rc"] }
 serde_derive = "1.0.8"
+throttled-reader = "1.0.0"

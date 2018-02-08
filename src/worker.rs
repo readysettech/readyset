@@ -484,6 +484,7 @@ impl Worker {
                 // we *still* can't trust sc.fd.
                 let fd = channel.get().0.get_ref().as_raw_fd();
 
+                channel.get_mut().0.syscall_limit(Some(1));
                 loop {
                     let mut m = match channel.get_mut().0.try_recv() {
                         Ok(p) => p,

@@ -9,6 +9,7 @@ use bufstream::BufStream;
 use byteorder::{NetworkEndian, WriteBytesExt};
 use mio::{self, Evented, Poll, PollOpt, Ready, Token};
 use serde::{Deserialize, Serialize};
+use throttled_reader::ThrottledReader;
 
 use super::{DeserializeReceiver, NonBlockingWriter, ReceiveError};
 
@@ -104,7 +105,7 @@ pub enum RecvError {
 }
 
 pub struct TcpReceiver<T> {
-    pub(crate) stream: BufReader<NonBlockingWriter<mio::net::TcpStream>>,
+    pub(crate) stream: BufReader<ThrottledReader<NonBlockingWriter<mio::net::TcpStream>>>,
     poisoned: bool,
     deserialize_receiver: DeserializeReceiver<T>,
 
@@ -117,7 +118,7 @@ where
 {
     pub fn new(stream: mio::net::TcpStream) -> Self {
         Self {
-            stream: BufReader::new(NonBlockingWriter::new(stream)),
+            stream: BufReader::new(ThrottledReader::new(NonBlockingWriter::new(stream))),
             poisoned: false,
             deserialize_receiver: DeserializeReceiver::new(),
             phantom: PhantomData,
@@ -125,7 +126,7 @@ where
     }
 
     pub fn get_ref(&self) -> &mio::net::TcpStream {
-        self.stream.get_ref().get_ref()
+        &*self.stream.get_ref().get_ref()
     }
 
     pub fn listen(addr: &SocketAddr) -> Result<Self, io::Error> {
@@ -139,6 +140,13 @@ where
 
     pub fn is_empty(&self) -> bool {
         self.stream.is_empty()
+    }
+
+    pub fn syscall_limit(&mut self, limit: Option<usize>) {
+        match limit {
+            Some(l) => self.stream.get_mut().set_limit(l),
+            None => self.stream.get_mut().unthrottle(),
+        }
     }
 
     pub fn try_recv(&mut self) -> Result<T, TryRecvError> {
