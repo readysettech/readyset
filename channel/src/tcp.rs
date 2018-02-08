@@ -52,7 +52,8 @@ pub struct TcpSender<T> {
 }
 
 impl<T: Serialize> TcpSender<T> {
-    pub fn new(mut stream: std::net::TcpStream, window: Option<u32>) -> Result<Self, io::Error> {
+    pub fn new(mut stream: std::net::TcpStream) -> Result<Self, io::Error> {
+        let window = None;
         if let Some(window) = window {
             assert!(window > 0);
         }
@@ -68,8 +69,8 @@ impl<T: Serialize> TcpSender<T> {
         })
     }
 
-    pub fn connect(addr: &SocketAddr, window: Option<u32>) -> Result<Self, io::Error> {
-        Self::new(std::net::TcpStream::connect(addr)?, window)
+    pub fn connect(addr: &SocketAddr) -> Result<Self, io::Error> {
+        Self::new(std::net::TcpStream::connect(addr)?)
     }
 
     pub fn local_addr(&self) -> io::Result<SocketAddr> {
@@ -321,20 +322,7 @@ where
     for<'de> T: Deserialize<'de>,
 {
     let (tx, rx) = connect(listen_addr);
-    let tx = TcpSender::new(tx, None).unwrap();
-    let rx = TcpReceiver::new(rx);
-    (tx, rx)
-}
-
-pub fn sync_channel<T: Serialize>(
-    listen_addr: SocketAddr,
-    size: u32,
-) -> (TcpSender<T>, TcpReceiver<T>)
-where
-    for<'de> T: Deserialize<'de>,
-{
-    let (tx, rx) = connect(listen_addr);
-    let tx = TcpSender::new(tx, Some(size)).unwrap();
+    let tx = TcpSender::new(tx).unwrap();
     let rx = TcpReceiver::new(rx);
     (tx, rx)
 }

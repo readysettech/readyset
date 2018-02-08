@@ -164,7 +164,7 @@ impl ControllerInner {
             "new worker registered from {:?}, which listens on {:?}", msg.source, remote
         );
 
-        let sender = Arc::new(Mutex::new(TcpSender::connect(remote, None)?));
+        let sender = Arc::new(Mutex::new(TcpSender::connect(remote)?));
         let ws = WorkerStatus::new(sender.clone());
         self.workers.insert(msg.source.clone(), ws);
         self.read_addrs.insert(msg.source.clone(), read_listen_addr);

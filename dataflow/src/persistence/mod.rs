@@ -339,7 +339,7 @@ impl GroupCommitQueueSet {
         let mut send_reply = |addr: SocketAddr, reply| {
             transaction_reply_txs
                 .entry(addr.clone())
-                .or_insert_with(|| TcpSender::connect(&addr, None).unwrap())
+                .or_insert_with(|| TcpSender::connect(&addr).unwrap())
                 .send(reply)
                 .unwrap()
         };

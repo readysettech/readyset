@@ -173,8 +173,8 @@ impl DomainBuilder {
 
         let debug_tx = self.debug_addr
             .as_ref()
-            .map(|addr| TcpSender::connect(addr, None).unwrap());
-        let control_reply_tx = TcpSender::connect(&self.control_addr, None).unwrap();
+            .map(|addr| TcpSender::connect(addr).unwrap());
+        let control_reply_tx = TcpSender::connect(&self.control_addr).unwrap();
 
         let transaction_state = transactions::DomainState::new(self.index, self.ts);
         let group_commit_queues = persistence::GroupCommitQueueSet::new(
@@ -1148,7 +1148,7 @@ impl Domain {
                                     use itertools::Itertools;
 
                                     let mut chunked_replay_tx =
-                                        TcpSender::connect(&domain_addr, Some(1)).unwrap();
+                                        TcpSender::connect(&domain_addr).unwrap();
 
                                     let start = time::Instant::now();
                                     debug!(log, "starting state chunker"; "node" => %link.dst);
