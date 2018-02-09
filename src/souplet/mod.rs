@@ -11,7 +11,7 @@ use std::time::{Duration, Instant};
 
 use channel::poll::{PollEvent, PollingLoop, ProcessResult};
 use channel::{self, TcpSender};
-use consensus::{Authority, STATE_KEY};
+use consensus::{Authority, Epoch, STATE_KEY};
 use dataflow::prelude::*;
 use dataflow::{DomainBuilder, Readers};
 
@@ -31,6 +31,7 @@ pub struct Souplet<A: Authority> {
     // Controller connection
     authority: A,
     listen_addr: SocketAddr,
+    epoch: Option<Epoch>,
 
     // Read RPC handling
     read_listen_addr: SocketAddr,
@@ -77,6 +78,7 @@ impl<A: Authority> Souplet<A> {
             pool: None,
 
             authority,
+            epoch: None,
             listen_addr: SocketAddr::new(listen_addr, 0),
             read_listen_addr,
             reader_exit: Some(reader_exit),
@@ -96,6 +98,7 @@ impl<A: Authority> Souplet<A> {
     pub fn run(&mut self) {
         loop {
             let leader = self.authority.get_leader().unwrap();
+            self.epoch = Some(leader.0);
             let descriptor: ControllerDescriptor = serde_json::from_slice(&leader.1).unwrap();
             let state: ControllerState =
                 serde_json::from_slice(&self.authority.try_read(STATE_KEY).unwrap().unwrap())
@@ -260,6 +263,7 @@ impl<A: Authority> Souplet<A> {
         };
         CoordinationMessage {
             source: addr,
+            epoch: self.epoch.unwrap(),
             payload: pl,
         }
     }

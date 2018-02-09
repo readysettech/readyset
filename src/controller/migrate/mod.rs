@@ -592,6 +592,7 @@ impl<'a> Migration<'a> {
                 &mainline.debug_channel,
                 &mut placer,
                 &mut workers,
+                mainline.epoch,
                 start_ts,
             );
             mainline.domains.insert(domain, d);

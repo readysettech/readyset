@@ -1,4 +1,5 @@
 use channel::tcp::TcpSender;
+use consensus::Epoch;
 use dataflow::{checktable, node, payload, DomainConfig, PersistenceParameters, Readers};
 use dataflow::payload::{EgressForBase, IngressFromBase};
 use dataflow::prelude::*;
@@ -70,6 +71,8 @@ pub struct ControllerInner {
 
     /// Local worker pool used for tests
     pub(super) local_pool: Option<worker::WorkerPool>,
+
+    pub(super) epoch: Epoch,
 
     heartbeat_every: Duration,
     healthcheck_every: Duration,
@@ -271,6 +274,7 @@ impl ControllerInner {
             domains: Default::default(),
             channel_coordinator: cc,
             debug_channel: None,
+            epoch: state.epoch,
 
             deps: HashMap::default(),
             remap: HashMap::default(),

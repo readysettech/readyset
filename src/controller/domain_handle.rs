@@ -8,6 +8,7 @@ use slog::Logger;
 
 use channel::{tcp, TcpReceiver, TcpSender};
 use channel::poll::{KeepPolling, PollEvent, PollingLoop, StopPolling};
+use consensus::Epoch;
 use dataflow::{self, DomainBuilder, DomainConfig, PersistenceParameters, Readers};
 use dataflow::payload::ControlReplyPacket;
 use dataflow::prelude::*;
@@ -135,6 +136,7 @@ impl DomainHandle {
         debug_addr: &Option<SocketAddr>,
         placer: &'a mut Box<Iterator<Item = (WorkerIdentifier, WorkerEndpoint)>>,
         workers: &'a mut Vec<WorkerEndpoint>,
+        epoch: Epoch,
         ts: i64,
     ) -> Self {
         // NOTE: warning to future self...
@@ -192,6 +194,7 @@ impl DomainHandle {
                     );
                     let src = w.local_addr().unwrap();
                     w.send(CoordinationMessage {
+                        epoch,
                         source: src,
                         payload: CoordinationPayload::AssignDomain(domain),
                     }).unwrap();
@@ -244,6 +247,7 @@ impl DomainHandle {
                 for endpoint in workers.iter() {
                     let mut s = endpoint.lock().unwrap();
                     let msg = CoordinationMessage {
+                        epoch,
                         source: s.local_addr().unwrap(),
                         payload: CoordinationPayload::DomainBooted((idx, shard), addr),
                     };

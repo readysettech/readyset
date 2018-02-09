@@ -14,7 +14,7 @@ use mio_pool;
 
 use controller::{LocalOrNot, ReadQuery, ReadReply};
 
-type Rpc = RpcServiceEndpoint<LocalOrNot<ReadQuery>, LocalOrNot<ReadReply>>;
+pub(crate) type Rpc = RpcServiceEndpoint<LocalOrNot<ReadQuery>, LocalOrNot<ReadReply>>;
 
 thread_local! {
     static READERS: RefCell<HashMap<
@@ -52,7 +52,7 @@ pub(crate) fn serve(
     h.finish();
 }
 
-fn handle_message(m: LocalOrNot<ReadQuery>, conn: &mut Rpc, s: &mut Readers) {
+pub(crate) fn handle_message(m: LocalOrNot<ReadQuery>, conn: &mut Rpc, s: &mut Readers) {
     let is_local = m.is_local();
     conn.send(&LocalOrNot::make(
         match unsafe { m.take() } {
