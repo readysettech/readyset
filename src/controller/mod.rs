@@ -1,20 +1,15 @@
-use channel;
 use channel::poll::{PollEvent, PollingLoop, ProcessResult};
-use channel::tcp::{TcpSender, TryRecvError};
-use channel::rpc::RpcServiceEndpoint;
+use channel::tcp::TcpSender;
 
 use consensus::{Authority, Epoch, STATE_KEY};
 use dataflow::checktable::service::CheckTableServer;
-use dataflow::{DomainBuilder, DomainConfig, PersistenceParameters, Readers};
-use dataflow::prelude::{ChannelCoordinator, DomainIndex};
+use dataflow::{DomainConfig, PersistenceParameters};
 
 use controller::domain_handle::DomainHandle;
 use controller::inner::ControllerInner;
 use controller::recipe::Recipe;
 use coordination::{CoordinationMessage, CoordinationPayload};
-use worker;
 
-use std::collections::HashMap;
 use std::io::{self, ErrorKind};
 use std::marker::PhantomData;
 use std::net::{IpAddr, SocketAddr};
@@ -22,7 +17,7 @@ use std::time::{self, Duration, Instant};
 use std::thread::{self, JoinHandle};
 use std::sync::{Arc, Mutex};
 use std::sync::mpsc::{self, Receiver, RecvTimeoutError, Sender};
-use std::{fs, process};
+use std::process;
 
 use failure::{self, Error};
 use futures::{self, Future, Stream};
@@ -30,7 +25,6 @@ use hyper::{self, Method, StatusCode};
 use hyper::header::ContentType;
 use hyper::server::{Http, NewService, Request, Response, Service};
 use mio::net::TcpListener;
-use mio_pool::{PoolBuilder, PoolHandle};
 use rand;
 use serde::Serialize;
 use serde_json;
@@ -49,6 +43,7 @@ mod handle;
 mod inner;
 mod mir_to_flow;
 mod mutator;
+mod worker_inner;
 
 pub use controller::builder::ControllerBuilder;
 pub use controller::handle::ControllerHandle;
@@ -57,6 +52,7 @@ pub use controller::migrate::Migration;
 pub use controller::mutator::{Mutator, MutatorBuilder, MutatorError};
 pub use controller::getter::{Getter, ReadQuery, ReadReply, RemoteGetter, RemoteGetterBuilder};
 pub(crate) use controller::getter::LocalOrNot;
+use controller::worker_inner::WorkerInner;
 
 type WorkerIdentifier = SocketAddr;
 type WorkerEndpoint = Arc<Mutex<TcpSender<CoordinationMessage>>>;
@@ -179,20 +175,6 @@ enum ControlEvent {
     Error(Error),
 }
 
-struct WorkerInner {
-    epoch: Epoch,
-    worker_pool: worker::WorkerPool,
-    channel_coordinator: Arc<ChannelCoordinator>,
-    readers: Readers,
-    read_threads: PoolHandle<()>,
-
-    sender: TcpSender<CoordinationMessage>,
-    sender_addr: SocketAddr,
-
-    heartbeat_every: Duration,
-    last_heartbeat: Instant,
-}
-
 /// Runs the soup instance.
 pub struct Controller<A: Authority + 'static> {
     worker: Option<WorkerInner>,
@@ -310,18 +292,20 @@ impl<A: Authority + 'static> Controller<A> {
                     inner.coordination_message(msg)
                 },
                 ControlEvent::SoupletMessage(CoordinationMessage { epoch, payload, .. }) => {
-                    if self.worker.is_none() || self.worker.as_ref().unwrap().epoch != epoch {
-                        continue;
-                    }
+                    if let Some(ref mut worker) = self.worker {
+                        if worker.epoch != epoch {
+                            continue;
+                        }
 
-                    match payload {
-                        CoordinationPayload::AssignDomain(d) => {
-                            self.handle_domain_assign(d).unwrap()
+                        match payload {
+                            CoordinationPayload::AssignDomain(d) => {
+                                worker.handle_domain_assign(d).unwrap()
+                            }
+                            CoordinationPayload::DomainBooted(domain, addr) => {
+                                worker.handle_domain_booted(domain, addr).unwrap()
+                            }
+                            _ => unreachable!(),
                         }
-                        CoordinationPayload::DomainBooted(domain, addr) => {
-                            self.handle_domain_booted(domain, addr).unwrap()
-                        }
-                        _ => unreachable!(),
                     }
                 }
                 ControlEvent::ExternalRequest(method, path, body, reply_tx) => {
@@ -341,25 +325,25 @@ impl<A: Authority + 'static> Controller<A> {
                         state.clone(),
                     ));
                     self.worker = Some(
-                        Self::make_worker(
+                        WorkerInner::new(
                             self.listen_addr,
                             self.checktable,
                             self.internal.addr,
                             self.souplet.addr,
                             &state,
-                            &self.log,
+                            self.log.clone(),
                         ).unwrap(),
                     );
                 }
                 ControlEvent::LostLeaderElection(state, descriptor) => {
                     assert!(self.inner.is_none());
-                    if let Ok(worker) = Self::make_worker(
+                    if let Ok(worker) = WorkerInner::new(
                         self.listen_addr,
                         descriptor.checktable_addr,
                         descriptor.internal_addr,
                         self.souplet.addr,
                         &state,
-                        &self.log,
+                        self.log.clone(),
                     ) {
                         self.worker = Some(worker);
                     }
@@ -375,75 +359,6 @@ impl<A: Authority + 'static> Controller<A> {
         if self.worker.is_some() {
             self.worker.take().unwrap().read_threads.finish();
         }
-    }
-
-    fn make_worker(
-        listen_addr: IpAddr,
-        checktable_addr: SocketAddr,
-        controller_addr: SocketAddr,
-        souplet_addr: SocketAddr,
-        state: &ControllerState,
-        log: &slog::Logger,
-    ) -> Result<WorkerInner, ()> {
-        let channel_coordinator = Arc::new(ChannelCoordinator::new());
-        let readers = Arc::new(Mutex::new(HashMap::new()));
-
-        let log_prefix = state.config.persistence.log_prefix.clone();
-        let prefix = format!("{}-log-", log_prefix);
-        let log_files: Vec<String> = fs::read_dir(".")
-            .unwrap()
-            .filter_map(|e| e.ok())
-            .filter(|e| e.file_type().ok().map(|t| t.is_file()).unwrap_or(false))
-            .map(|e| e.path().to_string_lossy().into_owned())
-            .filter(|path| path.starts_with(&prefix))
-            .collect();
-
-        let (read_threads, read_listen_addr) = Self::reads_listen(
-            SocketAddr::new(listen_addr, 0),
-            readers.clone(),
-            state.config.nreaders,
-        );
-
-        let mut sender = match TcpSender::connect(&controller_addr, None) {
-            Ok(sender) => sender,
-            Err(e) => {
-                error!(log, "failed to connect to controller: {:?}", e);
-                return Err(());
-            }
-        };
-
-        let sender_addr = sender.local_addr().unwrap();
-        let msg = CoordinationMessage {
-            source: sender_addr,
-            epoch: state.epoch,
-            payload: CoordinationPayload::Register {
-                addr: souplet_addr,
-                read_listen_addr,
-                log_files,
-            },
-        };
-
-        if let Err(e) = sender.send(msg) {
-            error!(log, "failed to register with controller: {:?}", e);
-            return Err(());
-        }
-
-        Ok(WorkerInner {
-            epoch: state.epoch,
-            worker_pool: worker::WorkerPool::new(
-                state.config.nworkers,
-                &log,
-                checktable_addr,
-                channel_coordinator.clone(),
-            ).unwrap(),
-            channel_coordinator,
-            read_threads,
-            readers,
-            sender,
-            sender_addr,
-            heartbeat_every: state.config.heartbeat_every,
-            last_heartbeat: Instant::now(),
-        })
     }
 
     fn listen_external(
@@ -611,35 +526,6 @@ impl<A: Authority + 'static> Controller<A> {
         })
     }
 
-    fn reads_listen(
-        addr: SocketAddr,
-        readers: Readers,
-        reader_threads: usize,
-    ) -> (PoolHandle<()>, SocketAddr) {
-        let listener = TcpListener::bind(&addr).unwrap();
-        let addr = listener.local_addr().unwrap();
-        let pool = PoolBuilder::from(listener).unwrap();
-        let h = pool.with_state(readers.clone())
-            .with_adapter(RpcServiceEndpoint::new)
-            .run(
-                reader_threads,
-                |conn: &mut ::souplet::readers::Rpc, s: &mut Readers| loop {
-                    match conn.try_recv() {
-                        Ok(m) => {
-                            ::souplet::readers::handle_message(m, conn, s);
-                        }
-                        Err(TryRecvError::Empty) => break Ok(false),
-                        Err(TryRecvError::DeserializationError(e)) => {
-                            return Err(io::Error::new(io::ErrorKind::InvalidData, e));
-                        }
-                        Err(TryRecvError::Disconnected) => break Ok(true),
-                    }
-                },
-            );
-
-        (h, addr)
-    }
-
     fn campaign(
         event_tx: Sender<ControlEvent>,
         authority: Arc<A>,
@@ -724,70 +610,6 @@ impl<A: Authority + 'static> Controller<A> {
                 }
             })
             .unwrap()
-    }
-
-    fn handle_domain_assign(&mut self, d: DomainBuilder) -> Result<(), channel::tcp::SendError> {
-        let worker = self.worker.as_mut().unwrap();
-
-        let listener = ::std::net::TcpListener::bind(SocketAddr::new(self.listen_addr, 0)).unwrap();
-        let addr = listener.local_addr().unwrap();
-
-        let idx = d.index;
-        let shard = d.shard;
-        let d = d.build(
-            self.log.clone(),
-            worker.readers.clone(),
-            worker.channel_coordinator.clone(),
-            addr,
-        );
-
-        let listener = ::mio::net::TcpListener::from_listener(listener, &addr).unwrap();
-        worker
-            .worker_pool
-            .add_replica(worker::NewReplica { inner: d, listener });
-
-        // need to register the domain with the local channel coordinator
-        worker
-            .channel_coordinator
-            .insert_addr((idx, shard), addr, false);
-
-        match worker.sender.send(CoordinationMessage {
-            source: worker.sender_addr,
-            epoch: worker.epoch,
-            payload: CoordinationPayload::DomainBooted((idx, shard), addr),
-        }) {
-            Ok(_) => {
-                trace!(
-                    self.log,
-                    "informed controller that domain {}.{} is at {:?}",
-                    idx.index(),
-                    shard,
-                    addr
-                );
-                Ok(())
-            }
-            Err(e) => return Err(e),
-        }
-    }
-
-    fn handle_domain_booted(
-        &mut self,
-        (domain, shard): (DomainIndex, usize),
-        addr: SocketAddr,
-    ) -> Result<(), String> {
-        trace!(
-            self.log,
-            "found that domain {}.{} is at {:?}",
-            domain.index(),
-            shard,
-            addr
-        );
-        self.worker
-            .as_mut()
-            .unwrap()
-            .channel_coordinator
-            .insert_addr((domain, shard), addr, false);
-        Ok(())
     }
 }
 
