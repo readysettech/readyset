@@ -184,7 +184,7 @@ impl Ingredient for NodeOperator {
     fn query_through<'a>(
         &self,
         columns: &[usize],
-        key: &KeyType<DataType>,
+        key: &KeyType,
         states: &'a StateMap,
     ) -> Option<Option<Box<Iterator<Item = &'a [DataType]> + 'a>>> {
         impl_ingredient_fn_ref!(self, query_through, columns, key, states)
@@ -193,7 +193,7 @@ impl Ingredient for NodeOperator {
         &self,
         parent: LocalNodeIndex,
         columns: &[usize],
-        key: &KeyType<DataType>,
+        key: &KeyType,
         domain: &DomainNodes,
         states: &'a StateMap,
     ) -> Option<Option<Box<Iterator<Item = &'a [DataType]> + 'a>>> {

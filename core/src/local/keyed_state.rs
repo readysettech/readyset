@@ -1,20 +1,22 @@
 use ::*;
-use std::hash::Hash;
 use fnv::FnvBuildHasher;
 use rahashmap::HashMap as RaHashMap;
 
 type FnvHashMap<K, V> = RaHashMap<K, V, FnvBuildHasher>;
 
-pub enum KeyedState<T: Eq + Hash> {
-    Single(FnvHashMap<T, Vec<Row<Vec<T>>>>),
-    Double(FnvHashMap<(T, T), Vec<Row<Vec<T>>>>),
-    Tri(FnvHashMap<(T, T, T), Vec<Row<Vec<T>>>>),
-    Quad(FnvHashMap<(T, T, T, T), Vec<Row<Vec<T>>>>),
-    Quin(FnvHashMap<(T, T, T, T, T), Vec<Row<Vec<T>>>>),
-    Sex(FnvHashMap<(T, T, T, T, T, T), Vec<Row<Vec<T>>>>),
+pub enum KeyedState {
+    Single(FnvHashMap<DataType, Vec<Row<Vec<DataType>>>>),
+    Double(FnvHashMap<(DataType, DataType), Vec<Row<Vec<DataType>>>>),
+    Tri(FnvHashMap<(DataType, DataType, DataType), Vec<Row<Vec<DataType>>>>),
+    Quad(FnvHashMap<(DataType, DataType, DataType, DataType), Vec<Row<Vec<DataType>>>>),
+    Quin(FnvHashMap<(DataType, DataType, DataType, DataType, DataType), Vec<Row<Vec<DataType>>>>),
+    Sex(FnvHashMap<
+        (DataType, DataType, DataType, DataType, DataType, DataType),
+        Vec<Row<Vec<DataType>>>,
+    >),
 }
 
-impl<T: Eq + Hash> KeyedState<T> {
+impl KeyedState {
     pub fn is_empty(&self) -> bool {
         match *self {
             KeyedState::Single(ref m) => m.is_empty(),
@@ -37,7 +39,7 @@ impl<T: Eq + Hash> KeyedState<T> {
         }
     }
 
-    pub fn lookup<'a>(&'a self, key: &KeyType<T>) -> Option<&'a Vec<Row<Vec<T>>>> {
+    pub fn lookup<'a>(&'a self, key: &KeyType) -> Option<&'a Vec<Row<Vec<DataType>>>> {
         match (self, key) {
             (&KeyedState::Single(ref m), &KeyType::Single(k)) => m.get(k),
             (&KeyedState::Double(ref m), &KeyType::Double(ref k)) => m.get(k),
@@ -49,7 +51,7 @@ impl<T: Eq + Hash> KeyedState<T> {
         }
     }
 
-    pub fn remove_at_index(&mut self, index: usize) -> Option<Vec<Row<Vec<T>>>> {
+    pub fn remove_at_index(&mut self, index: usize) -> Option<Vec<Row<Vec<DataType>>>> {
         match *self {
             KeyedState::Single(ref mut m) => m.remove_at_index(index).map(|(_, rs)| rs),
             KeyedState::Double(ref mut m) => m.remove_at_index(index).map(|(_, rs)| rs),
@@ -61,8 +63,8 @@ impl<T: Eq + Hash> KeyedState<T> {
     }
 }
 
-impl<'a, T: Eq + Hash> Into<KeyedState<T>> for &'a [usize] {
-    fn into(self) -> KeyedState<T> {
+impl<'a> Into<KeyedState> for &'a [usize] {
+    fn into(self) -> KeyedState {
         match self.len() {
             0 => unreachable!(),
             1 => KeyedState::Single(FnvHashMap::default()),
@@ -75,3 +77,4 @@ impl<'a, T: Eq + Hash> Into<KeyedState<T>> for &'a [usize] {
         }
     }
 }
+

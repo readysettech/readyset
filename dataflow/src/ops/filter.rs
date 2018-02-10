@@ -140,7 +140,7 @@ impl Ingredient for Filter {
     fn query_through<'a>(
         &self,
         columns: &[usize],
-        key: &KeyType<DataType>,
+        key: &KeyType,
         states: &'a StateMap,
     ) -> Option<Option<Box<Iterator<Item = &'a [DataType]> + 'a>>> {
         states.get(&*self.src).and_then(|state| {

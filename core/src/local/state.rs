@@ -1,18 +1,17 @@
 use ::*;
 use std::collections::HashMap;
-use std::hash::Hash;
 use std::rc::Rc;
 
 use local::keyed_state::KeyedState;
 use local::single_state::SingleState;
 
-pub struct State<T: Hash + Eq + Clone + 'static> {
-    state: Vec<SingleState<T>>,
+pub struct State {
+    state: Vec<SingleState>,
     by_tag: HashMap<Tag, usize>,
     rows: usize,
 }
 
-impl<T: Hash + Eq + Clone + 'static> Default for State<T> {
+impl Default for State {
     fn default() -> Self {
         State {
             state: Vec::new(),
@@ -22,7 +21,7 @@ impl<T: Hash + Eq + Clone + 'static> Default for State<T> {
     }
 }
 
-impl<T: Hash + Eq + Clone + 'static> State<T> {
+impl State {
     /// Construct base materializations differently (potentially)
     pub fn base() -> Self {
         Self::default()
@@ -62,7 +61,7 @@ impl<T: Hash + Eq + Clone + 'static> State<T> {
         if !self.is_empty() && partial.is_none() {
             // we need to *construct* the index!
             let (new, old) = self.state.split_last_mut().unwrap();
-            let mut insert = move |rs: &Vec<Row<Vec<T>>>| {
+            let mut insert = move |rs: &Vec<Row<Vec<DataType>>>| {
                 for r in rs {
                     new.insert(Row(r.0.clone()));
                 }
@@ -105,7 +104,7 @@ impl<T: Hash + Eq + Clone + 'static> State<T> {
         self.state.iter().any(|s| s.partial)
     }
 
-    pub fn insert(&mut self, r: Vec<T>, partial_tag: Option<Tag>) -> bool {
+    pub fn insert(&mut self, r: Vec<DataType>, partial_tag: Option<Tag>) -> bool {
         let r = Rc::new(r);
 
         if let Some(tag) = partial_tag {
@@ -130,10 +129,10 @@ impl<T: Hash + Eq + Clone + 'static> State<T> {
         }
     }
 
-    pub fn remove(&mut self, r: &[T]) -> bool {
+    pub fn remove(&mut self, r: &[DataType]) -> bool {
         let mut hit = false;
         let mut removed = false;
-        let fix = |removed: &mut bool, rs: &mut Vec<Row<Vec<T>>>| {
+        let fix = |removed: &mut bool, rs: &mut Vec<Row<Vec<DataType>>>| {
             // rustfmt
             if let Some(i) = rs.iter().position(|rsr| &rsr[..] == r) {
                 rs.swap_remove(i);
@@ -217,7 +216,7 @@ impl<T: Hash + Eq + Clone + 'static> State<T> {
         hit
     }
 
-    pub fn iter(&self) -> rahashmap::Values<T, Vec<Row<Vec<T>>>> {
+    pub fn iter(&self) -> rahashmap::Values<DataType, Vec<Row<Vec<DataType>>>> {
         for index in &self.state {
             if let KeyedState::Single(ref map) = index.state {
                 if index.partial {
@@ -246,7 +245,7 @@ impl<T: Hash + Eq + Clone + 'static> State<T> {
         }
     }
 
-    pub fn mark_filled(&mut self, key: Vec<T>, tag: &Tag) {
+    pub fn mark_filled(&mut self, key: Vec<DataType>, tag: &Tag) {
         debug_assert!(!self.state.is_empty(), "filling uninitialized index");
         let i = self.by_tag[tag];
         let index = &mut self.state[i];
@@ -298,7 +297,7 @@ impl<T: Hash + Eq + Clone + 'static> State<T> {
         assert!(replaced.is_none());
     }
 
-    pub fn mark_hole(&mut self, key: &[T], tag: &Tag) {
+    pub fn mark_hole(&mut self, key: &[DataType], tag: &Tag) {
         debug_assert!(!self.state.is_empty(), "filling uninitialized index");
         let i = self.by_tag[tag];
         let index = &mut self.state[i];
@@ -334,7 +333,7 @@ impl<T: Hash + Eq + Clone + 'static> State<T> {
         assert!(removed.is_some());
     }
 
-    pub fn lookup<'a>(&'a self, columns: &[usize], key: &KeyType<T>) -> LookupResult<'a, T> {
+    pub fn lookup<'a>(&'a self, columns: &[usize], key: &KeyType) -> LookupResult<'a> {
         debug_assert!(!self.state.is_empty(), "lookup on uninitialized index");
         let index = &self.state[self.state_for(columns)
                                     .expect("lookup on non-indexed column set")];
@@ -351,8 +350,8 @@ impl<T: Hash + Eq + Clone + 'static> State<T> {
     }
 
     /// Return a copy of all records. Panics if the state is only partially materialized.
-    pub fn cloned_records(&self) -> Vec<Vec<T>> {
-        fn fix<'a, T: Clone>(rs: &'a Vec<Row<Vec<T>>>) -> impl Iterator<Item = Vec<T>> + 'a {
+    pub fn cloned_records(&self) -> Vec<Vec<DataType>> {
+        fn fix<'a>(rs: &'a Vec<Row<Vec<DataType>>>) -> impl Iterator<Item = Vec<DataType>> + 'a {
             rs.iter().map(|r| Vec::clone(&**r))
         }
 
@@ -388,7 +387,7 @@ impl<T: Hash + Eq + Clone + 'static> State<T> {
     }
 }
 
-impl<'a, T: Eq + Hash + Clone + 'static> Drop for State<T> {
+impl<'a> Drop for State {
     fn drop(&mut self) {
         self.unalias_for_state();
         self.clear();
