@@ -287,20 +287,12 @@ fn it_works_w_partial_mat() {
     let mut b = ControllerBuilder::default();
     b.log_with(logger_pls());
     let mut g = b.build_inner();
-    let (a, _b, c) = g.migrate(|mig| {
+    let (a, b) = g.migrate(|mig| {
         let a = mig.add_ingredient("a", &["a", "b"], Base::default());
         let b = mig.add_ingredient("b", &["a", "b"], Base::default());
-
-        let mut emits = HashMap::new();
-        emits.insert(a, vec![0, 1]);
-        emits.insert(b, vec![0, 1]);
-        let u = Union::new(emits);
-        let c = mig.add_ingredient("c", &["a", "b"], u);
-        mig.maintain_anonymous(c, 0);
-        (a, b, c)
+        (a, b)
     });
 
-    let mut cq = g.get_getter(c).unwrap();
     let mut muta = g.get_mutator(a);
     let id: DataType = 1.into();
 
@@ -311,6 +303,21 @@ fn it_works_w_partial_mat() {
 
     // give it some time to propagate
     sleep();
+
+    let c = g.migrate(|mig| {
+        let mut emits = HashMap::new();
+        emits.insert(a, vec![0, 1]);
+        emits.insert(b, vec![0, 1]);
+        let u = Union::new(emits);
+        let c = mig.add_ingredient("c", &["a", "b"], u);
+        mig.maintain_anonymous(c, 0);
+        c
+    });
+
+    // give it some time to propagate
+    sleep();
+
+    let mut cq = g.get_getter(c).unwrap();
 
     // because the reader is partial, we should have no key until we read
     assert_eq!(cq.len().unwrap(), 0);
