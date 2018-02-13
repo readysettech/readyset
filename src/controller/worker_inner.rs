@@ -21,17 +21,17 @@ use mio_pool::{PoolBuilder, PoolHandle};
 use slog;
 
 pub(super) struct WorkerInner {
-    pub(super) epoch: Epoch,
-    pub(super) worker_pool: worker::WorkerPool,
-    pub(super) channel_coordinator: Arc<ChannelCoordinator>,
-    pub(super) readers: Readers,
-    pub(super) read_threads: PoolHandle<()>,
+    epoch: Epoch,
+    worker_pool: worker::WorkerPool,
+    channel_coordinator: Arc<ChannelCoordinator>,
+    readers: Readers,
+    read_threads: PoolHandle<()>,
 
-    pub(super) sender: TcpSender<CoordinationMessage>,
-    pub(super) sender_addr: SocketAddr,
+    sender: TcpSender<CoordinationMessage>,
+    sender_addr: SocketAddr,
 
-    pub(super) heartbeat_every: Duration,
-    pub(super) last_heartbeat: Instant,
+    heartbeat_every: Duration,
+    last_heartbeat: Instant,
 
     listen_addr: IpAddr,
 
@@ -172,6 +172,28 @@ impl WorkerInner {
         Ok(())
     }
 
+    /// Perform a heartbeat if it is time, and return the amount of time until another one is
+    /// needed.
+    pub(super) fn heartbeat(&mut self) -> Duration {
+        let elapsed = self.last_heartbeat.elapsed();
+        if elapsed > self.heartbeat_every {
+            let msg = CoordinationMessage {
+                source: self.sender_addr,
+                epoch: self.epoch,
+                payload: CoordinationPayload::Heartbeat,
+            };
+            match self.sender.send(msg) {
+                Err(_) => unimplemented!(),
+                Ok(_) => {
+                    self.last_heartbeat = Instant::now();
+                    self.heartbeat_every
+                }
+            }
+        } else {
+            self.heartbeat_every - elapsed
+        }
+    }
+
     fn reads_listen(
         addr: SocketAddr,
         readers: Readers,
@@ -199,5 +221,14 @@ impl WorkerInner {
             );
 
         (h, addr)
+    }
+
+    pub(crate) fn epoch(&self) -> Epoch {
+        self.epoch
+    }
+
+    pub(crate) fn shutdown(mut self) {
+        self.worker_pool.wait();
+        self.read_threads.finish();
     }
 }

@@ -257,31 +257,13 @@ impl<A: Authority + 'static> Controller<A> {
     fn main_loop(mut self, receiver: Receiver<ControlEvent>) {
         loop {
             let event = match self.worker {
-                Some(ref mut worker) => {
-                    let elapsed = worker.last_heartbeat.elapsed();
-                    if elapsed > worker.heartbeat_every {
-                        let msg = CoordinationMessage {
-                            source: worker.sender_addr,
-                            epoch: worker.epoch,
-                            payload: CoordinationPayload::Heartbeat,
-                        };
-                        match worker.sender.send(msg) {
-                            Err(_) => unimplemented!(),
-                            Ok(_) => {
-                                worker.last_heartbeat = Instant::now();
-                                continue;
-                            }
-                        }
+                Some(ref mut worker) => match receiver.recv_timeout(worker.heartbeat()) {
+                    Ok(event) => event,
+                    Err(RecvTimeoutError::Timeout) => {
+                        continue;
                     }
-
-                    match receiver.recv_timeout(worker.heartbeat_every - elapsed) {
-                        Ok(event) => event,
-                        Err(RecvTimeoutError::Timeout) => {
-                            continue;
-                        }
-                        Err(_) => break,
-                    }
-                }
+                    Err(_) => break,
+                },
                 None => match receiver.recv() {
                     Ok(event) => event,
                     Err(_) => break,
@@ -293,7 +275,7 @@ impl<A: Authority + 'static> Controller<A> {
                 },
                 ControlEvent::SoupletMessage(CoordinationMessage { epoch, payload, .. }) => {
                     if let Some(ref mut worker) = self.worker {
-                        if worker.epoch != epoch {
+                        if worker.epoch() != epoch {
                             continue;
                         }
 
@@ -318,6 +300,7 @@ impl<A: Authority + 'static> Controller<A> {
                     }
                 }
                 ControlEvent::WonLeaderElection(state) => {
+                    self.worker.take().map(|w| w.shutdown());
                     self.inner = Some(ControllerInner::new(
                         self.listen_addr,
                         self.checktable,
@@ -337,6 +320,7 @@ impl<A: Authority + 'static> Controller<A> {
                 }
                 ControlEvent::LostLeaderElection(state, descriptor) => {
                     assert!(self.inner.is_none());
+                    self.worker.take().map(|w| w.shutdown());
                     if let Ok(worker) = WorkerInner::new(
                         self.listen_addr,
                         descriptor.checktable_addr,
@@ -355,10 +339,7 @@ impl<A: Authority + 'static> Controller<A> {
         self.external.stop();
         self.internal.stop();
         self.souplet.stop();
-
-        if self.worker.is_some() {
-            self.worker.take().unwrap().read_threads.finish();
-        }
+        self.worker.map(|w| w.shutdown());
     }
 
     fn listen_external(
