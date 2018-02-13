@@ -8,7 +8,7 @@ use dataflow::{DomainConfig, PersistenceParameters};
 use controller::domain_handle::DomainHandle;
 use controller::inner::ControllerInner;
 use controller::recipe::Recipe;
-use coordination::{CoordinationMessage, CoordinationPayload};
+use coordination::CoordinationMessage;
 
 use std::io::{self, ErrorKind};
 use std::marker::PhantomData;
@@ -213,13 +213,6 @@ impl<A: Authority + 'static> Controller<A> {
         );
         let souplet = Self::souplet_listen(event_tx.clone(), SocketAddr::new(listen_addr, 0));
 
-        // let readers = Arc::new(Mutex::new(HashMap::new()));
-        // let reads = Self::reads_listen(
-        //     SocketAddr::new(listen_addr, 0),
-        //     readers.clone(),
-        //     config.nreaders,
-        // );
-
         let descriptor = ControllerDescriptor {
             external_addr: external.addr,
             internal_addr: internal.addr,
@@ -270,26 +263,12 @@ impl<A: Authority + 'static> Controller<A> {
                 },
             };
             match event {
+                ControlEvent::SoupletMessage(msg) => if let Some(ref mut worker) = self.worker {
+                    worker.coordination_message(msg)
+                },
                 ControlEvent::ControllerMessage(msg) => if let Some(ref mut inner) = self.inner {
                     inner.coordination_message(msg)
                 },
-                ControlEvent::SoupletMessage(CoordinationMessage { epoch, payload, .. }) => {
-                    if let Some(ref mut worker) = self.worker {
-                        if worker.epoch() != epoch {
-                            continue;
-                        }
-
-                        match payload {
-                            CoordinationPayload::AssignDomain(d) => {
-                                worker.handle_domain_assign(d).unwrap()
-                            }
-                            CoordinationPayload::DomainBooted(domain, addr) => {
-                                worker.handle_domain_booted(domain, addr).unwrap()
-                            }
-                            _ => unreachable!(),
-                        }
-                    }
-                }
                 ControlEvent::ExternalRequest(method, path, body, reply_tx) => {
                     if let Some(ref mut inner) = self.inner {
                         reply_tx

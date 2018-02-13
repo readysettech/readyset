@@ -110,10 +110,19 @@ impl WorkerInner {
         })
     }
 
-    pub(super) fn handle_domain_assign(
-        &mut self,
-        d: DomainBuilder,
-    ) -> Result<(), channel::tcp::SendError> {
+    pub(super) fn coordination_message(&mut self, msg: CoordinationMessage) {
+        if self.epoch == msg.epoch {
+            match msg.payload {
+                CoordinationPayload::AssignDomain(d) => self.handle_domain_assign(d).unwrap(),
+                CoordinationPayload::DomainBooted(domain, addr) => {
+                    self.handle_domain_booted(domain, addr).unwrap()
+                }
+                _ => unreachable!(),
+            }
+        }
+    }
+
+    fn handle_domain_assign(&mut self, d: DomainBuilder) -> Result<(), channel::tcp::SendError> {
         let listener = ::std::net::TcpListener::bind(SocketAddr::new(self.listen_addr, 0)).unwrap();
         let addr = listener.local_addr().unwrap();
 
@@ -155,7 +164,7 @@ impl WorkerInner {
         }
     }
 
-    pub(super) fn handle_domain_booted(
+    fn handle_domain_booted(
         &mut self,
         (domain, shard): (DomainIndex, usize),
         addr: SocketAddr,
@@ -223,11 +232,7 @@ impl WorkerInner {
         (h, addr)
     }
 
-    pub(crate) fn epoch(&self) -> Epoch {
-        self.epoch
-    }
-
-    pub(crate) fn shutdown(mut self) {
+    pub(super) fn shutdown(mut self) {
         self.worker_pool.wait();
         self.read_threads.finish();
     }
