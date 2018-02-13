@@ -282,10 +282,8 @@ fn it_works_w_mat() {
 
 #[test]
 fn it_works_w_partial_mat() {
-    use logger_pls;
     // set up graph
     let mut b = ControllerBuilder::default();
-    b.log_with(logger_pls());
     let mut g = b.build_inner();
     let (a, b) = g.migrate(|mig| {
         let a = mig.add_ingredient("a", &["a", "b"], Base::default());
