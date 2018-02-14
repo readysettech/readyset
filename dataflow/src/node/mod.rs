@@ -289,6 +289,10 @@ impl Node {
         self.index.as_ref().unwrap()
     }
 
+    pub fn is_base(&self) -> bool {
+        self.is_internal() && self.get_base().is_some()
+    }
+
     pub fn is_localized(&self) -> bool {
         self.index
             .as_ref()
