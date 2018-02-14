@@ -431,26 +431,26 @@ impl Ingredient for Join {
                     while other_rows.peek().is_some() {
                         if let Some(false) = make_null {
                             // we need to generate a -NULL for all these lefts
-                            ret.push((self.generate_null(other), false).into());
+                            ret.push((self.generate_null(&other), false).into());
                         }
                         if from == *self.left {
                             ret.push(
                                 (
-                                    self.generate_row(&row, other, Preprocessed::Neither),
+                                    self.generate_row(&row, &other, Preprocessed::Neither),
                                     positive,
                                 ).into(),
                             );
                         } else {
                             ret.push(
                                 (
-                                    self.generate_row(other, &row, Preprocessed::Neither),
+                                    self.generate_row(&other, &row, Preprocessed::Neither),
                                     positive,
                                 ).into(),
                             );
                         }
                         if let Some(true) = make_null {
                             // we need to generate a +NULL for all these lefts
-                            ret.push((self.generate_null(other), true).into());
+                            ret.push((self.generate_null(&other), true).into());
                         }
                         other = other_rows.next().unwrap();
                         other_rows_count += 1;
@@ -458,17 +458,17 @@ impl Ingredient for Join {
 
                     if let Some(false) = make_null {
                         // we need to generate a -NULL for the last left too
-                        ret.push((self.generate_null(other), false).into());
+                        ret.push((self.generate_null(&other), false).into());
                     }
                     ret.push(
                         (
-                            self.regenerate_row(row, other, from == *self.left, false),
+                            self.regenerate_row(row, &other, from == *self.left, false),
                             positive,
                         ).into(),
                     );
                     if let Some(true) = make_null {
                         // we need to generate a +NULL for the last left too
-                        ret.push((self.generate_null(other), true).into());
+                        ret.push((self.generate_null(&other), true).into());
                     }
                 } else if other_rows_count == 0 {
                     if self.kind == JoinType::Left && from == *self.left {

@@ -152,7 +152,7 @@ impl ToSql for DataType {
 
 impl PersistentState {
     fn initialize() -> Self {
-        let connection = Connection::open("sqlite_db").unwrap();
+        let connection = Connection::open_in_memory().unwrap();
         connection
             .execute("CREATE TABLE store (row BLOB)", &[])
             .unwrap();

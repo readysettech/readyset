@@ -1,3 +1,4 @@
+use std::borrow::Cow;
 use std::cmp::Ordering;
 use std::collections::HashMap;
 use std::mem;
@@ -9,7 +10,7 @@ use nom_sql::OrderType;
 #[derive(Clone, Serialize, Deserialize)]
 struct Order(Vec<(usize, OrderType)>);
 impl Order {
-    fn cmp(&self, a: &&Vec<DataType>, b: &&Vec<DataType>) -> Ordering {
+    fn cmp(&self, a: &Vec<DataType>, b: &Vec<DataType>) -> Ordering {
         for &(c, ref order_type) in &self.0 {
             let result = match *order_type {
                 OrderType::OrderAscending => a[c].cmp(&b[c]),
@@ -96,7 +97,7 @@ impl TopK {
     ) -> Records {
         let mut delta: Vec<Record> = Vec::new();
         let mut current: Vec<&Row> = current_topk.iter().collect();
-        current.sort_by(|a, b| self.order.cmp(&&***a, &&***b));
+        current.sort_by(|a, b| self.order.cmp(&***a, &&***b));
         for r in new.iter() {
             if let &Record::Negative(ref a) = r {
                 let idx = current.binary_search_by(|row| self.order.cmp(&&***row, &&a));
@@ -107,12 +108,12 @@ impl TopK {
             }
         }
 
-        let mut output_rows: Vec<(&Vec<DataType>, bool)> = new.iter()
+        let mut output_rows: Vec<(Vec<DataType>, bool)> = new.into_iter()
             .filter_map(|r| match r {
-                &Record::Positive(ref a) => Some((&*a, false)),
+                Record::Positive(a) => Some((a, false)),
                 _ => None,
             })
-            .chain(current.into_iter().map(|a| (&**a, true)))
+            .chain(current.into_iter().map(|a| ((**a).clone(), true)))
             .collect();
         output_rows.sort_by(|a, b| self.order.cmp(&a.0, &b.0));
 
@@ -127,38 +128,68 @@ impl TopK {
 
             // Get the minimum element of output_rows.
             if let Some((min, _)) = output_rows.iter().cloned().next() {
-                let is_min = |&&(ref r, _): &&(&Vec<DataType>, bool)| {
-                    self.order.cmp(&&r, &&min) == Ordering::Equal
+                let is_min = |&&(ref r, _): &&(Vec<DataType>, bool)| {
+                    self.order.cmp(&r, &min) == Ordering::Equal
                 };
 
                 let mut current_mins: Vec<_> = output_rows.iter().filter(is_min).cloned().collect();
 
-                output_rows = rs.iter()
-                    .filter_map(|r| {
-                        // Make sure that no duplicates are added to output_rows. This is simplified
-                        // by the fact that it currently contains all rows greater than `min`, and
-                        // none less than it. The only complication are rows which compare equal to
-                        // `min`: they get added except if there is already an identical row.
-                        match self.order.cmp(&&**r, &&min) {
-                            Ordering::Less => Some((r, false)),
-                            Ordering::Equal => {
-                                let e = current_mins.iter().position(|&(ref s, _)| **s == **r);
-                                match e {
-                                    Some(i) => {
-                                        current_mins.swap_remove(i);
-                                        None
+                output_rows = match rs {
+                    // TODO(ekmartin): try to refactor these (almost) duplicate branches:
+                    Cow::Borrowed(rs) => rs.iter()
+                        .filter_map(|r| {
+                            // Make sure that no duplicates are added to output_rows. This is simplified
+                            // by the fact that it currently contains all rows greater than `min`, and
+                            // none less than it. The only complication are rows which compare equal to
+                            // `min`: they get added except if there is already an identical row.
+                            match self.order.cmp(&&**r, &&min) {
+                                Ordering::Less => Some((r, false)),
+                                Ordering::Equal => {
+                                    let e = current_mins.iter().position(|&(ref s, _)| *s == **r);
+                                    match e {
+                                        Some(i) => {
+                                            current_mins.swap_remove(i);
+                                            None
+                                        }
+                                        None => Some((r, false)),
                                     }
-                                    None => Some((r, false)),
                                 }
+                                Ordering::Greater => None,
                             }
-                            Ordering::Greater => None,
-                        }
-                    })
-                    .map(|(r, p)| (&**r, p))
-                    .chain(output_rows.into_iter())
-                    .collect();
+                        })
+                        .map(|(r, p)| ((**r).clone(), p))
+                        .chain(output_rows.into_iter())
+                        .collect(),
+                    Cow::Owned(rs) => rs.into_iter()
+                        .filter_map(|r| {
+                            // Make sure that no duplicates are added to output_rows. This is simplified
+                            // by the fact that it currently contains all rows greater than `min`, and
+                            // none less than it. The only complication are rows which compare equal to
+                            // `min`: they get added except if there is already an identical row.
+                            match self.order.cmp(&&*r, &&min) {
+                                Ordering::Less => Some((r, false)),
+                                Ordering::Equal => {
+                                    let e = current_mins.iter().position(|&(ref s, _)| *s == *r);
+                                    match e {
+                                        Some(i) => {
+                                            current_mins.swap_remove(i);
+                                            None
+                                        }
+                                        None => Some((r, false)),
+                                    }
+                                }
+                                Ordering::Greater => None,
+                            }
+                        })
+                        .map(|(r, p)| (r.unpack(), p))
+                        .chain(output_rows.into_iter())
+                        .collect(),
+                };
             } else {
-                output_rows = rs.iter().map(|rs| (&**rs, false)).collect();
+                output_rows = match rs {
+                    Cow::Borrowed(rs) => rs.iter().map(|r| ((**r).clone(), false)).collect(),
+                    Cow::Owned(rs) => rs.into_iter().map(|r| (r.unpack(), false)).collect(),
+                };
             }
             output_rows.sort_by(|a, b| self.order.cmp(&a.0, &b.0));
         }
@@ -178,7 +209,7 @@ impl TopK {
                 bottom_rows
                     .into_iter()
                     .filter(|p| p.1)
-                    .map(|p| Record::Negative(p.0.clone())),
+                    .map(|p| Record::Negative(p.0)),
             );
         }
 
@@ -187,7 +218,7 @@ impl TopK {
             output_rows
                 .into_iter()
                 .filter(|p| !p.1)
-                .map(|p| Record::Positive(p.0.clone())),
+                .map(|p| Record::Positive(p.0)),
         );
         delta.into()
     }

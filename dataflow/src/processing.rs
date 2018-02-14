@@ -1,3 +1,4 @@
+use std::borrow::Cow;
 use std::collections::{HashMap, HashSet};
 
 use ops;
@@ -211,7 +212,7 @@ where
         _columns: &[usize],
         _key: &prelude::KeyType,
         _states: &'a prelude::StateMap,
-    ) -> Option<Option<Box<Iterator<Item = &'a [prelude::DataType]> + 'a>>> {
+    ) -> Option<Option<Box<Iterator<Item = Cow<'a, [prelude::DataType]>> + 'a>>> {
         None
     }
 
@@ -228,12 +229,15 @@ where
         key: &prelude::KeyType,
         domain: &prelude::DomainNodes,
         states: &'a prelude::StateMap,
-    ) -> Option<Option<Box<Iterator<Item = &'a [prelude::DataType]> + 'a>>> {
+    ) -> Option<Option<Box<Iterator<Item = Cow<'a, [prelude::DataType]>> + 'a>>> {
         states
             .get(&parent)
             .and_then(move |state| match state.lookup(columns, key) {
-                prelude::LookupResult::Some(rs) => {
-                    Some(Some(Box::new(rs.iter().map(|r| &r[..])) as Box<_>))
+                prelude::LookupResult::Some(Cow::Owned(rs)) => {
+                    Some(Some(Box::new(rs.into_iter().map(|r| Cow::Owned(r.unpack()))) as Box<_>))
+                }
+                prelude::LookupResult::Some(Cow::Borrowed(rs)) => {
+                    Some(Some(Box::new(rs.iter().map(|r| Cow::Borrowed(&r[..]))) as Box<_>))
                 }
                 prelude::LookupResult::Missing => Some(None),
             })

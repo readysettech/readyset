@@ -22,6 +22,12 @@ pub struct Row(pub(crate) Rc<Vec<DataType>>);
 
 unsafe impl Send for Row {}
 
+impl Row {
+    pub fn unpack(self) -> Vec<DataType> {
+        Rc::try_unwrap(self.0).unwrap()
+    }
+}
+
 impl Deref for Row {
     type Target = Vec<DataType>;
     fn deref(&self) -> &Self::Target {

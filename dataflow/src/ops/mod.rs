@@ -1,3 +1,4 @@
+use std::borrow::Cow;
 use std::collections::{HashMap, HashSet};
 
 use prelude::*;
@@ -194,7 +195,7 @@ impl Ingredient for NodeOperator {
         columns: &[usize],
         key: &KeyType,
         states: &'a StateMap,
-    ) -> Option<Option<Box<Iterator<Item = &'a [DataType]> + 'a>>> {
+    ) -> Option<Option<Box<Iterator<Item = Cow<'a, [DataType]>> + 'a>>> {
         impl_ingredient_fn_ref!(self, query_through, columns, key, states)
     }
     fn lookup<'a>(
@@ -204,7 +205,7 @@ impl Ingredient for NodeOperator {
         key: &KeyType,
         domain: &DomainNodes,
         states: &'a StateMap,
-    ) -> Option<Option<Box<Iterator<Item = &'a [DataType]> + 'a>>> {
+    ) -> Option<Option<Box<Iterator<Item = Cow<'a, [DataType]>> + 'a>>> {
         impl_ingredient_fn_ref!(self, lookup, parent, columns, key, domain, states)
     }
     fn parent_columns(&self, column: usize) -> Vec<(NodeIndex, Option<usize>)> {
