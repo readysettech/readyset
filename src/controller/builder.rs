@@ -81,21 +81,6 @@ impl ControllerBuilder {
         self.config.local_workers = workers;
     }
 
-    #[cfg(test)]
-    pub fn build_inner(self) -> ::controller::ControllerInner {
-        use std::net::SocketAddr;
-        use dataflow::checktable::service::CheckTableServer;
-        use controller::{ControllerInner, ControllerState};
-
-        let checktable_addr = CheckTableServer::start(SocketAddr::new(self.listen_addr, 0));
-        let initial_state = ControllerState {
-            config: self.config,
-            recipe: (),
-            epoch: LocalAuthority::get_epoch(),
-        };
-        ControllerInner::new(self.listen_addr, checktable_addr, self.log, initial_state)
-    }
-
     /// Set the logger that the derived controller should use. By default, it uses `slog::Discard`.
     pub fn log_with(&mut self, log: slog::Logger) {
         self.log = log;

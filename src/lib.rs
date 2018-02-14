@@ -315,6 +315,8 @@
 #![plugin(tarpc_plugins)]
 #![deny(unused_extern_crates)]
 
+#![feature(fnbox)]
+
 extern crate channel;
 extern crate consensus;
 extern crate core;

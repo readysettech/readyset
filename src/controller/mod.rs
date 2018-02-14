@@ -10,6 +10,8 @@ use controller::inner::ControllerInner;
 use controller::recipe::Recipe;
 use coordination::CoordinationMessage;
 
+#[cfg(test)]
+use std::boxed::FnBox;
 use std::io::{self, ErrorKind};
 use std::marker::PhantomData;
 use std::net::{IpAddr, SocketAddr};
@@ -173,6 +175,8 @@ enum ControlEvent {
     LostLeaderElection(ControllerState, ControllerDescriptor),
     Shutdown,
     Error(Error),
+    #[cfg(test)]
+    ManualMigration(Box<for<'a, 's> FnBox(&'a mut ::controller::migrate::Migration<'s>) + Send>),
 }
 
 /// Runs the soup instance.
@@ -313,6 +317,10 @@ impl<A: Authority + 'static> Controller<A> {
                 }
                 ControlEvent::Shutdown => break,
                 ControlEvent::Error(e) => panic!("{}", e),
+                #[cfg(test)]
+                ControlEvent::ManualMigration(f) => if let Some(ref mut inner) = self.inner {
+                    inner.migrate(move |m| f.call_box((m,)));
+                },
             }
         }
         self.external.stop();

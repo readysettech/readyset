@@ -76,14 +76,14 @@ fn sleep() {
 #[test]
 fn it_works_basic() {
     // set up graph
-    let mut g = ControllerBuilder::default().build_inner();
-    let pparams = PersistenceParameters::new(
+    let mut b = ControllerBuilder::default();
+    b.set_persistence(PersistenceParameters::new(
         DurabilityMode::DeleteOnExit,
         128,
         Duration::from_millis(1),
         Some(get_log_name("it_works_basic")),
-    );
-    g.with_persistence_options(pparams);
+    ));
+    let mut g = b.build_local();
     let (a, b, c) = g.migrate(|mig| {
         let a = mig.add_ingredient("a", &["a", "b"], Base::new(vec![]).with_key(vec![0]));
         let b = mig.add_ingredient("b", &["a", "b"], Base::new(vec![]).with_key(vec![0]));
@@ -98,8 +98,8 @@ fn it_works_basic() {
     });
 
     let mut cq = g.get_getter(c).unwrap();
-    let mut muta = g.get_mutator(a);
-    let mut mutb = g.get_mutator(b);
+    let mut muta = g.get_mutator(a).unwrap();
+    let mut mutb = g.get_mutator(b).unwrap();
     let id: DataType = 1.into();
 
     // send a value on a
@@ -144,7 +144,7 @@ fn it_works_basic() {
 #[test]
 fn it_works_streaming() {
     // set up graph
-    let mut g = ControllerBuilder::default().build_inner();
+    let mut g = ControllerBuilder::default().build_local();
     let (a, b, cq) = g.migrate(|mig| {
         let a = mig.add_ingredient("a", &["a", "b"], Base::default());
         let b = mig.add_ingredient("b", &["a", "b"], Base::default());
@@ -158,8 +158,8 @@ fn it_works_streaming() {
         (a, b, cq)
     });
 
-    let mut muta = g.get_mutator(a);
-    let mut mutb = g.get_mutator(b);
+    let mut muta = g.get_mutator(a).unwrap();
+    let mut mutb = g.get_mutator(b).unwrap();
     let id: DataType = 1.into();
 
     // send a value on a
@@ -180,7 +180,7 @@ fn it_works_streaming() {
 #[test]
 fn shared_interdomain_ancestor() {
     // set up graph
-    let mut g = ControllerBuilder::default().build_inner();
+    let mut g = ControllerBuilder::default().build_local();
     let (a, bq, cq) = g.migrate(|mig| {
         let a = mig.add_ingredient("a", &["a", "b"], Base::default());
 
@@ -197,7 +197,7 @@ fn shared_interdomain_ancestor() {
         (a, bq, cq)
     });
 
-    let mut muta = g.get_mutator(a);
+    let mut muta = g.get_mutator(a).unwrap();
     let id: DataType = 1.into();
 
     // send a value on a
@@ -226,7 +226,7 @@ fn shared_interdomain_ancestor() {
 #[test]
 fn it_works_w_mat() {
     // set up graph
-    let mut g = ControllerBuilder::default().build_inner();
+    let mut g = ControllerBuilder::default().build_local();
     let (a, b, c) = g.migrate(|mig| {
         let a = mig.add_ingredient("a", &["a", "b"], Base::default());
         let b = mig.add_ingredient("b", &["a", "b"], Base::default());
@@ -241,8 +241,8 @@ fn it_works_w_mat() {
     });
 
     let mut cq = g.get_getter(c).unwrap();
-    let mut muta = g.get_mutator(a);
-    let mut mutb = g.get_mutator(b);
+    let mut muta = g.get_mutator(a).unwrap();
+    let mut mutb = g.get_mutator(b).unwrap();
     let id: DataType = 1.into();
 
     // send a few values on a
@@ -283,7 +283,7 @@ fn it_works_w_mat() {
 #[test]
 fn it_works_deletion() {
     // set up graph
-    let mut g = ControllerBuilder::default().build_inner();
+    let mut g = ControllerBuilder::default().build_local();
     let (a, b, cq) = g.migrate(|mig| {
         let a = mig.add_ingredient("a", &["x", "y"], Base::new(vec![]).with_key(vec![1]));
         let b = mig.add_ingredient("b", &["_", "x", "y"], Base::new(vec![]).with_key(vec![2]));
@@ -297,8 +297,8 @@ fn it_works_deletion() {
         (a, b, cq)
     });
 
-    let mut muta = g.get_mutator(a);
-    let mut mutb = g.get_mutator(b);
+    let mut muta = g.get_mutator(a).unwrap();
+    let mut mutb = g.get_mutator(b).unwrap();
 
     // send a value on a
     muta.put(vec![1.into(), 2.into()]).unwrap();
@@ -324,22 +324,16 @@ fn it_works_deletion() {
 
 #[test]
 fn it_works_with_sql_recipe() {
-    let mut g = ControllerBuilder::default().build_inner();
+    let mut g = ControllerBuilder::default().build_local();
     let sql = "
         CREATE TABLE Car (id int, brand varchar(255), PRIMARY KEY(id));
         QUERY CountCars: SELECT COUNT(*) FROM Car WHERE brand = ?;
     ";
+    g.install_recipe(sql.to_owned()).unwrap();
+    let (inputs, outputs) = (g.inputs(), g.outputs());
 
-    let recipe = g.migrate(|mig| {
-        let mut recipe = Recipe::from_str(&sql, None).unwrap();
-        recipe.activate(mig, false).unwrap();
-        recipe
-    });
-
-    let car_index = recipe.node_addr_for("Car").unwrap();
-    let count_index = recipe.node_addr_for("CountCars").unwrap();
-    let mut mutator = g.get_mutator(car_index);
-    let mut getter = g.get_getter(count_index).unwrap();
+    let mut mutator = g.get_mutator(inputs["Car"]).unwrap();
+    let mut getter = g.get_getter(outputs["CountCars"]).unwrap();
     let brands = vec!["Volvo", "Volvo", "Volkswagen"];
     for (i, &brand) in brands.iter().enumerate() {
         mutator.put(vec![i.into(), brand.into()]).unwrap();
@@ -356,7 +350,7 @@ fn it_works_with_sql_recipe() {
 
 #[test]
 fn it_works_with_arithmetic_aliases() {
-    let mut g = ControllerBuilder::default().build_inner();
+    let mut g = ControllerBuilder::default().build_local();
     let sql = "
         CREATE TABLE Car (cid int, pid int, brand varchar(255), PRIMARY KEY(cid));
         CREATE TABLE Price (pid int, cent_price int, PRIMARY KEY(pid));
@@ -364,19 +358,12 @@ fn it_works_with_arithmetic_aliases() {
             JOIN (SELECT pid, cent_price / 100 AS price FROM Price) AS ActualPrice \
             ON Car.pid = ActualPrice.pid WHERE cid = ?;
     ";
+    g.install_recipe(sql.to_owned()).unwrap();
+    let (inputs, outputs) = (g.inputs(), g.outputs());
 
-    let recipe = g.migrate(|mig| {
-        let mut recipe = Recipe::from_str(&sql, None).unwrap();
-        recipe.activate(mig, false).unwrap();
-        recipe
-    });
-
-    let car_index = recipe.node_addr_for("Car").unwrap();
-    let price_index = recipe.node_addr_for("Price").unwrap();
-    let car_price_index = recipe.node_addr_for("CarPrice").unwrap();
-    let mut car_mutator = g.get_mutator(car_index);
-    let mut price_mutator = g.get_mutator(price_index);
-    let mut getter = g.get_getter(car_price_index).unwrap();
+    let mut car_mutator = g.get_mutator(inputs["Car"]).unwrap();
+    let mut price_mutator = g.get_mutator(inputs["Price"]).unwrap();
+    let mut getter = g.get_getter(outputs["CarPrice"]).unwrap();
     let cid = 1;
     let pid = 1;
     let cent_price = 10000;
@@ -401,32 +388,28 @@ fn it_works_with_arithmetic_aliases() {
 fn it_recovers_persisted_logs() {
     let log_name = LogName::new("it_recovers_persisted_logs");
     let setup = || {
-        let mut g = ControllerBuilder::default().build_inner();
-        let pparams = PersistenceParameters::new(
+        let mut g = ControllerBuilder::default();
+        g.set_persistence(PersistenceParameters::new(
             DurabilityMode::Permanent,
             128,
             Duration::from_millis(1),
             Some(log_name.name.clone()),
-        );
-        g.with_persistence_options(pparams);
+        ));
+        let mut g = g.build_local();
 
         let sql = "
             CREATE TABLE Car (id int, price int, PRIMARY KEY(id));
             QUERY CarPrice: SELECT price FROM Car WHERE id = ?;
         ";
+        g.install_recipe(sql.to_owned()).unwrap();
 
-        let recipe = g.migrate(|mig| {
-            let mut recipe = Recipe::from_str(&sql, None).unwrap();
-            recipe.activate(mig, false).unwrap();
-            recipe
-        });
-
-        (g, recipe)
+        g
     };
 
     {
-        let (g, recipe) = setup();
-        let mut mutator = g.get_mutator(recipe.node_addr_for("Car").unwrap());
+        let mut g = setup();
+        let inputs = g.inputs();
+        let mut mutator = g.get_mutator(inputs["Car"]).unwrap();
 
         for i in 1..10 {
             let price = i * 10;
@@ -437,9 +420,9 @@ fn it_recovers_persisted_logs() {
         sleep();
     }
 
-    let (mut g, recipe) = setup();
-    let mut getter = g.get_getter(recipe.node_addr_for("CarPrice").unwrap())
-        .unwrap();
+    let mut g = setup();
+    let outputs = g.outputs();
+    let mut getter = g.get_getter(outputs["CarPrice"]).unwrap();
 
     // Make sure that the new graph is empty:
     assert_eq!(getter.lookup(&1.into(), true).unwrap().len(), 0);
@@ -458,7 +441,7 @@ fn it_recovers_persisted_logs() {
 
 #[test]
 fn mutator_churn() {
-    let mut g = ControllerBuilder::default().build_inner();
+    let mut g = ControllerBuilder::default().build_local();
     let (vote, vc) = g.migrate(|mig| {
         // migrate
 
@@ -486,6 +469,7 @@ fn mutator_churn() {
     for _ in 0..votes {
         for i in 0..ids {
             g.get_mutator(vote)
+                .unwrap()
                 .put(vec![user.clone(), i.into()])
                 .unwrap();
         }
@@ -508,14 +492,14 @@ fn it_recovers_persisted_logs_w_multiple_nodes() {
     let log_name = LogName::new("it_recovers_persisted_logs_w_multiple_nodes");
     let tables = vec!["A", "B", "C"];
     let setup = || {
-        let mut g = ControllerBuilder::default().build_inner();
-        let pparams = PersistenceParameters::new(
+        let mut g = ControllerBuilder::default();
+        g.set_persistence(PersistenceParameters::new(
             DurabilityMode::Permanent,
             128,
             Duration::from_millis(1),
             Some(log_name.name.clone()),
-        );
-        g.with_persistence_options(pparams);
+        ));
+        let mut g = g.build_local();
 
         let sql = "
             CREATE TABLE A (id int, PRIMARY KEY(id));
@@ -526,20 +510,15 @@ fn it_recovers_persisted_logs_w_multiple_nodes() {
             QUERY BID: SELECT id FROM B WHERE id = ?;
             QUERY CID: SELECT id FROM C WHERE id = ?;
         ";
-
-        let recipe = g.migrate(|mig| {
-            let mut recipe = Recipe::from_str(&sql, None).unwrap();
-            recipe.activate(mig, false).unwrap();
-            recipe
-        });
-
-        (g, recipe)
+        g.install_recipe(sql.to_owned()).unwrap();
+        g
     };
 
     {
-        let (g, recipe) = setup();
+        let mut g = setup();
+        let inputs = g.inputs();
         for (i, table) in tables.iter().enumerate() {
-            let mut mutator = g.get_mutator(recipe.node_addr_for(table).unwrap());
+            let mut mutator = g.get_mutator(inputs[table.to_owned()]).unwrap();
             mutator.put(vec![i.into()]).unwrap();
         }
 
@@ -547,14 +526,14 @@ fn it_recovers_persisted_logs_w_multiple_nodes() {
         sleep();
     }
 
-    let (mut g, recipe) = setup();
+    let mut g = setup();
     // Recover and let the writes propagate:
     g.recover();
     sleep();
 
+    let outputs = g.outputs();
     for (i, table) in tables.iter().enumerate() {
-        let mut getter = g.get_getter(recipe.node_addr_for(&format!("{}ID", table)).unwrap())
-            .unwrap();
+        let mut getter = g.get_getter(outputs[&format!("{}ID", table)]).unwrap();
         let result = getter.lookup(&i.into(), true).unwrap();
         assert_eq!(result.len(), 1);
         assert_eq!(result[0][0], i.into());
@@ -565,14 +544,14 @@ fn it_recovers_persisted_logs_w_multiple_nodes() {
 fn it_recovers_persisted_logs_w_transactions() {
     let log_name = LogName::new("it_recovers_persisted_logs_w_transactions");
     let setup = || {
-        let mut g = ControllerBuilder::default().build_inner();
-        let pparams = PersistenceParameters::new(
+        let mut g = ControllerBuilder::default();
+        g.set_persistence(PersistenceParameters::new(
             DurabilityMode::Permanent,
             128,
             Duration::from_millis(1),
             Some(log_name.name.clone()),
-        );
-        g.with_persistence_options(pparams);
+        ));
+        let mut g = g.build_local();
 
         let a = g.migrate(|mig| {
             let a = mig.add_transactional_base("a", &["a", "b"], Base::default());
@@ -584,8 +563,8 @@ fn it_recovers_persisted_logs_w_transactions() {
     };
 
     {
-        let (g, a) = setup();
-        let mut mutator = g.get_mutator(a);
+        let (mut g, a) = setup();
+        let mut mutator = g.get_mutator(a).unwrap();
 
         for i in 1..10 {
             let b = i * 10;
@@ -619,22 +598,18 @@ fn it_recovers_persisted_logs_w_transactions() {
 
 #[test]
 fn it_works_with_simple_arithmetic() {
-    let mut g = ControllerBuilder::default().build_inner();
-    let sql = "
-        CREATE TABLE Car (id int, price int, PRIMARY KEY(id));
-        QUERY CarPrice: SELECT 2 * price FROM Car WHERE id = ?;
-    ";
+    let mut g = ControllerBuilder::default().build_local();
 
-    let recipe = g.migrate(|mig| {
+    g.migrate(|mig| {
+        let sql = "CREATE TABLE Car (id int, price int, PRIMARY KEY(id));
+                   QUERY CarPrice: SELECT 2 * price FROM Car WHERE id = ?;";
         let mut recipe = Recipe::from_str(&sql, None).unwrap();
         recipe.activate(mig, false).unwrap();
-        recipe
     });
 
-    let car_index = recipe.node_addr_for("Car").unwrap();
-    let count_index = recipe.node_addr_for("CarPrice").unwrap();
-    let mut mutator = g.get_mutator(car_index);
-    let mut getter = g.get_getter(count_index).unwrap();
+    let (inputs, outputs) = (g.inputs(), g.outputs());
+    let mut mutator = g.get_mutator(inputs["Car"]).unwrap();
+    let mut getter = g.get_getter(outputs["CarPrice"]).unwrap();
     let id: DataType = 1.into();
     let price: DataType = 123.into();
     mutator.put(vec![id.clone(), price]).unwrap();
@@ -650,22 +625,15 @@ fn it_works_with_simple_arithmetic() {
 
 #[test]
 fn it_works_with_multiple_arithmetic_expressions() {
-    let mut g = ControllerBuilder::default().build_inner();
-    let sql = "
-        CREATE TABLE Car (id int, price int, PRIMARY KEY(id));
-        QUERY CarPrice: SELECT 10 * 10, 2 * price, 10 * price, FROM Car WHERE id = ?;
-    ";
+    let mut g = ControllerBuilder::default().build_local();
+    let sql = "CREATE TABLE Car (id int, price int, PRIMARY KEY(id));
+               QUERY CarPrice: SELECT 10 * 10, 2 * price, 10 * price, FROM Car WHERE id = ?;
+               ";
+    g.install_recipe(sql.to_owned()).unwrap();
 
-    let recipe = g.migrate(|mig| {
-        let mut recipe = Recipe::from_str(&sql, None).unwrap();
-        recipe.activate(mig, false).unwrap();
-        recipe
-    });
-
-    let car_index = recipe.node_addr_for("Car").unwrap();
-    let count_index = recipe.node_addr_for("CarPrice").unwrap();
-    let mut mutator = g.get_mutator(car_index);
-    let mut getter = g.get_getter(count_index).unwrap();
+    let (inputs, outputs) = (g.inputs(), g.outputs());
+    let mut mutator = g.get_mutator(inputs["Car"]).unwrap();
+    let mut getter = g.get_getter(outputs["CarPrice"]).unwrap();
     let id: DataType = 1.into();
     let price: DataType = 123.into();
     mutator.put(vec![id.clone(), price]).unwrap();
@@ -683,7 +651,7 @@ fn it_works_with_multiple_arithmetic_expressions() {
 
 #[test]
 fn it_works_with_join_arithmetic() {
-    let mut g = ControllerBuilder::default().build_inner();
+    let mut g = ControllerBuilder::default().build_local();
     let sql = "
         CREATE TABLE Car (car_id int, price_id int, PRIMARY KEY(car_id));
         CREATE TABLE Price (price_id int, price int, PRIMARY KEY(price_id));
@@ -693,21 +661,13 @@ fn it_works_with_join_arithmetic() {
                   JOIN Sales ON Price.price_id = Sales.price_id \
                   WHERE car_id = ?;
     ";
+    g.install_recipe(sql.to_owned()).unwrap();
 
-    let recipe = g.migrate(|mig| {
-        let mut recipe = Recipe::from_str(&sql, None).unwrap();
-        recipe.activate(mig, false).unwrap();
-        recipe
-    });
-
-    let car_index = recipe.node_addr_for("Car").unwrap();
-    let price_index = recipe.node_addr_for("Price").unwrap();
-    let sales_index = recipe.node_addr_for("Sales").unwrap();
-    let query_index = recipe.node_addr_for("CarPrice").unwrap();
-    let mut car_mutator = g.get_mutator(car_index);
-    let mut price_mutator = g.get_mutator(price_index);
-    let mut sales_mutator = g.get_mutator(sales_index);
-    let mut getter = g.get_getter(query_index).unwrap();
+    let (inputs, outputs) = (g.inputs(), g.outputs());
+    let mut car_mutator = g.get_mutator(inputs["Car"]).unwrap();
+    let mut price_mutator = g.get_mutator(inputs["Price"]).unwrap();
+    let mut sales_mutator = g.get_mutator(inputs["Sales"]).unwrap();
+    let mut getter = g.get_getter(outputs["CarPrice"]).unwrap();
     let id = 1;
     let price = 123;
     let fraction = 0.7;
@@ -728,22 +688,16 @@ fn it_works_with_join_arithmetic() {
 
 #[test]
 fn it_works_with_function_arithmetic() {
-    let mut g = ControllerBuilder::default().build_inner();
+    let mut g = ControllerBuilder::default().build_local();
     let sql = "
         CREATE TABLE Bread (id int, price int, PRIMARY KEY(id));
         QUERY Price: SELECT 2 * MAX(price) FROM Bread;
     ";
+    g.install_recipe(sql.to_owned()).unwrap();
 
-    let recipe = g.migrate(|mig| {
-        let mut recipe = Recipe::from_str(&sql, None).unwrap();
-        recipe.activate(mig, false).unwrap();
-        recipe
-    });
-
-    let bread_index = recipe.node_addr_for("Bread").unwrap();
-    let query_index = recipe.node_addr_for("Price").unwrap();
-    let mut mutator = g.get_mutator(bread_index);
-    let mut getter = g.get_getter(query_index).unwrap();
+    let (inputs, outputs) = (g.inputs(), g.outputs());
+    let mut mutator = g.get_mutator(inputs["Bread"]).unwrap();
+    let mut getter = g.get_getter(outputs["Price"]).unwrap();
     let max_price = 20;
     for (i, price) in (10..max_price + 1).enumerate() {
         let id = i + 1;
@@ -763,7 +717,7 @@ fn it_works_with_function_arithmetic() {
 #[test]
 fn votes() {
     // set up graph
-    let mut g = ControllerBuilder::default().build_inner();
+    let mut g = ControllerBuilder::default().build_local();
     let (article1, article2, vote, article, vc, end) = g.migrate(|mig| {
         // add article base nodes (we use two so we can exercise unions too)
         let article1 = mig.add_ingredient("article1", &["id", "title"], Base::default());
@@ -800,9 +754,9 @@ fn votes() {
     let mut vcq = g.get_getter(vc).unwrap();
     let mut endq = g.get_getter(end).unwrap();
 
-    let mut mut1 = g.get_mutator(article1);
-    let mut mut2 = g.get_mutator(article2);
-    let mut mutv = g.get_mutator(vote);
+    let mut mut1 = g.get_mutator(article1).unwrap();
+    let mut mut2 = g.get_mutator(article2).unwrap();
+    let mut mutv = g.get_mutator(vote).unwrap();
 
     let a1: DataType = 1.into();
     let a2: DataType = 2.into();
@@ -867,7 +821,7 @@ fn transactional_vote() {
     // set up graph
     let mut g = ControllerBuilder::default();
     g.disable_partial(); // because end_votes forces full below partial
-    let mut g = g.build_inner();
+    let mut g = g.build_local();
     let validate = g.get_validator();
 
     let (article1, article2, vote, article, vc, end, end_title, end_votes) = g.migrate(|mig| {
@@ -922,9 +876,9 @@ fn transactional_vote() {
     let mut endq_title = g.get_getter(end_title).unwrap();
     let mut endq_votes = g.get_getter(end_votes).unwrap();
 
-    let mut mut1 = g.get_mutator(article1);
-    let mut mut2 = g.get_mutator(article2);
-    let mut mutv = g.get_mutator(vote);
+    let mut mut1 = g.get_mutator(article1).unwrap();
+    let mut mut2 = g.get_mutator(article2).unwrap();
+    let mut mutv = g.get_mutator(vote).unwrap();
 
     let a1: DataType = 1.into();
     let a2: DataType = 2.into();
@@ -1018,7 +972,7 @@ fn transactional_vote() {
 #[test]
 fn empty_migration() {
     // set up graph
-    let mut g = ControllerBuilder::default().build_inner();
+    let mut g = ControllerBuilder::default().build_local();
     g.migrate(|_| {});
 
     let (a, b, c) = g.migrate(|mig| {
@@ -1035,8 +989,8 @@ fn empty_migration() {
     });
 
     let mut cq = g.get_getter(c).unwrap();
-    let mut muta = g.get_mutator(a);
-    let mut mutb = g.get_mutator(b);
+    let mut muta = g.get_mutator(a).unwrap();
+    let mut mutb = g.get_mutator(b).unwrap();
     let id: DataType = 1.into();
 
     // send a value on a
@@ -1065,7 +1019,7 @@ fn simple_migration() {
     let id: DataType = 1.into();
 
     // set up graph
-    let mut g = ControllerBuilder::default().build_inner();
+    let mut g = ControllerBuilder::default().build_local();
     let a = g.migrate(|mig| {
         let a = mig.add_ingredient("a", &["a", "b"], Base::default());
         mig.maintain_anonymous(a, 0);
@@ -1073,7 +1027,7 @@ fn simple_migration() {
     });
 
     let mut aq = g.get_getter(a).unwrap();
-    let mut muta = g.get_mutator(a);
+    let mut muta = g.get_mutator(a).unwrap();
 
     // send a value on a
     muta.put(vec![id.clone(), 2.into()]).unwrap();
@@ -1092,7 +1046,7 @@ fn simple_migration() {
     });
 
     let mut bq = g.get_getter(b).unwrap();
-    let mut mutb = g.get_mutator(b);
+    let mut mutb = g.get_mutator(b).unwrap();
 
     // send a value on b
     mutb.put(vec![id.clone(), 4.into()]).unwrap();
@@ -1109,13 +1063,13 @@ fn add_columns() {
     let id: DataType = "x".into();
 
     // set up graph
-    let mut g = ControllerBuilder::default().build_inner();
+    let mut g = ControllerBuilder::default().build_local();
     let (a, aq) = g.migrate(|mig| {
         let a = mig.add_ingredient("a", &["a", "b"], Base::new(vec![1.into(), 2.into()]));
         let aq = mig.stream(a);
         (a, aq)
     });
-    let mut muta = g.get_mutator(a);
+    let mut muta = g.get_mutator(a).unwrap();
 
     // send a value on a
     muta.put(vec![id.clone(), "y".into()]).unwrap();
@@ -1127,7 +1081,7 @@ fn add_columns() {
     );
 
     // add a third column to a
-    g.migrate(|mig| {
+    g.migrate(move |mig| {
         mig.add_column(a, "c", 3.into());
     });
 
@@ -1141,7 +1095,7 @@ fn add_columns() {
     );
 
     // get a new muta and send a new value on it
-    let mut muta = g.get_mutator(a);
+    let mut muta = g.get_mutator(a).unwrap();
     muta.put(vec![id.clone(), "a".into(), 10.into()]).unwrap();
 
     // check that a got it, and included the third column
@@ -1156,19 +1110,19 @@ fn migrate_added_columns() {
     let id: DataType = "x".into();
 
     // set up graph
-    let mut g = ControllerBuilder::default().build_inner();
+    let mut g = ControllerBuilder::default().build_local();
     let a = g.migrate(|mig| {
         let a = mig.add_ingredient("a", &["a", "b"], Base::new(vec![1.into(), 2.into()]));
         a
     });
-    let mut muta = g.get_mutator(a);
+    let mut muta = g.get_mutator(a).unwrap();
 
     // send a value on a
     muta.put(vec![id.clone(), "y".into()]).unwrap();
     sleep();
 
     // add a third column to a, and a view that uses it
-    let b = g.migrate(|mig| {
+    let b = g.migrate(move |mig| {
         mig.add_column(a, "c", 3.into());
         let b = mig.add_ingredient("x", &["c", "b"], Project::new(a, &[2, 0], None, None));
         mig.maintain_anonymous(b, 1);
@@ -1180,7 +1134,7 @@ fn migrate_added_columns() {
     // send another (old) value on a
     muta.put(vec![id.clone(), "z".into()]).unwrap();
     // and an entirely new value
-    let mut muta = g.get_mutator(a);
+    let mut muta = g.get_mutator(a).unwrap();
     muta.put(vec![id.clone(), "a".into(), 10.into()]).unwrap();
 
     // give it some time to propagate
@@ -1204,36 +1158,36 @@ fn migrate_drop_columns() {
     let id: DataType = "x".into();
 
     // set up graph
-    let mut g = ControllerBuilder::default().build_inner();
+    let mut g = ControllerBuilder::default().build_local();
     let (a, stream) = g.migrate(|mig| {
         let a = mig.add_ingredient("a", &["a", "b"], Base::new(vec!["a".into(), "b".into()]));
         let stream = mig.stream(a);
         (a, stream)
     });
-    let mut muta1 = g.get_mutator(a);
+    let mut muta1 = g.get_mutator(a).unwrap();
 
     // send a value on a
     muta1.put(vec![id.clone(), "bx".into()]).unwrap();
     sleep();
 
     // drop a column
-    g.migrate(|mig| {
+    g.migrate(move |mig| {
         mig.drop_column(a, 1);
     });
 
     // new mutator should only require one column
     // and should inject default for a.b
-    let mut muta2 = g.get_mutator(a);
+    let mut muta2 = g.get_mutator(a).unwrap();
     muta2.put(vec![id.clone()]).unwrap();
     sleep();
 
     // add a new column
-    g.migrate(|mig| {
+    g.migrate(move |mig| {
         mig.add_column(a, "c", "c".into());
     });
 
     // new mutator allows putting two values, and injects default for a.b
-    let mut muta3 = g.get_mutator(a);
+    let mut muta3 = g.get_mutator(a).unwrap();
     muta3.put(vec![id.clone(), "cy".into()]).unwrap();
     sleep();
 
@@ -1270,14 +1224,14 @@ fn migrate_drop_columns() {
 #[test]
 fn key_on_added() {
     // set up graph
-    let mut g = ControllerBuilder::default().build_inner();
+    let mut g = ControllerBuilder::default().build_local();
     let a = g.migrate(|mig| {
         let a = mig.add_ingredient("a", &["a", "b"], Base::new(vec![1.into(), 2.into()]));
         a
     });
 
     // add a maintained view keyed on newly added column
-    let b = g.migrate(|mig| {
+    let b = g.migrate(move |mig| {
         mig.add_column(a, "c", 3.into());
         let b = mig.add_ingredient("x", &["c", "b"], Project::new(a, &[2, 1], None, None));
         mig.maintain_anonymous(b, 0);
@@ -1297,7 +1251,7 @@ fn replay_during_replay() {
     // right in a left join, that's what we have to construct.
     let mut g = ControllerBuilder::default();
     g.disable_partial();
-    let mut g = g.build_inner();
+    let mut g = g.build_local();
     let (a, u1, u2) = g.migrate(|mig| {
         // we need three bases:
         //
@@ -1311,7 +1265,7 @@ fn replay_during_replay() {
     });
 
     // add our joins
-    let (u, target) = g.migrate(|mig| {
+    let (u, target) = g.migrate(move |mig| {
         // u = u1 * u2
         let j = Join::new(u1, u2, JoinType::Inner, vec![B(0, 0), R(1)]);
         let u = mig.add_ingredient("u", &["u", "a"], j);
@@ -1325,9 +1279,9 @@ fn replay_during_replay() {
     // must already be present in the one index that `u` has. let's do some writes and check that
     // nothing crashes.
 
-    let mut muta = g.get_mutator(a);
-    let mut mutu1 = g.get_mutator(u1);
-    let mut mutu2 = g.get_mutator(u2);
+    let mut muta = g.get_mutator(a).unwrap();
+    let mut mutu1 = g.get_mutator(u1).unwrap();
+    let mut mutu2 = g.get_mutator(u2).unwrap();
 
     // as are numbers
     muta.put(vec![1.into()]).unwrap();
@@ -1357,7 +1311,7 @@ fn replay_during_replay() {
 
     // we now know that u has key a=1 in its index
     // now we add a secondary index on u.u
-    g.migrate(|mig| {
+    g.migrate(move |mig| {
         mig.maintain_anonymous(u, 0);
     });
 
@@ -1395,12 +1349,12 @@ fn replay_during_replay() {
 #[test]
 fn full_aggregation_with_bogokey() {
     // set up graph
-    let mut g = ControllerBuilder::default().build_inner();
+    let mut g = ControllerBuilder::default().build_local();
     let base = g.migrate(|mig| mig.add_ingredient("base", &["x"], Base::new(vec![1.into()])));
 
     // add an aggregation over the base with a bogo key.
     // in other words, the aggregation is across all rows.
-    let agg = g.migrate(|mig| {
+    let agg = g.migrate(move |mig| {
         let bogo = mig.add_ingredient(
             "bogo",
             &["x", "bogo"],
@@ -1416,7 +1370,7 @@ fn full_aggregation_with_bogokey() {
     });
 
     let mut aggq = g.get_getter(agg).unwrap();
-    let mut base = g.get_mutator(base);
+    let mut base = g.get_mutator(base).unwrap();
 
     // insert some values
     base.put(vec![1.into()]).unwrap();
@@ -1448,7 +1402,7 @@ fn full_aggregation_with_bogokey() {
 #[test]
 fn transactional_migration() {
     // set up graph
-    let mut g = ControllerBuilder::default().build_inner();
+    let mut g = ControllerBuilder::default().build_local();
     let a = g.migrate(|mig| {
         let a = mig.add_transactional_base("a", &["a", "b"], Base::default());
         mig.maintain_anonymous(a, 0);
@@ -1456,7 +1410,7 @@ fn transactional_migration() {
     });
 
     let mut aq = g.get_getter(a).unwrap();
-    let mut muta = g.get_mutator(a);
+    let mut muta = g.get_mutator(a).unwrap();
 
     // send a value on a
     muta.transactional_put(vec![1.into(), 2.into()], Token::empty())
@@ -1479,7 +1433,7 @@ fn transactional_migration() {
     });
 
     let mut bq = g.get_getter(b).unwrap();
-    let mut mutb = g.get_mutator(b);
+    let mut mutb = g.get_mutator(b).unwrap();
 
     // send a value on b
     mutb.transactional_put(vec![2.into(), 4.into()], Token::empty())
@@ -1494,7 +1448,7 @@ fn transactional_migration() {
         vec![vec![2.into(), 4.into()]]
     );
 
-    let c = g.migrate(|mig| {
+    let c = g.migrate(move |mig| {
         let mut emits = HashMap::new();
         emits.insert(a, vec![0, 1]);
         emits.insert(b, vec![0, 1]);
@@ -1537,16 +1491,16 @@ fn transactional_migration() {
 #[test]
 fn crossing_migration() {
     // set up graph
-    let mut g = ControllerBuilder::default().build_inner();
+    let mut g = ControllerBuilder::default().build_local();
     let (a, b) = g.migrate(|mig| {
         let a = mig.add_ingredient("a", &["a", "b"], Base::default());
         let b = mig.add_ingredient("b", &["a", "b"], Base::default());
         (a, b)
     });
-    let mut muta = g.get_mutator(a);
-    let mut mutb = g.get_mutator(b);
+    let mut muta = g.get_mutator(a).unwrap();
+    let mut mutb = g.get_mutator(b).unwrap();
 
-    let cq = g.migrate(|mig| {
+    let cq = g.migrate(move |mig| {
         let mut emits = HashMap::new();
         emits.insert(a, vec![0, 1]);
         emits.insert(b, vec![0, 1]);
@@ -1577,7 +1531,7 @@ fn independent_domain_migration() {
     let id: DataType = 1.into();
 
     // set up graph
-    let mut g = ControllerBuilder::default().build_inner();
+    let mut g = ControllerBuilder::default().build_local();
     let a = g.migrate(|mig| {
         let a = mig.add_ingredient("a", &["a", "b"], Base::default());
         mig.maintain_anonymous(a, 0);
@@ -1585,7 +1539,7 @@ fn independent_domain_migration() {
     });
 
     let mut aq = g.get_getter(a).unwrap();
-    let mut muta = g.get_mutator(a);
+    let mut muta = g.get_mutator(a).unwrap();
 
     // send a value on a
     muta.put(vec![id.clone(), 2.into()]).unwrap();
@@ -1604,7 +1558,7 @@ fn independent_domain_migration() {
     });
 
     let mut bq = g.get_getter(b).unwrap();
-    let mut mutb = g.get_mutator(b);
+    let mut mutb = g.get_mutator(b).unwrap();
 
     // send a value on b
     mutb.put(vec![id.clone(), 4.into()]).unwrap();
@@ -1619,16 +1573,16 @@ fn independent_domain_migration() {
 #[test]
 fn domain_amend_migration() {
     // set up graph
-    let mut g = ControllerBuilder::default().build_inner();
+    let mut g = ControllerBuilder::default().build_local();
     let (a, b) = g.migrate(|mig| {
         let a = mig.add_ingredient("a", &["a", "b"], Base::default());
         let b = mig.add_ingredient("b", &["a", "b"], Base::default());
         (a, b)
     });
-    let mut muta = g.get_mutator(a);
-    let mut mutb = g.get_mutator(b);
+    let mut muta = g.get_mutator(a).unwrap();
+    let mut mutb = g.get_mutator(b).unwrap();
 
-    let cq = g.migrate(|mig| {
+    let cq = g.migrate(move |mig| {
         let mut emits = HashMap::new();
         emits.insert(a, vec![0, 1]);
         emits.insert(b, vec![0, 1]);
@@ -1669,19 +1623,19 @@ fn state_replay_migration_stream() {
     // and send through some updates on the other (new) side of the join, and see that the expected
     // things come out the other end.
 
-    let mut g = ControllerBuilder::default().build_inner();
+    let mut g = ControllerBuilder::default().build_local();
     let a = g.migrate(|mig| {
         let a = mig.add_ingredient("a", &["x", "y"], Base::default());
         a
     });
-    let mut muta = g.get_mutator(a);
+    let mut muta = g.get_mutator(a).unwrap();
 
     // make a couple of records
     muta.put(vec![1.into(), "a".into()]).unwrap();
     muta.put(vec![1.into(), "b".into()]).unwrap();
     muta.put(vec![2.into(), "c".into()]).unwrap();
 
-    let (out, b) = g.migrate(|mig| {
+    let (out, b) = g.migrate(move |mig| {
         // add a new base and a join
         let b = mig.add_ingredient("b", &["x", "z"], Base::default());
         let j = Join::new(a, b, JoinType::Inner, vec![B(0, 0), L(1), R(1)]);
@@ -1692,7 +1646,7 @@ fn state_replay_migration_stream() {
 
         (out, b)
     });
-    let mut mutb = g.get_mutator(b);
+    let mut mutb = g.get_mutator(b).unwrap();
 
     // if all went according to plan, the ingress to j's domains hould now contain all the records
     // that we initially inserted into a. thus, when we forward matching things through j, we
@@ -1732,7 +1686,7 @@ fn migration_depends_on_unchanged_domain() {
     // this is tricky, because the system must realize that n is materialized, even though it
     // normally wouldn't even look at that part of the data flow graph!
 
-    let mut g = ControllerBuilder::default().build_inner();
+    let mut g = ControllerBuilder::default().build_local();
     let left = g.migrate(|mig| {
         // base node, so will be materialized
         let left = mig.add_ingredient("foo", &["a", "b"], Base::default());
@@ -1742,7 +1696,7 @@ fn migration_depends_on_unchanged_domain() {
         left
     });
 
-    g.migrate(|mig| {
+    g.migrate(move |mig| {
         // joins require their inputs to be materialized
         // we need a new base as well so we can actually make a join
         let tmp = mig.add_ingredient("tmp", &["a", "b"], Base::default());
@@ -1758,7 +1712,7 @@ fn migration_depends_on_unchanged_domain() {
 }
 
 fn do_full_vote_migration(old_puts_after: bool) {
-    let mut g = ControllerBuilder::default().build_inner();
+    let mut g = ControllerBuilder::default().build_local();
     let (article, vote, vc, end) = g.migrate(|mig| {
         // migrate
 
@@ -1782,8 +1736,8 @@ fn do_full_vote_migration(old_puts_after: bool) {
         mig.maintain_anonymous(end, 0);
         (article, vote, vc, end)
     });
-    let mut muta = g.get_mutator(article);
-    let mut mutv = g.get_mutator(vote);
+    let mut muta = g.get_mutator(article).unwrap();
+    let mut mutv = g.get_mutator(vote).unwrap();
 
     let n = 250i64;
     let title: DataType = "foo".into();
@@ -1813,7 +1767,7 @@ fn do_full_vote_migration(old_puts_after: bool) {
     }
 
     // migrate
-    let (rating, last) = g.migrate(|mig| {
+    let (rating, last) = g.migrate(move |mig| {
         // add new "ratings" base table
         let rating = mig.add_ingredient("rating", &["user", "id", "stars"], Base::default());
 
@@ -1841,7 +1795,7 @@ fn do_full_vote_migration(old_puts_after: bool) {
     });
 
     let mut last = g.get_getter(last).unwrap();
-    let mut mutr = g.get_mutator(rating);
+    let mut mutr = g.get_mutator(rating).unwrap();
     for i in 0..n {
         if old_puts_after {
             mutv.put(vec![1.into(), i.into()]).unwrap();
@@ -1882,7 +1836,7 @@ fn full_vote_migration_new_and_old() {
 
 #[test]
 fn live_writes() {
-    let mut g = ControllerBuilder::default().build_inner();
+    let mut g = ControllerBuilder::default().build_local();
     let (vote, vc) = g.migrate(|mig| {
         // migrate
 
@@ -1901,7 +1855,7 @@ fn live_writes() {
     });
 
     let mut vc_state = g.get_getter(vc).unwrap();
-    let mut add = g.get_mutator(vote);
+    let mut add = g.get_mutator(vote).unwrap();
 
     let ids = 1000;
     let votes = 7;
@@ -1920,7 +1874,7 @@ fn live_writes() {
     sleep();
 
     // now do a migration that's going to have to copy state
-    let vc2 = g.migrate(|mig| {
+    let vc2 = g.migrate(move |mig| {
         let vc2 = mig.add_ingredient(
             "votecount2",
             &["id", "votes"],
@@ -1959,15 +1913,15 @@ fn state_replay_migration_query() {
     // read from rather than relying on forwarding. to further stress the graph, *both* base nodes
     // are created and populated before the migration, meaning we have to replay through a join.
 
-    let mut g = ControllerBuilder::default().build_inner();
+    let mut g = ControllerBuilder::default().build_local();
     let (a, b) = g.migrate(|mig| {
         let a = mig.add_ingredient("a", &["x", "y"], Base::default());
         let b = mig.add_ingredient("b", &["x", "z"], Base::default());
 
         (a, b)
     });
-    let mut muta = g.get_mutator(a);
-    let mut mutb = g.get_mutator(b);
+    let mut muta = g.get_mutator(a).unwrap();
+    let mut mutb = g.get_mutator(b).unwrap();
 
     // make a couple of records
     muta.put(vec![1.into(), "a".into()]).unwrap();
@@ -1976,7 +1930,7 @@ fn state_replay_migration_query() {
     mutb.put(vec![1.into(), "n".into()]).unwrap();
     mutb.put(vec![2.into(), "o".into()]).unwrap();
 
-    let out = g.migrate(|mig| {
+    let out = g.migrate(move |mig| {
         // add join and a reader node
         let j = Join::new(a, b, JoinType::Inner, vec![B(0, 0), L(1), R(1)]);
         let j = mig.add_ingredient("j", &["x", "y", "z"], j);
@@ -2013,14 +1967,13 @@ fn state_replay_migration_query() {
 
 #[test]
 fn recipe_activates() {
-    let r_txt = "CREATE TABLE b (a text, c text, x text);\n";
-    let mut r = Recipe::from_str(r_txt, None).unwrap();
-    assert_eq!(r.version(), 0);
-    assert_eq!(r.expressions().len(), 1);
-    assert_eq!(r.prior(), None);
-
-    let mut g = ControllerBuilder::default().build_inner();
+    let mut g = ControllerBuilder::default().build_local();
     g.migrate(|mig| {
+        let r_txt = "CREATE TABLE b (a text, c text, x text);\n";
+        let mut r = Recipe::from_str(r_txt, None).unwrap();
+        assert_eq!(r.version(), 0);
+        assert_eq!(r.expressions().len(), 1);
+        assert_eq!(r.prior(), None);
         assert!(r.activate(mig, false).is_ok());
     });
     // one base node
@@ -2030,29 +1983,15 @@ fn recipe_activates() {
 #[test]
 fn recipe_activates_and_migrates() {
     let r_txt = "CREATE TABLE b (a text, c text, x text);\n";
-    let mut r = Recipe::from_str(r_txt, None).unwrap();
-    assert_eq!(r.version(), 0);
-    assert_eq!(r.expressions().len(), 1);
-    assert_eq!(r.prior(), None);
+    let r1_txt = "QUERY qa: SELECT a FROM b;\n
+                  QUERY qb: SELECT a, c FROM b WHERE a = 42;";
 
-    let mut g = ControllerBuilder::default().build_inner();
-    g.migrate(|mig| {
-        assert!(r.activate(mig, false).is_ok());
-    });
+    let mut g = ControllerBuilder::default().build_local();
+    g.install_recipe(r_txt.to_owned()).unwrap();
     // one base node
     assert_eq!(g.inputs().len(), 1);
 
-    let r_copy = r.clone();
-
-    let r1_txt = "QUERY qa: SELECT a FROM b;\n
-                  QUERY qb: SELECT a, c FROM b WHERE a = 42;";
-    let mut r1 = r.extend(r1_txt).unwrap();
-    assert_eq!(r1.version(), 1);
-    assert_eq!(r1.expressions().len(), 3);
-    assert_eq!(**r1.prior().unwrap(), r_copy);
-    g.migrate(|mig| {
-        assert!(r1.activate(mig, false).is_ok());
-    });
+    g.extend_recipe(r1_txt.to_owned()).unwrap();
     // still one base node
     assert_eq!(g.inputs().len(), 1);
     // two leaf nodes
@@ -2063,28 +2002,16 @@ fn recipe_activates_and_migrates() {
 fn recipe_activates_and_migrates_with_join() {
     let r_txt = "CREATE TABLE a (x int, y int, z int);\n
                  CREATE TABLE b (r int, s int);\n";
-    let mut r = Recipe::from_str(r_txt, None).unwrap();
-    assert_eq!(r.version(), 0);
-    assert_eq!(r.expressions().len(), 2);
-    assert_eq!(r.prior(), None);
+    let r1_txt = "QUERY q: SELECT y, s FROM a, b WHERE a.x = b.r;";
 
-    let mut g = ControllerBuilder::default().build_inner();
-    g.migrate(|mig| {
-        assert!(r.activate(mig, false).is_ok());
-    });
+    let mut g = ControllerBuilder::default().build_local();
+    g.install_recipe(r_txt.to_owned()).unwrap();
+
     // two base nodes
     assert_eq!(g.inputs().len(), 2);
 
-    let r_copy = r.clone();
+    g.extend_recipe(r1_txt.to_owned()).unwrap();
 
-    let r1_txt = "QUERY q: SELECT y, s FROM a, b WHERE a.x = b.r;";
-    let mut r1 = r.extend(r1_txt).unwrap();
-    assert_eq!(r1.version(), 1);
-    assert_eq!(r1.expressions().len(), 3);
-    assert_eq!(**r1.prior().unwrap(), r_copy);
-    g.migrate(|mig| {
-        assert!(r1.activate(mig, false).is_ok());
-    });
     // still two base nodes
     assert_eq!(g.inputs().len(), 2);
     // one leaf node
@@ -2097,9 +2024,9 @@ fn finkelstein1982_queries() {
     use std::fs::File;
 
     // set up graph
-    let mut g = ControllerBuilder::default().build_inner();
-    let mut inc = SqlIncorporator::default();
+    let mut g = ControllerBuilder::default().build_local();
     g.migrate(|mig| {
+        let mut inc = SqlIncorporator::default();
         let mut f = File::open("tests/finkelstein82.txt").unwrap();
         let mut s = String::new();
 
@@ -2129,9 +2056,9 @@ fn tpc_w() {
     use std::fs::File;
 
     // set up graph
-    let mut g = ControllerBuilder::default().build_inner();
-    let mut r = Recipe::blank(None);
+    let mut g = ControllerBuilder::default().build_local();
     g.migrate(|mig| {
+        let mut r = Recipe::blank(None);
         let mut f = File::open("tests/tpc-w-queries.txt").unwrap();
         let mut s = String::new();
 

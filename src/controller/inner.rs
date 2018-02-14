@@ -569,16 +569,6 @@ impl ControllerInner {
         }
     }
 
-    #[cfg(test)]
-    pub fn get_mutator(&self, base: NodeIndex) -> ::controller::Mutator {
-        self.mutator_builder(base)
-            .build("127.0.0.1:0".parse().unwrap())
-    }
-    #[cfg(test)]
-    pub fn get_getter(&self, node: NodeIndex) -> Option<::controller::RemoteGetter> {
-        self.getter_builder(node).map(|g| g.build())
-    }
-
     pub fn graphviz(&self) -> String {
         let mut s = String::new();
 

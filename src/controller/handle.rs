@@ -1,4 +1,4 @@
-use consensus::Authority;
+use consensus::{Authority, LocalAuthority};
 use dataflow::prelude::*;
 use dataflow::statistics::GraphStats;
 
@@ -135,6 +135,46 @@ impl<A: Authority> ControllerHandle<A> {
     /// Wait for associated local controller to exit.
     pub fn wait(mut self) {
         self.local.take().unwrap().1.join().unwrap()
+    }
+}
+impl ControllerHandle<LocalAuthority> {
+    #[cfg(test)]
+    pub fn migrate<F, T>(&mut self, f: F) -> T
+    where
+        F: for<'a> FnMut(&'a mut ::controller::migrate::Migration) -> T + Send + 'static,
+        T: Send + 'static,
+    {
+        use controller::migrate::Migration;
+        use std::boxed::FnBox;
+        use std::sync::Mutex;
+
+        let f = Arc::new(Mutex::new(Some(f)));
+        loop {
+            let (tx, rx) = ::std::sync::mpsc::channel();
+            let f = f.clone();
+            let b = Box::new(move |m: &mut Migration| {
+                let mut f = f.lock().unwrap().take().unwrap();
+                tx.send(f(m)).unwrap();
+            })
+                as Box<for<'a, 's> FnBox(&'a mut Migration<'s>) + Send + 'static>;
+
+            self.local
+                .as_mut()
+                .unwrap()
+                .0
+                .send(ControlEvent::ManualMigration(b))
+                .unwrap();
+
+            match rx.recv() {
+                Ok(ret) => return ret,
+                Err(_) => ::std::thread::sleep(::std::time::Duration::from_millis(100)),
+            }
+        }
+    }
+
+    #[cfg(test)]
+    pub fn get_validator(&self) -> Box<Fn(&::dataflow::checktable::Token) -> bool> {
+        unimplemented!()
     }
 }
 impl<A: Authority> Drop for ControllerHandle<A> {
