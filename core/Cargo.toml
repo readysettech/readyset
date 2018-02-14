@@ -4,6 +4,7 @@ version = "0.1.0"
 authors = ["The Distributary Developers"]
 
 [dependencies]
+rusqlite = "0.13.0"
 arccstr = "1.1.0"
 fnv = "1.0.5"
 serde_derive = "1.0.8"
@@ -14,6 +15,7 @@ rand = "0.4.2"
 chrono = { version = "0.4.0", features = ["serde"] }
 petgraph = { version = "0.4.11", features = ["serde-1"] }
 serde = { version = "1.0.8", features = ["rc"] }
+serde_json = "1.0.2"
 
 # git deps
 nom-sql = { git = "https://github.com/ms705/nom-sql.git", rev = "3e7ae4c4d32b77342051d5c217549ab8fcb68e85" }

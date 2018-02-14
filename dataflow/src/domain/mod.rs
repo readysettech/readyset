@@ -1468,15 +1468,16 @@ impl Domain {
         }
 
         let n = self.nodes[&source].borrow();
+        let data: &Vec<DataType> = &*row;
         if n.is_internal() {
             if let Some(b) = n.get_base() {
-                let mut row = ((*row).clone(), true).into();
+                let mut row = (data.clone(), true).into();
                 b.fix(&mut row);
                 return row;
             }
         }
 
-        return ((*row).clone(), true).into();
+        return (data.clone(), true).into();
     }
 
     fn seed_all(&mut self, tag: Tag, keys: HashSet<Vec<DataType>>, sends: &mut EnqueuedSends) {

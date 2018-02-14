@@ -75,7 +75,7 @@ impl Ingredient for Latest {
                 match db.lookup(&[self.key], &KeyType::Single(&r[self.key])) {
                     LookupResult::Some(rs) => {
                         debug_assert!(rs.len() <= 1, "a group had more than 1 result");
-                        Some((r, rs.get(0)))
+                        Some((r, rs))
                     }
                     LookupResult::Missing => {
                         // we don't actively materialize holes unless requested by a read. this
@@ -94,8 +94,8 @@ impl Ingredient for Latest {
             });
 
             // buffer emitted records
-            for (r, current) in currents {
-                if let Some(current) = current {
+            for (r, current_row) in currents {
+                if let Some(current) = current_row.get(0) {
                     out.push(Record::Negative((**current).clone()));
                 }
 

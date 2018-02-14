@@ -1,3 +1,5 @@
+use std::borrow::Cow;
+
 use ::*;
 use rand::{Rng, ThreadRng};
 use local::keyed_state::KeyedState;
@@ -332,13 +334,13 @@ impl SingleState {
     }
     pub fn lookup<'a>(&'a self, key: &KeyType) -> LookupResult<'a> {
         if let Some(rs) = self.state.lookup(key) {
-            LookupResult::Some(&rs[..])
+            LookupResult::Some(Cow::Borrowed(&rs[..]))
         } else {
             if self.partial() {
                 // partially materialized, so this is a hole (empty results would be vec![])
                 LookupResult::Missing
             } else {
-                LookupResult::Some(&[])
+                LookupResult::Some(Cow::Owned(vec![]))
             }
         }
     }

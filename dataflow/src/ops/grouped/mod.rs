@@ -203,11 +203,11 @@ where
                         }
                     }
 
-                    let old = {
+                    let rs = {
                         match db.lookup(&out_key[..], &KeyType::from(&group[..])) {
                             LookupResult::Some(rs) => {
                                 debug_assert!(rs.len() <= 1, "a group had more than 1 result");
-                                rs.get(0)
+                                rs
                             }
                             LookupResult::Missing => {
                                 misses.extend(group_rs.map(|r| Miss {
@@ -222,6 +222,7 @@ where
                         }
                     };
 
+                    let old = rs.get(0);
                     let (current, new) = {
                         use std::borrow::Cow;
 

@@ -1,13 +1,19 @@
-use rand::{self, Rng};
-use std::collections::HashMap;
+use std::borrow::Cow;
+use std::collections::{HashMap, HashSet};
 use std::rc::Rc;
 
 use ::*;
 use data::SizeOf;
 use local::single_state::SingleState;
+use serde_json;
+
+use rand::{self, Rng};
+use rusqlite::{self, Connection};
+use rusqlite::types::{ToSql, ToSqlOutput};
 
 pub enum State {
     InMemory(MemoryState),
+    Persistent(PersistentState),
 }
 
 impl State {
@@ -16,48 +22,48 @@ impl State {
     }
 
     pub fn base() -> Self {
-        State::InMemory(MemoryState::default())
+        State::Persistent(PersistentState::initialize())
     }
 
     /// Add an index keyed by the given columns and replayed to by the given partial tags.
     pub fn add_key(&mut self, columns: &[usize], partial: Option<Vec<Tag>>) {
         match *self {
-            State::InMemory(ref mut memory_state) => memory_state.add_key(columns, partial),
-            _ => unreachable!(),
+            State::InMemory(ref mut s) => s.add_key(columns, partial),
+            State::Persistent(ref mut s) => s.add_key(columns, partial),
         }
     }
 
     pub fn keys(&self) -> Vec<Vec<usize>> {
         match *self {
-            State::InMemory(ref memory_state) => memory_state.keys(),
+            State::InMemory(ref s) => s.keys(),
             _ => unreachable!(),
         }
     }
 
     pub fn is_useful(&self) -> bool {
         match *self {
-            State::InMemory(ref memory_state) => memory_state.is_useful(),
+            State::InMemory(ref s) => s.is_useful(),
             _ => unreachable!(),
         }
     }
 
     pub fn is_partial(&self) -> bool {
         match *self {
-            State::InMemory(ref memory_state) => memory_state.is_partial(),
-            _ => unreachable!(),
+            State::InMemory(ref s) => s.is_partial(),
+            State::Persistent(..) => false,
         }
     }
 
     pub fn insert(&mut self, r: Vec<DataType>, partial_tag: Option<Tag>) -> bool {
         match *self {
-            State::InMemory(ref mut memory_state) => memory_state.insert(r, partial_tag),
-            _ => unreachable!(),
+            State::InMemory(ref mut s) => s.insert(r, partial_tag),
+            State::Persistent(ref mut s) => s.insert(r, partial_tag),
         }
     }
 
     pub fn remove(&mut self, r: &[DataType]) -> bool {
         match *self {
-            State::InMemory(ref mut memory_state) => memory_state.remove(r),
+            State::InMemory(ref mut s) => s.remove(r),
             _ => unreachable!(),
         }
     }
@@ -65,6 +71,7 @@ impl State {
     pub fn mark_hole(&mut self, key: &[DataType], tag: &Tag) {
         match *self {
             State::InMemory(ref mut memory_state) => memory_state.mark_hole(key, tag),
+            // PersistentStates can't be partial:
             _ => unreachable!(),
         }
     }
@@ -72,6 +79,7 @@ impl State {
     pub fn mark_filled(&mut self, key: Vec<DataType>, tag: &Tag) {
         match *self {
             State::InMemory(ref mut memory_state) => memory_state.mark_filled(key, tag),
+            // PersistentStates can't be partial:
             _ => unreachable!(),
         }
     }
@@ -79,7 +87,7 @@ impl State {
     pub fn lookup<'a>(&'a self, columns: &[usize], key: &KeyType) -> LookupResult<'a> {
         match *self {
             State::InMemory(ref memory_state) => memory_state.lookup(columns, key),
-            _ => unreachable!(),
+            State::Persistent(ref s) => s.lookup(columns, key),
         }
     }
 
@@ -117,6 +125,149 @@ impl State {
             State::InMemory(ref mut memory_state) => memory_state.evict_keys(tag, keys),
             _ => unreachable!(),
         }
+    }
+}
+
+pub struct PersistentState {
+    connection: Connection,
+    statements: HashMap<Vec<usize>, String>,
+    indices: HashSet<usize>,
+}
+
+impl ToSql for DataType {
+    fn to_sql(&self) -> rusqlite::Result<ToSqlOutput> {
+        Ok(match *self {
+            DataType::None => unreachable!(),
+            DataType::Int(n) => ToSqlOutput::from(n),
+            DataType::BigInt(n) => ToSqlOutput::from(n),
+            DataType::Real(i, f) => {
+                let value = (i as f64) + (f as f64) * 1.0e-9;
+                ToSqlOutput::from(value)
+            }
+            DataType::Text(..) | DataType::TinyText(..) => ToSqlOutput::from(self.to_string()),
+            DataType::Timestamp(ts) => ToSqlOutput::from(ts.format("%+").to_string()),
+        })
+    }
+}
+
+impl PersistentState {
+    fn initialize() -> Self {
+        let connection = Connection::open("sqlite_db").unwrap();
+        connection
+            .execute("CREATE TABLE store (row BLOB)", &[])
+            .unwrap();
+
+        Self {
+            connection,
+            statements: Default::default(),
+            indices: Default::default(),
+        }
+    }
+
+    fn add_key(&mut self, columns: &[usize], partial: Option<Vec<Tag>>) {
+        assert!(partial.is_none(), "Bases can't be partial");
+        for index in columns.iter() {
+            if self.indices.contains(index) {
+                continue;
+            }
+
+            self.indices.insert(*index);
+            self.connection
+                .execute(
+                    &format!("ALTER TABLE store ADD COLUMN index_{} TEXT", index),
+                    &[],
+                )
+                .unwrap();
+        }
+
+        let clauses = columns
+            .iter()
+            .enumerate()
+            .map(|(i, column)| format!("index_{} = ?{}", column, i + 1))
+            .collect::<Vec<_>>()
+            .join(", ");
+
+        println!("clauses {:?}", clauses);
+        let statement = format!("SELECT row FROM store WHERE {}", clauses);
+        self.connection.prepare_cached(&statement).unwrap();
+        self.statements.insert(Vec::from(columns), statement);
+    }
+
+    fn insert(&mut self, r: Vec<DataType>, partial_tag: Option<Tag>) -> bool {
+        assert!(partial_tag.is_none(), "Bases can't be partial");
+        let columns = format!(
+            "row, {}",
+            self.indices
+                .iter()
+                .map(|index| format!("index_{}", index))
+                .collect::<Vec<String>>()
+                .join(", ")
+        );
+
+        let placeholders = (1..(self.indices.len() + 2))
+            .map(|placeholder| format!("?{}", placeholder))
+            .collect::<Vec<String>>()
+            .join(", ");
+
+        println!("INSERT INTO STORE ({}) VALUES ({})", columns, placeholders);
+        let mut statement = self.connection
+            .prepare_cached(&format!(
+                "INSERT INTO store ({}) VALUES ({})",
+                columns, placeholders
+            ))
+            .unwrap();
+
+        let row = serde_json::to_string(&r).unwrap();
+        // match self.indices.len() {
+        //      1 => statement.execute(&[&row, ]
+        //      _ => unreachable!()
+        //      // KeyType::Double((a, b)) => statement.execute(&[&a, &b]),
+        //      // KeyType::Tri((a, b, c)) => statement.execute(&[&a, &b, &c]),
+        //      // KeyType::Quad((a, b, c, d)) => statement.execute(&[&a, &b, &c, &d]),
+        //      // KeyType::Quin((a, b, c, d, e)) => statement.execute(&[&a, &b, &c, &d, &e]),
+        //      // KeyType::Sex((a, b, c, d, e, f)) => statement.execute(&[&a, &b, &c, &d, &e, &f]),
+        // }.unwrap();
+
+        let mut values: Vec<&ToSql> = vec![&row];
+        let mut index_values = self.indices
+            .iter()
+            .map(|index| {
+                println!("index value {}", r[*index]);
+                &r[*index] as &ToSql
+            })
+            .collect::<Vec<&ToSql>>();
+
+        values.append(&mut index_values);
+        statement.execute(&values[..]).unwrap();
+        true
+    }
+
+    fn lookup(&self, columns: &[usize], key: &KeyType) -> LookupResult {
+        let mut statement = self.connection
+            .prepare_cached(&self.statements[&Vec::from(columns)])
+            .unwrap();
+
+        println!("looking up {}", self.statements[&Vec::from(columns)]);
+        let rows = match *key {
+             KeyType::Single(a) => statement.query_map(&[a], |row| {
+                 let string: String = row.get(0);
+                 println!("got row {:?}", string);
+                 let data_row: Vec<DataType> = serde_json::from_str(&string).unwrap();
+                 data_row
+             }),
+             _ => unreachable!()
+             // KeyType::Double((a, b)) => statement.execute(&[&a, &b]),
+             // KeyType::Tri((a, b, c)) => statement.execute(&[&a, &b, &c]),
+             // KeyType::Quad((a, b, c, d)) => statement.execute(&[&a, &b, &c, &d]),
+             // KeyType::Quin((a, b, c, d, e)) => statement.execute(&[&a, &b, &c, &d, &e]),
+             // KeyType::Sex((a, b, c, d, e, f)) => statement.execute(&[&a, &b, &c, &d, &e, &f]),
+        };
+
+        let data = rows.unwrap()
+            .map(|row| Row(Rc::new(row.unwrap())))
+            .collect::<Vec<_>>();
+
+        LookupResult::Some(Cow::Owned(data))
     }
 }
 
