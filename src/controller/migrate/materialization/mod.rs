@@ -591,25 +591,7 @@ impl Materializations {
         if n.is_base() {
             // a new base must be empty, so we can materialize it immediately
             info!(self.log, "no need to replay empty new base"; "node" => ni.index());
-            empty.insert(ni);
-
-            // yet, we need to make sure the domain constructs reader backlog handles!
-            let prep = n.with_reader(|r| {
-                r.key().map(|key| {
-                    use dataflow::payload::InitialState;
-                    box Packet::PrepareState {
-                        node: *n.local_addr(),
-                        state: InitialState::Global {
-                            cols: n.fields().len(),
-                            key: key,
-                            gid: ni,
-                        },
-                    }
-                })
-            });
-            if let Some(Some(prep)) = prep {
-                domains.get_mut(&n.domain()).unwrap().send(prep).unwrap();
-            }
+            assert!(!self.partial.contains(&ni));
             return;
         }
 
