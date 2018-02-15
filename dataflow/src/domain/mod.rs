@@ -2299,6 +2299,7 @@ impl Domain {
                     let now = time::Instant::now();
                     self.buffered_replay_requests
                         .iter()
+                        .filter(|&(_, &(_, ref keys))| !keys.is_empty())
                         .map(|(_, &(first, _))| {
                             self.replay_batch_timeout
                                 .checked_sub(now.duration_since(first))
