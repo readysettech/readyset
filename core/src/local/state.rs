@@ -199,7 +199,7 @@ impl PersistentState {
 
     fn add_key(&mut self, columns: &[usize], partial: Option<Vec<Tag>>) {
         assert!(partial.is_none(), "Bases can't be partial");
-        // TODO(ekmartin): actually create indices too
+        // Add each of the individual index columns (index_0, index_1...):
         for index in columns.iter() {
             if self.indices.contains(index) {
                 continue;
@@ -218,6 +218,20 @@ impl PersistentState {
                 Err(e) => panic!(e),
             };
         }
+
+        // Then create the combined index on the given columns:
+        let index_clause = columns
+            .into_iter()
+            .map(|column| format!("index_{}", column))
+            .collect::<Vec<_>>()
+            .join(", ");
+
+        let index_query = format!(
+            "CREATE INDEX IF NOT EXISTS \"{}\" ON {} ({})",
+            index_clause, self.name, index_clause
+        );
+
+        self.connection.execute(&index_query, &[]).unwrap();
     }
 
     // Builds up an INSERT query on the form of:
