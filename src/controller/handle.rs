@@ -1,4 +1,5 @@
 use consensus::{Authority, LocalAuthority};
+use dataflow::checktable;
 use dataflow::prelude::*;
 use dataflow::statistics::GraphStats;
 
@@ -14,6 +15,7 @@ use hyper::{self, Client};
 use serde::Serialize;
 use serde::de::DeserializeOwned;
 use serde_json;
+use tarpc::sync::client::{self, ClientExt};
 use tokio_core::reactor::Core;
 
 use controller::{ControlEvent, ControllerDescriptor, WorkerEvent};
@@ -144,6 +146,17 @@ impl<A: Authority> ControllerHandle<A> {
         self.local_controller.take().unwrap().1.join().unwrap();
         self.local_worker.take().unwrap().1.join().unwrap();
     }
+
+    /// Get a function that can validate tokens.
+    pub fn get_validator(&self) -> Box<Fn(&::dataflow::checktable::Token) -> bool> {
+        let descriptor: ControllerDescriptor =
+            serde_json::from_slice(&self.authority.get_leader().unwrap().1).unwrap();
+        let checktable = checktable::CheckTableClient::connect(
+            descriptor.checktable_addr,
+            client::Options::default(),
+        ).unwrap();
+        Box::new(move |t: &checktable::Token| checktable.validate_token(t.clone()).unwrap())
+    }
 }
 impl ControllerHandle<LocalAuthority> {
     #[cfg(test)]
@@ -178,11 +191,6 @@ impl ControllerHandle<LocalAuthority> {
                 Err(_) => ::std::thread::sleep(::std::time::Duration::from_millis(100)),
             }
         }
-    }
-
-    #[cfg(test)]
-    pub fn get_validator(&self) -> Box<Fn(&::dataflow::checktable::Token) -> bool> {
-        unimplemented!()
     }
 }
 impl<A: Authority> Drop for ControllerHandle<A> {

@@ -1068,7 +1068,7 @@ fn add_columns() {
     let res = aq.lookup(&id, true).unwrap();
     assert_eq!(res.len(), 2);
     assert!(res.contains(&vec![id.clone(), "y".into()]));
-    assert!(res.contains(&vec![id.clone(), "z".into()]));
+    assert!(res.contains(&vec![id.clone(), "z".into(), 3.into()]));
 
     // get a new muta and send a new value on it
     let mut muta = g.get_mutator(a).unwrap();
@@ -1079,7 +1079,7 @@ fn add_columns() {
     let res = aq.lookup(&id, true).unwrap();
     assert_eq!(res.len(), 3);
     assert!(res.contains(&vec![id.clone(), "y".into()]));
-    assert!(res.contains(&vec![id.clone(), "z".into()]));
+    assert!(res.contains(&vec![id.clone(), "z".into(), 3.into()]));
     assert!(res.contains(&vec![id.clone(), "a".into(), 10.into()]));
 }
 
@@ -1175,7 +1175,7 @@ fn migrate_drop_columns() {
     muta2.put(vec![id.clone()]).unwrap();
     sleep();
 
-    let res = aq.lookup(&1.into(), true).unwrap();
+    let res = aq.lookup(&id.clone(), true).unwrap();
     assert_eq!(res.len(), 5);
     assert!(res.contains(&vec![id.clone(), "bx".into()]));
     assert!(res.contains(&vec![id.clone(), "b".into()]));

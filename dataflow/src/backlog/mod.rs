@@ -62,7 +62,7 @@ impl WriteHandle {
         I: IntoIterator<Item = Record>,
     {
         for r in rs {
-            debug_assert_eq!(r.len(), self.cols);
+            debug_assert!(r.len() >= self.cols);
             let key = r[self.key].clone();
             match r {
                 Record::Positive(r) => {
