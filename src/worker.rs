@@ -3,14 +3,13 @@ use std::thread;
 use std::net::{SocketAddr, ToSocketAddrs};
 use std::time::Duration;
 use std::sync::{mpsc, Arc, Mutex, TryLockError};
-use std::os::unix::io::AsRawFd;
+use std::os::unix::io::{AsRawFd, RawFd};
 use std::ops::AddAssign;
 
 use fnv::FnvHashMap;
 use slab::Slab;
 use vec_map::VecMap;
-use mio::{Evented, Events, Poll, PollOpt, Ready, Token};
-use mio::unix::EventedFd;
+use mio_pool::poll::{Events, Poll, Token};
 use mio::net::TcpListener;
 use slog::Logger;
 use timer_heap::{TimerHeap, TimerType};
@@ -19,6 +18,14 @@ use channel::{self, TcpReceiver, TcpSender};
 use channel::poll::{PollEvent, ProcessResult};
 use channel::tcp::{SendError, TryRecvError};
 use dataflow::{self, Domain, Packet};
+
+struct CachedRawFd(RawFd);
+
+impl AsRawFd for CachedRawFd {
+    fn as_raw_fd(&self) -> RawFd {
+        self.0
+    }
+}
 
 pub struct NewReplica {
     pub inner: Replica,
@@ -53,7 +60,6 @@ struct NewReplicaInternal {
     rit: ReplicaToken,
 }
 
-use std::os::unix::io::RawFd;
 #[derive(Clone)]
 struct SocketContext {
     rit: ReplicaToken,
@@ -173,14 +179,7 @@ impl WorkerPool {
         // Update Poll so workers start notifications about connections to the new replica
         let r = self.wstate.replicas.get_mut(rit).unwrap();
         let mut r = r.lock().unwrap();
-        self.poll
-            .register(
-                &listener,
-                Token(token),
-                Ready::readable(),
-                PollOpt::level() | PollOpt::oneshot(),
-            )
-            .unwrap();
+        self.poll.register(&listener, Token(token)).unwrap();
         r.listener = Some(listener);
         r.replica.booted(addr);
     }
@@ -295,20 +294,13 @@ impl Worker {
                 }
             }
 
-            if events.is_empty() {
-                // we must have timed out -- check timers
-                continue;
-            }
-
-            let token = events
-                .iter()
-                .next()
-                .map(|e| {
-                    assert!(e.readiness().is_readable());
-                    e.token()
-                })
-                .map(|Token(token)| token)
-                .unwrap();
+            let token = match events.into_iter().next() {
+                Some(Token(t)) => t,
+                None => {
+                    // we must have timed out -- check timers
+                    continue;
+                }
+            };
             trace!(self.log, "worker polled"; "token" => token);
 
             let refresh_truth = |shared: &mut SharedWorkerState| {
@@ -359,14 +351,7 @@ impl Worker {
             trace!(self.log, "worker handling replica event"; "replica" => sc.rit);
 
             let all = &self.all;
-            let ready = |e: &Evented| {
-                all.reregister(
-                    e,
-                    Token(token),
-                    Ready::readable(),
-                    PollOpt::level() | PollOpt::oneshot(),
-                )
-            };
+            let ready = |fd: RawFd| all.reregister(&CachedRawFd(fd), Token(token));
 
             if sc.listening {
                 // listening socket -- we need to accept a new connection
@@ -381,7 +366,6 @@ impl Worker {
                     //   d) we immediately relinquish
                     //
                     // so we should be safe from deadlocks
-                    use std::os::unix::io::AsRawFd;
                     let token = self.shared.truth.lock().unwrap().insert(SocketContext {
                         rit: sc.rit,
                         fd: stream.as_raw_fd(),
@@ -389,20 +373,13 @@ impl Worker {
                     });
                     debug!(self.log, "worker accepted new connection"; "token" => token);
 
-                    self.all
-                        .register(
-                            &stream,
-                            Token(token),
-                            Ready::readable(),
-                            PollOpt::level() | PollOpt::oneshot(),
-                        )
-                        .unwrap();
+                    self.all.register(&stream, Token(token)).unwrap();
 
                     let tcp = TcpReceiver::new(stream);
                     replica.receivers.insert(token, (tcp, None));
                 }
 
-                ready(replica.listener.as_ref().unwrap()).unwrap();
+                ready(replica.listener.as_ref().unwrap().as_raw_fd()).unwrap();
                 continue;
             }
 
@@ -420,7 +397,7 @@ impl Worker {
                     // the Entry::Vacant case below), so we must get the fd right from the truth.
                     // XXX
                     if let Some(fd) = self.shared.truth.lock().unwrap().get(token).map(|sc| sc.fd) {
-                        ready(&EventedFd(&fd)).unwrap();
+                        ready(fd).unwrap();
                     } else {
                         // spurious wakeup from mio for old (deregistered) token
                         debug!(self.log,
@@ -477,7 +454,7 @@ impl Worker {
                         if let Some(fd) =
                             self.shared.truth.lock().unwrap().get(token).map(|sc| sc.fd)
                         {
-                            ready(&EventedFd(&fd)).unwrap();
+                            ready(fd).unwrap();
                             // XXX: NLL would let us directly refresh truth here, which would save
                             // us one lock acquisition, but we don't have NLL yet :(
                             force_refresh_truth = true;
@@ -557,7 +534,7 @@ impl Worker {
                     if !self.process(&mut context.replica, m, &mut sends) {
                         // told to exit?
                         if rearm {
-                            ready(&EventedFd(&fd)).unwrap();
+                            ready(fd).unwrap();
                         }
                         warn!(self.log, "worker told to exit");
                         return;
@@ -683,7 +660,7 @@ impl Worker {
                         // we need to ready the fd for the original replica so that another thread
                         // will be notified if there's more work for it.
                         if carry == 1 && rearm {
-                            ready(&EventedFd(&fd)).unwrap();
+                            ready(fd).unwrap();
                             rearm = false;
                         }
 
@@ -691,7 +668,7 @@ impl Worker {
                         if !self.process(&mut context.replica, m, &mut sends) {
                             // told to exit?
                             if rearm {
-                                ready(&EventedFd(&fd)).unwrap();
+                                ready(fd).unwrap();
                             }
                             warn!(self.log, "worker told to exit");
                             return;
@@ -745,7 +722,7 @@ impl Worker {
             if rearm {
                 // there were no next()'s to ready the original socket, or we failed to handle it
                 // make sure to mark it as ready for other workers.
-                ready(&EventedFd(&fd)).unwrap();
+                ready(fd).unwrap();
             }
         }
     }
