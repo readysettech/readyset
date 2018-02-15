@@ -79,7 +79,3 @@ name = "basic-recipe"
 [[bin]]
 name = "controller"
 path = "src/controller/main.rs"
-
-[[bin]]
-name = "souplet"
-path = "src/souplet/main.rs"

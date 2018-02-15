@@ -5,7 +5,7 @@ use consensus::Epoch;
 use dataflow::{DomainBuilder, Readers};
 use dataflow::prelude::{ChannelCoordinator, DomainIndex};
 
-use controller::ControllerState;
+use controller::{readers, ControllerState};
 use coordination::{CoordinationMessage, CoordinationPayload};
 use worker;
 
@@ -215,10 +215,10 @@ impl WorkerInner {
             .with_adapter(RpcServiceEndpoint::new)
             .run(
                 reader_threads,
-                |conn: &mut ::souplet::readers::Rpc, s: &mut Readers| loop {
+                |conn: &mut readers::Rpc, s: &mut Readers| loop {
                     match conn.try_recv() {
                         Ok(m) => {
-                            ::souplet::readers::handle_message(m, conn, s);
+                            readers::handle_message(m, conn, s);
                         }
                         Err(TryRecvError::Empty) => break Ok(false),
                         Err(TryRecvError::DeserializationError(e)) => {

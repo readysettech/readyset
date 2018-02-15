@@ -346,7 +346,6 @@ extern crate vec_map;
 
 mod controller;
 mod coordination;
-mod souplet;
 mod worker;
 
 #[cfg(test)]
@@ -364,7 +363,6 @@ pub use dataflow::{DurabilityMode, PersistenceParameters};
 pub use controller::{Controller, ControllerBuilder, ControllerHandle, Mutator, MutatorBuilder,
                      MutatorError, ReadQuery, ReadReply, RemoteGetter, RemoteGetterBuilder,
                      RpcError};
-pub use souplet::Souplet;
 
 /// Just give me a damn terminal logger
 pub fn logger_pls() -> slog::Logger {
