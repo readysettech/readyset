@@ -119,8 +119,7 @@ where
 {
     pub fn new(listen_addr: SocketAddr) -> Self {
         let listener = std::net::TcpListener::bind(listen_addr).unwrap();
-        let addr = listener.local_addr().unwrap();
-        Self::from_listener(TcpListener::from_listener(listener, &addr).unwrap())
+        Self::from_listener(TcpListener::from_std(listener).unwrap())
     }
 
     pub fn from_listener(listener: TcpListener) -> Self {
