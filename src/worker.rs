@@ -207,6 +207,7 @@ impl Worker {
         // worker could be doing. and that'd be silly.
         let mut events = Events::with_capacity(1);
         let mut timers = TimerHeap::new();
+        let mut expired = Vec::new();
         let mut durtmp = None;
         let mut force_refresh_truth = false;
         let mut sends = Vec::new();
@@ -238,7 +239,8 @@ impl Worker {
 
         loop {
             // have any timers expired?
-            for rit in timers.expired() {
+            expired.extend(timers.expired());
+            for rit in expired.drain(..) {
                 // NOTE: try_lock is okay, because if another worker is handling it, the
                 // timeout is also being dealt with.
                 let rc = if let Some(rc) = self.shared.replicas.get(rit) {
@@ -250,7 +252,6 @@ impl Worker {
                 if let Ok(mut context) = rc.try_lock() {
                     match context.replica.on_event(PollEvent::Timeout, &mut sends) {
                         ProcessResult::KeepPolling => {
-                            // FIXME: this could return a bunch of things to be sent
                             let from_ri = context.replica.id();
                             for (ri, m) in sends.drain(..) {
                                 // TODO: handle one local packet without sending here too?
@@ -259,6 +260,20 @@ impl Worker {
                                 // deliver this packet to its destination TCP queue
                                 // XXX: unwrap
                                 send(&from_ri, &mut context.outputs, ri, m).unwrap();
+                            }
+
+                            // what's now the next timeout?
+                            context
+                                .replica
+                                .on_event(PollEvent::ResumePolling(&mut durtmp), &mut sends);
+                            if let Some(timeout) = durtmp.take() {
+                                timers.upsert(rit, timeout, TimerType::Oneshot);
+                            } else {
+                                timers.remove(rit);
+                            }
+                            if !sends.is_empty() {
+                                // ResumePolling is not allowed to send packets
+                                unimplemented!();
                             }
                         }
                         ProcessResult::StopPolling => unreachable!(),
@@ -484,6 +499,7 @@ impl Worker {
                 // we *still* can't trust sc.fd.
                 let fd = channel.get().0.get_ref().as_raw_fd();
 
+                channel.get_mut().0.syscall_limit(Some(1));
                 loop {
                     let mut m = match channel.get_mut().0.try_recv() {
                         Ok(p) => p,

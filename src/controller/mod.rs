@@ -117,7 +117,7 @@ pub(crate) struct ControllerDescriptor {
     pub nonce: u64,
 }
 
-#[derive(Clone, Serialize, Deserialize)]
+#[derive(Clone, Serialize, Deserialize, PartialEq)]
 pub(crate) struct ControllerConfig {
     pub sharding: Option<usize>,
     pub partial_enabled: bool,
@@ -318,6 +318,9 @@ fn instance_campaign<A: Authority + 'static>(
                     Some(ref state) if state.epoch > epoch => Err(()),
                     Some(mut state) => {
                         state.epoch = epoch;
+                        if state.config != config {
+                            panic!("Config in Zk does not match requested config!")
+                        }
                         Ok(state)
                     }
                 },

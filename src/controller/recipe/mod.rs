@@ -13,7 +13,7 @@ use std::vec::Vec;
 type QueryID = u64;
 
 /// Represents the result of a recipe activation.
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, Deserialize, Serialize)]
 pub struct ActivationResult {
     /// Map of query names to `NodeIndex` handles for reads/writes.
     pub new_nodes: HashMap<String, NodeIndex>,

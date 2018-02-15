@@ -31,7 +31,7 @@ pub struct DomainInputHandle {
 impl DomainInputHandle {
     pub fn new(listen_addr: SocketAddr, txs: Vec<SocketAddr>) -> Result<Self, io::Error> {
         let txs: Result<Vec<_>, _> = txs.iter()
-            .map(|addr| TcpSender::connect(addr, None))
+            .map(|addr| TcpSender::connect(addr))
             .collect();
         let tx_reply = PollingLoop::new(listen_addr);
         let tx_reply_addr = tx_reply.get_listener_addr().unwrap();

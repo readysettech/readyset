@@ -19,7 +19,7 @@ use checktable;
 use channel::TcpSender;
 
 /// Indicates to what degree updates should be persisted.
-#[derive(Clone, Debug, Serialize, Deserialize)]
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
 pub enum DurabilityMode {
     /// Don't do any durability
     MemoryOnly,
@@ -30,7 +30,7 @@ pub enum DurabilityMode {
 }
 
 /// Parameters to control the operation of GroupCommitQueue.
-#[derive(Clone, Debug, Serialize, Deserialize)]
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
 pub struct Parameters {
     /// Number of elements to buffer before flushing.
     pub queue_capacity: usize,
@@ -339,7 +339,7 @@ impl GroupCommitQueueSet {
         let mut send_reply = |addr: SocketAddr, reply| {
             transaction_reply_txs
                 .entry(addr.clone())
-                .or_insert_with(|| TcpSender::connect(&addr, None).unwrap())
+                .or_insert_with(|| TcpSender::connect(&addr).unwrap())
                 .send(reply)
                 .unwrap()
         };

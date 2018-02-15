@@ -79,6 +79,20 @@ pub(crate) fn handle_message(m: LocalOrNot<ReadQuery>, conn: &mut Rpc, s: &mut R
                     })
                     .collect(),
             ),
+            ReadQuery::Size { target } => {
+                let size = READERS.with(|readers_cache| {
+                    let mut readers_cache = readers_cache.borrow_mut();
+                    let &mut (ref mut reader, _) =
+                        readers_cache.entry(target.clone()).or_insert_with(|| {
+                            let readers = s.lock().unwrap();
+                            readers.get(&target).unwrap().clone()
+                        });
+
+                    reader.len()
+                });
+
+                ReadReply::Size(size)
+            }
         },
         is_local,
     )).unwrap();

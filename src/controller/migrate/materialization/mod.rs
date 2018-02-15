@@ -588,38 +588,14 @@ impl Materializations {
             debug!(self.log, "new stateless node: {:?}", n);
         }
 
-        if graph
-            .neighbors_directed(ni, petgraph::EdgeDirection::Incoming)
-            .filter(|&ni| !graph[ni].is_source())
-            .all(|n| empty.contains(&n))
-        {
-            // all parents are empty, so we can materialize it immediately
-            info!(self.log, "no need to replay empty view"; "node" => ni.index());
-            empty.insert(ni);
-
-            // we need to make sure the domain constructs reader backlog handles!
-            let prep = n.with_reader(|r| {
-                r.key().map(|key| {
-                    use dataflow::payload::InitialState;
-                    box Packet::PrepareState {
-                        node: *n.local_addr(),
-                        state: InitialState::Global {
-                            cols: n.fields().len(),
-                            key: key,
-                            gid: ni,
-                        },
-                    }
-                })
-            });
-            if let Some(Some(prep)) = prep {
-                domains.get_mut(&n.domain()).unwrap().send(prep).unwrap();
-            }
+        if n.is_base() {
+            // a new base must be empty, so we can materialize it immediately
+            info!(self.log, "no need to replay empty new base"; "node" => ni.index());
+            assert!(!self.partial.contains(&ni));
             return;
         }
 
-        // if this node doesn't need to be materialized, then we're done. note that this check
-        // needs to happen *after* the empty parents check so that we keep tracking whether or not
-        // nodes are empty.
+        // if this node doesn't need to be materialized, then we're done.
         has_state = !index_on.is_empty();
         n.with_reader(|r| {
             if r.is_materialized() {

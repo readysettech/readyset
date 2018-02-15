@@ -25,7 +25,7 @@ use timekeeper::{RealTime, SimpleTracker, ThreadTime, Timer, TimerSet};
 
 type EnqueuedSends = Vec<(ReplicaAddr, Box<Packet>)>;
 
-#[derive(Clone, Debug, Serialize, Deserialize)]
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
 pub struct Config {
     pub concurrent_replays: usize,
     pub replay_batch_timeout: time::Duration,
@@ -173,8 +173,8 @@ impl DomainBuilder {
 
         let debug_tx = self.debug_addr
             .as_ref()
-            .map(|addr| TcpSender::connect(addr, None).unwrap());
-        let control_reply_tx = TcpSender::connect(&self.control_addr, None).unwrap();
+            .map(|addr| TcpSender::connect(addr).unwrap());
+        let control_reply_tx = TcpSender::connect(&self.control_addr).unwrap();
 
         let transaction_state = transactions::DomainState::new(self.index, self.ts);
         let group_commit_queues = persistence::GroupCommitQueueSet::new(
@@ -1148,7 +1148,7 @@ impl Domain {
                                     use itertools::Itertools;
 
                                     let mut chunked_replay_tx =
-                                        TcpSender::connect(&domain_addr, Some(1)).unwrap();
+                                        TcpSender::connect(&domain_addr).unwrap();
 
                                     let start = time::Instant::now();
                                     debug!(log, "starting state chunker"; "node" => %link.dst);
@@ -2299,6 +2299,7 @@ impl Domain {
                     let now = time::Instant::now();
                     self.buffered_replay_requests
                         .iter()
+                        .filter(|&(_, &(_, ref keys))| !keys.is_empty())
                         .map(|(_, &(first, _))| {
                             self.replay_batch_timeout
                                 .checked_sub(now.duration_since(first))

@@ -66,7 +66,7 @@ impl WorkerInner {
             state.config.nreaders,
         );
 
-        let mut sender = match TcpSender::connect(&controller_addr, None) {
+        let mut sender = match TcpSender::connect(&controller_addr) {
             Ok(sender) => sender,
             Err(e) => {
                 error!(log, "failed to connect to controller: {:?}", e);

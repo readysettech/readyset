@@ -17,3 +17,9 @@ Cargo.lock
 # IDE
 .idea/
 .vscode/
+
+# R + plotly
+plots.html
+plots_files/
+.RData
+.Rhistory

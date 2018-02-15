@@ -178,7 +178,7 @@ impl SingleReadHandle {
     }
 
     #[allow(dead_code)]
-    pub(crate) fn len(&self) -> usize {
+    pub fn len(&self) -> usize {
         self.handle.len()
     }
 }

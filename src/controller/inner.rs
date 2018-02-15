@@ -18,6 +18,7 @@ use controller::{ControllerState, DomainHandle, Migration, Recipe, RemoteGetterB
                  WorkerIdentifier, WorkerStatus};
 use controller::migrate::materialization::Materializations;
 use controller::mutator::MutatorBuilder;
+use controller::recipe::ActivationResult;
 
 use hyper::{Method, StatusCode};
 use mio::net::TcpListener;
@@ -157,7 +158,7 @@ impl ControllerInner {
             "new worker registered from {:?}, which listens on {:?}", msg.source, remote
         );
 
-        let sender = Arc::new(Mutex::new(TcpSender::connect(remote, None)?));
+        let sender = Arc::new(Mutex::new(TcpSender::connect(remote)?));
         let ws = WorkerStatus::new(sender.clone());
         self.workers.insert(msg.source.clone(), ws);
         self.read_addrs.insert(msg.source.clone(), read_listen_addr);
@@ -484,24 +485,28 @@ impl ControllerInner {
         GraphStats { domains: domains }
     }
 
-    fn apply_recipe(&mut self, mut new: Recipe) -> Result<(), RpcError> {
-        let mut err = Ok(());
+    fn apply_recipe(&mut self, mut new: Recipe) -> Result<ActivationResult, RpcError> {
+        let mut err = Err(RpcError::Other("".to_owned())); // <3 type inference
         self.migrate(|mig| match new.activate(mig, false) {
-            Ok(_) => (),
+            Ok(ra) => {
+                err = Ok(ra);
+            }
             Err(e) => {
                 err = Err(RpcError::Other(format!("failed to activate recipe: {}", e)));
             }
         });
 
         match err {
-            Ok(_) => self.recipe = new,
+            Ok(_) => {
+                self.recipe = new;
+            }
             Err(ref e) => crit!(self.log, "{}", e.description()),
         }
 
         err
     }
 
-    pub fn extend_recipe(&mut self, add_txt: String) -> Result<(), RpcError> {
+    pub fn extend_recipe(&mut self, add_txt: String) -> Result<ActivationResult, RpcError> {
         let new = self.recipe.clone();
         match new.extend(&add_txt) {
             Ok(new) => self.apply_recipe(new),
@@ -512,7 +517,7 @@ impl ControllerInner {
         }
     }
 
-    pub fn install_recipe(&mut self, r_txt: String) -> Result<(), RpcError> {
+    pub fn install_recipe(&mut self, r_txt: String) -> Result<ActivationResult, RpcError> {
         match Recipe::from_str(&r_txt, Some(self.log.clone())) {
             Ok(r) => {
                 let old = self.recipe.clone();

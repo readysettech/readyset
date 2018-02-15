@@ -116,23 +116,28 @@ mod tests {
     #[test]
     fn it_works() {
         let authority = Arc::new(LocalAuthority::new());
-        assert!(authority.try_read(CONTROLLER_KEY).is_none());
-        assert!(authority.try_read("/a").is_none());
+        assert!(authority.try_read(CONTROLLER_KEY).unwrap().is_none());
+        assert!(authority.try_read("/a").unwrap().is_none());
         assert_eq!(
-            authority.read_modify_write("/a", |arg: Option<u32>| -> Result<u32, u32> {
-                assert!(arg.is_none());
-                Ok(12)
-            }),
+            authority
+                .read_modify_write("/a", |arg: Option<u32>| -> Result<u32, u32> {
+                    assert!(arg.is_none());
+                    Ok(12)
+                })
+                .unwrap(),
             Ok(12)
         );
-        assert_eq!(authority.try_read("/a"), Some("12".bytes().collect()));
-        assert_eq!(authority.become_leader(vec![15]), Epoch(1));
-        assert_eq!(authority.get_leader(), (Epoch(1), vec![15]));
+        assert_eq!(
+            authority.try_read("/a").unwrap(),
+            Some("12".bytes().collect())
+        );
+        assert_eq!(authority.become_leader(vec![15]).unwrap(), Epoch(1));
+        assert_eq!(authority.get_leader().unwrap(), (Epoch(1), vec![15]));
         {
             let authority = authority.clone();
-            thread::spawn(move || authority.become_leader(vec![20]));
+            thread::spawn(move || authority.become_leader(vec![20]).unwrap());
         }
         thread::sleep(Duration::from_millis(100));
-        assert_eq!(authority.get_leader(), (Epoch(1), vec![15]));
+        assert_eq!(authority.get_leader().unwrap(), (Epoch(1), vec![15]));
     }
 }
