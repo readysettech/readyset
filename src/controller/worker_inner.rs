@@ -135,7 +135,7 @@ impl WorkerInner {
             addr,
         );
 
-        let listener = ::mio::net::TcpListener::from_listener(listener, &addr).unwrap();
+        let listener = ::mio::net::TcpListener::from_std(listener).unwrap();
         self.worker_pool
             .add_replica(worker::NewReplica { inner: d, listener });
 
