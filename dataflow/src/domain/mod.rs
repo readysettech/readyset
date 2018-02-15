@@ -1304,16 +1304,18 @@ impl Domain {
                         if !index.is_empty() {
                             let mut s = {
                                 let n = self.nodes[&node].borrow();
-                                if n.is_internal() && n.get_base().is_some() {
-                                    State::base(
-                                        format!(
-                                            "{}_{}_{}",
-                                            self.persistence_parameters.log_prefix,
-                                            n.name(),
-                                            self.shard.unwrap_or(0),
-                                        ),
-                                        self.persistence_parameters.mode.clone(),
-                                    )
+                                let params = &self.persistence_parameters;
+                                if n.is_internal() && n.get_base().is_some()
+                                    && params.persist_base_nodes
+                                {
+                                    let base_name = format!(
+                                        "{}_{}_{}",
+                                        params.log_prefix,
+                                        n.name(),
+                                        self.shard.unwrap_or(0),
+                                    );
+
+                                    State::base(base_name, params.mode.clone())
                                 } else {
                                     State::default()
                                 }

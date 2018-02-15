@@ -25,6 +25,8 @@ pub struct Parameters {
     pub mode: DurabilityMode,
     /// Filename prefix for persistent log entries.
     pub log_prefix: String,
+    /// Whether PersistentState or MemoryState should be used for base nodes:
+    pub persist_base_nodes: bool,
 }
 
 impl Default for Parameters {
@@ -34,6 +36,7 @@ impl Default for Parameters {
             flush_timeout: time::Duration::new(0, 100_000),
             mode: DurabilityMode::MemoryOnly,
             log_prefix: String::from("soup"),
+            persist_base_nodes: true,
         }
     }
 }
@@ -57,6 +60,7 @@ impl Parameters {
         queue_capacity: usize,
         flush_timeout: time::Duration,
         log_prefix: Option<String>,
+        persist_base_nodes: bool,
     ) -> Self {
         let log_prefix = log_prefix.unwrap_or(String::from("soup"));
         assert!(!log_prefix.contains("-"));
@@ -66,6 +70,7 @@ impl Parameters {
             flush_timeout,
             mode,
             log_prefix,
+            persist_base_nodes,
         }
     }
 
