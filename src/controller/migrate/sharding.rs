@@ -83,6 +83,28 @@ pub fn shard(
             info!(log, "preserving sharding of pass-through node";
                   "node" => ?node,
                   "sharding" => ?s);
+
+            if graph[node].is_internal() {
+                if let Sharding::ByColumn(c, shards) = s {
+                    // remap c according to node's semantics
+                    let n = &graph[node];
+                    let src = (0..n.fields().len()).find(|&col| {
+                        if let Some(src) = n.parent_columns(col)[0].1 {
+                            src == c
+                        } else {
+                            false
+                        }
+                    });
+
+                    if let Some(src) = src {
+                        s = Sharding::ByColumn(src, shards);
+                    } else {
+                        // sharding column is not emitted by this node!
+                        // at this point, sharding is effectively random.
+                        s = Sharding::Random(shards);
+                    }
+                }
+            }
             graph.node_weight_mut(node).unwrap().shard_by(s);
             continue;
         }

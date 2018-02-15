@@ -395,7 +395,7 @@ fn it_works_deletion() {
 fn it_works_with_sql_recipe() {
     let mut g = ControllerBuilder::default().build_local();
     let sql = "
-        CREATE TABLE Car (id int, brand varchar(255), PRIMARY KEY(id));
+        CREATE TABLE Car (id int, brand varchar(255), PRIMARY KEY(brand));
         QUERY CountCars: SELECT COUNT(*) FROM Car WHERE brand = ?;
     ";
     g.install_recipe(sql.to_owned()).unwrap();
