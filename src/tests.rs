@@ -373,7 +373,7 @@ fn it_works_deletion() {
         Ok(vec![vec![1.into(), 2.into()].into()])
     );
 
-    // update value again
+    // send a value on b
     mutb.put(vec![0.into(), 1.into(), 4.into()]).unwrap();
     sleep();
 

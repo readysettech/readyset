@@ -44,7 +44,7 @@ pub struct ReplayPathSegment {
 pub enum TriggerEndpoint {
     None,
     Start(Vec<usize>),
-    End(domain::Index, usize),
+    End(bool, domain::Index, usize),
     Local(Vec<usize>),
 }
 

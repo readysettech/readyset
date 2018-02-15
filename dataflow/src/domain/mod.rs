@@ -88,7 +88,7 @@ impl PartialEq for DomainMode {
 enum TriggerEndpoint {
     None,
     Start(Vec<usize>),
-    End(Vec<TcpSender<Box<Packet>>>),
+    End(bool, Vec<TcpSender<Box<Packet>>>),
     Local(Vec<usize>),
 }
 
@@ -386,9 +386,37 @@ impl Domain {
 
     fn send_partial_replay_request(&mut self, tag: Tag, key: Vec<DataType>) {
         debug_assert!(self.concurrent_replays < self.max_concurrent_replays);
-        if let TriggerEndpoint::End(ref mut triggers) =
+        if let TriggerEndpoint::End(shuffled, ref mut triggers) =
             self.replay_paths.get_mut(&tag).unwrap().trigger
         {
+            if triggers.len() != 1 && shuffled {
+                // source is sharded by a different key than we are doing lookups for,
+                // so we need to trigger on all the shards.
+                self.concurrent_replays += 1;
+                trace!(self.log, "sending shuffled shard replay request";
+                       "tag" => ?tag,
+                       "key" => ?key,
+                       "buffered" => self.replay_request_queue.len(),
+                       "concurrent" => self.concurrent_replays,
+                       );
+
+                for trigger in triggers {
+                    if trigger
+                        .send(box Packet::RequestPartialReplay {
+                            tag,
+                            key: key.clone(), // sad to clone here
+                        })
+                        .is_err()
+                    {
+                        // we're shutting down -- it's fine.
+                    }
+                }
+                return;
+            }
+
+            // TODO: if we're sharded by a different key than the source, then we could cause
+            // replay responses to be sent to *other* shards too in response to our request :/
+
             // find right shard. it's important that we only request a replay from the right
             // shard, because otherwise all the other shard domains will miss, and then request
             // replays themselves for the miss key. however, the response to that request will
@@ -678,6 +706,7 @@ impl Domain {
 
             let addr = *n.borrow().local_addr();
             // TODO: message should be from actual parent, not self.
+            // FIXME: source address here needs to be shard index for sharded egress
             let m = if n.borrow().is_transactional() {
                 box Packet::Transaction {
                     link: Link::new(addr, addr),
@@ -1021,17 +1050,20 @@ impl Domain {
                             payload::TriggerEndpoint::None => TriggerEndpoint::None,
                             payload::TriggerEndpoint::Start(v) => TriggerEndpoint::Start(v),
                             payload::TriggerEndpoint::Local(v) => TriggerEndpoint::Local(v),
-                            payload::TriggerEndpoint::End(domain, shards) => TriggerEndpoint::End(
-                                (0..shards)
-                                    .map(|shard| {
-                                        // TODO: take advantage of local channels for replay paths.
-                                        self.channel_coordinator
-                                            .get_unbounded_tx(&(domain, shard))
-                                            .unwrap()
-                                            .0
-                                    })
-                                    .collect(),
-                            ),
+                            payload::TriggerEndpoint::End(shuffled, domain, shards) => {
+                                TriggerEndpoint::End(
+                                    shuffled,
+                                    (0..shards)
+                                        .map(|shard| {
+                                            // TODO: take advantage of local channels for replay paths.
+                                            self.channel_coordinator
+                                                .get_unbounded_tx(&(domain, shard))
+                                                .unwrap()
+                                                .0
+                                        })
+                                        .collect(),
+                                )
+                            }
                         };
 
                         self.replay_paths.insert(
@@ -1887,7 +1919,6 @@ impl Domain {
                         }
 
                         // we're done with the node
-                        let is_shard_merger = n.is_shard_merger();
                         drop(n);
 
                         if let Some(box Packet::Captured) = m {
@@ -2000,8 +2031,8 @@ impl Domain {
 
                         if i != path.len() - 1 {
                             // update link for next iteration
-                            if is_shard_merger {
-                                // we need to preserve the egress src
+                            if self.nodes[&path[i + 1].node].borrow().is_shard_merger() {
+                                // we need to preserve the egress src for shard mergers
                                 // (which includes shard identifier)
                             } else {
                                 m.as_mut().unwrap().link_mut().src = segment.node;

@@ -579,10 +579,9 @@ fn reshard(
         Sharding::None | Sharding::ForcedNone => {
             // NOTE: this *must* be a union so that we correctly buffer partial replays
             let n: NodeOperator =
-                ops::union::Union::new_deshard(src.into(), graph[src].sharded_by().shards()).into();
+                ops::union::Union::new_deshard(src.into(), graph[src].sharded_by()).into();
             let mut n = graph[src].mirror(n);
             n.shard_by(to);
-            n.mark_as_shard_merger(true);
             n
         }
         Sharding::ByColumn(c, _) => {

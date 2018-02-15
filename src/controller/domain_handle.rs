@@ -114,6 +114,7 @@ pub struct DomainHandle {
 
     cr_poll: PollingLoop<ControlReplyPacket>,
     txs: Vec<(TcpSender<Box<Packet>>, bool)>,
+    sharded_by: Sharding,
 
     // Which worker each shard is assigned to, if any.
     assignments: Vec<WorkerIdentifier>,
@@ -237,11 +238,17 @@ impl DomainHandle {
             _idx: idx,
             cr_poll,
             txs,
+            sharded_by,
             assignments,
         }
     }
 
+    pub fn sharding(&self) -> Sharding {
+        self.sharded_by
+    }
+
     pub fn shards(&self) -> usize {
+        assert_eq!(self.txs.len(), self.sharded_by.shards());
         self.txs.len()
     }
 

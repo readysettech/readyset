@@ -115,12 +115,6 @@ pub fn add(
                 // it belongs to this domain, not that of the parent
                 i.add_to(domain);
 
-                if graph[node].is_shard_merger() {
-                    // the ingress is really what merges the shards
-                    graph[node].mark_as_shard_merger(false);
-                    i.mark_as_shard_merger(true);
-                }
-
                 // the ingress is sharded the same way as its target
                 i.shard_by(graph[node].sharded_by());
 
