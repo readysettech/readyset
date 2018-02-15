@@ -352,7 +352,9 @@ impl PersistentState {
 impl Drop for PersistentState {
     fn drop(&mut self) {
         match self.durability_mode {
-            DurabilityMode::DeleteOnExit => {
+            // TODO(ekmartin): We don't support recovering persistent base node indices yet,
+            // so drop the tables at the end for all modes except InMemory:
+            DurabilityMode::Permanent | DurabilityMode::DeleteOnExit => {
                 self.connection
                     .execute(&format!("DROP TABLE {}", self.name), &[])
                     .unwrap();
