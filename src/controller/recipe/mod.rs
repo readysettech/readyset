@@ -1,5 +1,6 @@
 use nom_sql::parser as sql_parser;
 use nom_sql::SqlQuery;
+use consensus::Authority;
 use controller::Migration;
 use controller::sql::reuse::ReuseConfigType;
 use controller::sql::SqlIncorporator;
@@ -203,9 +204,9 @@ impl Recipe {
     /// Activate the recipe by migrating the Soup data-flow graph wrapped in `mig` to the recipe.
     /// This causes all necessary changes to said graph to be applied; however, it is the caller's
     /// responsibility to call `mig.commit()` afterwards.
-    pub fn activate(
+    pub fn activate<A: Authority + 'static>(
         &mut self,
-        mig: &mut Migration,
+        mig: &mut Migration<A>,
         transactional_base_nodes: bool,
     ) -> Result<ActivationResult, String> {
         debug!(self.log, "{} queries, {} of which are named",

@@ -6,6 +6,7 @@
 //!  - Existing egress nodes that gain new children must gain channels to facilitate forwarding
 //!  - State must be replayed for materializations in other domains that need it
 
+use consensus::Authority;
 use dataflow::prelude::*;
 use controller;
 
@@ -16,9 +17,9 @@ use petgraph::graph::NodeIndex;
 
 use slog::Logger;
 
-pub fn inform(
+pub fn inform<A: Authority + 'static>(
     log: &Logger,
-    controller: &mut controller::ControllerInner,
+    controller: &mut controller::ControllerInner<A>,
     nodes: HashMap<DomainIndex, Vec<(NodeIndex, bool)>>,
     ts: i64,
     prevs: Box<HashMap<DomainIndex, i64>>,

@@ -202,7 +202,7 @@ fn start_instance<A: Authority + 'static>(
     let controller_join_handle = thread::Builder::new()
         .name("ctrl-main".to_owned())
         .spawn(move || {
-            let internal = Controller::listen_internal(
+            let internal = Controller::<A>::listen_internal(
                 controller_event_tx.clone(),
                 SocketAddr::new(listen_addr, 0),
             );
@@ -229,6 +229,7 @@ fn start_instance<A: Authority + 'static>(
             let controller = Controller {
                 inner: None,
                 receiver: controller_event_rx,
+                authority: authority.clone(),
                 log,
                 internal,
                 external,
@@ -359,9 +360,11 @@ fn instance_campaign<A: Authority + 'static>(
 }
 
 /// Runs the soup instance.
-pub struct Controller {
+pub struct Controller<A: Authority + 'static> {
     receiver: Receiver<ControlEvent>,
-    inner: Option<ControllerInner>,
+    inner: Option<ControllerInner<A>>,
+
+    authority: Arc<A>,
 
     listen_addr: IpAddr,
     internal: ServingThread,
@@ -381,7 +384,7 @@ pub struct Worker {
     log: slog::Logger,
 }
 
-impl Controller {
+impl<A: Authority + 'static> Controller<A> {
     fn main_loop(mut self) {
         for event in self.receiver {
             match event {
@@ -404,6 +407,7 @@ impl Controller {
                 }
                 ControlEvent::WonLeaderElection(state) => {
                     self.inner = Some(ControllerInner::new(
+                        self.authority.clone(),
                         self.listen_addr,
                         self.checktable,
                         self.log.clone(),
@@ -424,7 +428,7 @@ impl Controller {
         self.internal.stop();
     }
 
-    fn listen_external<A: Authority + 'static>(
+    fn listen_external(
         event_tx: Sender<ControlEvent>,
         addr: SocketAddr,
         authority: Arc<A>,

@@ -20,6 +20,7 @@
 //!
 //! Beware, Here be dragons™
 
+use consensus::Authority;
 use dataflow::{checktable, node, payload};
 use dataflow::ops::base::Base;
 use dataflow::prelude::*;
@@ -57,8 +58,8 @@ pub(super) enum ColumnChange {
 ///
 /// Only one `Migration` can be in effect at any point in time. No changes are made to the running
 /// graph until the `Migration` is committed (using `Migration::commit`).
-pub struct Migration<'a> {
-    pub(super) mainline: &'a mut ControllerInner,
+pub struct Migration<'a, A: Authority + 'static> {
+    pub(super) mainline: &'a mut ControllerInner<A>,
     pub(super) added: Vec<NodeIndex>,
     pub(super) columns: Vec<(NodeIndex, ColumnChange)>,
     pub(super) readers: HashMap<NodeIndex, NodeIndex>,
@@ -67,7 +68,7 @@ pub struct Migration<'a> {
     pub(super) log: slog::Logger,
 }
 
-impl<'a> Migration<'a> {
+impl<'a, A: Authority + 'static> Migration<'a, A> {
     /// Add the given `Ingredient` to the Soup.
     ///
     /// The returned identifier can later be used to refer to the added ingredient.
