@@ -4,7 +4,8 @@ use consensus::LocalAuthority;
 use controller::ControllerBuilder;
 use controller::recipe::Recipe;
 use controller::sql::SqlIncorporator;
-use core::DataType;
+use core::{DataType, DurabilityMode};
+use dataflow::PersistenceParameters;
 use dataflow::checktable::Token;
 use dataflow::ops::base::Base;
 use dataflow::ops::grouped::aggregate::Aggregation;
@@ -13,7 +14,6 @@ use dataflow::ops::join::JoinSource::*;
 use dataflow::ops::join::{Join, JoinSource, JoinType};
 use dataflow::ops::project::Project;
 use dataflow::ops::union::Union;
-use dataflow::{DurabilityMode, PersistenceParameters};
 
 use std::collections::HashMap;
 use std::sync::Arc;

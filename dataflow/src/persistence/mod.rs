@@ -14,17 +14,6 @@ use debug::DebugEventType;
 use domain;
 use prelude::*;
 
-/// Indicates to what degree updates should be persisted.
-#[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
-pub enum DurabilityMode {
-    /// Don't do any durability
-    MemoryOnly,
-    /// Delete any log files on exit. Useful mainly for tests.
-    DeleteOnExit,
-    /// Persist updates to disk, and don't delete them later.
-    Permanent,
-}
-
 /// Parameters to control the operation of GroupCommitQueue.
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
 pub struct Parameters {

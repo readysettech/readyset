@@ -29,3 +29,14 @@ pub use map::Map;
 pub use petgraph::graph::NodeIndex;
 
 pub type StateMap = map::Map<State>;
+
+/// Indicates to what degree updates should be persisted.
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
+pub enum DurabilityMode {
+    /// Don't do any durability
+    MemoryOnly,
+    /// Delete any log files on exit. Useful mainly for tests.
+    DeleteOnExit,
+    /// Persist updates to disk, and don't delete them later.
+    Permanent,
+}

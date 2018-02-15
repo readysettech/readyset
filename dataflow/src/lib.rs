@@ -61,7 +61,6 @@ pub type DomainConfig = domain::Config;
 pub use checktable::connect_thread_checktable;
 pub use domain::{Domain, DomainBuilder, Index};
 pub use payload::{LocalBypass, Packet};
-pub use persistence::DurabilityMode;
 
 #[derive(Copy, Clone, PartialEq, Eq, Debug, Serialize, Deserialize)]
 pub enum Sharding {

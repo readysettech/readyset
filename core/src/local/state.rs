@@ -21,8 +21,9 @@ impl State {
         State::InMemory(MemoryState::default())
     }
 
-    pub fn base() -> Self {
-        State::Persistent(PersistentState::initialize())
+    pub fn base(name: String, durability_mode: DurabilityMode) -> Self {
+        let persistent = PersistentState::initialize(name, durability_mode);
+        State::Persistent(persistent)
     }
 
     /// Add an index keyed by the given columns and replayed to by the given partial tags.
@@ -131,7 +132,9 @@ impl State {
 
 /// PersistentState stores data in SQlite.
 pub struct PersistentState {
+    name: String,
     connection: Connection,
+    durability_mode: DurabilityMode,
     indices: HashSet<usize>,
 }
 
@@ -152,14 +155,25 @@ impl ToSql for DataType {
 }
 
 impl PersistentState {
-    fn initialize() -> Self {
-        let connection = Connection::open_in_memory().unwrap();
+    fn initialize(name: String, durability_mode: DurabilityMode) -> Self {
+        let connection = match durability_mode {
+            DurabilityMode::MemoryOnly => Connection::open_in_memory().unwrap(),
+            _ => Connection::open("soup.db").unwrap(),
+        };
+
+        // Wrap table names in double quotes in case of weird node names:
+        let full_name = format!("\"{}\"", name);
         connection
-            .execute("CREATE TABLE store (row BLOB)", &[])
+            .execute(
+                &format!("CREATE TABLE IF NOT EXISTS {} (row BLOB)", full_name),
+                &[],
+            )
             .unwrap();
 
         Self {
             connection,
+            durability_mode,
+            name: full_name,
             indices: Default::default(),
         }
     }
@@ -185,23 +199,29 @@ impl PersistentState {
 
     fn add_key(&mut self, columns: &[usize], partial: Option<Vec<Tag>>) {
         assert!(partial.is_none(), "Bases can't be partial");
+        // TODO(ekmartin): actually create indices too
         for index in columns.iter() {
             if self.indices.contains(index) {
                 continue;
             }
 
             self.indices.insert(*index);
-            self.connection
-                .execute(
-                    &format!("ALTER TABLE store ADD COLUMN index_{} TEXT", index),
-                    &[],
-                )
-                .unwrap();
+            let query = format!("ALTER TABLE {} ADD COLUMN index_{} TEXT", self.name, index);
+            match self.connection.execute(&query, &[]) {
+                Ok(..) => (),
+                // Ignore existing column errors:
+                Err(rusqlite::Error::SqliteFailure(_, Some(ref message)))
+                    if message == &format!("duplicate column name: index_{}", index) =>
+                {
+                    ()
+                }
+                Err(e) => panic!(e),
+            };
         }
     }
 
     // Builds up an INSERT query on the form of:
-    // `INSERT INTO STORE (index_0, index_1, row) VALUES (...)`
+    // `INSERT INTO store (index_0, index_1, row) VALUES (...)`
     // where row is a serialized representation of r.
     fn insert(&mut self, r: Vec<DataType>, partial_tag: Option<Tag>) -> bool {
         assert!(partial_tag.is_none(), "Bases can't be partial");
@@ -221,8 +241,8 @@ impl PersistentState {
 
         let mut statement = self.connection
             .prepare_cached(&format!(
-                "INSERT INTO store ({}) VALUES ({})",
-                columns, placeholders
+                "INSERT INTO {} ({}) VALUES ({})",
+                self.name, columns, placeholders
             ))
             .unwrap();
 
@@ -242,7 +262,7 @@ impl PersistentState {
     // `SELECT row FROM store WHERE index_0 = value AND index_1 = VALUE`
     fn lookup(&self, columns: &[usize], key: &KeyType) -> LookupResult {
         let clauses = Self::build_clause(columns.iter());
-        let query = format!("SELECT row FROM store WHERE {}", clauses);
+        let query = format!("SELECT row FROM {} WHERE {}", self.name, clauses);
         let mut statement = self.connection.prepare_cached(&query).unwrap();
 
         let rows = match *key {
@@ -272,14 +292,14 @@ impl PersistentState {
             .map(|index| &r[*index] as &ToSql)
             .collect::<Vec<&ToSql>>();
 
-        let query = format!("DELETE FROM store WHERE {}", clauses);
+        let query = format!("DELETE FROM {} WHERE {}", self.name, clauses);
         let mut statement = self.connection.prepare_cached(&query).unwrap();
         statement.execute(&index_values[..]).unwrap() > 0
     }
 
     fn cloned_records(&self) -> Vec<Vec<DataType>> {
         let mut statement = self.connection
-            .prepare_cached("SELECT row FROM store")
+            .prepare_cached(&format!("SELECT row FROM {}", self.name))
             .unwrap();
 
         let rows = statement
@@ -293,7 +313,7 @@ impl PersistentState {
 
     fn rows(&self) -> usize {
         let mut statement = self.connection
-            .prepare_cached("SELECT COUNT(row) FROM store")
+            .prepare_cached(&format!("SELECT COUNT(row) FROM {}", self.name))
             .unwrap();
 
         let mut rows = statement.query(&[]).unwrap();
@@ -307,8 +327,24 @@ impl PersistentState {
     }
 
     fn clear(&self) {
-        let mut statement = self.connection.prepare_cached("DELETE FROM store").unwrap();
+        let mut statement = self.connection
+            .prepare_cached(&format!("DELETE FROM {}", self.name))
+            .unwrap();
+
         statement.execute(&[]).unwrap();
+    }
+}
+
+impl Drop for PersistentState {
+    fn drop(&mut self) {
+        match self.durability_mode {
+            DurabilityMode::DeleteOnExit => {
+                self.connection
+                    .execute(&format!("DROP TABLE {}", self.name), &[])
+                    .unwrap();
+            }
+            _ => (),
+        };
     }
 }
 
@@ -497,15 +533,19 @@ impl SizeOf for State {
 mod tests {
     use super::*;
 
+    fn setup_persistent() -> State {
+        State::base(String::from("soup"), DurabilityMode::MemoryOnly)
+    }
+
     #[test]
     fn persistent_state_is_partial() {
-        let state = State::base();
+        let state = setup_persistent();
         assert!(!state.is_partial());
     }
 
     #[test]
     fn persistent_state_single_key() {
-        let mut state = State::base();
+        let mut state = setup_persistent();
         let columns = &[0];
         let row: Vec<DataType> = vec![10.into(), "Cat".into()];
         state.add_key(columns, None);
@@ -528,7 +568,7 @@ mod tests {
 
     #[test]
     fn persistent_state_multi_key() {
-        let mut state = State::base();
+        let mut state = setup_persistent();
         let columns = &[0, 2];
         let row: Vec<DataType> = vec![10.into(), "Cat".into(), 20.into()];
         state.add_key(columns, None);
@@ -549,7 +589,7 @@ mod tests {
 
     #[test]
     fn persistent_state_multiple_indices() {
-        let mut state = State::base();
+        let mut state = setup_persistent();
         let first: Vec<DataType> = vec![10.into(), "Cat".into(), 20.into()];
         let second: Vec<DataType> = vec![10.into(), "Bob".into(), 30.into()];
         state.add_key(&[0], None);
@@ -577,7 +617,7 @@ mod tests {
 
     #[test]
     fn persistent_state_remove() {
-        let mut state = State::base();
+        let mut state = setup_persistent();
         let columns = &[0];
         let first: Vec<DataType> = vec![10.into(), "Cat".into()];
         let second: Vec<DataType> = vec![20.into(), "Bob".into()];
@@ -601,7 +641,7 @@ mod tests {
 
     #[test]
     fn persistent_state_is_empty() {
-        let mut state = State::base();
+        let mut state = setup_persistent();
         let columns = &[0];
         let row: Vec<DataType> = vec![10.into(), "Cat".into()];
         state.add_key(columns, None);
@@ -612,7 +652,7 @@ mod tests {
 
     #[test]
     fn persistent_state_is_useful() {
-        let mut state = State::base();
+        let mut state = setup_persistent();
         let columns = &[0];
         assert!(!state.is_useful());
         state.add_key(columns, None);
@@ -621,7 +661,7 @@ mod tests {
 
     #[test]
     fn persistent_state_len() {
-        let mut state = State::base();
+        let mut state = setup_persistent();
         let columns = &[0];
         let first: Vec<DataType> = vec![10.into(), "Cat".into()];
         let second: Vec<DataType> = vec![20.into(), "Bob".into()];
@@ -635,7 +675,7 @@ mod tests {
 
     #[test]
     fn persistent_state_cloned_records() {
-        let mut state = State::base();
+        let mut state = setup_persistent();
         let columns = &[0];
         let first: Vec<DataType> = vec![10.into(), "Cat".into()];
         let second: Vec<DataType> = vec![20.into(), "Bob".into()];
@@ -647,7 +687,7 @@ mod tests {
 
     #[test]
     fn persistent_state_clear() {
-        let mut state = State::base();
+        let mut state = setup_persistent();
         let columns = &[0];
         let first: Vec<DataType> = vec![10.into(), "Cat".into()];
         let second: Vec<DataType> = vec![20.into(), "Bob".into()];
@@ -657,5 +697,14 @@ mod tests {
 
         state.clear();
         assert!(state.is_empty());
+    }
+
+    #[test]
+    fn persistent_state_weird_table_names() {
+        let mut state = State::base(String::from(".s-o_u#p."), DurabilityMode::MemoryOnly);
+        let columns = &[0];
+        let row: Vec<DataType> = vec![10.into(), "Cat".into()];
+        state.add_key(columns, None);
+        assert!(state.insert(row.clone(), None));
     }
 }
