@@ -5,7 +5,6 @@ mod query_signature;
 mod query_utils;
 pub mod reuse;
 
-use consensus::Authority;
 use core::NodeIndex;
 use controller::Migration;
 use controller::mir_to_flow::mir_query_to_flow_parts;
@@ -102,11 +101,11 @@ impl SqlIncorporator {
     /// The return value is a tuple containing the query name (specified or computing) and a `Vec`
     /// of `NodeIndex`es representing the nodes added to support the query.
     #[allow(unused)]
-    pub fn add_query<A: Authority + 'static>(
+    pub fn add_query(
         &mut self,
         query: &str,
         name: Option<String>,
-        mut mig: &mut Migration<A>,
+        mut mig: &mut Migration,
     ) -> Result<QueryFlowParts, String> {
         query.to_flow_parts(self, name, &mut mig)
     }
@@ -118,12 +117,12 @@ impl SqlIncorporator {
     ///
     /// The return value is a tuple containing the query name (specified or computing) and a `Vec`
     /// of `NodeIndex`es representing the nodes added to support the query.
-    pub fn add_parsed_query<A: Authority + 'static>(
+    pub fn add_parsed_query(
         &mut self,
         query: SqlQuery,
         name: Option<String>,
         is_leaf: bool,
-        mig: &mut Migration<A>,
+        mig: &mut Migration,
     ) -> Result<QueryFlowParts, String> {
         match name {
             None => self.nodes_for_query(query, is_leaf, mig),
@@ -300,13 +299,13 @@ impl SqlIncorporator {
         (qg, QueryGraphReuse::None)
     }
 
-    fn add_leaf_to_existing_query<A: Authority + 'static>(
+    fn add_leaf_to_existing_query(
         &mut self,
         query_name: &str,
         params: &Vec<Column>,
         final_query_node: MirNodeRef,
         project_columns: Option<Vec<Column>>,
-        mut mig: &mut Migration<A>,
+        mut mig: &mut Migration,
     ) -> QueryFlowParts {
         trace!(self.log, "Adding a new leaf below: {:?}", final_query_node);
 
@@ -328,11 +327,11 @@ impl SqlIncorporator {
         qfp
     }
 
-    fn add_base_via_mir<A: Authority + 'static>(
+    fn add_base_via_mir(
         &mut self,
         query_name: &str,
         query: &SqlQuery,
-        mut mig: &mut Migration<A>,
+        mut mig: &mut Migration,
     ) -> QueryFlowParts {
         // first, compute the MIR representation of the SQL query
         let mut mir = self.mir_converter
@@ -350,12 +349,12 @@ impl SqlIncorporator {
         qfp
     }
 
-    fn add_compound_query<A: Authority + 'static>(
+    fn add_compound_query(
         &mut self,
         query_name: &str,
         query: &CompoundSelectStatement,
         is_leaf: bool,
-        mut mig: &mut Migration<A>,
+        mut mig: &mut Migration,
     ) -> Result<QueryFlowParts, String> {
         let subqueries: Vec<MirQuery> = query
             .selects
@@ -386,12 +385,12 @@ impl SqlIncorporator {
 
     /// Returns tuple of `QueryFlowParts` and an optional new `MirQuery`. The latter is only
     /// present if a new `MirQuery` was added.
-    fn add_select_query<A: Authority + 'static>(
+    fn add_select_query(
         &mut self,
         query_name: &str,
         sq: &SelectStatement,
         is_leaf: bool,
-        mig: &mut Migration<A>,
+        mig: &mut Migration,
     ) -> (QueryFlowParts, Option<MirQuery>) {
         let (qg, reuse) = self.consider_query_graph(&query_name, sq);
         match reuse {
@@ -421,13 +420,13 @@ impl SqlIncorporator {
         }
     }
 
-    fn add_query_via_mir<A: Authority + 'static>(
+    fn add_query_via_mir(
         &mut self,
         query_name: &str,
         query: &SelectStatement,
         qg: QueryGraph,
         is_leaf: bool,
-        mut mig: &mut Migration<A>,
+        mut mig: &mut Migration,
     ) -> (QueryFlowParts, MirQuery) {
         use mir::visualize::GraphViz;
         // no QG-level reuse possible, so we'll build a new query.
@@ -477,14 +476,14 @@ impl SqlIncorporator {
         }
     }
 
-    fn extend_existing_query<A: Authority + 'static>(
+    fn extend_existing_query(
         &mut self,
         query_name: &str,
         query: &SelectStatement,
         qg: QueryGraph,
         reuse_mirs: Vec<MirQuery>,
         is_leaf: bool,
-        mut mig: &mut Migration<A>,
+        mut mig: &mut Migration,
     ) -> QueryFlowParts {
         use mir::reuse::merge_mir_for_queries;
         use mir::visualize::GraphViz;
@@ -534,11 +533,11 @@ impl SqlIncorporator {
         qfp
     }
 
-    fn nodes_for_query<A: Authority + 'static>(
+    fn nodes_for_query(
         &mut self,
         q: SqlQuery,
         is_leaf: bool,
-        mig: &mut Migration<A>,
+        mig: &mut Migration,
     ) -> Result<QueryFlowParts, String> {
         let name = match q {
             SqlQuery::CreateTable(ref ctq) => ctq.table.name.clone(),
@@ -548,12 +547,12 @@ impl SqlIncorporator {
         self.nodes_for_named_query(q, name, is_leaf, mig)
     }
 
-    fn nodes_for_named_query<A: Authority + 'static>(
+    fn nodes_for_named_query(
         &mut self,
         q: SqlQuery,
         query_name: String,
         is_leaf: bool,
-        mig: &mut Migration<A>,
+        mig: &mut Migration,
     ) -> Result<QueryFlowParts, String> {
         use nom_sql::{JoinRightSide, Table};
         use self::query_utils::ReferredTables;
@@ -673,31 +672,31 @@ pub trait ToFlowParts {
     /// Turn a SQL query into a set of nodes inserted into the Soup graph managed by
     /// the `SqlIncorporator` in the second argument. The query can optionally be named by the
     /// string in the `Option<String>` in the third argument.
-    fn to_flow_parts<A: Authority + 'static>(
+    fn to_flow_parts(
         &self,
         &mut SqlIncorporator,
         Option<String>,
-        &mut Migration<A>,
+        &mut Migration,
     ) -> Result<QueryFlowParts, String>;
 }
 
 impl<'a> ToFlowParts for &'a String {
-    fn to_flow_parts<A: Authority + 'static>(
+    fn to_flow_parts(
         &self,
         inc: &mut SqlIncorporator,
         name: Option<String>,
-        mig: &mut Migration<A>,
+        mig: &mut Migration,
     ) -> Result<QueryFlowParts, String> {
         self.as_str().to_flow_parts(inc, name, mig)
     }
 }
 
 impl<'a> ToFlowParts for &'a str {
-    fn to_flow_parts<A: Authority + 'static>(
+    fn to_flow_parts(
         &self,
         inc: &mut SqlIncorporator,
         name: Option<String>,
-        mig: &mut Migration<A>,
+        mig: &mut Migration,
     ) -> Result<QueryFlowParts, String> {
         // try parsing the incoming SQL
         let parsed_query = sql_parser::parse_query(self);

@@ -2,7 +2,6 @@ use nom_sql::{ArithmeticBase, ArithmeticExpression, Column, ColumnConstraint, Co
               Operator, OrderType};
 use std::collections::HashMap;
 
-use consensus::Authority;
 use core::{DataType, NodeIndex};
 use mir::{FlowNode, MirNodeRef};
 use mir::node::{GroupedNodeType, MirNode, MirNodeType};
@@ -13,10 +12,7 @@ use dataflow::ops::project::{Project, ProjectExpression, ProjectExpressionBase};
 use dataflow::ops;
 use controller::Migration;
 
-pub fn mir_query_to_flow_parts<A: Authority + 'static>(
-    mir_query: &mut MirQuery,
-    mig: &mut Migration<A>,
-) -> QueryFlowParts {
+pub fn mir_query_to_flow_parts(mir_query: &mut MirQuery, mig: &mut Migration) -> QueryFlowParts {
     use std::collections::VecDeque;
 
     let mut new_nodes = Vec::new();
@@ -71,10 +67,7 @@ pub fn mir_query_to_flow_parts<A: Authority + 'static>(
     }
 }
 
-pub fn mir_node_to_flow_parts<A: Authority + 'static>(
-    mir_node: &mut MirNode,
-    mig: &mut Migration<A>,
-) -> FlowNode {
+pub fn mir_node_to_flow_parts(mir_node: &mut MirNode, mig: &mut Migration) -> FlowNode {
     let name = mir_node.name.clone();
     match mir_node.flow_node {
         None => {
@@ -289,9 +282,9 @@ pub fn mir_node_to_flow_parts<A: Authority + 'static>(
     }
 }
 
-pub(crate) fn adapt_base_node<A: Authority + 'static>(
+pub(crate) fn adapt_base_node(
     over_node: MirNodeRef,
-    mig: &mut Migration<A>,
+    mig: &mut Migration,
     column_specs: &mut [(ColumnSpecification, Option<usize>)],
     add: &Vec<ColumnSpecification>,
     remove: &Vec<ColumnSpecification>,
@@ -339,11 +332,11 @@ pub(crate) fn adapt_base_node<A: Authority + 'static>(
     FlowNode::Existing(na)
 }
 
-pub(crate) fn make_base_node<A: Authority + 'static>(
+pub(crate) fn make_base_node(
     name: &str,
     column_specs: &mut [(ColumnSpecification, Option<usize>)],
     pkey_columns: &Vec<Column>,
-    mig: &mut Migration<A>,
+    mig: &mut Migration,
     transactional: bool,
 ) -> FlowNode {
     // remember the absolute base column ID for potential later removal
@@ -394,12 +387,12 @@ pub(crate) fn make_base_node<A: Authority + 'static>(
     }
 }
 
-pub(crate) fn make_union_node<A: Authority + 'static>(
+pub(crate) fn make_union_node(
     name: &str,
     columns: &[Column],
     emit: &Vec<Vec<Column>>,
     ancestors: &[MirNodeRef],
-    mig: &mut Migration<A>,
+    mig: &mut Migration,
 ) -> FlowNode {
     let column_names = columns.iter().map(|c| &c.name).collect::<Vec<_>>();
     let mut emit_column_id: HashMap<NodeIndex, Vec<usize>> = HashMap::new();
@@ -425,12 +418,12 @@ pub(crate) fn make_union_node<A: Authority + 'static>(
     FlowNode::New(node)
 }
 
-pub(crate) fn make_filter_node<A: Authority + 'static>(
+pub(crate) fn make_filter_node(
     name: &str,
     parent: MirNodeRef,
     columns: &[Column],
     conditions: &Vec<Option<(Operator, DataType)>>,
-    mig: &mut Migration<A>,
+    mig: &mut Migration,
 ) -> FlowNode {
     let parent_na = parent.borrow().flow_node_addr().unwrap();
     let column_names = columns.iter().map(|c| &c.name).collect::<Vec<_>>();
@@ -443,14 +436,14 @@ pub(crate) fn make_filter_node<A: Authority + 'static>(
     FlowNode::New(node)
 }
 
-pub(crate) fn make_grouped_node<A: Authority + 'static>(
+pub(crate) fn make_grouped_node(
     name: &str,
     parent: MirNodeRef,
     columns: &[Column],
     on: &Column,
     group_by: &Vec<Column>,
     kind: GroupedNodeType,
-    mig: &mut Migration<A>,
+    mig: &mut Migration,
 ) -> FlowNode {
     assert!(group_by.len() > 0);
     assert!(
@@ -494,11 +487,11 @@ pub(crate) fn make_grouped_node<A: Authority + 'static>(
     FlowNode::New(na)
 }
 
-pub(crate) fn make_identity_node<A: Authority + 'static>(
+pub(crate) fn make_identity_node(
     name: &str,
     parent: MirNodeRef,
     columns: &[Column],
-    mig: &mut Migration<A>,
+    mig: &mut Migration,
 ) -> FlowNode {
     let parent_na = parent.borrow().flow_node_addr().unwrap();
     let column_names = columns.iter().map(|c| &c.name).collect::<Vec<_>>();
@@ -511,7 +504,7 @@ pub(crate) fn make_identity_node<A: Authority + 'static>(
     FlowNode::New(node)
 }
 
-pub(crate) fn make_join_node<A: Authority + 'static>(
+pub(crate) fn make_join_node(
     name: &str,
     left: MirNodeRef,
     right: MirNodeRef,
@@ -520,7 +513,7 @@ pub(crate) fn make_join_node<A: Authority + 'static>(
     on_right: &Vec<Column>,
     proj_cols: &Vec<Column>,
     kind: JoinType,
-    mig: &mut Migration<A>,
+    mig: &mut Migration,
 ) -> FlowNode {
     use dataflow::ops::join::JoinSource;
 
@@ -606,12 +599,12 @@ pub(crate) fn make_join_node<A: Authority + 'static>(
     FlowNode::New(n)
 }
 
-pub(crate) fn make_latest_node<A: Authority + 'static>(
+pub(crate) fn make_latest_node(
     name: &str,
     parent: MirNodeRef,
     columns: &[Column],
     group_by: &Vec<Column>,
-    mig: &mut Migration<A>,
+    mig: &mut Migration,
 ) -> FlowNode {
     let parent_na = parent.borrow().flow_node_addr().unwrap();
     let column_names = columns.iter().map(|c| &c.name).collect::<Vec<_>>();
@@ -643,14 +636,14 @@ fn generate_projection_base(parent: &MirNodeRef, base: &ArithmeticBase) -> Proje
     }
 }
 
-pub(crate) fn make_project_node<A: Authority + 'static>(
+pub(crate) fn make_project_node(
     name: &str,
     parent: MirNodeRef,
     columns: &[Column],
     emit: &Vec<Column>,
     arithmetic: &Vec<(String, ArithmeticExpression)>,
     literals: &Vec<(String, DataType)>,
-    mig: &mut Migration<A>,
+    mig: &mut Migration,
 ) -> FlowNode {
     let parent_na = parent.borrow().flow_node_addr().unwrap();
     let column_names = columns.iter().map(|c| &c.name).collect::<Vec<_>>();
@@ -685,7 +678,7 @@ pub(crate) fn make_project_node<A: Authority + 'static>(
     FlowNode::New(n)
 }
 
-pub(crate) fn make_topk_node<A: Authority + 'static>(
+pub(crate) fn make_topk_node(
     name: &str,
     parent: MirNodeRef,
     columns: &[Column],
@@ -693,7 +686,7 @@ pub(crate) fn make_topk_node<A: Authority + 'static>(
     group_by: &Vec<Column>,
     k: usize,
     offset: usize,
-    mig: &mut Migration<A>,
+    mig: &mut Migration,
 ) -> FlowNode {
     let parent_na = parent.borrow().flow_node_addr().unwrap();
     let column_names = columns.iter().map(|c| &c.name).collect::<Vec<_>>();
@@ -738,11 +731,11 @@ pub(crate) fn make_topk_node<A: Authority + 'static>(
     FlowNode::New(na)
 }
 
-pub(crate) fn materialize_leaf_node<A: Authority + 'static>(
+pub(crate) fn materialize_leaf_node(
     parent: &MirNodeRef,
     name: String,
     key_cols: &Vec<Column>,
-    mig: &mut Migration<A>,
+    mig: &mut Migration,
 ) {
     let na = parent.borrow().flow_node_addr().unwrap();
 

@@ -1,5 +1,5 @@
 use channel::tcp::TcpSender;
-use consensus::{Authority, Epoch};
+use consensus::Epoch;
 use dataflow::{checktable, node, payload, DomainConfig, PersistenceParameters};
 use dataflow::payload::{EgressForBase, IngressFromBase};
 use dataflow::prelude::*;
@@ -32,7 +32,7 @@ use tarpc::sync::client::{self, ClientExt};
 /// does not allow direct manipulation of the graph. Instead, changes must be instigated through a
 /// `Migration`, which can be performed using `ControllerInner::migrate`. Only one `Migration` can
 /// occur at any given point in time.
-pub struct ControllerInner<A: Authority + 'static> {
+pub struct ControllerInner {
     pub(super) ingredients: petgraph::Graph<node::Node, Edge>,
     pub(super) source: NodeIndex,
     pub(super) ndomains: usize,
@@ -64,7 +64,6 @@ pub struct ControllerInner<A: Authority + 'static> {
     pub(super) remap: HashMap<DomainIndex, HashMap<NodeIndex, IndexPair>>,
 
     pub(super) epoch: Epoch,
-    authority: Arc<A>,
 
     heartbeat_every: Duration,
     healthcheck_every: Duration,
@@ -94,7 +93,7 @@ impl Display for RpcError {
     }
 }
 
-impl<A: Authority + 'static> ControllerInner<A> {
+impl ControllerInner {
     pub fn coordination_message(&mut self, msg: CoordinationMessage) {
         trace!(self.log, "Received {:?}", msg);
         let process = match msg.payload {
@@ -195,7 +194,6 @@ impl<A: Authority + 'static> ControllerInner<A> {
 
     /// Construct `ControllerInner` with a specified listening interface
     pub(super) fn new(
-        authority: Arc<A>,
         listen_addr: IpAddr,
         checktable_addr: SocketAddr,
         log: slog::Logger,
@@ -242,7 +240,6 @@ impl<A: Authority + 'static> ControllerInner<A> {
             channel_coordinator: cc,
             debug_channel: None,
             epoch: state.epoch,
-            authority,
 
             deps: HashMap::default(),
             remap: HashMap::default(),
@@ -298,7 +295,7 @@ impl<A: Authority + 'static> ControllerInner<A> {
     /// Perform a new query schema migration.
     pub fn migrate<F, T>(&mut self, f: F) -> T
     where
-        F: FnOnce(&mut Migration<A>) -> T,
+        F: FnOnce(&mut Migration) -> T,
     {
         info!(self.log, "starting migration");
         let miglog = self.log.new(o!());
@@ -568,7 +565,7 @@ impl<A: Authority + 'static> ControllerInner<A> {
     }
 }
 
-impl<A: Authority + 'static> Drop for ControllerInner<A> {
+impl Drop for ControllerInner {
     fn drop(&mut self) {
         for (_, d) in &mut self.domains {
             // XXX: this is a terrible ugly hack to ensure that all workers exit
