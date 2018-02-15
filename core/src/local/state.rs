@@ -187,7 +187,6 @@ impl PersistentState {
             .collect::<Vec<_>>()
             .join(", ");
 
-        println!("clauses {:?}", clauses);
         let statement = format!("SELECT row FROM store WHERE {}", clauses);
         self.connection.prepare_cached(&statement).unwrap();
         self.statements.insert(Vec::from(columns), statement);
@@ -209,7 +208,6 @@ impl PersistentState {
             .collect::<Vec<String>>()
             .join(", ");
 
-        println!("INSERT INTO STORE ({}) VALUES ({})", columns, placeholders);
         let mut statement = self.connection
             .prepare_cached(&format!(
                 "INSERT INTO store ({}) VALUES ({})",
@@ -218,23 +216,10 @@ impl PersistentState {
             .unwrap();
 
         let row = serde_json::to_string(&r).unwrap();
-        // match self.indices.len() {
-        //      1 => statement.execute(&[&row, ]
-        //      _ => unreachable!()
-        //      // KeyType::Double((a, b)) => statement.execute(&[&a, &b]),
-        //      // KeyType::Tri((a, b, c)) => statement.execute(&[&a, &b, &c]),
-        //      // KeyType::Quad((a, b, c, d)) => statement.execute(&[&a, &b, &c, &d]),
-        //      // KeyType::Quin((a, b, c, d, e)) => statement.execute(&[&a, &b, &c, &d, &e]),
-        //      // KeyType::Sex((a, b, c, d, e, f)) => statement.execute(&[&a, &b, &c, &d, &e, &f]),
-        // }.unwrap();
-
         let mut values: Vec<&ToSql> = vec![&row];
         let mut index_values = self.indices
             .iter()
-            .map(|index| {
-                println!("index value {}", r[*index]);
-                &r[*index] as &ToSql
-            })
+            .map(|index| &r[*index] as &ToSql)
             .collect::<Vec<&ToSql>>();
 
         values.append(&mut index_values);
@@ -247,20 +232,20 @@ impl PersistentState {
             .prepare_cached(&self.statements[&Vec::from(columns)])
             .unwrap();
 
-        println!("looking up {}", self.statements[&Vec::from(columns)]);
+        let mapper = |result: &rusqlite::Row| -> Vec<DataType> {
+            let row: String = result.get(0);
+            serde_json::from_str(&row).unwrap()
+        };
+
         let rows = match *key {
-             KeyType::Single(a) => statement.query_map(&[a], |row| {
-                 let string: String = row.get(0);
-                 println!("got row {:?}", string);
-                 let data_row: Vec<DataType> = serde_json::from_str(&string).unwrap();
-                 data_row
-             }),
-             _ => unreachable!()
-             // KeyType::Double((a, b)) => statement.execute(&[&a, &b]),
-             // KeyType::Tri((a, b, c)) => statement.execute(&[&a, &b, &c]),
-             // KeyType::Quad((a, b, c, d)) => statement.execute(&[&a, &b, &c, &d]),
-             // KeyType::Quin((a, b, c, d, e)) => statement.execute(&[&a, &b, &c, &d, &e]),
-             // KeyType::Sex((a, b, c, d, e, f)) => statement.execute(&[&a, &b, &c, &d, &e, &f]),
+            KeyType::Single(a) => statement.query_map(&[a], mapper),
+            KeyType::Double(ref r) => statement.query_map(&[&r.0, &r.1], mapper),
+            KeyType::Tri(ref r) => statement.query_map(&[&r.0, &r.1, &r.2], mapper),
+            KeyType::Quad(ref r) => statement.query_map(&[&r.0, &r.1, &r.2, &r.3], mapper),
+            KeyType::Quin(ref r) => statement.query_map(&[&r.0, &r.1, &r.2, &r.3, &r.4], mapper),
+            KeyType::Sex(ref r) => {
+                statement.query_map(&[&r.0, &r.1, &r.2, &r.3, &r.4, &r.5], mapper)
+            }
         };
 
         let data = rows.unwrap()
