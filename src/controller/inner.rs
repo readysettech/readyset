@@ -1,6 +1,6 @@
 use channel::tcp::TcpSender;
 use consensus::Epoch;
-use dataflow::{checktable, node, payload, DomainConfig, PersistenceParameters, Readers};
+use dataflow::{checktable, node, payload, DomainConfig, PersistenceParameters};
 use dataflow::payload::{EgressForBase, IngressFromBase};
 use dataflow::prelude::*;
 use dataflow::statistics::GraphStats;
@@ -10,7 +10,6 @@ use std::error::Error;
 use std::fmt::{self, Display};
 use std::net::{IpAddr, SocketAddr};
 use std::time::{Duration, Instant};
-use std::thread;
 use std::sync::{Arc, Mutex};
 use std::{io, time};
 
@@ -19,8 +18,6 @@ use controller::{ControllerState, DomainHandle, Migration, Recipe, RemoteGetterB
                  WorkerIdentifier, WorkerStatus};
 use controller::migrate::materialization::Materializations;
 use controller::mutator::MutatorBuilder;
-use souplet::readers;
-use worker;
 
 use hyper::{Method, StatusCode};
 use mio::net::TcpListener;
@@ -57,9 +54,6 @@ pub struct ControllerInner {
     pub(super) debug_channel: Option<SocketAddr>,
 
     pub(super) listen_addr: IpAddr,
-    read_listen_addr: SocketAddr,
-    pub(super) reader_exit: Option<Arc<()>>,
-    pub(super) readers: Readers,
 
     /// Map from worker address to the address the worker is listening on for reads.
     read_addrs: HashMap<WorkerIdentifier, SocketAddr>,
@@ -68,9 +62,6 @@ pub struct ControllerInner {
     /// State between migrations
     pub(super) deps: HashMap<DomainIndex, (IngressFromBase, EgressForBase)>,
     pub(super) remap: HashMap<DomainIndex, HashMap<NodeIndex, IndexPair>>,
-
-    /// Local worker pool used for tests
-    pub(super) local_pool: Option<worker::WorkerPool>,
 
     pub(super) epoch: Epoch,
 
@@ -220,20 +211,6 @@ impl ControllerInner {
             checktable::CheckTableClient::connect(checktable_addr, client::Options::default())
                 .unwrap();
 
-        let readers: Readers = Arc::default();
-        let nreaders = state.config.nreaders;
-        let listener = TcpListener::bind(&SocketAddr::new(listen_addr, 0)).unwrap();
-        let read_listen_addr = listener.local_addr().unwrap();
-        let thread_builder = thread::Builder::new().name("read-dispatcher".to_owned());
-        let reader_exit = Arc::new(());
-        {
-            let readers = readers.clone();
-            let reader_exit = reader_exit.clone();
-            thread_builder
-                .spawn(move || readers::serve(listener, readers, nreaders, reader_exit))
-                .unwrap();
-        }
-
         let mut materializations = Materializations::new(&log);
         if !state.config.partial_enabled {
             materializations.disable_partial()
@@ -241,18 +218,6 @@ impl ControllerInner {
 
         let cc = Arc::new(ChannelCoordinator::new());
         assert!((state.config.nworkers == 0) ^ (state.config.local_workers == 0));
-        let local_pool = if state.config.nworkers == 0 {
-            Some(
-                worker::WorkerPool::new(
-                    state.config.local_workers,
-                    &log,
-                    checktable_addr,
-                    cc.clone(),
-                ).unwrap(),
-            )
-        } else {
-            None
-        };
 
         ControllerInner {
             ingredients: g,
@@ -279,13 +244,8 @@ impl ControllerInner {
             deps: HashMap::default(),
             remap: HashMap::default(),
 
-            readers,
-            read_listen_addr,
-            reader_exit: Some(reader_exit),
             read_addrs: HashMap::default(),
             workers: HashMap::default(),
-
-            local_pool,
 
             last_checked_workers: Instant::now(),
         }
@@ -441,16 +401,13 @@ impl ControllerInner {
         self.find_getter_for(node).map(|r| {
             let domain = self.ingredients[r].domain();
             let shards = (0..self.domains[&domain].shards())
-                .map(|i| match self.domains[&domain].assignment(i) {
-                    Some(worker) => self.read_addrs[&worker].clone(),
-                    None => self.read_listen_addr.clone(),
-                })
+                .map(|i| self.read_addrs[&self.domains[&domain].assignment(i)].clone())
                 .map(|a| {
                     // NOTE: this is where we decide whether assignments are local or not (and
                     // hence whether we should use LocalBypass). currently, we assume that either
                     // *all* assignments are local, or *none* are. this is likely to change, at
                     // which point this has to change too.
-                    (a, self.local_pool.is_some())
+                    (a, false)
                 })
                 .collect();
 
@@ -610,16 +567,12 @@ impl ControllerInner {
 
 impl Drop for ControllerInner {
     fn drop(&mut self) {
-        drop(self.reader_exit.take());
         for (_, d) in &mut self.domains {
             // XXX: this is a terrible ugly hack to ensure that all workers exit
             for _ in 0..100 {
                 // don't unwrap, because given domain may already have terminated
                 drop(d.send(box payload::Packet::Quit));
             }
-        }
-        if let Some(ref mut local_pool) = self.local_pool {
-            local_pool.wait();
         }
     }
 }
