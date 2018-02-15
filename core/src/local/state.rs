@@ -70,7 +70,7 @@ impl State {
 
     pub fn mark_hole(&mut self, key: &[DataType], tag: &Tag) {
         match *self {
-            State::InMemory(ref mut memory_state) => memory_state.mark_hole(key, tag),
+            State::InMemory(ref mut s) => s.mark_hole(key, tag),
             // PersistentStates can't be partial:
             _ => unreachable!(),
         }
@@ -78,7 +78,7 @@ impl State {
 
     pub fn mark_filled(&mut self, key: Vec<DataType>, tag: &Tag) {
         match *self {
-            State::InMemory(ref mut memory_state) => memory_state.mark_filled(key, tag),
+            State::InMemory(ref mut s) => s.mark_filled(key, tag),
             // PersistentStates can't be partial:
             _ => unreachable!(),
         }
@@ -86,35 +86,35 @@ impl State {
 
     pub fn lookup<'a>(&'a self, columns: &[usize], key: &KeyType) -> LookupResult<'a> {
         match *self {
-            State::InMemory(ref memory_state) => memory_state.lookup(columns, key),
+            State::InMemory(ref s) => s.lookup(columns, key),
             State::Persistent(ref s) => s.lookup(columns, key),
         }
     }
 
     pub fn rows(&self) -> usize {
         match *self {
-            State::InMemory(ref memory_state) => memory_state.rows(),
+            State::InMemory(ref s) => s.rows(),
             _ => unreachable!(),
         }
     }
 
     pub fn cloned_records(&self) -> Vec<Vec<DataType>> {
         match *self {
-            State::InMemory(ref memory_state) => memory_state.cloned_records(),
-            _ => unreachable!(),
+            State::InMemory(ref s) => s.cloned_records(),
+            State::Persistent(ref s) => s.cloned_records(),
         }
     }
 
     pub fn clear(&mut self) {
         match *self {
-            State::InMemory(ref mut memory_state) => memory_state.clear(),
+            State::InMemory(ref mut s) => s.clear(),
             _ => unreachable!(),
         }
     }
 
     pub fn evict_random_keys(&mut self, count: usize) -> (&[usize], Vec<Vec<DataType>>, u64) {
         match *self {
-            State::InMemory(ref mut memory_state) => memory_state.evict_random_keys(count),
+            State::InMemory(ref mut s) => s.evict_random_keys(count),
             _ => unreachable!(),
         }
     }
@@ -122,7 +122,7 @@ impl State {
     /// Evict the listed keys from the materialization targeted by `tag`.
     pub fn evict_keys(&mut self, tag: &Tag, keys: &[Vec<DataType>]) -> (&[usize], u64) {
         match *self {
-            State::InMemory(ref mut memory_state) => memory_state.evict_keys(tag, keys),
+            State::InMemory(ref mut s) => s.evict_keys(tag, keys),
             _ => unreachable!(),
         }
     }
@@ -173,6 +173,12 @@ impl PersistentState {
             .map(|(i, column)| format!("index_{} = ?{}", column, i + 1))
             .collect::<Vec<_>>()
             .join(", ")
+    }
+
+    // Used with statement.query_map to deserialize the rows returned from SQlite
+    fn map_rows(result: &rusqlite::Row) -> Vec<DataType> {
+        let row: String = result.get(0);
+        serde_json::from_str(&row).unwrap()
     }
 
     fn add_key(&mut self, columns: &[usize], partial: Option<Vec<Tag>>) {
@@ -232,19 +238,16 @@ impl PersistentState {
         let query = format!("SELECT row FROM store WHERE {}", clauses);
         let mut statement = self.connection.prepare_cached(&query).unwrap();
 
-        let mapper = |result: &rusqlite::Row| -> Vec<DataType> {
-            let row: String = result.get(0);
-            serde_json::from_str(&row).unwrap()
-        };
-
         let rows = match *key {
-            KeyType::Single(a) => statement.query_map(&[a], mapper),
-            KeyType::Double(ref r) => statement.query_map(&[&r.0, &r.1], mapper),
-            KeyType::Tri(ref r) => statement.query_map(&[&r.0, &r.1, &r.2], mapper),
-            KeyType::Quad(ref r) => statement.query_map(&[&r.0, &r.1, &r.2, &r.3], mapper),
-            KeyType::Quin(ref r) => statement.query_map(&[&r.0, &r.1, &r.2, &r.3, &r.4], mapper),
+            KeyType::Single(a) => statement.query_map(&[a], Self::map_rows),
+            KeyType::Double(ref r) => statement.query_map(&[&r.0, &r.1], Self::map_rows),
+            KeyType::Tri(ref r) => statement.query_map(&[&r.0, &r.1, &r.2], Self::map_rows),
+            KeyType::Quad(ref r) => statement.query_map(&[&r.0, &r.1, &r.2, &r.3], Self::map_rows),
+            KeyType::Quin(ref r) => {
+                statement.query_map(&[&r.0, &r.1, &r.2, &r.3, &r.4], Self::map_rows)
+            }
             KeyType::Sex(ref r) => {
-                statement.query_map(&[&r.0, &r.1, &r.2, &r.3, &r.4, &r.5], mapper)
+                statement.query_map(&[&r.0, &r.1, &r.2, &r.3, &r.4, &r.5], Self::map_rows)
             }
         };
 
@@ -265,6 +268,20 @@ impl PersistentState {
         let query = format!("DELETE FROM store WHERE {}", clauses);
         let mut statement = self.connection.prepare_cached(&query).unwrap();
         statement.execute(&index_values[..]).unwrap() > 0
+    }
+
+    fn cloned_records(&self) -> Vec<Vec<DataType>> {
+        let mut statement = self.connection
+            .prepare_cached("SELECT row FROM store")
+            .unwrap();
+
+        let rows = statement
+            .query_map(&[], Self::map_rows)
+            .unwrap()
+            .map(|row| row.unwrap())
+            .collect::<Vec<_>>();
+
+        rows
     }
 }
 
@@ -443,7 +460,7 @@ impl SizeOf for State {
 
     fn deep_size_of(&self) -> u64 {
         match *self {
-            State::InMemory(ref memory_state) => memory_state.mem_size,
+            State::InMemory(ref s) => s.mem_size,
             _ => unreachable!(),
         }
     }
