@@ -7,7 +7,7 @@ use std::net::IpAddr;
 use slog;
 
 use controller::handle::ControllerHandle;
-use controller::{Controller, ControllerConfig};
+use controller::{self, ControllerConfig};
 
 /// Used to construct a controller.
 pub struct ControllerBuilder {
@@ -88,7 +88,7 @@ impl ControllerBuilder {
 
     /// Build a controller and return a handle to it.
     pub fn build<A: Authority + 'static>(self, authority: A) -> ControllerHandle<A> {
-        Controller::start(authority, self.listen_addr, self.config, self.log)
+        controller::start_instance(authority, self.listen_addr, self.config, self.log)
     }
 
     /// Build a local controller, and return a ControllerHandle to provide access to it.

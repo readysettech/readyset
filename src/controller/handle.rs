@@ -6,7 +6,8 @@ use std::collections::BTreeMap;
 use std::error::Error;
 use std::sync::Arc;
 use std::sync::mpsc::Sender;
-use std::thread::JoinHandle;
+use std::thread::{self, JoinHandle};
+use std::time::Duration;
 
 use futures::Stream;
 use hyper::{self, Client};
@@ -15,7 +16,7 @@ use serde::de::DeserializeOwned;
 use serde_json;
 use tokio_core::reactor::Core;
 
-use controller::{ControlEvent, ControllerDescriptor};
+use controller::{ControlEvent, ControllerDescriptor, WorkerEvent};
 use controller::inner::RpcError;
 use controller::getter::{RemoteGetter, RemoteGetterBuilder};
 use controller::mutator::{Mutator, MutatorBuilder};
@@ -24,7 +25,8 @@ use controller::mutator::{Mutator, MutatorBuilder};
 pub struct ControllerHandle<A: Authority> {
     pub(super) url: Option<String>,
     pub(super) authority: Arc<A>,
-    pub(super) local: Option<(Sender<ControlEvent>, JoinHandle<()>)>,
+    pub(super) local_controller: Option<(Sender<ControlEvent>, JoinHandle<()>)>,
+    pub(super) local_worker: Option<(Sender<WorkerEvent>, JoinHandle<()>)>,
 }
 impl<A: Authority> ControllerHandle<A> {
     /// Creates a `ControllerHandle` that bootstraps a connection to Soup via the configuration
@@ -33,7 +35,8 @@ impl<A: Authority> ControllerHandle<A> {
         ControllerHandle {
             url: None,
             authority: Arc::new(authority),
-            local: None,
+            local_controller: None,
+            local_worker: None,
         }
     }
 
@@ -51,6 +54,10 @@ impl<A: Authority> ControllerHandle<A> {
             let mut r = hyper::Request::new(hyper::Method::Post, url.parse().unwrap());
             r.set_body(serde_json::to_vec(request).unwrap());
             let res = core.run(client.request(r)).unwrap();
+            if res.status() == hyper::StatusCode::ServiceUnavailable {
+                thread::sleep(Duration::from_millis(100));
+                continue;
+            }
             if res.status() != hyper::StatusCode::Ok {
                 self.url = None;
                 continue;
@@ -83,7 +90,7 @@ impl<A: Authority> ControllerHandle<A> {
         let rgb: Option<RemoteGetterBuilder> = self.rpc("getter_builder", &node);
         rgb.map(|mut rgb| {
             for &mut (_, ref mut is_local) in &mut rgb.shards {
-                *is_local &= self.local.is_some();
+                *is_local &= self.local_controller.is_some();
             }
             rgb
         })
@@ -132,9 +139,10 @@ impl<A: Authority> ControllerHandle<A> {
         self.rpc("graphviz", &())
     }
 
-    /// Wait for associated local controller to exit.
+    /// Wait for associated local instance to exit (presumably forever).
     pub fn wait(mut self) {
-        self.local.take().unwrap().1.join().unwrap()
+        self.local_controller.take().unwrap().1.join().unwrap();
+        self.local_worker.take().unwrap().1.join().unwrap();
     }
 }
 impl ControllerHandle<LocalAuthority> {
@@ -158,7 +166,7 @@ impl ControllerHandle<LocalAuthority> {
             })
                 as Box<for<'a, 's> FnBox(&'a mut Migration<'s>) + Send + 'static>;
 
-            self.local
+            self.local_controller
                 .as_mut()
                 .unwrap()
                 .0
@@ -179,8 +187,12 @@ impl ControllerHandle<LocalAuthority> {
 }
 impl<A: Authority> Drop for ControllerHandle<A> {
     fn drop(&mut self) {
-        if let Some((sender, join_handle)) = self.local.take() {
+        if let Some((sender, join_handle)) = self.local_controller.take() {
             let _ = sender.send(ControlEvent::Shutdown);
+            let _ = join_handle.join();
+        }
+        if let Some((sender, join_handle)) = self.local_worker.take() {
+            let _ = sender.send(WorkerEvent::Shutdown);
             let _ = join_handle.join();
         }
     }

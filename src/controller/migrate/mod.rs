@@ -20,13 +20,11 @@
 //!
 //! Beware, Here be dragons™
 
-use channel;
 use dataflow::{checktable, node, payload};
 use dataflow::ops::base::Base;
 use dataflow::prelude::*;
 
 use std::collections::{HashMap, HashSet};
-use std::sync::mpsc;
 use std::time::Instant;
 
 use controller::{keys, ControllerInner, DomainHandle, WorkerEndpoint, WorkerIdentifier};
@@ -304,44 +302,6 @@ impl<'a> Migration<'a> {
         let ri = self.readers[&n];
 
         self.mainline.ingredients[ri].with_reader_mut(|r| r.set_key(key));
-    }
-
-    /// Obtain a channel that is fed by the output stream of the given node.
-    ///
-    /// As new updates are processed by the given node, its outputs will be streamed to the
-    /// returned channel. Node that this channel is *not* bounded, and thus a receiver that is
-    /// slower than the system as a hole will accumulate a large buffer over time.
-    #[allow(unused)]
-    pub fn stream(&mut self, n: NodeIndex) -> mpsc::Receiver<Vec<node::StreamUpdate>> {
-        self.ensure_reader_for(n, None);
-        let (tx, rx) = mpsc::channel();
-        let mut tx = channel::StreamSender::from_local(tx);
-
-        // If the reader hasn't been incorporated into the graph yet, just add the streamer
-        // directly.
-        let ri = self.readers[&n];
-        let mut res = None;
-        self.mainline.ingredients[ri].with_reader_mut(|r| {
-            res = Some(r.add_streamer(tx));
-        });
-        tx = match res.unwrap() {
-            Ok(_) => return rx,
-            Err(tx) => tx,
-        };
-
-        // Otherwise, send a message to the reader's domain to have it add the streamer.
-        let reader = &self.mainline.ingredients[self.readers[&n]];
-        self.mainline
-            .domains
-            .get_mut(&reader.domain())
-            .unwrap()
-            .send(box payload::Packet::AddStreamer {
-                node: *reader.local_addr(),
-                new_streamer: tx,
-            })
-            .unwrap();
-
-        rx
     }
 
     /// Commit the changes introduced by this `Migration` to the master `Soup`.

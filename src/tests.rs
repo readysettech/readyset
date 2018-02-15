@@ -2,7 +2,6 @@ extern crate glob;
 
 use core::DataType;
 use dataflow::checktable::Token;
-use dataflow::node::StreamUpdate;
 use dataflow::ops::base::Base;
 use dataflow::ops::grouped::aggregate::Aggregation;
 use dataflow::ops::identity::Identity;
@@ -17,7 +16,6 @@ use controller::sql::SqlIncorporator;
 
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 use std::thread;
-use std::sync::mpsc;
 use std::env;
 use std::fs;
 use std::collections::HashMap;
@@ -142,46 +140,10 @@ fn it_works_basic() {
 }
 
 #[test]
-fn it_works_streaming() {
-    // set up graph
-    let mut g = ControllerBuilder::default().build_local();
-    let (a, b, cq) = g.migrate(|mig| {
-        let a = mig.add_ingredient("a", &["a", "b"], Base::default());
-        let b = mig.add_ingredient("b", &["a", "b"], Base::default());
-
-        let mut emits = HashMap::new();
-        emits.insert(a, vec![0, 1]);
-        emits.insert(b, vec![0, 1]);
-        let u = Union::new(emits);
-        let c = mig.add_ingredient("c", &["a", "b"], u);
-        let cq = mig.stream(c);
-        (a, b, cq)
-    });
-
-    let mut muta = g.get_mutator(a).unwrap();
-    let mut mutb = g.get_mutator(b).unwrap();
-    let id: DataType = 1.into();
-
-    // send a value on a
-    muta.put(vec![id.clone(), 2.into()]).unwrap();
-    assert_eq!(
-        cq.recv_timeout(get_settle_time()),
-        Ok(vec![vec![id.clone(), 2.into()].into()])
-    );
-
-    // update value again
-    mutb.put(vec![id.clone(), 4.into()]).unwrap();
-    assert_eq!(
-        cq.recv_timeout(get_settle_time()),
-        Ok(vec![vec![id.clone(), 4.into()].into()])
-    );
-}
-
-#[test]
 fn shared_interdomain_ancestor() {
     // set up graph
     let mut g = ControllerBuilder::default().build_local();
-    let (a, bq, cq) = g.migrate(|mig| {
+    let (a, b, c) = g.migrate(|mig| {
         let a = mig.add_ingredient("a", &["a", "b"], Base::default());
 
         let mut emits = HashMap::new();
@@ -189,36 +151,41 @@ fn shared_interdomain_ancestor() {
 
         let u = Union::new(emits.clone());
         let b = mig.add_ingredient("b", &["a", "b"], u);
-        let bq = mig.stream(b);
+        mig.maintain_anonymous(b, 0);
 
         let u = Union::new(emits);
         let c = mig.add_ingredient("c", &["a", "b"], u);
-        let cq = mig.stream(c);
-        (a, bq, cq)
+        mig.maintain_anonymous(c, 0);
+        (a, b, c)
     });
 
+    let mut bq = g.get_getter(b).unwrap();
+    let mut cq = g.get_getter(c).unwrap();
     let mut muta = g.get_mutator(a).unwrap();
     let id: DataType = 1.into();
 
     // send a value on a
     muta.put(vec![id.clone(), 2.into()]).unwrap();
+    sleep();
     assert_eq!(
-        bq.recv_timeout(get_settle_time()),
+        bq.lookup(&id, true),
         Ok(vec![vec![id.clone(), 2.into()].into()])
     );
     assert_eq!(
-        cq.recv_timeout(get_settle_time()),
+        cq.lookup(&id, true),
         Ok(vec![vec![id.clone(), 2.into()].into()])
     );
 
     // update value again
+    let id: DataType = 2.into();
     muta.put(vec![id.clone(), 4.into()]).unwrap();
+    sleep();
     assert_eq!(
-        bq.recv_timeout(get_settle_time()),
+        bq.lookup(&id, true),
         Ok(vec![vec![id.clone(), 4.into()].into()])
     );
     assert_eq!(
-        cq.recv_timeout(get_settle_time()),
+        cq.lookup(&id, true),
         Ok(vec![vec![id.clone(), 4.into()].into()])
     );
 }
@@ -284,7 +251,7 @@ fn it_works_w_mat() {
 fn it_works_deletion() {
     // set up graph
     let mut g = ControllerBuilder::default().build_local();
-    let (a, b, cq) = g.migrate(|mig| {
+    let (a, b, c) = g.migrate(|mig| {
         let a = mig.add_ingredient("a", &["x", "y"], Base::new(vec![]).with_key(vec![1]));
         let b = mig.add_ingredient("b", &["_", "x", "y"], Base::new(vec![]).with_key(vec![2]));
 
@@ -293,32 +260,37 @@ fn it_works_deletion() {
         emits.insert(b, vec![1, 2]);
         let u = Union::new(emits);
         let c = mig.add_ingredient("c", &["x", "y"], u);
-        let cq = mig.stream(c);
-        (a, b, cq)
+        mig.maintain_anonymous(c, 0);
+        (a, b, c)
     });
 
+    let mut cq = g.get_getter(c).unwrap();
     let mut muta = g.get_mutator(a).unwrap();
     let mut mutb = g.get_mutator(b).unwrap();
 
     // send a value on a
     muta.put(vec![1.into(), 2.into()]).unwrap();
+    sleep();
     assert_eq!(
-        cq.recv_timeout(get_settle_time()),
+        cq.lookup(&1.into(), true),
         Ok(vec![vec![1.into(), 2.into()].into()])
     );
 
     // update value again
     mutb.put(vec![0.into(), 1.into(), 4.into()]).unwrap();
-    assert_eq!(
-        cq.recv_timeout(get_settle_time()),
-        Ok(vec![vec![1.into(), 4.into()].into()])
-    );
+    sleep();
+
+    let res = cq.lookup(&1.into(), true).unwrap();
+    assert_eq!(res.len(), 2);
+    assert!(res.contains(&vec![1.into(), 2.into()]));
+    assert!(res.contains(&vec![1.into(), 4.into()]));
 
     // delete first value
     muta.delete(vec![2.into()]).unwrap();
+    sleep();
     assert_eq!(
-        cq.recv_timeout(get_settle_time()),
-        Ok(vec![StreamUpdate::DeleteRow(vec![1.into(), 2.into()])])
+        cq.lookup(&1.into(), true),
+        Ok(vec![vec![1.into(), 4.into()]])
     );
 }
 
@@ -1064,19 +1036,21 @@ fn add_columns() {
 
     // set up graph
     let mut g = ControllerBuilder::default().build_local();
-    let (a, aq) = g.migrate(|mig| {
+    let a = g.migrate(|mig| {
         let a = mig.add_ingredient("a", &["a", "b"], Base::new(vec![1.into(), 2.into()]));
-        let aq = mig.stream(a);
-        (a, aq)
+        mig.maintain_anonymous(a, 0);
+        a
     });
+    let mut aq = g.get_getter(a).unwrap();
     let mut muta = g.get_mutator(a).unwrap();
 
     // send a value on a
     muta.put(vec![id.clone(), "y".into()]).unwrap();
+    sleep();
 
     // check that a got it
     assert_eq!(
-        aq.recv_timeout(get_settle_time()),
+        aq.lookup(&id, true),
         Ok(vec![vec![id.clone(), "y".into()].into()])
     );
 
@@ -1084,25 +1058,29 @@ fn add_columns() {
     g.migrate(move |mig| {
         mig.add_column(a, "c", 3.into());
     });
+    sleep();
 
     // send another (old) value on a
     muta.put(vec![id.clone(), "z".into()]).unwrap();
+    sleep();
 
     // check that a got it, and added the new, third column's default
-    assert_eq!(
-        aq.recv_timeout(get_settle_time()),
-        Ok(vec![vec![id.clone(), "z".into(), 3.into()].into()])
-    );
+    let res = aq.lookup(&id, true).unwrap();
+    assert_eq!(res.len(), 2);
+    assert!(res.contains(&vec![id.clone(), "y".into()]));
+    assert!(res.contains(&vec![id.clone(), "z".into()]));
 
     // get a new muta and send a new value on it
     let mut muta = g.get_mutator(a).unwrap();
     muta.put(vec![id.clone(), "a".into(), 10.into()]).unwrap();
+    sleep();
 
     // check that a got it, and included the third column
-    assert_eq!(
-        aq.recv_timeout(get_settle_time()),
-        Ok(vec![vec![id.clone(), "a".into(), 10.into()].into()])
-    );
+    let res = aq.lookup(&id, true).unwrap();
+    assert_eq!(res.len(), 3);
+    assert!(res.contains(&vec![id.clone(), "y".into()]));
+    assert!(res.contains(&vec![id.clone(), "z".into()]));
+    assert!(res.contains(&vec![id.clone(), "a".into(), 10.into()]));
 }
 
 #[test]
@@ -1159,27 +1137,27 @@ fn migrate_drop_columns() {
 
     // set up graph
     let mut g = ControllerBuilder::default().build_local();
-    let (a, stream) = g.migrate(|mig| {
+    let a = g.migrate(|mig| {
         let a = mig.add_ingredient("a", &["a", "b"], Base::new(vec!["a".into(), "b".into()]));
-        let stream = mig.stream(a);
-        (a, stream)
+        mig.maintain_anonymous(a, 0);
+        a
     });
+    let mut aq = g.get_getter(a).unwrap();
     let mut muta1 = g.get_mutator(a).unwrap();
 
     // send a value on a
     muta1.put(vec![id.clone(), "bx".into()]).unwrap();
-    sleep();
 
     // drop a column
     g.migrate(move |mig| {
         mig.drop_column(a, 1);
+        mig.maintain_anonymous(a, 0);
     });
 
     // new mutator should only require one column
     // and should inject default for a.b
     let mut muta2 = g.get_mutator(a).unwrap();
     muta2.put(vec![id.clone()]).unwrap();
-    sleep();
 
     // add a new column
     g.migrate(move |mig| {
@@ -1189,36 +1167,21 @@ fn migrate_drop_columns() {
     // new mutator allows putting two values, and injects default for a.b
     let mut muta3 = g.get_mutator(a).unwrap();
     muta3.put(vec![id.clone(), "cy".into()]).unwrap();
-    sleep();
 
     // using an old putter now should add default for c
     muta1.put(vec![id.clone(), "bz".into()]).unwrap();
-    sleep();
 
     // using putter that knows of neither b nor c should result in defaults for both
     muta2.put(vec![id.clone()]).unwrap();
+    sleep();
 
-    assert_eq!(
-        stream.recv_timeout(get_settle_time()),
-        Ok(vec![vec![id.clone(), "bx".into()].into()])
-    );
-    assert_eq!(
-        stream.recv_timeout(get_settle_time()),
-        Ok(vec![vec![id.clone(), "b".into()].into()])
-    );
-    assert_eq!(
-        stream.recv_timeout(get_settle_time()),
-        Ok(vec![vec![id.clone(), "b".into(), "cy".into()].into()])
-    );
-    assert_eq!(
-        stream.recv_timeout(get_settle_time()),
-        Ok(vec![vec![id.clone(), "bz".into(), "c".into()].into()])
-    );
-    assert_eq!(
-        stream.recv_timeout(get_settle_time()),
-        Ok(vec![vec![id.clone(), "b".into(), "c".into()].into()])
-    );
-    assert_eq!(stream.try_recv(), Err(mpsc::TryRecvError::Empty));
+    let res = aq.lookup(&1.into(), true).unwrap();
+    assert_eq!(res.len(), 5);
+    assert!(res.contains(&vec![id.clone(), "bx".into()]));
+    assert!(res.contains(&vec![id.clone(), "b".into()]));
+    assert!(res.contains(&vec![id.clone(), "b".into(), "cy".into()]));
+    assert!(res.contains(&vec![id.clone(), "bz".into(), "c".into()]));
+    assert!(res.contains(&vec![id.clone(), "b".into(), "c".into()]));
 }
 
 #[test]
@@ -1500,30 +1463,37 @@ fn crossing_migration() {
     let mut muta = g.get_mutator(a).unwrap();
     let mut mutb = g.get_mutator(b).unwrap();
 
-    let cq = g.migrate(move |mig| {
+    let c = g.migrate(move |mig| {
         let mut emits = HashMap::new();
         emits.insert(a, vec![0, 1]);
         emits.insert(b, vec![0, 1]);
         let u = Union::new(emits);
         let c = mig.add_ingredient("c", &["a", "b"], u);
-        mig.stream(c)
+        mig.maintain_anonymous(c, 0);
+        c
     });
+
+    let mut cq = g.get_getter(c).unwrap();
 
     let id: DataType = 1.into();
 
     // send a value on a
     muta.put(vec![id.clone(), 2.into()]).unwrap();
+    sleep();
+
     assert_eq!(
-        cq.recv_timeout(get_settle_time()),
+        cq.lookup(&id, true),
         Ok(vec![vec![id.clone(), 2.into()].into()])
     );
 
     // update value again
     mutb.put(vec![id.clone(), 4.into()]).unwrap();
-    assert_eq!(
-        cq.recv_timeout(get_settle_time()),
-        Ok(vec![vec![id.clone(), 4.into()].into()])
-    );
+    sleep();
+
+    let res = cq.lookup(&id, true).unwrap();
+    assert_eq!(res.len(), 2);
+    assert!(res.contains(&vec![id.clone(), 2.into()]));
+    assert!(res.contains(&vec![id.clone(), 4.into()]));
 }
 
 #[test]
@@ -1582,99 +1552,36 @@ fn domain_amend_migration() {
     let mut muta = g.get_mutator(a).unwrap();
     let mut mutb = g.get_mutator(b).unwrap();
 
-    let cq = g.migrate(move |mig| {
+    let c = g.migrate(move |mig| {
         let mut emits = HashMap::new();
         emits.insert(a, vec![0, 1]);
         emits.insert(b, vec![0, 1]);
         let u = Union::new(emits);
         let c = mig.add_ingredient("c", &["a", "b"], u);
-        mig.stream(c)
+        mig.maintain_anonymous(c, 0);
+        c
     });
+    let mut cq = g.get_getter(c).unwrap();
 
     let id: DataType = 1.into();
 
     // send a value on a
     muta.put(vec![id.clone(), 2.into()]).unwrap();
+    sleep();
+
     assert_eq!(
-        cq.recv_timeout(get_settle_time()),
+        cq.lookup(&id, true),
         Ok(vec![vec![id.clone(), 2.into()].into()])
     );
 
     // update value again
     mutb.put(vec![id.clone(), 4.into()]).unwrap();
-    assert_eq!(
-        cq.recv_timeout(get_settle_time()),
-        Ok(vec![vec![id.clone(), 4.into()].into()])
-    );
-}
+    sleep();
 
-#[test]
-#[ignore]
-// this test is ignored because partial materialization does not forward for keys unless they are
-// explicitly queried for. to re-add support for streaming consumers of Readers, we would need to
-// add a mechanism for registering interesting a key (effectively triggering a replay of that key
-// when called). this should be fairly straightforward to add in the existing infrastructure (just
-// use the same trigger that's given to the `backlog::ReadHandle` when it is partial), but it's
-// work we're fine putting off for now.
-fn state_replay_migration_stream() {
-    // we're going to set up a migration test that requires replaying existing state
-    // to do that, we'll first create a schema with just a base table, and write some stuff to it.
-    // then, we'll do a migration that adds a join in a different domain (requiring state replay),
-    // and send through some updates on the other (new) side of the join, and see that the expected
-    // things come out the other end.
-
-    let mut g = ControllerBuilder::default().build_local();
-    let a = g.migrate(|mig| {
-        let a = mig.add_ingredient("a", &["x", "y"], Base::default());
-        a
-    });
-    let mut muta = g.get_mutator(a).unwrap();
-
-    // make a couple of records
-    muta.put(vec![1.into(), "a".into()]).unwrap();
-    muta.put(vec![1.into(), "b".into()]).unwrap();
-    muta.put(vec![2.into(), "c".into()]).unwrap();
-
-    let (out, b) = g.migrate(move |mig| {
-        // add a new base and a join
-        let b = mig.add_ingredient("b", &["x", "z"], Base::default());
-        let j = Join::new(a, b, JoinType::Inner, vec![B(0, 0), L(1), R(1)]);
-        let j = mig.add_ingredient("j", &["x", "y", "z"], j);
-
-        // we want to observe what comes out of the join
-        let out = mig.stream(j);
-
-        (out, b)
-    });
-    let mut mutb = g.get_mutator(b).unwrap();
-
-    // if all went according to plan, the ingress to j's domains hould now contain all the records
-    // that we initially inserted into a. thus, when we forward matching things through j, we
-    // should see joined output records.
-
-    // there are (/should be) two records in a with x == 1
-    mutb.put(vec![1.into(), "n".into()]).unwrap();
-    // they may arrive in any order
-    let res = out.recv_timeout(get_settle_time()).unwrap();
-    assert!(
-        res.iter()
-            .any(|r| r == &vec![1.into(), "a".into(), "n".into()].into())
-    );
-    assert!(
-        res.iter()
-            .any(|r| r == &vec![1.into(), "b".into(), "n".into()].into())
-    );
-
-    // there are (/should be) one record in a with x == 2
-    mutb.put(vec![2.into(), "o".into()]).unwrap();
-    assert_eq!(
-        out.recv_timeout(get_settle_time()),
-        Ok(vec![vec![2.into(), "c".into(), "o".into()].into()])
-    );
-
-    // there should now be no more records
-    drop(g);
-    assert_eq!(out.recv(), Err(mpsc::RecvError));
+    let res = cq.lookup(&id, true).unwrap();
+    assert_eq!(res.len(), 2);
+    assert!(res.contains(&vec![id.clone(), 2.into()]));
+    assert!(res.contains(&vec![id.clone(), 4.into()]));
 }
 
 #[test]
