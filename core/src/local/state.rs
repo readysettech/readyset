@@ -33,23 +33,17 @@ impl State {
         }
     }
 
-    pub fn keys(&self) -> Vec<Vec<usize>> {
-        match *self {
-            State::InMemory(ref s) => s.keys(),
-            _ => unreachable!(),
-        }
-    }
-
     pub fn is_useful(&self) -> bool {
         match *self {
             State::InMemory(ref s) => s.is_useful(),
-            _ => unreachable!(),
+            State::Persistent(ref s) => s.indices.len() > 0,
         }
     }
 
     pub fn is_partial(&self) -> bool {
         match *self {
             State::InMemory(ref s) => s.is_partial(),
+            // PersistentStates can't be partial:
             State::Persistent(..) => false,
         }
     }
@@ -94,7 +88,14 @@ impl State {
     pub fn rows(&self) -> usize {
         match *self {
             State::InMemory(ref s) => s.rows(),
-            _ => unreachable!(),
+            State::Persistent(ref s) => s.rows(),
+        }
+    }
+
+    pub fn keys(&self) -> Vec<Vec<usize>> {
+        match *self {
+            State::InMemory(ref s) => s.keys(),
+            _ => unimplemented!(),
         }
     }
 
@@ -108,7 +109,7 @@ impl State {
     pub fn clear(&mut self) {
         match *self {
             State::InMemory(ref mut s) => s.clear(),
-            _ => unreachable!(),
+            State::Persistent(ref mut s) => s.clear(),
         }
     }
 
@@ -128,6 +129,7 @@ impl State {
     }
 }
 
+/// PersistentState stores data in SQlite.
 pub struct PersistentState {
     connection: Connection,
     indices: HashSet<usize>,
@@ -172,7 +174,7 @@ impl PersistentState {
             .enumerate()
             .map(|(i, column)| format!("index_{} = ?{}", column, i + 1))
             .collect::<Vec<_>>()
-            .join(", ")
+            .join(" AND ")
     }
 
     // Used with statement.query_map to deserialize the rows returned from SQlite
@@ -198,6 +200,9 @@ impl PersistentState {
         }
     }
 
+    // Builds up an INSERT query on the form of:
+    // `INSERT INTO STORE (index_0, index_1, row) VALUES (...)`
+    // where row is a serialized representation of r.
     fn insert(&mut self, r: Vec<DataType>, partial_tag: Option<Tag>) -> bool {
         assert!(partial_tag.is_none(), "Bases can't be partial");
         let columns = format!(
@@ -233,6 +238,8 @@ impl PersistentState {
         true
     }
 
+    // Retrieves rows from SQlite by building up a SELECT query on the form of
+    // `SELECT row FROM store WHERE index_0 = value AND index_1 = VALUE`
     fn lookup(&self, columns: &[usize], key: &KeyType) -> LookupResult {
         let clauses = Self::build_clause(columns.iter());
         let query = format!("SELECT row FROM store WHERE {}", clauses);
@@ -282,6 +289,26 @@ impl PersistentState {
             .collect::<Vec<_>>();
 
         rows
+    }
+
+    fn rows(&self) -> usize {
+        let mut statement = self.connection
+            .prepare_cached("SELECT COUNT(row) FROM store")
+            .unwrap();
+
+        let mut rows = statement.query(&[]).unwrap();
+        match rows.next() {
+            Some(row) => {
+                let count: i64 = row.unwrap().get(0);
+                count as usize
+            }
+            None => 0,
+        }
+    }
+
+    fn clear(&self) {
+        let mut statement = self.connection.prepare_cached("DELETE FROM store").unwrap();
+        statement.execute(&[]).unwrap();
     }
 }
 
@@ -461,7 +488,174 @@ impl SizeOf for State {
     fn deep_size_of(&self) -> u64 {
         match *self {
             State::InMemory(ref s) => s.mem_size,
-            _ => unreachable!(),
+            State::Persistent(..) => self.size_of(),
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn persistent_state_is_partial() {
+        let state = State::base();
+        assert!(!state.is_partial());
+    }
+
+    #[test]
+    fn persistent_state_single_key() {
+        let mut state = State::base();
+        let columns = &[0];
+        let row: Vec<DataType> = vec![10.into(), "Cat".into()];
+        state.add_key(columns, None);
+        state.insert(row, None);
+
+        match state.lookup(columns, &KeyType::Single(&5.into())) {
+            LookupResult::Some(rows) => assert_eq!(rows.len(), 0),
+            LookupResult::Missing => panic!("PersistentStates can't be materialized"),
+        };
+
+        match state.lookup(columns, &KeyType::Single(&10.into())) {
+            LookupResult::Some(rows) => {
+                let data = &*rows[0];
+                assert_eq!(data[0], 10.into());
+                assert_eq!(data[1], "Cat".into());
+            }
+            _ => panic!(),
+        }
+    }
+
+    #[test]
+    fn persistent_state_multi_key() {
+        let mut state = State::base();
+        let columns = &[0, 2];
+        let row: Vec<DataType> = vec![10.into(), "Cat".into(), 20.into()];
+        state.add_key(columns, None);
+        assert!(state.insert(row.clone(), None));
+
+        match state.lookup(columns, &KeyType::Double((1.into(), 2.into()))) {
+            LookupResult::Some(rows) => assert_eq!(rows.len(), 0),
+            LookupResult::Missing => panic!("PersistentStates can't be materialized"),
+        };
+
+        match state.lookup(columns, &KeyType::Double((10.into(), 20.into()))) {
+            LookupResult::Some(rows) => {
+                assert_eq!(&*rows[0], &row);
+            }
+            _ => panic!(),
+        }
+    }
+
+    #[test]
+    fn persistent_state_multiple_indices() {
+        let mut state = State::base();
+        let first: Vec<DataType> = vec![10.into(), "Cat".into(), 20.into()];
+        let second: Vec<DataType> = vec![10.into(), "Bob".into(), 30.into()];
+        state.add_key(&[0], None);
+        state.add_key(&[0, 2], None);
+        assert!(state.insert(first.clone(), None));
+        assert!(state.insert(second.clone(), None));
+
+        match state.lookup(&[0], &KeyType::Single(&10.into())) {
+            LookupResult::Some(rows) => {
+                assert_eq!(rows.len(), 2);
+                assert_eq!(&*rows[0], &first);
+                assert_eq!(&*rows[1], &second);
+            }
+            _ => panic!(),
+        }
+
+        match state.lookup(&[0, 2], &KeyType::Double((10.into(), 20.into()))) {
+            LookupResult::Some(rows) => {
+                assert_eq!(rows.len(), 1);
+                assert_eq!(&*rows[0], &first);
+            }
+            _ => panic!(),
+        }
+    }
+
+    #[test]
+    fn persistent_state_remove() {
+        let mut state = State::base();
+        let columns = &[0];
+        let first: Vec<DataType> = vec![10.into(), "Cat".into()];
+        let second: Vec<DataType> = vec![20.into(), "Bob".into()];
+        state.add_key(columns, None);
+        assert!(state.insert(first.clone(), None));
+        assert!(state.insert(second.clone(), None));
+        assert!(state.remove(&first));
+
+        match state.lookup(columns, &KeyType::Single(&first[0])) {
+            LookupResult::Some(rows) => assert_eq!(rows.len(), 0),
+            LookupResult::Missing => panic!("PersistentStates can't be materialized"),
+        };
+
+        match state.lookup(columns, &KeyType::Single(&second[0])) {
+            LookupResult::Some(rows) => {
+                assert_eq!(&*rows[0], &second);
+            }
+            _ => panic!(),
+        }
+    }
+
+    #[test]
+    fn persistent_state_is_empty() {
+        let mut state = State::base();
+        let columns = &[0];
+        let row: Vec<DataType> = vec![10.into(), "Cat".into()];
+        state.add_key(columns, None);
+        assert!(state.is_empty());
+        assert!(state.insert(row.clone(), None));
+        assert!(!state.is_empty());
+    }
+
+    #[test]
+    fn persistent_state_is_useful() {
+        let mut state = State::base();
+        let columns = &[0];
+        assert!(!state.is_useful());
+        state.add_key(columns, None);
+        assert!(state.is_useful());
+    }
+
+    #[test]
+    fn persistent_state_len() {
+        let mut state = State::base();
+        let columns = &[0];
+        let first: Vec<DataType> = vec![10.into(), "Cat".into()];
+        let second: Vec<DataType> = vec![20.into(), "Bob".into()];
+        state.add_key(columns, None);
+        assert_eq!(state.len(), 0);
+        assert!(state.insert(first.clone(), None));
+        assert_eq!(state.len(), 1);
+        assert!(state.insert(second.clone(), None));
+        assert_eq!(state.len(), 2);
+    }
+
+    #[test]
+    fn persistent_state_cloned_records() {
+        let mut state = State::base();
+        let columns = &[0];
+        let first: Vec<DataType> = vec![10.into(), "Cat".into()];
+        let second: Vec<DataType> = vec![20.into(), "Bob".into()];
+        state.add_key(columns, None);
+        assert!(state.insert(first.clone(), None));
+        assert!(state.insert(second.clone(), None));
+        assert_eq!(state.cloned_records(), vec![first, second]);
+    }
+
+    #[test]
+    fn persistent_state_clear() {
+        let mut state = State::base();
+        let columns = &[0];
+        let first: Vec<DataType> = vec![10.into(), "Cat".into()];
+        let second: Vec<DataType> = vec![20.into(), "Bob".into()];
+        state.add_key(columns, None);
+        assert!(state.insert(first.clone(), None));
+        assert!(state.insert(second.clone(), None));
+
+        state.clear();
+        assert!(state.is_empty());
     }
 }
