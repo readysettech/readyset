@@ -5,6 +5,7 @@ authors = ["Malte Schwarzkopf <malte@csail.mit.edu>"]
 
 [dependencies]
 msql-srv = "0.5"
+#distributary = { path = "../distributary" }
 distributary = { git = "https://github.com/mit-pdos/distributary.git" }
 slog = "2.0.6"
 slog-term = "2.0.1"
