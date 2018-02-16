@@ -186,7 +186,7 @@ impl DomainBuilder {
         Domain {
             index: self.index,
             shard,
-            nshards: self.nshards,
+            _nshards: self.nshards,
             domain_addr: addr,
 
             transaction_state,
@@ -231,7 +231,7 @@ impl DomainBuilder {
 pub struct Domain {
     index: Index,
     shard: Option<usize>,
-    nshards: usize,
+    _nshards: usize,
     domain_addr: SocketAddr,
 
     nodes: DomainNodes,
@@ -1127,7 +1127,6 @@ impl Domain {
                         let p = box Packet::ReplayPiece {
                             tag: tag,
                             link: link.clone(),
-                            nshards: self.nshards,
                             context: ReplayPieceContext::Regular {
                                 last: state.is_empty(),
                             },
@@ -1137,7 +1136,6 @@ impl Domain {
 
                         if !state.is_empty() {
                             let log = self.log.new(o!());
-                            let nshards = self.nshards;
                             let domain_addr = self.domain_addr;
 
                             let added_cols = self.ingress_inject.get(&from).cloned();
@@ -1198,7 +1196,6 @@ impl Domain {
                                         let p = box Packet::ReplayPiece {
                                             tag: tag,
                                             link: link.clone(), // to is overwritten by receiver
-                                            nshards: nshards,
                                             context: ReplayPieceContext::Regular { last },
                                             data: chunk,
                                             transaction_state: None,
@@ -1389,7 +1386,6 @@ impl Domain {
                     Some(box Packet::ReplayPiece {
                         link: Link::new(source, path[0].node),
                         tag: tag,
-                        nshards: 1,
                         context: ReplayPieceContext::Partial {
                             for_keys: keys,
                             ignore: false,
@@ -1531,7 +1527,6 @@ impl Domain {
                     let m = Some(box Packet::ReplayPiece {
                         link: Link::new(source, path[0].node),
                         tag: tag,
-                        nshards: 1,
                         context: ReplayPieceContext::Partial {
                             for_keys: k,
                             ignore: false,
@@ -1545,7 +1540,6 @@ impl Domain {
                     let m = Some(box Packet::ReplayPiece {
                         link: Link::new(source, path[0].node),
                         tag: tag,
-                        nshards: 1,
                         context: ReplayPieceContext::Partial {
                             for_keys: k,
                             ignore: true,
@@ -1735,7 +1729,6 @@ impl Domain {
                     tag,
                     link,
                     data,
-                    nshards,
                     mut context,
                     transaction_state,
                 } => {
@@ -1758,7 +1751,6 @@ impl Domain {
                         link: link.clone(),
                         tag,
                         data,
-                        nshards,
                         context: context.clone(),
                         transaction_state: transaction_state.clone(),
                     };
@@ -1936,7 +1928,6 @@ impl Domain {
                                             link: link, // TODO: use dummy link instead
                                             tag,
                                             data: Vec::<Record>::new().into(),
-                                            nshards: self.nshards,
                                             context: ReplayPieceContext::Partial {
                                                 for_keys: backfill_keys.unwrap().clone(),
                                                 ignore: true,
