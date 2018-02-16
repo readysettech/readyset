@@ -135,7 +135,7 @@ impl<W: io::Write> MysqlShim<W> for SoupBackend {
 }
 
 fn main() {
-    let listener = net::TcpListener::bind("127.0.0.1:0").unwrap();
+    let listener = net::TcpListener::bind("127.0.0.1:3306").unwrap();
     let port = listener.local_addr().unwrap().port();
     println!("listening on port {}", port);
 
