@@ -1245,6 +1245,12 @@ fn migrate_drop_columns() {
     // send a value on a
     muta1.put(vec![id.clone(), "bx".into()]).unwrap();
 
+    // check that it's there
+    sleep();
+    let res = aq.lookup(&id.clone(), true).unwrap();
+    assert_eq!(res.len(), 1);
+    assert!(res.contains(&vec![id.clone(), "bx".into()]));
+
     // drop a column
     g.migrate(move |mig| {
         mig.drop_column(a, 1);
@@ -1255,6 +1261,13 @@ fn migrate_drop_columns() {
     // and should inject default for a.b
     let mut muta2 = g.get_mutator(a).unwrap();
     muta2.put(vec![id.clone()]).unwrap();
+
+    // so two rows now!
+    sleep();
+    let res = aq.lookup(&id.clone(), true).unwrap();
+    assert_eq!(res.len(), 2);
+    assert!(res.contains(&vec![id.clone(), "bx".into()]));
+    assert!(res.contains(&vec![id.clone(), "b".into()]));
 
     // add a new column
     g.migrate(move |mig| {
@@ -1274,6 +1287,8 @@ fn migrate_drop_columns() {
 
     let res = aq.lookup(&id.clone(), true).unwrap();
     assert_eq!(res.len(), 5);
+    // NOTE: if we *hadn't* read bx and b above, they would have also have c because it would have
+    // been added when the lookups caused partial backfills.
     assert!(res.contains(&vec![id.clone(), "bx".into()]));
     assert!(res.contains(&vec![id.clone(), "b".into()]));
     assert!(res.contains(&vec![id.clone(), "b".into(), "cy".into()]));
