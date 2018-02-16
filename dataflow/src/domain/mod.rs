@@ -594,7 +594,7 @@ impl Domain {
             };
 
             if enable_output || !nodes[n.child(i)].borrow().is_output() {
-                if n.is_shard_merger() {
+                if nodes[n.child(i)].borrow().is_shard_merger() {
                     // we need to preserve the egress src (which includes shard identifier)
                 } else {
                     m.link_mut().src = me;
