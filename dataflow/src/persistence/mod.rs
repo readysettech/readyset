@@ -380,6 +380,7 @@ impl GroupCommitQueueSet {
                     {
                         match *state {
                             TransactionState::Pending(ref token, ..) => {
+                                // NOTE: this data.clone() seems sad?
                                 (id, data.clone(), Some(token.clone()))
                             }
                             TransactionState::WillCommit => (id, data.clone(), None),
