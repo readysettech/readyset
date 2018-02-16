@@ -3,6 +3,7 @@ use controller::domain_handle::DomainInputHandle;
 use dataflow::checktable;
 
 use std::net::SocketAddr;
+use std::cell::RefCell;
 use vec_map::VecMap;
 
 /// Indicates why a Mutator operation failed.
@@ -34,7 +35,7 @@ impl MutatorBuilder {
     /// Construct a `Mutator`.
     pub fn build(self) -> Mutator {
         Mutator {
-            domain_input_handle: DomainInputHandle::new(self.txs).unwrap(),
+            domain_input_handle: RefCell::new(DomainInputHandle::new(self.txs).unwrap()),
             addr: self.addr,
             key: self.key,
             key_is_primary: self.key_is_primary,
@@ -49,7 +50,8 @@ impl MutatorBuilder {
 
 /// A `Mutator` is used to perform reads and writes to base nodes.
 pub struct Mutator {
-    domain_input_handle: DomainInputHandle,
+    // the RefCell is *just* there so we can use ::sender()
+    domain_input_handle: RefCell<DomainInputHandle>,
     addr: LocalNodeIndex,
     key_is_primary: bool,
     key: Vec<usize>,
@@ -132,9 +134,9 @@ impl Mutator {
         }
     }
 
-    fn send(&mut self, mut rs: Records) {
+    fn prep_records(&self, mut rs: Records) -> Box<Packet> {
         self.inject_dropped_cols(&mut rs);
-        let m = if self.transactional {
+        if self.transactional {
             box Packet::Transaction {
                 link: Link::new(self.addr, self.addr),
                 src: None,
@@ -149,9 +151,13 @@ impl Mutator {
                 data: rs,
                 tracer: self.tracer.clone(),
             }
-        };
+        }
+    }
 
+    fn send(&mut self, rs: Records) {
+        let m = self.prep_records(rs);
         self.domain_input_handle
+            .borrow_mut()
             .base_send(m, &self.key[..], self.is_local)
             .unwrap();
     }
@@ -169,8 +175,39 @@ impl Mutator {
         };
 
         self.domain_input_handle
+            .borrow_mut()
             .base_send(m, &self.key[..], self.is_local)
             .map_err(|_| ())
+    }
+
+    /// Perform a non-transactional write to the base node this Mutator was generated for.
+    pub fn batch_put<I, V>(&mut self, i: I) -> Result<(), MutatorError>
+    where
+        I: IntoIterator<Item = V>,
+        V: Into<Vec<DataType>>,
+    {
+        let mut dih = self.domain_input_handle.borrow_mut();
+        let mut batch_putter = dih.sender();
+
+        for row in i {
+            let data = vec![row.into()];
+            if data[0].len() != self.expected_columns {
+                return Err(MutatorError::WrongColumnCount(
+                    self.expected_columns,
+                    data[0].len(),
+                ));
+            }
+
+            let m = self.prep_records(data.into());
+            batch_putter
+                .enqueue(m, &self.key[..], self.is_local)
+                .unwrap();
+        }
+
+        batch_putter
+            .wait()
+            .map(|_| ())
+            .map_err(|_| MutatorError::TransactionFailed)
     }
 
     /// Perform a non-transactional write to the base node this Mutator was generated for.

@@ -26,27 +26,29 @@ pub struct DomainInputHandle {
     txs: Vec<TcpSender<Box<Packet>>>,
 }
 
-impl DomainInputHandle {
-    pub fn new(txs: Vec<SocketAddr>) -> Result<Self, io::Error> {
-        let txs: Result<Vec<_>, _> = txs.iter().map(|addr| TcpSender::connect(addr)).collect();
+pub(crate) struct BatchSendHandle<'a> {
+    dih: &'a mut DomainInputHandle,
+    sent: Vec<usize>,
+}
 
-        Ok(Self { txs: txs? })
+impl<'a> BatchSendHandle<'a> {
+    pub(crate) fn new(dih: &'a mut DomainInputHandle) -> Self {
+        let sent = vec![0; dih.txs.len()];
+        Self { dih, sent }
     }
 
-    pub fn base_send(
+    pub(crate) fn enqueue(
         &mut self,
         mut p: Box<Packet>,
         key: &[usize],
         local: bool,
-    ) -> Result<i64, tcp::SendError> {
-        let mut sent_to = Vec::with_capacity(self.txs.len());
-
-        if self.txs.len() == 1 {
+    ) -> Result<(), tcp::SendError> {
+        if self.dih.txs.len() == 1 {
             if local {
                 p = p.make_local();
             }
-            self.txs[0].send(p)?;
-            sent_to.push(0);
+            self.dih.txs[0].send(p)?;
+            self.sent[0] += 1;
         } else {
             if key.is_empty() {
                 unreachable!("sharded base without a key?");
@@ -57,7 +59,7 @@ impl DomainInputHandle {
             }
             let key_col = key[0];
 
-            let mut shard_writes = vec![Vec::new(); self.txs.len()];
+            let mut shard_writes = vec![Vec::new(); self.dih.txs.len()];
             let mut data = p.take_data();
             for r in data.drain(..) {
                 let shard = {
@@ -65,7 +67,7 @@ impl DomainInputHandle {
                         Record::Positive(ref r) | Record::Negative(ref r) => &r[key_col],
                         Record::DeleteRequest(ref k) => &k[0],
                     };
-                    dataflow::shard_by(key, self.txs.len())
+                    dataflow::shard_by(key, self.dih.txs.len())
                 };
                 shard_writes[shard].push(r);
             }
@@ -78,21 +80,53 @@ impl DomainInputHandle {
                     p = p.make_local();
                 }
 
-                self.txs[s].send(p)?;
-                sent_to.push(s);
+                self.dih.txs[s].send(p)?;
+                self.sent[s] += 1;
             }
         }
 
+        Ok(())
+    }
+
+    pub(crate) fn wait(self) -> Result<i64, ()> {
         let mut id = Ok(0);
-        for shard in sent_to {
-            use bincode;
-            let res: Result<Result<i64, ()>, _> =
-                bincode::deserialize_from(&mut (&mut self.txs[shard]).reader(), bincode::Infinite);
-            id = res.unwrap();
+        for (shard, n) in self.sent.into_iter().enumerate() {
+            for _ in 0..n {
+                use bincode;
+                let res: Result<Result<i64, ()>, _>;
+                res = bincode::deserialize_from(
+                    &mut (&mut self.dih.txs[shard]).reader(),
+                    bincode::Infinite,
+                );
+                id = res.unwrap();
+            }
         }
 
         // XXX: this just returns the last id :/
-        id.map_err(|_| {
+        id
+    }
+}
+
+impl DomainInputHandle {
+    pub(crate) fn new(txs: Vec<SocketAddr>) -> Result<Self, io::Error> {
+        let txs: Result<Vec<_>, _> = txs.iter().map(|addr| TcpSender::connect(addr)).collect();
+
+        Ok(Self { txs: txs? })
+    }
+
+    pub(crate) fn sender(&mut self) -> BatchSendHandle {
+        BatchSendHandle::new(self)
+    }
+
+    pub(crate) fn base_send(
+        &mut self,
+        p: Box<Packet>,
+        key: &[usize],
+        local: bool,
+    ) -> Result<i64, tcp::SendError> {
+        let mut s = BatchSendHandle::new(self);
+        s.enqueue(p, key, local)?;
+        s.wait().map_err(|_| {
             tcp::SendError::IoError(io::Error::new(io::ErrorKind::Other, "write failed"))
         })
     }

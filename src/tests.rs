@@ -1882,11 +1882,9 @@ fn live_writes() {
     // continuously write to vote
     let jh = thread::spawn(move || {
         let user: DataType = 0.into();
-        for _ in 0..votes {
-            for i in 0..ids {
-                add.put(vec![user.clone(), i.into()]).unwrap();
-            }
-        }
+        // we need to use a batch putter because otherwise we'd wait for 7000 batch intervals
+        add.batch_put((0..votes).flat_map(|_| (0..ids).map(|i| vec![user.clone(), i.into()])))
+            .unwrap()
     });
 
     // let a few writes through to make migration take a while
