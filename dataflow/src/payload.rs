@@ -76,6 +76,11 @@ pub enum ReplayPieceContext {
     },
 }
 
+#[derive(Clone, Copy, Serialize, Deserialize)]
+pub struct SourceChannelIdentifier {
+    pub token: usize,
+}
+
 #[derive(Clone, Serialize, Deserialize)]
 pub enum TransactionState {
     Committed(
@@ -83,7 +88,7 @@ pub enum TransactionState {
         petgraph::graph::NodeIndex,
         Option<Box<HashMap<domain::Index, i64>>>,
     ),
-    Pending(checktable::Token, SocketAddr),
+    Pending(checktable::Token),
     WillCommit,
 }
 
@@ -119,6 +124,7 @@ pub enum Packet {
     /// Regular data-flow update.
     Message {
         link: Link,
+        src: Option<SourceChannelIdentifier>,
         data: Records,
         tracer: Tracer,
     },
@@ -126,6 +132,7 @@ pub enum Packet {
     /// Transactional data-flow update.
     Transaction {
         link: Link,
+        src: Option<SourceChannelIdentifier>,
         data: Records,
         state: TransactionState,
         tracer: Tracer,
@@ -377,20 +384,24 @@ impl Packet {
         match *self {
             Packet::Message {
                 ref link,
+                src: _,
                 ref data,
                 ref tracer,
             } => Packet::Message {
                 link: link.clone(),
+                src: None,
                 data: data.clone(),
                 tracer: tracer.clone(),
             },
             Packet::Transaction {
                 ref link,
+                src: _,
                 ref data,
                 ref state,
                 ref tracer,
             } => Packet::Transaction {
                 link: link.clone(),
+                src: None,
                 data: data.clone(),
                 state: state.clone(),
                 tracer: tracer.clone(),

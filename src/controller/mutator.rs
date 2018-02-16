@@ -32,9 +32,9 @@ pub struct MutatorBuilder {
 
 impl MutatorBuilder {
     /// Construct a `Mutator`.
-    pub fn build(self, listen_addr: SocketAddr) -> Mutator {
+    pub fn build(self) -> Mutator {
         Mutator {
-            domain_input_handle: DomainInputHandle::new(listen_addr, self.txs).unwrap(),
+            domain_input_handle: DomainInputHandle::new(self.txs).unwrap(),
             addr: self.addr,
             key: self.key,
             key_is_primary: self.key_is_primary,
@@ -137,6 +137,7 @@ impl Mutator {
         let m = if self.transactional {
             box Packet::Transaction {
                 link: Link::new(self.addr, self.addr),
+                src: None,
                 data: rs,
                 state: TransactionState::WillCommit,
                 tracer: self.tracer.clone(),
@@ -144,13 +145,14 @@ impl Mutator {
         } else {
             box Packet::Message {
                 link: Link::new(self.addr, self.addr),
+                src: None,
                 data: rs,
                 tracer: self.tracer.clone(),
             }
         };
 
         self.domain_input_handle
-            .base_send(m, &self.key[..], self.is_local)
+            .base_send(m, &self.key[..], self.is_local, false)
             .unwrap();
     }
 
@@ -160,15 +162,15 @@ impl Mutator {
         self.inject_dropped_cols(&mut rs);
         let m = box Packet::Transaction {
             link: Link::new(self.addr, self.addr),
+            src: None,
             data: rs,
-            state: TransactionState::Pending(t, self.domain_input_handle.tx_reply_addr()),
+            state: TransactionState::Pending(t),
             tracer: self.tracer.clone(),
         };
 
         self.domain_input_handle
-            .base_send(m, &self.key[..], self.is_local)
-            .unwrap();
-        self.domain_input_handle.receive_transaction_result()
+            .base_send(m, &self.key[..], self.is_local, true)
+            .map_err(|_| ())
     }
 
     /// Perform a non-transactional write to the base node this Mutator was generated for.

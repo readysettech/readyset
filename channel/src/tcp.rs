@@ -89,6 +89,10 @@ impl<T: Serialize> TcpSender<T> {
         poisoning_try!(self, self.stream.flush());
         Ok(())
     }
+
+    pub fn reader<'a>(&'a mut self) -> impl io::Read + 'a {
+        &mut self.stream
+    }
 }
 
 #[derive(Debug)]

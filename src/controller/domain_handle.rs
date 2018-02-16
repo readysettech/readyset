@@ -24,23 +24,13 @@ pub enum WaitError {
 
 pub struct DomainInputHandle {
     txs: Vec<TcpSender<Box<Packet>>>,
-    tx_reply: PollingLoop<Result<i64, ()>>,
-    tx_reply_addr: SocketAddr,
 }
 
 impl DomainInputHandle {
-    pub fn new(listen_addr: SocketAddr, txs: Vec<SocketAddr>) -> Result<Self, io::Error> {
-        let txs: Result<Vec<_>, _> = txs.iter()
-            .map(|addr| TcpSender::connect(addr))
-            .collect();
-        let tx_reply = PollingLoop::new(listen_addr);
-        let tx_reply_addr = tx_reply.get_listener_addr().unwrap();
+    pub fn new(txs: Vec<SocketAddr>) -> Result<Self, io::Error> {
+        let txs: Result<Vec<_>, _> = txs.iter().map(|addr| TcpSender::connect(addr)).collect();
 
-        Ok(Self {
-            txs: txs?,
-            tx_reply,
-            tx_reply_addr,
-        })
+        Ok(Self { txs: txs? })
     }
 
     pub fn base_send(
@@ -48,12 +38,16 @@ impl DomainInputHandle {
         mut p: Box<Packet>,
         key: &[usize],
         local: bool,
-    ) -> Result<(), tcp::SendError> {
+        transactional: bool,
+    ) -> Result<i64, tcp::SendError> {
+        let mut sent_to = Vec::with_capacity(self.txs.len());
+
         if self.txs.len() == 1 {
             if local {
                 p = p.make_local();
             }
-            self.txs[0].send(p)
+            self.txs[0].send(p)?;
+            sent_to.push(0);
         } else {
             if key.is_empty() {
                 unreachable!("sharded base without a key?");
@@ -86,26 +80,26 @@ impl DomainInputHandle {
                 }
 
                 self.txs[s].send(p)?;
+                sent_to.push(s);
             }
-            Ok(())
         }
-    }
 
-    pub fn receive_transaction_result(&mut self) -> Result<i64, ()> {
-        let mut result = Err(());
-        self.tx_reply.run_polling_loop(|event| match event {
-            PollEvent::ResumePolling(_) => KeepPolling,
-            PollEvent::Process(r) => {
-                result = r;
-                StopPolling
+        let mut id = Ok(0);
+        if transactional {
+            for shard in sent_to {
+                use bincode;
+                let res: Result<Result<i64, ()>, _> = bincode::deserialize_from(
+                    &mut (&mut self.txs[shard]).reader(),
+                    bincode::Infinite,
+                );
+                id = res.unwrap();
             }
-            PollEvent::Timeout => unreachable!(),
-        });
-        result
-    }
+        }
 
-    pub fn tx_reply_addr(&self) -> SocketAddr {
-        self.tx_reply_addr.clone()
+        // XXX: this just returns the last id :/
+        id.map_err(|_| {
+            tcp::SendError::IoError(io::Error::new(io::ErrorKind::Other, "transaction failed"))
+        })
     }
 }
 

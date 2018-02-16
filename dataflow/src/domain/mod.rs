@@ -12,7 +12,8 @@ use Readers;
 use channel::TcpSender;
 use channel::poll::{PollEvent, ProcessResult};
 use prelude::*;
-use payload::{ControlReplyPacket, ReplayPieceContext, ReplayTransactionState, TransactionState};
+use payload::{ControlReplyPacket, ReplayPieceContext, ReplayTransactionState,
+              SourceChannelIdentifier, TransactionState};
 use statistics;
 use transactions;
 use persistence;
@@ -22,6 +23,10 @@ use serde_json;
 use itertools::Itertools;
 use slog::Logger;
 use timekeeper::{RealTime, SimpleTracker, ThreadTime, Timer, TimerSet};
+
+pub trait Executor {
+    fn send_back(&self, SourceChannelIdentifier, Result<i64, ()>);
+}
 
 type EnqueuedSends = Vec<(ReplicaAddr, Box<Packet>)>;
 
@@ -710,6 +715,7 @@ impl Domain {
             let m = if n.borrow().is_transactional() {
                 box Packet::Transaction {
                     link: Link::new(addr, addr),
+                    src: None,
                     data: data,
                     state: ts.clone(),
                     tracer: tracer.clone(),
@@ -719,6 +725,7 @@ impl Domain {
                 // egress node), so it must be converted to a normal normal message.
                 box Packet::Message {
                     link: Link::new(addr, addr),
+                    src: None,
                     data: data,
                     tracer: tracer.clone(),
                 }
@@ -1640,6 +1647,7 @@ impl Domain {
                         });
                         Packet::Transaction {
                             link,
+                            src: None,
                             data,
                             tracer: None,
                             state: TransactionState::Committed(ts, global_addr, prevs),
@@ -1647,6 +1655,7 @@ impl Domain {
                     } else {
                         Packet::Message {
                             link,
+                            src: None,
                             data,
                             tracer: None,
                         }
@@ -2310,6 +2319,7 @@ impl Domain {
 
     pub fn on_event(
         &mut self,
+        executor: &Executor,
         event: PollEvent<Box<Packet>>,
         sends: &mut EnqueuedSends,
     ) -> ProcessResult {
@@ -2331,10 +2341,7 @@ impl Domain {
                 });
                 ProcessResult::KeepPolling
             }
-            PollEvent::Process(mut packet) => {
-                if let Some(local) = packet.extract_local() {
-                    packet = local;
-                }
+            PollEvent::Process(packet) => {
                 if let Packet::Quit = *packet {
                     return ProcessResult::StopPolling;
                 }
@@ -2344,7 +2351,9 @@ impl Domain {
                 if self.group_commit_queues.should_append(&packet, &self.nodes) {
                     debug_assert!(packet.is_regular());
                     packet.trace(PacketEvent::ExitInputChannel);
-                    let merged_packet = self.group_commit_queues.append(packet, &self.nodes);
+                    let merged_packet =
+                        self.group_commit_queues
+                            .append(packet, &self.nodes, executor);
                     if let Some(packet) = merged_packet {
                         self.handle(packet, sends);
                     }
@@ -2359,7 +2368,9 @@ impl Domain {
                 ProcessResult::KeepPolling
             }
             PollEvent::Timeout => {
-                if let Some(m) = self.group_commit_queues.flush_if_necessary(&self.nodes) {
+                if let Some(m) = self.group_commit_queues
+                    .flush_if_necessary(&self.nodes, executor)
+                {
                     self.handle(m, sends);
                     while let Some(p) = self.inject.take() {
                         self.handle(p, sends);

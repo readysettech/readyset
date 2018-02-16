@@ -5,6 +5,7 @@ use std::time::Duration;
 use std::sync::{mpsc, Arc, Mutex, TryLockError};
 use std::os::unix::io::{AsRawFd, RawFd};
 use std::ops::AddAssign;
+use std::cell::RefCell;
 
 use fnv::FnvHashMap;
 use slab::Slab;
@@ -18,6 +19,7 @@ use channel::{self, TcpReceiver, TcpSender};
 use channel::poll::{PollEvent, ProcessResult};
 use channel::tcp::{SendError, TryRecvError};
 use dataflow::{self, Domain, Packet};
+use dataflow::payload::SourceChannelIdentifier;
 
 struct CachedRawFd(RawFd);
 
@@ -38,9 +40,27 @@ type EnqueuedSend = (ReplicaIndex, Box<Packet>);
 type ChannelCoordinator = channel::ChannelCoordinator<ReplicaIndex>;
 type ReplicaToken = usize;
 
+type ReplicaReceiversInner = VecMap<RefCell<(TcpReceiver<Box<Packet>>, Option<ReplicaIndex>)>>;
+
+#[derive(Default)]
+struct ReplicaReceivers(ReplicaReceiversInner);
+
+use std::ops::{Deref, DerefMut};
+impl Deref for ReplicaReceivers {
+    type Target = ReplicaReceiversInner;
+    fn deref(&self) -> &Self::Target {
+        &self.0
+    }
+}
+impl DerefMut for ReplicaReceivers {
+    fn deref_mut(&mut self) -> &mut Self::Target {
+        &mut self.0
+    }
+}
+
 struct ReplicaContext {
     /// A map from socket token to `TcpReceiver`.
-    receivers: VecMap<(TcpReceiver<Box<Packet>>, Option<ReplicaIndex>)>,
+    receivers: ReplicaReceivers,
     listener: Option<TcpListener>,
     replica: Replica,
     outputs: FnvHashMap<ReplicaIndex, (TcpSender<Packet>, bool)>,
@@ -145,7 +165,7 @@ impl WorkerPool {
         let addr = listener.local_addr().unwrap();
 
         let rc = ReplicaContext {
-            receivers: VecMap::new(),
+            receivers: Default::default(),
             replica: inner,
             outputs: Default::default(),
             listener: None,
@@ -249,7 +269,12 @@ impl Worker {
                 };
 
                 if let Ok(mut context) = rc.try_lock() {
-                    match context.replica.on_event(PollEvent::Timeout, &mut sends) {
+                    let context = &mut *context;
+                    match context.replica.on_event(
+                        &mut context.receivers,
+                        PollEvent::Timeout,
+                        &mut sends,
+                    ) {
                         ProcessResult::KeepPolling => {
                             let from_ri = context.replica.id();
                             for (ri, m) in sends.drain(..) {
@@ -262,9 +287,11 @@ impl Worker {
                             }
 
                             // what's now the next timeout?
-                            context
-                                .replica
-                                .on_event(PollEvent::ResumePolling(&mut durtmp), &mut sends);
+                            context.replica.on_event(
+                                &mut context.receivers,
+                                PollEvent::ResumePolling(&mut durtmp),
+                                &mut sends,
+                            );
                             if let Some(timeout) = durtmp.take() {
                                 timers.upsert(rit, timeout, TimerType::Oneshot);
                             } else {
@@ -376,7 +403,7 @@ impl Worker {
                     self.all.register(&stream, Token(token)).unwrap();
 
                     let tcp = TcpReceiver::new(stream);
-                    replica.receivers.insert(token, (tcp, None));
+                    replica.receivers.insert(token, RefCell::new((tcp, None)));
                 }
 
                 ready(replica.listener.as_ref().unwrap().as_raw_fd()).unwrap();
@@ -418,9 +445,13 @@ impl Worker {
 
             let mut from_ri = context.replica.id();
 
-            let mut resume_polling = |rit: usize, replica: &mut Replica| {
+            let mut resume_polling = |rit: usize, context: &mut ReplicaContext| {
                 let mut sends = Vec::new();
-                replica.on_event(PollEvent::ResumePolling(&mut durtmp), &mut sends);
+                context.replica.on_event(
+                    &mut context.receivers,
+                    PollEvent::ResumePolling(&mut durtmp),
+                    &mut sends,
+                );
                 if let Some(timeout) = durtmp.take() {
                     timers.upsert(rit, timeout, TimerType::Oneshot);
                 } else {
@@ -439,9 +470,9 @@ impl Worker {
                 let context = &mut *context;
 
                 // we're responsible for running the given domain, and we have its lock
-                use vec_map::Entry;
-                let mut channel = match context.receivers.entry(token) {
-                    Entry::Vacant(_) => {
+                let channel = match context.receivers.get(token) {
+                    Some(ch) => ch,
+                    None => {
                         // this means our `truth` is out of date and a token has been reused.
                         // we need to update our truth, and try again. but how do we
                         // re-register this stream so that it'll get returned to a thread later
@@ -470,15 +501,18 @@ impl Worker {
                         }
                         continue;
                     }
-                    Entry::Occupied(mut e) => e,
                 };
 
                 // we *still* can't trust sc.fd.
-                let fd = channel.get().0.get_ref().as_raw_fd();
+                let fd = channel.borrow().0.get_ref().as_raw_fd();
 
-                channel.get_mut().0.syscall_limit(Some(1));
+                channel.borrow_mut().0.syscall_limit(Some(1));
                 loop {
-                    let mut m = match channel.get_mut().0.try_recv() {
+                    let m = channel.borrow_mut().0.try_recv();
+                    // even with nll we need to *first* try_recv, and *then* match. otherwise the
+                    // borrow_mut() handle will be kept until the end of the match, which would
+                    // prevent us from doing context.receivers.remove().
+                    let mut m = match m {
                         Ok(p) => p,
                         Err(TryRecvError::Empty) => break,
                         Err(TryRecvError::Disconnected) => {
@@ -486,7 +520,7 @@ impl Worker {
                             // mutator that goes away maybe?
                             // in any case, we can unregister the socket.
                             debug!(self.log, "worker dropped lost connection"; "token" => token);
-                            let rx = channel.remove();
+                            let rx = context.receivers.remove(token).unwrap();
 
                             // dropping rx will automatically deregister the socket (in theory)
                             //
@@ -499,7 +533,7 @@ impl Worker {
                             // NOTE: we *must* deregister before freeing `token`, because otherwise
                             // another connection can take (and register) `token`. This isn't a
                             // problem as far as file descriptors go, but mio may get confused.
-                            self.all.deregister(rx.0.get_ref()).is_err();
+                            self.all.deregister(rx.borrow().0.get_ref()).is_err();
 
                             // no deadlock for same reason as adding a socket to poll
                             self.shared.truth.lock().unwrap().remove(token);
@@ -515,13 +549,13 @@ impl Worker {
 
                     if let Packet::Hey(di, shard) = *m {
                         let ri = (di, shard);
-                        channel.get_mut().1 = Some(ri);
+                        channel.borrow_mut().1 = Some(ri);
                         #[cfg(feature = "carry_local")]
                         context.recvd_from_local.insert(ri, 0);
                         continue;
                     }
 
-                    if let Some(ri) = channel.get().1.as_ref() {
+                    if let Some(ri) = channel.borrow().1.as_ref() {
                         #[cfg(feature = "carry_local")]
                         context
                             .recvd_from_local
@@ -531,7 +565,19 @@ impl Worker {
                             .add_assign(1);
                     }
 
-                    if !self.process(&mut context.replica, m, &mut sends) {
+                    // we're in a bit of a tough spot here from a borrowck perspective, becuase the
+                    // replica may want to send to the channel we are currently holding a handle
+                    // to. the compiler is completely right about saying that borrowing
+                    // context.receivers here is *not* okay. However, *we* know that reading
+                    // context.receivers here is fine, since we hold the &mut context.receivers,
+                    // and we are not concurrently modifying it.
+                    if !self.process(
+                        &mut context.replica,
+                        &context.receivers,
+                        m,
+                        Some(token),
+                        &mut sends,
+                    ) {
                         // told to exit?
                         if rearm {
                             ready(fd).unwrap();
@@ -546,7 +592,7 @@ impl Worker {
                     // for a local destination in `output`, send the others, and then process
                     // that packet immediately to save some syscalls and a trip through the
                     // network stack..
-                    let last = channel.get().0.is_empty();
+                    let last = channel.borrow().0.is_empty();
                     let mut give_up_next = false;
                     for (ri, m) in sends.drain(..) {
                         #[cfg(feature = "carry_local")]
@@ -596,7 +642,7 @@ impl Worker {
             };
 
             // Register timeout for replica
-            resume_polling(sc.rit, &mut context.replica);
+            resume_polling(sc.rit, &mut *context);
 
             // we have a packet we can handle directly!
             let mut give_up_next = false;
@@ -665,13 +711,23 @@ impl Worker {
                         }
 
                         // no other thread is operating on the target domain, so we can do it
-                        if !self.process(&mut context.replica, m, &mut sends) {
-                            // told to exit?
-                            if rearm {
-                                ready(fd).unwrap();
+                        {
+                            // borrowck gets confused through DerefMut
+                            let context = &mut *context;
+                            if !self.process(
+                                &mut context.replica,
+                                &context.receivers,
+                                m,
+                                None,
+                                &mut sends,
+                            ) {
+                                // told to exit?
+                                if rearm {
+                                    ready(fd).unwrap();
+                                }
+                                warn!(self.log, "worker told to exit");
+                                return;
                             }
-                            warn!(self.log, "worker told to exit");
-                            return;
                         }
 
                         from_ri = ri;
@@ -700,7 +756,7 @@ impl Worker {
                         }
 
                         // Register timeout for replica
-                        resume_polling(rit, &mut context.replica);
+                        resume_polling(rit, &mut context);
                         context_of_next_origin = context;
                     }
                     Err(_) => {
@@ -734,13 +790,45 @@ impl Worker {
     // returns true if processing should continue
     fn process(
         &self,
-        domain: &mut Replica,
-        packet: Box<Packet>,
+        replica: &mut Replica,
+        receivers: &ReplicaReceivers,
+        mut packet: Box<Packet>,
+        token: Option<usize>,
         sends: &mut Vec<EnqueuedSend>,
     ) -> bool {
-        match domain.on_event(PollEvent::Process(packet), sends) {
+        if let Some(local) = packet.extract_local() {
+            packet = local;
+        }
+
+        if let Some(token) = token {
+            // XXX: inject token into packet somewhere
+            // (maybe only if it's a base?)
+            match *packet {
+                Packet::Transaction { ref mut src, .. } | Packet::Message { ref mut src, .. } => {
+                    *src = Some(SourceChannelIdentifier { token: token });
+                }
+                _ => {}
+            }
+        }
+
+        match replica.on_event(receivers, PollEvent::Process(packet), sends) {
             ProcessResult::KeepPolling => true,
             ProcessResult::StopPolling => false,
+        }
+    }
+}
+
+impl dataflow::Executor for ReplicaReceivers {
+    fn send_back(&self, channel: SourceChannelIdentifier, reply: Result<i64, ()>) {
+        if let Some(ch) = self.get(channel.token) {
+            // XXX: what if the token has been reused?
+            use bincode;
+            use std::io::Write;
+
+            let stream = ch.borrow();
+            let mut stream = stream.0.get_ref();
+            bincode::serialize_into(&mut stream, &reply, bincode::Infinite).is_ok();
+            stream.flush().is_ok();
         }
     }
 }

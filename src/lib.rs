@@ -308,15 +308,16 @@
 #![feature(try_from)]
 #![feature(box_patterns)]
 #![feature(box_syntax)]
+#![feature(nll)]
 #![feature(conservative_impl_trait)]
 #![feature(entry_or_default)]
 #![deny(missing_docs)]
 #![feature(plugin, use_extern_macros)]
 #![plugin(tarpc_plugins)]
 #![deny(unused_extern_crates)]
-
 #![feature(fnbox)]
 
+extern crate bincode;
 extern crate channel;
 extern crate consensus;
 extern crate core;
