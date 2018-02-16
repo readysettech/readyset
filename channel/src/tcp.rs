@@ -4,7 +4,7 @@ use std::io::{self, BufReader, Write};
 use std::marker::PhantomData;
 use std::net::SocketAddr;
 
-use bincode::{self, Infinite};
+use bincode;
 use bufstream::BufStream;
 use byteorder::{NetworkEndian, WriteBytesExt};
 use mio::{self, Evented, Poll, PollOpt, Ready, Token};
@@ -83,9 +83,9 @@ impl<T: Serialize> TcpSender<T> {
             return Err(SendError::Poisoned);
         }
 
-        let size = u32::try_from(bincode::serialized_size(t)).unwrap();
+        let size = u32::try_from(bincode::serialized_size(t).unwrap()).unwrap();
         poisoning_try!(self, self.stream.write_u32::<NetworkEndian>(size));
-        poisoning_try!(self, bincode::serialize_into(&mut self.stream, t, Infinite));
+        poisoning_try!(self, bincode::serialize_into(&mut self.stream, t));
         poisoning_try!(self, self.stream.flush());
         Ok(())
     }

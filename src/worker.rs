@@ -827,7 +827,7 @@ impl dataflow::Executor for ReplicaReceivers {
 
             let stream = ch.borrow();
             let mut stream = stream.0.get_ref();
-            bincode::serialize_into(&mut stream, &reply, bincode::Infinite).is_ok();
+            bincode::serialize_into(&mut stream, &reply).is_ok();
             stream.flush().is_ok();
         }
     }

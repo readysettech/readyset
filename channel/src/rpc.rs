@@ -3,7 +3,7 @@ use std::io::{self, Write};
 use std::marker::PhantomData;
 use std::net::SocketAddr;
 
-use bincode::{self, Infinite};
+use bincode;
 use bufstream::BufStream;
 use byteorder::{NetworkEndian, WriteBytesExt};
 use mio::{self, Evented, Poll, PollOpt, Ready, Token};
@@ -47,11 +47,11 @@ where
     }
 
     fn send_internal(&mut self, query: &Q) -> Result<R, SendError> {
-        let size: u32 = bincode::serialized_size(query) as u32;
+        let size: u32 = bincode::serialized_size(query).unwrap() as u32;
         self.stream.write_u32::<NetworkEndian>(size)?;
-        bincode::serialize_into(&mut self.stream, query, Infinite)?;
+        bincode::serialize_into(&mut self.stream, query)?;
         self.stream.flush()?;
-        Ok(bincode::deserialize_from(&mut self.stream, Infinite)?)
+        Ok(bincode::deserialize_from(&mut self.stream)?)
     }
 
     pub fn send(&mut self, query: &Q) -> Result<R, SendError> {
@@ -129,7 +129,7 @@ where
             return Err(RpcSendError::Disconnected);
         }
 
-        if bincode::serialize_into(&mut self.stream, reply, Infinite).is_err() {
+        if bincode::serialize_into(&mut self.stream, reply).is_err() {
             self.poisoned = true;
             return Err(RpcSendError::SerializationError);
         }

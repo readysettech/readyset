@@ -94,10 +94,7 @@ impl<'a> BatchSendHandle<'a> {
             for _ in 0..n {
                 use bincode;
                 let res: Result<Result<i64, ()>, _>;
-                res = bincode::deserialize_from(
-                    &mut (&mut self.dih.txs[shard]).reader(),
-                    bincode::Infinite,
-                );
+                res = bincode::deserialize_from(&mut (&mut self.dih.txs[shard]).reader());
                 id = res.unwrap();
             }
         }

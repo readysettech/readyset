@@ -33,7 +33,7 @@ tarpc = "0.9.0"
 tarpc-plugins = "0.2.0"
 tokio-core = "0.1.8"
 slab = "0.4"
-bincode = "0.9.0"
+bincode = "1.0.0"
 
 vec_map = { version = "0.8.0", features = ["eders"] }
 timer_heap = "0.2.0"
