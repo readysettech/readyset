@@ -80,6 +80,11 @@ impl Sharder {
                 ..
             } = m
             {
+                // FIXME: how do we know what shards to send this response to? for each key, the
+                // query could have come from any shard as far as we know. *or* it could have come
+                // from even further downstream, in which case we need to forward to *all* the
+                // shards.
+
                 // we need to send one message to each shard in for_keys
                 let shards = if let box Packet::ReplayPiece {
                     context:
