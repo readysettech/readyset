@@ -1,5 +1,6 @@
 extern crate distributary;
 extern crate msql_srv;
+extern crate nom_sql;
 #[macro_use]
 extern crate slog;
 
@@ -46,6 +47,43 @@ impl SoupBackend {
             outputs: outputs,
         }
     }
+
+    fn handle_create_table<W: io::Write>(
+        &mut self,
+        q: &str,
+        results: QueryResultWriter<W>,
+    ) -> io::Result<()> {
+        match self.soup.install_recipe(format!("{}", q)) {
+            Ok(_) => {
+                // no rows to return
+                results.completed(0, 0)
+            }
+            Err(e) => {
+                // XXX(malte): implement Error for RpcError
+                let msg = match e {
+                    RpcError::Other(msg) => msg,
+                };
+                Err(io::Error::new(io::ErrorKind::Other, msg))
+            }
+        }
+    }
+
+    fn handle_insert(&mut self, q: nom_sql::InsertStatement) -> io::Result<()> {
+        unimplemented!()
+    }
+
+    fn handle_select(&mut self, q: nom_sql::SelectStatement) -> io::Result<()> {
+        unimplemented!()
+    }
+
+    fn handle_set<W: io::Write>(
+        &mut self,
+        q: nom_sql::SetStatement,
+        results: QueryResultWriter<W>,
+    ) -> io::Result<()> {
+        // ignore
+        results.completed(0, 0)
+    }
 }
 
 impl<W: io::Write> MysqlShim<W> for SoupBackend {
@@ -69,15 +107,28 @@ impl<W: io::Write> MysqlShim<W> for SoupBackend {
     fn on_query(&mut self, query: &str, results: QueryResultWriter<W>) -> io::Result<()> {
         debug!(self.log, "query: {}", query);
 
-        match self.soup.install_recipe(format!("{};", query)) {
-            // TODO(malte): should return proper completion indication (depends on type of query)
-            Ok(_) => results.completed(0, 0),
+        if query.to_lowercase().contains("show tables") || query.to_lowercase().contains("rollback")
+        {
+            return results.completed(0, 0);
+        }
+
+        match nom_sql::parse_query(query) {
+            Ok(q) => match q {
+                nom_sql::SqlQuery::CreateTable(q) => self.handle_create_table(query, results),
+                nom_sql::SqlQuery::Insert(q) => self.handle_insert(q),
+                nom_sql::SqlQuery::Select(q) => self.handle_select(q),
+                nom_sql::SqlQuery::Set(q) => self.handle_set(q, results),
+                _ => {
+                    return results.error(
+                        msql_srv::ErrorKind::ER_NOT_SUPPORTED_YET,
+                        "unsupported query".as_bytes(),
+                    )
+                }
+            },
             Err(e) => {
-                // XXX(malte): implement Error for RpcError
-                let msg = match e {
-                    RpcError::Other(msg) => msg,
-                };
-                Err(io::Error::new(io::ErrorKind::Other, msg))
+                // if nom-sql rejects the query, there is no chance Soup will like it
+                crit!(self.log, "query can't be parsed: \"{}\"", query);
+                return results.error(msql_srv::ErrorKind::ER_PARSE_ERROR, e.as_bytes());
             }
         }
     }

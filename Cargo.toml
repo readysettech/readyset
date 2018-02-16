@@ -7,6 +7,7 @@ authors = ["Malte Schwarzkopf <malte@csail.mit.edu>"]
 msql-srv = "0.5"
 #distributary = { path = "../distributary" }
 distributary = { git = "https://github.com/mit-pdos/distributary.git" }
+nom_sql = { git = "https://github.com/ms705/nom-sql" }
 slog = "2.0.6"
 slog-term = "2.0.1"
 
