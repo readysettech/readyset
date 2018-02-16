@@ -152,7 +152,7 @@ impl Mutator {
         };
 
         self.domain_input_handle
-            .base_send(m, &self.key[..], self.is_local, false)
+            .base_send(m, &self.key[..], self.is_local)
             .unwrap();
     }
 
@@ -169,7 +169,7 @@ impl Mutator {
         };
 
         self.domain_input_handle
-            .base_send(m, &self.key[..], self.is_local, true)
+            .base_send(m, &self.key[..], self.is_local)
             .map_err(|_| ())
     }
 

@@ -261,6 +261,7 @@ impl GroupCommitQueueSet {
     fn merge_committed_packets<I>(
         packets: I,
         transaction_state: Option<TransactionState>,
+        ex: &domain::Executor,
     ) -> Option<Box<Packet>>
     where
         I: Iterator<Item = Box<Packet>>,
@@ -274,23 +275,35 @@ impl GroupCommitQueueSet {
         };
         let mut merged_tracer: Tracer = None;
 
+        let ts = if let Some(TransactionState::Committed(ts, ..)) = transaction_state {
+            ts
+        } else {
+            0
+        };
+
         let merged_data = packets.fold(Records::default(), |mut acc, p| {
             match (p,) {
                 (box Packet::Message {
                     ref link,
-                    src: _,
+                    src,
                     ref mut data,
                     ref mut tracer,
                 },)
                 | (box Packet::Transaction {
                     ref link,
-                    src: _,
+                    src,
                     ref mut data,
                     ref mut tracer,
                     ..
                 },) => {
                     assert_eq!(merged_link, *link);
                     acc.append(data);
+
+                    if let Some(src) = src {
+                        // notify sender that we've accepted the write
+                        // NOTE: we should *only* do this for base writes!
+                        ex.send_back(src, Ok(ts));
+                    }
 
                     match (&merged_tracer, tracer) {
                         (&Some((mtag, _)), &mut Some((tag, Some(ref sender)))) => {
@@ -341,8 +354,7 @@ impl GroupCommitQueueSet {
     ) -> Option<Box<Packet>> {
         let send_reply = |p: &Packet, reply| {
             let src = match *p {
-                Packet::Transaction { src: Some(src), .. }
-                | Packet::Message { src: Some(src), .. } => src,
+                Packet::Transaction { src: Some(src), .. } => src,
                 _ => unreachable!(),
             };
             ex.send_back(src, reply);
@@ -403,7 +415,6 @@ impl GroupCommitQueueSet {
         };
 
         let prevs = reply.prevs;
-        let timestamp = reply.timestamp;
         let committed_transactions = reply.committed_transactions;
 
         // TODO: persist list of committed transacions.
@@ -421,7 +432,6 @@ impl GroupCommitQueueSet {
                     send_reply(&packet, Err(()));
                     return None;
                 }
-                send_reply(&packet, Ok(timestamp));
             }
             Some(packet)
         });
@@ -429,6 +439,7 @@ impl GroupCommitQueueSet {
         Self::merge_committed_packets(
             committed_packets,
             Some(TransactionState::Committed(reply.timestamp, base, prevs)),
+            ex,
         )
     }
 
@@ -443,7 +454,9 @@ impl GroupCommitQueueSet {
         }
 
         match packets[0] {
-            box Packet::Message { .. } => Self::merge_committed_packets(packets.drain(..), None),
+            box Packet::Message { .. } => {
+                Self::merge_committed_packets(packets.drain(..), None, ex)
+            }
             box Packet::Transaction { .. } => Self::merge_transactional_packets(packets, nodes, ex),
             _ => unreachable!(),
         }

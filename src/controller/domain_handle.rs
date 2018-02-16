@@ -38,7 +38,6 @@ impl DomainInputHandle {
         mut p: Box<Packet>,
         key: &[usize],
         local: bool,
-        transactional: bool,
     ) -> Result<i64, tcp::SendError> {
         let mut sent_to = Vec::with_capacity(self.txs.len());
 
@@ -85,20 +84,16 @@ impl DomainInputHandle {
         }
 
         let mut id = Ok(0);
-        if transactional {
-            for shard in sent_to {
-                use bincode;
-                let res: Result<Result<i64, ()>, _> = bincode::deserialize_from(
-                    &mut (&mut self.txs[shard]).reader(),
-                    bincode::Infinite,
-                );
-                id = res.unwrap();
-            }
+        for shard in sent_to {
+            use bincode;
+            let res: Result<Result<i64, ()>, _> =
+                bincode::deserialize_from(&mut (&mut self.txs[shard]).reader(), bincode::Infinite);
+            id = res.unwrap();
         }
 
         // XXX: this just returns the last id :/
         id.map_err(|_| {
-            tcp::SendError::IoError(io::Error::new(io::ErrorKind::Other, "transaction failed"))
+            tcp::SendError::IoError(io::Error::new(io::ErrorKind::Other, "write failed"))
         })
     }
 }
