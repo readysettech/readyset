@@ -179,10 +179,9 @@ impl Ingredient for Base {
 
         let get_current = |current_key: &'_ _| {
             match db.lookup(key_cols, &KeyType::from(current_key)) {
-                LookupResult::Some(rows) => {
+                LookupResult::Some(ref rows) if rows.len() != 1 => {
                     match rows.len() {
                         0 => None,
-                        1 => Some(Cow::Borrowed(&*rows[0])),
                         n => {
                             // primary key, so better be unique!
                             assert_eq!(n, 1, "key {:?} not unique (n = {})!", current_key, n);
@@ -190,6 +189,10 @@ impl Ingredient for Base {
                         }
                     }
                 }
+                LookupResult::Some(Cow::Owned(mut rows)) => {
+                    Some(Cow::from(rows.pop().unwrap().unpack()))
+                }
+                LookupResult::Some(Cow::Borrowed(rows)) => Some(Cow::from(&rows[0][..])),
                 LookupResult::Missing => unreachable!(),
             }
         };
@@ -223,7 +226,7 @@ impl Ingredient for Base {
                     }
                 }
                 Record::Negative(u) => {
-                    assert_eq!(current, Some(Cow::Borrowed(&u)));
+                    assert_eq!(current, Some(Cow::from(&u[..])));
                     if current == was {
                         // save us a clone in a common case
                         was = Some(Cow::Owned(u));

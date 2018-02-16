@@ -133,55 +133,36 @@ impl TopK {
                 };
 
                 let mut current_mins: Vec<_> = output_rows.iter().filter(is_min).cloned().collect();
+                let mut filter = |r: &Row| -> bool {
+                    // Make sure that no duplicates are added to output_rows. This is simplified
+                    // by the fact that it currently contains all rows greater than `min`, and
+                    // none less than it. The only complication are rows which compare equal to
+                    // `min`: they get added except if there is already an identical row.
+                    match self.order.cmp(&&*r, &&min) {
+                        Ordering::Less => true,
+                        Ordering::Equal => {
+                            let e = current_mins.iter().position(|&(ref s, _)| *s == **r);
+                            match e {
+                                Some(i) => {
+                                    current_mins.swap_remove(i);
+                                    false
+                                }
+                                None => true,
+                            }
+                        }
+                        Ordering::Greater => false,
+                    }
+                };
 
                 output_rows = match rs {
-                    // TODO(ekmartin): try to refactor these (almost) duplicate branches:
                     Cow::Borrowed(rs) => rs.iter()
-                        .filter_map(|r| {
-                            // Make sure that no duplicates are added to output_rows. This is simplified
-                            // by the fact that it currently contains all rows greater than `min`, and
-                            // none less than it. The only complication are rows which compare equal to
-                            // `min`: they get added except if there is already an identical row.
-                            match self.order.cmp(&&**r, &&min) {
-                                Ordering::Less => Some((r, false)),
-                                Ordering::Equal => {
-                                    let e = current_mins.iter().position(|&(ref s, _)| *s == **r);
-                                    match e {
-                                        Some(i) => {
-                                            current_mins.swap_remove(i);
-                                            None
-                                        }
-                                        None => Some((r, false)),
-                                    }
-                                }
-                                Ordering::Greater => None,
-                            }
-                        })
-                        .map(|(r, p)| ((**r).clone(), p))
+                        .filter(|ref r| filter(r))
+                        .map(|r| ((**r).clone(), false))
                         .chain(output_rows.into_iter())
                         .collect(),
                     Cow::Owned(rs) => rs.into_iter()
-                        .filter_map(|r| {
-                            // Make sure that no duplicates are added to output_rows. This is simplified
-                            // by the fact that it currently contains all rows greater than `min`, and
-                            // none less than it. The only complication are rows which compare equal to
-                            // `min`: they get added except if there is already an identical row.
-                            match self.order.cmp(&&*r, &&min) {
-                                Ordering::Less => Some((r, false)),
-                                Ordering::Equal => {
-                                    let e = current_mins.iter().position(|&(ref s, _)| *s == *r);
-                                    match e {
-                                        Some(i) => {
-                                            current_mins.swap_remove(i);
-                                            None
-                                        }
-                                        None => Some((r, false)),
-                                    }
-                                }
-                                Ordering::Greater => None,
-                            }
-                        })
-                        .map(|(r, p)| (r.unpack(), p))
+                        .filter(filter)
+                        .map(|r| (r.unpack(), false))
                         .chain(output_rows.into_iter())
                         .collect(),
                 };

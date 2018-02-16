@@ -146,6 +146,7 @@ fn main() {
         512,
         Duration::new(0, 100_000),
         Some(deployment_name.to_string()),
+        true,
     );
     builder.set_persistence(persistence_params);
 

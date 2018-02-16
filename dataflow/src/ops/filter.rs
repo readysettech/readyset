@@ -174,65 +174,44 @@ impl Ingredient for Filter {
     ) -> Option<Option<Box<Iterator<Item = Cow<'a, [DataType]>> + 'a>>> {
         states.get(&*self.src).and_then(|state| {
             let f = self.filter.clone();
+            let filter = move |r: &&Row| {
+                r.iter().enumerate().all(|(i, d)| {
+                    // check if this filter matches
+                    if let Some(ref cond) = f[i] {
+                        match *cond {
+                            FilterCondition::Comparison(ref op, ref f) => {
+                                let v = match *f {
+                                    Value::Constant(ref dt) => dt,
+                                    Value::Column(c) => &r[c],
+                                };
+                                match *op {
+                                    Operator::Equal => d == v,
+                                    Operator::NotEqual => d != v,
+                                    Operator::Greater => d > v,
+                                    Operator::GreaterOrEqual => d >= v,
+                                    Operator::Less => d < v,
+                                    Operator::LessOrEqual => d <= v,
+                                    _ => unimplemented!(),
+                                }
+                            }
+                            FilterCondition::In(ref fs) => fs.contains(d),
+                        }
+                    } else {
+                        // everything matches no condition
+                        true
+                    }
+                })
+            };
+
             match state.lookup(columns, key) {
-                // TODO(ekmartin): try to refactor these (almost) duplicate branches:
                 LookupResult::Some(Cow::Borrowed(rs)) => {
-                    let r = Box::new(
-                        rs.iter()
-                            .filter(move |r| {
-                                r.iter().enumerate().all(|(i, d)| {
-                                    // check if this filter matches
-                                    if let Some(ref cond) = f[i] {
-                                        match *cond {
-                                            FilterCondition::Comparison(ref op, ref f) => {
-                                                let v = match *f {
-                                                    Value::Constant(ref dt) => dt,
-                                                    Value::Column(c) => &r[c],
-                                                };
-                                                match *op {
-                                                    Operator::Equal => d == v,
-                                                    Operator::NotEqual => d != v,
-                                                    Operator::Greater => d > v,
-                                                    Operator::GreaterOrEqual => d >= v,
-                                                    Operator::Less => d < v,
-                                                    Operator::LessOrEqual => d <= v,
-                                                    _ => unimplemented!(),
-                                                }
-                                            }
-                                            FilterCondition::In(ref fs) => fs.contains(d),
-                                        }
-                                    } else {
-                                        // everything matches no condition
-                                        true
-                                    }
-                                })
-                            })
-                            .map(|r| Cow::from(&r[..])),
-                    ) as Box<_>;
+                    let r = Box::new(rs.iter().filter(filter).map(|r| Cow::from(&r[..]))) as Box<_>;
                     Some(Some(r))
                 }
                 LookupResult::Some(Cow::Owned(rs)) => {
                     let r = Box::new(
                         rs.into_iter()
-                            .filter(move |r| {
-                                r.iter().enumerate().all(|(i, d)| {
-                                    // check if this filter matches
-                                    if let Some((ref op, ref f)) = f[i] {
-                                        match *op {
-                                            Operator::Equal => d == f,
-                                            Operator::NotEqual => d != f,
-                                            Operator::Greater => d > f,
-                                            Operator::GreaterOrEqual => d >= f,
-                                            Operator::Less => d < f,
-                                            Operator::LessOrEqual => d <= f,
-                                            _ => unimplemented!(),
-                                        }
-                                    } else {
-                                        // everything matches no condition
-                                        true
-                                    }
-                                })
-                            })
+                            .filter(move |ref r| filter(r))
                             .map(|r| Cow::from(r.unpack())),
                     ) as Box<_>;
                     Some(Some(r))
