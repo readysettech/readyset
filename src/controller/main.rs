@@ -71,7 +71,7 @@ fn main() {
         x => Some(x),
     };
 
-    let authority = ZookeeperAuthority::new(&zookeeper_addr);
+    let mut authority = ZookeeperAuthority::new(&zookeeper_addr);
     let mut builder = ControllerBuilder::default();
     builder.set_listen_addr(listen_addr);
     builder.set_local_workers(local_workers);
@@ -79,7 +79,9 @@ fn main() {
     builder.set_sharding(sharding);
 
     if matches.is_present("verbose") {
-        builder.log_with(distributary::logger_pls());
+        let log = distributary::logger_pls();
+        authority.log_with(log.clone());
+        builder.log_with(log);
     }
 
     builder.build(authority).wait();

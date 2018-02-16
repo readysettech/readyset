@@ -9,6 +9,9 @@ failure = "0.1.1"
 serde = "1.0.8"
 serde_derive = "1.0.8"
 serde_json = "1.0.2"
+slog = "2.0.6"
+#slog = { version = "2.0.6", features = ["max_level_trace", "release_max_level_debug"] }
+slog-term = "2.0.1"
 zookeeper = "0.4.0"
 
 [[bin]]

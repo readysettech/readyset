@@ -6,6 +6,7 @@ use failure::Error;
 use serde::Serialize;
 use serde::de::DeserializeOwned;
 use serde_json;
+use slog;
 use zookeeper::{Acl, CreateMode, KeeperState, Stat, WatchedEvent, Watcher, ZkError, ZooKeeper};
 
 use Authority;
@@ -37,6 +38,7 @@ impl Watcher for UnparkWatcher {
 
 pub struct ZookeeperAuthority {
     zk: ZooKeeper,
+    log: slog::Logger,
 }
 
 impl ZookeeperAuthority {
@@ -49,7 +51,15 @@ impl ZookeeperAuthority {
             Acl::open_unsafe().clone(),
             CreateMode::Persistent,
         );
-        Self { zk }
+        Self {
+            zk: zk,
+            log: slog::Logger::root(slog::Discard, o!()),
+        }
+    }
+
+    /// Enable logging
+    pub fn log_with(&mut self, log: slog::Logger) {
+        self.log = log;
     }
 }
 
@@ -68,6 +78,7 @@ impl Authority for ZookeeperAuthority {
 
         let (ref current_data, ref stat) = self.zk.get_data(&path, false)?;
         if *current_data == payload_data {
+            info!(self.log, "became leader at epoch {}", stat.czxid);
             Ok(Some(Epoch(stat.czxid)))
         } else {
             Ok(None)
@@ -84,7 +95,13 @@ impl Authority for ZookeeperAuthority {
 
             match self.zk.exists_w(CONTROLLER_KEY, UnparkWatcher::new()) {
                 Ok(_) => {}
-                Err(ZkError::NoNode) => thread::park_timeout(Duration::from_secs(60)),
+                Err(ZkError::NoNode) => {
+                    warn!(
+                        self.log,
+                        "no controller present, waiting for one to appear..."
+                    );
+                    thread::park_timeout(Duration::from_secs(60))
+                }
                 Err(e) => bail!(e),
             }
         }
