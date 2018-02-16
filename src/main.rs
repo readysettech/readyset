@@ -139,7 +139,9 @@ fn main() {
     let port = listener.local_addr().unwrap().port();
     println!("listening on port {}", port);
 
-    if let Ok((s, _)) = listener.accept() {
-        MysqlIntermediary::run_on_tcp(SoupBackend::new(), s).unwrap();
+    loop {
+        if let Ok((s, _)) = listener.accept() {
+            MysqlIntermediary::run_on_tcp(SoupBackend::new(), s).unwrap();
+        }
     }
 }
