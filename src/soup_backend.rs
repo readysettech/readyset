@@ -48,7 +48,7 @@ impl SoupBackend {
         q: &str,
         results: QueryResultWriter<W>,
     ) -> io::Result<()> {
-        match self.soup.install_recipe(format!("{}", q)) {
+        match self.soup.extend_recipe(format!("{}", q)) {
             Ok(_) => {
                 // no rows to return
                 results.completed(0, 0)
