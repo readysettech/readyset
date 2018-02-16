@@ -218,7 +218,7 @@ impl ControllerInner {
         }
 
         let cc = Arc::new(ChannelCoordinator::new());
-        assert!((state.config.nworkers == 0) ^ (state.config.local_workers == 0));
+        assert_ne!(state.config.nworkers, 0);
 
         ControllerInner {
             ingredients: g,

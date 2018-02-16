@@ -125,7 +125,6 @@ pub(crate) struct ControllerConfig {
     pub persistence: PersistenceParameters,
     pub heartbeat_every: Duration,
     pub healthcheck_every: Duration,
-    pub local_workers: usize,
     pub nworkers: usize,
     pub nreaders: usize,
 }
@@ -145,7 +144,6 @@ impl Default for ControllerConfig {
             persistence: Default::default(),
             heartbeat_every: Duration::from_secs(1),
             healthcheck_every: Duration::from_secs(10),
-            local_workers: 0,
             nworkers: 2,
             nreaders: 1,
         }

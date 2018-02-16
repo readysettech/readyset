@@ -76,11 +76,6 @@ impl ControllerBuilder {
         self.listen_addr = listen_addr;
     }
 
-    /// Set the number of worker threads to spin up in local mode (when nworkers == 0).
-    pub fn set_local_workers(&mut self, workers: usize) {
-        self.config.local_workers = workers;
-    }
-
     /// Set the logger that the derived controller should use. By default, it uses `slog::Discard`.
     pub fn log_with(&mut self, log: slog::Logger) {
         self.log = log;
