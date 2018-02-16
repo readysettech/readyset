@@ -162,6 +162,21 @@ impl<'a> From<&'a Literal> for DataType {
     }
 }
 
+impl From<Literal> for DataType {
+    fn from(l: Literal) -> Self {
+        match l {
+            Literal::Null => DataType::None,
+            Literal::Integer(i) => i.into(),
+            Literal::String(s) => s.as_str().into(),
+            Literal::CurrentTimestamp => {
+                let ts = chrono::Local::now().naive_local();
+                DataType::Timestamp(ts)
+            }
+            _ => unimplemented!(),
+        }
+    }
+}
+
 use std::borrow::Cow;
 impl<'a> Into<Cow<'a, str>> for &'a DataType {
     fn into(self) -> Cow<'a, str> {
