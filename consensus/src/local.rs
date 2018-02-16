@@ -131,7 +131,7 @@ mod tests {
             authority.try_read("/a").unwrap(),
             Some("12".bytes().collect())
         );
-        assert_eq!(authority.become_leader(vec![15]).unwrap(), Epoch(1));
+        assert_eq!(authority.become_leader(vec![15]).unwrap(), Some(Epoch(1)));
         assert_eq!(authority.get_leader().unwrap(), (Epoch(1), vec![15]));
         {
             let authority = authority.clone();
