@@ -10,7 +10,7 @@ pub struct SoupBackend {
     log: slog::Logger,
 
     _recipe: String,
-    _inputs: BTreeMap<String, Mutator>,
+    inputs: BTreeMap<String, Mutator>,
     _outputs: BTreeMap<String, RemoteGetter>,
 }
 
@@ -38,7 +38,7 @@ impl SoupBackend {
             log: log,
 
             _recipe: String::new(),
-            _inputs: inputs,
+            inputs: inputs,
             _outputs: outputs,
         }
     }
@@ -63,17 +63,31 @@ impl SoupBackend {
         }
     }
 
-    fn handle_insert(&mut self, q: nom_sql::InsertStatement) -> io::Result<()> {
+    fn handle_insert<W: io::Write>(
+        &mut self,
+        q: nom_sql::InsertStatement,
+        _results: QueryResultWriter<W>,
+    ) -> io::Result<()> {
+        let mut _putter = self.inputs.get(&q.table.name).unwrap();
+        /*match putter.put(
+            q.fields
+                .into_iter()
+                .map(|(_, v)| DataType::from(v))
+                .collect::<Vec<DataType>>(),
+        ) {
+            Ok(_) => Ok(()),
+            Err(e) => results.error(msql_srv::ErrorKind::ER_PARSE_ERROR, "".as_bytes()),
+        }*/
         unimplemented!()
     }
 
-    fn handle_select(&mut self, q: nom_sql::SelectStatement) -> io::Result<()> {
+    fn handle_select(&mut self, _q: nom_sql::SelectStatement) -> io::Result<()> {
         unimplemented!()
     }
 
     fn handle_set<W: io::Write>(
         &mut self,
-        q: nom_sql::SetStatement,
+        _q: nom_sql::SetStatement,
         results: QueryResultWriter<W>,
     ) -> io::Result<()> {
         // ignore
@@ -109,8 +123,8 @@ impl<W: io::Write> MysqlShim<W> for SoupBackend {
 
         match nom_sql::parse_query(query) {
             Ok(q) => match q {
-                nom_sql::SqlQuery::CreateTable(q) => self.handle_create_table(query, results),
-                nom_sql::SqlQuery::Insert(q) => self.handle_insert(q),
+                nom_sql::SqlQuery::CreateTable(_) => self.handle_create_table(query, results),
+                nom_sql::SqlQuery::Insert(q) => self.handle_insert(q, results),
                 nom_sql::SqlQuery::Select(q) => self.handle_select(q),
                 nom_sql::SqlQuery::Set(q) => self.handle_set(q, results),
                 _ => {
