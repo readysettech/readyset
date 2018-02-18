@@ -231,6 +231,17 @@ impl PersistentState {
             index_clause, self.name, index_clause
         );
 
+        // Make sure that existing rows contain the new index column too,
+        // if there are any. This could be faster with UPDATE statements
+        // if needed in the future.
+        if self.len() > 0 {
+            let rows = self.cloned_records();
+            self.clear();
+            for row in rows {
+                self.insert(row, None);
+            }
+        }
+
         self.connection.execute(&index_query, &[]).unwrap();
     }
 
@@ -632,6 +643,33 @@ mod tests {
     }
 
     #[test]
+    fn persistent_state_different_indices() {
+        let mut state = setup_persistent();
+        let first: Vec<DataType> = vec![10.into(), "Cat".into()];
+        let second: Vec<DataType> = vec![20.into(), "Bob".into()];
+        state.add_key(&[0], None);
+        state.add_key(&[1], None);
+        assert!(state.insert(first.clone(), None));
+        assert!(state.insert(second.clone(), None));
+
+        match state.lookup(&[0], &KeyType::Single(&10.into())) {
+            LookupResult::Some(rows) => {
+                assert_eq!(rows.len(), 1);
+                assert_eq!(&*rows[0], &first);
+            }
+            _ => panic!(),
+        }
+
+        match state.lookup(&[1], &KeyType::Single(&"Bob".into())) {
+            LookupResult::Some(rows) => {
+                assert_eq!(rows.len(), 1);
+                assert_eq!(&*rows[0], &second);
+            }
+            _ => panic!(),
+        }
+    }
+
+    #[test]
     fn persistent_state_remove() {
         let mut state = setup_persistent();
         let columns = &[0];
@@ -722,5 +760,33 @@ mod tests {
         let row: Vec<DataType> = vec![10.into(), "Cat".into()];
         state.add_key(columns, None);
         assert!(state.insert(row.clone(), None));
+    }
+
+    #[test]
+    fn persistent_state_old_records_new_index() {
+        let mut state = setup_persistent();
+        let row: Vec<DataType> = vec![10.into(), "Cat".into()];
+        state.add_key(&[0], None);
+        assert!(state.insert(row.clone(), None));
+        state.add_key(&[1], None);
+
+        match state.lookup(&[1], &KeyType::Single(&row[1])) {
+            LookupResult::Some(rows) => assert_eq!(&*rows[0], &row),
+            _ => unreachable!(),
+        };
+    }
+
+    #[test]
+    fn memory_state_old_records_new_index() {
+        let mut state = State::default();
+        let row: Vec<DataType> = vec![10.into(), "Cat".into()];
+        state.add_key(&[0], None);
+        assert!(state.insert(row.clone(), None));
+        state.add_key(&[1], None);
+
+        match state.lookup(&[1], &KeyType::Single(&row[1])) {
+            LookupResult::Some(rows) => assert_eq!(&*rows[0], &row),
+            _ => unreachable!(),
+        };
     }
 }
