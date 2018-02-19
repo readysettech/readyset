@@ -1,5 +1,6 @@
 use std::borrow::Cow;
 use std::collections::{HashMap, HashSet};
+use std::fs;
 use std::rc::Rc;
 
 use ::*;
@@ -156,18 +157,14 @@ impl ToSql for DataType {
 
 impl PersistentState {
     fn initialize(name: String, durability_mode: DurabilityMode) -> Self {
+        let full_name = format!("{}.db", name);
         let connection = match durability_mode {
             DurabilityMode::MemoryOnly => Connection::open_in_memory().unwrap(),
-            _ => Connection::open("soup.db").unwrap(),
+            _ => Connection::open(&full_name).unwrap(),
         };
 
-        // Wrap table names in double quotes in case of weird node names:
-        let full_name = format!("\"{}\"", name);
         connection
-            .execute(
-                &format!("CREATE TABLE IF NOT EXISTS {} (row BLOB)", full_name),
-                &[],
-            )
+            .execute("CREATE TABLE IF NOT EXISTS store (row BLOB)", &[])
             .unwrap();
 
         Self {
@@ -206,7 +203,7 @@ impl PersistentState {
             }
 
             self.indices.insert(*index);
-            let query = format!("ALTER TABLE {} ADD COLUMN index_{} TEXT", self.name, index);
+            let query = format!("ALTER TABLE store ADD COLUMN index_{} TEXT", index);
             match self.connection.execute(&query, &[]) {
                 Ok(..) => (),
                 // Ignore existing column errors:
@@ -227,8 +224,8 @@ impl PersistentState {
             .join(", ");
 
         let index_query = format!(
-            "CREATE INDEX IF NOT EXISTS \"{}\" ON {} ({})",
-            index_clause, self.name, index_clause
+            "CREATE INDEX IF NOT EXISTS \"{}\" ON store ({})",
+            index_clause, index_clause
         );
 
         // Make sure that existing rows contain the new index column too,
@@ -266,8 +263,8 @@ impl PersistentState {
 
         let mut statement = self.connection
             .prepare_cached(&format!(
-                "INSERT INTO {} ({}) VALUES ({})",
-                self.name, columns, placeholders
+                "INSERT INTO store ({}) VALUES ({})",
+                columns, placeholders
             ))
             .unwrap();
 
@@ -287,7 +284,7 @@ impl PersistentState {
     // `SELECT row FROM store WHERE index_0 = value AND index_1 = VALUE`
     fn lookup(&self, columns: &[usize], key: &KeyType) -> LookupResult {
         let clauses = Self::build_clause(columns.iter());
-        let query = format!("SELECT row FROM {} WHERE {}", self.name, clauses);
+        let query = format!("SELECT row FROM store WHERE {}", clauses);
         let mut statement = self.connection.prepare_cached(&query).unwrap();
 
         let rows = match *key {
@@ -317,14 +314,14 @@ impl PersistentState {
             .map(|index| &r[*index] as &ToSql)
             .collect::<Vec<&ToSql>>();
 
-        let query = format!("DELETE FROM {} WHERE {}", self.name, clauses);
+        let query = format!("DELETE FROM store WHERE {}", clauses);
         let mut statement = self.connection.prepare_cached(&query).unwrap();
         statement.execute(&index_values[..]).unwrap() > 0
     }
 
     fn cloned_records(&self) -> Vec<Vec<DataType>> {
         let mut statement = self.connection
-            .prepare_cached(&format!("SELECT row FROM {}", self.name))
+            .prepare_cached("SELECT row FROM store")
             .unwrap();
 
         let rows = statement
@@ -338,23 +335,15 @@ impl PersistentState {
 
     fn rows(&self) -> usize {
         let mut statement = self.connection
-            .prepare_cached(&format!("SELECT COUNT(row) FROM {}", self.name))
+            .prepare_cached("SELECT COUNT(row) FROM store")
             .unwrap();
 
-        let mut rows = statement.query(&[]).unwrap();
-        match rows.next() {
-            Some(row) => {
-                let count: i64 = row.unwrap().get(0);
-                count as usize
-            }
-            None => 0,
-        }
+        let count: i64 = statement.query_row(&[], |row| row.get(0)).unwrap();
+        count as usize
     }
 
     fn clear(&self) {
-        let mut statement = self.connection
-            .prepare_cached(&format!("DELETE FROM {}", self.name))
-            .unwrap();
+        let mut statement = self.connection.prepare_cached("DELETE FROM store").unwrap();
 
         statement.execute(&[]).unwrap();
     }
@@ -362,16 +351,13 @@ impl PersistentState {
 
 impl Drop for PersistentState {
     fn drop(&mut self) {
-        match self.durability_mode {
-            // TODO(ekmartin): We don't support recovering persistent base node indices yet,
-            // so drop the tables at the end for all modes except InMemory:
-            DurabilityMode::Permanent | DurabilityMode::DeleteOnExit => {
-                self.connection
-                    .execute(&format!("DROP TABLE {}", self.name), &[])
-                    .unwrap();
-            }
-            _ => (),
-        };
+        // TODO(ekmartin): We don't support recovering persistent base node indices yet,
+        // so drop the tables at the end for all modes except InMemory:
+        if self.durability_mode == DurabilityMode::MemoryOnly {
+            return;
+        }
+
+        fs::remove_file(&self.name).unwrap();
     }
 }
 
@@ -559,6 +545,7 @@ impl SizeOf for State {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::path::Path;
 
     fn setup_persistent() -> State {
         State::base(String::from("soup"), DurabilityMode::MemoryOnly)
@@ -754,12 +741,16 @@ mod tests {
     }
 
     #[test]
-    fn persistent_state_weird_table_names() {
-        let mut state = State::base(String::from(".s-o_u#p."), DurabilityMode::MemoryOnly);
-        let columns = &[0];
-        let row: Vec<DataType> = vec![10.into(), "Cat".into()];
-        state.add_key(columns, None);
-        assert!(state.insert(row.clone(), None));
+    fn persistent_state_drop() {
+        let name = ".s-o_u#p.";
+        let db_name = format!("{}.db", name);
+        let path = Path::new(&db_name);
+        {
+            let _state = State::base(String::from(name), DurabilityMode::DeleteOnExit);
+            assert!(path.exists());
+        }
+
+        assert!(!path.exists());
     }
 
     #[test]
