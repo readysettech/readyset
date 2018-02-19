@@ -4,6 +4,7 @@ version = "0.1.0"
 authors = ["The Distributary Developers"]
 
 [dependencies]
+bincode = "1.0.0"
 rusqlite = "0.13.0"
 arccstr = "1.1.0"
 fnv = "1.0.5"
