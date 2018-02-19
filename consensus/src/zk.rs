@@ -85,6 +85,10 @@ impl Authority for ZookeeperAuthority {
         }
     }
 
+    fn surrender_leadership(&self) -> Result<(), Error> {
+        Ok(self.zk.delete(CONTROLLER_KEY, None)?)
+    }
+
     fn get_leader(&self) -> Result<(Epoch, Vec<u8>), Error> {
         loop {
             match self.zk.get_data(CONTROLLER_KEY, false) {
@@ -120,7 +124,7 @@ impl Authority for ZookeeperAuthority {
 
         loop {
             match self.zk.get_data(CONTROLLER_KEY, false) {
-                Ok((_, ref stat)) if !is_new_epoch(stat) => {},
+                Ok((_, ref stat)) if !is_new_epoch(stat) => {}
                 Ok((data, stat)) => return Ok(Some((Epoch(stat.czxid), data))),
                 Err(ZkError::NoNode) => return Ok(None),
                 Err(e) => bail!(e),

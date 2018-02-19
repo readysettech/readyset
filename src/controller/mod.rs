@@ -18,7 +18,6 @@ use std::time::{self, Duration, Instant};
 use std::thread::{self, JoinHandle};
 use std::sync::{Arc, Mutex};
 use std::sync::mpsc::{self, Receiver, RecvTimeoutError, Sender};
-use std::process;
 
 use failure::{self, Error};
 use futures::{self, Future, Stream};
@@ -154,7 +153,9 @@ impl Default for ControllerConfig {
 pub(crate) struct ControllerState {
     pub config: ControllerConfig,
     pub epoch: Epoch,
-    pub recipe: (), // TODO: store all relevant state here.
+
+    pub recipe_version: usize,
+    pub recipes: Vec<String>,
 }
 
 enum ControlEvent {
@@ -180,13 +181,11 @@ enum WorkerEvent {
 /// Start up a new instance and return a handle to it. Dropping the handle will stop the
 /// controller.
 fn start_instance<A: Authority + 'static>(
-    authority: A,
+    authority: Arc<A>,
     listen_addr: IpAddr,
     config: ControllerConfig,
     log: slog::Logger,
 ) -> ControllerHandle<A> {
-    let authority = Arc::new(authority);
-
     let (controller_event_tx, controller_event_rx) = mpsc::channel();
     let (worker_event_tx, worker_event_rx) = mpsc::channel();
 
@@ -200,7 +199,7 @@ fn start_instance<A: Authority + 'static>(
     let controller_join_handle = thread::Builder::new()
         .name("ctrl-main".to_owned())
         .spawn(move || {
-            let internal = Controller::listen_internal(
+            let internal = Controller::<A>::listen_internal(
                 controller_event_tx.clone(),
                 SocketAddr::new(listen_addr, 0),
             );
@@ -216,22 +215,23 @@ fn start_instance<A: Authority + 'static>(
                 checktable_addr: checktable,
                 nonce: rand::random(),
             };
-            let campaign = instance_campaign(
+            let campaign = Some(instance_campaign(
                 controller_event_tx.clone(),
                 worker_event_tx,
                 authority.clone(),
                 descriptor,
                 config,
-            );
+            ));
 
             let controller = Controller {
+                authority,
                 inner: None,
                 receiver: controller_event_rx,
                 log,
                 internal,
                 external,
                 checktable,
-                _campaign: campaign,
+                campaign,
                 listen_addr,
             };
             controller.main_loop()
@@ -311,7 +311,8 @@ fn instance_campaign<A: Authority + 'static>(
                     None => Ok(ControllerState {
                         config: config.clone(),
                         epoch,
-                        recipe: (),
+                        recipe_version: 0,
+                        recipes: vec![],
                     }),
                     Some(ref state) if state.epoch > epoch => Err(()),
                     Some(mut state) => {
@@ -339,12 +340,10 @@ fn instance_campaign<A: Authority + 'static>(
 
             // LEADER STATE - manage system
             //
-            // It is not currently possible to safely handle loss of leadership status (and
-            // there is nothing that can currently trigger it), so we simply abort if the
-            // current epoch ends.
-            let _ = authority.await_new_epoch(epoch)?;
-            eprintln!("Lost leadership?! Aborting...");
-            process::abort();
+            // It is not currently possible to safely handle involuntary loss of leadership status
+            // (and there is nothing that can currently trigger it), so don't bother watching for
+            // it.
+            return Ok(());
         }
     };
 
@@ -360,7 +359,8 @@ fn instance_campaign<A: Authority + 'static>(
 }
 
 /// Runs the soup instance.
-pub struct Controller {
+pub struct Controller<A> {
+    authority: Arc<A>,
     receiver: Receiver<ControlEvent>,
     inner: Option<ControllerInner>,
 
@@ -368,7 +368,7 @@ pub struct Controller {
     internal: ServingThread,
     external: ServingThread,
     checktable: SocketAddr,
-    _campaign: JoinHandle<()>,
+    campaign: Option<JoinHandle<()>>,
 
     log: slog::Logger,
 }
@@ -382,7 +382,7 @@ pub struct Worker {
     log: slog::Logger,
 }
 
-impl Controller {
+impl<A: Authority + 'static> Controller<A> {
     fn main_loop(mut self) {
         for event in self.receiver {
             match event {
@@ -391,19 +391,15 @@ impl Controller {
                 },
                 ControlEvent::ExternalRequest(method, path, body, reply_tx) => {
                     if let Some(ref mut inner) = self.inner {
-                        if inner.workers.is_empty() {
-                            reply_tx.send(Err(StatusCode::ServiceUnavailable)).unwrap();
-                            continue;
-                        }
-
                         reply_tx
-                            .send(inner.external_request(method, path, body))
+                            .send(inner.external_request(method, path, body, &self.authority))
                             .unwrap()
                     } else {
                         reply_tx.send(Err(StatusCode::NotFound)).unwrap();
                     }
                 }
                 ControlEvent::WonLeaderElection(state) => {
+                    self.campaign.take().unwrap().join().unwrap();
                     self.inner = Some(ControllerInner::new(
                         self.listen_addr,
                         self.checktable,
@@ -421,11 +417,16 @@ impl Controller {
                 },
             }
         }
+
         self.external.stop();
         self.internal.stop();
+
+        if self.inner.is_some() {
+            self.authority.surrender_leadership().unwrap();
+        }
     }
 
-    fn listen_external<A: Authority + 'static>(
+    fn listen_external(
         event_tx: Sender<ControlEvent>,
         addr: SocketAddr,
         authority: Arc<A>,
@@ -645,7 +646,7 @@ mod tests {
         // Controller gets dropped. It doesn't have Domains, so we don't see any dropped.
         let authority = ZookeeperAuthority::new("127.0.0.1:2181/it_works_default");
         {
-            let _c = ControllerBuilder::default().build(authority);
+            let _c = ControllerBuilder::default().build(Arc::new(authority));
             thread::sleep(Duration::from_millis(100));
         }
         thread::sleep(Duration::from_millis(100));
@@ -659,7 +660,7 @@ mod tests {
                      CREATE TABLE b (r int, s int);\n";
 
         let authority = ZookeeperAuthority::new("127.0.0.1:2181/it_works_blender_with_migration");
-        let mut c = ControllerBuilder::default().build(authority);
+        let mut c = ControllerBuilder::default().build(Arc::new(authority));
         assert!(c.install_recipe(r_txt.to_owned()).is_ok());
     }
 

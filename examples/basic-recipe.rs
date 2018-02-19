@@ -37,9 +37,6 @@ fn main() {
     blender.install_recipe(sql.to_owned()).unwrap();
     println!("{}", blender.graphviz());
 
-    blender.recover();
-    thread::sleep(Duration::from_millis(1000));
-
     // Get mutators and getter.
     let inputs = blender.inputs();
     let outputs = blender.outputs();

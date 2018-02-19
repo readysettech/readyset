@@ -40,6 +40,10 @@ pub trait Authority: Send + Sync {
     /// elected.
     fn become_leader(&self, payload_data: Vec<u8>) -> Result<Option<Epoch>, Error>;
 
+    /// Voluntarily give up leadership, allowing another node to become leader. It is extremely
+    /// important that the node calling this function is actually the leader.
+    fn surrender_leadership(&self) -> Result<(), Error>;
+
     /// Returns the epoch and payload data for the current leader, blocking if there is not
     /// currently as leader. This method is intended for clients to determine the current leader.
     fn get_leader(&self) -> Result<(Epoch, Vec<u8>), Error>;

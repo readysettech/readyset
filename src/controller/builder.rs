@@ -3,6 +3,7 @@ use dataflow::PersistenceParameters;
 
 use std::time;
 use std::net::IpAddr;
+use std::sync::Arc;
 
 use slog;
 
@@ -82,12 +83,12 @@ impl ControllerBuilder {
     }
 
     /// Build a controller and return a handle to it.
-    pub fn build<A: Authority + 'static>(self, authority: A) -> ControllerHandle<A> {
+    pub fn build<A: Authority + 'static>(self, authority: Arc<A>) -> ControllerHandle<A> {
         controller::start_instance(authority, self.listen_addr, self.config, self.log)
     }
 
     /// Build a local controller, and return a ControllerHandle to provide access to it.
     pub fn build_local(self) -> ControllerHandle<LocalAuthority> {
-        self.build(LocalAuthority::new())
+        self.build(Arc::new(LocalAuthority::new()))
     }
 }

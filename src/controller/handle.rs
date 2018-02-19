@@ -115,12 +115,6 @@ impl<A: Authority> ControllerHandle<A> {
         self.get_mutator_builder(base).map(|m| m.build())
     }
 
-    /// Initiaties log recovery by sending a
-    /// StartRecovery packet to each base node domain.
-    pub fn recover(&mut self) {
-        self.rpc("recover", &())
-    }
-
     /// Get statistics about the time spent processing different parts of the graph.
     pub fn get_statistics(&mut self) -> GraphStats {
         self.rpc("get_statistics", &())

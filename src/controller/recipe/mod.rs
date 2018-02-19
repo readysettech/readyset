@@ -89,6 +89,13 @@ impl Recipe {
         }
     }
 
+    pub fn with_version(version: usize, log: Option<slog::Logger>) -> Recipe {
+        Recipe {
+            version,
+            ..Self::blank(log)
+        }
+    }
+
     /// Set the `Logger` to use for internal log messages.
     ///
     /// By default, all log messages are discarded.

@@ -1,6 +1,5 @@
 use std::collections::BTreeMap;
 use std::sync::{Condvar, Mutex};
-use std::thread;
 
 use failure::Error;
 use serde::Serialize;
@@ -11,12 +10,9 @@ use Authority;
 use Epoch;
 use CONTROLLER_KEY;
 
-/// Only Epoch there will ever be for a LocalAuthority.
-const ONLY_EPOCH: Epoch = Epoch(1);
-
-#[derive(Default)]
 struct LocalAuthorityInner {
     keys: BTreeMap<String, Vec<u8>>,
+    epoch: Epoch,
 }
 
 pub struct LocalAuthority {
@@ -27,14 +23,12 @@ pub struct LocalAuthority {
 impl LocalAuthority {
     pub fn new() -> Self {
         Self {
-            inner: Mutex::new(LocalAuthorityInner::default()),
+            inner: Mutex::new(LocalAuthorityInner {
+                keys: BTreeMap::default(),
+                epoch: Epoch(0),
+            }),
             cv: Condvar::new(),
         }
-    }
-
-    /// Get the only epoch that can ever exist for a local authority.
-    pub fn get_epoch() -> Epoch {
-        ONLY_EPOCH
     }
 }
 impl Authority for LocalAuthority {
@@ -43,10 +37,18 @@ impl Authority for LocalAuthority {
         if !inner.keys.contains_key(CONTROLLER_KEY) {
             inner.keys.insert(CONTROLLER_KEY.to_owned(), payload_data);
             self.cv.notify_all();
-            Ok(Some(ONLY_EPOCH))
+            Ok(Some(inner.epoch))
         } else {
             Ok(None)
         }
+    }
+
+    fn surrender_leadership(&self) -> Result<(), Error> {
+        let mut inner = self.inner.lock().unwrap();
+        assert!(inner.keys.remove(CONTROLLER_KEY).is_some());
+        inner.epoch = Epoch(inner.epoch.0 + 1);
+        self.cv.notify_all();
+        Ok(())
     }
 
     fn get_leader(&self) -> Result<(Epoch, Vec<u8>), Error> {
@@ -54,33 +56,29 @@ impl Authority for LocalAuthority {
         while !inner.keys.contains_key(CONTROLLER_KEY) {
             inner = self.cv.wait(inner).unwrap();
         }
-        Ok((ONLY_EPOCH, inner.keys.get(CONTROLLER_KEY).cloned().unwrap()))
+        Ok((
+            inner.epoch,
+            inner.keys.get(CONTROLLER_KEY).cloned().unwrap(),
+        ))
     }
 
     fn try_get_leader(&self) -> Result<Option<(Epoch, Vec<u8>)>, Error> {
-        Ok(self.inner
-            .lock()
-            .unwrap()
+        let inner = self.inner.lock().unwrap();
+
+        Ok(inner
             .keys
             .get(CONTROLLER_KEY)
             .cloned()
-            .map(|payload| (ONLY_EPOCH, payload)))
+            .map(|payload| (inner.epoch, payload)))
     }
 
     fn await_new_epoch(&self, epoch: Epoch) -> Result<Option<(Epoch, Vec<u8>)>, Error> {
-        assert_eq!(epoch, ONLY_EPOCH);
-
-        {
-            let inner = self.inner.lock().unwrap();
-            if !inner.keys.contains_key(CONTROLLER_KEY) {
-                return Ok(None);
-            }
+        let mut inner = self.inner.lock().unwrap();
+        while inner.epoch == epoch && inner.keys.contains_key(CONTROLLER_KEY) {
+            inner = self.cv.wait(inner).unwrap();
         }
 
-        // Epochs never change with a LocalAuthority, so this function should never return.
-        loop {
-            thread::park();
-        }
+        Ok(inner.keys.get(CONTROLLER_KEY).cloned().map(|k| (inner.epoch, k)))
     }
 
     fn try_read(&self, path: &str) -> Result<Option<Vec<u8>>, Error> {
@@ -112,6 +110,7 @@ mod tests {
     use super::*;
     use std::time::Duration;
     use std::sync::Arc;
+    use std::thread;
 
     #[test]
     fn it_works() {
@@ -131,13 +130,13 @@ mod tests {
             authority.try_read("/a").unwrap(),
             Some("12".bytes().collect())
         );
-        assert_eq!(authority.become_leader(vec![15]).unwrap(), Some(Epoch(1)));
-        assert_eq!(authority.get_leader().unwrap(), (Epoch(1), vec![15]));
+        assert_eq!(authority.become_leader(vec![15]).unwrap(), Some(Epoch(0)));
+        assert_eq!(authority.get_leader().unwrap(), (Epoch(0), vec![15]));
         {
             let authority = authority.clone();
             thread::spawn(move || authority.become_leader(vec![20]).unwrap());
         }
         thread::sleep(Duration::from_millis(100));
-        assert_eq!(authority.get_leader().unwrap(), (Epoch(1), vec![15]));
+        assert_eq!(authority.get_leader().unwrap(), (Epoch(0), vec![15]));
     }
 }

@@ -1,5 +1,5 @@
 use channel::tcp::TcpSender;
-use consensus::Epoch;
+use consensus::{Authority, Epoch, STATE_KEY};
 use dataflow::{checktable, node, payload, DomainConfig, PersistenceParameters};
 use dataflow::payload::{EgressForBase, IngressFromBase};
 use dataflow::prelude::*;
@@ -66,6 +66,8 @@ pub struct ControllerInner {
 
     pub(super) epoch: Epoch,
 
+    pending_recovery: Option<(Vec<String>, usize)>,
+
     heartbeat_every: Duration,
     healthcheck_every: Duration,
     last_checked_workers: Instant,
@@ -115,22 +117,33 @@ impl ControllerInner {
         self.check_worker_liveness();
     }
 
-    pub fn external_request(
+    pub fn external_request<A: Authority + 'static>(
         &mut self,
         method: Method,
         path: String,
         body: Vec<u8>,
+        authority: &Arc<A>,
     ) -> Result<String, StatusCode> {
         use serde_json as json;
         use hyper::Method::*;
 
+        match (&method, path.as_ref()) {
+            (&Get, "/graph") => return Ok(self.graphviz()),
+            (&Post, "/graphviz") => return Ok(json::to_string(&self.graphviz()).unwrap()),
+            (&Post, "/get_statistics") => {
+                return Ok(json::to_string(&self.get_statistics()).unwrap())
+            }
+            _ => {}
+        }
+
+        // TODO(jbehrens): Check for quorum instead of just a single worker.
+        if self.pending_recovery.is_some() || self.workers.is_empty() {
+            return Err(StatusCode::ServiceUnavailable);
+        }
+
         Ok(match (method, path.as_ref()) {
-            (Get, "/graph") => self.graphviz(),
             (Post, "/inputs") => json::to_string(&self.inputs()).unwrap(),
             (Post, "/outputs") => json::to_string(&self.outputs()).unwrap(),
-            (Post, "/recover") => json::to_string(&self.recover()).unwrap(),
-            (Post, "/graphviz") => json::to_string(&self.graphviz()).unwrap(),
-            (Post, "/get_statistics") => json::to_string(&self.get_statistics()).unwrap(),
             (Post, "/mutator_builder") => {
                 json::to_string(&self.mutator_builder(json::from_slice(&body).unwrap())).unwrap()
             }
@@ -138,10 +151,12 @@ impl ControllerInner {
                 json::to_string(&self.getter_builder(json::from_slice(&body).unwrap())).unwrap()
             }
             (Post, "/extend_recipe") => {
-                json::to_string(&self.extend_recipe(json::from_slice(&body).unwrap())).unwrap()
+                json::to_string(&self.extend_recipe(authority, json::from_slice(&body).unwrap()))
+                    .unwrap()
             }
             (Post, "/install_recipe") => {
-                json::to_string(&self.install_recipe(json::from_slice(&body).unwrap())).unwrap()
+                json::to_string(&self.install_recipe(authority, json::from_slice(&body).unwrap()))
+                    .unwrap()
             }
             _ => return Err(StatusCode::NotFound),
         })
@@ -162,6 +177,30 @@ impl ControllerInner {
         let ws = WorkerStatus::new(sender.clone());
         self.workers.insert(msg.source.clone(), ws);
         self.read_addrs.insert(msg.source.clone(), read_listen_addr);
+
+        if let Some((recipes, recipe_version)) = self.pending_recovery.take() {
+            // TODO(jbehrens): Wait for a quorum instead of always just one worker.
+            assert_eq!(self.workers.len(), 1);
+            assert_eq!(self.recipe.version(), 0);
+            assert!(recipe_version + 1 >= recipes.len());
+
+            info!(self.log, "Restoring graph configuration");
+            self.recipe =
+                Recipe::with_version(recipe_version + 1 - recipes.len(), Some(self.log.clone()));
+            for r in recipes {
+                self.apply_recipe(self.recipe.clone().extend(&r).unwrap())
+                    .unwrap();
+            }
+
+            info!(self.log, "Recovering from log");
+            for (_name, index) in self.inputs().iter() {
+                let node = &self.ingredients[*index];
+                let domain = self.domains.get_mut(&node.domain()).unwrap();
+                domain.send(box payload::Packet::StartRecovery).unwrap();
+                domain.wait_for_ack().unwrap();
+            }
+            info!(self.log, "Recovery complete");
+        }
 
         Ok(())
     }
@@ -220,6 +259,12 @@ impl ControllerInner {
         let cc = Arc::new(ChannelCoordinator::new());
         assert_ne!(state.config.nworkers, 0);
 
+        let pending_recovery = if !state.recipes.is_empty() {
+            Some((state.recipes, state.recipe_version))
+        } else {
+            None
+        };
+
         ControllerInner {
             ingredients: g,
             source: source,
@@ -248,6 +293,7 @@ impl ControllerInner {
             read_addrs: HashMap::default(),
             workers: HashMap::default(),
 
+            pending_recovery,
             last_checked_workers: Instant::now(),
         }
     }
@@ -312,18 +358,6 @@ impl ControllerInner {
         let r = f(&mut m);
         m.commit();
         r
-    }
-
-    /// Initiaties log recovery by sending a
-    /// StartRecovery packet to each base node domain.
-    pub fn recover(&mut self) {
-        info!(self.log, "Recovering from log");
-        for (_name, index) in self.inputs().iter() {
-            let node = &self.ingredients[*index];
-            let domain = self.domains.get_mut(&node.domain()).unwrap();
-            domain.send(box payload::Packet::StartRecovery).unwrap();
-            domain.wait_for_ack().unwrap();
-        }
     }
 
     /// Get a boxed function which can be used to validate tokens.
@@ -506,10 +540,34 @@ impl ControllerInner {
         err
     }
 
-    pub fn extend_recipe(&mut self, add_txt: String) -> Result<ActivationResult, RpcError> {
+    pub fn extend_recipe<A: Authority + 'static>(
+        &mut self,
+        authority: &Arc<A>,
+        add_txt: String,
+    ) -> Result<ActivationResult, RpcError> {
         let new = self.recipe.clone();
         match new.extend(&add_txt) {
-            Ok(new) => self.apply_recipe(new),
+            Ok(new) => {
+                let activation_result = self.apply_recipe(new);
+                if authority
+                    .read_modify_write(STATE_KEY, |state: Option<ControllerState>| match state {
+                        None => unreachable!(),
+                        Some(ref state) if state.epoch > self.epoch => Err(()),
+                        Some(mut state) => {
+                            state.recipe_version = self.recipe.version();
+                            state.recipes.push(add_txt.clone());
+                            Ok(state)
+                        }
+                    })
+                    .is_err()
+                {
+                    return Err(RpcError::Other(
+                        "Failed to persist recipe extension".to_owned(),
+                    ));
+                }
+
+                activation_result
+            }
             Err(e) => {
                 crit!(self.log, "failed to extend recipe: {:?}", e);
                 Err(RpcError::Other("failed to extend recipe".to_owned()))
@@ -517,12 +575,33 @@ impl ControllerInner {
         }
     }
 
-    pub fn install_recipe(&mut self, r_txt: String) -> Result<ActivationResult, RpcError> {
+    pub fn install_recipe<A: Authority + 'static>(
+        &mut self,
+        authority: &Arc<A>,
+        r_txt: String,
+    ) -> Result<ActivationResult, RpcError> {
         match Recipe::from_str(&r_txt, Some(self.log.clone())) {
             Ok(r) => {
                 let old = self.recipe.clone();
                 let mut new = old.replace(r).unwrap();
-                self.apply_recipe(new)
+                let activation_result = self.apply_recipe(new);
+                if authority
+                    .read_modify_write(STATE_KEY, |state: Option<ControllerState>| match state {
+                        None => unreachable!(),
+                        Some(ref state) if state.epoch > self.epoch => Err(()),
+                        Some(mut state) => {
+                            state.recipe_version = self.recipe.version();
+                            state.recipes = vec![r_txt.clone()];
+                            Ok(state)
+                        }
+                    })
+                    .is_err()
+                {
+                    return Err(RpcError::Other(
+                        "Failed to persist recipe installation".to_owned(),
+                    ));
+                }
+                activation_result
             }
             Err(e) => {
                 crit!(self.log, "failed to parse recipe: {:?}", e);

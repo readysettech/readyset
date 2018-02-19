@@ -5,6 +5,7 @@ extern crate distributary;
 
 use consensus::ZookeeperAuthority;
 use distributary::ControllerBuilder;
+use std::sync::Arc;
 
 fn main() {
     use clap::{App, Arg};
@@ -81,5 +82,5 @@ fn main() {
         builder.log_with(log);
     }
 
-    builder.build(authority).wait();
+    builder.build(Arc::new(authority)).wait();
 }
