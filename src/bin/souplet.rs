@@ -2,10 +2,15 @@
 extern crate clap;
 extern crate consensus;
 extern crate distributary;
+#[macro_use]
+extern crate slog;
+extern crate uuid;
 
 use consensus::ZookeeperAuthority;
 use distributary::ControllerBuilder;
 use std::sync::Arc;
+use std::time::Duration;
+use uuid::{Uuid, UuidVersion};
 
 fn main() {
     use clap::{App, Arg};
@@ -19,6 +24,18 @@ fn main() {
                 .takes_value(true)
                 .default_value("127.0.0.1")
                 .help("IP address to listen on"),
+        )
+        .arg(
+            Arg::with_name("deployment")
+                .long("deployment")
+                .takes_value(true)
+                .help("Soup deployment ID."),
+        )
+        .arg(
+            Arg::with_name("ephemeral")
+                .long("ephemeral")
+                .takes_value(false)
+                .help("Do not permanently store base logs."),
         )
         .arg(
             Arg::with_name("zookeeper")
@@ -60,6 +77,9 @@ fn main() {
         )
         .get_matches();
 
+    let log = distributary::logger_pls();
+
+    let ephemeral = matches.is_present("ephemeral");
     let listen_addr = matches.value_of("address").unwrap().parse().unwrap();
     let zookeeper_addr = matches.value_of("zookeeper").unwrap();
     let workers = value_t_or_exit!(matches, "workers", usize);
@@ -68,16 +88,39 @@ fn main() {
         0 => None,
         x => Some(x),
     };
+    let verbose = matches.is_present("verbose");
 
-    let mut authority = ZookeeperAuthority::new(&zookeeper_addr);
+    let deployment_name = match matches.value_of("deployment") {
+        Some(d) => String::from(d),
+        None => {
+            let id = Uuid::new(UuidVersion::Random).unwrap();
+            if verbose {
+                info!(log, "starting new Soup deployment '{}'", id.simple());
+            }
+            format!("{}", id.simple())
+        }
+    };
+
+    let mut authority = ZookeeperAuthority::new(&format!("{}/{}", zookeeper_addr, deployment_name));
     let mut builder = ControllerBuilder::default();
     builder.set_listen_addr(listen_addr);
     builder.set_nworkers(workers);
     builder.set_local_read_threads(readers);
     builder.set_sharding(sharding);
 
-    if matches.is_present("verbose") {
-        let log = distributary::logger_pls();
+    let persistence_params = distributary::PersistenceParameters::new(
+        if ephemeral {
+            distributary::DurabilityMode::DeleteOnExit
+        } else {
+            distributary::DurabilityMode::Permanent
+        },
+        512,
+        Duration::from_millis(1),
+        Some(deployment_name),
+    );
+    builder.set_persistence(persistence_params);
+
+    if verbose {
         authority.log_with(log.clone());
         builder.log_with(log);
     }
