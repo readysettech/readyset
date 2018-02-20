@@ -78,8 +78,7 @@ fn write_output(output: &Output, commit_id: git2::Oid, name: &str) {
     let mut stdout_file =
         File::create(&format!("{}-{}-stdout.log", commit_id, name)).expect(&format!(
             "Failed to create stdout log file for '{}' at commit '{}'.",
-            name,
-            commit_id
+            name, commit_id
         ));
     stdout_file
         .write_all(output.stdout.as_slice())
@@ -87,8 +86,7 @@ fn write_output(output: &Output, commit_id: git2::Oid, name: &str) {
     let mut stderr_file =
         File::create(&format!("{}-{}-stderr.log", commit_id, name)).expect(&format!(
             "Failed to create stderr log file for '{}' at commit '{}'.",
-            name,
-            commit_id
+            name, commit_id
         ));
     stderr_file
         .write_all(output.stderr.as_slice())
@@ -135,8 +133,7 @@ fn benchmark(
                         Err(_) => {
                             println!(
                                 "failed to parse value '{}' for {} into f64 number, ignoring",
-                                c,
-                                bm_name
+                                c, bm_name
                             );
                             continue;
                         }
