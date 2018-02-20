@@ -180,8 +180,9 @@ fn benchmark(
 fn build(workdir: &str) -> Output {
     Command::new("cargo")
         .current_dir(workdir)
-        .arg("build")
-        .arg("--release")
+        .arg("check")
+        .arg("--all")
+        .arg("--all-targets")
         .env("RUST_BACKTRACE", "1")
         .output()
         .expect("Failed to execute 'cargo build'!")
