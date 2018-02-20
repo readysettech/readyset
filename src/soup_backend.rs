@@ -1,4 +1,4 @@
-use distributary::{ControllerHandle, Mutator, RemoteGetter, RpcError, ZookeeperAuthority};
+use distributary::{ControllerHandle, DataType, Mutator, RemoteGetter, RpcError, ZookeeperAuthority};
 use msql_srv::{self, *};
 use nom_sql;
 use slog;
@@ -66,19 +66,18 @@ impl SoupBackend {
     fn handle_insert<W: io::Write>(
         &mut self,
         q: nom_sql::InsertStatement,
-        _results: QueryResultWriter<W>,
+        results: QueryResultWriter<W>,
     ) -> io::Result<()> {
-        let mut _putter = self.inputs.get(&q.table.name).unwrap();
-        /*match putter.put(
+        let putter = self.inputs.get_mut(&q.table.name).unwrap();
+        match putter.put(
             q.fields
                 .into_iter()
                 .map(|(_, v)| DataType::from(v))
                 .collect::<Vec<DataType>>(),
         ) {
             Ok(_) => Ok(()),
-            Err(e) => results.error(msql_srv::ErrorKind::ER_PARSE_ERROR, "".as_bytes()),
-        }*/
-        unimplemented!()
+            Err(_) => results.error(msql_srv::ErrorKind::ER_PARSE_ERROR, "".as_bytes()),
+        }
     }
 
     fn handle_select(&mut self, _q: nom_sql::SelectStatement) -> io::Result<()> {
