@@ -457,10 +457,8 @@ impl ControllerInner {
 
     /// Obtain a MutatorBuild that can be used to construct a Mutator to perform writes and deletes
     /// from the given named base node.
-    pub fn mutator_builder(&self, base: &str) -> MutatorBuilder {
-        let ni = *self.inputs()
-            .get(base)
-            .expect(&format!("no base node '{}'", base));
+    pub fn mutator_builder(&self, base: &str) -> Option<MutatorBuilder> {
+        let ni = *self.inputs().get(base)?;
         let node = &self.ingredients[ni];
 
         trace!(self.log, "creating mutator"; "for" => base);
@@ -500,7 +498,7 @@ impl ControllerInner {
             node.fields().len() - base_operator.get_dropped().len()
         );
 
-        MutatorBuilder {
+        Some(MutatorBuilder {
             txs,
             addr: (*node.local_addr()).into(),
             key: key,
@@ -510,7 +508,7 @@ impl ControllerInner {
             table_name: node.name().to_owned(),
             columns,
             is_local: true,
-        }
+        })
     }
 
     /// Get statistics about the time spent processing different parts of the graph.

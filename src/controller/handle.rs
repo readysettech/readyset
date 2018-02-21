@@ -4,7 +4,6 @@ use dataflow::prelude::*;
 use dataflow::statistics::GraphStats;
 
 use std::collections::BTreeMap;
-use std::error::Error;
 use std::sync::Arc;
 use std::sync::mpsc::Sender;
 use std::thread::{self, JoinHandle};
@@ -106,12 +105,12 @@ impl<A: Authority> ControllerHandle<A> {
 
     /// Obtain a MutatorBuild that can be used to construct a Mutator to perform writes and deletes
     /// from the given base node.
-    pub fn get_mutator_builder(&mut self, base: &str) -> Result<MutatorBuilder, Box<Error>> {
-        Ok(self.rpc("mutator_builder", &base))
+    pub fn get_mutator_builder(&mut self, base: &str) -> Option<MutatorBuilder> {
+        self.rpc("mutator_builder", &base)
     }
 
     /// Obtain a Mutator
-    pub fn get_mutator(&mut self, base: &str) -> Result<Mutator, Box<Error>> {
+    pub fn get_mutator(&mut self, base: &str) -> Option<Mutator> {
         self.get_mutator_builder(base).map(|m| m.build())
     }
 
