@@ -38,11 +38,9 @@ fn main() {
     println!("{}", blender.graphviz());
 
     // Get mutators and getter.
-    let inputs = blender.inputs();
-    let outputs = blender.outputs();
-    let mut article = blender.get_mutator(inputs["Article"]).unwrap();
-    let mut vote = blender.get_mutator(inputs["Vote"]).unwrap();
-    let mut awvc = blender.get_getter(outputs["ArticleWithVoteCount"]).unwrap();
+    let mut article = blender.get_mutator("Article").unwrap();
+    let mut vote = blender.get_mutator("Vote").unwrap();
+    let mut awvc = blender.get_getter("ArticleWithVoteCount").unwrap();
 
     println!("Creating article...");
     let aid = 1;

@@ -82,7 +82,7 @@ fn it_works_basic() {
         Some(get_log_name("it_works_basic")),
     ));
     let mut g = b.build_local();
-    let (a, b, c) = g.migrate(|mig| {
+    let _ = g.migrate(|mig| {
         let a = mig.add_ingredient("a", &["a", "b"], Base::new(vec![]).with_key(vec![0]));
         let b = mig.add_ingredient("b", &["a", "b"], Base::new(vec![]).with_key(vec![0]));
 
@@ -95,9 +95,9 @@ fn it_works_basic() {
         (a, b, c)
     });
 
-    let mut cq = g.get_getter(c).unwrap();
-    let mut muta = g.get_mutator(a).unwrap();
-    let mut mutb = g.get_mutator(b).unwrap();
+    let mut cq = g.get_getter("c").unwrap();
+    let mut muta = g.get_mutator("a").unwrap();
+    let mut mutb = g.get_mutator("b").unwrap();
     let id: DataType = 1.into();
 
     // send a value on a
@@ -143,7 +143,7 @@ fn it_works_basic() {
 fn shared_interdomain_ancestor() {
     // set up graph
     let mut g = ControllerBuilder::default().build_local();
-    let (a, b, c) = g.migrate(|mig| {
+    let _ = g.migrate(|mig| {
         let a = mig.add_ingredient("a", &["a", "b"], Base::default());
 
         let mut emits = HashMap::new();
@@ -159,9 +159,9 @@ fn shared_interdomain_ancestor() {
         (a, b, c)
     });
 
-    let mut bq = g.get_getter(b).unwrap();
-    let mut cq = g.get_getter(c).unwrap();
-    let mut muta = g.get_mutator(a).unwrap();
+    let mut bq = g.get_getter("b").unwrap();
+    let mut cq = g.get_getter("c").unwrap();
+    let mut muta = g.get_mutator("a").unwrap();
     let id: DataType = 1.into();
 
     // send a value on a
@@ -194,7 +194,7 @@ fn shared_interdomain_ancestor() {
 fn it_works_w_mat() {
     // set up graph
     let mut g = ControllerBuilder::default().build_local();
-    let (a, b, c) = g.migrate(|mig| {
+    let _ = g.migrate(|mig| {
         let a = mig.add_ingredient("a", &["a", "b"], Base::default());
         let b = mig.add_ingredient("b", &["a", "b"], Base::default());
 
@@ -207,9 +207,9 @@ fn it_works_w_mat() {
         (a, b, c)
     });
 
-    let mut cq = g.get_getter(c).unwrap();
-    let mut muta = g.get_mutator(a).unwrap();
-    let mut mutb = g.get_mutator(b).unwrap();
+    let mut cq = g.get_getter("c").unwrap();
+    let mut muta = g.get_mutator("a").unwrap();
+    let mut mutb = g.get_mutator("b").unwrap();
     let id: DataType = 1.into();
 
     // send a few values on a
@@ -258,7 +258,7 @@ fn it_works_w_partial_mat() {
         (a, b)
     });
 
-    let mut muta = g.get_mutator(a).unwrap();
+    let mut muta = g.get_mutator("a").unwrap();
     let id: DataType = 1.into();
 
     // send a few values on a
@@ -269,7 +269,7 @@ fn it_works_w_partial_mat() {
     // give it some time to propagate
     sleep();
 
-    let c = g.migrate(move |mig| {
+    let _ = g.migrate(move |mig| {
         let mut emits = HashMap::new();
         emits.insert(a, vec![0, 1]);
         emits.insert(b, vec![0, 1]);
@@ -282,7 +282,7 @@ fn it_works_w_partial_mat() {
     // give it some time to propagate
     sleep();
 
-    let mut cq = g.get_getter(c).unwrap();
+    let mut cq = g.get_getter("c").unwrap();
 
     // because the reader is partial, we should have no key until we read
     assert_eq!(cq.len().unwrap(), 0);
@@ -304,7 +304,7 @@ fn it_works_w_partial_mat_below_empty() {
     // for now.
     let b = ControllerBuilder::default();
     let mut g = b.build_local();
-    let (a, _b, c) = g.migrate(|mig| {
+    let _ = g.migrate(|mig| {
         let a = mig.add_ingredient("a", &["a", "b"], Base::default());
         let b = mig.add_ingredient("b", &["a", "b"], Base::default());
         let mut emits = HashMap::new();
@@ -316,7 +316,7 @@ fn it_works_w_partial_mat_below_empty() {
         (a, b, c)
     });
 
-    let mut muta = g.get_mutator(a).unwrap();
+    let mut muta = g.get_mutator("a").unwrap();
     let id: DataType = 1.into();
 
     // send a few values on a
@@ -327,7 +327,7 @@ fn it_works_w_partial_mat_below_empty() {
     // give it some time to propagate
     sleep();
 
-    let mut cq = g.get_getter(c).unwrap();
+    let mut cq = g.get_getter("c").unwrap();
 
     // despite the empty base tables, we'll make the reader partial and therefore we should have no
     // key until we read
@@ -348,7 +348,7 @@ fn it_works_w_partial_mat_below_empty() {
 fn it_works_deletion() {
     // set up graph
     let mut g = ControllerBuilder::default().build_local();
-    let (a, b, c) = g.migrate(|mig| {
+    let _ = g.migrate(|mig| {
         let a = mig.add_ingredient("a", &["x", "y"], Base::new(vec![]).with_key(vec![1]));
         let b = mig.add_ingredient("b", &["_", "x", "y"], Base::new(vec![]).with_key(vec![2]));
 
@@ -361,9 +361,9 @@ fn it_works_deletion() {
         (a, b, c)
     });
 
-    let mut cq = g.get_getter(c).unwrap();
-    let mut muta = g.get_mutator(a).unwrap();
-    let mut mutb = g.get_mutator(b).unwrap();
+    let mut cq = g.get_getter("c").unwrap();
+    let mut muta = g.get_mutator("a").unwrap();
+    let mut mutb = g.get_mutator("b").unwrap();
 
     // send a value on a
     muta.put(vec![1.into(), 2.into()]).unwrap();
@@ -399,10 +399,9 @@ fn it_works_with_sql_recipe() {
         QUERY CountCars: SELECT COUNT(*) FROM Car WHERE brand = ?;
     ";
     g.install_recipe(sql.to_owned()).unwrap();
-    let (inputs, outputs) = (g.inputs(), g.outputs());
 
-    let mut mutator = g.get_mutator(inputs["Car"]).unwrap();
-    let mut getter = g.get_getter(outputs["CountCars"]).unwrap();
+    let mut mutator = g.get_mutator("Car").unwrap();
+    let mut getter = g.get_getter("CountCars").unwrap();
     let brands = vec!["Volvo", "Volvo", "Volkswagen"];
     for (i, &brand) in brands.iter().enumerate() {
         mutator.put(vec![i.into(), brand.into()]).unwrap();
@@ -428,11 +427,10 @@ fn it_works_with_arithmetic_aliases() {
             ON Car.pid = ActualPrice.pid WHERE cid = ?;
     ";
     g.install_recipe(sql.to_owned()).unwrap();
-    let (inputs, outputs) = (g.inputs(), g.outputs());
 
-    let mut car_mutator = g.get_mutator(inputs["Car"]).unwrap();
-    let mut price_mutator = g.get_mutator(inputs["Price"]).unwrap();
-    let mut getter = g.get_getter(outputs["CarPrice"]).unwrap();
+    let mut car_mutator = g.get_mutator("Car").unwrap();
+    let mut price_mutator = g.get_mutator("Price").unwrap();
+    let mut getter = g.get_getter("CarPrice").unwrap();
     let cid = 1;
     let pid = 1;
     let cent_price = 10000;
@@ -475,8 +473,7 @@ fn it_recovers_persisted_logs() {
         ";
         g.install_recipe(sql.to_owned()).unwrap();
 
-        let inputs = g.inputs();
-        let mut mutator = g.get_mutator(inputs["Car"]).unwrap();
+        let mut mutator = g.get_mutator("Car").unwrap();
 
         for i in 1..10 {
             let price = i * 10;
@@ -490,8 +487,7 @@ fn it_recovers_persisted_logs() {
     let mut g = ControllerBuilder::default();
     g.set_persistence(persistence_params);
     let mut g = g.build(authority.clone());
-    let outputs = g.outputs();
-    let mut getter = g.get_getter(outputs["CarPrice"]).unwrap();
+    let mut getter = g.get_getter("CarPrice").unwrap();
 
     // Make sure that the new graph contains the old writes
     for i in 1..10 {
@@ -505,7 +501,7 @@ fn it_recovers_persisted_logs() {
 #[test]
 fn mutator_churn() {
     let mut g = ControllerBuilder::default().build_local();
-    let (vote, vc) = g.migrate(|mig| {
+    let _ = g.migrate(|mig| {
         // migrate
 
         // add vote base table
@@ -522,7 +518,7 @@ fn mutator_churn() {
         (vote, vc)
     });
 
-    let mut vc_state = g.get_getter(vc).unwrap();
+    let mut vc_state = g.get_getter("votecount").unwrap();
 
     let ids = 1000;
     let votes = 7;
@@ -531,7 +527,7 @@ fn mutator_churn() {
     let user: DataType = 0.into();
     for _ in 0..votes {
         for i in 0..ids {
-            g.get_mutator(vote)
+            g.get_mutator("vote")
                 .unwrap()
                 .put(vec![user.clone(), i.into()])
                 .unwrap();
@@ -577,9 +573,8 @@ fn it_recovers_persisted_logs_w_multiple_nodes() {
             QUERY CID: SELECT id FROM C WHERE id = ?;
         ";
         g.install_recipe(sql.to_owned()).unwrap();
-        let inputs = g.inputs();
         for (i, table) in tables.iter().enumerate() {
-            let mut mutator = g.get_mutator(inputs[table.to_owned()]).unwrap();
+            let mut mutator = g.get_mutator(table.to_owned()).unwrap();
             mutator.put(vec![i.into()]).unwrap();
         }
         sleep();
@@ -590,9 +585,8 @@ fn it_recovers_persisted_logs_w_multiple_nodes() {
     let mut g = ControllerBuilder::default();
     g.set_persistence(persistence_parameters);
     let mut g = g.build(authority.clone());
-    let outputs = g.outputs();
     for (i, table) in tables.iter().enumerate() {
-        let mut getter = g.get_getter(outputs[&format!("{}ID", table)]).unwrap();
+        let mut getter = g.get_getter(&format!("{}ID", table)).unwrap();
         let result = getter.lookup(&i.into(), true).unwrap();
         assert_eq!(result.len(), 1);
         assert_eq!(result[0][0], i.into());
@@ -618,13 +612,13 @@ fn it_recovers_persisted_logs_w_transactions() {
 
         // TODO: Convert this to use SQL interface (because only migrations specified that way get
         // persisted...)
-        let a = g.migrate(|mig| {
+        let _ = g.migrate(|mig| {
             let a = mig.add_transactional_base("a", &["a", "b"], Base::default());
             mig.maintain_anonymous(a, 0);
             a
         });
 
-        let mut mutator = g.get_mutator(a).unwrap();
+        let mut mutator = g.get_mutator("a").unwrap();
 
         for i in 1..10 {
             let b = i * 10;
@@ -640,8 +634,7 @@ fn it_recovers_persisted_logs_w_transactions() {
     let mut g = ControllerBuilder::default();
     g.set_persistence(persistence_params.clone());
     let mut g = g.build(authority.clone());
-    let outputs = g.outputs();
-    let mut getter = g.get_getter(outputs["a"]).unwrap();
+    let mut getter = g.get_getter("a").unwrap();
     for i in 1..10 {
         let b = i * 10;
         let (result, _token) = getter.transactional_lookup(&i.into()).unwrap();
@@ -662,9 +655,8 @@ fn it_works_with_simple_arithmetic() {
         recipe.activate(mig, false).unwrap();
     });
 
-    let (inputs, outputs) = (g.inputs(), g.outputs());
-    let mut mutator = g.get_mutator(inputs["Car"]).unwrap();
-    let mut getter = g.get_getter(outputs["CarPrice"]).unwrap();
+    let mut mutator = g.get_mutator("Car").unwrap();
+    let mut getter = g.get_getter("CarPrice").unwrap();
     let id: DataType = 1.into();
     let price: DataType = 123.into();
     mutator.put(vec![id.clone(), price]).unwrap();
@@ -686,9 +678,8 @@ fn it_works_with_multiple_arithmetic_expressions() {
                ";
     g.install_recipe(sql.to_owned()).unwrap();
 
-    let (inputs, outputs) = (g.inputs(), g.outputs());
-    let mut mutator = g.get_mutator(inputs["Car"]).unwrap();
-    let mut getter = g.get_getter(outputs["CarPrice"]).unwrap();
+    let mut mutator = g.get_mutator("Car").unwrap();
+    let mut getter = g.get_getter("CarPrice").unwrap();
     let id: DataType = 1.into();
     let price: DataType = 123.into();
     mutator.put(vec![id.clone(), price]).unwrap();
@@ -718,11 +709,10 @@ fn it_works_with_join_arithmetic() {
     ";
     g.install_recipe(sql.to_owned()).unwrap();
 
-    let (inputs, outputs) = (g.inputs(), g.outputs());
-    let mut car_mutator = g.get_mutator(inputs["Car"]).unwrap();
-    let mut price_mutator = g.get_mutator(inputs["Price"]).unwrap();
-    let mut sales_mutator = g.get_mutator(inputs["Sales"]).unwrap();
-    let mut getter = g.get_getter(outputs["CarPrice"]).unwrap();
+    let mut car_mutator = g.get_mutator("Car").unwrap();
+    let mut price_mutator = g.get_mutator("Price").unwrap();
+    let mut sales_mutator = g.get_mutator("Sales").unwrap();
+    let mut getter = g.get_getter("CarPrice").unwrap();
     let id = 1;
     let price = 123;
     let fraction = 0.7;
@@ -750,9 +740,8 @@ fn it_works_with_function_arithmetic() {
     ";
     g.install_recipe(sql.to_owned()).unwrap();
 
-    let (inputs, outputs) = (g.inputs(), g.outputs());
-    let mut mutator = g.get_mutator(inputs["Bread"]).unwrap();
-    let mut getter = g.get_getter(outputs["Price"]).unwrap();
+    let mut mutator = g.get_mutator("Bread").unwrap();
+    let mut getter = g.get_getter("Price").unwrap();
     let max_price = 20;
     for (i, price) in (10..max_price + 1).enumerate() {
         let id = i + 1;
@@ -773,10 +762,10 @@ fn it_works_with_function_arithmetic() {
 fn votes() {
     // set up graph
     let mut g = ControllerBuilder::default().build_local();
-    let (article1, article2, vote, article, vc, end) = g.migrate(|mig| {
+    let _ = g.migrate(|mig| {
         // add article base nodes (we use two so we can exercise unions too)
         let article1 = mig.add_ingredient("article1", &["id", "title"], Base::default());
-        let article2 = mig.add_ingredient("article1", &["id", "title"], Base::default());
+        let article2 = mig.add_ingredient("article2", &["id", "title"], Base::default());
 
         // add a (stupid) union of article1 + article2
         let mut emits = HashMap::new();
@@ -805,13 +794,13 @@ fn votes() {
         (article1, article2, vote, article, vc, end)
     });
 
-    let mut articleq = g.get_getter(article).unwrap();
-    let mut vcq = g.get_getter(vc).unwrap();
-    let mut endq = g.get_getter(end).unwrap();
+    let mut articleq = g.get_getter("article").unwrap();
+    let mut vcq = g.get_getter("vc").unwrap();
+    let mut endq = g.get_getter("end").unwrap();
 
-    let mut mut1 = g.get_mutator(article1).unwrap();
-    let mut mut2 = g.get_mutator(article2).unwrap();
-    let mut mutv = g.get_mutator(vote).unwrap();
+    let mut mut1 = g.get_mutator("article1").unwrap();
+    let mut mut2 = g.get_mutator("article2").unwrap();
+    let mut mutv = g.get_mutator("vote").unwrap();
 
     let a1: DataType = 1.into();
     let a2: DataType = 2.into();
@@ -879,10 +868,10 @@ fn transactional_vote() {
     let mut g = g.build_local();
     let validate = g.get_validator();
 
-    let (article1, article2, vote, article, vc, end, end_title, end_votes) = g.migrate(|mig| {
+    let _ = g.migrate(|mig| {
         // add article base nodes (we use two so we can exercise unions too)
         let article1 = mig.add_transactional_base("article1", &["id", "title"], Base::default());
-        let article2 = mig.add_transactional_base("article1", &["id", "title"], Base::default());
+        let article2 = mig.add_transactional_base("article2", &["id", "title"], Base::default());
 
         // add a (stupid) union of article1 + article2
         let mut emits = HashMap::new();
@@ -906,8 +895,10 @@ fn transactional_vote() {
         // add final join using first field from article and first from vc
         let j = Join::new(article, vc, JoinType::Inner, vec![B(0, 0), L(1), R(1)]);
         let end = mig.add_ingredient("end", &["id", "title", "votes"], j);
-        let end_title = mig.add_ingredient("end2", &["id", "title", "votes"], Identity::new(end));
-        let end_votes = mig.add_ingredient("end2", &["id", "title", "votes"], Identity::new(end));
+        let end_title =
+            mig.add_ingredient("end_title", &["id", "title", "votes"], Identity::new(end));
+        let end_votes =
+            mig.add_ingredient("end_votes", &["id", "title", "votes"], Identity::new(end));
 
         mig.maintain_anonymous(end, 0);
         mig.maintain_anonymous(end_title, 1);
@@ -925,15 +916,15 @@ fn transactional_vote() {
         )
     });
 
-    let mut articleq = g.get_getter(article).unwrap();
-    let mut vcq = g.get_getter(vc).unwrap();
-    let mut endq = g.get_getter(end).unwrap();
-    let mut endq_title = g.get_getter(end_title).unwrap();
-    let mut endq_votes = g.get_getter(end_votes).unwrap();
+    let mut articleq = g.get_getter("article").unwrap();
+    let mut vcq = g.get_getter("vc").unwrap();
+    let mut endq = g.get_getter("end").unwrap();
+    let mut endq_title = g.get_getter("end_title").unwrap();
+    let mut endq_votes = g.get_getter("end_votes").unwrap();
 
-    let mut mut1 = g.get_mutator(article1).unwrap();
-    let mut mut2 = g.get_mutator(article2).unwrap();
-    let mut mutv = g.get_mutator(vote).unwrap();
+    let mut mut1 = g.get_mutator("article1").unwrap();
+    let mut mut2 = g.get_mutator("article2").unwrap();
+    let mut mutv = g.get_mutator("vote").unwrap();
 
     let a1: DataType = 1.into();
     let a2: DataType = 2.into();
@@ -1030,7 +1021,7 @@ fn empty_migration() {
     let mut g = ControllerBuilder::default().build_local();
     g.migrate(|_| {});
 
-    let (a, b, c) = g.migrate(|mig| {
+    let _ = g.migrate(|mig| {
         let a = mig.add_ingredient("a", &["a", "b"], Base::default());
         let b = mig.add_ingredient("b", &["a", "b"], Base::default());
 
@@ -1043,9 +1034,9 @@ fn empty_migration() {
         (a, b, c)
     });
 
-    let mut cq = g.get_getter(c).unwrap();
-    let mut muta = g.get_mutator(a).unwrap();
-    let mut mutb = g.get_mutator(b).unwrap();
+    let mut cq = g.get_getter("c").unwrap();
+    let mut muta = g.get_mutator("a").unwrap();
+    let mut mutb = g.get_mutator("b").unwrap();
     let id: DataType = 1.into();
 
     // send a value on a
@@ -1075,14 +1066,14 @@ fn simple_migration() {
 
     // set up graph
     let mut g = ControllerBuilder::default().build_local();
-    let a = g.migrate(|mig| {
+    let _ = g.migrate(|mig| {
         let a = mig.add_ingredient("a", &["a", "b"], Base::default());
         mig.maintain_anonymous(a, 0);
         a
     });
 
-    let mut aq = g.get_getter(a).unwrap();
-    let mut muta = g.get_mutator(a).unwrap();
+    let mut aq = g.get_getter("a").unwrap();
+    let mut muta = g.get_mutator("a").unwrap();
 
     // send a value on a
     muta.put(vec![id.clone(), 2.into()]).unwrap();
@@ -1094,14 +1085,14 @@ fn simple_migration() {
     assert_eq!(aq.lookup(&id, true), Ok(vec![vec![1.into(), 2.into()]]));
 
     // add unrelated node b in a migration
-    let b = g.migrate(|mig| {
+    let _ = g.migrate(|mig| {
         let b = mig.add_ingredient("b", &["a", "b"], Base::default());
         mig.maintain_anonymous(b, 0);
         b
     });
 
-    let mut bq = g.get_getter(b).unwrap();
-    let mut mutb = g.get_mutator(b).unwrap();
+    let mut bq = g.get_getter("b").unwrap();
+    let mut mutb = g.get_mutator("b").unwrap();
 
     // send a value on b
     mutb.put(vec![id.clone(), 4.into()]).unwrap();
@@ -1124,8 +1115,8 @@ fn add_columns() {
         mig.maintain_anonymous(a, 0);
         a
     });
-    let mut aq = g.get_getter(a).unwrap();
-    let mut muta = g.get_mutator(a).unwrap();
+    let mut aq = g.get_getter("a").unwrap();
+    let mut muta = g.get_mutator("a").unwrap();
 
     // send a value on a
     muta.put(vec![id.clone(), "y".into()]).unwrap();
@@ -1154,7 +1145,7 @@ fn add_columns() {
     assert!(res.contains(&vec![id.clone(), "z".into(), 3.into()]));
 
     // get a new muta and send a new value on it
-    let mut muta = g.get_mutator(a).unwrap();
+    let mut muta = g.get_mutator("a").unwrap();
     muta.put(vec![id.clone(), "a".into(), 10.into()]).unwrap();
     sleep();
 
@@ -1176,26 +1167,26 @@ fn migrate_added_columns() {
         let a = mig.add_ingredient("a", &["a", "b"], Base::new(vec![1.into(), 2.into()]));
         a
     });
-    let mut muta = g.get_mutator(a).unwrap();
+    let mut muta = g.get_mutator("a").unwrap();
 
     // send a value on a
     muta.put(vec![id.clone(), "y".into()]).unwrap();
     sleep();
 
     // add a third column to a, and a view that uses it
-    let b = g.migrate(move |mig| {
+    let _ = g.migrate(move |mig| {
         mig.add_column(a, "c", 3.into());
         let b = mig.add_ingredient("x", &["c", "b"], Project::new(a, &[2, 0], None, None));
         mig.maintain_anonymous(b, 1);
         b
     });
 
-    let mut bq = g.get_getter(b).unwrap();
+    let mut bq = g.get_getter("x").unwrap();
 
     // send another (old) value on a
     muta.put(vec![id.clone(), "z".into()]).unwrap();
     // and an entirely new value
-    let mut muta = g.get_mutator(a).unwrap();
+    let mut muta = g.get_mutator("a").unwrap();
     muta.put(vec![id.clone(), "a".into(), 10.into()]).unwrap();
 
     // give it some time to propagate
@@ -1225,8 +1216,8 @@ fn migrate_drop_columns() {
         mig.maintain_anonymous(a, 0);
         a
     });
-    let mut aq = g.get_getter(a).unwrap();
-    let mut muta1 = g.get_mutator(a).unwrap();
+    let mut aq = g.get_getter("a").unwrap();
+    let mut muta1 = g.get_mutator("a").unwrap();
 
     // send a value on a
     muta1.put(vec![id.clone(), "bx".into()]).unwrap();
@@ -1245,7 +1236,7 @@ fn migrate_drop_columns() {
 
     // new mutator should only require one column
     // and should inject default for a.b
-    let mut muta2 = g.get_mutator(a).unwrap();
+    let mut muta2 = g.get_mutator("a").unwrap();
     muta2.put(vec![id.clone()]).unwrap();
 
     // so two rows now!
@@ -1261,7 +1252,7 @@ fn migrate_drop_columns() {
     });
 
     // new mutator allows putting two values, and injects default for a.b
-    let mut muta3 = g.get_mutator(a).unwrap();
+    let mut muta3 = g.get_mutator("a").unwrap();
     muta3.put(vec![id.clone(), "cy".into()]).unwrap();
 
     // using an old putter now should add default for c
@@ -1292,7 +1283,7 @@ fn key_on_added() {
     });
 
     // add a maintained view keyed on newly added column
-    let b = g.migrate(move |mig| {
+    let _ = g.migrate(move |mig| {
         mig.add_column(a, "c", 3.into());
         let b = mig.add_ingredient("x", &["c", "b"], Project::new(a, &[2, 1], None, None));
         mig.maintain_anonymous(b, 0);
@@ -1300,7 +1291,7 @@ fn key_on_added() {
     });
 
     // make sure we can read (may trigger a replay)
-    let mut bq = g.get_getter(b).unwrap();
+    let mut bq = g.get_getter("x").unwrap();
     assert!(bq.lookup(&3.into(), true).unwrap().is_empty());
 }
 
@@ -1326,7 +1317,7 @@ fn replay_during_replay() {
     });
 
     // add our joins
-    let (u, target) = g.migrate(move |mig| {
+    let (u, _) = g.migrate(move |mig| {
         // u = u1 * u2
         let j = Join::new(u1, u2, JoinType::Inner, vec![B(0, 0), R(1)]);
         let u = mig.add_ingredient("u", &["u", "a"], j);
@@ -1340,9 +1331,9 @@ fn replay_during_replay() {
     // must already be present in the one index that `u` has. let's do some writes and check that
     // nothing crashes.
 
-    let mut muta = g.get_mutator(a).unwrap();
-    let mut mutu1 = g.get_mutator(u1).unwrap();
-    let mut mutu2 = g.get_mutator(u2).unwrap();
+    let mut muta = g.get_mutator("a").unwrap();
+    let mut mutu1 = g.get_mutator("u1").unwrap();
+    let mut mutu2 = g.get_mutator("u2").unwrap();
 
     // as are numbers
     muta.put(vec![1.into()]).unwrap();
@@ -1363,7 +1354,7 @@ fn replay_during_replay() {
 
     // since u and target are both partial, the writes should not actually have propagated through
     // yet. do a read to see that one makes it through correctly:
-    let mut r = g.get_getter(target).unwrap();
+    let mut r = g.get_getter("end").unwrap();
 
     assert_eq!(
         r.lookup(&1.into(), true),
@@ -1376,7 +1367,7 @@ fn replay_during_replay() {
         mig.maintain_anonymous(u, 0);
     });
 
-    let mut second = g.get_getter(u).unwrap();
+    let mut second = g.get_getter("u").unwrap();
 
     // second is partial and empty, so any read should trigger a replay.
     // though that shouldn't interact with target in any way.
@@ -1415,7 +1406,7 @@ fn full_aggregation_with_bogokey() {
 
     // add an aggregation over the base with a bogo key.
     // in other words, the aggregation is across all rows.
-    let agg = g.migrate(move |mig| {
+    let _ = g.migrate(move |mig| {
         let bogo = mig.add_ingredient(
             "bogo",
             &["x", "bogo"],
@@ -1430,8 +1421,8 @@ fn full_aggregation_with_bogokey() {
         agg
     });
 
-    let mut aggq = g.get_getter(agg).unwrap();
-    let mut base = g.get_mutator(base).unwrap();
+    let mut aggq = g.get_getter("agg").unwrap();
+    let mut base = g.get_mutator("base").unwrap();
 
     // insert some values
     base.put(vec![1.into()]).unwrap();
@@ -1470,8 +1461,8 @@ fn transactional_migration() {
         a
     });
 
-    let mut aq = g.get_getter(a).unwrap();
-    let mut muta = g.get_mutator(a).unwrap();
+    let mut aq = g.get_getter("a").unwrap();
+    let mut muta = g.get_mutator("a").unwrap();
 
     // send a value on a
     muta.transactional_put(vec![1.into(), 2.into()], Token::empty())
@@ -1493,8 +1484,8 @@ fn transactional_migration() {
         b
     });
 
-    let mut bq = g.get_getter(b).unwrap();
-    let mut mutb = g.get_mutator(b).unwrap();
+    let mut bq = g.get_getter("b").unwrap();
+    let mut mutb = g.get_mutator("b").unwrap();
 
     // send a value on b
     mutb.transactional_put(vec![2.into(), 4.into()], Token::empty())
@@ -1509,7 +1500,7 @@ fn transactional_migration() {
         vec![vec![2.into(), 4.into()]]
     );
 
-    let c = g.migrate(move |mig| {
+    let _ = g.migrate(move |mig| {
         let mut emits = HashMap::new();
         emits.insert(a, vec![0, 1]);
         emits.insert(b, vec![0, 1]);
@@ -1519,7 +1510,7 @@ fn transactional_migration() {
         c
     });
 
-    let mut cq = g.get_getter(c).unwrap();
+    let mut cq = g.get_getter("c").unwrap();
 
     // check that c has both previous entries
     assert_eq!(
@@ -1558,10 +1549,10 @@ fn crossing_migration() {
         let b = mig.add_ingredient("b", &["a", "b"], Base::default());
         (a, b)
     });
-    let mut muta = g.get_mutator(a).unwrap();
-    let mut mutb = g.get_mutator(b).unwrap();
+    let mut muta = g.get_mutator("a").unwrap();
+    let mut mutb = g.get_mutator("b").unwrap();
 
-    let c = g.migrate(move |mig| {
+    let _ = g.migrate(move |mig| {
         let mut emits = HashMap::new();
         emits.insert(a, vec![0, 1]);
         emits.insert(b, vec![0, 1]);
@@ -1571,7 +1562,7 @@ fn crossing_migration() {
         c
     });
 
-    let mut cq = g.get_getter(c).unwrap();
+    let mut cq = g.get_getter("c").unwrap();
 
     let id: DataType = 1.into();
 
@@ -1600,14 +1591,14 @@ fn independent_domain_migration() {
 
     // set up graph
     let mut g = ControllerBuilder::default().build_local();
-    let a = g.migrate(|mig| {
+    let _ = g.migrate(|mig| {
         let a = mig.add_ingredient("a", &["a", "b"], Base::default());
         mig.maintain_anonymous(a, 0);
         a
     });
 
-    let mut aq = g.get_getter(a).unwrap();
-    let mut muta = g.get_mutator(a).unwrap();
+    let mut aq = g.get_getter("a").unwrap();
+    let mut muta = g.get_mutator("a").unwrap();
 
     // send a value on a
     muta.put(vec![id.clone(), 2.into()]).unwrap();
@@ -1619,14 +1610,14 @@ fn independent_domain_migration() {
     assert_eq!(aq.lookup(&id, true), Ok(vec![vec![1.into(), 2.into()]]));
 
     // add unrelated node b in a migration
-    let b = g.migrate(|mig| {
+    let _ = g.migrate(|mig| {
         let b = mig.add_ingredient("b", &["a", "b"], Base::default());
         mig.maintain_anonymous(b, 0);
         b
     });
 
-    let mut bq = g.get_getter(b).unwrap();
-    let mut mutb = g.get_mutator(b).unwrap();
+    let mut bq = g.get_getter("b").unwrap();
+    let mut mutb = g.get_mutator("b").unwrap();
 
     // send a value on b
     mutb.put(vec![id.clone(), 4.into()]).unwrap();
@@ -1647,10 +1638,10 @@ fn domain_amend_migration() {
         let b = mig.add_ingredient("b", &["a", "b"], Base::default());
         (a, b)
     });
-    let mut muta = g.get_mutator(a).unwrap();
-    let mut mutb = g.get_mutator(b).unwrap();
+    let mut muta = g.get_mutator("a").unwrap();
+    let mut mutb = g.get_mutator("b").unwrap();
 
-    let c = g.migrate(move |mig| {
+    let _ = g.migrate(move |mig| {
         let mut emits = HashMap::new();
         emits.insert(a, vec![0, 1]);
         emits.insert(b, vec![0, 1]);
@@ -1659,7 +1650,7 @@ fn domain_amend_migration() {
         mig.maintain_anonymous(c, 0);
         c
     });
-    let mut cq = g.get_getter(c).unwrap();
+    let mut cq = g.get_getter("c").unwrap();
 
     let id: DataType = 1.into();
 
@@ -1718,7 +1709,7 @@ fn migration_depends_on_unchanged_domain() {
 
 fn do_full_vote_migration(old_puts_after: bool) {
     let mut g = ControllerBuilder::default().build_local();
-    let (article, vote, vc, end) = g.migrate(|mig| {
+    let (article, _vote, vc, _end) = g.migrate(|mig| {
         // migrate
 
         // add article base node
@@ -1741,8 +1732,8 @@ fn do_full_vote_migration(old_puts_after: bool) {
         mig.maintain_anonymous(end, 0);
         (article, vote, vc, end)
     });
-    let mut muta = g.get_mutator(article).unwrap();
-    let mut mutv = g.get_mutator(vote).unwrap();
+    let mut muta = g.get_mutator("article").unwrap();
+    let mut mutv = g.get_mutator("vote").unwrap();
 
     let n = 250i64;
     let title: DataType = "foo".into();
@@ -1755,7 +1746,7 @@ fn do_full_vote_migration(old_puts_after: bool) {
         mutv.put(vec![1.into(), i.into()]).unwrap();
     }
 
-    let mut last = g.get_getter(end).unwrap();
+    let mut last = g.get_getter("awvc").unwrap();
     thread::sleep(get_settle_time().checked_mul(3).unwrap());
     for i in 0..n {
         let rows = last.lookup(&i.into(), true).unwrap();
@@ -1772,7 +1763,7 @@ fn do_full_vote_migration(old_puts_after: bool) {
     }
 
     // migrate
-    let (rating, last) = g.migrate(move |mig| {
+    let _ = g.migrate(move |mig| {
         // add new "ratings" base table
         let rating = mig.add_ingredient("rating", &["user", "id", "stars"], Base::default());
 
@@ -1799,8 +1790,8 @@ fn do_full_vote_migration(old_puts_after: bool) {
         (rating, newend)
     });
 
-    let mut last = g.get_getter(last).unwrap();
-    let mut mutr = g.get_mutator(rating).unwrap();
+    let mut last = g.get_getter("awr").unwrap();
+    let mut mutr = g.get_mutator("rating").unwrap();
     for i in 0..n {
         if old_puts_after {
             mutv.put(vec![1.into(), i.into()]).unwrap();
@@ -1842,7 +1833,7 @@ fn full_vote_migration_new_and_old() {
 #[test]
 fn live_writes() {
     let mut g = ControllerBuilder::default().build_local();
-    let (vote, vc) = g.migrate(|mig| {
+    let (_vote, vc) = g.migrate(|mig| {
         // migrate
 
         // add vote base table
@@ -1859,8 +1850,8 @@ fn live_writes() {
         (vote, vc)
     });
 
-    let mut vc_state = g.get_getter(vc).unwrap();
-    let mut add = g.get_mutator(vote).unwrap();
+    let mut vc_state = g.get_getter("votecount").unwrap();
+    let mut add = g.get_mutator("vote").unwrap();
 
     let ids = 1000;
     let votes = 7;
@@ -1877,7 +1868,7 @@ fn live_writes() {
     sleep();
 
     // now do a migration that's going to have to copy state
-    let vc2 = g.migrate(move |mig| {
+    let _ = g.migrate(move |mig| {
         let vc2 = mig.add_ingredient(
             "votecount2",
             &["id", "votes"],
@@ -1887,7 +1878,7 @@ fn live_writes() {
         vc2
     });
 
-    let mut vc2_state = g.get_getter(vc2).unwrap();
+    let mut vc2_state = g.get_getter("votecount2").unwrap();
 
     // TODO: check that the writer did indeed complete writes during the migration
 
@@ -1923,8 +1914,8 @@ fn state_replay_migration_query() {
 
         (a, b)
     });
-    let mut muta = g.get_mutator(a).unwrap();
-    let mut mutb = g.get_mutator(b).unwrap();
+    let mut muta = g.get_mutator("a").unwrap();
+    let mut mutb = g.get_mutator("b").unwrap();
 
     // make a couple of records
     muta.put(vec![1.into(), "a".into()]).unwrap();
@@ -1933,7 +1924,7 @@ fn state_replay_migration_query() {
     mutb.put(vec![1.into(), "n".into()]).unwrap();
     mutb.put(vec![2.into(), "o".into()]).unwrap();
 
-    let out = g.migrate(move |mig| {
+    let _ = g.migrate(move |mig| {
         // add join and a reader node
         let j = Join::new(a, b, JoinType::Inner, vec![B(0, 0), L(1), R(1)]);
         let j = mig.add_ingredient("j", &["x", "y", "z"], j);
@@ -1942,7 +1933,7 @@ fn state_replay_migration_query() {
         mig.maintain_anonymous(j, 0);
         j
     });
-    let mut out = g.get_getter(out).unwrap();
+    let mut out = g.get_getter("j").unwrap();
     sleep();
 
     // if all went according to plan, the join should now be fully populated!

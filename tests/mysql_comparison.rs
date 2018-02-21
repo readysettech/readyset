@@ -279,11 +279,9 @@ fn check_query(
 
     let mut g = ControllerBuilder::default().build_local();
     g.install_recipe(queries.join("\n")).unwrap();
-    let inputs = g.inputs();
-    let outputs = g.outputs();
 
     for (table_name, table) in tables.iter() {
-        let mut mutator = g.get_mutator(inputs[table_name]).unwrap();
+        let mut mutator = g.get_mutator(table_name).unwrap();
         for row in table.data.as_ref().unwrap().iter() {
             assert_eq!(row.len(), table.types.len());
             let row: Vec<DataType> = row.iter()
@@ -296,8 +294,7 @@ fn check_query(
 
     thread::sleep(time::Duration::from_millis(300));
 
-    let nd = outputs[query_name];
-    let mut getter = g.get_getter(nd).unwrap();
+    let mut getter = g.get_getter(query_name).unwrap();
 
     for (i, query_parameter) in query.values.iter().enumerate() {
         let query_param = query.types[0].make_datatype(&query_parameter[0]);

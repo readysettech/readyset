@@ -89,8 +89,8 @@ impl<A: Authority> ControllerHandle<A> {
 
     /// Obtain a `RemoteGetterBuilder` that can be sent to a client and then used to query a given
     /// (already maintained) reader node.
-    pub fn get_getter_builder(&mut self, node: NodeIndex) -> Option<RemoteGetterBuilder> {
-        let rgb: Option<RemoteGetterBuilder> = self.rpc("getter_builder", &node);
+    pub fn get_getter_builder(&mut self, name: &str) -> Option<RemoteGetterBuilder> {
+        let rgb: Option<RemoteGetterBuilder> = self.rpc("getter_builder", &name);
         rgb.map(|mut rgb| {
             for &mut (_, ref mut is_local) in &mut rgb.shards {
                 *is_local &= self.local_controller.is_some();
@@ -100,18 +100,18 @@ impl<A: Authority> ControllerHandle<A> {
     }
 
     /// Obtain a `RemoteGetter`.
-    pub fn get_getter(&mut self, node: NodeIndex) -> Option<RemoteGetter> {
-        self.get_getter_builder(node).map(|g| g.build())
+    pub fn get_getter(&mut self, name: &str) -> Option<RemoteGetter> {
+        self.get_getter_builder(name).map(|g| g.build())
     }
 
     /// Obtain a MutatorBuild that can be used to construct a Mutator to perform writes and deletes
     /// from the given base node.
-    pub fn get_mutator_builder(&mut self, base: NodeIndex) -> Result<MutatorBuilder, Box<Error>> {
+    pub fn get_mutator_builder(&mut self, base: &str) -> Result<MutatorBuilder, Box<Error>> {
         Ok(self.rpc("mutator_builder", &base))
     }
 
     /// Obtain a Mutator
-    pub fn get_mutator(&mut self, base: NodeIndex) -> Result<Mutator, Box<Error>> {
+    pub fn get_mutator(&mut self, base: &str) -> Result<Mutator, Box<Error>> {
         self.get_mutator_builder(base).map(|m| m.build())
     }
 

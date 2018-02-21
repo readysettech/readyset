@@ -435,8 +435,9 @@ impl ControllerInner {
     }
 
     /// Obtain a `RemoteGetterBuilder` that can be sent to a client and then used to query a given
-    /// (already maintained) reader node.
-    pub fn getter_builder(&self, node: NodeIndex) -> Option<RemoteGetterBuilder> {
+    /// (already maintained) reader node called `name`.
+    pub fn getter_builder(&self, name: &str) -> Option<RemoteGetterBuilder> {
+        let node = *self.outputs().get(name)?;
         self.find_getter_for(node).map(|r| {
             let domain = self.ingredients[r].domain();
             let shards = (0..self.domains[&domain].shards())
@@ -455,20 +456,23 @@ impl ControllerInner {
     }
 
     /// Obtain a MutatorBuild that can be used to construct a Mutator to perform writes and deletes
-    /// from the given base node.
-    pub fn mutator_builder(&self, base: NodeIndex) -> MutatorBuilder {
-        let node = &self.ingredients[base];
+    /// from the given named base node.
+    pub fn mutator_builder(&self, base: &str) -> MutatorBuilder {
+        let ni = *self.inputs()
+            .get(base)
+            .expect(&format!("no base node '{}'", base));
+        let node = &self.ingredients[ni];
 
-        trace!(self.log, "creating mutator"; "for" => base.index());
+        trace!(self.log, "creating mutator"; "for" => base);
 
-        let mut key = self.ingredients[base]
-            .suggest_indexes(base)
-            .remove(&base)
+        let mut key = self.ingredients[ni]
+            .suggest_indexes(ni)
+            .remove(&ni)
             .map(|(c, _)| c)
             .unwrap_or_else(Vec::new);
         let mut is_primary = false;
         if key.is_empty() {
-            if let Sharding::ByColumn(col, _) = self.ingredients[base].sharded_by() {
+            if let Sharding::ByColumn(col, _) = self.ingredients[ni].sharded_by() {
                 key = vec![col];
             }
         } else {
@@ -491,7 +495,7 @@ impl ControllerInner {
             addr: (*node.local_addr()).into(),
             key: key,
             key_is_primary: is_primary,
-            transactional: self.ingredients[base].is_transactional(),
+            transactional: self.ingredients[ni].is_transactional(),
             dropped: base_operator.get_dropped(),
             expected_columns: num_fields - base_operator.get_dropped().len(),
             is_local: true,
