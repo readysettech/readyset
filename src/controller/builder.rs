@@ -13,6 +13,8 @@ use controller::{self, ControllerConfig};
 /// Used to construct a controller.
 pub struct ControllerBuilder {
     config: ControllerConfig,
+    nworker_threads: usize,
+    nread_threads: usize,
     listen_addr: IpAddr,
     log: slog::Logger,
 }
@@ -22,6 +24,8 @@ impl Default for ControllerBuilder {
             config: ControllerConfig::default(),
             listen_addr: "127.0.0.1".parse().unwrap(),
             log: slog::Logger::root(slog::Discard, o!()),
+            nworker_threads: 2,
+            nread_threads: 1,
         }
     }
 }
@@ -63,13 +67,21 @@ impl ControllerBuilder {
 
     /// Set how many workers the controller should wait for before starting. More workers can join
     /// later, but they won't be assigned any of the initial domains.
-    pub fn set_nworkers(&mut self, workers: usize) {
-        self.config.nworkers = workers;
+    pub fn set_quorum(&mut self, quorum: usize) {
+        assert_ne!(quorum, 0);
+        self.config.quorum = quorum;
     }
 
-    /// Set how many threads should be set up when operating in local mode.
-    pub fn set_local_read_threads(&mut self, n: usize) {
-        self.config.nreaders = n;
+    /// Set the number of worker threads used by this instance.
+    pub fn set_worker_threads(&mut self, threads: usize) {
+        assert_ne!(threads, 0);
+        self.nworker_threads = threads;
+    }
+
+    /// Set the number of read threads that should be run on this instance.
+    pub fn set_read_threads(&mut self, threads: usize) {
+        assert_ne!(threads, 0);
+        self.nread_threads = threads;
     }
 
     /// Set the IP address that the controller should use for listening.
@@ -84,7 +96,14 @@ impl ControllerBuilder {
 
     /// Build a controller and return a handle to it.
     pub fn build<A: Authority + 'static>(self, authority: Arc<A>) -> ControllerHandle<A> {
-        controller::start_instance(authority, self.listen_addr, self.config, self.log)
+        controller::start_instance(
+            authority,
+            self.listen_addr,
+            self.config,
+            self.nworker_threads,
+            self.nread_threads,
+            self.log,
+        )
     }
 
     /// Build a local controller, and return a ControllerHandle to provide access to it.

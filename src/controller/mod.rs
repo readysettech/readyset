@@ -124,8 +124,7 @@ pub(crate) struct ControllerConfig {
     pub persistence: PersistenceParameters,
     pub heartbeat_every: Duration,
     pub healthcheck_every: Duration,
-    pub nworkers: usize,
-    pub nreaders: usize,
+    pub quorum: usize,
 }
 impl Default for ControllerConfig {
     fn default() -> Self {
@@ -143,8 +142,7 @@ impl Default for ControllerConfig {
             persistence: Default::default(),
             heartbeat_every: Duration::from_secs(1),
             healthcheck_every: Duration::from_secs(10),
-            nworkers: 2,
-            nreaders: 1,
+            quorum: 1,
         }
     }
 }
@@ -184,6 +182,8 @@ fn start_instance<A: Authority + 'static>(
     authority: Arc<A>,
     listen_addr: IpAddr,
     config: ControllerConfig,
+    nworker_threads: usize,
+    nread_threads: usize,
     log: slog::Logger,
 ) -> ControllerHandle<A> {
     let (controller_event_tx, controller_event_rx) = mpsc::channel();
@@ -246,6 +246,8 @@ fn start_instance<A: Authority + 'static>(
             let worker = Worker {
                 inner: None,
                 receiver: worker_event_rx,
+                nworker_threads,
+                nread_threads,
                 listen_addr,
                 internal,
                 log: log2,
@@ -375,6 +377,9 @@ pub struct Controller<A> {
 pub struct Worker {
     receiver: Receiver<WorkerEvent>,
     inner: Option<WorkerInner>,
+
+    nworker_threads: usize,
+    nread_threads: usize,
 
     listen_addr: IpAddr,
     internal: ServingThread,
@@ -596,6 +601,8 @@ impl Worker {
                         descriptor.internal_addr,
                         self.internal.addr,
                         &state,
+                        self.nworker_threads,
+                        self.nread_threads,
                         self.log.clone(),
                     ) {
                         self.inner = Some(worker);

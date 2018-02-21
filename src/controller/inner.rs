@@ -68,6 +68,7 @@ pub struct ControllerInner {
 
     pending_recovery: Option<(Vec<String>, usize)>,
 
+    quorum: usize,
     heartbeat_every: Duration,
     healthcheck_every: Duration,
     last_checked_workers: Instant,
@@ -136,8 +137,7 @@ impl ControllerInner {
             _ => {}
         }
 
-        // TODO(jbehrens): Check for quorum instead of just a single worker.
-        if self.pending_recovery.is_some() || self.workers.is_empty() {
+        if self.pending_recovery.is_some() || self.workers.len() < self.quorum {
             return Err(StatusCode::ServiceUnavailable);
         }
 
@@ -178,28 +178,31 @@ impl ControllerInner {
         self.workers.insert(msg.source.clone(), ws);
         self.read_addrs.insert(msg.source.clone(), read_listen_addr);
 
-        if let Some((recipes, recipe_version)) = self.pending_recovery.take() {
-            // TODO(jbehrens): Wait for a quorum instead of always just one worker.
-            assert_eq!(self.workers.len(), 1);
-            assert_eq!(self.recipe.version(), 0);
-            assert!(recipe_version + 1 >= recipes.len());
+        if self.workers.len() >= self.quorum {
+            if let Some((recipes, recipe_version)) = self.pending_recovery.take() {
+                assert_eq!(self.workers.len(), self.quorum);
+                assert_eq!(self.recipe.version(), 0);
+                assert!(recipe_version + 1 >= recipes.len());
 
-            info!(self.log, "Restoring graph configuration");
-            self.recipe =
-                Recipe::with_version(recipe_version + 1 - recipes.len(), Some(self.log.clone()));
-            for r in recipes {
-                self.apply_recipe(self.recipe.clone().extend(&r).unwrap())
-                    .unwrap();
-            }
+                info!(self.log, "Restoring graph configuration");
+                self.recipe = Recipe::with_version(
+                    recipe_version + 1 - recipes.len(),
+                    Some(self.log.clone()),
+                );
+                for r in recipes {
+                    self.apply_recipe(self.recipe.clone().extend(&r).unwrap())
+                        .unwrap();
+                }
 
-            info!(self.log, "Recovering from log");
-            for (_name, index) in self.inputs().iter() {
-                let node = &self.ingredients[*index];
-                let domain = self.domains.get_mut(&node.domain()).unwrap();
-                domain.send(box payload::Packet::StartRecovery).unwrap();
-                domain.wait_for_ack().unwrap();
+                info!(self.log, "Recovering from log");
+                for (_name, index) in self.inputs().iter() {
+                    let node = &self.ingredients[*index];
+                    let domain = self.domains.get_mut(&node.domain()).unwrap();
+                    domain.send(box payload::Packet::StartRecovery).unwrap();
+                    domain.wait_for_ack().unwrap();
+                }
+                info!(self.log, "Recovery complete");
             }
-            info!(self.log, "Recovery complete");
         }
 
         Ok(())
@@ -257,7 +260,7 @@ impl ControllerInner {
         }
 
         let cc = Arc::new(ChannelCoordinator::new());
-        assert_ne!(state.config.nworkers, 0);
+        assert_ne!(state.config.quorum, 0);
 
         let pending_recovery = if !state.recipes.is_empty() {
             Some((state.recipes, state.recipe_version))
@@ -280,6 +283,7 @@ impl ControllerInner {
             heartbeat_every: state.config.heartbeat_every,
             healthcheck_every: state.config.healthcheck_every,
             recipe: Recipe::blank(Some(log.clone())),
+            quorum: state.config.quorum,
             log,
 
             domains: Default::default(),

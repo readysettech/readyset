@@ -30,7 +30,7 @@ fn main() {
     // set up Soup via recipe
     let mut builder = ControllerBuilder::default();
     builder.log_with(distributary::logger_pls());
-    builder.set_nworkers(2);
+    builder.set_worker_threads(2);
     builder.set_persistence(persistence_params);
 
     let mut blender = builder.build_local();

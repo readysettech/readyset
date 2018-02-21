@@ -45,6 +45,8 @@ impl WorkerInner {
         controller_addr: SocketAddr,
         souplet_addr: SocketAddr,
         state: &ControllerState,
+        nworker_threads: usize,
+        nread_threads: usize,
         log: slog::Logger,
     ) -> Result<WorkerInner, ()> {
         let channel_coordinator = Arc::new(ChannelCoordinator::new());
@@ -63,7 +65,7 @@ impl WorkerInner {
         let (read_threads, read_listen_addr) = Self::reads_listen(
             SocketAddr::new(listen_addr, 0),
             readers.clone(),
-            state.config.nreaders,
+            nread_threads,
         );
 
         let mut sender = match TcpSender::connect(&controller_addr) {
@@ -93,7 +95,7 @@ impl WorkerInner {
         Ok(WorkerInner {
             epoch: state.epoch,
             worker_pool: worker::WorkerPool::new(
-                state.config.nworkers,
+                nworker_threads,
                 &log,
                 checktable_addr,
                 channel_coordinator.clone(),

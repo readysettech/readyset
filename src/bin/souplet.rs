@@ -51,7 +51,7 @@ fn main() {
                 .long("workers")
                 .takes_value(true)
                 .default_value("1")
-                .help("Number of worker threads to spin up"),
+                .help("Number of worker threads to run on this souplet."),
         )
         .arg(
             Arg::with_name("readers")
@@ -59,7 +59,15 @@ fn main() {
                 .long("readers")
                 .takes_value(true)
                 .default_value("1")
-                .help("Number of reader threads to spin up"),
+                .help("Number of reader threads to run on this souplet."),
+        )
+        .arg(
+            Arg::with_name("quorum")
+                .short("q")
+                .long("quorum")
+                .takes_value(true)
+                .default_value("1")
+                .help("Number of souplets to wait for before starting (including this one)."),
         )
         .arg(
             Arg::with_name("shards")
@@ -84,6 +92,7 @@ fn main() {
     let zookeeper_addr = matches.value_of("zookeeper").unwrap();
     let workers = value_t_or_exit!(matches, "workers", usize);
     let readers = value_t_or_exit!(matches, "readers", usize);
+    let quorum = value_t_or_exit!(matches, "quorum", usize);
     let sharding = match value_t_or_exit!(matches, "shards", usize) {
         0 => None,
         x => Some(x),
@@ -104,9 +113,10 @@ fn main() {
     let mut authority = ZookeeperAuthority::new(&format!("{}/{}", zookeeper_addr, deployment_name));
     let mut builder = ControllerBuilder::default();
     builder.set_listen_addr(listen_addr);
-    builder.set_nworkers(workers);
-    builder.set_local_read_threads(readers);
+    builder.set_worker_threads(workers);
+    builder.set_read_threads(readers);
     builder.set_sharding(sharding);
+    builder.set_quorum(quorum);
 
     let persistence_params = distributary::PersistenceParameters::new(
         if ephemeral {
