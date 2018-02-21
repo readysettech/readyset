@@ -100,6 +100,9 @@ fn it_works_basic() {
     let mut mutb = g.get_mutator("b").unwrap();
     let id: DataType = 1.into();
 
+    assert_eq!(muta.table_name(), "a");
+    assert_eq!(muta.columns(), &["a", "b"]);
+
     // send a value on a
     muta.put(vec![id.clone(), 2.into()]).unwrap();
 
@@ -402,6 +405,10 @@ fn it_works_with_sql_recipe() {
 
     let mut mutator = g.get_mutator("Car").unwrap();
     let mut getter = g.get_getter("CountCars").unwrap();
+
+    assert_eq!(mutator.table_name(), "Car");
+    assert_eq!(mutator.columns(), &["id", "brand"]);
+
     let brands = vec!["Volvo", "Volvo", "Volkswagen"];
     for (i, &brand) in brands.iter().enumerate() {
         mutator.put(vec![i.into(), brand.into()]).unwrap();

@@ -24,7 +24,9 @@ pub struct MutatorBuilder {
     pub(crate) key: Vec<usize>,
     pub(crate) transactional: bool,
     pub(crate) dropped: VecMap<DataType>,
-    pub(crate) expected_columns: usize,
+
+    pub(crate) table_name: String,
+    pub(crate) columns: Vec<String>,
 
     // skip so that serde will set value to default (which is false) when serializing
     #[serde(skip)]
@@ -42,7 +44,8 @@ impl MutatorBuilder {
             transactional: self.transactional,
             dropped: self.dropped,
             tracer: None,
-            expected_columns: self.expected_columns,
+            table_name: self.table_name,
+            columns: self.columns,
             is_local: self.is_local,
         }
     }
@@ -58,7 +61,8 @@ pub struct Mutator {
     transactional: bool,
     dropped: VecMap<DataType>,
     tracer: Tracer,
-    expected_columns: usize,
+    table_name: String,
+    columns: Vec<String>,
     is_local: bool,
 }
 
@@ -191,9 +195,9 @@ impl Mutator {
 
         for row in i {
             let data = vec![row.into()];
-            if data[0].len() != self.expected_columns {
+            if data[0].len() != self.columns.len() {
                 return Err(MutatorError::WrongColumnCount(
-                    self.expected_columns,
+                    self.columns.len(),
                     data[0].len(),
                 ));
             }
@@ -216,9 +220,9 @@ impl Mutator {
         V: Into<Vec<DataType>>,
     {
         let data = vec![u.into()];
-        if data[0].len() != self.expected_columns {
+        if data[0].len() != self.columns.len() {
             return Err(MutatorError::WrongColumnCount(
-                self.expected_columns,
+                self.columns.len(),
                 data[0].len(),
             ));
         }
@@ -232,9 +236,9 @@ impl Mutator {
         V: Into<Vec<Vec<DataType>>>,
     {
         let data = u.into();
-        if data[0].len() != self.expected_columns {
+        if data[0].len() != self.columns.len() {
             return Err(MutatorError::WrongColumnCount(
-                self.expected_columns,
+                self.columns.len(),
                 data[0].len(),
             ));
         }
@@ -248,9 +252,9 @@ impl Mutator {
         V: Into<Vec<DataType>>,
     {
         let data = vec![u.into()];
-        if data[0].len() != self.expected_columns {
+        if data[0].len() != self.columns.len() {
             return Err(MutatorError::WrongColumnCount(
-                self.expected_columns,
+                self.columns.len(),
                 data[0].len(),
             ));
         }
@@ -292,11 +296,8 @@ impl Mutator {
         );
 
         let u = u.into();
-        if u.len() != self.expected_columns {
-            return Err(MutatorError::WrongColumnCount(
-                self.expected_columns,
-                u.len(),
-            ));
+        if u.len() != self.columns.len() {
+            return Err(MutatorError::WrongColumnCount(self.columns.len(), u.len()));
         }
 
         let pkey = self.key.iter().map(|&col| &u[col]).cloned().collect();
@@ -319,11 +320,8 @@ impl Mutator {
         );
 
         let u: Vec<_> = u.into();
-        if u.len() != self.expected_columns {
-            return Err(MutatorError::WrongColumnCount(
-                self.expected_columns,
-                u.len(),
-            ));
+        if u.len() != self.columns.len() {
+            return Err(MutatorError::WrongColumnCount(self.columns.len(), u.len()));
         }
 
         let m = vec![
@@ -343,5 +341,15 @@ impl Mutator {
     /// Stop attaching the tracer to packets sent.
     pub fn stop_tracing(&mut self) {
         self.tracer = None;
+    }
+
+    /// Get the name of the base table that this mutator writes to.
+    pub fn table_name(&self) -> &str {
+        &self.table_name
+    }
+
+    /// Get the name of the columns in the base table this mutator is for.
+    pub fn columns(&self) -> &[String] {
+        &self.columns
     }
 }

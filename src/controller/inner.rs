@@ -487,9 +487,19 @@ impl ControllerInner {
             })
             .collect();
 
-        let num_fields = node.fields().len();
         let base_operator = node.get_base()
             .expect("asked to get mutator for non-base node");
+        let columns: Vec<String> = node.fields()
+            .iter()
+            .enumerate()
+            .filter(|&(n, _)| !base_operator.get_dropped().contains_key(n))
+            .map(|(_, s)| s.clone())
+            .collect();
+        assert_eq!(
+            columns.len(),
+            node.fields().len() - base_operator.get_dropped().len()
+        );
+
         MutatorBuilder {
             txs,
             addr: (*node.local_addr()).into(),
@@ -497,7 +507,8 @@ impl ControllerInner {
             key_is_primary: is_primary,
             transactional: self.ingredients[ni].is_transactional(),
             dropped: base_operator.get_dropped(),
-            expected_columns: num_fields - base_operator.get_dropped().len(),
+            table_name: node.name().to_owned(),
+            columns,
             is_local: true,
         }
     }
