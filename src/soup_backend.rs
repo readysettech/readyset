@@ -24,11 +24,11 @@ impl SoupBackend {
 
         let inputs = ch.inputs()
             .into_iter()
-            .map(|(n, i)| (n, ch.get_mutator(i).unwrap()))
+            .map(|(n, _)| (n.clone(), ch.get_mutator(&n).unwrap()))
             .collect::<BTreeMap<String, Mutator>>();
         let outputs = ch.outputs()
             .into_iter()
-            .map(|(n, o)| (n, ch.get_getter(o).unwrap()))
+            .map(|(n, _)| (n.clone(), ch.get_getter(&n).unwrap()))
             .collect::<BTreeMap<String, RemoteGetter>>();
 
         debug!(log, "Connected!");
