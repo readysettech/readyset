@@ -42,7 +42,7 @@ impl Default for Parameters {
     fn default() -> Self {
         Self {
             queue_capacity: 256,
-            flush_timeout: time::Duration::from_millis(1),
+            flush_timeout: time::Duration::new(0, 100_000),
             mode: DurabilityMode::MemoryOnly,
             log_prefix: String::from("soup"),
         }
