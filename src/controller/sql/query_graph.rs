@@ -689,24 +689,20 @@ pub fn to_query_graph(st: &SelectStatement) -> Result<QueryGraph, String> {
                 QueryGraphEdge::Join(ref jps) => qg.join_order.extend(
                     jps.iter()
                         .enumerate()
-                        .map(|(idx, _)| {
-                            JoinRef {
-                                src: src.clone(),
-                                dst: dst.clone(),
-                                index: idx,
-                            }
+                        .map(|(idx, _)| JoinRef {
+                            src: src.clone(),
+                            dst: dst.clone(),
+                            index: idx,
                         })
                         .collect::<Vec<_>>(),
                 ),
                 QueryGraphEdge::LeftJoin(ref jps) => qg.join_order.extend(
                     jps.iter()
                         .enumerate()
-                        .map(|(idx, _)| {
-                            JoinRef {
-                                src: src.clone(),
-                                dst: dst.clone(),
-                                index: idx,
-                            }
+                        .map(|(idx, _)| JoinRef {
+                            src: src.clone(),
+                            dst: dst.clone(),
+                            index: idx,
                         })
                         .collect::<Vec<_>>(),
                 ),

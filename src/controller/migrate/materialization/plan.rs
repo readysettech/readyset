@@ -184,11 +184,9 @@ impl<'a> Plan<'a> {
                 let locals: Vec<_> = nodes
                     .iter()
                     .skip(skip_first)
-                    .map(|&(ni, key)| {
-                        ReplayPathSegment {
-                            node: *self.graph[ni].local_addr(),
-                            partial_key: key,
-                        }
+                    .map(|&(ni, key)| ReplayPathSegment {
+                        node: *self.graph[ni].local_addr(),
+                        partial_key: key,
                     })
                     .collect();
 

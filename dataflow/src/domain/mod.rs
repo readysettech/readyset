@@ -1605,8 +1605,10 @@ impl Domain {
             .collect();
 
         for (local_addr, global_addr, is_transactional) in node_info {
-            let path = self.persistence_parameters
-                .log_path(self.nodes[&local_addr].borrow().name(), self.shard.unwrap_or(0));
+            let path = self.persistence_parameters.log_path(
+                self.nodes[&local_addr].borrow().name(),
+                self.shard.unwrap_or(0),
+            );
 
             let file = match File::open(&path) {
                 Ok(f) => f,

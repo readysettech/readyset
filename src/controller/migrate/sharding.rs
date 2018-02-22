@@ -613,8 +613,7 @@ fn reshard(
     // if `dst` refers to `src`, it now needs to refer to `node` instead
     let old = swaps.insert((dst, src), node);
     assert_eq!(
-        old,
-        None,
+        old, None,
         "re-sharding already sharded node introduces swap collision"
     );
 }
