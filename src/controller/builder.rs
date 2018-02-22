@@ -39,12 +39,6 @@ impl ControllerBuilder {
         self.config.domain_config.concurrent_replays = n;
     }
 
-    /// Set the maximum number of partial replay responses that can be aggregated into a single
-    /// replay batch.
-    pub fn set_partial_replay_batch_size(&mut self, n: usize) {
-        self.config.domain_config.replay_batch_size = n;
-    }
-
     /// Set the longest time a partial replay response can be delayed.
     pub fn set_partial_replay_batch_timeout(&mut self, t: time::Duration) {
         self.config.domain_config.replay_batch_timeout = t;

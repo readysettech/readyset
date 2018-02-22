@@ -137,7 +137,6 @@ impl Default for ControllerConfig {
             domain_config: DomainConfig {
                 concurrent_replays: 512,
                 replay_batch_timeout: time::Duration::from_millis(1),
-                replay_batch_size: 32,
             },
             persistence: Default::default(),
             heartbeat_every: Duration::from_secs(1),

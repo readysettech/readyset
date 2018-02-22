@@ -34,7 +34,6 @@ type EnqueuedSends = Vec<(ReplicaAddr, Box<Packet>)>;
 pub struct Config {
     pub concurrent_replays: usize,
     pub replay_batch_timeout: time::Duration,
-    pub replay_batch_size: usize,
 }
 
 const BATCH_SIZE: usize = 256;
@@ -215,7 +214,6 @@ impl DomainBuilder {
 
             buffered_replay_requests: Default::default(),
             has_buffered_replay_requests: false,
-            replay_batch_size: self.config.replay_batch_size,
             replay_batch_timeout: self.config.replay_batch_timeout,
 
             concurrent_replays: 0,
@@ -268,7 +266,6 @@ pub struct Domain {
     buffered_replay_requests: HashMap<Tag, (time::Instant, HashSet<Vec<DataType>>)>,
     has_buffered_replay_requests: bool,
     replay_batch_timeout: time::Duration,
-    replay_batch_size: usize,
 
     group_commit_queues: persistence::GroupCommitQueueSet,
 
@@ -1471,40 +1468,23 @@ impl Domain {
                 // TODO
                 use std::collections::hash_map::Entry;
                 let key = Vec::from(key);
-                let full = match self.buffered_replay_requests.entry(tag) {
+                match self.buffered_replay_requests.entry(tag) {
                     Entry::Occupied(mut o) => {
-                        let l = o.get().1.len();
-                        if l == self.replay_batch_size - 1 {
-                            use std::mem;
-                            let mut o =
-                                mem::replace(&mut o.get_mut().1, HashSet::with_capacity(l + 1));
-                            o.insert(key);
-                            Some(o)
-                        } else {
-                            if l == 0 {
-                                o.get_mut().0 = time::Instant::now();
-                            }
-                            o.into_mut().1.insert(key);
-                            self.has_buffered_replay_requests = true;
-                            None
+                        if o.get().1.is_empty() {
+                            o.get_mut().0 = time::Instant::now();
                         }
+                        o.into_mut().1.insert(key);
+                        self.has_buffered_replay_requests = true;
                     }
                     Entry::Vacant(v) => {
                         let mut ks = HashSet::new();
                         ks.insert(key);
-                        if self.replay_batch_size == 1 {
-                            Some(ks)
-                        } else {
-                            v.insert((time::Instant::now(), ks));
-                            self.has_buffered_replay_requests = true;
-                            None
-                        }
+                        v.insert((time::Instant::now(), ks));
+                        self.has_buffered_replay_requests = true;
                     }
-                };
-
-                if let Some(all) = full {
-                    self.seed_all(tag, all, sends);
                 }
+
+                // TODO: if timer has expired, call seed_all(tag, _, sends) immediately
                 return;
             }
         }
