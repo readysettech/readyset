@@ -357,6 +357,8 @@ impl Drop for PersistentState {
             return;
         }
 
+        // Journal files should get deleted automatically, but just in case:
+        let _ = fs::remove_file(format!("{}-journal", self.name));
         fs::remove_file(&self.name).unwrap();
     }
 }
