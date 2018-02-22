@@ -125,7 +125,7 @@ fn main() {
             distributary::DurabilityMode::Permanent
         },
         512,
-        Duration::from_millis(1),
+        Duration::new(0, 100_000),
         Some(deployment_name),
     );
     builder.set_persistence(persistence_params);
