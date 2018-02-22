@@ -66,6 +66,7 @@ impl<T> LocalOrNot<T> {
 /// The contents of a specific key
 #[derive(Serialize, Deserialize, Debug)]
 pub enum ReadReply {
+    // it's pretty unnecessary for us to have these results...
     /// Read normally
     Normal(Vec<Result<Datas, ()>>),
     /// Read and got checktable tokens
