@@ -1,7 +1,6 @@
 use std::io;
 use std::thread;
 use std::net::{SocketAddr, ToSocketAddrs};
-use std::time::Duration;
 use std::sync::{mpsc, Arc, Mutex, TryLockError};
 use std::os::unix::io::{AsRawFd, RawFd};
 use std::ops::AddAssign;
@@ -307,7 +306,7 @@ impl Worker {
                 }
             }
 
-            let next = timers.time_remaining().map(Duration::from_millis);
+            let next = timers.time_remaining();
             if let Err(e) = self.all.poll(&mut events, next) {
                 if e.kind() == io::ErrorKind::Interrupted {
                     // spurious wakeup
