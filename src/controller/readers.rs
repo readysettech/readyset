@@ -34,7 +34,7 @@ pub(crate) fn handle_message(m: LocalOrNot<ReadQuery>, conn: &mut Rpc, s: &mut R
                     });
 
                 let mut ret = Vec::with_capacity(keys.len());
-                ret.resize(keys.len(), Ok(Vec::new()));
+                ret.resize(keys.len(), Vec::new());
 
                 let dup = |rs: &[Vec<DataType>]| {
                     rs.into_iter()
@@ -51,17 +51,19 @@ pub(crate) fn handle_message(m: LocalOrNot<ReadQuery>, conn: &mut Rpc, s: &mut R
                     })
                     .enumerate();
 
+                let mut ready = true;
                 for (i, (key, v)) in found {
                     match v {
                         Ok(Some(rs)) => {
                             // immediate hit!
-                            ret[i] = Ok(rs);
+                            ret[i] = rs;
                             *key = DataType::None;
                         }
                         Err(()) => {
                             // map not yet ready
-                            ret[i] = Err(());
+                            ready = false;
                             *key = DataType::None;
+                            break;
                         }
                         Ok(None) => {
                             // triggered partial replay
@@ -69,8 +71,12 @@ pub(crate) fn handle_message(m: LocalOrNot<ReadQuery>, conn: &mut Rpc, s: &mut R
                     }
                 }
 
+                if !ready {
+                    return Err(());
+                }
+
                 if !block {
-                    return ret;
+                    return Ok(ret);
                 }
 
                 // block on all remaining keys
@@ -83,11 +89,12 @@ pub(crate) fn handle_message(m: LocalOrNot<ReadQuery>, conn: &mut Rpc, s: &mut R
                         // time, that replay trigger will just be ignored by the target domain.
                         ret[i] = reader
                             .find_and(key, dup, true)
-                            .map(|r| r.0.unwrap_or_default());
+                            .map(|r| r.0.unwrap_or_default())
+                            .expect("evmap *was* ready, then *stopped* being ready")
                     }
                 }
 
-                ret
+                Ok(ret)
             })),
             ReadQuery::WithToken { target, keys } => ReadReply::WithToken(
                 keys.into_iter()
