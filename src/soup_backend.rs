@@ -158,8 +158,12 @@ impl<W: io::Write> MysqlShim<W> for SoupBackend {
     fn on_query(&mut self, query: &str, results: QueryResultWriter<W>) -> io::Result<()> {
         debug!(self.log, "query: {}", query);
 
-        if query.to_lowercase().contains("show tables") || query.to_lowercase().contains("rollback")
+        if query.to_lowercase().contains("show tables")
+            || query.to_lowercase().starts_with("rollback")
+            || query.to_lowercase().starts_with("alter table")
+            || query.to_lowercase().starts_with("commit")
         {
+            warn!(self.log, "ignoring query \"{}\"", query);
             return results.completed(0, 0);
         }
 
