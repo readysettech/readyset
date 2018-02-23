@@ -418,7 +418,6 @@ impl ControllerInner {
         // *unrelated* reader node. to account for this, readers keep track of what node they are
         // "for", and we simply search for the appropriate reader by that metric. since we know
         // that the reader must be relatively close, a BFS search is the way to go.
-        // presumably only
         let mut bfs = Bfs::new(&self.ingredients, node);
         let mut reader = None;
         while let Some(child) = bfs.next(&self.ingredients) {
