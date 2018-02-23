@@ -83,6 +83,28 @@ pub fn shard(
             info!(log, "preserving sharding of pass-through node";
                   "node" => ?node,
                   "sharding" => ?s);
+
+            if graph[node].is_internal() {
+                if let Sharding::ByColumn(c, shards) = s {
+                    // remap c according to node's semantics
+                    let n = &graph[node];
+                    let src = (0..n.fields().len()).find(|&col| {
+                        if let Some(src) = n.parent_columns(col)[0].1 {
+                            src == c
+                        } else {
+                            false
+                        }
+                    });
+
+                    if let Some(src) = src {
+                        s = Sharding::ByColumn(src, shards);
+                    } else {
+                        // sharding column is not emitted by this node!
+                        // at this point, sharding is effectively random.
+                        s = Sharding::Random(shards);
+                    }
+                }
+            }
             graph.node_weight_mut(node).unwrap().shard_by(s);
             continue;
         }
@@ -557,10 +579,9 @@ fn reshard(
         Sharding::None | Sharding::ForcedNone => {
             // NOTE: this *must* be a union so that we correctly buffer partial replays
             let n: NodeOperator =
-                ops::union::Union::new_deshard(src.into(), graph[src].sharded_by().shards()).into();
+                ops::union::Union::new_deshard(src.into(), graph[src].sharded_by()).into();
             let mut n = graph[src].mirror(n);
             n.shard_by(to);
-            n.mark_as_shard_merger(true);
             n
         }
         Sharding::ByColumn(c, _) => {
@@ -592,8 +613,7 @@ fn reshard(
     // if `dst` refers to `src`, it now needs to refer to `node` instead
     let old = swaps.insert((dst, src), node);
     assert_eq!(
-        old,
-        None,
+        old, None,
         "re-sharding already sharded node introduces swap collision"
     );
 }

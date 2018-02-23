@@ -184,11 +184,9 @@ impl<'a> Plan<'a> {
                 let locals: Vec<_> = nodes
                     .iter()
                     .skip(skip_first)
-                    .map(|&(ni, key)| {
-                        ReplayPathSegment {
-                            node: *self.graph[ni].local_addr(),
-                            partial_key: key,
-                        }
+                    .map(|&(ni, key)| ReplayPathSegment {
+                        node: *self.graph[ni].local_addr(),
+                        partial_key: key,
                     })
                     .collect();
 
@@ -229,8 +227,24 @@ impl<'a> Plan<'a> {
                             *trigger = TriggerEndpoint::Start(vec![*key]);
                         } else if i == segments.len() - 1 {
                             // otherwise, should know how to trigger partial replay
-                            let shards = self.domains.get_mut(&segments[0].0).unwrap().shards();
-                            *trigger = TriggerEndpoint::End(segments[0].0.clone(), shards);
+                            // this means knowing how many sources there are (in the case of
+                            // sharding), as well as whether the partial key matches the sharding
+                            // key of the source. if it does, *all* shards need to be consulted
+                            // when doing a replay.
+                            let sharding = self.domains.get_mut(&segments[0].0).unwrap().sharding();
+                            let shards = sharding.shards();
+                            let shuffled = match sharding {
+                                Sharding::Random(..) => true,
+                                Sharding::ByColumn(c, _) => c != *key,
+                                _ => false,
+                            };
+
+                            if shuffled {
+                                warn!(self.m.log, "path shuffles partial key"; "tag" => tag.id());
+                            }
+
+                            *trigger =
+                                TriggerEndpoint::End(shuffled, segments[0].0.clone(), shards);
                         }
                     } else {
                         unreachable!();

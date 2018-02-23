@@ -25,7 +25,7 @@ pub enum ReadQuery {
         /// Keys to read with
         keys: Vec<DataType>,
     },
-    /// Size of reader
+    /// Read the size of a leaf view
     Size {
         /// Where to read from
         target: (NodeIndex, usize),
@@ -66,11 +66,13 @@ impl<T> LocalOrNot<T> {
 /// The contents of a specific key
 #[derive(Serialize, Deserialize, Debug)]
 pub enum ReadReply {
-    /// Read normally
-    Normal(Vec<Result<Datas, ()>>),
-    /// Read and got checktable tokens
-    WithToken(Vec<Result<(Datas, checktable::Token), ()>>),
-    /// Number of rows in the reader
+    /// Read normally.
+    /// Errors if view isn't ready yet.
+    Normal(Result<Vec<Datas>, ()>),
+    /// Read and got checktable tokens.
+    /// Errors if view isn't ready yet.
+    WithToken(Result<Vec<(Datas, checktable::Token)>, ()>),
+    /// Read size of view
     Size(usize),
 }
 
@@ -101,26 +103,49 @@ pub struct RemoteGetter {
 }
 
 impl RemoteGetter {
-    /// Query the number of rows in the reader
-    pub fn len(&mut self) -> usize {
-        let shard = &mut self.shards[0];
-        let is_local = shard.is_local();
-        let reply = shard
+    /// Query for the size of a specific view.
+    pub fn len(&mut self) -> Result<usize, ()> {
+        if self.shards.len() == 1 {
+            let shard = &mut self.shards[0];
+            let is_local = shard.is_local();
+            let reply = shard
                 .send(&LocalOrNot::make(
-                        ReadQuery::Size {
-                            target: (self.node, 0),
-                        },
-                        is_local,
+                    ReadQuery::Size {
+                        target: (self.node, 0),
+                    },
+                    is_local,
                 ))
                 .unwrap();
-        match unsafe { reply.take() } {
-            ReadReply::Size(size) => size,
-            _ => unreachable!(),
+            match unsafe { reply.take() } {
+                ReadReply::Size(rows) => Ok(rows),
+                _ => unreachable!(),
+            }
+        } else {
+            let shard_queries = 0..self.shards.len();
+
+            let len = shard_queries.into_iter().fold(0, |acc, shardi| {
+                let shard = &mut self.shards[shardi];
+                let is_local = shard.is_local();
+                let reply = shard
+                    .send(&LocalOrNot::make(
+                        ReadQuery::Size {
+                            target: (self.node, shardi),
+                        },
+                        is_local,
+                    ))
+                    .unwrap();
+
+                match unsafe { reply.take() } {
+                    ReadReply::Size(rows) => acc + rows,
+                    _ => unreachable!(),
+                }
+            });
+            Ok(len)
         }
     }
 
     /// Query for the results for the given keys, optionally blocking if it is not yet available.
-    pub fn multi_lookup(&mut self, keys: Vec<DataType>, block: bool) -> Vec<Result<Datas, ()>> {
+    pub fn multi_lookup(&mut self, keys: Vec<DataType>, block: bool) -> Result<Vec<Datas>, ()> {
         if self.shards.len() == 1 {
             let shard = &mut self.shards[0];
             let is_local = shard.is_local();
@@ -145,7 +170,8 @@ impl RemoteGetter {
                 shard_queries[shard].push(key);
             }
 
-            shard_queries
+            let mut err = false;
+            let rows = shard_queries
                 .into_iter()
                 .enumerate()
                 .filter(|&(_, ref keys)| !keys.is_empty())
@@ -164,11 +190,21 @@ impl RemoteGetter {
                         .unwrap();
 
                     match unsafe { reply.take() } {
-                        ReadReply::Normal(rows) => rows,
+                        ReadReply::Normal(Ok(rows)) => rows,
+                        ReadReply::Normal(Err(())) => {
+                            err = true;
+                            Vec::new()
+                        }
                         _ => unreachable!(),
                     }
                 })
-                .collect()
+                .collect();
+
+            if err {
+                Err(())
+            } else {
+                Ok(rows)
+            }
         }
     }
 
@@ -176,7 +212,7 @@ impl RemoteGetter {
     pub fn transactional_multi_lookup(
         &mut self,
         keys: Vec<DataType>,
-    ) -> Vec<Result<(Datas, checktable::Token), ()>> {
+    ) -> Result<Vec<(Datas, checktable::Token)>, ()> {
         if self.shards.len() == 1 {
             let shard = &mut self.shards[0];
             let is_local = shard.is_local();
@@ -200,7 +236,8 @@ impl RemoteGetter {
                 shard_queries[shard].push(key);
             }
 
-            shard_queries
+            let mut err = false;
+            let rows = shard_queries
                 .into_iter()
                 .enumerate()
                 .flat_map(|(shardi, keys)| {
@@ -217,11 +254,20 @@ impl RemoteGetter {
                         .unwrap();
 
                     match unsafe { reply.take() } {
-                        ReadReply::WithToken(rows) => rows,
+                        ReadReply::WithToken(Ok(rows)) => rows,
+                        ReadReply::WithToken(Err(())) => {
+                            err = true;
+                            Vec::new()
+                        }
                         _ => unreachable!(),
                     }
                 })
-                .collect()
+                .collect();
+            if err {
+                Err(())
+            } else {
+                Ok(rows)
+            }
         }
     }
 
@@ -229,9 +275,7 @@ impl RemoteGetter {
     pub fn lookup(&mut self, key: &DataType, block: bool) -> Result<Datas, ()> {
         // TODO: Optimized version of this function?
         self.multi_lookup(vec![key.clone()], block)
-            .into_iter()
-            .next()
-            .unwrap()
+            .map(|rs| rs.into_iter().next().unwrap())
     }
 
     /// Do a transactional lookup for a single key.
@@ -241,9 +285,7 @@ impl RemoteGetter {
     ) -> Result<(Datas, checktable::Token), ()> {
         // TODO: Optimized version of this function?
         self.transactional_multi_lookup(vec![key.clone()])
-            .into_iter()
-            .next()
-            .unwrap()
+            .map(|rs| rs.into_iter().next().unwrap())
     }
 }
 

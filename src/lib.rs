@@ -308,26 +308,30 @@
 #![feature(try_from)]
 #![feature(box_patterns)]
 #![feature(box_syntax)]
+#![feature(nll)]
 #![feature(conservative_impl_trait)]
 #![feature(entry_or_default)]
 #![deny(missing_docs)]
 #![feature(plugin, use_extern_macros)]
 #![plugin(tarpc_plugins)]
 #![deny(unused_extern_crates)]
+#![feature(fnbox)]
 
+extern crate bincode;
 extern crate channel;
 extern crate consensus;
 extern crate core;
 extern crate dataflow;
+extern crate failure;
 extern crate fnv;
 extern crate futures;
 extern crate hyper;
 extern crate mio;
+extern crate mio_pool;
 extern crate mir;
 extern crate nom_sql;
 extern crate petgraph;
 extern crate rand;
-extern crate rayon;
 extern crate serde;
 #[macro_use]
 extern crate serde_derive;
@@ -343,7 +347,6 @@ extern crate vec_map;
 
 mod controller;
 mod coordination;
-mod souplet;
 mod worker;
 
 #[cfg(test)]
@@ -363,7 +366,7 @@ pub use controller::{Controller, ControllerBuilder, ControllerHandle, Mutator, M
                      MutatorError, ReadQuery, ReadReply, RemoteGetter, RemoteGetterBuilder,
                      RpcError};
 
-pub use souplet::Souplet;
+pub use controller::recipe::ActivationResult;
 
 /// Just give me a damn terminal logger
 pub fn logger_pls() -> slog::Logger {

@@ -492,6 +492,7 @@ impl SqlIncorporator {
             .collect::<Vec<_>>();
 
         // TODO(malte): get rid of duplication and figure out where to track this state
+        debug!(self.log, "registering query \"{}\"", query_name);
         self.view_schemas.insert(String::from(query_name), fields);
 
         // We made a new query, so store the query graph and the corresponding leaf MIR node.
@@ -566,11 +567,8 @@ impl SqlIncorporator {
             "Reused {} nodes for {}", num_reused_nodes, query_name
         );
 
-        // We made a new query, so store the query graph and the corresponding leaf MIR node
-        let qg_hash = qg.signature().hash;
-        self.query_graphs.insert(qg_hash, qg);
-        self.mir_queries
-            .insert((qg_hash, universe), post_reuse_opt_mir);
+        // register local state
+        self.register_query(query_name, Some(qg), &post_reuse_opt_mir);
 
         qfp
     }
@@ -649,6 +647,7 @@ impl SqlIncorporator {
             // other kinds of queries *do* require their referred tables to exist!
             ref q @ SqlQuery::CompoundSelect(_)
             | ref q @ SqlQuery::Select(_)
+            | ref q @ SqlQuery::Set(_)
             | ref q @ SqlQuery::Update(_)
             | ref q @ SqlQuery::Delete(_)
             | ref q @ SqlQuery::Insert(_) => for t in &q.referred_tables() {
@@ -793,9 +792,9 @@ mod tests {
     #[test]
     fn it_parses() {
         // set up graph
-        let mut g = ControllerBuilder::default().build_inner();
-        let mut inc = SqlIncorporator::default();
+        let mut g = ControllerBuilder::default().build_local();
         g.migrate(|mig| {
+            let mut inc = SqlIncorporator::default();
             // Must have a base node for type inference to work, so make one manually
             assert!(
                 "CREATE TABLE users (id int, name varchar(40));"
@@ -831,9 +830,9 @@ mod tests {
     #[test]
     fn it_incorporates_simple_join() {
         // set up graph
-        let mut g = ControllerBuilder::default().build_inner();
-        let mut inc = SqlIncorporator::default();
+        let mut g = ControllerBuilder::default().build_local();
         g.migrate(|mig| {
+            let mut inc = SqlIncorporator::default();
             // Establish a base write type for "users"
             assert!(
                 inc.add_query("CREATE TABLE users (id int, name varchar(40));", None, mig)
@@ -887,9 +886,9 @@ mod tests {
     #[test]
     fn it_incorporates_simple_selection() {
         // set up graph
-        let mut g = ControllerBuilder::default().build_inner();
-        let mut inc = SqlIncorporator::default();
+        let mut g = ControllerBuilder::default().build_local();
         g.migrate(|mig| {
+            let mut inc = SqlIncorporator::default();
             // Establish a base write type
             assert!(
                 inc.add_query("CREATE TABLE users (id int, name varchar(40));", None, mig)
@@ -928,9 +927,9 @@ mod tests {
     #[test]
     fn it_incorporates_aggregation() {
         // set up graph
-        let mut g = ControllerBuilder::default().build_inner();
-        let mut inc = SqlIncorporator::default();
+        let mut g = ControllerBuilder::default().build_local();
         g.migrate(|mig| {
+            let mut inc = SqlIncorporator::default();
             // Establish a base write types
             assert!(
                 inc.add_query("CREATE TABLE votes (aid int, userid int);", None, mig)
@@ -982,10 +981,10 @@ mod tests {
     #[test]
     fn it_does_not_reuse_if_disabled() {
         // set up graph
-        let mut g = ControllerBuilder::default().build_inner();
-        let mut inc = SqlIncorporator::default();
-        inc.disable_reuse();
+        let mut g = ControllerBuilder::default().build_local();
         g.migrate(|mig| {
+            let mut inc = SqlIncorporator::default();
+            inc.disable_reuse();
             assert!(
                 inc.add_query("CREATE TABLE users (id int, name varchar(40));", None, mig)
                     .is_ok()
@@ -1011,9 +1010,9 @@ mod tests {
     #[test]
     fn it_reuses_identical_query() {
         // set up graph
-        let mut g = ControllerBuilder::default().build_inner();
-        let mut inc = SqlIncorporator::default();
+        let mut g = ControllerBuilder::default().build_local();
         g.migrate(|mig| {
+            let mut inc = SqlIncorporator::default();
             // Establish a base write type
             assert!(
                 inc.add_query("CREATE TABLE users (id int, name varchar(40));", None, mig)
@@ -1046,9 +1045,9 @@ mod tests {
     #[test]
     fn it_reuses_with_different_parameter() {
         // set up graph
-        let mut g = ControllerBuilder::default().build_inner();
-        let mut inc = SqlIncorporator::default();
+        let mut g = ControllerBuilder::default().build_local();
         g.migrate(|mig| {
+            let mut inc = SqlIncorporator::default();
             // Establish a base write type
             assert!(inc.add_query(
                 "CREATE TABLE users (id int, name varchar(40), address varchar(40));",
@@ -1112,9 +1111,9 @@ mod tests {
     #[test]
     fn it_incorporates_aggregation_no_group_by() {
         // set up graph
-        let mut g = ControllerBuilder::default().build_inner();
-        let mut inc = SqlIncorporator::default();
+        let mut g = ControllerBuilder::default().build_local();
         g.migrate(|mig| {
+            let mut inc = SqlIncorporator::default();
             // Establish a base write type
             assert!(
                 inc.add_query("CREATE TABLE votes (aid int, userid int);", None, mig)
@@ -1165,9 +1164,9 @@ mod tests {
     #[test]
     fn it_incorporates_aggregation_count_star() {
         // set up graph
-        let mut g = ControllerBuilder::default().build_inner();
-        let mut inc = SqlIncorporator::default();
+        let mut g = ControllerBuilder::default().build_local();
         g.migrate(|mig| {
+            let mut inc = SqlIncorporator::default();
             // Establish a base write type
             assert!(
                 inc.add_query("CREATE TABLE votes (userid int, aid int);", None, mig)
@@ -1215,9 +1214,9 @@ mod tests {
     #[test]
     fn it_incorporates_explicit_multi_join() {
         // set up graph
-        let mut g = ControllerBuilder::default().build_inner();
-        let mut inc = SqlIncorporator::default();
+        let mut g = ControllerBuilder::default().build_local();
         g.migrate(|mig| {
+            let mut inc = SqlIncorporator::default();
             // Establish base write types for "users" and "articles" and "votes"
             assert!(
                 inc.add_query("CREATE TABLE users (id int, name varchar(40));", None, mig)
@@ -1266,9 +1265,9 @@ mod tests {
     #[test]
     fn it_incorporates_implicit_multi_join() {
         // set up graph
-        let mut g = ControllerBuilder::default().build_inner();
-        let mut inc = SqlIncorporator::default();
+        let mut g = ControllerBuilder::default().build_local();
         g.migrate(|mig| {
+            let mut inc = SqlIncorporator::default();
             // Establish base write types for "users" and "articles" and "votes"
             assert!(
                 inc.add_query("CREATE TABLE users (id int, name varchar(40));", None, mig)
@@ -1329,9 +1328,9 @@ mod tests {
     #[test]
     fn it_incorporates_literal_projection() {
         // set up graph
-        let mut g = ControllerBuilder::default().build_inner();
-        let mut inc = SqlIncorporator::default();
+        let mut g = ControllerBuilder::default().build_local();
         g.migrate(|mig| {
+            let mut inc = SqlIncorporator::default();
             assert!(
                 inc.add_query("CREATE TABLE users (id int, name varchar(40));", None, mig)
                     .is_ok()
@@ -1350,9 +1349,9 @@ mod tests {
     #[test]
     fn it_incorporates_arithmetic_projection() {
         // set up graph
-        let mut g = ControllerBuilder::default().build_inner();
-        let mut inc = SqlIncorporator::default();
+        let mut g = ControllerBuilder::default().build_local();
         g.migrate(|mig| {
+            let mut inc = SqlIncorporator::default();
             assert!(
                 inc.add_query("CREATE TABLE users (id int, age int);", None, mig)
                     .is_ok()
@@ -1377,9 +1376,9 @@ mod tests {
 
     #[test]
     fn it_incorporates_join_with_nested_query() {
-        let mut g = ControllerBuilder::default().build_inner();
-        let mut inc = SqlIncorporator::default();
+        let mut g = ControllerBuilder::default().build_local();
         g.migrate(|mig| {
+            let mut inc = SqlIncorporator::default();
             assert!(
                 inc.add_query("CREATE TABLE users (id int, name varchar(40));", None, mig)
                     .is_ok()
@@ -1423,9 +1422,9 @@ mod tests {
     #[test]
     fn it_incorporates_compound_selection() {
         // set up graph
-        let mut g = ControllerBuilder::default().build_inner();
-        let mut inc = SqlIncorporator::default();
+        let mut g = ControllerBuilder::default().build_local();
         g.migrate(|mig| {
+            let mut inc = SqlIncorporator::default();
             assert!(
                 inc.add_query("CREATE TABLE users (id int, name varchar(40));", None, mig)
                     .is_ok()

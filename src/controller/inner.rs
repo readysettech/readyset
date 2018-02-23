@@ -1,14 +1,16 @@
 use channel::tcp::TcpSender;
-use dataflow::{checktable, node, payload, DomainConfig, PersistenceParameters, Readers};
+use consensus::{Authority, Epoch, STATE_KEY};
+use dataflow::{checktable, node, payload, DomainConfig, PersistenceParameters};
 use dataflow::payload::{EgressForBase, IngressFromBase};
 use dataflow::prelude::*;
 use dataflow::statistics::GraphStats;
 
 use std::collections::{BTreeMap, HashMap};
+use std::error::Error;
+use std::fmt::{self, Display};
 use std::net::{IpAddr, SocketAddr};
 use std::time::{Duration, Instant};
-use std::thread::{self};
-use std::sync::{Arc, Mutex, atomic};
+use std::sync::{Arc, Mutex};
 use std::{io, time};
 
 use coordination::{CoordinationMessage, CoordinationPayload};
@@ -17,8 +19,7 @@ use controller::{ControllerState, DomainHandle, Migration, Recipe, RemoteGetterB
 use controller::migrate::materialization::Materializations;
 use controller::mutator::MutatorBuilder;
 use controller::sql::reuse::ReuseConfigType;
-use souplet::readers;
-use worker;
+use controller::recipe::ActivationResult;
 
 use hyper::{Method, StatusCode};
 use mio::net::TcpListener;
@@ -55,9 +56,6 @@ pub struct ControllerInner {
     pub(super) debug_channel: Option<SocketAddr>,
 
     pub(super) listen_addr: IpAddr,
-    read_listen_addr: SocketAddr,
-    pub(super) reader_exit: Arc<atomic::AtomicBool>,
-    pub(super) readers: Readers,
 
     /// Map from worker address to the address the worker is listening on for reads.
     read_addrs: HashMap<WorkerIdentifier, SocketAddr>,
@@ -67,9 +65,11 @@ pub struct ControllerInner {
     pub(super) deps: HashMap<DomainIndex, (IngressFromBase, EgressForBase)>,
     pub(super) remap: HashMap<DomainIndex, HashMap<NodeIndex, IndexPair>>,
 
-    /// Local worker pool used for tests
-    pub(super) local_pool: Option<worker::WorkerPool>,
+    pub(super) epoch: Epoch,
 
+    pending_recovery: Option<(Vec<String>, usize)>,
+
+    quorum: usize,
     heartbeat_every: Duration,
     healthcheck_every: Duration,
     last_checked_workers: Instant,
@@ -84,6 +84,20 @@ pub enum RpcError {
     Other(String),
 }
 
+impl Error for RpcError {
+    fn description(&self) -> &str {
+        match *self {
+            RpcError::Other(ref s) => s,
+        }
+    }
+}
+
+impl Display for RpcError {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        write!(f, "{}", self.description())
+    }
+}
+
 impl ControllerInner {
     pub fn coordination_message(&mut self, msg: CoordinationMessage) {
         trace!(self.log, "Received {:?}", msg);
@@ -91,6 +105,7 @@ impl ControllerInner {
             CoordinationPayload::Register {
                 ref addr,
                 ref read_listen_addr,
+                ..
             } => self.handle_register(&msg, addr, read_listen_addr.clone()),
             CoordinationPayload::Heartbeat => self.handle_heartbeat(&msg),
             CoordinationPayload::DomainBooted(..) => Ok(()),
@@ -104,30 +119,45 @@ impl ControllerInner {
         self.check_worker_liveness();
     }
 
-    pub fn external_request(
+    pub fn external_request<A: Authority + 'static>(
         &mut self,
         method: Method,
         path: String,
         body: Vec<u8>,
+        authority: &Arc<A>,
     ) -> Result<String, StatusCode> {
         use serde_json as json;
         use hyper::Method::*;
 
+        match (&method, path.as_ref()) {
+            (&Get, "/graph") => return Ok(self.graphviz()),
+            (&Post, "/graphviz") => return Ok(json::to_string(&self.graphviz()).unwrap()),
+            (&Post, "/get_statistics") => {
+                return Ok(json::to_string(&self.get_statistics()).unwrap())
+            }
+            _ => {}
+        }
+
+        if self.pending_recovery.is_some() || self.workers.len() < self.quorum {
+            return Err(StatusCode::ServiceUnavailable);
+        }
+
         Ok(match (method, path.as_ref()) {
-            (Get, "/graph") => self.graphviz(),
             (Post, "/inputs") => json::to_string(&self.inputs()).unwrap(),
             (Post, "/outputs") => json::to_string(&self.outputs()).unwrap(),
-            (Post, "/recover") => json::to_string(&self.recover()).unwrap(),
-            (Post, "/graphviz") => json::to_string(&self.graphviz()).unwrap(),
-            (Post, "/get_statistics") => json::to_string(&self.get_statistics()).unwrap(),
             (Post, "/mutator_builder") => {
                 json::to_string(&self.mutator_builder(json::from_slice(&body).unwrap())).unwrap()
             }
             (Post, "/getter_builder") => {
                 json::to_string(&self.getter_builder(json::from_slice(&body).unwrap())).unwrap()
             }
+            (Post, "/extend_recipe") => {
+                json::to_string(&self.extend_recipe(authority, json::from_slice(&body).unwrap()))
+                    .unwrap()
+            }
             (Post, "/install_recipe") => {
-                json::to_string(&self.install_recipe(json::from_slice(&body).unwrap())).unwrap()
+                json::to_string(&self.install_recipe(authority, json::from_slice(&body).unwrap()))
+                    .unwrap()
             }
             (Post, "/set_security_config") => {
                 json::to_string(&self.set_security_config(json::from_slice(&body).unwrap())).unwrap()
@@ -153,10 +183,37 @@ impl ControllerInner {
             "new worker registered from {:?}, which listens on {:?}", msg.source, remote
         );
 
-        let sender = Arc::new(Mutex::new(TcpSender::connect(remote, None)?));
+        let sender = Arc::new(Mutex::new(TcpSender::connect(remote)?));
         let ws = WorkerStatus::new(sender.clone());
         self.workers.insert(msg.source.clone(), ws);
         self.read_addrs.insert(msg.source.clone(), read_listen_addr);
+
+        if self.workers.len() >= self.quorum {
+            if let Some((recipes, recipe_version)) = self.pending_recovery.take() {
+                assert_eq!(self.workers.len(), self.quorum);
+                assert_eq!(self.recipe.version(), 0);
+                assert!(recipe_version + 1 >= recipes.len());
+
+                info!(self.log, "Restoring graph configuration");
+                self.recipe = Recipe::with_version(
+                    recipe_version + 1 - recipes.len(),
+                    Some(self.log.clone()),
+                );
+                for r in recipes {
+                    self.apply_recipe(self.recipe.clone().extend(&r).unwrap())
+                        .unwrap();
+                }
+
+                info!(self.log, "Recovering from log");
+                for (_name, index) in self.inputs().iter() {
+                    let node = &self.ingredients[*index];
+                    let domain = self.domains.get_mut(&node.domain()).unwrap();
+                    domain.send(box payload::Packet::StartRecovery).unwrap();
+                    domain.wait_for_ack().unwrap();
+                }
+                info!(self.log, "Recovery complete");
+            }
+        }
 
         Ok(())
     }
@@ -207,36 +264,16 @@ impl ControllerInner {
             checktable::CheckTableClient::connect(checktable_addr, client::Options::default())
                 .unwrap();
 
-        let readers: Readers = Arc::default();
-        let nreaders = state.config.nreaders;
-        let listener = TcpListener::bind(&SocketAddr::new(listen_addr, 0)).unwrap();
-        let read_listen_addr = listener.local_addr().unwrap();
-        let thread_builder = thread::Builder::new().name("read-dispatcher".to_owned());
-        let reader_exit = Arc::new(atomic::AtomicBool::new(false));
-        {
-            let readers = readers.clone();
-            let reader_exit = reader_exit.clone();
-            thread_builder
-                .spawn(move || readers::serve(listener, readers, nreaders, reader_exit))
-                .unwrap();
-        }
-
         let mut materializations = Materializations::new(&log);
         if !state.config.partial_enabled {
             materializations.disable_partial()
         }
 
         let cc = Arc::new(ChannelCoordinator::new());
-        assert!((state.config.nworkers == 0) ^ (state.config.local_workers == 0));
-        let local_pool = if state.config.nworkers == 0 {
-            Some(
-                worker::WorkerPool::new(
-                    state.config.local_workers,
-                    &log,
-                    checktable_addr,
-                    cc.clone(),
-                ).unwrap(),
-            )
+        assert_ne!(state.config.quorum, 0);
+
+        let pending_recovery = if !state.recipes.is_empty() {
+            Some((state.recipes, state.recipe_version))
         } else {
             None
         };
@@ -256,23 +293,21 @@ impl ControllerInner {
             heartbeat_every: state.config.heartbeat_every,
             healthcheck_every: state.config.healthcheck_every,
             recipe: Recipe::blank(Some(log.clone())),
+            quorum: state.config.quorum,
             log,
 
             domains: Default::default(),
             channel_coordinator: cc,
             debug_channel: None,
+            epoch: state.epoch,
 
             deps: HashMap::default(),
             remap: HashMap::default(),
 
-            readers,
-            read_listen_addr,
-            reader_exit,
             read_addrs: HashMap::default(),
             workers: HashMap::default(),
 
-            local_pool,
-
+            pending_recovery,
             last_checked_workers: Instant::now(),
         }
     }
@@ -361,18 +396,6 @@ impl ControllerInner {
         r
     }
 
-    /// Initiaties log recovery by sending a
-    /// StartRecovery packet to each base node domain.
-    pub fn recover(&mut self) {
-        info!(self.log, "Recovering from log");
-        for (_name, index) in self.inputs().iter() {
-            let node = &self.ingredients[*index];
-            let domain = self.domains.get_mut(&node.domain()).unwrap();
-            domain.send(box payload::Packet::StartRecovery).unwrap();
-            domain.wait_for_ack().unwrap();
-        }
-    }
-
     /// Get a boxed function which can be used to validate tokens.
     #[allow(unused)]
     pub fn get_validator(&self) -> Box<Fn(&checktable::Token) -> bool> {
@@ -444,21 +467,19 @@ impl ControllerInner {
     }
 
     /// Obtain a `RemoteGetterBuilder` that can be sent to a client and then used to query a given
-    /// (already maintained) reader node.
-    pub fn getter_builder(&self, node: NodeIndex) -> Option<RemoteGetterBuilder> {
+    /// (already maintained) reader node called `name`.
+    pub fn getter_builder(&self, name: &str) -> Option<RemoteGetterBuilder> {
+        let node = *self.outputs().get(name)?;
         self.find_getter_for(node).map(|r| {
             let domain = self.ingredients[r].domain();
             let shards = (0..self.domains[&domain].shards())
-                .map(|i| match self.domains[&domain].assignment(i) {
-                    Some(worker) => self.read_addrs[&worker].clone(),
-                    None => self.read_listen_addr.clone(),
-                })
+                .map(|i| self.read_addrs[&self.domains[&domain].assignment(i)].clone())
                 .map(|a| {
                     // NOTE: this is where we decide whether assignments are local or not (and
                     // hence whether we should use LocalBypass). currently, we assume that either
                     // *all* assignments are local, or *none* are. this is likely to change, at
                     // which point this has to change too.
-                    (a, self.local_pool.is_some())
+                    (a, false)
                 })
                 .collect();
 
@@ -467,20 +488,21 @@ impl ControllerInner {
     }
 
     /// Obtain a MutatorBuild that can be used to construct a Mutator to perform writes and deletes
-    /// from the given base node.
-    pub fn mutator_builder(&self, base: NodeIndex) -> MutatorBuilder {
-        let node = &self.ingredients[base];
+    /// from the given named base node.
+    pub fn mutator_builder(&self, base: &str) -> Option<MutatorBuilder> {
+        let ni = *self.inputs().get(base)?;
+        let node = &self.ingredients[ni];
 
-        trace!(self.log, "creating mutator"; "for" => base.index());
+        trace!(self.log, "creating mutator"; "for" => base);
 
-        let mut key = self.ingredients[base]
-            .suggest_indexes(base)
-            .remove(&base)
+        let mut key = self.ingredients[ni]
+            .suggest_indexes(ni)
+            .remove(&ni)
             .map(|(c, _)| c)
             .unwrap_or_else(Vec::new);
         let mut is_primary = false;
         if key.is_empty() {
-            if let Sharding::ByColumn(col, _) = self.ingredients[base].sharded_by() {
+            if let Sharding::ByColumn(col, _) = self.ingredients[ni].sharded_by() {
                 key = vec![col];
             }
         } else {
@@ -495,19 +517,30 @@ impl ControllerInner {
             })
             .collect();
 
-        let num_fields = node.fields().len();
         let base_operator = node.get_base()
             .expect("asked to get mutator for non-base node");
-        MutatorBuilder {
+        let columns: Vec<String> = node.fields()
+            .iter()
+            .enumerate()
+            .filter(|&(n, _)| !base_operator.get_dropped().contains_key(n))
+            .map(|(_, s)| s.clone())
+            .collect();
+        assert_eq!(
+            columns.len(),
+            node.fields().len() - base_operator.get_dropped().len()
+        );
+
+        Some(MutatorBuilder {
             txs,
             addr: (*node.local_addr()).into(),
             key: key,
             key_is_primary: is_primary,
-            transactional: self.ingredients[base].is_transactional(),
+            transactional: self.ingredients[ni].is_transactional(),
             dropped: base_operator.get_dropped(),
-            expected_columns: num_fields - base_operator.get_dropped().len(),
+            table_name: node.name().to_owned(),
+            columns,
             is_local: true,
-        }
+        })
     }
 
     /// Get statistics about the time spent processing different parts of the graph.
@@ -596,33 +629,95 @@ impl ControllerInner {
         self.recipe.set_security_config(&p, url);
     }
 
-    pub fn install_recipe(&mut self, r_txt: String) -> Result<(), RpcError> {
+    fn apply_recipe(&mut self, mut new: Recipe) -> Result<ActivationResult, RpcError> {
+        let mut err = Err(RpcError::Other("".to_owned())); // <3 type inference
+        self.migrate(|mig| match new.activate(mig, false) {
+            Ok(ra) => {
+                err = Ok(ra);
+            }
+            Err(e) => {
+                err = Err(RpcError::Other(format!("failed to activate recipe: {}", e)));
+            }
+        });
+
+        match err {
+            Ok(_) => {
+                self.recipe = new;
+            }
+            Err(ref e) => crit!(self.log, "{}", e.description()),
+        }
+
+        err
+    }
+
+    pub fn extend_recipe<A: Authority + 'static>(
+        &mut self,
+        authority: &Arc<A>,
+        add_txt: String,
+    ) -> Result<ActivationResult, RpcError> {
+        let new = self.recipe.clone();
+        match new.extend(&add_txt) {
+            Ok(new) => {
+                let activation_result = self.apply_recipe(new);
+                if authority
+                    .read_modify_write(STATE_KEY, |state: Option<ControllerState>| match state {
+                        None => unreachable!(),
+                        Some(ref state) if state.epoch > self.epoch => Err(()),
+                        Some(mut state) => {
+                            state.recipe_version = self.recipe.version();
+                            state.recipes.push(add_txt.clone());
+                            Ok(state)
+                        }
+                    })
+                    .is_err()
+                {
+                    return Err(RpcError::Other(
+                        "Failed to persist recipe extension".to_owned(),
+                    ));
+                }
+
+                activation_result
+            }
+            Err(e) => {
+                crit!(self.log, "failed to extend recipe: {:?}", e);
+                Err(RpcError::Other("failed to extend recipe".to_owned()))
+            }
+        }
+    }
+
+    pub fn install_recipe<A: Authority + 'static>(
+        &mut self,
+        authority: &Arc<A>,
+        r_txt: String,
+    ) -> Result<ActivationResult, RpcError> {
         match Recipe::from_str(&r_txt, Some(self.log.clone())) {
             Ok(r) => {
                 let old = self.recipe.clone();
                 let mut new = old.replace(r).unwrap();
-                self.migrate(|mig| match new.activate(mig, false) {
-                    Ok(_) => (),
-                    Err(e) => panic!("failed to install recipe: {:?}", e),
-                });
-                self.recipe = new;
-
-                Ok(())
+                let activation_result = self.apply_recipe(new);
+                if authority
+                    .read_modify_write(STATE_KEY, |state: Option<ControllerState>| match state {
+                        None => unreachable!(),
+                        Some(ref state) if state.epoch > self.epoch => Err(()),
+                        Some(mut state) => {
+                            state.recipe_version = self.recipe.version();
+                            state.recipes = vec![r_txt.clone()];
+                            Ok(state)
+                        }
+                    })
+                    .is_err()
+                {
+                    return Err(RpcError::Other(
+                        "Failed to persist recipe installation".to_owned(),
+                    ));
+                }
+                activation_result
             }
             Err(e) => {
                 crit!(self.log, "failed to parse recipe: {:?}", e);
                 Err(RpcError::Other("failed to parse recipe".to_owned()))
             }
         }
-    }
-
-    pub fn get_mutator(&self, base: NodeIndex) -> ::controller::Mutator {
-        self.mutator_builder(base)
-            .build("127.0.0.1:0".parse().unwrap())
-    }
-
-    pub fn get_getter(&self, node: NodeIndex) -> Option<::controller::RemoteGetter> {
-        self.getter_builder(node).map(|g| g.build())
     }
 
     pub fn graphviz(&self) -> String {
@@ -666,16 +761,12 @@ impl ControllerInner {
 
 impl Drop for ControllerInner {
     fn drop(&mut self) {
-        self.reader_exit.store(true, atomic::Ordering::SeqCst);
         for (_, d) in &mut self.domains {
             // XXX: this is a terrible ugly hack to ensure that all workers exit
             for _ in 0..100 {
                 // don't unwrap, because given domain may already have terminated
                 drop(d.send(box payload::Packet::Quit));
             }
-        }
-        if let Some(ref mut local_pool) = self.local_pool {
-            local_pool.wait();
         }
     }
 }

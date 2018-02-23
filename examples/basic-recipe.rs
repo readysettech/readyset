@@ -30,22 +30,17 @@ fn main() {
     // set up Soup via recipe
     let mut builder = ControllerBuilder::default();
     builder.log_with(distributary::logger_pls());
-    builder.set_local_workers(2);
+    builder.set_worker_threads(2);
     builder.set_persistence(persistence_params);
 
     let mut blender = builder.build_local();
-    blender.install_recipe(sql.to_owned());
+    blender.install_recipe(sql.to_owned()).unwrap();
     println!("{}", blender.graphviz());
 
-    blender.recover();
-    thread::sleep(Duration::from_millis(1000));
-
     // Get mutators and getter.
-    let inputs = blender.inputs();
-    let outputs = blender.outputs();
-    let mut article = blender.get_mutator(inputs["Article"]).unwrap();
-    let mut vote = blender.get_mutator(inputs["Vote"]).unwrap();
-    let mut awvc = blender.get_getter(outputs["ArticleWithVoteCount"]).unwrap();
+    let mut article = blender.get_mutator("Article").unwrap();
+    let mut vote = blender.get_mutator("Vote").unwrap();
+    let mut awvc = blender.get_getter("ArticleWithVoteCount").unwrap();
 
     println!("Creating article...");
     let aid = 1;

@@ -12,7 +12,8 @@ use Readers;
 use channel::TcpSender;
 use channel::poll::{PollEvent, ProcessResult};
 use prelude::*;
-use payload::{ControlReplyPacket, ReplayPieceContext, ReplayTransactionState, TransactionState};
+use payload::{ControlReplyPacket, ReplayPieceContext, ReplayTransactionState,
+              SourceChannelIdentifier, TransactionState};
 use statistics;
 use transactions;
 use persistence;
@@ -23,13 +24,16 @@ use itertools::Itertools;
 use slog::Logger;
 use timekeeper::{RealTime, SimpleTracker, ThreadTime, Timer, TimerSet};
 
+pub trait Executor {
+    fn send_back(&self, SourceChannelIdentifier, Result<i64, ()>);
+}
+
 type EnqueuedSends = Vec<(ReplicaAddr, Box<Packet>)>;
 
-#[derive(Clone, Debug, Serialize, Deserialize)]
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
 pub struct Config {
     pub concurrent_replays: usize,
     pub replay_batch_timeout: time::Duration,
-    pub replay_batch_size: usize,
 }
 
 const BATCH_SIZE: usize = 256;
@@ -88,7 +92,7 @@ impl PartialEq for DomainMode {
 enum TriggerEndpoint {
     None,
     Start(Vec<usize>),
-    End(Vec<TcpSender<Box<Packet>>>),
+    End(bool, Vec<TcpSender<Box<Packet>>>),
     Local(Vec<usize>),
 }
 
@@ -173,8 +177,8 @@ impl DomainBuilder {
 
         let debug_tx = self.debug_addr
             .as_ref()
-            .map(|addr| TcpSender::connect(addr, None).unwrap());
-        let control_reply_tx = TcpSender::connect(&self.control_addr, None).unwrap();
+            .map(|addr| TcpSender::connect(addr).unwrap());
+        let control_reply_tx = TcpSender::connect(&self.control_addr).unwrap();
 
         let transaction_state = transactions::DomainState::new(self.index, self.ts);
         let group_commit_queues = persistence::GroupCommitQueueSet::new(
@@ -186,7 +190,7 @@ impl DomainBuilder {
         Domain {
             index: self.index,
             shard,
-            nshards: self.nshards,
+            _nshards: self.nshards,
             domain_addr: addr,
 
             transaction_state,
@@ -210,7 +214,6 @@ impl DomainBuilder {
 
             buffered_replay_requests: Default::default(),
             has_buffered_replay_requests: false,
-            replay_batch_size: self.config.replay_batch_size,
             replay_batch_timeout: self.config.replay_batch_timeout,
 
             concurrent_replays: 0,
@@ -231,7 +234,7 @@ impl DomainBuilder {
 pub struct Domain {
     index: Index,
     shard: Option<usize>,
-    nshards: usize,
+    _nshards: usize,
     domain_addr: SocketAddr,
 
     nodes: DomainNodes,
@@ -263,7 +266,6 @@ pub struct Domain {
     buffered_replay_requests: HashMap<Tag, (time::Instant, HashSet<Vec<DataType>>)>,
     has_buffered_replay_requests: bool,
     replay_batch_timeout: time::Duration,
-    replay_batch_size: usize,
 
     group_commit_queues: persistence::GroupCommitQueueSet,
 
@@ -386,9 +388,37 @@ impl Domain {
 
     fn send_partial_replay_request(&mut self, tag: Tag, key: Vec<DataType>) {
         debug_assert!(self.concurrent_replays < self.max_concurrent_replays);
-        if let TriggerEndpoint::End(ref mut triggers) =
+        if let TriggerEndpoint::End(shuffled, ref mut triggers) =
             self.replay_paths.get_mut(&tag).unwrap().trigger
         {
+            if triggers.len() != 1 && shuffled {
+                // source is sharded by a different key than we are doing lookups for,
+                // so we need to trigger on all the shards.
+                self.concurrent_replays += 1;
+                trace!(self.log, "sending shuffled shard replay request";
+                       "tag" => ?tag,
+                       "key" => ?key,
+                       "buffered" => self.replay_request_queue.len(),
+                       "concurrent" => self.concurrent_replays,
+                       );
+
+                for trigger in triggers {
+                    if trigger
+                        .send(box Packet::RequestPartialReplay {
+                            tag,
+                            key: key.clone(), // sad to clone here
+                        })
+                        .is_err()
+                    {
+                        // we're shutting down -- it's fine.
+                    }
+                }
+                return;
+            }
+
+            // TODO: if we're sharded by a different key than the source, then we could cause
+            // replay responses to be sent to *other* shards too in response to our request :/
+
             // find right shard. it's important that we only request a replay from the right
             // shard, because otherwise all the other shard domains will miss, and then request
             // replays themselves for the miss key. however, the response to that request will
@@ -566,7 +596,7 @@ impl Domain {
             };
 
             if enable_output || !nodes[n.child(i)].borrow().is_output() {
-                if n.is_shard_merger() {
+                if nodes[n.child(i)].borrow().is_shard_merger() {
                     // we need to preserve the egress src (which includes shard identifier)
                 } else {
                     m.link_mut().src = me;
@@ -678,9 +708,11 @@ impl Domain {
 
             let addr = *n.borrow().local_addr();
             // TODO: message should be from actual parent, not self.
+            // FIXME: source address here needs to be shard index for sharded egress
             let m = if n.borrow().is_transactional() {
                 box Packet::Transaction {
                     link: Link::new(addr, addr),
+                    src: None,
                     data: data,
                     state: ts.clone(),
                     tracer: tracer.clone(),
@@ -690,6 +722,7 @@ impl Domain {
                 // egress node), so it must be converted to a normal normal message.
                 box Packet::Message {
                     link: Link::new(addr, addr),
+                    src: None,
                     data: data,
                     tracer: tracer.clone(),
                 }
@@ -1021,17 +1054,20 @@ impl Domain {
                             payload::TriggerEndpoint::None => TriggerEndpoint::None,
                             payload::TriggerEndpoint::Start(v) => TriggerEndpoint::Start(v),
                             payload::TriggerEndpoint::Local(v) => TriggerEndpoint::Local(v),
-                            payload::TriggerEndpoint::End(domain, shards) => TriggerEndpoint::End(
-                                (0..shards)
-                                    .map(|shard| {
-                                        // TODO: take advantage of local channels for replay paths.
-                                        self.channel_coordinator
-                                            .get_unbounded_tx(&(domain, shard))
-                                            .unwrap()
-                                            .0
-                                    })
-                                    .collect(),
-                            ),
+                            payload::TriggerEndpoint::End(shuffled, domain, shards) => {
+                                TriggerEndpoint::End(
+                                    shuffled,
+                                    (0..shards)
+                                        .map(|shard| {
+                                            // TODO: take advantage of local channels for replay paths.
+                                            self.channel_coordinator
+                                                .get_unbounded_tx(&(domain, shard))
+                                                .unwrap()
+                                                .0
+                                        })
+                                        .collect(),
+                                )
+                            }
                         };
 
                         self.replay_paths.insert(
@@ -1095,7 +1131,6 @@ impl Domain {
                         let p = box Packet::ReplayPiece {
                             tag: tag,
                             link: link.clone(),
-                            nshards: self.nshards,
                             context: ReplayPieceContext::Regular {
                                 last: state.is_empty(),
                             },
@@ -1105,7 +1140,6 @@ impl Domain {
 
                         if !state.is_empty() {
                             let log = self.log.new(o!());
-                            let nshards = self.nshards;
                             let domain_addr = self.domain_addr;
 
                             let added_cols = self.ingress_inject.get(&from).cloned();
@@ -1148,7 +1182,7 @@ impl Domain {
                                     use itertools::Itertools;
 
                                     let mut chunked_replay_tx =
-                                        TcpSender::connect(&domain_addr, Some(1)).unwrap();
+                                        TcpSender::connect(&domain_addr).unwrap();
 
                                     let start = time::Instant::now();
                                     debug!(log, "starting state chunker"; "node" => %link.dst);
@@ -1166,7 +1200,6 @@ impl Domain {
                                         let p = box Packet::ReplayPiece {
                                             tag: tag,
                                             link: link.clone(), // to is overwritten by receiver
-                                            nshards: nshards,
                                             context: ReplayPieceContext::Regular { last },
                                             data: chunk,
                                             transaction_state: None,
@@ -1357,7 +1390,6 @@ impl Domain {
                     Some(box Packet::ReplayPiece {
                         link: Link::new(source, path[0].node),
                         tag: tag,
-                        nshards: 1,
                         context: ReplayPieceContext::Partial {
                             for_keys: keys,
                             ignore: false,
@@ -1436,40 +1468,23 @@ impl Domain {
                 // TODO
                 use std::collections::hash_map::Entry;
                 let key = Vec::from(key);
-                let full = match self.buffered_replay_requests.entry(tag) {
+                match self.buffered_replay_requests.entry(tag) {
                     Entry::Occupied(mut o) => {
-                        let l = o.get().1.len();
-                        if l == self.replay_batch_size - 1 {
-                            use std::mem;
-                            let mut o =
-                                mem::replace(&mut o.get_mut().1, HashSet::with_capacity(l + 1));
-                            o.insert(key);
-                            Some(o)
-                        } else {
-                            if l == 0 {
-                                o.get_mut().0 = time::Instant::now();
-                            }
-                            o.into_mut().1.insert(key);
-                            self.has_buffered_replay_requests = true;
-                            None
+                        if o.get().1.is_empty() {
+                            o.get_mut().0 = time::Instant::now();
                         }
+                        o.into_mut().1.insert(key);
+                        self.has_buffered_replay_requests = true;
                     }
                     Entry::Vacant(v) => {
                         let mut ks = HashSet::new();
                         ks.insert(key);
-                        if self.replay_batch_size == 1 {
-                            Some(ks)
-                        } else {
-                            v.insert((time::Instant::now(), ks));
-                            self.has_buffered_replay_requests = true;
-                            None
-                        }
+                        v.insert((time::Instant::now(), ks));
+                        self.has_buffered_replay_requests = true;
                     }
-                };
-
-                if let Some(all) = full {
-                    self.seed_all(tag, all, sends);
                 }
+
+                // TODO: if timer has expired, call seed_all(tag, _, sends) immediately
                 return;
             }
         }
@@ -1499,7 +1514,6 @@ impl Domain {
                     let m = Some(box Packet::ReplayPiece {
                         link: Link::new(source, path[0].node),
                         tag: tag,
-                        nshards: 1,
                         context: ReplayPieceContext::Partial {
                             for_keys: k,
                             ignore: false,
@@ -1513,7 +1527,6 @@ impl Domain {
                     let m = Some(box Packet::ReplayPiece {
                         link: Link::new(source, path[0].node),
                         tag: tag,
-                        nshards: 1,
                         context: ReplayPieceContext::Partial {
                             for_keys: k,
                             ignore: true,
@@ -1561,16 +1574,19 @@ impl Domain {
     fn handle_recovery(&mut self, sends: &mut EnqueuedSends) {
         let node_info: Vec<_> = self.nodes
             .iter()
-            .map(|(index, node)| {
+            .filter_map(|(index, node)| {
                 let n = node.borrow();
-                (index, n.global_addr(), n.is_transactional())
+                if n.is_internal() && n.get_base().is_some() {
+                    Some((index, n.global_addr(), n.is_transactional()))
+                } else {
+                    None
+                }
             })
             .collect();
 
         for (local_addr, global_addr, is_transactional) in node_info {
             let path = self.persistence_parameters.log_path(
-                &local_addr,
-                self.index,
+                self.nodes[&local_addr].borrow().name(),
                 self.shard.unwrap_or(0),
             );
 
@@ -1613,6 +1629,7 @@ impl Domain {
                         });
                         Packet::Transaction {
                             link,
+                            src: None,
                             data,
                             tracer: None,
                             state: TransactionState::Committed(ts, global_addr, prevs),
@@ -1620,6 +1637,7 @@ impl Domain {
                     } else {
                         Packet::Message {
                             link,
+                            src: None,
                             data,
                             tracer: None,
                         }
@@ -1702,7 +1720,6 @@ impl Domain {
                     tag,
                     link,
                     data,
-                    nshards,
                     mut context,
                     transaction_state,
                 } => {
@@ -1725,7 +1742,6 @@ impl Domain {
                         link: link.clone(),
                         tag,
                         data,
-                        nshards,
                         context: context.clone(),
                         transaction_state: transaction_state.clone(),
                     };
@@ -1886,7 +1902,6 @@ impl Domain {
                         }
 
                         // we're done with the node
-                        let is_shard_merger = n.is_shard_merger();
                         drop(n);
 
                         if let Some(box Packet::Captured) = m {
@@ -1904,7 +1919,6 @@ impl Domain {
                                             link: link, // TODO: use dummy link instead
                                             tag,
                                             data: Vec::<Record>::new().into(),
-                                            nshards: self.nshards,
                                             context: ReplayPieceContext::Partial {
                                                 for_keys: backfill_keys.unwrap().clone(),
                                                 ignore: true,
@@ -1999,8 +2013,8 @@ impl Domain {
 
                         if i != path.len() - 1 {
                             // update link for next iteration
-                            if is_shard_merger {
-                                // we need to preserve the egress src
+                            if self.nodes[&path[i + 1].node].borrow().is_shard_merger() {
+                                // we need to preserve the egress src for shard mergers
                                 // (which includes shard identifier)
                             } else {
                                 m.as_mut().unwrap().link_mut().src = segment.node;
@@ -2287,6 +2301,7 @@ impl Domain {
 
     pub fn on_event(
         &mut self,
+        executor: &Executor,
         event: PollEvent<Box<Packet>>,
         sends: &mut EnqueuedSends,
     ) -> ProcessResult {
@@ -2298,6 +2313,7 @@ impl Domain {
                     let now = time::Instant::now();
                     self.buffered_replay_requests
                         .iter()
+                        .filter(|&(_, &(_, ref keys))| !keys.is_empty())
                         .map(|(_, &(first, _))| {
                             self.replay_batch_timeout
                                 .checked_sub(now.duration_since(first))
@@ -2307,10 +2323,7 @@ impl Domain {
                 });
                 ProcessResult::KeepPolling
             }
-            PollEvent::Process(mut packet) => {
-                if let Some(local) = packet.extract_local() {
-                    packet = local;
-                }
+            PollEvent::Process(packet) => {
                 if let Packet::Quit = *packet {
                     return ProcessResult::StopPolling;
                 }
@@ -2320,7 +2333,9 @@ impl Domain {
                 if self.group_commit_queues.should_append(&packet, &self.nodes) {
                     debug_assert!(packet.is_regular());
                     packet.trace(PacketEvent::ExitInputChannel);
-                    let merged_packet = self.group_commit_queues.append(packet, &self.nodes);
+                    let merged_packet =
+                        self.group_commit_queues
+                            .append(packet, &self.nodes, executor);
                     if let Some(packet) = merged_packet {
                         self.handle(packet, sends);
                     }
@@ -2335,7 +2350,9 @@ impl Domain {
                 ProcessResult::KeepPolling
             }
             PollEvent::Timeout => {
-                if let Some(m) = self.group_commit_queues.flush_if_necessary(&self.nodes) {
+                if let Some(m) = self.group_commit_queues
+                    .flush_if_necessary(&self.nodes, executor)
+                {
                     self.handle(m, sends);
                     while let Some(p) = self.inject.take() {
                         self.handle(p, sends);

@@ -916,13 +916,11 @@ impl SqlToMirConverter {
                     }
                 }
             })
-            .chain(names.into_iter().map(|n| {
-                Column {
-                    name: n,
-                    alias: None,
-                    table: Some(String::from(name)),
-                    function: None,
-                }
+            .chain(names.into_iter().map(|n| Column {
+                name: n,
+                alias: None,
+                table: Some(String::from(name)),
+                function: None,
             }))
             .collect();
 

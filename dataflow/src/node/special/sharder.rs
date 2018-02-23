@@ -1,7 +1,6 @@
 use prelude::*;
 use payload;
 use vec_map::VecMap;
-use std::collections::HashSet;
 
 #[derive(Serialize, Deserialize)]
 pub struct Sharder {
@@ -72,82 +71,6 @@ impl Sharder {
     ) {
         // we need to shard the records inside `m` by their key,
         let mut m = m.take().unwrap();
-
-        if m.tag().is_some() {
-            // this is a replay packet, which we need to make sure we route correctly
-            if let box Packet::ReplayPiece {
-                context: payload::ReplayPieceContext::Partial { .. },
-                ..
-            } = m
-            {
-                // we need to send one message to each shard in for_keys
-                let shards = if let box Packet::ReplayPiece {
-                    context:
-                        payload::ReplayPieceContext::Partial {
-                            ref mut for_keys, ..
-                        },
-                    ..
-                } = m
-                {
-                    let keys = for_keys.len();
-                    for_keys
-                        .drain()
-                        .map(|key| {
-                            assert_eq!(key.len(), 1);
-                            let shard = self.shard(&key[0]);
-                            (shard, key)
-                        })
-                        .fold(VecMap::new(), |mut hm, (shard, key)| {
-                            hm.entry(shard)
-                                .or_insert_with(|| HashSet::with_capacity(keys))
-                                .insert(key);
-                            hm
-                        })
-                } else {
-                    unreachable!()
-                };
-
-                let records = m.take_data();
-                let mut shards: VecMap<_> = shards
-                    .into_iter()
-                    .map(|(shard, keys)| {
-                        let mut p = m.clone_data();
-                        if let Packet::ReplayPiece {
-                            ref mut nshards,
-                            context:
-                                payload::ReplayPieceContext::Partial {
-                                    ref mut for_keys, ..
-                                },
-                            ..
-                        } = p
-                        {
-                            *nshards = 1;
-                            *for_keys = keys;
-                        } else {
-                            unreachable!();
-                        }
-
-                        (shard, box p)
-                    })
-                    .collect();
-
-                for record in records {
-                    let shard = self.to_shard(&record);
-                    shards[shard].map_data(|rs| rs.push(record));
-                }
-
-                for (shard, mut p) in shards {
-                    let tx = &self.txs[shard];
-                    m.link_mut().src = index;
-                    m.link_mut().dst = tx.0;
-                    output.push((tx.1, p));
-                }
-                return;
-            }
-
-            // fall-through for regular replays, because they aren't really special in any way.
-        }
-
         for record in m.take_data() {
             let shard = self.to_shard(&record);
             let p = self.sharded
@@ -164,6 +87,16 @@ impl Sharder {
         {
             // this is the last replay piece for a full replay
             // we need to make sure it gets to every shard so they know to ready the node
+            force_all = true;
+        }
+        if let Packet::ReplayPiece {
+            context: payload::ReplayPieceContext::Partial { .. },
+            ..
+        } = *m
+        {
+            // we don't know *which* shard asked for a replay of the keys in this batch, so we need
+            // to send data to all of them. or for that matter, maybe the replay started below the
+            // eventual shard merged! pretty unfortunate. TODO
             force_all = true;
         }
         if let Packet::Transaction { .. } = *m {
@@ -186,12 +119,6 @@ impl Sharder {
             // replay pieces for each incoming replay piece, and needs to combine them somehow.
             // it's unclear how we do that.
             unimplemented!();
-        }
-        if let Packet::ReplayPiece {
-            ref mut nshards, ..
-        } = *m
-        {
-            *nshards = self.sharded.len();
         }
 
         for (i, &mut (dst, addr)) in self.txs.iter_mut().enumerate() {

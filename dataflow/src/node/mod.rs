@@ -36,7 +36,6 @@ pub struct Node {
     taken: bool,
 
     sharded_by: Sharding,
-    is_shard_merge: bool,
 }
 
 // constructors
@@ -60,7 +59,6 @@ impl Node {
             taken: false,
 
             sharded_by: Sharding::None,
-            is_shard_merge: false,
         }
     }
 
@@ -289,6 +287,10 @@ impl Node {
         self.index.as_ref().unwrap()
     }
 
+    pub fn is_base(&self) -> bool {
+        self.is_internal() && self.get_base().is_some()
+    }
+
     pub fn is_localized(&self) -> bool {
         self.index
             .as_ref()
@@ -304,10 +306,6 @@ impl Node {
 
     pub fn set_finalized_addr(&mut self, addr: IndexPair) {
         self.index = Some(addr);
-    }
-
-    pub fn mark_as_shard_merger(&mut self, is: bool) {
-        self.is_shard_merge = is;
     }
 }
 
@@ -377,7 +375,11 @@ impl Node {
     }
 
     pub fn is_shard_merger(&self) -> bool {
-        self.is_shard_merge
+        if let NodeType::Internal(NodeOperator::Union(ref u)) = self.inner {
+            u.is_shard_merger()
+        } else {
+            false
+        }
     }
 
     /// A node is considered to be an output node if changes to its state are visible outside of

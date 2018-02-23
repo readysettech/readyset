@@ -4,7 +4,7 @@ use prelude::*;
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
 enum Emit {
-    AllFrom(IndexPair),
+    AllFrom(IndexPair, Sharding),
     Project {
         emit: HashMap<IndexPair, Vec<usize>>,
 
@@ -83,13 +83,22 @@ impl Union {
     }
 
     /// Construct a new union operator meant to de-shard a sharded data-flow subtree.
-    pub fn new_deshard(parent: NodeIndex, shards: usize) -> Union {
+    pub fn new_deshard(parent: NodeIndex, sharding: Sharding) -> Union {
+        let shards = sharding.shards();
         Union {
-            emit: Emit::AllFrom(parent.into()),
+            emit: Emit::AllFrom(parent.into(), sharding),
             required: shards,
             replay_key: None,
             replay_pieces: HashMap::new(),
             full_wait_state: FullWait::None,
+        }
+    }
+
+    pub fn is_shard_merger(&self) -> bool {
+        if let Emit::AllFrom(..) = self.emit {
+            true
+        } else {
+            false
         }
     }
 }
@@ -101,7 +110,7 @@ impl Ingredient for Union {
 
     fn ancestors(&self) -> Vec<NodeIndex> {
         match self.emit {
-            Emit::AllFrom(p) => vec![p.as_global()],
+            Emit::AllFrom(p, _) => vec![p.as_global()],
             Emit::Project { ref emit, .. } => emit.keys().map(|k| k.as_global()).collect(),
         }
     }
@@ -143,7 +152,7 @@ impl Ingredient for Union {
                 mem::replace(emit, mapped_emit);
                 mem::replace(cols, mapped_cols);
             }
-            Emit::AllFrom(ref mut p) => {
+            Emit::AllFrom(ref mut p, _) => {
                 p.remap(remap);
             }
         }
@@ -159,7 +168,7 @@ impl Ingredient for Union {
         _: &StateMap,
     ) -> ProcessingResult {
         match self.emit {
-            Emit::AllFrom(_) => ProcessingResult {
+            Emit::AllFrom(..) => ProcessingResult {
                 results: rs,
                 misses: Vec::new(),
             },
@@ -413,11 +422,23 @@ impl Ingredient for Union {
                 // FIXME: with multi-partial indices, we may now need to track *multiple* ongoing
                 // replays!
 
+                // TODO: which node is key_col an index of?
+                if let Emit::AllFrom(_, Sharding::ByColumn(shard_col, _)) = self.emit {
+                    if shard_col == key_col {
+                        // No need to buffer since request should only be for one shard
+                        assert!(self.replay_pieces.is_empty());
+                        return RawProcessingResult::ReplayPiece(
+                            rs,
+                            keys.into_iter().cloned().collect(),
+                        );
+                    }
+                }
+
                 if self.replay_key.is_none() {
                     // the replay key is for our *output* column
                     // which might translate to different columns in our inputs
                     match self.emit {
-                        Emit::AllFrom(_) => {
+                        Emit::AllFrom(..) => {
                             self.replay_key = Some(Some((from, key_col)).into_iter().collect());
                         }
                         Emit::Project { ref emit_l, .. } => {
@@ -513,7 +534,7 @@ impl Ingredient for Union {
 
     fn resolve(&self, col: usize) -> Option<Vec<(NodeIndex, usize)>> {
         match self.emit {
-            Emit::AllFrom(p) => Some(vec![(p.as_global(), col)]),
+            Emit::AllFrom(p, _) => Some(vec![(p.as_global(), col)]),
             Emit::Project { ref emit, .. } => Some(
                 emit.iter()
                     .map(|(src, emit)| (src.as_global(), emit[col]))
@@ -525,7 +546,7 @@ impl Ingredient for Union {
     fn description(&self) -> String {
         // Ensure we get a consistent output by sorting.
         match self.emit {
-            Emit::AllFrom(_) => "⊍".to_string(),
+            Emit::AllFrom(..) => "⊍".to_string(),
             Emit::Project { ref emit, .. } => {
                 let mut emit = emit.iter().collect::<Vec<_>>();
                 emit.sort();
@@ -544,7 +565,7 @@ impl Ingredient for Union {
     }
     fn parent_columns(&self, col: usize) -> Vec<(NodeIndex, Option<usize>)> {
         match self.emit {
-            Emit::AllFrom(p) => vec![(p.as_global(), Some(col))],
+            Emit::AllFrom(p, _) => vec![(p.as_global(), Some(col))],
             Emit::Project { ref emit, .. } => emit.iter()
                 .map(|(src, emit)| (src.as_global(), Some(emit[col])))
                 .collect(),

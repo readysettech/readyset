@@ -1,6 +1,7 @@
 use channel::poll::{PollEvent, PollingLoop, ProcessResult};
 use channel::tcp::TcpSender;
-use consensus::{Authority, Epoch};
+
+use consensus::{Authority, Epoch, STATE_KEY};
 use dataflow::checktable::service::CheckTableServer;
 use dataflow::{DomainConfig, PersistenceParameters};
 
@@ -9,20 +10,21 @@ use controller::inner::ControllerInner;
 use controller::recipe::Recipe;
 use coordination::CoordinationMessage;
 
-use std::error::Error;
-use std::io::ErrorKind;
-use std::marker::PhantomData;
+#[cfg(test)]
+use std::boxed::FnBox;
+use std::io::{self, ErrorKind};
 use std::net::{IpAddr, SocketAddr};
-use std::time::{Duration, Instant};
+use std::time::{self, Duration, Instant};
 use std::thread::{self, JoinHandle};
 use std::sync::{Arc, Mutex};
-use std::sync::mpsc::{self, Receiver, Sender};
-use std::{io, time};
+use std::sync::mpsc::{self, Receiver, RecvTimeoutError, Sender};
 
+use failure::{self, Error};
 use futures::{self, Future, Stream};
 use hyper::{self, Method, StatusCode};
 use hyper::header::ContentType;
 use hyper::server::{Http, NewService, Request, Response, Service};
+use mio::net::TcpListener;
 use rand;
 use serde::Serialize;
 use serde_json;
@@ -41,8 +43,10 @@ mod builder;
 mod getter;
 mod handle;
 mod inner;
+mod readers;
 mod mir_to_flow;
 mod mutator;
+mod worker_inner;
 
 pub use controller::builder::ControllerBuilder;
 pub use controller::handle::ControllerHandle;
@@ -51,6 +55,7 @@ pub use controller::migrate::Migration;
 pub use controller::mutator::{Mutator, MutatorBuilder, MutatorError};
 pub use controller::getter::{Getter, ReadQuery, ReadReply, RemoteGetter, RemoteGetterBuilder};
 pub(crate) use controller::getter::LocalOrNot;
+use controller::worker_inner::WorkerInner;
 
 type WorkerIdentifier = SocketAddr;
 type WorkerEndpoint = Arc<Mutex<TcpSender<CoordinationMessage>>>;
@@ -80,6 +85,23 @@ struct ServingThread {
     stop: Box<Drop + Send>,
 }
 impl ServingThread {
+    fn new<F>(addr: SocketAddr, f: F) -> Self
+    where
+        F: FnOnce(TcpListener, Arc<()>) + Send + 'static,
+    {
+        let done = Arc::new(());
+        let done2 = done.clone();
+        let listener = TcpListener::bind(&addr).unwrap();
+        let addr = listener.local_addr().unwrap();
+        let builder = thread::Builder::new().name("souplet".to_owned());
+        let join_handle = builder.spawn(move || f(listener, done)).unwrap();
+
+        ServingThread {
+            addr,
+            join_handle,
+            stop: Box::new(done2),
+        }
+    }
     fn stop(self) {
         drop(self.stop);
         self.join_handle.join().unwrap();
@@ -88,25 +110,23 @@ impl ServingThread {
 
 /// Describes a running controller instance. A serialized version of this struct is stored in
 /// ZooKeeper so that clients can reach the currently active controller.
-#[derive(Serialize, Deserialize)]
-struct ControllerDescriptor {
-    external_addr: SocketAddr,
-    internal_addr: SocketAddr,
-    checktable_addr: SocketAddr,
-    nonce: u64,
+#[derive(Clone, Serialize, Deserialize)]
+pub(crate) struct ControllerDescriptor {
+    pub external_addr: SocketAddr,
+    pub internal_addr: SocketAddr,
+    pub checktable_addr: SocketAddr,
+    pub nonce: u64,
 }
 
-#[derive(Clone, Serialize, Deserialize)]
-struct ControllerConfig {
-    sharding: Option<usize>,
-    partial_enabled: bool,
-    domain_config: DomainConfig,
-    persistence: PersistenceParameters,
-    heartbeat_every: Duration,
-    healthcheck_every: Duration,
-    local_workers: usize,
-    nworkers: usize,
-    nreaders: usize,
+#[derive(Clone, Serialize, Deserialize, PartialEq)]
+pub(crate) struct ControllerConfig {
+    pub sharding: Option<usize>,
+    pub partial_enabled: bool,
+    pub domain_config: DomainConfig,
+    pub persistence: PersistenceParameters,
+    pub heartbeat_every: Duration,
+    pub healthcheck_every: Duration,
+    pub quorum: usize,
 }
 impl Default for ControllerConfig {
     fn default() -> Self {
@@ -118,31 +138,27 @@ impl Default for ControllerConfig {
             partial_enabled: true,
             domain_config: DomainConfig {
                 concurrent_replays: 512,
-                replay_batch_timeout: time::Duration::from_millis(1),
-                replay_batch_size: 32,
+                replay_batch_timeout: time::Duration::new(0, 10_000),
             },
             persistence: Default::default(),
             heartbeat_every: Duration::from_secs(1),
             healthcheck_every: Duration::from_secs(10),
-            #[cfg(test)]
-            local_workers: 2,
-            #[cfg(not(test))]
-            local_workers: 0,
-            nworkers: 0,
-            nreaders: 1,
+            quorum: 1,
         }
     }
 }
 
 #[derive(Clone, Serialize, Deserialize)]
-struct ControllerState {
-    config: ControllerConfig,
-    epoch: Epoch,
-    recipe: (), // TODO: store all relevant state here.
+pub(crate) struct ControllerState {
+    pub config: ControllerConfig,
+    pub epoch: Epoch,
+
+    pub recipe_version: usize,
+    pub recipes: Vec<String>,
 }
 
 enum ControlEvent {
-    ControllerMessage(CoordinationMessage),
+    InternalMessage(CoordinationMessage),
     ExternalRequest(
         Method,
         String,
@@ -150,114 +166,270 @@ enum ControlEvent {
         futures::sync::oneshot::Sender<Result<String, StatusCode>>,
     ),
     WonLeaderElection(ControllerState),
-    LostLeadership(Epoch),
     Shutdown,
-    Error(Box<Error + Send + Sync>),
+    Error(Error),
+    #[cfg(test)]
+    ManualMigration(Box<for<'a, 's> FnBox(&'a mut ::controller::migrate::Migration<'s>) + Send>),
+}
+enum WorkerEvent {
+    InternalMessage(CoordinationMessage),
+    LeaderChange(ControllerState, ControllerDescriptor),
+    Shutdown,
+}
+
+/// Start up a new instance and return a handle to it. Dropping the handle will stop the
+/// controller.
+fn start_instance<A: Authority + 'static>(
+    authority: Arc<A>,
+    listen_addr: IpAddr,
+    config: ControllerConfig,
+    nworker_threads: usize,
+    nread_threads: usize,
+    log: slog::Logger,
+) -> ControllerHandle<A> {
+    let (controller_event_tx, controller_event_rx) = mpsc::channel();
+    let (worker_event_tx, worker_event_rx) = mpsc::channel();
+
+    // Clone a bunch of items here before they get moved into one of the closures.
+    let log2 = log.clone();
+    let authority2 = authority.clone();
+    let controller_event_tx2 = controller_event_tx.clone();
+    let worker_event_tx2 = worker_event_tx.clone();
+    let worker_event_tx3 = worker_event_tx.clone();
+
+    let controller_join_handle = thread::Builder::new()
+        .name("ctrl-main".to_owned())
+        .spawn(move || {
+            let internal = Controller::<A>::listen_internal(
+                controller_event_tx.clone(),
+                SocketAddr::new(listen_addr, 0),
+            );
+            let checktable = CheckTableServer::start(SocketAddr::new(listen_addr, 0));
+            let external = Controller::listen_external(
+                controller_event_tx.clone(),
+                SocketAddr::new(listen_addr, 9000),
+                authority.clone(),
+            );
+            let descriptor = ControllerDescriptor {
+                external_addr: external.addr,
+                internal_addr: internal.addr,
+                checktable_addr: checktable,
+                nonce: rand::random(),
+            };
+            let campaign = Some(instance_campaign(
+                controller_event_tx.clone(),
+                worker_event_tx,
+                authority.clone(),
+                descriptor,
+                config,
+            ));
+
+            let controller = Controller {
+                authority,
+                inner: None,
+                receiver: controller_event_rx,
+                log,
+                internal,
+                external,
+                checktable,
+                campaign,
+                listen_addr,
+            };
+            controller.main_loop()
+        })
+        .unwrap();
+
+    let worker_join_handle = thread::Builder::new()
+        .name("ctrl-main".to_owned())
+        .spawn(move || {
+            let internal =
+                Worker::listen_internal(worker_event_tx2, SocketAddr::new(listen_addr, 0));
+            let worker = Worker {
+                inner: None,
+                receiver: worker_event_rx,
+                nworker_threads,
+                nread_threads,
+                listen_addr,
+                internal,
+                log: log2,
+            };
+            worker.main_loop()
+        })
+        .unwrap();
+
+    ControllerHandle {
+        url: None,
+        authority: authority2,
+        local_controller: Some((controller_event_tx2, controller_join_handle)),
+        local_worker: Some((worker_event_tx3, worker_join_handle)),
+    }
+}
+fn instance_campaign<A: Authority + 'static>(
+    controller_event_tx: Sender<ControlEvent>,
+    worker_event_tx: Sender<WorkerEvent>,
+    authority: Arc<A>,
+    descriptor: ControllerDescriptor,
+    config: ControllerConfig,
+) -> JoinHandle<()> {
+    let descriptor_bytes = serde_json::to_vec(&descriptor).unwrap();
+    let campaign_inner = move |controller_event_tx: Sender<ControlEvent>,
+                               worker_event_tx: Sender<WorkerEvent>|
+          -> Result<(), Error> {
+        let lost_election = |payload: Vec<u8>| -> Result<(), Error> {
+            let descriptor: ControllerDescriptor = serde_json::from_slice(&payload[..])?;
+            let state: ControllerState =
+                serde_json::from_slice(&authority.try_read(STATE_KEY).unwrap().unwrap()).unwrap();
+            worker_event_tx
+                .send(WorkerEvent::LeaderChange(state, descriptor))
+                .map_err(|_| failure::err_msg("ControlEvent send failed"))?;
+            Ok(())
+        };
+
+        loop {
+            // WORKER STATE - watch for leadership changes
+            //
+            // If there is currently a leader, then loop until there is a period without a
+            // leader, notifying the main thread every time a leader change occurs.
+            let mut epoch;
+            if let Some(leader) = authority.try_get_leader()? {
+                epoch = leader.0;
+                lost_election(leader.1)?;
+                while let Some(leader) = authority.await_new_epoch(epoch)? {
+                    epoch = leader.0;
+                    lost_election(leader.1)?;
+                }
+            }
+
+            // ELECTION STATE - attempt to become leader
+            //
+            // Becoming leader requires creating an ephemeral key and then doing an atomic
+            // update to another.
+            let epoch = match authority.become_leader(descriptor_bytes.clone())? {
+                Some(epoch) => epoch,
+                None => continue,
+            };
+            let state = authority.read_modify_write(
+                STATE_KEY,
+                |state: Option<ControllerState>| match state {
+                    None => Ok(ControllerState {
+                        config: config.clone(),
+                        epoch,
+                        recipe_version: 0,
+                        recipes: vec![],
+                    }),
+                    Some(ref state) if state.epoch > epoch => Err(()),
+                    Some(mut state) => {
+                        state.epoch = epoch;
+                        if state.config != config {
+                            panic!("Config in Zk does not match requested config!")
+                        }
+                        Ok(state)
+                    }
+                },
+            )?;
+            if state.is_err() {
+                continue;
+            }
+
+            controller_event_tx
+                .send(ControlEvent::WonLeaderElection(state.clone().unwrap()))
+                .map_err(|_| failure::err_msg("ControlEvent send failed"))?;
+            worker_event_tx
+                .send(WorkerEvent::LeaderChange(
+                    state.unwrap(),
+                    descriptor.clone(),
+                ))
+                .map_err(|_| failure::err_msg("WorkerEvent send failed"))?;
+
+            // LEADER STATE - manage system
+            //
+            // It is not currently possible to safely handle involuntary loss of leadership status
+            // (and there is nothing that can currently trigger it), so don't bother watching for
+            // it.
+            return Ok(());
+        }
+    };
+
+    thread::Builder::new()
+        .name("srv-zk".to_owned())
+        .spawn(move || {
+            if let Err(e) = campaign_inner(controller_event_tx.clone(), worker_event_tx.clone()) {
+                let _ = controller_event_tx.send(ControlEvent::Error(e));
+                let _ = worker_event_tx.send(WorkerEvent::Shutdown);
+            }
+        })
+        .unwrap()
 }
 
 /// Runs the soup instance.
-pub struct Controller<A: Authority + 'static> {
-    current_epoch: Option<Epoch>,
+pub struct Controller<A> {
+    authority: Arc<A>,
+    receiver: Receiver<ControlEvent>,
     inner: Option<ControllerInner>,
-    log: slog::Logger,
 
     listen_addr: IpAddr,
     internal: ServingThread,
     external: ServingThread,
     checktable: SocketAddr,
-    _campaign: JoinHandle<()>,
+    campaign: Option<JoinHandle<()>>,
 
-    phantom: PhantomData<A>,
+    log: slog::Logger,
+}
+pub struct Worker {
+    receiver: Receiver<WorkerEvent>,
+    inner: Option<WorkerInner>,
+
+    nworker_threads: usize,
+    nread_threads: usize,
+
+    listen_addr: IpAddr,
+    internal: ServingThread,
+
+    log: slog::Logger,
 }
 
 impl<A: Authority + 'static> Controller<A> {
-    /// Start up a new `Controller` and return a handle to it. Dropping the handle will stop the
-    /// controller.
-    fn start(
-        authority: A,
-        listen_addr: IpAddr,
-        config: ControllerConfig,
-        log: slog::Logger,
-    ) -> ControllerHandle<A> {
-        let authority = Arc::new(authority);
-
-        let (event_tx, event_rx) = mpsc::channel();
-        let internal = Self::listen_internal(event_tx.clone(), SocketAddr::new(listen_addr, 0));
-        let checktable = CheckTableServer::start(SocketAddr::new(listen_addr, 0));
-        let external = Self::listen_external(
-            event_tx.clone(),
-            SocketAddr::new(listen_addr, 9000),
-            authority.clone(),
-        );
-
-        let descriptor = ControllerDescriptor {
-            external_addr: external.addr,
-            internal_addr: internal.addr,
-            checktable_addr: checktable,
-            nonce: rand::random(),
-        };
-        let campaign = Self::campaign(event_tx.clone(), authority.clone(), descriptor, config);
-
-        let builder = thread::Builder::new().name("srv-main".to_owned());
-        let join_handle = builder
-            .spawn(move || {
-                let controller = Self {
-                    current_epoch: None,
-                    inner: None,
-                    log,
-                    internal,
-                    external,
-                    checktable,
-                    _campaign: campaign,
-                    listen_addr,
-                    phantom: PhantomData,
-                };
-                controller.main_loop(event_rx)
-            })
-            .unwrap();
-
-        ControllerHandle {
-            url: None,
-            authority,
-            local: Some((event_tx, join_handle)),
-        }
-    }
-
-    fn main_loop(mut self, receiver: Receiver<ControlEvent>) {
-        for event in receiver {
+    fn main_loop(mut self) {
+        for event in self.receiver {
             match event {
-                ControlEvent::ControllerMessage(msg) => if let Some(ref mut inner) = self.inner {
+                ControlEvent::InternalMessage(msg) => if let Some(ref mut inner) = self.inner {
                     inner.coordination_message(msg)
                 },
                 ControlEvent::ExternalRequest(method, path, body, reply_tx) => {
                     if let Some(ref mut inner) = self.inner {
                         reply_tx
-                            .send(inner.external_request(method, path, body))
+                            .send(inner.external_request(method, path, body, &self.authority))
                             .unwrap()
                     } else {
                         reply_tx.send(Err(StatusCode::NotFound)).unwrap();
                     }
                 }
                 ControlEvent::WonLeaderElection(state) => {
-                    self.current_epoch = Some(state.epoch);
+                    self.campaign.take().unwrap().join().unwrap();
                     self.inner = Some(ControllerInner::new(
                         self.listen_addr,
                         self.checktable,
                         self.log.clone(),
-                        state,
+                        state.clone(),
                     ));
-                }
-
-                ControlEvent::LostLeadership(new_epoch) => {
-                    self.current_epoch = Some(new_epoch);
-                    self.inner = None;
                 }
                 ControlEvent::Shutdown => break,
                 ControlEvent::Error(e) => panic!("{}", e),
+                #[cfg(test)]
+                ControlEvent::ManualMigration(f) => if let Some(ref mut inner) = self.inner {
+                    if !inner.workers.is_empty() {
+                        inner.migrate(move |m| f.call_box((m,)));
+                    }
+                },
             }
         }
+
         self.external.stop();
         self.internal.stop();
+
+        if self.inner.is_some() {
+            self.authority.surrender_leadership().unwrap();
+        }
     }
 
     fn listen_external(
@@ -378,98 +550,94 @@ impl<A: Authority + 'static> Controller<A> {
 
     /// Listen for messages from workers.
     fn listen_internal(event_tx: Sender<ControlEvent>, addr: SocketAddr) -> ServingThread {
-        let mut done = Arc::new(());
-        let done2 = done.clone();
-        let mut pl: PollingLoop<CoordinationMessage> = PollingLoop::new(addr);
-        let addr = pl.get_listener_addr().unwrap();
-        let builder = thread::Builder::new().name("srv-int".to_owned());
-        let join_handle = builder
-            .spawn(move || {
-                pl.run_polling_loop(move |e| {
-                    if Arc::get_mut(&mut done).is_some() {
-                        return ProcessResult::StopPolling;
-                    }
+        ServingThread::new(addr, move |listener, mut done| {
+            let mut pl = PollingLoop::from_listener(listener);
+            pl.run_polling_loop(move |e| {
+                if Arc::get_mut(&mut done).is_some() {
+                    return ProcessResult::StopPolling;
+                }
 
-                    match e {
-                        PollEvent::ResumePolling(timeout) => {
-                            *timeout = Some(Duration::from_millis(100));
-                        }
-                        PollEvent::Process(msg) => {
-                            if event_tx.send(ControlEvent::ControllerMessage(msg)).is_err() {
-                                return ProcessResult::StopPolling;
-                            }
-                        }
-                        PollEvent::Timeout => {}
+                match e {
+                    PollEvent::ResumePolling(timeout) => {
+                        *timeout = Some(Duration::from_millis(100));
                     }
-                    ProcessResult::KeepPolling
-                });
-            })
-            .unwrap();
-
-        ServingThread {
-            addr,
-            join_handle,
-            stop: Box::new(done2),
-        }
+                    PollEvent::Process(msg) => {
+                        if event_tx.send(ControlEvent::InternalMessage(msg)).is_err() {
+                            return ProcessResult::StopPolling;
+                        }
+                    }
+                    PollEvent::Timeout => {}
+                }
+                ProcessResult::KeepPolling
+            });
+        })
     }
+}
 
-    fn campaign(
-        event_tx: Sender<ControlEvent>,
-        authority: Arc<A>,
-        descriptor: ControllerDescriptor,
-        config: ControllerConfig,
-    ) -> JoinHandle<()> {
-        let descriptor = serde_json::to_vec(&descriptor).unwrap();
-        let campaign_inner =
-            move |event_tx: Sender<ControlEvent>| -> Result<(), Box<Error + Send + Sync>> {
-                loop {
-                    // become leader
-                    let current_epoch = authority.become_leader(descriptor.clone())?;
-                    let state = authority.read_modify_write(
-                        "/state",
-                        |state: Option<ControllerState>| match state {
-                            None => Ok(ControllerState {
-                                config: config.clone(),
-                                epoch: current_epoch,
-                                recipe: (),
-                            }),
-                            Some(ref state) if state.epoch > current_epoch => Err(()),
-                            Some(mut state) => {
-                                state.epoch = current_epoch;
-                                Ok(state)
-                            }
-                        },
-                    )?;
-                    if state.is_err() {
+impl Worker {
+    fn main_loop(mut self) {
+        loop {
+            let event = match self.inner {
+                Some(ref mut worker) => match self.receiver.recv_timeout(worker.heartbeat()) {
+                    Ok(event) => event,
+                    Err(RecvTimeoutError::Timeout) => {
                         continue;
                     }
-                    if !event_tx
-                        .send(ControlEvent::WonLeaderElection(state.unwrap()))
-                        .is_ok()
-                    {
-                        break;
-                    }
-
-                    // watch for overthrow
-                    let new_epoch = authority.await_new_epoch(current_epoch)?;
-                    if !event_tx
-                        .send(ControlEvent::LostLeadership(new_epoch))
-                        .is_ok()
-                    {
-                        break;
-                    }
-                }
-                Ok(())
+                    Err(_) => break,
+                },
+                None => match self.receiver.recv() {
+                    Ok(event) => event,
+                    Err(_) => break,
+                },
             };
-
-        thread::Builder::new()
-            .name("srv-zk".to_owned())
-            .spawn(move || {
-                if let Err(e) = campaign_inner(event_tx.clone()) {
-                    let _ = event_tx.send(ControlEvent::Error(e));
+            match event {
+                WorkerEvent::InternalMessage(msg) => if let Some(ref mut worker) = self.inner {
+                    worker.coordination_message(msg)
+                },
+                WorkerEvent::LeaderChange(state, descriptor) => {
+                    self.inner.take().map(|w| w.shutdown());
+                    if let Ok(worker) = WorkerInner::new(
+                        self.listen_addr,
+                        descriptor.checktable_addr,
+                        descriptor.internal_addr,
+                        self.internal.addr,
+                        &state,
+                        self.nworker_threads,
+                        self.nread_threads,
+                        self.log.clone(),
+                    ) {
+                        self.inner = Some(worker);
+                    }
                 }
-            })
-            .unwrap()
+                WorkerEvent::Shutdown => break,
+            }
+        }
+        self.internal.stop();
+        self.inner.map(|w| w.shutdown());
+    }
+
+    fn listen_internal(event_tx: Sender<WorkerEvent>, addr: SocketAddr) -> ServingThread {
+        ServingThread::new(addr, move |listener, mut done| {
+            let mut pl = PollingLoop::from_listener(listener);
+            pl.run_polling_loop(move |e| {
+                if Arc::get_mut(&mut done).is_some() {
+                    return ProcessResult::StopPolling;
+                }
+
+                match e {
+                    PollEvent::ResumePolling(timeout) => {
+                        *timeout = Some(Duration::from_millis(100));
+                    }
+                    PollEvent::Process(msg) => {
+                        if event_tx.send(WorkerEvent::InternalMessage(msg)).is_err() {
+                            return ProcessResult::StopPolling;
+                        }
+                    }
+                    PollEvent::Timeout => {}
+                }
+                ProcessResult::KeepPolling
+            });
+        })
     }
 }
 
@@ -486,7 +654,7 @@ mod tests {
         // Controller gets dropped. It doesn't have Domains, so we don't see any dropped.
         let authority = ZookeeperAuthority::new("127.0.0.1:2181/it_works_default");
         {
-            let _c = ControllerBuilder::default().build(authority);
+            let _c = ControllerBuilder::default().build(Arc::new(authority));
             thread::sleep(Duration::from_millis(100));
         }
         thread::sleep(Duration::from_millis(100));
@@ -500,8 +668,8 @@ mod tests {
                      CREATE TABLE b (r int, s int);\n";
 
         let authority = ZookeeperAuthority::new("127.0.0.1:2181/it_works_blender_with_migration");
-        let mut c = ControllerBuilder::default().build(authority);
-        c.install_recipe(r_txt.to_owned());
+        let mut c = ControllerBuilder::default().build(Arc::new(authority));
+        assert!(c.install_recipe(r_txt.to_owned()).is_ok());
     }
 
     // Controller without any domains gets dropped once it leaves the scope.
@@ -523,6 +691,6 @@ mod tests {
                      CREATE TABLE b (r int, s int);\n";
 
         let mut c = ControllerBuilder::default().build_local();
-        c.install_recipe(r_txt.to_owned());
+        assert!(c.install_recipe(r_txt.to_owned()).is_ok());
     }
 }

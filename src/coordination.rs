@@ -1,5 +1,6 @@
 use std::net::SocketAddr;
 
+use consensus::Epoch;
 use dataflow::prelude::*;
 use dataflow::DomainBuilder;
 
@@ -8,6 +9,8 @@ use dataflow::DomainBuilder;
 pub struct CoordinationMessage {
     /// The worker's `SocketAddr` from which this message was sent.
     pub source: SocketAddr,
+    /// The epoch this message is associated with.
+    pub epoch: Epoch,
     /// Message payload.
     pub payload: CoordinationPayload,
 }
@@ -21,6 +24,8 @@ pub enum CoordinationPayload {
         addr: SocketAddr,
         /// Address the worker will be listening on to serve reads.
         read_listen_addr: SocketAddr,
+        /// Which log files are stored locally on the worker.
+        log_files: Vec<String>,
     },
     /// Worker going offline.
     Deregister,

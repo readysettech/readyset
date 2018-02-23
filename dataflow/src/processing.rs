@@ -4,6 +4,8 @@ use ops::base::Base;
 use ops;
 use prelude;
 
+// TODO: make a Key type that is an ArrayVec<DataType>
+
 #[derive(PartialEq, Eq, Debug)]
 pub struct Miss {
     pub node: prelude::LocalNodeIndex,

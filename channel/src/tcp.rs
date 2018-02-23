@@ -1,13 +1,15 @@
 use std;
-use std::io::{self, BufReader, Read, Write};
+use std::convert::TryFrom;
+use std::io::{self, BufReader, Write};
 use std::marker::PhantomData;
 use std::net::SocketAddr;
 
-use bincode::{self, Infinite};
+use bincode;
 use bufstream::BufStream;
-use byteorder::{ByteOrder, NetworkEndian, WriteBytesExt};
+use byteorder::{NetworkEndian, WriteBytesExt};
 use mio::{self, Evented, Poll, PollOpt, Ready, Token};
 use serde::{Deserialize, Serialize};
+use throttled_reader::ThrottledReader;
 
 use super::{DeserializeReceiver, NonBlockingWriter, ReceiveError};
 
@@ -44,32 +46,22 @@ macro_rules! poisoning_try {
 
 pub struct TcpSender<T> {
     stream: BufStream<std::net::TcpStream>,
-    window: Option<u32>,
-    unacked: u32,
     poisoned: bool,
 
     phantom: PhantomData<T>,
 }
 
 impl<T: Serialize> TcpSender<T> {
-    pub fn new(mut stream: std::net::TcpStream, window: Option<u32>) -> Result<Self, io::Error> {
-        if let Some(window) = window {
-            assert!(window > 0);
-        }
-
-        stream.write_u32::<NetworkEndian>(window.unwrap_or(0))?;
-
+    pub fn new(stream: std::net::TcpStream) -> Result<Self, io::Error> {
         Ok(Self {
             stream: BufStream::new(stream),
-            window,
-            unacked: 0,
             poisoned: false,
             phantom: PhantomData,
         })
     }
 
-    pub fn connect(addr: &SocketAddr, window: Option<u32>) -> Result<Self, io::Error> {
-        Self::new(std::net::TcpStream::connect(addr)?, window)
+    pub fn connect(addr: &SocketAddr) -> Result<Self, io::Error> {
+        Self::new(std::net::TcpStream::connect(addr)?)
     }
 
     pub fn local_addr(&self) -> io::Result<SocketAddr> {
@@ -91,20 +83,15 @@ impl<T: Serialize> TcpSender<T> {
             return Err(SendError::Poisoned);
         }
 
-        if let Some(window) = self.window {
-            if self.unacked == window {
-                let mut buf = [0u8];
-                poisoning_try!(self, self.stream.read_exact(&mut buf));
-                self.unacked = 0;
-            }
-            self.unacked += 1;
-        }
-
-        let size: u32 = bincode::serialized_size(t) as u32;
+        let size = u32::try_from(bincode::serialized_size(t).unwrap()).unwrap();
         poisoning_try!(self, self.stream.write_u32::<NetworkEndian>(size));
-        poisoning_try!(self, bincode::serialize_into(&mut self.stream, t, Infinite));
+        poisoning_try!(self, bincode::serialize_into(&mut self.stream, t));
         poisoning_try!(self, self.stream.flush());
         Ok(())
+    }
+
+    pub fn reader<'a>(&'a mut self) -> impl io::Read + 'a {
+        &mut self.stream
     }
 }
 
@@ -121,44 +108,9 @@ pub enum RecvError {
     DeserializationError(bincode::Error),
 }
 
-#[derive(Default)]
-struct Buffer {
-    data: Vec<u8>,
-    size: usize,
-}
-
-impl Buffer {
-    pub fn fill_from<T: Read>(
-        &mut self,
-        stream: &mut T,
-        target_size: usize,
-    ) -> Result<(), io::Error> {
-        if self.data.len() < target_size {
-            self.data.resize(target_size, 0u8);
-        }
-
-        while self.size < target_size {
-            let n = stream.read(&mut self.data[self.size..target_size])?;
-            if n == 0 {
-                return Err(io::Error::from(io::ErrorKind::BrokenPipe));
-            }
-            self.size += n;
-        }
-        Ok(())
-    }
-}
-
 pub struct TcpReceiver<T> {
-    pub(crate) stream: BufReader<NonBlockingWriter<mio::net::TcpStream>>,
-    unacked: u32,
+    pub(crate) stream: BufReader<ThrottledReader<NonBlockingWriter<mio::net::TcpStream>>>,
     poisoned: bool,
-
-    // A value of zero for window makes the channel unbounded. None means that the window size is
-    // not yet known.
-    window: Option<u32>,
-    // Holds the bytes of the window size until it is known.
-    window_buf: Buffer,
-
     deserialize_receiver: DeserializeReceiver<T>,
 
     phantom: PhantomData<T>,
@@ -170,21 +122,15 @@ where
 {
     pub fn new(stream: mio::net::TcpStream) -> Self {
         Self {
-            stream: BufReader::new(NonBlockingWriter::new(stream)),
-            unacked: 0,
+            stream: BufReader::new(ThrottledReader::new(NonBlockingWriter::new(stream))),
             poisoned: false,
-            window: None,
-            window_buf: Buffer {
-                data: vec![0u8; 4],
-                size: 0,
-            },
             deserialize_receiver: DeserializeReceiver::new(),
             phantom: PhantomData,
         }
     }
 
     pub fn get_ref(&self) -> &mio::net::TcpStream {
-        self.stream.get_ref().get_ref()
+        &*self.stream.get_ref().get_ref()
     }
 
     pub fn listen(addr: &SocketAddr) -> Result<Self, io::Error> {
@@ -196,19 +142,15 @@ where
         self.stream.get_ref().get_ref().local_addr()
     }
 
-    fn send_ack(&mut self) {
-        match self.stream.get_mut().write(&[0u8]) {
-            Ok(n) => assert_eq!(n, 1),
-            Err(ref e) if e.kind() == io::ErrorKind::BrokenPipe => {}
-            Err(ref e) if e.kind() == io::ErrorKind::ConnectionReset => {}
-            Err(ref e) if e.kind() == io::ErrorKind::WouldBlock => unreachable!(),
-            Err(_) => self.poisoned = true,
-        }
-        self.unacked = 0;
-    }
-
     pub fn is_empty(&self) -> bool {
         self.stream.is_empty()
+    }
+
+    pub fn syscall_limit(&mut self, limit: Option<usize>) {
+        match limit {
+            Some(l) => self.stream.get_mut().set_limit(l),
+            None => self.stream.get_mut().unthrottle(),
+        }
     }
 
     pub fn try_recv(&mut self) -> Result<T, TryRecvError> {
@@ -216,40 +158,8 @@ where
             return Err(TryRecvError::Disconnected);
         }
 
-        if self.window.is_none() {
-            match self.window_buf.fill_from(&mut self.stream, 4) {
-                Ok(()) => {}
-                Err(ref e) if e.kind() == io::ErrorKind::WouldBlock => {
-                    return Err(TryRecvError::Empty)
-                }
-                _ => {
-                    self.poisoned = true;
-                    return Err(TryRecvError::Disconnected);
-                }
-            }
-            self.window = Some(NetworkEndian::read_u32(&self.window_buf.data[0..4]));
-        }
-
-        // Make sure that any previously issued ACKs are sent out on the wire.
-        match self.stream.get_mut().flush() {
-            Ok(()) => {}
-            Err(ref e) if e.kind() == io::ErrorKind::BrokenPipe => {}
-            Err(ref e) if e.kind() == io::ErrorKind::ConnectionReset => {}
-            Err(ref e) if e.kind() == io::ErrorKind::WouldBlock => return Err(TryRecvError::Empty),
-            Err(_) => {
-                self.poisoned = true;
-                return Err(TryRecvError::Disconnected);
-            }
-        }
-
         match self.deserialize_receiver.try_recv(&mut self.stream) {
-            Ok(msg) => {
-                self.unacked = self.unacked.saturating_add(1);
-                if self.unacked == *self.window.as_ref().unwrap() {
-                    self.send_ack();
-                }
-                Ok(msg)
-            }
+            Ok(msg) => Ok(msg),
             Err(ReceiveError::WouldBlock) => Err(TryRecvError::Empty),
             Err(ReceiveError::IoError(_)) => {
                 self.poisoned = true;
@@ -284,10 +194,12 @@ impl<T> Evented for TcpReceiver<T> {
         interest: Ready,
         opts: PollOpt,
     ) -> io::Result<()> {
-        self.stream
-            .get_ref()
-            .get_ref()
-            .register(poll, token, interest, opts)
+        self.stream.get_ref().get_ref().register(
+            poll,
+            token,
+            interest,
+            opts,
+        )
     }
 
     fn reregister(
@@ -297,10 +209,12 @@ impl<T> Evented for TcpReceiver<T> {
         interest: Ready,
         opts: PollOpt,
     ) -> io::Result<()> {
-        self.stream
-            .get_ref()
-            .get_ref()
-            .reregister(poll, token, interest, opts)
+        self.stream.get_ref().get_ref().reregister(
+            poll,
+            token,
+            interest,
+            opts,
+        )
     }
 
     fn deregister(&self, poll: &Poll) -> io::Result<()> {
@@ -321,20 +235,7 @@ where
     for<'de> T: Deserialize<'de>,
 {
     let (tx, rx) = connect(listen_addr);
-    let tx = TcpSender::new(tx, None).unwrap();
-    let rx = TcpReceiver::new(rx);
-    (tx, rx)
-}
-
-pub fn sync_channel<T: Serialize>(
-    listen_addr: SocketAddr,
-    size: u32,
-) -> (TcpSender<T>, TcpReceiver<T>)
-where
-    for<'de> T: Deserialize<'de>,
-{
-    let (tx, rx) = connect(listen_addr);
-    let tx = TcpSender::new(tx, Some(size)).unwrap();
+    let tx = TcpSender::new(tx).unwrap();
     let rx = TcpReceiver::new(rx);
     (tx, rx)
 }
@@ -346,7 +247,7 @@ mod tests {
     use mio::Events;
 
     #[test]
-    fn unbounded() {
+    fn it_works() {
         let (mut sender, mut receiver) = channel::<u32>("127.0.0.1:0".parse().unwrap());
 
         sender.send(12).unwrap();
@@ -359,21 +260,8 @@ mod tests {
     }
 
     #[test]
-    fn bounded() {
-        let (mut sender, mut receiver) = sync_channel::<u32>("127.0.0.1:0".parse().unwrap(), 2);
-
-        sender.send(12).unwrap();
-        sender.send(65).unwrap();
-        assert_eq!(receiver.recv().unwrap(), 12);
-        assert_eq!(receiver.recv().unwrap(), 65);
-
-        sender.send(13).unwrap();
-        assert_eq!(receiver.recv().unwrap(), 13);
-    }
-
-    #[test]
-    fn bounded_multithread() {
-        let (mut sender, mut receiver) = sync_channel::<u32>("127.0.0.1:0".parse().unwrap(), 2);
+    fn multithread() {
+        let (mut sender, mut receiver) = channel::<u32>("127.0.0.1:0".parse().unwrap());
 
         let t1 = thread::spawn(move || {
             sender.send(12).unwrap();
@@ -393,7 +281,7 @@ mod tests {
 
     #[test]
     fn poll() {
-        let (mut sender, mut receiver) = sync_channel::<u32>("127.0.0.1:0".parse().unwrap(), 2);
+        let (mut sender, mut receiver) = channel::<u32>("127.0.0.1:0".parse().unwrap());
 
         let t1 = thread::spawn(move || {
             sender.send(12).unwrap();
@@ -420,8 +308,8 @@ mod tests {
 
     #[test]
     fn ping_pong() {
-        let (mut sender, mut receiver) = sync_channel::<u32>("127.0.0.1:0".parse().unwrap(), 1);
-        let (mut sender2, mut receiver2) = sync_channel::<u32>("127.0.0.1:0".parse().unwrap(), 1);
+        let (mut sender, mut receiver) = channel::<u32>("127.0.0.1:0".parse().unwrap());
+        let (mut sender2, mut receiver2) = channel::<u32>("127.0.0.1:0".parse().unwrap());
 
         let t1 = thread::spawn(move || {
             let poll = Poll::new().unwrap();
