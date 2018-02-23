@@ -10,6 +10,7 @@ use table::Table;
 
 #[derive(Clone, Debug, Eq, Hash, PartialEq, Serialize, Deserialize)]
 pub enum SqlType {
+    Bool,
     Char(u16),
     Varchar(u16),
     Int(u16),
@@ -35,6 +36,7 @@ pub enum SqlType {
 impl fmt::Display for SqlType {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         match *self {
+            SqlType::Bool => write!(f, "BOOL"),
             SqlType::Char(len) => write!(f, "CHAR({})", len),
             SqlType::Varchar(len) => write!(f, "VARCHAR({})", len),
             SqlType::Int(len) => write!(f, "INT({})", len),
@@ -244,6 +246,135 @@ impl Default for FieldExpression {
 pub fn is_sql_identifier(chr: u8) -> bool {
     is_alphanumeric(chr) || chr == '_' as u8
 }
+
+#[inline]
+fn len_as_u16(len: &[u8]) -> u16 {
+    match str::from_utf8(len) {
+        Ok(s) => match u16::from_str(s) {
+            Ok(v) => v,
+            Err(e) => panic!(e),
+        },
+        Err(e) => panic!(e),
+    }
+}
+
+/// A SQL type specifier.
+named!(pub type_identifier<&[u8], SqlType>,
+    alt_complete!(
+          do_parse!(
+              tag_no_case!("bool") >>
+              (SqlType::Bool)
+          )
+        | do_parse!(
+              tag_no_case!("mediumtext") >>
+              (SqlType::Mediumtext)
+          )
+        | do_parse!(
+              tag_no_case!("timestamp") >>
+              _len: opt!(delimited!(tag!("("), digit, tag!(")"))) >>
+              opt_multispace >>
+              (SqlType::Timestamp)
+          )
+         | do_parse!(
+               tag_no_case!("varbinary") >>
+               len: delimited!(tag!("("), digit, tag!(")")) >>
+               opt_multispace >>
+               (SqlType::Varbinary(len_as_u16(len)))
+           )
+         | do_parse!(
+               tag_no_case!("mediumblob") >>
+               (SqlType::Mediumblob)
+           )
+         | do_parse!(
+               tag_no_case!("longblob") >>
+               (SqlType::Longblob)
+           )
+         | do_parse!(
+               tag_no_case!("tinyblob") >>
+               (SqlType::Tinyblob)
+           )
+         | do_parse!(
+               tag_no_case!("tinytext") >>
+               (SqlType::Tinytext)
+           )
+         | do_parse!(
+               tag_no_case!("varchar") >>
+               len: delimited!(tag!("("), digit, tag!(")")) >>
+               opt_multispace >>
+               _binary: opt!(tag_no_case!("binary")) >>
+               (SqlType::Varchar(len_as_u16(len)))
+           )
+         | do_parse!(
+               tag_no_case!("tinyint") >>
+               len: delimited!(tag!("("), digit, tag!(")")) >>
+               opt_multispace >>
+               _signed: opt!(alt_complete!(tag_no_case!("unsigned") | tag_no_case!("signed"))) >>
+               (SqlType::Tinyint(len_as_u16(len)))
+           )
+         | do_parse!(
+               tag_no_case!("bigint") >>
+               len: delimited!(tag!("("), digit, tag!(")")) >>
+               opt_multispace >>
+               _signed: opt!(alt_complete!(tag_no_case!("unsigned") | tag_no_case!("signed"))) >>
+               (SqlType::Bigint(len_as_u16(len)))
+           )
+         | do_parse!(
+               tag_no_case!("double") >>
+               opt_multispace >>
+               _signed: opt!(alt_complete!(tag_no_case!("unsigned") | tag_no_case!("signed"))) >>
+               (SqlType::Double)
+           )
+         | do_parse!(
+               tag_no_case!("float") >>
+               opt_multispace >>
+               _signed: opt!(alt_complete!(tag_no_case!("unsigned") | tag_no_case!("signed"))) >>
+               (SqlType::Float)
+           )
+         | do_parse!(
+               tag_no_case!("blob") >>
+               (SqlType::Blob)
+           )
+         | do_parse!(
+               tag_no_case!("datetime") >>
+               (SqlType::DateTime)
+           )
+         | do_parse!(
+               tag_no_case!("date") >>
+               (SqlType::Date)
+           )
+         | do_parse!(
+               tag_no_case!("real") >>
+               opt_multispace >>
+               _signed: opt!(alt_complete!(tag_no_case!("unsigned") | tag_no_case!("signed"))) >>
+               (SqlType::Real)
+           )
+         | do_parse!(
+               tag_no_case!("text") >>
+               (SqlType::Text)
+           )
+         | do_parse!(
+               tag_no_case!("longtext") >>
+               (SqlType::Longtext)
+           )
+         | do_parse!(
+               tag_no_case!("char") >>
+               len: delimited!(tag!("("), digit, tag!(")")) >>
+               opt_multispace >>
+               _binary: opt!(tag_no_case!("binary")) >>
+               (SqlType::Char(len_as_u16(len)))
+           )
+         | do_parse!(
+               alt_complete!(tag_no_case!("integer") | tag_no_case!("int") | tag_no_case!("smallint")) >>
+               len: opt!(delimited!(tag!("("), digit, tag!(")"))) >>
+               opt_multispace >>
+               _signed: opt!(alt_complete!(tag_no_case!("unsigned") | tag_no_case!("signed"))) >>
+               (SqlType::Int(match len {
+                   Some(len) => len_as_u16(len),
+                   None => 32 as u16,
+               }))
+           )
+    )
+);
 
 /// Parses the arguments for an agregation function, and also returns whether the distinct flag is
 /// present.
@@ -659,6 +790,27 @@ mod tests {
         assert!(sql_identifier(id4).is_err());
         assert!(sql_identifier(id5).is_err());
         assert!(sql_identifier(id6).is_done());
+    }
+
+    #[test]
+    fn sql_types() {
+        let ok = ["bool", "integer(16)", "datetime"];
+        let not_ok = ["varchar"];
+
+        let res_ok: Vec<_> = ok.iter()
+            .map(|t| type_identifier(t.as_bytes()).unwrap().1)
+            .collect();
+        let res_not_ok: Vec<_> = not_ok
+            .iter()
+            .map(|t| type_identifier(t.as_bytes()).is_done())
+            .collect();
+
+        assert_eq!(
+            res_ok,
+            [SqlType::Bool, SqlType::Int(16), SqlType::DateTime].to_vec()
+        );
+
+        assert!(res_not_ok.into_iter().all(|r| r == false));
     }
 
     #[test]

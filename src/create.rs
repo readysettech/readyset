@@ -4,7 +4,7 @@ use std::str::FromStr;
 use std::fmt;
 
 use common::{column_identifier_no_alias, field_list, opt_multispace, sql_identifier,
-             statement_terminator, table_reference, Literal, SqlType, TableKey};
+             statement_terminator, table_reference, type_identifier, Literal, SqlType, TableKey};
 use column::{ColumnConstraint, ColumnSpecification};
 use table::Table;
 
@@ -41,130 +41,6 @@ impl fmt::Display for CreateTableStatement {
         write!(f, ")")
     }
 }
-
-fn len_as_u16(len: &[u8]) -> u16 {
-    match str::from_utf8(len) {
-        Ok(s) => match u16::from_str(s) {
-            Ok(v) => v,
-            Err(e) => panic!(e),
-        },
-        Err(e) => panic!(e),
-    }
-}
-
-/// A SQL type specifier.
-named!(pub type_identifier<&[u8], SqlType>,
-    alt_complete!(
-          do_parse!(
-              tag_no_case!("mediumtext") >>
-              (SqlType::Mediumtext)
-          )
-        | do_parse!(
-              tag_no_case!("timestamp") >>
-              _len: opt!(delimited!(tag!("("), digit, tag!(")"))) >>
-              opt_multispace >>
-              (SqlType::Timestamp)
-          )
-         | do_parse!(
-               tag_no_case!("varbinary") >>
-               len: delimited!(tag!("("), digit, tag!(")")) >>
-               opt_multispace >>
-               (SqlType::Varbinary(len_as_u16(len)))
-           )
-         | do_parse!(
-               tag_no_case!("mediumblob") >>
-               (SqlType::Mediumblob)
-           )
-         | do_parse!(
-               tag_no_case!("longblob") >>
-               (SqlType::Longblob)
-           )
-         | do_parse!(
-               tag_no_case!("tinyblob") >>
-               (SqlType::Tinyblob)
-           )
-         | do_parse!(
-               tag_no_case!("tinytext") >>
-               (SqlType::Tinytext)
-           )
-         | do_parse!(
-               tag_no_case!("varchar") >>
-               len: delimited!(tag!("("), digit, tag!(")")) >>
-               opt_multispace >>
-               _binary: opt!(tag_no_case!("binary")) >>
-               (SqlType::Varchar(len_as_u16(len)))
-           )
-         | do_parse!(
-               tag_no_case!("tinyint") >>
-               len: delimited!(tag!("("), digit, tag!(")")) >>
-               opt_multispace >>
-               _signed: opt!(alt_complete!(tag_no_case!("unsigned") | tag_no_case!("signed"))) >>
-               (SqlType::Tinyint(len_as_u16(len)))
-           )
-         | do_parse!(
-               tag_no_case!("bigint") >>
-               len: delimited!(tag!("("), digit, tag!(")")) >>
-               opt_multispace >>
-               _signed: opt!(alt_complete!(tag_no_case!("unsigned") | tag_no_case!("signed"))) >>
-               (SqlType::Bigint(len_as_u16(len)))
-           )
-         | do_parse!(
-               tag_no_case!("double") >>
-               opt_multispace >>
-               _signed: opt!(alt_complete!(tag_no_case!("unsigned") | tag_no_case!("signed"))) >>
-               (SqlType::Double)
-           )
-         | do_parse!(
-               tag_no_case!("float") >>
-               opt_multispace >>
-               _signed: opt!(alt_complete!(tag_no_case!("unsigned") | tag_no_case!("signed"))) >>
-               (SqlType::Float)
-           )
-         | do_parse!(
-               tag_no_case!("blob") >>
-               (SqlType::Blob)
-           )
-         | do_parse!(
-               tag_no_case!("datetime") >>
-               (SqlType::DateTime)
-           )
-         | do_parse!(
-               tag_no_case!("date") >>
-               (SqlType::Date)
-           )
-         | do_parse!(
-               tag_no_case!("real") >>
-               opt_multispace >>
-               _signed: opt!(alt_complete!(tag_no_case!("unsigned") | tag_no_case!("signed"))) >>
-               (SqlType::Real)
-           )
-         | do_parse!(
-               tag_no_case!("text") >>
-               (SqlType::Text)
-           )
-         | do_parse!(
-               tag_no_case!("longtext") >>
-               (SqlType::Longtext)
-           )
-         | do_parse!(
-               tag_no_case!("char") >>
-               len: delimited!(tag!("("), digit, tag!(")")) >>
-               opt_multispace >>
-               _binary: opt!(tag_no_case!("binary")) >>
-               (SqlType::Char(len_as_u16(len)))
-           )
-         | do_parse!(
-               alt_complete!(tag_no_case!("integer") | tag_no_case!("int") | tag_no_case!("smallint")) >>
-               len: opt!(delimited!(tag!("("), digit, tag!(")"))) >>
-               opt_multispace >>
-               _signed: opt!(alt_complete!(tag_no_case!("unsigned") | tag_no_case!("signed"))) >>
-               (SqlType::Int(match len {
-                   Some(len) => len_as_u16(len),
-                   None => 32 as u16,
-               }))
-           )
-    )
-);
 
 /// Parse rule for an individual key specification.
 named!(pub key_specification<&[u8], TableKey>,
