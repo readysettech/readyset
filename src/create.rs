@@ -196,7 +196,8 @@ named!(pub key_specification<&[u8], TableKey>,
               (TableKey::PrimaryKey(columns))
           )
         | do_parse!(
-              tag_no_case!("unique key") >>
+              tag_no_case!("unique") >>
+              opt!(preceded!(multispace, tag_no_case!("key"))) >>
               opt_multispace >>
               name: opt!(sql_identifier) >>
               opt_multispace >>
@@ -314,6 +315,12 @@ named!(pub column_constraint<&[u8], ColumnConstraint>,
               tag_no_case!("primary key") >>
               opt_multispace >>
               (ColumnConstraint::PrimaryKey)
+          )
+        | do_parse!(
+              opt_multispace >>
+              tag_no_case!("unique") >>
+              opt_multispace >>
+              (ColumnConstraint::Unique)
           )
     )
 );
@@ -581,6 +588,34 @@ mod tests {
                         Column::from("change_message"),
                         SqlType::Longtext,
                         vec![ColumnConstraint::NotNull],
+                    ),
+                ],
+                ..Default::default()
+            }
+        );
+
+        let qstring = "CREATE TABLE `auth_group` (
+                       `id` integer AUTO_INCREMENT NOT NULL PRIMARY KEY,
+                       `name` varchar(80) NOT NULL UNIQUE)";
+        let res = creation(qstring.as_bytes());
+        assert_eq!(
+            res.unwrap().1,
+            CreateTableStatement {
+                table: Table::from("auth_group"),
+                fields: vec![
+                    ColumnSpecification::with_constraints(
+                        Column::from("id"),
+                        SqlType::Int(32),
+                        vec![
+                            ColumnConstraint::AutoIncrement,
+                            ColumnConstraint::NotNull,
+                            ColumnConstraint::PrimaryKey,
+                        ],
+                    ),
+                    ColumnSpecification::with_constraints(
+                        Column::from("name"),
+                        SqlType::Varchar(80),
+                        vec![ColumnConstraint::NotNull, ColumnConstraint::Unique],
                     ),
                 ],
                 ..Default::default()
