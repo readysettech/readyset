@@ -749,7 +749,7 @@ pub(crate) fn materialize_leaf_node(
     if !key_cols.is_empty() {
         // TODO(malte): this does not yet cover the case when there are multiple query
         // parameters, which requires compound key support on Reader nodes.
-        //assert_eq!(key_cols.len(), 1);
+        assert_eq!(key_cols.len(), 1);
         let first_key_col_id = parent
             .borrow()
             .column_id_for_column(key_cols.iter().next().unwrap());
