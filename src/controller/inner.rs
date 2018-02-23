@@ -20,6 +20,7 @@ use controller::migrate::materialization::Materializations;
 use controller::mutator::MutatorBuilder;
 use controller::sql::reuse::ReuseConfigType;
 use controller::recipe::ActivationResult;
+use controller::getter::RemoteGetter;
 
 use hyper::{Method, StatusCode};
 use mio::net::TcpListener;
@@ -487,6 +488,11 @@ impl ControllerInner {
         })
     }
 
+    fn get_getter(&self, name: &str) -> Option<RemoteGetter> {
+        let rgb: Option<RemoteGetterBuilder> = self.getter_builder(name);
+        rgb.map(|rgb| rgb.build())
+    }
+
     /// Obtain a MutatorBuild that can be used to construct a Mutator to perform writes and deletes
     /// from the given named base node.
     pub fn mutator_builder(&self, base: &str) -> Option<MutatorBuilder> {
@@ -576,15 +582,13 @@ impl ControllerInner {
         let log = self.log.clone();
         let mut r = self.recipe.clone();
         let groups = self.recipe.security_groups();
-        let outs = self.outputs();
 
         let mut universe_groups = HashMap::new();
 
         let uid = context.get("id").expect("Universe context must have id").clone();
         if context.get("group").is_none() {
             for g in groups {
-                let membership = outs[&g];
-                let mut getter = self.get_getter(membership).unwrap();
+                let mut getter = self.get_getter(&g).unwrap();
                 let my_groups: Vec<DataType> = getter.lookup(&uid, true).unwrap().iter().map(|v| v[1].clone()).collect();
                 universe_groups.insert(g, my_groups);
             }
@@ -605,20 +609,6 @@ impl ControllerInner {
             }.unwrap();
 
         });
-
-        // Write to Context table
-        let name = match context.get("group") {
-            None => format!("UserContext_{}", uid),
-            Some(g) => format!("GroupContext_{}_{}", g, uid)
-        };
-
-        let mut fields: Vec<_> = context.keys().collect();
-        fields.sort();
-        let record: Vec<DataType> = fields.iter().map(|&f| context.get(f).unwrap().clone()).collect();
-        let ins = self.inputs();
-        let mut mutator = self.get_mutator(ins[&name]);
-
-        mutator.put(record).unwrap();
 
         self.recipe = r;
     }

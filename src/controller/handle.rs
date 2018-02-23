@@ -204,7 +204,21 @@ impl ControllerHandle<LocalAuthority> {
 
     /// Install a new set of policies on the controller.
     pub fn create_universe(&mut self, context: HashMap<String, DataType>) {
-        self.rpc("create_universe", &context)
+        let uid = context.get("id").expect("Universe context must have id").clone();
+        self.rpc::<_, ()>("create_universe", &context);
+
+        // Write to Context table
+        let bname = match context.get("group") {
+            None => format!("UserContext_{}", uid),
+            Some(g) => format!("GroupContext_{}_{}", g, uid)
+        };
+
+        let mut fields: Vec<_> = context.keys().collect();
+        fields.sort();
+        let record: Vec<DataType> = fields.iter().map(|&f| context.get(f).unwrap().clone()).collect();
+        let mut mutator = self.get_mutator(&bname).unwrap();
+
+        mutator.put(record).unwrap();
     }
 }
 impl<A: Authority> Drop for ControllerHandle<A> {
