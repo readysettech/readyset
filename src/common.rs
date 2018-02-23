@@ -807,7 +807,7 @@ mod tests {
 
         assert_eq!(
             res_ok,
-            [SqlType::Bool, SqlType::Int(16), SqlType::DateTime].to_vec()
+            vec![SqlType::Bool, SqlType::Int(16), SqlType::DateTime]
         );
 
         assert!(res_not_ok.into_iter().all(|r| r == false));
