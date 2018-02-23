@@ -3,7 +3,7 @@ use dataflow::checktable;
 use dataflow::prelude::*;
 use dataflow::statistics::GraphStats;
 
-use std::collections::BTreeMap;
+use std::collections::{HashMap, BTreeMap};
 use std::sync::Arc;
 use std::sync::mpsc::Sender;
 use std::thread::{self, JoinHandle};

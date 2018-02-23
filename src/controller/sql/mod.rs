@@ -568,7 +568,7 @@ impl SqlIncorporator {
         );
 
         // register local state
-        self.register_query(query_name, Some(qg), &post_reuse_opt_mir);
+        self.register_query(query_name, Some(qg), &post_reuse_opt_mir, universe);
 
         qfp
     }
