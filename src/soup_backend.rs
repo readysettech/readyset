@@ -55,6 +55,7 @@ impl SoupBackend {
         match self.soup.extend_recipe(format!("{}", q)) {
             Ok(_) => {
                 // no rows to return
+                // TODO(malte): potentially eagerly cache the mutator for this table
                 results.completed(0, 0)
             }
             Err(e) => {
@@ -74,9 +75,7 @@ impl SoupBackend {
     ) -> io::Result<()> {
         let table = q.table.name.clone();
 
-        // create a getter if we don't have only for this table already
-        // TODO(malte): may need to make one anyway if the query has changed w.r.t. an
-        // earlier one of the same name?
+        // create a mutator if we don't have one for this table already
         let putter = self.inputs
             .entry(table.clone())
             .or_insert(self.soup.get_mutator(&table).unwrap());
@@ -104,7 +103,7 @@ impl SoupBackend {
             Ok(_) => {
                 self.query_count += 1;
 
-                // create a getter if we don't have only for this table already
+                // create a getter if we don't have one for this query already
                 // TODO(malte): may need to make one anyway if the query has changed w.r.t. an
                 // earlier one of the same name?
                 let getter = self.outputs
