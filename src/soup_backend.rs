@@ -11,7 +11,9 @@ pub struct SoupBackend {
 
     _recipe: String,
     inputs: BTreeMap<String, Mutator>,
-    _outputs: BTreeMap<String, RemoteGetter>,
+    outputs: BTreeMap<String, RemoteGetter>,
+
+    query_count: u64,
 }
 
 impl SoupBackend {
@@ -39,7 +41,9 @@ impl SoupBackend {
 
             _recipe: String::new(),
             inputs: inputs,
-            _outputs: outputs,
+            outputs: outputs,
+
+            query_count: 0,
         }
     }
 
@@ -68,7 +72,15 @@ impl SoupBackend {
         q: nom_sql::InsertStatement,
         results: QueryResultWriter<W>,
     ) -> io::Result<()> {
-        let putter = self.inputs.get_mut(&q.table.name).unwrap();
+        let table = q.table.name.clone();
+
+        // create a getter if we don't have only for this table already
+        // TODO(malte): may need to make one anyway if the query has changed w.r.t. an
+        // earlier one of the same name?
+        let putter = self.inputs
+            .entry(table.clone())
+            .or_insert(self.soup.get_mutator(&table).unwrap());
+
         match putter.put(
             q.fields
                 .into_iter()
@@ -80,8 +92,39 @@ impl SoupBackend {
         }
     }
 
-    fn handle_select(&mut self, _q: nom_sql::SelectStatement) -> io::Result<()> {
-        unimplemented!()
+    fn handle_select<W: io::Write>(
+        &mut self,
+        q: nom_sql::SelectStatement,
+        results: QueryResultWriter<W>,
+    ) -> io::Result<()> {
+        let qname = format!("q_{}", self.query_count);
+
+        // first do a migration to add the query if it doesn't exist already
+        match self.soup.extend_recipe(format!("QUERY {}: {};", qname, q)) {
+            Ok(_) => {
+                self.query_count += 1;
+
+                // create a getter if we don't have only for this table already
+                // TODO(malte): may need to make one anyway if the query has changed w.r.t. an
+                // earlier one of the same name?
+                let getter = self.outputs
+                    .entry(qname.clone())
+                    .or_insert(self.soup.get_getter(&qname).unwrap());
+
+                // now "execute" the query via a bogokey lookup
+                match getter.lookup(&DataType::None, true) {
+                    Ok(_) => results.completed(0, 0),
+                    Err(_) => results.error(msql_srv::ErrorKind::ER_NO, "".as_bytes()),
+                }
+            }
+            Err(e) => {
+                // XXX(malte): implement Error for RpcError
+                let msg = match e {
+                    RpcError::Other(msg) => msg,
+                };
+                Err(io::Error::new(io::ErrorKind::Other, msg))
+            }
+        }
     }
 
     fn handle_set<W: io::Write>(
@@ -124,7 +167,7 @@ impl<W: io::Write> MysqlShim<W> for SoupBackend {
             Ok(q) => match q {
                 nom_sql::SqlQuery::CreateTable(_) => self.handle_create_table(query, results),
                 nom_sql::SqlQuery::Insert(q) => self.handle_insert(q, results),
-                nom_sql::SqlQuery::Select(q) => self.handle_select(q),
+                nom_sql::SqlQuery::Select(q) => self.handle_select(q, results),
                 nom_sql::SqlQuery::Set(q) => self.handle_set(q, results),
                 _ => {
                     return results.error(
