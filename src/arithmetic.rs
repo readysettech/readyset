@@ -1,7 +1,6 @@
-use nom::multispace;
 use std::{fmt, str};
 
-use common::{as_alias, column_identifier_no_alias, integer_literal, Literal};
+use common::{as_alias, column_identifier_no_alias, integer_literal, opt_multispace, Literal};
 use column::Column;
 
 #[derive(Debug, Clone, Deserialize, Eq, Hash, PartialEq, Serialize)]
@@ -93,24 +92,22 @@ named!(pub arithmetic_base<&[u8], ArithmeticBase>,
 /// Parse simple arithmetic expressions combining literals, and columns and literals.
 /// TODO(malte): this doesn't currently support nested expressions.
 named!(pub arithmetic_expression<&[u8], ArithmeticExpression>,
-    complete!(chain!(
-        left: arithmetic_base ~
-        multispace? ~
-        op: arithmetic_operator ~
-        multispace? ~
-        right: arithmetic_base ~
-        alias: opt!(as_alias),
-        || {
-            ArithmeticExpression {
-                op: op,
-                left: left,
-                right: right,
-                alias: match alias {
-                    None => None,
-                    Some(a) => Some(String::from(a)),
-                },
-            }
-        }
+    complete!(do_parse!(
+        left: arithmetic_base >>
+        opt_multispace >>
+        op: arithmetic_operator >>
+        opt_multispace >>
+        right: arithmetic_base >>
+        alias: opt!(as_alias) >>
+        (ArithmeticExpression {
+            op: op,
+            left: left,
+            right: right,
+            alias: match alias {
+                None => None,
+                Some(a) => Some(String::from(a)),
+            },
+        })
     ))
 );
 

@@ -1,7 +1,7 @@
 use nom::multispace;
-use nom::{Err, ErrorKind, IResult, Needed};
 use std::str;
 
+use common::opt_multispace;
 use select::{limit_clause, nested_selection, order_clause, LimitClause, OrderClause,
              SelectStatement};
 
@@ -23,56 +23,52 @@ pub struct CompoundSelectStatement {
 /// Parse compound operator
 named!(compound_op<&[u8], CompoundSelectOperator>,
     alt_complete!(
-          chain!(
-              caseless_tag!("union") ~
+          do_parse!(
+              tag_no_case!("union") >>
               distinct: opt!(
                   preceded!(multispace,
-                            alt_complete!(  map!(caseless_tag!("all"), |_| { false })
-                                          | map!(caseless_tag!("distinct"), |_| { true }))
-                            )),
-              || {
-                  match distinct {
-                      // DISTINCT is the default in both MySQL and SQLite
-                      None => CompoundSelectOperator::DistinctUnion,
-                      Some(d) => {
-                          if d {
-                              CompoundSelectOperator::DistinctUnion
-                          } else {
-                              CompoundSelectOperator::Union
-                          }
-                      },
-                  }
-              }
+                            alt_complete!(  map!(tag_no_case!("all"), |_| { false })
+                                          | map!(tag_no_case!("distinct"), |_| { true }))
+                            )) >>
+              (match distinct {
+                  // DISTINCT is the default in both MySQL and SQLite
+                  None => CompoundSelectOperator::DistinctUnion,
+                  Some(d) => {
+                      if d {
+                          CompoundSelectOperator::DistinctUnion
+                      } else {
+                          CompoundSelectOperator::Union
+                      }
+                  },
+              })
           )
-        | map!(caseless_tag!("intersect"), |_| CompoundSelectOperator::Intersect)
-        | map!(caseless_tag!("except"), |_| CompoundSelectOperator::Except)
+        | map!(tag_no_case!("intersect"), |_| CompoundSelectOperator::Intersect)
+        | map!(tag_no_case!("except"), |_| CompoundSelectOperator::Except)
     )
 );
 
 /// Parse compound selection
 named!(pub compound_selection<&[u8], CompoundSelectStatement>,
-    complete!(chain!(
-        first_select: delimited!(opt!(tag!("(")), nested_selection, opt!(tag!(")"))) ~
+    complete!(do_parse!(
+        first_select: delimited!(opt!(tag!("(")), nested_selection, opt!(tag!(")"))) >>
         other_selects: many1!(
             complete!(
-                chain!(multispace? ~
-                       op: compound_op ~
-                       multispace ~
-                       tag!("(")? ~
-                       multispace? ~
-                       select: nested_selection ~
-                       multispace? ~
-                       tag!(")")?,
-                       || {
-                           (Some(op), select)
-                       }
+                do_parse!(opt_multispace >>
+                       op: compound_op >>
+                       multispace >>
+                       opt!(tag!("(")) >>
+                       opt_multispace >>
+                       select: nested_selection >>
+                       opt_multispace >>
+                       opt!(tag!(")")) >>
+                       (Some(op), select)
                 )
             )
-        ) ~
-        multispace? ~
-        order: order_clause? ~
-        limit: limit_clause?,
-        || {
+        ) >>
+        opt_multispace >>
+        order: opt!(order_clause) >>
+        limit: opt!(limit_clause) >>
+        ({
             let mut v = vec![(None, first_select)];
             v.extend(other_selects);
 
@@ -81,7 +77,7 @@ named!(pub compound_selection<&[u8], CompoundSelectStatement>,
                 order: order,
                 limit: limit,
             }
-        }
+        })
     ))
 );
 

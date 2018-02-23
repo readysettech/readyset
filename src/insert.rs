@@ -1,9 +1,9 @@
 use nom::multispace;
-use nom::{Err, ErrorKind, IResult, Needed};
 use std::str;
 use std::fmt;
 
-use common::{field_list, statement_terminator, table_reference, value_list, Literal};
+use common::{field_list, opt_multispace, statement_terminator, table_reference, value_list,
+             Literal};
 use column::Column;
 use table::Table;
 
@@ -40,30 +40,30 @@ impl fmt::Display for InsertStatement {
 /// Parse rule for a SQL insert query.
 /// TODO(malte): support REPLACE, multiple parens expr, nested selection, DEFAULT VALUES
 named!(pub insertion<&[u8], InsertStatement>,
-    complete!(chain!(
-        caseless_tag!("insert") ~
-        multispace ~
-        caseless_tag!("into") ~
-        multispace ~
-        table: table_reference ~
-        multispace? ~
-        fields: opt!(chain!(
-                tag!("(") ~
-                multispace? ~
-                fields: field_list ~
-                multispace? ~
-                tag!(")") ~
-                multispace,
-                || { fields }
+    complete!(do_parse!(
+        tag_no_case!("insert") >>
+        multispace >>
+        tag_no_case!("into") >>
+        multispace >>
+        table: table_reference >>
+        opt_multispace >>
+        fields: opt!(do_parse!(
+                tag!("(") >>
+                opt_multispace >>
+                fields: field_list >>
+                opt_multispace >>
+                tag!(")") >>
+                multispace >>
+                (fields)
                 )
-            ) ~
-        caseless_tag!("values") ~
-        multispace? ~
-        tag!("(") ~
-        values: value_list ~
-        tag!(")") ~
-        statement_terminator,
-        || {
+            ) >>
+        tag_no_case!("values") >>
+        opt_multispace >>
+        tag!("(") >>
+        values: value_list >>
+        tag!(")") >>
+        statement_terminator >>
+        ({
             // "table AS alias" isn't legal in INSERT statements
             assert!(table.alias.is_none());
             InsertStatement {
@@ -83,7 +83,7 @@ named!(pub insertion<&[u8], InsertStatement>,
                               .collect(),
                 },
             }
-        }
+        })
     ))
 );
 
