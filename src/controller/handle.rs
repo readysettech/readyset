@@ -192,6 +192,11 @@ impl ControllerHandle<LocalAuthority> {
         self.rpc("enable_reuse", &reuse_type)
     }
 
+    /// Set a fixed number of thread domains
+    pub fn set_ndomains(&mut self, ndomains: usize) {
+        self.rpc("set_ndomains", &ndomains)
+    }
+
     /// Install a new set of policies on the controller.
     pub fn set_security_config(&mut self, p: String) {
         let url = match self.url {

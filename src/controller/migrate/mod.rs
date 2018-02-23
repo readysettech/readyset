@@ -368,6 +368,7 @@ impl<'a> Migration<'a> {
             mainline.source,
             &new,
             &mut mainline.ndomains,
+            mainline.fixed_domains,
         );
 
         // Set up ingress and egress nodes

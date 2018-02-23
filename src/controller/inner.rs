@@ -75,6 +75,7 @@ pub struct ControllerInner {
     healthcheck_every: Duration,
     last_checked_workers: Instant,
 
+    pub(super) fixed_domains: bool,
     log: slog::Logger,
 }
 
@@ -168,6 +169,9 @@ impl ControllerInner {
             }
             (Post, "/enable_reuse") => {
                 json::to_string(&self.enable_reuse(json::from_slice(&body).unwrap())).unwrap()
+            }
+            (Post, "/set_ndomains") => {
+                json::to_string(&self.set_ndomains(json::from_slice(&body).unwrap())).unwrap()
             }
             _ => return Err(StatusCode::NotFound),
         })
@@ -310,6 +314,8 @@ impl ControllerInner {
 
             pending_recovery,
             last_checked_workers: Instant::now(),
+
+            fixed_domains: false,
         }
     }
 
@@ -708,6 +714,11 @@ impl ControllerInner {
                 Err(RpcError::Other("failed to parse recipe".to_owned()))
             }
         }
+    }
+
+    fn set_ndomains(&mut self, ndomains: usize) {
+        self.ndomains = ndomains;
+        self.fixed_domains = true;
     }
 
     pub fn graphviz(&self) -> String {

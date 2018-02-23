@@ -11,6 +11,7 @@ pub fn assign(
     source: NodeIndex,
     new: &HashSet<NodeIndex>,
     ndomains: &mut usize,
+    fixed_domains: bool,
 ) {
     // we need to walk the data flow graph and assign domains to all new nodes.
     // we use a couple of heuristics to pick and assignment:
@@ -38,9 +39,15 @@ pub fn assign(
         topo_list.push(node);
     }
 
+    let mut cur_domain = 0;
     let mut next_domain = || {
-        *ndomains += 1;
-        *ndomains - 1
+        if fixed_domains {
+            cur_domain = (cur_domain + 1) % *ndomains;
+            (cur_domain - 1) % *ndomains
+        } else {
+            *ndomains += 1;
+            *ndomains - 1
+        }
     };
 
     for node in topo_list {
