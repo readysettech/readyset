@@ -1,12 +1,11 @@
 use nom::multispace;
-use nom::{Err, ErrorKind, IResult, Needed};
 use std::collections::{HashSet, VecDeque};
 use std::str;
 use std::fmt;
 
 use column::Column;
-use common::{binary_comparison_operator, column_identifier, integer_literal, string_literal,
-             Literal, Operator};
+use common::{binary_comparison_operator, column_identifier, integer_literal, opt_multispace,
+             string_literal, Literal, Operator};
 
 use select::{nested_selection, SelectStatement};
 
@@ -93,127 +92,108 @@ impl fmt::Display for ConditionExpression {
 /// Parse a conditional expression into a condition tree structure
 named!(pub condition_expr<&[u8], ConditionExpression>,
        alt_complete!(
-           chain!(
-               left: and_expr ~
-               multispace? ~
-               caseless_tag!("or") ~
-               multispace ~
-               right: condition_expr,
-               || {
-                   ConditionExpression::LogicalOp(
-                       ConditionTree {
-                           operator: Operator::Or,
-                           left: Box::new(left),
-                           right: Box::new(right),
-                       }
-                   )
-               }
+           do_parse!(
+               left: and_expr >>
+               opt_multispace >>
+               tag_no_case!("or") >>
+               multispace >>
+               right: condition_expr >>
+               (ConditionExpression::LogicalOp(
+                   ConditionTree {
+                       operator: Operator::Or,
+                       left: Box::new(left),
+                       right: Box::new(right),
+                   }
+               ))
            )
        |   and_expr)
 );
 
 named!(pub and_expr<&[u8], ConditionExpression>,
        alt_complete!(
-           chain!(
-               left: parenthetical_expr ~
-               multispace? ~
-               caseless_tag!("and") ~
-               multispace ~
-               right: and_expr,
-               || {
-                   ConditionExpression::LogicalOp(
-                       ConditionTree {
-                           operator: Operator::And,
-                           left: Box::new(left),
-                           right: Box::new(right),
-                       }
-                   )
-               }
+           do_parse!(
+               left: parenthetical_expr >>
+               opt_multispace >>
+               tag_no_case!("and") >>
+               multispace >>
+               right: and_expr >>
+               (ConditionExpression::LogicalOp(
+                   ConditionTree {
+                       operator: Operator::And,
+                       left: Box::new(left),
+                       right: Box::new(right),
+                   }
+               ))
            )
        |   parenthetical_expr)
 );
 
 named!(pub parenthetical_expr<&[u8], ConditionExpression>,
        alt_complete!(
-           delimited!(tag!("("), condition_expr, chain!(tag!(")") ~ multispace?, ||{}))
+           delimited!(
+               do_parse!(tag!("(") >> opt_multispace >> ()),
+               condition_expr,
+               do_parse!(opt_multispace >> tag!(")") >> opt_multispace >> ())
+            )
        |   not_expr)
 );
 
 named!(pub not_expr<&[u8], ConditionExpression>,
        alt_complete!(
-           chain!(
-               caseless_tag!("not") ~
-               multispace ~
-               right: parenthetical_expr,
-               || {
-                   ConditionExpression::NegationOp(Box::new(right))
-               }
+           do_parse!(
+               tag_no_case!("not") >>
+               multispace >>
+               right: parenthetical_expr >>
+               (ConditionExpression::NegationOp(Box::new(right)))
            )
        |   boolean_primary)
 );
 
 named!(boolean_primary<&[u8], ConditionExpression>,
-    chain!(
-        left: predicate ~
-        multispace? ~
-        op: binary_comparison_operator ~
-        multispace? ~
-        right: predicate,
-        || {
-            ConditionExpression::ComparisonOp(
-                ConditionTree {
-                    operator: op,
-                    left: Box::new(left),
-                    right: Box::new(right),
-                }
-            )
-
-        }
+    do_parse!(
+        left: predicate >>
+        opt_multispace >>
+        op: binary_comparison_operator >>
+        opt_multispace >>
+        right: predicate >>
+        (ConditionExpression::ComparisonOp(
+            ConditionTree {
+                operator: op,
+                left: Box::new(left),
+                right: Box::new(right),
+            }
+        ))
     )
 );
 
 named!(predicate<&[u8], ConditionExpression>,
-    delimited!(
-        opt!(multispace),
-        alt_complete!(
-                chain!(
-                    tag!("?"),
-                    || {
-                        ConditionExpression::Base(
-                            ConditionBase::Placeholder
-                        )
-                    }
-                )
-            |   chain!(
-                    field: integer_literal,
-                    || {
-                        ConditionExpression::Base(ConditionBase::Literal(field))
-                    }
-                )
-            |   chain!(
-                    field: string_literal,
-                    || {
-                        ConditionExpression::Base(ConditionBase::Literal(field))
-                    }
-                )
-            |   chain!(
-                    field: column_identifier,
-                    || {
-                        ConditionExpression::Base(
-                            ConditionBase::Field(field)
-                        )
-                    }
-                )
-            |   chain!(
-                    select: delimited!(tag!("("), nested_selection, tag!(")")),
-                    || {
-                        ConditionExpression::Base(
-                            ConditionBase::NestedSelect(Box::new(select))
-                        )
-                    }
-                )
-        ),
-        opt!(multispace)
+    alt_complete!(
+            do_parse!(
+                tag!("?") >>
+                (ConditionExpression::Base(
+                    ConditionBase::Placeholder
+                ))
+            )
+        |   do_parse!(
+                field: integer_literal >>
+                (ConditionExpression::Base(ConditionBase::Literal(field)))
+            )
+        |   do_parse!(
+                field: string_literal >>
+                (ConditionExpression::Base(ConditionBase::Literal(field)))
+            )
+        |   do_parse!(
+                field: column_identifier >>
+                (ConditionExpression::Base(
+                    ConditionBase::Field(field)
+                ))
+            )
+        |   do_parse!(
+                select: delimited!(tag!("("), nested_selection, tag!(")")) >>
+                (ConditionExpression::Base(
+                    ConditionBase::NestedSelect(Box::new(select))
+                ))
+            )
     )
 );
 

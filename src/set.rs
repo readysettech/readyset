@@ -1,8 +1,7 @@
 use nom::multispace;
-use nom::{Err, ErrorKind, IResult, Needed};
 use std::{fmt, str};
 
-use common::{literal, sql_identifier, Literal};
+use common::{literal, opt_multispace, sql_identifier, Literal};
 
 #[derive(Clone, Debug, Hash, PartialEq, Serialize, Deserialize)]
 pub struct SetStatement {
@@ -19,20 +18,18 @@ impl fmt::Display for SetStatement {
 }
 
 named!(pub set<&[u8], SetStatement>,
-    chain!(
-        caseless_tag!("set") ~
-        multispace ~
-        var: map_res!(sql_identifier, str::from_utf8) ~
-        multispace? ~
-        caseless_tag!("=") ~
-        multispace? ~
-        val: literal,
-        || {
-            SetStatement {
-                variable: String::from(var),
-                value: val,
-            }
-        }
+    do_parse!(
+        tag_no_case!("set") >>
+        multispace >>
+        var: map_res!(sql_identifier, str::from_utf8) >>
+        opt_multispace >>
+        tag_no_case!("=") >>
+        opt_multispace >>
+        val: literal >>
+        (SetStatement {
+            variable: String::from(var),
+            value: val,
+        })
     )
 );
 

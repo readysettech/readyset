@@ -1,12 +1,11 @@
 use nom::multispace;
-use nom::{Err, ErrorKind, IResult, Needed};
 use std::str;
 use std::fmt;
 
 use column::Column;
 use common::FieldExpression;
 use common::{as_alias, column_identifier_no_alias, field_definition_expr, field_list,
-             statement_terminator, table_list, table_reference, unsigned_number};
+             opt_multispace, statement_terminator, table_list, table_reference, unsigned_number};
 use condition::{condition_expr, ConditionExpression};
 use join::{join_operator, JoinConstraint, JoinOperator, JoinRightSide};
 use table::Table;
@@ -91,211 +90,191 @@ impl fmt::Display for SelectStatement {
 
 /// Parse GROUP BY clause
 named!(group_by_clause<&[u8], GroupByClause>,
-    complete!(chain!(
-        multispace? ~
-        caseless_tag!("group by") ~
-        multispace ~
-        group_columns: field_list ~
+    complete!(do_parse!(
+        opt_multispace >>
+        tag_no_case!("group by") >>
+        multispace >>
+        group_columns: field_list >>
         having_clause: opt!(
-            complete!(chain!(
-                multispace? ~
-                caseless_tag!("having") ~
-                multispace? ~
-                ce: condition_expr,
-                || { ce }
+            complete!(do_parse!(
+                opt_multispace >>
+                tag_no_case!("having") >>
+                opt_multispace >>
+                ce: condition_expr >>
+                (ce)
             ))
-        ),
-    || {
-        GroupByClause {
+        ) >>
+        (GroupByClause {
             columns: group_columns,
             having: having_clause,
-        }
-    }))
+        })
+    ))
 );
 
 /// Parse LIMIT clause
 named!(pub limit_clause<&[u8], LimitClause>,
-    complete!(chain!(
-        multispace? ~
-        caseless_tag!("limit") ~
-        multispace ~
-        limit_val: unsigned_number ~
+    complete!(do_parse!(
+        opt_multispace >>
+        tag_no_case!("limit") >>
+        multispace >>
+        limit_val: unsigned_number >>
         offset_val: opt!(
-            complete!(chain!(
-                multispace? ~
-                caseless_tag!("offset") ~
-                multispace ~
-                val: unsigned_number,
-                || { val }
+            complete!(do_parse!(
+                opt_multispace >>
+                tag_no_case!("offset") >>
+                multispace >>
+                val: unsigned_number >>
+                (val)
             ))
-        ),
-    || {
-        LimitClause {
-            limit: limit_val,
-            offset: match offset_val {
-                None => 0,
-                Some(v) => v,
-            },
-        }
-    }))
+        ) >>
+    (LimitClause {
+        limit: limit_val,
+        offset: match offset_val {
+            None => 0,
+            Some(v) => v,
+        },
+    })))
 );
 
 /// Parse JOIN clause
 named!(join_clause<&[u8], JoinClause>,
-    complete!(chain!(
-        multispace? ~
-        _natural: opt!(caseless_tag!("natural")) ~
-        multispace? ~
-        op: join_operator ~
-        multispace ~
-        right: join_rhs ~
-        multispace ~
+    complete!(do_parse!(
+        opt_multispace >>
+        _natural: opt!(tag_no_case!("natural")) >>
+        opt_multispace >>
+        op: join_operator >>
+        multispace >>
+        right: join_rhs >>
+        multispace >>
         constraint: alt_complete!(
-              chain!(
-                  caseless_tag!("using") ~
-                  multispace ~
-                  fields: delimited!(tag!("("), field_list, tag!(")")),
-                  || {
-                      JoinConstraint::Using(fields)
-                  }
+              do_parse!(
+                  tag_no_case!("using") >>
+                  multispace >>
+                  fields: delimited!(tag!("("), field_list, tag!(")")) >>
+                  (JoinConstraint::Using(fields))
               )
-            | chain!(
-                  caseless_tag!("on") ~
-                  multispace ~
+            | do_parse!(
+                  tag_no_case!("on") >>
+                  multispace >>
                   cond: alt_complete!(delimited!(tag!("("), condition_expr, tag!(")"))
-                                      | condition_expr),
-                  || {
-                      JoinConstraint::On(cond)
-                  }
+                                      | condition_expr) >>
+                  (JoinConstraint::On(cond))
               )
-        ),
-    || {
-        JoinClause {
-            operator: op,
-            right: right,
-            constraint: constraint,
-        }
-    }))
+        ) >>
+    (JoinClause {
+        operator: op,
+        right: right,
+        constraint: constraint,
+    })))
 );
 
 /// Different options for the right hand side of the join operator in a `join_clause`
 named!(join_rhs<&[u8], JoinRightSide>,
     alt_complete!(
-          complete!(chain!(
-              select: delimited!(tag!("("), nested_selection, tag!(")")) ~
-              alias: opt!(as_alias),
-              || {
-                  JoinRightSide::NestedSelect(Box::new(select), alias.map(String::from))
-              }
+          complete!(do_parse!(
+              select: delimited!(tag!("("), nested_selection, tag!(")")) >>
+              alias: opt!(as_alias) >>
+              (JoinRightSide::NestedSelect(Box::new(select), alias.map(String::from)))
           ))
-        | complete!(chain!(
-              nested_join: delimited!(tag!("("), join_clause, tag!(")")),
-              || {
-                  JoinRightSide::NestedJoin(Box::new(nested_join))
-              }
+        | complete!(do_parse!(
+              nested_join: delimited!(tag!("("), join_clause, tag!(")")) >>
+              (JoinRightSide::NestedJoin(Box::new(nested_join)))
           ))
-        | complete!(chain!(
-              table: table_reference,
-              || {
-                  JoinRightSide::Table(table)
-              }
+        | complete!(do_parse!(
+              table: table_reference >>
+              (JoinRightSide::Table(table))
           ))
-        | complete!(chain!(
-              tables: delimited!(tag!("("), table_list, tag!(")")),
-              || {
-                  JoinRightSide::Tables(tables)
-              }
+        | complete!(do_parse!(
+              tables: delimited!(tag!("("), table_list, tag!(")")) >>
+              (JoinRightSide::Tables(tables))
           ))
     )
 );
 
 /// Parse ORDER BY clause
 named!(pub order_clause<&[u8], OrderClause>,
-    complete!(chain!(
-        multispace? ~
-        caseless_tag!("order by") ~
-        multispace ~
+    complete!(do_parse!(
+        opt_multispace >>
+        tag_no_case!("order by") >>
+        multispace >>
         order_expr: many0!(
-            chain!(
-                fieldname: column_identifier_no_alias ~
+            do_parse!(
+                fieldname: column_identifier_no_alias >>
                 ordering: opt!(
-                    complete!(chain!(
-                        multispace? ~
-                            ordering: alt_complete!(
-                                map!(caseless_tag!("desc"), |_| OrderType::OrderDescending)
-                                    | map!(caseless_tag!("asc"), |_| OrderType::OrderAscending)
-                            ),
-                        || { ordering }
+                    complete!(do_parse!(
+                        opt_multispace >>
+                        ordering: alt_complete!(
+                            map!(tag_no_case!("desc"), |_| OrderType::OrderDescending)
+                                | map!(tag_no_case!("asc"), |_| OrderType::OrderAscending)
+                        ) >>
+                        (ordering)
                     ))
-                ) ~
+                ) >>
                 opt!(
-                    complete!(chain!(
-                        multispace? ~
-                            tag!(",") ~
-                            multispace?,
-                        ||{}
+                    complete!(do_parse!(
+                        opt_multispace >>
+                        tag!(",") >>
+                        opt_multispace >>
+                        ()
                     ))
-                ),
-                || { (fieldname, ordering.unwrap_or(OrderType::OrderAscending)) }
+                ) >>
+                (fieldname, ordering.unwrap_or(OrderType::OrderAscending))
             )
-        ),
-    || {
-        OrderClause {
+        ) >>
+        (OrderClause {
             columns: order_expr,
             // order: match ordering {
             //     None => OrderType::OrderAscending,
             //     Some(ref o) => o.clone(),
             // },
-        }
-    }))
+        })
+    ))
 );
 
 /// Parse WHERE clause of a selection
 named!(pub where_clause<&[u8], ConditionExpression>,
-    complete!(chain!(
-        multispace? ~
-        caseless_tag!("where") ~
-        multispace ~
-        cond: condition_expr,
-        || { cond }
+    complete!(do_parse!(
+        opt_multispace >>
+        tag_no_case!("where") >>
+        multispace >>
+        cond: condition_expr >>
+        (cond)
     ))
 );
 
 /// Parse rule for a SQL selection query.
 named!(pub selection<&[u8], SelectStatement>,
-    chain!(
-        select: nested_selection ~
-        statement_terminator,
-        || { select }
+    do_parse!(
+        select: nested_selection >>
+        statement_terminator >>
+        (select)
     )
 );
 
 named!(pub nested_selection<&[u8], SelectStatement>,
-    chain!(
-        caseless_tag!("select") ~
-        multispace ~
-        distinct: opt!(caseless_tag!("distinct")) ~
-        multispace? ~
-        fields: field_definition_expr ~
-        delimited!(opt!(multispace), caseless_tag!("from"), opt!(multispace)) ~
-        tables: table_list ~
-        join: many0!(join_clause) ~
-        cond: opt!(where_clause) ~
-        group_by: opt!(group_by_clause) ~
-        order: opt!(order_clause) ~
-        limit: opt!(limit_clause) ~
-        || {
-            SelectStatement {
-                tables: tables,
-                distinct: distinct.is_some(),
-                fields: fields,
-                join: join,
-                where_clause: cond,
-                group_by: group_by,
-                order: order,
-                limit: limit,
-            }
-        }
+    do_parse!(
+        tag_no_case!("select") >>
+        multispace >>
+        distinct: opt!(tag_no_case!("distinct")) >>
+        opt_multispace >>
+        fields: field_definition_expr >>
+        delimited!(opt_multispace, tag_no_case!("from"), opt_multispace) >>
+        tables: table_list >>
+        join: many0!(join_clause) >>
+        cond: opt!(where_clause) >>
+        group_by: opt!(group_by_clause) >>
+        order: opt!(order_clause) >>
+        limit: opt!(limit_clause) >>
+        (SelectStatement {
+            tables: tables,
+            distinct: distinct.is_some(),
+            fields: fields,
+            join: join,
+            where_clause: cond,
+            group_by: group_by,
+            order: order,
+            limit: limit,
+        })
     )
 );
 

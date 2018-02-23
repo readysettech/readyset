@@ -1,8 +1,6 @@
-use nom::multispace;
-use nom::{Err, ErrorKind, IResult, Needed};
 use std::{fmt, str};
 
-use common::table_reference;
+use common::{opt_multispace, table_reference};
 use condition::ConditionExpression;
 use table::Table;
 use select::where_clause;
@@ -26,17 +24,17 @@ impl fmt::Display for DeleteStatement {
 }
 
 named!(pub deletion<&[u8], DeleteStatement>,
-    chain!(
-        caseless_tag!("delete") ~
-        delimited!(opt!(multispace), caseless_tag!("from"), opt!(multispace)) ~
-        table: table_reference ~
-        cond: opt!(where_clause) ~
-        || {
+    do_parse!(
+        tag_no_case!("delete") >>
+        delimited!(opt_multispace, tag_no_case!("from"), opt_multispace) >>
+        table: table_reference >>
+        cond: opt!(where_clause) >>
+        ({
             DeleteStatement {
                 table: table,
                 where_clause: cond,
             }
-        }
+        })
     )
 );
 
