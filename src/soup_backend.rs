@@ -139,7 +139,7 @@ impl SoupBackend {
 
 impl<W: io::Write> MysqlShim<W> for SoupBackend {
     fn on_prepare(&mut self, query: &str, info: StatementMetaWriter<W>) -> io::Result<()> {
-        warn!(self.log, "prepare: {}", query);
+        error!(self.log, "prepare: {}", query);
         info.reply(42, &[], &[])
     }
 
@@ -149,7 +149,7 @@ impl<W: io::Write> MysqlShim<W> for SoupBackend {
         _: ParamParser,
         results: QueryResultWriter<W>,
     ) -> io::Result<()> {
-        warn!(self.log, "exec: {}", id);
+        error!(self.log, "exec: {}", id);
         results.completed(0, 0)
     }
 
