@@ -824,7 +824,7 @@ mod tests {
             let qid = query_id_hash(
                 &["articles", "users"],
                 &[&Column::from("articles.author"), &Column::from("users.id")],
-                &[&Column::from("articles.title"), &Column::from("users.name")],
+                &[&Column::from("users.name"), &Column::from("articles.title")],
             );
             // join node
             let new_join_view = get_node(&inc, mig, &format!("q_{:x}_n0", qid));
@@ -988,7 +988,7 @@ mod tests {
 
             // Add the same query again
             let ncount = mig.graph().node_count();
-            let res = inc.add_query("SELECT name, id FROM users WHERE users.id = 42;", None, mig);
+            let res = inc.add_query("SELECT id, name FROM users WHERE users.id = 42;", None, mig);
             assert!(res.is_ok());
             // should have added no more nodes
             let qfp = res.unwrap();
@@ -996,6 +996,16 @@ mod tests {
             assert_eq!(mig.graph().node_count(), ncount);
             // should have ended up with the same leaf node
             assert_eq!(qfp.query_leaf, leaf);
+
+            // Add the same query again, but project columns in a different order
+            let ncount = mig.graph().node_count();
+            let res = inc.add_query("SELECT name, id FROM users WHERE users.id = 42;", None, mig);
+            assert!(res.is_ok());
+            // should have added two more nodes (project and reader)
+            let qfp = res.unwrap();
+            assert_eq!(mig.graph().node_count(), ncount + 2);
+            // should NOT have ended up with the same leaf node
+            assert_ne!(qfp.query_leaf, leaf);
         });
     }
 
@@ -1257,8 +1267,8 @@ mod tests {
                     &Column::from("votes.aid"),
                 ],
                 &[
-                    &Column::from("articles.title"),
                     &Column::from("users.name"),
+                    &Column::from("articles.title"),
                     &Column::from("votes.uid"),
                 ],
             );
@@ -1357,8 +1367,8 @@ mod tests {
                     &Column::from("nested_users.id"),
                 ],
                 &[
-                    &Column::from("articles.title"),
                     &Column::from("nested_users.name"),
+                    &Column::from("articles.title"),
                 ],
             );
             // join node
