@@ -327,7 +327,7 @@ impl Worker {
                     continue;
                 }
             };
-            trace!(self.log, "worker polled"; "token" => token);
+            //trace!(self.log, "worker polled"; "token" => token);
 
             let refresh_truth = |shared: &mut SharedWorkerState| {
                 let truth = shared.truth.lock().unwrap();
@@ -374,7 +374,7 @@ impl Worker {
                 .get(sc.rit)
                 .expect("token resolves to unknown replica");
 
-            trace!(self.log, "worker handling replica event"; "replica" => sc.rit);
+            //trace!(self.log, "worker handling replica event"; "replica" => sc.rit);
 
             let all = &self.all;
             let ready = |fd: RawFd| all.reregister(&CachedRawFd(fd), Token(token));
@@ -443,6 +443,7 @@ impl Worker {
             let mut rearm = true;
 
             let mut from_ri = context.replica.id();
+            trace!(self.log, "worker handling replica event"; "replica" => ?from_ri);
 
             let mut resume_polling = |rit: usize, context: &mut ReplicaContext| {
                 let mut sends = Vec::new();
