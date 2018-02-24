@@ -80,12 +80,15 @@ impl SoupBackend {
             .entry(table.clone())
             .or_insert(self.soup.get_mutator(&table).unwrap());
 
-        match putter.put(
-            q.fields
-                .into_iter()
-                .map(|(_, v)| DataType::from(v))
-                .collect::<Vec<DataType>>(),
-        ) {
+        let schema: Vec<String> = putter.columns().iter().cloned().collect();
+        let mut data: Vec<DataType> = vec![DataType::from(0 as i32); schema.len()];
+
+        for (c, v) in q.fields {
+            let idx = schema.iter().position(|f| *f == c.name).unwrap();
+            data[idx] = DataType::from(v);
+        }
+
+        match putter.put(data) {
             Ok(_) => Ok(()),
             Err(_) => results.error(msql_srv::ErrorKind::ER_PARSE_ERROR, "".as_bytes()),
         }
