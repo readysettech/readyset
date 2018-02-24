@@ -1461,7 +1461,7 @@ impl SqlToMirConverter {
                     OutputColumn::Literal(_) => None,
                 })
                 .collect();
-            let projected_literals: Vec<(String, DataType)> = qg.columns
+            let mut projected_literals: Vec<(String, DataType)> = qg.columns
                 .iter()
                 .filter_map(|oc| match *oc {
                     OutputColumn::Arithmetic(_) => None,
@@ -1471,6 +1471,14 @@ impl SqlToMirConverter {
                     }
                 })
                 .collect();
+
+            // if this query does not have any parameters, we must add a bogokey
+            let has_bogokey = if qg.parameters().is_empty() {
+                projected_literals.push(("bogokey".into(), DataType::from(0 as i32)));
+                true
+            } else {
+                false
+            };
 
             let ident = if has_leaf {
                 format!("q_{:x}_n{}", qg.signature().hash, new_node_count)
@@ -1490,7 +1498,6 @@ impl SqlToMirConverter {
             if has_leaf {
                 // We are supposed to add a `MaterializedLeaf` node keyed on the query
                 // parameters. For purely internal views (e.g., subqueries), this is not set.
-                let query_params = qg.parameters();
                 let columns = leaf_project_node
                     .borrow()
                     .columns()
@@ -1499,13 +1506,26 @@ impl SqlToMirConverter {
                     .map(|c| sanitize_leaf_column(c, name))
                     .collect();
 
+                let query_params = if has_bogokey {
+                    vec![
+                        Column {
+                            name: String::from("bogokey"),
+                            alias: None,
+                            table: Some(ident.clone()),
+                            function: None,
+                        },
+                    ]
+                } else {
+                    qg.parameters().into_iter().cloned().collect()
+                };
+
                 let leaf_node = MirNode::new(
                     name,
                     self.schema_version,
                     columns,
                     MirNodeType::Leaf {
                         node: leaf_project_node.clone(),
-                        keys: query_params.into_iter().cloned().collect(),
+                        keys: query_params,
                     },
                     vec![leaf_project_node.clone()],
                     vec![],
