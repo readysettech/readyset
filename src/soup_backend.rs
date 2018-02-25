@@ -89,8 +89,18 @@ impl SoupBackend {
         }
 
         match putter.put(data) {
-            Ok(_) => Ok(()),
-            Err(_) => results.error(msql_srv::ErrorKind::ER_PARSE_ERROR, "".as_bytes()),
+            Ok(_) => {
+                // XXX(malte): last_insert_id needs to be set correctly
+                // Could we have put more than one row?
+                results.completed(1, 0)
+            }
+            Err(e) => {
+                error!(self.log, "put error: {:?}", e);
+                results.error(
+                    msql_srv::ErrorKind::ER_UNKNOWN_ERROR,
+                    format!("{:?}", e).as_bytes(),
+                )
+            }
         }
     }
 
