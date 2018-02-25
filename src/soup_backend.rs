@@ -124,8 +124,11 @@ impl SoupBackend {
                     .or_insert(self.soup.get_getter(&qname).unwrap());
 
                 // now "execute" the query via a bogokey lookup
-                match getter.lookup(&DataType::None, true) {
-                    Ok(_) => results.completed(0, 0),
+                match getter.lookup(&DataType::from(0 as i32), true) {
+                    Ok(d) => {
+                        debug!(self.log, "get returned: {:?}", d);
+                        results.completed(0, 0)
+                    }
                     Err(_) => results.error(msql_srv::ErrorKind::ER_NO, "".as_bytes()),
                 }
             }
