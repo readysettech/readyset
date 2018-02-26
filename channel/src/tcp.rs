@@ -121,6 +121,7 @@ where
     for<'de> T: Deserialize<'de>,
 {
     pub fn new(stream: mio::net::TcpStream) -> Self {
+        stream.set_nodelay(true).unwrap(); // for acks
         Self {
             stream: BufReader::new(ThrottledReader::new(NonBlockingWriter::new(stream))),
             poisoned: false,

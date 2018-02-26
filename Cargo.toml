@@ -27,7 +27,7 @@ rand = "0.4.0"
 serde_derive = "1.0.8"
 serde_json = "1.0.2"
 slog = "2.0.6"
-#slog = { version = "2.0.6", features = ["max_level_trace", "release_max_level_debug"] }
+#slog = { version = "2.0.6", features = ["max_level_trace", "release_max_level_trace"] }
 slog-term = "2.0.1"
 tarpc = "0.9.0"
 tarpc-plugins = "0.2.0"
@@ -43,7 +43,7 @@ serde = { version = "1.0.8", features = ["rc"] }
 # git deps
 petgraph = { git = "https://github.com/fintelia/petgraph", branch = "serde", features = ["serde"] }
 memcached-rs = { git = "https://github.com/jonhoo/memcached-rs.git", branch = "expose-multi" }
-nom_sql = { git = "https://github.com/ms705/nom-sql.git", rev = "6c08e9c28caf40cc3014fd5eecee8d07fbf2023e" }
+nom_sql = { git = "https://github.com/ms705/nom-sql.git", rev = "75cec7e5c9104dd9ffbe979b6d881546a7ed2677" }
 
 # local deps
 channel = { path = "channel" }

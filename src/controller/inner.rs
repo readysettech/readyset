@@ -457,7 +457,6 @@ impl ControllerInner {
         // *unrelated* reader node. to account for this, readers keep track of what node they are
         // "for", and we simply search for the appropriate reader by that metric. since we know
         // that the reader must be relatively close, a BFS search is the way to go.
-        // presumably only
         let mut bfs = Bfs::new(&self.ingredients, node);
         let mut reader = None;
         while let Some(child) = bfs.next(&self.ingredients) {
@@ -476,7 +475,17 @@ impl ControllerInner {
     /// Obtain a `RemoteGetterBuilder` that can be sent to a client and then used to query a given
     /// (already maintained) reader node called `name`.
     pub fn getter_builder(&self, name: &str) -> Option<RemoteGetterBuilder> {
-        let node = *self.outputs().get(name)?;
+        // first try to resolve the node via the recipe, which handles aliasing between identical
+        // queries.
+        let node = match self.recipe.node_addr_for(name) {
+            Ok(ni) => ni,
+            Err(_) => {
+                // if the recipe doesn't know about this query, traverse the graph.
+                // we need this do deal with manually constructed graphs (e.g., in tests).
+                *self.outputs().get(name)?
+            }
+        };
+
         self.find_getter_for(node).map(|r| {
             let domain = self.ingredients[r].domain();
             let shards = (0..self.domains[&domain].shards())
@@ -502,7 +511,10 @@ impl ControllerInner {
     /// Obtain a MutatorBuild that can be used to construct a Mutator to perform writes and deletes
     /// from the given named base node.
     pub fn mutator_builder(&self, base: &str) -> Option<MutatorBuilder> {
-        let ni = *self.inputs().get(base)?;
+        let ni = match self.recipe.node_addr_for(base) {
+            Ok(ni) => ni,
+            Err(_) => *self.inputs().get(base)?,
+        };
         let node = &self.ingredients[ni];
 
         trace!(self.log, "creating mutator"; "for" => base);
