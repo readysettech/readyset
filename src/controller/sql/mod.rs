@@ -184,7 +184,7 @@ impl SqlIncorporator {
                     .expect("query graph should be present");
                 // note that this also checks the *order* in which parameters are specified; a
                 // different order means that we cannot simply reuse the existing reader.
-                if false && existing_qg.signature() == qg.signature()
+                if existing_qg.signature() == qg.signature()
                     && existing_qg.parameters() == qg.parameters()
                 {
                     // we already have this exact query, down to the exact same reader key columns
@@ -203,7 +203,7 @@ impl SqlIncorporator {
                     );
 
                     return (qg, QueryGraphReuse::ExactMatch(mir_query.leaf.clone()));
-                } else if false && existing_qg.signature() == qg.signature() {
+                } else if existing_qg.signature() == qg.signature() {
                     use self::query_graph::OutputColumn;
 
                     // if any of our columns are grouped expressions, we can't reuse here, since
