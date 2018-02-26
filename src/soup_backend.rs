@@ -84,7 +84,10 @@ impl SoupBackend {
         let mut data: Vec<DataType> = vec![DataType::from(0 as i32); schema.len()];
 
         for (c, v) in q.fields {
-            let idx = schema.iter().position(|f| *f == c.name).unwrap();
+            let idx = schema
+                .iter()
+                .position(|f| *f == c.name)
+                .expect(&format!("no column named '{}'", c.name));
             data[idx] = DataType::from(v);
         }
 
