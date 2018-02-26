@@ -52,7 +52,7 @@ impl SoupBackend {
         q: &str,
         results: QueryResultWriter<W>,
     ) -> io::Result<()> {
-        match self.soup.extend_recipe(format!("{}", q)) {
+        match self.soup.extend_recipe(format!("{};", q)) {
             Ok(_) => {
                 // no rows to return
                 // TODO(malte): potentially eagerly cache the mutator for this table
