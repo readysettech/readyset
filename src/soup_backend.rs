@@ -1,4 +1,5 @@
 use distributary::{ControllerHandle, DataType, Mutator, RemoteGetter, RpcError, ZookeeperAuthority};
+use regex::Regex;
 use msql_srv::{self, *};
 use nom_sql;
 use slog;
@@ -176,7 +177,12 @@ impl<W: io::Write> MysqlShim<W> for SoupBackend {
     fn on_query(&mut self, query: &str, results: QueryResultWriter<W>) -> io::Result<()> {
         debug!(self.log, "query: {}", query);
 
+        let query = Regex::new(r"(?s)/\*.*\*/").unwrap().replace_all(query, "");
+        let query = Regex::new(r" +").unwrap().replace_all(&query, " ");
+
         if query.to_lowercase().contains("show tables")
+            || query.to_lowercase().contains("show databases")
+            || query.to_lowercase().contains("show engines")
             || query.to_lowercase().starts_with("rollback")
             || query.to_lowercase().starts_with("alter table")
             || query.to_lowercase().starts_with("commit")
@@ -185,9 +191,9 @@ impl<W: io::Write> MysqlShim<W> for SoupBackend {
             return results.completed(0, 0);
         }
 
-        match nom_sql::parse_query(query) {
+        match nom_sql::parse_query(&query) {
             Ok(q) => match q {
-                nom_sql::SqlQuery::CreateTable(_) => self.handle_create_table(query, results),
+                nom_sql::SqlQuery::CreateTable(_) => self.handle_create_table(&query, results),
                 nom_sql::SqlQuery::Insert(q) => self.handle_insert(q, results),
                 nom_sql::SqlQuery::Select(q) => self.handle_select(q, results),
                 nom_sql::SqlQuery::Set(q) => self.handle_set(q, results),
@@ -195,7 +201,7 @@ impl<W: io::Write> MysqlShim<W> for SoupBackend {
                     return results.error(
                         msql_srv::ErrorKind::ER_NOT_SUPPORTED_YET,
                         "unsupported query".as_bytes(),
-                    )
+                    );
                 }
             },
             Err(e) => {
