@@ -268,6 +268,45 @@ fn it_queries() {
 }
 
 #[test]
+fn it_queries_many_rows() {
+    TestingShim::new(
+        |_, w| {
+            let cols = &[
+                Column {
+                    table: String::new(),
+                    column: "a".to_owned(),
+                    coltype: myc::constants::ColumnType::MYSQL_TYPE_SHORT,
+                    colflags: myc::constants::ColumnFlags::empty(),
+                },
+                Column {
+                    table: String::new(),
+                    column: "b".to_owned(),
+                    coltype: myc::constants::ColumnType::MYSQL_TYPE_SHORT,
+                    colflags: myc::constants::ColumnFlags::empty(),
+                },
+            ];
+            let mut w = w.start(cols)?;
+            w.write_col(1024i16)?;
+            w.write_col(1025i16)?;
+            w.end_row()?;
+            w.write_row(&[1024i16, 1025i16])?;
+            w.finish()
+        },
+        |_| unreachable!(),
+        |_, _, _| unreachable!(),
+    ).test(|db| {
+        let mut rows = 0;
+        for row in db.query("SELECT a, b FROM foo").unwrap() {
+            let row = row.unwrap();
+            assert_eq!(row.get::<i16, _>(0), Some(1024));
+            assert_eq!(row.get::<i16, _>(1), Some(1025));
+            rows += 1;
+        }
+        assert_eq!(rows, 2);
+    })
+}
+
+#[test]
 fn it_prepares() {
     let cols = vec![
         Column {
@@ -311,6 +350,55 @@ fn it_prepares() {
                 .unwrap()
                 .unwrap();
             assert_eq!(row.get::<i16, _>(0), Some(1024i16));
+        })
+}
+
+#[test]
+fn it_prepares_many() {
+    let cols = vec![
+        Column {
+            table: String::new(),
+            column: "a".to_owned(),
+            coltype: myc::constants::ColumnType::MYSQL_TYPE_SHORT,
+            colflags: myc::constants::ColumnFlags::empty(),
+        },
+        Column {
+            table: String::new(),
+            column: "b".to_owned(),
+            coltype: myc::constants::ColumnType::MYSQL_TYPE_SHORT,
+            colflags: myc::constants::ColumnFlags::empty(),
+        },
+    ];
+    let cols2 = cols.clone();
+
+    TestingShim::new(
+        |_, _| unreachable!(),
+        |q| {
+            assert_eq!(q, "SELECT a, b FROM x");
+            41
+        },
+        move |stmt, params, w| {
+            assert_eq!(stmt, 41);
+            assert_eq!(params.len(), 0);
+
+            let mut w = w.start(&cols)?;
+            w.write_col(1024i16)?;
+            w.write_col(1025i16)?;
+            w.end_row()?;
+            w.write_row(&[1024i16, 1025i16])?;
+            w.finish()
+        },
+    ).with_params(Vec::new())
+        .with_columns(cols2)
+        .test(|db| {
+            let mut rows = 0;
+            for row in db.prep_exec("SELECT a, b FROM x", ()).unwrap() {
+                let row = row.unwrap();
+                assert_eq!(row.get::<i16, _>(0), Some(1024));
+                assert_eq!(row.get::<i16, _>(1), Some(1025));
+                rows += 1;
+            }
+            assert_eq!(rows, 2);
         })
 }
 
