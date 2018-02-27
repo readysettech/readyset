@@ -80,6 +80,7 @@ pub enum ReadReply {
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct RemoteGetterBuilder {
     pub(crate) node: NodeIndex,
+    pub(crate) columns: Vec<String>,
     pub(crate) shards: Vec<(SocketAddr, bool)>,
 }
 
@@ -88,6 +89,7 @@ impl RemoteGetterBuilder {
     pub fn build(self) -> RemoteGetter {
         RemoteGetter {
             node: self.node,
+            columns: self.columns,
             shards: self.shards
                 .iter()
                 .map(|&(ref addr, is_local)| RpcClient::connect(addr, is_local).unwrap())
@@ -99,10 +101,16 @@ impl RemoteGetterBuilder {
 /// Struct to query the contents of a materialized view.
 pub struct RemoteGetter {
     node: NodeIndex,
+    columns: Vec<String>,
     shards: Vec<RpcClient<LocalOrNot<ReadQuery>, LocalOrNot<ReadReply>>>,
 }
 
 impl RemoteGetter {
+    /// Return the column schema of the view this getter is associated with.
+    pub fn columns(&self) -> &[String] {
+        self.columns.as_slice()
+    }
+
     /// Query for the size of a specific view.
     pub fn len(&mut self) -> Result<usize, ()> {
         if self.shards.len() == 1 {
