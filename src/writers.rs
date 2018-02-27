@@ -91,7 +91,8 @@ where
         w.write_u32::<LittleEndian>(1024)?;
         w.write_u8(c.coltype as u8)?;
         w.write_u16::<LittleEndian>(c.colflags.bits())?;
-        w.write_all(&[0x00])?;
+        w.write_all(&[0x00])?; // decimals
+        w.write_all(&[0x00, 0x00])?; // unused
         w.end_packet()?;
         empty = false;
     }
