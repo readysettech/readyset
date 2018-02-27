@@ -131,9 +131,42 @@ impl SoupBackend {
                 match getter.lookup(&DataType::from(0 as i32), true) {
                     Ok(d) => {
                         debug!(self.log, "get returned: {:?}", d);
-                        results.completed(0, 0)
+                        if d.len() > 0 {
+                            let mut schema: Vec<msql_srv::Column> = Vec::new();
+                            for fe in q.fields {
+                                match fe {
+                                    nom_sql::FieldExpression::Col(c) => {
+                                        schema.push(msql_srv::Column {
+                                            table: c.table.unwrap_or(String::new()),
+                                            column: c.name,
+                                            coltype: msql_srv::ColumnType::MYSQL_TYPE_STRING,
+                                            colflags: msql_srv::ColumnFlags::empty(),
+                                        })
+                                    }
+                                    _ => unimplemented!(),
+                                }
+                            }
+                            println!("schema: {:?}", schema);
+                            let mut rw = results.start(schema.as_slice()).unwrap();
+                            for r in d {
+                                let mut row: Vec<_> =
+                                    r.into_iter().map(|d| format!("{}", d)).collect();
+                                // drop bogokey
+                                row.pop();
+                                rw.write_row(row);
+                            }
+                            rw.finish()
+                        } else {
+                            results.completed(0, 0)
+                        }
                     }
-                    Err(_) => results.error(msql_srv::ErrorKind::ER_NO, "".as_bytes()),
+                    Err(_) => {
+                        error!(self.log, "error executing SELECT");
+                        results.error(
+                            msql_srv::ErrorKind::ER_UNKNOWN_ERROR,
+                            "Soup returned an error".as_bytes(),
+                        )
+                    }
                 }
             }
             Err(e) => {
