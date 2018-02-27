@@ -219,9 +219,8 @@ where
         if self.is_bin {
             self.writer.write_all(&self.data[..])?;
             self.data.clear();
-        } else {
-            self.writer.end_packet()?;
         }
+        self.writer.end_packet()?;
         self.col = 0;
 
         Ok(())
