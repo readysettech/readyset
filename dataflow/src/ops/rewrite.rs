@@ -74,7 +74,7 @@ impl Ingredient for Rewrite {
         state: &StateMap,
     ) -> ProcessingResult {
         assert!(from == *self.src || from == *self.should_rewrite);
-        let mut misses = Vec::new();
+        let misses = Vec::new();
         let mut emit_rs = Vec::with_capacity(rs.len());
 
         if rs.is_empty() {
