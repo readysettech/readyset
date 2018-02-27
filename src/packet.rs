@@ -24,7 +24,7 @@ impl<W: Write> Write for PacketWriter<W> {
     }
 
     fn flush(&mut self) -> io::Result<()> {
-        self.maybe_end_packet(false)?;
+        self.maybe_end_packet()?;
         self.w.flush()
     }
 }
@@ -38,9 +38,9 @@ impl<W: Write> PacketWriter<W> {
         }
     }
 
-    fn maybe_end_packet(&mut self, force: bool) -> io::Result<()> {
+    fn maybe_end_packet(&mut self) -> io::Result<()> {
         let len = self.to_write.len() - 4;
-        if len != 0 || force {
+        if len != 0 {
             LittleEndian::write_u24(&mut self.to_write[0..3], len as u32);
             self.to_write[3] = self.seq;
             self.seq = self.seq.wrapping_add(1);
@@ -52,7 +52,7 @@ impl<W: Write> PacketWriter<W> {
     }
 
     pub fn end_packet(&mut self) -> io::Result<()> {
-        self.maybe_end_packet(true)
+        self.maybe_end_packet()
     }
 }
 
