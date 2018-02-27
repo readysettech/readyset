@@ -398,7 +398,10 @@ impl ToMysqlValue for Vec<u8> {
     }
 }
 
-impl<'a> ToMysqlValue for &'a [u8] {
+impl<'a, T> ToMysqlValue for &'a T
+where
+    T: ToMysqlValue + ?Sized,
+{
     fn to_mysql_text<W: Write>(&self, w: &mut W) -> io::Result<()> {
         (*self).to_mysql_text(w)
     }
