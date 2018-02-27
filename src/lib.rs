@@ -36,7 +36,25 @@
 //!     fn on_close(&mut self, _: u32) {}
 //!
 //!     fn on_query(&mut self, _: &str, results: QueryResultWriter<W>) -> io::Result<()> {
-//!         results.completed(0, 0)
+//!         let cols = [
+//!             Column {
+//!                 table: "foo".to_string(),
+//!                 column: "a".to_string(),
+//!                 coltype: ColumnType::MYSQL_TYPE_LONGLONG,
+//!                 colflags: ColumnFlags::empty(),
+//!             },
+//!             Column {
+//!                 table: "foo".to_string(),
+//!                 column: "b".to_string(),
+//!                 coltype: ColumnType::MYSQL_TYPE_STRING,
+//!                 colflags: ColumnFlags::empty(),
+//!             },
+//!         ];
+//!
+//!         let mut rw = results.start(&cols)?;
+//!         rw.write_col(42)?;
+//!         rw.write_col("b's value")?;
+//!         rw.finish()
 //!     }
 //! }
 //!
@@ -52,7 +70,7 @@
 //!
 //!     let mut db = mysql::Conn::new(&format!("mysql://127.0.0.1:{}", port)).unwrap();
 //!     assert_eq!(db.ping(), true);
-//!     assert_eq!(db.query("SELECT a, b FROM foo").unwrap().count(), 0);
+//!     assert_eq!(db.query("SELECT a, b FROM foo").unwrap().count(), 1);
 //!     drop(db);
 //!     jh.join().unwrap();
 //! }
