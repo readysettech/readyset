@@ -1412,4 +1412,38 @@ mod tests {
             assert_eq!(union_view.description(), format!("3:[0, 1] ⋃ 6:[0, 1]"));
         });
     }
+
+    #[test]
+    fn it_distinguishes_predicates() {
+        // set up graph
+        let mut g = ControllerBuilder::default().build_local();
+        g.migrate(|mig| {
+            let mut inc = SqlIncorporator::default();
+            // Establish a base write type
+            assert!(
+                inc.add_query("CREATE TABLE users (id int, name varchar(40));", None, mig)
+                    .is_ok()
+            );
+            // Should have source and "users" base table node
+            assert_eq!(mig.graph().node_count(), 2);
+            assert_eq!(get_node(&inc, mig, "users").name(), "users");
+            assert_eq!(get_node(&inc, mig, "users").fields(), &["id", "name"]);
+            assert_eq!(get_node(&inc, mig, "users").description(), "B");
+
+            // Add a new query
+            let res = inc.add_query("SELECT id, name FROM users WHERE users.id = 42;", None, mig);
+            assert!(res.is_ok());
+            let leaf = res.unwrap().query_leaf;
+
+            // Add query with a different predicate
+            let ncount = mig.graph().node_count();
+            let res = inc.add_query("SELECT id, name FROM users WHERE users.id = 50;", None, mig);
+            assert!(res.is_ok());
+            let qfp = res.unwrap();
+             // should NOT have ended up with the same leaf node
+            assert_ne!(qfp.query_leaf, leaf);
+            // should have added three more nodes (filter, project and reader)
+            assert_eq!(mig.graph().node_count(), ncount + 3);
+        });
+    }
 }
