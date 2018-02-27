@@ -218,7 +218,7 @@ mod tests {
 
     #[test]
     fn it_compares_signatures() {
-        use sql::query_graph::to_query_graph;
+        use controller::sql::query_graph::to_query_graph;
         use nom_sql::parser::{parse_query, SqlQuery};
 
         let qa = parse_query("SELECT b.c3 FROM a, b WHERE a.c1 = 42;").unwrap();
