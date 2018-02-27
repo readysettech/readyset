@@ -50,17 +50,27 @@ impl State {
         }
     }
 
+    pub fn process_records(&mut self, records: &Records) {
+        match *self {
+            State::InMemory(ref mut s) => s.process_records(records),
+            State::Persistent(ref mut s) => s.process_records(records),
+        }
+    }
+
     pub fn insert(&mut self, r: Vec<DataType>, partial_tag: Option<Tag>) -> bool {
         match *self {
             State::InMemory(ref mut s) => s.insert(r, partial_tag),
-            State::Persistent(ref mut s) => s.insert(r, partial_tag),
+            State::Persistent(ref mut s) => {
+                assert!(partial_tag.is_none(), "Bases can't be partial");
+                PersistentState::insert(r, &s.indices, &s.connection)
+            }
         }
     }
 
     pub fn remove(&mut self, r: &[DataType]) -> bool {
         match *self {
             State::InMemory(ref mut s) => s.remove(r),
-            State::Persistent(ref mut s) => s.remove(r),
+            State::Persistent(ref mut s) => PersistentState::remove(r, &s.indices, &s.connection),
         }
     }
 
@@ -194,6 +204,55 @@ impl PersistentState {
         bincode::deserialize(&row).unwrap()
     }
 
+    // Builds up an INSERT query on the form of:
+    // `INSERT INTO store (index_0, index_1, row) VALUES (...)`
+    // where row is a serialized representation of r.
+    fn insert(r: Vec<DataType>, indices: &HashSet<usize>, connection: &Connection) -> bool {
+        let columns = format!(
+            "row, {}",
+            indices
+                .iter()
+                .map(|index| format!("index_{}", index))
+                .collect::<Vec<String>>()
+                .join(", ")
+        );
+
+        let placeholders = (1..(indices.len() + 2))
+            .map(|placeholder| format!("?{}", placeholder))
+            .collect::<Vec<String>>()
+            .join(", ");
+
+        let mut statement = connection
+            .prepare_cached(&format!(
+                "INSERT INTO store ({}) VALUES ({})",
+                columns, placeholders
+            ))
+            .unwrap();
+
+        let row = bincode::serialize(&r).unwrap();
+        let mut values: Vec<&ToSql> = vec![&row];
+        let mut index_values = indices
+            .iter()
+            .map(|index| &r[*index] as &ToSql)
+            .collect::<Vec<&ToSql>>();
+
+        values.append(&mut index_values);
+        statement.execute(&values[..]).unwrap();
+        true
+    }
+
+    fn remove(r: &[DataType], indices: &HashSet<usize>, connection: &Connection) -> bool {
+        let clauses = Self::build_clause(indices.iter());
+        let index_values = indices
+            .iter()
+            .map(|index| &r[*index] as &ToSql)
+            .collect::<Vec<&ToSql>>();
+
+        let query = format!("DELETE FROM store WHERE {}", clauses);
+        let mut statement = connection.prepare_cached(&query).unwrap();
+        statement.execute(&index_values[..]).unwrap() > 0
+    }
+
     fn add_key(&mut self, columns: &[usize], partial: Option<Vec<Tag>>) {
         assert!(partial.is_none(), "Bases can't be partial");
         // Add each of the individual index columns (index_0, index_1...):
@@ -235,49 +294,28 @@ impl PersistentState {
             let rows = self.cloned_records();
             self.clear();
             for row in rows {
-                self.insert(row, None);
+                Self::insert(row, &self.indices, &mut self.connection);
             }
         }
 
         self.connection.execute(&index_query, &[]).unwrap();
     }
 
-    // Builds up an INSERT query on the form of:
-    // `INSERT INTO store (index_0, index_1, row) VALUES (...)`
-    // where row is a serialized representation of r.
-    fn insert(&mut self, r: Vec<DataType>, partial_tag: Option<Tag>) -> bool {
-        assert!(partial_tag.is_none(), "Bases can't be partial");
-        let columns = format!(
-            "row, {}",
-            self.indices
-                .iter()
-                .map(|index| format!("index_{}", index))
-                .collect::<Vec<String>>()
-                .join(", ")
-        );
+    fn process_records(&mut self, records: &Records) {
+        let transaction = self.connection.transaction().unwrap();
+        for r in records.iter() {
+            match *r {
+                Record::Positive(ref r) => {
+                    Self::insert(r.clone(), &self.indices, &transaction);
+                }
+                Record::Negative(ref r) => {
+                    Self::remove(r, &self.indices, &transaction);
+                }
+                Record::BaseOperation(..) => unreachable!(),
+            }
+        }
 
-        let placeholders = (1..(self.indices.len() + 2))
-            .map(|placeholder| format!("?{}", placeholder))
-            .collect::<Vec<String>>()
-            .join(", ");
-
-        let mut statement = self.connection
-            .prepare_cached(&format!(
-                "INSERT INTO store ({}) VALUES ({})",
-                columns, placeholders
-            ))
-            .unwrap();
-
-        let row = bincode::serialize(&r).unwrap();
-        let mut values: Vec<&ToSql> = vec![&row];
-        let mut index_values = self.indices
-            .iter()
-            .map(|index| &r[*index] as &ToSql)
-            .collect::<Vec<&ToSql>>();
-
-        values.append(&mut index_values);
-        statement.execute(&values[..]).unwrap();
-        true
+        transaction.commit().unwrap();
     }
 
     // Retrieves rows from SQlite by building up a SELECT query on the form of
@@ -305,18 +343,6 @@ impl PersistentState {
             .collect::<Vec<_>>();
 
         LookupResult::Some(Cow::Owned(data))
-    }
-
-    fn remove(&mut self, r: &[DataType]) -> bool {
-        let clauses = Self::build_clause(self.indices.iter());
-        let index_values = self.indices
-            .iter()
-            .map(|index| &r[*index] as &ToSql)
-            .collect::<Vec<&ToSql>>();
-
-        let query = format!("DELETE FROM store WHERE {}", clauses);
-        let mut statement = self.connection.prepare_cached(&query).unwrap();
-        statement.execute(&index_values[..]).unwrap() > 0
     }
 
     fn cloned_records(&self) -> Vec<Vec<DataType>> {
@@ -427,6 +453,22 @@ impl MemoryState {
 
     fn is_partial(&self) -> bool {
         self.state.iter().any(|s| s.partial())
+    }
+
+    fn process_records(&mut self, records: &Records) {
+        for r in records.iter() {
+            match *r {
+                Record::Positive(ref r) => {
+                    let hit = self.insert(r.clone(), None);
+                    debug_assert!(hit);
+                }
+                Record::Negative(ref r) => {
+                    let hit = self.remove(r);
+                    debug_assert!(hit);
+                }
+                Record::BaseOperation(..) => unreachable!(),
+            }
+        }
     }
 
     fn insert(&mut self, r: Vec<DataType>, partial_tag: Option<Tag>) -> bool {
@@ -767,6 +809,45 @@ mod tests {
             LookupResult::Some(rows) => assert_eq!(&*rows[0], &row),
             _ => unreachable!(),
         };
+    }
+
+    fn process_records(mut state: State) {
+        let records: Records = vec![
+            (vec![1.into(), "A".into()], true),
+            (vec![2.into(), "B".into()], true),
+            (vec![3.into(), "C".into()], true),
+            (vec![1.into(), "A".into()], false),
+        ].into();
+
+        state.add_key(&[0], None);
+        state.process_records(&records);
+
+        // Make sure the first record has been deleted:
+        match state.lookup(&[0], &KeyType::Single(&records[0][0])) {
+            LookupResult::Some(rows) => assert_eq!(rows.len(), 0),
+            _ => unreachable!(),
+        };
+
+        // Then check that the rest exist:
+        for i in 1..3 {
+            let record = &records[i];
+            match state.lookup(&[0], &KeyType::Single(&record[0])) {
+                LookupResult::Some(rows) => assert_eq!(&*rows[0], &**record),
+                _ => unreachable!(),
+            };
+        }
+    }
+
+    #[test]
+    fn persistent_state_process_records() {
+        let state = setup_persistent();
+        process_records(state);
+    }
+
+    #[test]
+    fn memory_state_process_records() {
+        let state = State::default();
+        process_records(state);
     }
 
     #[test]

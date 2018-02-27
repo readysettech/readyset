@@ -280,18 +280,6 @@ pub fn materialize(rs: &mut Records, partial: Option<Tag>, state: Option<&mut St
             }
         });
     } else {
-        for r in rs.iter() {
-            match *r {
-                Record::Positive(ref r) => {
-                    let hit = state.insert(r.clone(), None);
-                    debug_assert!(hit);
-                }
-                Record::Negative(ref r) => {
-                    let hit = state.remove(r);
-                    debug_assert!(hit);
-                }
-                Record::BaseOperation(..) => unreachable!(),
-            }
-        }
+        state.process_records(rs);
     }
 }
