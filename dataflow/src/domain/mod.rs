@@ -305,10 +305,6 @@ impl Domain {
             // for the chosen tag so they'll start replay.
             let key = miss_key.clone(); // :(
             if let TriggerEndpoint::Local(..) = self.replay_paths[&tag].trigger {
-                if self.already_requested(&tag, &key[..]) {
-                    return;
-                }
-
                 trace!(self.log,
                        "got replay request";
                        "tag" => tag.id(),
@@ -769,53 +765,6 @@ impl Domain {
         }
     }
 
-    fn already_requested(&mut self, tag: &Tag, key: &[DataType]) -> bool {
-        match self.replay_paths.get(tag).unwrap() {
-            &ReplayPath {
-                trigger: TriggerEndpoint::End(..),
-                ref path,
-                ..
-            }
-            | &ReplayPath {
-                trigger: TriggerEndpoint::Local(..),
-                ref path,
-                ..
-            } => {
-                // a miss in a reader! make sure we don't re-do work
-                let addr = path.last().unwrap().node;
-                let n = self.nodes[&addr].borrow();
-                let mut already_replayed = false;
-                n.with_reader(|r| {
-                    if let Some(wh) = r.writer() {
-                        if wh.try_find_and(&key[0], |_| ()).unwrap().0.is_some() {
-                            // key has already been replayed!
-                            already_replayed = true;
-                        }
-                    }
-                });
-                if already_replayed {
-                    return true;
-                }
-
-                let mut had = false;
-                if let Some(ref mut prev) = self.reader_triggered.get_mut(&addr) {
-                    if prev.contains(&key[0]) {
-                        // we've already requested a replay of this key
-                        return true;
-                    }
-                    prev.insert(key[0].clone());
-                    had = true;
-                }
-
-                if !had {
-                    self.reader_triggered.insert(addr, HashSet::new());
-                }
-                false
-            }
-            _ => false,
-        }
-    }
-
     fn handle(&mut self, m: Box<Packet>, sends: &mut EnqueuedSends) {
         m.trace(PacketEvent::Handle);
 
@@ -972,6 +921,8 @@ impl Domain {
                                         };
 
                                         let mut m = box Packet::RequestReaderReplay {
+                                            // if this because multi-column, also modify [0] in
+                                            // handling of Packet::RequestReaderReplay
                                             key: vec![key.clone()],
                                             col: key_col,
                                             node: node,
@@ -1081,18 +1032,39 @@ impl Domain {
                         );
                     }
                     Packet::RequestReaderReplay { key, col, node } => {
-                        self.find_tags_and_replay(key, col, node, sends);
+                        // the reader could have raced with us filling in the key after some
+                        // *other* reader requested it, so let's double check that it indeed still
+                        // misses!
+                        let still_miss = self.nodes[&node]
+                            .borrow()
+                            .with_reader(|r| {
+                                r.writer()
+                                    .expect("reader replay requested for non-materialized reader")
+                                    .try_find_and(&key[0], |_| ())
+                                    .expect("reader replay requested for non-ready reader")
+                                    .0
+                                    .is_none()
+                            })
+                            .expect("reader replay requested for non-reader node");
+
+                        // ensure that we haven't already requested a replay of this key
+                        if still_miss
+                            && self.reader_triggered
+                                .entry(node)
+                                .or_default()
+                                .insert(key[0].clone())
+                        {
+                            self.find_tags_and_replay(key, col, node, sends);
+                        }
                     }
                     Packet::RequestPartialReplay { tag, key } => {
-                        if !self.already_requested(&tag, &key) {
-                            trace!(
-                                self.log,
-                               "got replay request";
-                               "tag" => tag.id(),
-                               "key" => format!("{:?}", key)
-                            );
-                            self.seed_replay(tag, &key[..], None, sends);
-                        }
+                        trace!(
+                            self.log,
+                           "got replay request";
+                           "tag" => tag.id(),
+                           "key" => format!("{:?}", key)
+                        );
+                        self.seed_replay(tag, &key[..], None, sends);
                     }
                     Packet::StartReplay { tag, from } => {
                         use std::thread;
