@@ -175,6 +175,8 @@ impl DomainBuilder {
             Some(self.shard)
         };
 
+        let log = log.new(o!("domain" => self.index.0, "shard" => self.shard));
+
         let debug_tx = self.debug_addr
             .as_ref()
             .map(|addr| TcpSender::connect(addr).unwrap());
