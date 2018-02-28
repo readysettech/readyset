@@ -34,28 +34,37 @@ fn main() {
                 .help("Zookeeper connection info."),
         )
         .arg(
+            Arg::with_name("deployment")
+                .long("deployment")
+                .short("d")
+                .required(true)
+                .takes_value(true)
+                .help("Soup deployment ID."),
+        )
+        .arg(
             Arg::with_name("clean")
                 .short("c")
                 .long("clean")
                 .takes_value(false)
-                .required_unless("dump")
+                .required_unless("show")
                 .help("Remove existing configuration."),
         )
         .arg(
-            Arg::with_name("dump")
-                .short("d")
-                .long("dump")
+            Arg::with_name("show")
+                .short("s")
+                .long("show")
                 .takes_value(false)
                 .required_unless("clean")
-                .help("Dump current configuration to stdout."),
+                .help("Print current configuration to stdout."),
         )
         .get_matches();
 
-    let zookeeper_addr = matches.value_of("zookeeper").unwrap();
+    let deployment = matches.value_of("deployment").unwrap();
+    let zookeeper_addr = format!("{}/{}", matches.value_of("zookeeper").unwrap(), deployment);
     let clean = matches.is_present("clean");
     let dump = matches.is_present("dump");
 
-    let zk = ZooKeeper::connect(zookeeper_addr, Duration::from_secs(1), EventWatcher).unwrap();
+    let zk = ZooKeeper::connect(&zookeeper_addr, Duration::from_secs(1), EventWatcher).unwrap();
 
     if dump {
         let (ref current_data, ref _stat) = match zk.get_data(STATE_KEY, false) {
