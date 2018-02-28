@@ -53,6 +53,7 @@ pub struct TcpSender<T> {
 
 impl<T: Serialize> TcpSender<T> {
     pub fn new(stream: std::net::TcpStream) -> Result<Self, io::Error> {
+        stream.set_nodelay(true).unwrap();
         Ok(Self {
             stream: BufStream::new(stream),
             poisoned: false,
