@@ -96,18 +96,21 @@ impl SoupBackend {
             .entry(table.clone())
             .or_insert(self.soup.get_mutator(&table).unwrap());
 
-        let schema: Vec<String> = putter.columns().iter().cloned().collect();
-        let mut data: Vec<DataType> = vec![DataType::from(0 as i32); schema.len()];
+        let schema: Vec<String> = putter.columns().to_vec();
+        let mut data: Vec<Vec<DataType>> =
+            vec![vec![DataType::from(0 as i32); schema.len()]; q.data.len()];
 
-        for (c, v) in q.fields {
-            let idx = schema
-                .iter()
-                .position(|f| *f == c.name)
-                .expect(&format!("no column named '{}'", c.name));
-            data[idx] = DataType::from(v);
+        for (ri, ref row) in q.data.iter().enumerate() {
+            for (ci, c) in q.fields.iter().enumerate() {
+                let idx = schema
+                    .iter()
+                    .position(|f| *f == c.name)
+                    .expect(&format!("no column named '{}'", c.name));
+                data[ri][idx] = DataType::from(row.get(ci).unwrap());
+            }
         }
 
-        match putter.put(data) {
+        match putter.multi_put(data) {
             Ok(_) => {
                 // XXX(malte): last_insert_id needs to be set correctly
                 // Could we have put more than one row?
