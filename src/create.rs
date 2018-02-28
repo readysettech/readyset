@@ -146,7 +146,7 @@ named!(pub field_specification_list<&[u8], Vec<ColumnSpecification> >,
                    ColumnSpecification {
                        column: identifier,
                        sql_type: t,
-                       constraints: constraints,
+                       constraints: constraints.into_iter().filter_map(|m|m).collect(),
                    }
                })
            ))
@@ -154,19 +154,25 @@ named!(pub field_specification_list<&[u8], Vec<ColumnSpecification> >,
 );
 
 /// Parse rule for a column definition contraint.
-named!(pub column_constraint<&[u8], ColumnConstraint>,
+named!(pub column_constraint<&[u8], Option<ColumnConstraint>>,
     alt_complete!(
           do_parse!(
               opt_multispace >>
               tag_no_case!("not null") >>
               opt_multispace >>
-              (ColumnConstraint::NotNull)
+              (Some(ColumnConstraint::NotNull))
+          )
+        | do_parse!(
+              opt_multispace >>
+              tag_no_case!("null") >>
+              opt_multispace >>
+              (None)
           )
         | do_parse!(
               opt_multispace >>
               tag_no_case!("auto_increment") >>
               opt_multispace >>
-              (ColumnConstraint::AutoIncrement)
+              (Some(ColumnConstraint::AutoIncrement))
           )
         | do_parse!(
               opt_multispace >>
@@ -184,19 +190,19 @@ named!(pub column_constraint<&[u8], ColumnConstraint>,
                   | do_parse!(tag_no_case!("current_timestamp") >> (Literal::CurrentTimestamp))
               ) >>
               opt_multispace >>
-              (ColumnConstraint::DefaultValue(def))
+              (Some(ColumnConstraint::DefaultValue(def)))
           )
         | do_parse!(
               opt_multispace >>
               tag_no_case!("primary key") >>
               opt_multispace >>
-              (ColumnConstraint::PrimaryKey)
+              (Some(ColumnConstraint::PrimaryKey))
           )
         | do_parse!(
               opt_multispace >>
               tag_no_case!("unique") >>
               opt_multispace >>
-              (ColumnConstraint::Unique)
+              (Some(ColumnConstraint::Unique))
           )
     )
 );
