@@ -50,7 +50,7 @@ named!(pub key_specification<&[u8], TableKey>,
               opt_multispace >>
               name: opt!(sql_identifier) >>
               opt_multispace >>
-              columns: delimited!(tag!("("), field_list, tag!(")")) >>
+              columns: delimited!(tag!("("), delimited!(opt_multispace, field_list, opt_multispace), tag!(")")) >>
               (match name {
                   Some(name) => {
                       let n = String::from(str::from_utf8(name).unwrap());
@@ -62,7 +62,7 @@ named!(pub key_specification<&[u8], TableKey>,
         | do_parse!(
               tag_no_case!("primary key") >>
               opt_multispace >>
-              columns: delimited!(tag!("("), field_list, tag!(")")) >>
+              columns: delimited!(tag!("("), delimited!(opt_multispace, field_list, opt_multispace), tag!(")")) >>
               opt!(complete!(do_parse!(
                           multispace >>
                           tag_no_case!("autoincrement") >>
@@ -77,7 +77,7 @@ named!(pub key_specification<&[u8], TableKey>,
               opt_multispace >>
               name: opt!(sql_identifier) >>
               opt_multispace >>
-              columns: delimited!(tag!("("), field_list, tag!(")")) >>
+              columns: delimited!(tag!("("), delimited!(opt_multispace, field_list, opt_multispace), tag!(")")) >>
               (match name {
                   Some(name) => {
                       let n = String::from(str::from_utf8(name).unwrap());
@@ -91,7 +91,7 @@ named!(pub key_specification<&[u8], TableKey>,
               opt_multispace >>
               name: sql_identifier >>
               opt_multispace >>
-              columns: delimited!(tag!("("), field_list, tag!(")")) >>
+              columns: delimited!(tag!("("), delimited!(opt_multispace, field_list, opt_multispace), tag!(")")) >>
               ({
                   let n = String::from(str::from_utf8(name).unwrap());
                   TableKey::Key(n, columns)
