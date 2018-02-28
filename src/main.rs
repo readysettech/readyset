@@ -2,6 +2,9 @@ extern crate distributary;
 extern crate regex;
 extern crate msql_srv;
 extern crate nom_sql;
+
+#[macro_use]
+extern crate lazy_static;
 #[macro_use]
 extern crate slog;
 
