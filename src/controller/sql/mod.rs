@@ -1415,6 +1415,7 @@ mod tests {
     }
 
     #[test]
+    #[ignore]
     fn it_distinguishes_predicates() {
         // set up graph
         let mut g = ControllerBuilder::default().build_local();

@@ -217,6 +217,7 @@ mod tests {
     }
 
     #[test]
+    #[ignore]
     fn it_compares_signatures() {
         use controller::sql::query_graph::to_query_graph;
         use nom_sql::parser::{parse_query, SqlQuery};
