@@ -424,14 +424,16 @@ fn it_works_with_sql_recipe() {
 }
 
 #[test]
-fn it_works_with_arithmetic_aliases() {
+fn forced_shuffle_despite_same_shard() {
+    // XXX: this test doesn't currently *fail* despite
+    // multiple trailing replay responses that are simply ignored...
+
     let mut g = ControllerBuilder::default().build_local();
     let sql = "
-        CREATE TABLE Car (cid int, pid int, brand varchar(255), PRIMARY KEY(cid));
-        CREATE TABLE Price (pid int, cent_price int, PRIMARY KEY(pid));
-        QUERY CarPrice: SELECT cid, ActualPrice.price FROM Car \
-            JOIN (SELECT pid, cent_price / 100 AS price FROM Price) AS ActualPrice \
-            ON Car.pid = ActualPrice.pid WHERE cid = ?;
+        CREATE TABLE Car (cid int, pid int, PRIMARY KEY(pid));
+        CREATE TABLE Price (pid int, price int, PRIMARY KEY(pid));
+        QUERY CarPrice: SELECT cid, price FROM Car \
+            JOIN Price ON Car.pid = Price.pid WHERE cid = ?;
     ";
     g.install_recipe(sql.to_owned()).unwrap();
 
@@ -440,14 +442,10 @@ fn it_works_with_arithmetic_aliases() {
     let mut getter = g.get_getter("CarPrice").unwrap();
     let cid = 1;
     let pid = 1;
-    let cent_price = 10000;
-    price_mutator
-        .put(vec![pid.into(), cent_price.into()])
-        .unwrap();
+    let price = 100;
 
-    car_mutator
-        .put(vec![cid.into(), pid.into(), "Volvo".into()])
-        .unwrap();
+    price_mutator.put(vec![pid.into(), price.into()]).unwrap();
+    car_mutator.put(vec![cid.into(), pid.into()]).unwrap();
 
     // Let writes propagate:
     sleep();
@@ -455,7 +453,62 @@ fn it_works_with_arithmetic_aliases() {
     // Retrieve the result of the count query:
     let result = getter.lookup(&cid.into(), true).unwrap();
     assert_eq!(result.len(), 1);
-    assert_eq!(result[0][1], 100.into());
+    assert_eq!(result[0][1], price.into());
+}
+
+#[test]
+fn double_shuffle() {
+    let mut g = ControllerBuilder::default().build_local();
+    let sql = "
+        CREATE TABLE Car (cid int, pid int, PRIMARY KEY(cid));
+        CREATE TABLE Price (pid int, price int, PRIMARY KEY(pid));
+        QUERY CarPrice: SELECT cid, price FROM Car \
+            JOIN Price ON Car.pid = Price.pid WHERE cid = ?;
+    ";
+    g.install_recipe(sql.to_owned()).unwrap();
+
+    let mut car_mutator = g.get_mutator("Car").unwrap();
+    let mut price_mutator = g.get_mutator("Price").unwrap();
+    let mut getter = g.get_getter("CarPrice").unwrap();
+    let cid = 1;
+    let pid = 1;
+    let price = 100;
+
+    price_mutator.put(vec![pid.into(), price.into()]).unwrap();
+    car_mutator.put(vec![cid.into(), pid.into()]).unwrap();
+
+    // Let writes propagate:
+    sleep();
+
+    // Retrieve the result of the count query:
+    let result = getter.lookup(&cid.into(), true).unwrap();
+    assert_eq!(result.len(), 1);
+    assert_eq!(result[0][1], price.into());
+}
+
+#[test]
+fn it_works_with_arithmetic_aliases() {
+    let mut g = ControllerBuilder::default().build_local();
+    let sql = "
+        CREATE TABLE Price (pid int, cent_price int, PRIMARY KEY(pid));
+        ModPrice: SELECT pid, cent_price / 100 AS price FROM Price;
+        QUERY AltPrice: SELECT pid, price FROM ModPrice WHERE pid = ?;
+    ";
+    g.install_recipe(sql.to_owned()).unwrap();
+
+    let mut price_mutator = g.get_mutator("Price").unwrap();
+    let mut getter = g.get_getter("AltPrice").unwrap();
+    let pid = 1;
+    let price = 10000;
+    price_mutator.put(vec![pid.into(), price.into()]).unwrap();
+
+    // Let writes propagate:
+    sleep();
+
+    // Retrieve the result of the count query:
+    let result = getter.lookup(&pid.into(), true).unwrap();
+    assert_eq!(result.len(), 1);
+    assert_eq!(result[0][1], (price / 100).into());
 }
 
 #[test]
