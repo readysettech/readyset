@@ -32,6 +32,7 @@ pub enum SqlType {
     Timestamp,
     Binary(u16),
     Varbinary(u16),
+    Enum(Vec<Literal>),
 }
 
 impl fmt::Display for SqlType {
@@ -59,6 +60,7 @@ impl fmt::Display for SqlType {
             SqlType::Timestamp => write!(f, "TIMESTAMP"),
             SqlType::Binary(len) => write!(f, "BINARY({})", len),
             SqlType::Varbinary(len) => write!(f, "VARBINARY({})", len),
+            SqlType::Enum(_) => write!(f, "ENUM(...)"),
         }
     }
 }
@@ -386,6 +388,12 @@ named!(pub type_identifier<&[u8], SqlType>,
                    Some(len) => len_as_u16(len),
                    None => 32 as u16,
                }))
+           )
+         | do_parse!(
+               tag_no_case!("enum") >>
+               variants: delimited!(tag!("("), value_list, tag!(")")) >>
+               opt_multispace >>
+               (SqlType::Enum(variants))
            )
     )
 );
