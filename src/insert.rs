@@ -11,6 +11,7 @@ use table::Table;
 pub struct InsertStatement {
     pub table: Table,
     pub fields: Vec<(Column, Literal)>,
+    pub ignore: bool,
 }
 
 impl fmt::Display for InsertStatement {
@@ -42,6 +43,7 @@ impl fmt::Display for InsertStatement {
 named!(pub insertion<&[u8], InsertStatement>,
     complete!(do_parse!(
         tag_no_case!("insert") >>
+        ignore: opt!(preceded!(multispace, tag_no_case!("ignore"))) >>
         multispace >>
         tag_no_case!("into") >>
         multispace >>
@@ -82,6 +84,7 @@ named!(pub insertion<&[u8], InsertStatement>,
                               })
                               .collect(),
                 },
+                ignore: ignore.is_some(),
             }
         })
     ))
