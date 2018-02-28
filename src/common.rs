@@ -30,6 +30,7 @@ pub enum SqlType {
     Date,
     DateTime,
     Timestamp,
+    Binary(u16),
     Varbinary(u16),
 }
 
@@ -56,6 +57,7 @@ impl fmt::Display for SqlType {
             SqlType::Date => write!(f, "DATE"),
             SqlType::DateTime => write!(f, "DATETIME"),
             SqlType::Timestamp => write!(f, "TIMESTAMP"),
+            SqlType::Binary(len) => write!(f, "BINARY({})", len),
             SqlType::Varbinary(len) => write!(f, "VARBINARY({})", len),
         }
     }
@@ -303,6 +305,18 @@ named!(pub type_identifier<&[u8], SqlType>,
                opt_multispace >>
                _binary: opt!(tag_no_case!("binary")) >>
                (SqlType::Varchar(len_as_u16(len)))
+           )
+         | do_parse!(
+               tag_no_case!("binary") >>
+               len: delimited!(tag!("("), digit, tag!(")")) >>
+               opt_multispace >>
+               (SqlType::Binary(len_as_u16(len)))
+           )
+         | do_parse!(
+               tag_no_case!("varbinary") >>
+               len: delimited!(tag!("("), digit, tag!(")")) >>
+               opt_multispace >>
+               (SqlType::Varbinary(len_as_u16(len)))
            )
          | do_parse!(
                tag_no_case!("tinyint") >>
