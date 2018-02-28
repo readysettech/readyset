@@ -3,8 +3,9 @@ use std::str;
 use std::str::FromStr;
 use std::fmt;
 
-use common::{column_identifier_no_alias, field_list, opt_multispace, sql_identifier,
-             statement_terminator, table_reference, type_identifier, Literal, SqlType, TableKey};
+use common::{column_identifier_no_alias, field_list, integer_literal, opt_multispace,
+             sql_identifier, statement_terminator, table_reference, type_identifier, Literal,
+             SqlType, TableKey};
 use column::{ColumnConstraint, ColumnSpecification};
 use table::Table;
 
@@ -274,6 +275,32 @@ named!(pub creation<&[u8], CreateTableStatement>,
                     tag!("=") >>
                     opt_multispace >>
                     alt_complete!(tag!("utf8")) >>
+                    ()
+                )
+            )
+        ) >>
+        opt_multispace >>
+        opt!(
+            complete!(
+                do_parse!(
+                    tag_no_case!("max_rows") >>
+                    opt_multispace >>
+                    opt!(tag!("=")) >>
+                    opt_multispace >>
+                    integer_literal >>
+                    ()
+                )
+            )
+        ) >>
+        opt_multispace >>
+        opt!(
+            complete!(
+                do_parse!(
+                    tag_no_case!("avg_row_length") >>
+                    opt_multispace >>
+                    opt!(tag!("=")) >>
+                    opt_multispace >>
+                    integer_literal >>
                     ()
                 )
             )
