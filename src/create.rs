@@ -393,6 +393,19 @@ mod tests {
     }
 
     #[test]
+    fn mediawiki_create3() {
+        let qstring = "CREATE TABLE `interwiki` (
+ iw_prefix varchar(32) NOT NULL,
+ iw_url blob NOT NULL,
+ iw_api blob NOT NULL,
+ iw_wikiid varchar(64) NOT NULL,
+ iw_local bool NOT NULL,
+ iw_trans tinyint NOT NULL default 0
+ ) ENGINE=, DEFAULT CHARSET=utf8";
+        creation(qstring.as_bytes()).unwrap();
+    }
+
+    #[test]
     fn keys() {
         // simple primary key
         let qstring = "CREATE TABLE users (id bigint(20), name varchar(255), email varchar(255), \
