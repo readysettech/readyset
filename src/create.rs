@@ -253,7 +253,8 @@ named!(pub creation<&[u8], CreateTableStatement>,
                     opt_multispace >>
                     tag!("=") >>
                     opt_multispace >>
-                    alphanumeric >>
+                    opt!(alphanumeric) >>
+                    opt!(tag!(",")) >>
                     ()
                 )
             )
@@ -367,6 +368,28 @@ mod tests {
                 ..Default::default()
             }
         );
+    }
+
+    #[test]
+    fn mediawiki_create2() {
+        let qstring = "CREATE TABLE `user` (
+                        user_id int unsigned NOT NULL PRIMARY KEY AUTO_INCREMENT,
+                        user_name varchar(255) binary NOT NULL default '',
+                        user_real_name varchar(255) binary NOT NULL default '',
+                        user_password tinyblob NOT NULL,
+                        user_newpassword tinyblob NOT NULL,
+                        user_newpass_time binary(14),
+                        user_email tinytext NOT NULL,
+                        user_touched binary(14) NOT NULL default '',
+                        user_token binary(32) NOT NULL default '',
+                        user_email_authenticated binary(14),
+                        user_email_token binary(32),
+                        user_email_token_expires binary(14),
+                        user_registration binary(14),
+                        user_editcount int,
+                        user_password_expires varbinary(14) DEFAULT NULL
+                       ) ENGINE=, DEFAULT CHARSET=utf8";
+        creation(qstring.as_bytes()).unwrap();
     }
 
     #[test]
