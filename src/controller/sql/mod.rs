@@ -1376,12 +1376,12 @@ mod tests {
             let new_join_view = get_node(&inc, mig, &format!("q_{:x}_n0", qid));
             assert_eq!(
                 new_join_view.fields(),
-                &["id", "name", "bogokey", "id", "author", "title"]
+                &["id", "name", "id", "author", "title"]
             );
             // leaf node
             let new_leaf_view = get_node(&inc, mig, &q.unwrap().name);
             assert_eq!(new_leaf_view.fields(), &["name", "title", "bogokey"]);
-            assert_eq!(new_leaf_view.description(), format!("π[1, 5, lit: 0]"));
+            assert_eq!(new_leaf_view.description(), format!("π[1, 4, lit: 0]"));
         });
     }
 
@@ -1409,11 +1409,8 @@ mod tests {
 
             // the leaf of this query (node above the reader) is a union
             let union_view = get_node(&inc, mig, &res.unwrap().name);
-            assert_eq!(union_view.fields(), &["id", "name", "bogokey"]);
-            assert_eq!(
-                union_view.description(),
-                format!("3:[0, 1, 2] ⋃ 6:[0, 1, 2]")
-            );
+            assert_eq!(union_view.fields(), &["id", "name"]);
+            assert_eq!(union_view.description(), format!("3:[0, 1] ⋃ 6:[0, 1]"));
         });
     }
 
