@@ -327,10 +327,10 @@ named!(pub type_identifier<&[u8], SqlType>,
            )
          | do_parse!(
                tag_no_case!("bigint") >>
-               len: delimited!(tag!("("), digit, tag!(")")) >>
+               len: opt!(delimited!(tag!("("), digit, tag!(")"))) >>
                opt_multispace >>
                _signed: opt!(alt_complete!(tag_no_case!("unsigned") | tag_no_case!("signed"))) >>
-               (SqlType::Bigint(len_as_u16(len)))
+               (SqlType::Bigint(len.map(|l|len_as_u16(l)).unwrap_or(1)))
            )
          | do_parse!(
                tag_no_case!("double") >>
