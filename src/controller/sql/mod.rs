@@ -905,7 +905,6 @@ mod tests {
                 mig,
             );
             assert!(res.is_ok());
-            println!("{:?}", res);
             // added the aggregation and the edge view, and a reader
             assert_eq!(mig.graph().node_count(), 5);
             // check aggregation view
@@ -1445,7 +1444,7 @@ mod tests {
             let res = inc.add_query("SELECT id, name FROM users WHERE users.id = 50;", None, mig);
             assert!(res.is_ok());
             let qfp = res.unwrap();
-             // should NOT have ended up with the same leaf node
+            // should NOT have ended up with the same leaf node
             assert_ne!(qfp.query_leaf, leaf);
             // should have added three more nodes (filter, project and reader)
             assert_eq!(mig.graph().node_count(), ncount + 3);
