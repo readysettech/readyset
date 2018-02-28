@@ -7,10 +7,17 @@ use std::io;
 use std::collections::BTreeMap;
 
 lazy_static! {
-    static ref HARD_CODED_REPLIES: Vec<(Regex, &'static str)> = vec![
-        (Regex::new(r"(?i)select version\(\) limit 1").unwrap(), "10.1.26-MariaDB-0+deb9u1"),
-        (Regex::new(r"(?i)show engines").unwrap(), "InnoDB"),
-        (Regex::new(r"SELECT 1 AS ping").unwrap(), "1"),
+    static ref HARD_CODED_REPLIES: Vec<(Regex, Vec<(&'static str, &'static str)>)> = vec![
+        (Regex::new(r"(?i)select version\(\) limit 1").unwrap(),
+         vec![("version()", "10.1.26-MariaDB-0+deb9u1")]),
+        (Regex::new(r"(?i)show engines").unwrap(),
+         vec![("Engine", "InnoDB"),
+              ("Support", "DEFAULT"),
+              ("Comment", ""),
+              ("Transactions", "YES"),
+              ("XA", "YES"),
+              ("Savepoints", "YES")]),
+        (Regex::new(r"SELECT 1 AS ping").unwrap(), vec![("ping", "1")]),
     ];
 }
 
@@ -238,19 +245,22 @@ impl<W: io::Write> MysqlShim<W> for SoupBackend {
             return results.completed(0, 0);
         }
 
-        for &(ref pattern, ref reply) in HARD_CODED_REPLIES.iter() {
+        for &(ref pattern, ref columns) in &*HARD_CODED_REPLIES {
             if pattern.is_match(query) {
-                let columns = &[
-                    Column {
+                let cols: Vec<_> = columns
+                    .iter()
+                    .map(|c| Column {
                         table: String::from(""),
-                        column: String::from(""),
+                        column: String::from(c.0),
                         coltype: ColumnType::MYSQL_TYPE_STRING,
                         colflags: ColumnFlags::empty(),
-                    },
-                ];
-                return results
-                    .start(columns)?
-                    .write_row(Some(String::from(*reply)));
+                    })
+                    .collect();
+                let mut writer = results.start(&cols[..])?;
+                for &(_, ref r) in columns {
+                    writer.write_col(String::from(*r))?;
+                }
+                return writer.end_row();
             }
         }
 
