@@ -332,6 +332,10 @@ pub(crate) fn adapt_base_node(
     FlowNode::Existing(na)
 }
 
+fn column_names<'a>(cs: &'a [Column]) -> Vec<&'a str> {
+    cs.iter().map(|c| c.name.as_str()).collect()
+}
+
 pub(crate) fn make_base_node(
     name: &str,
     column_specs: &mut [(ColumnSpecification, Option<usize>)],
@@ -344,10 +348,12 @@ pub(crate) fn make_base_node(
         cs.1 = Some(i);
     }
 
-    let column_names = column_specs
+    let columns: Vec<_> = column_specs
         .iter()
-        .map(|&(ref cs, _)| &cs.column.name)
-        .collect::<Vec<_>>();
+        .map(|&(ref cs, _)| &cs.column)
+        .cloned()
+        .collect();
+    let column_names = column_names(columns.as_slice());
 
     // note that this defaults to a "None" (= NULL) default value for columns that do not have one
     // specified; we don't currently handle a "NOT NULL" SQL constraint for defaults
@@ -394,7 +400,7 @@ pub(crate) fn make_union_node(
     ancestors: &[MirNodeRef],
     mig: &mut Migration,
 ) -> FlowNode {
-    let column_names = columns.iter().map(|c| &c.name).collect::<Vec<_>>();
+    let column_names = column_names(columns);
     let mut emit_column_id: HashMap<NodeIndex, Vec<usize>> = HashMap::new();
 
     // column_id_for_column doesn't take into consideration table aliases
@@ -426,7 +432,7 @@ pub(crate) fn make_filter_node(
     mig: &mut Migration,
 ) -> FlowNode {
     let parent_na = parent.borrow().flow_node_addr().unwrap();
-    let column_names = columns.iter().map(|c| &c.name).collect::<Vec<_>>();
+    let column_names = column_names(columns);
 
     let node = mig.add_ingredient(
         String::from(name),
@@ -456,7 +462,7 @@ pub(crate) fn make_grouped_node(
     );
 
     let parent_na = parent.borrow().flow_node_addr().unwrap();
-    let column_names = columns.iter().map(|c| &c.name).collect::<Vec<_>>();
+    let column_names = column_names(columns);
 
     let over_col_indx = parent.borrow().column_id_for_column(on);
     let group_col_indx = group_by
@@ -494,7 +500,7 @@ pub(crate) fn make_identity_node(
     mig: &mut Migration,
 ) -> FlowNode {
     let parent_na = parent.borrow().flow_node_addr().unwrap();
-    let column_names = columns.iter().map(|c| &c.name).collect::<Vec<_>>();
+    let column_names = column_names(columns);
 
     let node = mig.add_ingredient(
         String::from(name),
@@ -519,7 +525,7 @@ pub(crate) fn make_join_node(
 
     assert_eq!(on_left.len(), on_right.len());
 
-    let column_names = columns.iter().map(|c| &c.name).collect::<Vec<_>>();
+    let column_names = column_names(columns);
 
     let projected_cols_left: Vec<Column> = left.borrow()
         .columns
@@ -607,7 +613,7 @@ pub(crate) fn make_latest_node(
     mig: &mut Migration,
 ) -> FlowNode {
     let parent_na = parent.borrow().flow_node_addr().unwrap();
-    let column_names = columns.iter().map(|c| &c.name).collect::<Vec<_>>();
+    let column_names = column_names(columns);
 
     let group_col_indx = group_by
         .iter()
@@ -646,7 +652,7 @@ pub(crate) fn make_project_node(
     mig: &mut Migration,
 ) -> FlowNode {
     let parent_na = parent.borrow().flow_node_addr().unwrap();
-    let column_names = columns.iter().map(|c| &c.name).collect::<Vec<_>>();
+    let column_names = column_names(columns);
 
     let projected_column_ids = emit.iter()
         .map(|c| parent.borrow().column_id_for_column(c))
@@ -689,7 +695,7 @@ pub(crate) fn make_topk_node(
     mig: &mut Migration,
 ) -> FlowNode {
     let parent_na = parent.borrow().flow_node_addr().unwrap();
-    let column_names = columns.iter().map(|c| &c.name).collect::<Vec<_>>();
+    let column_names = column_names(columns);
 
     let group_by_indx = if group_by.is_empty() {
         // no query parameters, so we index on the first column
