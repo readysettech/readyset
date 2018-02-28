@@ -6,6 +6,14 @@ use slog;
 use std::io;
 use std::collections::BTreeMap;
 
+lazy_static! {
+    static ref HARD_CODED_REPLIES: Vec<(Regex, &'static str)> = vec![
+        (Regex::new(r"(?i)select version\(\) limit 1").unwrap(), "10.1.26-MariaDB-0+deb9u1"),
+        (Regex::new(r"(?i)show engines").unwrap(), "InnoDB"),
+        (Regex::new(r"SELECT 1 AS ping").unwrap(), "1"),
+    ];
+}
+
 pub struct SoupBackend {
     soup: ControllerHandle<ZookeeperAuthority>,
     log: slog::Logger,
@@ -153,7 +161,7 @@ impl SoupBackend {
                                     r.into_iter().map(|d| format!("{}", d)).collect();
                                 // drop bogokey
                                 row.pop();
-                                rw.write_row(row);
+                                rw.write_row(row)?;
                             }
                             rw.finish()
                         } else {
@@ -211,17 +219,39 @@ impl<W: io::Write> MysqlShim<W> for SoupBackend {
         debug!(self.log, "query: {}", query);
 
         let query = Regex::new(r"(?s)/\*.*\*/").unwrap().replace_all(query, "");
+        let query = Regex::new(r"--.*\n").unwrap().replace_all(&query, "\n");
         let query = Regex::new(r" +").unwrap().replace_all(&query, " ");
+        let query = query.replace('"', "'");
+        let query = query.trim();
 
         if query.to_lowercase().contains("show tables")
             || query.to_lowercase().contains("show databases")
-            || query.to_lowercase().contains("show engines")
+            || query.to_lowercase().starts_with("begin")
             || query.to_lowercase().starts_with("rollback")
             || query.to_lowercase().starts_with("alter table")
             || query.to_lowercase().starts_with("commit")
+            || query.to_lowercase().starts_with("create index")
+            || query.to_lowercase().starts_with("create unique index")
+            || query.to_lowercase().starts_with("create fulltext index")
         {
-            warn!(self.log, "ignoring query \"{}\"", query);
+            //            warn!(self.log, "ignoring query \"{}\"", query);
             return results.completed(0, 0);
+        }
+
+        for &(ref pattern, ref reply) in HARD_CODED_REPLIES.iter() {
+            if pattern.is_match(query) {
+                let columns = &[
+                    Column {
+                        table: String::from(""),
+                        column: String::from(""),
+                        coltype: ColumnType::MYSQL_TYPE_STRING,
+                        colflags: ColumnFlags::empty(),
+                    },
+                ];
+                return results
+                    .start(columns)?
+                    .write_row(Some(String::from(*reply)));
+            }
         }
 
         match nom_sql::parse_query(&query) {
@@ -231,6 +261,7 @@ impl<W: io::Write> MysqlShim<W> for SoupBackend {
                 nom_sql::SqlQuery::Select(q) => self.handle_select(q, results),
                 nom_sql::SqlQuery::Set(q) => self.handle_set(q, results),
                 _ => {
+                    error!(self.log, "Unsupported query: {}", query);
                     return results.error(
                         msql_srv::ErrorKind::ER_NOT_SUPPORTED_YET,
                         "unsupported query".as_bytes(),
@@ -239,8 +270,9 @@ impl<W: io::Write> MysqlShim<W> for SoupBackend {
             },
             Err(e) => {
                 // if nom-sql rejects the query, there is no chance Soup will like it
-                crit!(self.log, "query can't be parsed: \"{}\"", query);
-                return results.error(msql_srv::ErrorKind::ER_PARSE_ERROR, e.as_bytes());
+                error!(self.log, "query can't be parsed: \"{}\"", query);
+                results.completed(0, 0)
+                //return results.error(msql_srv::ErrorKind::ER_PARSE_ERROR, e.as_bytes());
             }
         }
     }
