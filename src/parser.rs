@@ -101,10 +101,8 @@ mod tests {
 
         let expected = SqlQuery::Insert(InsertStatement {
             table: Table::from("users"),
-            fields: vec![
-                (Column::from("0"), 42.into()),
-                (Column::from("1"), "test".into()),
-            ],
+            fields: vec![Column::from("0"), Column::from("1")],
+            data: vec![vec![42.into(), "test".into()]],
             ..Default::default()
         });
         let mut h0 = DefaultHasher::new();

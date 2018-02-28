@@ -10,7 +10,8 @@ use table::Table;
 #[derive(Clone, Debug, Default, Hash, PartialEq, Serialize, Deserialize)]
 pub struct InsertStatement {
     pub table: Table,
-    pub fields: Vec<(Column, Literal)>,
+    pub fields: Vec<Column>,
+    pub data: Vec<Vec<Literal>>,
     pub ignore: bool,
 }
 
@@ -22,16 +23,23 @@ impl fmt::Display for InsertStatement {
             " ({})",
             self.fields
                 .iter()
-                .map(|&(ref col, _)| col.name.to_owned())
+                .map(|ref col| col.name.to_owned())
                 .collect::<Vec<_>>()
                 .join(", ")
         )?;
         write!(
             f,
-            " VALUES ({})",
-            self.fields
+            " VALUES {}",
+            self.data
                 .iter()
-                .map(|&(_, ref literal)| literal.to_string())
+                .map(|fields| format!(
+                    "({})",
+                    fields
+                        .into_iter()
+                        .map(|l| l.to_string())
+                        .collect::<Vec<_>>()
+                        .join(", ")
+                ))
                 .collect::<Vec<_>>()
                 .join(", ")
         )
@@ -61,9 +69,22 @@ named!(pub insertion<&[u8], InsertStatement>,
             ) >>
         tag_no_case!("values") >>
         opt_multispace >>
-        tag!("(") >>
-        values: value_list >>
-        tag!(")") >>
+        data: many1!(
+            do_parse!(
+                tag!("(") >>
+                values: value_list >>
+                tag!(")") >>
+                opt!(
+                    complete!(do_parse!(
+                            opt_multispace >>
+                            tag!(",") >>
+                            opt_multispace >>
+                            ()
+                    ))
+                ) >>
+                (values)
+            )
+        ) >>
         statement_terminator >>
         ({
             // "table AS alias" isn't legal in INSERT statements
@@ -74,16 +95,16 @@ named!(pub insertion<&[u8], InsertStatement>,
                     Some(ref f) =>
                         f.iter()
                          .cloned()
-                         .zip(values.into_iter())
                          .collect(),
                     None =>
-                        values.into_iter()
+                        data[0].iter()
                               .enumerate()
-                              .map(|(i, v)| {
-                                  (Column::from(format!("{}", i).as_str()), v)
+                              .map(|(i, _)| {
+                                  Column::from(format!("{}", i).as_str())
                               })
                               .collect(),
                 },
+                data: data,
                 ignore: ignore.is_some(),
             }
         })
@@ -105,10 +126,8 @@ mod tests {
             res.unwrap().1,
             InsertStatement {
                 table: Table::from("users"),
-                fields: vec![
-                    (Column::from("0"), 42.into()),
-                    (Column::from("1"), "test".into()),
-                ],
+                fields: vec![Column::from("0"), Column::from("1")],
+                data: vec![vec![42.into(), "test".into()]],
                 ..Default::default()
             }
         );
@@ -124,10 +143,18 @@ mod tests {
             InsertStatement {
                 table: Table::from("users"),
                 fields: vec![
-                    (Column::from("0"), 42.into()),
-                    (Column::from("1"), "test".into()),
-                    (Column::from("2"), "test".into()),
-                    (Column::from("3"), Literal::CurrentTimestamp),
+                    Column::from("0"),
+                    Column::from("1"),
+                    Column::from("2"),
+                    Column::from("3"),
+                ],
+                data: vec![
+                    vec![
+                        42.into(),
+                        "test".into(),
+                        "test".into(),
+                        Literal::CurrentTimestamp,
+                    ],
                 ],
                 ..Default::default()
             }
@@ -143,10 +170,8 @@ mod tests {
             res.unwrap().1,
             InsertStatement {
                 table: Table::from("users"),
-                fields: vec![
-                    (Column::from("id"), 42.into()),
-                    (Column::from("name"), "test".into()),
-                ],
+                fields: vec![Column::from("id"), Column::from("name")],
+                data: vec![vec![42.into(), "test".into()]],
                 ..Default::default()
             }
         );
@@ -162,9 +187,26 @@ mod tests {
             res.unwrap().1,
             InsertStatement {
                 table: Table::from("users"),
-                fields: vec![
-                    (Column::from("id"), 42.into()),
-                    (Column::from("name"), "test".into()),
+                fields: vec![Column::from("id"), Column::from("name")],
+                data: vec![vec![42.into(), "test".into()]],
+                ..Default::default()
+            }
+        );
+    }
+
+    #[test]
+    fn multi_insert() {
+        let qstring = "INSERT INTO users (id, name) VALUES (42, \"test\"),(21, \"test2\");";
+
+        let res = insertion(qstring.as_bytes());
+        assert_eq!(
+            res.unwrap().1,
+            InsertStatement {
+                table: Table::from("users"),
+                fields: vec![Column::from("id"), Column::from("name")],
+                data: vec![
+                    vec![42.into(), "test".into()],
+                    vec![21.into(), "test2".into()],
                 ],
                 ..Default::default()
             }
