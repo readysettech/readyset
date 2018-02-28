@@ -47,7 +47,7 @@ impl fmt::Display for InsertStatement {
 }
 
 /// Parse rule for a SQL insert query.
-/// TODO(malte): support REPLACE, multiple parens expr, nested selection, DEFAULT VALUES
+/// TODO(malte): support REPLACE, nested selection, DEFAULT VALUES
 named!(pub insertion<&[u8], InsertStatement>,
     complete!(do_parse!(
         tag_no_case!("insert") >>
