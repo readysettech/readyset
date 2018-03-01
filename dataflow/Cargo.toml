@@ -19,11 +19,11 @@ vec_map = { version = "0.8.0", features = ["eders"] }
 
 # need features
 backtrace = { version = "0.3.2", features = ["serialize-serde"] }
+petgraph = { version = "0.4.11", features = ["serde-1"] }
 serde = { version = "1.0.8", features = ["rc"] }
 timekeeper = {version = "0.3.0", default-features = false }
 
 # git deps
-petgraph = { git = "https://github.com/fintelia/petgraph", branch = "serde", features = ["serde"] }
 nom_sql = { git = "https://github.com/ms705/nom-sql.git", rev = "159140accbaa6e83ee0d6d6eb22abb2fad03da9d" }
 
 # local deps
