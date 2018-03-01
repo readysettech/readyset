@@ -821,14 +821,71 @@ impl Worker {
 impl dataflow::Executor for ReplicaReceivers {
     fn send_back(&self, channel: SourceChannelIdentifier, reply: Result<i64, ()>) {
         if let Some(ch) = self.get(channel.token) {
-            // XXX: what if the token has been reused?
             use bincode;
-            use std::io::Write;
+            use std::io::{self, Write};
 
+            let bytes = bincode::serialize(&reply).unwrap();
+            let mut bytes = &bytes[..];
+
+            // XXX: what if the token has been reused?
             let stream = ch.borrow();
             let mut stream = stream.0.get_ref();
-            bincode::serialize_into(&mut stream, &reply).is_ok();
-            stream.flush().is_ok();
+
+            // NOTE: mio::net::TcpStream doesn't expose underlying stream :(
+            let set_nonblocking = |s: &::mio::net::TcpStream, on: bool| {
+                use std::net::TcpStream;
+                use std::os::unix::io::{AsRawFd, FromRawFd, IntoRawFd};
+                let t = unsafe { TcpStream::from_raw_fd(s.as_raw_fd()) };
+                t.set_nonblocking(on).unwrap();
+                // avoid closing on Drop
+                t.into_raw_fd();
+            };
+
+            let mut undo_blocking = false;
+            while !bytes.is_empty() {
+                // NOTE: we unfortunately can't just serialize_into the stream
+                // https://github.com/TyOverby/bincode/issues/229
+                match stream.write(bytes) {
+                    Ok(n) => {
+                        bytes = &bytes[n..];
+                    }
+                    Err(e) => match e.kind() {
+                        io::ErrorKind::WouldBlock => {
+                            // transient -- retry (and start blocking)
+                            set_nonblocking(stream, false);
+                            undo_blocking = true;
+                        }
+                        io::ErrorKind::Interrupted | io::ErrorKind::TimedOut => {
+                            // transient -- retry
+                        }
+                        _ => {
+                            // permanent, client disconnected, ignore and swallow
+                            return;
+                        }
+                    },
+                }
+            }
+
+            while let Err(e) = stream.flush() {
+                match e.kind() {
+                    io::ErrorKind::WouldBlock => {
+                        // transient -- retry (and start blocking)
+                        set_nonblocking(stream, false);
+                        undo_blocking = true;
+                    }
+                    io::ErrorKind::Interrupted | io::ErrorKind::TimedOut => {
+                        // transient -- retry
+                    }
+                    _ => {
+                        // client connection lost, ignore and swallow
+                        return;
+                    }
+                }
+            }
+
+            if undo_blocking {
+                set_nonblocking(stream, true);
+            }
         }
     }
 }

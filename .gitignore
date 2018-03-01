@@ -1,3 +1,6 @@
+run.sh
+*.hist
+.*.rustfmt
 *-log-*.json
 *.png
 *.log

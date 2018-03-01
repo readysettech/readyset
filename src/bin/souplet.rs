@@ -2,15 +2,12 @@
 extern crate clap;
 extern crate consensus;
 extern crate distributary;
-#[macro_use]
 extern crate slog;
-extern crate uuid;
 
 use consensus::ZookeeperAuthority;
 use distributary::ControllerBuilder;
 use std::sync::Arc;
 use std::time::Duration;
-use uuid::{Uuid, UuidVersion};
 
 fn main() {
     use clap::{App, Arg};
@@ -28,6 +25,7 @@ fn main() {
         .arg(
             Arg::with_name("deployment")
                 .long("deployment")
+                .required(true)
                 .takes_value(true)
                 .help("Soup deployment ID."),
         )
@@ -98,17 +96,7 @@ fn main() {
         x => Some(x),
     };
     let verbose = matches.is_present("verbose");
-
-    let deployment_name = match matches.value_of("deployment") {
-        Some(d) => String::from(d),
-        None => {
-            let id = Uuid::new(UuidVersion::Random).unwrap();
-            if verbose {
-                info!(log, "starting new Soup deployment '{}'", id.simple());
-            }
-            format!("{}", id.simple())
-        }
-    };
+    let deployment_name = matches.value_of("deployment").unwrap();
 
     let mut authority = ZookeeperAuthority::new(&format!("{}/{}", zookeeper_addr, deployment_name));
     let mut builder = ControllerBuilder::default();
@@ -126,7 +114,7 @@ fn main() {
         },
         512,
         Duration::new(0, 100_000),
-        Some(deployment_name),
+        Some(deployment_name.to_string()),
     );
     builder.set_persistence(persistence_params);
 

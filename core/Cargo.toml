@@ -15,5 +15,5 @@ serde = { version = "1.0.8", features = ["rc"] }
 
 # git deps
 petgraph = { git = "https://github.com/fintelia/petgraph", branch = "serde", features = ["serde"] }
-nom_sql = { git = "https://github.com/ms705/nom-sql.git", rev = "75cec7e5c9104dd9ffbe979b6d881546a7ed2677" }
+nom_sql = { git = "https://github.com/ms705/nom-sql.git", rev = "159140accbaa6e83ee0d6d6eb22abb2fad03da9d" }
 

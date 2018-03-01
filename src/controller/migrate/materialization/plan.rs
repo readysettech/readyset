@@ -231,7 +231,7 @@ impl<'a> Plan<'a> {
                             // sharding), as well as whether the partial key matches the sharding
                             // key of the source. if it does, *all* shards need to be consulted
                             // when doing a replay.
-                            let sharding = self.domains.get_mut(&segments[0].0).unwrap().sharding();
+                            let sharding = self.graph[segments[0].1[0].0].sharded_by();
                             let shards = sharding.shards();
                             let shuffled = match sharding {
                                 Sharding::Random(..) => true,

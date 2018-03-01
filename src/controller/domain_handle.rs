@@ -134,7 +134,6 @@ pub struct DomainHandle {
 
     cr_poll: PollingLoop<ControlReplyPacket>,
     txs: Vec<(TcpSender<Box<Packet>>, bool)>,
-    sharded_by: Sharding,
 
     // Which worker each shard is assigned to, if any.
     assignments: Vec<WorkerIdentifier>,
@@ -143,7 +142,7 @@ pub struct DomainHandle {
 impl DomainHandle {
     pub fn new<'a>(
         idx: DomainIndex,
-        sharded_by: Sharding,
+        num_shards: usize,
         log: &Logger,
         graph: &mut Graph,
         config: &DomainConfig,
@@ -161,7 +160,6 @@ impl DomainHandle {
         // the code currently relies on the fact that the domains that are sharded by the same key
         // *also* have the same number of shards. if this no longer holds, we actually need to do a
         // shuffle, otherwise writes will end up on the wrong shard. keep that in mind.
-        let num_shards = sharded_by.shards();
 
         let mut txs = Vec::new();
         let mut cr_rxs = Vec::new();
@@ -258,17 +256,11 @@ impl DomainHandle {
             _idx: idx,
             cr_poll,
             txs,
-            sharded_by,
             assignments,
         }
     }
 
-    pub fn sharding(&self) -> Sharding {
-        self.sharded_by
-    }
-
     pub fn shards(&self) -> usize {
-        assert_eq!(self.txs.len(), self.sharded_by.shards());
         self.txs.len()
     }
 

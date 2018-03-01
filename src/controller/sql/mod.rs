@@ -878,8 +878,8 @@ mod tests {
             );
             // leaf node
             let new_leaf_view = get_node(&inc, mig, &q.unwrap().name);
-            assert_eq!(new_leaf_view.fields(), &["name", "title"]);
-            assert_eq!(new_leaf_view.description(), format!("π[4, 2]"));
+            assert_eq!(new_leaf_view.fields(), &["name", "title", "bogokey"]);
+            assert_eq!(new_leaf_view.description(), format!("π[4, 2, lit: 0]"));
         });
     }
 
@@ -919,8 +919,8 @@ mod tests {
             assert_eq!(filter.description(), format!("σ[f0 = 42]"));
             // leaf view node
             let edge = get_node(&inc, mig, &res.unwrap().name);
-            assert_eq!(edge.fields(), &["name"]);
-            assert_eq!(edge.description(), format!("π[1]"));
+            assert_eq!(edge.fields(), &["name", "bogokey"]);
+            assert_eq!(edge.description(), format!("π[1, lit: 0]"));
         });
     }
 
@@ -973,8 +973,8 @@ mod tests {
             assert_eq!(agg_view.description(), format!("|*| γ[0]"));
             // check edge view
             let edge_view = get_node(&inc, mig, &res.unwrap().name);
-            assert_eq!(edge_view.fields(), &["votes"]);
-            assert_eq!(edge_view.description(), format!("π[1]"));
+            assert_eq!(edge_view.fields(), &["votes", "bogokey"]);
+            assert_eq!(edge_view.description(), format!("π[1, lit: 0]"));
         });
     }
 
@@ -1164,10 +1164,11 @@ mod tests {
             assert_eq!(agg_view.fields(), &["grp", "count"]);
             assert_eq!(agg_view.description(), format!("|*| γ[1]"));
             // check edge view -- note that it's not actually currently possible to read from
-            // this for a lack of key (the value would be the key)
+            // this for a lack of key (the value would be the key). Hence, the view also has a
+            // bogokey column.
             let edge_view = get_node(&inc, mig, &res.unwrap().name);
-            assert_eq!(edge_view.fields(), &["count"]);
-            assert_eq!(edge_view.description(), format!("π[1]"));
+            assert_eq!(edge_view.fields(), &["count", "bogokey"]);
+            assert_eq!(edge_view.description(), format!("π[1, lit: 0]"));
         });
     }
 
@@ -1214,10 +1215,11 @@ mod tests {
             assert_eq!(agg_view.fields(), &["userid", "count"]);
             assert_eq!(agg_view.description(), format!("|*| γ[0]"));
             // check edge view -- note that it's not actually currently possible to read from
-            // this for a lack of key (the value would be the key)
+            // this for a lack of key (the value would be the key). Hence, the view also has a
+            // bogokey column.
             let edge_view = get_node(&inc, mig, &res.unwrap().name);
-            assert_eq!(edge_view.fields(), &["count"]);
-            assert_eq!(edge_view.description(), format!("π[1]"));
+            assert_eq!(edge_view.fields(), &["count", "bogokey"]);
+            assert_eq!(edge_view.description(), format!("π[1, lit: 0]"));
         });
     }
 
@@ -1267,8 +1269,8 @@ mod tests {
             // XXX(malte): non-deterministic join ordering make it difficult to assert on the join
             // views
             // leaf view
-            let leaf_view = get_node(&inc, &*mig, &q.unwrap().name);
-            assert_eq!(leaf_view.fields(), &["name", "title", "uid"]);
+            let leaf_view = get_node(&inc, mig, "q_3");
+            assert_eq!(leaf_view.fields(), &["name", "title", "uid", "bogokey"]);
         });
     }
 
@@ -1330,8 +1332,8 @@ mod tests {
                 &["aid", "title", "author", "id", "name", "aid", "uid"]
             );
             // leaf view
-            let leaf_view = get_node(&inc, &*mig, &q.unwrap().name);
-            assert_eq!(leaf_view.fields(), &["name", "title", "uid"]);
+            let leaf_view = get_node(&inc, mig, "q_3");
+            assert_eq!(leaf_view.fields(), &["name", "title", "uid", "bogokey"]);
         });
     }
 
@@ -1351,8 +1353,8 @@ mod tests {
 
             // leaf view node
             let edge = get_node(&inc, mig, &res.unwrap().name);
-            assert_eq!(edge.fields(), &["name", "1"]);
-            assert_eq!(edge.description(), format!("π[1, lit: 1]"));
+            assert_eq!(edge.fields(), &["name", "1", "bogokey"]);
+            assert_eq!(edge.description(), format!("π[1, lit: 1, lit: 0]"));
         });
     }
 
@@ -1376,10 +1378,10 @@ mod tests {
 
             // leaf view node
             let edge = get_node(&inc, mig, &res.unwrap().name);
-            assert_eq!(edge.fields(), &["2 * users.age", "twenty"]);
+            assert_eq!(edge.fields(), &["bogokey", "2 * users.age", "twenty"]);
             assert_eq!(
                 edge.description(),
-                format!("π[(lit: 2) * 1, (lit: 2) * (lit: 10)]")
+                format!("π[(lit: 2) * 1, (lit: 2) * (lit: 10), lit: 0]")
             );
         });
     }
@@ -1424,8 +1426,8 @@ mod tests {
             );
             // leaf node
             let new_leaf_view = get_node(&inc, mig, &q.unwrap().name);
-            assert_eq!(new_leaf_view.fields(), &["name", "title"]);
-            assert_eq!(new_leaf_view.description(), format!("π[1, 4]"));
+            assert_eq!(new_leaf_view.fields(), &["name", "title", "bogokey"]);
+            assert_eq!(new_leaf_view.description(), format!("π[1, 4, lit: 0]"));
         });
     }
 
@@ -1455,6 +1457,41 @@ mod tests {
             let union_view = get_node(&inc, mig, &res.unwrap().name);
             assert_eq!(union_view.fields(), &["id", "name"]);
             assert_eq!(union_view.description(), format!("3:[0, 1] ⋃ 6:[0, 1]"));
+        });
+    }
+
+    #[test]
+    #[ignore]
+    fn it_distinguishes_predicates() {
+        // set up graph
+        let mut g = ControllerBuilder::default().build_local();
+        g.migrate(|mig| {
+            let mut inc = SqlIncorporator::default();
+            // Establish a base write type
+            assert!(
+                inc.add_query("CREATE TABLE users (id int, name varchar(40));", None, mig)
+                    .is_ok()
+            );
+            // Should have source and "users" base table node
+            assert_eq!(mig.graph().node_count(), 2);
+            assert_eq!(get_node(&inc, mig, "users").name(), "users");
+            assert_eq!(get_node(&inc, mig, "users").fields(), &["id", "name"]);
+            assert_eq!(get_node(&inc, mig, "users").description(), "B");
+
+            // Add a new query
+            let res = inc.add_query("SELECT id, name FROM users WHERE users.id = 42;", None, mig);
+            assert!(res.is_ok());
+            let leaf = res.unwrap().query_leaf;
+
+            // Add query with a different predicate
+            let ncount = mig.graph().node_count();
+            let res = inc.add_query("SELECT id, name FROM users WHERE users.id = 50;", None, mig);
+            assert!(res.is_ok());
+            let qfp = res.unwrap();
+            // should NOT have ended up with the same leaf node
+            assert_ne!(qfp.query_leaf, leaf);
+            // should have added three more nodes (filter, project and reader)
+            assert_eq!(mig.graph().node_count(), ncount + 3);
         });
     }
 }

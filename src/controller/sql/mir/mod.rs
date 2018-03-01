@@ -1392,7 +1392,7 @@ impl SqlToMirConverter {
                 .collect();
 
             // if this query does not have any parameters, we must add a bogokey
-            let has_bogokey = if qg.parameters().is_empty() {
+            let has_bogokey = if has_leaf && qg.parameters().is_empty() {
                 projected_literals.push(("bogokey".into(), DataType::from(0 as i32)));
                 true
             } else {

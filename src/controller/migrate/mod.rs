@@ -566,7 +566,7 @@ impl<'a> Migration<'a> {
             let nodes = uninformed_domain_nodes.remove(&domain).unwrap();
             let d = DomainHandle::new(
                 domain,
-                mainline.ingredients[nodes[0].0].sharded_by(),
+                mainline.ingredients[nodes[0].0].sharded_by().shards(),
                 &log,
                 &mut mainline.ingredients,
                 &mainline.domain_config,

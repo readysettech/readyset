@@ -488,6 +488,7 @@ impl ControllerInner {
 
         self.find_getter_for(node).map(|r| {
             let domain = self.ingredients[r].domain();
+            let columns = self.ingredients[r].fields().to_vec();
             let shards = (0..self.domains[&domain].shards())
                 .map(|i| self.read_addrs[&self.domains[&domain].assignment(i)].clone())
                 .map(|a| {
@@ -499,7 +500,11 @@ impl ControllerInner {
                 })
                 .collect();
 
-            RemoteGetterBuilder { node: r, shards }
+            RemoteGetterBuilder {
+                node: r,
+                columns,
+                shards,
+            }
         })
     }
 
