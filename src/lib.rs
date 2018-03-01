@@ -77,6 +77,16 @@
 //! ```
 #![deny(missing_docs)]
 
+// Note to developers: you can find decent overviews of the protocol at
+//
+//   https://github.com/cwarden/mysql-proxy/blob/master/doc/protocol.rst
+//
+// and
+//
+//   https://mariadb.com/kb/en/library/clientserver-protocol/
+//
+// Wireshark also does a pretty good job at parsing the MySQL protocol.
+
 extern crate byteorder;
 extern crate chrono;
 extern crate mysql_common as myc;
