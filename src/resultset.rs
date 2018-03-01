@@ -104,8 +104,9 @@ pub struct RowWriter<'a, W: Write + 'a> {
     data: Vec<u8>,
     columns: &'a [Column],
 
+    // next column to write for the current row
+    // NOTE: (ab)used to track number of *rows* for a zero-column resultset
     col: usize,
-    wrote_any: bool,
 
     finished: bool,
 }
@@ -120,28 +121,27 @@ where
         is_bin: bool,
     ) -> io::Result<RowWriter<'a, W>> {
         let bitmap_len = (columns.len() + 7 + 2) / 8;
-        Ok(RowWriter {
+        let mut rw = RowWriter {
             is_bin: is_bin,
             writer: writer,
             columns: columns,
             bitmap_len,
             data: Vec::new(),
 
-            wrote_any: false,
             col: 0,
 
             finished: false,
-        })
+        };
+        rw.start()?;
+        Ok(rw)
     }
 
     #[inline]
     fn start(&mut self) -> io::Result<()> {
-        if !self.columns.is_empty() && !self.wrote_any {
-            self.wrote_any = true;
-            writers::column_definitions(self.columns, self.writer)
-        } else {
-            Ok(())
+        if !self.columns.is_empty() {
+            writers::column_definitions(self.columns, self.writer)?;
         }
+        Ok(())
     }
 
     /// Write a value to the next column of the current row as a part of this resultset.
@@ -159,7 +159,6 @@ where
     where
         T: ToMysqlValue,
     {
-        self.start()?;
         if self.columns.is_empty() {
             return Ok(());
         }
@@ -205,7 +204,8 @@ where
 
     /// Indicate that no more column data will be written for the current row.
     pub fn end_row(&mut self) -> io::Result<()> {
-        if !self.wrote_any {
+        if self.columns.is_empty() {
+            self.col += 1;
             return Ok(());
         }
 
@@ -237,8 +237,10 @@ where
         I: IntoIterator<Item = E>,
         E: ToMysqlValue,
     {
-        for v in row {
-            self.write_col(v)?;
+        if !self.columns.is_empty() {
+            for v in row {
+                self.write_col(v)?;
+            }
         }
         self.end_row()
     }
@@ -248,16 +250,17 @@ impl<'a, W: Write + 'a> RowWriter<'a, W> {
     fn finish_inner(&mut self) -> io::Result<()> {
         self.finished = true;
 
-        if self.col != 0 {
+        if !self.columns.is_empty() && self.col != 0 {
             self.end_row()?;
         }
 
-        if self.wrote_any {
-            // we wrote out at least one row
-            self.writer.end_packet()?;
-            writers::write_eof_packet(self.writer, StatusFlags::empty())
+        if self.columns.is_empty() {
+            // response to no column query is always an OK packet
+            // we've kept track of the number of rows in col (hacky, I know)
+            writers::write_ok_packet(self.writer, self.col as u64, 0)
         } else {
-            writers::write_ok_packet(self.writer, 0, 0)
+            // we wrote out at least one row
+            writers::write_eof_packet(self.writer, StatusFlags::empty())
         }
     }
 
