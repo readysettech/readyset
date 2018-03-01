@@ -223,7 +223,7 @@ mod tests {
         assert_eq!(rs, result);
 
         rw.seed(should_rw, rw2.clone());
-        let rs = rw.one_row(should_rw, rw2.clone(), false);
+        rw.one_row(should_rw, rw2.clone(), false);
 
         // forward [2, b] to src; should be rewritten and produce [2, "NONE"].
         let result = vec![((vec![2.into(), "NONE".into()], true))].into();
