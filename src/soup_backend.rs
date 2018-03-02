@@ -33,8 +33,8 @@ pub struct SoupBackend {
 }
 
 impl SoupBackend {
-    pub fn new(log: slog::Logger) -> Self {
-        let mut zk_auth = ZookeeperAuthority::new("127.0.0.1:2181");
+    pub fn new(zk_addr: &str, deployment_id: &str, log: slog::Logger) -> Self {
+        let mut zk_auth = ZookeeperAuthority::new(&format!("{}/{}", zk_addr, deployment_id));
         zk_auth.log_with(log.clone());
 
         debug!(log, "Connecting to Soup...",);

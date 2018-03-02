@@ -4,6 +4,7 @@ version = "0.1.0"
 authors = ["Malte Schwarzkopf <malte@csail.mit.edu>"]
 
 [dependencies]
+clap = "2.24.0"
 msql-srv = "0.5"
 #distributary = { path = "../distributary" }
 distributary = { git = "https://github.com/mit-pdos/distributary.git" }
