@@ -214,7 +214,7 @@ impl Ingredient for Project {
                 if let Some(ref add) = self.additional {
                     emit_cols.extend(
                         add.iter()
-                            .map(|e| format!("lit: {}", e.to_string()))
+                            .map(|e| format!("lit: {}", e))
                             .collect::<Vec<_>>(),
                     );
                 }
