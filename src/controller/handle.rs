@@ -214,8 +214,8 @@ impl ControllerHandle<LocalAuthority> {
 
         // Write to Context table
         let bname = match context.get("group") {
-            None => format!("UserContext_{}", uid),
-            Some(g) => format!("GroupContext_{}_{}", g, uid)
+            None => format!("UserContext_{}", uid.to_string()),
+            Some(g) => format!("GroupContext_{}_{}", g.to_string(), uid.to_string())
         };
 
         let mut fields: Vec<_> = context.keys().collect();

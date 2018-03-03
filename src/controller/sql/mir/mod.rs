@@ -1128,7 +1128,7 @@ impl SqlToMirConverter {
         let uformat = if uid == "global".into() {
             String::from("")
         } else {
-            format!("_u{}", uid)
+            format!("_u{}", uid.to_string())
         };
 
         // Canonical operator order: B-J-G-F-P-R
@@ -1217,7 +1217,7 @@ impl SqlToMirConverter {
                     if root == name {
                         None
                     } else {
-                        let view_name = format!("{}_{}{}", root, gname, gid);
+                        let view_name = format!("{}_{}{}", root, gname.to_string(), gid.to_string());
                         Some(self.get_view(&view_name))
                     }
 

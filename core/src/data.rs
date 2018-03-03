@@ -42,9 +42,9 @@ pub enum DataType {
     Timestamp(NaiveDateTime),
 }
 
-#[cfg(any(feature = "web", test))]
 impl DataType {
     /// Lossy representation as JSON value.
+    #[cfg(any(feature = "web", test))]
     pub fn to_json(&self) -> Value {
         match *self {
             DataType::None => json!(null),
@@ -53,6 +53,27 @@ impl DataType {
             DataType::Real(i, f) => json!((i as f64) + (f as f64) * 1.0e-9),
             DataType::Text(..) | DataType::TinyText(..) => Value::String(self.into()),
             DataType::Timestamp(ts) => json!(ts.format("%+").to_string()),
+        }
+    }
+    
+    pub fn to_string(&self) -> String {
+        match *self {
+            DataType::None => String::from("*"),
+            DataType::Text(..) | DataType::TinyText(..) => {
+                let text: Cow<str> = self.into();
+                format!("{}", text)
+            }
+            DataType::Int(n) => format!("{}", n),
+            DataType::BigInt(n) => format!("{}", n),
+            DataType::Real(i, frac) => {
+                if i == 0 && frac < 0 {
+                    // We have to insert the negative sign ourselves.
+                    format!("{}", format!("-0.{:09}", frac.abs()))
+                } else {
+                    format!("{}", format!("{}.{:09}", i, frac.abs()))
+                }
+            }
+            DataType::Timestamp(ts) => format!("{}", format!("{}", ts.format("%c"))),
         }
     }
 }
@@ -354,7 +375,7 @@ impl fmt::Display for DataType {
             DataType::None => write!(f, "*"),
             DataType::Text(..) | DataType::TinyText(..) => {
                 let text: Cow<str> = self.into();
-                write!(f, "{}", text)
+                write!(f, "\"{}\"", text)
             }
             DataType::Int(n) => write!(f, "{}", n),
             DataType::BigInt(n) => write!(f, "{}", n),

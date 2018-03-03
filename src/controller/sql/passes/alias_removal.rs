@@ -80,8 +80,8 @@ impl AliasRemoval for SqlQuery {
                     if context.get("id").is_some() {
                         let universe_id = context.get("id").unwrap();
                         match context.get("group") {
-                            Some(g) => add_alias("GroupContext", &format!("GroupContext_{}_{}", g, universe_id)),
-                            None => add_alias("UserContext", &format!("UserContext_{}", universe_id)),
+                            Some(g) => add_alias("GroupContext", &format!("GroupContext_{}_{}", g.to_string(), universe_id.to_string())),
+                            None => add_alias("UserContext", &format!("UserContext_{}", universe_id.to_string())),
                         }
                     }
 

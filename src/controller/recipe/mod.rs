@@ -261,8 +261,8 @@ impl Recipe {
             let (id, group) = mig.universe();
             let new_name = if n.is_some() {
                 match group {
-                    Some(ref g) => Some(format!("{}_{}{}", n.clone().unwrap(), g, id)),
-                    None => Some(format!("{}_u{}", n.clone().unwrap(), id)),
+                    Some(ref g) => Some(format!("{}_{}{}", n.clone().unwrap(), g.to_string(), id.to_string())),
+                    None => Some(format!("{}_u{}", n.clone().unwrap(), id.to_string())),
                 }
             } else {
                 None

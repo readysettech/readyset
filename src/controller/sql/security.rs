@@ -83,15 +83,15 @@ impl Multiverse for SqlIncorporator {
 
         let (uc_name, universe_policies) = if group.is_none() {
             info!(self.log, "Starting user universe {}", universe.id);
-            let uc_name = format!("UserContext_{}", universe.id);
+            let uc_name = format!("UserContext_{}", universe.id.to_string());
 
             (uc_name, config.policies())
         } else {
             info!(self.log, "Starting group universe {}", universe.id);
-            let group_name = group.clone().unwrap().into();
-            let uc_name = format!("GroupContext_{}_{}", group_name, universe.id);
+            let group_name: DataType = group.clone().unwrap().into();
+            let uc_name = format!("GroupContext_{}_{}", group_name.to_string(), universe.id.to_string());
 
-            (uc_name, config.get_group_policies(group_name))
+            (uc_name, config.get_group_policies(group_name.to_string()))
         };
 
         let base = self.add_base(uc_name.clone(), &mut fields, mig);
