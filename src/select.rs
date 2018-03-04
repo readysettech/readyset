@@ -1113,4 +1113,45 @@ mod tests {
 
         assert_eq!(res.unwrap().1, expected);
     }
+
+    #[test]
+    fn where_in_clause() {
+        let qstr = "SELECT `auth_permission`.`content_type_id`, `auth_permission`.`codename`
+                    FROM `auth_permission`
+                    JOIN `django_content_type`
+                      ON ( `auth_permission`.`content_type_id` = `django_content_type`.`id` )
+                    WHERE `auth_permission`.`content_type_id` IN (0);";
+        let res = selection(qstr.as_bytes());
+
+        let expected_where_clause = Some(ComparisonOp(ConditionTree {
+            left: Box::new(Base(Field(Column::from("auth_permission.content_type_id")))),
+            right: Box::new(Base(Literal(0.into()))),
+            operator: Operator::In,
+        }));
+
+        let expected = SelectStatement {
+            tables: vec![Table::from("auth_permission")],
+            fields: vec![
+                FieldExpression::Col(Column::from("auth_permission.content_type_id")),
+                FieldExpression::Col(Column::from("auth_permission.codename")),
+            ],
+            join: vec![
+                JoinClause {
+                    operator: JoinOperator::Join,
+                    right: JoinRightSide::Table(Table::from("django_content_type")),
+                    constraint: JoinConstraint::On(ComparisonOp(ConditionTree {
+                        operator: Operator::Equal,
+                        left: Box::new(Base(Field(Column::from(
+                            "auth_permission.content_type_id",
+                        )))),
+                        right: Box::new(Base(Field(Column::from("django_content_type.id")))),
+                    })),
+                },
+            ],
+            where_clause: expected_where_clause,
+            ..Default::default()
+        };
+
+        assert_eq!(res.unwrap().1, expected);
+    }
 }
