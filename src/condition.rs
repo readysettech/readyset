@@ -169,7 +169,7 @@ named!(boolean_primary<&[u8], ConditionExpression>,
 );
 
 named!(predicate<&[u8], ConditionExpression>,
-    dbg_dmp!(do_parse!(
+    do_parse!(
         left: simple_expr >>
         op_right: opt!(
             alt_complete!(
@@ -201,7 +201,7 @@ named!(predicate<&[u8], ConditionExpression>,
                 }),
             None => left,
         })
-    ))
+    )
 );
 
 named!(simple_expr<&[u8], ConditionExpression>,
