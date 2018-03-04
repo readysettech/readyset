@@ -150,20 +150,22 @@ named!(pub not_expr<&[u8], ConditionExpression>,
 );
 
 named!(boolean_primary<&[u8], ConditionExpression>,
-    do_parse!(
-        left: predicate >>
-        opt_multispace >>
-        op: binary_comparison_operator >>
-        opt_multispace >>
-        right: predicate >>
-        (ConditionExpression::ComparisonOp(
-            ConditionTree {
-                operator: op,
-                left: Box::new(left),
-                right: Box::new(right),
-            }
-        ))
-    )
+    alt_complete!(
+        do_parse!(
+            left: predicate >>
+            opt_multispace >>
+            op: binary_comparison_operator >>
+            opt_multispace >>
+            right: predicate >>
+            (ConditionExpression::ComparisonOp(
+                ConditionTree {
+                    operator: op,
+                    left: Box::new(left),
+                    right: Box::new(right),
+                }
+            ))
+        )
+        | predicate)
 );
 
 named!(predicate<&[u8], ConditionExpression>,
