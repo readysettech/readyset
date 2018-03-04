@@ -65,7 +65,7 @@ where
 //       see https://github.com/jonhoo/msql-srv/commit/13e5e753e5042a42cc45ad57c2b760561da2fb50
 // NOTE: yes, I know the = / => distinction is ugly
 macro_rules! like_try_into {
-    ($self:ident, $source:ty = $target:ty, $w:ident, $m:ident, $c:ident) => {{
+    ($self: ident, $source: ty = $target: ty, $w: ident, $m: ident, $c: ident) => {{
         let min = <$target>::min_value() as $source;
         let max = <$target>::max_value() as $source;
         if *$self <= max && *$self >= min {
@@ -74,7 +74,7 @@ macro_rules! like_try_into {
             Err(bad($self, $c))
         }
     }};
-    ($self:ident, $source:ty => $target:ty, $w:ident, $m:ident, $c:ident) => {{
+    ($self: ident, $source: ty => $target: ty, $w: ident, $m: ident, $c: ident) => {{
         let min = <$target>::min_value() as $source;
         let max = <$target>::max_value() as $source;
         if *$self <= max && *$self >= min {
@@ -82,11 +82,11 @@ macro_rules! like_try_into {
         } else {
             Err(bad($self, $c))
         }
-    }}
+    }};
 }
 
 macro_rules! forgiving_numeric {
-    ($t:ty) => {
+    ($t: ty) => {
         impl ToMysqlValue for $t {
             mysql_text_trivial!();
             fn to_mysql_bin<W: Write>(&self, w: &mut W, c: &Column) -> io::Result<()> {
@@ -124,7 +124,7 @@ macro_rules! forgiving_numeric {
                 }
             }
         }
-    }
+    };
 }
 
 forgiving_numeric!(usize);
@@ -658,7 +658,7 @@ mod tests {
         use super::*;
 
         macro_rules! rt {
-            ($name:ident, $t:ty, $v:expr) => {
+            ($name: ident, $t: ty, $v: expr) => {
                 #[test]
                 fn $name() {
                     let mut data = Vec::new();
@@ -669,7 +669,7 @@ mod tests {
                         v
                     );
                 }
-            }
+            };
         }
 
         rt!(u8_one, u8, 1);
@@ -714,10 +714,10 @@ mod tests {
         use super::*;
 
         macro_rules! rt {
-            ($name:ident, $t:ty, $v:expr, $ct:expr) => {
+            ($name: ident, $t: ty, $v: expr, $ct: expr) => {
                 rt!($name, $t, $v, $ct, false);
             };
-            ($name:ident, $t:ty, $v:expr, $ct:expr, $sig:expr) => {
+            ($name: ident, $t: ty, $v: expr, $ct: expr, $sig: expr) => {
                 #[test]
                 fn $name() {
                     let mut data = Vec::new();
@@ -735,11 +735,13 @@ mod tests {
                     let v: $t = $v;
                     v.to_mysql_bin(&mut data, &col).unwrap();
                     assert_eq!(
-                        from_value::<$t>(value::read_bin_value(&mut &data[..], $ct, !$sig).unwrap()),
+                        from_value::<$t>(
+                            value::read_bin_value(&mut &data[..], $ct, !$sig).unwrap()
+                        ),
                         v
                     );
                 }
-            }
+            };
         }
 
         rt!(u8_one, u8, 1, ColumnType::MYSQL_TYPE_TINY, false);
