@@ -1,4 +1,5 @@
 use std::io::{self, Write};
+use myc;
 use myc::io::WriteMysqlExt;
 use myc::constants::{ColumnFlags, ColumnType};
 use byteorder::{LittleEndian, WriteBytesExt};
@@ -410,7 +411,7 @@ where
     }
 }
 
-use chrono::{Datelike, NaiveDate, NaiveDateTime, Timelike};
+use chrono::{self, Datelike, NaiveDate, NaiveDateTime, Timelike};
 impl ToMysqlValue for NaiveDate {
     fn to_mysql_text<W: Write>(&self, w: &mut W) -> io::Result<()> {
         w.write_lenenc_str(
@@ -536,6 +537,109 @@ impl ToMysqlValue for Duration {
                 Ok(())
             }
             _ => Err(bad(self, c)),
+        }
+    }
+}
+
+impl ToMysqlValue for myc::value::Value {
+    fn to_mysql_text<W: Write>(&self, w: &mut W) -> io::Result<()> {
+        match *self {
+            myc::value::Value::NULL => None::<u8>.to_mysql_text(w),
+            myc::value::Value::Bytes(ref bytes) => bytes.to_mysql_text(w),
+            myc::value::Value::Int(n) => n.to_mysql_text(w),
+            myc::value::Value::UInt(n) => n.to_mysql_text(w),
+            myc::value::Value::Float(f) => f.to_mysql_text(w),
+            myc::value::Value::Date(y, mo, d, h, mi, s, us) => {
+                NaiveDate::from_ymd(y as i32, mo as u32, d as u32)
+                    .and_hms_micro(h as u32, mi as u32, s as u32, us)
+                    .to_mysql_text(w)
+            }
+            myc::value::Value::Time(neg, d, h, m, s, us) => {
+                if neg {
+                    return Err(io::Error::new(
+                        io::ErrorKind::Other,
+                        "negative times not yet supported",
+                    ));
+                }
+                (chrono::Duration::days(d as i64) + chrono::Duration::hours(h as i64)
+                    + chrono::Duration::minutes(m as i64)
+                    + chrono::Duration::seconds(s as i64)
+                    + chrono::Duration::microseconds(us as i64))
+                    .to_std()
+                    .expect("only positive times at the moment")
+                    .to_mysql_text(w)
+            }
+        }
+    }
+    fn to_mysql_bin<W: Write>(&self, w: &mut W, c: &Column) -> io::Result<()> {
+        match *self {
+            myc::value::Value::NULL => unreachable!(),
+            myc::value::Value::Bytes(ref bytes) => bytes.to_mysql_bin(w, c),
+            myc::value::Value::Int(n) => {
+                // we *could* just delegate to i64 impl here, but then you couldn't use myc::value::Value
+                // and return, say, a short. also, myc uses i64 for *every* number type, *except*
+                // u64, so we even need to coerce across unsigned :( the good news is that our
+                // impls for numbers auto-upgrade to wider coltypes, so we can just downcast to the
+                // smallest containing type, and then call on that
+                let signed = !c.colflags.contains(ColumnFlags::UNSIGNED_FLAG);
+                if signed {
+                    if n >= i8::min_value() as i64 && n <= i8::max_value() as i64 {
+                        (n as i8).to_mysql_bin(w, c)
+                    } else if n >= i16::min_value() as i64 && n <= i16::max_value() as i64 {
+                        (n as i16).to_mysql_bin(w, c)
+                    } else if n >= i32::min_value() as i64 && n <= i32::max_value() as i64 {
+                        (n as i32).to_mysql_bin(w, c)
+                    } else {
+                        n.to_mysql_bin(w, c)
+                    }
+                } else if n < 0 {
+                    Err(bad(self, c))
+                } else {
+                    if n <= u8::max_value() as i64 {
+                        (n as u8).to_mysql_bin(w, c)
+                    } else if n <= u16::max_value() as i64 {
+                        (n as u16).to_mysql_bin(w, c)
+                    } else if n <= u32::max_value() as i64 {
+                        (n as u32).to_mysql_bin(w, c)
+                    } else {
+                        // must work since u64::max_value() > i64::max_value(), and n >= 0
+                        (n as u64).to_mysql_bin(w, c)
+                    }
+                }
+            }
+            myc::value::Value::UInt(n) => {
+                // we are not as lenient with unsigned ints because the mysql crate isn't either
+                n.to_mysql_bin(w, c)
+            }
+            myc::value::Value::Float(f) => f.to_mysql_bin(w, c),
+            myc::value::Value::Date(y, mo, d, h, mi, s, us) => {
+                NaiveDate::from_ymd(y as i32, mo as u32, d as u32)
+                    .and_hms_micro(h as u32, mi as u32, s as u32, us)
+                    .to_mysql_bin(w, c)
+            }
+            myc::value::Value::Time(neg, d, h, m, s, us) => {
+                if neg {
+                    return Err(io::Error::new(
+                        io::ErrorKind::Other,
+                        "negative times not yet supported",
+                    ));
+                }
+                (chrono::Duration::days(d as i64) + chrono::Duration::hours(h as i64)
+                    + chrono::Duration::minutes(m as i64)
+                    + chrono::Duration::seconds(s as i64)
+                    + chrono::Duration::microseconds(us as i64))
+                    .to_std()
+                    .expect("only positive times at the moment")
+                    .to_mysql_bin(w, c)
+            }
+        }
+    }
+
+    fn is_null(&self) -> bool {
+        if let myc::value::Value::NULL = *self {
+            true
+        } else {
+            false
         }
     }
 }
