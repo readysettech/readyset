@@ -5,7 +5,7 @@ use std::fmt;
 
 use column::Column;
 use common::{binary_comparison_operator, column_identifier, integer_literal, opt_multispace,
-             string_literal, Literal, Operator};
+             string_literal, value_list, Literal, Operator};
 
 use select::{nested_selection, SelectStatement};
 
@@ -169,6 +169,42 @@ named!(boolean_primary<&[u8], ConditionExpression>,
 );
 
 named!(predicate<&[u8], ConditionExpression>,
+    dbg_dmp!(do_parse!(
+        left: simple_expr >>
+        op_right: opt!(
+            alt_complete!(
+                  do_parse!(
+                      neg: opt!(preceded!(opt_multispace, tag_no_case!("not"))) >>
+                      multispace >>
+                      tag_no_case!("in") >>
+                      multispace >>
+                      sq: nested_selection >>
+                      (ConditionExpression::Base(ConditionBase::NestedSelect(Box::new(sq))))
+                  )
+                | do_parse!(
+                      neg: opt!(preceded!(opt_multispace, tag_no_case!("not"))) >>
+                      multispace >>
+                      tag_no_case!("in") >>
+                      multispace >>
+                      vl: delimited!(tag!("("), value_list, tag!(")")) >>
+                      // XXX(malte): incorrect -- don't just return first element!
+                      (ConditionExpression::Base(ConditionBase::Literal(vl[0].clone())))
+                  )
+            )
+        ) >>
+        (match op_right {
+            Some(right) => ConditionExpression::ComparisonOp(
+                ConditionTree {
+                    operator: Operator::In,
+                    left: Box::new(left),
+                    right: Box::new(right),
+                }),
+            None => left,
+        })
+    ))
+);
+
+named!(simple_expr<&[u8], ConditionExpression>,
     alt_complete!(
             do_parse!(
                 tag!("?") >>
@@ -499,4 +535,16 @@ mod tests {
         assert_eq!(res.unwrap().1, expected);
     }
 
+    #[test]
+    fn in_list_of_values() {
+        use ConditionBase::*;
+
+        let cond = "bar in (0)";
+
+        let res = condition_expr(cond.as_bytes());
+
+        let expected = flat_condition_tree(Operator::In, Field("bar".into()), Literal(0.into()));
+
+        assert_eq!(res.unwrap().1, expected);
+    }
 }
