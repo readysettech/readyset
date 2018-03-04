@@ -13,6 +13,7 @@ use select::{nested_selection, SelectStatement};
 pub enum ConditionBase {
     Field(Column),
     Literal(Literal),
+    LiteralList(Vec<Literal>),
     Placeholder,
     NestedSelect(Box<SelectStatement>),
 }
@@ -22,6 +23,14 @@ impl fmt::Display for ConditionBase {
         match *self {
             ConditionBase::Field(ref col) => write!(f, "{}", col),
             ConditionBase::Literal(ref literal) => write!(f, "{}", literal.to_string()),
+            ConditionBase::LiteralList(ref ll) => write!(
+                f,
+                "({})",
+                ll.iter()
+                    .map(|l| l.to_string())
+                    .collect::<Vec<_>>()
+                    .join(", ")
+            ),
             ConditionBase::Placeholder => write!(f, "?"),
             ConditionBase::NestedSelect(ref select) => write!(f, "{}", select),
         }
@@ -187,8 +196,7 @@ named!(predicate<&[u8], ConditionExpression>,
                       tag_no_case!("in") >>
                       multispace >>
                       vl: delimited!(tag!("("), value_list, tag!(")")) >>
-                      // XXX(malte): incorrect -- don't just return first element!
-                      (ConditionExpression::Base(ConditionBase::Literal(vl[0].clone())))
+                      (ConditionExpression::Base(ConditionBase::LiteralList(vl)))
                   )
             )
         ) >>
@@ -543,7 +551,11 @@ mod tests {
 
         let res = condition_expr(cond.as_bytes());
 
-        let expected = flat_condition_tree(Operator::In, Field("bar".into()), Literal(0.into()));
+        let expected = flat_condition_tree(
+            Operator::In,
+            Field("bar".into()),
+            LiteralList(vec![0.into()]),
+        );
 
         assert_eq!(res.unwrap().1, expected);
     }

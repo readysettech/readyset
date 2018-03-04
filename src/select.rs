@@ -1125,7 +1125,7 @@ mod tests {
 
         let expected_where_clause = Some(ComparisonOp(ConditionTree {
             left: Box::new(Base(Field(Column::from("auth_permission.content_type_id")))),
-            right: Box::new(Base(Literal(0.into()))),
+            right: Box::new(Base(LiteralList(vec![0.into()]))),
             operator: Operator::In,
         }));
 
