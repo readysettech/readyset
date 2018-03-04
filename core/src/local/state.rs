@@ -174,7 +174,11 @@ impl PersistentState {
         };
 
         connection
-            .execute("CREATE TABLE IF NOT EXISTS store (row BLOB)", &[])
+            .execute_batch(
+                "CREATE TABLE IF NOT EXISTS store (row BLOB);
+                PRAGMA synchronous = OFF;
+                PRAGMA journal_mode = OFF;",
+            )
             .unwrap();
 
         Self {
