@@ -343,6 +343,7 @@ fn classify_conditionals(
                         ConditionBase::Placeholder => if let ConditionBase::Field(ref lf) = *l {
                             params.push(lf.clone());
                         },
+                        ConditionBase::LiteralList(_) => (),
                         ConditionBase::NestedSelect(_) => unimplemented!(),
                     }
                 };
