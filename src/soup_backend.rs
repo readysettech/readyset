@@ -114,7 +114,7 @@ impl SoupBackend {
             Ok(_) => {
                 // XXX(malte): last_insert_id needs to be set correctly
                 // Could we have put more than one row?
-                results.completed(1, 0)
+                results.completed(q.data.len() as u64, 1)
             }
             Err(e) => {
                 error!(self.log, "put error: {:?}", e);
