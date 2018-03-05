@@ -52,7 +52,7 @@ pub trait Multiverse {
     fn add_base(
         &mut self,
         name: String,
-        fields: &mut Vec<&String>,
+        fields: &mut Vec<String>,
         mig: &mut Migration
     ) -> QueryFlowParts;
 }
@@ -78,8 +78,7 @@ impl Multiverse for SqlIncorporator {
         };
 
         // Create the UserContext base node.
-        let context = mig.context();
-        let mut fields: Vec<_> = context.keys().collect();
+        let mut fields: Vec<String> = mig.context().keys().cloned().collect();
 
         let (uc_name, universe_policies) = if group.is_none() {
             info!(self.log, "Starting user universe {}", universe.id);
@@ -153,7 +152,7 @@ impl Multiverse for SqlIncorporator {
     fn add_base(
         &mut self,
         name: String,
-        fields: &mut Vec<&String>,
+        fields: &mut Vec<String>,
         mig: &mut Migration
     ) -> QueryFlowParts {
         // Unfortunately, we can't add the base directly to the graph, because we needd

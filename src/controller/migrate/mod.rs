@@ -121,8 +121,8 @@ impl<'a> Migration<'a> {
     }
 
     /// Returns the context of this migration
-    pub fn context(&self) -> HashMap<String, DataType> {
-        self.context.clone()
+    pub fn context(&self) -> &HashMap<String, DataType> {
+        &self.context
     }
 
     /// Returns the universe in which this migration is operating in.

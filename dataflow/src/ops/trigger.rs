@@ -20,8 +20,7 @@ pub struct Trigger {
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub enum TriggerType {
-    // url to the blender, group name
-    GroupCreation{ url: String, group: String },
+    GroupCreation{ controller_url: String, group: String },
 }
 
 impl Trigger {
@@ -66,7 +65,7 @@ impl Trigger {
         }
 
         match self.trigger {
-            TriggerType::GroupCreation{ ref url, ref group } => {
+            TriggerType::GroupCreation{ ref controller_url, ref group } => {
                 let contexts = gids.iter().map(|gid| {
                     let mut group_context: HashMap<String, DataType> = HashMap::new();
                     group_context.insert(String::from("id"), gid.clone());
@@ -74,7 +73,7 @@ impl Trigger {
                     group_context
                 }).collect();
 
-                self.rpc("create_universe", contexts, url);
+                self.rpc("create_universe", contexts, controller_url);
             }
         }
     }
@@ -174,7 +173,7 @@ mod tests {
         let mut g = ops::test::MockGraph::new();
         let s = g.add_base("source", &["x", "y", "z"]);
         let trigger_type = TriggerType::GroupCreation {
-            url: String::from("url"),
+            controller_url: String::from("localhost"),
             group: String::from("group"),
         };
         g.set_op(

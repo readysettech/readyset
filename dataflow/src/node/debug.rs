@@ -113,11 +113,7 @@ impl Node {
     }
 
     fn is_security(name: &str) -> bool {
-        use regex::Regex;
-
-        let re = Regex::new(r"^sp_").unwrap();
-
-        re.is_match(name)
+        name.starts_with("sp_")
     }
 
     fn escape(s: &str) -> String {

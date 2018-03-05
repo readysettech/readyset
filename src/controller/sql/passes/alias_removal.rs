@@ -6,7 +6,7 @@ use std::collections::HashMap;
 use dataflow::prelude::DataType;
 
 pub trait AliasRemoval {
-    fn expand_table_aliases(self, context: HashMap<String, DataType>) -> SqlQuery;
+    fn expand_table_aliases(self, context: &HashMap<String, DataType>) -> SqlQuery;
 }
 
 fn rewrite_conditional(
@@ -65,7 +65,7 @@ fn rewrite_conditional(
 }
 
 impl AliasRemoval for SqlQuery {
-    fn expand_table_aliases(self, context: HashMap<String, DataType>) -> SqlQuery {
+    fn expand_table_aliases(self, context: &HashMap<String, DataType>) -> SqlQuery {
         let mut table_aliases = HashMap::new();
 
         match self {
@@ -188,7 +188,7 @@ mod tests {
         };
         let mut context = HashMap::new();
         context.insert(String::from("id"), "global".into());
-        let res = SqlQuery::Select(q).expand_table_aliases(context);
+        let res = SqlQuery::Select(q).expand_table_aliases(&context);
         // Table alias removed in field list
         match res {
             SqlQuery::Select(tq) => {

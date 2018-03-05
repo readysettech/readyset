@@ -23,18 +23,9 @@ impl Rewrite {
         }
     }
 
-    fn rewrite(&self, r: Vec<DataType>) -> Vec<DataType> {
-        let mut r = r.clone();
+    fn rewrite(&self, mut r: Vec<DataType>) -> Vec<DataType> {
         r[self.rw_col] = self.value.clone();
         r
-    }
-
-    fn generate_row(&self, r: Vec<DataType>, positive: bool) -> Record {
-        if positive {
-            Record::Positive(r.clone())
-        } else {
-            Record::Negative(r.clone())
-        }
     }
 }
 
@@ -51,7 +42,6 @@ impl Ingredient for Rewrite {
     fn is_join(&self) -> bool {
         true
     }
-
 
     fn must_replay_among(&self) -> Option<HashSet<NodeIndex>> {
         Some(Some(self.src.as_global()).into_iter().collect())
@@ -73,7 +63,7 @@ impl Ingredient for Rewrite {
         nodes: &DomainNodes,
         state: &StateMap,
     ) -> ProcessingResult {
-        assert!(from == *self.src || from == *self.should_rewrite);
+        debug_assert!(from == *self.src || from == *self.should_rewrite);
         let misses = Vec::new();
         let mut emit_rs = Vec::with_capacity(rs.len());
 
@@ -107,7 +97,7 @@ impl Ingredient for Rewrite {
                     emit_rs.push(r);
                 } else {
                     let (r, positive) = r.extract();
-                    let row = self.generate_row(self.rewrite(r), positive);
+                    let row = (self.rewrite(r), positive).into();
                     emit_rs.push(row);
                 }
 
@@ -130,19 +120,18 @@ impl Ingredient for Rewrite {
                 if other_rows.peek().is_none() {
                     continue;
                 } else {
-                    let mut other;;
                     while other_rows.peek().is_some() {
-                        other = other_rows.next().unwrap();
+                        let other = other_rows.next().unwrap().to_vec();
                         if r.is_positive() {
                             // emit negatives for other
-                            emit_rs.push(self.generate_row(other.to_vec(), false));
+                            emit_rs.push((other.clone(), false).into());
                             // emit positives for rewritten other
-                            emit_rs.push(self.generate_row(self.rewrite(other.to_vec()), true));
+                            emit_rs.push((self.rewrite(other), true).into());
                         } else {
                             // emit positives for other
-                            emit_rs.push(self.generate_row(other.to_vec(), true));
+                            emit_rs.push((other.clone(), true).into());
                             // emit negatives for rewritten other
-                            emit_rs.push(self.generate_row(self.rewrite(other.to_vec()), false));
+                            emit_rs.push((self.rewrite(other), false).into());
                         }
 
                     }
