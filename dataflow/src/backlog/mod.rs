@@ -182,7 +182,10 @@ impl SingleReadHandle {
         self.handle.len()
     }
 
-    pub fn nrows(&self) -> usize {
+    /// Count the number of rows in the reader.
+    /// This is a potentially very costly operation, since it will 
+    /// hold up writers until all rows are iterated through.
+    pub fn count_rows(&self) -> usize {
         let mut nrows = 0;
         self.handle.for_each(|_, v| nrows += v.len());
         nrows

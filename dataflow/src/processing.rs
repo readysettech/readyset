@@ -211,8 +211,8 @@ where
         false
     }
 
-    /// Returns true if this operator should always materialize its state
-    fn must_materialize(&self) -> bool {
+    /// Returns true if this operator requires a full materialization
+    fn requires_full_materialization(&self) -> bool {
         false
     }
 }

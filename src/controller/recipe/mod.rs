@@ -5,7 +5,7 @@ use controller::sql::reuse::ReuseConfigType;
 use controller::sql::SqlIncorporator;
 use dataflow::prelude::DataType;
 use dataflow::ops::trigger::Trigger;
-use dataflow::ops::trigger::TriggerType;
+use dataflow::ops::trigger::TriggerEvent;
 use core::NodeIndex;
 
 use controller::security::SecurityConfig;
@@ -342,7 +342,7 @@ impl Recipe {
                     .add_parsed_query(group.membership(), Some(group.name()), true, mig)?;
 
                 /// Add trigger node below group membership views
-                let group_creation = TriggerType::GroupCreation { controller_url: config.url.clone(), group: group.name() };
+                let group_creation = TriggerEvent::GroupCreation { controller_url: config.url.clone(), group: group.name() };
                 let trigger = Trigger::new(qfp.query_leaf,  group_creation, vec![1]);
                 mig.add_ingredient(&format!("{}-trigger", group.name()), &["uid", "gid"], trigger);
 

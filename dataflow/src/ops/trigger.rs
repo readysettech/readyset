@@ -8,24 +8,31 @@ use serde::Serialize;
 use serde_json;
 use std::thread;
 
-/// Applies the identity operation to the view. Since the identity does nothing,
-/// it is the simplest possible operation. Primary intended as a reference
+/// A Trigger data-flow operator.
+///
+/// This node triggers an event in the dataflow graph whenever a 
+/// new `key` arrives.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Trigger {
     us: Option<IndexPair>,
     src: IndexPair,
-    trigger: TriggerType,
+    trigger: TriggerEvent,
     key: Vec<usize>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
-pub enum TriggerType {
+pub enum TriggerEvent {
+    /// Triggers the creation of a new group universe.
     GroupCreation{ controller_url: String, group: String },
 }
 
 impl Trigger {
     /// Construct a new Trigger operator.
-    pub fn new(src: NodeIndex, trigger: TriggerType, key: Vec<usize>) -> Trigger {
+    ///
+    /// `src` is the parent node from which this node receives records.
+    /// Whenever this node receives a record with a new value for `key`, 
+    /// it triggers the event specified by `trigger`
+    pub fn new(src: NodeIndex, trigger: TriggerEvent, key: Vec<usize>) -> Trigger {
         assert_eq!(key.len(), 1);
         Trigger {
             us: None,
@@ -59,14 +66,14 @@ impl Trigger {
         });
     }
 
-    fn trigger(&self, gids: Vec<DataType>) {
-        if gids.is_empty() {
+    fn trigger(&self, ids: Vec<DataType>) {
+        if ids.is_empty() {
             return
         }
 
         match self.trigger {
-            TriggerType::GroupCreation{ ref controller_url, ref group } => {
-                let contexts = gids.iter().map(|gid| {
+            TriggerEvent::GroupCreation{ ref controller_url, ref group } => {
+                let contexts = ids.iter().map(|gid| {
                     let mut group_context: HashMap<String, DataType> = HashMap::new();
                     group_context.insert(String::from("id"), gid.clone());
                     group_context.insert(String::from("group"), group.clone().into());
@@ -158,7 +165,11 @@ impl Ingredient for Trigger {
         vec![(self.src.as_global(), Some(column))]
     }
 
-    fn must_materialize(&self) -> bool {
+    // Trigger nodes require full materialization because we want group universes
+    // to be long lived and to exist even if no user makes use of it.
+    // We do this for two reasons: 1) to make user universe creation faster and 
+    // 2) so we don't have to order group and user universe migrations.
+    fn requires_full_materialization(&self) -> bool {
         true
     }
 }
@@ -172,7 +183,7 @@ mod tests {
     fn setup(materialized: bool) -> ops::test::MockGraph {
         let mut g = ops::test::MockGraph::new();
         let s = g.add_base("source", &["x", "y", "z"]);
-        let trigger_type = TriggerType::GroupCreation {
+        let trigger_type = TriggerEvent::GroupCreation {
             controller_url: String::from("localhost"),
             group: String::from("group"),
         };

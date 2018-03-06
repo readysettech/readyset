@@ -304,7 +304,7 @@ impl Materializations {
                 able = false;
             }
 
-            if graph[ni].is_internal() && graph[ni].must_materialize() {
+            if graph[ni].is_internal() && graph[ni].requires_full_materialization() {
                 able = false;
             }
 
