@@ -20,7 +20,6 @@ use controller::migrate::materialization::Materializations;
 use controller::mutator::MutatorBuilder;
 use controller::sql::reuse::ReuseConfigType;
 use controller::recipe::ActivationResult;
-use controller::getter::RemoteGetter;
 
 use hyper::{Method, StatusCode};
 use mio::net::TcpListener;
@@ -508,11 +507,6 @@ impl ControllerInner {
         })
     }
 
-    fn get_getter(&self, name: &str) -> Option<RemoteGetter> {
-        let rgb: Option<RemoteGetterBuilder> = self.getter_builder(name);
-        rgb.map(|rgb| rgb.build())
-    }
-
     /// Obtain a MutatorBuild that can be used to construct a Mutator to perform writes and deletes
     /// from the given named base node.
     pub fn mutator_builder(&self, base: &str) -> Option<MutatorBuilder> {
@@ -611,7 +605,8 @@ impl ControllerInner {
         let uid = context.get("id").expect("Universe context must have id").clone();
         if context.get("group").is_none() {
             for g in groups {
-                let mut getter = self.get_getter(&g).unwrap();
+                let rgb: Option<RemoteGetterBuilder> = self.getter_builder(&g);
+                let mut getter = rgb.map(|rgb| rgb.build()).unwrap();
                 let my_groups: Vec<DataType> = getter.lookup(&uid, true).unwrap().iter().map(|v| v[1].clone()).collect();
                 universe_groups.insert(g, my_groups);
             }
