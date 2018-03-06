@@ -176,8 +176,8 @@ impl PersistentState {
         connection
             .execute_batch(
                 "CREATE TABLE IF NOT EXISTS store (row BLOB);
-                PRAGMA synchronous = OFF;
-                PRAGMA journal_mode = OFF;",
+                PRAGMA synchronous = NORMAL;
+                PRAGMA journal_mode = WAL;",
             )
             .unwrap();
 
@@ -387,8 +387,10 @@ impl Drop for PersistentState {
             return;
         }
 
-        // Journal files should get deleted automatically, but just in case:
+        // Journal/WAL files should get deleted automatically, but just in case:
         let _ = fs::remove_file(format!("{}-journal", self.name));
+        let _ = fs::remove_file(format!("{}-shm", self.name));
+        let _ = fs::remove_file(format!("{}-wal", self.name));
         fs::remove_file(&self.name).unwrap();
     }
 }
