@@ -242,7 +242,6 @@ impl SqlToMirConverter {
             CompoundSelectOperator::Union => self.make_union_node(
                 &union_name,
                 &sqs.iter().map(|mq| mq.leaf.clone()).collect(),
-                !has_leaf,
             ),
             _ => unimplemented!(),
         };
@@ -583,7 +582,7 @@ impl SqlToMirConverter {
         }
     }
 
-    fn make_union_node(&self, name: &str, ancestors: &Vec<MirNodeRef>, is_leaf: bool) -> MirNodeRef {
+    fn make_union_node(&self, name: &str, ancestors: &Vec<MirNodeRef>) -> MirNodeRef {
         let mut emit: Vec<Vec<Column>> = Vec::new();
         assert!(ancestors.len() > 1, "union must have more than 1 ancestors");
 
@@ -611,14 +610,7 @@ impl SqlToMirConverter {
                     acols.push(ac.clone());
                 }
             }
-            let cols: Vec<Column> = acols.iter().map(|c| {
-                if is_leaf {
-                    sanitize_leaf_column(c.clone(), name)
-                } else {
-                    c.clone()
-                }
-            }).collect();
-            emit.push(cols.clone());
+            emit.push(acols.clone());
         }
 
         assert!(
@@ -638,18 +630,9 @@ impl SqlToMirConverter {
         )
     }
 
-    fn make_union_from_same_base(&self, name: &str, ancestors: Vec<MirNodeRef>, columns: Vec<Column>, is_leaf: bool) -> MirNodeRef {
+    fn make_union_from_same_base(&self, name: &str, ancestors: Vec<MirNodeRef>, columns: Vec<Column>) -> MirNodeRef {
         assert!(ancestors.len() > 1, "union must have more than 1 ancestors");
         trace!(self.log, "Added union node wiht columns {:?}", columns);
-        let columns: Vec<Column> = columns.into_iter()
-                        .map(|c| {
-                            if is_leaf {
-                                sanitize_leaf_column(c, name)
-                            } else {
-                                c
-                            }
-                        }).collect();
-
         let emit = ancestors
             .iter()
             .map(|_| columns.clone())
@@ -1032,7 +1015,6 @@ impl SqlToMirConverter {
                             &format!("{}_un", name),
                             vec![last_left, last_right],
                             output_cols,
-                            false,
                         );
 
                         pred_nodes.extend(left.clone());
@@ -1336,7 +1318,7 @@ impl SqlToMirConverter {
 
             let final_node = if ancestors.len() > 1 {
                 // If we have multiple queries, reconcile them.
-                let nodes = self.reconcile(&format!("q_{:x}{}", qg.signature().hash, uformat), &qg, &ancestors, new_node_count, has_leaf);
+                let nodes = self.reconcile(&format!("q_{:x}{}", qg.signature().hash, uformat), &qg, &ancestors, new_node_count);
                 new_node_count += nodes.len();
                 nodes_added.extend(nodes.clone());
 

@@ -13,7 +13,6 @@ pub trait SecurityBoundary {
         qg: &QueryGraph,
         ancestors: &Vec<MirNodeRef>,
         node_count: usize,
-        has_leaf: bool,
     ) -> Vec<MirNodeRef>;
 
     fn make_security_boundary(
@@ -31,7 +30,6 @@ impl SecurityBoundary for SqlToMirConverter {
         qg: &QueryGraph,
         ancestors: &Vec<MirNodeRef>,
         node_count: usize,
-        has_leaf: bool,
         ) -> Vec<MirNodeRef> {
         use controller::sql::mir::grouped::make_grouped;
 
@@ -39,7 +37,7 @@ impl SecurityBoundary for SqlToMirConverter {
         let mut node_count = node_count;
 
         // First, union the results from all ancestors
-        let union = self.make_union_node(&format!("{}_n{}", name, node_count), &ancestors, has_leaf);
+        let union = self.make_union_node(&format!("{}_n{}", name, node_count), &ancestors);
         nodes_added.push(union.clone());
         node_count += 1;
 
