@@ -134,18 +134,9 @@ impl Ingredient for Rewrite {
                 } else {
                     while other_rows.peek().is_some() {
                         let other = other_rows.next().unwrap().to_vec();
-                        if r.is_positive() {
-                            // emit negatives for other
-                            emit_rs.push((other.clone(), false).into());
-                            // emit positives for rewritten other
-                            emit_rs.push((self.rewrite(other), true).into());
-                        } else {
-                            // emit positives for other
-                            emit_rs.push((other.clone(), true).into());
-                            // emit negatives for rewritten other
-                            emit_rs.push((self.rewrite(other), false).into());
-                        }
 
+                        emit_rs.push((other.clone(), !r.is_positive()).into());
+                        emit_rs.push((self.rewrite(other), r.is_positive()).into());
                     }
                 }
 
