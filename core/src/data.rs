@@ -43,19 +43,6 @@ pub enum DataType {
 }
 
 impl DataType {
-    /// Lossy representation as JSON value.
-    #[cfg(any(feature = "web", test))]
-    pub fn to_json(&self) -> Value {
-        match *self {
-            DataType::None => json!(null),
-            DataType::Int(n) => json!(n),
-            DataType::BigInt(n) => json!(n),
-            DataType::Real(i, f) => json!((i as f64) + (f as f64) * 1.0e-9),
-            DataType::Text(..) | DataType::TinyText(..) => Value::String(self.into()),
-            DataType::Timestamp(ts) => json!(ts.format("%+").to_string()),
-        }
-    }
-    
     pub fn to_string(&self) -> String {
         match *self {
             DataType::None => String::from("*"),
@@ -619,16 +606,6 @@ mod tests {
         assert_eq!(a.to_string(), "2.500000000");
         assert_eq!(b.to_string(), "-2.010000000");
         assert_eq!(c.to_string(), "-0.012345678");
-    }
-
-    #[test]
-    fn real_to_json() {
-        let a: DataType = (2.5).into();
-        let b: DataType = (-2.01).into();
-        let c: DataType = (-0.012345678).into();
-        assert_eq!(a.to_json(), json!(2.5));
-        assert_eq!(b.to_json(), json!(-2.01));
-        assert_eq!(c.to_json(), json!(-0.012345678));
     }
 
     #[test]
