@@ -18,7 +18,6 @@ use controller::{ControllerState, DomainHandle, Migration, Recipe, RemoteGetterB
                  WorkerIdentifier, WorkerStatus};
 use controller::migrate::materialization::Materializations;
 use controller::mutator::MutatorBuilder;
-use controller::sql::reuse::ReuseConfigType;
 use controller::recipe::ActivationResult;
 
 use hyper::{Method, StatusCode};
@@ -166,12 +165,6 @@ impl ControllerInner {
             (Post, "/create_universe") => {
                 json::to_string(&self.create_universe(json::from_slice(&body).unwrap())).unwrap()
             }
-            (Post, "/enable_reuse") => {
-                json::to_string(&self.enable_reuse(json::from_slice(&body).unwrap())).unwrap()
-            }
-            (Post, "/set_ndomains") => {
-                json::to_string(&self.set_ndomains(json::from_slice(&body).unwrap())).unwrap()
-            }
             _ => return Err(StatusCode::NotFound),
         })
     }
@@ -282,10 +275,18 @@ impl ControllerInner {
             None
         };
 
+        let mut recipe = Recipe::blank(Some(log.clone()));
+        recipe.enable_reuse(state.config.reuse);
+
+        let (fixed_domains, ndomains) = match state.config.fixed_domains {
+            Some(n) => (true, n),
+            None => (false, 0),
+        };
+
         ControllerInner {
             ingredients: g,
             source: source,
-            ndomains: 0,
+            ndomains: ndomains,
             checktable,
             checktable_addr,
             listen_addr,
@@ -296,7 +297,7 @@ impl ControllerInner {
             persistence: state.config.persistence,
             heartbeat_every: state.config.heartbeat_every,
             healthcheck_every: state.config.healthcheck_every,
-            recipe: Recipe::blank(Some(log.clone())),
+            recipe: recipe,
             quorum: state.config.quorum,
             log,
 
@@ -314,7 +315,7 @@ impl ControllerInner {
             pending_recovery,
             last_checked_workers: Instant::now(),
 
-            fixed_domains: false,
+            fixed_domains: fixed_domains,
         }
     }
 
@@ -591,9 +592,6 @@ impl ControllerInner {
         GraphStats { domains: domains }
     }
 
-    pub fn enable_reuse(&mut self, reuse_type: ReuseConfigType) {
-        self.recipe.enable_reuse(reuse_type);
-    }
 
     pub fn create_universe(&mut self, context: HashMap<String, DataType>) {
         let log = self.log.clone();
@@ -726,11 +724,6 @@ impl ControllerInner {
                 Err(RpcError::Other("failed to parse recipe".to_owned()))
             }
         }
-    }
-
-    fn set_ndomains(&mut self, ndomains: usize) {
-        self.ndomains = ndomains;
-        self.fixed_domains = true;
     }
 
     pub fn graphviz(&self) -> String {
