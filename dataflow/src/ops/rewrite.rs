@@ -86,6 +86,8 @@ impl Ingredient for Rewrite {
             };
         }
 
+        // TODO: it would be nice to just use `rs`,
+        // instead of creating a new `emit_rs`
         for r in rs {
             if from == *self.src {
                 let key = r[self.signal_key].clone();
