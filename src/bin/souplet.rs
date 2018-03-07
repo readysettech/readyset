@@ -30,10 +30,12 @@ fn main() {
                 .help("Soup deployment ID."),
         )
         .arg(
-            Arg::with_name("ephemeral")
-                .long("ephemeral")
-                .takes_value(false)
-                .help("Do not permanently store base logs."),
+            Arg::with_name("durability")
+                .long("durability")
+                .takes_value(true)
+                .possible_values(&["persistent", "ephemeral", "memory"])
+                .default_value("persistent")
+                .help("How to maintain base logs."),
         )
         .arg(
             Arg::with_name("zookeeper")
@@ -85,7 +87,7 @@ fn main() {
 
     let log = distributary::logger_pls();
 
-    let ephemeral = matches.is_present("ephemeral");
+    let durability = matches.value_of("durability").unwrap();
     let listen_addr = matches.value_of("address").unwrap().parse().unwrap();
     let zookeeper_addr = matches.value_of("zookeeper").unwrap();
     let workers = value_t_or_exit!(matches, "workers", usize);
@@ -107,10 +109,11 @@ fn main() {
     builder.set_quorum(quorum);
 
     let persistence_params = distributary::PersistenceParameters::new(
-        if ephemeral {
-            distributary::DurabilityMode::DeleteOnExit
-        } else {
-            distributary::DurabilityMode::Permanent
+        match durability {
+            "persistent" => distributary::DurabilityMode::Permanent,
+            "ephemeral" => distributary::DurabilityMode::DeleteOnExit,
+            "memory" => distributary::DurabilityMode::MemoryOnly,
+            _ => unreachable!(),
         },
         512,
         Duration::new(0, 100_000),

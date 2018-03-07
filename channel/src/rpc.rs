@@ -25,6 +25,7 @@ where
     for<'de> R: Deserialize<'de>,
 {
     pub fn new(stream: std::net::TcpStream, is_local: bool) -> Result<Self, io::Error> {
+        stream.set_nodelay(true)?;
         Ok(Self {
             stream: BufStream::new(stream),
             poisoned: false,
@@ -87,6 +88,7 @@ where
     for<'de> Q: Deserialize<'de>,
 {
     pub fn new(stream: mio::net::TcpStream) -> Self {
+        stream.set_nodelay(true).unwrap();
         Self {
             stream: NonBlockingWriter::new(BufStream::new(stream)),
             deserialize_receiver: DeserializeReceiver::new(),

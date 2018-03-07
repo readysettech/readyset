@@ -27,7 +27,6 @@ use hyper::header::ContentType;
 use hyper::server::{Http, NewService, Request, Response, Service};
 use mio::net::TcpListener;
 use rand;
-use serde::Serialize;
 use serde_json;
 use slog;
 

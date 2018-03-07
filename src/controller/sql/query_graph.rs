@@ -344,9 +344,8 @@ fn classify_conditionals(
                         ConditionBase::Placeholder => if let ConditionBase::Field(ref lf) = *l {
                             params.push(lf.clone());
                         },
-                        ConditionBase::NestedSelect(_) => {
-                            unreachable!("nested selections should have been removed")
-                        }
+                        ConditionBase::LiteralList(_) => (),
+                        ConditionBase::NestedSelect(_) => unimplemented!(),
                     }
                 };
             };

@@ -22,7 +22,7 @@ const TINYTEXT_WIDTH: usize = 15;
 /// Note that cloning a `DataType` using the `Clone` trait is possible, but may result in cache
 /// contention on the reference counts for de-duplicated strings. Use `DataType::deep_clone` to
 /// clone the *value* of a `DataType` without danger of contention.
-#[derive(Eq, PartialOrd, Ord, Clone, Serialize, Deserialize)]
+#[derive(Eq, Clone, Serialize, Deserialize)]
 #[warn(variant_size_differences)]
 pub enum DataType {
     /// An empty value.
@@ -96,16 +96,67 @@ impl PartialEq for DataType {
         match (self, other) {
             (&DataType::Text(ref a), &DataType::Text(ref b)) => a == b,
             (&DataType::TinyText(ref a), &DataType::TinyText(ref b)) => a == b,
-            (&DataType::Int(ref a), &DataType::Int(ref b)) => a == b,
-            (&DataType::Int(ref a), &DataType::BigInt(ref b)) => *a as i64 == *b,
-            (&DataType::BigInt(ref a), &DataType::Int(ref b)) => *a == *b as i64,
-            (&DataType::BigInt(ref a), &DataType::BigInt(ref b)) => a == b,
-            (&DataType::Real(ref ai, ref af), &DataType::Real(ref bi, ref bf)) => {
-                ai == bi && af == bf
+            (&DataType::Text(..), &DataType::TinyText(..))
+            | (&DataType::TinyText(..), &DataType::Text(..)) => {
+                let a: Cow<str> = self.into();
+                let b: Cow<str> = other.into();
+                a == b
             }
-            (&DataType::Timestamp(ref tsa), &DataType::Timestamp(ref tsb)) => *tsa == *tsb,
+            (&DataType::BigInt(a), &DataType::BigInt(b)) => a == b,
+            (&DataType::Int(a), &DataType::Int(b)) => a == b,
+            (&DataType::BigInt(..), &DataType::Int(..))
+            | (&DataType::Int(..), &DataType::BigInt(..)) => {
+                let a: i64 = self.into();
+                let b: i64 = other.into();
+                a == b
+            }
+            (&DataType::Real(ai, af), &DataType::Real(bi, bf)) => ai == bi && af == bf,
+            (&DataType::Timestamp(tsa), &DataType::Timestamp(tsb)) => tsa == tsb,
             (&DataType::None, &DataType::None) => true,
+
             _ => false,
+        }
+    }
+}
+
+use std::cmp::Ordering;
+impl PartialOrd for DataType {
+    fn partial_cmp(&self, other: &DataType) -> Option<Ordering> {
+        Some(self.cmp(other))
+    }
+}
+
+impl Ord for DataType {
+    fn cmp(&self, other: &DataType) -> Ordering {
+        match (self, other) {
+            (&DataType::Text(ref a), &DataType::Text(ref b)) => a.cmp(b),
+            (&DataType::TinyText(ref a), &DataType::TinyText(ref b)) => a.cmp(b),
+            (&DataType::Text(..), &DataType::TinyText(..))
+            | (&DataType::TinyText(..), &DataType::Text(..)) => {
+                let a: Cow<str> = self.into();
+                let b: Cow<str> = other.into();
+                a.cmp(&b)
+            }
+            (&DataType::BigInt(a), &DataType::BigInt(ref b)) => a.cmp(b),
+            (&DataType::Int(a), &DataType::Int(b)) => a.cmp(&b),
+            (&DataType::BigInt(..), &DataType::Int(..))
+            | (&DataType::Int(..), &DataType::BigInt(..)) => {
+                let a: i64 = self.into();
+                let b: i64 = other.into();
+                a.cmp(&b)
+            }
+            (&DataType::Real(ai, af), &DataType::Real(ref bi, ref bf)) => {
+                ai.cmp(bi).then_with(|| af.cmp(bf))
+            }
+            (&DataType::Timestamp(tsa), &DataType::Timestamp(ref tsb)) => tsa.cmp(tsb),
+            (&DataType::None, &DataType::None) => Ordering::Equal,
+
+            // order Ints, Reals, Text, Timestamps, None
+            (&DataType::Int(..), _) | (&DataType::BigInt(..), _) => Ordering::Greater,
+            (&DataType::Real(..), _) => Ordering::Greater,
+            (&DataType::Text(..), _) | (&DataType::TinyText(..), _) => Ordering::Greater,
+            (&DataType::Timestamp(..), _) => Ordering::Greater,
+            (&DataType::None, _) => Ordering::Greater,
         }
     }
 }
@@ -117,14 +168,18 @@ impl Hash for DataType {
         // collisions, but the decreased overhead is worth it.
         match *self {
             DataType::None => {}
-            DataType::Int(n) => n.hash(state),
-            DataType::BigInt(n) => n.hash(state),
+            DataType::Int(..) | DataType::BigInt(..) => {
+                let n: i64 = self.into();
+                n.hash(state)
+            }
             DataType::Real(i, f) => {
                 i.hash(state);
                 f.hash(state);
             }
-            DataType::Text(ref t) => t.hash(state),
-            DataType::TinyText(t) => t.hash(state),
+            DataType::Text(..) | DataType::TinyText(..) => {
+                let t: Cow<str> = self.into();
+                t.hash(state)
+            }
             DataType::Timestamp(ts) => ts.hash(state),
         }
     }
@@ -236,10 +291,20 @@ impl Into<String> for DataType {
 
 impl Into<i64> for DataType {
     fn into(self) -> i64 {
-        if let DataType::BigInt(s) = self {
-            s
-        } else {
-            unreachable!();
+        match self {
+            DataType::BigInt(s) => s,
+            DataType::Int(s) => s as i64,
+            _ => unreachable!(),
+        }
+    }
+}
+
+impl<'a> Into<i64> for &'a DataType {
+    fn into(self) -> i64 {
+        match *self {
+            DataType::BigInt(s) => s,
+            DataType::Int(s) => s as i64,
+            _ => unreachable!(),
         }
     }
 }
@@ -659,5 +724,240 @@ mod tests {
         assert_eq!(format!("{}", timestamp), "Thu Jan  1 00:00:00 1970");
         assert_eq!(format!("{}", int), "5");
         assert_eq!(format!("{}", big_int), "5");
+    }
+
+    #[test]
+    fn data_type_fungibility() {
+        use std::convert::TryFrom;
+
+        let txt1: DataType = "hi".into();
+        let txt12: DataType = "no".into();
+        let txt2: DataType = DataType::Text(ArcCStr::try_from("hi").unwrap());
+        let text: DataType = "this is a very long text indeed".into();
+        let text2: DataType = "this is another long text".into();
+        let real: DataType = (-0.05).into();
+        let real2: DataType = (-0.06).into();
+        let time = DataType::Timestamp(NaiveDateTime::from_timestamp(0, 42_000_000));
+        let time2 = DataType::Timestamp(NaiveDateTime::from_timestamp(1, 42_000_000));
+        let shrt = DataType::Int(5);
+        let shrt6 = DataType::Int(6);
+        let long = DataType::BigInt(5);
+        let long6 = DataType::BigInt(6);
+
+        assert_eq!(txt1, txt1);
+        assert_eq!(txt2, txt2);
+        assert_eq!(text, text);
+        assert_eq!(shrt, shrt);
+        assert_eq!(long, long);
+        assert_eq!(real, real);
+        assert_eq!(time, time);
+
+        // coercion
+        assert_eq!(txt1, txt2);
+        assert_eq!(txt2, txt1);
+        assert_eq!(shrt, long);
+        assert_eq!(long, shrt);
+
+        // negation
+        assert_ne!(txt1, txt12);
+        assert_ne!(txt1, text);
+        assert_ne!(txt1, real);
+        assert_ne!(txt1, time);
+        assert_ne!(txt1, shrt);
+        assert_ne!(txt1, long);
+
+        assert_ne!(txt2, txt12);
+        assert_ne!(txt2, text);
+        assert_ne!(txt2, real);
+        assert_ne!(txt2, time);
+        assert_ne!(txt2, shrt);
+        assert_ne!(txt2, long);
+
+        assert_ne!(text, text2);
+        assert_ne!(text, txt1);
+        assert_ne!(text, txt2);
+        assert_ne!(text, real);
+        assert_ne!(text, time);
+        assert_ne!(text, shrt);
+        assert_ne!(text, long);
+
+        assert_ne!(real, real2);
+        assert_ne!(real, txt1);
+        assert_ne!(real, txt2);
+        assert_ne!(real, text);
+        assert_ne!(real, time);
+        assert_ne!(real, shrt);
+        assert_ne!(real, long);
+
+        assert_ne!(time, time2);
+        assert_ne!(time, txt1);
+        assert_ne!(time, txt2);
+        assert_ne!(time, text);
+        assert_ne!(time, real);
+        assert_ne!(time, shrt);
+        assert_ne!(time, long);
+
+        assert_ne!(shrt, shrt6);
+        assert_ne!(shrt, txt1);
+        assert_ne!(shrt, txt2);
+        assert_ne!(shrt, text);
+        assert_ne!(shrt, real);
+        assert_ne!(shrt, time);
+        assert_ne!(shrt, long6);
+
+        assert_ne!(long, long6);
+        assert_ne!(long, txt1);
+        assert_ne!(long, txt2);
+        assert_ne!(long, text);
+        assert_ne!(long, real);
+        assert_ne!(long, time);
+        assert_ne!(long, shrt6);
+
+        use std::cmp::Ordering;
+        assert_eq!(txt1.cmp(&txt1), Ordering::Equal);
+        assert_eq!(txt2.cmp(&txt2), Ordering::Equal);
+        assert_eq!(text.cmp(&text), Ordering::Equal);
+        assert_eq!(shrt.cmp(&shrt), Ordering::Equal);
+        assert_eq!(long.cmp(&long), Ordering::Equal);
+        assert_eq!(real.cmp(&real), Ordering::Equal);
+        assert_eq!(time.cmp(&time), Ordering::Equal);
+
+        // coercion
+        assert_eq!(txt1.cmp(&txt2), Ordering::Equal);
+        assert_eq!(txt2.cmp(&txt1), Ordering::Equal);
+        assert_eq!(shrt.cmp(&long), Ordering::Equal);
+        assert_eq!(long.cmp(&shrt), Ordering::Equal);
+
+        // negation
+        assert_ne!(txt1.cmp(&txt12), Ordering::Equal);
+        assert_ne!(txt1.cmp(&text), Ordering::Equal);
+        assert_ne!(txt1.cmp(&real), Ordering::Equal);
+        assert_ne!(txt1.cmp(&time), Ordering::Equal);
+        assert_ne!(txt1.cmp(&shrt), Ordering::Equal);
+        assert_ne!(txt1.cmp(&long), Ordering::Equal);
+
+        assert_ne!(txt2.cmp(&txt12), Ordering::Equal);
+        assert_ne!(txt2.cmp(&text), Ordering::Equal);
+        assert_ne!(txt2.cmp(&real), Ordering::Equal);
+        assert_ne!(txt2.cmp(&time), Ordering::Equal);
+        assert_ne!(txt2.cmp(&shrt), Ordering::Equal);
+        assert_ne!(txt2.cmp(&long), Ordering::Equal);
+
+        assert_ne!(text.cmp(&text2), Ordering::Equal);
+        assert_ne!(text.cmp(&txt1), Ordering::Equal);
+        assert_ne!(text.cmp(&txt2), Ordering::Equal);
+        assert_ne!(text.cmp(&real), Ordering::Equal);
+        assert_ne!(text.cmp(&time), Ordering::Equal);
+        assert_ne!(text.cmp(&shrt), Ordering::Equal);
+        assert_ne!(text.cmp(&long), Ordering::Equal);
+
+        assert_ne!(real.cmp(&real2), Ordering::Equal);
+        assert_ne!(real.cmp(&txt1), Ordering::Equal);
+        assert_ne!(real.cmp(&txt2), Ordering::Equal);
+        assert_ne!(real.cmp(&text), Ordering::Equal);
+        assert_ne!(real.cmp(&time), Ordering::Equal);
+        assert_ne!(real.cmp(&shrt), Ordering::Equal);
+        assert_ne!(real.cmp(&long), Ordering::Equal);
+
+        assert_ne!(time.cmp(&time2), Ordering::Equal);
+        assert_ne!(time.cmp(&txt1), Ordering::Equal);
+        assert_ne!(time.cmp(&txt2), Ordering::Equal);
+        assert_ne!(time.cmp(&text), Ordering::Equal);
+        assert_ne!(time.cmp(&real), Ordering::Equal);
+        assert_ne!(time.cmp(&shrt), Ordering::Equal);
+        assert_ne!(time.cmp(&long), Ordering::Equal);
+
+        assert_ne!(shrt.cmp(&shrt6), Ordering::Equal);
+        assert_ne!(shrt.cmp(&txt1), Ordering::Equal);
+        assert_ne!(shrt.cmp(&txt2), Ordering::Equal);
+        assert_ne!(shrt.cmp(&text), Ordering::Equal);
+        assert_ne!(shrt.cmp(&real), Ordering::Equal);
+        assert_ne!(shrt.cmp(&time), Ordering::Equal);
+        assert_ne!(shrt.cmp(&long6), Ordering::Equal);
+
+        assert_ne!(long.cmp(&long6), Ordering::Equal);
+        assert_ne!(long.cmp(&txt1), Ordering::Equal);
+        assert_ne!(long.cmp(&txt2), Ordering::Equal);
+        assert_ne!(long.cmp(&text), Ordering::Equal);
+        assert_ne!(long.cmp(&real), Ordering::Equal);
+        assert_ne!(long.cmp(&time), Ordering::Equal);
+        assert_ne!(long.cmp(&shrt6), Ordering::Equal);
+
+        let hash = |dt: &DataType| {
+            use std::collections::hash_map::DefaultHasher;
+            use std::hash::{Hash, Hasher};
+            let mut s = DefaultHasher::new();
+            dt.hash(&mut s);
+            s.finish()
+        };
+
+        assert_eq!(hash(&txt1), hash(&txt1));
+        assert_eq!(hash(&txt2), hash(&txt2));
+        assert_eq!(hash(&text), hash(&text));
+        assert_eq!(hash(&shrt), hash(&shrt));
+        assert_eq!(hash(&long), hash(&long));
+        assert_eq!(hash(&real), hash(&real));
+        assert_eq!(hash(&time), hash(&time));
+
+        // coercion
+        assert_eq!(hash(&txt1), hash(&txt2));
+        assert_eq!(hash(&txt2), hash(&txt1));
+        assert_eq!(hash(&shrt), hash(&long));
+        assert_eq!(hash(&long), hash(&shrt));
+
+        // negation
+        assert_ne!(hash(&txt1), hash(&txt12));
+        assert_ne!(hash(&txt1), hash(&text));
+        assert_ne!(hash(&txt1), hash(&real));
+        assert_ne!(hash(&txt1), hash(&time));
+        assert_ne!(hash(&txt1), hash(&shrt));
+        assert_ne!(hash(&txt1), hash(&long));
+
+        assert_ne!(hash(&txt2), hash(&txt12));
+        assert_ne!(hash(&txt2), hash(&text));
+        assert_ne!(hash(&txt2), hash(&real));
+        assert_ne!(hash(&txt2), hash(&time));
+        assert_ne!(hash(&txt2), hash(&shrt));
+        assert_ne!(hash(&txt2), hash(&long));
+
+        assert_ne!(hash(&text), hash(&text2));
+        assert_ne!(hash(&text), hash(&txt1));
+        assert_ne!(hash(&text), hash(&txt2));
+        assert_ne!(hash(&text), hash(&real));
+        assert_ne!(hash(&text), hash(&time));
+        assert_ne!(hash(&text), hash(&shrt));
+        assert_ne!(hash(&text), hash(&long));
+
+        assert_ne!(hash(&real), hash(&real2));
+        assert_ne!(hash(&real), hash(&txt1));
+        assert_ne!(hash(&real), hash(&txt2));
+        assert_ne!(hash(&real), hash(&text));
+        assert_ne!(hash(&real), hash(&time));
+        assert_ne!(hash(&real), hash(&shrt));
+        assert_ne!(hash(&real), hash(&long));
+
+        assert_ne!(hash(&time), hash(&time2));
+        assert_ne!(hash(&time), hash(&txt1));
+        assert_ne!(hash(&time), hash(&txt2));
+        assert_ne!(hash(&time), hash(&text));
+        assert_ne!(hash(&time), hash(&real));
+        assert_ne!(hash(&time), hash(&shrt));
+        assert_ne!(hash(&time), hash(&long));
+
+        assert_ne!(hash(&shrt), hash(&shrt6));
+        assert_ne!(hash(&shrt), hash(&txt1));
+        assert_ne!(hash(&shrt), hash(&txt2));
+        assert_ne!(hash(&shrt), hash(&text));
+        assert_ne!(hash(&shrt), hash(&real));
+        assert_ne!(hash(&shrt), hash(&time));
+        assert_ne!(hash(&shrt), hash(&long6));
+
+        assert_ne!(hash(&long), hash(&long6));
+        assert_ne!(hash(&long), hash(&txt1));
+        assert_ne!(hash(&long), hash(&txt2));
+        assert_ne!(hash(&long), hash(&text));
+        assert_ne!(hash(&long), hash(&real));
+        assert_ne!(hash(&long), hash(&time));
+        assert_ne!(hash(&long), hash(&shrt6));
     }
 }
