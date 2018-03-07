@@ -105,7 +105,7 @@ impl Ingredient for Rewrite {
                     misses.push(Miss {
                        node: *self.signal,
                        columns: vec![0],
-                       replay_key: None,
+                       replay_key: replay_key_col.map(|col| vec![r[col].clone()]),
                        key: vec![key],
                     });
                 }
