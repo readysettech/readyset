@@ -71,12 +71,12 @@ impl Ingredient for Rewrite {
         from: LocalNodeIndex,
         rs: Records,
         _: &mut Tracer,
-        _: Option<usize>,
+        replay_key_col: Option<usize>,
         nodes: &DomainNodes,
         state: &StateMap,
     ) -> ProcessingResult {
         debug_assert!(from == *self.src || from == *self.signal);
-        let misses = Vec::new();
+        let mut misses = Vec::new();
         let mut emit_rs = Vec::with_capacity(rs.len());
 
         if rs.is_empty() {
@@ -100,8 +100,12 @@ impl Ingredient for Rewrite {
 
 
                 if rc.is_none() {
-                    // todo (larat): might need to do some stuff here
-                    continue;
+                    misses.push(Miss {
+                       node: *self.signal,
+                       columns: vec![0],
+                       replay_key: None,
+                       key: vec![key],
+                    });
                 }
 
                 let mut rc = rc.unwrap().peekable();
@@ -124,8 +128,12 @@ impl Ingredient for Rewrite {
                 ).unwrap();
 
                 if other_rows.is_none() {
-                    // todo (larat): might need to do some stuff here
-                    continue;
+                     misses.push(Miss {
+                       node: *self.src,
+                       columns: vec![self.signal_key],
+                       replay_key: replay_key_col.map(|col| vec![r[col].clone()]),
+                       key: vec![key],
+                    });
                 }
 
                 let mut other_rows = other_rows.unwrap().peekable();
