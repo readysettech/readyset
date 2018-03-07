@@ -308,14 +308,15 @@ fn classify_conditionals(
                 if let ConditionExpression::Base(ref r) = *ct.right.as_ref() {
                     match *r {
                         // right-hand side is field, so this must be a comma join
-                        ConditionBase::Field(ref fr) => {
+                        // or a security policy using UserContext
+                        ConditionBase::Field(ref rf) => {
                             // column/column comparison --> comma join
-                            if let ConditionBase::Field(ref fl) = *l {
+                            if let ConditionBase::Field(ref lf) = *l {
                                 if ct.operator == Operator::Equal || ct.operator == Operator::In {
                                     // equi-join between two tables
                                     let mut join_ct = ct.clone();
                                     if let Ordering::Less =
-                                        fr.table.as_ref().cmp(&fl.table.as_ref())
+                                        rf.table.as_ref().cmp(&lf.table.as_ref())
                                     {
                                         use std::mem;
                                         mem::swap(&mut join_ct.left, &mut join_ct.right);

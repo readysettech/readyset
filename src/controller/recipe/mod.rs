@@ -3,7 +3,12 @@ use nom_sql::SqlQuery;
 use controller::Migration;
 use controller::sql::reuse::ReuseConfigType;
 use controller::sql::SqlIncorporator;
+use dataflow::prelude::DataType;
+use dataflow::ops::trigger::Trigger;
+use dataflow::ops::trigger::TriggerEvent;
 use core::NodeIndex;
+
+use controller::security::SecurityConfig;
 
 use slog;
 use std::collections::HashMap;
@@ -32,6 +37,8 @@ pub struct Recipe {
     expression_order: Vec<QueryID>,
     /// Named read/write expression aliases, mapping to queries in `expressions`.
     aliases: HashMap<String, QueryID>,
+    /// Security configuration
+    security_config: Option<SecurityConfig>,
 
     /// Recipe revision.
     version: usize,
@@ -64,6 +71,14 @@ fn hash_query(q: &SqlQuery) -> QueryID {
 
 #[allow(unused)]
 impl Recipe {
+    /// Return security groups in the recipe
+    pub fn security_groups(&self) -> Vec<String> {
+        match self.security_config {
+            Some(ref config) => config.groups.keys().cloned().collect(),
+            None => vec![]
+        }
+    }
+
     /// Return active aliases for expressions
     pub fn aliases(&self) -> Vec<&str> {
         self.aliases.keys().map(String::as_str).collect()
@@ -86,6 +101,7 @@ impl Recipe {
                 None => slog::Logger::root(slog::Discard, o!()),
                 Some(log) => log,
             },
+            security_config: None,
         }
     }
 
@@ -138,6 +154,13 @@ impl Recipe {
         }
     }
 
+    /// Set recipe's security configuration
+    pub fn set_security_config(&mut self, config_text: &str, url: String) {
+        let mut config = SecurityConfig::parse(config_text);
+        config.url = url;
+        self.security_config = Some(config);
+    }
+
     /// Creates a recipe from a set of SQL queries in a string (e.g., read from a file).
     /// Note that the recipe is not backed by a Soup data-flow graph until `activate` is called on
     /// it.
@@ -153,6 +176,7 @@ impl Recipe {
 
         // parse and compute differences to current recipe
         let parsed_queries = Recipe::parse(&cleaned_recipe_text)?;
+
         Ok(Recipe::from_queries(parsed_queries, log))
     }
 
@@ -200,11 +224,72 @@ impl Recipe {
             expressions: expressions,
             expression_order: expression_order,
             aliases: aliases,
+            security_config: None,
             version: 0,
             prior: None,
             inc: Some(inc),
             log: log,
         }
+    }
+
+    /// Creates a new security universe
+    pub fn create_universe(&mut self, mig: &mut Migration, universe_groups: HashMap<String, Vec<DataType>>) -> Result<ActivationResult, String> {
+        use controller::sql::security::Multiverse;
+
+        let mut result = ActivationResult {
+            new_nodes: HashMap::default(),
+            expressions_added: 0,
+            expressions_removed: 0,
+        };
+
+        if self.security_config.is_some() {
+            let qfps = self.inc
+                .as_mut()
+                .unwrap()
+                .prepare_universe(&self.security_config.clone().unwrap(), universe_groups, mig);
+
+            for qfp in qfps {
+                result.new_nodes.insert(qfp.name.clone(), qfp.query_leaf);
+            }
+        }
+
+        for expr in self.expressions.values() {
+            let (n, q, is_leaf) = expr.clone();
+
+            // add the universe-specific query
+            // don't use query name to avoid conflict with global queries
+            let (id, group) = mig.universe();
+            let new_name = if n.is_some() {
+                match group {
+                    Some(ref g) => Some(format!("{}_{}{}", n.clone().unwrap(), g.to_string(), id.to_string())),
+                    None => Some(format!("{}_u{}", n.clone().unwrap(), id.to_string())),
+                }
+            } else {
+                None
+            };
+
+            let is_leaf = if group.is_some() {
+                false
+            } else {
+                is_leaf
+            };
+
+            let qfp = self.inc
+                .as_mut()
+                .unwrap()
+                .add_parsed_query(q, new_name, is_leaf, mig)?;
+
+            // If the user provided us with a query name, use that.
+            // If not, use the name internally used by the QFP.
+            let query_name = match n {
+                Some(name) => name,
+                None => qfp.name.clone(),
+            };
+
+            result.new_nodes.insert(query_name, qfp.query_leaf);
+        }
+
+        Ok(result)
     }
 
     /// Activate the recipe by migrating the Soup data-flow graph wrapped in `mig` to the recipe.
@@ -244,6 +329,28 @@ impl Recipe {
             .as_mut()
             .unwrap()
             .set_transactional(transactional_base_nodes);
+
+        // create nodes to enforce security configuration
+        if self.security_config.is_some() {
+            info!(self.log, "Found a security configuration, bootstrapping groups...");
+            let config = self.security_config.take().unwrap();
+            for group in config.groups.values() {
+                info!(self.log, "Creating membership view for group {}", group.name());
+                let qfp = self.inc
+                    .as_mut()
+                    .unwrap()
+                    .add_parsed_query(group.membership(), Some(group.name()), true, mig)?;
+
+                /// Add trigger node below group membership views
+                let group_creation = TriggerEvent::GroupCreation { controller_url: config.url.clone(), group: group.name() };
+                let trigger = Trigger::new(qfp.query_leaf,  group_creation, vec![1]);
+                mig.add_ingredient(&format!("{}-trigger", group.name()), &["uid", "gid"], trigger);
+
+                result.new_nodes.insert(group.name(), qfp.query_leaf);
+            }
+
+            self.security_config = Some(config);
+        }
 
         // add new queries to the Soup graph carried by `mig`, and reflect state in the
         // incorporator in `inc`. `NodeIndex`es for new nodes are collected in `new_nodes` to be
@@ -333,6 +440,7 @@ impl Recipe {
             log: self.log.clone(),
             // retain the old recipe for future reference
             prior: Some(Box::new(self)),
+            security_config: None,
         };
 
         // apply changes
@@ -425,6 +533,8 @@ impl Recipe {
         new.version = self.version + 1;
         // retain the old incorporator but move it to the new recipe
         let prior_inc = self.inc.take();
+        // retain security configuration
+        new.security_config = self.security_config.take();
         // retain the old recipe for future reference
         new.prior = Some(Box::new(self));
         // retain the previous `SqlIncorporator` state
@@ -432,6 +542,12 @@ impl Recipe {
 
         // return new recipe as replacement for self
         Ok(new)
+    }
+
+    /// Increments the version of a recipe. Returns the new version number.
+    pub fn next(&mut self) -> usize {
+        self.version += 1;
+        self.version
     }
 
     /// Returns the version number of this recipe.

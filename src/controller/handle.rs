@@ -3,7 +3,7 @@ use dataflow::checktable;
 use dataflow::prelude::*;
 use dataflow::statistics::GraphStats;
 
-use std::collections::BTreeMap;
+use std::collections::{HashMap, BTreeMap};
 use std::sync::Arc;
 use std::sync::mpsc::Sender;
 use std::thread::{self, JoinHandle};
@@ -184,6 +184,35 @@ impl ControllerHandle<LocalAuthority> {
                 Err(_) => ::std::thread::sleep(::std::time::Duration::from_millis(100)),
             }
         }
+    }
+
+    /// Install a new set of policies on the controller.
+    pub fn set_security_config(&mut self, p: String) {
+        let url = match self.url {
+            Some(ref url) => url.clone(),
+            None => panic!("url not defined"),
+        };
+
+        self.rpc("set_security_config", &(p, url))
+    }
+
+    /// Install a new set of policies on the controller.
+    pub fn create_universe(&mut self, context: HashMap<String, DataType>) {
+        let uid = context.get("id").expect("Universe context must have id").clone();
+        self.rpc::<_, ()>("create_universe", &context);
+
+        // Write to Context table
+        let bname = match context.get("group") {
+            None => format!("UserContext_{}", uid.to_string()),
+            Some(g) => format!("GroupContext_{}_{}", g.to_string(), uid.to_string())
+        };
+
+        let mut fields: Vec<_> = context.keys().collect();
+        fields.sort();
+        let record: Vec<DataType> = fields.iter().map(|&f| context.get(f).unwrap().clone()).collect();
+        let mut mutator = self.get_mutator(&bname).unwrap();
+
+        mutator.put(record).unwrap();
     }
 }
 impl<A: Authority> Drop for ControllerHandle<A> {

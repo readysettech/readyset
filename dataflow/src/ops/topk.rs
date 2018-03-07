@@ -340,7 +340,12 @@ impl Ingredient for TopK {
     }
 
     fn description(&self) -> String {
-        format!("TopK")
+        let group_cols = self.group_by
+            .iter()
+            .map(|g| g.to_string())
+            .collect::<Vec<_>>()
+            .join(", ");
+        format!("TopK γ[{}]", group_cols)
     }
 
     fn parent_columns(&self, col: usize) -> Vec<(NodeIndex, Option<usize>)> {

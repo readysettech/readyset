@@ -8,6 +8,7 @@ use dataflow::{DomainConfig, PersistenceParameters};
 use controller::domain_handle::DomainHandle;
 use controller::inner::ControllerInner;
 use controller::recipe::Recipe;
+use controller::sql::reuse::ReuseConfigType;
 use coordination::CoordinationMessage;
 
 #[cfg(test)]
@@ -29,12 +30,14 @@ use rand;
 use serde_json;
 use slog;
 
+
 pub mod domain_handle;
 pub mod keys;
 pub mod migrate;
 
 pub(crate) mod recipe;
 pub(crate) mod sql;
+pub(crate) mod security;
 
 mod builder;
 mod getter;
@@ -124,6 +127,8 @@ pub(crate) struct ControllerConfig {
     pub heartbeat_every: Duration,
     pub healthcheck_every: Duration,
     pub quorum: usize,
+    pub fixed_domains: Option<usize>,
+    pub reuse: ReuseConfigType,
 }
 impl Default for ControllerConfig {
     fn default() -> Self {
@@ -141,6 +146,8 @@ impl Default for ControllerConfig {
             heartbeat_every: Duration::from_secs(1),
             healthcheck_every: Duration::from_secs(10),
             quorum: 1,
+            fixed_domains: None,
+            reuse: ReuseConfigType::Finkelstein,
         }
     }
 }

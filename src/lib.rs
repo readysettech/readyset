@@ -361,9 +361,11 @@ pub use dataflow::debug::{DebugEvent, DebugEventType};
 pub use dataflow::prelude::DomainIndex;
 pub use dataflow::{DurabilityMode, PersistenceParameters};
 
+pub use controller::sql::reuse::ReuseConfigType;
 pub use controller::{Controller, ControllerBuilder, ControllerHandle, Mutator, MutatorBuilder,
                      MutatorError, ReadQuery, ReadReply, RemoteGetter, RemoteGetterBuilder,
                      RpcError};
+
 pub use controller::recipe::ActivationResult;
 
 /// Just give me a damn terminal logger

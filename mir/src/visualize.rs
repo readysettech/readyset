@@ -272,6 +272,11 @@ impl GraphViz for MirNodeType {
 
                 write!(out, "{}", cols)?;
             }
+            MirNodeType::Rewrite {
+                ref column, ..
+            } => {
+                write!(out, "Rw | column: {}", column)?;
+            }
         }
         Ok(out)
     }

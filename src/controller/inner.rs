@@ -73,6 +73,7 @@ pub struct ControllerInner {
     healthcheck_every: Duration,
     last_checked_workers: Instant,
 
+    pub(super) fixed_domains: bool,
     log: slog::Logger,
 }
 
@@ -157,6 +158,12 @@ impl ControllerInner {
             (Post, "/install_recipe") => {
                 json::to_string(&self.install_recipe(authority, json::from_slice(&body).unwrap()))
                     .unwrap()
+            }
+            (Post, "/set_security_config") => {
+                json::to_string(&self.set_security_config(json::from_slice(&body).unwrap())).unwrap()
+            }
+            (Post, "/create_universe") => {
+                json::to_string(&self.create_universe(json::from_slice(&body).unwrap())).unwrap()
             }
             _ => return Err(StatusCode::NotFound),
         })
@@ -268,10 +275,18 @@ impl ControllerInner {
             None
         };
 
+        let mut recipe = Recipe::blank(Some(log.clone()));
+        recipe.enable_reuse(state.config.reuse);
+
+        let (fixed_domains, ndomains) = match state.config.fixed_domains {
+            Some(n) => (true, n),
+            None => (false, 0),
+        };
+
         ControllerInner {
             ingredients: g,
             source: source,
-            ndomains: 0,
+            ndomains: ndomains,
             checktable,
             checktable_addr,
             listen_addr,
@@ -282,7 +297,7 @@ impl ControllerInner {
             persistence: state.config.persistence,
             heartbeat_every: state.config.heartbeat_every,
             healthcheck_every: state.config.healthcheck_every,
-            recipe: Recipe::blank(Some(log.clone())),
+            recipe: recipe,
             quorum: state.config.quorum,
             log,
 
@@ -299,6 +314,8 @@ impl ControllerInner {
 
             pending_recovery,
             last_checked_workers: Instant::now(),
+
+            fixed_domains: fixed_domains,
         }
     }
 
@@ -343,6 +360,28 @@ impl ControllerInner {
         self.materializations.set_logger(&self.log);
     }
 
+    /// Adds a new user universe.
+    /// User universes automatically enforce security policies.
+    pub fn add_universe<F, T>(&mut self, context: HashMap<String, DataType>, f: F) -> T
+    where
+        F: FnOnce(&mut Migration) -> T,
+    {
+        info!(self.log, "starting migration: new soup universe");
+        let miglog = self.log.new(o!());
+        let mut m = Migration {
+            mainline: self,
+            added: Default::default(),
+            columns: Default::default(),
+            readers: Default::default(),
+            context: context,
+            start: time::Instant::now(),
+            log: miglog,
+        };
+        let r = f(&mut m);
+        m.commit();
+        r
+    }
+
     /// Perform a new query schema migration.
     pub fn migrate<F, T>(&mut self, f: F) -> T
     where
@@ -355,7 +394,7 @@ impl ControllerInner {
             added: Default::default(),
             columns: Default::default(),
             readers: Default::default(),
-
+            context: Default::default(),
             start: time::Instant::now(),
             log: miglog,
         };
@@ -551,6 +590,49 @@ impl ControllerInner {
             .collect();
 
         GraphStats { domains: domains }
+    }
+
+
+    pub fn create_universe(&mut self, context: HashMap<String, DataType>) {
+        let log = self.log.clone();
+        let mut r = self.recipe.clone();
+        let groups = self.recipe.security_groups();
+
+        let mut universe_groups = HashMap::new();
+
+        let uid = context.get("id").expect("Universe context must have id").clone();
+        if context.get("group").is_none() {
+            for g in groups {
+                let rgb: Option<RemoteGetterBuilder> = self.getter_builder(&g);
+                let mut getter = rgb.map(|rgb| rgb.build()).unwrap();
+                let my_groups: Vec<DataType> = getter.lookup(&uid, true).unwrap().iter().map(|v| v[1].clone()).collect();
+                universe_groups.insert(g, my_groups);
+            }
+        }
+
+        self.add_universe(context.clone(), |mut mig| {
+            r.next();
+            match r.create_universe(&mut mig, universe_groups) {
+                Ok(ar) => {
+                    info!(log, "{} expressions added", ar.expressions_added);
+                    info!(log, "{} expressions removed", ar.expressions_removed);
+                    Ok(())
+                }
+                Err(e) => {
+                    crit!(log, "failed to create universe: {:?}", e);
+                    Err(RpcError::Other("failed to create universe".to_owned()))
+                }
+            }.unwrap();
+
+        });
+
+        self.recipe = r;
+    }
+
+    pub fn set_security_config(&mut self, config: (String, String)) {
+        let p = config.0;
+        let url = config.1;
+        self.recipe.set_security_config(&p, url);
     }
 
     fn apply_recipe(&mut self, mut new: Recipe) -> Result<ActivationResult, RpcError> {

@@ -227,10 +227,9 @@ impl MirNode {
             // otherwise, just look up in the column set
             _ => match self.columns
                 .iter()
-                .position(|cc| cc.name == c.name && cc.table == c.table)
+                .position(|cc| cc.name == c.name)
             {
                 None => {
-                    println!("{:?}, {:?}", c, self.columns);
                     panic!("tried to look up non-existent column {:?}", c.name);
                 }
                 Some(id) => id,
@@ -397,6 +396,8 @@ pub enum MirNodeType {
     Reuse { node: MirNodeRef },
     /// leaf (reader) node, keys
     Leaf { node: MirNodeRef, keys: Vec<Column> },
+    /// Rewrite node
+    Rewrite { value: String, column: String, key: String },
 }
 
 impl MirNodeType {
@@ -431,7 +432,11 @@ impl MirNodeType {
             MirNodeType::Project { ref mut emit, .. } => {
                 emit.push(c);
             }
-            MirNodeType::Union { .. } => unimplemented!(),
+            MirNodeType::Union { ref mut emit } => {
+               for e in emit.iter_mut() {
+                   e.push(c.clone());
+               }
+            }
             MirNodeType::TopK {
                 ref mut group_by, ..
             } => {
@@ -598,6 +603,16 @@ impl MirNodeType {
                 keys: ref our_keys, ..
             } => match *other {
                 MirNodeType::Leaf { ref keys, .. } => keys == our_keys,
+                _ => false,
+            },
+            MirNodeType::Union { emit: ref our_emit } => match *other {
+                MirNodeType::Union { ref emit } => emit == our_emit,
+                _ => false,
+            },
+            MirNodeType::Rewrite { value: ref our_value, key: ref our_key, column: ref our_col } => match *other {
+                MirNodeType::Rewrite { ref value, ref key, ref column } => {
+                    (value == our_value && our_key == key && our_col == column)
+                }
                 _ => false,
             },
             _ => unimplemented!(),
@@ -835,6 +850,9 @@ impl Debug for MirNodeType {
 
                 write!(f, "{}", cols)
             }
+            MirNodeType::Rewrite {
+                ref column, ..
+            } => write!(f, "Rw [{}]", column),
         }
     }
 }

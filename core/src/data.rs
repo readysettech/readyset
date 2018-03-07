@@ -4,9 +4,6 @@ use chrono::{self, NaiveDateTime};
 
 use nom_sql::Literal;
 
-#[cfg(any(feature = "web", test))]
-use serde_json::Value;
-
 use std::hash::{Hash, Hasher};
 use std::ops::{Add, Deref, DerefMut, Div, Mul, Sub};
 use std::fmt;
@@ -42,17 +39,25 @@ pub enum DataType {
     Timestamp(NaiveDateTime),
 }
 
-#[cfg(any(feature = "web", test))]
 impl DataType {
-    /// Lossy representation as JSON value.
-    pub fn to_json(&self) -> Value {
+    pub fn to_string(&self) -> String {
         match *self {
-            DataType::None => json!(null),
-            DataType::Int(n) => json!(n),
-            DataType::BigInt(n) => json!(n),
-            DataType::Real(i, f) => json!((i as f64) + (f as f64) * 1.0e-9),
-            DataType::Text(..) | DataType::TinyText(..) => Value::String(self.into()),
-            DataType::Timestamp(ts) => json!(ts.format("%+").to_string()),
+            DataType::None => String::from("*"),
+            DataType::Text(..) | DataType::TinyText(..) => {
+                let text: Cow<str> = self.into();
+                format!("{}", text)
+            }
+            DataType::Int(n) => format!("{}", n),
+            DataType::BigInt(n) => format!("{}", n),
+            DataType::Real(i, frac) => {
+                if i == 0 && frac < 0 {
+                    // We have to insert the negative sign ourselves.
+                    format!("{}", format!("-0.{:09}", frac.abs()))
+                } else {
+                    format!("{}", format!("{}.{:09}", i, frac.abs()))
+                }
+            }
+            DataType::Timestamp(ts) => format!("{}", format!("{}", ts.format("%c"))),
         }
     }
 }
@@ -284,6 +289,16 @@ impl<'a> Into<i64> for &'a DataType {
             DataType::BigInt(s) => s,
             DataType::Int(s) => s as i64,
             _ => unreachable!(),
+        }
+    }
+}
+
+impl Into<i32> for DataType {
+    fn into(self) -> i32 {
+        if let DataType::Int(s) = self {
+            s
+        } else {
+            unreachable!();
         }
     }
 }
@@ -588,16 +603,6 @@ mod tests {
         assert_eq!(a.to_string(), "2.500000000");
         assert_eq!(b.to_string(), "-2.010000000");
         assert_eq!(c.to_string(), "-0.012345678");
-    }
-
-    #[test]
-    fn real_to_json() {
-        let a: DataType = (2.5).into();
-        let b: DataType = (-2.01).into();
-        let c: DataType = (-0.012345678).into();
-        assert_eq!(a.to_json(), json!(2.5));
-        assert_eq!(b.to_json(), json!(-2.01));
-        assert_eq!(c.to_json(), json!(-0.012345678));
     }
 
     #[test]
