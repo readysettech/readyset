@@ -4,9 +4,6 @@ use chrono::{self, NaiveDateTime};
 
 use nom_sql::Literal;
 
-#[cfg(any(feature = "web", test))]
-use serde_json::Value;
-
 use std::hash::{Hash, Hasher};
 use std::ops::{Add, Deref, DerefMut, Div, Mul, Sub};
 use std::fmt;
