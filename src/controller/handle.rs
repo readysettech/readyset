@@ -21,7 +21,6 @@ use controller::{ControlEvent, ControllerDescriptor, WorkerEvent};
 use controller::inner::RpcError;
 use controller::getter::{RemoteGetter, RemoteGetterBuilder};
 use controller::mutator::{Mutator, MutatorBuilder};
-use controller::sql::reuse::ReuseConfigType;
 use controller::recipe::ActivationResult;
 
 /// `ControllerHandle` is a handle to a Controller.
@@ -185,16 +184,6 @@ impl ControllerHandle<LocalAuthority> {
                 Err(_) => ::std::thread::sleep(::std::time::Duration::from_millis(100)),
             }
         }
-    }
-
-    /// Enable reuse type
-    pub fn enable_reuse(&mut self, reuse_type: ReuseConfigType) {
-        self.rpc("enable_reuse", &reuse_type)
-    }
-
-    /// Set a fixed number of thread domains
-    pub fn set_ndomains(&mut self, ndomains: usize) {
-        self.rpc("set_ndomains", &ndomains)
     }
 
     /// Install a new set of policies on the controller.
