@@ -326,7 +326,7 @@ fn test(workdir: &str, timeout: Option<u64>) -> Output {
     let mut cmd = match timeout {
         None => {
             let mut cmd = Command::new("cargo");
-            cmd.arg("test");
+            cmd.arg("test").arg("--all");
             cmd
         }
         Some(timeout) => {
@@ -335,7 +335,8 @@ fn test(workdir: &str, timeout: Option<u64>) -> Output {
                 .arg(&format!("{}s", timeout + 30))
                 .arg(&format!("{}s", timeout))
                 .arg("cargo")
-                .arg("test");
+                .arg("test")
+                .arg("--all");
             cmd
         }
     };
