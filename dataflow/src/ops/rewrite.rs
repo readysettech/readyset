@@ -1,6 +1,8 @@
 use std::collections::{HashMap, HashSet};
 use prelude::*;
 
+/// A Rewrite data-flow operator.
+/// This node rewrites a column from a subset of records to a pre-determined value.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Rewrite {
     src: IndexPair,
@@ -12,8 +14,6 @@ pub struct Rewrite {
     signal_key: usize,
 }
 
-/// A Rewrite data-flow operator. 
-/// This node rewrites a column from a subset of records to a pre-determined value.
 impl Rewrite {
     /// Creates a new instance of Rewrite.
     ///
