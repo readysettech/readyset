@@ -130,7 +130,10 @@ impl Ingredient for Rewrite {
                 ).unwrap();
 
                 if other_rows.is_none() {
-                     misses.push(Miss {
+                    // replays always happen from the `src` side,
+                    // so replay_key_col must be None
+                    assert_eq!(replay_key_col, None);
+                    misses.push(Miss {
                        node: *self.src,
                        columns: vec![self.signal_key],
                        replay_key: replay_key_col.map(|col| vec![r[col].clone()]),
