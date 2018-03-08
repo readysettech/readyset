@@ -602,7 +602,6 @@ impl SizeOf for DataType {
 
         let inner = match *self {
             DataType::Text(ref t) => size_of_val(t) + t.to_bytes().len(),
-            DataType::Timestamp(ref t) => size_of_val(t),
             _ => 0usize,
         };
 
@@ -996,7 +995,7 @@ mod tests {
         assert_eq!(size_of_val(&long), 16);
         assert_eq!(size_of_val(&time), 16);
         assert_eq!(size_of_val(&time), time.size_of());
-        assert_eq!(time.deep_size_of(), time.size_of() + 12); // DataType + NaiveDateTime
+        assert_eq!(time.deep_size_of(), 16); // DataType + inline NaiveDateTime
 
         assert_eq!(size_of_val(&rec), 24);
         assert_eq!(rec.size_of(), 24 + 3 * 16);
