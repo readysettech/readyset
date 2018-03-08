@@ -29,8 +29,9 @@ fn main() {
 
     // set up Soup via recipe
     let mut builder = ControllerBuilder::default();
-    builder.log_with(distributary::logger_pls());
+    //builder.log_with(distributary::logger_pls());
     builder.set_worker_threads(2);
+    builder.disable_partial();
     builder.set_persistence(persistence_params);
 
     let mut blender = builder.build_local();
@@ -66,5 +67,5 @@ fn main() {
     thread::sleep(Duration::from_millis(1000));
 
     println!("Reading...");
-    println!("{:#?}", awvc.lookup(&1.into(), true))
+    println!("{:#?}", awvc.lookup(&1.into(), true));
 }

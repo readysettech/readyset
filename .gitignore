@@ -26,3 +26,5 @@ plots.html
 plots_files/
 .RData
 .Rhistory
+
+*.swp
