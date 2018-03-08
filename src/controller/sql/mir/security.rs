@@ -30,7 +30,7 @@ impl SecurityBoundary for SqlToMirConverter {
         qg: &QueryGraph,
         ancestors: &Vec<MirNodeRef>,
         node_count: usize,
-        ) -> Vec<MirNodeRef> {
+    ) -> Vec<MirNodeRef> {
         use controller::sql::mir::grouped::make_grouped;
 
         let mut nodes_added = Vec::new();
@@ -56,11 +56,10 @@ impl SecurityBoundary for SqlToMirConverter {
             &HashMap::new(), // we only care about this, if no parent node is specified.
             node_count,
             &mut Some(union),
-            true
+            true,
         );
 
         nodes_added.extend(grouped);
-
 
         nodes_added
     }
@@ -115,7 +114,11 @@ fn make_security_nodes(
     prev_node: &MirNodeRef,
     node_for_rel: HashMap<&str, MirNodeRef>,
 ) -> (Vec<MirNodeRef>, Vec<MirNodeRef>) {
-    let policies = match mir_converter.universe.row_policies.get(&String::from(table)) {
+    let policies = match mir_converter
+        .universe
+        .row_policies
+        .get(&String::from(table))
+    {
         Some(p) => p.clone(),
         // no policies associated with this base node
         None => return (vec![], vec![]),
@@ -206,7 +209,7 @@ fn make_security_nodes(
             &format!("sp_{:x}", qg.signature().hash),
             qg,
             &local_node_for_rel,
-            node_count
+            node_count,
         );
 
         node_count += join_nodes.len();

@@ -1,6 +1,6 @@
 use controller::sql::query_graph::{JoinRef, QueryGraph, QueryGraphEdge};
 use controller::sql::mir::SqlToMirConverter;
-use std::collections::{HashSet, HashMap};
+use std::collections::{HashMap, HashSet};
 use dataflow::ops::join::JoinType;
 use nom_sql::ConditionTree;
 use mir::MirNodeRef;
@@ -72,12 +72,8 @@ pub fn make_joins(
 fn from_join_ref<'a>(jref: &JoinRef, qg: &'a QueryGraph) -> (JoinType, &'a ConditionTree) {
     let edge = qg.edges.get(&(jref.src.clone(), jref.dst.clone())).unwrap();
     match *edge {
-        QueryGraphEdge::Join(ref jps) => {
-            (JoinType::Inner, jps.get(jref.index).unwrap())
-        }
-        QueryGraphEdge::LeftJoin(ref jps) => {
-            (JoinType::Left, jps.get(jref.index).unwrap())
-        }
+        QueryGraphEdge::Join(ref jps) => (JoinType::Inner, jps.get(jref.index).unwrap()),
+        QueryGraphEdge::LeftJoin(ref jps) => (JoinType::Left, jps.get(jref.index).unwrap()),
         QueryGraphEdge::GroupBy(_) => unreachable!(),
     }
 }

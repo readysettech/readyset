@@ -92,8 +92,7 @@ impl SqlToMirConverter {
                     None => {
                         panic!(
                             "Inconsistency: view \"{}\" does not exist at v{}",
-                            view_name,
-                            v
+                            view_name, v
                         );
                     }
                     Some(bmn) => MirNode::reuse(bmn.clone(), self.schema_version),
@@ -239,10 +238,9 @@ impl SqlToMirConverter {
             format!("{}_union", name)
         };
         let mut final_node = match op {
-            CompoundSelectOperator::Union => self.make_union_node(
-                &union_name,
-                &sqs.iter().map(|mq| mq.leaf.clone()).collect(),
-            ),
+            CompoundSelectOperator::Union => {
+                self.make_union_node(&union_name, &sqs.iter().map(|mq| mq.leaf.clone()).collect())
+            }
             _ => unimplemented!(),
         };
         let node_id = (union_name, self.schema_version);
@@ -598,7 +596,10 @@ impl SqlToMirConverter {
         // Find columns present in all ancestors
         let mut selected_cols = HashSet::new();
         for c in ucols {
-            if ancestors.iter().all(|a| a.borrow().columns().iter().any(|ac| ac.name == c.name)) {
+            if ancestors
+                .iter()
+                .all(|a| a.borrow().columns().iter().any(|ac| ac.name == c.name))
+            {
                 selected_cols.insert(c.name.clone());
             }
         }
@@ -606,7 +607,9 @@ impl SqlToMirConverter {
         for ancestor in ancestors.iter() {
             let mut acols: Vec<Column> = Vec::new();
             for ac in ancestor.borrow().columns() {
-                if selected_cols.contains(&ac.name) && acols.iter().find(|ref c| ac.name == c.name).is_none() {
+                if selected_cols.contains(&ac.name)
+                    && acols.iter().find(|ref c| ac.name == c.name).is_none()
+                {
                     acols.push(ac.clone());
                 }
             }
@@ -614,9 +617,7 @@ impl SqlToMirConverter {
         }
 
         assert!(
-            emit
-                .iter()
-                .all(|e| e.len() == selected_cols.len()),
+            emit.iter().all(|e| e.len() == selected_cols.len()),
             "all ancestors columns must have the same size"
         );
 
@@ -630,13 +631,15 @@ impl SqlToMirConverter {
         )
     }
 
-    fn make_union_from_same_base(&self, name: &str, ancestors: Vec<MirNodeRef>, columns: Vec<Column>) -> MirNodeRef {
+    fn make_union_from_same_base(
+        &self,
+        name: &str,
+        ancestors: Vec<MirNodeRef>,
+        columns: Vec<Column>,
+    ) -> MirNodeRef {
         assert!(ancestors.len() > 1, "union must have more than 1 ancestors");
         trace!(self.log, "Added union node wiht columns {:?}", columns);
-        let emit = ancestors
-            .iter()
-            .map(|_| columns.clone())
-            .collect();
+        let emit = ancestors.iter().map(|_| columns.clone()).collect();
 
         MirNode::new(
             name,
@@ -652,7 +655,12 @@ impl SqlToMirConverter {
         let mut fields = parent.borrow().columns().iter().cloned().collect();
 
         let filter = self.to_conditions(cond, &mut fields, &parent);
-        trace!(self.log, "Added filter node {} with condition {:?}", name, filter);
+        trace!(
+            self.log,
+            "Added filter node {} with condition {:?}",
+            name,
+            filter
+        );
         MirNode::new(
             name,
             self.schema_version,
@@ -1133,13 +1141,12 @@ impl SqlToMirConverter {
                 node_for_rel.insert(*rel, base_for_rel);
             }
 
-
             let join_nodes = make_joins(
                 self,
                 &format!("q_{:x}{}", qg.signature().hash, uformat),
                 qg,
                 &node_for_rel,
-                new_node_count
+                new_node_count,
             );
 
             new_node_count += join_nodes.len();
@@ -1173,15 +1180,16 @@ impl SqlToMirConverter {
             }
 
             // 2.5 Reorder some predicates before group by nodes
-            let (created_predicates, predicates_above_group_by_nodes) = make_predicates_above_grouped(
-                self,
-                &format!( "q_{:x}{}", qg.signature().hash, uformat),
-                &qg,
-                &node_for_rel,
-                new_node_count,
-                &column_to_predicates,
-                &mut prev_node,
-            );
+            let (created_predicates, predicates_above_group_by_nodes) =
+                make_predicates_above_grouped(
+                    self,
+                    &format!("q_{:x}{}", qg.signature().hash, uformat),
+                    &qg,
+                    &node_for_rel,
+                    new_node_count,
+                    &column_to_predicates,
+                    &mut prev_node,
+                );
 
             new_node_count += predicates_above_group_by_nodes.len();
 
@@ -1190,33 +1198,37 @@ impl SqlToMirConverter {
             let (last_policy_nodes, policy_nodes) =
                 self.make_security_boundary(universe.clone(), &mut node_for_rel, prev_node.clone());
 
+            let mut ancestors = self.universe.member_of.iter().fold(
+                vec![],
+                |mut acc, (gname, gids)| {
+                    let group_views: Vec<MirNodeRef> = gids.iter()
+                        .filter_map(|gid| {
+                            // This is a little annoying, but because of the way we name universe queries,
+                            // we need to strip the view name of the _u{uid} suffix
+                            let root = name.trim_right_matches(&uformat);
+                            if root == name {
+                                None
+                            } else {
+                                let view_name =
+                                    format!("{}_{}{}", root, gname.to_string(), gid.to_string());
+                                Some(self.get_view(&view_name))
+                            }
+                        })
+                        .collect();
 
-            let mut ancestors = self.universe.member_of.iter().fold(vec![], |mut acc, (gname, gids)| {
-                let group_views: Vec<MirNodeRef> = gids.iter().filter_map(|gid| {
-                    // This is a little annoying, but because of the way we name universe queries,
-                    // we need to strip the view name of the _u{uid} suffix
-                    let root = name.trim_right_matches(&uformat);
-                    if root == name {
-                        None
-                    } else {
-                        let view_name = format!("{}_{}{}", root, gname.to_string(), gid.to_string());
-                        Some(self.get_view(&view_name))
-                    }
-
-                }).collect();
-
-                trace!(self.log, "group views {:?}", group_views);
-                acc.extend(group_views);
-                acc
-            });
+                    trace!(self.log, "group views {:?}", group_views);
+                    acc.extend(group_views);
+                    acc
+                },
+            );
 
             nodes_added = base_nodes
-                    .into_iter()
-                    .chain(join_nodes.into_iter())
-                    .chain(predicates_above_group_by_nodes.into_iter())
-                    .chain(policy_nodes.into_iter())
-                    .chain(ancestors.clone().into_iter())
-                    .collect();
+                .into_iter()
+                .chain(join_nodes.into_iter())
+                .chain(predicates_above_group_by_nodes.into_iter())
+                .chain(policy_nodes.into_iter())
+                .chain(ancestors.clone().into_iter())
+                .collect();
 
             // For each policy chain, create a version of the query
             // All query versions, including group queries will be reconciled at the end
@@ -1226,12 +1238,12 @@ impl SqlToMirConverter {
                 // 3. Add function and grouped nodes
                 let mut func_nodes: Vec<MirNodeRef> = make_grouped(
                     self,
-                    &format!( "q_{:x}{}", qg.signature().hash, uformat),
+                    &format!("q_{:x}{}", qg.signature().hash, uformat),
                     &qg,
                     &node_for_rel,
                     new_node_count,
                     &mut prev_node,
-                    false
+                    false,
                 );
 
                 new_node_count += func_nodes.len();
@@ -1318,7 +1330,12 @@ impl SqlToMirConverter {
 
             let final_node = if ancestors.len() > 1 {
                 // If we have multiple queries, reconcile them.
-                let nodes = self.reconcile(&format!("q_{:x}{}", qg.signature().hash, uformat), &qg, &ancestors, new_node_count);
+                let nodes = self.reconcile(
+                    &format!("q_{:x}{}", qg.signature().hash, uformat),
+                    &qg,
+                    &ancestors,
+                    new_node_count,
+                );
                 new_node_count += nodes.len();
                 nodes_added.extend(nodes.clone());
 
@@ -1327,18 +1344,18 @@ impl SqlToMirConverter {
                 ancestors.last().unwrap().clone()
             };
 
-
-            let final_node_cols: Vec<Column> = final_node.borrow().columns().iter().cloned().collect();
+            let final_node_cols: Vec<Column> =
+                final_node.borrow().columns().iter().cloned().collect();
             // 5. Generate leaf views that expose the query result
             let mut projected_columns: Vec<&Column> = if universe.1.is_none() {
                 qg.columns
-                .iter()
-                .filter_map(|oc| match *oc {
-                    OutputColumn::Arithmetic(_) => None,
-                    OutputColumn::Data(ref c) => Some(c),
-                    OutputColumn::Literal(_) => None,
-                })
-                .collect()
+                    .iter()
+                    .filter_map(|oc| match *oc {
+                        OutputColumn::Arithmetic(_) => None,
+                        OutputColumn::Data(ref c) => Some(c),
+                        OutputColumn::Literal(_) => None,
+                    })
+                    .collect()
             } else {
                 // If we are creating a query for a group universe, we project
                 // all columns in the final node. When a user universe that

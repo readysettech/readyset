@@ -10,10 +10,14 @@ pub fn make_rewrite_nodes(
     node_count: usize,
 ) -> Vec<MirNodeRef> {
     let mut nodes = Vec::new();
-    let rewrite_policies = match mir_converter.universe.rewrite_policies.get(&String::from(table)) {
+    let rewrite_policies = match mir_converter
+        .universe
+        .rewrite_policies
+        .get(&String::from(table))
+    {
         Some(p) => p.clone(),
         // no policies associated with this base node
-        None => return nodes
+        None => return nodes,
     };
 
     let mut node_count = node_count;
