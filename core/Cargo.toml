@@ -11,9 +11,9 @@ serde_json = "1.0.2"
 
 # need features
 chrono = { version = "0.4.0", features = ["serde"] }
+petgraph = { version = "0.4.11", features = ["serde-1"] }
 serde = { version = "1.0.8", features = ["rc"] }
 
 # git deps
-petgraph = { git = "https://github.com/fintelia/petgraph", branch = "serde", features = ["serde"] }
-nom_sql = { git = "https://github.com/ms705/nom-sql.git", rev = "159140accbaa6e83ee0d6d6eb22abb2fad03da9d" }
+nom_sql = { git = "https://github.com/ms705/nom-sql.git", rev = "884e763ad7fe8bb49061c42131b377a387708e09" }
 

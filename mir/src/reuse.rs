@@ -60,6 +60,7 @@ pub fn merge_mir_for_queries(
     // found.
     let mut visited = HashSet::new();
     let mut reuse = HashMap::new();
+    let mut reused = HashSet::new();
     while let Some((old, new)) = trace_nodes.pop_front() {
         let new_id = new.borrow().versioned_name();
         // reuseable node found, keep going
@@ -111,6 +112,10 @@ pub fn merge_mir_for_queries(
             let mut found = false;
             for old_child in old.borrow().children() {
                 if old_child.borrow().can_reuse_as(&*new_child.borrow()) {
+                    if reused.contains(&old_child.borrow().versioned_name()) {
+                        continue;
+                    }
+
                     trace!(
                         log,
                         "add child {:?} to queue as it has a match",
@@ -118,6 +123,8 @@ pub fn merge_mir_for_queries(
                     );
                     trace_nodes.push_back((old_child.clone(), new_child.clone()));
                     found = true;
+                    reused.insert(old_child.borrow().versioned_name());
+                    break;
                 }
             }
             if !found {

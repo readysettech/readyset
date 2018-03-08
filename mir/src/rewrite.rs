@@ -32,7 +32,7 @@ pub fn pull_required_base_columns(q: &mut MirQuery) {
                 !mn.borrow()
                     .ancestors()
                     .iter()
-                    .any(|a| a.borrow().columns().contains(c))
+                    .any(|a| a.borrow().columns().iter().any(|ac|  ac.name == c.name))
             })
             .collect();
 

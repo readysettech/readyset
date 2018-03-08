@@ -3,8 +3,10 @@ use nom_sql::{Column, ConditionBase, ConditionExpression, ConditionTree, FieldEx
 
 use std::collections::HashMap;
 
+use dataflow::prelude::DataType;
+
 pub trait AliasRemoval {
-    fn expand_table_aliases(self) -> SqlQuery;
+    fn expand_table_aliases(self, context: &HashMap<String, DataType>) -> SqlQuery;
 }
 
 fn rewrite_conditional(
@@ -63,7 +65,7 @@ fn rewrite_conditional(
 }
 
 impl AliasRemoval for SqlQuery {
-    fn expand_table_aliases(self) -> SqlQuery {
+    fn expand_table_aliases(self, context: &HashMap<String, DataType>) -> SqlQuery {
         let mut table_aliases = HashMap::new();
 
         match self {
@@ -73,6 +75,16 @@ impl AliasRemoval for SqlQuery {
                     let mut add_alias = |alias: &str, name: &str| {
                         table_aliases.insert(alias.to_string(), name.to_string());
                     };
+
+                    // Add alias for universe context tables
+                    if context.get("id").is_some() {
+                        let universe_id = context.get("id").unwrap();
+                        match context.get("group") {
+                            Some(g) => add_alias("GroupContext", &format!("GroupContext_{}_{}", g.to_string(), universe_id.to_string())),
+                            None => add_alias("UserContext", &format!("UserContext_{}", universe_id.to_string())),
+                        }
+                    }
+
                     for t in &sq.tables {
                         match t.alias {
                             None => (),
@@ -152,6 +164,7 @@ mod tests {
     use nom_sql::SelectStatement;
     use nom_sql::{Column, FieldExpression, SqlQuery, Table};
     use super::AliasRemoval;
+    use std::collections::HashMap;
 
     #[test]
     fn it_removes_aliases() {
@@ -173,7 +186,9 @@ mod tests {
             })),
             ..Default::default()
         };
-        let res = SqlQuery::Select(q).expand_table_aliases();
+        let mut context = HashMap::new();
+        context.insert(String::from("id"), "global".into());
+        let res = SqlQuery::Select(q).expand_table_aliases(&context);
         // Table alias removed in field list
         match res {
             SqlQuery::Select(tq) => {

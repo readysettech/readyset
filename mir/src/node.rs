@@ -1,10 +1,11 @@
-use nom_sql::{ArithmeticExpression, Column, ColumnSpecification, Operator, OrderType};
+use nom_sql::{ArithmeticExpression, Column, ColumnSpecification, OrderType};
 use std::cell::RefCell;
 use std::fmt::{Debug, Display, Error, Formatter};
 use std::rc::Rc;
 
 use core::{DataType, NodeIndex};
 use dataflow::ops;
+use dataflow::ops::filter::FilterCondition;
 use dataflow::ops::grouped::aggregate::Aggregation as AggregationKind;
 use dataflow::ops::grouped::extremum::Extremum as ExtremumKind;
 use {FlowNode, MirNodeRef};
@@ -225,12 +226,8 @@ impl MirNode {
             },
             MirNodeType::Reuse { ref node } => node.borrow().column_id_for_column(c),
             // otherwise, just look up in the column set
-            _ => match self.columns
-                .iter()
-                .position(|cc| cc.name == c.name && cc.table == c.table)
-            {
+            _ => match self.columns.iter().position(|cc| cc.name == c.name) {
                 None => {
-                    println!("{:?}, {:?}", c, self.columns);
                     panic!("tried to look up non-existent column {:?}", c.name);
                 }
                 Some(id) => id,
@@ -354,7 +351,7 @@ pub enum MirNodeType {
     },
     /// filter conditions (one for each parent column)
     Filter {
-        conditions: Vec<Option<(Operator, DataType)>>,
+        conditions: Vec<Option<FilterCondition>>,
     },
     /// over column, separator
     GroupConcat { on: Column, separator: String },
@@ -397,6 +394,12 @@ pub enum MirNodeType {
     Reuse { node: MirNodeRef },
     /// leaf (reader) node, keys
     Leaf { node: MirNodeRef, keys: Vec<Column> },
+    /// Rewrite node
+    Rewrite {
+        value: String,
+        column: String,
+        key: String,
+    },
 }
 
 impl MirNodeType {
@@ -431,7 +434,9 @@ impl MirNodeType {
             MirNodeType::Project { ref mut emit, .. } => {
                 emit.push(c);
             }
-            MirNodeType::Union { .. } => unimplemented!(),
+            MirNodeType::Union { ref mut emit } => for e in emit.iter_mut() {
+                e.push(c.clone());
+            },
             MirNodeType::TopK {
                 ref mut group_by, ..
             } => {
@@ -600,6 +605,22 @@ impl MirNodeType {
                 MirNodeType::Leaf { ref keys, .. } => keys == our_keys,
                 _ => false,
             },
+            MirNodeType::Union { emit: ref our_emit } => match *other {
+                MirNodeType::Union { ref emit } => emit == our_emit,
+                _ => false,
+            },
+            MirNodeType::Rewrite {
+                value: ref our_value,
+                key: ref our_key,
+                column: ref our_col,
+            } => match *other {
+                MirNodeType::Rewrite {
+                    ref value,
+                    ref key,
+                    ref column,
+                } => (value == our_value && our_key == key && our_col == column),
+                _ => false,
+            },
             _ => unimplemented!(),
         }
     }
@@ -703,9 +724,19 @@ impl Debug for MirNodeType {
                         .iter()
                         .enumerate()
                         .filter_map(|(i, ref e)| match e.as_ref() {
-                            Some(&(ref op, ref x)) => {
-                                Some(format!("f{} {} {}", i, escape(&format!("{}", op)), x))
-                            }
+                            Some(cond) => match *cond {
+                                FilterCondition::Equality(ref op, ref x) => {
+                                    Some(format!("f{} {} {}", i, escape(&format!("{}", op)), x))
+                                }
+                                FilterCondition::In(ref xs) => Some(format!(
+                                    "f{} IN ({})",
+                                    i,
+                                    xs.iter()
+                                        .map(|d| format!("{}", d))
+                                        .collect::<Vec<_>>()
+                                        .join(", ")
+                                )),
+                            },
                             None => None,
                         })
                         .collect::<Vec<_>>()
@@ -835,6 +866,7 @@ impl Debug for MirNodeType {
 
                 write!(f, "{}", cols)
             }
+            MirNodeType::Rewrite { ref column, .. } => write!(f, "Rw [{}]", column),
         }
     }
 }

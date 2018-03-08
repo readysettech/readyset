@@ -1,5 +1,5 @@
 use nom_sql::{ArithmeticBase, ArithmeticExpression, Column, ColumnConstraint, ColumnSpecification,
-              Operator, OrderType};
+              OrderType};
 use std::collections::HashMap;
 
 use core::{DataType, NodeIndex};
@@ -9,6 +9,7 @@ use mir::query::{MirQuery, QueryFlowParts};
 use dataflow::ops::join::{Join, JoinType};
 use dataflow::ops::latest::Latest;
 use dataflow::ops::project::{Project, ProjectExpression, ProjectExpressionBase};
+use dataflow::ops::filter::FilterCondition;
 use dataflow::ops;
 use controller::Migration;
 
@@ -267,6 +268,25 @@ pub fn mir_node_to_flow_parts(mir_node: &mut MirNode, mig: &mut Migration) -> Fl
                         mig,
                     )
                 }
+                MirNodeType::Rewrite {
+                    ref value,
+                    ref column,
+                    ref key,
+                } => {
+                    let src = mir_node.ancestors[0].clone();
+                    let should_rewrite = mir_node.ancestors[1].clone();
+
+                    make_rewrite_node(
+                        &name,
+                        src,
+                        should_rewrite,
+                        mir_node.columns.as_slice(),
+                        value,
+                        column,
+                        key,
+                        mig,
+                    )
+                }
             };
 
             // any new flow nodes have been instantiated by now, so we replace them with
@@ -424,11 +444,44 @@ pub(crate) fn make_union_node(
     FlowNode::New(node)
 }
 
+pub(crate) fn make_rewrite_node(
+    name: &str,
+    src: MirNodeRef,
+    should_rewrite: MirNodeRef,
+    columns: &[Column],
+    value: &String,
+    rewrite_col: &String,
+    key: &String,
+    mig: &mut Migration,
+) -> FlowNode {
+    let src_na = src.borrow().flow_node_addr().unwrap();
+    let should_rewrite_na = should_rewrite.borrow().flow_node_addr().unwrap();
+    let column_names = columns.iter().map(|c| &c.name).collect::<Vec<_>>();
+    let rewrite_col = column_names
+        .iter()
+        .rposition(|c| *c == rewrite_col)
+        .unwrap();
+    let key = column_names.iter().rposition(|c| *c == key).unwrap();
+
+    let node = mig.add_ingredient(
+        String::from(name),
+        column_names.as_slice(),
+        ops::rewrite::Rewrite::new(
+            src_na,
+            should_rewrite_na,
+            rewrite_col,
+            value.clone().into(),
+            key,
+        ),
+    );
+    FlowNode::New(node)
+}
+
 pub(crate) fn make_filter_node(
     name: &str,
     parent: MirNodeRef,
     columns: &[Column],
-    conditions: &Vec<Option<(Operator, DataType)>>,
+    conditions: &Vec<Option<FilterCondition>>,
     mig: &mut Migration,
 ) -> FlowNode {
     let parent_na = parent.borrow().flow_node_addr().unwrap();
@@ -560,7 +613,7 @@ pub(crate) fn make_join_node(
     // at this point in the codebase, so the `r2.a = r1.b` will join on the wrong `a` column.
     let left_join_col_id = projected_cols_left
         .iter()
-        .position(|lc| lc == on_left.first().unwrap())
+        .position(|lc| lc.name == on_left.first().unwrap().name)
         .expect(&format!(
             "missing left-side join column {:?} in {:?}",
             on_left.first().unwrap(),
@@ -568,7 +621,7 @@ pub(crate) fn make_join_node(
         ));
     let right_join_col_id = projected_cols_right
         .iter()
-        .position(|rc| rc == on_right.first().unwrap())
+        .position(|rc| rc.name == on_right.first().unwrap().name)
         .expect(&format!(
             "missing right-side join column {:?} in {:?}",
             on_left.first().unwrap(),

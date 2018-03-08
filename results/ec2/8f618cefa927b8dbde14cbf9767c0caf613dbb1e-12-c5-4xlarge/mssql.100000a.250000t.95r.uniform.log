@@ -1,0 +1,129 @@
+# actual ops/s: 16914.21
+# op	pct	sojourn	remote
+write	50	100003	18915	(all µs)
+read	50	100003	7747	(all µs)
+write	95	100003	39295	(all µs)
+read	95	100003	18047	(all µs)
+write	99	100003	50265	(all µs)
+read	99	100003	23434	(all µs)
+write	100	100003	96575	(all µs)
+read	100	100003	49315	(all µs)
+# actual ops/s: 16883.14
+# op	pct	sojourn	remote
+write	50	100003	18992	(all µs)
+read	50	100003	7795	(all µs)
+write	95	100003	39379	(all µs)
+read	95	100003	18093	(all µs)
+write	99	100003	50323	(all µs)
+read	99	100003	23684	(all µs)
+write	100	100003	79055	(all µs)
+read	100	100003	100003	(all µs)
+# actual ops/s: 16906.50
+# op	pct	sojourn	remote
+write	50	100003	18927	(all µs)
+read	50	100003	7744	(all µs)
+write	95	100003	39525	(all µs)
+read	95	100003	18100	(all µs)
+write	99	100003	51001	(all µs)
+read	99	100003	23370	(all µs)
+write	100	100003	88215	(all µs)
+read	100	100003	100003	(all µs)
+# actual ops/s: 16896.22
+# op	pct	sojourn	remote
+write	50	100003	18967	(all µs)
+read	50	100003	7695	(all µs)
+write	95	100003	39595	(all µs)
+read	95	100003	17938	(all µs)
+write	99	100003	51013	(all µs)
+read	99	100003	23602	(all µs)
+write	100	100003	82035	(all µs)
+read	100	100003	48407	(all µs)
+# actual ops/s: 16962.99
+# op	pct	sojourn	remote
+write	50	100003	18867	(all µs)
+read	50	100003	7648	(all µs)
+write	95	100003	39519	(all µs)
+read	95	100003	18052	(all µs)
+write	99	100003	50965	(all µs)
+read	99	100003	23357	(all µs)
+write	100	100003	78563	(all µs)
+read	100	100003	46061	(all µs)
+# actual ops/s: 16881.66
+# op	pct	sojourn	remote
+write	50	100003	18931	(all µs)
+read	50	100003	7687	(all µs)
+write	95	100003	38983	(all µs)
+read	95	100003	18152	(all µs)
+write	99	100003	50511	(all µs)
+read	99	100003	23486	(all µs)
+write	100	100003	100003	(all µs)
+read	100	100003	43053	(all µs)
+# actual ops/s: 16975.51
+# op	pct	sojourn	remote
+write	50	100003	18892	(all µs)
+read	50	100003	7649	(all µs)
+write	95	100003	39107	(all µs)
+read	95	100003	17937	(all µs)
+write	99	100003	49975	(all µs)
+read	99	100003	23285	(all µs)
+write	100	100003	78719	(all µs)
+read	100	100003	51111	(all µs)
+# actual ops/s: 16989.47
+# op	pct	sojourn	remote
+write	50	100003	18908	(all µs)
+read	50	100003	7646	(all µs)
+write	95	100003	39165	(all µs)
+read	95	100003	17857	(all µs)
+write	99	100003	49327	(all µs)
+read	99	100003	23322	(all µs)
+write	100	100003	93087	(all µs)
+read	100	100003	41143	(all µs)
+# actual ops/s: 16972.70
+# op	pct	sojourn	remote
+write	50	100003	18823	(all µs)
+read	50	100003	7666	(all µs)
+write	95	100003	39265	(all µs)
+read	95	100003	18116	(all µs)
+write	99	100003	50483	(all µs)
+read	99	100003	23394	(all µs)
+write	100	100003	81127	(all µs)
+read	100	100003	44365	(all µs)
+# actual ops/s: 16963.04
+# op	pct	sojourn	remote
+write	50	100003	18893	(all µs)
+read	50	100003	7658	(all µs)
+write	95	100003	39513	(all µs)
+read	95	100003	18035	(all µs)
+write	99	100003	51003	(all µs)
+read	99	100003	23470	(all µs)
+write	100	100003	79691	(all µs)
+read	100	100003	40553	(all µs)
+# actual ops/s: 16960.79
+# op	pct	sojourn	remote
+write	50	100003	18921	(all µs)
+read	50	100003	7608	(all µs)
+write	95	100003	39323	(all µs)
+read	95	100003	18090	(all µs)
+write	99	100003	51337	(all µs)
+read	99	100003	23506	(all µs)
+write	100	100003	88083	(all µs)
+read	100	100003	48467	(all µs)
+# actual ops/s: 16985.62
+# op	pct	sojourn	remote
+write	50	100003	18831	(all µs)
+read	50	100003	7680	(all µs)
+write	95	100003	39099	(all µs)
+read	95	100003	18035	(all µs)
+write	99	100003	50151	(all µs)
+read	99	100003	23417	(all µs)
+write	100	100003	79239	(all µs)
+read	100	100003	100003	(all µs)
+# server stats:
+uptime:
+ 22:11:51 up 36 min,  0 users,  load average: 5.61, 3.32, 2.79
+disk:
+475148	/opt/mssql-ramdisk/data/
+tables:
+art                                                                                                                                              5712
+awvc                                                                                                                                             4296
+vt                                                                                                                                              63440

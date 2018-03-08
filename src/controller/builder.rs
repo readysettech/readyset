@@ -8,6 +8,7 @@ use std::sync::Arc;
 use slog;
 
 use controller::handle::ControllerHandle;
+use controller::sql::reuse::ReuseConfigType;
 use controller::{self, ControllerConfig};
 
 /// Used to construct a controller.
@@ -87,6 +88,19 @@ impl ControllerBuilder {
     pub fn log_with(&mut self, log: slog::Logger) {
         self.log = log;
     }
+
+    /// Set the reuse policy for all subsequent migrations
+    pub fn set_reuse(&mut self, reuse_type: ReuseConfigType) {
+        self.config.reuse = reuse_type;
+    }
+
+    /// Set the number of fixed domains for all subsequent migration.
+    /// `None` disables fixed domains, and allows migrations to change
+    /// the number of domains as they see fit.
+    fn set_fixed_domains(&mut self, ndomains: Option<usize>) {
+        self.config.fixed_domains = ndomains;
+    }
+
 
     /// Build a controller and return a handle to it.
     pub fn build<A: Authority + 'static>(self, authority: Arc<A>) -> ControllerHandle<A> {

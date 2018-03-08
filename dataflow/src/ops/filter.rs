@@ -8,14 +8,20 @@ use prelude::*;
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Filter {
     src: IndexPair,
-    filter: sync::Arc<Vec<Option<(Operator, DataType)>>>,
+    filter: sync::Arc<Vec<Option<FilterCondition>>>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub enum FilterCondition {
+    Equality(Operator, DataType),
+    In(Vec<DataType>),
 }
 
 impl Filter {
     /// Construct a new filter operator. The `filter` vector must have as many elements as the
     /// `src` node has columns. Each column that is set to `None` matches any value, while columns
     /// in the filter that have values set will check for equality on that column.
-    pub fn new(src: NodeIndex, filter: &[Option<(Operator, DataType)>]) -> Filter {
+    pub fn new(src: NodeIndex, filter: &[Option<FilterCondition>]) -> Filter {
         Filter {
             src: src.into(),
             filter: sync::Arc::new(Vec::from(filter)),
@@ -56,15 +62,19 @@ impl Ingredient for Filter {
             self.filter.iter().enumerate().all(|(i, fi)| {
                 // check if this filter matches
                 let d = &r[i];
-                if let Some((ref op, ref f)) = *fi {
-                    match *op {
-                        Operator::Equal => d == f,
-                        Operator::NotEqual => d != f,
-                        Operator::Greater => d > f,
-                        Operator::GreaterOrEqual => d >= f,
-                        Operator::Less => d < f,
-                        Operator::LessOrEqual => d <= f,
-                        _ => unimplemented!(),
+                if let Some(ref cond) = *fi {
+                    match *cond {
+                        FilterCondition::Equality(ref op, ref f) => match *op {
+                            Operator::Equal => d == f,
+                            Operator::NotEqual => d != f,
+                            Operator::Greater => d > f,
+                            Operator::GreaterOrEqual => d >= f,
+                            Operator::Less => d < f,
+                            Operator::LessOrEqual => d <= f,
+                            Operator::In => unreachable!(),
+                            _ => unimplemented!(),
+                        },
+                        FilterCondition::In(ref fs) => fs.contains(d),
                     }
                 } else {
                     // everything matches no condition
@@ -102,9 +112,19 @@ impl Ingredient for Filter {
                 .iter()
                 .enumerate()
                 .filter_map(|(i, ref e)| match e.as_ref() {
-                    Some(&(ref op, ref x)) => {
-                        Some(format!("f{} {} {}", i, escape(&format!("{}", op)), x))
-                    }
+                    Some(cond) => match *cond {
+                        FilterCondition::Equality(ref op, ref x) => {
+                            Some(format!("f{} {} {}", i, escape(&format!("{}", op)), x))
+                        }
+                        FilterCondition::In(ref xs) => Some(format!(
+                            "f{} IN ({})",
+                            i,
+                            xs.iter()
+                                .map(|d| format!("{}", d))
+                                .collect::<Vec<_>>()
+                                .join(", ")
+                        )),
+                    },
                     None => None,
                 })
                 .collect::<Vec<_>>()
@@ -132,15 +152,18 @@ impl Ingredient for Filter {
                             .filter(move |r| {
                                 r.iter().enumerate().all(|(i, d)| {
                                     // check if this filter matches
-                                    if let Some((ref op, ref f)) = f[i] {
-                                        match *op {
-                                            Operator::Equal => d == f,
-                                            Operator::NotEqual => d != f,
-                                            Operator::Greater => d > f,
-                                            Operator::GreaterOrEqual => d >= f,
-                                            Operator::Less => d < f,
-                                            Operator::LessOrEqual => d <= f,
-                                            _ => unimplemented!(),
+                                    if let Some(ref cond) = f[i] {
+                                        match *cond {
+                                            FilterCondition::Equality(ref op, ref f) => match *op {
+                                                Operator::Equal => d == f,
+                                                Operator::NotEqual => d != f,
+                                                Operator::Greater => d > f,
+                                                Operator::GreaterOrEqual => d >= f,
+                                                Operator::Less => d < f,
+                                                Operator::LessOrEqual => d <= f,
+                                                _ => unimplemented!(),
+                                            },
+                                            FilterCondition::In(ref fs) => fs.contains(d),
                                         }
                                     } else {
                                         // everything matches no condition
@@ -174,7 +197,7 @@ mod tests {
 
     fn setup(
         materialized: bool,
-        filters: Option<&[Option<(Operator, DataType)>]>,
+        filters: Option<&[Option<FilterCondition>]>,
     ) -> ops::test::MockGraph {
         let mut g = ops::test::MockGraph::new();
         let s = g.add_base("source", &["x", "y"]);
@@ -183,7 +206,10 @@ mod tests {
             &["x", "y"],
             Filter::new(
                 s.as_global(),
-                filters.unwrap_or(&[None, Some((Operator::Equal, "a".into()))]),
+                filters.unwrap_or(&[
+                    None,
+                    Some(FilterCondition::Equality(Operator::Equal, "a".into())),
+                ]),
             ),
             materialized,
         );
@@ -227,8 +253,8 @@ mod tests {
         let mut g = setup(
             false,
             Some(&[
-                Some((Operator::Equal, 1.into())),
-                Some((Operator::Equal, "a".into())),
+                Some(FilterCondition::Equality(Operator::Equal, 1.into())),
+                Some(FilterCondition::Equality(Operator::Equal, "a".into())),
             ]),
         );
 
@@ -286,8 +312,8 @@ mod tests {
         let mut g = setup(
             false,
             Some(&[
-                Some((Operator::LessOrEqual, 2.into())),
-                Some((Operator::NotEqual, "a".into())),
+                Some(FilterCondition::Equality(Operator::LessOrEqual, 2.into())),
+                Some(FilterCondition::Equality(Operator::NotEqual, "a".into())),
             ]),
         );
 
@@ -307,6 +333,35 @@ mod tests {
 
         // both conditions match (1 <= 2, "b" != "a")
         left = vec![1.into(), "b".into()];
+        assert_eq!(g.narrow_one_row(left.clone(), false), vec![left].into());
+    }
+
+    #[test]
+    fn it_works_with_in_list() {
+        let mut g = setup(
+            false,
+            Some(&[
+                Some(FilterCondition::In(vec![2.into(), 42.into()])),
+                Some(FilterCondition::In(vec!["b".into()])),
+            ]),
+        );
+
+        let mut left: Vec<DataType>;
+
+        // both conditions match (2 IN (2, 42), "b" IN ("b"))
+        left = vec![2.into(), "b".into()];
+        assert_eq!(g.narrow_one_row(left.clone(), false), vec![left].into());
+
+        // second condition fails ("a" NOT IN ("b"))
+        left = vec![2.into(), "a".into()];
+        assert!(g.narrow_one_row(left.clone(), false).is_empty());
+
+        // first condition fails (3 NOT IN (2, 42))
+        left = vec![3.into(), "b".into()];
+        assert!(g.narrow_one_row(left.clone(), false).is_empty());
+
+        // both conditions match (42 IN (2, 42), "b" IN ("b"))
+        left = vec![42.into(), "b".into()];
         assert_eq!(g.narrow_one_row(left.clone(), false), vec![left].into());
     }
 }

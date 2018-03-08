@@ -1,19 +1,20 @@
 use MirNodeRef;
 use node::{MirNode, MirNodeType};
 use query::MirQuery;
+use dataflow::ops::filter::FilterCondition;
+
 use std::collections::HashMap;
-use nom_sql::Operator;
-use core::DataType;
 
 pub fn optimize(q: MirQuery) -> MirQuery {
     //remove_extraneous_projections(&mut q);
     q
 }
 
-pub fn optimize_post_reuse(q: &mut MirQuery) {
-    find_and_merge_filter_chains(q);
+pub fn optimize_post_reuse(_q: &mut MirQuery) {
+    // find_and_merge_filter_chains(q);
 }
 
+#[allow(dead_code)]
 fn find_and_merge_filter_chains(q: &MirQuery) {
     let mut chained_filters = Vec::new();
     // depth first search
@@ -134,7 +135,7 @@ fn end_filter_chain(chained_filters: &mut Vec<MirNodeRef>) {
 fn to_conditions(
     chained_filters: &Vec<MirNodeRef>,
     num_columns: usize,
-) -> Vec<Option<(Operator, DataType)>> {
+) -> Vec<Option<FilterCondition>> {
     let mut merged_conditions = vec![None; num_columns];
     for filter in chained_filters {
         match filter.borrow().inner {
