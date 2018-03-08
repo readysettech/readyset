@@ -78,7 +78,7 @@ path = "src/lib.rs"
 name = "basic-recipe"
 
 [[example]]
-name = "test-recipe"
+name = "karma-recipe"
 
 [[bin]]
 name = "souplet"

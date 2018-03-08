@@ -50,7 +50,6 @@ fn main() {
     let mut builder = ControllerBuilder::default();
     //builder.log_with(distributary::logger_pls());
     builder.set_worker_threads(2);
-    builder.disable_partial();
     builder.set_persistence(persistence_params);
 
     // Get a local copy of the controller
