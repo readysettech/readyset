@@ -4,6 +4,7 @@ use mir::node::{GroupedNodeType, MirNode, MirNodeType};
 use mir::query::MirQuery;
 // TODO(malte): remove if possible
 pub use mir::FlowNode;
+use dataflow::ops::filter::FilterCondition;
 use dataflow::ops::join::JoinType;
 
 use nom_sql::{ArithmeticExpression, Column, ColumnSpecification, CompoundSelectOperator,
@@ -108,7 +109,7 @@ impl SqlToMirConverter {
         ct: &ConditionTree,
         columns: &mut Vec<Column>,
         n: &MirNodeRef,
-    ) -> Vec<Option<(Operator, DataType)>> {
+    ) -> Vec<Option<FilterCondition>> {
         use std::cmp::max;
 
         // TODO(malte): we only support one level of condition nesting at this point :(
@@ -116,15 +117,18 @@ impl SqlToMirConverter {
             ConditionExpression::Base(ConditionBase::Field(ref f)) => f.clone(),
             _ => unimplemented!(),
         };
-        let r = match *ct.right.as_ref() {
+        let f = Some(match *ct.right.as_ref() {
             ConditionExpression::Base(ConditionBase::Literal(Literal::Integer(ref i))) => {
-                DataType::from(*i)
+                FilterCondition::Equality(ct.operator.clone(), DataType::from(*i))
             }
             ConditionExpression::Base(ConditionBase::Literal(Literal::String(ref s))) => {
-                DataType::from(s.clone())
+                FilterCondition::Equality(ct.operator.clone(), DataType::from(s.clone()))
+            }
+            ConditionExpression::Base(ConditionBase::LiteralList(ref ll)) => {
+                FilterCondition::In(ll.iter().map(|l| DataType::from(l.clone())).collect())
             }
             _ => unimplemented!(),
-        };
+        });
 
         let absolute_column_ids: Vec<usize> = columns
             .iter()
@@ -134,7 +138,6 @@ impl SqlToMirConverter {
         let num_columns = max(columns.len(), max_column_id + 1);
         let mut filters = vec![None; num_columns];
 
-        let f = Some((ct.operator.clone(), DataType::from(r)));
         match columns.iter().rposition(|c| *c.name == l.name) {
             None => {
                 // Might occur if the column doesn't exist in the parent; e.g., for aggregations.

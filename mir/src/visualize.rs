@@ -1,6 +1,7 @@
 use std::collections::HashMap;
 use std::fmt::{self, Write};
 
+use dataflow::ops::filter::FilterCondition;
 use dataflow::ops::grouped::aggregate::Aggregation as AggregationKind;
 use dataflow::ops::grouped::extremum::Extremum as ExtremumKind;
 use node::{MirNode, MirNodeType};
@@ -153,9 +154,19 @@ impl GraphViz for MirNodeType {
                         .iter()
                         .enumerate()
                         .filter_map(|(i, ref e)| match e.as_ref() {
-                            Some(&(ref op, ref x)) => {
-                                Some(format!("f{} {} {}", i, escape(&format!("{}", op)), x))
-                            }
+                            Some(cond) => match *cond {
+                                FilterCondition::Equality(ref op, ref x) => {
+                                    Some(format!("f{} {} {}", i, escape(&format!("{}", op)), x))
+                                }
+                                FilterCondition::In(ref xs) => Some(format!(
+                                    "f{} IN ({})",
+                                    i,
+                                    xs.iter()
+                                        .map(|d| format!("{}", d))
+                                        .collect::<Vec<_>>()
+                                        .join(", ")
+                                )),
+                            },
                             None => None,
                         })
                         .collect::<Vec<_>>()

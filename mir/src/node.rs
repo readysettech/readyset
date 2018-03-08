@@ -1,10 +1,11 @@
-use nom_sql::{ArithmeticExpression, Column, ColumnSpecification, Operator, OrderType};
+use nom_sql::{ArithmeticExpression, Column, ColumnSpecification, OrderType};
 use std::cell::RefCell;
 use std::fmt::{Debug, Display, Error, Formatter};
 use std::rc::Rc;
 
 use core::{DataType, NodeIndex};
 use dataflow::ops;
+use dataflow::ops::filter::FilterCondition;
 use dataflow::ops::grouped::aggregate::Aggregation as AggregationKind;
 use dataflow::ops::grouped::extremum::Extremum as ExtremumKind;
 use {FlowNode, MirNodeRef};
@@ -350,7 +351,7 @@ pub enum MirNodeType {
     },
     /// filter conditions (one for each parent column)
     Filter {
-        conditions: Vec<Option<(Operator, DataType)>>,
+        conditions: Vec<Option<FilterCondition>>,
     },
     /// over column, separator
     GroupConcat { on: Column, separator: String },
@@ -723,9 +724,19 @@ impl Debug for MirNodeType {
                         .iter()
                         .enumerate()
                         .filter_map(|(i, ref e)| match e.as_ref() {
-                            Some(&(ref op, ref x)) => {
-                                Some(format!("f{} {} {}", i, escape(&format!("{}", op)), x))
-                            }
+                            Some(cond) => match *cond {
+                                FilterCondition::Equality(ref op, ref x) => {
+                                    Some(format!("f{} {} {}", i, escape(&format!("{}", op)), x))
+                                }
+                                FilterCondition::In(ref xs) => Some(format!(
+                                    "f{} IN ({})",
+                                    i,
+                                    xs.iter()
+                                        .map(|d| format!("{}", d))
+                                        .collect::<Vec<_>>()
+                                        .join(", ")
+                                )),
+                            },
                             None => None,
                         })
                         .collect::<Vec<_>>()

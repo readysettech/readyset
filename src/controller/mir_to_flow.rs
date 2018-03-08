@@ -1,5 +1,5 @@
 use nom_sql::{ArithmeticBase, ArithmeticExpression, Column, ColumnConstraint, ColumnSpecification,
-              Operator, OrderType};
+              OrderType};
 use std::collections::HashMap;
 
 use core::{DataType, NodeIndex};
@@ -9,6 +9,7 @@ use mir::query::{MirQuery, QueryFlowParts};
 use dataflow::ops::join::{Join, JoinType};
 use dataflow::ops::latest::Latest;
 use dataflow::ops::project::{Project, ProjectExpression, ProjectExpressionBase};
+use dataflow::ops::filter::FilterCondition;
 use dataflow::ops;
 use controller::Migration;
 
@@ -480,7 +481,7 @@ pub(crate) fn make_filter_node(
     name: &str,
     parent: MirNodeRef,
     columns: &[Column],
-    conditions: &Vec<Option<(Operator, DataType)>>,
+    conditions: &Vec<Option<FilterCondition>>,
     mig: &mut Migration,
 ) -> FlowNode {
     let parent_na = parent.borrow().flow_node_addr().unwrap();
