@@ -591,42 +591,42 @@ impl Into<Records> for Vec<(Vec<DataType>, bool)> {
     }
 }
 
-trait SizeOf {
-    fn deep_size_of(&self) -> usize;
-    fn size_of(&self) -> usize;
+pub trait SizeOf {
+    fn deep_size_of(&self) -> u64;
+    fn size_of(&self) -> u64;
 }
 
 impl SizeOf for DataType {
-    fn deep_size_of(&self) -> usize {
+    fn deep_size_of(&self) -> u64 {
         use std::mem::size_of_val;
 
         let inner = match *self {
-            DataType::Text(ref t) => size_of_val(t) + t.to_bytes().len(),
-            _ => 0usize,
+            DataType::Text(ref t) => size_of_val(t) as u64 + t.to_bytes().len() as u64,
+            _ => 0u64,
         };
 
         self.size_of() + inner
     }
 
-    fn size_of(&self) -> usize {
+    fn size_of(&self) -> u64 {
         use std::mem::size_of;
 
         // doesn't include data if stored externally
-        size_of::<DataType>()
+        size_of::<DataType>() as u64
     }
 }
 
 impl SizeOf for Vec<DataType> {
-    fn deep_size_of(&self) -> usize {
+    fn deep_size_of(&self) -> u64 {
         use std::mem::size_of_val;
 
-        size_of_val(self) + self.iter().fold(0usize, |acc, d| acc + d.deep_size_of())
+        size_of_val(self) as u64 + self.iter().fold(0u64, |acc, d| acc + d.deep_size_of())
     }
 
-    fn size_of(&self) -> usize {
+    fn size_of(&self) -> u64 {
         use std::mem::{size_of, size_of_val};
 
-        size_of_val(self) + size_of::<DataType>() * self.len()
+        size_of_val(self) as u64 + size_of::<DataType>() as u64 * self.len() as u64
     }
 }
 
