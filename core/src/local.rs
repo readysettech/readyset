@@ -1,4 +1,5 @@
 use ::*;
+use data::SizeOf;
 use std::ops::{Deref, Index, IndexMut};
 use std::iter::FromIterator;
 use std::collections::HashMap;
@@ -400,6 +401,7 @@ pub struct State<T: Hash + Eq + Clone + 'static> {
     state: Vec<SingleState<T>>,
     by_tag: HashMap<Tag, usize>,
     rows: usize,
+    mem_size: u64,
 }
 
 impl<T: Hash + Eq + Clone + 'static> Default for State<T> {
@@ -408,7 +410,20 @@ impl<T: Hash + Eq + Clone + 'static> Default for State<T> {
             state: Vec::new(),
             by_tag: HashMap::new(),
             rows: 0,
+            mem_size: 0,
         }
+    }
+}
+
+impl<T: Hash + Eq + Clone + 'static> SizeOf for State<T> {
+    fn size_of(&self) -> u64 {
+        use std::mem::size_of;
+
+        size_of::<T>() as u64
+    }
+
+    fn deep_size_of(&self) -> u64 {
+        self.mem_size
     }
 }
 
@@ -584,7 +599,10 @@ impl<T: Hash + Eq + Clone + 'static> State<T> {
         true
     }
 
-    pub fn insert(&mut self, r: Vec<T>, partial_tag: Option<Tag>) -> bool {
+    pub fn insert(&mut self, r: Vec<T>, partial_tag: Option<Tag>) -> bool
+    where
+        T: SizeOf,
+    {
         let r = Rc::new(r);
 
         if let Some(tag) = partial_tag {
@@ -602,6 +620,8 @@ impl<T: Hash + Eq + Clone + 'static> State<T> {
         } else {
             let mut hit_any = true;
             self.rows = self.rows.saturating_add(1);
+            self.mem_size = self.mem_size
+                .saturating_add((*r).iter().fold(0u64, |acc, d| acc + d.deep_size_of()));
             for i in 0..self.state.len() {
                 hit_any = State::insert_into(&mut self.state[i], Row(r.clone())) || hit_any;
             }
@@ -609,7 +629,10 @@ impl<T: Hash + Eq + Clone + 'static> State<T> {
         }
     }
 
-    pub fn remove(&mut self, r: &[T]) -> bool {
+    pub fn remove(&mut self, r: &[T]) -> bool
+    where
+        T: SizeOf,
+    {
         let mut hit = false;
         let mut removed = false;
         let fix = |removed: &mut bool, rs: &mut Vec<Row<Vec<T>>>| {
@@ -696,6 +719,8 @@ impl<T: Hash + Eq + Clone + 'static> State<T> {
 
         if removed {
             self.rows = self.rows.saturating_sub(1);
+            self.mem_size = self.mem_size
+                .saturating_sub((*r).iter().fold(0u64, |acc, d| acc + d.deep_size_of()));
         }
 
         hit
@@ -851,6 +876,7 @@ impl<T: Hash + Eq + Clone + 'static> State<T> {
 
     pub fn clear(&mut self) {
         self.rows = 0;
+        self.mem_size = 0;
         for s in &mut self.state {
             match s.state {
                 KeyedState::Single(ref mut map) => map.clear(),
