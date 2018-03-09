@@ -325,7 +325,7 @@ impl DomainHandle {
         let mut size = 0;
         for _ in 0..self.shards() {
             match self.wait_for_next_reply() {
-                ControlReplyPacket::StateSize(s) => size += s,
+                ControlReplyPacket::StateSize(n, _) => size += n,
                 r => return Err(WaitError::WrongReply(r)),
             }
         }

@@ -865,9 +865,14 @@ impl Domain {
                         n.with_reader_mut(|r| r.add_streamer(new_streamer).unwrap());
                     }
                     Packet::StateSizeProbe { node } => {
-                        let size = self.state.get(&node).map(|state| state.len()).unwrap_or(0);
+                        use core::data::SizeOf;
+                        let row_count = self.state.get(&node).map(|state| state.len()).unwrap_or(0);
+                        let mem_size = self.state
+                            .get(&node)
+                            .map(|state| state.deep_size_of())
+                            .unwrap_or(0);
                         self.control_reply_tx
-                            .send(ControlReplyPacket::StateSize(size))
+                            .send(ControlReplyPacket::StateSize(row_count, mem_size))
                             .unwrap();
                     }
                     Packet::PrepareState { node, state } => {
