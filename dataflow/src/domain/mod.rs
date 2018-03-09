@@ -1258,18 +1258,25 @@ impl Domain {
                         let node_stats = self.nodes
                             .values()
                             .filter_map(|nd| {
+                                use core::data::SizeOf;
+
                                 let ref n = *nd.borrow();
                                 let local_index: LocalNodeIndex = *n.local_addr();
                                 let node_index: NodeIndex = n.global_addr();
 
                                 let time = self.process_times.num_nanoseconds(local_index);
                                 let ptime = self.process_ptimes.num_nanoseconds(local_index);
+                                let mem_size = self.state
+                                    .get(&local_index)
+                                    .map(|state| state.deep_size_of())
+                                    .unwrap_or(0);
                                 if time.is_some() && ptime.is_some() {
                                     Some((
                                         node_index,
                                         statistics::NodeStats {
                                             process_time: time.unwrap(),
                                             process_ptime: ptime.unwrap(),
+                                            mem_size: mem_size,
                                         },
                                     ))
                                 } else {
