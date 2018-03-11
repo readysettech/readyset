@@ -2,10 +2,10 @@ use distributary::{ControllerHandle, DataType, Mutator, RemoteGetter, ZookeeperA
 
 use regex::Regex;
 use msql_srv::{self, *};
-use nom_sql;
+use nom_sql::{self, ColumnSpecification};
 use slog;
 use std::io;
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, HashMap};
 
 lazy_static! {
     static ref HARD_CODED_REPLIES: Vec<(Regex, Vec<(&'static str, &'static str)>)> = vec![
@@ -35,6 +35,8 @@ pub struct SoupBackend {
     _recipe: String,
     inputs: BTreeMap<String, Mutator>,
     outputs: BTreeMap<String, RemoteGetter>,
+
+    table_schemas: HashMap<String, Vec<ColumnSpecification>>,
 
     query_count: u64,
 }
@@ -66,17 +68,20 @@ impl SoupBackend {
             inputs: inputs,
             outputs: outputs,
 
+            table_schemas: HashMap::default(),
+
             query_count: 0,
         }
     }
 
     fn handle_create_table<W: io::Write>(
         &mut self,
-        q: &str,
+        q: nom_sql::CreateTableStatement,
         results: QueryResultWriter<W>,
     ) -> io::Result<()> {
         match self.soup.extend_recipe(format!("{};", q)) {
             Ok(_) => {
+                self.table_schemas.insert(q.table.name.clone(), q.fields);
                 // no rows to return
                 // TODO(malte): potentially eagerly cache the mutator for this table
                 results.completed(0, 0)
@@ -280,7 +285,7 @@ impl<W: io::Write> MysqlShim<W> for SoupBackend {
 
         match nom_sql::parse_query(&query) {
             Ok(q) => match q {
-                nom_sql::SqlQuery::CreateTable(_) => self.handle_create_table(&query, results),
+                nom_sql::SqlQuery::CreateTable(q) => self.handle_create_table(q, results),
                 nom_sql::SqlQuery::Insert(q) => self.handle_insert(q, results),
                 nom_sql::SqlQuery::Select(q) => self.handle_select(q, results),
                 nom_sql::SqlQuery::Set(q) => self.handle_set(q, results),
