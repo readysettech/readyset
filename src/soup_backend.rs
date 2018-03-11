@@ -2,7 +2,7 @@ use distributary::{ControllerHandle, DataType, Mutator, RemoteGetter, ZookeeperA
 
 use regex::Regex;
 use msql_srv::{self, *};
-use nom_sql::{self, ColumnSpecification};
+use nom_sql::{self, ColumnConstraint, ColumnSpecification};
 use slog;
 use std::io;
 use std::collections::{BTreeMap, HashMap};
@@ -37,6 +37,7 @@ pub struct SoupBackend {
     outputs: BTreeMap<String, RemoteGetter>,
 
     table_schemas: HashMap<String, Vec<ColumnSpecification>>,
+    auto_increments: HashMap<String, Vec<u64>>,
 
     query_count: u64,
 }
@@ -69,6 +70,7 @@ impl SoupBackend {
             outputs: outputs,
 
             table_schemas: HashMap::default(),
+            auto_increments: HashMap::default(),
 
             query_count: 0,
         }
@@ -106,7 +108,24 @@ impl SoupBackend {
         let mut data: Vec<Vec<DataType>> =
             vec![vec![DataType::from(0 as i32); schema.len()]; q.data.len()];
 
+        let auto_increment_columns: Vec<_> = self.table_schemas[&table]
+            .iter()
+            .filter(|c| c.constraints.contains(&ColumnConstraint::AutoIncrement))
+            .collect();
+
         for (ri, ref row) in q.data.iter().enumerate() {
+            let mut auto_increments = &mut self.auto_increments
+                .entry(table.clone())
+                .or_insert(vec![0; auto_increment_columns.len()]);
+            for (aii, col) in auto_increment_columns.iter().enumerate() {
+                let idx = schema
+                    .iter()
+                    .position(|f| *f == col.column.name)
+                    .expect(&format!("no column named '{}'", col.column.name));
+                auto_increments[aii] += 1;
+                data[ri][idx] = DataType::from(auto_increments[aii] as i64);
+            }
+
             for (ci, c) in q.fields.iter().enumerate() {
                 let idx = schema
                     .iter()
@@ -120,7 +139,7 @@ impl SoupBackend {
             Ok(_) => {
                 // XXX(malte): last_insert_id needs to be set correctly
                 // Could we have put more than one row?
-                results.completed(q.data.len() as u64, 1)
+                results.completed(q.data.len() as u64, self.auto_increments[&table][0])
             }
             Err(e) => {
                 error!(self.log, "put error: {:?}", e);
