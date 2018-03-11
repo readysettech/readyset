@@ -116,8 +116,7 @@ impl SoupBackend {
         // can only have one AUTO_INCREMENT column
         assert_eq!(auto_increment_columns.len(), 1);
 
-        let mut auto_increment: &mut u64 =
-            &mut self.auto_increments.entry(table.clone()).or_insert(0);
+        let auto_increment: &mut u64 = &mut self.auto_increments.entry(table.clone()).or_insert(0);
         let last_insert_id = *auto_increment + 1;
 
         for (ri, ref row) in q.data.iter().enumerate() {
