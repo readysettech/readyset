@@ -2,7 +2,7 @@ use distributary::{ControllerHandle, DataType, Mutator, RemoteGetter, ZookeeperA
 
 use regex::Regex;
 use msql_srv::{self, *};
-use nom_sql::{self, ColumnConstraint, ColumnSpecification};
+use nom_sql::{self, ColumnConstraint, ColumnSpecification, SqlType};
 use slog;
 use std::io;
 use std::collections::{BTreeMap, HashMap};
@@ -73,6 +73,27 @@ impl SoupBackend {
             auto_increments: HashMap::default(),
 
             query_count: 0,
+        }
+    }
+
+    fn schema_for_column(&self, c: &nom_sql::Column) -> msql_srv::Column {
+        let table = c.table.as_ref().unwrap();
+        let col_schema = &self.table_schemas[table]
+            .iter()
+            .find(|cc| cc.column.name == c.name)
+            .expect(&format!("column {} not found", c.name));
+        assert_eq!(col_schema.column.name, c.name);
+
+        msql_srv::Column {
+            table: table.clone(),
+            column: c.name.clone(),
+            coltype: match col_schema.sql_type {
+                SqlType::Text => msql_srv::ColumnType::MYSQL_TYPE_STRING,
+                SqlType::Varchar(_) => msql_srv::ColumnType::MYSQL_TYPE_VAR_STRING,
+                SqlType::Int(_) => msql_srv::ColumnType::MYSQL_TYPE_LONG,
+                _ => unimplemented!(),
+            },
+            colflags: msql_srv::ColumnFlags::empty(),
         }
     }
 
@@ -166,6 +187,16 @@ impl SoupBackend {
             Ok(_) => {
                 self.query_count += 1;
 
+                let mut schema: Vec<msql_srv::Column> = Vec::new();
+                for fe in q.fields {
+                    match fe {
+                        nom_sql::FieldExpression::Col(c) => {
+                            schema.push(self.schema_for_column(&c));
+                        }
+                        _ => unimplemented!(),
+                    }
+                }
+
                 // create a getter if we don't have one for this query already
                 // TODO(malte): may need to make one anyway if the query has changed w.r.t. an
                 // earlier one of the same name?
@@ -176,22 +207,8 @@ impl SoupBackend {
                 // now "execute" the query via a bogokey lookup
                 match getter.lookup(&DataType::from(0 as i32), true) {
                     Ok(d) => {
-                        debug!(self.log, "get returned: {:?}", d);
-                        if d.len() > 0 {
-                            let mut schema: Vec<msql_srv::Column> = Vec::new();
-                            for fe in q.fields {
-                                match fe {
-                                    nom_sql::FieldExpression::Col(c) => {
-                                        schema.push(msql_srv::Column {
-                                            table: c.table.unwrap_or(String::new()),
-                                            column: c.name,
-                                            coltype: msql_srv::ColumnType::MYSQL_TYPE_STRING,
-                                            colflags: msql_srv::ColumnFlags::empty(),
-                                        })
-                                    }
-                                    _ => unimplemented!(),
-                                }
-                            }
+                        let num_rows = d.len();
+                        if num_rows > 0 {
                             let mut rw = results.start(schema.as_slice()).unwrap();
                             for r in d {
                                 let mut row: Vec<_> =
