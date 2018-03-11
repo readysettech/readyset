@@ -189,7 +189,6 @@ impl SoupBackend {
                                     _ => unimplemented!(),
                                 }
                             }
-                            println!("schema: {:?}", schema);
                             let mut rw = results.start(schema.as_slice()).unwrap();
                             for r in d {
                                 let mut row: Vec<_> =
