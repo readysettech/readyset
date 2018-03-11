@@ -93,7 +93,27 @@ impl SoupBackend {
                 SqlType::Int(_) => msql_srv::ColumnType::MYSQL_TYPE_LONG,
                 _ => unimplemented!(),
             },
-            colflags: msql_srv::ColumnFlags::empty(),
+            colflags: {
+                let mut flags = msql_srv::ColumnFlags::empty();
+                for c in &col_schema.constraints {
+                    match *c {
+                        ColumnConstraint::AutoIncrement => {
+                            flags |= msql_srv::ColumnFlags::AUTO_INCREMENT_FLAG;
+                        }
+                        ColumnConstraint::NotNull => {
+                            flags |= msql_srv::ColumnFlags::NOT_NULL_FLAG;
+                        }
+                        ColumnConstraint::PrimaryKey => {
+                            flags |= msql_srv::ColumnFlags::PRI_KEY_FLAG;
+                        }
+                        ColumnConstraint::Unique => {
+                            flags |= msql_srv::ColumnFlags::UNIQUE_KEY_FLAG;
+                        }
+                        _ => (),
+                    }
+                }
+                flags
+            },
         }
     }
 
