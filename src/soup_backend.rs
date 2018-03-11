@@ -80,13 +80,7 @@ impl SoupBackend {
                 // TODO(malte): potentially eagerly cache the mutator for this table
                 results.completed(0, 0)
             }
-            Err(e) => {
-                // XXX(malte): implement Error for RpcError
-                let msg = match e {
-                    RpcError::Other(msg) => msg,
-                };
-                Err(io::Error::new(io::ErrorKind::Other, msg))
-            }
+            Err(e) => Err(io::Error::new(io::ErrorKind::Other, e)),
         }
     }
 
@@ -193,13 +187,7 @@ impl SoupBackend {
                     }
                 }
             }
-            Err(e) => {
-                // XXX(malte): implement Error for RpcError
-                let msg = match e {
-                    RpcError::Other(msg) => msg,
-                };
-                Err(io::Error::new(io::ErrorKind::Other, msg))
-            }
+            Err(e) => Err(io::Error::new(io::ErrorKind::Other, e)),
         }
     }
 
