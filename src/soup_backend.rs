@@ -1,4 +1,5 @@
-use distributary::{ControllerHandle, DataType, Mutator, RemoteGetter, RpcError, ZookeeperAuthority};
+use distributary::{ControllerHandle, DataType, Mutator, RemoteGetter, ZookeeperAuthority};
+
 use regex::Regex;
 use msql_srv::{self, *};
 use nom_sql;
