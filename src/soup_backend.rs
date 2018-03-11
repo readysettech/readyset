@@ -37,7 +37,7 @@ pub struct SoupBackend {
     outputs: BTreeMap<String, RemoteGetter>,
 
     table_schemas: HashMap<String, Vec<ColumnSpecification>>,
-    auto_increments: HashMap<String, Vec<u64>>,
+    auto_increments: HashMap<String, u64>,
 
     query_count: u64,
 }
@@ -113,17 +113,21 @@ impl SoupBackend {
             .filter(|c| c.constraints.contains(&ColumnConstraint::AutoIncrement))
             .collect();
 
+        // can only have one AUTO_INCREMENT column
+        assert_eq!(auto_increment_columns.len(), 1);
+
+        let mut auto_increment: &mut u64 =
+            &mut self.auto_increments.entry(table.clone()).or_insert(0);
+        let last_insert_id = *auto_increment + 1;
+
         for (ri, ref row) in q.data.iter().enumerate() {
-            let mut auto_increments = &mut self.auto_increments
-                .entry(table.clone())
-                .or_insert(vec![0; auto_increment_columns.len()]);
-            for (aii, col) in auto_increment_columns.iter().enumerate() {
+            if let Some(col) = auto_increment_columns.iter().next() {
                 let idx = schema
                     .iter()
                     .position(|f| *f == col.column.name)
                     .expect(&format!("no column named '{}'", col.column.name));
-                auto_increments[aii] += 1;
-                data[ri][idx] = DataType::from(auto_increments[aii] as i64);
+                *auto_increment += 1;
+                data[ri][idx] = DataType::from(*auto_increment as i64);
             }
 
             for (ci, c) in q.fields.iter().enumerate() {
@@ -139,7 +143,7 @@ impl SoupBackend {
             Ok(_) => {
                 // XXX(malte): last_insert_id needs to be set correctly
                 // Could we have put more than one row?
-                results.completed(q.data.len() as u64, self.auto_increments[&table][0])
+                results.completed(q.data.len() as u64, last_insert_id)
             }
             Err(e) => {
                 error!(self.log, "put error: {:?}", e);
