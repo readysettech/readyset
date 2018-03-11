@@ -240,17 +240,20 @@ impl<W: io::Write> MysqlShim<W> for SoupBackend {
             //            warn!(self.log, "ignoring query \"{}\"", query);
             return results.completed(0, 0);
         }
-        if query.to_lowercase().starts_with("update") || query.to_lowercase().starts_with("delete") {
+        if query.to_lowercase().starts_with("update") || query.to_lowercase().starts_with("delete")
+        {
             return results.completed(1, 1);
         }
 
         if query.to_lowercase().contains("show tables") {
-            let cols = [Column {
+            let cols = [
+                Column {
                     table: String::from(""),
                     column: String::from("Tables"),
                     coltype: ColumnType::MYSQL_TYPE_STRING,
                     colflags: ColumnFlags::empty(),
-                }];
+                },
+            ];
             let writer = results.start(&cols)?;
             return writer.finish();
         }
