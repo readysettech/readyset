@@ -126,7 +126,7 @@ impl fmt::Display for ColumnConstraint {
             ColumnConstraint::DefaultValue(ref literal) => {
                 write!(f, "DEFAULT {}", literal.to_string())
             }
-            ColumnConstraint::AutoIncrement => write!(f, "AUTOINCREMENT"),
+            ColumnConstraint::AutoIncrement => write!(f, "AUTO_INCREMENT"),
             ColumnConstraint::PrimaryKey => write!(f, "PRIMARY KEY"),
             ColumnConstraint::Unique => write!(f, "UNIQUE"),
         }
