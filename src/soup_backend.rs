@@ -18,6 +18,12 @@ lazy_static! {
               ("XA", "YES"),
               ("Savepoints", "YES")]),
         (Regex::new(r"SELECT 1 AS ping").unwrap(), vec![("ping", "1")]),
+        (Regex::new(r"(?i)show global variables like 'read_only'").unwrap(),
+         vec![("Variable_name", "read_only"), ("Value", "OFF")]),
+        (Regex::new(r"(?i)select get_lock\(.*\) as lockstatus").unwrap(),
+         vec![("lockstatus", "1")]),
+        (Regex::new(r"(?i)select release_lock\(.*\) as lockstatus").unwrap(),
+         vec![("lockstatus", "1")]),
     ];
 }
 
@@ -234,8 +240,7 @@ impl<W: io::Write> MysqlShim<W> for SoupBackend {
         let query = query.replace('"', "'");
         let query = query.trim();
 
-        if query.to_lowercase().contains("show tables")
-            || query.to_lowercase().contains("show databases")
+        if query.to_lowercase().contains("show databases")
             || query.to_lowercase().starts_with("begin")
             || query.to_lowercase().starts_with("rollback")
             || query.to_lowercase().starts_with("alter table")
@@ -246,6 +251,20 @@ impl<W: io::Write> MysqlShim<W> for SoupBackend {
         {
             //            warn!(self.log, "ignoring query \"{}\"", query);
             return results.completed(0, 0);
+        }
+        if query.to_lowercase().starts_with("update") || query.to_lowercase().starts_with("delete") {
+            return results.completed(1, 1);
+        }
+
+        if query.to_lowercase().contains("show tables") {
+            let cols = [Column {
+                    table: String::from(""),
+                    column: String::from("Tables"),
+                    coltype: ColumnType::MYSQL_TYPE_STRING,
+                    colflags: ColumnFlags::empty(),
+                }];
+            let writer = results.start(&cols)?;
+            return writer.finish();
         }
 
         for &(ref pattern, ref columns) in &*HARD_CODED_REPLIES {
@@ -281,7 +300,7 @@ impl<W: io::Write> MysqlShim<W> for SoupBackend {
                     );
                 }
             },
-            Err(e) => {
+            Err(_e) => {
                 // if nom-sql rejects the query, there is no chance Soup will like it
                 error!(self.log, "query can't be parsed: \"{}\"", query);
                 results.completed(0, 0)
