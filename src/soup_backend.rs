@@ -12,7 +12,6 @@ pub struct SoupBackend {
     soup: ControllerHandle<ZookeeperAuthority>,
     log: slog::Logger,
 
-    _recipe: String,
     inputs: BTreeMap<String, Mutator>,
     outputs: BTreeMap<String, RemoteGetter>,
 
@@ -45,7 +44,6 @@ impl SoupBackend {
             soup: ch,
             log: log,
 
-            _recipe: String::new(),
             inputs: inputs,
             outputs: outputs,
 
