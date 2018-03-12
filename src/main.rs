@@ -11,6 +11,7 @@ extern crate lazy_static;
 extern crate slog;
 
 mod soup_backend;
+mod utils;
 
 use msql_srv::MysqlIntermediary;
 use std::net;
