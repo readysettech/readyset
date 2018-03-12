@@ -43,7 +43,7 @@ impl<'a> Value<'a> {
 }
 
 macro_rules! read_bytes {
-    ($input:expr, $len:expr) => {
+    ($input: expr, $len: expr) => {
         if $len as usize > $input.len() {
             Err(io::Error::new(
                 io::ErrorKind::UnexpectedEof,
@@ -54,7 +54,7 @@ macro_rules! read_bytes {
             *$input = rest;
             Ok(bits)
         }
-    }
+    };
 }
 
 impl<'a> ValueInner<'a> {
@@ -86,20 +86,24 @@ impl<'a> ValueInner<'a> {
             }
             ColumnType::MYSQL_TYPE_SHORT | ColumnType::MYSQL_TYPE_YEAR => {
                 if unsigned {
-                    Ok(ValueInner::UInt(u64::from(input
-                        .read_u16::<LittleEndian>()?)))
+                    Ok(ValueInner::UInt(
+                        u64::from(input.read_u16::<LittleEndian>()?),
+                    ))
                 } else {
-                    Ok(ValueInner::Int(i64::from(input
-                        .read_i16::<LittleEndian>()?)))
+                    Ok(ValueInner::Int(
+                        i64::from(input.read_i16::<LittleEndian>()?),
+                    ))
                 }
             }
             ColumnType::MYSQL_TYPE_LONG | ColumnType::MYSQL_TYPE_INT24 => {
                 if unsigned {
-                    Ok(ValueInner::UInt(u64::from(input
-                        .read_u32::<LittleEndian>()?)))
+                    Ok(ValueInner::UInt(
+                        u64::from(input.read_u32::<LittleEndian>()?),
+                    ))
                 } else {
-                    Ok(ValueInner::Int(i64::from(input
-                        .read_i32::<LittleEndian>()?)))
+                    Ok(ValueInner::Int(
+                        i64::from(input.read_i32::<LittleEndian>()?),
+                    ))
                 }
             }
             ColumnType::MYSQL_TYPE_LONGLONG => {
@@ -258,33 +262,33 @@ mod tests {
     use std::time;
 
     macro_rules! rt {
-            ($name:ident, $t:ty, $v:expr, $ct:expr) => {
-                rt!($name, $t, $v, $ct, false);
-            };
-            ($name:ident, $t:ty, $v:expr, $ct:expr, $sig:expr) => {
-                #[test]
-                fn $name() {
-                    let mut data = Vec::new();
-                    let mut col = Column {
-                        table: String::new(),
-                        column: String::new(),
-                        coltype: $ct,
-                        colflags: ColumnFlags::empty(),
-                    };
+        ($name: ident, $t: ty, $v: expr, $ct: expr) => {
+            rt!($name, $t, $v, $ct, false);
+        };
+        ($name: ident, $t: ty, $v: expr, $ct: expr, $sig: expr) => {
+            #[test]
+            fn $name() {
+                let mut data = Vec::new();
+                let mut col = Column {
+                    table: String::new(),
+                    column: String::new(),
+                    coltype: $ct,
+                    colflags: ColumnFlags::empty(),
+                };
 
-                    if !$sig {
-                        col.colflags.insert(ColumnFlags::UNSIGNED_FLAG);
-                    }
-
-                    let v: $t = $v;
-                    data.write_bin_value(&myc::value::Value::from(v)).unwrap();
-                    assert_eq!(
-                        Into::<$t>::into(Value::parse_from(&mut &data[..], $ct, !$sig).unwrap()),
-                        v
-                    );
+                if !$sig {
+                    col.colflags.insert(ColumnFlags::UNSIGNED_FLAG);
                 }
+
+                let v: $t = $v;
+                data.write_bin_value(&myc::value::Value::from(v)).unwrap();
+                assert_eq!(
+                    Into::<$t>::into(Value::parse_from(&mut &data[..], $ct, !$sig).unwrap()),
+                    v
+                );
             }
-        }
+        };
+    }
 
     rt!(u8_one, u8, 1, ColumnType::MYSQL_TYPE_TINY, false);
     rt!(i8_one, i8, 1, ColumnType::MYSQL_TYPE_TINY, true);
