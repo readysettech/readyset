@@ -14,7 +14,12 @@ mod soup_backend;
 mod utils;
 
 use msql_srv::MysqlIntermediary;
+use nom_sql::ColumnSpecification;
+use std::collections::HashMap;
 use std::net;
+use std::sync::{Arc, Mutex};
+use std::sync::atomic::AtomicUsize;
+
 use soup_backend::SoupBackend;
 
 fn main() {
@@ -58,9 +63,21 @@ fn main() {
 
     info!(log, "listening on port {}", port);
 
+    let query_counter = Arc::new(AtomicUsize::new(0));
+    let schemas: Arc<Mutex<HashMap<String, Vec<ColumnSpecification>>>> =
+        Arc::new(Mutex::new(HashMap::default()));
+    let auto_increments: Arc<Mutex<HashMap<String, u64>>> =
+        Arc::new(Mutex::new(HashMap::default()));
+
     while let Ok((s, _)) = listener.accept() {
-        // XXX: shouldn't be making a new soup backend for every connection
-        let soup = SoupBackend::new(zk_addr, deployment, log.clone());
+        let soup = SoupBackend::new(
+            zk_addr,
+            deployment,
+            schemas.clone(),
+            auto_increments.clone(),
+            query_counter.clone(),
+            log.clone(),
+        );
         MysqlIntermediary::run_on_tcp(soup, s).unwrap();
     }
 }
