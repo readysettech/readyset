@@ -235,12 +235,19 @@ impl SoupBackend {
                         let num_rows = d.len();
                         if num_rows > 0 {
                             let mut rw = results.start(schema.as_slice()).unwrap();
-                            for r in d {
-                                let mut row: Vec<_> =
-                                    r.into_iter().map(|d| format!("{}", d)).collect();
+                            for mut r in d {
                                 // drop bogokey
-                                row.pop();
-                                rw.write_row(row)?;
+                                r.pop();
+                                for c in r {
+                                    match c {
+                                        DataType::Int(i) => rw.write_col(i as i32)?,
+                                        DataType::BigInt(i) => rw.write_col(i as i64)?,
+                                        DataType::Text(t) => rw.write_col(t.to_str().unwrap())?,
+                                        dt @ DataType::TinyText(_) => rw.write_col(dt.to_string())?,
+                                        _ => unimplemented!(),
+                                    }
+                                }
+                                rw.end_row()?;
                             }
                             rw.finish()
                         } else {
