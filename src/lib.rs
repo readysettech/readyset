@@ -209,8 +209,11 @@ impl<B: MysqlShim<W>, R: Read, W: Write> MysqlIntermediary<B, R, W> {
 
     fn init(&mut self) -> io::Result<()> {
         self.writer.write_all(&[10])?; // protocol 10
-        self.writer.write_all(&b"0.0.1-alpha-msql-proxy\0"[..])?;
-        self.writer.write_all(&[0x08, 0x00, 0x00, 0x00])?; // connection ID
+
+        // 5.1.10 because that's what Ruby's ActiveRecord requires
+        self.writer.write_all(&b"5.1.10-alpha-msql-proxy\0"[..])?;
+
+        self.writer.write_all(&[0x08, 0x00, 0x00, 0x00])?; // TODO: connection ID
         self.writer.write_all(&b";X,po_k}\0"[..])?; // auth seed
         self.writer.write_all(&[0x00, 0x42])?; // just 4.1 proto
         self.writer.write_all(&[0x21])?; // UTF8_GENERAL_CI
