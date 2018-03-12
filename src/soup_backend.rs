@@ -218,13 +218,16 @@ impl SoupBackend {
                         _ => unimplemented!(),
                     }
                 }
+                println!("schema: {:?}", schema);
 
                 // create a getter if we don't have one for this query already
                 // TODO(malte): may need to make one anyway if the query has changed w.r.t. an
                 // earlier one of the same name?
-                let getter = self.outputs
-                    .entry(qname.clone())
-                    .or_insert(self.soup.get_getter(&qname).unwrap());
+                let getter = self.outputs.entry(qname.clone()).or_insert(
+                    self.soup
+                        .get_getter(&qname)
+                        .expect(&format!("no view named '{}'", qname)),
+                );
 
                 // now "execute" the query via a bogokey lookup
                 match getter.lookup(&DataType::from(0 as i32), true) {
