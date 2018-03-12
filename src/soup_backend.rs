@@ -5,6 +5,7 @@ use nom_sql::{self, ColumnConstraint, ColumnSpecification, SqlType};
 use slog;
 use std::io;
 use std::collections::{BTreeMap, HashMap};
+use std::sync::{self, Arc, Mutex};
 
 use utils;
 
@@ -15,14 +16,21 @@ pub struct SoupBackend {
     inputs: BTreeMap<String, Mutator>,
     outputs: BTreeMap<String, RemoteGetter>,
 
-    table_schemas: HashMap<String, Vec<ColumnSpecification>>,
-    auto_increments: HashMap<String, u64>,
+    table_schemas: Arc<Mutex<HashMap<String, Vec<ColumnSpecification>>>>,
+    auto_increments: Arc<Mutex<HashMap<String, u64>>>,
 
-    query_count: u64,
+    query_count: Arc<sync::atomic::AtomicUsize>,
 }
 
 impl SoupBackend {
-    pub fn new(zk_addr: &str, deployment_id: &str, log: slog::Logger) -> Self {
+    pub fn new(
+        zk_addr: &str,
+        deployment_id: &str,
+        schemas: Arc<Mutex<HashMap<String, Vec<ColumnSpecification>>>>,
+        auto_increments: Arc<Mutex<HashMap<String, u64>>>,
+        query_counter: Arc<sync::atomic::AtomicUsize>,
+        log: slog::Logger,
+    ) -> Self {
         let mut zk_auth = ZookeeperAuthority::new(&format!("{}/{}", zk_addr, deployment_id));
         zk_auth.log_with(log.clone());
 
@@ -47,16 +55,17 @@ impl SoupBackend {
             inputs: inputs,
             outputs: outputs,
 
-            table_schemas: HashMap::default(),
-            auto_increments: HashMap::default(),
+            table_schemas: schemas,
+            auto_increments: auto_increments,
 
-            query_count: 0,
+            query_count: query_counter,
         }
     }
 
     fn schema_for_column(&self, c: &nom_sql::Column) -> msql_srv::Column {
         let table = c.table.as_ref().unwrap();
-        let col_schema = &self.table_schemas[table]
+        let ts_lock = self.table_schemas.lock().unwrap();
+        let col_schema = &(*ts_lock)[table]
             .iter()
             .find(|cc| cc.column.name == c.name)
             .expect(&format!("column {} not found", c.name));
@@ -104,7 +113,8 @@ impl SoupBackend {
     ) -> io::Result<()> {
         match self.soup.extend_recipe(format!("{};", q)) {
             Ok(_) => {
-                self.table_schemas.insert(q.table.name.clone(), q.fields);
+                let mut ts_lock = self.table_schemas.lock().unwrap();
+                ts_lock.insert(q.table.name.clone(), q.fields);
                 // no rows to return
                 // TODO(malte): potentially eagerly cache the mutator for this table
                 results.completed(0, 0)
@@ -129,7 +139,8 @@ impl SoupBackend {
         let mut data: Vec<Vec<DataType>> =
             vec![vec![DataType::from(0 as i32); schema.len()]; q.data.len()];
 
-        let auto_increment_columns: Vec<_> = self.table_schemas[&table]
+        let ts_lock = self.table_schemas.lock().unwrap();
+        let auto_increment_columns: Vec<_> = ts_lock[&table]
             .iter()
             .filter(|c| c.constraints.contains(&ColumnConstraint::AutoIncrement))
             .collect();
@@ -137,7 +148,8 @@ impl SoupBackend {
         // can only have one AUTO_INCREMENT column
         assert_eq!(auto_increment_columns.len(), 1);
 
-        let auto_increment: &mut u64 = &mut self.auto_increments.entry(table.clone()).or_insert(0);
+        let mut ai_lock = self.auto_increments.lock().unwrap();
+        let auto_increment: &mut u64 = &mut (*ai_lock).entry(table.clone()).or_insert(0);
         let last_insert_id = *auto_increment + 1;
 
         for (ri, ref row) in q.data.iter().enumerate() {
@@ -180,13 +192,13 @@ impl SoupBackend {
         q: nom_sql::SelectStatement,
         results: QueryResultWriter<W>,
     ) -> io::Result<()> {
-        let qname = format!("q_{}", self.query_count);
+        let qc = self.query_count
+            .fetch_add(1, sync::atomic::Ordering::SeqCst);
+        let qname = format!("q_{}", qc);
 
         // first do a migration to add the query if it doesn't exist already
         match self.soup.extend_recipe(format!("QUERY {}: {};", qname, q)) {
             Ok(_) => {
-                self.query_count += 1;
-
                 let mut schema: Vec<msql_srv::Column> = Vec::new();
                 for fe in q.fields {
                     match fe {
