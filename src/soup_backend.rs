@@ -91,6 +91,8 @@ impl SoupBackend {
                 SqlType::Text => msql_srv::ColumnType::MYSQL_TYPE_STRING,
                 SqlType::Varchar(_) => msql_srv::ColumnType::MYSQL_TYPE_VAR_STRING,
                 SqlType::Int(_) => msql_srv::ColumnType::MYSQL_TYPE_LONG,
+                SqlType::DateTime => msql_srv::ColumnType::MYSQL_TYPE_DATETIME,
+                SqlType::Bool => msql_srv::ColumnType::MYSQL_TYPE_TINY,
                 _ => unimplemented!(),
             },
             colflags: {
