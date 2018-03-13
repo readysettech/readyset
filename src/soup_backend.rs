@@ -146,8 +146,8 @@ impl SoupBackend {
             .filter(|c| c.constraints.contains(&ColumnConstraint::AutoIncrement))
             .collect();
 
-        // can only have one AUTO_INCREMENT column
-        assert_eq!(auto_increment_columns.len(), 1);
+        // can only have zero or one AUTO_INCREMENT columns
+        assert!(auto_increment_columns.len() <= 1);
 
         let mut ai_lock = self.auto_increments.lock().unwrap();
         let auto_increment: &mut u64 = &mut (*ai_lock).entry(table.clone()).or_insert(0);
