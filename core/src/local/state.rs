@@ -51,6 +51,10 @@ impl State {
     }
 
     pub fn process_records(&mut self, records: &Records) {
+        if records.len() == 0 {
+            return;
+        }
+
         match *self {
             State::InMemory(ref mut s) => s.process_records(records),
             State::Persistent(ref mut s) => s.process_records(records),
@@ -177,7 +181,7 @@ impl PersistentState {
             .execute_batch(
                 "CREATE TABLE IF NOT EXISTS store (row BLOB);
                 PRAGMA locking_mode = EXCLUSIVE;
-                PRAGMA synchronous = NORMAL;
+                PRAGMA synchronous = FULL;
                 PRAGMA journal_mode = WAL;",
             )
             .unwrap();
