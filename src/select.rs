@@ -336,10 +336,10 @@ mod tests {
             SelectStatement {
                 tables: vec![Table::from("users")],
                 fields: vec![
-                    FieldExpression::Literal(Literal::Null),
-                    FieldExpression::Literal(1.into()),
-                    FieldExpression::Literal("foo".into()),
-                    FieldExpression::Literal(Literal::CurrentTime),
+                    FieldExpression::Literal(Literal::Null.into()),
+                    FieldExpression::Literal(Literal::Integer(1).into()),
+                    FieldExpression::Literal(Literal::String("foo".to_owned()).into()),
+                    FieldExpression::Literal(Literal::CurrentTime.into()),
                 ],
                 ..Default::default()
             }

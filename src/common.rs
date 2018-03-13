@@ -114,6 +114,21 @@ impl ToString for Literal {
     }
 }
 
+#[derive(Debug, Clone, Deserialize, Eq, Hash, PartialEq, Serialize)]
+pub struct LiteralExpression {
+    pub value: Literal,
+    pub alias: Option<String>,
+}
+
+impl From<Literal> for LiteralExpression {
+    fn from(l: Literal) -> Self {
+        LiteralExpression {
+            value: l,
+            alias: None,
+        }
+    }
+}
+
 #[derive(Clone, Debug, Hash, PartialEq, Serialize, Deserialize)]
 pub enum Operator {
     Not,
@@ -225,7 +240,7 @@ pub enum FieldExpression {
     AllInTable(String),
     Arithmetic(ArithmeticExpression),
     Col(Column),
-    Literal(Literal),
+    Literal(LiteralExpression),
 }
 
 impl Display for FieldExpression {
@@ -235,7 +250,7 @@ impl Display for FieldExpression {
             FieldExpression::AllInTable(ref table) => write!(f, "{}.*", table),
             FieldExpression::Arithmetic(ref expr) => write!(f, "{}", expr),
             FieldExpression::Col(ref col) => write!(f, "{}", col.name.as_str()),
-            FieldExpression::Literal(ref lit) => write!(f, "{}", lit.to_string()),
+            FieldExpression::Literal(ref lit) => write!(f, "{}", lit.value.to_string()),
         }
     }
 }
@@ -680,7 +695,7 @@ named!(pub field_definition_expr<&[u8], Vec<FieldExpression>>,
                      (FieldExpression::Arithmetic(expr))
                  )
                  | do_parse!(
-                     literal: literal >>
+                     literal: literal_expression >>
                      (FieldExpression::Literal(literal))
                  )
                  | do_parse!(
@@ -756,6 +771,17 @@ named!(pub literal<&[u8], Literal>,
         | do_parse!(tag_no_case!("CURRENT_DATE") >> (Literal::CurrentDate))
         | do_parse!(tag_no_case!("CURRENT_TIME") >> (Literal::CurrentTime))
 //        | float_literal
+    )
+);
+
+named!(pub literal_expression<&[u8], LiteralExpression>,
+    do_parse!(
+        literal: delimited!(opt!(tag!("(")), literal, opt!(tag!(")"))) >>
+        alias: opt!(as_alias) >>
+        (LiteralExpression {
+            value: literal,
+            alias: alias.map(|a| a.to_string()),
+        })
     )
 );
 
