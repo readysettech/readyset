@@ -627,9 +627,12 @@ pub fn to_query_graph(st: &SelectStatement) -> Result<QueryGraph, String> {
             }
             FieldExpression::Literal(ref l) => {
                 qg.columns.push(OutputColumn::Literal(LiteralColumn {
-                    name: l.to_string(),
+                    name: match l.alias {
+                        Some(ref a) => a.to_string(),
+                        None => l.value.to_string(),
+                    },
                     table: None,
-                    value: l.clone(),
+                    value: l.value.clone(),
                 }));
             }
             FieldExpression::Arithmetic(ref a) => {
