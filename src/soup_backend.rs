@@ -75,6 +75,7 @@ impl SoupBackend {
             table: table.clone(),
             column: c.name.clone(),
             coltype: match col_schema.sql_type {
+                SqlType::Longtext => msql_srv::ColumnType::MYSQL_TYPE_BLOB,
                 SqlType::Text => msql_srv::ColumnType::MYSQL_TYPE_STRING,
                 SqlType::Varchar(_) => msql_srv::ColumnType::MYSQL_TYPE_VAR_STRING,
                 SqlType::Int(_) => msql_srv::ColumnType::MYSQL_TYPE_LONG,
