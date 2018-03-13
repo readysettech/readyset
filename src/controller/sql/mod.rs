@@ -191,9 +191,9 @@ impl SqlIncorporator {
                     // in exactly the same order
                     info!(
                         self.log,
-                        "An exact match for query \"{}\" already exists in universe \"{:?}\", reusing it",
+                        "An exact match for query \"{}\" already exists in universe \"{}\", reusing it",
                         query_name,
-                        universe,
+                        universe.0.to_string(),
                     );
 
                     trace!(self.log,
