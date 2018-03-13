@@ -186,6 +186,7 @@ impl SqlIncorporator {
                 // different order means that we cannot simply reuse the existing reader.
                 if existing_qg.signature() == qg.signature()
                     && existing_qg.parameters() == qg.parameters()
+                    && existing_qg.exact_hash() == qg.exact_hash()
                 {
                     // we already have this exact query, down to the exact same reader key columns
                     // in exactly the same order
