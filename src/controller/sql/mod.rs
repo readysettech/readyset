@@ -149,7 +149,10 @@ impl SqlIncorporator {
     /// Retrieves the flow node associated with a given query's leaf view.
     #[allow(unused)]
     pub fn get_query_address(&self, name: &str) -> Option<NodeIndex> {
-        self.mir_converter.get_leaf(name)
+        match self.leaf_addresses.get(name) {
+            None => self.mir_converter.get_leaf(name),
+            Some(na) => Some(na.clone()),
+        }
     }
 
     fn consider_query_graph(
@@ -453,7 +456,7 @@ impl SqlIncorporator {
             QueryGraphReuse::ExactMatch(mn) => {
                 let flow_node = mn.borrow().flow_node.as_ref().unwrap().address();
                 let qfp = QueryFlowParts {
-                    name: String::from(mn.borrow().name()),
+                    name: String::from(query_name),
                     new_nodes: vec![],
                     reused_nodes: vec![flow_node],
                     query_leaf: flow_node,
