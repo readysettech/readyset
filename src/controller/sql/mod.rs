@@ -462,8 +462,13 @@ impl SqlIncorporator {
         let universe = mig.universe();
         // no QG-level reuse possible, so we'll build a new query.
         // first, compute the MIR representation of the SQL query
-        let mut mir = self.mir_converter
-            .named_query_to_mir(query_name, query, &qg, is_leaf, universe.clone());
+        let mut mir = self.mir_converter.named_query_to_mir(
+            query_name,
+            query,
+            &qg,
+            is_leaf,
+            universe.clone(),
+        );
 
         trace!(self.log, "Unoptimized MIR:\n{}", mir.to_graphviz().unwrap());
 
@@ -481,7 +486,13 @@ impl SqlIncorporator {
         (qfp, mir)
     }
 
-    fn register_query(&mut self, query_name: &str, qg: Option<QueryGraph>, mir: &MirQuery, universe: UniverseId) {
+    fn register_query(
+        &mut self,
+        query_name: &str,
+        qg: Option<QueryGraph>,
+        mir: &MirQuery,
+        universe: UniverseId,
+    ) {
         // TODO(malte): we currently need to remember these for local state, but should figure out
         // a better plan (see below)
         let fields = mir.leaf
@@ -501,11 +512,9 @@ impl SqlIncorporator {
         match qg {
             Some(qg) => {
                 let qg_hash = qg.signature().hash;
-                self.query_graphs
-                    .insert(qg_hash, qg);
-                self.mir_queries
-                    .insert((qg_hash, universe), mir.clone());
-            },
+                self.query_graphs.insert(qg_hash, qg);
+                self.mir_queries.insert((qg_hash, universe), mir.clone());
+            }
             None => (),
         }
     }
@@ -525,8 +534,13 @@ impl SqlIncorporator {
 
         // no QG-level reuse possible, so we'll build a new query.
         // first, compute the MIR representation of the SQL query
-        let new_query_mir = self.mir_converter
-            .named_query_to_mir(query_name, query, &qg, is_leaf, universe.clone());
+        let new_query_mir = self.mir_converter.named_query_to_mir(
+            query_name,
+            query,
+            &qg,
+            is_leaf,
+            universe.clone(),
+        );
 
         // TODO(malte): should we run the MIR-level optimizations here?
         let new_opt_mir = new_query_mir.optimize();
@@ -607,7 +621,7 @@ impl SqlIncorporator {
         let mut fq = q.clone();
         for sq in fq.extract_subqueries() {
             use self::passes::subqueries::{field_with_table_name, query_from_condition_base,
-                                          Subquery};
+                                           Subquery};
             use nom_sql::{JoinRightSide, Table};
             match sq {
                 Subquery::InComparison(cond_base) => {

@@ -36,8 +36,6 @@ pub struct RewritePolicy {
     pub rewrite_view: String,
 }
 
-
-
 pub trait Multiverse {
     /// Prepare a new security universe.
     /// It creates universe-specific nodes like UserContext and UserGroups and
@@ -53,7 +51,7 @@ pub trait Multiverse {
         &mut self,
         name: String,
         fields: &mut Vec<String>,
-        mig: &mut Migration
+        mig: &mut Migration,
     ) -> QueryFlowParts;
 }
 
@@ -88,7 +86,11 @@ impl Multiverse for SqlIncorporator {
         } else {
             info!(self.log, "Starting group universe {}", universe.id);
             let group_name: DataType = group.clone().unwrap().into();
-            let uc_name = format!("GroupContext_{}_{}", group_name.to_string(), universe.id.to_string());
+            let uc_name = format!(
+                "GroupContext_{}_{}",
+                group_name.to_string(),
+                universe.id.to_string()
+            );
 
             (uc_name, config.get_group_policies(group_name.to_string()))
         };
@@ -104,7 +106,8 @@ impl Multiverse for SqlIncorporator {
         let mut row_policies_qg: HashMap<String, Vec<QueryGraph>> = HashMap::new();
         for policy in universe_policies {
             if !policy.is_row_policy() {
-                let qfp = self.add_parsed_query(policy.predicate(), None, false, mig).unwrap();
+                let qfp = self.add_parsed_query(policy.predicate(), None, false, mig)
+                    .unwrap();
                 let rewrite_view = qfp.name.clone();
                 let rw_pol = RewritePolicy {
                     value: policy.value(),
@@ -113,7 +116,10 @@ impl Multiverse for SqlIncorporator {
                     rewrite_view: rewrite_view,
                 };
 
-                let e = universe.rewrite_policies.entry(policy.table().clone()).or_insert_with(Vec::new);
+                let e = universe
+                    .rewrite_policies
+                    .entry(policy.table().clone())
+                    .or_insert_with(Vec::new);
                 e.push(rw_pol);
                 qfps.push(qfp);
                 continue;
@@ -135,7 +141,9 @@ impl Multiverse for SqlIncorporator {
                 Err(e) => panic!(e),
             };
 
-            let e = row_policies_qg.entry(policy.table().clone()).or_insert_with(Vec::new);
+            let e = row_policies_qg
+                .entry(policy.table().clone())
+                .or_insert_with(Vec::new);
             e.push(qg);
         }
 
@@ -153,7 +161,7 @@ impl Multiverse for SqlIncorporator {
         &mut self,
         name: String,
         fields: &mut Vec<String>,
-        mig: &mut Migration
+        mig: &mut Migration,
     ) -> QueryFlowParts {
         // Unfortunately, we can't add the base directly to the graph, because we needd
         // it to be recorded in the MIR level, so other queries can reference it.
@@ -172,6 +180,7 @@ impl Multiverse for SqlIncorporator {
 
         let parsed_query = sql_parser::parse_query(&s).unwrap();
 
-        self.add_parsed_query(parsed_query, Some(name), false, mig).unwrap()
+        self.add_parsed_query(parsed_query, Some(name), false, mig)
+            .unwrap()
     }
 }
