@@ -1,7 +1,7 @@
 use distributary::{ControllerHandle, DataType, Mutator, RemoteGetter, ZookeeperAuthority};
 
 use msql_srv::{self, *};
-use nom_sql::{self, ColumnConstraint, ColumnSpecification, SqlType};
+use nom_sql::{self, ColumnConstraint, ColumnSpecification, Literal, SqlType};
 use slog;
 use std::io;
 use std::collections::{BTreeMap, HashMap};
@@ -206,6 +206,19 @@ impl SoupBackend {
                         nom_sql::FieldExpression::Col(c) => {
                             schema.push(self.schema_for_column(&c));
                         }
+                        nom_sql::FieldExpression::Literal(le) => schema.push(msql_srv::Column {
+                            table: "".to_owned(),
+                            column: match le.alias {
+                                Some(a) => a,
+                                None => le.value.to_string(),
+                            },
+                            coltype: match le.value {
+                                Literal::Integer(_) => msql_srv::ColumnType::MYSQL_TYPE_LONG,
+                                Literal::String(_) => msql_srv::ColumnType::MYSQL_TYPE_VAR_STRING,
+                                _ => unimplemented!(),
+                            },
+                            colflags: msql_srv::ColumnFlags::empty(),
+                        }),
                         _ => unimplemented!(),
                     }
                 }
