@@ -196,7 +196,8 @@ impl SqlIncorporator {
                         universe.0.to_string(),
                     );
 
-                    trace!(self.log,
+                    trace!(
+                        self.log,
                         "Reusing MirQuery {} with QueryGraph {:#?}",
                         mir_query.name,
                         existing_qg,
