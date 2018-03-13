@@ -5,6 +5,7 @@ use nom_sql::SelectStatement;
 
 use std::cmp::Ordering;
 use std::collections::HashMap;
+use std::hash::{Hash, Hasher};
 use std::string::String;
 use std::vec::Vec;
 
@@ -121,14 +122,14 @@ impl PartialOrd for OutputColumn {
     }
 }
 
-#[derive(Clone, Debug, PartialEq)]
+#[derive(Clone, Debug, Hash, PartialEq)]
 pub struct JoinRef {
     pub src: String,
     pub dst: String,
     pub index: usize,
 }
 
-#[derive(Clone, Debug, PartialEq)]
+#[derive(Clone, Debug, Hash, PartialEq)]
 pub struct QueryGraphNode {
     pub rel_name: String,
     pub predicates: Vec<ConditionExpression>,
@@ -136,7 +137,7 @@ pub struct QueryGraphNode {
     pub parameters: Vec<Column>,
 }
 
-#[derive(Clone, Debug, PartialEq)]
+#[derive(Clone, Debug, Hash, PartialEq)]
 pub enum QueryGraphEdge {
     Join(Vec<ConditionTree>),
     LeftJoin(Vec<ConditionTree>),
@@ -176,6 +177,33 @@ impl QueryGraph {
                 acc.extend(qgn.parameters.iter());
                 acc
             })
+    }
+
+    pub fn exact_hash(&self) -> u64 {
+        use std::collections::hash_map::DefaultHasher;
+
+        let mut s = DefaultHasher::new();
+        self.hash(&mut s);
+        s.finish()
+    }
+}
+
+impl Hash for QueryGraph {
+    fn hash<H: Hasher>(&self, state: &mut H) {
+        // sorted iteration over relations, edges to ensure consistent hash
+        let mut rels: Vec<(&String, &QueryGraphNode)> = self.relations.iter().collect();
+        rels.sort_by(|a, b| a.0.cmp(b.0));
+        rels.hash(state);
+        let mut edges: Vec<(&(String, String), &QueryGraphEdge)> = self.edges.iter().collect();
+        edges.sort_by(|a, b| match (a.0).0.cmp(&(b.0).0) {
+            Ordering::Equal => (a.0).1.cmp(&(b.0).1),
+            x => x,
+        });
+        edges.hash(state);
+
+        // columns and join_order are Vecs, so already ordered
+        self.columns.hash(state);
+        self.join_order.hash(state);
     }
 }
 
