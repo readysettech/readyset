@@ -205,13 +205,35 @@ impl SqlIncorporator {
                     );
 
                     return (qg, QueryGraphReuse::ExactMatch(mir_query.leaf.clone()));
-                } else if existing_qg.signature() == qg.signature() {
+                } else if existing_qg.signature() == qg.signature()
+                    && existing_qg.parameters() != qg.parameters()
+                {
                     use self::query_graph::OutputColumn;
+
+                    // the signatures match, but this comparison has only given us an inexact result:
+                    // we know that both queries mention the same columns, but not that they
+                    // actually do the same comparisons or have the same literals. Hence, we need
+                    // to scan the predicates here and ensure that for each predicate in the
+                    // incoming QG, we have a matching predicate in the existing one.
+                    // Since `qg.relations.predicates` only contains comparisons between columns
+                    // and literals (col/col is a join predicate and associated with the join edge,
+                    // col/param is stored in qg.params), we will not be inhibited by the fact that
+                    // the queries have different parameters.
+                    let mut predicates_match = true;
+                    for (r, n) in qg.relations.iter() {
+                        for p in n.predicates.iter() {
+                            if !existing_qg.relations.contains_key(r)
+                                || !existing_qg.relations[r].predicates.contains(p)
+                            {
+                                predicates_match = false;
+                            }
+                        }
+                    }
 
                     // if any of our columns are grouped expressions, we can't reuse here, since
                     // the difference in parameters means that there is a difference in the implied
                     // GROUP BY clause
-                    if qg.columns.iter().all(|c| match *c {
+                    let no_grouped_columns = qg.columns.iter().all(|c| match *c {
                         OutputColumn::Literal(_) => true,
                         OutputColumn::Arithmetic(ref ac) => {
                             let mut is_function = false;
@@ -226,7 +248,9 @@ impl SqlIncorporator {
                             !is_function
                         }
                         OutputColumn::Data(ref dc) => dc.function.is_none(),
-                    }) {
+                    });
+
+                    if predicates_match && no_grouped_columns {
                         // QGs are identical, except for parameters (or their order)
                         info!(
                             self.log,
@@ -1477,7 +1501,6 @@ mod tests {
     }
 
     #[test]
-    #[ignore]
     fn it_distinguishes_predicates() {
         // set up graph
         let mut g = ControllerBuilder::default().build_local();
