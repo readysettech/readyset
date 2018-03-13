@@ -85,7 +85,7 @@ named!(pub compound_selection<&[u8], CompoundSelectStatement>,
 mod tests {
     use super::*;
     use column::Column;
-    use common::FieldExpression;
+    use common::{FieldExpression, Literal};
     use table::Table;
 
     #[test]
@@ -99,7 +99,7 @@ mod tests {
             tables: vec![Table::from("Vote")],
             fields: vec![
                 FieldExpression::Col(Column::from("id")),
-                FieldExpression::Literal(1.into()),
+                FieldExpression::Literal(Literal::Integer(1).into()),
             ],
             ..Default::default()
         };
@@ -135,7 +135,7 @@ mod tests {
             tables: vec![Table::from("Vote")],
             fields: vec![
                 FieldExpression::Col(Column::from("id")),
-                FieldExpression::Literal(1.into()),
+                FieldExpression::Literal(Literal::Integer(1).into()),
             ],
             ..Default::default()
         };
@@ -150,8 +150,8 @@ mod tests {
         let third_select = SelectStatement {
             tables: vec![Table::from("Vote")],
             fields: vec![
-                FieldExpression::Literal(42.into()),
-                FieldExpression::Literal(5.into()),
+                FieldExpression::Literal(Literal::Integer(42).into()),
+                FieldExpression::Literal(Literal::Integer(5).into()),
             ],
             ..Default::default()
         };
@@ -178,7 +178,7 @@ mod tests {
             tables: vec![Table::from("Vote")],
             fields: vec![
                 FieldExpression::Col(Column::from("id")),
-                FieldExpression::Literal(1.into()),
+                FieldExpression::Literal(Literal::Integer(1).into()),
             ],
             ..Default::default()
         };
