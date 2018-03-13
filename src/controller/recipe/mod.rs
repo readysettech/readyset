@@ -75,7 +75,7 @@ impl Recipe {
     pub fn security_groups(&self) -> Vec<String> {
         match self.security_config {
             Some(ref config) => config.groups.keys().cloned().collect(),
-            None => vec![]
+            None => vec![],
         }
     }
 
@@ -233,7 +233,11 @@ impl Recipe {
     }
 
     /// Creates a new security universe
-    pub fn create_universe(&mut self, mig: &mut Migration, universe_groups: HashMap<String, Vec<DataType>>) -> Result<ActivationResult, String> {
+    pub fn create_universe(
+        &mut self,
+        mig: &mut Migration,
+        universe_groups: HashMap<String, Vec<DataType>>,
+    ) -> Result<ActivationResult, String> {
         use controller::sql::security::Multiverse;
 
         let mut result = ActivationResult {
@@ -243,10 +247,11 @@ impl Recipe {
         };
 
         if self.security_config.is_some() {
-            let qfps = self.inc
-                .as_mut()
-                .unwrap()
-                .prepare_universe(&self.security_config.clone().unwrap(), universe_groups, mig);
+            let qfps = self.inc.as_mut().unwrap().prepare_universe(
+                &self.security_config.clone().unwrap(),
+                universe_groups,
+                mig,
+            );
 
             for qfp in qfps {
                 result.new_nodes.insert(qfp.name.clone(), qfp.query_leaf);
@@ -261,18 +266,19 @@ impl Recipe {
             let (id, group) = mig.universe();
             let new_name = if n.is_some() {
                 match group {
-                    Some(ref g) => Some(format!("{}_{}{}", n.clone().unwrap(), g.to_string(), id.to_string())),
+                    Some(ref g) => Some(format!(
+                        "{}_{}{}",
+                        n.clone().unwrap(),
+                        g.to_string(),
+                        id.to_string()
+                    )),
                     None => Some(format!("{}_u{}", n.clone().unwrap(), id.to_string())),
                 }
             } else {
                 None
             };
 
-            let is_leaf = if group.is_some() {
-                false
-            } else {
-                is_leaf
-            };
+            let is_leaf = if group.is_some() { false } else { is_leaf };
 
             let qfp = self.inc
                 .as_mut()
@@ -332,19 +338,35 @@ impl Recipe {
 
         // create nodes to enforce security configuration
         if self.security_config.is_some() {
-            info!(self.log, "Found a security configuration, bootstrapping groups...");
+            info!(
+                self.log,
+                "Found a security configuration, bootstrapping groups..."
+            );
             let config = self.security_config.take().unwrap();
             for group in config.groups.values() {
-                info!(self.log, "Creating membership view for group {}", group.name());
-                let qfp = self.inc
-                    .as_mut()
-                    .unwrap()
-                    .add_parsed_query(group.membership(), Some(group.name()), true, mig)?;
+                info!(
+                    self.log,
+                    "Creating membership view for group {}",
+                    group.name()
+                );
+                let qfp = self.inc.as_mut().unwrap().add_parsed_query(
+                    group.membership(),
+                    Some(group.name()),
+                    true,
+                    mig,
+                )?;
 
                 /// Add trigger node below group membership views
-                let group_creation = TriggerEvent::GroupCreation { controller_url: config.url.clone(), group: group.name() };
-                let trigger = Trigger::new(qfp.query_leaf,  group_creation, vec![1]);
-                mig.add_ingredient(&format!("{}-trigger", group.name()), &["uid", "gid"], trigger);
+                let group_creation = TriggerEvent::GroupCreation {
+                    controller_url: config.url.clone(),
+                    group: group.name(),
+                };
+                let trigger = Trigger::new(qfp.query_leaf, group_creation, vec![1]);
+                mig.add_ingredient(
+                    &format!("{}-trigger", group.name()),
+                    &["uid", "gid"],
+                    trigger,
+                );
 
                 result.new_nodes.insert(group.name(), qfp.query_leaf);
             }
