@@ -240,6 +240,18 @@ impl<'a> Plan<'a> {
                             };
 
                             if shuffled {
+                                if !segments
+                                    .iter()
+                                    .flat_map(|s| s.1.iter())
+                                    .any(|&(n, _)| self.graph[n].is_sharder())
+                                {
+                                    // we have a shuffled partial key replay path, but no shuffle.
+                                    // that won't work, since it means the target won't have a way
+                                    // to wait for all the replays from upstream shards (which it
+                                    // needs to) when triggering a replay.
+                                    crit!(self.m.log, "unshuffled path shuffles partial key"; "tag" => tag.id());
+                                    unimplemented!();
+                                }
                                 warn!(self.m.log, "path shuffles partial key"; "tag" => tag.id());
                             }
 
