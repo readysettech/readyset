@@ -626,67 +626,62 @@ impl<T: Hash + Eq + Clone + 'static> State<T> {
                         hit = true;
                     }
                 }
-                _ => {
-                    match s.state {
-                        KeyedState::Double(ref mut map) => {
-                            // TODO: can we avoid the Clone here?
-                            let key = (r[s.key[0]].clone(), r[s.key[1]].clone());
-                            if let Some(ref mut rs) = map.get_mut(&key) {
-                                fix(&mut removed, rs);
-                                hit = true;
-                            }
-                        }
-                        KeyedState::Tri(ref mut map) => {
-                            let key = (
-                                r[s.key[0]].clone(),
-                                r[s.key[1]].clone(),
-                                r[s.key[2]].clone(),
-                            );
-                            if let Some(ref mut rs) = map.get_mut(&key) {
-                                fix(&mut removed, rs);
-                                hit = true;
-                            }
-                        }
-                        KeyedState::Quad(ref mut map) => {
-                            let key = (
-                                r[s.key[0]].clone(),
-                                r[s.key[1]].clone(),
-                                r[s.key[2]].clone(),
-                                r[s.key[3]].clone(),
-                            );
-                            if let Some(ref mut rs) = map.get_mut(&key) {
-                                fix(&mut removed, rs);
-                                hit = true;
-                            }
-                        }
-                        KeyedState::Quin(ref mut map) => {
-                            let key = (
-                                r[s.key[0]].clone(),
-                                r[s.key[1]].clone(),
-                                r[s.key[2]].clone(),
-                                r[s.key[3]].clone(),
-                                r[s.key[4]].clone(),
-                            );
-                            if let Some(ref mut rs) = map.get_mut(&key) {
-                                fix(&mut removed, rs);
-                                hit = true;
-                            }
-                        }
-                        KeyedState::Sex(ref mut map) => {
-                            let key = (
-                                r[s.key[0]].clone(),
-                                r[s.key[1]].clone(),
-                                r[s.key[2]].clone(),
-                                r[s.key[3]].clone(),
-                                r[s.key[4]].clone(),
-                                r[s.key[5]].clone(),
-                            );
-                            if let Some(ref mut rs) = map.get_mut(&key) {
-                                fix(&mut removed, rs);
-                                hit = true;
-                            }
-                        }
-                        KeyedState::Single(..) => unreachable!(),
+                KeyedState::Double(ref mut map) => {
+                    // TODO: can we avoid the Clone here?
+                    let key = (r[s.key[0]].clone(), r[s.key[1]].clone());
+                    if let Some(ref mut rs) = map.get_mut(&key) {
+                        fix(&mut removed, rs);
+                        hit = true;
+                    }
+                }
+                KeyedState::Tri(ref mut map) => {
+                    let key = (
+                        r[s.key[0]].clone(),
+                        r[s.key[1]].clone(),
+                        r[s.key[2]].clone(),
+                    );
+                    if let Some(ref mut rs) = map.get_mut(&key) {
+                        fix(&mut removed, rs);
+                        hit = true;
+                    }
+                }
+                KeyedState::Quad(ref mut map) => {
+                    let key = (
+                        r[s.key[0]].clone(),
+                        r[s.key[1]].clone(),
+                        r[s.key[2]].clone(),
+                        r[s.key[3]].clone(),
+                    );
+                    if let Some(ref mut rs) = map.get_mut(&key) {
+                        fix(&mut removed, rs);
+                        hit = true;
+                    }
+                }
+                KeyedState::Quin(ref mut map) => {
+                    let key = (
+                        r[s.key[0]].clone(),
+                        r[s.key[1]].clone(),
+                        r[s.key[2]].clone(),
+                        r[s.key[3]].clone(),
+                        r[s.key[4]].clone(),
+                    );
+                    if let Some(ref mut rs) = map.get_mut(&key) {
+                        fix(&mut removed, rs);
+                        hit = true;
+                    }
+                }
+                KeyedState::Sex(ref mut map) => {
+                    let key = (
+                        r[s.key[0]].clone(),
+                        r[s.key[1]].clone(),
+                        r[s.key[2]].clone(),
+                        r[s.key[3]].clone(),
+                        r[s.key[4]].clone(),
+                        r[s.key[5]].clone(),
+                    );
+                    if let Some(ref mut rs) = map.get_mut(&key) {
+                        fix(&mut removed, rs);
+                        hit = true;
                     }
                 }
             }
