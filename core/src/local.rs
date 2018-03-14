@@ -1,8 +1,13 @@
 use ::*;
-use std::ops::{Deref, Index, IndexMut};
-use std::iter::FromIterator;
 use std::collections::HashMap;
+use std::hash::Hash;
+use std::iter::FromIterator;
+use std::ops::{Deref, Index, IndexMut};
 use std::rc::Rc;
+use fnv::FnvBuildHasher;
+use rahashmap::HashMap as RaHashMap;
+
+type FnvHashMap<K, V> = RaHashMap<K, V, FnvBuildHasher>;
 
 #[derive(Clone, Copy, Eq, PartialEq, Ord, PartialOrd, Hash, Debug, Serialize, Deserialize)]
 pub struct Tag(pub u32);
@@ -260,10 +265,6 @@ impl<T: 'static> IntoIterator for Map<T> {
     }
 }
 
-use std::collections::hash_map;
-use fnv::FnvHashMap;
-use std::hash::Hash;
-
 pub struct Row<T>(Rc<T>);
 
 unsafe impl<T> Send for Row<T> {}
@@ -498,7 +499,7 @@ impl<T: Hash + Eq + Clone + 'static> State<T> {
     ///
     /// Returns false if a hole was encountered (and the record hence not inserted).
     fn insert_into(s: &mut SingleState<T>, r: Row<Vec<T>>) -> bool {
-        use std::collections::hash_map::Entry;
+        use rahashmap::Entry;
         match s.state {
             KeyedState::Single(ref mut map) => {
                 // treat this specially to avoid the extra Vec
@@ -701,7 +702,7 @@ impl<T: Hash + Eq + Clone + 'static> State<T> {
         hit
     }
 
-    pub fn iter(&self) -> hash_map::Values<T, Vec<Row<Vec<T>>>> {
+    pub fn iter(&self) -> rahashmap::Values<T, Vec<Row<Vec<T>>>> {
         for index in &self.state {
             if let KeyedState::Single(ref map) = index.state {
                 if index.partial.is_some() {
