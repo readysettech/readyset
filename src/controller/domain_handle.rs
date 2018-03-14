@@ -59,8 +59,7 @@ impl<'a> BatchSendHandle<'a> {
             }
             let key_col = key[0];
 
-            let mut shard_writes: HashMap<usize, Vec<Record>> =
-                HashMap::with_capacity(self.dih.txs.len());
+            let mut shard_writes = vec![Vec::new(); self.dih.txs.len()];
             let mut data = p.take_data();
             for r in data.drain(..) {
                 let shard = {
@@ -70,19 +69,21 @@ impl<'a> BatchSendHandle<'a> {
                     };
                     dataflow::shard_by(key, self.dih.txs.len())
                 };
-                shard_writes.entry(shard).or_insert_with(Vec::new).push(r);
+                shard_writes[shard].push(r);
             }
 
-            for (s, rs) in shard_writes.into_iter() {
-                let mut p = Box::new(p.clone_data()); // ok here, as data previously emptied
-                p.swap_data(rs.into());
+            for (s, rs) in shard_writes.drain(..).enumerate() {
+                if !rs.is_empty() {
+                    let mut p = Box::new(p.clone_data()); // ok here, as data previously emptied
+                    p.swap_data(rs.into());
 
-                if local {
-                    p = p.make_local();
+                    if local {
+                        p = p.make_local();
+                    }
+
+                    self.dih.txs[s].send(p)?;
+                    self.sent[s] += 1;
                 }
-
-                self.dih.txs[s].send(p)?;
-                self.sent[s] += 1;
             }
         }
 
