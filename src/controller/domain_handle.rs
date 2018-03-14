@@ -73,15 +73,17 @@ impl<'a> BatchSendHandle<'a> {
             }
 
             for (s, rs) in shard_writes.drain(..).enumerate() {
-                let mut p = Box::new(p.clone_data()); // ok here, as data previously emptied
-                p.swap_data(rs.into());
+                if !rs.is_empty() {
+                    let mut p = Box::new(p.clone_data()); // ok here, as data previously emptied
+                    p.swap_data(rs.into());
 
-                if local {
-                    p = p.make_local();
+                    if local {
+                        p = p.make_local();
+                    }
+
+                    self.dih.txs[s].send(p)?;
+                    self.sent[s] += 1;
                 }
-
-                self.dih.txs[s].send(p)?;
-                self.sent[s] += 1;
             }
         }
 
