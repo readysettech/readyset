@@ -515,71 +515,68 @@ impl<T: Hash + Eq + Clone + 'static> State<T> {
                 }
                 map.insert(r[s.key[0]].clone(), vec![r]);
             }
-            _ => match s.state {
-                KeyedState::Double(ref mut map) => {
-                    let key = (r[s.key[0]].clone(), r[s.key[1]].clone());
-                    match map.entry(key) {
-                        Entry::Occupied(mut rs) => rs.get_mut().push(r),
-                        Entry::Vacant(..) if s.partial.is_some() => return false,
-                        rs @ Entry::Vacant(..) => rs.or_default().push(r),
-                    }
+            KeyedState::Double(ref mut map) => {
+                let key = (r[s.key[0]].clone(), r[s.key[1]].clone());
+                match map.entry(key) {
+                    Entry::Occupied(mut rs) => rs.get_mut().push(r),
+                    Entry::Vacant(..) if s.partial.is_some() => return false,
+                    rs @ Entry::Vacant(..) => rs.or_default().push(r),
                 }
-                KeyedState::Tri(ref mut map) => {
-                    let key = (
-                        r[s.key[0]].clone(),
-                        r[s.key[1]].clone(),
-                        r[s.key[2]].clone(),
-                    );
-                    match map.entry(key) {
-                        Entry::Occupied(mut rs) => rs.get_mut().push(r),
-                        Entry::Vacant(..) if s.partial.is_some() => return false,
-                        rs @ Entry::Vacant(..) => rs.or_default().push(r),
-                    }
+            }
+            KeyedState::Tri(ref mut map) => {
+                let key = (
+                    r[s.key[0]].clone(),
+                    r[s.key[1]].clone(),
+                    r[s.key[2]].clone(),
+                );
+                match map.entry(key) {
+                    Entry::Occupied(mut rs) => rs.get_mut().push(r),
+                    Entry::Vacant(..) if s.partial.is_some() => return false,
+                    rs @ Entry::Vacant(..) => rs.or_default().push(r),
                 }
-                KeyedState::Quad(ref mut map) => {
-                    let key = (
-                        r[s.key[0]].clone(),
-                        r[s.key[1]].clone(),
-                        r[s.key[2]].clone(),
-                        r[s.key[3]].clone(),
-                    );
-                    match map.entry(key) {
-                        Entry::Occupied(mut rs) => rs.get_mut().push(r),
-                        Entry::Vacant(..) if s.partial.is_some() => return false,
-                        rs @ Entry::Vacant(..) => rs.or_default().push(r),
-                    }
+            }
+            KeyedState::Quad(ref mut map) => {
+                let key = (
+                    r[s.key[0]].clone(),
+                    r[s.key[1]].clone(),
+                    r[s.key[2]].clone(),
+                    r[s.key[3]].clone(),
+                );
+                match map.entry(key) {
+                    Entry::Occupied(mut rs) => rs.get_mut().push(r),
+                    Entry::Vacant(..) if s.partial.is_some() => return false,
+                    rs @ Entry::Vacant(..) => rs.or_default().push(r),
                 }
-                KeyedState::Quin(ref mut map) => {
-                    let key = (
-                        r[s.key[0]].clone(),
-                        r[s.key[1]].clone(),
-                        r[s.key[2]].clone(),
-                        r[s.key[3]].clone(),
-                        r[s.key[4]].clone(),
-                    );
-                    match map.entry(key) {
-                        Entry::Occupied(mut rs) => rs.get_mut().push(r),
-                        Entry::Vacant(..) if s.partial.is_some() => return false,
-                        rs @ Entry::Vacant(..) => rs.or_default().push(r),
-                    }
+            }
+            KeyedState::Quin(ref mut map) => {
+                let key = (
+                    r[s.key[0]].clone(),
+                    r[s.key[1]].clone(),
+                    r[s.key[2]].clone(),
+                    r[s.key[3]].clone(),
+                    r[s.key[4]].clone(),
+                );
+                match map.entry(key) {
+                    Entry::Occupied(mut rs) => rs.get_mut().push(r),
+                    Entry::Vacant(..) if s.partial.is_some() => return false,
+                    rs @ Entry::Vacant(..) => rs.or_default().push(r),
                 }
-                KeyedState::Sex(ref mut map) => {
-                    let key = (
-                        r[s.key[0]].clone(),
-                        r[s.key[1]].clone(),
-                        r[s.key[2]].clone(),
-                        r[s.key[3]].clone(),
-                        r[s.key[4]].clone(),
-                        r[s.key[5]].clone(),
-                    );
-                    match map.entry(key) {
-                        Entry::Occupied(mut rs) => rs.get_mut().push(r),
-                        Entry::Vacant(..) if s.partial.is_some() => return false,
-                        rs @ Entry::Vacant(..) => rs.or_default().push(r),
-                    }
+            }
+            KeyedState::Sex(ref mut map) => {
+                let key = (
+                    r[s.key[0]].clone(),
+                    r[s.key[1]].clone(),
+                    r[s.key[2]].clone(),
+                    r[s.key[3]].clone(),
+                    r[s.key[4]].clone(),
+                    r[s.key[5]].clone(),
+                );
+                match map.entry(key) {
+                    Entry::Occupied(mut rs) => rs.get_mut().push(r),
+                    Entry::Vacant(..) if s.partial.is_some() => return false,
+                    rs @ Entry::Vacant(..) => rs.or_default().push(r),
                 }
-                KeyedState::Single(..) => unreachable!(),
-            },
+            }
         }
 
         true
