@@ -2,6 +2,7 @@ use std::hash::Hash;
 use std::ops::Deref;
 use std::rc::Rc;
 
+mod single_state;
 mod state;
 mod keyed_state;
 

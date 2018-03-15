@@ -48,6 +48,17 @@ impl<T: Eq + Hash> KeyedState<T> {
             _ => unreachable!(),
         }
     }
+
+    pub fn remove_at_index(&mut self, index: usize) -> Option<Vec<Row<Vec<T>>>> {
+        match *self {
+            KeyedState::Single(ref mut m) => m.remove_at_index(index).map(|(_, rs)| rs),
+            KeyedState::Double(ref mut m) => m.remove_at_index(index).map(|(_, rs)| rs),
+            KeyedState::Tri(ref mut m) => m.remove_at_index(index).map(|(_, rs)| rs),
+            KeyedState::Quad(ref mut m) => m.remove_at_index(index).map(|(_, rs)| rs),
+            KeyedState::Quin(ref mut m) => m.remove_at_index(index).map(|(_, rs)| rs),
+            KeyedState::Sex(ref mut m) => m.remove_at_index(index).map(|(_, rs)| rs),
+        }
+    }
 }
 
 impl<'a, T: Eq + Hash> Into<KeyedState<T>> for &'a [usize] {
