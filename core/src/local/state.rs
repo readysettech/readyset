@@ -43,7 +43,6 @@ impl<T: Hash + Eq + Clone + 'static> State<T> {
             (self.state.len(), false)
         };
 
-        let is_partial = partial.is_some();
         if let Some(ref p) = partial {
             for &tag in p {
                 self.by_tag.insert(tag, i);
@@ -57,16 +56,11 @@ impl<T: Hash + Eq + Clone + 'static> State<T> {
         self.state.push(SingleState {
             key: Vec::from(columns),
             state: columns.into(),
-            partial: is_partial,
+            partial: partial.is_some(),
         });
 
-        if !self.is_empty() {
+        if !self.is_empty() && partial.is_none() {
             // we need to *construct* the index!
-            if is_partial {
-                // partial views can start out empty
-                return;
-            }
-
             let (new, old) = self.state.split_last_mut().unwrap();
             let mut insert = move |rs: &Vec<Row<Vec<T>>>| {
                 for r in rs {
