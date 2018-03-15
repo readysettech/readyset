@@ -394,7 +394,7 @@ pub enum LookupResult<'a, T: 'a> {
 struct SingleState<T: Hash + Eq + Clone + 'static> {
     key: Vec<usize>,
     state: KeyedState<T>,
-    partial: Option<Vec<Tag>>,
+    partial: bool,
 }
 
 pub struct State<T: Hash + Eq + Clone + 'static> {
@@ -446,7 +446,7 @@ impl<T: Hash + Eq + Clone + 'static> State<T> {
         self.state.push(SingleState {
             key: Vec::from(columns),
             state: columns.into(),
-            partial: partial,
+            partial: is_partial,
         });
 
         if !self.is_empty() {
@@ -492,7 +492,7 @@ impl<T: Hash + Eq + Clone + 'static> State<T> {
     }
 
     pub fn is_partial(&self) -> bool {
-        self.state.iter().any(|s| s.partial.is_some())
+        self.state.iter().any(|s| s.partial)
     }
 
     /// Insert the given record into the given state.
@@ -509,7 +509,7 @@ impl<T: Hash + Eq + Clone + 'static> State<T> {
                 if let Some(ref mut rs) = map.get_mut(&r[s.key[0]]) {
                     rs.push(r);
                     return true;
-                } else if s.partial.is_some() {
+                } else if s.partial {
                     // trying to insert a record into partial materialization hole!
                     return false;
                 }
@@ -519,7 +519,7 @@ impl<T: Hash + Eq + Clone + 'static> State<T> {
                 let key = (r[s.key[0]].clone(), r[s.key[1]].clone());
                 match map.entry(key) {
                     Entry::Occupied(mut rs) => rs.get_mut().push(r),
-                    Entry::Vacant(..) if s.partial.is_some() => return false,
+                    Entry::Vacant(..) if s.partial => return false,
                     rs @ Entry::Vacant(..) => rs.or_default().push(r),
                 }
             }
@@ -531,7 +531,7 @@ impl<T: Hash + Eq + Clone + 'static> State<T> {
                 );
                 match map.entry(key) {
                     Entry::Occupied(mut rs) => rs.get_mut().push(r),
-                    Entry::Vacant(..) if s.partial.is_some() => return false,
+                    Entry::Vacant(..) if s.partial => return false,
                     rs @ Entry::Vacant(..) => rs.or_default().push(r),
                 }
             }
@@ -544,7 +544,7 @@ impl<T: Hash + Eq + Clone + 'static> State<T> {
                 );
                 match map.entry(key) {
                     Entry::Occupied(mut rs) => rs.get_mut().push(r),
-                    Entry::Vacant(..) if s.partial.is_some() => return false,
+                    Entry::Vacant(..) if s.partial => return false,
                     rs @ Entry::Vacant(..) => rs.or_default().push(r),
                 }
             }
@@ -558,7 +558,7 @@ impl<T: Hash + Eq + Clone + 'static> State<T> {
                 );
                 match map.entry(key) {
                     Entry::Occupied(mut rs) => rs.get_mut().push(r),
-                    Entry::Vacant(..) if s.partial.is_some() => return false,
+                    Entry::Vacant(..) if s.partial => return false,
                     rs @ Entry::Vacant(..) => rs.or_default().push(r),
                 }
             }
@@ -573,7 +573,7 @@ impl<T: Hash + Eq + Clone + 'static> State<T> {
                 );
                 match map.entry(key) {
                     Entry::Occupied(mut rs) => rs.get_mut().push(r),
-                    Entry::Vacant(..) if s.partial.is_some() => return false,
+                    Entry::Vacant(..) if s.partial => return false,
                     rs @ Entry::Vacant(..) => rs.or_default().push(r),
                 }
             }
@@ -697,7 +697,7 @@ impl<T: Hash + Eq + Clone + 'static> State<T> {
     pub fn iter(&self) -> rahashmap::Values<T, Vec<Row<Vec<T>>>> {
         for index in &self.state {
             if let KeyedState::Single(ref map) = index.state {
-                if index.partial.is_some() {
+                if index.partial {
                     unimplemented!();
                 }
                 return map.values();
@@ -818,7 +818,7 @@ impl<T: Hash + Eq + Clone + 'static> State<T> {
         if let Some(rs) = index.state.lookup(key) {
             LookupResult::Some(&rs[..])
         } else {
-            if index.partial.is_some() {
+            if index.partial {
                 // partially materialized, so this is a hole (empty results would be vec![])
                 LookupResult::Missing
             } else {
