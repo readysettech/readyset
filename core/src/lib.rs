@@ -1,6 +1,7 @@
 #![feature(box_syntax)]
 #![feature(conservative_impl_trait)]
 #![feature(entry_or_default)]
+#![feature(non_modrs_mods)]
 #![feature(try_from)]
 #![deny(unused_extern_crates)]
 
