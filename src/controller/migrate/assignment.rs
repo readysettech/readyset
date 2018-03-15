@@ -43,7 +43,7 @@ pub fn assign(
     let mut next_domain = || {
         if fixed_domains {
             cur_domain = (cur_domain + 1) % *ndomains;
-            (cur_domain - 1) % *ndomains
+            cur_domain
         } else {
             *ndomains += 1;
             *ndomains - 1

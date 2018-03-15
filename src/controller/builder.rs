@@ -97,7 +97,7 @@ impl ControllerBuilder {
     /// Set the number of fixed domains for all subsequent migration.
     /// `None` disables fixed domains, and allows migrations to change
     /// the number of domains as they see fit.
-    fn set_fixed_domains(&mut self, ndomains: Option<usize>) {
+    pub fn set_fixed_domains(&mut self, ndomains: Option<usize>) {
         self.config.fixed_domains = ndomains;
     }
 
