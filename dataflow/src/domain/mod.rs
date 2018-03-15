@@ -1317,7 +1317,7 @@ impl Domain {
         }
     }
 
-    fn seed_row(&self, source: LocalNodeIndex, row: &Row<Vec<DataType>>) -> Record {
+    fn seed_row(&self, source: LocalNodeIndex, row: &Row) -> Record {
         if let Some(&(start, ref defaults)) = self.ingress_inject.get(&source) {
             let mut v = Vec::with_capacity(start + defaults.len());
             v.extend(row.iter().cloned());

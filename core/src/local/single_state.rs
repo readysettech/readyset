@@ -1,6 +1,5 @@
 use local::keyed_state::KeyedState;
 use local::Row;
-use data::DataType;
 
 pub struct SingleState {
     pub key: Vec<usize>,
@@ -10,7 +9,7 @@ pub struct SingleState {
 impl SingleState {
     /// Inserts the given record, or returns false if a hole was encountered (and the record hence
     /// not inserted).
-    pub fn insert(&mut self, r: Row<Vec<DataType>>) -> bool {
+    pub fn insert(&mut self, r: Row) -> bool {
         use rahashmap::Entry;
         match self.state {
             KeyedState::Single(ref mut map) => {

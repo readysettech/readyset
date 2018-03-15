@@ -16,17 +16,19 @@ impl Tag {
     }
 }
 
-pub struct Row<T>(pub(crate) Rc<T>);
-unsafe impl<T> Send for Row<T> {}
-impl<T> Deref for Row<T> {
-    type Target = T;
+pub struct Row(pub(crate) Rc<Vec<DataType>>);
+
+unsafe impl Send for Row {}
+
+impl Deref for Row {
+    type Target = Vec<DataType>;
     fn deref(&self) -> &Self::Target {
         &*self.0
     }
 }
 
 pub enum LookupResult<'a> {
-    Some(&'a [Row<Vec<DataType>>]),
+    Some(&'a [Row]),
     Missing,
 }
 

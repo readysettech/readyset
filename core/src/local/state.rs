@@ -61,7 +61,7 @@ impl State {
         if !self.is_empty() && partial.is_none() {
             // we need to *construct* the index!
             let (new, old) = self.state.split_last_mut().unwrap();
-            let mut insert = move |rs: &Vec<Row<Vec<DataType>>>| {
+            let mut insert = move |rs: &Vec<Row>| {
                 for r in rs {
                     new.insert(Row(r.0.clone()));
                 }
@@ -132,7 +132,7 @@ impl State {
     pub fn remove(&mut self, r: &[DataType]) -> bool {
         let mut hit = false;
         let mut removed = false;
-        let fix = |removed: &mut bool, rs: &mut Vec<Row<Vec<DataType>>>| {
+        let fix = |removed: &mut bool, rs: &mut Vec<Row>| {
             // rustfmt
             if let Some(i) = rs.iter().position(|rsr| &rsr[..] == r) {
                 rs.swap_remove(i);
@@ -216,7 +216,7 @@ impl State {
         hit
     }
 
-    pub fn iter(&self) -> rahashmap::Values<DataType, Vec<Row<Vec<DataType>>>> {
+    pub fn iter(&self) -> rahashmap::Values<DataType, Vec<Row>> {
         for index in &self.state {
             if let KeyedState::Single(ref map) = index.state {
                 if index.partial {
@@ -351,7 +351,7 @@ impl State {
 
     /// Return a copy of all records. Panics if the state is only partially materialized.
     pub fn cloned_records(&self) -> Vec<Vec<DataType>> {
-        fn fix<'a>(rs: &'a Vec<Row<Vec<DataType>>>) -> impl Iterator<Item = Vec<DataType>> + 'a {
+        fn fix<'a>(rs: &'a Vec<Row>) -> impl Iterator<Item = Vec<DataType>> + 'a {
             rs.iter().map(|r| Vec::clone(&**r))
         }
 
