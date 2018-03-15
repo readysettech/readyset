@@ -424,6 +424,41 @@ fn it_works_with_sql_recipe() {
 }
 
 #[test]
+#[allow_fail]
+fn it_works_with_reads_before_writes() {
+    let mut g = ControllerBuilder::default().build_local();
+    let sql = "
+        CREATE TABLE Article (aid int, PRIMARY KEY(aid));
+        CREATE TABLE Vote (aid int, uid int);
+        QUERY ArticleVote: SELECT Article.aid, Vote.uid \
+            FROM Article, Vote \
+            WHERE Article.aid = Vote.aid AND Article.aid = ?;
+    ";
+
+    g.install_recipe(sql.to_owned()).unwrap();
+    let mut article = g.get_mutator("Article").unwrap();
+    let mut vote = g.get_mutator("Vote").unwrap();
+    let mut awvc = g.get_getter("ArticleVote").unwrap();
+
+    let aid = 1;
+    let uid = 10;
+
+    // TODO: This lookup results in the partial key being populated
+    // with an empty result, which leads to the second read not replaying correctly.
+    assert!(awvc.lookup(&aid.into(), true).unwrap().is_empty());
+
+    article.put(vec![aid.into()]).unwrap();
+    sleep();
+
+    vote.put(vec![aid.into(), uid.into()]).unwrap();
+    sleep();
+
+    let result = awvc.lookup(&aid.into(), true).unwrap();
+    assert_eq!(result.len(), 1);
+    assert_eq!(result[0], vec![aid.into(), uid.into()]);
+}
+
+#[test]
 fn forced_shuffle_despite_same_shard() {
     // XXX: this test doesn't currently *fail* despite
     // multiple trailing replay responses that are simply ignored...
