@@ -5,20 +5,11 @@ use std::rc::Rc;
 use local::keyed_state::KeyedState;
 use local::single_state::SingleState;
 
+#[derive(Default)]
 pub struct State {
     state: Vec<SingleState>,
     by_tag: HashMap<Tag, usize>,
     rows: usize,
-}
-
-impl Default for State {
-    fn default() -> Self {
-        State {
-            state: Vec::new(),
-            by_tag: HashMap::new(),
-            rows: 0,
-        }
-    }
 }
 
 impl State {
