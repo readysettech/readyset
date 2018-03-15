@@ -16,7 +16,7 @@ pub use payload::{Link, Packet, PacketEvent, ReplayPathSegment, Tracer, Transact
 pub use Sharding;
 
 // domain local state
-pub type DomainNodes = ::core::local::Map<cell::RefCell<Node>>;
+pub type DomainNodes = Map<cell::RefCell<Node>>;
 pub type DomainIndex = domain::Index;
 pub type ReplicaAddr = (domain::Index, usize);
 

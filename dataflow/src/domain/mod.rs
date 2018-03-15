@@ -245,15 +245,15 @@ pub struct Domain {
 
     not_ready: HashSet<LocalNodeIndex>,
 
-    ingress_inject: local::Map<(usize, Vec<DataType>)>,
+    ingress_inject: Map<(usize, Vec<DataType>)>,
 
     transaction_state: transactions::DomainState,
     persistence_parameters: persistence::Parameters,
 
     mode: DomainMode,
-    waiting: local::Map<Waiting>,
+    waiting: Map<Waiting>,
     replay_paths: HashMap<Tag, ReplayPath>,
-    reader_triggered: local::Map<HashSet<DataType>>,
+    reader_triggered: Map<HashSet<DataType>>,
 
     concurrent_replays: usize,
     max_concurrent_replays: usize,
@@ -522,7 +522,7 @@ impl Domain {
         m: Box<Packet>,
         not_ready: &HashSet<LocalNodeIndex>,
         mode: &mut DomainMode,
-        waiting: &mut local::Map<Waiting>,
+        waiting: &mut Map<Waiting>,
         states: &mut StateMap,
         nodes: &DomainNodes,
         shard: Option<usize>,

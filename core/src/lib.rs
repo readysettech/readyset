@@ -21,11 +21,13 @@ extern crate serde_json;
 pub mod addressing;
 pub mod data;
 pub mod local;
+pub mod map;
 
 pub use data::{DataType, Datas, Record, Records};
 pub use addressing::{IndexPair, LocalNodeIndex};
-pub use local::{KeyType, LookupResult, Map, Row, Tag};
+pub use local::{KeyType, LookupResult, Row, Tag};
+pub use map::Map;
 pub use petgraph::graph::NodeIndex;
 
 pub type State = local::State<DataType>;
-pub type StateMap = local::Map<State>;
+pub type StateMap = map::Map<State>;
