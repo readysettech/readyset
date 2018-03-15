@@ -127,6 +127,7 @@ pub enum Packet {
         src: Option<SourceChannelIdentifier>,
         data: Records,
         tracer: Tracer,
+        senders: Vec<SourceChannelIdentifier>,
     },
 
     /// Transactional data-flow update.
@@ -136,6 +137,7 @@ pub enum Packet {
         data: Records,
         state: TransactionState,
         tracer: Tracer,
+        senders: Vec<SourceChannelIdentifier>,
     },
 
     /// Update that is part of a tagged data-flow replay path.
@@ -390,11 +392,13 @@ impl Packet {
                 src: _,
                 ref data,
                 ref tracer,
+                ref senders,
             } => Packet::Message {
                 link: link.clone(),
                 src: None,
                 data: data.clone(),
                 tracer: tracer.clone(),
+                senders: senders.clone(),
             },
             Packet::Transaction {
                 ref link,
@@ -402,12 +406,14 @@ impl Packet {
                 ref data,
                 ref state,
                 ref tracer,
+                ref senders,
             } => Packet::Transaction {
                 link: link.clone(),
                 src: None,
                 data: data.clone(),
                 state: state.clone(),
                 tracer: tracer.clone(),
+                senders: senders.clone(),
             },
             Packet::ReplayPiece {
                 ref link,

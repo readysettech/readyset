@@ -13,8 +13,7 @@ use Readers;
 use channel::TcpSender;
 use channel::poll::{PollEvent, ProcessResult};
 use prelude::*;
-use payload::{ControlReplyPacket, ReplayPieceContext, ReplayTransactionState,
-              SourceChannelIdentifier, TransactionState};
+use payload::{ControlReplyPacket, ReplayPieceContext, ReplayTransactionState, TransactionState};
 use statistics;
 use transactions;
 use persistence;
@@ -24,10 +23,6 @@ use serde_json;
 use itertools::Itertools;
 use slog::Logger;
 use timekeeper::{RealTime, SimpleTracker, ThreadTime, Timer, TimerSet};
-
-pub trait Executor {
-    fn send_back(&self, SourceChannelIdentifier, Result<i64, ()>);
-}
 
 type EnqueuedSends = Vec<(ReplicaAddr, Box<Packet>)>;
 
@@ -535,6 +530,7 @@ impl Domain {
         process_ptimes: &mut TimerSet<LocalNodeIndex, SimpleTracker, ThreadTime>,
         enable_output: bool,
         sends: &mut EnqueuedSends,
+        executor: Option<&Executor>,
     ) -> HashMap<LocalNodeIndex, Vec<Record>> {
         let me = m.link().dst;
         let mut output_messages = HashMap::new();
@@ -561,7 +557,7 @@ impl Domain {
         process_times.start(me);
         process_ptimes.start(me);
         let mut m = Some(m);
-        n.process(&mut m, None, states, nodes, shard, true, sends);
+        n.process(&mut m, None, states, nodes, shard, true, sends, executor);
         process_ptimes.stop();
         process_times.stop();
         drop(n);
@@ -618,6 +614,7 @@ impl Domain {
                     process_ptimes,
                     enable_output,
                     sends,
+                    None,
                 ) {
                     use std::collections::hash_map::Entry;
                     match output_messages.entry(k) {
@@ -648,6 +645,7 @@ impl Domain {
         m: Box<Packet>,
         enable_output: bool,
         sends: &mut EnqueuedSends,
+        executor: Option<&Executor>,
     ) -> HashMap<LocalNodeIndex, Vec<Record>> {
         Self::dispatch(
             m,
@@ -662,6 +660,7 @@ impl Domain {
             &mut self.process_ptimes,
             enable_output,
             sends,
+            executor,
         )
     }
 
@@ -669,6 +668,7 @@ impl Domain {
         &mut self,
         messages: Vec<Box<Packet>>,
         sends: &mut EnqueuedSends,
+        executor: Option<&Executor>,
     ) {
         assert!(!messages.is_empty());
 
@@ -685,7 +685,7 @@ impl Domain {
         };
 
         for m in messages {
-            let new_messages = self.dispatch_(m, false, sends);
+            let new_messages = self.dispatch_(m, false, sends, executor);
 
             for (key, mut value) in new_messages {
                 egress_messages
@@ -718,6 +718,7 @@ impl Domain {
                     data: data,
                     state: ts.clone(),
                     tracer: tracer.clone(),
+                    senders: vec![],
                 }
             } else {
                 // The packet is about to hit a non-transactional output node (which could be an
@@ -727,6 +728,7 @@ impl Domain {
                     src: None,
                     data: data,
                     tracer: tracer.clone(),
+                    senders: vec![],
                 }
             };
 
@@ -745,6 +747,7 @@ impl Domain {
                 self.shard,
                 true,
                 sends,
+                None,
             );
             self.process_ptimes.stop();
             self.process_times.stop();
@@ -752,10 +755,12 @@ impl Domain {
         }
     }
 
-    fn process_transactions(&mut self, sends: &mut EnqueuedSends) {
+    fn process_transactions(&mut self, sends: &mut EnqueuedSends, executor: Option<&Executor>) {
         loop {
             match self.transaction_state.get_next_event() {
-                transactions::Event::Transaction(m) => self.transactional_dispatch(m, sends),
+                transactions::Event::Transaction(m) => {
+                    self.transactional_dispatch(m, sends, executor)
+                }
                 transactions::Event::StartMigration => {
                     self.control_reply_tx
                         .send(ControlReplyPacket::ack())
@@ -771,12 +776,12 @@ impl Domain {
         }
     }
 
-    fn handle(&mut self, m: Box<Packet>, sends: &mut EnqueuedSends) {
+    fn handle(&mut self, m: Box<Packet>, sends: &mut EnqueuedSends, executor: Option<&Executor>) {
         m.trace(PacketEvent::Handle);
 
         match *m {
             Packet::Message { .. } => {
-                self.dispatch_(m, true, sends);
+                self.dispatch_(m, true, sends, executor);
             }
             Packet::Transaction { .. }
             | Packet::StartMigration { .. }
@@ -786,7 +791,7 @@ impl Domain {
                 ..
             } => {
                 self.transaction_state.handle(m);
-                self.process_transactions(sends);
+                self.process_transactions(sends, executor);
             }
             Packet::ReplayPiece { .. } => {
                 self.handle_replay(m, sends);
@@ -1469,7 +1474,7 @@ impl Domain {
             {
                 if self.nodes[&source].borrow().is_transactional() {
                     self.transaction_state.schedule_replay(tag, key.into());
-                    self.process_transactions(sends);
+                    self.process_transactions(sends, None);
                     return;
                 }
 
@@ -1642,6 +1647,7 @@ impl Domain {
                             data,
                             tracer: None,
                             state: TransactionState::Committed(ts, global_addr, prevs),
+                            senders: vec![],
                         }
                     } else {
                         Packet::Message {
@@ -1649,10 +1655,11 @@ impl Domain {
                             src: None,
                             data,
                             tracer: None,
+                            senders: vec![],
                         }
                     }
                 })
-                .for_each(|packet| self.handle(box packet, sends));
+                .for_each(|packet| self.handle(box packet, sends, None));
         }
 
         self.control_reply_tx
@@ -1717,6 +1724,7 @@ impl Domain {
                         self.shard,
                         false,
                         sends,
+                        None,
                     );
                 }
                 break;
@@ -1841,6 +1849,7 @@ impl Domain {
                             self.shard,
                             false,
                             sends,
+                            None,
                         );
 
                         // ignore duplicate misses
@@ -1945,6 +1954,7 @@ impl Domain {
                                             self.shard,
                                             false,
                                             sends,
+                                            None,
                                         );
                                     }
                                 }
@@ -2242,6 +2252,7 @@ impl Domain {
                         &mut self.process_ptimes,
                         true,
                         sends,
+                        None,
                     );
                 } else {
                     // no transactions allowed here since we're still in a migration
@@ -2346,14 +2357,14 @@ impl Domain {
                         self.group_commit_queues
                             .append(packet, &self.nodes, executor);
                     if let Some(packet) = merged_packet {
-                        self.handle(packet, sends);
+                        self.handle(packet, sends, Some(executor));
                     }
                 } else {
-                    self.handle(packet, sends);
+                    self.handle(packet, sends, Some(executor));
                 }
 
                 while let Some(p) = self.inject.take() {
-                    self.handle(p, sends);
+                    self.handle(p, sends, Some(executor));
                 }
 
                 ProcessResult::KeepPolling
@@ -2362,12 +2373,12 @@ impl Domain {
                 if let Some(m) = self.group_commit_queues
                     .flush_if_necessary(&self.nodes, executor)
                 {
-                    self.handle(m, sends);
+                    self.handle(m, sends, Some(executor));
                     while let Some(p) = self.inject.take() {
-                        self.handle(p, sends);
+                        self.handle(p, sends, Some(executor));
                     }
                 } else if self.has_buffered_replay_requests {
-                    self.handle(box Packet::Spin, sends);
+                    self.handle(box Packet::Spin, sends, Some(executor));
                 }
                 ProcessResult::KeepPolling
             }

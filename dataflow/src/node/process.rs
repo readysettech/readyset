@@ -13,6 +13,7 @@ impl Node {
         on_shard: Option<usize>,
         swap: bool,
         output: &mut Vec<(ReplicaAddr, Box<Packet>)>,
+        executor: Option<&Executor>,
     ) -> Vec<Miss> {
         m.as_mut().unwrap().trace(PacketEvent::Process);
 
@@ -176,6 +177,28 @@ impl Node {
                         materialize(rs, tag, state.get_mut(&addr));
                     });
                 }
+
+                // Send write-ACKs to all the clients with updates that made
+                // it into this merged packet:
+                match (i.get_base(), executor, m) {
+                    (
+                        Some(..),
+                        Some(ex),
+                        &mut box Packet::Message {
+                            ref mut senders, ..
+                        },
+                    ) => senders.drain(..).for_each(|src| ex.send_back(src, Ok(0))),
+                    (
+                        Some(..),
+                        Some(ex),
+                        &mut box Packet::Transaction {
+                            ref mut senders,
+                            state: TransactionState::Committed(ts, ..),
+                            ..
+                        },
+                    ) => senders.drain(..).for_each(|src| ex.send_back(src, Ok(ts))),
+                    _ => {}
+                };
 
                 misses
             }

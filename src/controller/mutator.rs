@@ -147,6 +147,7 @@ impl Mutator {
                 data: rs,
                 state: TransactionState::WillCommit,
                 tracer: self.tracer.clone(),
+                senders: vec![],
             }
         } else {
             box Packet::Message {
@@ -154,6 +155,7 @@ impl Mutator {
                 src: None,
                 data: rs,
                 tracer: self.tracer.clone(),
+                senders: vec![],
             }
         }
     }
@@ -176,6 +178,7 @@ impl Mutator {
             data: rs,
             state: TransactionState::Pending(t),
             tracer: self.tracer.clone(),
+            senders: vec![],
         };
 
         self.domain_input_handle
