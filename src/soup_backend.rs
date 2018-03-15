@@ -313,12 +313,11 @@ impl<W: io::Write> MysqlShim<W> for SoupBackend {
             || query.to_lowercase().starts_with("create unique index")
             || query.to_lowercase().starts_with("create fulltext index")
         {
-            //            warn!(self.log, "ignoring query \"{}\"", query);
+            warn!(
+                self.log,
+                "ignoring unsupported query \"{}\" and returning empty results", query
+            );
             return results.completed(0, 0);
-        }
-        if query.to_lowercase().starts_with("update") || query.to_lowercase().starts_with("delete")
-        {
-            return results.completed(1, 1);
         }
 
         if query.to_lowercase().contains("show tables") {
@@ -360,6 +359,14 @@ impl<W: io::Write> MysqlShim<W> for SoupBackend {
                 nom_sql::SqlQuery::Insert(q) => self.handle_insert(q, results),
                 nom_sql::SqlQuery::Select(q) => self.handle_select(q, results),
                 nom_sql::SqlQuery::Set(q) => self.handle_set(q, results),
+                nom_sql::SqlQuery::Update(q) => {
+                    error!(self.log, "ignoring UPDATE query \"{}\"", q);
+                    return results.completed(1, 1);
+                }
+                nom_sql::SqlQuery::Delete(q) => {
+                    error!(self.log, "ignoring DELETE query \"{}\"", q);
+                    return results.completed(1, 1);
+                }
                 _ => {
                     error!(self.log, "Unsupported query: {}", query);
                     return results.error(
