@@ -33,6 +33,10 @@ fn main() {
     builder.set_worker_threads(2);
     builder.set_persistence(persistence_params);
 
+    // TODO: This should be removed when the `it_works_with_reads_before_writes`
+    // test passes again.
+    builder.disable_partial();
+
     let mut blender = builder.build_local();
     blender.install_recipe(sql.to_owned()).unwrap();
     println!("{}", blender.graphviz());
