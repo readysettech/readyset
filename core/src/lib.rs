@@ -26,9 +26,8 @@ pub mod map;
 
 pub use data::{DataType, Datas, Record, Records};
 pub use addressing::{IndexPair, LocalNodeIndex};
-pub use local::{KeyType, LookupResult, Row, Tag};
+pub use local::{KeyType, LookupResult, Row, State, Tag};
 pub use map::Map;
 pub use petgraph::graph::NodeIndex;
 
-pub type State = local::State<DataType>;
 pub type StateMap = map::Map<State>;

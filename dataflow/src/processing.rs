@@ -160,7 +160,7 @@ where
     fn query_through<'a>(
         &self,
         _columns: &[usize],
-        _key: &prelude::KeyType<prelude::DataType>,
+        _key: &prelude::KeyType,
         _states: &'a prelude::StateMap,
     ) -> Option<Option<Box<Iterator<Item = &'a [prelude::DataType]> + 'a>>> {
         None
@@ -176,7 +176,7 @@ where
         &self,
         parent: prelude::LocalNodeIndex,
         columns: &[usize],
-        key: &prelude::KeyType<prelude::DataType>,
+        key: &prelude::KeyType,
         domain: &prelude::DomainNodes,
         states: &'a prelude::StateMap,
     ) -> Option<Option<Box<Iterator<Item = &'a [prelude::DataType]> + 'a>>> {

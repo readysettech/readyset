@@ -1,4 +1,3 @@
-use std::hash::Hash;
 use std::ops::Deref;
 use std::rc::Rc;
 
@@ -6,6 +5,7 @@ mod single_state;
 mod state;
 mod keyed_state;
 
+pub use data::DataType;
 pub use self::state::State;
 
 #[derive(Clone, Copy, Eq, PartialEq, Ord, PartialOrd, Hash, Debug, Serialize, Deserialize)]
@@ -16,33 +16,36 @@ impl Tag {
     }
 }
 
-pub struct Row<T>(pub(crate) Rc<T>);
-unsafe impl<T> Send for Row<T> {}
-impl<T> Deref for Row<T> {
-    type Target = T;
+pub struct Row(pub(crate) Rc<Vec<DataType>>);
+
+unsafe impl Send for Row {}
+
+impl Deref for Row {
+    type Target = Vec<DataType>;
     fn deref(&self) -> &Self::Target {
         &*self.0
     }
 }
 
-pub enum LookupResult<'a, T: 'a> {
-    Some(&'a [Row<Vec<T>>]),
+pub enum LookupResult<'a> {
+    Some(&'a [Row]),
     Missing,
 }
 
 #[derive(Clone)]
-pub enum KeyType<'a, T: 'a> {
-    Single(&'a T),
-    Double((T, T)),
-    Tri((T, T, T)),
-    Quad((T, T, T, T)),
-    Quin((T, T, T, T, T)),
-    Sex((T, T, T, T, T, T)),
+pub enum KeyType<'a> {
+    Single(&'a DataType),
+    Double((DataType, DataType)),
+    Tri((DataType, DataType, DataType)),
+    Quad((DataType, DataType, DataType, DataType)),
+    Quin((DataType, DataType, DataType, DataType, DataType)),
+    Sex((DataType, DataType, DataType, DataType, DataType, DataType)),
 }
-impl<'a, T: 'static + Eq + Hash + Clone> KeyType<'a, T> {
+
+impl<'a> KeyType<'a> {
     pub fn from<I>(other: I) -> Self
     where
-        I: IntoIterator<Item = &'a T>,
+        I: IntoIterator<Item = &'a DataType>,
         <I as IntoIterator>::IntoIter: ExactSizeIterator,
     {
         let mut other = other.into_iter();
