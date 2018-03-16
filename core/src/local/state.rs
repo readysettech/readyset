@@ -386,17 +386,14 @@ impl PersistentState {
 
 impl Drop for PersistentState {
     fn drop(&mut self) {
-        // TODO(ekmartin): We don't support recovering persistent base node indices yet,
-        // so drop the tables at the end for all modes except InMemory:
-        if self.durability_mode == DurabilityMode::MemoryOnly {
-            return;
+        if self.durability_mode == DurabilityMode::DeleteOnExit {
+            // Journal/WAL files should get deleted automatically, so ignore
+            // any potential errors in case they are in fact deleted:
+            let _ = fs::remove_file(format!("{}-journal", self.name));
+            let _ = fs::remove_file(format!("{}-shm", self.name));
+            let _ = fs::remove_file(format!("{}-wal", self.name));
+            fs::remove_file(&self.name).unwrap();
         }
-
-        // Journal/WAL files should get deleted automatically, but just in case:
-        let _ = fs::remove_file(format!("{}-journal", self.name));
-        let _ = fs::remove_file(format!("{}-shm", self.name));
-        let _ = fs::remove_file(format!("{}-wal", self.name));
-        fs::remove_file(&self.name).unwrap();
     }
 }
 
