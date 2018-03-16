@@ -325,6 +325,13 @@ impl Materializations {
                         stack.clear();
                         able = false
                     }
+                } else if let Some(Some(_)) = graph[child].with_reader(|r| r.key()) {
+                    // reader child (which is effectively materialized)
+                    if !self.partial.contains(&child) {
+                        // reader is full, so we can't be partial
+                        stack.clear();
+                        able = false
+                    }
                 } else {
                     // non-materialized child -- keep walking
                     stack
