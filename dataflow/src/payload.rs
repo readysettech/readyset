@@ -520,7 +520,8 @@ impl fmt::Debug for Packet {
 pub enum ControlReplyPacket {
     #[cfg(debug_assertions)] Ack(Backtrace),
     #[cfg(not(debug_assertions))] Ack(()),
-    StateSize(usize),
+    /// (number of rows, size in bytes)
+    StateSize(usize, u64),
     Statistics(
         statistics::DomainStats,
         HashMap<petgraph::graph::NodeIndex, statistics::NodeStats>,

@@ -16,6 +16,7 @@ pub struct DomainStats {
 pub struct NodeStats {
     pub process_time: u64,
     pub process_ptime: u64,
+    pub mem_size: u64,
 }
 
 /// Struct holding statistics about an entire graph.

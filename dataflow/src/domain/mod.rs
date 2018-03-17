@@ -865,9 +865,14 @@ impl Domain {
                         n.with_reader_mut(|r| r.add_streamer(new_streamer).unwrap());
                     }
                     Packet::StateSizeProbe { node } => {
-                        let size = self.state.get(&node).map(|state| state.len()).unwrap_or(0);
+                        use core::data::SizeOf;
+                        let row_count = self.state.get(&node).map(|state| state.len()).unwrap_or(0);
+                        let mem_size = self.state
+                            .get(&node)
+                            .map(|state| state.deep_size_of())
+                            .unwrap_or(0);
                         self.control_reply_tx
-                            .send(ControlReplyPacket::StateSize(size))
+                            .send(ControlReplyPacket::StateSize(row_count, mem_size))
                             .unwrap();
                     }
                     Packet::PrepareState { node, state } => {
@@ -1253,18 +1258,25 @@ impl Domain {
                         let node_stats = self.nodes
                             .values()
                             .filter_map(|nd| {
+                                use core::data::SizeOf;
+
                                 let ref n = *nd.borrow();
                                 let local_index: LocalNodeIndex = *n.local_addr();
                                 let node_index: NodeIndex = n.global_addr();
 
                                 let time = self.process_times.num_nanoseconds(local_index);
                                 let ptime = self.process_ptimes.num_nanoseconds(local_index);
+                                let mem_size = self.state
+                                    .get(&local_index)
+                                    .map(|state| state.deep_size_of())
+                                    .unwrap_or(0);
                                 if time.is_some() && ptime.is_some() {
                                     Some((
                                         node_index,
                                         statistics::NodeStats {
                                             process_time: time.unwrap(),
                                             process_ptime: ptime.unwrap(),
+                                            mem_size: mem_size,
                                         },
                                     ))
                                 } else {

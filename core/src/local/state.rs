@@ -1,4 +1,5 @@
 use ::*;
+use data::SizeOf;
 use std::collections::HashMap;
 use std::rc::Rc;
 
@@ -10,6 +11,7 @@ pub struct State {
     state: Vec<SingleState>,
     by_tag: HashMap<Tag, usize>,
     rows: usize,
+    mem_size: u64,
 }
 
 impl State {
@@ -113,6 +115,8 @@ impl State {
         } else {
             let mut hit_any = true;
             self.rows = self.rows.saturating_add(1);
+            self.mem_size = self.mem_size
+                .saturating_add((*r).iter().fold(0u64, |acc, d| acc + d.deep_size_of()));
             for i in 0..self.state.len() {
                 hit_any = self.state[i].insert(Row(r.clone())) || hit_any;
             }
@@ -202,6 +206,8 @@ impl State {
 
         if removed {
             self.rows = self.rows.saturating_sub(1);
+            self.mem_size = self.mem_size
+                .saturating_sub((*r).iter().fold(0u64, |acc, d| acc + d.deep_size_of()));
         }
 
         hit
@@ -382,5 +388,17 @@ impl<'a> Drop for State {
     fn drop(&mut self) {
         self.unalias_for_state();
         self.clear();
+    }
+}
+
+impl SizeOf for State {
+    fn size_of(&self) -> u64 {
+        use std::mem::size_of;
+
+        size_of::<Self>() as u64
+    }
+
+    fn deep_size_of(&self) -> u64 {
+        self.mem_size
     }
 }
