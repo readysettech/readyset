@@ -989,12 +989,12 @@ mod tests {
         // DataType should always use 16 bytes itself
         assert_eq!(size_of::<DataType>(), 16);
         assert_eq!(size_of_val(&txt), 16);
-        assert_eq!(size_of_val(&txt), txt.size_of());
+        assert_eq!(size_of_val(&txt) as u64, txt.size_of());
         assert_eq!(txt.deep_size_of(), txt.size_of() + 8 + 2); // DataType + ArcCStr's ptr + 2 chars
         assert_eq!(size_of_val(&shrt), 16);
         assert_eq!(size_of_val(&long), 16);
         assert_eq!(size_of_val(&time), 16);
-        assert_eq!(size_of_val(&time), time.size_of());
+        assert_eq!(size_of_val(&time) as u64, time.size_of());
         assert_eq!(time.deep_size_of(), 16); // DataType + inline NaiveDateTime
 
         assert_eq!(size_of_val(&rec), 24);
