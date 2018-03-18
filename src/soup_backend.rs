@@ -124,6 +124,19 @@ impl SoupBackend {
         }
     }
 
+    fn handle_delete<W: io::Write>(
+        &mut self,
+        q: nom_sql::DeleteStatement,
+        results: QueryResultWriter<W>,
+    ) -> io::Result<()> {
+        error!(self.log, "ignoring DELETE query \"{}\"", q);
+
+        // 0. assert that WHERE clause only mentions primary key
+        // 1. Delete matching rows from Soup
+
+        return results.completed(1, 1);
+    }
+
     fn handle_insert<W: io::Write>(
         &mut self,
         q: nom_sql::InsertStatement,
@@ -222,7 +235,6 @@ impl SoupBackend {
                         _ => unimplemented!(),
                     }
                 }
-                println!("schema: {:?}", schema);
 
                 // create a getter if we don't have one for this query already
                 // TODO(malte): may need to make one anyway if the query has changed w.r.t. an
@@ -278,6 +290,22 @@ impl SoupBackend {
     ) -> io::Result<()> {
         // ignore
         results.completed(0, 0)
+    }
+
+    fn handle_update<W: io::Write>(
+        &mut self,
+        q: nom_sql::UpdateStatement,
+        results: QueryResultWriter<W>,
+    ) -> io::Result<()> {
+        error!(self.log, "ignoring UPDATE query \"{}\"", q);
+
+        // 0. assert that WHERE clause only filters on primary key
+        //
+        // 1. Read from Soup by key to get full rows
+        // 2. Rewrite the column values specified in SET part of UPDATE clause
+        // 3. Write results to Soup, deleting old rows, then putting new ones
+
+        return results.completed(1, 1);
     }
 }
 
@@ -359,14 +387,8 @@ impl<W: io::Write> MysqlShim<W> for SoupBackend {
                 nom_sql::SqlQuery::Insert(q) => self.handle_insert(q, results),
                 nom_sql::SqlQuery::Select(q) => self.handle_select(q, results),
                 nom_sql::SqlQuery::Set(q) => self.handle_set(q, results),
-                nom_sql::SqlQuery::Update(q) => {
-                    error!(self.log, "ignoring UPDATE query \"{}\"", q);
-                    return results.completed(1, 1);
-                }
-                nom_sql::SqlQuery::Delete(q) => {
-                    error!(self.log, "ignoring DELETE query \"{}\"", q);
-                    return results.completed(1, 1);
-                }
+                nom_sql::SqlQuery::Update(q) => self.handle_update(q, results),
+                nom_sql::SqlQuery::Delete(q) => self.handle_delete(q, results),
                 _ => {
                     error!(self.log, "Unsupported query: {}", query);
                     return results.error(
