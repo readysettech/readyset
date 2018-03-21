@@ -18,7 +18,8 @@ struct MysqlSpawner {
     opts: my::Opts,
 }
 impl MysqlSpawner {
-    fn new(opts: my::OptsBuilder) -> Self {
+    fn new(mut opts: my::OptsBuilder) -> Self {
+        opts.tcp_nodelay(true);
         MysqlSpawner { opts: opts.into() }
     }
 }
@@ -29,15 +30,16 @@ struct MysqlTrawler {
 impl MysqlTrawler {
     fn new(handle: &tokio_core::reactor::Handle, opts: my::Opts) -> Self {
         let mut c = my::Pool::new(opts, handle);
-        c.tcp_nodelay(true);
         MysqlTrawler { c }
     }
 }
+/*
 impl Drop for MysqlTrawler {
     fn drop(&mut self) {
         self.c.disconnect();
     }
 }
+*/
 impl trawler::LobstersClient for MysqlTrawler {
     type Factory = MysqlSpawner;
 
@@ -49,7 +51,6 @@ impl trawler::LobstersClient for MysqlTrawler {
         this: Rc<Self>,
         req: trawler::LobstersRequest,
     ) -> Box<futures::Future<Item = time::Duration, Error = ()>> {
-        let mut uid = None;
         let sent = time::Instant::now();
         match req {
             LobstersRequest::Frontpage => Box::new(
@@ -136,28 +137,35 @@ impl trawler::LobstersClient for MysqlTrawler {
                     .map_err(|e| {
                         eprintln!("{:?}", e);
                     })
-                    .map(|_| sent.elapsed()),
+                    .map(move |_| sent.elapsed()),
             ),
             LobstersRequest::Recent => {
-                unimplemented!();
+                // TODO
+                Box::new(futures::future::ok(time::Duration::new(0, 0)))
             }
             LobstersRequest::Login(uid) => {
-                unimplemented!();
+                // TODO
+                Box::new(futures::future::ok(time::Duration::new(0, 0)))
             }
             LobstersRequest::Logout(..) => {
-                unimplemented!();
+                // TODO
+                Box::new(futures::future::ok(time::Duration::new(0, 0)))
             }
             LobstersRequest::Story(id) => {
-                unimplemented!();
+                // TODO
+                Box::new(futures::future::ok(time::Duration::new(0, 0)))
             }
             LobstersRequest::StoryVote(user, story, v) => {
-                unimplemented!();
+                // TODO
+                Box::new(futures::future::ok(time::Duration::new(0, 0)))
             }
             LobstersRequest::CommentVote(user, comment, v) => {
-                unimplemented!();
+                // TODO
+                Box::new(futures::future::ok(time::Duration::new(0, 0)))
             }
             LobstersRequest::Submit { id, user, title } => {
-                unimplemented!();
+                // TODO
+                Box::new(futures::future::ok(time::Duration::new(0, 0)))
             }
             LobstersRequest::Comment {
                 id,
@@ -165,7 +173,8 @@ impl trawler::LobstersClient for MysqlTrawler {
                 story,
                 parent,
             } => {
-                unimplemented!();
+                // TODO
+                Box::new(futures::future::ok(time::Duration::new(0, 0)))
             }
         }
     }
