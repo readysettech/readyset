@@ -4,7 +4,7 @@ version = "0.1.0"
 authors = ["Jon Gjengset <jon@thesquareplanet.com>"]
 
 [dependencies]
-trawler = "0.2"
+trawler = "0.2.5"
 #mysql_async = "0.13"
 mysql_async = { git = "https://github.com/jonhoo/mysql_async" }
 tokio-core = "0.1"
