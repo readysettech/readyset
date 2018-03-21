@@ -300,6 +300,18 @@ impl SoupBackend {
         error!(self.log, "ignoring UPDATE query \"{}\"", q);
 
         // 0. assert that WHERE clause only filters on primary key
+        let ts = self.table_schemas.lock().unwrap();
+        let pkey: Vec<_> = ts.get(&q.table.name)
+            .unwrap()
+            .into_iter()
+            .filter(|cs| cs.constraints.contains(&ColumnConstraint::PrimaryKey))
+            .map(|cs| &cs.column)
+            .collect();
+        if let Some(cond) = q.where_clause {
+            if !utils::ensure_pkey_condition(&cond, &pkey) {
+                panic!("UPDATE query without primary key condition");
+            }
+        };
         //
         // 1. Read from Soup by key to get full rows
         // 2. Rewrite the column values specified in SET part of UPDATE clause

@@ -1,3 +1,4 @@
+use nom_sql::{self, ConditionBase, ConditionExpression, Operator};
 use regex::Regex;
 
 lazy_static! {
@@ -28,4 +29,50 @@ pub(crate) fn sanitize_query(query: &str) -> String {
     let query = query.replace('"', "'");
     let query = query.trim();
     query.to_owned()
+}
+
+pub(crate) fn ensure_pkey_condition(
+    cond: &ConditionExpression,
+    pkey: &Vec<&nom_sql::Column>,
+) -> bool {
+    // below logic only works for single-column primary keys
+    // a more general implementation would check that every component column of the pkey occurs in
+    // an ANDed set of conditions
+    assert_eq!(pkey.len(), 1);
+    match *cond {
+        ConditionExpression::LogicalOp(ref ct) => {
+            match ct.operator {
+                Operator::And => {
+                    // if AND, recurse
+                    // This only matches nonsensical queries like
+                    // "WHERE pkey = 4 AND pkey = 12" or "WHERE pkey = 4 AND pkey = 4"
+                    ensure_pkey_condition(&*ct.left, pkey)
+                        && ensure_pkey_condition(&*ct.right, pkey)
+                }
+                _ => {
+                    // if OR, recurse to see if both branches are on pkey
+                    ensure_pkey_condition(&*ct.left, pkey)
+                        && ensure_pkey_condition(&*ct.right, pkey)
+                }
+            }
+        }
+        ConditionExpression::ComparisonOp(ref ct) => {
+            // either ct.left or ct.right must be the primary key column
+            let left_is_pkey = match *ct.left {
+                // all good
+                ConditionExpression::Base(ConditionBase::Field(ref f)) => f == pkey[0],
+                _ => false,
+            };
+            let right_is_pkey = match *ct.right {
+                // all good
+                ConditionExpression::Base(ConditionBase::Field(ref f)) => f == pkey[0],
+                _ => false,
+            };
+
+            // one side has to be the pkey column, and it can't be a comma join, so XOR
+            left_is_pkey ^ right_is_pkey
+        }
+        ConditionExpression::NegationOp(_) => unimplemented!(),
+        _ => unreachable!(),
+    }
 }
