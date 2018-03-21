@@ -322,10 +322,44 @@ named!(pub creation<&[u8], CreateTableStatement>,
                 })
                 .collect();
 
+            // and to keys:
+            let named_keys = keys.and_then(|ks| {
+                Some(
+                    ks.into_iter()
+                        .map(|key| {
+                            let attach_names = |columns: Vec<Column>| {
+                                columns
+                                    .into_iter()
+                                    .map(|column| Column {
+                                        table: Some(table.name.clone()),
+                                        ..column
+                                    })
+                                    .collect()
+                            };
+
+                            match key {
+                                TableKey::PrimaryKey(columns) => {
+                                    TableKey::PrimaryKey(attach_names(columns))
+                                }
+                                TableKey::UniqueKey(name, columns) => {
+                                    TableKey::UniqueKey(name, attach_names(columns))
+                                }
+                                TableKey::FulltextKey(name, columns) => {
+                                    TableKey::FulltextKey(name, attach_names(columns))
+                                }
+                                TableKey::Key(name, columns) => {
+                                    TableKey::Key(name, attach_names(columns))
+                                }
+                            }
+                        })
+                        .collect(),
+                )
+            });
+
             CreateTableStatement {
                 table: table,
                 fields: named_fields,
-                keys: keys,
+                keys: named_keys,
             }
         })
     ))
@@ -466,7 +500,7 @@ mod tests {
                     ColumnSpecification::new(Column::from("users.name"), SqlType::Varchar(255)),
                     ColumnSpecification::new(Column::from("users.email"), SqlType::Varchar(255)),
                 ],
-                keys: Some(vec![TableKey::PrimaryKey(vec![Column::from("id")])]),
+                keys: Some(vec![TableKey::PrimaryKey(vec![Column::from("users.id")])]),
                 ..Default::default()
             }
         );
@@ -486,7 +520,7 @@ mod tests {
                     ColumnSpecification::new(Column::from("users.email"), SqlType::Varchar(255)),
                 ],
                 keys: Some(vec![
-                    TableKey::UniqueKey(Some(String::from("id_k")), vec![Column::from("id")]),
+                    TableKey::UniqueKey(Some(String::from("id_k")), vec![Column::from("users.id")]),
                 ]),
                 ..Default::default()
             }
