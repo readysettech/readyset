@@ -1,3 +1,5 @@
+#![feature(box_syntax, box_patterns)]
+
 #[macro_use]
 extern crate clap;
 extern crate distributary;

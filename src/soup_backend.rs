@@ -1,7 +1,8 @@
 use distributary::{ControllerHandle, DataType, Mutator, RemoteGetter, ZookeeperAuthority};
 
 use msql_srv::{self, *};
-use nom_sql::{self, ColumnConstraint, ColumnSpecification, Literal, SqlType};
+use nom_sql::{self, ColumnConstraint, ColumnSpecification, ConditionBase, ConditionExpression,
+              ConditionTree, Literal, SqlType};
 use slog;
 use std::io;
 use std::collections::{BTreeMap, HashMap};
@@ -115,6 +116,10 @@ impl SoupBackend {
         match self.soup.extend_recipe(format!("{};", q)) {
             Ok(_) => {
                 let mut ts_lock = self.table_schemas.lock().unwrap();
+                // TODO(ekmartin): handle q.keys as well:
+                // CREATE TABLE t (id int, PRIMARY KEY (id))
+                // will result in t not having any constraints,
+                // but instead have a PrimaryKey under q.keys.
                 ts_lock.insert(q.table.name.clone(), q.fields);
                 // no rows to return
                 // TODO(malte): potentially eagerly cache the mutator for this table
@@ -129,12 +134,53 @@ impl SoupBackend {
         q: nom_sql::DeleteStatement,
         results: QueryResultWriter<W>,
     ) -> io::Result<()> {
-        error!(self.log, "ignoring DELETE query \"{}\"", q);
+        let cond = q.where_clause
+            .expect("only supports DELETEs with WHERE-clauses");
 
-        // 0. assert that WHERE clause only mentions primary key
-        // 1. Delete matching rows from Soup
+        {
+            let ts = self.table_schemas.lock().unwrap();
+            let pkey: Vec<_> = ts
+                .get(&q.table.name)
+                .unwrap()
+                .into_iter()
+                .filter(|cs| cs.constraints.contains(&ColumnConstraint::PrimaryKey))
+                .map(|cs| &cs.column)
+                .collect();
 
-        return results.completed(1, 1);
+            assert!(
+                utils::ensure_pkey_condition(&cond, &pkey),
+                "DELETE with non-primary-key WHERE-clause is not supported"
+            );
+        }
+
+        // create a mutator if we don't have one for this table already
+        let mutator = self.inputs
+            .entry(q.table.name.clone())
+            .or_insert(self.soup.get_mutator(&q.table.name).unwrap());
+
+        let key = match cond {
+            ConditionExpression::ComparisonOp(ConditionTree {
+                left: box ConditionExpression::Base(ConditionBase::Literal(ref l)),
+                ..
+            })
+            | ConditionExpression::ComparisonOp(ConditionTree {
+                right: box ConditionExpression::Base(ConditionBase::Literal(ref l)),
+                ..
+            }) => vec![DataType::from(l)],
+            // TODO(ekmartin): support LogicalOp as well
+            _ => panic!("DELETE WHERE-clauses need at least one literal"),
+        };
+
+        match mutator.delete(key) {
+            Ok(_) => results.completed(1, 0),
+            Err(e) => {
+                error!(self.log, "delete error: {:?}", e);
+                results.error(
+                    msql_srv::ErrorKind::ER_UNKNOWN_ERROR,
+                    format!("{:?}", e).as_bytes(),
+                )
+            }
+        }
     }
 
     fn handle_insert<W: io::Write>(
