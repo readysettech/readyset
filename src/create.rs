@@ -6,7 +6,7 @@ use std::fmt;
 use common::{column_identifier_no_alias, field_list, integer_literal, opt_multispace,
              sql_identifier, statement_terminator, table_reference, type_identifier, Literal,
              SqlType, TableKey};
-use column::{ColumnConstraint, ColumnSpecification};
+use column::{Column, ColumnConstraint, ColumnSpecification};
 use table::Table;
 
 #[derive(Clone, Debug, Default, Hash, PartialEq, Serialize, Deserialize)]
@@ -309,11 +309,57 @@ named!(pub creation<&[u8], CreateTableStatement>,
         ({
             // "table AS alias" isn't legal in CREATE statements
             assert!(table.alias.is_none());
+            // attach table names to columns:
+            let named_fields = fields
+                .into_iter()
+                .map(|field| {
+                    let column = Column {
+                        table: Some(table.name.clone()),
+                        ..field.column
+                    };
+
+                    ColumnSpecification { column, ..field }
+                })
+                .collect();
+
+            // and to keys:
+            let named_keys = keys.and_then(|ks| {
+                Some(
+                    ks.into_iter()
+                        .map(|key| {
+                            let attach_names = |columns: Vec<Column>| {
+                                columns
+                                    .into_iter()
+                                    .map(|column| Column {
+                                        table: Some(table.name.clone()),
+                                        ..column
+                                    })
+                                    .collect()
+                            };
+
+                            match key {
+                                TableKey::PrimaryKey(columns) => {
+                                    TableKey::PrimaryKey(attach_names(columns))
+                                }
+                                TableKey::UniqueKey(name, columns) => {
+                                    TableKey::UniqueKey(name, attach_names(columns))
+                                }
+                                TableKey::FulltextKey(name, columns) => {
+                                    TableKey::FulltextKey(name, attach_names(columns))
+                                }
+                                TableKey::Key(name, columns) => {
+                                    TableKey::Key(name, attach_names(columns))
+                                }
+                            }
+                        })
+                        .collect(),
+                )
+            });
 
             CreateTableStatement {
                 table: table,
-                fields: fields,
-                keys: keys,
+                fields: named_fields,
+                keys: named_keys,
             }
         })
     ))
@@ -362,9 +408,9 @@ mod tests {
             CreateTableStatement {
                 table: Table::from("users"),
                 fields: vec![
-                    ColumnSpecification::new(Column::from("id"), SqlType::Bigint(20)),
-                    ColumnSpecification::new(Column::from("name"), SqlType::Varchar(255)),
-                    ColumnSpecification::new(Column::from("email"), SqlType::Varchar(255)),
+                    ColumnSpecification::new(Column::from("users.id"), SqlType::Bigint(20)),
+                    ColumnSpecification::new(Column::from("users.name"), SqlType::Varchar(255)),
+                    ColumnSpecification::new(Column::from("users.email"), SqlType::Varchar(255)),
                 ],
                 ..Default::default()
             }
@@ -382,7 +428,7 @@ mod tests {
                 table: Table::from("user_newtalk"),
                 fields: vec![
                     ColumnSpecification::with_constraints(
-                        Column::from("user_id"),
+                        Column::from("user_newtalk.user_id"),
                         SqlType::Int(5),
                         vec![
                             ColumnConstraint::NotNull,
@@ -390,7 +436,7 @@ mod tests {
                         ],
                     ),
                     ColumnSpecification::with_constraints(
-                        Column::from("user_ip"),
+                        Column::from("user_newtalk.user_ip"),
                         SqlType::Varchar(40),
                         vec![
                             ColumnConstraint::NotNull,
@@ -450,11 +496,11 @@ mod tests {
             CreateTableStatement {
                 table: Table::from("users"),
                 fields: vec![
-                    ColumnSpecification::new(Column::from("id"), SqlType::Bigint(20)),
-                    ColumnSpecification::new(Column::from("name"), SqlType::Varchar(255)),
-                    ColumnSpecification::new(Column::from("email"), SqlType::Varchar(255)),
+                    ColumnSpecification::new(Column::from("users.id"), SqlType::Bigint(20)),
+                    ColumnSpecification::new(Column::from("users.name"), SqlType::Varchar(255)),
+                    ColumnSpecification::new(Column::from("users.email"), SqlType::Varchar(255)),
                 ],
-                keys: Some(vec![TableKey::PrimaryKey(vec![Column::from("id")])]),
+                keys: Some(vec![TableKey::PrimaryKey(vec![Column::from("users.id")])]),
                 ..Default::default()
             }
         );
@@ -469,12 +515,12 @@ mod tests {
             CreateTableStatement {
                 table: Table::from("users"),
                 fields: vec![
-                    ColumnSpecification::new(Column::from("id"), SqlType::Bigint(20)),
-                    ColumnSpecification::new(Column::from("name"), SqlType::Varchar(255)),
-                    ColumnSpecification::new(Column::from("email"), SqlType::Varchar(255)),
+                    ColumnSpecification::new(Column::from("users.id"), SqlType::Bigint(20)),
+                    ColumnSpecification::new(Column::from("users.name"), SqlType::Varchar(255)),
+                    ColumnSpecification::new(Column::from("users.email"), SqlType::Varchar(255)),
                 ],
                 keys: Some(vec![
-                    TableKey::UniqueKey(Some(String::from("id_k")), vec![Column::from("id")]),
+                    TableKey::UniqueKey(Some(String::from("id_k")), vec![Column::from("users.id")]),
                 ]),
                 ..Default::default()
             }
@@ -499,7 +545,7 @@ mod tests {
                 table: Table::from("django_admin_log"),
                 fields: vec![
                     ColumnSpecification::with_constraints(
-                        Column::from("id"),
+                        Column::from("django_admin_log.id"),
                         SqlType::Int(32),
                         vec![
                             ColumnConstraint::AutoIncrement,
@@ -508,29 +554,35 @@ mod tests {
                         ],
                     ),
                     ColumnSpecification::with_constraints(
-                        Column::from("action_time"),
+                        Column::from("django_admin_log.action_time"),
                         SqlType::DateTime,
                         vec![ColumnConstraint::NotNull],
                     ),
                     ColumnSpecification::with_constraints(
-                        Column::from("user_id"),
+                        Column::from("django_admin_log.user_id"),
                         SqlType::Int(32),
                         vec![ColumnConstraint::NotNull],
                     ),
-                    ColumnSpecification::new(Column::from("content_type_id"), SqlType::Int(32)),
-                    ColumnSpecification::new(Column::from("object_id"), SqlType::Longtext),
+                    ColumnSpecification::new(
+                        Column::from("django_admin_log.content_type_id"),
+                        SqlType::Int(32),
+                    ),
+                    ColumnSpecification::new(
+                        Column::from("django_admin_log.object_id"),
+                        SqlType::Longtext,
+                    ),
                     ColumnSpecification::with_constraints(
-                        Column::from("object_repr"),
+                        Column::from("django_admin_log.object_repr"),
                         SqlType::Varchar(200),
                         vec![ColumnConstraint::NotNull],
                     ),
                     ColumnSpecification::with_constraints(
-                        Column::from("action_flag"),
+                        Column::from("django_admin_log.action_flag"),
                         SqlType::Int(32),
                         vec![ColumnConstraint::NotNull],
                     ),
                     ColumnSpecification::with_constraints(
-                        Column::from("change_message"),
+                        Column::from("django_admin_log.change_message"),
                         SqlType::Longtext,
                         vec![ColumnConstraint::NotNull],
                     ),
@@ -549,7 +601,7 @@ mod tests {
                 table: Table::from("auth_group"),
                 fields: vec![
                     ColumnSpecification::with_constraints(
-                        Column::from("id"),
+                        Column::from("auth_group.id"),
                         SqlType::Int(32),
                         vec![
                             ColumnConstraint::AutoIncrement,
@@ -558,7 +610,7 @@ mod tests {
                         ],
                     ),
                     ColumnSpecification::with_constraints(
-                        Column::from("name"),
+                        Column::from("auth_group.name"),
                         SqlType::Varchar(80),
                         vec![ColumnConstraint::NotNull, ColumnConstraint::Unique],
                     ),
