@@ -1,0 +1,11 @@
+[package]
+name = "trawler-mysql"
+version = "0.1.0"
+authors = ["Jon Gjengset <jon@thesquareplanet.com>"]
+
+[dependencies]
+trawler = "0.2"
+mysql_async = "0.12"
+tokio-core = "0.1"
+clap = "2.31"
+futures = "0.1"
