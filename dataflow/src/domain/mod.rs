@@ -866,7 +866,7 @@ impl Domain {
                     }
                     Packet::StateSizeProbe { node } => {
                         use core::data::SizeOf;
-                        let row_count = self.state.get(&node).map(|state| state.len()).unwrap_or(0);
+                        let row_count = self.state.get(&node).map(|state| state.rows()).unwrap_or(0);
                         let mem_size = self.state
                             .get(&node)
                             .map(|state| state.deep_size_of())

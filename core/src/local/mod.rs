@@ -5,7 +5,7 @@ mod single_state;
 mod state;
 mod keyed_state;
 
-pub use data::DataType;
+pub use data::{DataType, SizeOf};
 pub use self::state::State;
 
 #[derive(Clone, Copy, Eq, PartialEq, Ord, PartialOrd, Hash, Debug, Serialize, Deserialize)]
@@ -24,6 +24,15 @@ impl Deref for Row {
     type Target = Vec<DataType>;
     fn deref(&self) -> &Self::Target {
         &*self.0
+    }
+}
+impl SizeOf for Row {
+    fn size_of(&self) -> u64 {
+        use std::mem::size_of;
+        size_of::<Self>() as u64
+    }
+    fn deep_size_of(&self) -> u64 {
+        (*self.0).deep_size_of()
     }
 }
 

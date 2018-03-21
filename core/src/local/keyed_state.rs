@@ -70,7 +70,7 @@ impl KeyedState {
         Some((
             rs.iter()
                 .filter(|r| Rc::strong_count(&r.0) == 1)
-                .map(|r| r.deep_size_of())
+                .map(SizeOf::deep_size_of)
                 .sum(),
             key,
         ))
@@ -108,7 +108,7 @@ impl KeyedState {
         }.map(|rows| {
             rows.iter()
                 .filter(|r| Rc::strong_count(&r.0) == 1)
-                .map(|r| r.deep_size_of())
+                .map(SizeOf::deep_size_of)
                 .sum()
         })
             .unwrap_or(0)
