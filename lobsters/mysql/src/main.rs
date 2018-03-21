@@ -59,16 +59,23 @@ impl trawler::LobstersClient for MysqlTrawler {
                     .and_then(|c| {
                         c.drop_exec(
                             "\
-                             SELECT  users.* \
+                             SELECT users.* \
                              FROM users WHERE users.session_token = ? \
-                             ORDER BY users.id ASC LIMIT 1; \
-                             BEGIN; \
-                             SELECT  `keystores`.* FROM `keystores` WHERE `keystores`.`key` = 'traffic:date' ORDER BY `keystores`.`key` ASC LIMIT 1 FOR UPDATE; \
-                             SELECT  `keystores`.* FROM `keystores` WHERE `keystores`.`key` = 'traffic:hits' ORDER BY `keystores`.`key` ASC LIMIT 1 FOR UPDATE; \
-                             UPDATE `keystores` SET `value` = 1521590012 WHERE `keystores`.`key` = 'traffic:date'; \
-                             COMMIT;",
+                             ORDER BY users.id ASC LIMIT 1",
                             ("KMQEEJjXymcyFj3j7Qn3c3kZ5AFcghUxscm6J9c0a3XBTMjD2OA9PEoecxyt",),
                         )
+                    })
+                    .and_then(|c| {
+                        c.start_transaction(my::TransactionOptions::new())
+                            .and_then(|t| {
+                                t.drop_exec(
+                                 "SELECT keystores.* FROM keystores WHERE keystores.key = 'traffic:date' ORDER BY keystores.key ASC LIMIT 1 FOR UPDATE; \
+                                 SELECT keystores.* FROM keystores WHERE keystores.key = 'traffic:hits' ORDER BY keystores.key ASC LIMIT 1 FOR UPDATE; \
+                                 UPDATE keystores SET value = 1521590012 WHERE keystores.key = 'traffic:date';",
+                                 (),
+                            )
+                            })
+                            .and_then(|t| t.commit())
                     })
                     .and_then(|c| c.drop_query("SELECT `tags`.* FROM `tags` WHERE 1=0"))
                     .and_then(|c| {
