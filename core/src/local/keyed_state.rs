@@ -1,4 +1,5 @@
 use ::*;
+use data::SizeOf;
 use fnv::FnvBuildHasher;
 use rahashmap::HashMap as RaHashMap;
 
@@ -10,10 +11,7 @@ pub enum KeyedState {
     Tri(FnvHashMap<(DataType, DataType, DataType), Vec<Row>>),
     Quad(FnvHashMap<(DataType, DataType, DataType, DataType), Vec<Row>>),
     Quin(FnvHashMap<(DataType, DataType, DataType, DataType, DataType), Vec<Row>>),
-    Sex(FnvHashMap<
-        (DataType, DataType, DataType, DataType, DataType, DataType),
-        Vec<Row>,
-    >),
+    Sex(FnvHashMap<(DataType, DataType, DataType, DataType, DataType, DataType), Vec<Row>>),
 }
 
 impl KeyedState {
@@ -51,15 +49,57 @@ impl KeyedState {
         }
     }
 
-    pub fn remove_at_index(&mut self, index: usize) -> Option<Vec<Row>> {
+    /// Remove all rows for the first key at or after `index`, returning that key along with the
+    /// number of bytes freed. Returns None if already empty.
+    pub fn evict_at_index(&mut self, index: usize) -> Option<(u64, Vec<DataType>)> {
+        let (rs, key) = match *self {
+            KeyedState::Single(ref mut m) => m.remove_at_index(index).map(|(k, rs)| (rs, vec![k])),
+            KeyedState::Double(ref mut m) => {
+                m.remove_at_index(index).map(|(k, rs)| (rs, vec![k.0, k.1]))
+            }
+            KeyedState::Tri(ref mut m) => m.remove_at_index(index)
+                .map(|(k, rs)| (rs, vec![k.0, k.1, k.2])),
+            KeyedState::Quad(ref mut m) => m.remove_at_index(index)
+                .map(|(k, rs)| (rs, vec![k.0, k.1, k.2, k.3])),
+            KeyedState::Quin(ref mut m) => m.remove_at_index(index)
+                .map(|(k, rs)| (rs, vec![k.0, k.1, k.2, k.3, k.4])),
+            KeyedState::Sex(ref mut m) => m.remove_at_index(index)
+                .map(|(k, rs)| (rs, vec![k.0, k.1, k.2, k.3, k.4, k.5])),
+        }?;
+        Some((rs.iter().map(|r| r.deep_size_of()).sum(), key))
+    }
+
+    /// Remove all rows for the given key, returning the number of bytes freed.
+    pub fn evict(&mut self, key: &[DataType]) -> u64 {
         match *self {
-            KeyedState::Single(ref mut m) => m.remove_at_index(index).map(|(_, rs)| rs),
-            KeyedState::Double(ref mut m) => m.remove_at_index(index).map(|(_, rs)| rs),
-            KeyedState::Tri(ref mut m) => m.remove_at_index(index).map(|(_, rs)| rs),
-            KeyedState::Quad(ref mut m) => m.remove_at_index(index).map(|(_, rs)| rs),
-            KeyedState::Quin(ref mut m) => m.remove_at_index(index).map(|(_, rs)| rs),
-            KeyedState::Sex(ref mut m) => m.remove_at_index(index).map(|(_, rs)| rs),
-        }
+            KeyedState::Single(ref mut m) => m.remove(&(key[0])),
+            KeyedState::Double(ref mut m) => m.remove(&(key[0].clone(), key[1].clone())),
+            KeyedState::Tri(ref mut m) => {
+                m.remove(&(key[0].clone(), key[1].clone(), key[2].clone()))
+            }
+            KeyedState::Quad(ref mut m) => m.remove(&(
+                key[0].clone(),
+                key[1].clone(),
+                key[2].clone(),
+                key[3].clone(),
+            )),
+            KeyedState::Quin(ref mut m) => m.remove(&(
+                key[0].clone(),
+                key[1].clone(),
+                key[2].clone(),
+                key[3].clone(),
+                key[4].clone(),
+            )),
+            KeyedState::Sex(ref mut m) => m.remove(&(
+                key[0].clone(),
+                key[1].clone(),
+                key[2].clone(),
+                key[3].clone(),
+                key[4].clone(),
+                key[5].clone(),
+            )),
+        }.map(|rows| rows.iter().map(|r| r.deep_size_of()).sum())
+            .unwrap_or(0)
     }
 }
 

@@ -11,6 +11,7 @@ extern crate fnv;
 extern crate nom_sql;
 extern crate petgraph;
 extern crate rahashmap;
+extern crate rand;
 extern crate serde;
 #[macro_use]
 extern crate serde_derive;
