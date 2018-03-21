@@ -1,8 +1,9 @@
-use ::*;
-use data::SizeOf;
+use rand::{self, Rng};
 use std::collections::HashMap;
 use std::rc::Rc;
 
+use ::*;
+use data::SizeOf;
 use local::keyed_state::KeyedState;
 use local::single_state::SingleState;
 
@@ -26,6 +27,7 @@ impl State {
         self.state.iter().position(|s| &s.key[..] == cols)
     }
 
+    /// Add an index keyed by the given columns and replayed to by the given partial tags.
     pub fn add_key(&mut self, columns: &[usize], partial: Option<Vec<Tag>>) {
         let (i, exists) = if let Some(i) = self.state_for(columns) {
             // already keyed by this key; just adding tags
@@ -59,6 +61,8 @@ impl State {
                     new.insert(Row(r.0.clone()));
                 }
             };
+
+            assert!(!old[0].partial);
             match old[0].state {
                 KeyedState::Single(ref map) => for rs in map.values() {
                     insert(rs);
@@ -352,6 +356,7 @@ impl State {
             rs.iter().map(|r| Vec::clone(&**r))
         }
 
+        assert!(!self.state[0].partial);
         match self.state[0].state {
             KeyedState::Single(ref map) => map.values().flat_map(fix).collect(),
             KeyedState::Double(ref map) => map.values().flat_map(fix).collect(),
@@ -381,6 +386,22 @@ impl State {
         if let Some(left) = left {
             self.state.push(left);
         }
+    }
+
+    /// Evict `count` randomly selected keys, returning key colunms of the index chosen to evict
+    /// from along with the keys evicted.
+    pub fn evict_random_keys(&mut self, count: usize) -> (&[usize], Vec<Vec<DataType>>) {
+        let mut rng = rand::thread_rng();
+        let index = rng.gen_range(0, self.state.len());
+        let (bytes_freed, keys) = self.state[index].evict_random_keys(count, &mut rng);
+        self.mem_size = self.mem_size.saturating_sub(bytes_freed);
+        (&self.state[index].key, keys)
+    }
+
+    /// Evict the listed keys from the materialization targeted by `tag`.
+    pub fn evict_keys(&mut self, tag: &Tag, keys: &[Vec<DataType>]) {
+        self.mem_size = self.mem_size
+            .saturating_sub(self.state[self.by_tag[tag]].evict_keys(keys));
     }
 }
 

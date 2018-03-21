@@ -2,6 +2,7 @@ use ::*;
 use data::SizeOf;
 use fnv::FnvBuildHasher;
 use rahashmap::HashMap as RaHashMap;
+use std::rc::Rc;
 
 type FnvHashMap<K, V> = RaHashMap<K, V, FnvBuildHasher>;
 
@@ -66,7 +67,13 @@ impl KeyedState {
             KeyedState::Sex(ref mut m) => m.remove_at_index(index)
                 .map(|(k, rs)| (rs, vec![k.0, k.1, k.2, k.3, k.4, k.5])),
         }?;
-        Some((rs.iter().map(|r| r.deep_size_of()).sum(), key))
+        Some((
+            rs.iter()
+                .filter(|r| Rc::strong_count(&r.0) == 1)
+                .map(|r| r.deep_size_of())
+                .sum(),
+            key,
+        ))
     }
 
     /// Remove all rows for the given key, returning the number of bytes freed.
@@ -98,7 +105,12 @@ impl KeyedState {
                 key[4].clone(),
                 key[5].clone(),
             )),
-        }.map(|rows| rows.iter().map(|r| r.deep_size_of()).sum())
+        }.map(|rows| {
+            rows.iter()
+                .filter(|r| Rc::strong_count(&r.0) == 1)
+                .map(|r| r.deep_size_of())
+                .sum()
+        })
             .unwrap_or(0)
     }
 }

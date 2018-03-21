@@ -1,4 +1,4 @@
-use rand::{self, Rng};
+use rand::{Rng, ThreadRng};
 use local::keyed_state::KeyedState;
 use local::Row;
 use DataType;
@@ -97,9 +97,11 @@ impl SingleState {
 
     /// Evict `count` randomly selected keys from state and return them along with the number of
     /// bytes freed.
-    pub fn evict_random_keys(&mut self, count: usize) -> (u64, Vec<Vec<DataType>>) {
-        let mut rng = rand::thread_rng();
-
+    pub fn evict_random_keys(
+        &mut self,
+        count: usize,
+        rng: &mut ThreadRng,
+    ) -> (u64, Vec<Vec<DataType>>) {
         let mut bytes_freed = 0;
         let mut keys = Vec::with_capacity(count);
         for _ in 0..count {
