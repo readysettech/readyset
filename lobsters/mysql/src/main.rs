@@ -146,8 +146,120 @@ impl trawler::LobstersClient for MysqlTrawler {
                     .map(move |_| sent.elapsed()),
             ),
             LobstersRequest::Recent => {
-                // TODO
-                Box::new(futures::future::ok(time::Duration::new(0, 0)))
+                Box::new(
+                    this.c
+                        .get_conn()
+                        .and_then(|c| {
+                            c.drop_exec(
+                                "\
+                                 SELECT users.* \
+                                 FROM users WHERE users.session_token = ? \
+                                 ORDER BY users.id ASC LIMIT 1",
+                                ("KMQEEJjXymcyFj3j7Qn3c3kZ5AFcghUxscm6J9c0a3XBTMjD2OA9PEoecxyt",),
+                            )
+                        })
+                        .and_then(|c| {
+                            c.start_transaction(my::TransactionOptions::new())
+                                .and_then(|t| {
+                                    t.drop_query(
+                                 "SELECT keystores.* FROM keystores WHERE keystores.key = 'traffic:date' ORDER BY keystores.key ASC LIMIT 1 FOR UPDATE; \
+                                 SELECT keystores.* FROM keystores WHERE keystores.key = 'traffic:hits' ORDER BY keystores.key ASC LIMIT 1 FOR UPDATE; \
+                                 UPDATE keystores SET value = 1521590012 WHERE keystores.key = 'traffic:date';",
+                            )
+                                })
+                                .and_then(|t| t.commit())
+                        })
+                        .and_then(|c| c.drop_query("SELECT `tags`.* FROM `tags` WHERE 1=0"))
+                        .and_then(|c| {
+                            // /recent is a little weird:
+                            // https://github.com/lobsters/lobsters/blob/50b4687aeeec2b2d60598f63e06565af226f93e3/app/models/story_repository.rb#L41
+                            // but it *basically* just looks for stories in the past few days
+                            // because all our stories are for the same day, we add a LIMIT
+                            c.query(
+                                "SELECT `stories`.`id`, \
+                                 `stories`.`upvotes`, \
+                                 `stories`.`downvotes`, \
+                                 `stories`.`user_id` \
+                                 FROM `stories` \
+                                 WHERE `stories`.`merged_story_id` IS NULL \
+                                 AND `stories`.`is_expired` = 0 \
+                                 AND `stories`.`created_at` > NOW() - INTERVAL 3 DAY \
+                                 WHERE upvotes - downvotes <= 5 \
+                                 ORDER BY stories.id DESC, stories.created_at DESC \
+                                 LIMIT 25",
+                            )
+                        })
+                        .and_then(|stories| {
+                            stories.reduce_and_drop(Vec::new(), |mut stories, story| {
+                                stories.push(story.get::<String, _>("id").unwrap());
+                                stories
+                            })
+                        })
+                        .and_then(|(c, stories)| {
+                            c.query(&format!(
+                                "SELECT  `stories`.* FROM `stories` WHERE `stories`.`id` IN ({})",
+                                stories.join(", ")
+                            ))
+                        })
+                        .and_then(|stories| {
+                            stories.reduce_and_drop(
+                                (HashSet::new(), HashSet::new()),
+                                |(mut users, mut stories), story| {
+                                    users.insert(story.get::<String, _>("user_id").unwrap());
+                                    stories.insert(story.get::<String, _>("id").unwrap());
+                                    (users, stories)
+                                },
+                            )
+                        })
+                        .and_then(|(c, (users, stories))| {
+                            let users: Vec<_> = users.into_iter().collect();
+                            c.drop_query(&format!(
+                                "SELECT `users`.* FROM `users` WHERE `users`.`id` IN ({})",
+                                users.join(",")
+                            )).map(move |c| (c, stories))
+                        })
+                        .and_then(|(c, stories)| {
+                            let stories = stories.into_iter().collect::<Vec<_>>().join(", ");
+                            c
+                            .drop_query(&format!(
+                                "SELECT `suggested_titles`.* FROM `suggested_titles` WHERE `suggested_titles`.`story_id` IN ({})", stories
+                            ))
+                            .map(move |c| (c, stories))
+                        })
+                        .and_then(|(c, stories)| {
+                            c
+                            .drop_query(&format!(
+                                "SELECT `suggested_taggings`.* FROM `suggested_taggings` WHERE `suggested_taggings`.`story_id` IN ({})", stories
+                            ))
+                            .map(move |c| (c, stories))
+                        })
+                        .and_then(|(c, stories)| {
+                            c.query(&format!(
+                        "SELECT `taggings`.* FROM `taggings` WHERE `taggings`.`story_id` IN ({})",
+                        stories
+                        ))
+                        })
+                        .and_then(|taggings| {
+                            taggings.reduce_and_drop(HashSet::new(), |mut tags, tagging| {
+                                tags.insert(tagging.get::<String, _>("tag_id").unwrap());
+                                tags
+                            })
+                        })
+                        .and_then(|(c, tags)| {
+                            let tags = tags.into_iter()
+                                .map(String::from)
+                                .collect::<Vec<_>>()
+                                .join(", ");
+                            c.drop_query(&format!(
+                                "SELECT `tags`.* FROM `tags` WHERE `tags`.`id` IN ({})",
+                                tags
+                            ))
+                        })
+                        .map_err(|e| {
+                            eprintln!("{:?}", e);
+                        })
+                        .map(move |_| sent.elapsed()),
+                )
             }
             LobstersRequest::Login(uid) => {
                 // TODO
