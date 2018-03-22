@@ -270,8 +270,126 @@ impl trawler::LobstersClient for MysqlTrawler {
                 Box::new(futures::future::ok(time::Duration::new(0, 0)))
             }
             LobstersRequest::Story(id) => {
-                // TODO
-                Box::new(futures::future::ok(time::Duration::new(0, 0)))
+                Box::new(
+                    this.c
+                        .get_conn()
+                        .and_then(|c| {
+                            c.drop_exec(
+                                "\
+                                 SELECT users.* \
+                                 FROM users WHERE users.session_token = ? \
+                                 ORDER BY users.id ASC LIMIT 1",
+                                ("KMQEEJjXymcyFj3j7Qn3c3kZ5AFcghUxscm6J9c0a3XBTMjD2OA9PEoecxyt",),
+                            )
+                        })
+                        .and_then(|c| {
+                            c.start_transaction(my::TransactionOptions::new())
+                                .and_then(|t| {
+                                    t.drop_query(
+                                 "SELECT keystores.* FROM keystores WHERE keystores.key = 'traffic:date' ORDER BY keystores.key ASC LIMIT 1 FOR UPDATE; \
+                                 SELECT keystores.* FROM keystores WHERE keystores.key = 'traffic:hits' ORDER BY keystores.key ASC LIMIT 1 FOR UPDATE; \
+                                 UPDATE keystores SET value = 1521590012 WHERE keystores.key = 'traffic:date';",
+                            )
+                                })
+                                .and_then(|t| t.commit())
+                        })
+                        .and_then(move |c| {
+                            c.prep_exec(
+                                "SELECT `stories`.* \
+                                 FROM `stories` \
+                                 WHERE `stories`.`short_id` = ? \
+                                 ORDER BY `stories`.`id` ASC LIMIT 1",
+                                (::std::str::from_utf8(&id[..]).unwrap(),),
+                            ).and_then(|result| result.collect_and_drop::<my::Row>())
+                                .map(|(c, mut story)| (c, story.swap_remove(0)))
+                        })
+                        .and_then(|(c, story)| {
+                            let author = story.get::<u32, _>("user_id").unwrap();
+                            let id = story.get::<u32, _>("id").unwrap();
+                            c.drop_exec(
+                                "SELECT `users`.* FROM `users` WHERE `users`.`id` = ? LIMIT 1",
+                                (author,),
+                            ).map(move |c| (c, id))
+                        })
+                        .and_then(|(c, story)| {
+                            // XXX: probably not drop here, but we know we have no merged stories
+                            c.drop_exec(
+                                "SELECT `stories`.`id` \
+                                 FROM `stories` \
+                                 WHERE `stories`.`merged_story_id` = ?",
+                                (story,),
+                            ).map(move |c| (c, story))
+                        })
+                        .and_then(|(c, story)| {
+                            c.prep_exec(
+                                "SELECT `comments`.* \
+                                 FROM `comments` \
+                                 WHERE `comments`.`story_id` = ? \
+                                 ORDER BY \
+                                 (upvotes - downvotes) < 0 ASC, \
+                                 confidence DESC",
+                                (story,),
+                            ).map(move |comments| (comments, story))
+                        })
+                        .and_then(|(comments, story)| {
+                            comments
+                                .reduce_and_drop(
+                                    (HashSet::new(), HashSet::new()),
+                                    |(mut users, mut comments), comment| {
+                                        users.insert(comment.get::<String, _>("user_id").unwrap());
+                                        comments.insert(comment.get::<String, _>("id").unwrap());
+                                        (users, comments)
+                                    },
+                                )
+                                .map(move |(c, folded)| (c, folded, story))
+                        })
+                        .and_then(|(c, (users, comments), story)| {
+                            // get user info for all commenters
+                            let users = users.into_iter().collect::<Vec<_>>().join(", ");
+                            c.drop_query(&format!(
+                                "SELECT `users`.* FROM `users` WHERE `users`.`id` IN ({})",
+                                users
+                            )).map(move |c| (c, comments, story))
+                        })
+                        .and_then(|(c, comments, story)| {
+                            // get comment votes
+                            // XXX: why?!
+                            let comments = comments.into_iter().collect::<Vec<_>>().join(", ");
+                            c.drop_query(&format!(
+                                "SELECT `votes`.* FROM `votes` WHERE `votes`.`comment_id` IN ({})",
+                                comments
+                            )).map(move |c| (c, story))
+                            // NOTE: lobste.rs here fetches the user list again. unclear why?
+                        })
+                        .and_then(|(c, story)| {
+                            c.prep_exec(
+                                "SELECT `taggings`.* \
+                                 FROM `taggings` \
+                                 WHERE `taggings`.`story_id` = ?",
+                                (story,),
+                            )
+                        })
+                        .and_then(|taggings| {
+                            taggings.reduce_and_drop(HashSet::new(), |mut tags, tagging| {
+                                tags.insert(tagging.get::<String, _>("tag_id").unwrap());
+                                tags
+                            })
+                        })
+                        .and_then(|(c, tags)| {
+                            let tags = tags.into_iter()
+                                .map(String::from)
+                                .collect::<Vec<_>>()
+                                .join(", ");
+                            c.drop_query(&format!(
+                                "SELECT `tags`.* FROM `tags` WHERE `tags`.`id` IN ({})",
+                                tags
+                            ))
+                        })
+                        .map_err(|e| {
+                            eprintln!("{:?}", e);
+                        })
+                        .map(move |_| sent.elapsed()),
+                )
             }
             LobstersRequest::StoryVote(user, story, v) => {
                 // TODO
