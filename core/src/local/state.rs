@@ -52,10 +52,12 @@ impl State {
             // we need to *construct* the index!
             let (new, old) = self.state.split_last_mut().unwrap();
 
-            assert!(!old[0].partial());
-            for rs in old[0].values() {
-                for r in rs {
-                    new.insert_row(Row(r.0.clone()));
+            if !old.is_empty() {
+                assert!(!old[0].partial());
+                for rs in old[0].values() {
+                    for r in rs {
+                        new.insert_row(Row(r.0.clone()));
+                    }
                 }
             }
         }
