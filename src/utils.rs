@@ -80,9 +80,9 @@ pub(crate) fn ensure_pkey_condition(
     }
 }
 
-// Helper for flatten_delete_conditional - returns true if the
+// Helper for flatten_conditional - returns true if the
 // expression is "valid" (i.e. not something like `a = 1 AND a = 2`.
-fn do_flatten_delete_conditional(
+fn do_flatten_conditional(
     cond: &ConditionExpression,
     mut flattened: &mut HashSet<DataType>,
 ) -> bool {
@@ -104,28 +104,28 @@ fn do_flatten_delete_conditional(
             ref right,
         }) => {
             // Allow `key = 1 AND key = 1` but not `key = 1 AND key = 2`:
-            left == right && do_flatten_delete_conditional(&*left, &mut flattened)
+            left == right && do_flatten_conditional(&*left, &mut flattened)
         }
         ConditionExpression::LogicalOp(ConditionTree {
             operator: Operator::Or,
             ref left,
             ref right,
         }) => {
-            do_flatten_delete_conditional(&*left, &mut flattened)
-                && do_flatten_delete_conditional(&*right, &mut flattened)
+            do_flatten_conditional(&*left, &mut flattened)
+                && do_flatten_conditional(&*right, &mut flattened)
         }
         _ => false,
     }
 }
 
-// Takes a tree of conditional expressions for a DELETE statement and returns a list of all the
-// keys that should be deleted.
+// Takes a tree of conditional expressions for a DELETE/UPDATE statement and returns a list of all the
+// keys that should be mutated.
 // DELETE FROM a WHERE key = 1 OR key = 2 -> Some([1, 2])
 // DELETE FROM a WHERE key = 1 OR key = 2 AND key = 3 -> None // Bogus query
 // DELETE FROM a WHERE key = 1 AND key = 1 -> Some([1])
-pub(crate) fn flatten_delete_conditional(cond: &ConditionExpression) -> Option<HashSet<DataType>> {
+pub(crate) fn flatten_conditional(cond: &ConditionExpression) -> Option<HashSet<DataType>> {
     let mut flattened = HashSet::new();
-    if do_flatten_delete_conditional(cond, &mut flattened) {
+    if do_flatten_conditional(cond, &mut flattened) {
         Some(flattened)
     } else {
         None
