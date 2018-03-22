@@ -276,6 +276,35 @@ fn update_basic() {
 }
 
 #[test]
+fn update_pkey() {
+    let d = Deployment::new("delete_basic");
+    let opts = setup(&d);
+    let mut conn = mysql::Conn::new(opts).unwrap();
+    conn.query("CREATE TABLE Cats (id int PRIMARY KEY, name VARCHAR(255), PRIMARY KEY(id))")
+        .unwrap();
+    sleep();
+
+    conn.query("INSERT INTO Cats (id, name) VALUES (1, \"Bob\")")
+        .unwrap();
+    sleep();
+
+    {
+        let query = "UPDATE Cats SET Cats.name = \"Rusty\", Cats.id = 10 WHERE Cats.id = 1";
+        let updated = conn.query(query).unwrap();
+        assert_eq!(updated.affected_rows(), 1);
+    }
+
+    let name: String = conn.first("SELECT Cats.name FROM Cats WHERE Cats.id = 10")
+        .unwrap()
+        .unwrap();
+    assert_eq!(name, String::from("Rusty"));
+    let old_row = conn.query("SELECT Cats.name FROM Cats WHERE Cats.id = 1")
+        .unwrap()
+        .next();
+    assert!(old_row.is_none());
+}
+
+#[test]
 fn update_separate() {
     let d = Deployment::new("delete_basic");
     let opts = setup(&d);
@@ -316,14 +345,14 @@ fn update_multiple() {
     sleep();
 
     for i in 1..4 {
-        conn.query(format!("INSERT INTO Cats (id, name) VALUES ({}, \"Bob\")", i))
-            .unwrap();
+        let query = format!("INSERT INTO Cats (id, name) VALUES ({}, \"Bob\")", i);
+        conn.query(query).unwrap();
         sleep();
     }
 
     {
-        let updated = conn.query("UPDATE Cats SET Cats.name = \"Rusty\" WHERE Cats.id = 1 OR Cats.id = 2")
-            .unwrap();
+        let query = "UPDATE Cats SET Cats.name = \"Rusty\" WHERE Cats.id = 1 OR Cats.id = 2";
+        let updated = conn.query(query).unwrap();
         assert_eq!(updated.affected_rows(), 2);
     }
 
@@ -334,7 +363,9 @@ fn update_multiple() {
         assert_eq!(name, "Rusty");
     }
 
-    let name: String = conn.first("SELECT Cats.name FROM Cats WHERE Cats.id = 3").unwrap().unwrap();
+    let name: String = conn.first("SELECT Cats.name FROM Cats WHERE Cats.id = 3")
+        .unwrap()
+        .unwrap();
     assert_eq!(name, "Bob");
 }
 
@@ -370,7 +401,8 @@ fn update_bogus() {
     sleep();
 
     // `id` can't be both 1 and 2!
-    let deleted = conn.query("UPDATE Cats SET Cats.name = \"Rusty\" WHERE Cats.id = 1 AND Cats.id = 2")
-        .unwrap();
+    let deleted = conn.query(
+        "UPDATE Cats SET Cats.name = \"Rusty\" WHERE Cats.id = 1 AND Cats.id = 2",
+    ).unwrap();
     assert_eq!(deleted.affected_rows(), 0);
 }

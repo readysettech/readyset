@@ -431,52 +431,51 @@ impl SoupBackend {
                 //   [[1, "bob"], [1, "anne"]],
                 //   [[2, "cat"], [1, "dog"]],
                 // ]
+                //
                 // We want to turn that into a flat list of records, and update each record with
                 // the new values given in the query:
-                let updated_rows: Vec<Vec<DataType>> = lookup_results
+                let changed_rows: Vec<(Vec<DataType>, Vec<DataType>)> = lookup_results
                     .into_iter()
                     .map(|result| {
                         result
                             .into_iter()
                             .filter_map(|row| {
-                                let mut has_changed = false;
-                                let new_row = row.into_iter()
+                                let new_row = row.clone()
+                                    .into_iter()
                                     .enumerate()
                                     .map(|(i, column)| {
                                         update_columns
                                             .get(&i)
-                                            .and_then(|v| {
-                                                if v != &column {
-                                                    has_changed = true;
-                                                    Some(v.clone())
-                                                } else {
-                                                    None
-                                                }
-                                            })
+                                            .and_then(|v| Some(v.clone()))
                                             .unwrap_or(column)
                                     })
                                     .collect::<Vec<DataType>>();
 
                                 // Filter out rows with no actual content changes:
-                                if has_changed {
-                                    Some(new_row)
-                                } else {
+                                if row == new_row {
                                     None
+                                } else {
+                                    // Keep both the old and new row here in case we mutated the
+                                    // primary key (if that's the case we'll need to delete by the
+                                    // old key, _not_ the new one):
+                                    Some((row, new_row))
                                 }
                             })
-                            .collect::<Vec<Vec<DataType>>>()
+                            .collect::<Vec<(Vec<DataType>, Vec<DataType>)>>()
                     })
                     .flat_map(|r| r)
                     .collect();
 
-                if updated_rows.len() == 0 {
+                if changed_rows.len() == 0 {
                     // This might happen if there's no actual changes in content.
                     return results.completed(0, 0);
                 }
 
                 // Then we want to delete the old rows:
-                for row in updated_rows.iter() {
-                    let key = vec![row[key_index].clone()];
+                let mut new_rows = vec![];
+                for (old_row, new_row) in changed_rows.into_iter() {
+                    new_rows.push(new_row);
+                    let key = vec![old_row[key_index].clone()];
                     match mutator.delete(key) {
                         Ok(..) => {}
                         Err(e) => {
@@ -490,8 +489,8 @@ impl SoupBackend {
                 }
 
                 // And finally, insert the updated rows:
-                let count = updated_rows.len() as u64;
-                match mutator.multi_put(updated_rows) {
+                let count = new_rows.len() as u64;
+                match mutator.multi_put(new_rows) {
                     Ok(..) => results.completed(count, 0),
                     Err(e) => {
                         error!(self.log, "update: {:?}", e);
