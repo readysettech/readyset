@@ -83,6 +83,7 @@ fn do_flatten_conditional(
 
 // Takes a tree of conditional expressions for a DELETE/UPDATE statement and returns a list of all the
 // keys that should be mutated.
+// Panics if given a WHERE-clause containing other keys than the primary.
 // DELETE FROM a WHERE key = 1 OR key = 2 -> Some([1, 2])
 // DELETE FROM a WHERE key = 1 OR key = 2 AND key = 3 -> None // Bogus query
 // DELETE FROM a WHERE key = 1 AND key = 1 -> Some([1])
@@ -99,5 +100,85 @@ pub(crate) fn flatten_conditional(
         Some(flattened)
     } else {
         None
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use nom_sql::{self, SqlQuery};
+    use super::*;
+
+    fn compare_flatten<I>(cond_query: &str, pkey_name: &str, expected: Option<Vec<I>>)
+    where
+        I: Into<DataType>,
+    {
+        let cond = match nom_sql::parse_query(cond_query).unwrap() {
+            SqlQuery::Update(u) => u.where_clause.unwrap(),
+            SqlQuery::Delete(d) => d.where_clause.unwrap(),
+            _ => unreachable!(),
+        };
+
+        let pkey = Column {
+            name: String::from(pkey_name),
+            table: Some(String::from("T")),
+            alias: None,
+            function: None,
+        };
+
+        let flat: Option<HashSet<DataType>> =
+            expected.and_then(|e| Some(e.into_iter().map(|v| v.into()).collect()));
+        assert_eq!(flatten_conditional(&cond, &vec![&pkey]), flat);
+    }
+
+    #[test]
+    fn test_flatten_conditional() {
+        compare_flatten("DELETE FROM T WHERE T.a = 1", "a", Some(vec![1]));
+        compare_flatten(
+            "DELETE FROM T WHERE T.a = 1 OR T.a = 2",
+            "a",
+            Some(vec![1, 2]),
+        );
+        compare_flatten("UPDATE T SET T.b = 2 WHERE T.a = 1", "a", Some(vec![1]));
+        compare_flatten(
+            "UPDATE T SET T.b = 2 WHERE T.a = 1 OR T.a = 2",
+            "a",
+            Some(vec![1, 2]),
+        );
+
+        // Valid, but bogus, ORs:
+        compare_flatten("DELETE FROM T WHERE T.a = 1 OR T.a = 1", "a", Some(vec![1]));
+        compare_flatten(
+            "UPDATE T SET T.b = 2 WHERE T.a = 1 OR T.a = 1",
+            "a",
+            Some(vec![1]),
+        );
+
+        // Valid, but bogus, ANDs:
+        compare_flatten(
+            "DELETE FROM T WHERE T.a = 1 AND T.a = 1",
+            "a",
+            Some(vec![1]),
+        );
+        compare_flatten(
+            "UPDATE T SET T.b = 2 WHERE T.a = 1 AND T.a = 1",
+            "a",
+            Some(vec![1]),
+        );
+
+        // Invalid ANDs:
+        compare_flatten::<DataType>("DELETE FROM T WHERE T.a = 1 AND T.a = 2", "a", None);
+        compare_flatten::<DataType>("UPDATE T SET T.b = 2 WHERE T.a = 1 AND T.a = 2", "a", None);
+    }
+
+    #[test]
+    #[should_panic]
+    fn test_flatten_conditional_non_key_delete() {
+        compare_flatten("DELETE FROM T WHERE T.b = 1", "a", Some(vec![1]));
+    }
+
+    #[test]
+    #[should_panic]
+    fn test_flatten_conditional_non_key_update() {
+        compare_flatten("UPDATE T SET T.b = 2 WHERE T.b = 1", "a", Some(vec![1]));
     }
 }
