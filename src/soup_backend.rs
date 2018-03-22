@@ -397,8 +397,6 @@ impl SoupBackend {
                 let qc = self.query_count
                     .fetch_add(1, sync::atomic::Ordering::SeqCst);
                 let qname = format!("q_{}", qc);
-                // TODO(ekmartin): does this create an extra set of nodes?
-                // if so we should cache the getter
                 let getter = match self.soup
                     .extend_recipe(format!("QUERY {}: {};", qname, select_q))
                 {
