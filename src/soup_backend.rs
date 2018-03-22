@@ -152,6 +152,9 @@ impl SoupBackend {
 
         match utils::flatten_conditional(&cond, &pkey) {
             None => results.completed(0, 0),
+            Some(ref flattened) if flattened.len() == 0 => {
+                panic!("DELETE only supports WHERE-clauses on primary keys");
+            }
             Some(flattened) => {
                 let mut deleted = 0;
                 for key in flattened {
@@ -333,7 +336,7 @@ impl SoupBackend {
         results: QueryResultWriter<W>,
     ) -> io::Result<()> {
         let cond = q.where_clause
-            .expect("only supports DELETEs with WHERE-clauses");
+            .expect("only supports UPDATEs with WHERE-clauses");
 
         let ts = self.table_schemas.lock().unwrap();
         let fields = ts.get(&q.table.name).unwrap();
@@ -393,7 +396,11 @@ impl SoupBackend {
 
         match utils::flatten_conditional(&cond, &pkey) {
             None => results.completed(0, 0),
+            Some(ref flattened) if flattened.len() == 0 => {
+                panic!("UPDATE only supports WHERE-clauses on primary keys");
+            }
             Some(flattened) => {
+                println!("got here {:?}", flattened);
                 let qc = self.query_count
                     .fetch_add(1, sync::atomic::Ordering::SeqCst);
                 let qname = format!("q_{}", qc);
