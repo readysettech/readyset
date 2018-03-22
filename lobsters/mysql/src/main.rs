@@ -29,8 +29,9 @@ struct MysqlTrawler {
 }
 impl MysqlTrawler {
     fn new(handle: &tokio_core::reactor::Handle, opts: my::Opts) -> Self {
-        let mut c = my::Pool::new(opts, handle);
-        MysqlTrawler { c }
+        MysqlTrawler {
+            c: my::Pool::new(opts, handle),
+        }
     }
 }
 /*
