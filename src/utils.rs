@@ -1,3 +1,5 @@
+use std::collections::HashSet;
+
 use distributary::DataType;
 use nom_sql::{self, ConditionBase, ConditionExpression, ConditionTree, Operator};
 use regex::Regex;
@@ -82,7 +84,7 @@ pub(crate) fn ensure_pkey_condition(
 // expression is "valid" (i.e. not something like `a = 1 AND a = 2`.
 fn do_flatten_delete_conditional(
     cond: &ConditionExpression,
-    mut flattened: &mut Vec<DataType>,
+    mut flattened: &mut HashSet<DataType>,
 ) -> bool {
     match *cond {
         ConditionExpression::ComparisonOp(ConditionTree {
@@ -93,16 +95,16 @@ fn do_flatten_delete_conditional(
             right: box ConditionExpression::Base(ConditionBase::Literal(ref l)),
             ..
         }) => {
-            flattened.push(DataType::from(l));
+            flattened.insert(DataType::from(l));
             true
         }
         ConditionExpression::LogicalOp(ConditionTree {
             operator: Operator::And,
             ref left,
             ref right,
-        }) if left != right =>
-        {
-            false
+        }) => {
+            // Allow `key = 1 AND key = 1` but not `key = 1 AND key = 2`:
+            left == right && do_flatten_delete_conditional(&*left, &mut flattened)
         }
         ConditionExpression::LogicalOp(ConditionTree {
             operator: Operator::Or,
@@ -121,8 +123,8 @@ fn do_flatten_delete_conditional(
 // DELETE FROM a WHERE key = 1 OR key = 2 -> Some([1, 2])
 // DELETE FROM a WHERE key = 1 OR key = 2 AND key = 3 -> None // Bogus query
 // DELETE FROM a WHERE key = 1 AND key = 1 -> Some([1])
-pub(crate) fn flatten_delete_conditional(cond: &ConditionExpression) -> Option<Vec<DataType>> {
-    let mut flattened = vec![];
+pub(crate) fn flatten_delete_conditional(cond: &ConditionExpression) -> Option<HashSet<DataType>> {
+    let mut flattened = HashSet::new();
     if do_flatten_delete_conditional(cond, &mut flattened) {
         Some(flattened)
     } else {
