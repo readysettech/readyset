@@ -90,21 +90,29 @@ impl trawler::LobstersClient for MysqlTrawler {
                         stories.reduce_and_drop(
                             (HashSet::new(), HashSet::new()),
                             |(mut users, mut stories), story| {
-                                users.insert(story.get::<String, _>("user_id").unwrap());
-                                stories.insert(story.get::<String, _>("id").unwrap());
+                                users.insert(story.get::<u32, _>("user_id").unwrap());
+                                stories.insert(story.get::<u32, _>("id").unwrap());
                                 (users, stories)
                             },
                         )
                     })
                     .and_then(|(c, (users, stories))| {
-                        let users: Vec<_> = users.into_iter().collect();
+                        let users = users
+                            .into_iter()
+                            .map(|id| format!("{}", id))
+                            .collect::<Vec<_>>()
+                            .join(",");
                         c.drop_query(&format!(
                             "SELECT `users`.* FROM `users` WHERE `users`.`id` IN ({})",
-                            users.join(",")
+                            users,
                         )).map(move |c| (c, stories))
                     })
                     .and_then(|(c, stories)| {
-                        let stories = stories.into_iter().collect::<Vec<_>>().join(", ");
+                        let stories = stories
+                            .into_iter()
+                            .map(|id| format!("{}", id))
+                            .collect::<Vec<_>>()
+                            .join(",");
                         c
                             .drop_query(&format!(
                                 "SELECT `suggested_titles`.* FROM `suggested_titles` WHERE `suggested_titles`.`story_id` IN ({})", stories
@@ -126,15 +134,15 @@ impl trawler::LobstersClient for MysqlTrawler {
                     })
                     .and_then(|taggings| {
                         taggings.reduce_and_drop(HashSet::new(), |mut tags, tagging| {
-                            tags.insert(tagging.get::<String, _>("tag_id").unwrap());
+                            tags.insert(tagging.get::<u32, _>("tag_id").unwrap());
                             tags
                         })
                     })
                     .and_then(|(c, tags)| {
                         let tags = tags.into_iter()
-                            .map(String::from)
+                            .map(|id| format!("{}", id))
                             .collect::<Vec<_>>()
-                            .join(", ");
+                            .join(",");
                         c.drop_query(&format!(
                             "SELECT `tags`.* FROM `tags` WHERE `tags`.`id` IN ({})",
                             tags
@@ -191,63 +199,80 @@ impl trawler::LobstersClient for MysqlTrawler {
                         })
                         .and_then(|stories| {
                             stories.reduce_and_drop(Vec::new(), |mut stories, story| {
-                                stories.push(story.get::<String, _>("id").unwrap());
+                                stories.push(story.get::<u32, _>("id").unwrap());
                                 stories
                             })
                         })
                         .and_then(|(c, stories)| {
+                            let stories = stories
+                                .into_iter()
+                                .map(|id| format!("{}", id))
+                                .collect::<Vec<_>>()
+                                .join(",");
                             c.query(&format!(
                                 "SELECT  `stories`.* FROM `stories` WHERE `stories`.`id` IN ({})",
-                                stories.join(", ")
+                                stories
                             ))
                         })
                         .and_then(|stories| {
                             stories.reduce_and_drop(
                                 (HashSet::new(), HashSet::new()),
                                 |(mut users, mut stories), story| {
-                                    users.insert(story.get::<String, _>("user_id").unwrap());
-                                    stories.insert(story.get::<String, _>("id").unwrap());
+                                    users.insert(story.get::<u32, _>("user_id").unwrap());
+                                    stories.insert(story.get::<u32, _>("id").unwrap());
                                     (users, stories)
                                 },
                             )
                         })
                         .and_then(|(c, (users, stories))| {
-                            let users: Vec<_> = users.into_iter().collect();
+                            let users = users
+                                .into_iter()
+                                .map(|id| format!("{}", id))
+                                .collect::<Vec<_>>()
+                                .join(",");
                             c.drop_query(&format!(
                                 "SELECT `users`.* FROM `users` WHERE `users`.`id` IN ({})",
-                                users.join(",")
+                                users
                             )).map(move |c| (c, stories))
                         })
                         .and_then(|(c, stories)| {
-                            let stories = stories.into_iter().collect::<Vec<_>>().join(", ");
-                            c
-                            .drop_query(&format!(
-                                "SELECT `suggested_titles`.* FROM `suggested_titles` WHERE `suggested_titles`.`story_id` IN ({})", stories
-                            ))
-                            .map(move |c| (c, stories))
+                            let stories = stories
+                                .into_iter()
+                                .map(|id| format!("{}", id))
+                                .collect::<Vec<_>>()
+                                .join(",");
+                            c.drop_query(&format!(
+                                "SELECT `suggested_titles`.* \
+                                 FROM `suggested_titles` \
+                                 WHERE `suggested_titles`.`story_id` IN ({})",
+                                stories
+                            )).map(move |c| (c, stories))
                         })
                         .and_then(|(c, stories)| {
-                            c
-                            .drop_query(&format!(
-                                "SELECT `suggested_taggings`.* FROM `suggested_taggings` WHERE `suggested_taggings`.`story_id` IN ({})", stories
-                            ))
-                            .map(move |c| (c, stories))
+                            c.drop_query(&format!(
+                                "SELECT `suggested_taggings`.* \
+                                 FROM `suggested_taggings` \
+                                 WHERE `suggested_taggings`.`story_id` IN ({})",
+                                stories
+                            )).map(move |c| (c, stories))
                         })
                         .and_then(|(c, stories)| {
                             c.query(&format!(
-                        "SELECT `taggings`.* FROM `taggings` WHERE `taggings`.`story_id` IN ({})",
-                        stories
-                        ))
+                                "SELECT `taggings`.* \
+                                 FROM `taggings` \
+                                 WHERE `taggings`.`story_id` IN ({})",
+                                stories
+                            ))
                         })
                         .and_then(|taggings| {
                             taggings.reduce_and_drop(HashSet::new(), |mut tags, tagging| {
-                                tags.insert(tagging.get::<String, _>("tag_id").unwrap());
+                                tags.insert(tagging.get::<u32, _>("tag_id").unwrap());
                                 tags
                             })
                         })
                         .and_then(|(c, tags)| {
                             let tags = tags.into_iter()
-                                .map(String::from)
+                                .map(|id| format!("{}", id))
                                 .collect::<Vec<_>>()
                                 .join(", ");
                             c.drop_query(&format!(
@@ -379,13 +404,13 @@ impl trawler::LobstersClient for MysqlTrawler {
                         })
                         .and_then(|taggings| {
                             taggings.reduce_and_drop(HashSet::new(), |mut tags, tagging| {
-                                tags.insert(tagging.get::<String, _>("tag_id").unwrap());
+                                tags.insert(tagging.get::<u32, _>("tag_id").unwrap());
                                 tags
                             })
                         })
                         .and_then(|(c, tags)| {
                             let tags = tags.into_iter()
-                                .map(String::from)
+                                .map(|id| format!("{}", id))
                                 .collect::<Vec<_>>()
                                 .join(", ");
                             c.drop_query(&format!(
