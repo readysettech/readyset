@@ -16,6 +16,7 @@ regex = "0.2.6"
 
 [dev-dependencies]
 mysql = "12.0.4"
+zookeeper = { git = "https://github.com/bonifaido/rust-zookeeper", rev = "1167cfce5f5088112bd53983614145e5787b4c8f" }
 
 [lib]
 name = "mysoupql"
