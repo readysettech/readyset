@@ -4,6 +4,7 @@ extern crate mysql;
 extern crate nom_sql;
 #[macro_use]
 extern crate slog;
+extern crate zookeeper;
 
 extern crate mysoupql;
 
@@ -18,6 +19,7 @@ use std::thread;
 use distributary::{ControllerBuilder, ZookeeperAuthority};
 use msql_srv::MysqlIntermediary;
 use nom_sql::ColumnSpecification;
+use zookeeper::{WatchedEvent, ZooKeeper, ZooKeeperExt};
 
 use mysoupql::SoupBackend;
 
@@ -37,6 +39,21 @@ impl Deployment {
         );
 
         Self { name }
+    }
+}
+
+impl Drop for Deployment {
+    fn drop(&mut self) {
+        // Remove the ZK data if we created any:
+        let zk = ZooKeeper::connect(
+            "127.0.0.1:2181",
+            Duration::from_secs(3),
+            |_: WatchedEvent| {},
+        );
+
+        if let Ok(z) = zk {
+            let _ = z.delete_recursive(&format!("/{}", self.name));
+        }
     }
 }
 
