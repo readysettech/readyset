@@ -35,6 +35,9 @@ pub(super) struct WorkerInner {
 
     listen_addr: IpAddr,
 
+    memory_limit: usize,
+    domains: Vec<(DomainIndex, usize)>,
+
     log: slog::Logger,
 }
 
@@ -47,6 +50,7 @@ impl WorkerInner {
         state: &ControllerState,
         nworker_threads: usize,
         nread_threads: usize,
+        memory_limit: usize,
         log: slog::Logger,
     ) -> Result<WorkerInner, ()> {
         let channel_coordinator = Arc::new(ChannelCoordinator::new());
@@ -108,6 +112,8 @@ impl WorkerInner {
             heartbeat_every: state.config.heartbeat_every,
             last_heartbeat: Instant::now(),
             listen_addr,
+            memory_limit,
+            domains: Vec::new(),
             log,
         })
     }
@@ -144,6 +150,7 @@ impl WorkerInner {
         // need to register the domain with the local channel coordinator
         self.channel_coordinator
             .insert_addr((idx, shard), addr, false);
+        self.domains.push((idx, shard));
 
         let msg = CoordinationMessage {
             source: self.sender_addr,

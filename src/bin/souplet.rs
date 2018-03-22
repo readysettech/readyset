@@ -54,6 +54,14 @@ fn main() {
                 .help("Number of worker threads to run on this souplet."),
         )
         .arg(
+            Arg::with_name("memory")
+                .short("m")
+                .long("memory")
+                .takes_value(true)
+                .default_value("1073741824")
+                .help("Memory, in bytes, available for materialized state."),
+        )
+        .arg(
             Arg::with_name("readers")
                 .short("r")
                 .long("readers")
@@ -91,6 +99,7 @@ fn main() {
     let listen_addr = matches.value_of("address").unwrap().parse().unwrap();
     let zookeeper_addr = matches.value_of("zookeeper").unwrap();
     let workers = value_t_or_exit!(matches, "workers", usize);
+    let memory = value_t_or_exit!(matches, "memory", usize);
     let readers = value_t_or_exit!(matches, "readers", usize);
     let quorum = value_t_or_exit!(matches, "quorum", usize);
     let sharding = match value_t_or_exit!(matches, "shards", usize) {
@@ -104,6 +113,7 @@ fn main() {
     let mut builder = ControllerBuilder::default();
     builder.set_listen_addr(listen_addr);
     builder.set_worker_threads(workers);
+    builder.set_memory_limit(memory);
     builder.set_read_threads(readers);
     builder.set_sharding(sharding);
     builder.set_quorum(quorum);

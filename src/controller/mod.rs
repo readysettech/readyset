@@ -189,6 +189,7 @@ fn start_instance<A: Authority + 'static>(
     config: ControllerConfig,
     nworker_threads: usize,
     nread_threads: usize,
+    memory_limit: usize,
     log: slog::Logger,
 ) -> ControllerHandle<A> {
     let (controller_event_tx, controller_event_rx) = mpsc::channel();
@@ -253,6 +254,7 @@ fn start_instance<A: Authority + 'static>(
                 receiver: worker_event_rx,
                 nworker_threads,
                 nread_threads,
+                memory_limit,
                 listen_addr,
                 internal,
                 log: log2,
@@ -385,6 +387,7 @@ pub struct Worker {
 
     nworker_threads: usize,
     nread_threads: usize,
+    memory_limit: usize,
 
     listen_addr: IpAddr,
     internal: ServingThread,
@@ -608,6 +611,7 @@ impl Worker {
                         &state,
                         self.nworker_threads,
                         self.nread_threads,
+                        self.memory_limit,
                         self.log.clone(),
                     ) {
                         self.inner = Some(worker);
