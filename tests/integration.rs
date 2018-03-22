@@ -276,6 +276,37 @@ fn update_basic() {
 }
 
 #[test]
+fn update_separate() {
+    let d = Deployment::new("delete_basic");
+    let opts = setup(&d);
+    let mut conn = mysql::Conn::new(opts).unwrap();
+    conn.query("CREATE TABLE Cats (id int PRIMARY KEY, name VARCHAR(255), PRIMARY KEY(id))")
+        .unwrap();
+    sleep();
+
+    conn.query("INSERT INTO Cats (id, name) VALUES (1, \"Bob\")")
+        .unwrap();
+    sleep();
+
+    {
+        let updated = conn.query("UPDATE Cats SET Cats.name = \"Rusty\" WHERE Cats.id = 1")
+            .unwrap();
+        assert_eq!(updated.affected_rows(), 1);
+    }
+
+    {
+        let updated = conn.query("UPDATE Cats SET Cats.name = \"Rusty II\" WHERE Cats.id = 1")
+            .unwrap();
+        assert_eq!(updated.affected_rows(), 1);
+    }
+
+    let name: String = conn.first("SELECT Cats.name FROM Cats WHERE Cats.id = 1")
+        .unwrap()
+        .unwrap();
+    assert_eq!(name, String::from("Rusty II"));
+}
+
+#[test]
 fn update_multiple() {
     let d = Deployment::new("delete_basic");
     let opts = setup(&d);
