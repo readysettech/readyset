@@ -14,6 +14,9 @@ slog = "2.0.6"
 slog-term = "2.0.1"
 regex = "0.2.6"
 
-#[bin]
-#name = "mysoupql"
-#path = "src/main.rs"
+[dev-dependencies]
+mysql = "12.0.4"
+
+[lib]
+name = "mysoupql"
+path = "src/lib.rs"
