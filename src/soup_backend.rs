@@ -1,8 +1,7 @@
 use distributary::{ControllerHandle, DataType, Mutator, RemoteGetter, ZookeeperAuthority};
 
 use msql_srv::{self, *};
-use nom_sql::{self, ColumnConstraint, ColumnSpecification, ConditionBase, ConditionExpression,
-              ConditionTree, Literal, SqlType};
+use nom_sql::{self, ColumnConstraint, ColumnSpecification, Literal, SqlType};
 use slog;
 use std::io;
 use std::collections::{BTreeMap, HashMap};
@@ -139,8 +138,7 @@ impl SoupBackend {
 
         {
             let ts = self.table_schemas.lock().unwrap();
-            let pkey: Vec<_> = ts
-                .get(&q.table.name)
+            let pkey: Vec<_> = ts.get(&q.table.name)
                 .unwrap()
                 .into_iter()
                 .filter(|cs| cs.constraints.contains(&ColumnConstraint::PrimaryKey))
@@ -158,27 +156,24 @@ impl SoupBackend {
             .entry(q.table.name.clone())
             .or_insert(self.soup.get_mutator(&q.table.name).unwrap());
 
-        let key = match cond {
-            ConditionExpression::ComparisonOp(ConditionTree {
-                left: box ConditionExpression::Base(ConditionBase::Literal(ref l)),
-                ..
-            })
-            | ConditionExpression::ComparisonOp(ConditionTree {
-                right: box ConditionExpression::Base(ConditionBase::Literal(ref l)),
-                ..
-            }) => vec![DataType::from(l)],
-            // TODO(ekmartin): support LogicalOp as well
-            _ => panic!("DELETE WHERE-clauses need at least one literal"),
-        };
+        match utils::flatten_delete_conditional(&cond) {
+            None => results.completed(0, 0),
+            Some(flattened) => {
+                let mut deleted = 0;
+                for key in flattened {
+                    match mutator.delete(vec![key]) {
+                        Ok(_) => deleted += 1,
+                        Err(e) => {
+                            error!(self.log, "delete error: {:?}", e);
+                            return results.error(
+                                msql_srv::ErrorKind::ER_UNKNOWN_ERROR,
+                                format!("{:?}", e).as_bytes(),
+                            );
+                        }
+                    };
+                }
 
-        match mutator.delete(key) {
-            Ok(_) => results.completed(1, 0),
-            Err(e) => {
-                error!(self.log, "delete error: {:?}", e);
-                results.error(
-                    msql_srv::ErrorKind::ER_UNKNOWN_ERROR,
-                    format!("{:?}", e).as_bytes(),
-                )
+                results.completed(deleted, 0)
             }
         }
     }
