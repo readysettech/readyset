@@ -162,7 +162,7 @@ fn delete_multiple() {
 
 #[test]
 fn delete_bogus() {
-    let d = Deployment::new("delete_multiple");
+    let d = Deployment::new("delete_bogus");
     let opts = setup(&d);
     let mut conn = mysql::Conn::new(opts).unwrap();
     conn.query("CREATE TABLE Cats (id int PRIMARY KEY, PRIMARY KEY(id))")
@@ -177,7 +177,7 @@ fn delete_bogus() {
 
 #[test]
 fn delete_bogus_valid_and() {
-    let d = Deployment::new("delete_basic");
+    let d = Deployment::new("delete_bogus_valid_and");
     let opts = setup(&d);
     let mut conn = mysql::Conn::new(opts).unwrap();
     conn.query("CREATE TABLE Cats (id int PRIMARY KEY, PRIMARY KEY(id))")
@@ -207,7 +207,7 @@ fn delete_bogus_valid_and() {
 
 #[test]
 fn delete_bogus_valid_or() {
-    let d = Deployment::new("delete_basic");
+    let d = Deployment::new("delete_bogus_valid_or");
     let opts = setup(&d);
     let mut conn = mysql::Conn::new(opts).unwrap();
     conn.query("CREATE TABLE Cats (id int PRIMARY KEY, PRIMARY KEY(id))")
@@ -236,8 +236,8 @@ fn delete_bogus_valid_or() {
 }
 
 #[test]
-fn delete_non_key() {
-    let d = Deployment::new("delete_multiple");
+fn delete_other_column() {
+    let d = Deployment::new("delete_other_column");
     let opts = setup(&d);
     let mut conn = mysql::Conn::new(opts).unwrap();
     conn.query("CREATE TABLE Cats (id int PRIMARY KEY, name VARCHAR(255), PRIMARY KEY(id))")
@@ -245,14 +245,26 @@ fn delete_non_key() {
     sleep();
 
     assert!(
-        conn.query("DELETE FROM Cats WHERE Cats.id = 1 OR Cats.name = \"bob\"")
+        conn.query("DELETE FROM Cats WHERE Cats.id = 1 OR Cats.name = \"Bob\"")
             .is_err()
     );
 }
 
 #[test]
+fn delete_no_keys() {
+    let d = Deployment::new("delete_no_keys");
+    let opts = setup(&d);
+    let mut conn = mysql::Conn::new(opts).unwrap();
+    conn.query("CREATE TABLE Cats (id int PRIMARY KEY, name VARCHAR(255), PRIMARY KEY(id))")
+        .unwrap();
+    sleep();
+
+    assert!(conn.query("DELETE FROM Cats WHERE 1 = 1").is_err());
+}
+
+#[test]
 fn update_basic() {
-    let d = Deployment::new("delete_basic");
+    let d = Deployment::new("update_basic");
     let opts = setup(&d);
     let mut conn = mysql::Conn::new(opts).unwrap();
     conn.query("CREATE TABLE Cats (id int PRIMARY KEY, name VARCHAR(255), PRIMARY KEY(id))")
@@ -277,7 +289,7 @@ fn update_basic() {
 
 #[test]
 fn update_pkey() {
-    let d = Deployment::new("delete_basic");
+    let d = Deployment::new("update_pkey");
     let opts = setup(&d);
     let mut conn = mysql::Conn::new(opts).unwrap();
     conn.query("CREATE TABLE Cats (id int PRIMARY KEY, name VARCHAR(255), PRIMARY KEY(id))")
@@ -306,7 +318,7 @@ fn update_pkey() {
 
 #[test]
 fn update_separate() {
-    let d = Deployment::new("delete_basic");
+    let d = Deployment::new("update_separate");
     let opts = setup(&d);
     let mut conn = mysql::Conn::new(opts).unwrap();
     conn.query("CREATE TABLE Cats (id int PRIMARY KEY, name VARCHAR(255), PRIMARY KEY(id))")
@@ -337,7 +349,7 @@ fn update_separate() {
 
 #[test]
 fn update_multiple() {
-    let d = Deployment::new("delete_basic");
+    let d = Deployment::new("update_multiple");
     let opts = setup(&d);
     let mut conn = mysql::Conn::new(opts).unwrap();
     conn.query("CREATE TABLE Cats (id int PRIMARY KEY, name VARCHAR(255), PRIMARY KEY(id))")
@@ -370,8 +382,34 @@ fn update_multiple() {
 }
 
 #[test]
+fn update_no_keys() {
+    let d = Deployment::new("update_no_keys");
+    let opts = setup(&d);
+    let mut conn = mysql::Conn::new(opts).unwrap();
+    conn.query("CREATE TABLE Cats (id int PRIMARY KEY, name VARCHAR(255), PRIMARY KEY(id))")
+        .unwrap();
+    sleep();
+
+    let query = "UPDATE Cats SET Cats.name = \"Rusty\" WHERE 1 = 1";
+    assert!(conn.query(query).is_err());
+}
+
+#[test]
+fn update_other_column() {
+    let d = Deployment::new("update_no_keys");
+    let opts = setup(&d);
+    let mut conn = mysql::Conn::new(opts).unwrap();
+    conn.query("CREATE TABLE Cats (id int PRIMARY KEY, name VARCHAR(255), PRIMARY KEY(id))")
+        .unwrap();
+    sleep();
+
+    let query = "UPDATE Cats SET Cats.name = \"Rusty\" WHERE Cats.name = \"Bob\"";
+    assert!(conn.query(query).is_err());
+}
+
+#[test]
 fn update_no_changes() {
-    let d = Deployment::new("delete_basic");
+    let d = Deployment::new("update_no_changes");
     let opts = setup(&d);
     let mut conn = mysql::Conn::new(opts).unwrap();
     conn.query("CREATE TABLE Cats (id int PRIMARY KEY, name VARCHAR(255), PRIMARY KEY(id))")
@@ -389,7 +427,7 @@ fn update_no_changes() {
 
 #[test]
 fn update_bogus() {
-    let d = Deployment::new("delete_multiple");
+    let d = Deployment::new("update_bogus");
     let opts = setup(&d);
     let mut conn = mysql::Conn::new(opts).unwrap();
     conn.query("CREATE TABLE Cats (id int PRIMARY KEY, name VARCHAR(255), PRIMARY KEY(id))")

@@ -59,15 +59,27 @@ fn do_flatten_conditional(
             flattened.insert(DataType::from(l));
             true
         }
+        ConditionExpression::ComparisonOp(ConditionTree {
+            left: box ConditionExpression::Base(ConditionBase::Literal(ref left)),
+            right: box ConditionExpression::Base(ConditionBase::Literal(ref right)),
+            operator: Operator::Equal,
+        }) if left == right =>
+        {
+            true
+        }
         ConditionExpression::LogicalOp(ConditionTree {
             operator: Operator::And,
             ref left,
             ref right,
         }) => {
-            // Allow `key = 1 AND key = 1` but not `key = 1 AND key = 2`:
-            // TODO(ekmartin): This could support bogus queries on the form of
-            // `key = 1 AND 10 = 10` if we wanted.
-            left == right && do_flatten_conditional(&*left, pkey, &mut flattened)
+            do_flatten_conditional(&*left, pkey, &mut flattened) && {
+                let count = flattened.len();
+                let valid = do_flatten_conditional(&*right, pkey, &mut flattened);
+                // Only valid if neither of the sides contain a bad key, and if they both refer to
+                // the same key value. `key = 1 AND key = 1` is okay, whereas `key = 1 AND key = 2`
+                // is not.
+                valid && count == flattened.len()
+            }
         }
         ConditionExpression::LogicalOp(ConditionTree {
             operator: Operator::Or,
@@ -164,6 +176,17 @@ mod tests {
             "a",
             Some(vec![1]),
         );
+        compare_flatten("DELETE FROM T WHERE T.a = 1 AND 1 = 1", "a", Some(vec![1]));
+        compare_flatten(
+            "UPDATE T SET T.b = 2 WHERE T.a = 1 AND 1 = 1",
+            "a",
+            Some(vec![1]),
+        );
+
+        // We can't really handle these at the moment, but in the future we might want to
+        // delete/update all rows:
+        compare_flatten::<DataType>("DELETE FROM T WHERE 1 = 1", "a", Some(vec![]));
+        compare_flatten::<DataType>("UPDATE T SET T.b = 2 WHERE 1 = 1", "a", Some(vec![]));
 
         // Invalid ANDs:
         compare_flatten::<DataType>("DELETE FROM T WHERE T.a = 1 AND T.a = 2", "a", None);
