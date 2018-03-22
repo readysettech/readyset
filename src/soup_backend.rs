@@ -156,10 +156,10 @@ impl SoupBackend {
                 panic!("DELETE only supports WHERE-clauses on primary keys");
             }
             Some(flattened) => {
-                let mut deleted = 0;
+                let count = flattened.len() as u64;
                 for key in flattened {
                     match mutator.delete(vec![key]) {
-                        Ok(_) => deleted += 1,
+                        Ok(_) => {}
                         Err(e) => {
                             error!(self.log, "delete error: {:?}", e);
                             return results.error(
@@ -170,7 +170,7 @@ impl SoupBackend {
                     };
                 }
 
-                results.completed(deleted, 0)
+                results.completed(count, 0)
             }
         }
     }
@@ -400,7 +400,6 @@ impl SoupBackend {
                 panic!("UPDATE only supports WHERE-clauses on primary keys");
             }
             Some(flattened) => {
-                println!("got here {:?}", flattened);
                 let qc = self.query_count
                     .fetch_add(1, sync::atomic::Ordering::SeqCst);
                 let qname = format!("q_{}", qc);
