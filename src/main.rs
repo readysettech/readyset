@@ -5,12 +5,13 @@ extern crate clap;
 extern crate distributary;
 extern crate msql_srv;
 extern crate nom_sql;
-extern crate regex;
 
 #[macro_use]
-extern crate lazy_static;
-#[macro_use]
 extern crate slog;
+#[macro_use]
+extern crate lazy_static;
+
+extern crate regex;
 
 mod soup_backend;
 mod utils;
