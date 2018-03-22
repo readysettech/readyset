@@ -304,8 +304,8 @@ impl trawler::LobstersClient for MysqlTrawler {
                                 .map(|(c, mut story)| (c, story.swap_remove(0)))
                         })
                         .and_then(|(c, story)| {
-                            let author = story.get::<u32, _>("user_id").unwrap();
-                            let id = story.get::<u32, _>("id").unwrap();
+                            let author = story.get::<i32, _>("user_id").unwrap();
+                            let id = story.get::<i32, _>("id").unwrap();
                             c.drop_exec(
                                 "SELECT `users`.* FROM `users` WHERE `users`.`id` = ? LIMIT 1",
                                 (author,),
@@ -336,8 +336,8 @@ impl trawler::LobstersClient for MysqlTrawler {
                                 .reduce_and_drop(
                                     (HashSet::new(), HashSet::new()),
                                     |(mut users, mut comments), comment| {
-                                        users.insert(comment.get::<String, _>("user_id").unwrap());
-                                        comments.insert(comment.get::<String, _>("id").unwrap());
+                                        users.insert(comment.get::<i32, _>("user_id").unwrap());
+                                        comments.insert(comment.get::<i32, _>("id").unwrap());
                                         (users, comments)
                                     },
                                 )
@@ -345,7 +345,11 @@ impl trawler::LobstersClient for MysqlTrawler {
                         })
                         .and_then(|(c, (users, comments), story)| {
                             // get user info for all commenters
-                            let users = users.into_iter().collect::<Vec<_>>().join(", ");
+                            let users = users
+                                .into_iter()
+                                .map(|id| format!("{}", id))
+                                .collect::<Vec<_>>()
+                                .join(", ");
                             c.drop_query(&format!(
                                 "SELECT `users`.* FROM `users` WHERE `users`.`id` IN ({})",
                                 users
@@ -354,7 +358,11 @@ impl trawler::LobstersClient for MysqlTrawler {
                         .and_then(|(c, comments, story)| {
                             // get comment votes
                             // XXX: why?!
-                            let comments = comments.into_iter().collect::<Vec<_>>().join(", ");
+                            let comments = comments
+                                .into_iter()
+                                .map(|id| format!("{}", id))
+                                .collect::<Vec<_>>()
+                                .join(", ");
                             c.drop_query(&format!(
                                 "SELECT `votes`.* FROM `votes` WHERE `votes`.`comment_id` IN ({})",
                                 comments
