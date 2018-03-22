@@ -304,8 +304,8 @@ impl trawler::LobstersClient for MysqlTrawler {
                                 .map(|(c, mut story)| (c, story.swap_remove(0)))
                         })
                         .and_then(|(c, story)| {
-                            let author = story.get::<i32, _>("user_id").unwrap();
-                            let id = story.get::<i32, _>("id").unwrap();
+                            let author = story.get::<u32, _>("user_id").unwrap();
+                            let id = story.get::<u32, _>("id").unwrap();
                             c.drop_exec(
                                 "SELECT `users`.* FROM `users` WHERE `users`.`id` = ? LIMIT 1",
                                 (author,),
@@ -336,8 +336,8 @@ impl trawler::LobstersClient for MysqlTrawler {
                                 .reduce_and_drop(
                                     (HashSet::new(), HashSet::new()),
                                     |(mut users, mut comments), comment| {
-                                        users.insert(comment.get::<i32, _>("user_id").unwrap());
-                                        comments.insert(comment.get::<i32, _>("id").unwrap());
+                                        users.insert(comment.get::<u32, _>("user_id").unwrap());
+                                        comments.insert(comment.get::<u32, _>("id").unwrap());
                                         (users, comments)
                                     },
                                 )
