@@ -137,27 +137,20 @@ impl SoupBackend {
         let cond = q.where_clause
             .expect("only supports DELETEs with WHERE-clauses");
 
-        {
-            let ts = self.table_schemas.lock().unwrap();
-            let pkey: Vec<_> = ts.get(&q.table.name)
-                .unwrap()
-                .into_iter()
-                .filter(|cs| cs.constraints.contains(&ColumnConstraint::PrimaryKey))
-                .map(|cs| &cs.column)
-                .collect();
-
-            assert!(
-                utils::ensure_pkey_condition(&cond, &pkey),
-                "DELETE with non-primary-key WHERE-clause is not supported"
-            );
-        }
+        let ts = self.table_schemas.lock().unwrap();
+        let pkey: Vec<_> = ts.get(&q.table.name)
+            .unwrap()
+            .into_iter()
+            .filter(|cs| cs.constraints.contains(&ColumnConstraint::PrimaryKey))
+            .map(|cs| &cs.column)
+            .collect();
 
         // create a mutator if we don't have one for this table already
         let mutator = self.inputs
             .entry(q.table.name.clone())
             .or_insert(self.soup.get_mutator(&q.table.name).unwrap());
 
-        match utils::flatten_conditional(&cond) {
+        match utils::flatten_conditional(&cond, &pkey) {
             None => results.completed(0, 0),
             Some(flattened) => {
                 let mut deleted = 0;
@@ -350,11 +343,6 @@ impl SoupBackend {
             .map(|cs| &cs.column)
             .collect();
 
-        assert!(
-            utils::ensure_pkey_condition(&cond, &pkey),
-            "DELETE with non-primary-key WHERE-clause is not supported"
-        );
-
         // Updating rows happens in three steps:
         // 1. Read from Soup by key to get full rows
         // 2. Rewrite the column values specified in SET part of UPDATE clause
@@ -403,7 +391,7 @@ impl SoupBackend {
             .entry(q.table.name.clone())
             .or_insert(self.soup.get_mutator(&q.table.name).unwrap());
 
-        match utils::flatten_conditional(&cond) {
+        match utils::flatten_conditional(&cond, &pkey) {
             None => results.completed(0, 0),
             Some(flattened) => {
                 let qc = self.query_count

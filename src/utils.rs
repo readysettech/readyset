@@ -1,7 +1,7 @@
 use std::collections::HashSet;
 
 use distributary::DataType;
-use nom_sql::{self, ConditionBase, ConditionExpression, ConditionTree, Operator};
+use nom_sql::{Column, ConditionBase, ConditionExpression, ConditionTree, Operator};
 use regex::Regex;
 
 lazy_static! {
@@ -34,67 +34,28 @@ pub(crate) fn sanitize_query(query: &str) -> String {
     query.to_owned()
 }
 
-pub(crate) fn ensure_pkey_condition(
-    cond: &ConditionExpression,
-    pkey: &Vec<&nom_sql::Column>,
-) -> bool {
-    // below logic only works for single-column primary keys
-    // a more general implementation would check that every component column of the pkey occurs in
-    // an ANDed set of conditions
-    assert_eq!(pkey.len(), 1);
-    match *cond {
-        ConditionExpression::LogicalOp(ref ct) => {
-            match ct.operator {
-                Operator::And => {
-                    // if AND, recurse
-                    // This only matches nonsensical queries like
-                    // "WHERE pkey = 4 AND pkey = 12" or "WHERE pkey = 4 AND pkey = 4"
-                    ensure_pkey_condition(&*ct.left, pkey)
-                        && ensure_pkey_condition(&*ct.right, pkey)
-                }
-                _ => {
-                    // if OR, recurse to see if both branches are on pkey
-                    ensure_pkey_condition(&*ct.left, pkey)
-                        && ensure_pkey_condition(&*ct.right, pkey)
-                }
-            }
-        }
-        ConditionExpression::ComparisonOp(ref ct) => {
-            // either ct.left or ct.right must be the primary key column
-            let left_is_pkey = match *ct.left {
-                // all good
-                ConditionExpression::Base(ConditionBase::Field(ref f)) => f == pkey[0],
-                _ => false,
-            };
-            let right_is_pkey = match *ct.right {
-                // all good
-                ConditionExpression::Base(ConditionBase::Field(ref f)) => f == pkey[0],
-                _ => false,
-            };
-
-            // one side has to be the pkey column, and it can't be a comma join, so XOR
-            left_is_pkey ^ right_is_pkey
-        }
-        ConditionExpression::NegationOp(_) => unimplemented!(),
-        _ => unreachable!(),
-    }
-}
-
 // Helper for flatten_conditional - returns true if the
 // expression is "valid" (i.e. not something like `a = 1 AND a = 2`.
 fn do_flatten_conditional(
     cond: &ConditionExpression,
+    pkey: &Column,
     mut flattened: &mut HashSet<DataType>,
 ) -> bool {
     match *cond {
         ConditionExpression::ComparisonOp(ConditionTree {
             left: box ConditionExpression::Base(ConditionBase::Literal(ref l)),
-            ..
+            right: box ConditionExpression::Base(ConditionBase::Field(ref c)),
+            operator: Operator::Equal,
         })
         | ConditionExpression::ComparisonOp(ConditionTree {
+            left: box ConditionExpression::Base(ConditionBase::Field(ref c)),
             right: box ConditionExpression::Base(ConditionBase::Literal(ref l)),
-            ..
+            operator: Operator::Equal,
         }) => {
+            if c != pkey {
+                panic!("UPDATE/DELETE only supports WHERE-clauses on primary keys");
+            }
+
             flattened.insert(DataType::from(l));
             true
         }
@@ -104,15 +65,17 @@ fn do_flatten_conditional(
             ref right,
         }) => {
             // Allow `key = 1 AND key = 1` but not `key = 1 AND key = 2`:
-            left == right && do_flatten_conditional(&*left, &mut flattened)
+            // TODO(ekmartin): This could support bogus queries on the form of
+            // `key = 1 AND 10 = 10` if we wanted.
+            left == right && do_flatten_conditional(&*left, pkey, &mut flattened)
         }
         ConditionExpression::LogicalOp(ConditionTree {
             operator: Operator::Or,
             ref left,
             ref right,
         }) => {
-            do_flatten_conditional(&*left, &mut flattened)
-                && do_flatten_conditional(&*right, &mut flattened)
+            do_flatten_conditional(&*left, pkey, &mut flattened)
+                && do_flatten_conditional(&*right, pkey, &mut flattened)
         }
         _ => false,
     }
@@ -123,9 +86,16 @@ fn do_flatten_conditional(
 // DELETE FROM a WHERE key = 1 OR key = 2 -> Some([1, 2])
 // DELETE FROM a WHERE key = 1 OR key = 2 AND key = 3 -> None // Bogus query
 // DELETE FROM a WHERE key = 1 AND key = 1 -> Some([1])
-pub(crate) fn flatten_conditional(cond: &ConditionExpression) -> Option<HashSet<DataType>> {
+pub(crate) fn flatten_conditional(
+    cond: &ConditionExpression,
+    pkey: &Vec<&Column>,
+) -> Option<HashSet<DataType>> {
+    // below logic only works for single-column primary keys
+    // a more general implementation would return a collection of tuples, where each tuple
+    // consists of the primary key columns needed to retrieve a row.
+    assert_eq!(pkey.len(), 1);
     let mut flattened = HashSet::new();
-    if do_flatten_conditional(cond, &mut flattened) {
+    if do_flatten_conditional(cond, pkey[0], &mut flattened) {
         Some(flattened)
     } else {
         None
