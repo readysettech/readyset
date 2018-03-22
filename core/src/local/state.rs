@@ -45,7 +45,8 @@ impl State {
             return;
         }
 
-        self.state.push(SingleState::new(columns, partial.is_some()));
+        self.state
+            .push(SingleState::new(columns, partial.is_some()));
 
         if !self.state.is_empty() && partial.is_none() {
             // we need to *construct* the index!
