@@ -1,4 +1,5 @@
-use nom_sql::{self, ConditionBase, ConditionExpression, Operator};
+use distributary::DataType;
+use nom_sql::{self, ConditionBase, ConditionExpression, ConditionTree, Operator};
 use regex::Regex;
 
 lazy_static! {
@@ -74,5 +75,57 @@ pub(crate) fn ensure_pkey_condition(
         }
         ConditionExpression::NegationOp(_) => unimplemented!(),
         _ => unreachable!(),
+    }
+}
+
+// Helper for flatten_delete_conditional - returns true if the
+// expression is "valid" (i.e. not something like `a = 1 AND a = 2`.
+fn do_flatten_delete_conditional(
+    cond: &ConditionExpression,
+    mut flattened: &mut Vec<DataType>,
+) -> bool {
+    match *cond {
+        ConditionExpression::ComparisonOp(ConditionTree {
+            left: box ConditionExpression::Base(ConditionBase::Literal(ref l)),
+            ..
+        })
+        | ConditionExpression::ComparisonOp(ConditionTree {
+            right: box ConditionExpression::Base(ConditionBase::Literal(ref l)),
+            ..
+        }) => {
+            flattened.push(DataType::from(l));
+            true
+        }
+        ConditionExpression::LogicalOp(ConditionTree {
+            operator: Operator::And,
+            ref left,
+            ref right,
+        }) if left != right =>
+        {
+            false
+        }
+        ConditionExpression::LogicalOp(ConditionTree {
+            operator: Operator::Or,
+            ref left,
+            ref right,
+        }) => {
+            do_flatten_delete_conditional(&*left, &mut flattened)
+                && do_flatten_delete_conditional(&*right, &mut flattened)
+        }
+        _ => false,
+    }
+}
+
+// Takes a tree of conditional expressions for a DELETE statement and returns a list of all the
+// keys that should be deleted.
+// DELETE FROM a WHERE key = 1 OR key = 2 -> Some([1, 2])
+// DELETE FROM a WHERE key = 1 OR key = 2 AND key = 3 -> None // Bogus query
+// DELETE FROM a WHERE key = 1 AND key = 1 -> Some([1])
+pub(crate) fn flatten_delete_conditional(cond: &ConditionExpression) -> Option<Vec<DataType>> {
+    let mut flattened = vec![];
+    if do_flatten_delete_conditional(cond, &mut flattened) {
+        Some(flattened)
+    } else {
+        None
     }
 }
