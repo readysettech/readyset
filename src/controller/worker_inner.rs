@@ -3,6 +3,7 @@ use channel::tcp::{TcpSender, TryRecvError};
 use channel::rpc::RpcServiceEndpoint;
 use consensus::Epoch;
 use dataflow::{DomainBuilder, Readers};
+use dataflow::payload;
 use dataflow::prelude::{ChannelCoordinator, DomainIndex};
 
 use controller::{readers, ControllerState};
@@ -14,6 +15,7 @@ use std::io;
 use std::net::{IpAddr, SocketAddr};
 use std::time::{Duration, Instant};
 use std::sync::{Arc, Mutex};
+use std::sync::atomic::{AtomicUsize, Ordering};
 use std::fs;
 
 use mio::net::TcpListener;
@@ -36,7 +38,7 @@ pub(super) struct WorkerInner {
     listen_addr: IpAddr,
 
     memory_limit: usize,
-    domains: Vec<(DomainIndex, usize)>,
+    state_sizes: HashMap<(DomainIndex, usize), Arc<AtomicUsize>>,
 
     log: slog::Logger,
 }
@@ -113,7 +115,7 @@ impl WorkerInner {
             last_heartbeat: Instant::now(),
             listen_addr,
             memory_limit,
-            domains: Vec::new(),
+            state_sizes: HashMap::new(),
             log,
         })
     }
@@ -136,11 +138,13 @@ impl WorkerInner {
 
         let idx = d.index;
         let shard = d.shard;
+        let state_size = Arc::new(AtomicUsize::new(0));
         let d = d.build(
             self.log.clone(),
             self.readers.clone(),
             self.channel_coordinator.clone(),
             addr,
+            state_size.clone(),
         );
 
         let listener = ::mio::net::TcpListener::from_std(listener).unwrap();
@@ -150,7 +154,7 @@ impl WorkerInner {
         // need to register the domain with the local channel coordinator
         self.channel_coordinator
             .insert_addr((idx, shard), addr, false);
-        self.domains.push((idx, shard));
+        self.state_sizes.insert((idx, shard), state_size);
 
         let msg = CoordinationMessage {
             source: self.sender_addr,
@@ -195,6 +199,29 @@ impl WorkerInner {
     pub(super) fn heartbeat(&mut self) -> Duration {
         let elapsed = self.last_heartbeat.elapsed();
         if elapsed > self.heartbeat_every {
+            // also check own state size
+            // 1. tell domains to update state size
+            for &(di, shard) in self.state_sizes.keys() {
+                let mut tx = self.channel_coordinator.get_tx(&(di, shard)).unwrap();
+                tx.0.send(box payload::Packet::UpdateStateSize).unwrap();
+            }
+            // 2. add current state sizes (could be out of date, as packet sent below is not
+            //    necessarily received immediately)
+            let total: usize = self.state_sizes
+                .iter()
+                .map(|(_, sa)| sa.load(Ordering::Relaxed))
+                .sum();
+            // 3. are we above the limit?
+            if total >= self.memory_limit {
+                error!(
+                    self.log,
+                    "aggregate domain state ({} bytes) exceeds memory limit ({} bytes)",
+                    total,
+                    self.memory_limit
+                );
+                // TODO(malte): evict!
+            }
+
             let msg = CoordinationMessage {
                 source: self.sender_addr,
                 epoch: self.epoch,

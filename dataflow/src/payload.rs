@@ -279,6 +279,9 @@ pub enum Packet {
     /// Request that a domain send usage statistics on the control reply channel.
     GetStatistics,
 
+    /// Ask domain to log its state size
+    UpdateStateSize,
+
     /// The packet was captured awaiting the receipt of other replays.
     Captured,
 

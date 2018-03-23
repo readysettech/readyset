@@ -1,6 +1,7 @@
 use petgraph::graph::NodeIndex;
 use std::collections::{HashMap, HashSet, VecDeque};
 use std::sync::{Arc, Mutex};
+use std::sync::atomic::{AtomicUsize, Ordering};
 use std::time;
 use std::collections::hash_map::Entry;
 use std::io::{BufRead, BufReader, ErrorKind};
@@ -162,6 +163,7 @@ impl DomainBuilder {
         readers: Readers,
         channel_coordinator: Arc<ChannelCoordinator>,
         addr: SocketAddr,
+        state_size: Arc<AtomicUsize>,
     ) -> Domain {
         // initially, all nodes are not ready
         let not_ready = self.nodes
@@ -224,6 +226,7 @@ impl DomainBuilder {
 
             group_commit_queues,
 
+            state_size: state_size,
             total_time: Timer::new(),
             total_ptime: Timer::new(),
             wait_time: Timer::new(),
@@ -271,6 +274,7 @@ pub struct Domain {
 
     group_commit_queues: persistence::GroupCommitQueueSet,
 
+    state_size: Arc<AtomicUsize>,
     total_time: Timer<SimpleTracker, RealTime>,
     total_ptime: Timer<SimpleTracker, ThreadTime>,
     wait_time: Timer<SimpleTracker, RealTime>,
@@ -1288,6 +1292,25 @@ impl Domain {
                         self.control_reply_tx
                             .send(ControlReplyPacket::Statistics(domain_stats, node_stats))
                             .unwrap();
+                    }
+                    Packet::UpdateStateSize => {
+                        let total: u64 = self.nodes
+                            .values()
+                            .map(|nd| {
+                                use core::data::SizeOf;
+
+                                let ref n = *nd.borrow();
+                                let local_index: LocalNodeIndex = *n.local_addr();
+
+                                self.state
+                                    .get(&local_index)
+                                    .map(|state| state.deep_size_of())
+                                    .unwrap_or(0)
+                            })
+                            .sum();
+
+                        self.state_size.store(total as usize, Ordering::Relaxed);
+                        // no response sent, as worker will read the atomic
                     }
                     Packet::Captured => {
                         unreachable!("captured packets should never be sent around")
