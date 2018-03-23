@@ -140,6 +140,12 @@ pub enum Packet {
         senders: Vec<SourceChannelIdentifier>,
     },
 
+    /// Eviction
+    Eviction {
+        link: Option<Link>,
+        keys: Vec<Vec<DataType>>,
+    },
+
     /// Update that is part of a tagged data-flow replay path.
     ReplayPiece {
         link: Link,
