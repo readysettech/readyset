@@ -1,8 +1,9 @@
 use distributary::{ControllerHandle, DataType, Mutator, RemoteGetter, ZookeeperAuthority};
 
 use msql_srv::{self, *};
-use nom_sql::{self, ColumnConstraint, ColumnSpecification, ConditionBase, ConditionExpression,
-              ConditionTree, FieldExpression, Literal, Operator, SelectStatement, SqlType};
+use nom_sql::{self, ColumnConstraint, ConditionBase, ConditionExpression, ConditionTree,
+              CreateTableStatement, FieldExpression, Literal, Operator, SelectStatement, SqlType};
+
 use slog;
 use std::io;
 use std::collections::{BTreeMap, HashMap};
@@ -17,7 +18,7 @@ pub struct SoupBackend {
     inputs: BTreeMap<String, Mutator>,
     outputs: BTreeMap<String, RemoteGetter>,
 
-    table_schemas: Arc<Mutex<HashMap<String, Vec<ColumnSpecification>>>>,
+    table_schemas: Arc<Mutex<HashMap<String, CreateTableStatement>>>,
     auto_increments: Arc<Mutex<HashMap<String, u64>>>,
 
     query_count: Arc<sync::atomic::AtomicUsize>,
@@ -27,7 +28,7 @@ impl SoupBackend {
     pub fn new(
         zk_addr: &str,
         deployment_id: &str,
-        schemas: Arc<Mutex<HashMap<String, Vec<ColumnSpecification>>>>,
+        schemas: Arc<Mutex<HashMap<String, CreateTableStatement>>>,
         auto_increments: Arc<Mutex<HashMap<String, u64>>>,
         query_counter: Arc<sync::atomic::AtomicUsize>,
         log: slog::Logger,
@@ -67,6 +68,7 @@ impl SoupBackend {
         let table = c.table.as_ref().unwrap();
         let ts_lock = self.table_schemas.lock().unwrap();
         let col_schema = &(*ts_lock)[table]
+            .fields
             .iter()
             .find(|cc| cc.column.name == c.name)
             .expect(&format!("column {} not found", c.name));
@@ -116,11 +118,7 @@ impl SoupBackend {
         match self.soup.extend_recipe(format!("{};", q)) {
             Ok(_) => {
                 let mut ts_lock = self.table_schemas.lock().unwrap();
-                // TODO(ekmartin): handle q.keys as well:
-                // CREATE TABLE t (id int, PRIMARY KEY (id))
-                // will result in t not having any constraints,
-                // but instead have a PrimaryKey under q.keys.
-                ts_lock.insert(q.table.name.clone(), q.fields);
+                ts_lock.insert(q.table.name.clone(), q);
                 // no rows to return
                 // TODO(malte): potentially eagerly cache the mutator for this table
                 results.completed(0, 0)
@@ -138,11 +136,9 @@ impl SoupBackend {
             .expect("only supports DELETEs with WHERE-clauses");
 
         let ts = self.table_schemas.lock().unwrap();
-        let pkey: Vec<_> = ts.get(&q.table.name)
-            .unwrap()
+        let pkey = utils::get_primary_key(&ts[&q.table.name])
             .into_iter()
-            .filter(|cs| cs.constraints.contains(&ColumnConstraint::PrimaryKey))
-            .map(|cs| &cs.column)
+            .map(|(_, c)| c)
             .collect();
 
         // create a mutator if we don't have one for this table already
@@ -193,6 +189,7 @@ impl SoupBackend {
 
         let ts_lock = self.table_schemas.lock().unwrap();
         let auto_increment_columns: Vec<_> = ts_lock[&table]
+            .fields
             .iter()
             .filter(|c| c.constraints.contains(&ColumnConstraint::AutoIncrement))
             .collect();
@@ -339,12 +336,10 @@ impl SoupBackend {
             .expect("only supports UPDATEs with WHERE-clauses");
 
         let ts = self.table_schemas.lock().unwrap();
-        let fields = ts.get(&q.table.name).unwrap();
-        let pkey: Vec<_> = fields
-            .into_iter()
-            .filter(|cs| cs.constraints.contains(&ColumnConstraint::PrimaryKey))
-            .map(|cs| &cs.column)
-            .collect();
+        let CreateTableStatement { ref fields, .. } = ts[&q.table.name];
+        let pkey = utils::get_primary_key(&ts[&q.table.name]);
+        let key_indices: Vec<_> = pkey.iter().map(|&(i, _)| i).collect();
+        let key_values: Vec<_> = pkey.iter().map(|&(_, c)| c).collect();
 
         // Updating rows happens in three steps:
         // 1. Read from Soup by key to get full rows
@@ -355,7 +350,7 @@ impl SoupBackend {
         // all the columns in the table:
         let where_clause = Some(ConditionExpression::ComparisonOp(ConditionTree {
             operator: Operator::Equal,
-            left: box ConditionExpression::Base(ConditionBase::Field(pkey[0].clone())),
+            left: box ConditionExpression::Base(ConditionBase::Field(key_values[0].clone())),
             right: box ConditionExpression::Base(ConditionBase::Placeholder),
         }));
 
@@ -373,12 +368,6 @@ impl SoupBackend {
             limit: None,
         };
 
-        // Note that this only works for single column primary keys for now.
-        let key_index = fields
-            .iter()
-            .position(|ref cs| cs.constraints.contains(&ColumnConstraint::PrimaryKey))
-            .unwrap(); // We already know we have a PK at this point.
-
         // update_columns maps column indices to the value they should be updated to:
         let mut update_columns = HashMap::new();
         for (i, field) in fields.into_iter().enumerate() {
@@ -394,7 +383,7 @@ impl SoupBackend {
             .entry(q.table.name.clone())
             .or_insert(self.soup.get_mutator(&q.table.name).unwrap());
 
-        match utils::flatten_conditional(&cond, &pkey) {
+        match utils::flatten_conditional(&cond, &key_values) {
             None => results.completed(0, 0),
             Some(ref flattened) if flattened.len() == 0 => {
                 panic!("UPDATE only supports WHERE-clauses on primary keys");
@@ -481,7 +470,7 @@ impl SoupBackend {
                 let mut new_rows = vec![];
                 for (old_row, new_row) in changed_rows.into_iter() {
                     new_rows.push(new_row);
-                    let key = vec![old_row[key_index].clone()];
+                    let key: Vec<_> = key_indices.iter().map(|i| old_row[*i].clone()).collect();
                     match mutator.delete(key) {
                         Ok(..) => {}
                         Err(e) => {

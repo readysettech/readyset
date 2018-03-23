@@ -1,7 +1,8 @@
 use std::collections::HashSet;
 
 use distributary::DataType;
-use nom_sql::{Column, ConditionBase, ConditionExpression, ConditionTree, Operator};
+use nom_sql::{Column, ColumnConstraint, ConditionBase, ConditionExpression, ConditionTree,
+              CreateTableStatement, Operator, TableKey};
 use regex::Regex;
 
 lazy_static! {
@@ -115,6 +116,31 @@ pub(crate) fn flatten_conditional(
     }
 }
 
+// Finds the primary for the given table, both by looking at constraints on individual
+// columns and by searching through keys.
+pub(crate) fn get_primary_key(schema: &CreateTableStatement) -> Vec<(usize, &Column)> {
+    let &CreateTableStatement {
+        ref keys,
+        ref fields,
+        ..
+    } = schema;
+    fields
+        .into_iter()
+        .enumerate()
+        .filter(|&(_, cs)| {
+            cs.constraints.contains(&ColumnConstraint::PrimaryKey) || match *keys {
+                // Try finding PRIMARY KEY constraints in keys as well:
+                Some(ref keys) => keys.iter().any(|key| match *key {
+                    TableKey::PrimaryKey(ref cols) => cols.iter().any(|c| c == &cs.column),
+                    _ => false,
+                }),
+                _ => false,
+            }
+        })
+        .map(|(i, cs)| (i, &cs.column))
+        .collect()
+}
+
 #[cfg(test)]
 mod tests {
     use nom_sql::{self, SqlQuery};
@@ -140,6 +166,13 @@ mod tests {
         let flat: Option<HashSet<DataType>> =
             expected.and_then(|e| Some(e.into_iter().map(|v| v.into()).collect()));
         assert_eq!(flatten_conditional(&cond, &vec![&pkey]), flat);
+    }
+
+    fn get_schema(query: &str) -> CreateTableStatement {
+        match nom_sql::parse_query(query).unwrap() {
+            SqlQuery::CreateTable(c) => c,
+            _ => unreachable!(),
+        }
     }
 
     #[test]
@@ -191,6 +224,31 @@ mod tests {
         // Invalid ANDs:
         compare_flatten::<DataType>("DELETE FROM T WHERE T.a = 1 AND T.a = 2", "a", None);
         compare_flatten::<DataType>("UPDATE T SET T.b = 2 WHERE T.a = 1 AND T.a = 2", "a", None);
+    }
+
+    #[test]
+    fn test_get_primary_key() {
+        let with_field = get_schema("CREATE TABLE A (other int, id int PRIMARY KEY)");
+        assert_eq!(
+            get_primary_key(&with_field),
+            vec![(1, &with_field.fields[1].column)]
+        );
+
+        let with_const = get_schema("CREATE TABLE A (other int, id int, PRIMARY KEY (id))");
+        assert_eq!(
+            get_primary_key(&with_const),
+            vec![(1, &with_const.fields[1].column)]
+        );
+
+        let with_both =
+            get_schema("CREATE TABLE A (other int, id int PRIMARY KEY, PRIMARY KEY (id))");
+        assert_eq!(
+            get_primary_key(&with_both),
+            vec![(1, &with_both.fields[1].column)]
+        );
+
+        let with_none = get_schema("CREATE TABLE A (other int, id int)");
+        assert_eq!(get_primary_key(&with_none), vec![]);
     }
 
     #[test]

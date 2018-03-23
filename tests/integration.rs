@@ -18,7 +18,7 @@ use std::thread;
 
 use distributary::{ControllerBuilder, ZookeeperAuthority};
 use msql_srv::MysqlIntermediary;
-use nom_sql::ColumnSpecification;
+use nom_sql::CreateTableStatement;
 use zookeeper::{WatchedEvent, ZooKeeper, ZooKeeperExt};
 
 use mysoupql::SoupBackend;
@@ -90,7 +90,7 @@ fn setup(deployment: &Deployment) -> mysql::Opts {
     });
 
     let query_counter = Arc::new(AtomicUsize::new(0));
-    let schemas: Arc<Mutex<HashMap<String, Vec<ColumnSpecification>>>> =
+    let schemas: Arc<Mutex<HashMap<String, CreateTableStatement>>> =
         Arc::new(Mutex::new(HashMap::default()));
     let auto_increments: Arc<Mutex<HashMap<String, u64>>> =
         Arc::new(Mutex::new(HashMap::default()));
@@ -132,6 +132,31 @@ fn delete_basic() {
         .unwrap()
         .next();
     assert!(row.is_some());
+
+    {
+        let deleted = conn.query("DELETE FROM Cats WHERE Cats.id = 1").unwrap();
+        assert_eq!(deleted.affected_rows(), 1);
+    }
+
+    let row = conn.query("SELECT Cats.id FROM Cats WHERE Cats.id = 1")
+        .unwrap()
+        .next();
+    assert!(row.is_none());
+}
+
+#[test]
+fn delete_only_constraint() {
+    let d = Deployment::new("delete_only_constraint");
+    let opts = setup(&d);
+    let mut conn = mysql::Conn::new(opts).unwrap();
+    // Note that this doesn't have `id int PRIMARY KEY` like the other tests:
+    conn.query("CREATE TABLE Cats (id int, name VARCHAR(255), PRIMARY KEY(id))")
+        .unwrap();
+    sleep();
+
+    conn.query("INSERT INTO Cats (id, name) VALUES (1, \"Bob\")")
+        .unwrap();
+    sleep();
 
     {
         let deleted = conn.query("DELETE FROM Cats WHERE Cats.id = 1").unwrap();
@@ -285,6 +310,32 @@ fn update_basic() {
     let opts = setup(&d);
     let mut conn = mysql::Conn::new(opts).unwrap();
     conn.query("CREATE TABLE Cats (id int PRIMARY KEY, name VARCHAR(255), PRIMARY KEY(id))")
+        .unwrap();
+    sleep();
+
+    conn.query("INSERT INTO Cats (id, name) VALUES (1, \"Bob\")")
+        .unwrap();
+    sleep();
+
+    {
+        let updated = conn.query("UPDATE Cats SET Cats.name = \"Rusty\" WHERE Cats.id = 1")
+            .unwrap();
+        assert_eq!(updated.affected_rows(), 1);
+    }
+
+    let name: String = conn.first("SELECT Cats.name FROM Cats WHERE Cats.id = 1")
+        .unwrap()
+        .unwrap();
+    assert_eq!(name, String::from("Rusty"));
+}
+
+#[test]
+fn update_only_constraint() {
+    let d = Deployment::new("update_only_constraint");
+    let opts = setup(&d);
+    let mut conn = mysql::Conn::new(opts).unwrap();
+    // Note that this doesn't have `id int PRIMARY KEY` like the other tests:
+    conn.query("CREATE TABLE Cats (id int, name VARCHAR(255), PRIMARY KEY(id))")
         .unwrap();
     sleep();
 
