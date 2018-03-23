@@ -142,7 +142,7 @@ pub struct ColumnSpecification {
 
 impl fmt::Display for ColumnSpecification {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        write!(f, "{} {}", self.column, self.sql_type)?;
+        write!(f, "{} {}", self.column.name, self.sql_type)?;
         for constraint in self.constraints.iter() {
             write!(f, " {}", constraint)?;
         }

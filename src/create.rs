@@ -626,4 +626,16 @@ mod tests {
         );
     }
 
+    #[test]
+    fn format_create() {
+        let qstring = "CREATE TABLE `auth_group` (
+                       `id` integer AUTO_INCREMENT NOT NULL PRIMARY KEY,
+                       `name` varchar(80) NOT NULL UNIQUE)";
+        // TODO(malte): INTEGER isn't quite reflected right here, perhaps
+        let expected = "CREATE TABLE auth_group (\
+                        id INT(32) AUTO_INCREMENT NOT NULL PRIMARY KEY, \
+                        name VARCHAR(80) NOT NULL UNIQUE)";
+        let res = creation(qstring.as_bytes());
+        assert_eq!(format!("{}", res.unwrap().1), expected);
+    }
 }
