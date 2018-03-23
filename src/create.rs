@@ -280,7 +280,7 @@ named!(pub creation<&[u8], CreateTableStatement>,
                     opt_multispace >>
                     tag!("=") >>
                     opt_multispace >>
-                    alt_complete!(tag!("utf8")) >>
+                    alt_complete!(tag!("utf8") | tag!("utf8mb4")) >>
                     ()
                 )
             )
