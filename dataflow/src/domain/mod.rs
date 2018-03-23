@@ -1257,6 +1257,37 @@ impl Domain {
                             .send(ControlReplyPacket::ack())
                             .unwrap();
                     }
+                    Packet::Eviction { .. } => {
+                        let largest = self.nodes
+                            .values()
+                            .map(|nd| {
+                                use core::data::SizeOf;
+
+                                let ref n = *nd.borrow();
+                                let local_index: LocalNodeIndex = *n.local_addr();
+
+                                (
+                                    local_index,
+                                    self.state
+                                        .get(&local_index)
+                                        .map(|state| state.deep_size_of())
+                                        .unwrap_or(0),
+                                )
+                            })
+                            .max_by_key(|&(_, s)| s);
+
+                        if let Some(largest) = largest {
+                            let evicted = self.state
+                                .get_mut(&largest.0)
+                                .map(|state| state.evict_random_keys(1));
+                            debug!(
+                                self.log,
+                                "evicted {:?} from domain {}",
+                                evicted,
+                                self.index.index()
+                            );
+                        }
+                    }
                     Packet::GetStatistics => {
                         let domain_stats = statistics::DomainStats {
                             total_time: self.total_time.num_nanoseconds(),

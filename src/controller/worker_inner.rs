@@ -216,10 +216,11 @@ impl WorkerInner {
             }
             // 2. add current state sizes (could be out of date, as packet sent below is not
             //    necessarily received immediately)
-            let total: usize = self.state_sizes
+            let sizes: Vec<(&(DomainIndex, usize), usize)> = self.state_sizes
                 .iter()
-                .map(|(_, sa)| sa.load(Ordering::Relaxed))
-                .sum();
+                .map(|(ds, sa)| (ds, sa.load(Ordering::Relaxed)))
+                .collect();
+            let total: usize = sizes.iter().map(|&(_, s)| s).sum();
             // 3. are we above the limit?
             if total >= self.memory_limit {
                 error!(
@@ -228,7 +229,15 @@ impl WorkerInner {
                     total,
                     self.memory_limit
                 );
-                // TODO(malte): evict!
+                // evict from the largest domain
+                let largest = sizes.into_iter().max_by_key(|&(_, s)| s).unwrap();
+                let mut tx = self.channel_coordinator.get_tx(largest.0).unwrap();
+                tx.0
+                    .send(box payload::Packet::Eviction {
+                        link: None,
+                        keys: vec![],
+                    })
+                    .unwrap();
             }
 
             let msg = CoordinationMessage {
