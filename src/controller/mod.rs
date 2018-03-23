@@ -30,7 +30,6 @@ use rand;
 use serde_json;
 use slog;
 
-
 pub mod domain_handle;
 pub mod keys;
 pub mod migrate;

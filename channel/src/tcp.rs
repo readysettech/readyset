@@ -196,12 +196,10 @@ impl<T> Evented for TcpReceiver<T> {
         interest: Ready,
         opts: PollOpt,
     ) -> io::Result<()> {
-        self.stream.get_ref().get_ref().register(
-            poll,
-            token,
-            interest,
-            opts,
-        )
+        self.stream
+            .get_ref()
+            .get_ref()
+            .register(poll, token, interest, opts)
     }
 
     fn reregister(
@@ -211,12 +209,10 @@ impl<T> Evented for TcpReceiver<T> {
         interest: Ready,
         opts: PollOpt,
     ) -> io::Result<()> {
-        self.stream.get_ref().get_ref().reregister(
-            poll,
-            token,
-            interest,
-            opts,
-        )
+        self.stream
+            .get_ref()
+            .get_ref()
+            .reregister(poll, token, interest, opts)
     }
 
     fn deregister(&self, poll: &Poll) -> io::Result<()> {

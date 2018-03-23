@@ -159,9 +159,9 @@ impl ControllerInner {
                 json::to_string(&self.install_recipe(authority, json::from_slice(&body).unwrap()))
                     .unwrap()
             }
-            (Post, "/set_security_config") => {
-                json::to_string(&self.set_security_config(json::from_slice(&body).unwrap())).unwrap()
-            }
+            (Post, "/set_security_config") => json::to_string(&self.set_security_config(
+                json::from_slice(&body).unwrap(),
+            )).unwrap(),
             (Post, "/create_universe") => {
                 json::to_string(&self.create_universe(json::from_slice(&body).unwrap())).unwrap()
             }
@@ -592,7 +592,6 @@ impl ControllerInner {
         GraphStats { domains: domains }
     }
 
-
     pub fn create_universe(&mut self, context: HashMap<String, DataType>) {
         let log = self.log.clone();
         let mut r = self.recipe.clone();
@@ -600,12 +599,20 @@ impl ControllerInner {
 
         let mut universe_groups = HashMap::new();
 
-        let uid = context.get("id").expect("Universe context must have id").clone();
+        let uid = context
+            .get("id")
+            .expect("Universe context must have id")
+            .clone();
         if context.get("group").is_none() {
             for g in groups {
                 let rgb: Option<RemoteGetterBuilder> = self.getter_builder(&g);
                 let mut getter = rgb.map(|rgb| rgb.build()).unwrap();
-                let my_groups: Vec<DataType> = getter.lookup(&uid, true).unwrap().iter().map(|v| v[1].clone()).collect();
+                let my_groups: Vec<DataType> = getter
+                    .lookup(&uid, true)
+                    .unwrap()
+                    .iter()
+                    .map(|v| v[1].clone())
+                    .collect();
                 universe_groups.insert(g, my_groups);
             }
         }
@@ -623,7 +630,6 @@ impl ControllerInner {
                     Err(RpcError::Other("failed to create universe".to_owned()))
                 }
             }.unwrap();
-
         });
 
         self.recipe = r;

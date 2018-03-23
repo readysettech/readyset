@@ -109,7 +109,6 @@ impl ControllerBuilder {
         self.config.fixed_domains = ndomains;
     }
 
-
     /// Build a controller and return a handle to it.
     pub fn build<A: Authority + 'static>(self, authority: Arc<A>) -> ControllerHandle<A> {
         controller::start_instance(

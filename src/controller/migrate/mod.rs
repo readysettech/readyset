@@ -128,7 +128,6 @@ impl<'a> Migration<'a> {
     /// Returns the universe in which this migration is operating in.
     /// If not specified, assumes `global` universe.
     pub fn universe(&self) -> (DataType, Option<DataType>) {
-
         let id = match self.context.get("id") {
             Some(id) => id.clone(),
             None => "global".into(),
@@ -140,7 +139,6 @@ impl<'a> Migration<'a> {
         };
 
         (id, group)
-
     }
 
     /// Add a transactional base node to the graph

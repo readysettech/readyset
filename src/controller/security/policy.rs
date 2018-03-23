@@ -6,8 +6,7 @@ use nom_sql::SqlQuery;
 enum Action {
     Allow,
     Deny,
-    #[allow(dead_code)]
-    Rewrite,
+    #[allow(dead_code)] Rewrite,
 }
 
 #[derive(Clone, Debug, Hash, PartialEq, Serialize, Deserialize)]
@@ -93,23 +92,20 @@ impl Policy {
 
     pub fn parse(policy_text: &str) -> Vec<Policy> {
         let config: Vec<Value> = match serde_json::from_str(policy_text) {
-                Ok(v) => v,
-                Err(e) => panic!(e.to_string()),
-            };
+            Ok(v) => v,
+            Err(e) => panic!(e.to_string()),
+        };
 
         config
             .iter()
-            .map(|p| {
-                match p.get("action") {
-                    Some(action) =>
-                        match action.as_str() {
-                            Some("rewrite") => Policy::parse_rewrite_policy(p),
-                            Some("allow") => Policy::parse_row_policy(p, Action::Allow),
-                            Some("deny") => Policy::parse_row_policy(p, Action::Deny),
-                            _ => panic!("Unsupported policy action {}", action),
-                        }
-                    None => Policy::parse_row_policy(p, Action::Allow),
-                }
+            .map(|p| match p.get("action") {
+                Some(action) => match action.as_str() {
+                    Some("rewrite") => Policy::parse_rewrite_policy(p),
+                    Some("allow") => Policy::parse_row_policy(p, Action::Allow),
+                    Some("deny") => Policy::parse_row_policy(p, Action::Deny),
+                    _ => panic!("Unsupported policy action {}", action),
+                },
+                None => Policy::parse_row_policy(p, Action::Allow),
             })
             .collect()
     }
@@ -122,8 +118,7 @@ impl Policy {
         let table = p["table"].as_str().unwrap();
         let pred = p["predicate"].as_str().unwrap();
 
-        let sq =
-            sql_parser::parse_query(&format!("select * from {} {};", table, pred)).unwrap();
+        let sq = sql_parser::parse_query(&format!("select * from {} {};", table, pred)).unwrap();
 
         let rp = RowPolicy {
             name: name.to_string(),
@@ -136,7 +131,6 @@ impl Policy {
             Action::Deny => Policy::Deny(rp),
             Action::Rewrite => unreachable!(),
         }
-
     }
 
     fn parse_rewrite_policy(p: &Value) -> Policy {
@@ -151,8 +145,7 @@ impl Policy {
         let column = p["column"].as_str().unwrap();
         let key = p["key"].as_str().unwrap();
 
-        let sq =
-            sql_parser::parse_query(rewrite).unwrap();
+        let sq = sql_parser::parse_query(rewrite).unwrap();
 
         Policy::Rewrite(RewritePolicy {
             name: name.to_string(),
@@ -178,7 +171,13 @@ mod tests {
         let policies = Policy::parse(policy_text);
 
         assert_eq!(policies.len(), 2);
-        assert_eq!(policies[0].predicate(), sql_parser::parse_query(p0).unwrap());
-        assert_eq!(policies[1].predicate(), sql_parser::parse_query(p1).unwrap());
+        assert_eq!(
+            policies[0].predicate(),
+            sql_parser::parse_query(p0).unwrap()
+        );
+        assert_eq!(
+            policies[1].predicate(),
+            sql_parser::parse_query(p1).unwrap()
+        );
     }
 }

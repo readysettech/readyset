@@ -3,7 +3,7 @@ use dataflow::checktable;
 use dataflow::prelude::*;
 use dataflow::statistics::GraphStats;
 
-use std::collections::{HashMap, BTreeMap};
+use std::collections::{BTreeMap, HashMap};
 use std::sync::Arc;
 use std::sync::mpsc::Sender;
 use std::thread::{self, JoinHandle};
@@ -198,18 +198,24 @@ impl ControllerHandle<LocalAuthority> {
 
     /// Install a new set of policies on the controller.
     pub fn create_universe(&mut self, context: HashMap<String, DataType>) {
-        let uid = context.get("id").expect("Universe context must have id").clone();
+        let uid = context
+            .get("id")
+            .expect("Universe context must have id")
+            .clone();
         self.rpc::<_, ()>("create_universe", &context);
 
         // Write to Context table
         let bname = match context.get("group") {
             None => format!("UserContext_{}", uid.to_string()),
-            Some(g) => format!("GroupContext_{}_{}", g.to_string(), uid.to_string())
+            Some(g) => format!("GroupContext_{}_{}", g.to_string(), uid.to_string()),
         };
 
         let mut fields: Vec<_> = context.keys().collect();
         fields.sort();
-        let record: Vec<DataType> = fields.iter().map(|&f| context.get(f).unwrap().clone()).collect();
+        let record: Vec<DataType> = fields
+            .iter()
+            .map(|&f| context.get(f).unwrap().clone())
+            .collect();
         let mut mutator = self.get_mutator(&bname).unwrap();
 
         mutator.put(record).unwrap();
