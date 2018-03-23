@@ -327,8 +327,11 @@ impl Ingredient for TopK {
         }
     }
 
-    fn on_eviction(&mut self, _key_columns: &[usize], _keys: &[Vec<DataType>]) {
-        unimplemented!()
+    fn on_eviction(&mut self, key_columns: &[usize], keys: &[Vec<DataType>]) {
+        assert_eq!(key_columns, &self.group_by[..]);
+        for key in keys {
+            self.counts.remove(key);
+        }
     }
 
     fn suggest_indexes(&self, this: NodeIndex) -> HashMap<NodeIndex, (Vec<usize>, bool)> {

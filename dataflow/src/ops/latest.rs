@@ -131,10 +131,6 @@ impl Ingredient for Latest {
         }
     }
 
-    fn on_eviction(&mut self, _key_columns: &[usize], _keys: &[Vec<DataType>]) {
-        unimplemented!()
-    }
-
     fn suggest_indexes(&self, this: NodeIndex) -> HashMap<NodeIndex, (Vec<usize>, bool)> {
         // index all key columns
         Some((this, (self.key.clone(), true))).into_iter().collect()
