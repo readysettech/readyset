@@ -7,7 +7,7 @@ authors = ["The Distributary Developers"]
 arccstr = "1.0.4"
 fnv = "1.0.5"
 serde_derive = "1.0.8"
-rahashmap = "0.2.0"
+rahashmap = "0.2.1"
 rand = "0.4.2"
 
 # need features
