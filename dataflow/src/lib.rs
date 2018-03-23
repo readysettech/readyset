@@ -2,6 +2,7 @@
 #![feature(box_patterns)]
 #![feature(use_extern_macros)]
 #![feature(entry_or_default)]
+#![feature(if_while_or_patterns)]
 #![feature(plugin, use_extern_macros)]
 #![plugin(tarpc_plugins)]
 #![deny(unused_extern_crates)]

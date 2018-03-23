@@ -176,10 +176,13 @@ impl State {
         (self.state[index].key(), keys)
     }
 
-    /// Evict the listed keys from the materialization targeted by `tag`.
-    pub fn evict_keys(&mut self, tag: &Tag, keys: &[Vec<DataType>]) {
+    /// Evict the listed keys from the materialization targeted by `tag`, returning the key columns
+    /// of the index that was evicted from.
+    pub fn evict_keys(&mut self, tag: &Tag, keys: &[Vec<DataType>]) -> &[usize] {
+        let index = self.by_tag[tag];
         self.mem_size = self.mem_size
-            .saturating_sub(self.state[self.by_tag[tag]].evict_keys(keys));
+            .saturating_sub(self.state[index].evict_keys(keys));
+        self.state[index].key()
     }
 }
 

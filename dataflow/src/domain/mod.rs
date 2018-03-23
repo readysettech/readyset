@@ -796,6 +796,9 @@ impl Domain {
             Packet::ReplayPiece { .. } => {
                 self.handle_replay(m, sends);
             }
+            Packet::Evict { .. } | Packet::EvictKeys { .. } => {
+                self.handle_eviction(m, sends);
+            }
             Packet::StartRecovery { .. } => {
                 self.handle_recovery(sends);
             }
@@ -875,7 +878,8 @@ impl Domain {
                     }
                     Packet::StateSizeProbe { node } => {
                         use core::data::SizeOf;
-                        let row_count = self.state.get(&node).map(|state| state.rows()).unwrap_or(0);
+                        let row_count =
+                            self.state.get(&node).map(|state| state.rows()).unwrap_or(0);
                         let mem_size = self.state
                             .get(&node)
                             .map(|state| state.deep_size_of())
@@ -1256,37 +1260,6 @@ impl Domain {
                         self.control_reply_tx
                             .send(ControlReplyPacket::ack())
                             .unwrap();
-                    }
-                    Packet::Eviction { .. } => {
-                        let largest = self.nodes
-                            .values()
-                            .map(|nd| {
-                                use core::data::SizeOf;
-
-                                let ref n = *nd.borrow();
-                                let local_index: LocalNodeIndex = *n.local_addr();
-
-                                (
-                                    local_index,
-                                    self.state
-                                        .get(&local_index)
-                                        .map(|state| state.deep_size_of())
-                                        .unwrap_or(0),
-                                )
-                            })
-                            .max_by_key(|&(_, s)| s);
-
-                        if let Some(largest) = largest {
-                            let evicted = self.state
-                                .get_mut(&largest.0)
-                                .map(|state| state.evict_random_keys(1));
-                            debug!(
-                                self.log,
-                                "evicted {:?} from domain {}",
-                                evicted,
-                                self.index.index()
-                            );
-                        }
                     }
                     Packet::GetStatistics => {
                         let domain_stats = statistics::DomainStats {
@@ -1795,7 +1768,7 @@ impl Domain {
                     };
                     let mut m = Some(m);
 
-                    // let's collect some informationn about the destination of this replay
+                    // let's collect some information about the destination of this replay
                     let dst = path.last().unwrap().node;
                     let dst_is_reader = self.nodes[&dst]
                         .borrow()
@@ -2337,6 +2310,147 @@ impl Domain {
             assert!(self.inject.is_none());
             self.inject = Some(box Packet::Finish(tag, node));
         }
+    }
+
+    pub fn handle_eviction(&mut self, m: Box<Packet>, sends: &mut EnqueuedSends) {
+        fn trigger_downstream_evictions(
+            key_columns: &[usize],
+            keys: &[Vec<DataType>],
+            node: LocalNodeIndex,
+            sends: &mut EnqueuedSends,
+            replay_paths: &HashMap<Tag, ReplayPath>,
+            shard: Option<usize>,
+            state: &mut StateMap,
+            nodes: &mut DomainNodes,
+        ) {
+            for (tag, ref path) in replay_paths {
+                if path.source == Some(node) {
+                    // Check whether this replay path is for the same key.
+                    match path.trigger {
+                        TriggerEndpoint::Local(ref key) | TriggerEndpoint::Start(ref key) => {
+                            if &key[..] != key_columns {
+                                continue;
+                            }
+                        }
+                        _ => unreachable!(),
+                    };
+
+                    walk_path(path, keys, *tag, shard, nodes, sends);
+
+                    if let TriggerEndpoint::Local(_) = path.trigger {
+                        let target = replay_paths[&tag].path.last().unwrap();
+                        state[&target.node].evict_keys(&tag, keys);
+                        trigger_downstream_evictions(
+                            &[*target.partial_key.as_ref().unwrap()],
+                            keys,
+                            target.node,
+                            sends,
+                            replay_paths,
+                            shard,
+                            state,
+                            nodes,
+                        );
+                    }
+                }
+            }
+        }
+
+        fn walk_path(
+            path: &ReplayPath,
+            keys: &[Vec<DataType>],
+            tag: Tag,
+            shard: Option<usize>,
+            nodes: &mut DomainNodes,
+            sends: &mut EnqueuedSends,
+        ) {
+            for segment in &path.path {
+                nodes[&segment.node].borrow_mut().process_eviction(
+                    &[*segment.partial_key.as_ref().unwrap()],
+                    keys,
+                    tag,
+                    shard,
+                    sends,
+                );
+            }
+        }
+
+        match (*m,) {
+            (Packet::Evict { node, num_keys },) => {
+                let node = node.or_else(|| {
+                    self.nodes
+                        .values()
+                        .map(|nd| {
+                            use core::data::SizeOf;
+
+                            let ref n = *nd.borrow();
+                            let local_index: LocalNodeIndex = *n.local_addr();
+
+                            (
+                                local_index,
+                                self.state
+                                    .get(&local_index)
+                                    .map(|state| state.deep_size_of())
+                                    .unwrap_or(0),
+                            )
+                        })
+                        .max_by_key(|&(_, s)| s)
+                        .map(|(n, _)| n)
+                });
+
+                if let Some(node) = node {
+                    let (key_columns, keys) = {
+                        let k = self.state[&node].evict_random_keys(num_keys);
+                        (k.0.to_vec(), k.1)
+                    };
+                    trigger_downstream_evictions(
+                        &key_columns[..],
+                        &keys[..],
+                        node,
+                        sends,
+                        &self.replay_paths,
+                        self.shard,
+                        &mut self.state,
+                        &mut self.nodes,
+                    );
+                }
+            }
+            (Packet::EvictKeys {
+                link: Link { dst, .. },
+                keys,
+                tag,
+            },) => {
+                assert_eq!(dst, self.replay_paths[&tag].path.first().unwrap().node);
+                walk_path(
+                    &self.replay_paths[&tag],
+                    &keys[..],
+                    tag,
+                    self.shard,
+                    &mut self.nodes,
+                    sends,
+                );
+
+                match self.replay_paths[&tag].trigger {
+                    TriggerEndpoint::End(..) | TriggerEndpoint::Local(..) => {
+                        // This path terminates inside the domain. Find the target node, evict
+                        // from it, and then propogate the eviction further downstream.
+                        let target = self.replay_paths[&tag].path.last().unwrap().node;
+                        let key_columns = self.state[&target].evict_keys(&tag, &keys).to_vec();
+                        trigger_downstream_evictions(
+                            &key_columns[..],
+                            &keys[..],
+                            target,
+                            sends,
+                            &self.replay_paths,
+                            self.shard,
+                            &mut self.state,
+                            &mut self.nodes,
+                        );
+                    }
+                    TriggerEndpoint::None | TriggerEndpoint::Start(..) => {}
+                }
+            }
+            _ => unreachable!(),
+        };
     }
 
     pub fn id(&self) -> (Index, usize) {

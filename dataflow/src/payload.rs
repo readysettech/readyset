@@ -140,12 +140,6 @@ pub enum Packet {
         senders: Vec<SourceChannelIdentifier>,
     },
 
-    /// Eviction
-    Eviction {
-        link: Option<Link>,
-        keys: Vec<Vec<DataType>>,
-    },
-
     /// Update that is part of a tagged data-flow replay path.
     ReplayPiece {
         link: Link,
@@ -153,6 +147,20 @@ pub enum Packet {
         data: Records,
         context: ReplayPieceContext,
         transaction_state: Option<ReplayTransactionState>,
+    },
+
+    /// Trigger an eviction from the target node.
+    Evict {
+        node: Option<LocalNodeIndex>,
+        num_keys: usize,
+    },
+
+    /// Evict the indicated keys from the materialization targed by the replay path `tag` (along
+    /// with any other materializations below it).
+    EvictKeys {
+        link: Link,
+        tag: Tag,
+        keys: Vec<Vec<DataType>>,
     },
 
     //
@@ -356,6 +364,7 @@ impl Packet {
     pub fn tag(&self) -> Option<Tag> {
         match *self {
             Packet::ReplayPiece { tag, .. } => Some(tag),
+            Packet::EvictKeys { tag, .. } => Some(tag),
             _ => None,
         }
     }
@@ -533,8 +542,10 @@ impl fmt::Debug for Packet {
 
 #[derive(Debug, Serialize, Deserialize)]
 pub enum ControlReplyPacket {
-    #[cfg(debug_assertions)] Ack(Backtrace),
-    #[cfg(not(debug_assertions))] Ack(()),
+    #[cfg(debug_assertions)]
+    Ack(Backtrace),
+    #[cfg(not(debug_assertions))]
+    Ack(()),
     /// (number of rows, size in bytes)
     StateSize(usize, u64),
     Statistics(

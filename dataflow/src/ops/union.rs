@@ -527,6 +527,10 @@ impl Ingredient for Union {
         }
     }
 
+    fn on_eviction(&mut self, _key_columns: &[usize], _keys: &[Vec<DataType>]) {
+        unimplemented!()
+    }
+
     fn suggest_indexes(&self, _: NodeIndex) -> HashMap<NodeIndex, (Vec<usize>, bool)> {
         // index nothing (?)
         HashMap::new()

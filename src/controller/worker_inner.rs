@@ -233,9 +233,9 @@ impl WorkerInner {
                 let largest = sizes.into_iter().max_by_key(|&(_, s)| s).unwrap();
                 let mut tx = self.channel_coordinator.get_tx(largest.0).unwrap();
                 tx.0
-                    .send(box payload::Packet::Eviction {
-                        link: None,
-                        keys: vec![],
+                    .send(box payload::Packet::Evict {
+                        node: None,
+                        num_keys: 1,
                     })
                     .unwrap();
             }
