@@ -53,7 +53,104 @@ impl trawler::LobstersClient for MysqlTrawler {
         req: trawler::LobstersRequest,
     ) -> Box<futures::Future<Item = time::Duration, Error = ()>> {
         let sent = time::Instant::now();
+
+        // TODO: getting user notifications:
+        /*
+            .and_then(move |c| {
+                c.drop_exec(
+                    "SELECT COUNT(*) FROM `replying_comments` \
+                     WHERE `replying_comments`.`user_id` = ? \
+                     AND `replying_comments`.`is_unread` = 1",
+                    (uid,),
+                )
+            })
+            .and_then(move |c| {
+                c.drop_query(&format!(
+                    "SELECT  `keystores`.* \
+                     FROM `keystores` \
+                     WHERE `keystores`.`key` = 'user:{}:unread_messages' \
+                     ORDER BY `keystores`.`key` ASC LIMIT 1",
+                    uid
+                ))
+            })
+        */
+
         match req {
+            LobstersRequest::User(uid) => Box::new(
+                this.c
+                    .get_conn()
+                    .and_then(|c| {
+                        c.drop_exec(
+                            "\
+                             SELECT users.* \
+                             FROM users WHERE users.session_token = ? \
+                             ORDER BY users.id ASC LIMIT 1",
+                            ("KMQEEJjXymcyFj3j7Qn3c3kZ5AFcghUxscm6J9c0a3XBTMjD2OA9PEoecxyt",),
+                        )
+                    })
+                    .and_then(|c| {
+                        c.start_transaction(my::TransactionOptions::new())
+                            .and_then(|t| {
+                                t.drop_query(
+                                 "SELECT keystores.* FROM keystores WHERE keystores.key = 'traffic:date' ORDER BY keystores.key ASC LIMIT 1 FOR UPDATE; \
+                                 SELECT keystores.* FROM keystores WHERE keystores.key = 'traffic:hits' ORDER BY keystores.key ASC LIMIT 1 FOR UPDATE; \
+                                 UPDATE keystores SET value = 1521590012 WHERE keystores.key = 'traffic:date';",
+                            )
+                            })
+                            .and_then(|t| t.commit())
+                    })
+                    .and_then(move |c| {
+                        c.first_exec::<_, _, my::Row>(
+                            "SELECT  `users`.* FROM `users` \
+                             WHERE `users`.`username` = ? \
+                             ORDER BY `users`.`id` ASC LIMIT 1",
+                            (format!("user{}", uid),),
+                        )
+                    })
+                    .and_then(move |(c, user)| {
+                        let uid = user.unwrap().get::<u32, _>("id").unwrap();
+
+                        // most popular tag
+                        c.drop_exec(
+                            "SELECT  `tags`.* FROM `tags` \
+                             INNER JOIN `taggings` ON `taggings`.`tag_id` = `tags`.`id` \
+                             INNER JOIN `stories` ON `stories`.`id` = `taggings`.`story_id` \
+                             WHERE `tags`.`inactive` = 0 \
+                             AND `stories`.`user_id` = ? \
+                             GROUP BY `tags`.`id` \
+                             ORDER BY COUNT(*) desc LIMIT 1",
+                            (uid,),
+                        ).and_then(move |c| {
+                                c.drop_query(&format!(
+                                    "SELECT  `keystores`.* \
+                                     FROM `keystores` \
+                                     WHERE `keystores`.`key` = 'user:{}:stories_submitted' \
+                                     ORDER BY `keystores`.`key` ASC LIMIT 1",
+                                    uid
+                                ))
+                            })
+                            .and_then(move |c| {
+                                c.drop_query(&format!(
+                                    "SELECT  `keystores`.* \
+                                     FROM `keystores` \
+                                     WHERE `keystores`.`key` = 'user:{}:comments_posted' \
+                                     ORDER BY `keystores`.`key` ASC LIMIT 1",
+                                    uid
+                                ))
+                            })
+                            .and_then(move |c| {
+                                c.drop_exec(
+                                    "SELECT  1 AS one FROM `hats` \
+                                     WHERE `hats`.`user_id` = ? LIMIT 1",
+                                    (uid,),
+                                )
+                            })
+                    })
+                    .map_err(|e| {
+                        eprintln!("{:?}", e);
+                    })
+                    .map(move |_| sent.elapsed()),
+            ),
             LobstersRequest::Frontpage => Box::new(
                 this.c
                     .get_conn()
@@ -288,6 +385,7 @@ impl trawler::LobstersClient for MysqlTrawler {
                 )
             }
             LobstersRequest::Login(uid) => Box::new(
+                // TODO: also create users -- how do we avoid clashing with existing user ids?
                 this.c
                     .get_conn()
                     .and_then(move |c| {
