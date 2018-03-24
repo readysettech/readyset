@@ -54,7 +54,19 @@ impl trawler::LobstersClient for MysqlTrawler {
     ) -> Box<futures::Future<Item = time::Duration, Error = ()>> {
         let sent = time::Instant::now();
 
-        // TODO: getting user notifications:
+        let c = this.c.get_conn();
+
+        // TODO: session management
+        let c = c.and_then(|c| {
+            c.drop_exec(
+                "\
+                 SELECT users.* \
+                 FROM users WHERE users.session_token = ? \
+                 ORDER BY users.id ASC LIMIT 1",
+                ("KMQEEJjXymcyFj3j7Qn3c3kZ5AFcghUxscm6J9c0a3XBTMjD2OA9PEoecxyt",),
+            )
+        });
+        // TODO: notifications
         /*
             .and_then(move |c| {
                 c.drop_exec(
@@ -75,106 +87,70 @@ impl trawler::LobstersClient for MysqlTrawler {
             })
         */
 
-        match req {
-            LobstersRequest::User(uid) => Box::new(
-                this.c
-                    .get_conn()
-                    .and_then(|c| {
-                        c.drop_exec(
-                            "\
-                             SELECT users.* \
-                             FROM users WHERE users.session_token = ? \
-                             ORDER BY users.id ASC LIMIT 1",
-                            ("KMQEEJjXymcyFj3j7Qn3c3kZ5AFcghUxscm6J9c0a3XBTMjD2OA9PEoecxyt",),
-                        )
-                    })
-                    .and_then(|c| {
-                        c.start_transaction(my::TransactionOptions::new())
-                            .and_then(|t| {
-                                t.drop_query(
-                                 "SELECT keystores.* FROM keystores WHERE keystores.key = 'traffic:date' ORDER BY keystores.key ASC LIMIT 1 FOR UPDATE; \
-                                 SELECT keystores.* FROM keystores WHERE keystores.key = 'traffic:hits' ORDER BY keystores.key ASC LIMIT 1 FOR UPDATE; \
-                                 UPDATE keystores SET value = 1521590012 WHERE keystores.key = 'traffic:date';",
-                            )
-                            })
-                            .and_then(|t| t.commit())
+        // TODO: traffic management
+        // https://github.com/lobsters/lobsters/blob/master/app/controllers/application_controller.rb#L37
+        let c = c.and_then(|c| {
+            c.start_transaction(my::TransactionOptions::new())
+                .and_then(|t| {
+                    t.drop_query(
+                     "SELECT keystores.* FROM keystores WHERE keystores.key = 'traffic:date' ORDER BY keystores.key ASC LIMIT 1 FOR UPDATE; \
+                     SELECT keystores.* FROM keystores WHERE keystores.key = 'traffic:hits' ORDER BY keystores.key ASC LIMIT 1 FOR UPDATE; \
+                     UPDATE keystores SET value = 100 WHERE keystores.key = 'traffic:hits'; \
+                     UPDATE keystores SET value = 1521590012 WHERE keystores.key = 'traffic:date';",
+                )
+                })
+                .and_then(|t| t.commit())
+        });
+
+        let c: Box<Future<Item = my::Conn, Error = my::errors::Error>> = match req {
+            LobstersRequest::User(uid) => Box::new(c.and_then(move |c| {
+                c.first_exec::<_, _, my::Row>(
+                    "SELECT  `users`.* FROM `users` \
+                     WHERE `users`.`username` = ? \
+                     ORDER BY `users`.`id` ASC LIMIT 1",
+                    (format!("user{}", uid),),
+                )
+            }).and_then(move |(c, user)| {
+                let uid = user.unwrap().get::<u32, _>("id").unwrap();
+
+                // most popular tag
+                c.drop_exec(
+                    "SELECT  `tags`.* FROM `tags` \
+                     INNER JOIN `taggings` ON `taggings`.`tag_id` = `tags`.`id` \
+                     INNER JOIN `stories` ON `stories`.`id` = `taggings`.`story_id` \
+                     WHERE `tags`.`inactive` = 0 \
+                     AND `stories`.`user_id` = ? \
+                     GROUP BY `tags`.`id` \
+                     ORDER BY COUNT(*) desc LIMIT 1",
+                    (uid,),
+                ).and_then(move |c| {
+                        c.drop_query(&format!(
+                            "SELECT  `keystores`.* \
+                             FROM `keystores` \
+                             WHERE `keystores`.`key` = 'user:{}:stories_submitted' \
+                             ORDER BY `keystores`.`key` ASC LIMIT 1",
+                            uid
+                        ))
                     })
                     .and_then(move |c| {
-                        c.first_exec::<_, _, my::Row>(
-                            "SELECT  `users`.* FROM `users` \
-                             WHERE `users`.`username` = ? \
-                             ORDER BY `users`.`id` ASC LIMIT 1",
-                            (format!("user{}", uid),),
-                        )
+                        c.drop_query(&format!(
+                            "SELECT  `keystores`.* \
+                             FROM `keystores` \
+                             WHERE `keystores`.`key` = 'user:{}:comments_posted' \
+                             ORDER BY `keystores`.`key` ASC LIMIT 1",
+                            uid
+                        ))
                     })
-                    .and_then(move |(c, user)| {
-                        let uid = user.unwrap().get::<u32, _>("id").unwrap();
-
-                        // most popular tag
+                    .and_then(move |c| {
                         c.drop_exec(
-                            "SELECT  `tags`.* FROM `tags` \
-                             INNER JOIN `taggings` ON `taggings`.`tag_id` = `tags`.`id` \
-                             INNER JOIN `stories` ON `stories`.`id` = `taggings`.`story_id` \
-                             WHERE `tags`.`inactive` = 0 \
-                             AND `stories`.`user_id` = ? \
-                             GROUP BY `tags`.`id` \
-                             ORDER BY COUNT(*) desc LIMIT 1",
+                            "SELECT  1 AS one FROM `hats` \
+                             WHERE `hats`.`user_id` = ? LIMIT 1",
                             (uid,),
-                        ).and_then(move |c| {
-                                c.drop_query(&format!(
-                                    "SELECT  `keystores`.* \
-                                     FROM `keystores` \
-                                     WHERE `keystores`.`key` = 'user:{}:stories_submitted' \
-                                     ORDER BY `keystores`.`key` ASC LIMIT 1",
-                                    uid
-                                ))
-                            })
-                            .and_then(move |c| {
-                                c.drop_query(&format!(
-                                    "SELECT  `keystores`.* \
-                                     FROM `keystores` \
-                                     WHERE `keystores`.`key` = 'user:{}:comments_posted' \
-                                     ORDER BY `keystores`.`key` ASC LIMIT 1",
-                                    uid
-                                ))
-                            })
-                            .and_then(move |c| {
-                                c.drop_exec(
-                                    "SELECT  1 AS one FROM `hats` \
-                                     WHERE `hats`.`user_id` = ? LIMIT 1",
-                                    (uid,),
-                                )
-                            })
-                    })
-                    .map_err(|e| {
-                        eprintln!("{:?}", e);
-                    })
-                    .map(move |_| sent.elapsed()),
-            ),
-            LobstersRequest::Frontpage => Box::new(
-                this.c
-                    .get_conn()
-                    .and_then(|c| {
-                        c.drop_exec(
-                            "\
-                             SELECT users.* \
-                             FROM users WHERE users.session_token = ? \
-                             ORDER BY users.id ASC LIMIT 1",
-                            ("KMQEEJjXymcyFj3j7Qn3c3kZ5AFcghUxscm6J9c0a3XBTMjD2OA9PEoecxyt",),
                         )
                     })
-                    .and_then(|c| {
-                        c.start_transaction(my::TransactionOptions::new())
-                            .and_then(|t| {
-                                t.drop_query(
-                                 "SELECT keystores.* FROM keystores WHERE keystores.key = 'traffic:date' ORDER BY keystores.key ASC LIMIT 1 FOR UPDATE; \
-                                 SELECT keystores.* FROM keystores WHERE keystores.key = 'traffic:hits' ORDER BY keystores.key ASC LIMIT 1 FOR UPDATE; \
-                                 UPDATE keystores SET value = 1521590012 WHERE keystores.key = 'traffic:date';",
-                            )
-                            })
-                            .and_then(|t| t.commit())
-                    })
-                    .and_then(|c| c.drop_query("SELECT `tags`.* FROM `tags` WHERE 1=0"))
+            })),
+            LobstersRequest::Frontpage => Box::new(
+                c.and_then(|c| c.drop_query("SELECT `tags`.* FROM `tags` WHERE 1=0"))
                     .and_then(|c| {
                         c.query(
                             "SELECT  `stories`.* FROM `stories` \
@@ -245,37 +221,11 @@ impl trawler::LobstersClient for MysqlTrawler {
                             "SELECT `tags`.* FROM `tags` WHERE `tags`.`id` IN ({})",
                             tags
                         ))
-                    })
-                    .map_err(|e| {
-                        eprintln!("{:?}", e);
-                    })
-                    .map(move |_| sent.elapsed()),
+                    }),
             ),
             LobstersRequest::Recent => {
                 Box::new(
-                    this.c
-                        .get_conn()
-                        .and_then(|c| {
-                            c.drop_exec(
-                                "\
-                                 SELECT users.* \
-                                 FROM users WHERE users.session_token = ? \
-                                 ORDER BY users.id ASC LIMIT 1",
-                                ("KMQEEJjXymcyFj3j7Qn3c3kZ5AFcghUxscm6J9c0a3XBTMjD2OA9PEoecxyt",),
-                            )
-                        })
-                        .and_then(|c| {
-                            c.start_transaction(my::TransactionOptions::new())
-                                .and_then(|t| {
-                                    t.drop_query(
-                                 "SELECT keystores.* FROM keystores WHERE keystores.key = 'traffic:date' ORDER BY keystores.key ASC LIMIT 1 FOR UPDATE; \
-                                 SELECT keystores.* FROM keystores WHERE keystores.key = 'traffic:hits' ORDER BY keystores.key ASC LIMIT 1 FOR UPDATE; \
-                                 UPDATE keystores SET value = 1521590012 WHERE keystores.key = 'traffic:date';",
-                            )
-                                })
-                                .and_then(|t| t.commit())
-                        })
-                        .and_then(|c| c.drop_query("SELECT `tags`.* FROM `tags` WHERE 1=0"))
+                    c.and_then(|c| c.drop_query("SELECT `tags`.* FROM `tags` WHERE 1=0"))
                         .and_then(|c| {
                             // /recent is a little weird:
                             // https://github.com/lobsters/lobsters/blob/50b4687aeeec2b2d60598f63e06565af226f93e3/app/models/story_repository.rb#L41
@@ -377,73 +327,27 @@ impl trawler::LobstersClient for MysqlTrawler {
                                 "SELECT `tags`.* FROM `tags` WHERE `tags`.`id` IN ({})",
                                 tags
                             ))
-                        })
-                        .map_err(|e| {
-                            eprintln!("{:?}", e);
-                        })
-                        .map(move |_| sent.elapsed()),
+                        }),
                 )
             }
             LobstersRequest::Login(uid) => Box::new(
                 // TODO: also create users -- how do we avoid clashing with existing user ids?
-                this.c
-                    .get_conn()
-                    .and_then(move |c| {
-                        c.drop_exec(
-                            "\
-                             SELECT  `users`.* \
-                             FROM `users` \
-                             WHERE `users`.`username` = ? \
-                             ORDER BY `users`.`id` ASC LIMIT 1",
-                            (format!("user{}", uid),),
-                        )
-                    })
-                    .map_err(|e| {
-                        eprintln!("{:?}", e);
-                    })
-                    .map(move |_| sent.elapsed()),
+                c.and_then(move |c| {
+                    c.drop_exec(
+                        "\
+                         SELECT  `users`.* \
+                         FROM `users` \
+                         WHERE `users`.`username` = ? \
+                         ORDER BY `users`.`id` ASC LIMIT 1",
+                        (format!("user{}", uid),),
+                    )
+                }),
             ),
-            LobstersRequest::Logout(..) => Box::new(
-                this.c
-                    .get_conn()
-                    .and_then(|c| {
-                        c.drop_exec(
-                            "\
-                             SELECT users.* \
-                             FROM users WHERE users.session_token = ? \
-                             ORDER BY users.id ASC LIMIT 1",
-                            ("KMQEEJjXymcyFj3j7Qn3c3kZ5AFcghUxscm6J9c0a3XBTMjD2OA9PEoecxyt",),
-                        )
-                    })
-                    .map_err(|e| {
-                        eprintln!("{:?}", e);
-                    })
-                    .map(move |_| sent.elapsed()),
-            ),
+            LobstersRequest::Logout(..) => Box::new(c),
             LobstersRequest::Story(id) => {
                 Box::new(
                     this.c
                         .get_conn()
-                        .and_then(|c| {
-                            c.drop_exec(
-                                "\
-                                 SELECT users.* \
-                                 FROM users WHERE users.session_token = ? \
-                                 ORDER BY users.id ASC LIMIT 1",
-                                ("KMQEEJjXymcyFj3j7Qn3c3kZ5AFcghUxscm6J9c0a3XBTMjD2OA9PEoecxyt",),
-                            )
-                        })
-                        .and_then(|c| {
-                            c.start_transaction(my::TransactionOptions::new())
-                                .and_then(|t| {
-                                    t.drop_query(
-                                 "SELECT keystores.* FROM keystores WHERE keystores.key = 'traffic:date' ORDER BY keystores.key ASC LIMIT 1 FOR UPDATE; \
-                                 SELECT keystores.* FROM keystores WHERE keystores.key = 'traffic:hits' ORDER BY keystores.key ASC LIMIT 1 FOR UPDATE; \
-                                 UPDATE keystores SET value = 1521590012 WHERE keystores.key = 'traffic:date';",
-                            )
-                                })
-                                .and_then(|t| t.commit())
-                        })
                         .and_then(move |c| {
                             c.prep_exec(
                                 "SELECT `stories`.* \
@@ -543,38 +447,13 @@ impl trawler::LobstersClient for MysqlTrawler {
                                 "SELECT `tags`.* FROM `tags` WHERE `tags`.`id` IN ({})",
                                 tags
                             ))
-                        })
-                        .map_err(|e| {
-                            eprintln!("{:?}", e);
-                        })
-                        .map(move |_| sent.elapsed()),
+                        }),
                 )
             }
             LobstersRequest::StoryVote(user, story, v) => {
                 Box::new(
                     this.c
                         .get_conn()
-                        .and_then(|c| {
-                            c.drop_exec(
-                                "\
-                                 SELECT users.* \
-                                 FROM users WHERE users.session_token = ? \
-                                 ORDER BY users.id ASC LIMIT 1",
-                                ("KMQEEJjXymcyFj3j7Qn3c3kZ5AFcghUxscm6J9c0a3XBTMjD2OA9PEoecxyt",),
-                            )
-                        })
-                        .and_then(|c| {
-                            c.start_transaction(my::TransactionOptions::new())
-                                .and_then(|t| {
-                                    t.drop_query(
-                                 "SELECT keystores.* FROM keystores WHERE keystores.key = 'traffic:date' ORDER BY keystores.key ASC LIMIT 1 FOR UPDATE; \
-                                 SELECT keystores.* FROM keystores WHERE keystores.key = 'traffic:hits' ORDER BY keystores.key ASC LIMIT 1 FOR UPDATE; \
-                                 UPDATE keystores SET value = 100 WHERE keystores.key = 'traffic:hits'; \
-                                 UPDATE keystores SET value = 1521590012 WHERE keystores.key = 'traffic:date';",
-                            )
-                                })
-                                .and_then(|t| t.commit())
-                        })
                         .and_then(move |c| {
                             c.prep_exec(
                                 "SELECT `stories`.* \
@@ -691,37 +570,13 @@ impl trawler::LobstersClient for MysqlTrawler {
                                     )
                                 })
                                 .and_then(|t| t.commit())
-                        })
-                        .map_err(|e| {
-                            eprintln!("{:?}", e);
-                        })
-                        .map(move |_| sent.elapsed()),
+                        }),
                 )
             }
             LobstersRequest::CommentVote(user, comment, v) => {
                 Box::new(
                     this.c
                         .get_conn()
-                        .and_then(|c| {
-                            c.drop_exec(
-                                "\
-                                 SELECT users.* \
-                                 FROM users WHERE users.session_token = ? \
-                                 ORDER BY users.id ASC LIMIT 1",
-                                ("KMQEEJjXymcyFj3j7Qn3c3kZ5AFcghUxscm6J9c0a3XBTMjD2OA9PEoecxyt",),
-                            )
-                        })
-                        .and_then(|c| {
-                            c.start_transaction(my::TransactionOptions::new())
-                                .and_then(|t| {
-                                    t.drop_query(
-                                 "SELECT keystores.* FROM keystores WHERE keystores.key = 'traffic:date' ORDER BY keystores.key ASC LIMIT 1 FOR UPDATE; \
-                                 SELECT keystores.* FROM keystores WHERE keystores.key = 'traffic:hits' ORDER BY keystores.key ASC LIMIT 1 FOR UPDATE; \
-                                 UPDATE keystores SET value = 1521590012 WHERE keystores.key = 'traffic:date';",
-                            )
-                                })
-                                .and_then(|t| t.commit())
-                        })
                         .and_then(move |c| {
                             c.prep_exec(
                                 "SELECT `comments`.* \
@@ -884,38 +739,13 @@ impl trawler::LobstersClient for MysqlTrawler {
                                     )
                                 })
                                 .and_then(|t| t.commit())
-                        })
-                        .map_err(|e| {
-                            eprintln!("{:?}", e);
-                        })
-                        .map(move |_| sent.elapsed()),
+                        }),
                 )
             }
-
             LobstersRequest::Submit { id, user, title } => {
                 Box::new(
                     this.c
                         .get_conn()
-                        .and_then(|c| {
-                            c.drop_exec(
-                                "\
-                                 SELECT users.* \
-                                 FROM users WHERE users.session_token = ? \
-                                 ORDER BY users.id ASC LIMIT 1",
-                                ("KMQEEJjXymcyFj3j7Qn3c3kZ5AFcghUxscm6J9c0a3XBTMjD2OA9PEoecxyt",),
-                            )
-                        })
-                        .and_then(|c| {
-                            c.start_transaction(my::TransactionOptions::new())
-                                .and_then(|t| {
-                                    t.drop_query(
-                                 "SELECT keystores.* FROM keystores WHERE keystores.key = 'traffic:date' ORDER BY keystores.key ASC LIMIT 1 FOR UPDATE; \
-                                 SELECT keystores.* FROM keystores WHERE keystores.key = 'traffic:hits' ORDER BY keystores.key ASC LIMIT 1 FOR UPDATE; \
-                                 UPDATE keystores SET value = 1521590012 WHERE keystores.key = 'traffic:date';",
-                            )
-                                })
-                                .and_then(|t| t.commit())
-                        })
                         .and_then(move |c| {
                             // check that tags exist
                             c.drop_query(
@@ -1004,43 +834,41 @@ impl trawler::LobstersClient for MysqlTrawler {
                                          ('user:{}:stories_submitted', 1) \
                                          ON DUPLICATE KEY UPDATE `value` = `value` + 1",
                                         user
-                                    )
-                                    ).map(move |t| (t, story))
+                                    )).map(move |t| (t, story))
                                 })
                                 .and_then(move |(t, story)| {
                                     t.drop_query(&format!(
                                         "SELECT  `keystores`.* \
-                                        FROM `keystores` \
-                                        WHERE `keystores`.`key` = 'user:{}:stories_submitted' \
-                                        ORDER BY `keystores`.`key` ASC LIMIT 1",
+                                         FROM `keystores` \
+                                         WHERE `keystores`.`key` = 'user:{}:stories_submitted' \
+                                         ORDER BY `keystores`.`key` ASC LIMIT 1",
                                         user
-                                    )
-                                    ).map(move |t| (t, story))
+                                    )).map(move |t| (t, story))
                                 })
                                 .and_then(move |(t, story)| {
                                     t.drop_exec(
                                         "SELECT  `votes`.* FROM `votes` \
-                                        WHERE `votes`.`user_id` = ? \
-                                        AND `votes`.`story_id` = ? \
-                                        AND `votes`.`comment_id` IS NULL \
-                                        ORDER BY `votes`.`id` ASC LIMIT 1",
-                                        (user, story)
+                                         WHERE `votes`.`user_id` = ? \
+                                         AND `votes`.`story_id` = ? \
+                                         AND `votes`.`comment_id` IS NULL \
+                                         ORDER BY `votes`.`id` ASC LIMIT 1",
+                                        (user, story),
                                     ).map(move |t| (t, story))
                                 })
                                 .and_then(move |(t, story)| {
                                     t.drop_exec(
                                         "INSERT INTO `votes` (`user_id`, `story_id`, `vote`) \
-                                        VALUES (?, ?, 1)",
-                                        (user, story)
+                                         VALUES (?, ?, 1)",
+                                        (user, story),
                                     ).map(move |t| (t, story))
                                 })
                                 .and_then(move |(t, story)| {
                                     t.drop_exec(
                                         "SELECT `comments`.`upvotes`, `comments`.`downvotes` \
-                                        FROM `comments` \
-                                        WHERE `comments`.`story_id` = ? \
-                                        AND (user_id <> ?)",
-                                        (story, user)
+                                         FROM `comments` \
+                                         WHERE `comments`.`story_id` = ? \
+                                         AND (user_id <> ?)",
+                                        (story, user),
                                     ).map(move |t| (t, story))
                                 })
                                 .and_then(move |(t, story)| {
@@ -1056,26 +884,21 @@ impl trawler::LobstersClient for MysqlTrawler {
                                     )
                                 })
                                 .and_then(|t| t.commit())
-                        })
-                        // TODO
-                        //
-                        //  SELECT  `read_ribbons`.* \
-                        //  FROM `read_ribbons` \
-                        //  WHERE `read_ribbons`.`user_id` = 12 \
-                        //  AND `read_ribbons`.`story_id` = 5747 \
-                        //  ORDER BY `read_ribbons`.`id` ASC LIMIT 1
-                        //
-                        //  BEGIN
-                        //
-                        //  INSERT INTO `read_ribbons` \
-                        //  (`created_at`, `updated_at`, `user_id`, `story_id`) \
-                        //  VALUES ('2018-03-24 15:55:58', '2018-03-24 15:55:58', 12, 5747)
-                        //
-                        //  COMMIT
-                        .map_err(|e| {
-                            eprintln!("{:?}", e);
-                        })
-                        .map(move |_| sent.elapsed()),
+                        }), // TODO
+                            //
+                            //  SELECT  `read_ribbons`.* \
+                            //  FROM `read_ribbons` \
+                            //  WHERE `read_ribbons`.`user_id` = 12 \
+                            //  AND `read_ribbons`.`story_id` = 5747 \
+                            //  ORDER BY `read_ribbons`.`id` ASC LIMIT 1
+                            //
+                            //  BEGIN
+                            //
+                            //  INSERT INTO `read_ribbons` \
+                            //  (`created_at`, `updated_at`, `user_id`, `story_id`) \
+                            //  VALUES ('2018-03-24 15:55:58', '2018-03-24 15:55:58', 12, 5747)
+                            //
+                            //  COMMIT
                 )
             }
             LobstersRequest::Comment {
@@ -1087,26 +910,6 @@ impl trawler::LobstersClient for MysqlTrawler {
                 Box::new(
                     this.c
                         .get_conn()
-                        .and_then(|c| {
-                            c.drop_exec(
-                                "\
-                                 SELECT users.* \
-                                 FROM users WHERE users.session_token = ? \
-                                 ORDER BY users.id ASC LIMIT 1",
-                                ("KMQEEJjXymcyFj3j7Qn3c3kZ5AFcghUxscm6J9c0a3XBTMjD2OA9PEoecxyt",),
-                            )
-                        })
-                        .and_then(|c| {
-                            c.start_transaction(my::TransactionOptions::new())
-                                .and_then(|t| {
-                                    t.drop_query(
-                                 "SELECT keystores.* FROM keystores WHERE keystores.key = 'traffic:date' ORDER BY keystores.key ASC LIMIT 1 FOR UPDATE; \
-                                 SELECT keystores.* FROM keystores WHERE keystores.key = 'traffic:hits' ORDER BY keystores.key ASC LIMIT 1 FOR UPDATE; \
-                                 UPDATE keystores SET value = 1521590012 WHERE keystores.key = 'traffic:date';",
-                            )
-                                })
-                                .and_then(|t| t.commit())
-                        })
                         .and_then(move |c| {
                             c.first_exec::<_, _, my::Row>(
                                 "SELECT `stories`.* \
@@ -1326,14 +1129,14 @@ impl trawler::LobstersClient for MysqlTrawler {
                                     // author of the parent comment here..
                                 })
                                 .and_then(|t| t.commit())
-                        })
-                        .map_err(|e| {
-                            eprintln!("{:?}", e);
-                        })
-                        .map(move |_| sent.elapsed()),
+                        }),
                 )
             }
-        }
+        };
+
+        Box::new(c.map_err(|e| {
+            eprintln!("{:?}", e);
+        }).map(move |_| sent.elapsed()))
     }
 }
 
