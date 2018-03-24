@@ -305,6 +305,64 @@ fn delete_no_keys() {
 }
 
 #[test]
+fn delete_compound_primary_key() {
+    let d = Deployment::new("delete_compound_primary_key");
+    let opts = setup(&d);
+    let mut conn = mysql::Conn::new(opts).unwrap();
+    conn.query("CREATE TABLE Vote (aid int, uid int, reason VARCHAR(255), PRIMARY KEY(aid, uid))")
+        .unwrap();
+    sleep();
+
+    conn.query("INSERT INTO Vote (aid, uid) VALUES (1, 2)")
+        .unwrap();
+    conn.query("INSERT INTO Vote (aid, uid) VALUES (1, 3)")
+        .unwrap();
+    sleep();
+
+    {
+        let q = "DELETE FROM Vote WHERE Vote.aid = 1 AND Vote.uid = 2";
+        let deleted = conn.query(q).unwrap();
+        assert_eq!(deleted.affected_rows(), 1);
+    }
+
+    let q = "SELECT Vote.uid FROM Vote WHERE Vote.aid = 1 AND Vote.uid = 2";
+    let row = conn.query(q).unwrap().next();
+    assert!(row.is_none());
+
+    let q = "SELECT Vote.uid FROM Vote WHERE Vote.aid = 1 AND Vote.uid = 3";
+    let uid: i32 = conn.first(q).unwrap().unwrap();
+    assert_eq!(uid, 3);
+}
+
+#[test]
+fn delete_multi_compound_primary_key() {
+    let d = Deployment::new("delete_multi_compound_primary_key");
+    let opts = setup(&d);
+    let mut conn = mysql::Conn::new(opts).unwrap();
+    conn.query("CREATE TABLE Vote (aid int, uid int, reason VARCHAR(255), PRIMARY KEY(aid, uid))")
+        .unwrap();
+    sleep();
+
+    conn.query("INSERT INTO Vote (aid, uid) VALUES (1, 2)")
+        .unwrap();
+    conn.query("INSERT INTO Vote (aid, uid) VALUES (1, 3)")
+        .unwrap();
+    sleep();
+
+    {
+        let q = "DELETE FROM Vote WHERE (Vote.aid = 1 AND Vote.uid = 2) OR (Vote.aid = 1 AND Vote.uid = 3)";
+        let deleted = conn.query(q).unwrap();
+        assert_eq!(deleted.affected_rows(), 2);
+    }
+
+    for _ in 2..4 {
+        let q = "SELECT Vote.uid FROM Vote WHERE Vote.aid = 1 AND Vote.uid = 2";
+        let row = conn.query(q).unwrap().next();
+        assert!(row.is_none());
+    }
+}
+
+#[test]
 fn update_basic() {
     let d = Deployment::new("update_basic");
     let opts = setup(&d);
@@ -327,6 +385,69 @@ fn update_basic() {
         .unwrap()
         .unwrap();
     assert_eq!(name, String::from("Rusty"));
+}
+
+#[test]
+fn update_compound_primary_key() {
+    let d = Deployment::new("update_compound_primary_key");
+    let opts = setup(&d);
+    let mut conn = mysql::Conn::new(opts).unwrap();
+    conn.query("CREATE TABLE Vote (aid int, uid int, reason VARCHAR(255), PRIMARY KEY(aid, uid))")
+        .unwrap();
+    sleep();
+
+    conn.query("INSERT INTO Vote (aid, uid, reason) VALUES (1, 2, \"okay\")")
+        .unwrap();
+    conn.query("INSERT INTO Vote (aid, uid, reason) VALUES (1, 3, \"still okay\")")
+        .unwrap();
+    sleep();
+
+    {
+        let q = "UPDATE Vote SET Vote.reason = \"better\" WHERE Vote.aid = 1 AND Vote.uid = 2";
+        let updated = conn.query(q).unwrap();
+        assert_eq!(updated.affected_rows(), 1);
+    }
+
+    let q = "SELECT Vote.reason FROM Vote WHERE Vote.aid = 1 AND Vote.uid = 2";
+    let name: String = conn.first(q).unwrap().unwrap();
+    assert_eq!(name, String::from("better"));
+
+    let q = "SELECT Vote.reason FROM Vote WHERE Vote.aid = 1 AND Vote.uid = 3";
+    let name: String = conn.first(q).unwrap().unwrap();
+    assert_eq!(name, String::from("still okay"));
+}
+
+#[test]
+fn update_multi_compound_key() {
+    let d = Deployment::new("update_multi_compound_key");
+    let opts = setup(&d);
+    let mut conn = mysql::Conn::new(opts).unwrap();
+    conn.query("CREATE TABLE Vote (aid int, uid int, reason VARCHAR(255), PRIMARY KEY(aid, uid))")
+        .unwrap();
+    sleep();
+
+    conn.query("INSERT INTO Vote (aid, uid, reason) VALUES (1, 2, \"okay\")")
+        .unwrap();
+    conn.query("INSERT INTO Vote (aid, uid, reason) VALUES (1, 3, \"still okay\")")
+        .unwrap();
+    sleep();
+
+    {
+        let q = "UPDATE Vote SET Vote.reason = \"better\" \
+                 WHERE (Vote.aid = 1 AND Vote.uid = 2) OR (Vote.aid = 1 AND Vote.uid = 3)";
+        let updated = conn.query(q).unwrap();
+        assert_eq!(updated.affected_rows(), 2);
+    }
+
+    for uid in 2..4 {
+        let q = format!(
+            "SELECT Vote.reason FROM Vote WHERE Vote.aid = 1 AND Vote.uid = {}",
+            uid
+        );
+
+        let name: String = conn.first(q).unwrap().unwrap();
+        assert_eq!(name, String::from("better"));
+    }
 }
 
 #[test]

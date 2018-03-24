@@ -154,7 +154,7 @@ impl SoupBackend {
             Some(flattened) => {
                 let count = flattened.len() as u64;
                 for key in flattened {
-                    match mutator.delete(vec![key]) {
+                    match mutator.delete(key) {
                         Ok(_) => {}
                         Err(e) => {
                             error!(self.log, "delete error: {:?}", e);
@@ -409,7 +409,9 @@ impl SoupBackend {
                     }
                 };
 
-                let keys = flattened.into_iter().collect();
+                // NOTE: Soup doesn't support compound primary key reads yet,
+                // so we'll use only part of the key and filter out what we get later.
+                let keys = flattened.iter().map(|key| key[0].clone()).collect();
                 let lookup_results = match getter.multi_lookup(keys, true) {
                     Ok(r) => r,
                     Err(e) => {
@@ -431,10 +433,22 @@ impl SoupBackend {
                 // the new values given in the query:
                 let changed_rows: Vec<(Vec<DataType>, Vec<DataType>)> = lookup_results
                     .into_iter()
-                    .map(|result| {
+                    .enumerate()
+                    .map(|(i, result)| {
                         result
                             .into_iter()
                             .filter_map(|row| {
+                                // NOTE: Since Soup doesn't support reads on compound primary keys
+                                // yet, we have to filter out rows where only part of the key
+                                // matches:
+                                if pkey.len() > 1
+                                    && key_indices
+                                        .iter()
+                                        .any(|key_i| row[*key_i] != flattened[i][*key_i])
+                                {
+                                    return None;
+                                }
+
                                 let new_row = row.clone()
                                     .into_iter()
                                     .enumerate()
