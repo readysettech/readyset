@@ -686,21 +686,20 @@ impl trawler::LobstersClient for MysqlTrawler {
                                 })
                                 .and_then(move |c| {
                                     // get all the stuff needed to compute updated hotness
-                                    c.prep_exec(
+                                    c.first_exec::<_, _, my::Row>(
                                         "SELECT `stories`.* \
                                          FROM `stories` \
                                          WHERE `stories`.`id` = ? \
                                          ORDER BY `stories`.`id` ASC LIMIT 1",
                                         (story,),
-                                    ).and_then(|result| result.collect_and_drop::<my::Row>())
-                                        .map(|(c, mut story)| {
-                                            let story = story.swap_remove(0);
-                                            (
-                                                c,
-                                                story.get::<u32, _>("user_id").unwrap(),
-                                                story.get::<f64, _>("hotness").unwrap(),
-                                            )
-                                        })
+                                    ).map(|(c, story)| {
+                                        let story = story.unwrap();
+                                        (
+                                            c,
+                                            story.get::<u32, _>("user_id").unwrap(),
+                                            story.get::<f64, _>("hotness").unwrap(),
+                                        )
+                                    })
                                 })
                                 .and_then(move |(t, story_author, score)| {
                                     t.drop_exec(
