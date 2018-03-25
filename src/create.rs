@@ -48,7 +48,9 @@ impl fmt::Display for CreateTableStatement {
 named!(pub key_specification<&[u8], TableKey>,
     alt_complete!(
           do_parse!(
-              tag_no_case!("fulltext key") >>
+              tag_no_case!("fulltext") >>
+              multispace >>
+              alt_complete!(tag_no_case!("key") | tag_no_case!("index")) >>
               opt_multispace >>
               name: opt!(sql_identifier) >>
               opt_multispace >>
