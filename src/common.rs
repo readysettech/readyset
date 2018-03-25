@@ -287,6 +287,21 @@ fn len_as_u16(len: &[u8]) -> u16 {
     }
 }
 
+named!(pub precision<&[u8], (u8, Option<u8>)>,
+    delimited!(tag!("("),
+               do_parse!(
+                   m: map_res!(digit, str::from_utf8) >>
+                   d: opt!(do_parse!(
+                             tag!(",") >>
+                             opt_multispace >>
+                             d: map_res!(digit, str::from_utf8) >>
+                             (d)
+                        )) >>
+                   ((u8::from_str(m).unwrap(), d.map(|r| u8::from_str(r).unwrap())))
+               ),
+               tag!(")"))
+);
+
 /// A SQL type specifier.
 named!(pub type_identifier<&[u8], SqlType>,
     alt_complete!(
@@ -365,12 +380,13 @@ named!(pub type_identifier<&[u8], SqlType>,
                _signed: opt!(alt_complete!(tag_no_case!("unsigned") | tag_no_case!("signed"))) >>
                (SqlType::Double)
            )
-         | do_parse!(
+         | dbg_dmp!(do_parse!(
                tag_no_case!("float") >>
                opt_multispace >>
-               _signed: opt!(alt_complete!(tag_no_case!("unsigned") | tag_no_case!("signed"))) >>
+               _prec: opt!(precision) >>
+               opt_multispace >>
                (SqlType::Float)
-           )
+           ))
          | do_parse!(
                tag_no_case!("blob") >>
                (SqlType::Blob)
@@ -425,17 +441,9 @@ named!(pub type_identifier<&[u8], SqlType>,
                // former has "at least" M precision, the latter "exactly".
                // See https://dev.mysql.com/doc/refman/5.7/en/precision-math-decimal-characteristics.html
                alt_complete!(tag_no_case!("decimal") | tag_no_case!("numeric")) >>
-               opts: opt!(delimited!(tag!("("),
-                          do_parse!(
-                              m: map_res!(digit, str::from_utf8) >>
-                              tag!(",") >>
-                              opt_multispace >>
-                              d: opt!(map_res!(digit, str::from_utf8)) >>
-                              ((u8::from_str(m).unwrap(), d.map(|r| u8::from_str(r).unwrap())))
-                          ),
-                          tag!(")"))) >>
+               prec: opt!(precision) >>
                opt_multispace >>
-               (match opts {
+               (match prec {
                    None => SqlType::Decimal(32, 0),
                    Some((m, None)) => SqlType::Decimal(m, 0),
                    Some((m, Some(d))) => SqlType::Decimal(m, d),
