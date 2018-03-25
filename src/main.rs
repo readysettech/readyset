@@ -1,20 +1,23 @@
+#![feature(box_syntax, box_patterns)]
+
 #[macro_use]
 extern crate clap;
 extern crate distributary;
 extern crate msql_srv;
 extern crate nom_sql;
-extern crate regex;
 
 #[macro_use]
 extern crate lazy_static;
 #[macro_use]
 extern crate slog;
 
+extern crate regex;
+
 mod soup_backend;
 mod utils;
 
 use msql_srv::MysqlIntermediary;
-use nom_sql::ColumnSpecification;
+use nom_sql::CreateTableStatement;
 use std::collections::HashMap;
 use std::net;
 use std::sync::{Arc, Mutex};
@@ -64,7 +67,7 @@ fn main() {
     info!(log, "listening on port {}", port);
 
     let query_counter = Arc::new(AtomicUsize::new(0));
-    let schemas: Arc<Mutex<HashMap<String, Vec<ColumnSpecification>>>> =
+    let schemas: Arc<Mutex<HashMap<String, CreateTableStatement>>> =
         Arc::new(Mutex::new(HashMap::default()));
     let auto_increments: Arc<Mutex<HashMap<String, u64>>> =
         Arc::new(Mutex::new(HashMap::default()));
