@@ -3,11 +3,12 @@ use std::str;
 use std::str::FromStr;
 use std::fmt;
 
-use common::{column_identifier_no_alias, field_list, integer_literal, opt_multispace,
-             sql_identifier, statement_terminator, table_reference, type_identifier, Literal,
-             Real, SqlType, TableKey};
+use common::{column_identifier_no_alias, integer_literal, opt_multispace, sql_identifier,
+             statement_terminator, table_reference, type_identifier, Literal, Real, SqlType,
+             TableKey};
 use column::{Column, ColumnConstraint, ColumnSpecification};
 use keywords::escape_if_keyword;
+use order::{order_type, OrderType};
 use table::Table;
 
 #[derive(Clone, Debug, Default, Hash, PartialEq, Serialize, Deserialize)]
@@ -44,6 +45,36 @@ impl fmt::Display for CreateTableStatement {
     }
 }
 
+/// MySQL grammar element for index column definition (§13.1.18, index_col_name)
+named!(pub index_col_name<&[u8], (Column, Option<u16>, Option<OrderType>)>,
+    do_parse!(
+        column: column_identifier_no_alias >>
+        opt_multispace >>
+        len: opt!(delimited!(tag!("("), map_res!(digit, str::from_utf8), tag!(")"))) >>
+        order: opt!(order_type) >>
+        ((column, len.map(|l| u16::from_str(l).unwrap()), order))
+    )
+);
+
+/// Helper for list of index columns
+named!(pub index_col_list<&[u8], Vec<Column> >,
+       many0!(
+           do_parse!(
+               entry: index_col_name >>
+               opt!(
+                   complete!(do_parse!(
+                       opt_multispace >>
+                       tag!(",") >>
+                       opt_multispace >>
+                       ()
+                   ))
+               ) >>
+               // XXX(malte): ignores length and order
+               (entry.0)
+           )
+       )
+);
+
 /// Parse rule for an individual key specification.
 named!(pub key_specification<&[u8], TableKey>,
     alt_complete!(
@@ -54,7 +85,7 @@ named!(pub key_specification<&[u8], TableKey>,
               opt_multispace >>
               name: opt!(sql_identifier) >>
               opt_multispace >>
-              columns: delimited!(tag!("("), delimited!(opt_multispace, field_list, opt_multispace), tag!(")")) >>
+              columns: delimited!(tag!("("), delimited!(opt_multispace, index_col_list, opt_multispace), tag!(")")) >>
               (match name {
                   Some(name) => {
                       let n = String::from(str::from_utf8(name).unwrap());
@@ -66,7 +97,7 @@ named!(pub key_specification<&[u8], TableKey>,
         | do_parse!(
               tag_no_case!("primary key") >>
               opt_multispace >>
-              columns: delimited!(tag!("("), delimited!(opt_multispace, field_list, opt_multispace), tag!(")")) >>
+              columns: delimited!(tag!("("), delimited!(opt_multispace, index_col_list, opt_multispace), tag!(")")) >>
               opt!(complete!(do_parse!(
                           multispace >>
                           tag_no_case!("autoincrement") >>
@@ -87,7 +118,7 @@ named!(pub key_specification<&[u8], TableKey>,
               opt_multispace >>
               name: opt!(sql_identifier) >>
               opt_multispace >>
-              columns: delimited!(tag!("("), delimited!(opt_multispace, field_list, opt_multispace), tag!(")")) >>
+              columns: delimited!(tag!("("), delimited!(opt_multispace, index_col_list, opt_multispace), tag!(")")) >>
               (match name {
                   Some(name) => {
                       let n = String::from(str::from_utf8(name).unwrap());
@@ -101,7 +132,7 @@ named!(pub key_specification<&[u8], TableKey>,
               opt_multispace >>
               name: sql_identifier >>
               opt_multispace >>
-              columns: delimited!(tag!("("), delimited!(opt_multispace, field_list, opt_multispace), tag!(")")) >>
+              columns: delimited!(tag!("("), delimited!(opt_multispace, index_col_list, opt_multispace), tag!(")")) >>
               ({
                   let n = String::from(str::from_utf8(name).unwrap());
                   TableKey::Key(n, columns)
