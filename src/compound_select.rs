@@ -2,8 +2,8 @@ use nom::multispace;
 use std::str;
 
 use common::opt_multispace;
-use select::{limit_clause, nested_selection, order_clause, LimitClause, OrderClause,
-             SelectStatement};
+use select::{limit_clause, nested_selection, LimitClause, SelectStatement};
+use order::{order_clause, OrderClause};
 
 #[derive(Clone, Debug, Hash, PartialEq, Deserialize, Serialize)]
 pub enum CompoundSelectOperator {
