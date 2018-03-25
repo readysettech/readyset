@@ -232,7 +232,6 @@ mod tests {
         let qstring = "update users set name=42, password='xxx' where id=1";
         let expected = "UPDATE users SET name = 42, password = 'xxx' WHERE id = 1";
         let res = parse_query(qstring);
-        println!("res: {:#?}", res);
         assert!(res.is_ok());
         assert_eq!(expected, format!("{}", res.unwrap()));
     }
