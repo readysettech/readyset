@@ -217,6 +217,7 @@ impl<'a> From<&'a Literal> for DataType {
                 let ts = chrono::Local::now().naive_local();
                 DataType::Timestamp(ts)
             }
+            Literal::FixedPoint(ref r) => DataType::Real(r.integral as i32, r.fractional as i32),
             _ => unimplemented!(),
         }
     }
@@ -232,6 +233,7 @@ impl From<Literal> for DataType {
                 let ts = chrono::Local::now().naive_local();
                 DataType::Timestamp(ts)
             }
+            Literal::FixedPoint(r) => DataType::Real(r.integral as i32, r.fractional as i32),
             _ => unimplemented!(),
         }
     }
