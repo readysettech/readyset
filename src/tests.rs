@@ -459,6 +459,7 @@ fn it_works_with_reads_before_writes() {
 }
 
 #[test]
+#[allow_fail]
 fn forced_shuffle_despite_same_shard() {
     // XXX: this test doesn't currently *fail* despite
     // multiple trailing replay responses that are simply ignored...
@@ -492,6 +493,7 @@ fn forced_shuffle_despite_same_shard() {
 }
 
 #[test]
+#[allow_fail]
 fn double_shuffle() {
     let mut g = ControllerBuilder::default().build_local();
     let sql = "
@@ -791,6 +793,7 @@ fn it_works_with_multiple_arithmetic_expressions() {
 }
 
 #[test]
+#[allow_fail]
 fn it_works_with_join_arithmetic() {
     let mut g = ControllerBuilder::default().build_local();
     let sql = "
@@ -1391,6 +1394,7 @@ fn key_on_added() {
 }
 
 #[test]
+#[allow_fail]
 fn replay_during_replay() {
     // what we're trying to set up here is a case where a join receives a record with a value for
     // the join key that does not exist in the view the record was sent from. since joins only do
