@@ -2,6 +2,7 @@ use std::{fmt, str};
 
 use common::{opt_multispace, table_reference};
 use condition::ConditionExpression;
+use keywords::escape_if_keyword;
 use table::Table;
 use select::where_clause;
 
@@ -14,7 +15,7 @@ pub struct DeleteStatement {
 impl fmt::Display for DeleteStatement {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         write!(f, "DELETE FROM ")?;
-        write!(f, "{}", self.table)?;
+        write!(f, "{}", escape_if_keyword(&self.table.name))?;
         if let Some(ref where_clause) = self.where_clause {
             write!(f, " WHERE ")?;
             write!(f, "{}", where_clause)?;

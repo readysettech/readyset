@@ -3,6 +3,7 @@ use std::fmt::{self, Display};
 use std::str;
 
 use common::{Literal, SqlType};
+use keywords::escape_if_keyword;
 
 #[derive(Clone, Debug, Eq, Hash, PartialEq, Serialize, Deserialize)]
 pub enum FunctionExpression {
@@ -52,12 +53,17 @@ pub struct Column {
 impl fmt::Display for Column {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         if let Some(ref table) = self.table {
-            write!(f, "{}.{}", table, self.name)?;
+            write!(
+                f,
+                "{}.{}",
+                escape_if_keyword(table),
+                escape_if_keyword(&self.name)
+            )?;
         } else {
-            write!(f, "{}", self.name)?;
+            write!(f, "{}", escape_if_keyword(&self.name))?;
         }
         if let Some(ref alias) = self.alias {
-            write!(f, " AS {}", alias)?;
+            write!(f, " AS {}", escape_if_keyword(alias))?;
         }
         Ok(())
     }
@@ -144,7 +150,12 @@ pub struct ColumnSpecification {
 
 impl fmt::Display for ColumnSpecification {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        write!(f, "{} {}", self.column.name, self.sql_type)?;
+        write!(
+            f,
+            "{} {}",
+            escape_if_keyword(&self.column.name),
+            self.sql_type
+        )?;
         for constraint in self.constraints.iter() {
             write!(f, " {}", constraint)?;
         }

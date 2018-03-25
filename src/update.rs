@@ -3,6 +3,7 @@ use std::{fmt, str};
 
 use common::{field_value_list, table_reference, Literal};
 use condition::ConditionExpression;
+use keywords::escape_if_keyword;
 use table::Table;
 use column::Column;
 use select::where_clause;
@@ -16,7 +17,7 @@ pub struct UpdateStatement {
 
 impl fmt::Display for UpdateStatement {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        write!(f, "UPDATE {} ", self.table)?;
+        write!(f, "UPDATE {} ", escape_if_keyword(&self.table.name))?;
         assert!(self.fields.len() > 0);
         write!(
             f,
