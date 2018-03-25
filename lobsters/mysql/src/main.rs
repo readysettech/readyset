@@ -1066,7 +1066,7 @@ impl trawler::LobstersClient for MysqlTrawler {
                                     t.drop_exec(
                                         &format!(
                                             "UPDATE `stories` \
-                                             SET `comment_count` = {}
+                                             SET `comments_count` = {}
                                              WHERE `stories`.`id` = ?",
                                             count,
                                         ),
