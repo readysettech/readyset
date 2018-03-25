@@ -33,6 +33,7 @@ pub enum SqlType {
     Binary(u16),
     Varbinary(u16),
     Enum(Vec<Literal>),
+    Decimal(u8, u8),
 }
 
 impl fmt::Display for SqlType {
@@ -418,6 +419,27 @@ named!(pub type_identifier<&[u8], SqlType>,
                variants: delimited!(tag!("("), value_list, tag!(")")) >>
                opt_multispace >>
                (SqlType::Enum(variants))
+           )
+         | do_parse!(
+               // TODO(malte): not strictly ok to treat DECIMAL and NUMERIC as identical; the
+               // former has "at least" M precision, the latter "exactly".
+               // See https://dev.mysql.com/doc/refman/5.7/en/precision-math-decimal-characteristics.html
+               alt_complete!(tag_no_case!("decimal") | tag_no_case!("numeric")) >>
+               opts: opt!(delimited!(tag!("("),
+                          do_parse!(
+                              m: map_res!(digit, str::from_utf8) >>
+                              tag!(",") >>
+                              opt_multispace >>
+                              d: opt!(map_res!(digit, str::from_utf8)) >>
+                              ((u8::from_str(m).unwrap(), d.map(|r| u8::from_str(r).unwrap())))
+                          ),
+                          tag!(")"))) >>
+               opt_multispace >>
+               (match opts {
+                   None => SqlType::Decimal(32, 0),
+                   Some((m, None)) => SqlType::Decimal(m, 0),
+                   Some((m, Some(d))) => SqlType::Decimal(m, d),
+                })
            )
     )
 );
