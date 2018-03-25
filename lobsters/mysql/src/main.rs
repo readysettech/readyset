@@ -1003,7 +1003,7 @@ impl trawler::LobstersClient for MysqlTrawler {
                                              (`created_at`, `updated_at`, `short_id`, `story_id`, \
                                              `user_id`, `comment`, `upvotes`, `confidence`, \
                                              `markeddown_comment`) \
-                                             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                                             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
                                             (
                                                 "2018-03-24 15:43:27",
                                                 "2018-03-24 15:43:27",
