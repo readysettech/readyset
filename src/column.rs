@@ -113,6 +113,7 @@ impl PartialOrd for Column {
 #[derive(Clone, Debug, Eq, Hash, PartialEq, Serialize, Deserialize)]
 pub enum ColumnConstraint {
     NotNull,
+    Collation(String),
     DefaultValue(Literal),
     AutoIncrement,
     PrimaryKey,
@@ -123,6 +124,7 @@ impl fmt::Display for ColumnConstraint {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         match *self {
             ColumnConstraint::NotNull => write!(f, "NOT NULL"),
+            ColumnConstraint::Collation(ref collation) => write!(f, "COLLATE {}", collation),
             ColumnConstraint::DefaultValue(ref literal) => {
                 write!(f, "DEFAULT {}", literal.to_string())
             }
