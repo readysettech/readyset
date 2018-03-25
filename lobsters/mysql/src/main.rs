@@ -78,14 +78,26 @@ impl trawler::LobstersClient for MysqlTrawler {
                     t.drop_query(
                         "SELECT keystores.* FROM keystores \
                          WHERE keystores.key = 'traffic:date' \
-                         ORDER BY keystores.key ASC LIMIT 1 FOR UPDATE; \
-                         SELECT keystores.* FROM keystores \
+                         ORDER BY keystores.key ASC LIMIT 1 FOR UPDATE",
+                    )
+                })
+                .and_then(|t| {
+                    t.drop_query(
+                        "SELECT keystores.* FROM keystores \
                          WHERE keystores.key = 'traffic:hits' \
-                         ORDER BY keystores.key ASC LIMIT 1 FOR UPDATE; \
-                         UPDATE keystores SET value = 100 \
-                         WHERE keystores.key = 'traffic:hits'; \
-                         UPDATE keystores SET value = 1521590012 \
-                         WHERE keystores.key = 'traffic:date';",
+                         ORDER BY keystores.key ASC LIMIT 1 FOR UPDATE",
+                    )
+                })
+                .and_then(|t| {
+                    t.drop_query(
+                        "UPDATE keystores SET value = 100 \
+                         WHERE keystores.key = 'traffic:hits'",
+                    )
+                })
+                .and_then(|t| {
+                    t.drop_query(
+                        "UPDATE keystores SET value = 1521590012 \
+                         WHERE keystores.key = 'traffic:date'",
                     )
                 })
                 .and_then(|t| t.commit())
