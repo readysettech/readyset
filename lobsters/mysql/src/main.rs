@@ -56,7 +56,9 @@ impl trawler::LobstersClient for MysqlTrawler {
 
         let c = this.c.get_conn();
 
-        // TODO: session management
+        // TODO: session management. now predictable token! pass in `as` parameter?
+        // TODO: notifications
+        /*
         let c = c.and_then(|c| {
             c.drop_exec(
                 "\
@@ -66,7 +68,7 @@ impl trawler::LobstersClient for MysqlTrawler {
                 ("KMQEEJjXymcyFj3j7Qn3c3kZ5AFcghUxscm6J9c0a3XBTMjD2OA9PEoecxyt",),
             )
         });
-        // TODO: notifications
+        */
 
         // TODO: traffic management
         // https://github.com/lobsters/lobsters/blob/master/app/controllers/application_controller.rb#L37
@@ -89,6 +91,8 @@ impl trawler::LobstersClient for MysqlTrawler {
                 .and_then(|t| t.commit())
         });
 
+        // TODO: some queries are different when logged in.
+        // e.g., / also loads tag filters, votes, hidden_stories, and saved_stories
         let c: Box<Future<Item = my::Conn, Error = my::errors::Error>> = match req {
             LobstersRequest::User(uid) => Box::new(c.and_then(move |c| {
                 c.first_exec::<_, _, my::Row>(
@@ -317,19 +321,37 @@ impl trawler::LobstersClient for MysqlTrawler {
                         }),
                 )
             }
-            LobstersRequest::Login(uid) => Box::new(
-                // TODO: also create users -- how do we avoid clashing with existing user ids?
-                c.and_then(move |c| {
-                    c.drop_exec(
+            LobstersRequest::Login(uid) => Box::new(c.and_then(move |c| {
+                c.first_exec::<_, _, my::Row>(
+                    "\
+                     SELECT  1 as one \
+                     FROM `users` \
+                     WHERE `users`.`username` = ? \
+                     ORDER BY `users`.`id` ASC LIMIT 1",
+                    (format!("user{}", uid),),
+                )
+            }).and_then(move |(c, user)| {
+                if user.is_none() {
+                    futures::future::Either::A(c.drop_exec(
                         "\
-                         SELECT  `users`.* \
-                         FROM `users` \
-                         WHERE `users`.`username` = ? \
-                         ORDER BY `users`.`id` ASC LIMIT 1",
-                        (format!("user{}", uid),),
-                    )
-                }),
-            ),
+                         INSERT INTO `users` \
+                         (`username`, `email`, `password_digest`, `created_at`, \
+                         `session_token`, `rss_token`, `mailing_list_token`) \
+                         VALUES (?, ?, ?, ?, ?, ?, ?)",
+                        (
+                            format!("user{}", uid),
+                            format!("user{}@example.com", uid),
+                            "$2a$10$Tq3wrGeC0xtgzuxqOlc3v.07VTUvxvwI70kuoVihoO2cE5qj7ooka", // test
+                            "2018-03-25 16:00:24",
+                            format!("token{}", uid),
+                            "ryEKWLIxQe7yKGrUdg0vRpV25PzVUhJP4uwMAW8qw8Ye6W1DueXu1crKE4Ba",
+                            "COoHFt9BXj",
+                        ),
+                    ))
+                } else {
+                    futures::future::Either::B(futures::future::ok(c))
+                }
+            })),
             LobstersRequest::Logout(..) => Box::new(c),
             LobstersRequest::Story(id) => {
                 Box::new(
