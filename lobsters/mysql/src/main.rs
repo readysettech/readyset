@@ -650,7 +650,7 @@ impl trawler::LobstersClient for MysqlTrawler {
                                         &format!(
                                             "UPDATE `users` \
                                              SET `karma` = `karma` {} \
-                                             WHERE `users`.`id` = ?",
+                                             WHERE `id` = ?",
                                             match v {
                                                 Vote::Up => "+ 1",
                                                 Vote::Down => "- 1",
@@ -670,7 +670,7 @@ impl trawler::LobstersClient for MysqlTrawler {
                                              `upvotes` = `upvotes` {}, \
                                              `downvotes` = `downvotes` {}, \
                                              `confidence` = {}
-                                             WHERE `users`.`id` = ?",
+                                             WHERE `id` = ?",
                                             match v {
                                                 Vote::Up => "+ 1",
                                                 Vote::Down => "+ 0",
@@ -681,7 +681,7 @@ impl trawler::LobstersClient for MysqlTrawler {
                                             },
                                             confidence,
                                         ),
-                                        (author,),
+                                        (comment,),
                                     )
                                 })
                                 .and_then(move |c| {
