@@ -253,4 +253,19 @@ mod tests {
         assert_eq!(expected1, format!("{}", res1.unwrap()));
     }
 
+    #[test]
+    fn format_query_with_escaped_keyword() {
+        let qstring0 = "delete from articles where `key`='aaa'";
+        let qstring1 = "delete from `where` where user=?";
+
+        let expected0 = "DELETE FROM articles WHERE `key` = 'aaa'";
+        let expected1 = "DELETE FROM `where` WHERE user = ?";
+
+        let res0 = parse_query(qstring0);
+        let res1 = parse_query(qstring1);
+        assert!(res0.is_ok());
+        assert!(res1.is_ok());
+        assert_eq!(expected0, format!("{}", res0.unwrap()));
+        assert_eq!(expected1, format!("{}", res1.unwrap()));
+    }
 }

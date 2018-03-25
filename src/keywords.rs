@@ -1,5 +1,7 @@
-named!(keyword_follow_char<&[u8], char>,
-       peek!(one_of!(" \n;()\t,="))
+named!(keyword_follow_char<&[u8], &[u8]>,
+       peek!(alt_complete!(tag!(" ") | tag!("\n") | tag!(";") |
+                           tag!("(") | tag!(")") | tag!("\t") |
+                           tag!(",") | tag!("=") | eof!()))
 );
 
 named!(keyword_a_to_c<&[u8], &[u8]>,
@@ -157,3 +159,11 @@ named!(pub sql_keyword<&[u8], &[u8]>,
         (kw)
     ))
 );
+
+pub fn escape_if_keyword(s: &str) -> String {
+    if sql_keyword(s.as_bytes()).is_done() {
+        format!("`{}`", s)
+    } else {
+        s.to_owned()
+    }
+}

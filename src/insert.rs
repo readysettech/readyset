@@ -5,6 +5,7 @@ use std::fmt;
 use common::{field_list, opt_multispace, statement_terminator, table_reference, value_list,
              Literal};
 use column::Column;
+use keywords::escape_if_keyword;
 use table::Table;
 
 #[derive(Clone, Debug, Default, Hash, PartialEq, Serialize, Deserialize)]
@@ -17,7 +18,7 @@ pub struct InsertStatement {
 
 impl fmt::Display for InsertStatement {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        write!(f, "INSERT INTO {}", self.table)?;
+        write!(f, "INSERT INTO {}", escape_if_keyword(&self.table.name))?;
         write!(
             f,
             " ({})",

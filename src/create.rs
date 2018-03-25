@@ -7,6 +7,7 @@ use common::{column_identifier_no_alias, field_list, integer_literal, opt_multis
              sql_identifier, statement_terminator, table_reference, type_identifier, Literal,
              SqlType, TableKey};
 use column::{Column, ColumnConstraint, ColumnSpecification};
+use keywords::escape_if_keyword;
 use table::Table;
 
 #[derive(Clone, Debug, Default, Hash, PartialEq, Serialize, Deserialize)]
@@ -18,7 +19,7 @@ pub struct CreateTableStatement {
 
 impl fmt::Display for CreateTableStatement {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        write!(f, "CREATE TABLE {} ", self.table)?;
+        write!(f, "CREATE TABLE {} ", escape_if_keyword(&self.table.name))?;
         write!(f, "(")?;
         write!(
             f,

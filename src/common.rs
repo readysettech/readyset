@@ -5,7 +5,7 @@ use std::str::FromStr;
 
 use arithmetic::{arithmetic_expression, ArithmeticExpression};
 use column::{Column, FunctionExpression};
-use keywords::sql_keyword;
+use keywords::{escape_if_keyword, sql_keyword};
 use table::Table;
 
 #[derive(Clone, Debug, Eq, Hash, PartialEq, Serialize, Deserialize)]
@@ -183,7 +183,7 @@ impl fmt::Display for TableKey {
                     "({})",
                     columns
                         .iter()
-                        .map(|c| c.name.to_owned())
+                        .map(|c| escape_if_keyword(&c.name))
                         .collect::<Vec<_>>()
                         .join(", ")
                 )
@@ -191,14 +191,14 @@ impl fmt::Display for TableKey {
             TableKey::UniqueKey(ref name, ref columns) => {
                 write!(f, "UNIQUE KEY ")?;
                 if let Some(ref name) = *name {
-                    write!(f, "{} ", name)?;
+                    write!(f, "{} ", escape_if_keyword(name))?;
                 }
                 write!(
                     f,
                     "({})",
                     columns
                         .iter()
-                        .map(|c| c.name.to_owned())
+                        .map(|c| escape_if_keyword(&c.name))
                         .collect::<Vec<_>>()
                         .join(", ")
                 )
@@ -206,26 +206,26 @@ impl fmt::Display for TableKey {
             TableKey::FulltextKey(ref name, ref columns) => {
                 write!(f, "FULLTEXT KEY ")?;
                 if let Some(ref name) = *name {
-                    write!(f, "{} ", name)?;
+                    write!(f, "{} ", escape_if_keyword(name))?;
                 }
                 write!(
                     f,
                     "({})",
                     columns
                         .iter()
-                        .map(|c| c.name.to_owned())
+                        .map(|c| escape_if_keyword(&c.name))
                         .collect::<Vec<_>>()
                         .join(", ")
                 )
             }
             TableKey::Key(ref name, ref columns) => {
-                write!(f, "KEY {} ", name)?;
+                write!(f, "KEY {} ", escape_if_keyword(name))?;
                 write!(
                     f,
                     "({})",
                     columns
                         .iter()
-                        .map(|c| c.name.to_owned())
+                        .map(|c| escape_if_keyword(&c.name))
                         .collect::<Vec<_>>()
                         .join(", ")
                 )
@@ -247,9 +247,9 @@ impl Display for FieldExpression {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         match *self {
             FieldExpression::All => write!(f, "*"),
-            FieldExpression::AllInTable(ref table) => write!(f, "{}.*", table),
+            FieldExpression::AllInTable(ref table) => write!(f, "{}.*", escape_if_keyword(table)),
             FieldExpression::Arithmetic(ref expr) => write!(f, "{}", expr),
-            FieldExpression::Col(ref col) => write!(f, "{}", col.name.as_str()),
+            FieldExpression::Col(ref col) => write!(f, "{}", col),
             FieldExpression::Literal(ref lit) => write!(f, "{}", lit.value.to_string()),
         }
     }
