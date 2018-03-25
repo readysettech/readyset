@@ -599,16 +599,16 @@ impl trawler::LobstersClient for MysqlTrawler {
                     this.c
                         .get_conn()
                         .and_then(move |c| {
-                            c.prep_exec(
+                            c.first_exec::<_, _, my::Row>(
                                 "SELECT `comments`.* \
                                  FROM `comments` \
                                  WHERE `comments`.`short_id` = ? \
                                  ORDER BY `comments`.`id` ASC LIMIT 1",
                                 (::std::str::from_utf8(&comment[..]).unwrap(),),
-                            ).and_then(|result| result.collect_and_drop::<my::Row>())
-                                .map(|(c, mut comment)| (c, comment.swap_remove(0)))
+                            )
                         })
                         .and_then(move |(c, comment)| {
+                            let comment = comment.unwrap();
                             let author = comment.get::<u32, _>("user_id").unwrap();
                             let id = comment.get::<u32, _>("id").unwrap();
                             let story = comment.get::<u32, _>("story_id").unwrap();
