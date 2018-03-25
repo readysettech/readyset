@@ -95,7 +95,7 @@ named!(pub key_specification<&[u8], TableKey>,
               })
           )
         | do_parse!(
-              tag_no_case!("key") >>
+              alt_complete!(tag_no_case!("key") | tag_no_case!("index")) >>
               opt_multispace >>
               name: sql_identifier >>
               opt_multispace >>
