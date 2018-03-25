@@ -624,7 +624,7 @@ impl trawler::LobstersClient for MysqlTrawler {
                                 (user, story, id),
                             ).map(move |c| (c, author, id, story, upvotes, downvotes))
                         })
-                        .and_then(move |(c, author, story, comment, upvotes, downvotes)| {
+                        .and_then(move |(c, author, comment, story, upvotes, downvotes)| {
                             // TODO: do something else if user has already voted
                             // TODO: technically need to re-load comment under transaction
                             c.start_transaction(my::TransactionOptions::new())
