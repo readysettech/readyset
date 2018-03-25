@@ -15,8 +15,8 @@ pub use self::insert::InsertStatement;
 pub use self::join::{JoinConstraint, JoinOperator, JoinRightSide};
 pub use self::parser::*;
 pub use self::compound_select::{CompoundSelectOperator, CompoundSelectStatement};
-pub use self::select::{GroupByClause, JoinClause, LimitClause, OrderClause, OrderType,
-                       SelectStatement};
+pub use self::select::{GroupByClause, JoinClause, LimitClause, SelectStatement};
+pub use self::order::{OrderClause, OrderType};
 pub use self::table::Table;
 pub use self::set::SetStatement;
 pub use self::update::UpdateStatement;
@@ -38,3 +38,4 @@ mod table;
 mod delete;
 mod update;
 mod set;
+mod order;
