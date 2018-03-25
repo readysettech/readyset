@@ -61,14 +61,22 @@ impl fmt::Display for SqlType {
             SqlType::Binary(len) => write!(f, "BINARY({})", len),
             SqlType::Varbinary(len) => write!(f, "VARBINARY({})", len),
             SqlType::Enum(_) => write!(f, "ENUM(...)"),
+            SqlType::Decimal(m, d) => write!(f, "DECIMAL({}, {})", m, d),
         }
     }
+}
+
+#[derive(Clone, Debug, Eq, Hash, PartialEq, Serialize, Deserialize)]
+pub struct Real {
+    pub integral: i32,
+    pub fractional: u32,
 }
 
 #[derive(Clone, Debug, Eq, Hash, PartialEq, Serialize, Deserialize)]
 pub enum Literal {
     Null,
     Integer(i64),
+    FixedPoint(Real),
     String(String),
     Blob(Vec<u8>),
     CurrentTime,
@@ -99,6 +107,7 @@ impl ToString for Literal {
         match *self {
             Literal::Null => "NULL".to_string(),
             Literal::Integer(ref i) => format!("{}", i),
+            Literal::FixedPoint(ref f) => format!("{}.{}", f.integral, f.fractional),
             Literal::String(ref s) => format!("'{}'", s),
             Literal::Blob(ref bv) => format!(
                 "{}",

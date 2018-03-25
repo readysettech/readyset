@@ -5,7 +5,7 @@ use std::fmt;
 
 use common::{column_identifier_no_alias, field_list, integer_literal, opt_multispace,
              sql_identifier, statement_terminator, table_reference, type_identifier, Literal,
-             SqlType, TableKey};
+             Real, SqlType, TableKey};
 use column::{Column, ColumnConstraint, ColumnSpecification};
 use keywords::escape_if_keyword;
 use table::Table;
@@ -192,6 +192,14 @@ named!(pub column_constraint<&[u8], Option<ColumnConstraint>>,
                     ))
                   | do_parse!(d: map_res!(digit, str::from_utf8) >> (
                         Literal::Integer(i64::from_str(d).unwrap())
+                    ))
+                  | do_parse!(i: map_res!(digit, str::from_utf8) >>
+                              tag!(".") >>
+                              f: map_res!(digit, str::from_utf8) >> (
+                              Literal::FixedPoint(Real {
+                                  integral: i32::from_str(i).unwrap(),
+                                  fractional: u32::from_str(f).unwrap()
+                              })
                     ))
                   | do_parse!(tag!("''") >> (Literal::String(String::from(""))))
                   | do_parse!(tag_no_case!("null") >> (Literal::Null))
