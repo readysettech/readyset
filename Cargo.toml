@@ -7,7 +7,7 @@ authors = ["Malte Schwarzkopf <malte@csail.mit.edu>"]
 clap = "2.24.0"
 msql-srv = "0.5"
 #distributary = { path = "../distributary" }
-distributary = { git = "https://github.com/mit-pdos/distributary.git" }
+distributary = { git = "https://github.com/mit-pdos/distributary.git", rev = "df4bcf411fa5d3e1d5bcc30f11a6ac321f81ffbb" }
 lazy_static = "1.0.0"
 nom_sql = { git = "https://github.com/ms705/nom-sql.git", rev = "41a2c94c6b3f5947588610c3766d8eaf7e11ab6d" }
 slog = "2.0.6"
