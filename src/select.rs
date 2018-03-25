@@ -7,6 +7,7 @@ use common::FieldExpression;
 use common::{as_alias, column_identifier_no_alias, field_definition_expr, field_list,
              opt_multispace, statement_terminator, table_list, table_reference, unsigned_number};
 use condition::{condition_expr, ConditionExpression};
+use keywords::escape_if_keyword;
 use join::{join_operator, JoinConstraint, JoinOperator, JoinRightSide};
 use table::Table;
 
@@ -14,6 +15,25 @@ use table::Table;
 pub struct GroupByClause {
     pub columns: Vec<Column>,
     pub having: Option<ConditionExpression>,
+}
+
+impl fmt::Display for GroupByClause {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        write!(f, "GROUP BY ")?;
+        write!(
+            f,
+            "{}",
+            self.columns
+                .iter()
+                .map(|c| format!("{}", escape_if_keyword(&c.name)))
+                .collect::<Vec<_>>()
+                .join(", ")
+        )?;
+        if let Some(ref having) = self.having {
+            write!(f, " HAVING {}", having)?;
+        }
+        Ok(())
+    }
 }
 
 #[derive(Clone, Debug, Hash, PartialEq, Serialize, Deserialize)]
@@ -29,15 +49,49 @@ pub struct LimitClause {
     pub offset: u64,
 }
 
+impl fmt::Display for LimitClause {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        write!(f, "LIMIT {}", self.limit)?;
+        if self.offset > 0 {
+            write!(f, " OFFSET {}", self.offset)?;
+        }
+        Ok(())
+    }
+}
+
 #[derive(Clone, Debug, Hash, PartialEq, Serialize, Deserialize)]
 pub enum OrderType {
     OrderAscending,
     OrderDescending,
 }
 
+impl fmt::Display for OrderType {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        match *self {
+            OrderType::OrderAscending => write!(f, "ASC"),
+            OrderType::OrderDescending => write!(f, "DESC"),
+        }
+    }
+}
+
 #[derive(Clone, Debug, Hash, PartialEq, Serialize, Deserialize)]
 pub struct OrderClause {
     pub columns: Vec<(Column, OrderType)>, // TODO(malte): can this be an arbitrary expr?
+}
+
+impl fmt::Display for OrderClause {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        write!(f, "ORDER BY ")?;
+        write!(
+            f,
+            "{}",
+            self.columns
+                .iter()
+                .map(|&(ref c, ref o)| format!("{} {}", escape_if_keyword(&c.name), o))
+                .collect::<Vec<_>>()
+                .join(", ")
+        )
+    }
 }
 
 #[derive(Clone, Debug, Default, Hash, PartialEq, Serialize, Deserialize)]
@@ -83,6 +137,15 @@ impl fmt::Display for SelectStatement {
         if let Some(ref where_clause) = self.where_clause {
             write!(f, " WHERE ")?;
             write!(f, "{}", where_clause)?;
+        }
+        if let Some(ref group_by) = self.group_by {
+            write!(f, "{}", group_by)?;
+        }
+        if let Some(ref order) = self.order {
+            write!(f, "{}", order)?;
+        }
+        if let Some(ref limit) = self.limit {
+            write!(f, "{}", limit)?;
         }
         Ok(())
     }
