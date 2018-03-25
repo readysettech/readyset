@@ -1,7 +1,9 @@
 use distributary::{ControllerHandle, DataType, Mutator, RemoteGetter, ZookeeperAuthority};
 
 use msql_srv::{self, *};
-use nom_sql::{self, ColumnConstraint, ColumnSpecification, Literal, SqlType};
+use nom_sql::{self, ColumnConstraint, ConditionBase, ConditionExpression, ConditionTree,
+              CreateTableStatement, FieldExpression, Literal, Operator, SelectStatement, SqlType};
+
 use slog;
 use std::io;
 use std::collections::{BTreeMap, HashMap};
@@ -16,7 +18,7 @@ pub struct SoupBackend {
     inputs: BTreeMap<String, Mutator>,
     outputs: BTreeMap<String, RemoteGetter>,
 
-    table_schemas: Arc<Mutex<HashMap<String, Vec<ColumnSpecification>>>>,
+    table_schemas: Arc<Mutex<HashMap<String, CreateTableStatement>>>,
     auto_increments: Arc<Mutex<HashMap<String, u64>>>,
 
     query_count: Arc<sync::atomic::AtomicUsize>,
@@ -26,7 +28,7 @@ impl SoupBackend {
     pub fn new(
         zk_addr: &str,
         deployment_id: &str,
-        schemas: Arc<Mutex<HashMap<String, Vec<ColumnSpecification>>>>,
+        schemas: Arc<Mutex<HashMap<String, CreateTableStatement>>>,
         auto_increments: Arc<Mutex<HashMap<String, u64>>>,
         query_counter: Arc<sync::atomic::AtomicUsize>,
         log: slog::Logger,
@@ -66,6 +68,7 @@ impl SoupBackend {
         let table = c.table.as_ref().unwrap();
         let ts_lock = self.table_schemas.lock().unwrap();
         let col_schema = &(*ts_lock)[table]
+            .fields
             .iter()
             .find(|cc| cc.column.name == c.name)
             .expect(&format!("column {} not found", c.name));
@@ -115,7 +118,7 @@ impl SoupBackend {
         match self.soup.extend_recipe(format!("{};", q)) {
             Ok(_) => {
                 let mut ts_lock = self.table_schemas.lock().unwrap();
-                ts_lock.insert(q.table.name.clone(), q.fields);
+                ts_lock.insert(q.table.name.clone(), q);
                 // no rows to return
                 // TODO(malte): potentially eagerly cache the mutator for this table
                 results.completed(0, 0)
@@ -129,12 +132,43 @@ impl SoupBackend {
         q: nom_sql::DeleteStatement,
         results: QueryResultWriter<W>,
     ) -> io::Result<()> {
-        error!(self.log, "ignoring DELETE query \"{}\"", q);
+        let cond = q.where_clause
+            .expect("only supports DELETEs with WHERE-clauses");
 
-        // 0. assert that WHERE clause only mentions primary key
-        // 1. Delete matching rows from Soup
+        let ts = self.table_schemas.lock().unwrap();
+        let pkey = utils::get_primary_key(&ts[&q.table.name])
+            .into_iter()
+            .map(|(_, c)| c)
+            .collect();
 
-        return results.completed(1, 1);
+        // create a mutator if we don't have one for this table already
+        let mutator = self.inputs
+            .entry(q.table.name.clone())
+            .or_insert(self.soup.get_mutator(&q.table.name).unwrap());
+
+        match utils::flatten_conditional(&cond, &pkey) {
+            None => results.completed(0, 0),
+            Some(ref flattened) if flattened.len() == 0 => {
+                panic!("DELETE only supports WHERE-clauses on primary keys");
+            }
+            Some(flattened) => {
+                let count = flattened.len() as u64;
+                for key in flattened {
+                    match mutator.delete(key) {
+                        Ok(_) => {}
+                        Err(e) => {
+                            error!(self.log, "delete error: {:?}", e);
+                            return results.error(
+                                msql_srv::ErrorKind::ER_UNKNOWN_ERROR,
+                                format!("{:?}", e).as_bytes(),
+                            );
+                        }
+                    };
+                }
+
+                results.completed(count, 0)
+            }
+        }
     }
 
     fn handle_insert<W: io::Write>(
@@ -155,6 +189,7 @@ impl SoupBackend {
 
         let ts_lock = self.table_schemas.lock().unwrap();
         let auto_increment_columns: Vec<_> = ts_lock[&table]
+            .fields
             .iter()
             .filter(|c| c.constraints.contains(&ColumnConstraint::AutoIncrement))
             .collect();
@@ -297,27 +332,185 @@ impl SoupBackend {
         q: nom_sql::UpdateStatement,
         results: QueryResultWriter<W>,
     ) -> io::Result<()> {
-        error!(self.log, "ignoring UPDATE query \"{}\"", q);
+        let cond = q.where_clause
+            .expect("only supports UPDATEs with WHERE-clauses");
 
-        // 0. assert that WHERE clause only filters on primary key
         let ts = self.table_schemas.lock().unwrap();
-        let pkey: Vec<_> = ts.get(&q.table.name)
-            .unwrap()
-            .into_iter()
-            .filter(|cs| cs.constraints.contains(&ColumnConstraint::PrimaryKey))
-            .map(|cs| &cs.column)
-            .collect();
-        if let Some(cond) = q.where_clause {
-            if !utils::ensure_pkey_condition(&cond, &pkey) {
-                panic!("UPDATE query without primary key condition");
-            }
-        };
-        //
+        let CreateTableStatement { ref fields, .. } = ts[&q.table.name];
+        let pkey = utils::get_primary_key(&ts[&q.table.name]);
+        let key_indices: Vec<_> = pkey.iter().map(|&(i, _)| i).collect();
+        let key_values: Vec<_> = pkey.iter().map(|&(_, c)| c).collect();
+
+        // Updating rows happens in three steps:
         // 1. Read from Soup by key to get full rows
         // 2. Rewrite the column values specified in SET part of UPDATE clause
         // 3. Write results to Soup, deleting old rows, then putting new ones
+        //
+        // To accomplish the first step we need to buld a getter that retrieves
+        // all the columns in the table:
+        let where_clause = Some(ConditionExpression::ComparisonOp(ConditionTree {
+            operator: Operator::Equal,
+            left: box ConditionExpression::Base(ConditionBase::Field(key_values[0].clone())),
+            right: box ConditionExpression::Base(ConditionBase::Placeholder),
+        }));
 
-        return results.completed(1, 1);
+        let select_q = SelectStatement {
+            tables: vec![q.table.clone()],
+            fields: fields
+                .into_iter()
+                .map(|cs| FieldExpression::Col(cs.column.clone()))
+                .collect(),
+            distinct: false,
+            join: vec![],
+            where_clause,
+            group_by: None,
+            order: None,
+            limit: None,
+        };
+
+        // update_columns maps column indices to the value they should be updated to:
+        let mut update_columns = HashMap::new();
+        for (i, field) in fields.into_iter().enumerate() {
+            for &(ref update_column, ref value) in q.fields.iter() {
+                if update_column == &field.column {
+                    update_columns.insert(i, DataType::from(value));
+                }
+            }
+        }
+
+        // create a mutator if we don't have one for this table already
+        let mutator = self.inputs
+            .entry(q.table.name.clone())
+            .or_insert(self.soup.get_mutator(&q.table.name).unwrap());
+
+        match utils::flatten_conditional(&cond, &key_values) {
+            None => results.completed(0, 0),
+            Some(ref flattened) if flattened.len() == 0 => {
+                panic!("UPDATE only supports WHERE-clauses on primary keys");
+            }
+            Some(flattened) => {
+                let qc = self.query_count
+                    .fetch_add(1, sync::atomic::Ordering::SeqCst);
+                let qname = format!("q_{}", qc);
+                let getter = match self.soup
+                    .extend_recipe(format!("QUERY {}: {};", qname, select_q))
+                {
+                    Ok(_) => self.outputs.entry(qname.clone()).or_insert(
+                        self.soup
+                            .get_getter(&qname)
+                            .expect(&format!("no view named '{}'", qname)),
+                    ),
+                    Err(e) => {
+                        error!(self.log, "update: {:?}", e);
+                        return results.error(
+                            msql_srv::ErrorKind::ER_UNKNOWN_ERROR,
+                            format!("{:?}", e).as_bytes(),
+                        );
+                    }
+                };
+
+                // NOTE: Soup doesn't support compound primary key reads yet,
+                // so we'll use only part of the key and filter out what we get later.
+                let keys = flattened.iter().map(|key| key[0].clone()).collect();
+                let lookup_results = match getter.multi_lookup(keys, true) {
+                    Ok(r) => r,
+                    Err(e) => {
+                        error!(self.log, "update: {:?}", e);
+                        return results.error(
+                            msql_srv::ErrorKind::ER_UNKNOWN_ERROR,
+                            format!("{:?}", e).as_bytes(),
+                        );
+                    }
+                };
+
+                // multi_lookup gives us a vector of results for each key, i.e.:
+                // [
+                //   [[1, "bob"], [1, "anne"]],
+                //   [[2, "cat"], [1, "dog"]],
+                // ]
+                //
+                // We want to turn that into a flat list of records, and update each record with
+                // the new values given in the query:
+                let changed_rows: Vec<(Vec<DataType>, Vec<DataType>)> = lookup_results
+                    .into_iter()
+                    .enumerate()
+                    .map(|(i, result)| {
+                        result
+                            .into_iter()
+                            .filter_map(|row| {
+                                // NOTE: Since Soup doesn't support reads on compound primary keys
+                                // yet, we have to filter out rows where only part of the key
+                                // matches:
+                                if pkey.len() > 1
+                                    && key_indices
+                                        .iter()
+                                        .any(|key_i| row[*key_i] != flattened[i][*key_i])
+                                {
+                                    return None;
+                                }
+
+                                let new_row = row.clone()
+                                    .into_iter()
+                                    .enumerate()
+                                    .map(|(i, column)| {
+                                        update_columns
+                                            .get(&i)
+                                            .and_then(|v| Some(v.clone()))
+                                            .unwrap_or(column)
+                                    })
+                                    .collect::<Vec<DataType>>();
+
+                                // Filter out rows with no actual content changes:
+                                if row == new_row {
+                                    None
+                                } else {
+                                    // Keep both the old and new row here in case we mutated the
+                                    // primary key (if that's the case we'll need to delete by the
+                                    // old key, _not_ the new one):
+                                    Some((row, new_row))
+                                }
+                            })
+                            .collect::<Vec<(Vec<DataType>, Vec<DataType>)>>()
+                    })
+                    .flat_map(|r| r)
+                    .collect();
+
+                if changed_rows.len() == 0 {
+                    // This might happen if there's no actual changes in content.
+                    return results.completed(0, 0);
+                }
+
+                // Then we want to delete the old rows:
+                let mut new_rows = vec![];
+                for (old_row, new_row) in changed_rows.into_iter() {
+                    new_rows.push(new_row);
+                    let key: Vec<_> = key_indices.iter().map(|i| old_row[*i].clone()).collect();
+                    match mutator.delete(key) {
+                        Ok(..) => {}
+                        Err(e) => {
+                            error!(self.log, "update: {:?}", e);
+                            return results.error(
+                                msql_srv::ErrorKind::ER_UNKNOWN_ERROR,
+                                format!("{:?}", e).as_bytes(),
+                            );
+                        }
+                    };
+                }
+
+                // And finally, insert the updated rows:
+                let count = new_rows.len() as u64;
+                match mutator.multi_put(new_rows) {
+                    Ok(..) => results.completed(count, 0),
+                    Err(e) => {
+                        error!(self.log, "update: {:?}", e);
+                        results.error(
+                            msql_srv::ErrorKind::ER_UNKNOWN_ERROR,
+                            format!("{:?}", e).as_bytes(),
+                        )
+                    }
+                }
+            }
+        }
     }
 }
 
