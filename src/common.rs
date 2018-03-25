@@ -380,13 +380,13 @@ named!(pub type_identifier<&[u8], SqlType>,
                _signed: opt!(alt_complete!(tag_no_case!("unsigned") | tag_no_case!("signed"))) >>
                (SqlType::Double)
            )
-         | dbg_dmp!(do_parse!(
+         | do_parse!(
                tag_no_case!("float") >>
                opt_multispace >>
                _prec: opt!(precision) >>
                opt_multispace >>
                (SqlType::Float)
-           ))
+           )
          | do_parse!(
                tag_no_case!("blob") >>
                (SqlType::Blob)
