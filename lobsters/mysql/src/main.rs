@@ -67,25 +67,6 @@ impl trawler::LobstersClient for MysqlTrawler {
             )
         });
         // TODO: notifications
-        /*
-            .and_then(move |c| {
-                c.drop_exec(
-                    "SELECT COUNT(*) FROM `replying_comments` \
-                     WHERE `replying_comments`.`user_id` = ? \
-                     AND `replying_comments`.`is_unread` = 1",
-                    (uid,),
-                )
-            })
-            .and_then(move |c| {
-                c.drop_query(&format!(
-                    "SELECT  `keystores`.* \
-                     FROM `keystores` \
-                     WHERE `keystores`.`key` = 'user:{}:unread_messages' \
-                     ORDER BY `keystores`.`key` ASC LIMIT 1",
-                    uid
-                ))
-            })
-        */
 
         // TODO: traffic management
         // https://github.com/lobsters/lobsters/blob/master/app/controllers/application_controller.rb#L37
@@ -93,11 +74,17 @@ impl trawler::LobstersClient for MysqlTrawler {
             c.start_transaction(my::TransactionOptions::new())
                 .and_then(|t| {
                     t.drop_query(
-                     "SELECT keystores.* FROM keystores WHERE keystores.key = 'traffic:date' ORDER BY keystores.key ASC LIMIT 1 FOR UPDATE; \
-                     SELECT keystores.* FROM keystores WHERE keystores.key = 'traffic:hits' ORDER BY keystores.key ASC LIMIT 1 FOR UPDATE; \
-                     UPDATE keystores SET value = 100 WHERE keystores.key = 'traffic:hits'; \
-                     UPDATE keystores SET value = 1521590012 WHERE keystores.key = 'traffic:date';",
-                )
+                        "SELECT keystores.* FROM keystores \
+                         WHERE keystores.key = 'traffic:date' \
+                         ORDER BY keystores.key ASC LIMIT 1 FOR UPDATE; \
+                         SELECT keystores.* FROM keystores \
+                         WHERE keystores.key = 'traffic:hits' \
+                         ORDER BY keystores.key ASC LIMIT 1 FOR UPDATE; \
+                         UPDATE keystores SET value = 100 \
+                         WHERE keystores.key = 'traffic:hits'; \
+                         UPDATE keystores SET value = 1521590012 \
+                         WHERE keystores.key = 'traffic:date';",
+                    )
                 })
                 .and_then(|t| t.commit())
         });
@@ -884,21 +871,7 @@ impl trawler::LobstersClient for MysqlTrawler {
                                     )
                                 })
                                 .and_then(|t| t.commit())
-                        }), // TODO
-                            //
-                            //  SELECT  `read_ribbons`.* \
-                            //  FROM `read_ribbons` \
-                            //  WHERE `read_ribbons`.`user_id` = 12 \
-                            //  AND `read_ribbons`.`story_id` = 5747 \
-                            //  ORDER BY `read_ribbons`.`id` ASC LIMIT 1
-                            //
-                            //  BEGIN
-                            //
-                            //  INSERT INTO `read_ribbons` \
-                            //  (`created_at`, `updated_at`, `user_id`, `story_id`) \
-                            //  VALUES ('2018-03-24 15:55:58', '2018-03-24 15:55:58', 12, 5747)
-                            //
-                            //  COMMIT
+                        }), // TODO: read_ribbons
                 )
             }
             LobstersRequest::Comment {
