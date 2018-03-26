@@ -2379,19 +2379,16 @@ impl Domain {
                 let node = node.or_else(|| {
                     self.nodes
                         .values()
-                        .map(|nd| {
+                        .filter_map(|nd| {
                             use core::data::SizeOf;
 
                             let ref n = *nd.borrow();
                             let local_index: LocalNodeIndex = *n.local_addr();
 
-                            (
-                                local_index,
-                                self.state
-                                    .get(&local_index)
-                                    .map(|state| state.deep_size_of())
-                                    .unwrap_or(0),
-                            )
+                            self.state
+                                .get(&local_index)
+                                .filter(|state| state.is_partial())
+                                .map(|state| (local_index, state.deep_size_of()))
                         })
                         .max_by_key(|&(_, s)| s)
                         .map(|(n, _)| n)

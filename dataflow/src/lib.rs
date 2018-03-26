@@ -1,5 +1,6 @@
 #![feature(box_syntax)]
 #![feature(box_patterns)]
+#![feature(option_filter)]
 #![feature(use_extern_macros)]
 #![feature(entry_or_default)]
 #![feature(if_while_or_patterns)]
