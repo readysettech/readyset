@@ -948,8 +948,8 @@ impl trawler::LobstersClient for MysqlTrawler {
                                     (
                                         c,
                                         Some((
-                                            parent.get::<u32, _>("id"),
-                                            parent.get::<u32, _>("thread_id"),
+                                            parent.get::<u32, _>("id").unwrap(),
+                                            parent.get::<Option<u32>, _>("thread_id").unwrap(),
                                         )),
                                     )
                                 }))
