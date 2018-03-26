@@ -218,7 +218,17 @@ impl WorkerInner {
             //    necessarily received immediately)
             let sizes: Vec<(&(DomainIndex, usize), usize)> = self.state_sizes
                 .iter()
-                .map(|(ds, sa)| (ds, sa.load(Ordering::Relaxed)))
+                .map(|(ds, sa)| {
+                    let size = sa.load(Ordering::Relaxed);
+                    debug!(
+                        self.log,
+                        "domain {}.{} state size is {} bytes",
+                        ds.0.index(),
+                        ds.1,
+                        size
+                    );
+                    (ds, size)
+                })
                 .collect();
             let total: usize = sizes.iter().map(|&(_, s)| s).sum();
             // 3. are we above the limit?
@@ -231,6 +241,7 @@ impl WorkerInner {
                 );
                 // evict from the largest domain
                 let largest = sizes.into_iter().max_by_key(|&(_, s)| s).unwrap();
+                warn!(self.log, "evicting from {:?}", largest);
                 let mut tx = self.channel_coordinator.get_tx(largest.0).unwrap();
                 tx.0
                     .send(box payload::Packet::Evict {
