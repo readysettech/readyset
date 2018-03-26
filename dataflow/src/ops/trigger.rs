@@ -10,7 +10,7 @@ use std::thread;
 
 /// A Trigger data-flow operator.
 ///
-/// This node triggers an event in the dataflow graph whenever a 
+/// This node triggers an event in the dataflow graph whenever a
 /// new `key` arrives.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Trigger {
@@ -23,14 +23,17 @@ pub struct Trigger {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub enum TriggerEvent {
     /// Triggers the creation of a new group universe.
-    GroupCreation{ controller_url: String, group: String },
+    GroupCreation {
+        controller_url: String,
+        group: String,
+    },
 }
 
 impl Trigger {
     /// Construct a new Trigger operator.
     ///
     /// `src` is the parent node from which this node receives records.
-    /// Whenever this node receives a record with a new value for `key`, 
+    /// Whenever this node receives a record with a new value for `key`,
     /// it triggers the event specified by `trigger`
     pub fn new(src: NodeIndex, trigger: TriggerEvent, key: Vec<usize>) -> Trigger {
         assert_eq!(key.len(), 1);
@@ -169,7 +172,7 @@ impl Ingredient for Trigger {
 
     // Trigger nodes require full materialization because we want group universes
     // to be long lived and to exist even if no user makes use of it.
-    // We do this for two reasons: 1) to make user universe creation faster and 
+    // We do this for two reasons: 1) to make user universe creation faster and
     // 2) so we don't have to order group and user universe migrations.
     fn requires_full_materialization(&self) -> bool {
         true
@@ -192,7 +195,6 @@ mod tests {
         g.set_op(
             "trigger",
             &["x", "y", "z"],
-
             Trigger::new(s.as_global(), trigger_type, vec![0]),
             materialized,
         );

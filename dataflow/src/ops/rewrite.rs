@@ -41,7 +41,6 @@ impl Rewrite {
     }
 }
 
-
 impl Ingredient for Rewrite {
     fn take(&mut self) -> NodeOperator {
         Clone::clone(self).into()
@@ -118,7 +117,6 @@ impl Ingredient for Rewrite {
                     let row = (self.rewrite(r), positive).into();
                     emit_rs.push(row);
                 }
-
             } else if from == *self.signal {
                 let key = r[0].clone();
                 let other_rows = self.lookup(
@@ -152,7 +150,6 @@ impl Ingredient for Rewrite {
                         emit_rs.push((self.rewrite(other), r.is_positive()).into());
                     }
                 }
-
             }
         }
 
@@ -160,7 +157,6 @@ impl Ingredient for Rewrite {
             results: emit_rs.into(),
             misses: misses,
         }
-
     }
 
     fn suggest_indexes(&self, _: NodeIndex) -> HashMap<NodeIndex, (Vec<usize>, bool)> {
