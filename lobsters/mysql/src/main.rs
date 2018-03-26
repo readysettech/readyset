@@ -1221,7 +1221,7 @@ fn main() {
             time::Duration::from_secs(value_t_or_exit!(args, "warmup", u64)),
             time::Duration::from_secs(value_t_or_exit!(args, "runtime", u64)),
         )
-        .in_flight(50);
+        .in_flight(20);
 
     if let Some(h) = args.value_of("histogram") {
         wl.with_histogram(h);
