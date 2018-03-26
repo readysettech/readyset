@@ -243,7 +243,7 @@ impl trawler::LobstersClient for MysqlTrawler {
                                  WHERE `stories`.`merged_story_id` IS NULL \
                                  AND `stories`.`is_expired` = 0 \
                                  AND `stories`.`created_at` > NOW() - INTERVAL 3 DAY \
-                                 AND upvotes - downvotes <= 5 \
+                                 AND CAST(upvotes AS signed) - CAST(downvotes AS signed) <= 5 \
                                  ORDER BY stories.id DESC, stories.created_at DESC \
                                  LIMIT 25",
                             )
@@ -402,7 +402,7 @@ impl trawler::LobstersClient for MysqlTrawler {
                                  FROM `comments` \
                                  WHERE `comments`.`story_id` = ? \
                                  ORDER BY \
-                                 (upvotes - downvotes) < 0 ASC, \
+                                 (CAST(upvotes AS signed) - CAST(downvotes AS signed)) < 0 ASC, \
                                  confidence DESC",
                                 (story,),
                             ).map(move |comments| (comments, story))
