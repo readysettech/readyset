@@ -30,9 +30,11 @@ impl From<Vec<DataType>> for StreamUpdate {
 
 #[derive(Serialize, Deserialize)]
 pub struct Reader {
-    #[serde(skip)] writer: Option<backlog::WriteHandle>,
+    #[serde(skip)]
+    writer: Option<backlog::WriteHandle>,
 
-    #[serde(skip)] streamers: Vec<channel::StreamSender<Vec<StreamUpdate>>>,
+    #[serde(skip)]
+    streamers: Vec<channel::StreamSender<Vec<StreamUpdate>>>,
 
     token_generator: Option<checktable::TokenGenerator>,
 

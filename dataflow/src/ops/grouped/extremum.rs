@@ -118,18 +118,20 @@ impl GroupedOperation for ExtremumOperator {
             }
         };
 
-        let is_extreme_value = |x: i64| if let Some(data) = current {
-            let n = match *data {
-                DataType::Int(n) => n as i64,
-                DataType::BigInt(n) => n,
-                _ => unreachable!(),
-            };
-            match self.op {
-                Extremum::MAX => x >= n,
-                Extremum::MIN => x <= n,
+        let is_extreme_value = |x: i64| {
+            if let Some(data) = current {
+                let n = match *data {
+                    DataType::Int(n) => n as i64,
+                    DataType::BigInt(n) => n,
+                    _ => unreachable!(),
+                };
+                match self.op {
+                    Extremum::MAX => x >= n,
+                    Extremum::MIN => x <= n,
+                }
+            } else {
+                true
             }
-        } else {
-            true
         };
 
         for d in diffs {

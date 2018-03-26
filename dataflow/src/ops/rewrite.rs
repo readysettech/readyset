@@ -18,14 +18,20 @@ impl Rewrite {
     /// Creates a new instance of Rewrite.
     ///
     /// `src` and `signal` are the parent nodes of the operator.
-    /// `src` forwards records that may or may not have their columns rewritten, 
+    /// `src` forwards records that may or may not have their columns rewritten,
     /// while `signal` signals which of those records should actually be
     /// rewritten.
     /// `signal_key` specifies what key to use for lookups in the signalling parent
     /// to determine if a row should be rewritten or not.
-    /// `rw_col` specifies which column is being rewritten and `value` dictates 
+    /// `rw_col` specifies which column is being rewritten and `value` dictates
     /// the value the column is rewritten to.
-    pub fn new(src: NodeIndex, signal: NodeIndex, rw_col: usize, value: DataType, signal_key: usize) -> Rewrite {
+    pub fn new(
+        src: NodeIndex,
+        signal: NodeIndex,
+        rw_col: usize,
+        value: DataType,
+        signal_key: usize,
+    ) -> Rewrite {
         Rewrite {
             src: src.into(),
             signal: signal.into(),
@@ -91,21 +97,15 @@ impl Ingredient for Rewrite {
             if from == *self.src {
                 let key = r[self.signal_key].clone();
                 // ask signal if column should be rewritten
-                let rc = self.lookup(
-                    *self.signal,
-                    &[0],
-                    &KeyType::Single(&key),
-                    nodes,
-                    state,
-                ).unwrap();
-
+                let rc = self.lookup(*self.signal, &[0], &KeyType::Single(&key), nodes, state)
+                    .unwrap();
 
                 if rc.is_none() {
                     misses.push(Miss {
-                       node: *self.signal,
-                       columns: vec![0],
-                       replay_key: replay_key_col.map(|col| vec![r[col].clone()]),
-                       key: vec![key],
+                        node: *self.signal,
+                        columns: vec![0],
+                        replay_key: replay_key_col.map(|col| vec![r[col].clone()]),
+                        key: vec![key],
                     });
                 }
 
@@ -132,10 +132,10 @@ impl Ingredient for Rewrite {
                     // so replay_key_col must be None
                     assert_eq!(replay_key_col, None);
                     misses.push(Miss {
-                       node: *self.src,
-                       columns: vec![self.signal_key],
-                       replay_key: replay_key_col.map(|col| vec![r[col].clone()]),
-                       key: vec![key],
+                        node: *self.src,
+                        columns: vec![self.signal_key],
+                        replay_key: replay_key_col.map(|col| vec![r[col].clone()]),
+                        key: vec![key],
                     });
                 }
 
@@ -196,13 +196,7 @@ mod tests {
         let src = g.add_base("src", &["id", "rw_col"]);
         let signal = g.add_base("signal", &["id"]);
 
-        let rw = Rewrite::new(
-            src.as_global(),
-            signal.as_global(),
-            1,
-            "NONE".into(),
-            0,
-        );
+        let rw = Rewrite::new(src.as_global(), signal.as_global(), 1, "NONE".into(), 0);
 
         g.set_op("rewrite", &["rw0", "rw1"], rw, false);
         (g, src, signal)
@@ -233,7 +227,10 @@ mod tests {
         assert_eq!(rs, result);
 
         // forward 1 to signal; should produce Positive([1, "NONE"]) and Negative([1, "a"]).
-        let result = vec![((vec![1.into(), "a".into()], false)), ((vec![1.into(), "NONE".into()], true))].into();
+        let result = vec![
+            ((vec![1.into(), "a".into()], false)),
+            ((vec![1.into(), "NONE".into()], true)),
+        ].into();
         rw.seed(should_rw, rw1.clone());
         let rs = rw.one_row(should_rw, rw1.clone(), false);
         assert_eq!(rs, result);

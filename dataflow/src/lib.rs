@@ -15,6 +15,7 @@ extern crate channel;
 extern crate core;
 extern crate evmap;
 extern crate fnv;
+extern crate hyper;
 extern crate itertools;
 extern crate nom_sql;
 extern crate petgraph;
@@ -30,7 +31,6 @@ extern crate tarpc;
 extern crate timekeeper;
 extern crate tokio_core;
 extern crate vec_map;
-extern crate hyper;
 
 pub mod backlog;
 pub mod checktable;

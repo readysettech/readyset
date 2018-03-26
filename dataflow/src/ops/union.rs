@@ -1,4 +1,4 @@
-use std::collections::{HashMap, HashSet, BTreeMap};
+use std::collections::{BTreeMap, HashMap, HashSet};
 
 use prelude::*;
 

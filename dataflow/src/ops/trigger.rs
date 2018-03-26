@@ -45,19 +45,20 @@ impl Trigger {
         }
     }
 
-    fn rpc<Q: Serialize>(
-        &self,
-        path: &str,
-        requests: Vec<Q>,
-        url: &String,
-    ) where Q: Send {
+    fn rpc<Q: Serialize>(&self, path: &str, requests: Vec<Q>, url: &String)
+    where
+        Q: Send,
+    {
         use hyper;
         let url = format!("{}/{}", url, path);
-        let requests: Vec<hyper::Request> = requests.iter().map(|req| {
-            let mut r = hyper::Request::new(hyper::Method::Post, url.clone().parse().unwrap());
-            r.set_body(serde_json::to_string(&req).unwrap());
-            r
-        }).collect();
+        let requests: Vec<hyper::Request> = requests
+            .iter()
+            .map(|req| {
+                let mut r = hyper::Request::new(hyper::Method::Post, url.clone().parse().unwrap());
+                r.set_body(serde_json::to_string(&req).unwrap());
+                r
+            })
+            .collect();
 
         // TODO: instead of spawing a thred for each request, we could have a
         // long running thread that we just send requests to.
@@ -73,17 +74,22 @@ impl Trigger {
 
     fn trigger(&self, ids: Vec<DataType>) {
         if ids.is_empty() {
-            return
+            return;
         }
 
         match self.trigger {
-            TriggerEvent::GroupCreation{ ref controller_url, ref group } => {
-                let contexts = ids.iter().map(|gid| {
-                    let mut group_context: HashMap<String, DataType> = HashMap::new();
-                    group_context.insert(String::from("id"), gid.clone());
-                    group_context.insert(String::from("group"), group.clone().into());
-                    group_context
-                }).collect();
+            TriggerEvent::GroupCreation {
+                ref controller_url,
+                ref group,
+            } => {
+                let contexts = ids.iter()
+                    .map(|gid| {
+                        let mut group_context: HashMap<String, DataType> = HashMap::new();
+                        group_context.insert(String::from("id"), gid.clone());
+                        group_context.insert(String::from("group"), group.clone().into());
+                        group_context
+                    })
+                    .collect();
 
                 self.rpc("create_universe", contexts, controller_url);
             }
@@ -123,17 +129,15 @@ impl Ingredient for Trigger {
             .get(&*us)
             .expect("trigger must have its own state materialized");
 
-        let mut trigger_keys: Vec<DataType> = rs
-            .iter()
-            .map(|r| r[self.key[0]].clone())
-            .collect();
+        let mut trigger_keys: Vec<DataType> = rs.iter().map(|r| r[self.key[0]].clone()).collect();
 
         // sort and dedup to trigger just once for each key
         trigger_keys.sort();
         trigger_keys.dedup();
 
-        let keys = trigger_keys.iter().filter_map(|k| {
-            match db.lookup(&[self.key[0]], &KeyType::Single(&k)) {
+        let keys = trigger_keys
+            .iter()
+            .filter_map(|k| match db.lookup(&[self.key[0]], &KeyType::Single(&k)) {
                 LookupResult::Some(rs) => {
                     if rs.len() == 0 {
                         Some(k)
@@ -142,8 +146,9 @@ impl Ingredient for Trigger {
                     }
                 }
                 LookupResult::Missing => unimplemented!(),
-            }
-        }).cloned().collect();
+            })
+            .cloned()
+            .collect();
 
         self.trigger(keys);
 
