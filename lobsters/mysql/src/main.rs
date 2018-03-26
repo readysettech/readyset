@@ -1229,11 +1229,14 @@ fn main() {
 
     // check that we can indeed connect
     let mut s = MysqlSpawner::new(my::OptsBuilder::from_opts(args.value_of("dbn").unwrap()));
-    let mut core = tokio_core::reactor::Core::new().unwrap();
-    use trawler::LobstersClient;
-    let c = Rc::new(MysqlTrawler::spawn(&mut s, &core.handle()));
-    core.run(MysqlTrawler::handle(c, LobstersRequest::Frontpage))
-        .unwrap();
+
+    if !args.is_present("prime") {
+        let mut core = tokio_core::reactor::Core::new().unwrap();
+        use trawler::LobstersClient;
+        let c = Rc::new(MysqlTrawler::spawn(&mut s, &core.handle()));
+        core.run(MysqlTrawler::handle(c, LobstersRequest::Frontpage))
+            .unwrap();
+    }
 
     wl.run::<MysqlTrawler, _>(s, args.is_present("prime"));
 }
