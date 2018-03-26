@@ -2390,6 +2390,7 @@ impl Domain {
                                 .filter(|state| state.is_partial())
                                 .map(|state| (local_index, state.deep_size_of()))
                         })
+                        .filter(|&(_, s)| s > 0)
                         .max_by_key(|&(_, s)| s)
                         .map(|(n, _)| n)
                 });
