@@ -183,36 +183,33 @@ impl GroupCommitQueueSet {
         nodes: &DomainNodes,
         ex: &Executor,
     ) -> Option<Box<Packet>> {
-        // With persistent bases we're already maintaining a write-ahead log,
-        // so no need to log twice.
-        if !self.params.persist_base_nodes
-            && (self.params.mode == DurabilityMode::DeleteOnExit
-                || self.params.mode == DurabilityMode::Permanent)
-        {
-            if !self.files.contains_key(node) {
-                let file = self.get_or_create_file(node, nodes);
-                self.files.insert(node.clone(), file);
-            }
+        match self.params.mode {
+            DurabilityMode::DeleteOnExit | DurabilityMode::Permanent => {
+                if !self.files.contains_key(node) {
+                    let file = self.get_or_create_file(node, nodes);
+                    self.files.insert(node.clone(), file);
+                }
 
-            let mut file = &mut self.files[node].1;
-            {
-                let data_to_flush: Vec<_> = self.pending_packets[&node]
-                    .iter()
-                    .map(|p| match **p {
-                        Packet::Transaction { ref data, .. } | Packet::Message { ref data, .. } => {
-                            data
-                        }
-                        _ => unreachable!(),
-                    })
-                    .collect();
-                serde_json::to_writer(&mut file, &data_to_flush).unwrap();
-                // Separate log flushes with a newline so that the
-                // file can be easily parsed later on:
-                writeln!(&mut file, "").unwrap();
-            }
+                let mut file = &mut self.files[node].1;
+                {
+                    let data_to_flush: Vec<_> = self.pending_packets[&node]
+                        .iter()
+                        .map(|p| match **p {
+                            Packet::Transaction { ref data, .. }
+                            | Packet::Message { ref data, .. } => data,
+                            _ => unreachable!(),
+                        })
+                        .collect();
+                    serde_json::to_writer(&mut file, &data_to_flush).unwrap();
+                    // Separate log flushes with a newline so that the
+                    // file can be easily parsed later on:
+                    writeln!(&mut file, "").unwrap();
+                }
 
-            file.flush().unwrap();
-            file.get_mut().sync_data().unwrap();
+                file.flush().unwrap();
+                file.get_mut().sync_data().unwrap();
+            }
+            DurabilityMode::MemoryOnly => {}
         }
 
         self.wait_start.remove(node);

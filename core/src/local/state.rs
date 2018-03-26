@@ -177,11 +177,19 @@ impl PersistentState {
             _ => Connection::open(&full_name).unwrap(),
         };
 
+        // SQLite pragmas:
+        // locking_mode = EXCLUSIVE - We never intend to open this DB in another process
+        // journal_mode = WAL - Use SQlite's "new" write-ahead log mode
+        // synchronous = OFF - Never fsync on commit
+        //     We always fsync Soup's log before ACK-ing a write, so this won't cause any loss of
+        //     data. SQlite does state that a poorly timed crash might cause database corruption on
+        //     the other hand, so we might need to change to NORMAL. With SQlite's WAL enabled
+        //     NORMAL indicates that a fsync will happen prior to the WAL being checkpointed.
         connection
             .execute_batch(
                 "CREATE TABLE IF NOT EXISTS store (row BLOB);
                 PRAGMA locking_mode = EXCLUSIVE;
-                PRAGMA synchronous = FULL;
+                PRAGMA synchronous = OFF;
                 PRAGMA journal_mode = WAL;",
             )
             .unwrap();
