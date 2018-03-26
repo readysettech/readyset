@@ -356,8 +356,8 @@ impl trawler::LobstersClient for MysqlTrawler {
                             "$2a$10$Tq3wrGeC0xtgzuxqOlc3v.07VTUvxvwI70kuoVihoO2cE5qj7ooka", // test
                             "2018-03-25 16:00:24",
                             format!("token{}", uid),
-                            "ryEKWLIxQe7yKGrUdg0vRpV25PzVUhJP4uwMAW8qw8Ye6W1DueXu1crKE4Ba",
-                            "COoHFt9BXj",
+                            format!("rsstoken{}", uid),
+                            format!("mtok{}", uid),
                         ),
                     ))
                 } else {
