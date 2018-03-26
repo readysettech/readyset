@@ -190,7 +190,7 @@ impl PersistentState {
                 "CREATE TABLE IF NOT EXISTS store (row BLOB);
                 PRAGMA locking_mode = EXCLUSIVE;
                 PRAGMA synchronous = OFF;
-                PRAGMA journal_mode = WAL;",
+                PRAGMA journal_mode = OFF;",
             )
             .unwrap();
 
