@@ -4,7 +4,7 @@ version = "0.1.0"
 authors = ["Jon Gjengset <jon@thesquareplanet.com>"]
 
 [dependencies]
-trawler = "0.3.0"
+trawler = "0.3.2"
 mysql_async = "0.14"
 tokio-core = "0.1"
 clap = "2.31"
