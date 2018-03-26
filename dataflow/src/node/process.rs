@@ -152,6 +152,24 @@ impl Node {
                     *t = tracer.take();
                 }
 
+                if i.get_base().is_some() && executor.is_some() {
+                    // Send write-ACKs to all the clients with updates that made
+                    // it into this merged packet:
+                    let m = &mut **m;
+                    let ex = executor.unwrap();
+                    match *m {
+                        Packet::Message {
+                            ref mut senders, ..
+                        } => senders.drain(..).for_each(|src| ex.send_back(src, Ok(0))),
+                        Packet::Transaction {
+                            ref mut senders,
+                            state: TransactionState::Committed(ts, ..),
+                            ..
+                        } => senders.drain(..).for_each(|src| ex.send_back(src, Ok(ts))),
+                        _ => {}
+                    }
+                }
+
                 // When a replay originates at a base node, we replay the data *through* that same
                 // base node because its column set may have changed. However, this replay through
                 // the base node itself should *NOT* update the materialization, because otherwise
