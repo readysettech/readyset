@@ -324,6 +324,7 @@ impl Packet {
             Packet::Message { ref mut link, .. } => link,
             Packet::Transaction { ref mut link, .. } => link,
             Packet::ReplayPiece { ref mut link, .. } => link,
+            Packet::EvictKeys { ref mut link, .. } => link,
             _ => unreachable!(),
         }
     }
