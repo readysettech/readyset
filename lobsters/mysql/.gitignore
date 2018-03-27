@@ -1,4 +1,5 @@
-
+*.log
+*.hist
 /target/
 **/*.rs.bk
 Cargo.lock

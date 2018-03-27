@@ -1,9 +1,11 @@
+extern crate rusoto_core;
+extern crate rusoto_sts;
 extern crate tsunami;
 
-use tsunami::*;
 use std::collections::HashMap;
 use std::fs::File;
 use std::io::prelude::*;
+use tsunami::*;
 
 fn main() {
     let mut b = TsunamiBuilder::default();
@@ -11,28 +13,69 @@ fn main() {
     b.add_set(
         "server",
         1,
-        MachineSetup::new("c5.2xlarge", "ami-2705da5a", |ssh| {
-            ssh.cmd("./reprime-ramdisk.sh").map(|out| {
-                eprintln!("==> initial ramdisk setup: {}", out);
-            })
-        }),
+        MachineSetup::new("m5.2xlarge", "ami-2705da5a", |ssh| {
+            eprintln!("==> priming ramdisk");
+            ssh.cmd("./reprime-ramdisk.sh")
+                .map(|out| {
+                    let out = out.trim_right();
+                    if !out.is_empty() {
+                        eprintln!(" -> primed\n{}", out);
+                    }
+                })
+                .map_err(|e| {
+                    eprintln!(" -> failed:\n{:?}", e);
+                    e
+                })
+        }).as_user("ubuntu"),
     );
     b.add_set(
         "trawler",
         1,
-        MachineSetup::new("c5.4xlarge", "ami-6a03dc17", |ssh| {
+        MachineSetup::new("c5.4xlarge", "ami-2766b85a", |ssh| {
+            eprintln!("==> setting up trawler");
+            eprintln!(" -> git update");
             ssh.cmd("git -C benchmarks pull").map(|out| {
-                eprintln!("==> git update:\n{}", out);
+                let out = out.trim_right();
+                if !out.is_empty() && !out.contains("Already up-to-date.") {
+                    eprintln!("{}", out);
+                }
             })?;
+
+            eprintln!(" -> rebuild");
             ssh.cmd("cd benchmarks/lobsters/mysql && cargo b --release --bin trawler-mysql")
                 .map(|out| {
-                    eprintln!("==> rebuild:\n{}", out);
+                    let out = out.trim_right();
+                    if !out.is_empty() {
+                        eprintln!("{}", out);
+                    }
+                })
+                .map_err(|e| {
+                    eprintln!(" -> rebuild failed!\n{:?}", e);
+                    e
                 })?;
+
             Ok(())
-        }),
+        }).as_user("ubuntu"),
     );
 
-    b.run(|mut vms: HashMap<String, Vec<Machine>>| {
+    // https://github.com/rusoto/rusoto/blob/master/AWS-CREDENTIALS.md
+    let sts = rusoto_sts::StsClient::new(
+        rusoto_core::default_tls_client().unwrap(),
+        rusoto_core::EnvironmentProvider,
+        rusoto_core::Region::UsEast1,
+    );
+    let provider = rusoto_sts::StsAssumeRoleSessionCredentialsProvider::new(
+        sts,
+        "arn:aws:sts::125163634912:role/soup".to_owned(),
+        "vote-benchmark".to_owned(),
+        None,
+        None,
+        None,
+        None,
+    );
+
+    b.set_region(rusoto_core::Region::UsEast1);
+    b.run_as(provider, |mut vms: HashMap<String, Vec<Machine>>| {
         let mut server = vms.remove("server").unwrap().swap_remove(0);
         let mut trawler = vms.remove("trawler").unwrap().swap_remove(0);
 
@@ -62,10 +105,19 @@ fn main() {
                      --warmup 60 \
                      --runtime 240 \
                      --issuers 15 \
+                     --histogram lobsters-mysql-{}.hist \
                      \"mysql://lobsters:$(cat ~/mysql.pass)@{}/lobsters\"",
-                    scale, server.private_ip,
+                    scale, scale, server.private_ip,
                 ))
                 .and_then(|out| Ok(output.write_all(out.as_bytes()).map(|_| ())?))?;
+
+            let mut hist = File::create(format!("lobsters-mysql-{}.hist", scale))?;
+            trawler
+                .ssh
+                .as_mut()
+                .unwrap()
+                .cmd_raw(&format!("cat lobsters-mysql-{}.hist", scale))
+                .and_then(|out| Ok(hist.write_all(&out[..]).map(|_| ())?))?;
         }
 
         Ok(())
