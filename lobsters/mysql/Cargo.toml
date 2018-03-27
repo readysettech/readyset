@@ -4,11 +4,11 @@ version = "0.1.0"
 authors = ["Jon Gjengset <jon@thesquareplanet.com>"]
 
 [features]
-orchestration = ["tsunami", "rusoto_core", "rusoto_sts"]
+orchestration = ["tsunami", "rusoto_core", "rusoto_sts", "chrono"]
 default = []
 
 [dependencies]
-trawler = "0.3.2"
+trawler = "0.3.7"
 mysql_async = "0.14"
 tokio-core = "0.1"
 clap = "2.31"
@@ -17,6 +17,7 @@ futures = "0.1"
 tsunami = { version = "0.5.7", optional = true }
 rusoto_core = { version = "0.31", optional = true }
 rusoto_sts = { version = "0.31", optional = true }
+chrono = { version = "0.4", optional = true }
 
 [[bin]]
 name = "trawler-mysql"

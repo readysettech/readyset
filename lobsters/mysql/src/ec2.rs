@@ -1,3 +1,4 @@
+extern crate chrono;
 extern crate rusoto_core;
 extern crate rusoto_sts;
 extern crate tsunami;
@@ -74,8 +75,11 @@ fn main() {
         None,
     );
 
+    b.set_max_duration(2);
     b.set_region(rusoto_core::Region::UsEast1);
     b.run_as(provider, |mut vms: HashMap<String, Vec<Machine>>| {
+        use chrono::prelude::*;
+
         let mut server = vms.remove("server").unwrap().swap_remove(0);
         let mut trawler = vms.remove("trawler").unwrap().swap_remove(0);
 
@@ -84,15 +88,21 @@ fn main() {
 
             if scale != 1 {
                 // need to re-prime server
+                eprintln!(" -> repriming db");
                 server
                     .ssh
                     .as_mut()
                     .unwrap()
                     .cmd("./reprime-ramdisk.sh")
                     .map(|out| {
-                        eprintln!(" -> reprime db... {}", out);
+                        let out = out.trim_right();
+                        if !out.is_empty() {
+                            eprintln!(" -> reprimed db...\n{}", out);
+                        }
                     })?;
             }
+
+            eprintln!(" -> started at {}", Local::now().time().format("%H:%M:%S"));
 
             let mut output = File::create(format!("lobsters-mysql-{}.log", scale))?;
             trawler
@@ -110,6 +120,8 @@ fn main() {
                     scale, scale, server.private_ip,
                 ))
                 .and_then(|out| Ok(output.write_all(out.as_bytes()).map(|_| ())?))?;
+
+            eprintln!(" -> finished at {}", Local::now().time().format("%H:%M:%S"));
 
             let mut hist = File::create(format!("lobsters-mysql-{}.hist", scale))?;
             trawler
