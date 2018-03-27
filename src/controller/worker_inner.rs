@@ -39,6 +39,7 @@ pub(super) struct WorkerInner {
 
     memory_limit: usize,
     state_sizes: HashMap<(DomainIndex, usize), Arc<AtomicUsize>>,
+    domain_senders: HashMap<(DomainIndex, usize), TcpSender<Box<payload::Packet>>>,
 
     log: slog::Logger,
 }
@@ -116,6 +117,7 @@ impl WorkerInner {
             listen_addr,
             memory_limit,
             state_sizes: HashMap::new(),
+            domain_senders: HashMap::new(),
             log,
         })
     }
@@ -202,16 +204,24 @@ impl WorkerInner {
             // also check own state size
             // 1. tell domains to update state size
             for &(di, shard) in self.state_sizes.keys() {
-                let mut tx = self.channel_coordinator.get_tx(&(di, shard));
-                // we're lax about failures here since missing an UpdateStateSize message has
-                // no correctness implications
-                match tx {
-                    // domain may already have exited
-                    None => continue,
-                    Some(mut tx) => match tx.0.send(box payload::Packet::UpdateStateSize) {
-                        Ok(_) => (),
-                        Err(_) => error!(self.log, "failed to send UpdateStateSize to domain"),
-                    },
+                let mut tx = match self.domain_senders.get_mut(&(di, shard)) {
+                    None => {
+                        // we're lax about failures here since missing an UpdateStateSize message has
+                        // no correctness implications
+                        match self.channel_coordinator.get_tx(&(di, shard)) {
+                            // domain may already have exited
+                            None => continue,
+                            Some(tx) => {
+                                self.domain_senders.insert((di, shard), tx.0);
+                                self.domain_senders.get_mut(&(di, shard)).unwrap()
+                            }
+                        }
+                    }
+                    Some(mut tx) => tx,
+                };
+                match tx.send(box payload::Packet::UpdateStateSize) {
+                    Ok(_) => (),
+                    Err(_) => error!(self.log, "failed to send UpdateStateSize to domain"),
                 }
             }
             // 2. add current state sizes (could be out of date, as packet sent below is not
@@ -242,13 +252,11 @@ impl WorkerInner {
                 // evict from the largest domain
                 let largest = sizes.into_iter().max_by_key(|&(_, s)| s).unwrap();
                 warn!(self.log, "evicting from {:?}", largest);
-                let mut tx = self.channel_coordinator.get_tx(largest.0).unwrap();
-                tx.0
-                    .send(box payload::Packet::Evict {
-                        node: None,
-                        num_keys: 1,
-                    })
-                    .unwrap();
+                let tx = self.domain_senders.get_mut(largest.0).unwrap();
+                tx.send(box payload::Packet::Evict {
+                    node: None,
+                    num_keys: 1,
+                }).unwrap();
             }
 
             let msg = CoordinationMessage {
