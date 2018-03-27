@@ -1313,6 +1313,7 @@ impl Domain {
 
                                 self.state
                                     .get(&local_index)
+                                    .filter(|state| state.is_partial())
                                     .map(|state| state.deep_size_of())
                                     .unwrap_or(0)
                             })
