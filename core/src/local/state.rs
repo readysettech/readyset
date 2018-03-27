@@ -157,13 +157,7 @@ impl State {
         for s in &mut self.state {
             s.clear();
         }
-    }
-
-    fn unalias_for_state(&mut self) {
-        let left = self.state.drain(..).last();
-        if let Some(left) = left {
-            self.state.push(left);
-        }
+        self.mem_size = 0;
     }
 
     /// Evict `count` randomly selected keys, returning key colunms of the index chosen to evict
@@ -183,13 +177,6 @@ impl State {
         self.mem_size = self.mem_size
             .saturating_sub(self.state[index].evict_keys(keys));
         self.state[index].key()
-    }
-}
-
-impl<'a> Drop for State {
-    fn drop(&mut self) {
-        self.unalias_for_state();
-        self.clear();
     }
 }
 
