@@ -91,7 +91,6 @@ impl State {
                     return true;
                 }
             };
-            // FIXME: self.rows += ?
             self.mem_size += r.deep_size_of();
             self.state[i].insert_row(Row(r))
         } else {
@@ -106,15 +105,12 @@ impl State {
 
     pub fn remove(&mut self, r: &[DataType]) -> bool {
         let mut hit = false;
-        let mut removed = false;
-
         for s in &mut self.state {
-            s.remove_row(r, &mut hit, &mut removed);
-        }
-
-        if removed {
-            self.mem_size = self.mem_size
-                .saturating_sub((*r).iter().fold(0u64, |acc, d| acc + d.deep_size_of()));
+            if let Some(row) = s.remove_row(r, &mut hit) {
+                if Rc::strong_count(&row.0) == 1 {
+                    self.mem_size = self.mem_size.checked_sub(row.deep_size_of()).unwrap();
+                }
+            }
         }
 
         hit
