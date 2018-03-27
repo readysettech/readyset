@@ -9,3 +9,12 @@ mysql_async = "0.14"
 tokio-core = "0.1"
 clap = "2.31"
 futures = "0.1"
+tsunami = "0.5"
+
+[[bin]]
+name = "trawler-mysql"
+path = "src/main.rs"
+
+[[bin]]
+name = "trawler-mysql-ec2"
+path = "src/ec2.rs"
