@@ -129,6 +129,15 @@ impl Reader {
         self.token_generator = Some(gen);
     }
 
+    pub fn on_eviction(&mut self, key_columns: &[usize], keys: &[Vec<DataType>]) {
+        let w = self.writer.as_mut().unwrap();
+        for k in keys {
+            assert_eq!(k.len(), 1); // no compound keys yet
+            w.mark_hole(&k[0]);
+        }
+        w.swap();
+    }
+
     pub fn process(&mut self, m: &mut Option<Box<Packet>>, swap: bool) {
         if let Some(ref mut state) = self.writer {
             let m = m.as_mut().unwrap();

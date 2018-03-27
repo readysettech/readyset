@@ -236,7 +236,10 @@ impl Node {
             NodeType::Internal(ref mut i) => {
                 i.on_eviction(key_columns, keys);
             }
-            NodeType::Ingress | NodeType::Reader(_) => {}
+            NodeType::Reader(ref mut r) => {
+                r.on_eviction(key_columns, keys);
+            }
+            NodeType::Ingress => {}
             NodeType::Egress(None) | NodeType::Source | NodeType::Dropped => unreachable!(),
         }
     }

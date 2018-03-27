@@ -2440,6 +2440,7 @@ impl Domain {
                         // This path terminates inside the domain. Find the target node, evict
                         // from it, and then propogate the eviction further downstream.
                         let target = self.replay_paths[&tag].path.last().unwrap().node;
+                        // We've already evicted from readers in walk_path
                         if self.nodes[&target].borrow().is_reader() {
                             return;
                         }
