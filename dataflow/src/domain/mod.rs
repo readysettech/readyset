@@ -2403,7 +2403,7 @@ impl Domain {
                     let mut freed = 0u64;
                     while freed < num_bytes as u64 {
                         let (key_columns, keys, bytes) = {
-                            let k = self.state[&node].evict_random_keys(1);
+                            let k = self.state[&node].evict_random_keys(100);
                             (k.0.to_vec(), k.1, k.2)
                         };
                         freed += bytes;
