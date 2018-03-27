@@ -21,12 +21,13 @@ fn main() {
         "trawler",
         1,
         MachineSetup::new("c5.4xlarge", "ami-6a03dc17", |ssh| {
-            ssh.cmd("git -C trawler pull").map(|out| {
+            ssh.cmd("git -C benchmarks pull").map(|out| {
                 eprintln!("==> git update:\n{}", out);
             })?;
-            ssh.cmd("cd trawler && cargo b --release").map(|out| {
-                eprintln!("==> rebuild:\n{}", out);
-            })?;
+            ssh.cmd("cd benchmarks/lobsters/mysql && cargo b --release --bin trawler-mysql")
+                .map(|out| {
+                    eprintln!("==> rebuild:\n{}", out);
+                })?;
             Ok(())
         }),
     );
@@ -56,7 +57,7 @@ fn main() {
                 .as_mut()
                 .unwrap()
                 .cmd(&format!(
-                    "trawler/target/release/trawler-mysql \
+                    "benchmarks/lobsters/mysql/target/release/trawler-mysql \
                      --reqscale {} \
                      --warmup 60 \
                      --runtime 240 \
