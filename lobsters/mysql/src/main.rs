@@ -72,6 +72,7 @@ impl trawler::LobstersClient for MysqlTrawler {
 
         // TODO: traffic management
         // https://github.com/lobsters/lobsters/blob/master/app/controllers/application_controller.rb#L37
+        /*
         let c = c.and_then(|c| {
             c.start_transaction(my::TransactionOptions::new())
                 .and_then(|t| {
@@ -102,6 +103,7 @@ impl trawler::LobstersClient for MysqlTrawler {
                 })
                 .and_then(|t| t.commit())
         });
+        */
 
         // TODO: some queries are different when logged in.
         // e.g., / also loads tag filters, votes, hidden_stories, and saved_stories
