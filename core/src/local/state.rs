@@ -98,6 +98,9 @@ impl State {
             for i in 0..self.state.len() {
                 hit_any = self.state[i].insert_row(Row(r.clone())) || hit_any;
             }
+            if hit_any {
+                self.mem_size += r.deep_size_of();
+            }
             hit_any
         }
     }
