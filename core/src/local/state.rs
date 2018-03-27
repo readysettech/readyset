@@ -159,22 +159,22 @@ impl State {
     }
 
     /// Evict `count` randomly selected keys, returning key colunms of the index chosen to evict
-    /// from along with the keys evicted.
-    pub fn evict_random_keys(&mut self, count: usize) -> (&[usize], Vec<Vec<DataType>>) {
+    /// from along with the keys evicted and the number of bytes evicted.
+    pub fn evict_random_keys(&mut self, count: usize) -> (&[usize], Vec<Vec<DataType>>, u64) {
         let mut rng = rand::thread_rng();
         let index = rng.gen_range(0, self.state.len());
         let (bytes_freed, keys) = self.state[index].evict_random_keys(count, &mut rng);
         self.mem_size = self.mem_size.saturating_sub(bytes_freed);
-        (self.state[index].key(), keys)
+        (self.state[index].key(), keys, bytes_freed)
     }
 
     /// Evict the listed keys from the materialization targeted by `tag`, returning the key columns
-    /// of the index that was evicted from.
-    pub fn evict_keys(&mut self, tag: &Tag, keys: &[Vec<DataType>]) -> &[usize] {
+    /// of the index that was evicted from and the number of bytes evicted.
+    pub fn evict_keys(&mut self, tag: &Tag, keys: &[Vec<DataType>]) -> (&[usize], u64) {
         let index = self.by_tag[tag];
-        self.mem_size = self.mem_size
-            .saturating_sub(self.state[index].evict_keys(keys));
-        self.state[index].key()
+        let bytes = self.state[index].evict_keys(keys);
+        self.mem_size = self.mem_size.saturating_sub(bytes);
+        (self.state[index].key(), bytes)
     }
 }
 

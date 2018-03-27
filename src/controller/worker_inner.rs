@@ -199,6 +199,8 @@ impl WorkerInner {
     /// Perform a heartbeat if it is time, and return the amount of time until another one is
     /// needed.
     pub(super) fn heartbeat(&mut self) -> Duration {
+        use std::cmp;
+
         let elapsed = self.last_heartbeat.elapsed();
         if elapsed > self.heartbeat_every {
             // also check own state size
@@ -255,7 +257,7 @@ impl WorkerInner {
                 let tx = self.domain_senders.get_mut(largest.0).unwrap();
                 tx.send(box payload::Packet::Evict {
                     node: None,
-                    num_keys: 1,
+                    num_bytes: cmp::min(largest.1, total - self.memory_limit),
                 }).unwrap();
             }
 

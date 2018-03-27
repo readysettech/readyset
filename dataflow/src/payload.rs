@@ -152,7 +152,7 @@ pub enum Packet {
     /// Trigger an eviction from the target node.
     Evict {
         node: Option<LocalNodeIndex>,
-        num_keys: usize,
+        num_bytes: usize,
     },
 
     /// Evict the indicated keys from the materialization targed by the replay path `tag` (along

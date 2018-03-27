@@ -2376,7 +2376,7 @@ impl Domain {
         }
 
         match (*m,) {
-            (Packet::Evict { node, num_keys },) => {
+            (Packet::Evict { node, num_bytes },) => {
                 let node = node.or_else(|| {
                     self.nodes
                         .values()
@@ -2393,24 +2393,31 @@ impl Domain {
                         })
                         .filter(|&(_, s)| s > 0)
                         .max_by_key(|&(_, s)| s)
-                        .map(|(n, _)| n)
+                        .map(|(n, s)| {
+                            warn!(self.log, "chose to evict from node {:?} with size {}", n, s);
+                            n
+                        })
                 });
 
                 if let Some(node) = node {
-                    let (key_columns, keys) = {
-                        let k = self.state[&node].evict_random_keys(num_keys);
-                        (k.0.to_vec(), k.1)
-                    };
-                    trigger_downstream_evictions(
-                        &key_columns[..],
-                        &keys[..],
-                        node,
-                        sends,
-                        &self.replay_paths,
-                        self.shard,
-                        &mut self.state,
-                        &mut self.nodes,
-                    );
+                    let mut freed = 0u64;
+                    while freed < num_bytes as u64 {
+                        let (key_columns, keys, bytes) = {
+                            let k = self.state[&node].evict_random_keys(1);
+                            (k.0.to_vec(), k.1, k.2)
+                        };
+                        freed += bytes;
+                        trigger_downstream_evictions(
+                            &key_columns[..],
+                            &keys[..],
+                            node,
+                            sends,
+                            &self.replay_paths,
+                            self.shard,
+                            &mut self.state,
+                            &mut self.nodes,
+                        );
+                    }
                 }
             }
             (Packet::EvictKeys {
@@ -2436,7 +2443,7 @@ impl Domain {
                         if self.nodes[&target].borrow().is_reader() {
                             return;
                         }
-                        let key_columns = self.state[&target].evict_keys(&tag, &keys).to_vec();
+                        let key_columns = self.state[&target].evict_keys(&tag, &keys).0.to_vec();
                         trigger_downstream_evictions(
                             &key_columns[..],
                             &keys[..],
