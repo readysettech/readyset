@@ -365,19 +365,16 @@ impl trawler::LobstersClient for MysqlTrawler {
             LobstersRequest::Logout(..) => Box::new(c),
             LobstersRequest::Story(id) => {
                 Box::new(
-                    this.c
-                        .get_conn()
-                        .and_then(move |c| {
-                            c.prep_exec(
-                                "SELECT `stories`.* \
-                                 FROM `stories` \
-                                 WHERE `stories`.`short_id` = ? \
-                                 ORDER BY `stories`.`id` ASC LIMIT 1",
-                                (::std::str::from_utf8(&id[..]).unwrap(),),
-                            ).and_then(|result| result.collect_and_drop::<my::Row>())
-                                .map(|(c, mut story)| (c, story.swap_remove(0)))
-                        })
-                        .and_then(|(c, story)| {
+                    c.and_then(move |c| {
+                        c.prep_exec(
+                            "SELECT `stories`.* \
+                             FROM `stories` \
+                             WHERE `stories`.`short_id` = ? \
+                             ORDER BY `stories`.`id` ASC LIMIT 1",
+                            (::std::str::from_utf8(&id[..]).unwrap(),),
+                        ).and_then(|result| result.collect_and_drop::<my::Row>())
+                            .map(|(c, mut story)| (c, story.swap_remove(0)))
+                    }).and_then(|(c, story)| {
                             let author = story.get::<u32, _>("user_id").unwrap();
                             let id = story.get::<u32, _>("id").unwrap();
                             c.drop_exec(
@@ -471,19 +468,16 @@ impl trawler::LobstersClient for MysqlTrawler {
             }
             LobstersRequest::StoryVote(user, story, v) => {
                 Box::new(
-                    this.c
-                        .get_conn()
-                        .and_then(move |c| {
-                            c.prep_exec(
-                                "SELECT `stories`.* \
-                                 FROM `stories` \
-                                 WHERE `stories`.`short_id` = ? \
-                                 ORDER BY `stories`.`id` ASC LIMIT 1",
-                                (::std::str::from_utf8(&story[..]).unwrap(),),
-                            ).and_then(|result| result.collect_and_drop::<my::Row>())
-                                .map(|(c, mut story)| (c, story.swap_remove(0)))
-                        })
-                        .and_then(move |(c, story)| {
+                    c.and_then(move |c| {
+                        c.prep_exec(
+                            "SELECT `stories`.* \
+                             FROM `stories` \
+                             WHERE `stories`.`short_id` = ? \
+                             ORDER BY `stories`.`id` ASC LIMIT 1",
+                            (::std::str::from_utf8(&story[..]).unwrap(),),
+                        ).and_then(|result| result.collect_and_drop::<my::Row>())
+                            .map(|(c, mut story)| (c, story.swap_remove(0)))
+                    }).and_then(move |(c, story)| {
                             let author = story.get::<u32, _>("user_id").unwrap();
                             let id = story.get::<u32, _>("id").unwrap();
                             let score = story.get::<f64, _>("hotness").unwrap();
@@ -594,18 +588,15 @@ impl trawler::LobstersClient for MysqlTrawler {
             }
             LobstersRequest::CommentVote(user, comment, v) => {
                 Box::new(
-                    this.c
-                        .get_conn()
-                        .and_then(move |c| {
-                            c.first_exec::<_, _, my::Row>(
-                                "SELECT `comments`.* \
-                                 FROM `comments` \
-                                 WHERE `comments`.`short_id` = ? \
-                                 ORDER BY `comments`.`id` ASC LIMIT 1",
-                                (::std::str::from_utf8(&comment[..]).unwrap(),),
-                            )
-                        })
-                        .and_then(move |(c, comment)| {
+                    c.and_then(move |c| {
+                        c.first_exec::<_, _, my::Row>(
+                            "SELECT `comments`.* \
+                             FROM `comments` \
+                             WHERE `comments`.`short_id` = ? \
+                             ORDER BY `comments`.`id` ASC LIMIT 1",
+                            (::std::str::from_utf8(&comment[..]).unwrap(),),
+                        )
+                    }).and_then(move |(c, comment)| {
                             let comment = comment.unwrap();
                             let author = comment.get::<u32, _>("user_id").unwrap();
                             let id = comment.get::<u32, _>("id").unwrap();
@@ -762,17 +753,14 @@ impl trawler::LobstersClient for MysqlTrawler {
             }
             LobstersRequest::Submit { id, user, title } => {
                 Box::new(
-                    this.c
-                        .get_conn()
-                        .and_then(|c| {
-                            // check that tags are active
-                            c.first::<_, my::Row>(
-                                "SELECT  `tags`.* FROM `tags` \
-                                 WHERE `tags`.`inactive` = 0 AND `tags`.`tag` IN ('test') \
-                                 ORDER BY `tags`.`id` ASC LIMIT 1",
-                            )
-                        })
-                        .map(|(c, tag)| (c, tag.unwrap().get::<u32, _>("id")))
+                    c.and_then(|c| {
+                        // check that tags are active
+                        c.first::<_, my::Row>(
+                            "SELECT  `tags`.* FROM `tags` \
+                             WHERE `tags`.`inactive` = 0 AND `tags`.`tag` IN ('test') \
+                             ORDER BY `tags`.`id` ASC LIMIT 1",
+                        )
+                    }).map(|(c, tag)| (c, tag.unwrap().get::<u32, _>("id")))
                         .and_then(move |(c, tag)| {
                             // check that story id isn't already assigned
                             c.drop_exec(
@@ -902,18 +890,15 @@ impl trawler::LobstersClient for MysqlTrawler {
                 parent,
             } => {
                 Box::new(
-                    this.c
-                        .get_conn()
-                        .and_then(move |c| {
-                            c.first_exec::<_, _, my::Row>(
-                                "SELECT `stories`.* \
-                                 FROM `stories` \
-                                 WHERE `stories`.`short_id` = ? \
-                                 ORDER BY `stories`.`id` ASC LIMIT 1",
-                                (::std::str::from_utf8(&story[..]).unwrap(),),
-                            ).map(|(c, story)| (c, story.unwrap()))
-                        })
-                        .and_then(|(c, story)| {
+                    c.and_then(move |c| {
+                        c.first_exec::<_, _, my::Row>(
+                            "SELECT `stories`.* \
+                             FROM `stories` \
+                             WHERE `stories`.`short_id` = ? \
+                             ORDER BY `stories`.`id` ASC LIMIT 1",
+                            (::std::str::from_utf8(&story[..]).unwrap(),),
+                        ).map(|(c, story)| (c, story.unwrap()))
+                    }).and_then(|(c, story)| {
                             let author = story.get::<u32, _>("user_id").unwrap();
                             let hotness = story.get::<f64, _>("hotness").unwrap();
                             let id = story.get::<u32, _>("id").unwrap();
