@@ -2433,6 +2433,9 @@ impl Domain {
                         // This path terminates inside the domain. Find the target node, evict
                         // from it, and then propogate the eviction further downstream.
                         let target = self.replay_paths[&tag].path.last().unwrap().node;
+                        if self.nodes[&target].borrow().is_reader() {
+                            return;
+                        }
                         let key_columns = self.state[&target].evict_keys(&tag, &keys).to_vec();
                         trigger_downstream_evictions(
                             &key_columns[..],
