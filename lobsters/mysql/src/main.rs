@@ -155,17 +155,15 @@ impl trawler::LobstersClient for MysqlTrawler {
                     })
             })),
             LobstersRequest::Frontpage => Box::new(
-                c.and_then(|c| c.drop_query("SELECT `tags`.* FROM `tags` WHERE 1=0"))
-                    .and_then(|c| {
-                        c.query(
-                            "SELECT  `stories`.* FROM `stories` \
-                             WHERE `stories`.`merged_story_id` IS NULL \
-                             AND `stories`.`is_expired` = 0 \
-                             AND ((CAST(upvotes AS signed) - CAST(downvotes AS signed)) >= 0) \
-                             ORDER BY hotness LIMIT 26 OFFSET 0",
-                        )
-                    })
-                    .and_then(|stories| {
+                c.and_then(|c| {
+                    c.query(
+                        "SELECT  `stories`.* FROM `stories` \
+                         WHERE `stories`.`merged_story_id` IS NULL \
+                         AND `stories`.`is_expired` = 0 \
+                         AND ((CAST(upvotes AS signed) - CAST(downvotes AS signed)) >= 0) \
+                         ORDER BY hotness LIMIT 26 OFFSET 0",
+                    )
+                }).and_then(|stories| {
                         stories.reduce_and_drop(
                             (HashSet::new(), HashSet::new()),
                             |(mut users, mut stories), story| {
@@ -230,27 +228,25 @@ impl trawler::LobstersClient for MysqlTrawler {
             ),
             LobstersRequest::Recent => {
                 Box::new(
-                    c.and_then(|c| c.drop_query("SELECT `tags`.* FROM `tags` WHERE 1=0"))
-                        .and_then(|c| {
-                            // /recent is a little weird:
-                            // https://github.com/lobsters/lobsters/blob/50b4687aeeec2b2d60598f63e06565af226f93e3/app/models/story_repository.rb#L41
-                            // but it *basically* just looks for stories in the past few days
-                            // because all our stories are for the same day, we add a LIMIT
-                            c.query(
-                                "SELECT `stories`.`id`, \
-                                 `stories`.`upvotes`, \
-                                 `stories`.`downvotes`, \
-                                 `stories`.`user_id` \
-                                 FROM `stories` \
-                                 WHERE `stories`.`merged_story_id` IS NULL \
-                                 AND `stories`.`is_expired` = 0 \
-                                 AND `stories`.`created_at` > NOW() - INTERVAL 3 DAY \
-                                 AND CAST(upvotes AS signed) - CAST(downvotes AS signed) <= 5 \
-                                 ORDER BY stories.id DESC, stories.created_at DESC \
-                                 LIMIT 25",
-                            )
-                        })
-                        .and_then(|stories| {
+                    c.and_then(|c| {
+                        // /recent is a little weird:
+                        // https://github.com/lobsters/lobsters/blob/50b4687aeeec2b2d60598f63e06565af226f93e3/app/models/story_repository.rb#L41
+                        // but it *basically* just looks for stories in the past few days
+                        // because all our stories are for the same day, we add a LIMIT
+                        c.query(
+                            "SELECT `stories`.`id`, \
+                             `stories`.`upvotes`, \
+                             `stories`.`downvotes`, \
+                             `stories`.`user_id` \
+                             FROM `stories` \
+                             WHERE `stories`.`merged_story_id` IS NULL \
+                             AND `stories`.`is_expired` = 0 \
+                             AND `stories`.`created_at` > NOW() - INTERVAL 3 DAY \
+                             AND CAST(upvotes AS signed) - CAST(downvotes AS signed) <= 5 \
+                             ORDER BY stories.id DESC, stories.created_at DESC \
+                             LIMIT 25",
+                        )
+                    }).and_then(|stories| {
                             stories.reduce_and_drop(Vec::new(), |mut stories, story| {
                                 stories.push(story.get::<u32, _>("id").unwrap());
                                 stories
@@ -768,16 +764,6 @@ impl trawler::LobstersClient for MysqlTrawler {
                 Box::new(
                     this.c
                         .get_conn()
-                        .and_then(move |c| {
-                            // check that tags exist
-                            c.drop_query(
-                                "SELECT  1 AS one FROM `tags` \
-                                 INNER JOIN `taggings` ON `tags`.`id` = `taggings`.`tag_id` \
-                                 WHERE `taggings`.`story_id` IS NULL \
-                                 AND (1=0) \
-                                 AND `tags`.`tag` IN ('test') LIMIT 1",
-                            )
-                        })
                         .and_then(|c| {
                             // check that tags are active
                             c.first::<_, my::Row>(
