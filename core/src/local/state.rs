@@ -94,8 +94,7 @@ impl State {
             self.mem_size += r.deep_size_of();
             self.state[i].insert_row(Row(r))
         } else {
-            let mut hit_any = true;
-            self.mem_size += r.deep_size_of();
+            let mut hit_any = false;
             for i in 0..self.state.len() {
                 hit_any = self.state[i].insert_row(Row(r.clone())) || hit_any;
             }
