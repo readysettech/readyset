@@ -19,7 +19,6 @@ struct MysqlSpawner {
 }
 impl MysqlSpawner {
     fn new(mut opts: my::OptsBuilder) -> Self {
-        opts.tcp_nodelay(true);
         MysqlSpawner { opts: opts.into() }
     }
 }
@@ -1203,7 +1202,10 @@ fn main() {
     }
 
     // check that we can indeed connect
-    let mut s = MysqlSpawner::new(my::OptsBuilder::from_opts(args.value_of("dbn").unwrap()));
+    let mut opts = my::OptsBuilder::from_opts(args.value_of("dbn").unwrap());
+    opts.tcp_nodelay(true);
+    opts.pool_max(Some(200));
+    let mut s = MysqlSpawner::new(opts);
 
     if !args.is_present("prime") {
         let mut core = tokio_core::reactor::Core::new().unwrap();
