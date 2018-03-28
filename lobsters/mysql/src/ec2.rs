@@ -86,7 +86,7 @@ fn main() {
         let mut trawler = vms.remove("trawler").unwrap().swap_remove(0);
 
         for &scale in [
-            1, 100, 200, 400, 800, 1000, 1200, 1400, 1600, 1800, 2000, 2200, 2400, 2600
+            1, 100, 200, 400, 800, 1600, 2400, 3200, 4000, 4800, 5600, 6400
         ].into_iter()
         {
             eprintln!("==> benchmark w/ {}x load", scale);
