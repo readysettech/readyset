@@ -8,7 +8,7 @@ orchestration = ["tsunami", "rusoto_core", "rusoto_sts", "chrono"]
 default = []
 
 [dependencies]
-trawler = "0.3.7"
+trawler = "0.4.0"
 mysql_async = "0.14"
 tokio-core = "0.1"
 clap = "2.31"

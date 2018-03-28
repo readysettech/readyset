@@ -225,6 +225,49 @@ impl trawler::LobstersClient for MysqlTrawler {
                         ))
                     }),
             ),
+            LobstersRequest::Comments => Box::new(
+                c.and_then(|c| {
+                    c.query(
+                        "SELECT  `comments`.* \
+                         FROM `comments` \
+                         WHERE `comments`.`is_deleted` = 0 \
+                         AND `comments`.`is_moderated` = 0 \
+                         ORDER BY id DESC \
+                         LIMIT 20 OFFSET 0",
+                    )
+                }).and_then(|comments| {
+                        comments.reduce_and_drop(
+                            (HashSet::new(), HashSet::new()),
+                            |(mut users, mut stories), comment| {
+                                users.insert(comment.get::<u32, _>("user_id").unwrap());
+                                stories.insert(comment.get::<u32, _>("story_id").unwrap());
+                                (users, stories)
+                            },
+                        )
+                    })
+                    .and_then(|(c, (users, stories))| {
+                        let users = users
+                            .into_iter()
+                            .map(|id| format!("{}", id))
+                            .collect::<Vec<_>>()
+                            .join(",");
+                        c.drop_query(&format!(
+                            "SELECT `users`.* FROM `users` WHERE `users`.`id` IN ({})",
+                            users
+                        )).map(move |c| (c, stories))
+                    })
+                    .and_then(|(c, stories)| {
+                        let stories = stories
+                            .into_iter()
+                            .map(|id| format!("{}", id))
+                            .collect::<Vec<_>>()
+                            .join(",");
+                        c.drop_query(&format!(
+                            "SELECT  `stories`.* FROM `stories` WHERE `stories`.`id` IN ({})",
+                            stories
+                        ))
+                    }),
+            ),
             LobstersRequest::Recent => {
                 Box::new(
                     c.and_then(|c| {
