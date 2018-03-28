@@ -284,8 +284,6 @@ impl trawler::LobstersClient for MysqlTrawler {
                              FROM `stories` \
                              WHERE `stories`.`merged_story_id` IS NULL \
                              AND `stories`.`is_expired` = 0 \
-                             AND (`stories`.`created_at` > NOW() - INTERVAL 3 DAY \
-                             OR `stories`.`created_at` <= NOW() - INTERVAL 3 DAY) \
                              AND CAST(upvotes AS signed) - CAST(downvotes AS signed) <= 5 \
                              ORDER BY stories.id DESC, stories.created_at DESC \
                              LIMIT 25",
