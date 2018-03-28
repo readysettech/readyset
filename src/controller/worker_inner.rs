@@ -252,7 +252,7 @@ impl WorkerInner {
             .iter()
             .map(|(ds, sa)| {
                 let size = sa.load(Ordering::Relaxed);
-                debug!(
+                trace!(
                     self.log,
                     "domain {}.{} state size is {} bytes",
                     ds.0.index(),
@@ -268,15 +268,16 @@ impl WorkerInner {
             None => (),
             Some(limit) => {
                 if total >= limit {
-                    error!(
-                        self.log,
-                        "aggregate domain state ({} bytes) exceeds memory limit ({} bytes)",
-                        total,
-                        limit
-                    );
                     // evict from the largest domain
                     let largest = sizes.into_iter().max_by_key(|&(_, s)| s).unwrap();
-                    warn!(self.log, "evicting from {:?}", largest);
+                    info!(
+                        self.log,
+                        "memory footprint ({} bytes) exceeds limit ({} bytes); evicting from largest domain {}",
+                        total,
+                        limit,
+                        (largest.0).0.index(),
+                    );
+
                     let tx = self.domain_senders.get_mut(largest.0).unwrap();
                     tx.send(box payload::Packet::Evict {
                         node: None,
