@@ -205,6 +205,44 @@ impl Node {
             NodeType::Source | NodeType::Dropped => unreachable!(),
         }
     }
+
+    pub fn process_eviction(
+        &mut self,
+        key_columns: &[usize],
+        keys: &[Vec<DataType>],
+        tag: Tag,
+        on_shard: Option<usize>,
+        output: &mut Vec<(ReplicaAddr, Box<Packet>)>,
+    ) {
+        let addr = *self.local_addr();
+        match self.inner {
+            NodeType::Egress(Some(ref mut e)) => {
+                e.process(
+                    &mut Some(Box::new(Packet::EvictKeys {
+                        link: Link {
+                            src: addr,
+                            dst: addr,
+                        },
+                        tag,
+                        keys: keys.to_vec(),
+                    })),
+                    on_shard.unwrap_or(0),
+                    output,
+                );
+            }
+            NodeType::Sharder(ref mut s) => {
+                s.process_eviction(key_columns, tag, keys, addr, on_shard.is_some(), output);
+            }
+            NodeType::Internal(ref mut i) => {
+                i.on_eviction(key_columns, keys);
+            }
+            NodeType::Reader(ref mut r) => {
+                r.on_eviction(key_columns, keys);
+            }
+            NodeType::Ingress => {}
+            NodeType::Egress(None) | NodeType::Source | NodeType::Dropped => unreachable!(),
+        }
+    }
 }
 
 pub fn materialize(rs: &mut Records, partial: Option<Tag>, state: Option<&mut State>) {

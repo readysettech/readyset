@@ -58,8 +58,8 @@ fn main() {
                 .short("m")
                 .long("memory")
                 .takes_value(true)
-                .default_value("1073741824")
-                .help("Memory, in bytes, available for materialized state."),
+                .default_value("0")
+                .help("Memory, in bytes, available for materialized state [0 = unlimited]."),
         )
         .arg(
             Arg::with_name("readers")
@@ -113,7 +113,9 @@ fn main() {
     let mut builder = ControllerBuilder::default();
     builder.set_listen_addr(listen_addr);
     builder.set_worker_threads(workers);
-    builder.set_memory_limit(memory);
+    if memory > 0 {
+        builder.set_memory_limit(memory);
+    }
     builder.set_read_threads(readers);
     builder.set_sharding(sharding);
     builder.set_quorum(quorum);

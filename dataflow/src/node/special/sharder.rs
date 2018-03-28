@@ -129,4 +129,56 @@ impl Sharder {
             }
         }
     }
+
+    pub fn process_eviction(
+        &mut self,
+        key_columns: &[usize],
+        tag: Tag,
+        keys: &[Vec<DataType>],
+        src: LocalNodeIndex,
+        is_sharded: bool,
+        output: &mut Vec<(ReplicaAddr, Box<Packet>)>,
+    ) {
+        assert!(!is_sharded);
+
+        if key_columns.len() == 1 && key_columns[0] == self.shard_by {
+            // Send only to the shards that must evict something.
+            for key in keys {
+                let shard = self.shard(&key[0]);
+                let dst = self.txs[shard].0;
+                let p = self.sharded
+                    .entry(shard)
+                    .or_insert_with(|| box Packet::EvictKeys {
+                        link: Link { src, dst },
+                        keys: Vec::new(),
+                        tag,
+                    });
+                match p {
+                    &mut box Packet::EvictKeys { ref mut keys, .. } => keys.push(key.to_vec()),
+                    _ => unreachable!(),
+                }
+            }
+
+            for (i, &mut (_, addr)) in self.txs.iter_mut().enumerate() {
+                if let Some(shard) = self.sharded.remove(i) {
+                    output.push((addr, shard));
+                }
+            }
+        } else {
+            assert_eq!(!key_columns.len(), 0);
+            assert!(!key_columns.contains(&self.shard_by));
+
+            // send to all shards
+            for &mut (dst, addr) in self.txs.iter_mut() {
+                output.push((
+                    addr,
+                    Box::new(Packet::EvictKeys {
+                        link: Link { src, dst },
+                        keys: keys.to_vec(),
+                        tag,
+                    }),
+                ))
+            }
+        }
+    }
 }

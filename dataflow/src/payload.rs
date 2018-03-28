@@ -149,6 +149,20 @@ pub enum Packet {
         transaction_state: Option<ReplayTransactionState>,
     },
 
+    /// Trigger an eviction from the target node.
+    Evict {
+        node: Option<LocalNodeIndex>,
+        num_bytes: usize,
+    },
+
+    /// Evict the indicated keys from the materialization targed by the replay path `tag` (along
+    /// with any other materializations below it).
+    EvictKeys {
+        link: Link,
+        tag: Tag,
+        keys: Vec<Vec<DataType>>,
+    },
+
     //
     // Internal control
     //
@@ -310,6 +324,7 @@ impl Packet {
             Packet::Message { ref mut link, .. } => link,
             Packet::Transaction { ref mut link, .. } => link,
             Packet::ReplayPiece { ref mut link, .. } => link,
+            Packet::EvictKeys { ref mut link, .. } => link,
             _ => unreachable!(),
         }
     }
@@ -350,6 +365,7 @@ impl Packet {
     pub fn tag(&self) -> Option<Tag> {
         match *self {
             Packet::ReplayPiece { tag, .. } => Some(tag),
+            Packet::EvictKeys { tag, .. } => Some(tag),
             _ => None,
         }
     }
@@ -527,8 +543,10 @@ impl fmt::Debug for Packet {
 
 #[derive(Debug, Serialize, Deserialize)]
 pub enum ControlReplyPacket {
-    #[cfg(debug_assertions)] Ack(Backtrace),
-    #[cfg(not(debug_assertions))] Ack(()),
+    #[cfg(debug_assertions)]
+    Ack(Backtrace),
+    #[cfg(not(debug_assertions))]
+    Ack(()),
     /// (number of rows, size in bytes)
     StateSize(usize, u64),
     Statistics(

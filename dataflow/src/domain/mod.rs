@@ -796,6 +796,9 @@ impl Domain {
             Packet::ReplayPiece { .. } => {
                 self.handle_replay(m, sends);
             }
+            Packet::Evict { .. } | Packet::EvictKeys { .. } => {
+                self.handle_eviction(m, sends);
+            }
             Packet::StartRecovery { .. } => {
                 self.handle_recovery(sends);
             }
@@ -875,7 +878,8 @@ impl Domain {
                     }
                     Packet::StateSizeProbe { node } => {
                         use core::data::SizeOf;
-                        let row_count = self.state.get(&node).map(|state| state.rows()).unwrap_or(0);
+                        let row_count =
+                            self.state.get(&node).map(|state| state.rows()).unwrap_or(0);
                         let mem_size = self.state
                             .get(&node)
                             .map(|state| state.deep_size_of())
@@ -1309,6 +1313,7 @@ impl Domain {
 
                                 self.state
                                     .get(&local_index)
+                                    .filter(|state| state.is_partial())
                                     .map(|state| state.deep_size_of())
                                     .unwrap_or(0)
                             })
@@ -1764,7 +1769,7 @@ impl Domain {
                     };
                     let mut m = Some(m);
 
-                    // let's collect some informationn about the destination of this replay
+                    // let's collect some information about the destination of this replay
                     let dst = path.last().unwrap().node;
                     let dst_is_reader = self.nodes[&dst]
                         .borrow()
@@ -2306,6 +2311,156 @@ impl Domain {
             assert!(self.inject.is_none());
             self.inject = Some(box Packet::Finish(tag, node));
         }
+    }
+
+    pub fn handle_eviction(&mut self, m: Box<Packet>, sends: &mut EnqueuedSends) {
+        fn trigger_downstream_evictions(
+            key_columns: &[usize],
+            keys: &[Vec<DataType>],
+            node: LocalNodeIndex,
+            sends: &mut EnqueuedSends,
+            replay_paths: &HashMap<Tag, ReplayPath>,
+            shard: Option<usize>,
+            state: &mut StateMap,
+            nodes: &mut DomainNodes,
+        ) {
+            for (tag, ref path) in replay_paths {
+                if path.source == Some(node) {
+                    // Check whether this replay path is for the same key.
+                    match path.trigger {
+                        TriggerEndpoint::Local(ref key) | TriggerEndpoint::Start(ref key) => {
+                            if &key[..] != key_columns {
+                                continue;
+                            }
+                        }
+                        _ => unreachable!(),
+                    };
+
+                    walk_path(path, keys, *tag, shard, nodes, sends);
+
+                    if let TriggerEndpoint::Local(_) = path.trigger {
+                        let target = replay_paths[&tag].path.last().unwrap();
+                        state[&target.node].evict_keys(&tag, keys);
+                        trigger_downstream_evictions(
+                            &[*target.partial_key.as_ref().unwrap()],
+                            keys,
+                            target.node,
+                            sends,
+                            replay_paths,
+                            shard,
+                            state,
+                            nodes,
+                        );
+                    }
+                }
+            }
+        }
+
+        fn walk_path(
+            path: &ReplayPath,
+            keys: &[Vec<DataType>],
+            tag: Tag,
+            shard: Option<usize>,
+            nodes: &mut DomainNodes,
+            sends: &mut EnqueuedSends,
+        ) {
+            for segment in &path.path {
+                nodes[&segment.node].borrow_mut().process_eviction(
+                    &[*segment.partial_key.as_ref().unwrap()],
+                    keys,
+                    tag,
+                    shard,
+                    sends,
+                );
+            }
+        }
+
+        match (*m,) {
+            (Packet::Evict { node, num_bytes },) => {
+                let node = node.or_else(|| {
+                    self.nodes
+                        .values()
+                        .filter_map(|nd| {
+                            use core::data::SizeOf;
+
+                            let ref n = *nd.borrow();
+                            let local_index: LocalNodeIndex = *n.local_addr();
+
+                            self.state
+                                .get(&local_index)
+                                .filter(|state| state.is_partial())
+                                .map(|state| (local_index, state.deep_size_of()))
+                        })
+                        .filter(|&(_, s)| s > 0)
+                        .max_by_key(|&(_, s)| s)
+                        .map(|(n, s)| {
+                            warn!(self.log, "chose to evict from node {:?} with size {}", n, s);
+                            n
+                        })
+                });
+
+                if let Some(node) = node {
+                    let mut freed = 0u64;
+                    while freed < num_bytes as u64 {
+                        let (key_columns, keys, bytes) = {
+                            let k = self.state[&node].evict_random_keys(100);
+                            (k.0.to_vec(), k.1, k.2)
+                        };
+                        freed += bytes;
+                        trigger_downstream_evictions(
+                            &key_columns[..],
+                            &keys[..],
+                            node,
+                            sends,
+                            &self.replay_paths,
+                            self.shard,
+                            &mut self.state,
+                            &mut self.nodes,
+                        );
+                    }
+                }
+            }
+            (Packet::EvictKeys {
+                link: Link { dst, .. },
+                keys,
+                tag,
+            },) => {
+                assert_eq!(dst, self.replay_paths[&tag].path.first().unwrap().node);
+                walk_path(
+                    &self.replay_paths[&tag],
+                    &keys[..],
+                    tag,
+                    self.shard,
+                    &mut self.nodes,
+                    sends,
+                );
+
+                match self.replay_paths[&tag].trigger {
+                    TriggerEndpoint::End(..) | TriggerEndpoint::Local(..) => {
+                        // This path terminates inside the domain. Find the target node, evict
+                        // from it, and then propogate the eviction further downstream.
+                        let target = self.replay_paths[&tag].path.last().unwrap().node;
+                        // We've already evicted from readers in walk_path
+                        if self.nodes[&target].borrow().is_reader() {
+                            return;
+                        }
+                        let key_columns = self.state[&target].evict_keys(&tag, &keys).0.to_vec();
+                        trigger_downstream_evictions(
+                            &key_columns[..],
+                            &keys[..],
+                            target,
+                            sends,
+                            &self.replay_paths,
+                            self.shard,
+                            &mut self.state,
+                            &mut self.nodes,
+                        );
+                    }
+                    TriggerEndpoint::None | TriggerEndpoint::Start(..) => {}
+                }
+            }
+            _ => unreachable!(),
+        };
     }
 
     pub fn id(&self) -> (Index, usize) {

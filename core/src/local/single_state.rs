@@ -108,27 +108,28 @@ impl SingleState {
     }
 
     /// Attempt to remove row `r`.
-    pub fn remove_row(&mut self, r: &[DataType], hit: &mut bool, remove: &mut bool) {
-        let mut do_remove = |self_rows: &mut usize, rs: &mut Vec<Row>| {
+    pub fn remove_row(&mut self, r: &[DataType], hit: &mut bool) -> Option<Row> {
+        let mut do_remove = |self_rows: &mut usize, rs: &mut Vec<Row>| -> Option<Row> {
             *hit = true;
             if let Some(i) = rs.iter().position(|rsr| &rsr[..] == r) {
                 self_rows.checked_sub(1).unwrap();
-                rs.swap_remove(i);
-                *remove = true;
+                Some(rs.swap_remove(i))
+            } else {
+                None
             }
         };
 
         match self.state {
             KeyedState::Single(ref mut map) => {
                 if let Some(ref mut rs) = map.get_mut(&r[self.key[0]]) {
-                    do_remove(&mut self.rows, rs)
+                    return do_remove(&mut self.rows, rs);
                 }
             }
             KeyedState::Double(ref mut map) => {
                 // TODO: can we avoid the Clone here?
                 let key = (r[self.key[0]].clone(), r[self.key[1]].clone());
                 if let Some(ref mut rs) = map.get_mut(&key) {
-                    do_remove(&mut self.rows, rs)
+                    return do_remove(&mut self.rows, rs);
                 }
             }
             KeyedState::Tri(ref mut map) => {
@@ -138,7 +139,7 @@ impl SingleState {
                     r[self.key[2]].clone(),
                 );
                 if let Some(ref mut rs) = map.get_mut(&key) {
-                    do_remove(&mut self.rows, rs)
+                    return do_remove(&mut self.rows, rs);
                 }
             }
             KeyedState::Quad(ref mut map) => {
@@ -149,7 +150,7 @@ impl SingleState {
                     r[self.key[3]].clone(),
                 );
                 if let Some(ref mut rs) = map.get_mut(&key) {
-                    do_remove(&mut self.rows, rs)
+                    return do_remove(&mut self.rows, rs);
                 }
             }
             KeyedState::Quin(ref mut map) => {
@@ -161,7 +162,7 @@ impl SingleState {
                     r[self.key[4]].clone(),
                 );
                 if let Some(ref mut rs) = map.get_mut(&key) {
-                    do_remove(&mut self.rows, rs)
+                    return do_remove(&mut self.rows, rs);
                 }
             }
             KeyedState::Sex(ref mut map) => {
@@ -174,10 +175,11 @@ impl SingleState {
                     r[self.key[5]].clone(),
                 );
                 if let Some(ref mut rs) = map.get_mut(&key) {
-                    do_remove(&mut self.rows, rs)
+                    return do_remove(&mut self.rows, rs);
                 }
             }
         }
+        None
     }
 
     pub fn mark_filled(&mut self, key: Vec<DataType>) {
@@ -330,7 +332,4 @@ impl SingleState {
             }
         }
     }
-    // pub fn nkeys(&self) -> usize {
-    //     self.state.len()
-    // }
 }

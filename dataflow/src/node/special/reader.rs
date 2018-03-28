@@ -30,9 +30,11 @@ impl From<Vec<DataType>> for StreamUpdate {
 
 #[derive(Serialize, Deserialize)]
 pub struct Reader {
-    #[serde(skip)] writer: Option<backlog::WriteHandle>,
+    #[serde(skip)]
+    writer: Option<backlog::WriteHandle>,
 
-    #[serde(skip)] streamers: Vec<channel::StreamSender<Vec<StreamUpdate>>>,
+    #[serde(skip)]
+    streamers: Vec<channel::StreamSender<Vec<StreamUpdate>>>,
 
     token_generator: Option<checktable::TokenGenerator>,
 
@@ -125,6 +127,15 @@ impl Reader {
     pub fn set_token_generator(&mut self, gen: checktable::TokenGenerator) {
         assert!(self.token_generator.is_none());
         self.token_generator = Some(gen);
+    }
+
+    pub fn on_eviction(&mut self, key_columns: &[usize], keys: &[Vec<DataType>]) {
+        let w = self.writer.as_mut().unwrap();
+        for k in keys {
+            assert_eq!(k.len(), 1); // no compound keys yet
+            w.mark_hole(&k[0]);
+        }
+        w.swap();
     }
 
     pub fn process(&mut self, m: &mut Option<Box<Packet>>, swap: bool) {

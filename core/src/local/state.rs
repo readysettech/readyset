@@ -91,14 +91,15 @@ impl State {
                     return true;
                 }
             };
-            // FIXME: self.rows += ?
             self.mem_size += r.deep_size_of();
             self.state[i].insert_row(Row(r))
         } else {
-            let mut hit_any = true;
-            self.mem_size += r.deep_size_of();
+            let mut hit_any = false;
             for i in 0..self.state.len() {
-                hit_any = self.state[i].insert_row(Row(r.clone())) || hit_any;
+                hit_any |= self.state[i].insert_row(Row(r.clone()));
+            }
+            if hit_any {
+                self.mem_size += r.deep_size_of();
             }
             hit_any
         }
@@ -106,15 +107,12 @@ impl State {
 
     pub fn remove(&mut self, r: &[DataType]) -> bool {
         let mut hit = false;
-        let mut removed = false;
-
         for s in &mut self.state {
-            s.remove_row(r, &mut hit, &mut removed);
-        }
-
-        if removed {
-            self.mem_size = self.mem_size
-                .saturating_sub((*r).iter().fold(0u64, |acc, d| acc + d.deep_size_of()));
+            if let Some(row) = s.remove_row(r, &mut hit) {
+                if Rc::strong_count(&row.0) == 1 {
+                    self.mem_size = self.mem_size.checked_sub(row.deep_size_of()).unwrap();
+                }
+            }
         }
 
         hit
@@ -157,36 +155,26 @@ impl State {
         for s in &mut self.state {
             s.clear();
         }
-    }
-
-    fn unalias_for_state(&mut self) {
-        let left = self.state.drain(..).last();
-        if let Some(left) = left {
-            self.state.push(left);
-        }
+        self.mem_size = 0;
     }
 
     /// Evict `count` randomly selected keys, returning key colunms of the index chosen to evict
-    /// from along with the keys evicted.
-    pub fn evict_random_keys(&mut self, count: usize) -> (&[usize], Vec<Vec<DataType>>) {
+    /// from along with the keys evicted and the number of bytes evicted.
+    pub fn evict_random_keys(&mut self, count: usize) -> (&[usize], Vec<Vec<DataType>>, u64) {
         let mut rng = rand::thread_rng();
         let index = rng.gen_range(0, self.state.len());
         let (bytes_freed, keys) = self.state[index].evict_random_keys(count, &mut rng);
         self.mem_size = self.mem_size.saturating_sub(bytes_freed);
-        (self.state[index].key(), keys)
+        (self.state[index].key(), keys, bytes_freed)
     }
 
-    /// Evict the listed keys from the materialization targeted by `tag`.
-    pub fn evict_keys(&mut self, tag: &Tag, keys: &[Vec<DataType>]) {
-        self.mem_size = self.mem_size
-            .saturating_sub(self.state[self.by_tag[tag]].evict_keys(keys));
-    }
-}
-
-impl<'a> Drop for State {
-    fn drop(&mut self) {
-        self.unalias_for_state();
-        self.clear();
+    /// Evict the listed keys from the materialization targeted by `tag`, returning the key columns
+    /// of the index that was evicted from and the number of bytes evicted.
+    pub fn evict_keys(&mut self, tag: &Tag, keys: &[Vec<DataType>]) -> (&[usize], u64) {
+        let index = self.by_tag[tag];
+        let bytes = self.state[index].evict_keys(keys);
+        self.mem_size = self.mem_size.saturating_sub(bytes);
+        (self.state[index].key(), bytes)
     }
 }
 

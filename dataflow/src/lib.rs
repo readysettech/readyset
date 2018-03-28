@@ -1,7 +1,9 @@
 #![feature(box_syntax)]
 #![feature(box_patterns)]
+#![feature(option_filter)]
 #![feature(use_extern_macros)]
 #![feature(entry_or_default)]
+#![feature(if_while_or_patterns)]
 #![feature(plugin, use_extern_macros)]
 #![plugin(tarpc_plugins)]
 #![deny(unused_extern_crates)]
@@ -13,6 +15,7 @@ extern crate channel;
 extern crate core;
 extern crate evmap;
 extern crate fnv;
+extern crate hyper;
 extern crate itertools;
 extern crate nom_sql;
 extern crate petgraph;
@@ -28,7 +31,6 @@ extern crate tarpc;
 extern crate timekeeper;
 extern crate tokio_core;
 extern crate vec_map;
-extern crate hyper;
 
 pub mod backlog;
 pub mod checktable;

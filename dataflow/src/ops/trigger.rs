@@ -10,7 +10,7 @@ use std::thread;
 
 /// A Trigger data-flow operator.
 ///
-/// This node triggers an event in the dataflow graph whenever a 
+/// This node triggers an event in the dataflow graph whenever a
 /// new `key` arrives.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Trigger {
@@ -23,14 +23,17 @@ pub struct Trigger {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub enum TriggerEvent {
     /// Triggers the creation of a new group universe.
-    GroupCreation{ controller_url: String, group: String },
+    GroupCreation {
+        controller_url: String,
+        group: String,
+    },
 }
 
 impl Trigger {
     /// Construct a new Trigger operator.
     ///
     /// `src` is the parent node from which this node receives records.
-    /// Whenever this node receives a record with a new value for `key`, 
+    /// Whenever this node receives a record with a new value for `key`,
     /// it triggers the event specified by `trigger`
     pub fn new(src: NodeIndex, trigger: TriggerEvent, key: Vec<usize>) -> Trigger {
         assert_eq!(key.len(), 1);
@@ -42,19 +45,20 @@ impl Trigger {
         }
     }
 
-    fn rpc<Q: Serialize>(
-        &self,
-        path: &str,
-        requests: Vec<Q>,
-        url: &String,
-    ) where Q: Send {
+    fn rpc<Q: Serialize>(&self, path: &str, requests: Vec<Q>, url: &String)
+    where
+        Q: Send,
+    {
         use hyper;
         let url = format!("{}/{}", url, path);
-        let requests: Vec<hyper::Request> = requests.iter().map(|req| {
-            let mut r = hyper::Request::new(hyper::Method::Post, url.clone().parse().unwrap());
-            r.set_body(serde_json::to_string(&req).unwrap());
-            r
-        }).collect();
+        let requests: Vec<hyper::Request> = requests
+            .iter()
+            .map(|req| {
+                let mut r = hyper::Request::new(hyper::Method::Post, url.clone().parse().unwrap());
+                r.set_body(serde_json::to_string(&req).unwrap());
+                r
+            })
+            .collect();
 
         // TODO: instead of spawing a thred for each request, we could have a
         // long running thread that we just send requests to.
@@ -70,17 +74,22 @@ impl Trigger {
 
     fn trigger(&self, ids: Vec<DataType>) {
         if ids.is_empty() {
-            return
+            return;
         }
 
         match self.trigger {
-            TriggerEvent::GroupCreation{ ref controller_url, ref group } => {
-                let contexts = ids.iter().map(|gid| {
-                    let mut group_context: HashMap<String, DataType> = HashMap::new();
-                    group_context.insert(String::from("id"), gid.clone());
-                    group_context.insert(String::from("group"), group.clone().into());
-                    group_context
-                }).collect();
+            TriggerEvent::GroupCreation {
+                ref controller_url,
+                ref group,
+            } => {
+                let contexts = ids.iter()
+                    .map(|gid| {
+                        let mut group_context: HashMap<String, DataType> = HashMap::new();
+                        group_context.insert(String::from("id"), gid.clone());
+                        group_context.insert(String::from("group"), group.clone().into());
+                        group_context
+                    })
+                    .collect();
 
                 self.rpc("create_universe", contexts, controller_url);
             }
@@ -120,17 +129,15 @@ impl Ingredient for Trigger {
             .get(&*us)
             .expect("trigger must have its own state materialized");
 
-        let mut trigger_keys: Vec<DataType> = rs
-            .iter()
-            .map(|r| r[self.key[0]].clone())
-            .collect();
+        let mut trigger_keys: Vec<DataType> = rs.iter().map(|r| r[self.key[0]].clone()).collect();
 
         // sort and dedup to trigger just once for each key
         trigger_keys.sort();
         trigger_keys.dedup();
 
-        let keys = trigger_keys.iter().filter_map(|k| {
-            match db.lookup(&[self.key[0]], &KeyType::Single(&k)) {
+        let keys = trigger_keys
+            .iter()
+            .filter_map(|k| match db.lookup(&[self.key[0]], &KeyType::Single(&k)) {
                 LookupResult::Some(rs) => {
                     if rs.len() == 0 {
                         Some(k)
@@ -139,8 +146,9 @@ impl Ingredient for Trigger {
                     }
                 }
                 LookupResult::Missing => unimplemented!(),
-            }
-        }).cloned().collect();
+            })
+            .cloned()
+            .collect();
 
         self.trigger(keys);
 
@@ -169,7 +177,7 @@ impl Ingredient for Trigger {
 
     // Trigger nodes require full materialization because we want group universes
     // to be long lived and to exist even if no user makes use of it.
-    // We do this for two reasons: 1) to make user universe creation faster and 
+    // We do this for two reasons: 1) to make user universe creation faster and
     // 2) so we don't have to order group and user universe migrations.
     fn requires_full_materialization(&self) -> bool {
         true
@@ -192,7 +200,6 @@ mod tests {
         g.set_op(
             "trigger",
             &["x", "y", "z"],
-
             Trigger::new(s.as_global(), trigger_type, vec![0]),
             materialized,
         );

@@ -16,7 +16,7 @@ pub struct ControllerBuilder {
     config: ControllerConfig,
     nworker_threads: usize,
     nread_threads: usize,
-    memory_limit: usize,
+    memory_limit: Option<usize>,
     listen_addr: IpAddr,
     log: slog::Logger,
 }
@@ -28,7 +28,7 @@ impl Default for ControllerBuilder {
             log: slog::Logger::root(slog::Discard, o!()),
             nworker_threads: 2,
             nread_threads: 1,
-            memory_limit: 1024 * 1024,
+            memory_limit: None,
         }
     }
 }
@@ -84,7 +84,7 @@ impl ControllerBuilder {
     /// Set the number of worker threads used by this instance.
     pub fn set_memory_limit(&mut self, limit: usize) {
         assert_ne!(limit, 0);
-        self.memory_limit = limit;
+        self.memory_limit = Some(limit);
     }
 
     /// Set the IP address that the controller should use for listening.

@@ -37,8 +37,9 @@ pub(super) struct WorkerInner {
 
     listen_addr: IpAddr,
 
-    memory_limit: usize,
+    memory_limit: Option<usize>,
     state_sizes: HashMap<(DomainIndex, usize), Arc<AtomicUsize>>,
+    domain_senders: HashMap<(DomainIndex, usize), TcpSender<Box<payload::Packet>>>,
 
     log: slog::Logger,
 }
@@ -52,7 +53,7 @@ impl WorkerInner {
         state: &ControllerState,
         nworker_threads: usize,
         nread_threads: usize,
-        memory_limit: usize,
+        memory_limit: Option<usize>,
         log: slog::Logger,
     ) -> Result<WorkerInner, ()> {
         let channel_coordinator = Arc::new(ChannelCoordinator::new());
@@ -116,6 +117,7 @@ impl WorkerInner {
             listen_addr,
             memory_limit,
             state_sizes: HashMap::new(),
+            domain_senders: HashMap::new(),
             log,
         })
     }
@@ -199,37 +201,8 @@ impl WorkerInner {
     pub(super) fn heartbeat(&mut self) -> Duration {
         let elapsed = self.last_heartbeat.elapsed();
         if elapsed > self.heartbeat_every {
-            // also check own state size
-            // 1. tell domains to update state size
-            for &(di, shard) in self.state_sizes.keys() {
-                let mut tx = self.channel_coordinator.get_tx(&(di, shard));
-                // we're lax about failures here since missing an UpdateStateSize message has
-                // no correctness implications
-                match tx {
-                    // domain may already have exited
-                    None => continue,
-                    Some(mut tx) => match tx.0.send(box payload::Packet::UpdateStateSize) {
-                        Ok(_) => (),
-                        Err(_) => error!(self.log, "failed to send UpdateStateSize to domain"),
-                    },
-                }
-            }
-            // 2. add current state sizes (could be out of date, as packet sent below is not
-            //    necessarily received immediately)
-            let total: usize = self.state_sizes
-                .iter()
-                .map(|(_, sa)| sa.load(Ordering::Relaxed))
-                .sum();
-            // 3. are we above the limit?
-            if total >= self.memory_limit {
-                error!(
-                    self.log,
-                    "aggregate domain state ({} bytes) exceeds memory limit ({} bytes)",
-                    total,
-                    self.memory_limit
-                );
-                // TODO(malte): evict!
-            }
+            // check if we're about the memory limit, and trigger evictions if so
+            self.evict_if_too_large();
 
             let msg = CoordinationMessage {
                 source: self.sender_addr,
@@ -245,6 +218,72 @@ impl WorkerInner {
             }
         } else {
             self.heartbeat_every - elapsed
+        }
+    }
+
+    fn evict_if_too_large(&mut self) {
+        use std::cmp;
+
+        // 1. tell domains to update state size
+        for &(di, shard) in self.state_sizes.keys() {
+            let mut tx = match self.domain_senders.get_mut(&(di, shard)) {
+                None => {
+                    // we're lax about failures here since missing an UpdateStateSize message has
+                    // no correctness implications
+                    match self.channel_coordinator.get_tx(&(di, shard)) {
+                        // domain may already have exited
+                        None => continue,
+                        Some(tx) => {
+                            self.domain_senders.insert((di, shard), tx.0);
+                            self.domain_senders.get_mut(&(di, shard)).unwrap()
+                        }
+                    }
+                }
+                Some(mut tx) => tx,
+            };
+            match tx.send(box payload::Packet::UpdateStateSize) {
+                Ok(_) => (),
+                Err(_) => error!(self.log, "failed to send UpdateStateSize to domain"),
+            }
+        }
+        // 2. add current state sizes (could be out of date, as packet sent below is not
+        //    necessarily received immediately)
+        let sizes: Vec<(&(DomainIndex, usize), usize)> = self.state_sizes
+            .iter()
+            .map(|(ds, sa)| {
+                let size = sa.load(Ordering::Relaxed);
+                debug!(
+                    self.log,
+                    "domain {}.{} state size is {} bytes",
+                    ds.0.index(),
+                    ds.1,
+                    size
+                );
+                (ds, size)
+            })
+            .collect();
+        let total: usize = sizes.iter().map(|&(_, s)| s).sum();
+        // 3. are we above the limit?
+        match self.memory_limit {
+            None => (),
+            Some(limit) => {
+                if total >= limit {
+                    error!(
+                        self.log,
+                        "aggregate domain state ({} bytes) exceeds memory limit ({} bytes)",
+                        total,
+                        limit
+                    );
+                    // evict from the largest domain
+                    let largest = sizes.into_iter().max_by_key(|&(_, s)| s).unwrap();
+                    warn!(self.log, "evicting from {:?}", largest);
+                    let tx = self.domain_senders.get_mut(largest.0).unwrap();
+                    tx.send(box payload::Packet::Evict {
+                        node: None,
+                        num_bytes: cmp::min(largest.1, total - limit),
+                    }).unwrap();
+                }
+            }
         }
     }
 
