@@ -1204,8 +1204,8 @@ fn main() {
     // check that we can indeed connect
     let mut opts = my::OptsBuilder::from_opts(args.value_of("dbn").unwrap());
     opts.tcp_nodelay(true);
-    opts.pool_min(Some(200));
-    opts.pool_max(Some(200));
+    opts.pool_min(Some(200usize));
+    opts.pool_max(Some(200usize));
     let mut s = MysqlSpawner::new(opts);
 
     if !args.is_present("prime") {
