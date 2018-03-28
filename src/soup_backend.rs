@@ -329,7 +329,7 @@ impl SoupBackend {
 
     fn handle_update<W: io::Write>(
         &mut self,
-        q: nom_sql::UpdateStatement,
+        mut q: nom_sql::UpdateStatement,
         results: QueryResultWriter<W>,
     ) -> io::Result<()> {
         let cond = q.where_clause
@@ -371,7 +371,12 @@ impl SoupBackend {
         // update_columns maps column indices to the value they should be updated to:
         let mut update_columns = HashMap::new();
         for (i, field) in fields.into_iter().enumerate() {
-            for &(ref update_column, ref value) in q.fields.iter() {
+            for &mut (ref mut update_column, ref value) in q.fields.iter_mut() {
+                // we must ensure that all columns have their table set because the schema we're
+                // comparing against sets it; the parser does not itself guarantee this.
+                if update_column.table.is_none() {
+                    update_column.table = Some(q.table.name.clone());
+                }
                 if update_column == &field.column {
                     update_columns.insert(i, DataType::from(value));
                 }
