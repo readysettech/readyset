@@ -137,11 +137,32 @@ impl Ingredient for Base {
         _: &DomainNodes,
         state: &StateMap,
     ) -> ProcessingResult {
-        let results = rs.into_iter().map(|r| {
+        let results = rs.into_iter().filter_map(|r| {
             //rustfmt
             match r {
-                Record::Positive(u) => Record::Positive(u),
-                Record::Negative(u) => Record::Negative(u),
+                Record::Positive(u) => {
+                    if let Some(ref key) = self.primary_key {
+                        let cols = self.primary_key.as_ref().unwrap();
+                        let db = state
+                            .get(&*self.us.unwrap())
+                            .expect("base with primary key must be materialized");
+
+                        let keyval: Vec<DataType> = key.iter().map(|kc| u[*kc].clone()).collect();
+                        match db.lookup(cols.as_slice(), &KeyType::from(&keyval[..])) {
+                            LookupResult::Some(rows) => {
+                                if rows.is_empty() {
+                                    Some(Record::Positive(u))
+                                } else {
+                                    None
+                                }
+                            }
+                            LookupResult::Missing => unreachable!(), // base can't be partial
+                        }
+                    } else {
+                        Some(Record::Positive(u))
+                    }
+                }
+                Record::Negative(u) => Some(Record::Negative(u)),
                 Record::DeleteRequest(key) => {
                     let cols = self.primary_key
                         .as_ref()
@@ -153,7 +174,7 @@ impl Ingredient for Base {
                     match db.lookup(cols.as_slice(), &KeyType::from(&key[..])) {
                         LookupResult::Some(rows) => {
                             assert_eq!(rows.len(), 1);
-                            Record::Negative((*rows[0]).clone())
+                            Some(Record::Negative((*rows[0]).clone()))
                         }
                         LookupResult::Missing => unreachable!(),
                     }
