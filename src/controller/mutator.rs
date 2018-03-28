@@ -289,7 +289,8 @@ impl Mutator {
 
     /// Perform a non-transactional update (delete followed by put) to the base node this Mutator
     /// was generated for.
-    pub fn update<V>(&mut self, u: V) -> Result<(), MutatorError>
+    #[allow(unreachable_code)]
+    pub fn update<V>(&mut self, _u: V) -> Result<(), MutatorError>
     where
         V: Into<Vec<DataType>>,
     {
@@ -301,7 +302,7 @@ impl Mutator {
             "update operations can only be applied to base nodes with key columns"
         );
 
-        let u = u.into();
+        let u = _u.into();
         if u.len() != self.columns.len() {
             return Err(MutatorError::WrongColumnCount(self.columns.len(), u.len()));
         }
