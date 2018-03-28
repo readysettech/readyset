@@ -635,6 +635,7 @@ impl SqlIncorporator {
         use controller::sql::passes::alias_removal::AliasRemoval;
         use controller::sql::passes::count_star_rewrite::CountStarRewrite;
         use controller::sql::passes::implied_tables::ImpliedTableExpansion;
+        use controller::sql::passes::key_def_coalescing::KeyDefinitionCoalescing;
         use controller::sql::passes::star_expansion::StarExpansion;
         use controller::sql::passes::negation_removal::NegationRemoval;
         use controller::sql::passes::subqueries::SubQueries;
@@ -704,6 +705,7 @@ impl SqlIncorporator {
         // as we no longer have to consider complications like aliases.
         fq.expand_table_aliases(mig.context())
             .remove_negation()
+            .coalesce_key_definitions()
             .expand_stars(&self.view_schemas)
             .expand_implied_tables(&self.view_schemas)
             .rewrite_count_star(&self.view_schemas)

@@ -520,6 +520,10 @@ impl SqlToMirConverter {
                 .all(|c| c.column.table == Some(String::from(name)))
         );
 
+        // primary keys can either be specified directly (at the end of CREATE TABLE), or inline
+        // with the definition of a field (i.e., as a ColumnConstraint).
+        // We assume here that an earlier rewrite pass has coalesced all primary key definitions in
+        // the TableKey structure passed in via `keys`.
         let primary_keys = match keys {
             None => vec![],
             Some(keys) => keys.iter()
