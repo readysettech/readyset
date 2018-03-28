@@ -1,14 +1,25 @@
 extern crate chrono;
+extern crate clap;
 extern crate rusoto_core;
 extern crate rusoto_sts;
 extern crate tsunami;
 
+use clap::{App, Arg};
 use std::collections::HashMap;
-use std::fs::File;
+use std::fs::{File, OpenOptions};
 use std::io::prelude::*;
 use tsunami::*;
 
 fn main() {
+    let args = App::new("trawler-mysql ec2 orchestrator")
+        .about("Run the MySQL trawler benchmark on ec2")
+        .arg(
+            Arg::with_name("SCALE")
+                .help("Run the given scale(s).")
+                .multiple(true),
+        )
+        .get_matches();
+
     let mut b = TsunamiBuilder::default();
     b.use_term_logger();
     b.add_set(
@@ -78,14 +89,33 @@ fn main() {
     b.set_max_duration(2);
     b.set_region(rusoto_core::Region::UsEast1);
 
-    let mut load = File::create("load.log").unwrap();
+    let scales: Box<Iterator<Item = usize>> = args.values_of("SCALE")
+        .map(|it| Box::new(it.map(|s| s.parse().unwrap())) as Box<_>)
+        .unwrap_or(Box::new(
+            [
+                1usize, 100, 200, 400, 800, 1600, 2400, 3200, 3600, 3800, 4000, 4200, 4400, 4800
+            ].into_iter()
+                .map(|&s| s),
+        ) as Box<_>);
+
+    let mut load = if args.is_present("SCALE") {
+        OpenOptions::new()
+            .write(true)
+            .truncate(false)
+            .append(true)
+            .create(true)
+            .open("load.log")
+            .unwrap()
+    } else {
+        File::create("load.log").unwrap()
+    };
     b.run_as(provider, |mut vms: HashMap<String, Vec<Machine>>| {
         use chrono::prelude::*;
 
         let mut server = vms.remove("server").unwrap().swap_remove(0);
         let mut trawler = vms.remove("trawler").unwrap().swap_remove(0);
 
-        for &scale in [1, 100, 200, 400, 800, 1600, 2400, 3200, 4000, 4400, 4800].into_iter() {
+        for scale in scales {
             eprintln!("==> benchmark w/ {}x load", scale);
 
             if scale != 1 {
