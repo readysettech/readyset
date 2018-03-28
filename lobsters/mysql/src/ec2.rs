@@ -43,7 +43,7 @@ fn main() {
     b.add_set(
         "trawler",
         1,
-        MachineSetup::new("c5.4xlarge", "ami-b1449ccc", |ssh| {
+        MachineSetup::new("c5.4xlarge", "ami-44954e39", |ssh| {
             eprintln!("==> setting up trawler");
             eprintln!(" -> git update");
             ssh.cmd("git -C benchmarks pull").map(|out| {
