@@ -18,7 +18,7 @@ struct MysqlSpawner {
     opts: my::Opts,
 }
 impl MysqlSpawner {
-    fn new(mut opts: my::OptsBuilder) -> Self {
+    fn new(opts: my::OptsBuilder) -> Self {
         MysqlSpawner { opts: opts.into() }
     }
 }
