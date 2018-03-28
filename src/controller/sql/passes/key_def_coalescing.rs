@@ -35,7 +35,8 @@ impl KeyDefinitionCoalescing for SqlQuery {
 
 #[cfg(test)]
 mod tests {
-    use nom_sql::{Column, ColumnConstraint, ColumnSpecification, SqlQuery, SqlType, Table, TableKey};
+    use nom_sql::{Column, ColumnConstraint, ColumnSpecification, SqlQuery, SqlType, Table,
+                  TableKey};
     use super::KeyDefinitionCoalescing;
 
     #[test]
@@ -73,7 +74,10 @@ mod tests {
                         ColumnSpecification::new(Column::from("t.val"), SqlType::Text),
                     ]
                 );
-                assert_eq!(ctq.keys, Some(vec![TableKey::PrimaryKey(vec![Column::from("t.id")])]));
+                assert_eq!(
+                    ctq.keys,
+                    Some(vec![TableKey::PrimaryKey(vec![Column::from("t.id")])])
+                );
             }
             // if we get anything other than a CreateTable back, something really weird is up
             _ => panic!(),
