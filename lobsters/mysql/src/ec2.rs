@@ -115,7 +115,7 @@ fn main() {
                     "timeout 7m benchmarks/lobsters/mysql/target/release/trawler-mysql \
                      --reqscale {} \
                      --warmup 60 \
-                     --runtime 240 \
+                     --runtime 120 \
                      --issuers 15 \
                      --histogram lobsters-mysql-{}.hist \
                      \"mysql://lobsters:$(cat ~/mysql.pass)@{}/lobsters\"",
