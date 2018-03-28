@@ -116,10 +116,10 @@ impl TopK {
             .collect();
         output_rows.sort_by(|a, b| self.order.cmp(&a.0, &b.0));
 
-        let src_db = state
-            .get(&*self.src)
-            .expect("topk must have its parent's state materialized");
         if output_rows.len() < self.k {
+            let src_db = state
+                .get(&*self.src)
+                .expect("topk must have its parent's state materialized");
             let rs = match src_db.lookup(&self.group_by[..], &KeyType::from(group)) {
                 LookupResult::Some(rs) => rs,
                 LookupResult::Missing => unreachable!(),
