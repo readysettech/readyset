@@ -14,7 +14,7 @@ fn main() {
     b.add_set(
         "server",
         1,
-        MachineSetup::new("m5.2xlarge", "ami-2705da5a", |ssh| {
+        MachineSetup::new("m5.2xlarge", "ami-8178a0fc", |ssh| {
             eprintln!("==> priming ramdisk");
             ssh.cmd("./reprime-ramdisk.sh")
                 .map(|out| {
@@ -32,7 +32,7 @@ fn main() {
     b.add_set(
         "trawler",
         1,
-        MachineSetup::new("c5.4xlarge", "ami-bbdd04c6", |ssh| {
+        MachineSetup::new("c5.4xlarge", "ami-b1449ccc", |ssh| {
             eprintln!("==> setting up trawler");
             eprintln!(" -> git update");
             ssh.cmd("git -C benchmarks pull").map(|out| {
@@ -85,10 +85,7 @@ fn main() {
         let mut server = vms.remove("server").unwrap().swap_remove(0);
         let mut trawler = vms.remove("trawler").unwrap().swap_remove(0);
 
-        for &scale in [
-            1, 100, 200, 400, 800, 1600, 2400, 3200, 4000, 4800, 5600, 6400
-        ].into_iter()
-        {
+        for &scale in [1, 100, 200, 400, 800, 1600, 2400, 3200, 4000, 4400, 4800].into_iter() {
             eprintln!("==> benchmark w/ {}x load", scale);
 
             if scale != 1 {
@@ -115,7 +112,7 @@ fn main() {
                 .as_mut()
                 .unwrap()
                 .cmd_raw(&format!(
-                    "benchmarks/lobsters/mysql/target/release/trawler-mysql \
+                    "timeout 7m benchmarks/lobsters/mysql/target/release/trawler-mysql \
                      --reqscale {} \
                      --warmup 60 \
                      --runtime 240 \
@@ -133,7 +130,10 @@ fn main() {
                 .ssh
                 .as_mut()
                 .unwrap()
-                .cmd_raw(&format!("awk '{{print \"{} \"$2}}' /proc/loadavg", scale))
+                .cmd_raw(&format!(
+                    "awk '{{print \"{} \"$1\" \"$2}}' /proc/loadavg",
+                    scale
+                ))
                 .and_then(|out| Ok(load.write_all(&out[..]).map(|_| ())?))?;
 
             let mut hist = File::create(format!("lobsters-mysql-{}.hist", scale))?;
