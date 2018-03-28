@@ -210,7 +210,13 @@ impl WorkerInner {
                 payload: CoordinationPayload::Heartbeat,
             };
             match self.sender.send(msg) {
-                Err(_) => unimplemented!(),
+                Err(e) => {
+                    // TODO(malte): probably should bail out and try to reconnect here if the
+                    // connection dropped?
+                    error!(self.log, "failed to send heartbeat to controller: {:?}", e);
+                    // try again in 100ms
+                    Duration::from_millis(100)
+                }
                 Ok(_) => {
                     self.last_heartbeat = Instant::now();
                     self.heartbeat_every
