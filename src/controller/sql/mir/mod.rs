@@ -529,7 +529,6 @@ impl SqlToMirConverter {
                 })
                 .collect(),
         };
-        // TODO(malte): support >1 pkey
         assert!(primary_keys.len() <= 1);
 
         // remember the schema for this version
