@@ -21,7 +21,10 @@ impl KeyDefinitionCoalescing for SqlQuery {
                     ctq.keys = match ctq.keys {
                         None => Some(vec![TableKey::PrimaryKey(pk)]),
                         Some(mut ks) => {
-                            ks.push(TableKey::PrimaryKey(pk));
+                            let new_key = TableKey::PrimaryKey(pk);
+                            if !ks.contains(&new_key) {
+                                ks.push(new_key);
+                            }
                             Some(ks)
                         }
                     }
