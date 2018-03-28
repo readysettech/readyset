@@ -6,13 +6,13 @@ extern crate clap;
 extern crate futures;
 
 use clap::{App, Arg};
-use trawler::{LobstersRequest, Vote};
 use futures::Future;
 use my::prelude::*;
+use trawler::{LobstersRequest, Vote};
 
-use std::time;
 use std::collections::HashSet;
 use std::rc::Rc;
+use std::time;
 
 struct MysqlSpawner {
     opts: my::Opts,
