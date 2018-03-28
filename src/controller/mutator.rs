@@ -293,6 +293,9 @@ impl Mutator {
     where
         V: Into<Vec<DataType>>,
     {
+        // See 869c59974349bbc6c0cab314285c35376906cba4.
+        panic!("Not currently working correctly due to primary key uniqueness constraint!");
+
         assert!(
             !self.key.is_empty() && self.key_is_primary,
             "update operations can only be applied to base nodes with key columns"
