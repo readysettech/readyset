@@ -129,7 +129,7 @@ impl Reader {
         self.token_generator = Some(gen);
     }
 
-    pub fn on_eviction(&mut self, key_columns: &[usize], keys: &[Vec<DataType>]) {
+    pub fn on_eviction(&mut self, _key_columns: &[usize], keys: &[Vec<DataType>]) {
         let w = self.writer.as_mut().unwrap();
         for k in keys {
             assert_eq!(k.len(), 1); // no compound keys yet
