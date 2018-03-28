@@ -105,13 +105,13 @@ impl fmt::Display for SelectStatement {
             write!(f, "{}", where_clause)?;
         }
         if let Some(ref group_by) = self.group_by {
-            write!(f, "{}", group_by)?;
+            write!(f, " {}", group_by)?;
         }
         if let Some(ref order) = self.order {
-            write!(f, "{}", order)?;
+            write!(f, " {}", order)?;
         }
         if let Some(ref limit) = self.limit {
-            write!(f, "{}", limit)?;
+            write!(f, " {}", limit)?;
         }
         Ok(())
     }
