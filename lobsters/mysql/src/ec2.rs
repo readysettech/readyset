@@ -54,7 +54,7 @@ fn main() {
             })?;
 
             eprintln!(" -> rebuild");
-            ssh.cmd("cd benchmarks/lobsters/mysql && cargo b --release --bin trawler-mysql")
+            ssh.cmd("cd benchmarks/lobsters/mysql && cargo b --release --bin trawler-mysql 2>&1")
                 .map(|out| {
                     let out = out.trim_right();
                     if !out.is_empty() {
