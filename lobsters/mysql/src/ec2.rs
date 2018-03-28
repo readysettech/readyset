@@ -77,6 +77,8 @@ fn main() {
 
     b.set_max_duration(2);
     b.set_region(rusoto_core::Region::UsEast1);
+
+    let mut load = File::create("load.log").unwrap();
     b.run_as(provider, |mut vms: HashMap<String, Vec<Machine>>| {
         use chrono::prelude::*;
 
@@ -112,7 +114,7 @@ fn main() {
                 .ssh
                 .as_mut()
                 .unwrap()
-                .cmd(&format!(
+                .cmd_raw(&format!(
                     "benchmarks/lobsters/mysql/target/release/trawler-mysql \
                      --reqscale {} \
                      --warmup 60 \
@@ -122,9 +124,17 @@ fn main() {
                      \"mysql://lobsters:$(cat ~/mysql.pass)@{}/lobsters\"",
                     scale, scale, server.private_ip,
                 ))
-                .and_then(|out| Ok(output.write_all(out.as_bytes()).map(|_| ())?))?;
+                .and_then(|out| Ok(output.write_all(&out[..]).map(|_| ())?))?;
 
             eprintln!(" -> finished at {}", Local::now().time().format("%H:%M:%S"));
+
+            // gather server load
+            server
+                .ssh
+                .as_mut()
+                .unwrap()
+                .cmd_raw(&format!("awk '{{print \"{} \"$2}}' /proc/loadavg", scale))
+                .and_then(|out| Ok(load.write_all(&out[..]).map(|_| ())?))?;
 
             let mut hist = File::create(format!("lobsters-mysql-{}.hist", scale))?;
             trawler
