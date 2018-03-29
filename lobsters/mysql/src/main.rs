@@ -977,15 +977,23 @@ impl trawler::LobstersClient for MysqlTrawler {
                                      AND `comments`.`short_id` = ? \
                                      ORDER BY `comments`.`id` ASC LIMIT 1",
                                     (story, ::std::str::from_utf8(&parent[..]).unwrap()),
-                                ).map(|(c, parent)| {
-                                    let parent = parent.unwrap();
-                                    (
-                                        c,
-                                        Some((
-                                            parent.get::<u32, _>("id").unwrap(),
-                                            parent.get::<Option<u32>, _>("thread_id").unwrap(),
-                                        )),
-                                    )
+                                ).map(move |(c, p)| {
+                                    if let Some(p) = p {
+                                        (
+                                            c,
+                                            Some((
+                                                p.get::<u32, _>("id").unwrap(),
+                                                p.get::<Option<u32>, _>("thread_id").unwrap(),
+                                            )),
+                                        )
+                                    } else {
+                                        eprintln!(
+                                            "failed to find parent comment {} in story {}",
+                                            ::std::str::from_utf8(&parent[..]).unwrap(),
+                                            story
+                                        );
+                                        (c, None)
+                                    }
                                 }))
                             } else {
                                 futures::future::Either::B(futures::future::ok((c, None)))
