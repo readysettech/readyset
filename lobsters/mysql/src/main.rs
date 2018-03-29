@@ -7,12 +7,14 @@ extern crate futures;
 
 use clap::{App, Arg};
 use futures::Future;
+use futures::future::Either;
 use my::prelude::*;
-use trawler::{LobstersRequest, UserId, Vote};
-
+use std::cell::RefCell;
+use std::collections::HashMap;
 use std::collections::HashSet;
 use std::rc::Rc;
 use std::time;
+use trawler::{LobstersRequest, UserId, Vote};
 
 struct MysqlSpawner {
     opts: my::Opts,
@@ -25,11 +27,13 @@ impl MysqlSpawner {
 
 struct MysqlTrawler {
     c: my::Pool,
+    tokens: RefCell<HashMap<u32, String>>,
 }
 impl MysqlTrawler {
     fn new(handle: &tokio_core::reactor::Handle, opts: my::Opts) -> Self {
         MysqlTrawler {
             c: my::Pool::new(opts, handle),
+            tokens: HashMap::new().into(),
         }
     }
 }
@@ -56,19 +60,25 @@ impl trawler::LobstersClient for MysqlTrawler {
 
         let c = this.c.get_conn();
 
-        // TODO: session management. now predictable token! pass in `as` parameter?
-        // TODO: notifications
-        /*
-        let c = c.and_then(|c| {
-            c.drop_exec(
-                "\
-                 SELECT users.* \
-                 FROM users WHERE users.session_token = ? \
-                 ORDER BY users.id ASC LIMIT 1",
-                ("KMQEEJjXymcyFj3j7Qn3c3kZ5AFcghUxscm6J9c0a3XBTMjD2OA9PEoecxyt",),
-            )
-        });
-        */
+        let c = if let Some(u) = acting_as {
+            let this = this.clone();
+            Either::A(c.and_then(move |c| {
+                let tokens = this.tokens.borrow();
+                if let Some(u) = tokens.get(&u) {
+                    Either::A(c.drop_exec(
+                        "\
+                         SELECT users.* \
+                         FROM users WHERE users.session_token = ? \
+                         ORDER BY users.id ASC LIMIT 1",
+                        (u,),
+                    ))
+                } else {
+                    Either::B(futures::future::ok(c))
+                }
+            }))
+        } else {
+            Either::B(c)
+        };
 
         // TODO: traffic management
         // https://github.com/lobsters/lobsters/blob/master/app/controllers/application_controller.rb#L37
@@ -105,8 +115,6 @@ impl trawler::LobstersClient for MysqlTrawler {
         });
         */
 
-        // TODO: some queries are different when logged in.
-        // e.g., / also loads tag filters, votes, hidden_stories, and saved_stories
         let c: Box<Future<Item = my::Conn, Error = my::errors::Error>> = match req {
             LobstersRequest::User(uid) => {
                 // rustfmt
@@ -159,8 +167,59 @@ impl trawler::LobstersClient for MysqlTrawler {
             }
             LobstersRequest::Frontpage => {
                 // rustfmt
-                Box::new(
-                    c.and_then(|c| {
+                let initial = match acting_as {
+                    Some(uid) => Either::A(
+                        c.and_then(move |c| {
+                            c.query(&format!(
+                                "SELECT `tag_filters`.* FROM `tag_filters` \
+                                 WHERE `tag_filters`.`user_id` = {}",
+                                uid
+                            ))
+                        }).and_then(|tags| {
+                                tags.reduce_and_drop(Vec::new(), |mut tags, tag| {
+                                    tags.push(tag.get::<u32, _>("tag_id").unwrap());
+                                    tags
+                                })
+                            })
+                            .and_then(move |(c, tags)| {
+                                let tags = tags.into_iter()
+                                    .map(|id| format!("{}", id))
+                                    .collect::<Vec<_>>()
+                                    .join(",");
+                                c.query(&format!(
+                                    "SELECT  `stories`.* FROM `stories` \
+                                     WHERE `stories`.`merged_story_id` IS NULL \
+                                     AND `stories`.`is_expired` = 0 \
+                                     AND ((\
+                                     CAST(upvotes AS signed) \
+                                     - \
+                                     CAST(downvotes AS signed))\
+                                     >= 0) \
+                                     AND (`stories`.`id` NOT IN \
+                                     (SELECT `hidden_stories`.`story_id` \
+                                     FROM `hidden_stories` \
+                                     WHERE `hidden_stories`.`user_id` = {}\
+                                     )\
+                                     ) {} \
+                                     ORDER BY hotness LIMIT 26 OFFSET 0",
+                                    uid,
+                                    if tags.is_empty() {
+                                        String::from("")
+                                    } else {
+                                        // should probably just inline tag_filters here instead
+                                        format!(
+                                            " AND (`stories`.`id` NOT IN (\
+                                             SELECT `taggings`.`story_id` \
+                                             FROM `taggings` \
+                                             WHERE `taggings`.`tag_id` IN ({}) \
+                                             )) ",
+                                            tags
+                                        )
+                                    },
+                                ))
+                            }),
+                    ),
+                    None => Either::B(c.and_then(|c| {
                         c.query(
                             "SELECT  `stories`.* FROM `stories` \
                              WHERE `stories`.`merged_story_id` IS NULL \
@@ -168,221 +227,396 @@ impl trawler::LobstersClient for MysqlTrawler {
                              AND ((CAST(upvotes AS signed) - CAST(downvotes AS signed)) >= 0) \
                              ORDER BY hotness LIMIT 26 OFFSET 0",
                         )
-                    }).and_then(|stories| {
-                            stories.reduce_and_drop(
-                                (HashSet::new(), HashSet::new()),
-                                |(mut users, mut stories), story| {
-                                    users.insert(story.get::<u32, _>("user_id").unwrap());
-                                    stories.insert(story.get::<u32, _>("id").unwrap());
-                                    (users, stories)
-                                },
-                            )
-                        })
-                        .and_then(|(c, (users, stories))| {
-                            let users = users
-                                .into_iter()
-                                .map(|id| format!("{}", id))
-                                .collect::<Vec<_>>()
-                                .join(",");
-                            c.drop_query(&format!(
-                                "SELECT `users`.* FROM `users` WHERE `users`.`id` IN ({})",
-                                users,
-                            )).map(move |c| (c, stories))
-                        })
-                        .and_then(|(c, stories)| {
-                            let stories = stories
-                                .into_iter()
-                                .map(|id| format!("{}", id))
-                                .collect::<Vec<_>>()
-                                .join(",");
-                            c
-                            .drop_query(&format!(
-                                "SELECT `suggested_titles`.* FROM `suggested_titles` WHERE `suggested_titles`.`story_id` IN ({})", stories
-                            ))
-                            .map(move |c| (c, stories))
-                        })
-                        .and_then(|(c, stories)| {
-                            c
-                            .drop_query(&format!(
-                                "SELECT `suggested_taggings`.* FROM `suggested_taggings` WHERE `suggested_taggings`.`story_id` IN ({})", stories
-                            ))
-                            .map(move |c| (c, stories))
-                        })
-                        .and_then(|(c, stories)| {
-                            c.query(&format!(
-                        "SELECT `taggings`.* FROM `taggings` WHERE `taggings`.`story_id` IN ({})",
-                        stories
-                    ))
-                        })
-                        .and_then(|taggings| {
-                            taggings.reduce_and_drop(HashSet::new(), |mut tags, tagging| {
+                    })),
+                };
+
+                let main = initial
+                    .and_then(|stories| {
+                        stories.reduce_and_drop(
+                            (HashSet::new(), HashSet::new()),
+                            |(mut users, mut stories), story| {
+                                users.insert(story.get::<u32, _>("user_id").unwrap());
+                                stories.insert(story.get::<u32, _>("id").unwrap());
+                                (users, stories)
+                            },
+                        )
+                    })
+                    .and_then(|(c, (users, stories))| {
+                        let users = users
+                            .into_iter()
+                            .map(|id| format!("{}", id))
+                            .collect::<Vec<_>>()
+                            .join(",");
+                        c.drop_query(&format!(
+                            "SELECT `users`.* FROM `users` WHERE `users`.`id` IN ({})",
+                            users,
+                        )).map(move |c| (c, stories))
+                    })
+                    .and_then(|(c, stories)| {
+                        let stories = stories
+                            .into_iter()
+                            .map(|id| format!("{}", id))
+                            .collect::<Vec<_>>()
+                            .join(",");
+                        c.drop_query(&format!(
+                            "SELECT `suggested_titles`.* \
+                             FROM `suggested_titles` \
+                             WHERE `suggested_titles`.`story_id` IN ({})",
+                            stories
+                        )).map(move |c| (c, stories))
+                    })
+                    .and_then(|(c, stories)| {
+                        c.drop_query(&format!(
+                            "SELECT `suggested_taggings`.* \
+                             FROM `suggested_taggings` \
+                             WHERE `suggested_taggings`.`story_id` IN ({})",
+                            stories
+                        )).map(move |c| (c, stories))
+                    })
+                    .and_then(|(c, stories)| {
+                        c.query(&format!(
+                            "SELECT `taggings`.* FROM `taggings` \
+                             WHERE `taggings`.`story_id` IN ({})",
+                            stories
+                        )).map(move |t| (t, stories))
+                    })
+                    .and_then(|(taggings, stories)| {
+                        taggings
+                            .reduce_and_drop(HashSet::new(), |mut tags, tagging| {
                                 tags.insert(tagging.get::<u32, _>("tag_id").unwrap());
                                 tags
                             })
-                        })
-                        .and_then(|(c, tags)| {
-                            let tags = tags.into_iter()
-                                .map(|id| format!("{}", id))
-                                .collect::<Vec<_>>()
-                                .join(",");
+                            .map(|x| (x, stories))
+                    })
+                    .and_then(|((c, tags), stories)| {
+                        let tags = tags.into_iter()
+                            .map(|id| format!("{}", id))
+                            .collect::<Vec<_>>()
+                            .join(",");
+                        c.drop_query(&format!(
+                            "SELECT `tags`.* FROM `tags` WHERE `tags`.`id` IN ({})",
+                            tags
+                        )).map(move |c| (c, stories))
+                    });
+
+                // also load things that we need to highlight
+                Box::new(match acting_as {
+                    None => Either::A(main.map(|(c, _)| c)),
+                    Some(uid) => Either::B(
+                        main.and_then(move |(c, stories)| {
                             c.drop_query(&format!(
-                                "SELECT `tags`.* FROM `tags` WHERE `tags`.`id` IN ({})",
-                                tags
-                            ))
-                        }),
-                )
+                                "SELECT `votes`.* FROM `votes` \
+                                 WHERE `votes`.`user_id` = {} \
+                                 AND `votes`.`story_id` IN ({}) \
+                                 AND `votes`.`comment_id` IS NULL",
+                                uid, stories,
+                            )).map(move |c| (c, stories))
+                        }).and_then(move |(c, stories)| {
+                                c.drop_query(&format!(
+                                    "SELECT `hidden_stories`.* \
+                                     FROM `hidden_stories` \
+                                     WHERE `hidden_stories`.`user_id` = {} \
+                                     AND `hidden_stories`.`story_id` IN ({})",
+                                    uid, stories,
+                                )).map(move |c| (c, stories))
+                            })
+                            .and_then(move |(c, stories)| {
+                                c.drop_query(&format!(
+                                    "SELECT `saved_stories`.* \
+                                     FROM `saved_stories` \
+                                     WHERE `saved_stories`.`user_id` = {} \
+                                     AND `saved_stories`.`story_id` IN ({})",
+                                    uid, stories,
+                                ))
+                            }),
+                    ),
+                })
             }
             LobstersRequest::Comments => {
                 // rustfmt
                 Box::new(
-                    c.and_then(|c| {
-                        c.query(
+                    c.and_then(move |c| {
+                        c.query(&format!(
                             "SELECT  `comments`.* \
                              FROM `comments` \
                              WHERE `comments`.`is_deleted` = 0 \
                              AND `comments`.`is_moderated` = 0 \
+                             {} \
                              ORDER BY id DESC \
                              LIMIT 20 OFFSET 0",
-                        )
+                            match acting_as {
+                                None => String::from(""),
+                                Some(uid) => format!(
+                                    " AND (NOT EXISTS (\
+                                     SELECT 1 FROM hidden_stories \
+                                     WHERE user_id = {} \
+                                     AND hidden_stories.story_id = comments.story_id)) ",
+                                    uid
+                                ),
+                            }
+                        ))
                     }).and_then(|comments| {
                             comments.reduce_and_drop(
-                                (HashSet::new(), HashSet::new()),
-                                |(mut users, mut stories), comment| {
+                                (Vec::new(), HashSet::new(), HashSet::new()),
+                                |(mut comments, mut users, mut stories), comment| {
+                                    comments.push(comment.get::<u32, _>("id").unwrap());
                                     users.insert(comment.get::<u32, _>("user_id").unwrap());
                                     stories.insert(comment.get::<u32, _>("story_id").unwrap());
-                                    (users, stories)
+                                    (comments, users, stories)
                                 },
                             )
                         })
-                        .and_then(|(c, (users, stories))| {
+                        .and_then(|(c, (comments, users, stories))| {
                             let users = users
                                 .into_iter()
                                 .map(|id| format!("{}", id))
                                 .collect::<Vec<_>>()
                                 .join(",");
                             c.drop_query(&format!(
-                                "SELECT `users`.* FROM `users` WHERE `users`.`id` IN ({})",
+                                "SELECT `users`.* FROM `users` \
+                                 WHERE `users`.`id` IN ({})",
                                 users
-                            )).map(move |c| (c, stories))
+                            )).map(move |c| (c, comments, stories))
                         })
-                        .and_then(|(c, stories)| {
+                        .and_then(|(c, comments, stories)| {
                             let stories = stories
                                 .into_iter()
                                 .map(|id| format!("{}", id))
                                 .collect::<Vec<_>>()
                                 .join(",");
-                            c.drop_query(&format!(
-                                "SELECT  `stories`.* FROM `stories` WHERE `stories`.`id` IN ({})",
+                            c.query(&format!(
+                                "SELECT  `stories`.* FROM `stories` \
+                                 WHERE `stories`.`id` IN ({})",
                                 stories
+                            )).map(move |stories| (stories, comments))
+                        })
+                        .and_then(|(stories, comments)| {
+                            stories
+                                .reduce_and_drop(HashSet::new(), |mut authors, story| {
+                                    authors.insert(story.get::<u32, _>("user_id").unwrap());
+                                    authors
+                                })
+                                .map(move |(c, authors)| (c, authors, comments))
+                        })
+                        .and_then(move |(c, authors, comments)| match acting_as {
+                            None => Either::A(futures::future::ok((c, authors))),
+                            Some(uid) => {
+                                let comments = comments
+                                    .into_iter()
+                                    .map(|id| format!("{}", id))
+                                    .collect::<Vec<_>>()
+                                    .join(",");
+                                Either::B(c.drop_query(&format!(
+                                    "SELECT `votes`.* FROM `votes` \
+                                     WHERE `votes`.`user_id` = {} \
+                                     AND `votes`.`comment_id` IN ({})",
+                                    uid, comments
+                                )).map(move |c| (c, authors)))
+                            }
+                        })
+                        .and_then(|(c, authors)| {
+                            // NOTE: the real website issues all of these one by one...
+                            let authors = authors
+                                .into_iter()
+                                .map(|id| format!("{}", id))
+                                .collect::<Vec<_>>()
+                                .join(",");
+                            c.drop_query(&format!(
+                                "SELECT  `users`.* FROM `users` \
+                                 WHERE `users`.`id` IN ({})",
+                                authors
                             ))
                         }),
                 )
             }
             LobstersRequest::Recent => {
                 // rustfmt
-                Box::new(
-                    c.and_then(|c| {
-                        // /recent is a little weird:
-                        // https://github.com/lobsters/lobsters/blob/50b4687aeeec2b2d60598f63e06565af226f93e3/app/models/story_repository.rb#L41
-                        // but it *basically* just looks for stories in the past few days
-                        // because all our stories are for the same day, we add a LIMIT
-                        // also note the `NOW()` hack to support dbs primed a while ago
-                        c.query(
-                            "SELECT `stories`.`id`, \
-                             `stories`.`upvotes`, \
-                             `stories`.`downvotes`, \
-                             `stories`.`user_id` \
-                             FROM `stories` \
-                             WHERE `stories`.`merged_story_id` IS NULL \
-                             AND `stories`.`is_expired` = 0 \
-                             AND CAST(upvotes AS signed) - CAST(downvotes AS signed) <= 5 \
-                             ORDER BY stories.id DESC \
-                             LIMIT 25",
-                        )
-                    }).and_then(|stories| {
-                            stories.reduce_and_drop(Vec::new(), |mut stories, story| {
-                                stories.push(story.get::<u32, _>("id").unwrap());
-                                stories
+                //
+                // /recent is a little weird:
+                // https://github.com/lobsters/lobsters/blob/50b4687aeeec2b2d60598f63e06565af226f93e3/app/models/story_repository.rb#L41
+                // but it *basically* just looks for stories in the past few days
+                // because all our stories are for the same day, we add a LIMIT
+                // also note the `NOW()` hack to support dbs primed a while ago
+                let q_start = "SELECT `stories`.`id`, \
+                               `stories`.`upvotes`, \
+                               `stories`.`downvotes`, \
+                               `stories`.`user_id` \
+                               FROM `stories` \
+                               WHERE `stories`.`merged_story_id` IS NULL \
+                               AND `stories`.`is_expired` = 0 \
+                               AND CAST(upvotes AS signed) - CAST(downvotes AS signed) <= 5";
+                let q_end = "ORDER BY stories.id DESC LIMIT 25";
+
+                let initial = match acting_as {
+                    Some(uid) => Either::A(
+                        c.and_then(move |c| {
+                            c.query(&format!(
+                                "SELECT `tag_filters`.* FROM `tag_filters` \
+                                 WHERE `tag_filters`.`user_id` = {}",
+                                uid
+                            ))
+                        }).and_then(|tags| {
+                                tags.reduce_and_drop(Vec::new(), |mut tags, tag| {
+                                    tags.push(tag.get::<u32, _>("tag_id").unwrap());
+                                    tags
+                                })
                             })
+                            .and_then(move |(c, tags)| {
+                                let tags = tags.into_iter()
+                                    .map(|id| format!("{}", id))
+                                    .collect::<Vec<_>>()
+                                    .join(",");
+                                c.query(&format!(
+                                    "{} \
+                                     AND (`stories`.`id` NOT IN (\
+                                     SELECT `hidden_stories`.`story_id` \
+                                     FROM `hidden_stories` \
+                                     WHERE `hidden_stories`.`user_id` = {})) \
+                                     {} \
+                                     {}",
+                                    q_start,
+                                    uid,
+                                    if tags.is_empty() {
+                                        String::from("")
+                                    } else {
+                                        // should probably just inline tag_filters here instead
+                                        format!(
+                                            " AND (`stories`.`id` NOT IN (\
+                                             SELECT `taggings`.`story_id` \
+                                             FROM `taggings` \
+                                             WHERE `taggings`.`tag_id` IN ({}) \
+                                             )) ",
+                                            tags
+                                        )
+                                    },
+                                    q_end,
+                                ))
+                            }),
+                    ),
+                    None => {
+                        Either::B(c.and_then(move |c| c.query(&format!("{} {}", q_start, q_end))))
+                    }
+                };
+
+                let main = initial
+                    .and_then(|stories| {
+                        stories.reduce_and_drop(Vec::new(), |mut stories, story| {
+                            stories.push(story.get::<u32, _>("id").unwrap());
+                            stories
                         })
-                        .and_then(|(c, stories)| {
-                            let stories = stories
-                                .into_iter()
-                                .map(|id| format!("{}", id))
-                                .collect::<Vec<_>>()
-                                .join(",");
-                            c.query(&format!(
-                                "SELECT  `stories`.* FROM `stories` WHERE `stories`.`id` IN ({})",
-                                stories
-                            ))
-                        })
-                        .and_then(|stories| {
-                            stories.reduce_and_drop(
-                                (HashSet::new(), HashSet::new()),
-                                |(mut users, mut stories), story| {
-                                    users.insert(story.get::<u32, _>("user_id").unwrap());
-                                    stories.insert(story.get::<u32, _>("id").unwrap());
-                                    (users, stories)
-                                },
-                            )
-                        })
-                        .and_then(|(c, (users, stories))| {
-                            let users = users
-                                .into_iter()
-                                .map(|id| format!("{}", id))
-                                .collect::<Vec<_>>()
-                                .join(",");
-                            c.drop_query(&format!(
-                                "SELECT `users`.* FROM `users` WHERE `users`.`id` IN ({})",
-                                users
-                            )).map(move |c| (c, stories))
-                        })
-                        .and_then(|(c, stories)| {
-                            let stories = stories
-                                .into_iter()
-                                .map(|id| format!("{}", id))
-                                .collect::<Vec<_>>()
-                                .join(",");
-                            c.drop_query(&format!(
-                                "SELECT `suggested_titles`.* \
-                                 FROM `suggested_titles` \
-                                 WHERE `suggested_titles`.`story_id` IN ({})",
-                                stories
-                            )).map(move |c| (c, stories))
-                        })
-                        .and_then(|(c, stories)| {
-                            c.drop_query(&format!(
-                                "SELECT `suggested_taggings`.* \
-                                 FROM `suggested_taggings` \
-                                 WHERE `suggested_taggings`.`story_id` IN ({})",
-                                stories
-                            )).map(move |c| (c, stories))
-                        })
-                        .and_then(|(c, stories)| {
-                            c.query(&format!(
-                                "SELECT `taggings`.* \
-                                 FROM `taggings` \
-                                 WHERE `taggings`.`story_id` IN ({})",
-                                stories
-                            ))
-                        })
-                        .and_then(|taggings| {
-                            taggings.reduce_and_drop(HashSet::new(), |mut tags, tagging| {
+                    })
+                    .and_then(|(c, stories)| {
+                        let stories = stories
+                            .into_iter()
+                            .map(|id| format!("{}", id))
+                            .collect::<Vec<_>>()
+                            .join(",");
+                        c.query(&format!(
+                            "SELECT  `stories`.* FROM `stories` WHERE `stories`.`id` IN ({})",
+                            stories
+                        ))
+                    })
+                    .and_then(|stories| {
+                        stories.reduce_and_drop(
+                            (HashSet::new(), HashSet::new()),
+                            |(mut users, mut stories), story| {
+                                users.insert(story.get::<u32, _>("user_id").unwrap());
+                                stories.insert(story.get::<u32, _>("id").unwrap());
+                                (users, stories)
+                            },
+                        )
+                    })
+                    .and_then(|(c, (users, stories))| {
+                        let users = users
+                            .into_iter()
+                            .map(|id| format!("{}", id))
+                            .collect::<Vec<_>>()
+                            .join(",");
+                        c.drop_query(&format!(
+                            "SELECT `users`.* FROM `users` WHERE `users`.`id` IN ({})",
+                            users
+                        )).map(move |c| (c, stories))
+                    })
+                    .and_then(|(c, stories)| {
+                        let stories = stories
+                            .into_iter()
+                            .map(|id| format!("{}", id))
+                            .collect::<Vec<_>>()
+                            .join(",");
+                        c.drop_query(&format!(
+                            "SELECT `suggested_titles`.* \
+                             FROM `suggested_titles` \
+                             WHERE `suggested_titles`.`story_id` IN ({})",
+                            stories
+                        )).map(move |c| (c, stories))
+                    })
+                    .and_then(|(c, stories)| {
+                        c.drop_query(&format!(
+                            "SELECT `suggested_taggings`.* \
+                             FROM `suggested_taggings` \
+                             WHERE `suggested_taggings`.`story_id` IN ({})",
+                            stories
+                        )).map(move |c| (c, stories))
+                    })
+                    .and_then(|(c, stories)| {
+                        c.query(&format!(
+                            "SELECT `taggings`.* \
+                             FROM `taggings` \
+                             WHERE `taggings`.`story_id` IN ({})",
+                            stories
+                        )).map(move |t| (t, stories))
+                    })
+                    .and_then(|(taggings, stories)| {
+                        taggings
+                            .reduce_and_drop(HashSet::new(), |mut tags, tagging| {
                                 tags.insert(tagging.get::<u32, _>("tag_id").unwrap());
                                 tags
                             })
-                        })
-                        .and_then(|(c, tags)| {
-                            let tags = tags.into_iter()
-                                .map(|id| format!("{}", id))
-                                .collect::<Vec<_>>()
-                                .join(", ");
+                            .map(move |x| (x, stories))
+                    })
+                    .and_then(|((c, tags), stories)| {
+                        let tags = tags.into_iter()
+                            .map(|id| format!("{}", id))
+                            .collect::<Vec<_>>()
+                            .join(", ");
+                        c.drop_query(&format!(
+                            "SELECT `tags`.* FROM `tags` WHERE `tags`.`id` IN ({})",
+                            tags
+                        )).map(move |c| (c, stories))
+                    });
+
+                // also load things that we need to highlight
+                Box::new(match acting_as {
+                    None => Either::A(main.map(|(c, _)| c)),
+                    Some(uid) => Either::B(
+                        main.and_then(move |(c, stories)| {
                             c.drop_query(&format!(
-                                "SELECT `tags`.* FROM `tags` WHERE `tags`.`id` IN ({})",
-                                tags
-                            ))
-                        }),
-                )
+                                "SELECT `votes`.* FROM `votes` \
+                                 WHERE `votes`.`user_id` = {} \
+                                 AND `votes`.`story_id` IN ({}) \
+                                 AND `votes`.`comment_id` IS NULL",
+                                uid, stories,
+                            )).map(move |c| (c, stories))
+                        }).and_then(move |(c, stories)| {
+                                c.drop_query(&format!(
+                                    "SELECT `hidden_stories`.* \
+                                     FROM `hidden_stories` \
+                                     WHERE `hidden_stories`.`user_id` = {} \
+                                     AND `hidden_stories`.`story_id` IN ({})",
+                                    uid, stories,
+                                )).map(move |c| (c, stories))
+                            })
+                            .and_then(move |(c, stories)| {
+                                c.drop_query(&format!(
+                                    "SELECT `saved_stories`.* \
+                                     FROM `saved_stories` \
+                                     WHERE `saved_stories`.`user_id` = {} \
+                                     AND `saved_stories`.`story_id` IN ({})",
+                                    uid, stories,
+                                ))
+                            }),
+                    ),
+                })
             }
             LobstersRequest::Login => {
                 // rustfmt
@@ -422,6 +656,11 @@ impl trawler::LobstersClient for MysqlTrawler {
             LobstersRequest::Logout => Box::new(c),
             LobstersRequest::Story(id) => {
                 // rustfmt
+                //
+                // TODO: keep track of when the user has seen this story
+                // SELECT  `read_ribbons`.* FROM `read_ribbons` WHERE `read_ribbons`.`user_id` = 414 AND `read_ribbons`.`story_id` = 4 ORDER BY `read_ribbons`.`id` ASC LIMIT 1
+                // INSERT INTO `read_ribbons` (`created_at`, `updated_at`, `user_id`, `story_id`) VALUES ('2018-03-29 17:50:02', '2018-03-29 17:50:02', 414, 4)
+                // UPDATE `read_ribbons` SET `read_ribbons`.`updated_at` = '2018-03-29 17:50:02' WHERE `read_ribbons`.`id` = 1
                 Box::new(
                     c.and_then(move |c| {
                         c.prep_exec(
@@ -498,6 +737,40 @@ impl trawler::LobstersClient for MysqlTrawler {
                             )).map(move |c| (c, story))
                             // NOTE: lobste.rs here fetches the user list again. unclear why?
                         })
+                        .and_then(move |(c, story)| match acting_as {
+                            None => Either::A(futures::future::ok((c, story))),
+                            Some(uid) => Either::B(
+                                c.drop_query(&format!(
+                                    "SELECT `votes`.* \
+                                     FROM `votes` \
+                                     WHERE `votes`.`user_id` = {} \
+                                     AND `votes`.`story_id` = {} \
+                                     AND `votes`.`comment_id` IS NULL \
+                                     ORDER BY `votes`.`id` ASC LIMIT 1",
+                                    uid, story
+                                )).and_then(move |c| {
+                                        c.drop_query(&format!(
+                                            "SELECT `hidden_stories`.* \
+                                             FROM `hidden_stories` \
+                                             WHERE `hidden_stories`.`user_id` = {} \
+                                             AND `hidden_stories`.`story_id` = {} \
+                                             ORDER BY `hidden_stories`.`id` ASC LIMIT 1",
+                                            uid, story
+                                        ))
+                                    })
+                                    .and_then(move |c| {
+                                        c.drop_query(&format!(
+                                            "SELECT `saved_stories`.* \
+                                             FROM `saved_stories` \
+                                             WHERE `saved_stories`.`user_id` = {} \
+                                             AND `saved_stories`.`story_id` = {} \
+                                             ORDER BY `saved_stories`.`id` ASC LIMIT 1",
+                                            uid, story
+                                        ))
+                                    })
+                                    .map(move |c| (c, story)),
+                            ),
+                        })
                         .and_then(|(c, story)| {
                             c.prep_exec(
                                 "SELECT `taggings`.* \
@@ -522,6 +795,7 @@ impl trawler::LobstersClient for MysqlTrawler {
                                 tags
                             ))
                         }),
+                    // XXX: + a bunch of repeated, seemingly superfluous queries
                 )
             }
             LobstersRequest::StoryVote(story, v) => {
@@ -1181,6 +1455,10 @@ impl trawler::LobstersClient for MysqlTrawler {
                 )
             }
         };
+
+        // TODO: notifications
+        //  SELECT COUNT(*) FROM `replying_comments` WHERE `replying_comments`.`user_id` = 65 AND `replying_comments`.`is_unread` = 1
+        //  SELECT  `keystores`.* FROM `keystores` WHERE `keystores`.`key` = 'user:65:unread_messages' ORDER BY `keystores`.`key` ASC LIMIT 1
 
         Box::new(c.map_err(|e| {
             eprintln!("{:?}", e);
