@@ -107,7 +107,10 @@ fn main() {
             .open("load.log")
             .unwrap()
     } else {
-        File::create("load.log").unwrap()
+        let mut f = File::create("load.log").unwrap();
+        f.write_all(b"# reqscale sload1 sload5 cload1 cload5\n")
+            .unwrap();
+        f
     };
     b.run_as(provider, |mut vms: HashMap<String, Vec<Machine>>| {
         use chrono::prelude::*;
@@ -156,15 +159,24 @@ fn main() {
             eprintln!(" -> finished at {}", Local::now().time().format("%H:%M:%S"));
 
             // gather server load
-            server
+            let sload = server
                 .ssh
                 .as_mut()
                 .unwrap()
-                .cmd_raw(&format!(
-                    "awk '{{print \"{} \"$1\" \"$2}}' /proc/loadavg",
-                    scale
-                ))
-                .and_then(|out| Ok(load.write_all(&out[..]).map(|_| ())?))?;
+                .cmd_raw("awk '{print $1\" \"$2}' /proc/loadavg")?;
+
+            // gather client load
+            let cload = trawler
+                .ssh
+                .as_mut()
+                .unwrap()
+                .cmd_raw("awk '{print $1\" \"$2}' /proc/loadavg")?;
+
+            load.write_all(format!("{} ", scale).as_bytes())?;
+            load.write_all(&sload[..])?;
+            load.write_all(b" ")?;
+            load.write_all(&cload[..])?;
+            load.write_all(b"\n")?;
 
             let mut hist = File::create(format!("lobsters-mysql-{}.hist", scale))?;
             trawler
