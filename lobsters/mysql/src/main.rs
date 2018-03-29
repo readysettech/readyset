@@ -3,6 +3,7 @@ extern crate tokio_core;
 extern crate trawler;
 #[macro_use]
 extern crate clap;
+extern crate chrono;
 extern crate futures;
 
 use clap::{App, Arg};
@@ -642,7 +643,7 @@ impl trawler::LobstersClient for MysqlTrawler {
                                 format!("user{}", uid),
                                 format!("user{}@example.com", uid),
                                 "$2a$10$Tq3wrGeC0xtgzuxqOlc3v.07VTUvxvwI70kuoVihoO2cE5qj7ooka", // test
-                                "2018-03-25 16:00:24",
+                                chrono::Local::now().naive_local(),
                                 format!("token{}", uid),
                                 format!("rsstoken{}", uid),
                                 format!("mtok{}", uid),
@@ -656,11 +657,6 @@ impl trawler::LobstersClient for MysqlTrawler {
             LobstersRequest::Logout => Box::new(c),
             LobstersRequest::Story(id) => {
                 // rustfmt
-                //
-                // TODO: keep track of when the user has seen this story
-                // SELECT  `read_ribbons`.* FROM `read_ribbons` WHERE `read_ribbons`.`user_id` = 414 AND `read_ribbons`.`story_id` = 4 ORDER BY `read_ribbons`.`id` ASC LIMIT 1
-                // INSERT INTO `read_ribbons` (`created_at`, `updated_at`, `user_id`, `story_id`) VALUES ('2018-03-29 17:50:02', '2018-03-29 17:50:02', 414, 4)
-                // UPDATE `read_ribbons` SET `read_ribbons`.`updated_at` = '2018-03-29 17:50:02' WHERE `read_ribbons`.`id` = 1
                 Box::new(
                     c.and_then(move |c| {
                         c.prep_exec(
@@ -678,6 +674,50 @@ impl trawler::LobstersClient for MysqlTrawler {
                                 "SELECT `users`.* FROM `users` WHERE `users`.`id` = ? LIMIT 1",
                                 (author,),
                             ).map(move |c| (c, id))
+                        })
+                        .and_then(move |(c, story)| {
+                            // NOTE: technically this happens before the select from user...
+                            match acting_as {
+                                None => Either::A(futures::future::ok(c)),
+                                Some(uid) => {
+                                    // keep track of when the user last saw this story
+                                    // NOTE: *technically* the update only happens at the end...
+                                    Either::B(c.first::<_, my::Row>(&format!(
+                                        "SELECT  `read_ribbons`.* \
+                                         FROM `read_ribbons` \
+                                         WHERE `read_ribbons`.`user_id` = {} \
+                                         AND `read_ribbons`.`story_id` = {} \
+                                         ORDER BY `read_ribbons`.`id` ASC LIMIT 1",
+                                        uid, story
+                                    )).and_then(move |(c, rr)| {
+                                        let now = chrono::Local::now().naive_local();
+                                        match rr {
+                                            None => Either::A(c.drop_exec(
+                                                "INSERT INTO \
+                                                 `read_ribbons` \
+                                                 (`created_at`, \
+                                                 `updated_at`, \
+                                                 `user_id`, \
+                                                 `story_id`) \
+                                                 VALUES (?, \
+                                                 ?, \
+                                                 ?, \
+                                                 ?)",
+                                                (now, now, uid, story),
+                                            )),
+                                            Some(rr) => Either::B(c.drop_exec(
+                                                "UPDATE `read_ribbons` \
+                                                 SET \
+                                                 `read_ribbons`.`updated_at` \
+                                                 = ? \
+                                                 WHERE \
+                                                 `read_ribbons`.`id` = ?",
+                                                (now, rr.get::<u32, _>("id").unwrap()),
+                                            )),
+                                        }
+                                    }))
+                                }
+                            }.map(move |c| (c, story))
                         })
                         .and_then(|(c, story)| {
                             // XXX: probably not drop here, but we know we have no merged stories
@@ -1139,7 +1179,7 @@ impl trawler::LobstersClient for MysqlTrawler {
                                          `markeddown_description`) \
                                          VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
                                         (
-                                            "2018-03-24 15:43:27",
+                                            chrono::Local::now().naive_local(),
                                             user,
                                             title,
                                             "to infinity", // lorem ipsum?
@@ -1218,7 +1258,7 @@ impl trawler::LobstersClient for MysqlTrawler {
                                     )
                                 })
                                 .and_then(|t| t.commit())
-                        }), // TODO: read_ribbons
+                        }),
                 )
             }
             LobstersRequest::Comment { id, story, parent } => {
@@ -1291,6 +1331,7 @@ impl trawler::LobstersClient for MysqlTrawler {
                             // TODO: real impl checks *new* short_id *again*
                             c.start_transaction(my::TransactionOptions::new())
                                 .and_then(move |t| {
+                                    let now = chrono::Local::now().naive_local();
                                     if let Some((parent, thread)) = parent {
                                         futures::future::Either::A(t.prep_exec(
                                             "INSERT INTO `comments` \
@@ -1300,8 +1341,8 @@ impl trawler::LobstersClient for MysqlTrawler {
                                              `markeddown_comment`) \
                                              VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
                                             (
-                                                "2018-03-24 15:43:27",
-                                                "2018-03-24 15:43:27",
+                                                now,
+                                                now,
                                                 ::std::str::from_utf8(&id[..]).unwrap(),
                                                 story,
                                                 user,
@@ -1321,8 +1362,8 @@ impl trawler::LobstersClient for MysqlTrawler {
                                              `markeddown_comment`) \
                                              VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
                                             (
-                                                "2018-03-24 15:43:27",
-                                                "2018-03-24 15:43:27",
+                                                now,
+                                                now,
                                                 ::std::str::from_utf8(&id[..]).unwrap(),
                                                 story,
                                                 user,
@@ -1456,9 +1497,28 @@ impl trawler::LobstersClient for MysqlTrawler {
             }
         };
 
-        // TODO: notifications
-        //  SELECT COUNT(*) FROM `replying_comments` WHERE `replying_comments`.`user_id` = 65 AND `replying_comments`.`is_unread` = 1
-        //  SELECT  `keystores`.* FROM `keystores` WHERE `keystores`.`key` = 'user:65:unread_messages' ORDER BY `keystores`.`key` ASC LIMIT 1
+        // notifications
+        let c = if let Some(uid) = acting_as {
+            Either::A(c.and_then(move |c| {
+                c.drop_query(&format!(
+                    "SELECT COUNT(*) \
+                     FROM `replying_comments` \
+                     WHERE `replying_comments`.`user_id` = {} \
+                     AND `replying_comments`.`is_unread` = 1",
+                    uid
+                )).and_then(move |c| {
+                    c.drop_query(&format!(
+                        "SELECT `keystores`.* \
+                         FROM `keystores` \
+                         WHERE `keystores`.`key` = 'user:{}:unread_messages' \
+                         ORDER BY `keystores`.`key` ASC LIMIT 1",
+                        uid
+                    ))
+                })
+            }))
+        } else {
+            Either::B(c)
+        };
 
         Box::new(c.map_err(|e| {
             eprintln!("{:?}", e);
