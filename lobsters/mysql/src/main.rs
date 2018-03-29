@@ -8,7 +8,7 @@ extern crate futures;
 use clap::{App, Arg};
 use futures::Future;
 use my::prelude::*;
-use trawler::{LobstersRequest, Vote};
+use trawler::{LobstersRequest, UserId, Vote};
 
 use std::collections::HashSet;
 use std::rc::Rc;
@@ -49,6 +49,7 @@ impl trawler::LobstersClient for MysqlTrawler {
 
     fn handle(
         this: Rc<Self>,
+        acting_as: Option<UserId>,
         req: trawler::LobstersRequest,
     ) -> Box<futures::Future<Item = time::Duration, Error = ()>> {
         let sent = time::Instant::now();
@@ -373,17 +374,18 @@ impl trawler::LobstersClient for MysqlTrawler {
                         }),
                 )
             }
-            LobstersRequest::Login(uid) => Box::new(c.and_then(move |c| {
+            LobstersRequest::Login => Box::new(c.and_then(move |c| {
                 c.first_exec::<_, _, my::Row>(
                     "\
                      SELECT  1 as one \
                      FROM `users` \
                      WHERE `users`.`username` = ? \
                      ORDER BY `users`.`id` ASC LIMIT 1",
-                    (format!("user{}", uid),),
+                    (format!("user{}", acting_as.unwrap()),),
                 )
             }).and_then(move |(c, user)| {
                 if user.is_none() {
+                    let uid = acting_as.unwrap();
                     futures::future::Either::A(c.drop_exec(
                         "\
                          INSERT INTO `users` \
@@ -404,7 +406,7 @@ impl trawler::LobstersClient for MysqlTrawler {
                     futures::future::Either::B(futures::future::ok(c))
                 }
             })),
-            LobstersRequest::Logout(..) => Box::new(c),
+            LobstersRequest::Logout => Box::new(c),
             LobstersRequest::Story(id) => {
                 Box::new(
                     c.and_then(move |c| {
@@ -508,7 +510,8 @@ impl trawler::LobstersClient for MysqlTrawler {
                         }),
                 )
             }
-            LobstersRequest::StoryVote(user, story, v) => {
+            LobstersRequest::StoryVote(story, v) => {
+                let user = acting_as.unwrap();
                 Box::new(
                     c.and_then(move |c| {
                         c.prep_exec(
@@ -628,7 +631,8 @@ impl trawler::LobstersClient for MysqlTrawler {
                         }),
                 )
             }
-            LobstersRequest::CommentVote(user, comment, v) => {
+            LobstersRequest::CommentVote(comment, v) => {
+                let user = acting_as.unwrap();
                 Box::new(
                     c.and_then(move |c| {
                         c.first_exec::<_, _, my::Row>(
@@ -793,7 +797,8 @@ impl trawler::LobstersClient for MysqlTrawler {
                         }),
                 )
             }
-            LobstersRequest::Submit { id, user, title } => {
+            LobstersRequest::Submit { id, title } => {
+                let user = acting_as.unwrap();
                 Box::new(
                     c.and_then(|c| {
                         // check that tags are active
@@ -925,12 +930,8 @@ impl trawler::LobstersClient for MysqlTrawler {
                         }), // TODO: read_ribbons
                 )
             }
-            LobstersRequest::Comment {
-                id,
-                user,
-                story,
-                parent,
-            } => {
+            LobstersRequest::Comment { id, story, parent } => {
+                let user = acting_as.unwrap();
                 Box::new(
                     c.and_then(move |c| {
                         c.first_exec::<_, _, my::Row>(
@@ -1253,7 +1254,7 @@ fn main() {
         let mut core = tokio_core::reactor::Core::new().unwrap();
         use trawler::LobstersClient;
         let c = Rc::new(MysqlTrawler::spawn(&mut s, &core.handle()));
-        core.run(MysqlTrawler::handle(c, LobstersRequest::Frontpage))
+        core.run(MysqlTrawler::handle(c, None, LobstersRequest::Frontpage))
             .unwrap();
     }
 

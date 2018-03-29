@@ -1463,7 +1463,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 
 [[package]]
 name = "trawler"
-version = "0.4.0"
+version = "0.5.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 dependencies = [
  "clap 2.31.2 (registry+https://github.com/rust-lang/crates.io-index)",
@@ -1495,7 +1495,7 @@ dependencies = [
  "rusoto_core 0.31.0 (registry+https://github.com/rust-lang/crates.io-index)",
  "rusoto_sts 0.31.0 (registry+https://github.com/rust-lang/crates.io-index)",
  "tokio-core 0.1.16 (registry+https://github.com/rust-lang/crates.io-index)",
- "trawler 0.4.0 (registry+https://github.com/rust-lang/crates.io-index)",
+ "trawler 0.5.0 (registry+https://github.com/rust-lang/crates.io-index)",
  "tsunami 0.5.7 (registry+https://github.com/rust-lang/crates.io-index)",
 ]
 
@@ -1849,7 +1849,7 @@ dependencies = [
 "checksum tokio-tls 0.1.4 (registry+https://github.com/rust-lang/crates.io-index)" = "772f4b04e560117fe3b0a53e490c16ddc8ba6ec437015d91fa385564996ed913"
 "checksum tokio-udp 0.1.0 (registry+https://github.com/rust-lang/crates.io-index)" = "137bda266504893ac4774e0ec4c2108f7ccdbcb7ac8dced6305fe9e4e0b5041a"
 "checksum traitobject 0.1.0 (registry+https://github.com/rust-lang/crates.io-index)" = "efd1f82c56340fdf16f2a953d7bda4f8fdffba13d93b00844c25572110b26079"
-"checksum trawler 0.4.0 (registry+https://github.com/rust-lang/crates.io-index)" = "fecb836bde0b34bd508025e7ae555135ef395c1f00a7f86af0071ede9dcbc3f7"
+"checksum trawler 0.5.0 (registry+https://github.com/rust-lang/crates.io-index)" = "ef387b0a441fe54f9c4c80ae6aeb84f785873aa77d47c0f21f9aa1f7466cd52f"
 "checksum tsunami 0.5.7 (registry+https://github.com/rust-lang/crates.io-index)" = "acbf336b7e56c6b7b8c6aaadbb8365e91cfec0fe894b10f4abdf09887efb7289"
 "checksum twox-hash 1.1.0 (registry+https://github.com/rust-lang/crates.io-index)" = "475352206e7a290c5fccc27624a163e8d0d115f7bb60ca18a64fc9ce056d7435"
 "checksum typeable 0.1.2 (registry+https://github.com/rust-lang/crates.io-index)" = "1410f6f91f21d1612654e7cc69193b0334f909dcf2c790c4826254fbb86f8887"
