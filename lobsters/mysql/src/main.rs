@@ -116,55 +116,58 @@ impl trawler::LobstersClient for MysqlTrawler {
         });
         */
 
-        let c: Box<Future<Item = my::Conn, Error = my::errors::Error>> = match req {
+        let c: Box<Future<Item = (my::Conn, bool), Error = my::errors::Error>> = match req {
             LobstersRequest::User(uid) => {
                 // rustfmt
-                Box::new(c.and_then(move |c| {
-                    c.first_exec::<_, _, my::Row>(
-                        "SELECT  `users`.* FROM `users` \
-                         WHERE `users`.`username` = ? \
-                         ORDER BY `users`.`id` ASC LIMIT 1",
-                        (format!("user{}", uid),),
-                    )
-                }).and_then(move |(c, user)| {
-                    let uid = user.unwrap().get::<u32, _>("id").unwrap();
+                Box::new(
+                    c.and_then(move |c| {
+                        c.first_exec::<_, _, my::Row>(
+                            "SELECT  `users`.* FROM `users` \
+                             WHERE `users`.`username` = ? \
+                             ORDER BY `users`.`id` ASC LIMIT 1",
+                            (format!("user{}", uid),),
+                        )
+                    }).and_then(move |(c, user)| {
+                            let uid = user.unwrap().get::<u32, _>("id").unwrap();
 
-                    // most popular tag
-                    c.drop_exec(
-                        "SELECT  `tags`.* FROM `tags` \
-                         INNER JOIN `taggings` ON `taggings`.`tag_id` = `tags`.`id` \
-                         INNER JOIN `stories` ON `stories`.`id` = `taggings`.`story_id` \
-                         WHERE `tags`.`inactive` = 0 \
-                         AND `stories`.`user_id` = ? \
-                         GROUP BY `tags`.`id` \
-                         ORDER BY COUNT(*) desc LIMIT 1",
-                        (uid,),
-                    ).and_then(move |c| {
-                            c.drop_query(&format!(
-                                "SELECT  `keystores`.* \
-                                 FROM `keystores` \
-                                 WHERE `keystores`.`key` = 'user:{}:stories_submitted' \
-                                 ORDER BY `keystores`.`key` ASC LIMIT 1",
-                                uid
-                            ))
-                        })
-                        .and_then(move |c| {
-                            c.drop_query(&format!(
-                                "SELECT  `keystores`.* \
-                                 FROM `keystores` \
-                                 WHERE `keystores`.`key` = 'user:{}:comments_posted' \
-                                 ORDER BY `keystores`.`key` ASC LIMIT 1",
-                                uid
-                            ))
-                        })
-                        .and_then(move |c| {
+                            // most popular tag
                             c.drop_exec(
-                                "SELECT  1 AS one FROM `hats` \
-                                 WHERE `hats`.`user_id` = ? LIMIT 1",
+                                "SELECT  `tags`.* FROM `tags` \
+                                 INNER JOIN `taggings` ON `taggings`.`tag_id` = `tags`.`id` \
+                                 INNER JOIN `stories` ON `stories`.`id` = `taggings`.`story_id` \
+                                 WHERE `tags`.`inactive` = 0 \
+                                 AND `stories`.`user_id` = ? \
+                                 GROUP BY `tags`.`id` \
+                                 ORDER BY COUNT(*) desc LIMIT 1",
                                 (uid,),
-                            )
+                            ).and_then(move |c| {
+                                    c.drop_query(&format!(
+                                        "SELECT  `keystores`.* \
+                                         FROM `keystores` \
+                                         WHERE `keystores`.`key` = 'user:{}:stories_submitted' \
+                                         ORDER BY `keystores`.`key` ASC LIMIT 1",
+                                        uid
+                                    ))
+                                })
+                                .and_then(move |c| {
+                                    c.drop_query(&format!(
+                                        "SELECT  `keystores`.* \
+                                         FROM `keystores` \
+                                         WHERE `keystores`.`key` = 'user:{}:comments_posted' \
+                                         ORDER BY `keystores`.`key` ASC LIMIT 1",
+                                        uid
+                                    ))
+                                })
+                                .and_then(move |c| {
+                                    c.drop_exec(
+                                        "SELECT  1 AS one FROM `hats` \
+                                         WHERE `hats`.`user_id` = ? LIMIT 1",
+                                        (uid,),
+                                    )
+                                })
                         })
-                }))
+                        .map(|c| (c, true)),
+                )
             }
             LobstersRequest::Frontpage => {
                 // rustfmt
@@ -301,37 +304,39 @@ impl trawler::LobstersClient for MysqlTrawler {
                     });
 
                 // also load things that we need to highlight
-                Box::new(match acting_as {
-                    None => Either::A(main.map(|(c, _)| c)),
-                    Some(uid) => Either::B(
-                        main.and_then(move |(c, stories)| {
-                            c.drop_query(&format!(
-                                "SELECT `votes`.* FROM `votes` \
-                                 WHERE `votes`.`user_id` = {} \
-                                 AND `votes`.`story_id` IN ({}) \
-                                 AND `votes`.`comment_id` IS NULL",
-                                uid, stories,
-                            )).map(move |c| (c, stories))
-                        }).and_then(move |(c, stories)| {
+                Box::new(
+                    match acting_as {
+                        None => Either::A(main.map(|(c, _)| c)),
+                        Some(uid) => Either::B(
+                            main.and_then(move |(c, stories)| {
                                 c.drop_query(&format!(
-                                    "SELECT `hidden_stories`.* \
-                                     FROM `hidden_stories` \
-                                     WHERE `hidden_stories`.`user_id` = {} \
-                                     AND `hidden_stories`.`story_id` IN ({})",
+                                    "SELECT `votes`.* FROM `votes` \
+                                     WHERE `votes`.`user_id` = {} \
+                                     AND `votes`.`story_id` IN ({}) \
+                                     AND `votes`.`comment_id` IS NULL",
                                     uid, stories,
                                 )).map(move |c| (c, stories))
-                            })
-                            .and_then(move |(c, stories)| {
-                                c.drop_query(&format!(
-                                    "SELECT `saved_stories`.* \
-                                     FROM `saved_stories` \
-                                     WHERE `saved_stories`.`user_id` = {} \
-                                     AND `saved_stories`.`story_id` IN ({})",
-                                    uid, stories,
-                                ))
-                            }),
-                    ),
-                })
+                            }).and_then(move |(c, stories)| {
+                                    c.drop_query(&format!(
+                                        "SELECT `hidden_stories`.* \
+                                         FROM `hidden_stories` \
+                                         WHERE `hidden_stories`.`user_id` = {} \
+                                         AND `hidden_stories`.`story_id` IN ({})",
+                                        uid, stories,
+                                    )).map(move |c| (c, stories))
+                                })
+                                .and_then(move |(c, stories)| {
+                                    c.drop_query(&format!(
+                                        "SELECT `saved_stories`.* \
+                                         FROM `saved_stories` \
+                                         WHERE `saved_stories`.`user_id` = {} \
+                                         AND `saved_stories`.`story_id` IN ({})",
+                                        uid, stories,
+                                    ))
+                                }),
+                        ),
+                    }.map(|c| (c, true)),
+                )
             }
             LobstersRequest::Comments => {
                 // rustfmt
@@ -427,7 +432,8 @@ impl trawler::LobstersClient for MysqlTrawler {
                                  WHERE `users`.`id` IN ({})",
                                 authors
                             ))
-                        }),
+                        })
+                        .map(|c| (c, true)),
                 )
             }
             LobstersRequest::Recent => {
@@ -587,53 +593,56 @@ impl trawler::LobstersClient for MysqlTrawler {
                     });
 
                 // also load things that we need to highlight
-                Box::new(match acting_as {
-                    None => Either::A(main.map(|(c, _)| c)),
-                    Some(uid) => Either::B(
-                        main.and_then(move |(c, stories)| {
-                            c.drop_query(&format!(
-                                "SELECT `votes`.* FROM `votes` \
-                                 WHERE `votes`.`user_id` = {} \
-                                 AND `votes`.`story_id` IN ({}) \
-                                 AND `votes`.`comment_id` IS NULL",
-                                uid, stories,
-                            )).map(move |c| (c, stories))
-                        }).and_then(move |(c, stories)| {
+                Box::new(
+                    match acting_as {
+                        None => Either::A(main.map(|(c, _)| c)),
+                        Some(uid) => Either::B(
+                            main.and_then(move |(c, stories)| {
                                 c.drop_query(&format!(
-                                    "SELECT `hidden_stories`.* \
-                                     FROM `hidden_stories` \
-                                     WHERE `hidden_stories`.`user_id` = {} \
-                                     AND `hidden_stories`.`story_id` IN ({})",
+                                    "SELECT `votes`.* FROM `votes` \
+                                     WHERE `votes`.`user_id` = {} \
+                                     AND `votes`.`story_id` IN ({}) \
+                                     AND `votes`.`comment_id` IS NULL",
                                     uid, stories,
                                 )).map(move |c| (c, stories))
-                            })
-                            .and_then(move |(c, stories)| {
-                                c.drop_query(&format!(
-                                    "SELECT `saved_stories`.* \
-                                     FROM `saved_stories` \
-                                     WHERE `saved_stories`.`user_id` = {} \
-                                     AND `saved_stories`.`story_id` IN ({})",
-                                    uid, stories,
-                                ))
-                            }),
-                    ),
-                })
+                            }).and_then(move |(c, stories)| {
+                                    c.drop_query(&format!(
+                                        "SELECT `hidden_stories`.* \
+                                         FROM `hidden_stories` \
+                                         WHERE `hidden_stories`.`user_id` = {} \
+                                         AND `hidden_stories`.`story_id` IN ({})",
+                                        uid, stories,
+                                    )).map(move |c| (c, stories))
+                                })
+                                .and_then(move |(c, stories)| {
+                                    c.drop_query(&format!(
+                                        "SELECT `saved_stories`.* \
+                                         FROM `saved_stories` \
+                                         WHERE `saved_stories`.`user_id` = {} \
+                                         AND `saved_stories`.`story_id` IN ({})",
+                                        uid, stories,
+                                    ))
+                                }),
+                        ),
+                    }.map(|c| (c, true)),
+                )
             }
             LobstersRequest::Login => {
                 // rustfmt
-                Box::new(c.and_then(move |c| {
-                    c.first_exec::<_, _, my::Row>(
-                        "\
-                         SELECT  1 as one \
-                         FROM `users` \
-                         WHERE `users`.`username` = ? \
-                         ORDER BY `users`.`id` ASC LIMIT 1",
-                        (format!("user{}", acting_as.unwrap()),),
-                    )
-                }).and_then(move |(c, user)| {
-                    if user.is_none() {
-                        let uid = acting_as.unwrap();
-                        futures::future::Either::A(c.drop_exec(
+                Box::new(
+                    c.and_then(move |c| {
+                        c.first_exec::<_, _, my::Row>(
+                            "\
+                             SELECT  1 as one \
+                             FROM `users` \
+                             WHERE `users`.`username` = ? \
+                             ORDER BY `users`.`id` ASC LIMIT 1",
+                            (format!("user{}", acting_as.unwrap()),),
+                        )
+                    }).and_then(move |(c, user)| {
+                            if user.is_none() {
+                                let uid = acting_as.unwrap();
+                                futures::future::Either::A(c.drop_exec(
                             "\
                              INSERT INTO `users` \
                              (`username`, `email`, `password_digest`, `created_at`, \
@@ -649,12 +658,14 @@ impl trawler::LobstersClient for MysqlTrawler {
                                 format!("mtok{}", uid),
                             ),
                         ))
-                    } else {
-                        futures::future::Either::B(futures::future::ok(c))
-                    }
-                }))
+                            } else {
+                                futures::future::Either::B(futures::future::ok(c))
+                            }
+                        })
+                        .map(|c| (c, false)),
+                )
             }
-            LobstersRequest::Logout => Box::new(c),
+            LobstersRequest::Logout => Box::new(c.map(|c| (c, false))),
             LobstersRequest::Story(id) => {
                 // rustfmt
                 Box::new(
@@ -834,9 +845,10 @@ impl trawler::LobstersClient for MysqlTrawler {
                                 "SELECT `tags`.* FROM `tags` WHERE `tags`.`id` IN ({})",
                                 tags
                             ))
-                        }),
-                    // XXX: + a bunch of repeated, seemingly superfluous queries
+                        })
+                        .map(|c| (c, true)),
                 )
+                // XXX: + a bunch of repeated, seemingly superfluous queries
             }
             LobstersRequest::StoryVote(story, v) => {
                 // rustfmt
@@ -957,7 +969,8 @@ impl trawler::LobstersClient for MysqlTrawler {
                                     )
                                 })
                                 .and_then(|t| t.commit())
-                        }),
+                        })
+                        .map(|c| (c, false)),
                 )
             }
             LobstersRequest::CommentVote(comment, v) => {
@@ -1124,7 +1137,8 @@ impl trawler::LobstersClient for MysqlTrawler {
                                     )
                                 })
                                 .and_then(|t| t.commit())
-                        }),
+                        })
+                        .map(|c| (c, false)),
                 )
             }
             LobstersRequest::Submit { id, title } => {
@@ -1258,7 +1272,8 @@ impl trawler::LobstersClient for MysqlTrawler {
                                     )
                                 })
                                 .and_then(|t| t.commit())
-                        }),
+                        })
+                        .map(|c| (c, false)),
                 )
             }
             LobstersRequest::Comment { id, story, parent } => {
@@ -1492,15 +1507,20 @@ impl trawler::LobstersClient for MysqlTrawler {
                                     // author of the parent comment here..
                                 })
                                 .and_then(|t| t.commit())
-                        }),
+                        })
+                        .map(|c| (c, false)),
                 )
             }
         };
 
         // notifications
         let c = if let Some(uid) = acting_as {
-            Either::A(c.and_then(move |c| {
-                c.drop_query(&format!(
+            Either::A(c.and_then(move |(c, with_notifications)| {
+                if !with_notifications {
+                    return Either::A(futures::future::ok(c));
+                }
+
+                Either::B(c.drop_query(&format!(
                     "SELECT COUNT(*) \
                      FROM `replying_comments` \
                      WHERE `replying_comments`.`user_id` = {} \
@@ -1514,10 +1534,10 @@ impl trawler::LobstersClient for MysqlTrawler {
                          ORDER BY `keystores`.`key` ASC LIMIT 1",
                         uid
                     ))
-                })
+                }))
             }))
         } else {
-            Either::B(c)
+            Either::B(c.map(|(c, _)| c))
         };
 
         Box::new(c.map_err(|e| {
