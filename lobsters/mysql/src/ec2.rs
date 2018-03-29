@@ -163,19 +163,21 @@ fn main() {
                 .ssh
                 .as_mut()
                 .unwrap()
-                .cmd_raw("awk '{print $1\" \"$2}' /proc/loadavg")?;
+                .cmd("awk '{print $1\" \"$2}' /proc/loadavg")?;
+            let sload = sload.trim_right();
 
             // gather client load
             let cload = trawler
                 .ssh
                 .as_mut()
                 .unwrap()
-                .cmd_raw("awk '{print $1\" \"$2}' /proc/loadavg")?;
+                .cmd("awk '{print $1\" \"$2}' /proc/loadavg")?;
+            let cload = cload.trim_right();
 
             load.write_all(format!("{} ", scale).as_bytes())?;
-            load.write_all(&sload[..])?;
+            load.write_all(sload.as_bytes())?;
             load.write_all(b" ")?;
-            load.write_all(&cload[..])?;
+            load.write_all(cload.as_bytes())?;
             load.write_all(b"\n")?;
 
             let mut hist = File::create(format!("lobsters-mysql-{}.hist", scale))?;
