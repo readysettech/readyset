@@ -2472,7 +2472,7 @@ impl Domain {
                         .filter(|&(_, s)| s > 0)
                         .max_by_key(|&(_, s)| s)
                         .map(|(n, s)| {
-                            warn!(self.log, "chose to evict from node {:?} with size {}", n, s);
+                            trace!(self.log, "chose to evict from node {:?} with size {}", n, s);
                             n
                         })
                 });
