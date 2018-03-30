@@ -216,7 +216,7 @@ where
                         t.drop_exec(
                             &format!(
                                 "UPDATE `stories` \
-                                             SET `hotness` = {}
+                                             SET `hotness` = {} - 1
                                              WHERE `stories`.`id` = ?",
                                 hotness,
                             ),

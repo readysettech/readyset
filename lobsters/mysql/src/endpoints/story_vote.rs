@@ -121,7 +121,7 @@ where
                                     Vote::Up => "+ 0",
                                     Vote::Down => "+ 1",
                                 },
-                                score + match v {
+                                score - match v {
                                     Vote::Up => 1.0,
                                     Vote::Down => -1.0,
                                 }
