@@ -2402,11 +2402,18 @@ impl Domain {
                 if let Some(node) = node {
                     let mut freed = 0u64;
                     while freed < num_bytes as u64 {
+                        use core::data::SizeOf;
+
                         let (key_columns, keys, bytes) = {
                             let k = self.state[&node].evict_random_keys(100);
                             (k.0.to_vec(), k.1, k.2)
                         };
                         freed += bytes;
+
+                        if self.state[&node].deep_size_of() == 0 {
+                            break;
+                        }
+
                         trigger_downstream_evictions(
                             &key_columns[..],
                             &keys[..],
