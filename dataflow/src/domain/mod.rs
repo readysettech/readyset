@@ -1919,8 +1919,14 @@ impl Domain {
                                     // we must be filling a hole in a Reader. we need to ensure
                                     // that the hole for the key we're replaying ends up being
                                     // filled, even if that hole is empty!
-                                    r.writer_mut().map(|wh| {
+                                    r.writer_mut().map(|mut wh| {
                                         for key in backfill_keys.iter() {
+                                            let size = wh.try_find_and(key, |rs| {
+                                                rs.iter().map(|r| r.deep_size_of()).sum()
+                                            }).unwrap_or(0);
+                                            wh.mem_size =
+                                                wh.mem_size.checked_sub(size as usize).unwrap();
+
                                             wh.mut_with_key(&key[..]).mark_filled();
                                         }
                                     });
@@ -1977,8 +1983,14 @@ impl Domain {
                                     }
                                 } else {
                                     n.with_reader_mut(|r| {
-                                        r.writer_mut().map(|wh| {
+                                        r.writer_mut().map(|mut wh| {
                                             for miss in &missed_on {
+                                                let size = wh.try_find_and(key, |rs| {
+                                                    rs.iter().map(|r| r.deep_size_of()).sum()
+                                                }).unwrap_or(0);
+                                                wh.mem_size =
+                                                    wh.mem_size.checked_sub(size as usize).unwrap();
+
                                                 wh.mut_with_key(&miss[..]).mark_hole();
                                             }
                                         });
@@ -2483,30 +2495,31 @@ impl Domain {
                         use core::data::SizeOf;
 
                         if self.nodes[&node].borrow().is_reader() {
-                            warn!(self.log, "ignoring eviction from reader");
-                            break;
+                            self.nodes[&node]
+                                .borrow_mut()
+                                .with_reader_mut(|r| freed += r.evict_random_keys(100));
+                        } else {
+                            let (key_columns, keys, bytes) = {
+                                let k = self.state[&node].evict_random_keys(100);
+                                (k.0.to_vec(), k.1, k.2)
+                            };
+                            freed += bytes;
+
+                            if self.state[&node].deep_size_of() == 0 {
+                                break;
+                            }
+
+                            trigger_downstream_evictions(
+                                &key_columns[..],
+                                &keys[..],
+                                node,
+                                sends,
+                                &self.replay_paths,
+                                self.shard,
+                                &mut self.state,
+                                &mut self.nodes,
+                            );
                         }
-
-                        let (key_columns, keys, bytes) = {
-                            let k = self.state[&node].evict_random_keys(100);
-                            (k.0.to_vec(), k.1, k.2)
-                        };
-                        freed += bytes;
-
-                        if self.state[&node].deep_size_of() == 0 {
-                            break;
-                        }
-
-                        trigger_downstream_evictions(
-                            &key_columns[..],
-                            &keys[..],
-                            node,
-                            sends,
-                            &self.replay_paths,
-                            self.shard,
-                            &mut self.state,
-                            &mut self.nodes,
-                        );
                     }
                 }
             }

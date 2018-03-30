@@ -2,6 +2,9 @@ use core::{DataType, Record};
 use core::data::SizeOf;
 use fnv::FnvBuildHasher;
 use std::borrow::Cow;
+use evmap;
+
+use rand::{Rng, ThreadRng};
 use std::sync::Arc;
 
 /// Allocate a new end-user facing result table.
@@ -232,6 +235,17 @@ impl WriteHandle {
 
     pub(crate) fn is_partial(&self) -> bool {
         self.partial
+    }
+
+    /// Evict `count` randomly selected keys from state and return them along with the number of
+    /// bytes freed.
+    pub fn evict_random_keys(&mut self, count: usize, rng: &mut ThreadRng) -> u64 {
+        let bytes_freed = 0;
+        for _ in 0..count {
+            self.handle.empty_at_index(rng.gen());
+        }
+        // XXX(malte): always zero!
+        bytes_freed
     }
 }
 

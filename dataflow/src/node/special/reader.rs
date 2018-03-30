@@ -134,6 +134,18 @@ impl Reader {
         self.token_generator = Some(gen);
     }
 
+    /// Evict `count` randomly selected keys, returning key columns of the index chosen to evict
+    /// from along with the keys evicted and the number of bytes evicted.
+    pub fn evict_random_keys(&mut self, count: usize) -> u64 {
+        let mut bytes_freed = 0;
+        if let Some(ref mut handle) = self.writer {
+            use rand;
+            let mut rng = rand::thread_rng();
+            bytes_freed = handle.evict_random_keys(count, &mut rng);
+        }
+        bytes_freed
+    }
+
     pub fn on_eviction(&mut self, _key_columns: &[usize], keys: &[Vec<DataType>]) {
         let w = self.writer.as_mut().unwrap();
         for k in keys {

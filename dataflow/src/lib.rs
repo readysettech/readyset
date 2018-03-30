@@ -20,6 +20,7 @@ extern crate hyper;
 extern crate itertools;
 extern crate nom_sql;
 extern crate petgraph;
+extern crate rand;
 extern crate regex;
 extern crate serde;
 #[macro_use]

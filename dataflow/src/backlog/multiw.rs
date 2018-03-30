@@ -26,6 +26,16 @@ impl Handle {
         }
     }
 
+    /// Evict `count` randomly selected keys from state and return them along with the number of
+    /// bytes freed.
+    pub fn empty_at_index(&mut self, index: usize) {
+        match *self {
+            Handle::Single(ref mut h) | Handle::Double(ref mut h) | Handle::Many(ref mut h) => {
+                h.empty_at_index(index)
+            }
+        }
+    }
+
     pub fn refresh(&mut self) {
         match *self {
             Handle::Single(ref mut h) => h.refresh(),
