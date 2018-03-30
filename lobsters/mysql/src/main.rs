@@ -54,6 +54,16 @@ impl trawler::LobstersClient for MysqlTrawler {
         MysqlTrawler::new(handle, spawner.opts.clone())
     }
 
+    fn setup(spawner: &mut Self::Factory) {
+        let mut core = tokio_core::reactor::Core::new().unwrap();
+        let mut opts = spawner.opts.clone();
+        opts.pool_min(None);
+        opts.pool_max(None);
+        let mut c = my::Pool::new(opts, &core.handle());
+        core.run(c.drop_query(include_str!("../db-schema.sql")))
+            .unwrap();
+    }
+
     fn handle(
         this: Rc<Self>,
         acting_as: Option<UserId>,
