@@ -17,11 +17,11 @@ use std::time;
 use trawler::{LobstersRequest, UserId};
 
 struct MysqlSpawner {
-    opts: my::Opts,
+    opts: my::OptsBuilder,
 }
 impl MysqlSpawner {
     fn new(opts: my::OptsBuilder) -> Self {
-        MysqlSpawner { opts: opts.into() }
+        MysqlSpawner { opts }
     }
 }
 
@@ -51,22 +51,22 @@ impl trawler::LobstersClient for MysqlTrawler {
     type Factory = MysqlSpawner;
 
     fn spawn(spawner: &mut Self::Factory, handle: &tokio_core::reactor::Handle) -> Self {
-        MysqlTrawler::new(handle, spawner.opts.clone())
+        MysqlTrawler::new(handle, spawner.opts.clone().into())
     }
 
     fn setup(spawner: &mut Self::Factory) {
         let mut core = tokio_core::reactor::Core::new().unwrap();
         let mut opts = spawner.opts.clone();
-        opts.pool_min(None);
-        opts.pool_max(None);
-        let db: String = opts.get_db_name().unwrap().clone();
-        let mut c = my::Pool::new(opts, &core.handle());
-        core.run(c.drop_query(&format!("DROP DATABASE {}", db)))
-            .unwrap();
-        core.run(c.drop_query(&format!("CREATE DATABASE {}", db)))
-            .unwrap();
-        core.run(c.drop_query(include_str!("../db-schema.sql")))
-            .unwrap();
+        opts.pool_min(None::<usize>);
+        opts.pool_max(None::<usize>);
+        let db: String = my::Opts::from(opts.clone()).get_db_name().unwrap().clone();
+        let c = my::Pool::new(opts, &core.handle());
+        core.run(
+            c.get_conn()
+                .and_then(|c| c.drop_query(&format!("DROP DATABASE {}", db)))
+                .and_then(|c| c.drop_query(&format!("CREATE DATABASE {}", db)))
+                .and_then(|c| c.drop_query(include_str!("../db-schema.sql"))),
+        ).unwrap();
     }
 
     fn handle(
