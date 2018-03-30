@@ -1499,12 +1499,12 @@ dependencies = [
  "rusoto_sts 0.31.0 (registry+https://github.com/rust-lang/crates.io-index)",
  "tokio-core 0.1.16 (registry+https://github.com/rust-lang/crates.io-index)",
  "trawler 0.5.3 (registry+https://github.com/rust-lang/crates.io-index)",
- "tsunami 0.5.7 (registry+https://github.com/rust-lang/crates.io-index)",
+ "tsunami 0.5.8 (registry+https://github.com/rust-lang/crates.io-index)",
 ]
 
 [[package]]
 name = "tsunami"
-version = "0.5.7"
+version = "0.5.8"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 dependencies = [
  "failure 0.1.1 (registry+https://github.com/rust-lang/crates.io-index)",
@@ -1853,7 +1853,7 @@ dependencies = [
 "checksum tokio-udp 0.1.0 (registry+https://github.com/rust-lang/crates.io-index)" = "137bda266504893ac4774e0ec4c2108f7ccdbcb7ac8dced6305fe9e4e0b5041a"
 "checksum traitobject 0.1.0 (registry+https://github.com/rust-lang/crates.io-index)" = "efd1f82c56340fdf16f2a953d7bda4f8fdffba13d93b00844c25572110b26079"
 "checksum trawler 0.5.3 (registry+https://github.com/rust-lang/crates.io-index)" = "34f68fd959bb3b36cf0d4514e6a9741501bcea68aa263f38cf6274002e98ab4e"
-"checksum tsunami 0.5.7 (registry+https://github.com/rust-lang/crates.io-index)" = "acbf336b7e56c6b7b8c6aaadbb8365e91cfec0fe894b10f4abdf09887efb7289"
+"checksum tsunami 0.5.8 (registry+https://github.com/rust-lang/crates.io-index)" = "22cf2ab1e93960639c42fc0850c2af82bc55830c0645e682201c4da8fe58478f"
 "checksum twox-hash 1.1.0 (registry+https://github.com/rust-lang/crates.io-index)" = "475352206e7a290c5fccc27624a163e8d0d115f7bb60ca18a64fc9ce056d7435"
 "checksum typeable 0.1.2 (registry+https://github.com/rust-lang/crates.io-index)" = "1410f6f91f21d1612654e7cc69193b0334f909dcf2c790c4826254fbb86f8887"
 "checksum typenum 1.10.0 (registry+https://github.com/rust-lang/crates.io-index)" = "612d636f949607bdf9b123b4a6f6d966dedf3ff669f7f045890d3a4a73948169"

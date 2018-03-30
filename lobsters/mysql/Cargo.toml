@@ -15,7 +15,7 @@ clap = "2.31"
 futures = "0.1"
 chrono = "0.4"
 
-tsunami = { version = "0.5.7", optional = true }
+tsunami = { version = "0.5.8", optional = true }
 rusoto_core = { version = "0.31", optional = true }
 rusoto_sts = { version = "0.31", optional = true }
 
