@@ -568,7 +568,7 @@ impl Domain {
 
         // normally, we ignore misses during regular forwarding.
         // however, we have to be a little careful in the case of joins.
-        if n.is_join() && !misses.is_empty() {
+        if n.is_internal() && n.is_join() && !misses.is_empty() {
             // there are two possible cases here:
             //
             //  - this is a write that will hit a hole in every downstream materialization.
