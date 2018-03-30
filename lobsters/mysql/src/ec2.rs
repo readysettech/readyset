@@ -92,8 +92,9 @@ fn main() {
     let scales: Box<Iterator<Item = usize>> = args.values_of("SCALE")
         .map(|it| Box::new(it.map(|s| s.parse().unwrap())) as Box<_>)
         .unwrap_or(Box::new(
-            [1usize, 100, 200, 400, 600, 800, 1000, 1200, 1400, 1600]
-                .into_iter()
+            [
+                1usize, 100, 200, 400, 600, 800, 850, 900, 950, 1000, 1050, 1100, 1200, 1400, 1600
+            ].into_iter()
                 .map(|&s| s),
         ) as Box<_>);
 
