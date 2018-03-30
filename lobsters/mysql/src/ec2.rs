@@ -8,6 +8,7 @@ use clap::{App, Arg};
 use std::collections::HashMap;
 use std::fs::{File, OpenOptions};
 use std::io::prelude::*;
+use std::time;
 use tsunami::*;
 
 fn main() {
@@ -88,6 +89,7 @@ fn main() {
 
     b.set_max_duration(2);
     b.set_region(rusoto_core::Region::UsEast1);
+    b.wait_limit(time::Duration::from_secs(20));
 
     let scales: Box<Iterator<Item = usize>> = args.values_of("SCALE")
         .map(|it| Box::new(it.map(|s| s.parse().unwrap())) as Box<_>)
