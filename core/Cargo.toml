@@ -5,7 +5,7 @@ authors = ["The Distributary Developers"]
 
 [dependencies]
 bincode = "1.0.0"
-rusqlite = "0.13.0"
+rocksdb = "0.10.0"
 arccstr = "1.1.0"
 fnv = "1.0.5"
 serde_derive = "1.0.8"

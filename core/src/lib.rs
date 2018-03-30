@@ -12,7 +12,7 @@ extern crate nom_sql;
 extern crate petgraph;
 extern crate rahashmap;
 extern crate rand;
-extern crate rusqlite;
+extern crate rocksdb;
 extern crate serde;
 #[macro_use]
 extern crate serde_derive;

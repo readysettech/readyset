@@ -1,6 +1,5 @@
 use std::borrow::Cow;
-use std::collections::{HashMap, HashSet};
-use std::fs;
+use std::collections::HashMap;
 use std::rc::Rc;
 
 use ::*;
@@ -9,8 +8,7 @@ use local::single_state::SingleState;
 
 use bincode;
 use rand::{self, Rng};
-use rusqlite::{self, Connection};
-use rusqlite::types::{ToSql, ToSqlOutput};
+use rocksdb::{self, DB};
 
 pub enum State {
     InMemory(MemoryState),
@@ -66,7 +64,7 @@ impl State {
             State::InMemory(ref mut s) => s.insert(r, partial_tag),
             State::Persistent(ref mut s) => {
                 assert!(partial_tag.is_none(), "Bases can't be partial");
-                PersistentState::insert(r, &s.indices, &s.connection)
+                s.insert(r)
             }
         }
     }
@@ -74,7 +72,7 @@ impl State {
     pub fn remove(&mut self, r: &[DataType]) -> bool {
         match *self {
             State::InMemory(ref mut s) => s.remove(r),
-            State::Persistent(ref mut s) => PersistentState::remove(r, &s.indices, &s.connection),
+            State::Persistent(ref mut s) => s.remove(r),
         }
     }
 
@@ -147,260 +145,212 @@ impl State {
 
 /// PersistentState stores data in SQlite.
 pub struct PersistentState {
-    name: String,
-    connection: Connection,
+    // name: String,
+    db: DB,
     durability_mode: DurabilityMode,
-    indices: HashSet<usize>,
-}
-
-impl ToSql for DataType {
-    fn to_sql(&self) -> rusqlite::Result<ToSqlOutput> {
-        Ok(match *self {
-            DataType::None => unreachable!(),
-            DataType::Int(n) => ToSqlOutput::from(n),
-            DataType::BigInt(n) => ToSqlOutput::from(n),
-            DataType::Real(i, f) => {
-                let value = (i as f64) + (f as f64) * 1.0e-9;
-                ToSqlOutput::from(value)
-            }
-            DataType::Text(..) | DataType::TinyText(..) => ToSqlOutput::from(self.to_string()),
-            DataType::Timestamp(ts) => ToSqlOutput::from(ts.format("%+").to_string()),
-        })
-    }
+    indices: Vec<Vec<usize>>,
 }
 
 impl PersistentState {
     fn initialize(name: String, durability_mode: DurabilityMode) -> Self {
-        let full_name = format!("{}.db", name);
-        let connection = match durability_mode {
-            DurabilityMode::MemoryOnly => Connection::open_in_memory().unwrap(),
-            _ => Connection::open(&full_name).unwrap(),
-        };
+        let mut opts = rocksdb::Options::default();
+        opts.create_if_missing(true);
 
-        // SQLite pragmas:
-        // locking_mode = EXCLUSIVE - We never intend to open this DB in another process
-        // journal_mode = WAL - Use SQlite's "new" write-ahead log mode
-        // synchronous = OFF - Never fsync on commit
-        //     We always fsync Soup's log before ACK-ing a write, so this won't cause any loss of
-        //     data. SQlite does state that a poorly timed crash might cause database corruption on
-        //     the other hand, so we might need to change to NORMAL. With SQlite's WAL enabled
-        //     NORMAL indicates that a fsync will happen prior to the WAL being checkpointed.
-        connection
-            .execute_batch(
-                "CREATE TABLE IF NOT EXISTS store (row BLOB);
-                PRAGMA locking_mode = EXCLUSIVE;
-                PRAGMA synchronous = OFF;
-                PRAGMA journal_mode = OFF;",
-            )
-            .unwrap();
+        // Number of threads used by RocksDB:
+        // opts.increase_parallelism(4);
+        // opts.set_compression_type(rocksdb::DBCompressionType::Snappy);
+        // opts.optimize_for_point_lookup(cache_size); ?
+
+        let full_name = format!("{}.db", name);
+        let db = DB::open(&opts, &full_name).unwrap();
 
         Self {
-            connection,
+            db,
             durability_mode,
-            name: full_name,
+            // name: full_name,
             indices: Default::default(),
         }
     }
 
-    // Joins together a SQL clause on the form of
-    // index_0 = columns[0], index_1 = columns[1]...
-    fn build_clause<'a, I>(columns: I) -> String
-    where
-        I: Iterator<Item = &'a usize>,
-    {
-        columns
-            .enumerate()
-            .map(|(i, column)| format!("index_{} = ?{}", column, i + 1))
-            .collect::<Vec<_>>()
-            .join(" AND ")
-    }
+    // Puts by primary key first, then retrieves the existing value for each index and appends the
+    // newly created primary key value.
+    fn insert(&mut self, r: Vec<DataType>) -> bool {
+        let primary_index = self.indices[0].iter().map(|i| &r[*i]).collect::<Vec<_>>();
+        println!("built pk value {:?} out of {:?}", primary_index, r);
+        let primary_key = bincode::serialize(&primary_index).unwrap();
+        // Wrap it in a vec to always maintain the same data type for both the primary and other
+        // indices: Vec<Vec<DataType>>
+        let row = bincode::serialize(&vec![&r]).unwrap();
+        // We assume the first index is a primary key, which means we can't have multiple
+        // rows for the first index, and that we don't have to retrieve an existing value
+        // to append to.
+        // TODO(ekmartin): This would force each table to have a primary key, which is
+        // probably not what we want.
+        self.db.put(&primary_key, &row).unwrap();
 
-    // Used with statement.query_map to deserialize the rows returned from SQlite
-    fn map_rows(result: &rusqlite::Row) -> Vec<DataType> {
-        let row: Vec<u8> = result.get(0);
-        bincode::deserialize(&row).unwrap()
-    }
+        // TODO(ekmartin): maybe the index key should include placeholders for the columns that
+        // aren't part of the index, otherwise we could have a case where we have e.g.:
+        // Columns: a, b, c, d
+        // Index 1: (a, b)
+        // Index 2: (c, d)
+        // A retrieval for (a, b) would then collide with (c, d) with the current scheme.
+        for columns in &self.indices[1..] {
+            // Construct a key with the index values, and serialize it with bincode:
+            let index = columns.iter().map(|i| &r[*i]).collect::<Vec<_>>();
+            println!("built regular index {:?} out of {:?}", index, r);
+            let key = bincode::serialize(&index).unwrap();
+            // Since an index can point to multiple primary keys, we attempt to retrieve the
+            // existing rows this index points to, to add our new primary key to that.
+            let existing = self.db.get(&key).unwrap();
+            let mut values = if let Some(v) = existing {
+                let v: Vec<Vec<DataType>> = bincode::deserialize(&&*v).unwrap();
+                v
+            } else {
+                vec![]
+            };
 
-    // Builds up an INSERT query on the form of:
-    // `INSERT INTO store (index_0, index_1, row) VALUES (...)`
-    // where row is a serialized representation of r.
-    fn insert(r: Vec<DataType>, indices: &HashSet<usize>, connection: &Connection) -> bool {
-        let columns = format!(
-            "row, {}",
-            indices
+            // To avoid having to clone all the values in primary_index we turn
+            // our Vec<Vec<DataType>> into Vec<Vec<&DataType>>, which lets us clone
+            // only primary_index itself - not each column.
+            let mut rows: Vec<Vec<&DataType>> = values
                 .iter()
-                .map(|index| format!("index_{}", index))
-                .collect::<Vec<String>>()
-                .join(", ")
-        );
+                .map(|row| row.iter().map(|d| d).collect())
+                .collect();
 
-        let placeholders = (1..(indices.len() + 2))
-            .map(|placeholder| format!("?{}", placeholder))
-            .collect::<Vec<String>>()
-            .join(", ");
+            rows.push(primary_index.clone());
+            println!("pointing {:?} -> {:?}", index, rows);
+            self.db
+                .put(&key, &bincode::serialize(&rows).unwrap())
+                .unwrap();
+        }
 
-        let mut statement = connection
-            .prepare_cached(&format!(
-                "INSERT INTO store ({}) VALUES ({})",
-                columns, placeholders
-            ))
-            .unwrap();
-
-        let row = bincode::serialize(&r).unwrap();
-        let mut values: Vec<&ToSql> = vec![&row];
-        let mut index_values = indices
-            .iter()
-            .map(|index| &r[*index] as &ToSql)
-            .collect::<Vec<&ToSql>>();
-
-        values.append(&mut index_values);
-        statement.execute(&values[..]).unwrap();
         true
     }
 
-    fn remove(r: &[DataType], indices: &HashSet<usize>, connection: &Connection) -> bool {
-        let clauses = Self::build_clause(indices.iter());
-        let index_values = indices
-            .iter()
-            .map(|index| &r[*index] as &ToSql)
-            .collect::<Vec<&ToSql>>();
+    fn remove(&mut self, r: &[DataType]) -> bool {
+        for columns in self.indices.iter() {
+            let index = columns.iter().map(|i| &r[*i]).collect::<Vec<_>>();
+            let key = bincode::serialize(&index).unwrap();
+            self.db.delete(&key).unwrap();
+        }
 
-        let query = format!("DELETE FROM store WHERE {}", clauses);
-        let mut statement = connection.prepare_cached(&query).unwrap();
-        statement.execute(&index_values[..]).unwrap() > 0
+        true
     }
 
     fn add_key(&mut self, columns: &[usize], partial: Option<Vec<Tag>>) {
         assert!(partial.is_none(), "Bases can't be partial");
-        // Add each of the individual index columns (index_0, index_1...):
-        for index in columns.iter() {
-            if self.indices.contains(index) {
-                continue;
-            }
-
-            self.indices.insert(*index);
-            let query = format!("ALTER TABLE store ADD COLUMN index_{} TEXT", index);
-            match self.connection.execute(&query, &[]) {
-                Ok(..) => (),
-                // Ignore existing column errors:
-                Err(rusqlite::Error::SqliteFailure(_, Some(ref message)))
-                    if message == &format!("duplicate column name: index_{}", index) =>
-                {
-                    ()
-                }
-                Err(e) => panic!(e),
-            };
+        let c = Vec::from(columns);
+        if !self.indices.contains(&c) {
+            self.indices.push(c);
         }
 
-        // Then create the combined index on the given columns:
-        let index_clause = columns
-            .into_iter()
-            .map(|column| format!("index_{}", column))
-            .collect::<Vec<_>>()
-            .join(", ");
-
-        let index_query = format!(
-            "CREATE INDEX IF NOT EXISTS \"{}\" ON store ({})",
-            index_clause, index_clause
-        );
-
-        // Make sure that existing rows contain the new index column too,
-        // if there are any. This could be faster with UPDATE statements
-        // if needed in the future.
+        // Put all the existing values for the new index.
+        // TODO: maybe not even do rows() here, just straight for the iterator.
         if self.rows() > 0 {
-            let rows = self.cloned_records();
-            self.clear();
-            for row in rows {
-                Self::insert(row, &self.indices, &mut self.connection);
-            }
+            // TODO: this shouldn't use cloned_records, since it'd need to deserialize
+            // we should just retrieve the raw bytes and put them directly.
+            // for row in self.cloned_records() {
+            //     let index = columns.iter().map(|i| &r[i]).collect::<Vec<_>>();
+            //     let r = bincode::serialize(&row).unwrap();
+            //     let key = bincode::serialize(&index).unwrap();
+            //     self.db.put(&key, &r).unwrap();
+            // }
         }
-
-        self.connection.execute(&index_query, &[]).unwrap();
     }
 
     fn process_records(&mut self, records: &Records) {
-        let transaction = self.connection.transaction().unwrap();
         for r in records.iter() {
             match *r {
                 Record::Positive(ref r) => {
-                    Self::insert(r.clone(), &self.indices, &transaction);
+                    self.insert(r.clone());
                 }
                 Record::Negative(ref r) => {
-                    Self::remove(r, &self.indices, &transaction);
+                    self.remove(r);
                 }
                 Record::BaseOperation(..) => unreachable!(),
             }
         }
-
-        transaction.commit().unwrap();
     }
 
-    // Retrieves rows from SQlite by building up a SELECT query on the form of
-    // `SELECT row FROM store WHERE index_0 = value AND index_1 = VALUE`
     fn lookup(&self, columns: &[usize], key: &KeyType) -> LookupResult {
-        let clauses = Self::build_clause(columns.iter());
-        let query = format!("SELECT row FROM store WHERE {}", clauses);
-        let mut statement = self.connection.prepare_cached(&query).unwrap();
-
-        let rows = match *key {
-            KeyType::Single(a) => statement.query_map(&[a], Self::map_rows),
-            KeyType::Double(ref r) => statement.query_map(&[&r.0, &r.1], Self::map_rows),
-            KeyType::Tri(ref r) => statement.query_map(&[&r.0, &r.1, &r.2], Self::map_rows),
-            KeyType::Quad(ref r) => statement.query_map(&[&r.0, &r.1, &r.2, &r.3], Self::map_rows),
-            KeyType::Quin(ref r) => {
-                statement.query_map(&[&r.0, &r.1, &r.2, &r.3, &r.4], Self::map_rows)
-            }
-            KeyType::Sex(ref r) => {
-                statement.query_map(&[&r.0, &r.1, &r.2, &r.3, &r.4, &r.5], Self::map_rows)
-            }
+        let values = match *key {
+            KeyType::Single(a) => vec![a],
+            KeyType::Double(ref r) => vec![&r.0, &r.1],
+            KeyType::Tri(ref r) => vec![&r.0, &r.1, &r.2],
+            KeyType::Quad(ref r) => vec![&r.0, &r.1, &r.2, &r.3],
+            KeyType::Quin(ref r) => vec![&r.0, &r.1, &r.2, &r.3, &r.4],
+            KeyType::Sex(ref r) => vec![&r.0, &r.1, &r.2, &r.3, &r.4, &r.5],
         };
 
-        let data = rows.unwrap()
-            .map(|row| Row(Rc::new(row.unwrap())))
+        println!("looking up key {:?}", values);
+        let k = bincode::serialize(&values).unwrap();
+        let pks_or_row: Vec<Vec<DataType>> = match self.db.get(&k).unwrap() {
+            Some(data) => bincode::deserialize(&*data).unwrap(),
+            None => return LookupResult::Some(Cow::Owned(vec![])),
+        };
+
+        let rows: Vec<Vec<DataType>> = if columns == &self.indices[0][..] {
+            pks_or_row
+        } else {
+            // If this wasn't a primary index, pks_or_row now
+            // points to a series of primary keys that we need
+            // to retrieve the actual values for through additional .get() requests.
+            pks_or_row
+                .into_iter()
+                .flat_map(|pk| {
+                    println!("retrieving pk {:?}", pk);
+                    let k = bincode::serialize(&pk).unwrap();
+                    let data = self.db
+                        .get(&k)
+                        .unwrap()
+                        .expect("index points to non-existant primary key value");
+                    let rs: Vec<Vec<DataType>> = bincode::deserialize(&*data).unwrap();
+                    rs
+                })
+                .collect()
+        };
+
+        let data = rows.into_iter()
+            .map(|row| Row(Rc::new(row)))
             .collect::<Vec<_>>();
 
         LookupResult::Some(Cow::Owned(data))
     }
 
     fn cloned_records(&self) -> Vec<Vec<DataType>> {
-        let mut statement = self.connection
-            .prepare_cached("SELECT row FROM store")
-            .unwrap();
+        // let mut statement = self.db.prepare_cached("SELECT row FROM store").unwrap();
 
-        let rows = statement
-            .query_map(&[], Self::map_rows)
-            .unwrap()
-            .map(|row| row.unwrap())
-            .collect::<Vec<_>>();
+        // let rows = statement
+        //     .query_map(&[], Self::map_rows)
+        //     .unwrap()
+        //     .map(|row| row.unwrap())
+        //     .collect::<Vec<_>>();
 
-        rows
+        vec![]
     }
 
     fn rows(&self) -> usize {
-        let mut statement = self.connection
-            .prepare_cached("SELECT COUNT(row) FROM store")
-            .unwrap();
-
-        let count: i64 = statement.query_row(&[], |row| row.get(0)).unwrap();
-        count as usize
+        0
+        // either iterator or to get an estimated number,
+        // A: Use GetIntProperty(cf_handle, “rocksdb.estimate-num-keys") to obtain an estimated
+        // number of keys stored in a column family, or use
+        // GetAggregatedIntProperty(“rocksdb.estimate-num-keys", &num_keys) to obtain an estimated
+        // number of keys stored in the whole RocksDB database.
+        // unimplemented!()
     }
 
     fn clear(&self) {
-        let mut statement = self.connection.prepare_cached("DELETE FROM store").unwrap();
-
-        statement.execute(&[]).unwrap();
+        // maybe just rm the db and create a new?
+        unimplemented!()
     }
 }
 
 impl Drop for PersistentState {
     fn drop(&mut self) {
-        if self.durability_mode == DurabilityMode::DeleteOnExit {
-            // Journal/WAL files should get deleted automatically, so ignore
-            // any potential errors in case they are in fact deleted:
-            let _ = fs::remove_file(format!("{}-journal", self.name));
-            let _ = fs::remove_file(format!("{}-shm", self.name));
-            let _ = fs::remove_file(format!("{}-wal", self.name));
-            fs::remove_file(&self.name).unwrap();
+        if self.durability_mode != DurabilityMode::Permanent {
+            // We'd like to destroy the database files here as well,
+            // but to do so we need to drop self.db first. How would we do that?
+            // DB::destroy(&rocksdb::Options::default(), &self.name).unwrap()
         }
     }
 }
@@ -472,6 +422,8 @@ impl MemoryState {
     }
 
     fn process_records(&mut self, records: &Records) {
+        // Might consider using a write batch if it helps here (might not help when we're not
+        // waiting for fsyncs).
         for r in records.iter() {
             match *r {
                 Record::Positive(ref r) => {
@@ -606,20 +558,51 @@ impl SizeOf for State {
 mod tests {
     use super::*;
     use std::path::Path;
+    use std::time::{SystemTime, UNIX_EPOCH};
 
-    fn setup_persistent() -> State {
-        State::base(String::from("soup"), DurabilityMode::MemoryOnly)
+    // Ensures correct handling of state file names, by deleting used state files in Drop.
+    struct StateName {
+        name: String,
+    }
+
+    impl StateName {
+        fn new(prefix: &str) -> Self {
+            let current_time = SystemTime::now().duration_since(UNIX_EPOCH).unwrap();
+            let name = format!(
+                "{}.{}.{}",
+                prefix,
+                current_time.as_secs(),
+                current_time.subsec_nanos()
+            );
+
+            Self { name }
+        }
+    }
+
+    // Removes the log files matching the glob ./{log_name}-*.json.
+    // Used to clean up after recovery tests, where a persistent log is created.
+    impl Drop for StateName {
+        fn drop(&mut self) {
+            // TODO: might have to use the same options here?
+            DB::destroy(&rocksdb::Options::default(), format!("{}.db", self.name)).unwrap()
+        }
+    }
+
+    fn setup_persistent(name: String) -> State {
+        State::base(name, DurabilityMode::MemoryOnly)
     }
 
     #[test]
     fn persistent_state_is_partial() {
-        let state = setup_persistent();
+        let n = StateName::new("persistent_state_is_partial");
+        let state = setup_persistent(n.name.clone());
         assert!(!state.is_partial());
     }
 
     #[test]
     fn persistent_state_single_key() {
-        let mut state = setup_persistent();
+        let n = StateName::new("persistent_state_single_key");
+        let mut state = setup_persistent(n.name.clone());
         let columns = &[0];
         let row: Vec<DataType> = vec![10.into(), "Cat".into()];
         state.add_key(columns, None);
@@ -642,7 +625,8 @@ mod tests {
 
     #[test]
     fn persistent_state_multi_key() {
-        let mut state = setup_persistent();
+        let n = StateName::new("persistent_state_multi_key");
+        let mut state = setup_persistent(n.name.clone());
         let columns = &[0, 2];
         let row: Vec<DataType> = vec![10.into(), "Cat".into(), 20.into()];
         state.add_key(columns, None);
@@ -663,15 +647,24 @@ mod tests {
 
     #[test]
     fn persistent_state_multiple_indices() {
-        let mut state = setup_persistent();
-        let first: Vec<DataType> = vec![10.into(), "Cat".into(), 20.into()];
-        let second: Vec<DataType> = vec![10.into(), "Bob".into(), 30.into()];
+        let n = StateName::new("persistent_state_multiple_indices");
+        let mut state = setup_persistent(n.name.clone());
+        let first: Vec<DataType> = vec![10.into(), "Cat".into(), 1.into()];
+        let second: Vec<DataType> = vec![20.into(), "Cat".into(), 1.into()];
         state.add_key(&[0], None);
-        state.add_key(&[0, 2], None);
+        state.add_key(&[1, 2], None);
         assert!(state.insert(first.clone(), None));
         assert!(state.insert(second.clone(), None));
 
         match state.lookup(&[0], &KeyType::Single(&10.into())) {
+            LookupResult::Some(rows) => {
+                assert_eq!(rows.len(), 1);
+                assert_eq!(&*rows[0], &first);
+            }
+            _ => panic!(),
+        }
+
+        match state.lookup(&[1, 2], &KeyType::Double(("Cat".into(), 1.into()))) {
             LookupResult::Some(rows) => {
                 assert_eq!(rows.len(), 2);
                 assert_eq!(&*rows[0], &first);
@@ -679,19 +672,12 @@ mod tests {
             }
             _ => panic!(),
         }
-
-        match state.lookup(&[0, 2], &KeyType::Double((10.into(), 20.into()))) {
-            LookupResult::Some(rows) => {
-                assert_eq!(rows.len(), 1);
-                assert_eq!(&*rows[0], &first);
-            }
-            _ => panic!(),
-        }
     }
 
     #[test]
     fn persistent_state_different_indices() {
-        let mut state = setup_persistent();
+        let n = StateName::new("persistent_state_different_indices");
+        let mut state = setup_persistent(n.name.clone());
         let first: Vec<DataType> = vec![10.into(), "Cat".into()];
         let second: Vec<DataType> = vec![20.into(), "Bob".into()];
         state.add_key(&[0], None);
@@ -718,7 +704,8 @@ mod tests {
 
     #[test]
     fn persistent_state_remove() {
-        let mut state = setup_persistent();
+        let n = StateName::new("persistent_state_remove");
+        let mut state = setup_persistent(n.name.clone());
         let columns = &[0];
         let first: Vec<DataType> = vec![10.into(), "Cat".into()];
         let second: Vec<DataType> = vec![20.into(), "Bob".into()];
@@ -741,19 +728,9 @@ mod tests {
     }
 
     #[test]
-    fn persistent_state_is_empty() {
-        let mut state = setup_persistent();
-        let columns = &[0];
-        let row: Vec<DataType> = vec![10.into(), "Cat".into()];
-        state.add_key(columns, None);
-        assert!(state.is_empty());
-        assert!(state.insert(row.clone(), None));
-        assert!(!state.is_empty());
-    }
-
-    #[test]
     fn persistent_state_is_useful() {
-        let mut state = setup_persistent();
+        let n = StateName::new("persistent_state_is_useful");
+        let mut state = setup_persistent(n.name.clone());
         let columns = &[0];
         assert!(!state.is_useful());
         state.add_key(columns, None);
@@ -761,22 +738,24 @@ mod tests {
     }
 
     #[test]
-    fn persistent_state_len() {
-        let mut state = setup_persistent();
+    fn persistent_state_rows() {
+        let n = StateName::new("persistent_state_rows");
+        let mut state = setup_persistent(n.name.clone());
         let columns = &[0];
         let first: Vec<DataType> = vec![10.into(), "Cat".into()];
         let second: Vec<DataType> = vec![20.into(), "Bob".into()];
         state.add_key(columns, None);
-        assert_eq!(state.len(), 0);
+        assert_eq!(state.rows(), 0);
         assert!(state.insert(first.clone(), None));
-        assert_eq!(state.len(), 1);
+        assert_eq!(state.rows(), 1);
         assert!(state.insert(second.clone(), None));
-        assert_eq!(state.len(), 2);
+        assert_eq!(state.rows(), 2);
     }
 
     #[test]
     fn persistent_state_cloned_records() {
-        let mut state = setup_persistent();
+        let n = StateName::new("persistent_state_cloned_records");
+        let mut state = setup_persistent(n.name.clone());
         let columns = &[0];
         let first: Vec<DataType> = vec![10.into(), "Cat".into()];
         let second: Vec<DataType> = vec![20.into(), "Bob".into()];
@@ -788,7 +767,8 @@ mod tests {
 
     #[test]
     fn persistent_state_clear() {
-        let mut state = setup_persistent();
+        let n = StateName::new("persistent_state_clear");
+        let mut state = setup_persistent(n.name.clone());
         let columns = &[0];
         let first: Vec<DataType> = vec![10.into(), "Cat".into()];
         let second: Vec<DataType> = vec![20.into(), "Bob".into()];
@@ -797,7 +777,7 @@ mod tests {
         assert!(state.insert(second.clone(), None));
 
         state.clear();
-        assert!(state.is_empty());
+        assert_eq!(state.rows(), 0);
     }
 
     #[test]
@@ -815,7 +795,8 @@ mod tests {
 
     #[test]
     fn persistent_state_old_records_new_index() {
-        let mut state = setup_persistent();
+        let n = StateName::new("persistent_state_old_records_new_index");
+        let mut state = setup_persistent(n.name.clone());
         let row: Vec<DataType> = vec![10.into(), "Cat".into()];
         state.add_key(&[0], None);
         assert!(state.insert(row.clone(), None));
@@ -856,7 +837,8 @@ mod tests {
 
     #[test]
     fn persistent_state_process_records() {
-        let state = setup_persistent();
+        let n = StateName::new("persistent_state_process_records");
+        let state = setup_persistent(n.name.clone());
         process_records(state);
     }
 
