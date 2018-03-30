@@ -1386,11 +1386,19 @@ impl Domain {
                                 let ref n = *nd.borrow();
                                 let local_index: LocalNodeIndex = *n.local_addr();
 
-                                self.state
-                                    .get(&local_index)
-                                    .filter(|state| state.is_partial())
-                                    .map(|state| state.deep_size_of())
-                                    .unwrap_or(0)
+                                if n.is_reader() {
+                                    // We are a reader, which has its own kind of state
+                                    let mut size = 0;
+                                    n.with_reader(|r| size = r.state_size().unwrap_or(0));
+                                    size
+                                } else {
+                                    // Not a reader, state is with domain
+                                    self.state
+                                        .get(&local_index)
+                                        .filter(|state| state.is_partial())
+                                        .map(|state| state.deep_size_of())
+                                        .unwrap_or(0)
+                                }
                             })
                             .sum();
 
