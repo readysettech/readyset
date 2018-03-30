@@ -25,7 +25,7 @@ fn main() {
     b.add_set(
         "server",
         1,
-        MachineSetup::new("m5.2xlarge", "ami-8178a0fc", |ssh| {
+        MachineSetup::new("c5.2xlarge", "ami-8178a0fc", |ssh| {
             eprintln!("==> priming ramdisk");
             ssh.cmd("./reprime-ramdisk.sh")
                 .map(|out| {
@@ -43,7 +43,7 @@ fn main() {
     b.add_set(
         "trawler",
         1,
-        MachineSetup::new("c5.4xlarge", "ami-44954e39", |ssh| {
+        MachineSetup::new("c5.2xlarge", "ami-44954e39", |ssh| {
             eprintln!("==> setting up trawler");
             eprintln!(" -> git update");
             ssh.cmd("git -C benchmarks pull").map(|out| {
@@ -93,7 +93,7 @@ fn main() {
         .map(|it| Box::new(it.map(|s| s.parse().unwrap())) as Box<_>)
         .unwrap_or(Box::new(
             [
-                1usize, 100, 200, 400, 600, 800, 850, 900, 950, 1000, 1050, 1100, 1200, 1400, 1600
+                1usize, 100, 200, 400, 600, 800, 900, 950, 1000, 1050, 1100, 1150, 1200, 1400, 1600
             ].into_iter()
                 .map(|&s| s),
         ) as Box<_>);
