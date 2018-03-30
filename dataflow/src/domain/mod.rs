@@ -2458,10 +2458,16 @@ impl Domain {
                             let ref n = *nd.borrow();
                             let local_index: LocalNodeIndex = *n.local_addr();
 
-                            self.state
-                                .get(&local_index)
-                                .filter(|state| state.is_partial())
-                                .map(|state| (local_index, state.deep_size_of()))
+                            if n.is_reader() {
+                                let mut size = 0;
+                                n.with_reader(|r| size = r.state_size().unwrap_or(0));
+                                Some((local_index, size))
+                            } else {
+                                self.state
+                                    .get(&local_index)
+                                    .filter(|state| state.is_partial())
+                                    .map(|state| (local_index, state.deep_size_of()))
+                            }
                         })
                         .filter(|&(_, s)| s > 0)
                         .max_by_key(|&(_, s)| s)
@@ -2475,6 +2481,11 @@ impl Domain {
                     let mut freed = 0u64;
                     while freed < num_bytes as u64 {
                         use core::data::SizeOf;
+
+                        if self.nodes[&node].borrow().is_reader() {
+                            warn!(self.log, "ignoring eviction from reader");
+                            break;
+                        }
 
                         let (key_columns, keys, bytes) = {
                             let k = self.state[&node].evict_random_keys(100);
