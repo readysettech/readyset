@@ -59,7 +59,12 @@ impl trawler::LobstersClient for MysqlTrawler {
         let mut opts = spawner.opts.clone();
         opts.pool_min(None);
         opts.pool_max(None);
+        let db: String = opts.get_db_name().unwrap().clone();
         let mut c = my::Pool::new(opts, &core.handle());
+        core.run(c.drop_query(&format!("DROP DATABASE {}", db)))
+            .unwrap();
+        core.run(c.drop_query(&format!("CREATE DATABASE {}", db)))
+            .unwrap();
         core.run(c.drop_query(include_str!("../db-schema.sql")))
             .unwrap();
     }
