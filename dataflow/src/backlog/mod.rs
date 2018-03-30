@@ -1,4 +1,5 @@
 use core::{DataType, Record};
+use core::data::SizeOf;
 use fnv::FnvBuildHasher;
 use std::borrow::Cow;
 use std::sync::Arc;
@@ -67,6 +68,7 @@ fn new_inner(
         key: Vec::from(key),
         cols: cols,
         contiguous,
+        mem_size: 0,
     };
     let r = SingleReadHandle {
         handle: r,
@@ -107,6 +109,7 @@ pub(crate) struct WriteHandle {
     cols: usize,
     key: Vec<usize>,
     contiguous: bool,
+    mem_size: usize,
 }
 
 type Key<'a> = Cow<'a, [DataType]>;
@@ -215,7 +218,12 @@ impl WriteHandle {
     where
         I: IntoIterator<Item = Record>,
     {
-        self.handle.add(&self.key[..], self.cols, rs)
+        let mem_delta = self.handle.add(&self.key[..], self.cols, rs);
+        if mem_delta > 0 {
+            self.mem_size += mem_delta as usize;
+        } else if mem_delta < 0 {
+            self.mem_size.checked_sub(mem_delta as usize);
+        }
     }
 
     pub(crate) fn update_ts(&mut self, ts: i64) {
@@ -224,6 +232,18 @@ impl WriteHandle {
 
     pub(crate) fn is_partial(&self) -> bool {
         self.partial
+    }
+}
+
+impl SizeOf for WriteHandle {
+    fn size_of(&self) -> u64 {
+        use std::mem::size_of;
+
+        size_of::<Self>() as u64
+    }
+
+    fn deep_size_of(&self) -> u64 {
+        self.mem_size as u64
     }
 }
 

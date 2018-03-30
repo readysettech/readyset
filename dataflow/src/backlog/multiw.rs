@@ -82,10 +82,11 @@ impl Handle {
         }
     }
 
-    pub fn add<I>(&mut self, key: &[usize], cols: usize, rs: I)
+    pub fn add<I>(&mut self, key: &[usize], cols: usize, rs: I) -> isize
     where
         I: IntoIterator<Item = Record>,
     {
+        let mut memory_delta = 0;
         match *self {
             Handle::Single(ref mut h) => {
                 assert_eq!(key.len(), 1);
@@ -93,6 +94,7 @@ impl Handle {
                     debug_assert!(r.len() >= cols);
                     match r {
                         Record::Positive(r) => {
+                            memory_delta += r.deep_size_of() as usize;
                             h.insert(r[key[0]].clone(), r);
                         }
                         Record::Negative(r) => {
@@ -100,6 +102,7 @@ impl Handle {
                             // last record. this means that future lookups will fail, and cause a
                             // replay, which will produce an empty result. this will work, but is
                             // somewhat inefficient.
+                            memory_delta - r.deep_size_of() as usize;
                             h.remove(r[key[0]].clone(), r);
                         }
                         Record::BaseOperation(..) => unreachable!(),
@@ -112,30 +115,33 @@ impl Handle {
                     debug_assert!(r.len() >= cols);
                     match r {
                         Record::Positive(r) => {
+                            memory_delta += r.deep_size_of() as usize;
                             h.insert((r[key[0]].clone(), r[key[1]].clone()), r);
                         }
                         Record::Negative(r) => {
+                            memory_delta - r.deep_size_of() as usize;
                             h.remove((r[key[0]].clone(), r[key[1]].clone()), r);
                         }
                         Record::BaseOperation(..) => unreachable!(),
                     }
                 }
             }
-            Handle::Many(ref mut h) => {
-                for r in rs {
-                    debug_assert!(r.len() >= cols);
-                    let key = key.iter().map(|&k| &r[k]).cloned().collect();
-                    match r {
-                        Record::Positive(r) => {
-                            h.insert(key, r);
-                        }
-                        Record::Negative(r) => {
-                            h.remove(key, r);
-                        }
-                        Record::BaseOperation(..) => unreachable!(),
+            Handle::Many(ref mut h) => for r in rs {
+                debug_assert!(r.len() >= cols);
+                let key = key.iter().map(|&k| &r[k]).cloned().collect();
+                match r {
+                    Record::Positive(r) => {
+                        memory_delta += r.deep_size_of() as usize;
+                        h.insert(key, r);
                     }
+                    Record::Negative(r) => {
+                        memory_delta - r.deep_size_of() as usize;
+                        h.remove(key, r);
+                    }
+                    Record::BaseOperation(..) => unreachable!(),
                 }
-            }
+            },
         }
+        memory_delta
     }
 }
