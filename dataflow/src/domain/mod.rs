@@ -557,17 +557,59 @@ impl Domain {
         process_times.start(me);
         process_ptimes.start(me);
         let mut m = Some(m);
-        n.process(&mut m, None, states, nodes, shard, true, sends, executor);
+        let misses = n.process(&mut m, None, states, nodes, shard, true, sends, executor);
         process_ptimes.stop();
         process_times.stop();
-        drop(n);
 
         if m.is_none() {
             // no need to deal with our children if we're not sending them anything
             return output_messages;
         }
 
-        // ignore misses during regular forwarding
+        // normally, we ignore misses during regular forwarding.
+        // however, we have to be a little careful in the case of joins.
+        if n.is_join() && !misses.is_empty() {
+            // there are two possible cases here:
+            //
+            //  - this is a write that will hit a hole in every downstream materialization.
+            //    dropping it is totally safe!
+            //  - this is a write that will update an entry in some downstream materialization.
+            //    this is *not* allowed! we *must* ensure that downstream remains up to date.
+            //    but how can we? we missed in the other side of the join, so we can't produce the
+            //    necessary output record... what we *can* do though is evict from any downstream,
+            //    and then we guarantee that we're in case 1!
+            //
+            // if you're curious about how we may have ended up in case 2 above, here are two ways:
+            //
+            //  - some downstream view is partial over the join key. some time in the past, it
+            //    requested a replay of key k. that replay produced *no* rows from the side that
+            //    was replayed. this in turn means that no lookup was performed on the other side
+            //    of the join, and so k wasn't replayed to that other side (which then still has a
+            //    hole!). in that case, any subsequent write with k in the join column from the
+            //    replay side will miss in the other side.
+            //  - some downstream view is partial over a column that is *not* the join key. in the
+            //    past, it replayed some key k, which means that we aren't allowed to drop any
+            //    write with k in that column. now, a write comes along with k in that replay
+            //    column, but with some hitherto unseen key z in the join column. if the replay of
+            //    k never caused a lookup of z in the other side of the join, then the other side
+            //    will have a hole. thus, we end up in the situation where we need to forward a
+            //    write through the join, but we miss.
+            //
+            // unfortunately, we can't easily distinguish between the case where we have to evict
+            // and the case where we don't (at least not currently), so we *always* need to evict
+            // when this happens. this shouldn't normally be *too* bad, because writes are likely
+            // to be dropped before they even reach the join in most benign cases (e.g., in an
+            // ingress). this can be remedied somewhat in the future by ensuring that the first of
+            // the two causes outlined above can't happen (by always doing a lookup on the replay
+            // key, even if there are now rows). then we know that the *only* case where we have to
+            // evict is when the replay key != the join key.
+            //
+            // but, for now, here we go:
+            // TODO
+        }
+
+        drop(n);
+
         match m.as_ref().unwrap() {
             m @ &box Packet::Message { .. } if m.is_empty() => {
                 // no need to deal with our children if we're not sending them anything

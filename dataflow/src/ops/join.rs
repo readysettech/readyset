@@ -285,8 +285,6 @@ impl Ingredient for Join {
             let mut new_right_count = None;
             let prev_join_key = rs[at][from_key].clone();
 
-            // FIXME: if we miss in other and this is *not* a replay, evict replay key downstream
-
             if from == *self.right && self.kind == JoinType::Left {
                 let rc = self.lookup(
                     *self.right,
