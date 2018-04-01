@@ -2,7 +2,7 @@ use distributary::{ControllerHandle, DataType, Mutator, RemoteGetter, ZookeeperA
 
 use msql_srv::{self, *};
 use nom_sql::{self, ColumnConstraint, ConditionBase, ConditionExpression, ConditionTree,
-              CreateTableStatement, FieldExpression, Literal, Operator, SelectStatement, SqlType};
+              CreateTableStatement, FieldExpression, Operator, SelectStatement};
 
 use slog;
 use std::io;
@@ -23,6 +23,9 @@ pub struct SoupBackend {
     auto_increments: Arc<Mutex<HashMap<String, u64>>>,
 
     query_count: Arc<sync::atomic::AtomicUsize>,
+
+    prepared: HashMap<String, u32>,
+    prepared_count: u32,
 }
 
 impl SoupBackend {
@@ -63,6 +66,8 @@ impl SoupBackend {
 
             query_count: query_counter,
 
+            prepared: HashMap::new(),
+            prepared_count: 0,
         }
     }
 
@@ -457,8 +462,52 @@ impl SoupBackend {
 
 impl<W: io::Write> MysqlShim<W> for SoupBackend {
     fn on_prepare(&mut self, query: &str, info: StatementMetaWriter<W>) -> io::Result<()> {
-        error!(self.log, "prepare: {}", query);
-        info.reply(42, &[], &[])
+        debug!(self.log, "prepare: {}", query);
+
+        let query = utils::sanitize_query(query);
+
+        match nom_sql::parse_query(&query) {
+            Ok(q) => match q {
+                nom_sql::SqlQuery::Select(q) => {
+                    // extract parameter columns
+                    let ts_lock = self.table_schemas.lock().unwrap();
+                    let schema = schema_for_query(&(*ts_lock), &q);
+
+                    // XXX(malte): incorrect! need to extract parameter columns
+                    let params: Vec<msql_srv::Column> = vec![];
+
+                    // add the query to Soup
+                    let qc = self.query_count
+                        .fetch_add(1, sync::atomic::Ordering::SeqCst);
+                    let qname = format!("q_{}", qc);
+                    match self.soup.extend_recipe(format!("QUERY {}: {};", qname, q)) {
+                        Ok(_) => {
+                            // register a new prepared statement
+                            self.prepared_count += 1;
+                            self.prepared.insert(qname, self.prepared_count);
+                            info.reply(self.prepared_count, params.as_slice(), schema.as_slice())
+                        }
+                        Err(e) => return Err(io::Error::new(io::ErrorKind::Other, e)),
+                    }
+                }
+                _ => {
+                    // Soup only supports prepared SELECT statements at the moment
+                    error!(
+                        self.log,
+                        "Unsupported query for prepared statement: {}", query
+                    );
+                    return info.error(
+                        msql_srv::ErrorKind::ER_NOT_SUPPORTED_YET,
+                        "unsupported query".as_bytes(),
+                    );
+                }
+            },
+            Err(e) => {
+                // if nom-sql rejects the query, there is no chance Soup will like it
+                error!(self.log, "query can't be parsed: \"{}\"", query);
+                info.error(msql_srv::ErrorKind::ER_PARSE_ERROR, e.as_bytes())
+            }
+        }
     }
 
     fn on_execute(
