@@ -1,7 +1,7 @@
 extern crate glob;
 
 use consensus::LocalAuthority;
-use controller::ControllerBuilder;
+use controller::{ControllerBuilder, ControllerHandle};
 use controller::recipe::Recipe;
 use controller::sql::SqlIncorporator;
 use core::{DataType, DurabilityMode};
@@ -54,6 +54,23 @@ impl Drop for LogName {
             fs::remove_file(log_path.unwrap()).unwrap();
         }
     }
+}
+
+// PersistenceParameters with a log_name on the form of `prefix` + timestamp,
+// avoiding collisions between separate test runs (in case an earlier panic causes clean-up to
+// fail).
+fn get_persistence_params(prefix: &str) -> PersistenceParameters {
+    let mut params = PersistenceParameters::default();
+    params.log_prefix = get_log_name(prefix);
+    params
+}
+
+// Builds a local controller with the given log prefix
+// (suffixed with a timestamp, see `get_log_name`).
+pub fn build_local(prefix: &str) -> ControllerHandle<LocalAuthority> {
+    let mut builder = ControllerBuilder::default();
+    builder.set_persistence(get_persistence_params(prefix));
+    builder.build_local()
 }
 
 fn get_settle_time() -> Duration {
@@ -230,7 +247,7 @@ fn base_mutation() {
 #[test]
 fn shared_interdomain_ancestor() {
     // set up graph
-    let mut g = ControllerBuilder::default().build_local();
+    let mut g = build_local("shared_interdomain_ancestor");
     let _ = g.migrate(|mig| {
         let a = mig.add_ingredient("a", &["a", "b"], Base::default());
 
@@ -281,7 +298,7 @@ fn shared_interdomain_ancestor() {
 #[test]
 fn it_works_w_mat() {
     // set up graph
-    let mut g = ControllerBuilder::default().build_local();
+    let mut g = build_local("it_works_w_mat");
     let _ = g.migrate(|mig| {
         let a = mig.add_ingredient("a", &["a", "b"], Base::default());
         let b = mig.add_ingredient("b", &["a", "b"], Base::default());
@@ -338,8 +355,7 @@ fn it_works_w_mat() {
 #[test]
 fn it_works_w_partial_mat() {
     // set up graph
-    let b = ControllerBuilder::default();
-    let mut g = b.build_local();
+    let mut g = build_local("it_works_w_partial_mat");
     let (a, b) = g.migrate(|mig| {
         let a = mig.add_ingredient("a", &["a", "b"], Base::default());
         let b = mig.add_ingredient("b", &["a", "b"], Base::default());
@@ -390,8 +406,7 @@ fn it_works_w_partial_mat() {
 fn it_works_w_partial_mat_below_empty() {
     // set up graph with all nodes added in a single migration. The base tables are therefore empty
     // for now.
-    let b = ControllerBuilder::default();
-    let mut g = b.build_local();
+    let mut g = build_local("it_works_w_partial_mat_below_empty");
     let _ = g.migrate(|mig| {
         let a = mig.add_ingredient("a", &["a", "b"], Base::default());
         let b = mig.add_ingredient("b", &["a", "b"], Base::default());
@@ -435,7 +450,7 @@ fn it_works_w_partial_mat_below_empty() {
 #[test]
 fn it_works_deletion() {
     // set up graph
-    let mut g = ControllerBuilder::default().build_local();
+    let mut g = build_local("it_works_deletion");
     let _ = g.migrate(|mig| {
         let a = mig.add_ingredient("a", &["x", "y"], Base::new(vec![]).with_key(vec![1]));
         let b = mig.add_ingredient("b", &["_", "x", "y"], Base::new(vec![]).with_key(vec![2]));
@@ -481,7 +496,7 @@ fn it_works_deletion() {
 
 #[test]
 fn it_works_with_sql_recipe() {
-    let mut g = ControllerBuilder::default().build_local();
+    let mut g = build_local("it_works_with_sql_recipe");
     let sql = "
         CREATE TABLE Car (id int, brand varchar(255), PRIMARY KEY(id));
         QUERY CountCars: SELECT COUNT(*) FROM Car WHERE brand = ?;
@@ -546,7 +561,7 @@ fn it_works_with_vote() {
 
 #[test]
 fn it_works_with_reads_before_writes() {
-    let mut g = ControllerBuilder::default().build_local();
+    let mut g = build_local("it_works_with_reads_before_writes");
     let sql = "
         CREATE TABLE Article (aid int, PRIMARY KEY(aid));
         CREATE TABLE Vote (aid int, uid int, PRIMARY KEY(aid, uid));
@@ -581,7 +596,7 @@ fn forced_shuffle_despite_same_shard() {
     // XXX: this test doesn't currently *fail* despite
     // multiple trailing replay responses that are simply ignored...
 
-    let mut g = ControllerBuilder::default().build_local();
+    let mut g = build_local("forced_shuffle_despite_same_shard");
     let sql = "
         CREATE TABLE Car (cid int, pid int, PRIMARY KEY(pid));
         CREATE TABLE Price (pid int, price int, PRIMARY KEY(pid));
@@ -612,7 +627,7 @@ fn forced_shuffle_despite_same_shard() {
 #[test]
 #[allow_fail]
 fn double_shuffle() {
-    let mut g = ControllerBuilder::default().build_local();
+    let mut g = build_local("double_shuffle");
     let sql = "
         CREATE TABLE Car (cid int, pid int, PRIMARY KEY(cid));
         CREATE TABLE Price (pid int, price int, PRIMARY KEY(pid));
@@ -642,7 +657,7 @@ fn double_shuffle() {
 
 #[test]
 fn it_works_with_arithmetic_aliases() {
-    let mut g = ControllerBuilder::default().build_local();
+    let mut g = build_local("it_works_with_arithmetic_aliases");
     let sql = "
         CREATE TABLE Price (pid int, cent_price int, PRIMARY KEY(pid));
         ModPrice: SELECT pid, cent_price / 100 AS price FROM Price;
@@ -715,7 +730,7 @@ fn it_recovers_persisted_logs() {
 
 #[test]
 fn mutator_churn() {
-    let mut g = ControllerBuilder::default().build_local();
+    let mut g = build_local("mutator_churn");
     let _ = g.migrate(|mig| {
         // migrate
 
@@ -863,7 +878,7 @@ fn it_recovers_persisted_logs_w_transactions() {
 
 #[test]
 fn it_works_with_simple_arithmetic() {
-    let mut g = ControllerBuilder::default().build_local();
+    let mut g = build_local("it_works_with_simple_arithmetic");
 
     g.migrate(|mig| {
         let sql = "CREATE TABLE Car (id int, price int, PRIMARY KEY(id));
@@ -889,7 +904,7 @@ fn it_works_with_simple_arithmetic() {
 
 #[test]
 fn it_works_with_multiple_arithmetic_expressions() {
-    let mut g = ControllerBuilder::default().build_local();
+    let mut g = build_local("it_works_with_multiple_arithmetic_expressions");
     let sql = "CREATE TABLE Car (id int, price int, PRIMARY KEY(id));
                QUERY CarPrice: SELECT 10 * 10, 2 * price, 10 * price, FROM Car WHERE id = ?;
                ";
@@ -915,7 +930,7 @@ fn it_works_with_multiple_arithmetic_expressions() {
 #[test]
 #[allow_fail]
 fn it_works_with_join_arithmetic() {
-    let mut g = ControllerBuilder::default().build_local();
+    let mut g = build_local("it_works_with_join_arithmetic");
     let sql = "
         CREATE TABLE Car (car_id int, price_id int, PRIMARY KEY(car_id));
         CREATE TABLE Price (price_id int, price int, PRIMARY KEY(price_id));
@@ -951,7 +966,7 @@ fn it_works_with_join_arithmetic() {
 
 #[test]
 fn it_works_with_function_arithmetic() {
-    let mut g = ControllerBuilder::default().build_local();
+    let mut g = build_local("it_works_with_function_arithmetic");
     let sql = "
         CREATE TABLE Bread (id int, price int, PRIMARY KEY(id));
         QUERY Price: SELECT 2 * MAX(price) FROM Bread;
@@ -977,7 +992,7 @@ fn it_works_with_function_arithmetic() {
 #[test]
 fn votes() {
     // set up graph
-    let mut g = ControllerBuilder::default().build_local();
+    let mut g = build_local("votes");
     let _ = g.migrate(|mig| {
         // add article base nodes (we use two so we can exercise unions too)
         let article1 = mig.add_ingredient("article1", &["id", "title"], Base::default());
@@ -1080,6 +1095,7 @@ fn votes() {
 fn transactional_vote() {
     // set up graph
     let mut g = ControllerBuilder::default();
+    g.set_persistence(get_persistence_params("transactional_vote"));
     g.disable_partial(); // because end_votes forces full below partial
     let mut g = g.build_local();
     let validate = g.get_validator();
@@ -1234,7 +1250,7 @@ fn transactional_vote() {
 #[test]
 fn empty_migration() {
     // set up graph
-    let mut g = ControllerBuilder::default().build_local();
+    let mut g = build_local("empty_migration");
     g.migrate(|_| {});
 
     let _ = g.migrate(|mig| {
@@ -1284,7 +1300,7 @@ fn simple_migration() {
     let id: DataType = 1.into();
 
     // set up graph
-    let mut g = ControllerBuilder::default().build_local();
+    let mut g = build_local("simple_migration");
     let _ = g.migrate(|mig| {
         let a = mig.add_ingredient("a", &["a", "b"], Base::default());
         mig.maintain_anonymous(a, &[0]);
@@ -1334,7 +1350,7 @@ fn add_columns() {
     let id: DataType = "x".into();
 
     // set up graph
-    let mut g = ControllerBuilder::default().build_local();
+    let mut g = build_local("add_columns");
     let a = g.migrate(|mig| {
         let a = mig.add_ingredient("a", &["a", "b"], Base::new(vec![1.into(), 2.into()]));
         mig.maintain_anonymous(a, &[0]);
@@ -1387,7 +1403,7 @@ fn migrate_added_columns() {
     let id: DataType = "x".into();
 
     // set up graph
-    let mut g = ControllerBuilder::default().build_local();
+    let mut g = build_local("migrate_added_columns");
     let a = g.migrate(|mig| {
         let a = mig.add_ingredient("a", &["a", "b"], Base::new(vec![1.into(), 2.into()]));
         a
@@ -1435,7 +1451,7 @@ fn migrate_drop_columns() {
     let id: DataType = "x".into();
 
     // set up graph
-    let mut g = ControllerBuilder::default().build_local();
+    let mut g = build_local("migrate_drop_columns");
     let a = g.migrate(|mig| {
         let a = mig.add_ingredient("a", &["a", "b"], Base::new(vec!["a".into(), "b".into()]));
         mig.maintain_anonymous(a, &[0]);
@@ -1501,7 +1517,7 @@ fn migrate_drop_columns() {
 #[test]
 fn key_on_added() {
     // set up graph
-    let mut g = ControllerBuilder::default().build_local();
+    let mut g = build_local("key_on_added");
     let a = g.migrate(|mig| {
         let a = mig.add_ingredient("a", &["a", "b"], Base::new(vec![1.into(), 2.into()]));
         a
@@ -1529,6 +1545,7 @@ fn replay_during_replay() {
     // right in a left join, that's what we have to construct.
     let mut g = ControllerBuilder::default();
     g.disable_partial();
+    g.set_persistence(get_persistence_params("replay_during_replay"));
     let mut g = g.build_local();
     let (a, u1, u2) = g.migrate(|mig| {
         // we need three bases:
@@ -1627,7 +1644,7 @@ fn replay_during_replay() {
 #[test]
 fn full_aggregation_with_bogokey() {
     // set up graph
-    let mut g = ControllerBuilder::default().build_local();
+    let mut g = build_local("full_aggregation_with_bogokey");
     let base = g.migrate(|mig| mig.add_ingredient("base", &["x"], Base::new(vec![1.into()])));
 
     // add an aggregation over the base with a bogo key.
@@ -1680,7 +1697,7 @@ fn full_aggregation_with_bogokey() {
 #[test]
 fn transactional_migration() {
     // set up graph
-    let mut g = ControllerBuilder::default().build_local();
+    let mut g = build_local("transactional_migration");
     let a = g.migrate(|mig| {
         let a = mig.add_transactional_base("a", &["a", "b"], Base::default());
         mig.maintain_anonymous(a, &[0]);
@@ -1769,7 +1786,7 @@ fn transactional_migration() {
 #[test]
 fn crossing_migration() {
     // set up graph
-    let mut g = ControllerBuilder::default().build_local();
+    let mut g = build_local("crossing_migration");
     let (a, b) = g.migrate(|mig| {
         let a = mig.add_ingredient("a", &["a", "b"], Base::default());
         let b = mig.add_ingredient("b", &["a", "b"], Base::default());
@@ -1816,7 +1833,7 @@ fn independent_domain_migration() {
     let id: DataType = 1.into();
 
     // set up graph
-    let mut g = ControllerBuilder::default().build_local();
+    let mut g = build_local("independent_domain_migration");
     let _ = g.migrate(|mig| {
         let a = mig.add_ingredient("a", &["a", "b"], Base::default());
         mig.maintain_anonymous(a, &[0]);
@@ -1864,7 +1881,7 @@ fn independent_domain_migration() {
 #[test]
 fn domain_amend_migration() {
     // set up graph
-    let mut g = ControllerBuilder::default().build_local();
+    let mut g = build_local("domain_amend_migration");
     let (a, b) = g.migrate(|mig| {
         let a = mig.add_ingredient("a", &["a", "b"], Base::default());
         let b = mig.add_ingredient("b", &["a", "b"], Base::default());
@@ -1914,7 +1931,7 @@ fn migration_depends_on_unchanged_domain() {
     // this is tricky, because the system must realize that n is materialized, even though it
     // normally wouldn't even look at that part of the data flow graph!
 
-    let mut g = ControllerBuilder::default().build_local();
+    let mut g = build_local("migration_depends_on_unchanged_domain");
     let left = g.migrate(|mig| {
         // base node, so will be materialized
         let left = mig.add_ingredient("foo", &["a", "b"], Base::default());
@@ -1940,7 +1957,7 @@ fn migration_depends_on_unchanged_domain() {
 }
 
 fn do_full_vote_migration(old_puts_after: bool) {
-    let mut g = ControllerBuilder::default().build_local();
+    let mut g = build_local(&format!("do_full_vote_migration_{}", old_puts_after));
     let (article, _vote, vc, _end) = g.migrate(|mig| {
         // migrate
 
@@ -2069,7 +2086,7 @@ fn full_vote_migration_new_and_old() {
 
 #[test]
 fn live_writes() {
-    let mut g = ControllerBuilder::default().build_local();
+    let mut g = build_local("live_writes");
     let (_vote, vc) = g.migrate(|mig| {
         // migrate
 
@@ -2144,7 +2161,7 @@ fn state_replay_migration_query() {
     // read from rather than relying on forwarding. to further stress the graph, *both* base nodes
     // are created and populated before the migration, meaning we have to replay through a join.
 
-    let mut g = ControllerBuilder::default().build_local();
+    let mut g = build_local("state_replay_migration_query");
     let (a, b) = g.migrate(|mig| {
         let a = mig.add_ingredient("a", &["x", "y"], Base::default());
         let b = mig.add_ingredient("b", &["x", "z"], Base::default());
@@ -2198,7 +2215,7 @@ fn state_replay_migration_query() {
 
 #[test]
 fn recipe_activates() {
-    let mut g = ControllerBuilder::default().build_local();
+    let mut g = build_local("recipe_activates");
     g.migrate(|mig| {
         let r_txt = "CREATE TABLE b (a text, c text, x text);\n";
         let mut r = Recipe::from_str(r_txt, None).unwrap();
@@ -2217,7 +2234,7 @@ fn recipe_activates_and_migrates() {
     let r1_txt = "QUERY qa: SELECT a FROM b;\n
                   QUERY qb: SELECT a, c FROM b WHERE a = 42;";
 
-    let mut g = ControllerBuilder::default().build_local();
+    let mut g = build_local("recipe_activates_and_migrates");
     g.install_recipe(r_txt.to_owned()).unwrap();
     // one base node
     assert_eq!(g.inputs().len(), 1);
@@ -2235,7 +2252,7 @@ fn recipe_activates_and_migrates_with_join() {
                  CREATE TABLE b (r int, s int);\n";
     let r1_txt = "QUERY q: SELECT y, s FROM a, b WHERE a.x = b.r;";
 
-    let mut g = ControllerBuilder::default().build_local();
+    let mut g = build_local("recipe_activates_and_migrates_with_join");
     g.install_recipe(r_txt.to_owned()).unwrap();
 
     // two base nodes
@@ -2255,7 +2272,7 @@ fn finkelstein1982_queries() {
     use std::io::Read;
 
     // set up graph
-    let mut g = ControllerBuilder::default().build_local();
+    let mut g = build_local("finkelstein1982_queries");
     g.migrate(|mig| {
         let mut inc = SqlIncorporator::default();
         let mut f = File::open("tests/finkelstein82.txt").unwrap();
@@ -2287,7 +2304,7 @@ fn tpc_w() {
     use std::io::Read;
 
     // set up graph
-    let mut g = ControllerBuilder::default().build_local();
+    let mut g = build_local("tpc_w");
     g.migrate(|mig| {
         let mut r = Recipe::blank(None);
         let mut f = File::open("tests/tpc-w-queries.txt").unwrap();
