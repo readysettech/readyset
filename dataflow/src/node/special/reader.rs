@@ -142,6 +142,7 @@ impl Reader {
             use rand;
             let mut rng = rand::thread_rng();
             bytes_freed = handle.evict_random_keys(count, &mut rng);
+            handle.swap();
         }
         bytes_freed
     }
