@@ -10,6 +10,7 @@ extern crate lazy_static;
 #[macro_use]
 extern crate slog;
 
+mod schema;
 mod soup_backend;
 mod utils;
 
