@@ -2495,9 +2495,12 @@ impl Domain {
                         use core::data::SizeOf;
 
                         if self.nodes[&node].borrow().is_reader() {
+                            // we can only evict one key a time here because the freed memory
+                            // calculation is based on the key that *will* be evicted. We may count
+                            // the same individual key twice if we batch evictions here.
                             self.nodes[&node]
                                 .borrow_mut()
-                                .with_reader_mut(|r| freed += r.evict_random_keys(100));
+                                .with_reader_mut(|r| freed += r.evict_random_key());
                         } else {
                             let (key_columns, keys, bytes) = {
                                 let k = self.state[&node].evict_random_keys(100);

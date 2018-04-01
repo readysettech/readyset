@@ -238,19 +238,22 @@ impl WriteHandle {
     }
 
     /// Evict `count` randomly selected keys from state and return them along with the number of
-    /// bytes freed.
-    pub fn evict_random_keys(&mut self, count: usize, rng: &mut ThreadRng) -> u64 {
-        let mut bytes_freed = 0;
-        for _ in 0..count {
+    /// bytes that will be freed once the underlying `evmap` applies the operation.
+    pub fn evict_random_key(&mut self, rng: &mut ThreadRng) -> u64 {
+        let mut bytes_to_be_freed = 0;
+        if self.mem_size > 0 {
             match self.handle.empty_at_index(rng.gen()) {
-                None => continue,
+                None => (),
                 Some((_k, vs)) => {
                     let size: u64 = vs.into_iter().map(|r| r.deep_size_of() as u64).sum();
-                    bytes_freed += size;
+                    bytes_to_be_freed += size;
                 }
             }
+            self.mem_size = self.mem_size
+                .checked_sub(bytes_to_be_freed as usize)
+                .unwrap();
         }
-        bytes_freed
+        bytes_to_be_freed
     }
 }
 

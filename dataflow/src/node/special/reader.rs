@@ -134,14 +134,15 @@ impl Reader {
         self.token_generator = Some(gen);
     }
 
-    /// Evict `count` randomly selected keys, returning key columns of the index chosen to evict
-    /// from along with the keys evicted and the number of bytes evicted.
-    pub fn evict_random_keys(&mut self, count: usize) -> u64 {
+    /// Evict a randomly selected key, returning the number of bytes evicted.
+    /// Note that due to how `evmap` applies the evictions asynchronously, we can only evict a
+    /// single key at a time here.
+    pub fn evict_random_key(&mut self) -> u64 {
         let mut bytes_freed = 0;
         if let Some(ref mut handle) = self.writer {
             use rand;
             let mut rng = rand::thread_rng();
-            bytes_freed = handle.evict_random_keys(count, &mut rng);
+            bytes_freed = handle.evict_random_key(&mut rng);
             handle.swap();
         }
         bytes_freed
