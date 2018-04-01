@@ -65,9 +65,12 @@ impl trawler::LobstersClient for MysqlTrawler {
             c.get_conn()
                 .and_then(|c| c.drop_query(&format!("DROP DATABASE {}", db)))
                 .and_then(|c| c.drop_query(&format!("CREATE DATABASE {}", db)))
-                .and_then(|c| c.drop_query(&format!("USE {}", db)))
-                .and_then(|c| c.drop_query(include_str!("../db-schema.sql"))),
+                .and_then(|c| c.drop_query(&format!("USE {}", db))),
         ).unwrap();
+        for q in include_str!("../db-schema.sql").lines() {
+            core.run(c.get_conn().and_then(|c| c.drop_query(q)))
+                .unwrap();
+        }
     }
 
     fn handle(
