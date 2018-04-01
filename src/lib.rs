@@ -36,6 +36,7 @@ mod select;
 mod compound_select;
 mod table;
 mod delete;
+mod drop;
 mod update;
 mod set;
 mod order;

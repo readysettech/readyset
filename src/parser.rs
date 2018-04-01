@@ -7,6 +7,7 @@ use insert::{insertion, InsertStatement};
 use compound_select::{compound_selection, CompoundSelectStatement};
 use select::{selection, SelectStatement};
 use delete::{deletion, DeleteStatement};
+use drop::{drop_table, DropTableStatement};
 use update::{updating, UpdateStatement};
 use set::{set, SetStatement};
 
@@ -17,6 +18,7 @@ pub enum SqlQuery {
     CompoundSelect(CompoundSelectStatement),
     Select(SelectStatement),
     Delete(DeleteStatement),
+    DropTable(DropTableStatement),
     Update(UpdateStatement),
     Set(SetStatement),
 }
@@ -28,6 +30,7 @@ impl fmt::Display for SqlQuery {
             SqlQuery::Insert(ref insert) => write!(f, "{}", insert),
             SqlQuery::CreateTable(ref create) => write!(f, "{}", create),
             SqlQuery::Delete(ref delete) => write!(f, "{}", delete),
+            SqlQuery::DropTable(ref drop) => write!(f, "{}", drop),
             SqlQuery::Update(ref update) => write!(f, "{}", update),
             SqlQuery::Set(ref set) => write!(f, "{}", set),
             _ => unimplemented!(),
@@ -68,6 +71,11 @@ pub fn parse_query(input: &str) -> Result<SqlQuery, &str> {
 
     match deletion(&q_bytes) {
         IResult::Done(_, o) => return Ok(SqlQuery::Delete(o)),
+        _ => (),
+    };
+
+    match drop_table(&q_bytes) {
+        IResult::Done(_, o) => return Ok(SqlQuery::DropTable(o)),
         _ => (),
     };
 
