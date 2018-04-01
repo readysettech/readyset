@@ -585,7 +585,8 @@ impl<W: io::Write> MysqlShim<W> for SoupBackend {
                 nom_sql::SqlQuery::Update(q) => self.handle_update(q, results),
                 nom_sql::SqlQuery::Delete(q) => self.handle_delete(q, results),
                 nom_sql::SqlQuery::DropTable(q) => {
-                    warn!(self.log, "Ignoring DROP TABLE query: \"{}\"", q)
+                    warn!(self.log, "Ignoring DROP TABLE query: \"{}\"", q);
+                    return results.completed(0, 0);
                 }
                 _ => {
                     error!(self.log, "Unsupported query: {}", query);
