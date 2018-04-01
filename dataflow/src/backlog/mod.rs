@@ -240,11 +240,16 @@ impl WriteHandle {
     /// Evict `count` randomly selected keys from state and return them along with the number of
     /// bytes freed.
     pub fn evict_random_keys(&mut self, count: usize, rng: &mut ThreadRng) -> u64 {
-        let bytes_freed = 0;
+        let mut bytes_freed = 0;
         for _ in 0..count {
-            self.handle.empty_at_index(rng.gen());
+            match self.handle.empty_at_index(rng.gen()) {
+                None => continue,
+                Some((_k, vs)) => {
+                    let size: u64 = vs.into_iter().map(|r| r.deep_size_of() as u64).sum();
+                    bytes_freed += size;
+                }
+            }
         }
-        // XXX(malte): always zero!
         bytes_freed
     }
 }
