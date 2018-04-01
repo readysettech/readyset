@@ -1,10 +1,10 @@
+extern crate chrono;
+#[macro_use]
+extern crate clap;
+extern crate futures;
 extern crate mysql_async as my;
 extern crate tokio_core;
 extern crate trawler;
-#[macro_use]
-extern crate clap;
-extern crate chrono;
-extern crate futures;
 
 use clap::{App, Arg};
 use futures::Future;
