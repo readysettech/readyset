@@ -145,8 +145,11 @@ impl State {
 
 /// PersistentState stores data in SQlite.
 pub struct PersistentState {
-    // name: String,
-    db: DB,
+    name: String,
+    // We don't really want DB to be an option, but doing so lets us drop it manually in
+    // PersistenState's Drop by setting `self.db = None` - after which we can then discard the
+    // persisted files if we want to.
+    db: Option<DB>,
     durability_mode: DurabilityMode,
     indices: Vec<Vec<usize>>,
 }
@@ -166,12 +169,12 @@ impl PersistentState {
         // opts.optimize_for_point_lookup(cache_size); ?
 
         let full_name = format!("{}.db", name);
-        let db = DB::open(&opts, &full_name).unwrap();
+        let db = Some(DB::open(&opts, &full_name).unwrap());
 
         Self {
             db,
             durability_mode,
-            // name: full_name,
+            name: full_name,
             indices: Default::default(),
         }
     }
@@ -189,7 +192,8 @@ impl PersistentState {
         // to append to.
         // TODO(ekmartin): This would force each table to have a primary key, which is
         // probably not what we want.
-        self.db.put(&serialized_pk, &row).unwrap();
+        let db = self.db.as_ref().unwrap();
+        db.put(&serialized_pk, &row).unwrap();
 
         for (i, columns) in self.indices[1..].iter().enumerate() {
             // Construct a key with the index values, and serialize it with bincode:
@@ -198,7 +202,7 @@ impl PersistentState {
             let serialized_key = bincode::serialize(&(KeyIndex(i + 1), index)).unwrap();
             // Since an index can point to multiple primary keys, we attempt to retrieve the
             // existing rows this index points to, to add our new primary key to that.
-            let existing = self.db.get(&serialized_key).unwrap();
+            let existing = db.get(&serialized_key).unwrap();
             let mut values = if let Some(v) = existing {
                 let v: Vec<Vec<DataType>> = bincode::deserialize(&&*v).unwrap();
                 v
@@ -215,8 +219,7 @@ impl PersistentState {
                 .collect();
 
             rows.push(pk.clone());
-            self.db
-                .put(&serialized_key, &bincode::serialize(&rows).unwrap())
+            db.put(&serialized_key, &bincode::serialize(&rows).unwrap())
                 .unwrap();
         }
 
@@ -224,10 +227,11 @@ impl PersistentState {
     }
 
     fn remove(&mut self, r: &[DataType]) -> bool {
+        let db = self.db.as_ref().unwrap();
         for (i, columns) in self.indices.iter().enumerate() {
             let index = columns.iter().map(|i| &r[*i]).collect::<Vec<_>>();
             let serialized_key = bincode::serialize(&(KeyIndex(i), index)).unwrap();
-            self.db.delete(&serialized_key).unwrap();
+            db.delete(&serialized_key).unwrap();
         }
 
         true
@@ -280,7 +284,8 @@ impl PersistentState {
             .position(|index| &index[..] == columns)
             .expect("could not find index for columns");
         let k = bincode::serialize(&(index, values)).unwrap();
-        let pks_or_row: Vec<Vec<DataType>> = match self.db.get(&k).unwrap() {
+        let db = self.db.as_ref().unwrap();
+        let pks_or_row: Vec<Vec<DataType>> = match db.get(&k).unwrap() {
             Some(data) => bincode::deserialize(&*data).unwrap(),
             None => return LookupResult::Some(Cow::Owned(vec![])),
         };
@@ -295,8 +300,7 @@ impl PersistentState {
                 .into_iter()
                 .flat_map(|pk| {
                     let k = bincode::serialize(&(KeyIndex(0), pk)).unwrap();
-                    let data = self.db
-                        .get(&k)
+                    let data = db.get(&k)
                         .unwrap()
                         .expect("index points to non-existant primary key value");
                     let rs: Vec<Vec<DataType>> = bincode::deserialize(&*data).unwrap();
@@ -314,6 +318,8 @@ impl PersistentState {
 
     fn cloned_records(&self) -> Vec<Vec<DataType>> {
         self.db
+            .as_ref()
+            .unwrap()
             .iterator(rocksdb::IteratorMode::Start)
             .filter(|&(ref key, _)| {
                 // Filter out non-pk indices:
@@ -329,6 +335,8 @@ impl PersistentState {
 
     fn rows(&self) -> usize {
         self.db
+            .as_ref()
+            .unwrap()
             .iterator(rocksdb::IteratorMode::Start)
             .filter(|&(ref key, _)| {
                 // Filter out non-pk indices:
@@ -340,8 +348,9 @@ impl PersistentState {
 
     fn clear(&self) {
         // Would potentially be faster to just drop self.db and call DB::Destroy:
-        for (key, _) in self.db.iterator(rocksdb::IteratorMode::Start) {
-            self.db.delete(&key).unwrap();
+        let db = self.db.as_ref().unwrap();
+        for (key, _) in db.iterator(rocksdb::IteratorMode::Start) {
+            db.delete(&key).unwrap();
         }
     }
 }
@@ -349,10 +358,8 @@ impl PersistentState {
 impl Drop for PersistentState {
     fn drop(&mut self) {
         if self.durability_mode != DurabilityMode::Permanent {
-            // We'd like to destroy the database files here as well, but to do so we need to drop
-            // self.db first. How would we do that? Ideally we'd want something like PostDrop, but
-            // maybe we just have to move this higher up the hierarchy instead.
-            // DB::destroy(&rocksdb::Options::default(), &self.name).unwrap()
+            self.db = None;
+            DB::destroy(&rocksdb::Options::default(), &self.name).unwrap()
         }
     }
 }
@@ -559,51 +566,30 @@ impl SizeOf for State {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::path::Path;
     use std::time::{SystemTime, UNIX_EPOCH};
 
-    // Ensures correct handling of state file names, by deleting used state files in Drop.
-    struct StateName {
-        name: String,
-    }
+    fn setup_persistent(prefix: &str) -> State {
+        let current_time = SystemTime::now().duration_since(UNIX_EPOCH).unwrap();
+        let name = format!(
+            "{}.{}.{}",
+            prefix,
+            current_time.as_secs(),
+            current_time.subsec_nanos()
+        );
 
-    impl StateName {
-        fn new(prefix: &str) -> Self {
-            let current_time = SystemTime::now().duration_since(UNIX_EPOCH).unwrap();
-            let name = format!(
-                "{}.{}.{}",
-                prefix,
-                current_time.as_secs(),
-                current_time.subsec_nanos()
-            );
-
-            Self { name }
-        }
-    }
-
-    // Removes the log files matching the glob ./{log_name}-*.json.
-    // Used to clean up after recovery tests, where a persistent log is created.
-    impl Drop for StateName {
-        fn drop(&mut self) {
-            // TODO: might have to use the same options here?
-            DB::destroy(&rocksdb::Options::default(), format!("{}.db", self.name)).unwrap()
-        }
-    }
-
-    fn setup_persistent(name: String) -> State {
         State::base(name, DurabilityMode::MemoryOnly)
     }
 
     #[test]
     fn persistent_state_is_partial() {
-        let n = StateName::new("persistent_state_is_partial");
-        let state = setup_persistent(n.name.clone());
+        let state = setup_persistent("persistent_state_is_partial");
         assert!(!state.is_partial());
     }
 
     #[test]
     fn persistent_state_single_key() {
-        let n = StateName::new("persistent_state_single_key");
-        let mut state = setup_persistent(n.name.clone());
+        let mut state = setup_persistent("persistent_state_single_key");
         let columns = &[0];
         let row: Vec<DataType> = vec![10.into(), "Cat".into()];
         state.add_key(columns, None);
@@ -626,8 +612,7 @@ mod tests {
 
     #[test]
     fn persistent_state_multi_key() {
-        let n = StateName::new("persistent_state_multi_key");
-        let mut state = setup_persistent(n.name.clone());
+        let mut state = setup_persistent("persistent_state_multi_key");
         let columns = &[0, 2];
         let row: Vec<DataType> = vec![10.into(), "Cat".into(), 20.into()];
         state.add_key(columns, None);
@@ -648,8 +633,7 @@ mod tests {
 
     #[test]
     fn persistent_state_multiple_indices() {
-        let n = StateName::new("persistent_state_multiple_indices");
-        let mut state = setup_persistent(n.name.clone());
+        let mut state = setup_persistent("persistent_state_multiple_indices");
         let first: Vec<DataType> = vec![10.into(), "Cat".into(), 1.into()];
         let second: Vec<DataType> = vec![20.into(), "Cat".into(), 1.into()];
         state.add_key(&[0], None);
@@ -677,8 +661,7 @@ mod tests {
 
     #[test]
     fn persistent_state_different_indices() {
-        let n = StateName::new("persistent_state_different_indices");
-        let mut state = setup_persistent(n.name.clone());
+        let mut state = setup_persistent("persistent_state_different_indices");
         let first: Vec<DataType> = vec![10.into(), "Cat".into()];
         let second: Vec<DataType> = vec![20.into(), "Bob".into()];
         state.add_key(&[0], None);
@@ -705,8 +688,7 @@ mod tests {
 
     #[test]
     fn persistent_state_remove() {
-        let n = StateName::new("persistent_state_remove");
-        let mut state = setup_persistent(n.name.clone());
+        let mut state = setup_persistent("persistent_state_remove");
         let columns = &[0];
         let first: Vec<DataType> = vec![10.into(), "Cat".into()];
         let second: Vec<DataType> = vec![20.into(), "Bob".into()];
@@ -730,8 +712,7 @@ mod tests {
 
     #[test]
     fn persistent_state_is_useful() {
-        let n = StateName::new("persistent_state_is_useful");
-        let mut state = setup_persistent(n.name.clone());
+        let mut state = setup_persistent("persistent_state_is_useful");
         let columns = &[0];
         assert!(!state.is_useful());
         state.add_key(columns, None);
@@ -740,8 +721,7 @@ mod tests {
 
     #[test]
     fn persistent_state_rows() {
-        let n = StateName::new("persistent_state_rows");
-        let mut state = setup_persistent(n.name.clone());
+        let mut state = setup_persistent("persistent_state_rows");
         let first: Vec<DataType> = vec![10.into(), "Cat".into()];
         let second: Vec<DataType> = vec![20.into(), "Bob".into()];
         state.add_key(&[0], None);
@@ -755,8 +735,7 @@ mod tests {
 
     #[test]
     fn persistent_state_cloned_records() {
-        let n = StateName::new("persistent_state_cloned_records");
-        let mut state = setup_persistent(n.name.clone());
+        let mut state = setup_persistent("persistent_state_cloned_records");
         let columns = &[0];
         let first: Vec<DataType> = vec![10.into(), "Cat".into()];
         let second: Vec<DataType> = vec![20.into(), "Bob".into()];
@@ -768,8 +747,7 @@ mod tests {
 
     #[test]
     fn persistent_state_clear() {
-        let n = StateName::new("persistent_state_clear");
-        let mut state = setup_persistent(n.name.clone());
+        let mut state = setup_persistent("persistent_state_clear");
         let columns = &[0];
         let first: Vec<DataType> = vec![10.into(), "Cat".into()];
         let second: Vec<DataType> = vec![20.into(), "Bob".into()];
@@ -781,23 +759,22 @@ mod tests {
         assert_eq!(state.rows(), 0);
     }
 
-    // #[test]
-    // fn persistent_state_drop() {
-    //     let name = ".s-o_u#p.";
-    //     let db_name = format!("{}.db", name);
-    //     let path = Path::new(&db_name);
-    //     {
-    //         let _state = State::base(String::from(name), DurabilityMode::DeleteOnExit);
-    //         assert!(path.exists());
-    //     }
+    #[test]
+    fn persistent_state_drop() {
+        let name = ".s-o_u#p.";
+        let db_name = format!("{}.db", name);
+        let path = Path::new(&db_name);
+        {
+            let _state = State::base(String::from(name), DurabilityMode::DeleteOnExit);
+            assert!(path.exists());
+        }
 
-    //     assert!(!path.exists());
-    // }
+        assert!(!path.exists());
+    }
 
     #[test]
     fn persistent_state_old_records_new_index() {
-        let n = StateName::new("persistent_state_old_records_new_index");
-        let mut state = setup_persistent(n.name.clone());
+        let mut state = setup_persistent("persistent_state_old_records_new_index");
         let row: Vec<DataType> = vec![10.into(), "Cat".into()];
         state.add_key(&[0], None);
         assert!(state.insert(row.clone(), None));
@@ -838,8 +815,7 @@ mod tests {
 
     #[test]
     fn persistent_state_process_records() {
-        let n = StateName::new("persistent_state_process_records");
-        let state = setup_persistent(n.name.clone());
+        let state = setup_persistent("persistent_state_process_records");
         process_records(state);
     }
 
