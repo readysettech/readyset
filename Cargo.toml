@@ -42,7 +42,7 @@ serde = { version = "1.0.8", features = ["rc"] }
 # git deps
 petgraph = { version = "0.4.11", features = ["serde-1"] }
 memcached-rs = { git = "https://github.com/jonhoo/memcached-rs.git", branch = "expose-multi" }
-nom_sql = { git = "https://github.com/ms705/nom-sql.git", rev = "beb5bbb07cf0a94516cad545a2f9592af9371c54" }
+nom_sql = { git = "https://github.com/ms705/nom-sql.git", rev = "d8c96eae6fb0c5a9aba34fd49fcde459e0eea131" }
 
 # local deps
 channel = { path = "channel" }

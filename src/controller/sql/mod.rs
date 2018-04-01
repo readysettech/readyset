@@ -694,6 +694,7 @@ impl SqlIncorporator {
             | ref q @ SqlQuery::Set(_)
             | ref q @ SqlQuery::Update(_)
             | ref q @ SqlQuery::Delete(_)
+            | ref q @ SqlQuery::DropTable(_)
             | ref q @ SqlQuery::Insert(_) => for t in &q.referred_tables() {
                 if !self.view_schemas.contains_key(&t.name) {
                     panic!("query refers to unknown table \"{}\"", t.name);
