@@ -10,6 +10,7 @@ use std::collections::{BTreeMap, HashMap};
 use std::sync::{self, Arc, Mutex};
 
 use utils;
+use schema::schema_for_query;
 
 pub struct SoupBackend {
     soup: ControllerHandle<ZookeeperAuthority>,
@@ -61,52 +62,7 @@ impl SoupBackend {
             auto_increments: auto_increments,
 
             query_count: query_counter,
-        }
-    }
 
-    fn schema_for_column(&self, c: &nom_sql::Column) -> msql_srv::Column {
-        let table = c.table.as_ref().unwrap();
-        let ts_lock = self.table_schemas.lock().unwrap();
-        let col_schema = &(*ts_lock)[table]
-            .fields
-            .iter()
-            .find(|cc| cc.column.name == c.name)
-            .expect(&format!("column {} not found", c.name));
-        assert_eq!(col_schema.column.name, c.name);
-
-        msql_srv::Column {
-            table: table.clone(),
-            column: c.name.clone(),
-            coltype: match col_schema.sql_type {
-                SqlType::Longtext => msql_srv::ColumnType::MYSQL_TYPE_BLOB,
-                SqlType::Text => msql_srv::ColumnType::MYSQL_TYPE_STRING,
-                SqlType::Varchar(_) => msql_srv::ColumnType::MYSQL_TYPE_VAR_STRING,
-                SqlType::Int(_) => msql_srv::ColumnType::MYSQL_TYPE_LONG,
-                SqlType::DateTime => msql_srv::ColumnType::MYSQL_TYPE_DATETIME,
-                SqlType::Bool => msql_srv::ColumnType::MYSQL_TYPE_TINY,
-                _ => unimplemented!(),
-            },
-            colflags: {
-                let mut flags = msql_srv::ColumnFlags::empty();
-                for c in &col_schema.constraints {
-                    match *c {
-                        ColumnConstraint::AutoIncrement => {
-                            flags |= msql_srv::ColumnFlags::AUTO_INCREMENT_FLAG;
-                        }
-                        ColumnConstraint::NotNull => {
-                            flags |= msql_srv::ColumnFlags::NOT_NULL_FLAG;
-                        }
-                        ColumnConstraint::PrimaryKey => {
-                            flags |= msql_srv::ColumnFlags::PRI_KEY_FLAG;
-                        }
-                        ColumnConstraint::Unique => {
-                            flags |= msql_srv::ColumnFlags::UNIQUE_KEY_FLAG;
-                        }
-                        _ => (),
-                    }
-                }
-                flags
-            },
         }
     }
 
@@ -248,28 +204,8 @@ impl SoupBackend {
         // first do a migration to add the query if it doesn't exist already
         match self.soup.extend_recipe(format!("QUERY {}: {};", qname, q)) {
             Ok(_) => {
-                let mut schema: Vec<msql_srv::Column> = Vec::new();
-                for fe in q.fields {
-                    match fe {
-                        nom_sql::FieldExpression::Col(c) => {
-                            schema.push(self.schema_for_column(&c));
-                        }
-                        nom_sql::FieldExpression::Literal(le) => schema.push(msql_srv::Column {
-                            table: "".to_owned(),
-                            column: match le.alias {
-                                Some(a) => a,
-                                None => le.value.to_string(),
-                            },
-                            coltype: match le.value {
-                                Literal::Integer(_) => msql_srv::ColumnType::MYSQL_TYPE_LONG,
-                                Literal::String(_) => msql_srv::ColumnType::MYSQL_TYPE_VAR_STRING,
-                                _ => unimplemented!(),
-                            },
-                            colflags: msql_srv::ColumnFlags::empty(),
-                        }),
-                        _ => unimplemented!(),
-                    }
-                }
+                let ts_lock = self.table_schemas.lock().unwrap();
+                let schema = schema_for_query(&(*ts_lock), &q);
 
                 // create a getter if we don't have one for this query already
                 // TODO(malte): may need to make one anyway if the query has changed w.r.t. an

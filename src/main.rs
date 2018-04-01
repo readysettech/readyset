@@ -13,8 +13,9 @@ extern crate slog;
 
 extern crate regex;
 
-mod soup_backend;
 mod utils;
+mod soup_backend;
+mod schema;
 
 use msql_srv::MysqlIntermediary;
 use nom_sql::CreateTableStatement;
