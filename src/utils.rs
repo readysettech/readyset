@@ -2,7 +2,7 @@ use std::collections::HashSet;
 
 use distributary::DataType;
 use nom_sql::{Column, ColumnConstraint, ConditionBase, ConditionExpression, ConditionTree,
-              CreateTableStatement, Operator, TableKey};
+              CreateTableStatement, Operator, SelectStatement, TableKey};
 use regex::Regex;
 
 lazy_static! {
@@ -187,6 +187,46 @@ pub(crate) fn get_primary_key(schema: &CreateTableStatement) -> Vec<(usize, &Col
         })
         .map(|(i, cs)| (i, &cs.column))
         .collect()
+}
+
+fn get_parameter_columns_recurse(cond: &ConditionExpression) -> Vec<&Column> {
+    match *cond {
+        ConditionExpression::ComparisonOp(ConditionTree {
+            left: box ConditionExpression::Base(ConditionBase::Field(ref c)),
+            right: box ConditionExpression::Base(ConditionBase::Placeholder),
+            operator: Operator::Equal,
+        })
+        | ConditionExpression::ComparisonOp(ConditionTree {
+            left: box ConditionExpression::Base(ConditionBase::Placeholder),
+            right: box ConditionExpression::Base(ConditionBase::Field(ref c)),
+            operator: Operator::Equal,
+        }) => vec![c],
+        ConditionExpression::LogicalOp(ConditionTree {
+            operator: Operator::And,
+            ref left,
+            ref right,
+        })
+        | ConditionExpression::LogicalOp(ConditionTree {
+            operator: Operator::Or,
+            ref left,
+            ref right,
+        }) => {
+            let mut l = get_parameter_columns_recurse(left);
+            let mut r = get_parameter_columns_recurse(right);
+            l.append(&mut r);
+            r
+        }
+        ConditionExpression::NegationOp(ref expr) => get_parameter_columns_recurse(expr),
+        _ => unimplemented!(),
+    }
+}
+
+pub(crate) fn get_parameter_columns(query: &SelectStatement) -> Vec<&Column> {
+    if let Some(ref wc) = query.where_clause {
+        get_parameter_columns_recurse(wc)
+    } else {
+        vec![]
+    }
 }
 
 #[cfg(test)]

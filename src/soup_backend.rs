@@ -10,7 +10,7 @@ use std::collections::{BTreeMap, HashMap};
 use std::sync::{self, Arc, Mutex};
 
 use utils;
-use schema::schema_for_query;
+use schema::{schema_for_column, schema_for_query};
 
 pub struct SoupBackend {
     soup: ControllerHandle<ZookeeperAuthority>,
@@ -471,10 +471,14 @@ impl<W: io::Write> MysqlShim<W> for SoupBackend {
                 nom_sql::SqlQuery::Select(q) => {
                     // extract parameter columns
                     let ts_lock = self.table_schemas.lock().unwrap();
-                    let schema = schema_for_query(&(*ts_lock), &q);
+                    let table_schemas = &(*ts_lock);
+                    let schema = schema_for_query(table_schemas, &q);
 
-                    // XXX(malte): incorrect! need to extract parameter columns
-                    let params: Vec<msql_srv::Column> = vec![];
+                    // extract parameter columns
+                    let params: Vec<msql_srv::Column> = utils::get_parameter_columns(&q)
+                        .into_iter()
+                        .map(|c| schema_for_column(table_schemas, c))
+                        .collect();
 
                     // add the query to Soup
                     let qc = self.query_count
