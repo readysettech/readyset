@@ -182,18 +182,25 @@ impl PersistentState {
     // Puts by primary key first, then retrieves the existing value for each index and appends the
     // newly created primary key value.
     fn insert(&mut self, r: Vec<DataType>) -> bool {
-        let pk = self.indices[0].iter().map(|i| &r[*i]).collect::<Vec<_>>();
+        let pk = self.indices[0]
+            .iter()
+            .map(|i| r[*i].clone())
+            .collect::<Vec<_>>();
         let serialized_pk = bincode::serialize(&(KeyIndex(0), &pk)).unwrap();
-        // Wrap it in a vec to always maintain the same data type for both the primary and other
-        // indices: Vec<Vec<DataType>>
-        let row = bincode::serialize(&vec![&r]).unwrap();
-        // We assume the first index is a primary key, which means we can't have multiple
-        // rows for the first index, and that we don't have to retrieve an existing value
-        // to append to.
-        // TODO(ekmartin): This would force each table to have a primary key, which is
-        // probably not what we want.
         let db = self.db.as_ref().unwrap();
-        db.put(&serialized_pk, &row).unwrap();
+        let mut rows = if let Some(v) = db.get(&serialized_pk).unwrap() {
+            let v: Vec<Vec<DataType>> = bincode::deserialize(&&*v).unwrap();
+            v
+        } else {
+            vec![]
+        };
+
+        rows.push(r.clone());
+        let mut write_opts = rocksdb::WriteOptions::default();
+        write_opts.set_sync(false);
+        write_opts.disable_wal(true);
+        let pk_value = bincode::serialize(&rows).unwrap();
+        db.put_opt(&serialized_pk, &pk_value, &write_opts).unwrap();
 
         for (i, columns) in self.indices[1..].iter().enumerate() {
             // Construct a key with the index values, and serialize it with bincode:
@@ -210,17 +217,12 @@ impl PersistentState {
                 vec![]
             };
 
-            // To avoid having to clone all the values in primary_index we turn
-            // our Vec<Vec<DataType>> into Vec<Vec<&DataType>>, which lets us clone
-            // only primary_index itself - not each column.
-            let mut rows: Vec<Vec<&DataType>> = values
-                .iter()
-                .map(|row| row.iter().map(|d| d).collect())
-                .collect();
-
-            rows.push(pk.clone());
-            db.put(&serialized_key, &bincode::serialize(&rows).unwrap())
-                .unwrap();
+            values.push(pk.clone());
+            db.put_opt(
+                &serialized_key,
+                &bincode::serialize(&values).unwrap(),
+                &write_opts,
+            ).unwrap();
         }
 
         true
