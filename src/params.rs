@@ -1,6 +1,6 @@
+use myc;
 use std::borrow::Borrow;
 use {Column, Value};
-use myc;
 
 /// A `ParamParser` decodes query parameters included in a client's `EXECUTE` command given
 /// type information for the expected parameters.

@@ -1,9 +1,9 @@
-use std::io::{self, Write};
-use myc;
-use myc::io::WriteMysqlExt;
-use myc::constants::{ColumnFlags, ColumnType};
-use byteorder::{LittleEndian, WriteBytesExt};
 use Column;
+use byteorder::{LittleEndian, WriteBytesExt};
+use myc;
+use myc::constants::{ColumnFlags, ColumnType};
+use myc::io::WriteMysqlExt;
+use std::io::{self, Write};
 
 /// Implementors of this trait can be sent as a single resultset value to a MySQL/MariaDB client.
 pub trait ToMysqlValue {
@@ -65,7 +65,7 @@ where
 //       see https://github.com/jonhoo/msql-srv/commit/13e5e753e5042a42cc45ad57c2b760561da2fb50
 // NOTE: yes, I know the = / => distinction is ugly
 macro_rules! like_try_into {
-    ($self: ident, $source: ty = $target: ty, $w: ident, $m: ident, $c: ident) => {{
+    ($self:ident, $source:ty = $target:ty, $w:ident, $m:ident, $c:ident) => {{
         let min = <$target>::min_value() as $source;
         let max = <$target>::max_value() as $source;
         if *$self <= max && *$self >= min {
@@ -74,7 +74,7 @@ macro_rules! like_try_into {
             Err(bad($self, $c))
         }
     }};
-    ($self: ident, $source: ty => $target: ty, $w: ident, $m: ident, $c: ident) => {{
+    ($self:ident, $source:ty => $target:ty, $w:ident, $m:ident, $c:ident) => {{
         let min = <$target>::min_value() as $source;
         let max = <$target>::max_value() as $source;
         if *$self <= max && *$self >= min {
@@ -86,7 +86,7 @@ macro_rules! like_try_into {
 }
 
 macro_rules! forgiving_numeric {
-    ($t: ty) => {
+    ($t:ty) => {
         impl ToMysqlValue for $t {
             mysql_text_trivial!();
             fn to_mysql_bin<W: Write>(&self, w: &mut W, c: &Column) -> io::Result<()> {
@@ -647,18 +647,18 @@ impl ToMysqlValue for myc::value::Value {
 #[cfg(test)]
 #[allow(unused_imports)]
 mod tests {
-    use myc::value;
-    use myc::value::convert::from_value;
-    use {Column, ColumnFlags, ColumnType};
     use super::ToMysqlValue;
     use chrono::{self, TimeZone};
+    use myc::value;
+    use myc::value::convert::from_value;
     use std::time;
+    use {Column, ColumnFlags, ColumnType};
 
     mod roundtrip_text {
         use super::*;
 
         macro_rules! rt {
-            ($name: ident, $t: ty, $v: expr) => {
+            ($name:ident, $t:ty, $v:expr) => {
                 #[test]
                 fn $name() {
                     let mut data = Vec::new();
@@ -714,10 +714,10 @@ mod tests {
         use super::*;
 
         macro_rules! rt {
-            ($name: ident, $t: ty, $v: expr, $ct: expr) => {
+            ($name:ident, $t:ty, $v:expr, $ct:expr) => {
                 rt!($name, $t, $v, $ct, false);
             };
-            ($name: ident, $t: ty, $v: expr, $ct: expr, $sig: expr) => {
+            ($name:ident, $t:ty, $v:expr, $ct:expr, $sig:expr) => {
                 #[test]
                 fn $name() {
                     let mut data = Vec::new();

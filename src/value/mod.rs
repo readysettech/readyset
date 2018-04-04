@@ -1,5 +1,5 @@
-mod encode;
 mod decode;
+mod encode;
 
-pub use self::encode::ToMysqlValue;
 pub use self::decode::Value;
+pub use self::encode::ToMysqlValue;

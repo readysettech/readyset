@@ -8,10 +8,10 @@
 extern crate msql_srv;
 extern crate mysql;
 
+use msql_srv::*;
 use std::io;
 use std::net;
 use std::thread;
-use msql_srv::*;
 
 struct Backend;
 impl<W: io::Write> MysqlShim<W> for Backend {

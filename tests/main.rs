@@ -3,9 +3,9 @@ extern crate mysql;
 extern crate mysql_common as myc;
 extern crate nom;
 
-use std::thread;
-use std::net;
 use std::io;
+use std::net;
+use std::thread;
 
 use msql_srv::{Column, ErrorKind, MysqlIntermediary, MysqlShim, ParamParser, QueryResultWriter,
                StatementMetaWriter};

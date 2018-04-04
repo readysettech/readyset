@@ -93,20 +93,20 @@ extern crate mysql_common as myc;
 #[macro_use]
 extern crate nom;
 
-use std::io::prelude::*;
-use std::net;
 use std::io;
+use std::io::prelude::*;
 use std::iter;
+use std::net;
 
 pub use myc::constants::{ColumnFlags, ColumnType};
 
-mod packet;
 mod commands;
-mod params;
-mod value;
-mod resultset;
-mod writers;
 mod errorcodes;
+mod packet;
+mod params;
+mod resultset;
+mod value;
+mod writers;
 
 /// Meta-information abot a single column, used either to describe a prepared statement parameter
 /// or an output column.
@@ -128,10 +128,10 @@ pub struct Column {
     pub colflags: ColumnFlags,
 }
 
-pub use value::{ToMysqlValue, Value};
-pub use resultset::{QueryResultWriter, RowWriter, StatementMetaWriter};
 pub use errorcodes::ErrorKind;
 pub use params::{ParamParser, Params};
+pub use resultset::{QueryResultWriter, RowWriter, StatementMetaWriter};
+pub use value::{ToMysqlValue, Value};
 
 /// Implementors of this trait can be used to drive a MySQL-compatible database backend.
 pub trait MysqlShim<W: Write> {

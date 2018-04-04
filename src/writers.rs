@@ -1,9 +1,9 @@
-use std::io::{self, Write};
-use packet::PacketWriter;
-use {Column, ErrorKind};
 use byteorder::{LittleEndian, WriteBytesExt};
-use myc::io::WriteMysqlExt;
 use myc::constants::StatusFlags;
+use myc::io::WriteMysqlExt;
+use packet::PacketWriter;
+use std::io::{self, Write};
+use {Column, ErrorKind};
 
 pub(crate) fn write_eof_packet<W: Write>(
     w: &mut PacketWriter<W>,
