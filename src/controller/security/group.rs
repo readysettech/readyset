@@ -1,8 +1,8 @@
+use controller::security::policy::Policy;
+use nom_sql::SqlQuery;
+use nom_sql::parser as sql_parser;
 use serde_json;
 use serde_json::Value;
-use nom_sql::parser as sql_parser;
-use nom_sql::SqlQuery;
-use controller::security::policy::Policy;
 
 #[derive(Clone, Debug, Hash, PartialEq, Serialize, Deserialize)]
 pub struct Group {

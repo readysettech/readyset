@@ -1,8 +1,8 @@
-use controller::sql::reuse::{ReuseConfiguration, ReuseType};
 use controller::sql::query_graph::QueryGraph;
+use controller::sql::reuse::{ReuseConfiguration, ReuseType};
 
-use std::vec::Vec;
 use std::collections::HashMap;
+use std::vec::Vec;
 
 /// Full reuse algorithm
 /// Implementation of reuse algorithm that checks all available reuse options.

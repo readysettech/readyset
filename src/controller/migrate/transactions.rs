@@ -1,10 +1,10 @@
-use dataflow::prelude::*;
-use dataflow::payload::{EgressForBase, IngressFromBase};
 use controller::domain_handle::DomainHandle;
+use dataflow::payload::{EgressForBase, IngressFromBase};
+use dataflow::prelude::*;
 use petgraph;
+use slog::Logger;
 use std::borrow::Borrow;
 use std::collections::{HashMap, HashSet};
-use slog::Logger;
 
 fn count_base_ingress(
     graph: &Graph,

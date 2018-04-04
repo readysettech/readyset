@@ -1,9 +1,9 @@
-use std::collections::{HashMap, HashSet};
+use controller::domain_handle::DomainHandle;
+use controller::keys;
 use dataflow::payload::TriggerEndpoint;
 use dataflow::prelude::*;
-use controller::keys;
-use controller::domain_handle::DomainHandle;
 use petgraph;
+use std::collections::{HashMap, HashSet};
 
 const FILTER_SPECIFICITY: usize = 10;
 

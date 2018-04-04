@@ -1,12 +1,13 @@
+use nom_sql::SqlQuery;
+use nom_sql::parser as sql_parser;
 use serde_json;
 use serde_json::Value;
-use nom_sql::parser as sql_parser;
-use nom_sql::SqlQuery;
 
 enum Action {
     Allow,
     Deny,
-    #[allow(dead_code)] Rewrite,
+    #[allow(dead_code)]
+    Rewrite,
 }
 
 #[derive(Clone, Debug, Hash, PartialEq, Serialize, Deserialize)]

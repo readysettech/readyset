@@ -2,16 +2,16 @@ use nom_sql::{ArithmeticBase, ArithmeticExpression, Column, ColumnConstraint, Co
               OrderType};
 use std::collections::HashMap;
 
+use controller::Migration;
 use core::{DataType, NodeIndex};
-use mir::{FlowNode, MirNodeRef};
-use mir::node::{GroupedNodeType, MirNode, MirNodeType};
-use mir::query::{MirQuery, QueryFlowParts};
+use dataflow::ops;
+use dataflow::ops::filter::FilterCondition;
 use dataflow::ops::join::{Join, JoinType};
 use dataflow::ops::latest::Latest;
 use dataflow::ops::project::{Project, ProjectExpression, ProjectExpressionBase};
-use dataflow::ops::filter::FilterCondition;
-use dataflow::ops;
-use controller::Migration;
+use mir::node::{GroupedNodeType, MirNode, MirNodeType};
+use mir::query::{MirQuery, QueryFlowParts};
+use mir::{FlowNode, MirNodeRef};
 
 pub fn mir_query_to_flow_parts(mir_query: &mut MirQuery, mig: &mut Migration) -> QueryFlowParts {
     use std::collections::VecDeque;

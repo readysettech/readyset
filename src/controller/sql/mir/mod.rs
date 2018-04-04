@@ -3,16 +3,16 @@ pub use mir::MirNodeRef;
 use mir::node::{GroupedNodeType, MirNode, MirNodeType};
 use mir::query::MirQuery;
 // TODO(malte): remove if possible
-pub use mir::FlowNode;
 use dataflow::ops::filter::FilterCondition;
 use dataflow::ops::join::JoinType;
+pub use mir::FlowNode;
 
+use controller::sql::query_graph::{OutputColumn, QueryGraph};
+use controller::sql::query_signature::Signature;
 use nom_sql::{ArithmeticExpression, Column, ColumnSpecification, CompoundSelectOperator,
               ConditionBase, ConditionExpression, ConditionTree, Literal, Operator, SqlQuery,
               TableKey};
 use nom_sql::{LimitClause, OrderClause, SelectStatement};
-use controller::sql::query_graph::{OutputColumn, QueryGraph};
-use controller::sql::query_signature::Signature;
 
 use slog;
 use std::collections::{HashMap, HashSet};
@@ -20,13 +20,13 @@ use std::collections::{HashMap, HashSet};
 use std::ops::Deref;
 use std::vec::Vec;
 
-use controller::sql::security::Universe;
 use controller::sql::UniverseId;
+use controller::sql::security::Universe;
 
+mod grouped;
+mod join;
 mod rewrite;
 mod security;
-mod join;
-mod grouped;
 
 fn sanitize_leaf_column(mut c: Column, view_name: &str) -> Column {
     c.table = Some(view_name.to_string());
@@ -1111,10 +1111,10 @@ impl SqlToMirConverter {
         has_leaf: bool,
         universe: UniverseId,
     ) -> Vec<MirNodeRef> {
-        use std::collections::HashMap;
-        use controller::sql::mir::join::make_joins;
-        use controller::sql::mir::grouped::make_predicates_above_grouped;
         use controller::sql::mir::grouped::make_grouped;
+        use controller::sql::mir::grouped::make_predicates_above_grouped;
+        use controller::sql::mir::join::make_joins;
+        use std::collections::HashMap;
 
         let mut nodes_added: Vec<MirNodeRef>;
         let mut new_node_count = 0;

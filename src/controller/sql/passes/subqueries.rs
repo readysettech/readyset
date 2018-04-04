@@ -1,5 +1,5 @@
-use nom_sql::{Column, ConditionBase, ConditionExpression, JoinRightSide, SqlQuery};
 use nom_sql::ConditionExpression::*;
+use nom_sql::{Column, ConditionBase, ConditionExpression, JoinRightSide, SqlQuery};
 
 #[derive(Debug, PartialEq)]
 pub enum Subquery<'a> {
@@ -38,8 +38,8 @@ pub fn field_with_table_name(name: String, column: Column) -> ConditionBase {
 }
 
 pub fn query_from_condition_base(cond: &ConditionBase) -> (SqlQuery, Column) {
-    use nom_sql::FieldExpression;
     use nom_sql::ConditionBase::NestedSelect;
+    use nom_sql::FieldExpression;
     let (sq, column);
     match *cond {
         NestedSelect(ref bst) => {
@@ -88,11 +88,11 @@ impl SubQueries for SqlQuery {
 
 #[cfg(test)]
 mod tests {
-    use nom_sql::{Column, ConditionTree, FieldExpression, Operator, SelectStatement, SqlQuery,
-                  Table};
+    use super::*;
     use nom_sql::ConditionBase::*;
     use nom_sql::ConditionExpression::*;
-    use super::*;
+    use nom_sql::{Column, ConditionTree, FieldExpression, Operator, SelectStatement, SqlQuery,
+                  Table};
 
     fn wrap(cb: ConditionBase) -> Box<ConditionExpression> {
         Box::new(Base(cb))

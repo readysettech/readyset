@@ -1,24 +1,24 @@
-use std::io;
-use std::thread;
-use std::net::{SocketAddr, ToSocketAddrs};
-use std::sync::{mpsc, Arc, Mutex, TryLockError};
-use std::os::unix::io::{AsRawFd, RawFd};
-use std::ops::AddAssign;
 use std::cell::RefCell;
+use std::io;
+use std::net::{SocketAddr, ToSocketAddrs};
+use std::ops::AddAssign;
+use std::os::unix::io::{AsRawFd, RawFd};
+use std::sync::{mpsc, Arc, Mutex, TryLockError};
+use std::thread;
 
 use fnv::FnvHashMap;
-use slab::Slab;
-use vec_map::VecMap;
-use mio_pool::poll::{Events, Poll, Token};
 use mio::net::TcpListener;
+use mio_pool::poll::{Events, Poll, Token};
+use slab::Slab;
 use slog::Logger;
 use timer_heap::{TimerHeap, TimerType};
+use vec_map::VecMap;
 
-use channel::{self, TcpReceiver, TcpSender};
 use channel::poll::{PollEvent, ProcessResult};
 use channel::tcp::{SendError, TryRecvError};
-use dataflow::{self, Domain, Packet};
+use channel::{self, TcpReceiver, TcpSender};
 use dataflow::payload::SourceChannelIdentifier;
+use dataflow::{self, Domain, Packet};
 
 struct CachedRawFd(RawFd);
 

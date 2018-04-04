@@ -1,11 +1,11 @@
-use dataflow::prelude::DataType;
 use controller::Migration;
-use std::collections::HashMap;
-use nom_sql::SqlQuery;
 use controller::security::SecurityConfig;
-use controller::sql::{QueryFlowParts, SqlIncorporator};
 use controller::sql::query_graph::{to_query_graph, QueryGraph};
+use controller::sql::{QueryFlowParts, SqlIncorporator};
+use dataflow::prelude::DataType;
+use nom_sql::SqlQuery;
 use nom_sql::parser as sql_parser;
+use std::collections::HashMap;
 
 #[derive(Clone, Debug)]
 pub struct Universe {

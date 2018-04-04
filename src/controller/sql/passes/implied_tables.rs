@@ -15,8 +15,8 @@ fn rewrite_conditional<F>(
 where
     F: Fn(Column, &Vec<Table>) -> Column,
 {
-    use nom_sql::ConditionExpression::*;
     use nom_sql::ConditionBase::*;
+    use nom_sql::ConditionExpression::*;
 
     let translate_ct_arm = |bce: Box<ConditionExpression>| -> Box<ConditionExpression> {
         let new_ce = match *bce {
@@ -247,9 +247,9 @@ impl ImpliedTableExpansion for SqlQuery {
 
 #[cfg(test)]
 mod tests {
+    use super::ImpliedTableExpansion;
     use nom_sql::{Column, FieldExpression, SqlQuery, Table};
     use std::collections::HashMap;
-    use super::ImpliedTableExpansion;
 
     #[test]
     fn it_expands_implied_tables_for_select() {

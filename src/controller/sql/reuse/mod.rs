@@ -1,25 +1,26 @@
-use nom_sql::Table;
 use controller::sql::query_graph::QueryGraph;
+use nom_sql::Table;
 
-use std::vec::Vec;
 use std::collections::HashMap;
+use std::vec::Vec;
 
-use controller::sql::reuse::join_order::reorder_joins;
 use controller::sql::UniverseId;
+use controller::sql::reuse::join_order::reorder_joins;
 
 use dataflow::prelude::DataType;
 
 mod finkelstein;
-mod relaxed;
 mod full;
 mod helpers;
 mod join_order;
+mod relaxed;
 
 #[derive(Clone, Debug)]
 pub enum ReuseType {
     DirectExtension,
     PrefixReuse,
-    #[allow(dead_code)] BackjoinRequired(Vec<Table>),
+    #[allow(dead_code)]
+    BackjoinRequired(Vec<Table>),
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]

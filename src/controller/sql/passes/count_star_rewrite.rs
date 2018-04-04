@@ -111,9 +111,9 @@ impl CountStarRewrite for SqlQuery {
 
 #[cfg(test)]
 mod tests {
+    use super::CountStarRewrite;
     use nom_sql::{Column, FieldExpression, SqlQuery};
     use std::collections::HashMap;
-    use super::CountStarRewrite;
 
     #[test]
     fn it_expands_count_star() {

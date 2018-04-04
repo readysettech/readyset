@@ -1,9 +1,9 @@
 //! Functions for assigning new nodes to thread domains.
 
 use dataflow::prelude::*;
+use petgraph;
 use slog::Logger;
 use std::collections::HashSet;
-use petgraph;
 
 pub fn assign(
     log: &Logger,

@@ -1,28 +1,28 @@
 use petgraph::graph::NodeIndex;
-use std::collections::{HashMap, HashSet, VecDeque};
-use std::sync::{Arc, Mutex};
-use std::sync::atomic::{AtomicUsize, Ordering};
-use std::time;
 use std::collections::hash_map::Entry;
-use std::io::{BufRead, BufReader, ErrorKind};
+use std::collections::{HashMap, HashSet, VecDeque};
 use std::fs::File;
+use std::io::{BufRead, BufReader, ErrorKind};
+use std::sync::atomic::{AtomicUsize, Ordering};
+use std::sync::{Arc, Mutex};
+use std::time;
 
 use std::net::SocketAddr;
 
 use Readers;
 use channel::TcpSender;
 use channel::poll::{PollEvent, ProcessResult};
-use prelude::*;
-use payload::{ControlReplyPacket, ReplayPieceContext, ReplayTransactionState, TransactionState};
-use statistics;
-use transactions;
-use persistence;
-use debug;
 use checktable;
-use serde_json;
+use debug;
 use itertools::Itertools;
+use payload::{ControlReplyPacket, ReplayPieceContext, ReplayTransactionState, TransactionState};
+use persistence;
+use prelude::*;
+use serde_json;
 use slog::Logger;
+use statistics;
 use timekeeper::{RealTime, SimpleTracker, ThreadTime, Timer, TimerSet};
+use transactions;
 
 type EnqueuedSends = Vec<(ReplicaAddr, Box<Packet>)>;
 
@@ -40,7 +40,7 @@ macro_rules! dur_to_ns {
     ($d:expr) => {{
         let d = $d;
         d.as_secs() * NANOS_PER_SEC + d.subsec_nanos() as u64
-    }}
+    }};
 }
 
 #[allow(missing_docs)]
@@ -341,8 +341,8 @@ impl Domain {
         needed_for: Tag,
         sends: &mut EnqueuedSends,
     ) {
-        use std::ops::AddAssign;
         use std::collections::hash_map::Entry;
+        use std::ops::AddAssign;
 
         // when the replay eventually succeeds, we want to re-do the replay.
         let mut w = self.waiting.remove(&miss_in).unwrap_or_default();

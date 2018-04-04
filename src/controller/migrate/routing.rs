@@ -6,13 +6,13 @@
 //!  - Egress nodes must be added to nodes that now have children in a different domain
 //!  - Egress nodes that gain new children must gain channels to facilitate forwarding
 
-use dataflow::prelude::*;
-use dataflow::node;
 use controller::domain_handle::DomainHandle;
+use dataflow::node;
+use dataflow::prelude::*;
 use petgraph;
 use petgraph::graph::NodeIndex;
-use std::collections::{HashMap, HashSet};
 use slog::Logger;
+use std::collections::{HashMap, HashSet};
 
 /// Add in ingress and egress nodes as appropriate in the graph to facilitate cross-domain
 /// communication.

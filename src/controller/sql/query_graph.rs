@@ -1,7 +1,7 @@
+use nom_sql::SelectStatement;
 use nom_sql::{ArithmeticBase, ArithmeticExpression, Column, ConditionBase, ConditionExpression,
               ConditionTree, FieldExpression, JoinConstraint, JoinOperator, JoinRightSide,
               Literal, Operator};
-use nom_sql::SelectStatement;
 
 use std::cmp::Ordering;
 use std::collections::HashMap;

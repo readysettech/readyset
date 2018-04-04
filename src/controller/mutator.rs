@@ -1,9 +1,9 @@
-use dataflow::prelude::*;
 use controller::domain_handle::DomainInputHandle;
 use dataflow::checktable;
+use dataflow::prelude::*;
 
-use std::net::SocketAddr;
 use std::cell::RefCell;
+use std::net::SocketAddr;
 use vec_map::VecMap;
 
 /// Indicates why a Mutator operation failed.

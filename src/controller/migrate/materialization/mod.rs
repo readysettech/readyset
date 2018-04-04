@@ -5,13 +5,13 @@
 //! domains, but does not perform that copying itself (that is the role of the `augmentation`
 //! module).
 
-use dataflow::prelude::*;
 use controller::domain_handle::DomainHandle;
 use controller::keys;
+use dataflow::prelude::*;
 use petgraph;
 use petgraph::graph::NodeIndex;
-use std::collections::{HashMap, HashSet};
 use slog::Logger;
+use std::collections::{HashMap, HashSet};
 use std::mem;
 use std::sync::atomic::{AtomicUsize, Ordering};
 
@@ -22,7 +22,7 @@ macro_rules! dur_to_ns {
     ($d:expr) => {{
         let d = $d;
         d.as_secs() * NANOS_PER_SEC + d.subsec_nanos() as u64
-    }}
+    }};
 }
 
 type Indices = HashSet<Vec<usize>>;

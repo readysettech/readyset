@@ -1,7 +1,7 @@
 use std::collections::{HashMap, HashSet};
 
-use ops::base::Base;
 use ops;
+use ops::base::Base;
 use prelude;
 
 // TODO: make a Key type that is an ArrayVec<DataType>

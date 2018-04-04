@@ -1,6 +1,6 @@
-use std::fmt;
-use std::collections::HashMap;
 use std::cmp::Ordering;
+use std::collections::HashMap;
+use std::fmt;
 
 use prelude::*;
 

@@ -1,12 +1,12 @@
-use nom_sql::parser as sql_parser;
-use nom_sql::SqlQuery;
 use controller::Migration;
-use controller::sql::reuse::ReuseConfigType;
 use controller::sql::SqlIncorporator;
-use dataflow::prelude::DataType;
+use controller::sql::reuse::ReuseConfigType;
+use core::NodeIndex;
 use dataflow::ops::trigger::Trigger;
 use dataflow::ops::trigger::TriggerEvent;
-use core::NodeIndex;
+use dataflow::prelude::DataType;
+use nom_sql::SqlQuery;
+use nom_sql::parser as sql_parser;
 
 use controller::security::SecurityConfig;
 

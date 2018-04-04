@@ -1,7 +1,7 @@
 use channel::rpc::RpcClient;
 
-use dataflow::prelude::*;
 use dataflow::backlog::{self, ReadHandle};
+use dataflow::prelude::*;
 use dataflow::{self, checktable, LocalBypass, Readers};
 
 use std::net::SocketAddr;

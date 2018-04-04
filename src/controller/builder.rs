@@ -1,9 +1,9 @@
 use consensus::{Authority, LocalAuthority};
 use dataflow::PersistenceParameters;
 
-use std::time;
 use std::net::IpAddr;
 use std::sync::Arc;
+use std::time;
 
 use slog;
 

@@ -3,22 +3,22 @@ mod passes;
 mod query_graph;
 mod query_signature;
 mod query_utils;
-pub mod security;
 pub mod reuse;
+pub mod security;
 
-use core::NodeIndex;
-use dataflow::prelude::DataType;
+use self::mir::{MirNodeRef, SqlToMirConverter};
+use self::query_graph::{to_query_graph, QueryGraph};
+use self::query_signature::Signature;
+use self::reuse::{ReuseConfig, ReuseConfigType};
 use controller::Migration;
 use controller::mir_to_flow::mir_query_to_flow_parts;
+use core::NodeIndex;
+use dataflow::prelude::DataType;
+use mir::query::{MirQuery, QueryFlowParts};
+use mir::reuse as mir_reuse;
 use nom_sql::parser as sql_parser;
 use nom_sql::{ArithmeticBase, Column, SqlQuery};
 use nom_sql::{CompoundSelectOperator, CompoundSelectStatement, SelectStatement};
-use self::mir::{MirNodeRef, SqlToMirConverter};
-use self::reuse::{ReuseConfig, ReuseConfigType};
-use self::query_graph::{to_query_graph, QueryGraph};
-use self::query_signature::Signature;
-use mir::query::{MirQuery, QueryFlowParts};
-use mir::reuse as mir_reuse;
 
 use slog;
 use std::collections::HashMap;
@@ -636,8 +636,8 @@ impl SqlIncorporator {
         use controller::sql::passes::count_star_rewrite::CountStarRewrite;
         use controller::sql::passes::implied_tables::ImpliedTableExpansion;
         use controller::sql::passes::key_def_coalescing::KeyDefinitionCoalescing;
-        use controller::sql::passes::star_expansion::StarExpansion;
         use controller::sql::passes::negation_removal::NegationRemoval;
+        use controller::sql::passes::star_expansion::StarExpansion;
         use controller::sql::passes::subqueries::SubQueries;
         use controller::sql::query_utils::ReferredTables;
 
@@ -801,10 +801,10 @@ impl<'a> ToFlowParts for &'a str {
 
 #[cfg(test)]
 mod tests {
-    use nom_sql::Column;
-    use dataflow::prelude::*;
-    use controller::{ControllerBuilder, Migration};
     use super::{SqlIncorporator, ToFlowParts};
+    use controller::{ControllerBuilder, Migration};
+    use dataflow::prelude::*;
+    use nom_sql::Column;
     use nom_sql::FunctionExpression;
 
     /// Helper to grab a reference to a named view.
@@ -819,8 +819,8 @@ mod tests {
     /// ordered by `Ord`.
     fn query_id_hash(relations: &[&str], attrs: &[&Column], columns: &[&Column]) -> u64 {
         use controller::sql::query_graph::OutputColumn;
-        use std::hash::{Hash, Hasher};
         use std::collections::hash_map::DefaultHasher;
+        use std::hash::{Hash, Hasher};
 
         let mut hasher = DefaultHasher::new();
         for r in relations.iter() {

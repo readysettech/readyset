@@ -1,19 +1,19 @@
 extern crate glob;
 
+use consensus::LocalAuthority;
+use controller::ControllerBuilder;
+use controller::recipe::Recipe;
+use controller::sql::SqlIncorporator;
 use core::DataType;
 use dataflow::checktable::Token;
 use dataflow::ops::base::Base;
 use dataflow::ops::grouped::aggregate::Aggregation;
 use dataflow::ops::identity::Identity;
-use dataflow::ops::join::{Join, JoinSource, JoinType};
 use dataflow::ops::join::JoinSource::*;
+use dataflow::ops::join::{Join, JoinSource, JoinType};
 use dataflow::ops::project::Project;
 use dataflow::ops::union::Union;
 use dataflow::{DurabilityMode, PersistenceParameters};
-use consensus::LocalAuthority;
-use controller::ControllerBuilder;
-use controller::recipe::Recipe;
-use controller::sql::SqlIncorporator;
 
 use std::collections::HashMap;
 use std::sync::Arc;
@@ -1817,7 +1817,11 @@ fn do_full_vote_migration(old_puts_after: bool) {
         let article = mig.add_ingredient("article", &["id", "title"], Base::default());
 
         // add vote base table
-        let vote = mig.add_ingredient("vote", &["user", "id"], Base::default().with_key(vec![0, 1]));
+        let vote = mig.add_ingredient(
+            "vote",
+            &["user", "id"],
+            Base::default().with_key(vec![0, 1]),
+        );
 
         // add vote count
         let vc = mig.add_ingredient(
@@ -2115,8 +2119,8 @@ fn recipe_activates_and_migrates_with_join() {
 
 #[test]
 fn finkelstein1982_queries() {
-    use std::io::Read;
     use std::fs::File;
+    use std::io::Read;
 
     // set up graph
     let mut g = ControllerBuilder::default().build_local();
@@ -2147,8 +2151,8 @@ fn finkelstein1982_queries() {
 
 #[test]
 fn tpc_w() {
-    use std::io::Read;
     use std::fs::File;
+    use std::io::Read;
 
     // set up graph
     let mut g = ControllerBuilder::default().build_local();

@@ -51,10 +51,10 @@ impl StarExpansion for SqlQuery {
 
 #[cfg(test)]
 mod tests {
+    use super::StarExpansion;
     use nom_sql::SelectStatement;
     use nom_sql::{Column, FieldExpression, SqlQuery, Table};
     use std::collections::HashMap;
-    use super::StarExpansion;
 
     #[test]
     fn it_expands_stars() {

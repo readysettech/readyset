@@ -1,10 +1,10 @@
-use mir::MirNodeRef;
 use controller::sql::UniverseId;
 use controller::sql::mir::SqlToMirConverter;
-use std::collections::HashMap;
-use controller::sql::query_signature::Signature;
-use controller::sql::query_graph::QueryGraph;
 use controller::sql::mir::rewrite::make_rewrite_nodes;
+use controller::sql::query_graph::QueryGraph;
+use controller::sql::query_signature::Signature;
+use mir::MirNodeRef;
+use std::collections::HashMap;
 
 pub trait SecurityBoundary {
     fn reconcile(

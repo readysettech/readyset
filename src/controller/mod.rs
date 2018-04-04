@@ -15,16 +15,16 @@ use coordination::CoordinationMessage;
 use std::boxed::FnBox;
 use std::io::{self, ErrorKind};
 use std::net::{IpAddr, SocketAddr};
-use std::time::{self, Duration, Instant};
-use std::thread::{self, JoinHandle};
-use std::sync::{Arc, Mutex};
 use std::sync::mpsc::{self, Receiver, RecvTimeoutError, Sender};
+use std::sync::{Arc, Mutex};
+use std::thread::{self, JoinHandle};
+use std::time::{self, Duration, Instant};
 
 use failure::{self, Error};
 use futures::{self, Future, Stream};
-use hyper::{self, Method, StatusCode};
 use hyper::header::ContentType;
 use hyper::server::{Http, NewService, Request, Response, Service};
+use hyper::{self, Method, StatusCode};
 use mio::net::TcpListener;
 use rand;
 use serde_json;
@@ -35,25 +35,25 @@ pub mod keys;
 pub mod migrate;
 
 pub(crate) mod recipe;
-pub(crate) mod sql;
 pub(crate) mod security;
+pub(crate) mod sql;
 
 mod builder;
 mod getter;
 mod handle;
 mod inner;
-mod readers;
 mod mir_to_flow;
 mod mutator;
+mod readers;
 mod worker_inner;
 
 pub use controller::builder::ControllerBuilder;
+pub(crate) use controller::getter::LocalOrNot;
+pub use controller::getter::{Getter, ReadQuery, ReadReply, RemoteGetter, RemoteGetterBuilder};
 pub use controller::handle::ControllerHandle;
 pub use controller::inner::RpcError;
 pub use controller::migrate::Migration;
 pub use controller::mutator::{Mutator, MutatorBuilder, MutatorError};
-pub use controller::getter::{Getter, ReadQuery, ReadReply, RemoteGetter, RemoteGetterBuilder};
-pub(crate) use controller::getter::LocalOrNot;
 use controller::worker_inner::WorkerInner;
 
 type WorkerIdentifier = SocketAddr;

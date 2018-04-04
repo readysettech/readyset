@@ -1,22 +1,22 @@
 use channel;
-use channel::tcp::{TcpSender, TryRecvError};
 use channel::rpc::RpcServiceEndpoint;
+use channel::tcp::{TcpSender, TryRecvError};
 use consensus::Epoch;
-use dataflow::{DomainBuilder, Readers};
 use dataflow::payload;
 use dataflow::prelude::{ChannelCoordinator, DomainIndex};
+use dataflow::{DomainBuilder, Readers};
 
 use controller::{readers, ControllerState};
 use coordination::{CoordinationMessage, CoordinationPayload};
 use worker;
 
 use std::collections::HashMap;
+use std::fs;
 use std::io;
 use std::net::{IpAddr, SocketAddr};
-use std::time::{Duration, Instant};
-use std::sync::{Arc, Mutex};
 use std::sync::atomic::{AtomicUsize, Ordering};
-use std::fs;
+use std::sync::{Arc, Mutex};
+use std::time::{Duration, Instant};
 
 use mio::net::TcpListener;
 use mio_pool::{PoolBuilder, PoolHandle};

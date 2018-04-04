@@ -1,10 +1,10 @@
-use std::collections::HashMap;
 use channel::rpc::RpcServiceEndpoint;
 use dataflow::Readers;
-use dataflow::checktable::TokenGenerator;
 use dataflow::backlog::SingleReadHandle;
+use dataflow::checktable::TokenGenerator;
 use dataflow::prelude::*;
 use std::cell::RefCell;
+use std::collections::HashMap;
 
 use controller::{LocalOrNot, ReadQuery, ReadReply};
 

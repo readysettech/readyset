@@ -20,9 +20,9 @@
 //!
 //! Beware, Here be dragons™
 
-use dataflow::{checktable, node, payload};
 use dataflow::ops::base::Base;
 use dataflow::prelude::*;
+use dataflow::{checktable, node, payload};
 
 use std::collections::{HashMap, HashSet};
 use std::time::Instant;
@@ -32,19 +32,19 @@ use controller::{keys, ControllerInner, DomainHandle, WorkerEndpoint, WorkerIden
 use petgraph;
 use slog;
 
-pub mod routing;
-pub mod transactions;
-pub mod materialization;
-pub mod augmentation;
 pub mod assignment;
+pub mod augmentation;
+pub mod materialization;
+pub mod routing;
 pub mod sharding;
+pub mod transactions;
 
 const NANOS_PER_SEC: u64 = 1_000_000_000;
 macro_rules! dur_to_ns {
     ($d:expr) => {{
         let d = $d;
         d.as_secs() * NANOS_PER_SEC + d.subsec_nanos() as u64
-    }}
+    }};
 }
 
 #[derive(Clone)]

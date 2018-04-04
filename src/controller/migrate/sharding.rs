@@ -1,10 +1,10 @@
-use dataflow::prelude::*;
 use dataflow::node;
-use petgraph::graph::NodeIndex;
-use std::collections::{HashMap, HashSet};
-use slog::Logger;
-use petgraph;
 use dataflow::ops;
+use dataflow::prelude::*;
+use petgraph;
+use petgraph::graph::NodeIndex;
+use slog::Logger;
+use std::collections::{HashMap, HashSet};
 
 pub fn shard(
     log: &Logger,

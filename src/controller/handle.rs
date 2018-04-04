@@ -17,11 +17,11 @@ use serde_json;
 use tarpc::sync::client::{self, ClientExt};
 use tokio_core::reactor::Core;
 
-use controller::{ControlEvent, ControllerDescriptor, WorkerEvent};
-use controller::inner::RpcError;
 use controller::getter::{RemoteGetter, RemoteGetterBuilder};
+use controller::inner::RpcError;
 use controller::mutator::{Mutator, MutatorBuilder};
 use controller::recipe::ActivationResult;
+use controller::{ControlEvent, ControllerDescriptor, WorkerEvent};
 
 /// `ControllerHandle` is a handle to a Controller.
 pub struct ControllerHandle<A: Authority> {

@@ -2,11 +2,11 @@ use serde_json;
 use serde_json::Value;
 use std::collections::HashMap;
 
-pub mod policy;
 pub mod group;
+pub mod policy;
 
-use controller::security::policy::Policy;
 use controller::security::group::Group;
+use controller::security::policy::Policy;
 
 #[derive(Clone, Debug)]
 pub struct SecurityConfig {

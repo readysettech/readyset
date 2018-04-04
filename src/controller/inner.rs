@@ -1,24 +1,24 @@
 use channel::tcp::TcpSender;
 use consensus::{Authority, Epoch, STATE_KEY};
-use dataflow::{checktable, node, payload, DomainConfig, PersistenceParameters};
 use dataflow::payload::{EgressForBase, IngressFromBase};
 use dataflow::prelude::*;
 use dataflow::statistics::GraphStats;
+use dataflow::{checktable, node, payload, DomainConfig, PersistenceParameters};
 
 use std::collections::{BTreeMap, HashMap};
 use std::error::Error;
 use std::fmt::{self, Display};
 use std::net::{IpAddr, SocketAddr};
-use std::time::{Duration, Instant};
 use std::sync::{Arc, Mutex};
+use std::time::{Duration, Instant};
 use std::{io, time};
 
-use coordination::{CoordinationMessage, CoordinationPayload};
-use controller::{ControllerState, DomainHandle, Migration, Recipe, RemoteGetterBuilder,
-                 WorkerIdentifier, WorkerStatus};
 use controller::migrate::materialization::Materializations;
 use controller::mutator::MutatorBuilder;
 use controller::recipe::ActivationResult;
+use controller::{ControllerState, DomainHandle, Migration, Recipe, RemoteGetterBuilder,
+                 WorkerIdentifier, WorkerStatus};
+use coordination::{CoordinationMessage, CoordinationPayload};
 
 use hyper::{Method, StatusCode};
 use mio::net::TcpListener;
@@ -126,8 +126,8 @@ impl ControllerInner {
         body: Vec<u8>,
         authority: &Arc<A>,
     ) -> Result<String, StatusCode> {
-        use serde_json as json;
         use hyper::Method::*;
+        use serde_json as json;
 
         match (&method, path.as_ref()) {
             (&Get, "/graph") => return Ok(self.graphviz()),
