@@ -306,6 +306,7 @@ impl<B: MysqlShim<W>, R: Read, W: Write> MysqlIntermediary<B, R, W> {
 
                     self.shim.on_execute(stmt, params, w)?;
                 }
+                Command::SendLongData { stmt, param, data } => unimplemented!(),
                 Command::Close(stmt) => {
                     self.shim.on_close(stmt);
                     // NOTE: spec dictates no response from server
