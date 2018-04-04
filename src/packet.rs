@@ -1,7 +1,7 @@
-use nom::{self, IResult};
-use std::io::prelude::*;
-use std::io;
 use byteorder::{ByteOrder, LittleEndian};
+use nom::{self, IResult};
+use std::io;
+use std::io::prelude::*;
 
 const U24_MAX: usize = 16_777_215;
 
@@ -194,21 +194,20 @@ impl<'a> Deref for Packet<'a> {
 fn packet<'a>(input: &'a [u8]) -> IResult<&'a [u8], (u8, Packet<'a>)> {
     do_parse!(
         input,
-        full:
-            fold_many0!(
-                fullpacket,
-                (0, None),
-                |(seq, pkt): (_, Option<Packet<'a>>), (nseq, p)| {
-                    let pkt = if let Some(mut pkt) = pkt {
-                        assert_eq!(nseq, seq + 1);
-                        pkt.extend(p);
-                        Some(pkt)
-                    } else {
-                        Some(Packet(p, Vec::new()))
-                    };
-                    (nseq, pkt)
-                }
-            ) >> last: onepacket >> ({
+        full: fold_many0!(
+            fullpacket,
+            (0, None),
+            |(seq, pkt): (_, Option<Packet<'a>>), (nseq, p)| {
+                let pkt = if let Some(mut pkt) = pkt {
+                    assert_eq!(nseq, seq + 1);
+                    pkt.extend(p);
+                    Some(pkt)
+                } else {
+                    Some(Packet(p, Vec::new()))
+                };
+                (nseq, pkt)
+            }
+        ) >> last: onepacket >> ({
             let seq = last.0;
             let pkt = if let Some(mut pkt) = full.1 {
                 assert_eq!(last.0, full.0 + 1);

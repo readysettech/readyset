@@ -1,5 +1,5 @@
-use nom;
 use myc::constants::{CapabilityFlags, Command as CommandByte};
+use nom;
 
 #[derive(Debug)]
 pub struct ClientHandshake<'a> {

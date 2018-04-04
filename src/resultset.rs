@@ -1,11 +1,11 @@
-use std::io::{self, Write};
+use byteorder::WriteBytesExt;
+use myc::constants::{ColumnFlags, StatusFlags};
 use packet::PacketWriter;
+use std::borrow::Borrow;
+use std::io::{self, Write};
+use value::ToMysqlValue;
 use writers;
 use {Column, ErrorKind};
-use std::borrow::Borrow;
-use byteorder::WriteBytesExt;
-use value::ToMysqlValue;
-use myc::constants::{ColumnFlags, StatusFlags};
 
 /// Convenience type for responding to a client `PREPARE` command.
 ///

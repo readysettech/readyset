@@ -1,7 +1,7 @@
-use std::io;
 use byteorder::{LittleEndian, ReadBytesExt};
-use myc::io::ReadMysqlExt;
 use myc::constants::ColumnType;
+use myc::io::ReadMysqlExt;
+use std::io;
 
 /// MySQL value as provided when executing prepared statements.
 #[derive(Debug, PartialEq, Copy, Clone)]
@@ -43,7 +43,7 @@ impl<'a> Value<'a> {
 }
 
 macro_rules! read_bytes {
-    ($input: expr, $len: expr) => {
+    ($input:expr, $len:expr) => {
         if $len as usize > $input.len() {
             Err(io::Error::new(
                 io::ErrorKind::UnexpectedEof,
@@ -254,18 +254,18 @@ impl<'a> Into<Duration> for Value<'a> {
 #[cfg(test)]
 #[allow(unused_imports)]
 mod tests {
-    use myc;
-    use {Column, ColumnFlags, ColumnType};
     use super::Value;
-    use myc::io::WriteMysqlExt;
     use chrono::{self, TimeZone};
+    use myc;
+    use myc::io::WriteMysqlExt;
     use std::time;
+    use {Column, ColumnFlags, ColumnType};
 
     macro_rules! rt {
-        ($name: ident, $t: ty, $v: expr, $ct: expr) => {
+        ($name:ident, $t:ty, $v:expr, $ct:expr) => {
             rt!($name, $t, $v, $ct, false);
         };
-        ($name: ident, $t: ty, $v: expr, $ct: expr, $sig: expr) => {
+        ($name:ident, $t:ty, $v:expr, $ct:expr, $sig:expr) => {
             #[test]
             fn $name() {
                 let mut data = Vec::new();
