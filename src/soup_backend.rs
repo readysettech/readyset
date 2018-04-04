@@ -24,7 +24,7 @@ pub struct SoupBackend {
 
     query_count: Arc<sync::atomic::AtomicUsize>,
 
-    prepared: HashMap<String, u32>,
+    prepared: HashMap<u32, (String, SelectStatement, Vec<msql_srv::Column>)>,
     prepared_count: u32,
 }
 
@@ -489,7 +489,8 @@ impl<W: io::Write> MysqlShim<W> for SoupBackend {
                         Ok(_) => {
                             // register a new prepared statement
                             self.prepared_count += 1;
-                            self.prepared.insert(qname, self.prepared_count);
+                            self.prepared
+                                .insert(self.prepared_count, (qname, q, params.clone()));
                             info.reply(self.prepared_count, params.as_slice(), schema.as_slice())
                         }
                         Err(e) => return Err(io::Error::new(io::ErrorKind::Other, e)),
@@ -518,11 +519,63 @@ impl<W: io::Write> MysqlShim<W> for SoupBackend {
     fn on_execute(
         &mut self,
         id: u32,
-        _: ParamParser,
+        params: ParamParser,
         results: QueryResultWriter<W>,
     ) -> io::Result<()> {
         error!(self.log, "exec: {}", id);
-        results.completed(0, 0)
+        match self.prepared.get(&id) {
+            None => results.error(
+                msql_srv::ErrorKind::ER_UNKNOWN_ERROR,
+                "non-existent statement".as_bytes(),
+            ),
+            Some(&(ref qname, ref q, ref types)) => {
+                // XXX(malte): assumes we're dealing with a SELECT
+                // talk to Soup
+                let getter = self.outputs.entry(qname.clone()).or_insert(
+                    self.soup
+                        .get_getter(&qname)
+                        .expect(&format!("no view named '{}'", qname)),
+                );
+                let ts_lock = self.table_schemas.lock().unwrap();
+                let schema = schema_for_query(&(*ts_lock), &q);
+
+                // XXX(malte): handle non-string keys
+                let key: &str = params.iter(types).next().unwrap().into();
+                match getter.lookup(&DataType::from(key), true) {
+                    Ok(d) => {
+                        info!(self.log, "exec({}) returning {:?}", key, d);
+                        let num_rows = d.len();
+                        if num_rows > 0 {
+                            let mut rw = results.start(schema.as_slice()).unwrap();
+                            for mut r in d {
+                                // drop bogokey
+                                r.pop();
+                                for c in r {
+                                    match c {
+                                        DataType::Int(i) => rw.write_col(i as i32)?,
+                                        DataType::BigInt(i) => rw.write_col(i as i64)?,
+                                        DataType::Text(t) => rw.write_col(t.to_str().unwrap())?,
+                                        dt @ DataType::TinyText(_) => rw.write_col(dt.to_string())?,
+                                        _ => unimplemented!(),
+                                    }
+                                }
+                                rw.end_row()?;
+                            }
+                            rw.finish()
+                        } else {
+                            results.completed(0, 0)
+                        }
+                    }
+                    Err(_) => {
+                        error!(self.log, "error executing SELECT");
+                        results.error(
+                            msql_srv::ErrorKind::ER_UNKNOWN_ERROR,
+                            "Soup returned an error".as_bytes(),
+                        )
+                    }
+                }
+            }
+        }
     }
 
     fn on_close(&mut self, _: u32) {}
