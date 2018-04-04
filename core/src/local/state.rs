@@ -143,6 +143,11 @@ impl State {
     }
 }
 
+struct PersistentIndex {
+    columns: Vec<usize>,
+    seq: usize,
+}
+
 /// PersistentState stores data in SQlite.
 pub struct PersistentState {
     name: String,
@@ -151,7 +156,7 @@ pub struct PersistentState {
     // persisted files if we want to.
     db: Option<DB>,
     durability_mode: DurabilityMode,
-    indices: Vec<Vec<usize>>,
+    indices: Vec<PersistentIndex>,
 }
 
 // index in PersistentState.indices
@@ -182,47 +187,34 @@ impl PersistentState {
     // Puts by primary key first, then retrieves the existing value for each index and appends the
     // newly created primary key value.
     fn insert(&mut self, r: Vec<DataType>) -> bool {
-        let pk = self.indices[0]
-            .iter()
-            .map(|i| r[*i].clone())
-            .collect::<Vec<_>>();
-        let serialized_pk = bincode::serialize(&(KeyIndex(0), &pk)).unwrap();
-        let db = self.db.as_ref().unwrap();
-        let mut rows = if let Some(v) = db.get(&serialized_pk).unwrap() {
-            let v: Vec<Vec<DataType>> = bincode::deserialize(&&*v).unwrap();
-            v
-        } else {
-            vec![]
+        let (pk_seq, pk) = {
+            let pk_index = &mut self.indices[0];
+            pk_index.seq += 1;
+            let pk = pk_index
+                .columns
+                .iter()
+                .map(|i| r[*i].clone())
+                .collect::<Vec<_>>();
+
+            (pk_index.seq, pk)
         };
 
-        rows.push(r.clone());
+        let serialized_pk = bincode::serialize(&(KeyIndex(0), &pk, pk_seq)).unwrap();
+        let db = self.db.as_ref().unwrap();
         let mut write_opts = rocksdb::WriteOptions::default();
         write_opts.set_sync(false);
         write_opts.disable_wal(true);
-        let pk_value = bincode::serialize(&rows).unwrap();
+        let pk_value = bincode::serialize(&r).unwrap();
         db.put_opt(&serialized_pk, &pk_value, &write_opts).unwrap();
-
-        for (i, columns) in self.indices[1..].iter().enumerate() {
+        let serialized_pk_only = bincode::serialize(&pk).unwrap();
+        for (i, index) in self.indices[1..].iter_mut().enumerate() {
+            index.seq += 1;
             // Construct a key with the index values, and serialize it with bincode:
-            let index = columns.iter().map(|i| &r[*i]).collect::<Vec<_>>();
+            let key = index.columns.iter().map(|i| &r[*i]).collect::<Vec<_>>();
             // Add 1 to i since we're slicing indices by 1..:
-            let serialized_key = bincode::serialize(&(KeyIndex(i + 1), index)).unwrap();
-            // Since an index can point to multiple primary keys, we attempt to retrieve the
-            // existing rows this index points to, to add our new primary key to that.
-            let existing = db.get(&serialized_key).unwrap();
-            let mut values = if let Some(v) = existing {
-                let v: Vec<Vec<DataType>> = bincode::deserialize(&&*v).unwrap();
-                v
-            } else {
-                vec![]
-            };
-
-            values.push(pk.clone());
-            db.put_opt(
-                &serialized_key,
-                &bincode::serialize(&values).unwrap(),
-                &write_opts,
-            ).unwrap();
+            let serialized_key = bincode::serialize(&(KeyIndex(i + 1), &key, index.seq)).unwrap();
+            db.put_opt(&serialized_key, &serialized_pk_only, &write_opts)
+                .unwrap();
         }
 
         true
@@ -230,10 +222,14 @@ impl PersistentState {
 
     fn remove(&mut self, r: &[DataType]) -> bool {
         let db = self.db.as_ref().unwrap();
-        for (i, columns) in self.indices.iter().enumerate() {
-            let index = columns.iter().map(|i| &r[*i]).collect::<Vec<_>>();
-            let serialized_key = bincode::serialize(&(KeyIndex(i), index)).unwrap();
-            db.delete(&serialized_key).unwrap();
+        for (i, index) in self.indices.iter().enumerate() {
+            let index_row = index.columns.iter().map(|i| &r[*i]).collect::<Vec<_>>();
+            let serialized_key = bincode::serialize(&(KeyIndex(i), index_row)).unwrap();
+            for (key, _value) in db.prefix_iterator(&serialized_key)
+                .take_while(|&(ref k, _)| k.starts_with(&serialized_key))
+            {
+                db.delete(&key).unwrap();
+            }
         }
 
         true
@@ -241,9 +237,14 @@ impl PersistentState {
 
     fn add_key(&mut self, columns: &[usize], partial: Option<Vec<Tag>>) {
         assert!(partial.is_none(), "Bases can't be partial");
-        let c = Vec::from(columns);
-        if !self.indices.contains(&c) {
-            self.indices.push(c);
+        let existing = self.indices
+            .iter()
+            .any(|index| &index.columns[..] == columns);
+        if !existing {
+            self.indices.push(PersistentIndex {
+                columns: Vec::from(columns),
+                seq: 0,
+            });
         }
 
         if self.rows() > 0 {
@@ -283,37 +284,36 @@ impl PersistentState {
 
         let index = self.indices
             .iter()
-            .position(|index| &index[..] == columns)
+            .position(|index| &index.columns[..] == columns)
             .expect("could not find index for columns");
-        let k = bincode::serialize(&(index, values)).unwrap();
+        let prefix = bincode::serialize(&(index, values)).unwrap();
         let db = self.db.as_ref().unwrap();
-        let pks_or_row: Vec<Vec<DataType>> = match db.get(&k).unwrap() {
-            Some(data) => bincode::deserialize(&*data).unwrap(),
-            None => return LookupResult::Some(Cow::Owned(vec![])),
-        };
-
-        let rows: Vec<Vec<DataType>> = if index == 0 {
-            pks_or_row
+        let data = if index > 0 {
+            let mut rows = vec![];
+            for (_key, value) in db.prefix_iterator(&prefix)
+                .take_while(|&(ref k, _)| k.starts_with(&prefix))
+            {
+                let row: Vec<DataType> = bincode::deserialize(&*value).unwrap();
+                let row_key = KeyType::from(&row[..]);
+                match self.lookup(&self.indices[0].columns, &row_key) {
+                    LookupResult::Some(Cow::Owned(ref mut rs)) => rows.append(rs),
+                    _ => unreachable!(),
+                };
+            }
+            rows
         } else {
-            // If this wasn't a primary index, pks_or_row now
-            // points to a series of primary keys that we need
-            // to retrieve the actual values for through additional .get() requests.
-            pks_or_row
-                .into_iter()
-                .flat_map(|pk| {
-                    let k = bincode::serialize(&(KeyIndex(0), pk)).unwrap();
-                    let data = db.get(&k)
-                        .unwrap()
-                        .expect("index points to non-existant primary key value");
-                    let rs: Vec<Vec<DataType>> = bincode::deserialize(&*data).unwrap();
-                    rs
-                })
-                .collect()
-        };
+            let mut rows = vec![];
+            for (_key, value) in db.prefix_iterator(&prefix)
+                .take_while(|&(ref k, _)| k.starts_with(&prefix))
+            {
+                let row: Vec<DataType> = bincode::deserialize(&*value).unwrap();
+                rows.push(row);
+            }
 
-        let data = rows.into_iter()
-            .map(|row| Row(Rc::new(row)))
-            .collect::<Vec<_>>();
+            rows.into_iter()
+                .map(|row| Row(Rc::new(row)))
+                .collect::<Vec<_>>()
+        };
 
         LookupResult::Some(Cow::Owned(data))
     }
@@ -325,13 +325,10 @@ impl PersistentState {
             .iterator(rocksdb::IteratorMode::Start)
             .filter(|&(ref key, _)| {
                 // Filter out non-pk indices:
-                let (i, _): (KeyIndex, Vec<DataType>) = bincode::deserialize(&key).unwrap();
+                let i: KeyIndex = bincode::deserialize(&key).unwrap();
                 i.0 == 0
             })
-            .flat_map(|(_, ref value)| {
-                let rows: Vec<Vec<DataType>> = bincode::deserialize(&value).unwrap();
-                rows
-            })
+            .map(|(_, ref value)| bincode::deserialize(&value).unwrap())
             .collect()
     }
 
@@ -342,7 +339,7 @@ impl PersistentState {
             .iterator(rocksdb::IteratorMode::Start)
             .filter(|&(ref key, _)| {
                 // Filter out non-pk indices:
-                let (i, _): (KeyIndex, Vec<DataType>) = bincode::deserialize(&key).unwrap();
+                let i: KeyIndex = bincode::deserialize(&key).unwrap();
                 i.0 == 0
             })
             .count()
@@ -738,10 +735,10 @@ mod tests {
     #[test]
     fn persistent_state_cloned_records() {
         let mut state = setup_persistent("persistent_state_cloned_records");
-        let columns = &[0];
         let first: Vec<DataType> = vec![10.into(), "Cat".into()];
         let second: Vec<DataType> = vec![20.into(), "Bob".into()];
-        state.add_key(columns, None);
+        state.add_key(&[0], None);
+        state.add_key(&[0, 1], None);
         assert!(state.insert(first.clone(), None));
         assert!(state.insert(second.clone(), None));
         assert_eq!(state.cloned_records(), vec![first, second]);
