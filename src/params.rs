@@ -1,5 +1,6 @@
 use myc;
 use std::borrow::Borrow;
+use std::collections::HashMap;
 use {Column, Value};
 
 /// A `ParamParser` decodes query parameters included in a client's `EXECUTE` command given
@@ -7,7 +8,10 @@ use {Column, Value};
 ///
 /// Users should invoke [`iter`](struct.ParamParser.html#method.iter) method to iterate over the
 /// provided parameters.
-pub struct ParamParser<'a>(pub(crate) &'a [u8]);
+pub struct ParamParser<'a>(
+    pub(crate) &'a [u8],
+    pub(crate) Option<&'a HashMap<u16, Vec<u8>>>,
+);
 
 impl<'a> ParamParser<'a> {
     /// Produces an iterator over the parameters supplied by the client given the expected types of
@@ -26,6 +30,7 @@ impl<'a> ParamParser<'a> {
             typmap: None,
             types: types.into_iter(),
             col: 0,
+            long_data: self.1,
         }
     }
 }
@@ -36,7 +41,8 @@ pub struct Params<'a, I> {
     nullmap: Option<&'a [u8]>,
     typmap: Option<&'a [u8]>,
     types: I,
-    col: usize,
+    col: u16,
+    long_data: Option<&'a HashMap<u16, Vec<u8>>>,
 }
 
 impl<'a, I, E> Iterator for Params<'a, I>
@@ -65,7 +71,7 @@ where
         // NULL-bitmap-byte = ((field-pos + offset) / 8)
         // NULL-bitmap-bit  = ((field-pos + offset) % 8)
         if let Some(nullmap) = self.nullmap {
-            let byte = self.col / 8;
+            let byte = self.col as usize / 8;
             if byte >= nullmap.len() {
                 return None;
             }
@@ -80,8 +86,8 @@ where
         let pt = self.typmap
             .map(|typmap| {
                 (
-                    myc::constants::ColumnType::from(typmap[2 * self.col]),
-                    (typmap[2 * self.col + 1] & 128) != 0,
+                    myc::constants::ColumnType::from(typmap[2 * self.col as usize]),
+                    (typmap[2 * self.col as usize + 1] & 128) != 0,
                 )
             })
             .unwrap_or_else(move || {
@@ -93,7 +99,12 @@ where
                 )
             });
 
+        let v = if let Some(data) = self.long_data.and_then(|d| d.get(&self.col)) {
+            Value::bytes(&data[..])
+        } else {
+            Value::parse_from(&mut self.input, pt.0, pt.1).unwrap()
+        };
         self.col += 1;
-        Some(Value::parse_from(&mut self.input, pt.0, pt.1).unwrap())
+        Some(v)
     }
 }

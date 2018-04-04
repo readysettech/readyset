@@ -93,6 +93,7 @@ extern crate mysql_common as myc;
 #[macro_use]
 extern crate nom;
 
+use std::collections::HashMap;
 use std::io;
 use std::io::prelude::*;
 use std::iter;
@@ -238,6 +239,7 @@ impl<B: MysqlShim<W>, R: Read, W: Write> MysqlIntermediary<B, R, W> {
     fn run(mut self) -> io::Result<()> {
         use commands::Command;
 
+        let mut long_data: HashMap<u32, _> = HashMap::new();
         while let Some((seq, packet)) = self.reader.next()? {
             self.writer.set_seq(seq + 1);
             let cmd = commands::parse(&packet).unwrap().1;
@@ -297,16 +299,26 @@ impl<B: MysqlShim<W>, R: Read, W: Write> MysqlIntermediary<B, R, W> {
                     )?;
                 }
                 Command::Execute { stmt, params } => {
-                    let params = params::ParamParser(params);
+                    {
+                        let params = params::ParamParser(params, long_data.get(&stmt));
 
-                    let w = QueryResultWriter {
-                        is_bin: true,
-                        writer: &mut self.writer,
-                    };
+                        let w = QueryResultWriter {
+                            is_bin: true,
+                            writer: &mut self.writer,
+                        };
 
-                    self.shim.on_execute(stmt, params, w)?;
+                        self.shim.on_execute(stmt, params, w)?;
+                    }
+                    long_data.remove(&stmt);
                 }
-                Command::SendLongData { stmt, param, data } => unimplemented!(),
+                Command::SendLongData { stmt, param, data } => {
+                    long_data
+                        .entry(stmt)
+                        .or_insert_with(HashMap::new)
+                        .entry(param)
+                        .or_insert_with(Vec::new)
+                        .extend(data);
+                }
                 Command::Close(stmt) => {
                     self.shim.on_close(stmt);
                     // NOTE: spec dictates no response from server

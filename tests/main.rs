@@ -354,6 +354,53 @@ fn it_prepares() {
 }
 
 #[test]
+fn send_long() {
+    let cols = vec![
+        Column {
+            table: String::new(),
+            column: "a".to_owned(),
+            coltype: myc::constants::ColumnType::MYSQL_TYPE_SHORT,
+            colflags: myc::constants::ColumnFlags::empty(),
+        },
+    ];
+    let cols2 = cols.clone();
+    let params = vec![
+        Column {
+            table: String::new(),
+            column: "c".to_owned(),
+            coltype: myc::constants::ColumnType::MYSQL_TYPE_BLOB,
+            colflags: myc::constants::ColumnFlags::empty(),
+        },
+    ];
+
+    TestingShim::new(
+        |_, _| unreachable!(),
+        |q| {
+            assert_eq!(q, "SELECT a FROM b WHERE c = ?");
+            41
+        },
+        move |stmt, params, w| {
+            assert_eq!(stmt, 41);
+            assert_eq!(params.len(), 1);
+            assert_eq!(Into::<&[u8]>::into(params[0]), b"Hello world");
+
+            let mut w = w.start(&cols)?;
+            w.write_col(1024i16)?;
+            w.finish()
+        },
+    ).with_params(params)
+        .with_columns(cols2)
+        .test(|db| {
+            let row = db.prep_exec("SELECT a FROM b WHERE c = ?", (b"Hello world",))
+                .unwrap()
+                .next()
+                .unwrap()
+                .unwrap();
+            assert_eq!(row.get::<i16, _>(0), Some(1024i16));
+        })
+}
+
+#[test]
 fn it_prepares_many() {
     let cols = vec![
         Column {

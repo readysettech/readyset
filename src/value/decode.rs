@@ -40,6 +40,10 @@ impl<'a> Value<'a> {
     ) -> io::Result<Self> {
         ValueInner::parse_from(input, ct, unsigned).map(Value)
     }
+
+    pub(crate) fn bytes(input: &'a [u8]) -> Value<'a> {
+        Value(ValueInner::Bytes(input))
+    }
 }
 
 macro_rules! read_bytes {
