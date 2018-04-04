@@ -33,7 +33,15 @@ pub enum Command<'a> {
     Close(u32),
     Prepare(&'a [u8]),
     Init(&'a [u8]),
-    Execute { stmt: u32, params: &'a [u8] },
+    Execute {
+        stmt: u32,
+        params: &'a [u8],
+    },
+    SendLongData {
+        stmt: u32,
+        param: u16,
+        data: &'a [u8],
+    },
     Ping,
     Quit,
 }
@@ -53,12 +61,27 @@ named!(
 );
 
 named!(
+    send_long_data<Command>,
+    do_parse!(
+        stmt: apply!(nom::le_u32,) >>
+        param: apply!(nom::le_u16,) >>
+        data: apply!(nom::rest,) >> // rustfmt
+        (Command::SendLongData {
+            stmt,
+            param,
+            data,
+        })
+    )
+);
+
+named!(
     pub parse<Command>,
     alt!(
         preceded!(tag!(&[CommandByte::COM_QUERY as u8]), apply!(nom::rest,)) => { |sql| Command::Query(sql) } |
         preceded!(tag!(&[CommandByte::COM_INIT_DB as u8]), apply!(nom::rest,)) => { |db| Command::Init(db) } |
         preceded!(tag!(&[CommandByte::COM_STMT_PREPARE as u8]), apply!(nom::rest,)) => { |sql| Command::Prepare(sql) } |
         preceded!(tag!(&[CommandByte::COM_STMT_EXECUTE as u8]), execute) |
+        preceded!(tag!(&[CommandByte::COM_STMT_SEND_LONG_DATA as u8]), send_long_data) |
         preceded!(tag!(&[CommandByte::COM_STMT_CLOSE as u8]), apply!(nom::le_u32,)) => { |stmt| Command::Close(stmt)} |
         tag!(&[CommandByte::COM_QUIT as u8]) => { |_| Command::Quit } |
         tag!(&[CommandByte::COM_PING as u8]) => { |_| Command::Ping }
