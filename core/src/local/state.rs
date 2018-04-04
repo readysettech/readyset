@@ -143,12 +143,18 @@ impl State {
     }
 }
 
+// Index in PersistentState.indices
+type KeyIndex = u64;
+
+// Sequence number in PersistentIndex
+type KeySeq = u64;
+
 struct PersistentIndex {
     columns: Vec<usize>,
     // TODO(ekmartin): seq is incremented each time a row is inserted for this index, which is
     // probably not optimal. Should probably look into something like the MyRocks record format:
     // https://github.com/facebook/mysql-5.6/wiki/MyRocks-record-format
-    seq: u64,
+    seq: KeySeq,
 }
 
 /// PersistentState stores data in SQlite.
@@ -161,10 +167,6 @@ pub struct PersistentState {
     durability_mode: DurabilityMode,
     indices: Vec<PersistentIndex>,
 }
-
-// index in PersistentState.indices
-#[derive(Debug, PartialEq, Deserialize, Serialize)]
-struct KeyIndex(u64);
 
 impl PersistentState {
     fn initialize(name: String, durability_mode: DurabilityMode) -> Self {
@@ -199,6 +201,28 @@ impl PersistentState {
         bytes
     }
 
+    // A key is built up of three components:
+    //   * `index`
+    //      This lets us lookup equally sized and typed indices correctly.
+    //      As an example, imagine if we have a table with the columns (Int, Int, Int).
+    //      How would we differ between an index on [0, 1] and [0, 2]?
+    //      We'd either have to include placeholders for all the columns, or, as we have done,
+    //      prefix each row with an identifier for that index.
+    //  * `row`
+    //      The actual index values
+    //  * `seq`
+    //      Maintained for each index in `self.indices` and incremented on inserts. This lets us
+    //      store multiple values for a single key.
+    fn serialize_key(index: KeyIndex, row: &Vec<&DataType>, seq: KeySeq) -> Vec<u8> {
+        bincode::serialize(&(index, row, seq)).unwrap()
+    }
+
+    // When reading keys we ignore the sequence number, but for the logic in Self::transform_fn to
+    // work correctly we need a placeholder value, which is 0.
+    fn serialize_prefix(index: KeyIndex, row: &Vec<&DataType>) -> Vec<u8> {
+        Self::serialize_key(index, row, 0)
+    }
+
     // Puts by primary key first, then retrieves the existing value for each index and appends the
     // newly created primary key value.
     fn insert(&mut self, r: Vec<DataType>) -> bool {
@@ -209,7 +233,7 @@ impl PersistentState {
             (pk_index.seq, pk)
         };
 
-        let serialized_pk = bincode::serialize(&(KeyIndex(0), &pk, pk_seq)).unwrap();
+        let serialized_pk = Self::serialize_key(0, &pk, pk_seq);
         let db = self.db.as_ref().unwrap();
         let mut write_opts = rocksdb::WriteOptions::default();
         write_opts.set_sync(false);
@@ -222,8 +246,7 @@ impl PersistentState {
             // Construct a key with the index values, and serialize it with bincode:
             let key = index.columns.iter().map(|i| &r[*i]).collect::<Vec<_>>();
             // Add 1 to i since we're slicing indices by 1..:
-            let serialized_key =
-                bincode::serialize(&(KeyIndex((i + 1) as u64), &key, index.seq)).unwrap();
+            let serialized_key = Self::serialize_key((i + 1) as u64, &key, index.seq);
             db.put_opt(&serialized_key, &serialized_pk_only, &write_opts)
                 .unwrap();
         }
@@ -235,8 +258,7 @@ impl PersistentState {
         let db = self.db.as_ref().unwrap();
         for (i, index) in self.indices.iter().enumerate() {
             let index_row = index.columns.iter().map(|i| &r[*i]).collect::<Vec<_>>();
-            let serialized_key =
-                bincode::serialize(&(KeyIndex(i as u64), index_row, 0u64)).unwrap();
+            let serialized_key = Self::serialize_key(i as u64, &index_row, 0u64);
             for (key, _value) in db.prefix_iterator(&serialized_key) {
                 db.delete(&key).unwrap();
             }
@@ -296,7 +318,7 @@ impl PersistentState {
             .iter()
             .position(|index| &index.columns[..] == columns)
             .expect("could not find index for columns");
-        let prefix = bincode::serialize(&(index, values, 0u64)).unwrap();
+        let prefix = Self::serialize_prefix(index as u64, &values);
         let db = self.db.as_ref().unwrap();
         let data = if index > 0 {
             let mut rows = vec![];
@@ -332,7 +354,7 @@ impl PersistentState {
             .filter(|&(ref key, _)| {
                 // Filter out non-pk indices:
                 let i: KeyIndex = bincode::deserialize(&key).unwrap();
-                i.0 == 0
+                i == 0
             })
             .map(|(_, ref value)| bincode::deserialize(&value).unwrap())
             .collect()
@@ -346,7 +368,7 @@ impl PersistentState {
             .filter(|&(ref key, _)| {
                 // Filter out non-pk indices:
                 let i: KeyIndex = bincode::deserialize(&key).unwrap();
-                i.0 == 0
+                i == 0
             })
             .count()
     }
@@ -832,15 +854,16 @@ mod tests {
         };
 
         let row: Vec<DataType> = vec![1.into(), 10.into()];
-        let key = (KeyIndex(0), &row, index.seq);
-        let k = bincode::serialize(&key).unwrap();
+        let r = row.iter().collect();
+        let k = PersistentState::serialize_key(0, &r, index.seq);
         let t = PersistentState::transform_fn(&k);
         let (key_out, row_out): (KeyIndex, Vec<DataType>) = bincode::deserialize(&t).unwrap();
-        assert_eq!(KeyIndex(0), key_out);
-        assert_eq!(row, row_out);
+        assert_eq!(0, key_out);
+        assert_eq!(row[0], row_out[0]);
+        assert_eq!(row[1], row_out[1]);
 
         // Make sure we're actually slicing away the sequence number:
-        let full_key: Result<(KeyIndex, Vec<DataType>, u64), _> = bincode::deserialize(&t);
+        let full_key: Result<(KeyIndex, Vec<DataType>, KeySeq), _> = bincode::deserialize(&t);
         assert!(full_key.is_err());
     }
 
