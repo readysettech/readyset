@@ -532,6 +532,7 @@ impl Domain {
         sends: &mut EnqueuedSends,
         executor: Option<&Executor>,
     ) -> HashMap<LocalNodeIndex, Vec<Record>> {
+        let src = m.link().src;
         let me = m.link().dst;
         let mut output_messages = HashMap::new();
 
@@ -605,7 +606,39 @@ impl Domain {
             // evict is when the replay key != the join key.
             //
             // but, for now, here we go:
-            // TODO
+            // first, what partial replay paths go through this node?
+            let from = nodes[&src].borrow().global_addr();
+            let deps: Vec<_> = paths
+                .iter()
+                .filter_map(|(&tag, rp)| {
+                    rp.path
+                        .iter()
+                        .find(|rps| rps.node == me)
+                        .and_then(|rps| rps.partial_key)
+                        .map(|k| {
+                            // we need the *input* column that produces that output
+                            n.parent_columns(k)
+                                .into_iter()
+                                .find(|&(ni, _)| ni == from)
+                                .unwrap()
+                                .1
+                                .unwrap()
+                        })
+                        .map(move |k| (tag, k))
+                })
+                .collect();
+
+            let mut evictions = HashMap::new();
+            for miss in misses {
+                for &(tag, key) in &deps {
+                    evictions
+                        .entry(tag)
+                        .or_insert_with(HashSet::new)
+                        .insert(miss.record[key].clone());
+                }
+            }
+
+            // TODO: now send evictions for all the (tag, [key]) things in evictions
         }
 
         drop(n);
