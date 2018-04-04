@@ -250,7 +250,7 @@ impl Ingredient for TopK {
         // For example, if we get a -, then a +, for the same group, we don't want to
         // execute two queries.
         let mut consolidate = HashMap::new();
-        for rec in rs.iter() {
+        for rec in rs {
             let group = rec.iter()
                 .enumerate()
                 .filter_map(|(i, v)| {
@@ -263,10 +263,7 @@ impl Ingredient for TopK {
                 .cloned()
                 .collect::<Vec<_>>();
 
-            consolidate
-                .entry(group)
-                .or_insert_with(Vec::new)
-                .push(rec.clone());
+            consolidate.entry(group).or_insert_with(Vec::new).push(rec);
         }
 
         // find the current value for each group
@@ -283,16 +280,18 @@ impl Ingredient for TopK {
                 match db.lookup(group_by, &KeyType::from(&group[..])) {
                     LookupResult::Some(rs) => Some((group, diffs, rs)),
                     LookupResult::Missing => {
-                        misses.push(Miss {
-                            node: *us,
-                            columns: Vec::from(group_by),
-                            replay_key: replay_key_col.map(|col| {
-                                // since topk is an identity, we don't need to map this output
-                                // column to an input column.
-                                vec![diffs[0][col].clone()]
-                            }),
-                            key: group.clone(),
-                        });
+                        misses.extend(diffs.into_iter().map(|r| {
+                            Miss {
+                                on: *us,
+                                lookup_cols: Vec::from(group_by),
+                                replay_cols: replay_key_col.map(|col| {
+                                    // since topk is an identity, we don't need to map this output
+                                    // column to an input column.
+                                    vec![col]
+                                }),
+                                record: r.extract().0,
+                            }
+                        }));
                         None
                     }
                 }

@@ -183,16 +183,22 @@ where
         {
             let out_key = &self.out_key;
             let mut handle_group =
-                |inner: &mut T, group_r: Record, mut diffs: ::std::vec::Drain<_>| {
-                    let (group_r, _) = group_r.extract();
-                    let mut group_by_i = 0;
+                |inner: &mut T,
+                 group_rs: ::std::vec::Drain<Record>,
+                 mut diffs: ::std::vec::Drain<_>| {
+                    let mut group_rs = group_rs.peekable();
+
                     let mut group = Vec::with_capacity(group_by.len() + 1);
-                    for (col, v) in group_r.into_iter().enumerate() {
-                        if col == group_by[group_by_i] {
-                            group.push(v);
-                            group_by_i += 1;
-                            if group_by_i == group_by.len() {
-                                break;
+                    {
+                        let group_r = group_rs.peek().unwrap();
+                        let mut group_by_i = 0;
+                        for (col, v) in group_r.iter().enumerate() {
+                            if col == group_by[group_by_i] {
+                                group.push(v.clone());
+                                group_by_i += 1;
+                                if group_by_i == group_by.len() {
+                                    break;
+                                }
                             }
                         }
                     }
@@ -204,19 +210,21 @@ where
                                 rs.get(0)
                             }
                             LookupResult::Missing => {
-                                misses.push(Miss {
-                                    node: *us,
-                                    columns: out_key.clone(),
-                                    replay_key: replay_key_col.map(|col| {
-                                        // since group columns go first in our output, and the
-                                        // replay key must be on our group by column (partial can't
-                                        // go through generated columns), this column should be
-                                        // < group.len()
-                                        debug_assert!(col < group.len());
-                                        vec![group[col].clone()]
-                                    }),
-                                    key: group,
-                                });
+                                misses.extend(group_rs.map(|r| {
+                                    Miss {
+                                        on: *us,
+                                        lookup_cols: out_key.clone(),
+                                        replay_cols: replay_key_col.map(|col| {
+                                            // since group columns go first in our output, and the
+                                            // replay key must be on our group by column (partial can't
+                                            // go through generated columns), this column should be
+                                            // < group.len()
+                                            debug_assert!(col < group.len());
+                                            vec![col]
+                                        }),
+                                        record: r.extract().0,
+                                    }
+                                }));
                                 return;
                             }
                         }
@@ -254,29 +262,18 @@ where
                     }
                 };
 
-            let mut prev_group_r = None;
             let mut diffs = Vec::new();
+            let mut group_rs = Vec::new();
             for r in rs {
-                if prev_group_r.is_some()
-                    && cmp(prev_group_r.as_ref().unwrap(), &r) != Ordering::Equal
-                {
-                    handle_group(
-                        &mut self.inner,
-                        prev_group_r.take().unwrap(),
-                        diffs.drain(..),
-                    );
+                if !group_rs.is_empty() && cmp(&group_rs[0], &r) != Ordering::Equal {
+                    handle_group(&mut self.inner, group_rs.drain(..), diffs.drain(..));
                 }
+
                 diffs.push(self.inner.to_diff(&r[..], r.is_positive()));
-                if prev_group_r.is_none() {
-                    prev_group_r = Some(r);
-                }
+                group_rs.push(r);
             }
             assert!(!diffs.is_empty());
-            handle_group(
-                &mut self.inner,
-                prev_group_r.take().unwrap(),
-                diffs.drain(..),
-            );
+            handle_group(&mut self.inner, group_rs.drain(..), diffs.drain(..));
         }
 
         ProcessingResult {

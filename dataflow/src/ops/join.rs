@@ -1,5 +1,6 @@
 use std::collections::HashMap;
 use std::collections::HashSet;
+use std::mem;
 
 use prelude::*;
 
@@ -327,18 +328,20 @@ impl Ingredient for Join {
             ).unwrap();
 
             if other_rows.is_none() {
-                let replay_key = replay_key_col.map(|col| vec![rs[at][col].clone()]);
+                // we missed in the other side!
+                let from = at;
                 at = rs[at..]
                     .iter()
                     .position(|r| r[from_key] != prev_join_key)
                     .map(|p| at + p)
                     .unwrap_or(rs.len());
-                misses.push(Miss {
-                    node: other,
-                    columns: vec![other_key],
-                    replay_key,
-                    key: vec![prev_join_key],
-                });
+                misses.extend((from..at).map(|i| Miss {
+                    on: other,
+                    replay_cols: replay_key_col.map(|c| vec![c]),
+                    lookup_cols: vec![other_key],
+                    // NOTE: we're stealing data here!
+                    record: mem::replace(&mut *rs[i], Vec::new()),
+                }));
                 continue;
             }
 
@@ -369,12 +372,19 @@ impl Ingredient for Join {
                     }
                 } else {
                     // we got a right, but missed in right; clearly, a replay is needed
-                    misses.push(Miss {
-                        node: from,
-                        columns: vec![self.on.1],
-                        replay_key: replay_key_col.map(|col| vec![rs[at][col].clone()]),
-                        key: vec![rs[at][self.on.1].clone()],
-                    });
+                    let start = at;
+                    at = rs[at..]
+                        .iter()
+                        .position(|r| r[from_key] != prev_join_key)
+                        .map(|p| at + p)
+                        .unwrap_or(rs.len());
+                    misses.extend((start..at).map(|i| Miss {
+                        on: from,
+                        replay_cols: replay_key_col.map(|c| vec![c]),
+                        lookup_cols: vec![self.on.1],
+                        // NOTE: we're stealing data here!
+                        record: mem::replace(&mut *rs[i], Vec::new()),
+                    }));
                     continue;
                 }
             }

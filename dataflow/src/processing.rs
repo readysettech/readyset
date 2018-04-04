@@ -8,10 +8,38 @@ use prelude;
 
 #[derive(PartialEq, Eq, Debug)]
 pub struct Miss {
-    pub node: prelude::LocalNodeIndex,
-    pub columns: Vec<usize>,
-    pub replay_key: Option<Vec<prelude::DataType>>,
-    pub key: Vec<prelude::DataType>,
+    pub on: prelude::LocalNodeIndex,
+    pub lookup_cols: Vec<usize>,
+    pub replay_cols: Option<Vec<usize>>,
+    pub record: Vec<prelude::DataType>,
+}
+
+impl Miss {
+    pub(crate) fn replay_key<'a>(
+        &'a self,
+    ) -> Option<impl Iterator<Item = &prelude::DataType> + 'a> {
+        self.replay_cols
+            .as_ref()
+            .map(move |rc| rc.iter().map(move |&rc| &self.record[rc]))
+    }
+
+    pub(crate) fn replay_key_vec(&self) -> Option<Vec<prelude::DataType>> {
+        self.replay_cols
+            .as_ref()
+            .map(|rc| rc.iter().map(|&rc| &self.record[rc]).cloned().collect())
+    }
+
+    pub(crate) fn lookup_key<'a>(&'a self) -> impl Iterator<Item = &prelude::DataType> + 'a {
+        self.lookup_cols.iter().map(move |&rc| &self.record[rc])
+    }
+
+    pub(crate) fn lookup_key_vec(&self) -> Vec<prelude::DataType> {
+        self.lookup_cols
+            .iter()
+            .map(|&rc| &self.record[rc])
+            .cloned()
+            .collect()
+    }
 }
 
 pub struct ProcessingResult {

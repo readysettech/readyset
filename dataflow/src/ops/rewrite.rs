@@ -102,11 +102,12 @@ impl Ingredient for Rewrite {
 
                 if rc.is_none() {
                     misses.push(Miss {
-                        node: *self.signal,
-                        columns: vec![0],
-                        replay_key: replay_key_col.map(|col| vec![r[col].clone()]),
-                        key: vec![key],
+                        on: *self.signal,
+                        lookup_cols: vec![0],
+                        replay_cols: replay_key_col.map(|col| vec![col]),
+                        record: r.extract().0,
                     });
+                    continue;
                 }
 
                 let mut rc = rc.unwrap().peekable();
@@ -132,11 +133,12 @@ impl Ingredient for Rewrite {
                     // so replay_key_col must be None
                     assert_eq!(replay_key_col, None);
                     misses.push(Miss {
-                        node: *self.src,
-                        columns: vec![self.signal_key],
-                        replay_key: replay_key_col.map(|col| vec![r[col].clone()]),
-                        key: vec![key],
+                        on: *self.src,
+                        lookup_cols: vec![self.signal_key],
+                        replay_cols: replay_key_col.map(|col| vec![col]),
+                        record: r.extract().0,
                     });
+                    continue;
                 }
 
                 let mut other_rows = other_rows.unwrap().peekable();

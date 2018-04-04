@@ -97,15 +97,15 @@ impl Ingredient for Latest {
                         // can't be a read, because reads cause replay, which fill holes with an
                         // empty set before processing!
                         misses.push(Miss {
-                            node: *us,
-                            columns: vec![self.key[0]],
-                            replay_key: replay_key_col.map(|col| {
+                            on: *us,
+                            lookup_cols: vec![self.key[0]],
+                            replay_cols: replay_key_col.map(|col| {
                                 debug_assert_eq!(col, self.key[0]);
                                 // since latest is an identity, we don't need to map this output
                                 // column to an input column.
-                                vec![r[col].clone()]
+                                vec![col]
                             }),
-                            key: vec![r[self.key[0]].clone()],
+                            record: r.extract().0,
                         });
                         None
                     }

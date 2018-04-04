@@ -1901,20 +1901,12 @@ impl Domain {
 
                         // ignore duplicate misses
                         misses.sort_unstable_by(|a, b| {
-                            use std::cmp::Ordering;
-                            let mut x = a.replay_key.cmp(&b.replay_key);
-                            if x != Ordering::Equal {
-                                return x;
-                            }
-                            x = a.columns.cmp(&b.columns);
-                            if x != Ordering::Equal {
-                                return x;
-                            }
-                            x = a.key.cmp(&b.key);
-                            if x != Ordering::Equal {
-                                return x;
-                            }
-                            a.node.cmp(&b.node)
+                            a.on
+                                .cmp(&b.on)
+                                .then_with(|| a.replay_cols.cmp(&b.replay_cols))
+                                .then_with(|| a.lookup_cols.cmp(&b.lookup_cols))
+                                .then_with(|| a.lookup_key().cmp(b.lookup_key()))
+                                .then_with(|| a.replay_key().unwrap().cmp(b.replay_key().unwrap()))
                         });
                         misses.dedup();
 
@@ -1922,8 +1914,8 @@ impl Domain {
                             let mut prev = None;
                             let mut missed_on = Vec::with_capacity(misses.len());
                             for miss in &misses {
-                                let k = miss.replay_key.as_ref().unwrap();
-                                if prev.is_none() || k != prev.unwrap() {
+                                let k: Vec<_> = miss.replay_key_vec().unwrap();
+                                if prev.is_none() || &k != prev.as_ref().unwrap() {
                                     missed_on.push(k.clone());
                                     prev = Some(k);
                                 }
@@ -2037,10 +2029,10 @@ impl Domain {
                             let misses = misses;
                             for miss in misses {
                                 need_replay.push((
-                                    miss.node,
-                                    miss.replay_key.unwrap(),
-                                    miss.key,
-                                    miss.columns,
+                                    miss.on,
+                                    miss.replay_key_vec().unwrap(),
+                                    miss.lookup_key_vec(),
+                                    miss.lookup_cols,
                                     tag,
                                 ));
                             }
