@@ -469,16 +469,17 @@ impl<W: io::Write> MysqlShim<W> for SoupBackend {
         match nom_sql::parse_query(&query) {
             Ok(q) => match q {
                 nom_sql::SqlQuery::Select(q) => {
-                    // extract parameter columns
                     let ts_lock = self.table_schemas.lock().unwrap();
                     let table_schemas = &(*ts_lock);
-                    let schema = schema_for_query(table_schemas, &q);
 
                     // extract parameter columns
                     let params: Vec<msql_srv::Column> = utils::get_parameter_columns(&q)
                         .into_iter()
                         .map(|c| schema_for_column(table_schemas, c))
                         .collect();
+
+                    // extract result schema
+                    let schema = schema_for_query(table_schemas, &q);
 
                     // add the query to Soup
                     let qc = self.query_count
