@@ -20,8 +20,8 @@ impl State {
         State::InMemory(MemoryState::default())
     }
 
-    pub fn base(name: String, durability_mode: DurabilityMode) -> Self {
-        let persistent = PersistentState::initialize(name, durability_mode);
+    pub fn base(name: String, threads: i32, durability_mode: DurabilityMode) -> Self {
+        let persistent = PersistentState::initialize(name, threads, durability_mode);
         State::Persistent(persistent)
     }
 
@@ -169,14 +169,15 @@ pub struct PersistentState {
 }
 
 impl PersistentState {
-    fn initialize(name: String, durability_mode: DurabilityMode) -> Self {
+    fn initialize(name: String, threads: i32, durability_mode: DurabilityMode) -> Self {
         let mut opts = rocksdb::Options::default();
         opts.create_if_missing(true);
         let transform = SliceTransform::create("key", Self::transform_fn, None);
         opts.set_prefix_extractor(transform);
 
-        // Number of threads used by RocksDB:
-        // opts.increase_parallelism(4);
+        // Assigns the number of threads for RocksDB's low priority background pool:
+        opts.increase_parallelism(threads);
+
         // opts.set_compression_type(rocksdb::DBCompressionType::Snappy);
         // opts.optimize_for_point_lookup(cache_size); ?
 
@@ -605,7 +606,7 @@ mod tests {
             current_time.subsec_nanos()
         );
 
-        State::base(name, DurabilityMode::MemoryOnly)
+        State::base(name, 1, DurabilityMode::MemoryOnly)
     }
 
     #[test]
@@ -792,7 +793,7 @@ mod tests {
         let db_name = format!("{}.db", name);
         let path = Path::new(&db_name);
         {
-            let _state = State::base(String::from(name), DurabilityMode::DeleteOnExit);
+            let _state = State::base(String::from(name), 1, DurabilityMode::DeleteOnExit);
             assert!(path.exists());
         }
 

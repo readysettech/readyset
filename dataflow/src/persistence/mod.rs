@@ -25,8 +25,10 @@ pub struct Parameters {
     pub mode: DurabilityMode,
     /// Filename prefix for persistent log entries.
     pub log_prefix: String,
-    /// Whether PersistentState or MemoryState should be used for base nodes:
+    /// Whether PersistentState or MemoryState should be used for base nodes.
     pub persist_base_nodes: bool,
+    /// Number of background threads PersistentState can use (shared acrosss all worker threads).
+    pub persistence_threads: i32,
 }
 
 impl Default for Parameters {
@@ -37,6 +39,7 @@ impl Default for Parameters {
             mode: DurabilityMode::MemoryOnly,
             log_prefix: String::from("soup"),
             persist_base_nodes: true,
+            persistence_threads: 1,
         }
     }
 }
@@ -71,6 +74,7 @@ impl Parameters {
             mode,
             log_prefix,
             persist_base_nodes,
+            ..Default::default()
         }
     }
 
