@@ -548,7 +548,7 @@ impl Domain {
             return output_messages;
         }
 
-        let mut m = {
+        let (mut m, evictions) = {
             let mut n = self.nodes[&me].borrow_mut();
             self.process_times.start(me);
             self.process_ptimes.start(me);
@@ -573,7 +573,7 @@ impl Domain {
 
             // normally, we ignore misses during regular forwarding.
             // however, we have to be a little careful in the case of joins.
-            if n.is_internal() && n.is_join() && !misses.is_empty() {
+            let evictions = if n.is_internal() && n.is_join() && !misses.is_empty() {
                 // there are two possible cases here:
                 //
                 //  - this is a write that will hit a hole in every downstream materialization.
@@ -643,10 +643,27 @@ impl Domain {
                     }
                 }
 
-                // TODO: now send evictions for all the (tag, [key]) things in evictions
-            }
-            m
+                Some(evictions)
+            } else {
+                None
+            };
+
+            (m, evictions)
         };
+
+        if let Some(evictions) = evictions {
+            // now send evictions for all the (tag, [key]) things in evictions
+            for (tag, keys) in evictions {
+                self.handle_eviction(
+                    Box::new(Packet::EvictKeys {
+                        keys: keys.into_iter().map(|dt| vec![dt]).collect(),
+                        link: Link::new(src, me),
+                        tag: tag,
+                    }),
+                    sends,
+                );
+            }
+        }
 
         match m.as_ref().unwrap() {
             m @ &box Packet::Message { .. } if m.is_empty() => {

@@ -426,7 +426,6 @@ fn it_works_with_sql_recipe() {
 }
 
 #[test]
-#[allow_fail]
 fn it_works_with_reads_before_writes() {
     let mut g = ControllerBuilder::default().build_local();
     let sql = "
