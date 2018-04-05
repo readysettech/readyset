@@ -791,7 +791,7 @@ named!(pub integer_literal<&[u8], Literal>,
 named!(pub string_literal<&[u8], Literal>,
     do_parse!(
         val: alt_complete!(
-            delimited!(tag!("\""), opt!(take_until!("\"")), tag!("\""))
+              delimited!(tag!("\""), opt!(take_until!("\"")), tag!("\""))
             | delimited!(tag!("'"), opt!(take_until!("'")), tag!("'"))
         ) >>
         ({
