@@ -271,7 +271,7 @@ named!(pub nested_selection<&[u8], SelectStatement>,
 mod tests {
     use super::*;
     use column::{Column, FunctionExpression};
-    use common::{FieldExpression, Operator};
+    use common::{FieldExpression, Literal, Operator};
     use condition::ConditionBase::*;
     use condition::ConditionExpression::*;
     use condition::ConditionTree;
@@ -411,7 +411,7 @@ mod tests {
         let expected_left = Base(Field(Column::from("email")));
         let expected_where_cond = Some(ComparisonOp(ConditionTree {
             left: Box::new(expected_left),
-            right: Box::new(Base(Placeholder)),
+            right: Box::new(Base(Literal(Literal::Placeholder))),
             operator: Operator::Equal,
         }));
         assert_eq!(
@@ -554,7 +554,7 @@ mod tests {
         let expected_left = Base(Field(Column::from("paperId")));
         let expected_where_cond = Some(ComparisonOp(ConditionTree {
             left: Box::new(expected_left),
-            right: Box::new(Base(Placeholder)),
+            right: Box::new(Base(Literal(Literal::Placeholder))),
             operator: Operator::Equal,
         }));
         assert_eq!(
@@ -577,13 +577,13 @@ mod tests {
 
         let left_ct = ConditionTree {
             left: Box::new(Base(Field(Column::from("paperId")))),
-            right: Box::new(Base(Placeholder)),
+            right: Box::new(Base(Literal(Literal::Placeholder))),
             operator: Operator::Equal,
         };
         let left_comp = Box::new(ComparisonOp(left_ct));
         let right_ct = ConditionTree {
             left: Box::new(Base(Field(Column::from("paperStorageId")))),
-            right: Box::new(Base(Placeholder)),
+            right: Box::new(Base(Literal(Literal::Placeholder))),
             operator: Operator::Equal,
         };
         let right_comp = Box::new(ComparisonOp(right_ct));
@@ -614,7 +614,7 @@ mod tests {
         });
         let ct = ConditionTree {
             left: Box::new(Base(Field(Column::from("id")))),
-            right: Box::new(Base(Placeholder)),
+            right: Box::new(Base(Literal(Literal::Placeholder))),
             operator: Operator::Equal,
         };
         let expected_where_cond = Some(ComparisonOp(ct));
@@ -739,7 +739,7 @@ mod tests {
             })),
             right: Box::new(ComparisonOp(ConditionTree {
                 left: Box::new(Base(Field(Column::from("item.i_subject")))),
-                right: Box::new(Base(Placeholder)),
+                right: Box::new(Base(Literal(Literal::Placeholder))),
                 operator: Operator::Equal,
             })),
             operator: Operator::And,
@@ -842,7 +842,7 @@ mod tests {
         let res = selection(qstring.as_bytes());
         let ct = ConditionTree {
             left: Box::new(Base(Field(Column::from("ContactInfo.contactId")))),
-            right: Box::new(Base(Placeholder)),
+            right: Box::new(Base(Literal(Literal::Placeholder))),
             operator: Operator::Equal,
         };
         let expected_where_cond = Some(ComparisonOp(ct));

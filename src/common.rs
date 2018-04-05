@@ -83,6 +83,7 @@ pub enum Literal {
     CurrentTime,
     CurrentDate,
     CurrentTimestamp,
+    Placeholder,
 }
 
 impl From<i64> for Literal {
@@ -120,6 +121,7 @@ impl ToString for Literal {
             Literal::CurrentTime => "CURRENT_TIME".to_string(),
             Literal::CurrentDate => "CURRENT_DATE".to_string(),
             Literal::CurrentTimestamp => "CURRENT_TIMESTAMP".to_string(),
+            Literal::Placeholder => "?".to_string(),
         }
     }
 }
