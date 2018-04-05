@@ -1,8 +1,10 @@
 use petgraph::graph::NodeIndex;
+use std::cell;
 use std::collections::hash_map::Entry;
 use std::collections::{HashMap, HashSet, VecDeque};
 use std::fs::File;
 use std::io::{BufRead, BufReader, ErrorKind};
+use std::mem;
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time;
@@ -518,16 +520,8 @@ impl Domain {
     }
 
     fn dispatch(
+        &mut self,
         m: Box<Packet>,
-        not_ready: &HashSet<LocalNodeIndex>,
-        mode: &mut DomainMode,
-        waiting: &mut Map<Waiting>,
-        states: &mut StateMap,
-        nodes: &DomainNodes,
-        shard: Option<usize>,
-        paths: &mut HashMap<Tag, ReplayPath>,
-        process_times: &mut TimerSet<LocalNodeIndex, SimpleTracker, RealTime>,
-        process_ptimes: &mut TimerSet<LocalNodeIndex, SimpleTracker, ThreadTime>,
         enable_output: bool,
         sends: &mut EnqueuedSends,
         executor: Option<&Executor>,
@@ -536,7 +530,7 @@ impl Domain {
         let me = m.link().dst;
         let mut output_messages = HashMap::new();
 
-        match *mode {
+        match self.mode {
             DomainMode::Forwarding => (),
             DomainMode::Replaying {
                 ref to,
@@ -550,98 +544,109 @@ impl Domain {
             DomainMode::Replaying { .. } => (),
         }
 
-        if !not_ready.is_empty() && not_ready.contains(&me) {
+        if !self.not_ready.is_empty() && self.not_ready.contains(&me) {
             return output_messages;
         }
 
-        let mut n = nodes[&me].borrow_mut();
-        process_times.start(me);
-        process_ptimes.start(me);
-        let mut m = Some(m);
-        let misses = n.process(&mut m, None, states, nodes, shard, true, sends, executor);
-        process_ptimes.stop();
-        process_times.stop();
+        let mut m = {
+            let mut n = self.nodes[&me].borrow_mut();
+            self.process_times.start(me);
+            self.process_ptimes.start(me);
+            let mut m = Some(m);
+            let misses = n.process(
+                &mut m,
+                None,
+                &mut self.state,
+                &self.nodes,
+                self.shard,
+                true,
+                sends,
+                executor,
+            );
+            self.process_ptimes.stop();
+            self.process_times.stop();
 
-        if m.is_none() {
-            // no need to deal with our children if we're not sending them anything
-            return output_messages;
-        }
-
-        // normally, we ignore misses during regular forwarding.
-        // however, we have to be a little careful in the case of joins.
-        if n.is_internal() && n.is_join() && !misses.is_empty() {
-            // there are two possible cases here:
-            //
-            //  - this is a write that will hit a hole in every downstream materialization.
-            //    dropping it is totally safe!
-            //  - this is a write that will update an entry in some downstream materialization.
-            //    this is *not* allowed! we *must* ensure that downstream remains up to date.
-            //    but how can we? we missed in the other side of the join, so we can't produce the
-            //    necessary output record... what we *can* do though is evict from any downstream,
-            //    and then we guarantee that we're in case 1!
-            //
-            // if you're curious about how we may have ended up in case 2 above, here are two ways:
-            //
-            //  - some downstream view is partial over the join key. some time in the past, it
-            //    requested a replay of key k. that replay produced *no* rows from the side that
-            //    was replayed. this in turn means that no lookup was performed on the other side
-            //    of the join, and so k wasn't replayed to that other side (which then still has a
-            //    hole!). in that case, any subsequent write with k in the join column from the
-            //    replay side will miss in the other side.
-            //  - some downstream view is partial over a column that is *not* the join key. in the
-            //    past, it replayed some key k, which means that we aren't allowed to drop any
-            //    write with k in that column. now, a write comes along with k in that replay
-            //    column, but with some hitherto unseen key z in the join column. if the replay of
-            //    k never caused a lookup of z in the other side of the join, then the other side
-            //    will have a hole. thus, we end up in the situation where we need to forward a
-            //    write through the join, but we miss.
-            //
-            // unfortunately, we can't easily distinguish between the case where we have to evict
-            // and the case where we don't (at least not currently), so we *always* need to evict
-            // when this happens. this shouldn't normally be *too* bad, because writes are likely
-            // to be dropped before they even reach the join in most benign cases (e.g., in an
-            // ingress). this can be remedied somewhat in the future by ensuring that the first of
-            // the two causes outlined above can't happen (by always doing a lookup on the replay
-            // key, even if there are now rows). then we know that the *only* case where we have to
-            // evict is when the replay key != the join key.
-            //
-            // but, for now, here we go:
-            // first, what partial replay paths go through this node?
-            let from = nodes[&src].borrow().global_addr();
-            let deps: Vec<_> = paths
-                .iter()
-                .filter_map(|(&tag, rp)| {
-                    rp.path
-                        .iter()
-                        .find(|rps| rps.node == me)
-                        .and_then(|rps| rps.partial_key)
-                        .map(|k| {
-                            // we need the *input* column that produces that output
-                            n.parent_columns(k)
-                                .into_iter()
-                                .find(|&(ni, _)| ni == from)
-                                .unwrap()
-                                .1
-                                .unwrap()
-                        })
-                        .map(move |k| (tag, k))
-                })
-                .collect();
-
-            let mut evictions = HashMap::new();
-            for miss in misses {
-                for &(tag, key) in &deps {
-                    evictions
-                        .entry(tag)
-                        .or_insert_with(HashSet::new)
-                        .insert(miss.record[key].clone());
-                }
+            if m.is_none() {
+                // no need to deal with our children if we're not sending them anything
+                return output_messages;
             }
 
-            // TODO: now send evictions for all the (tag, [key]) things in evictions
-        }
+            // normally, we ignore misses during regular forwarding.
+            // however, we have to be a little careful in the case of joins.
+            if n.is_internal() && n.is_join() && !misses.is_empty() {
+                // there are two possible cases here:
+                //
+                //  - this is a write that will hit a hole in every downstream materialization.
+                //    dropping it is totally safe!
+                //  - this is a write that will update an entry in some downstream materialization.
+                //    this is *not* allowed! we *must* ensure that downstream remains up to date.
+                //    but how can we? we missed in the other side of the join, so we can't produce
+                //    the necessary output record... what we *can* do though is evict from any
+                //    downstream, and then we guarantee that we're in case 1!
+                //
+                // if you're curious about how we may have ended up in case 2 above, here are two
+                // ways:
+                //
+                //  - some downstream view is partial over the join key. some time in the past, it
+                //    requested a replay of key k. that replay produced *no* rows from the side
+                //    that was replayed. this in turn means that no lookup was performed on the
+                //    other side of the join, and so k wasn't replayed to that other side (which
+                //    then still has a hole!). in that case, any subsequent write with k in the
+                //    join column from the replay side will miss in the other side.
+                //  - some downstream view is partial over a column that is *not* the join key. in
+                //    the past, it replayed some key k, which means that we aren't allowed to drop
+                //    any write with k in that column. now, a write comes along with k in that
+                //    replay column, but with some hitherto unseen key z in the join column. if the
+                //    replay of k never caused a lookup of z in the other side of the join, then
+                //    the other side will have a hole. thus, we end up in the situation where we
+                //    need to forward a write through the join, but we miss.
+                //
+                // unfortunately, we can't easily distinguish between the case where we have to
+                // evict and the case where we don't (at least not currently), so we *always* need
+                // to evict when this happens. this shouldn't normally be *too* bad, because writes
+                // are likely to be dropped before they even reach the join in most benign cases
+                // (e.g., in an ingress). this can be remedied somewhat in the future by ensuring
+                // that the first of the two causes outlined above can't happen (by always doing a
+                // lookup on the replay key, even if there are now rows). then we know that the
+                // *only* case where we have to evict is when the replay key != the join key.
+                //
+                // but, for now, here we go:
+                // first, what partial replay paths go through this node?
+                let from = self.nodes[&src].borrow().global_addr();
+                let deps: Vec<_> = self.replay_paths
+                    .iter()
+                    .filter_map(|(&tag, rp)| {
+                        rp.path
+                            .iter()
+                            .find(|rps| rps.node == me)
+                            .and_then(|rps| rps.partial_key)
+                            .map(|k| {
+                                // we need the *input* column that produces that output
+                                n.parent_columns(k)
+                                    .into_iter()
+                                    .find(|&(ni, _)| ni == from)
+                                    .unwrap()
+                                    .1
+                                    .unwrap()
+                            })
+                            .map(move |k| (tag, k))
+                    })
+                    .collect();
 
-        drop(n);
+                let mut evictions = HashMap::new();
+                for miss in misses {
+                    for &(tag, key) in &deps {
+                        evictions
+                            .entry(tag)
+                            .or_insert_with(HashSet::new)
+                            .insert(miss.record[key].clone());
+                    }
+                }
+
+                // TODO: now send evictions for all the (tag, [key]) things in evictions
+            }
+            m
+        };
 
         match m.as_ref().unwrap() {
             m @ &box Packet::Message { .. } if m.is_empty() => {
@@ -659,38 +664,31 @@ impl Domain {
             ref m => unreachable!("dispatch process got {:?}", m),
         }
 
-        let n = nodes[&me].borrow();
-        for i in 0..n.nchildren() {
+        let nchildren = self.nodes[&me].borrow().nchildren();
+        for i in 0..nchildren {
             // avoid cloning if we can
-            let mut m = if i == n.nchildren() - 1 {
+            let mut m = if i == nchildren - 1 {
                 m.take().unwrap()
             } else {
                 m.as_ref().map(|m| box m.clone_data()).unwrap()
             };
 
-            if enable_output || !nodes[n.child(i)].borrow().is_output() {
-                if nodes[n.child(i)].borrow().is_shard_merger() {
+            let childi = *self.nodes[&me].borrow().child(i);
+            let (child_is_output, child_is_merger) = {
+                // XXX: shouldn't NLL make this unnecessary?
+                let c = self.nodes[&childi].borrow();
+                (c.is_output(), c.is_shard_merger())
+            };
+
+            if enable_output || !child_is_output {
+                if child_is_merger {
                     // we need to preserve the egress src (which includes shard identifier)
                 } else {
                     m.link_mut().src = me;
                 }
-                m.link_mut().dst = *n.child(i);
+                m.link_mut().dst = childi;
 
-                for (k, mut v) in Self::dispatch(
-                    m,
-                    not_ready,
-                    mode,
-                    waiting,
-                    states,
-                    nodes,
-                    shard,
-                    paths,
-                    process_times,
-                    process_ptimes,
-                    enable_output,
-                    sends,
-                    None,
-                ) {
+                for (k, mut v) in self.dispatch(m, enable_output, sends, None) {
                     use std::collections::hash_map::Entry;
                     match output_messages.entry(k) {
                         Entry::Occupied(mut rs) => rs.get_mut().append(&mut v),
@@ -701,7 +699,7 @@ impl Domain {
                 }
             } else {
                 let mut data = m.take_data();
-                match output_messages.entry(*n.child(i)) {
+                match output_messages.entry(childi) {
                     Entry::Occupied(entry) => {
                         entry.into_mut().append(&mut data);
                     }
@@ -713,30 +711,6 @@ impl Domain {
         }
 
         output_messages
-    }
-
-    fn dispatch_(
-        &mut self,
-        m: Box<Packet>,
-        enable_output: bool,
-        sends: &mut EnqueuedSends,
-        executor: Option<&Executor>,
-    ) -> HashMap<LocalNodeIndex, Vec<Record>> {
-        Self::dispatch(
-            m,
-            &self.not_ready,
-            &mut self.mode,
-            &mut self.waiting,
-            &mut self.state,
-            &self.nodes,
-            self.shard,
-            &mut self.replay_paths,
-            &mut self.process_times,
-            &mut self.process_ptimes,
-            enable_output,
-            sends,
-            executor,
-        )
     }
 
     pub fn transactional_dispatch(
@@ -760,7 +734,7 @@ impl Domain {
         };
 
         for m in messages {
-            let new_messages = self.dispatch_(m, false, sends, executor);
+            let new_messages = self.dispatch(m, false, sends, executor);
 
             for (key, mut value) in new_messages {
                 egress_messages
@@ -856,7 +830,7 @@ impl Domain {
 
         match *m {
             Packet::Message { .. } => {
-                self.dispatch_(m, true, sends, executor);
+                self.dispatch(m, true, sends, executor);
             }
             Packet::Transaction { .. }
             | Packet::StartMigration { .. }
@@ -881,7 +855,6 @@ impl Domain {
                 match consumed {
                     // workaround #16223
                     Packet::AddNode { node, parents } => {
-                        use std::cell;
                         let addr = *node.local_addr();
                         self.not_ready.insert(addr);
 
@@ -2282,11 +2255,12 @@ impl Domain {
     }
 
     fn finish_replay(&mut self, tag: Tag, node: LocalNodeIndex, sends: &mut EnqueuedSends) {
+        let mut was = mem::replace(&mut self.mode, DomainMode::Forwarding);
         let finished = if let DomainMode::Replaying {
             ref to,
             ref mut buffered,
             ref mut passes,
-        } = self.mode
+        } = was
         {
             if *to != node {
                 // we're told to continue replay for node a, but not b is being replayed
@@ -2308,24 +2282,10 @@ impl Domain {
                 // updates before yielding to the main loop (which might buffer more things).
 
                 if let m @ box Packet::Message { .. } = m {
-                    // NOTE: we cannot use self.dispatch_ here, because we specifically need to
-                    // override the buffering behavior that our self.replaying_to = Some above would
-                    // initiate.
-                    Self::dispatch(
-                        m,
-                        &self.not_ready,
-                        &mut DomainMode::Forwarding,
-                        &mut self.waiting,
-                        &mut self.state,
-                        &self.nodes,
-                        self.shard,
-                        &mut self.replay_paths,
-                        &mut self.process_times,
-                        &mut self.process_ptimes,
-                        true,
-                        sends,
-                        None,
-                    );
+                    // NOTE: we specifically need to override the buffering behavior that our
+                    // self.replaying_to = Some above would initiate.
+                    self.mode = DomainMode::Forwarding;
+                    self.dispatch(m, true, sends, None);
                 } else {
                     // no transactions allowed here since we're still in a migration
                     unreachable!();
@@ -2345,6 +2305,7 @@ impl Domain {
             // we're told to continue replay, but nothing is being replayed
             unreachable!();
         };
+        mem::replace(&mut self.mode, was);
 
         if finished {
             use std::mem;
