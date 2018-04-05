@@ -8,7 +8,7 @@ use local::single_state::SingleState;
 
 use bincode;
 use rand::{self, Rng};
-use rocksdb::{self, SliceTransform, DB};
+use rocksdb::{self, DBIterator, MemtableFactory, SliceTransform, DB};
 
 pub enum State {
     InMemory(MemoryState),
@@ -174,12 +174,15 @@ impl PersistentState {
         opts.create_if_missing(true);
         let transform = SliceTransform::create("key", Self::transform_fn, None);
         opts.set_prefix_extractor(transform);
-
         // Assigns the number of threads for RocksDB's low priority background pool:
         opts.increase_parallelism(threads);
-
-        // opts.set_compression_type(rocksdb::DBCompressionType::Snappy);
-        // opts.optimize_for_point_lookup(cache_size); ?
+        // Use a hash skiplist since we're doing prefix seeks:
+        opts.set_allow_concurrent_memtable_write(false);
+        opts.set_memtable_factory(MemtableFactory::HashSkipList {
+            bucket_count: 1_000_000,
+            height: 4,
+            branching_factor: 4,
+        });
 
         let full_name = format!("{}.db", name);
         let db = Some(DB::open(&opts, &full_name).unwrap());
@@ -351,7 +354,7 @@ impl PersistentState {
         self.db
             .as_ref()
             .unwrap()
-            .iterator(rocksdb::IteratorMode::Start)
+            .full_iterator(rocksdb::IteratorMode::Start)
             .filter(|&(ref key, _)| {
                 // Filter out non-pk indices:
                 let i: KeyIndex = bincode::deserialize(&key).unwrap();
@@ -365,7 +368,7 @@ impl PersistentState {
         self.db
             .as_ref()
             .unwrap()
-            .iterator(rocksdb::IteratorMode::Start)
+            .full_iterator(rocksdb::IteratorMode::Start)
             .filter(|&(ref key, _)| {
                 // Filter out non-pk indices:
                 let i: KeyIndex = bincode::deserialize(&key).unwrap();
@@ -377,7 +380,7 @@ impl PersistentState {
     fn clear(&self) {
         // Would potentially be faster to just drop self.db and call DB::Destroy:
         let db = self.db.as_ref().unwrap();
-        for (key, _) in db.iterator(rocksdb::IteratorMode::Start) {
+        for (key, _) in db.full_iterator(rocksdb::IteratorMode::Start) {
             db.delete(&key).unwrap();
         }
     }
@@ -765,9 +768,9 @@ mod tests {
     fn persistent_state_cloned_records() {
         let mut state = setup_persistent("persistent_state_cloned_records");
         let first: Vec<DataType> = vec![10.into(), "Cat".into()];
-        let second: Vec<DataType> = vec![20.into(), "Bob".into()];
+        let second: Vec<DataType> = vec![20.into(), "Cat".into()];
         state.add_key(&[0], None);
-        state.add_key(&[0, 1], None);
+        state.add_key(&[1], None);
         assert!(state.insert(first.clone(), None));
         assert!(state.insert(second.clone(), None));
         assert_eq!(state.cloned_records(), vec![first, second]);
