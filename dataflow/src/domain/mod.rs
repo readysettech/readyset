@@ -2403,7 +2403,7 @@ impl Domain {
                         _ => unreachable!(),
                     };
 
-                    walk_path(path, keys, *tag, shard, nodes, sends);
+                    walk_path(&path.path[..], keys, *tag, shard, nodes, sends);
 
                     if let TriggerEndpoint::Local(_) = path.trigger {
                         let target = replay_paths[&tag].path.last().unwrap();
@@ -2424,14 +2424,14 @@ impl Domain {
         }
 
         fn walk_path(
-            path: &ReplayPath,
+            path: &[ReplayPathSegment],
             keys: &[Vec<DataType>],
             tag: Tag,
             shard: Option<usize>,
             nodes: &mut DomainNodes,
             sends: &mut EnqueuedSends,
         ) {
-            for segment in &path.path {
+            for segment in path {
                 nodes[&segment.node].borrow_mut().process_eviction(
                     &[*segment.partial_key.as_ref().unwrap()],
                     keys,
@@ -2499,9 +2499,13 @@ impl Domain {
                 keys,
                 tag,
             },) => {
-                assert_eq!(dst, self.replay_paths[&tag].path.first().unwrap().node);
+                let i = self.replay_paths[&tag]
+                    .path
+                    .iter()
+                    .position(|ps| ps.node == dst)
+                    .expect("got eviction for non-local node");
                 walk_path(
-                    &self.replay_paths[&tag],
+                    &self.replay_paths[&tag].path[i..],
                     &keys[..],
                     tag,
                     self.shard,
@@ -2512,7 +2516,7 @@ impl Domain {
                 match self.replay_paths[&tag].trigger {
                     TriggerEndpoint::End(..) | TriggerEndpoint::Local(..) => {
                         // This path terminates inside the domain. Find the target node, evict
-                        // from it, and then propogate the eviction further downstream.
+                        // from it, and then propagate the eviction further downstream.
                         let target = self.replay_paths[&tag].path.last().unwrap().node;
                         // We've already evicted from readers in walk_path
                         if self.nodes[&target].borrow().is_reader() {
