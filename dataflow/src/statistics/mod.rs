@@ -1,7 +1,7 @@
 use std::collections::HashMap;
 
-use prelude::*;
 use domain;
+use prelude::*;
 
 /// Struct holding statistics about a domain. All times are in nanoseconds.
 #[derive(Debug, Serialize, Deserialize)]

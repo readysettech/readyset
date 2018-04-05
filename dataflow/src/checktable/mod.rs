@@ -10,17 +10,17 @@ use std::collections::HashMap;
 use std::fmt;
 use std::fmt::Debug;
 
-use domain;
-use prelude::*;
-use payload::{EgressForBase, IngressFromBase};
 use core::local::Tag as ReplayPath;
+use domain;
+use payload::{EgressForBase, IngressFromBase};
+use prelude::*;
 
 pub mod service;
 pub use self::service::SyncClient as CheckTableClient;
 pub use self::service::TransactionId;
 
-use std::net::SocketAddr;
 use std::cell::RefCell;
+use std::net::SocketAddr;
 thread_local!(static CHECKTABLE: RefCell<Option<CheckTableClient>> = RefCell::new(None));
 pub fn connect_thread_checktable(addr: SocketAddr) {
     CHECKTABLE.with(|ct| {

@@ -1,6 +1,6 @@
-use std::fmt;
 use node::{Node, NodeType};
 use prelude::*;
+use std::fmt;
 
 impl fmt::Debug for Node {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {

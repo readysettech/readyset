@@ -3,8 +3,8 @@ use std::cell;
 
 // core types
 pub use core::*;
-pub use processing::{Ingredient, Miss, ProcessingResult, RawProcessingResult, ReplayContext};
 pub use ops::NodeOperator;
+pub use processing::{Ingredient, Miss, ProcessingResult, RawProcessingResult, ReplayContext};
 
 // graph types
 pub use node::{MaterializationStatus, Node};
@@ -12,9 +12,9 @@ pub type Edge = ();
 pub type Graph = petgraph::Graph<Node, Edge>;
 
 // dataflow types
+pub use Sharding;
 pub use payload::{Link, Packet, PacketEvent, ReplayPathSegment, SourceChannelIdentifier, Tracer,
                   TransactionState};
-pub use Sharding;
 
 // domain local state
 pub type DomainNodes = Map<cell::RefCell<Node>>;

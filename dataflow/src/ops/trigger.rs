@@ -3,10 +3,10 @@ use std::collections::HashMap;
 use prelude::*;
 
 use hyper::Client;
-use tokio_core::reactor::Core;
 use serde::Serialize;
 use serde_json;
 use std::thread;
+use tokio_core::reactor::Core;
 
 /// A Trigger data-flow operator.
 ///

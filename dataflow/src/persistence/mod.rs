@@ -9,10 +9,10 @@ use std::io::Write;
 use std::path::PathBuf;
 use std::time;
 
+use checktable;
 use debug::DebugEventType;
 use domain;
 use prelude::*;
-use checktable;
 
 /// Indicates to what degree updates should be persisted.
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]

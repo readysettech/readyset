@@ -1,6 +1,6 @@
 use nom_sql::ArithmeticOperator;
-use std::fmt;
 use std::collections::HashMap;
+use std::fmt;
 
 use prelude::*;
 

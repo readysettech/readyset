@@ -1,5 +1,5 @@
-use ops;
 use node::special;
+use ops;
 use processing::Ingredient;
 
 #[derive(Clone, Serialize, Deserialize)]

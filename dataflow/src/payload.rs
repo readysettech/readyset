@@ -8,13 +8,13 @@ use checktable;
 use debug::{DebugEvent, DebugEventType};
 use domain;
 use node;
-use statistics;
 use prelude::*;
+use statistics;
 
-use std::fmt;
 use std::collections::{HashMap, HashSet};
-use std::time;
+use std::fmt;
 use std::net::SocketAddr;
+use std::time;
 
 #[derive(Clone, PartialEq, Serialize, Deserialize)]
 pub struct Link {

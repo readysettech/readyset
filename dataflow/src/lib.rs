@@ -46,8 +46,8 @@ mod persistence;
 mod processing;
 mod transactions;
 
-use std::sync::{Arc, Mutex};
 use std::collections::HashMap;
+use std::sync::{Arc, Mutex};
 
 use checktable::TokenGenerator;
 
@@ -57,10 +57,10 @@ pub type Readers = Arc<
 pub type PersistenceParameters = persistence::Parameters;
 pub type DomainConfig = domain::Config;
 
-pub use persistence::DurabilityMode;
+pub use checktable::connect_thread_checktable;
 pub use domain::{Domain, DomainBuilder, Index};
 pub use payload::{LocalBypass, Packet};
-pub use checktable::connect_thread_checktable;
+pub use persistence::DurabilityMode;
 
 #[derive(Copy, Clone, PartialEq, Eq, Debug, Serialize, Deserialize)]
 pub enum Sharding {
@@ -92,8 +92,8 @@ pub fn shard_by(dt: &core::DataType, shards: usize) -> usize {
         core::DataType::Int(n) => n as usize % shards,
         core::DataType::BigInt(n) => n as usize % shards,
         core::DataType::Text(..) | core::DataType::TinyText(..) => {
-            use std::hash::Hasher;
             use std::borrow::Cow;
+            use std::hash::Hasher;
             let mut hasher = fnv::FnvHasher::default();
             let s: Cow<str> = dt.into();
             hasher.write(s.as_bytes());

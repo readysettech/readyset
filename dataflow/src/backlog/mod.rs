@@ -1,6 +1,6 @@
 use core::{DataType, Record};
-use fnv::FnvBuildHasher;
 use evmap;
+use fnv::FnvBuildHasher;
 
 use std::sync::Arc;
 

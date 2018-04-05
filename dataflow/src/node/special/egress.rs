@@ -1,5 +1,5 @@
-use std::collections::HashMap;
 use prelude::*;
+use std::collections::HashMap;
 
 #[derive(Serialize, Deserialize)]
 struct EgressTx {

@@ -1,9 +1,9 @@
+use domain;
+use ops;
+use petgraph;
+use prelude::*;
 use std::collections::HashMap;
 use std::ops::{Deref, DerefMut};
-use domain;
-use prelude::*;
-use petgraph;
-use ops;
 
 mod process;
 pub use self::process::materialize;

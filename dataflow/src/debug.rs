@@ -1,5 +1,5 @@
-use std::time;
 use payload::PacketEvent;
+use std::time;
 
 /// Events that can occur
 #[derive(Copy, Clone, Debug, Serialize, Deserialize)]

@@ -1,6 +1,6 @@
-use prelude::*;
 use node::NodeType;
 use payload;
+use prelude::*;
 use std::collections::HashSet;
 
 impl Node {

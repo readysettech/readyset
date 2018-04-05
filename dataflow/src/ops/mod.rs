@@ -3,16 +3,16 @@ use std::collections::{HashMap, HashSet};
 use prelude::*;
 
 pub mod base;
+pub mod filter;
 pub mod grouped;
+pub mod identity;
 pub mod join;
 pub mod latest;
 pub mod project;
-pub mod union;
-pub mod identity;
-pub mod filter;
+pub mod rewrite;
 pub mod topk;
 pub mod trigger;
-pub mod rewrite;
+pub mod union;
 
 #[derive(Clone, Serialize, Deserialize)]
 pub enum NodeOperator {
@@ -38,7 +38,7 @@ macro_rules! nodeop_from_impl {
                 $variant(other)
             }
         }
-    }
+    };
 }
 
 nodeop_from_impl!(NodeOperator::Base, base::Base);
@@ -215,11 +215,11 @@ impl Ingredient for NodeOperator {
 
 #[cfg(test)]
 pub mod test {
-    use std::collections::HashMap;
     use std::cell;
+    use std::collections::HashMap;
 
-    use prelude::*;
     use node;
+    use prelude::*;
 
     use petgraph::graph::NodeIndex;
 

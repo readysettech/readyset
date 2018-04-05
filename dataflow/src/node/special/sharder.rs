@@ -1,5 +1,5 @@
-use prelude::*;
 use payload;
+use prelude::*;
 use vec_map::VecMap;
 
 #[derive(Serialize, Deserialize)]
