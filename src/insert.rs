@@ -213,4 +213,20 @@ mod tests {
             }
         );
     }
+
+    #[test]
+    fn insert_with_parameters() {
+        let qstring = "INSERT INTO users (id, name) VALUES (?, ?);";
+
+        let res = insertion(qstring.as_bytes());
+        assert_eq!(
+            res.unwrap().1,
+            InsertStatement {
+                table: Table::from("users"),
+                fields: vec![Column::from("id"), Column::from("name")],
+                data: vec![vec![Literal::Placeholder, Literal::Placeholder]],
+                ..Default::default()
+            }
+        );
+    }
 }

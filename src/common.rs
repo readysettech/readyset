@@ -811,6 +811,7 @@ named!(pub literal<&[u8], Literal>,
         | do_parse!(tag_no_case!("CURRENT_TIMESTAMP") >> (Literal::CurrentTimestamp))
         | do_parse!(tag_no_case!("CURRENT_DATE") >> (Literal::CurrentDate))
         | do_parse!(tag_no_case!("CURRENT_TIME") >> (Literal::CurrentTime))
+        | do_parse!(tag_no_case!("?") >> (Literal::Placeholder))
 //        | float_literal
     )
 );
