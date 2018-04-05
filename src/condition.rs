@@ -14,7 +14,6 @@ pub enum ConditionBase {
     Field(Column),
     Literal(Literal),
     LiteralList(Vec<Literal>),
-    Placeholder,
     NestedSelect(Box<SelectStatement>),
 }
 
@@ -31,7 +30,6 @@ impl fmt::Display for ConditionBase {
                     .collect::<Vec<_>>()
                     .join(", ")
             ),
-            ConditionBase::Placeholder => write!(f, "?"),
             ConditionBase::NestedSelect(ref select) => write!(f, "{}", select),
         }
     }
@@ -217,7 +215,7 @@ named!(simple_expr<&[u8], ConditionExpression>,
             do_parse!(
                 tag!("?") >>
                 (ConditionExpression::Base(
-                    ConditionBase::Placeholder
+                    ConditionBase::Literal(Literal::Placeholder)
                 ))
             )
         |   do_parse!(
@@ -297,7 +295,7 @@ mod tests {
             flat_condition_tree(
                 Operator::Equal,
                 ConditionBase::Field(Column::from("foo")),
-                ConditionBase::Placeholder
+                ConditionBase::Literal(Literal::Placeholder)
             )
         );
     }
@@ -380,7 +378,7 @@ mod tests {
         let a = ComparisonOp(ConditionTree {
             operator: Operator::Equal,
             left: Box::new(Base(Field("foo".into()))),
-            right: Box::new(Base(Placeholder)),
+            right: Box::new(Base(Literal(Literal::Placeholder))),
         });
 
         let b = ComparisonOp(ConditionTree {
@@ -422,7 +420,7 @@ mod tests {
         let a = ComparisonOp(ConditionTree {
             operator: Operator::Equal,
             left: Box::new(Base(Field("foo".into()))),
-            right: Box::new(Base(Placeholder)),
+            right: Box::new(Base(Literal(Literal::Placeholder))),
         });
 
         let b = ComparisonOp(ConditionTree {
