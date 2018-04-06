@@ -7,6 +7,7 @@
 #![feature(plugin, use_extern_macros)]
 #![plugin(tarpc_plugins)]
 #![deny(unused_extern_crates)]
+#![feature(conservative_impl_trait)]
 
 #[allow(unused_extern_crates)]
 extern crate backtrace;
