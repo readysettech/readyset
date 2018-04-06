@@ -139,7 +139,6 @@ impl SoupBackend {
         q: nom_sql::InsertStatement,
         results: QueryResultWriter<W>,
     ) -> io::Result<()> {
-        // allocate space for rows
         let data: Vec<Vec<DataType>> = q.data
             .iter()
             .map(|row| row.iter().map(|v| DataType::from(v)).collect())
