@@ -30,6 +30,28 @@ pub struct SoupBackend {
     prepared_count: u32,
 }
 
+fn get_or_make_mutator<'a, 'b>(
+    soup: &'b mut ControllerHandle<ZookeeperAuthority>,
+    inputs: &'a mut BTreeMap<String, Mutator>,
+    table: &'b str,
+) -> &'a mut Mutator {
+    inputs.entry(table.to_owned()).or_insert_with(|| {
+        soup.get_mutator(table)
+            .expect(&format!("no table named {}", table))
+    })
+}
+
+fn get_or_make_getter<'a, 'b>(
+    soup: &'b mut ControllerHandle<ZookeeperAuthority>,
+    outputs: &'a mut BTreeMap<String, RemoteGetter>,
+    view: &'b str,
+) -> &'a mut RemoteGetter {
+    outputs.entry(view.to_owned()).or_insert_with(|| {
+        soup.get_getter(view)
+            .expect(&format!("no view named '{}'", view))
+    })
+}
+
 impl SoupBackend {
     pub fn new(
         zk_addr: &str,
@@ -105,9 +127,7 @@ impl SoupBackend {
             .collect();
 
         // create a mutator if we don't have one for this table already
-        let mutator = self.inputs
-            .entry(q.table.name.clone())
-            .or_insert(self.soup.get_mutator(&q.table.name).unwrap());
+        let mutator = get_or_make_mutator(&mut self.soup, &mut self.inputs, &q.table.name);
 
         match utils::flatten_conditional(&cond, &pkey) {
             None => results.completed(0, 0),
@@ -164,12 +184,8 @@ impl SoupBackend {
 
                 // create a getter if we don't have one for this query already
                 // TODO(malte): may need to make one anyway if the query has changed w.r.t. an
-                // earlier one of the same name?
-                let getter = self.outputs.entry(qname.clone()).or_insert(
-                    self.soup
-                        .get_getter(&qname)
-                        .expect(&format!("no view named '{}'", qname)),
-                );
+                // earlier one of the same name
+                let getter = get_or_make_getter(&mut self.soup, &mut self.outputs, &qname);
 
                 // now "execute" the query via a bogokey lookup
                 match getter.lookup(&DataType::from(0 as i32), true) {
@@ -275,9 +291,7 @@ impl SoupBackend {
         }
 
         // create a mutator if we don't have one for this table already
-        let mutator = self.inputs
-            .entry(q.table.name.clone())
-            .or_insert(self.soup.get_mutator(&q.table.name).unwrap());
+        let mutator = get_or_make_mutator(&mut self.soup, &mut self.inputs, &q.table.name);
 
         match utils::flatten_conditional(&cond, &key_values) {
             None => results.completed(0, 0),
@@ -291,11 +305,7 @@ impl SoupBackend {
                 let getter = match self.soup
                     .extend_recipe(format!("QUERY {}: {};", qname, select_q))
                 {
-                    Ok(_) => self.outputs.entry(qname.clone()).or_insert(
-                        self.soup
-                            .get_getter(&qname)
-                            .expect(&format!("no view named '{}'", qname)),
-                    ),
+                    Ok(_) => get_or_make_getter(&mut self.soup, &mut self.outputs, &qname),
                     Err(e) => {
                         error!(self.log, "update: {:?}", e);
                         return results.error(
@@ -427,11 +437,7 @@ impl SoupBackend {
         results: QueryResultWriter<W>,
     ) -> io::Result<()> {
         // talk to Soup
-        let getter = self.outputs.entry(qname.to_owned()).or_insert(
-            self.soup
-                .get_getter(qname)
-                .expect(&format!("no view named '{}'", qname)),
-        );
+        let getter = get_or_make_getter(&mut self.soup, &mut self.outputs, qname);
         let ts_lock = self.table_schemas.lock().unwrap();
         let schema = schema_for_select(&(*ts_lock), &q);
 
@@ -478,9 +484,7 @@ impl SoupBackend {
         results: QueryResultWriter<W>,
     ) -> io::Result<()> {
         // create a mutator if we don't have one for this table already
-        let putter = self.inputs
-            .entry(table.to_owned())
-            .or_insert(self.soup.get_mutator(table).unwrap());
+        let putter = get_or_make_mutator(&mut self.soup, &mut self.inputs, table);
         let schema: Vec<String> = putter.columns().to_vec();
 
         // handle auto increment
