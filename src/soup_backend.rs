@@ -6,10 +6,11 @@ use nom_sql::{self, ColumnConstraint, ConditionBase, ConditionExpression, Condit
               SelectStatement};
 
 use slog;
-use std::io;
 use std::collections::{BTreeMap, HashMap};
+use std::io;
 use std::sync::{self, Arc, Mutex};
 
+use convert::ToDataType;
 use utils;
 use schema::{schema_for_column, schema_for_insert, schema_for_select};
 
@@ -643,16 +644,18 @@ impl<W: io::Write> MysqlShim<W> for SoupBackend {
         if let Some((qname, q, types)) = self.prepared.get(&id).map(|e| e.clone()) {
             match q {
                 nom_sql::SqlQuery::Select(ref q) => {
-                    // XXX(malte): handle non-string keys
-                    let k: &str = params.iter(types).next().unwrap().into();
-                    let key = vec![DataType::from(k)];
-
+                    let key: Vec<_> = params
+                        .into_iter()
+                        .map(|pv| pv.value.to_datatype())
+                        .collect();
                     self.execute_select(&qname, &q, &key, results)
                 }
                 nom_sql::SqlQuery::Insert(ref q) => {
-                    // XXX(malte): handle non-string keys
-                    let values: Vec<&str> = params.iter(types).map(|v| v.into()).collect();
-                    self.execute_insert(&q, values.into_iter().map(|v| v.into()).collect(), results)
+                    let values: Vec<DataType> = params
+                        .into_iter()
+                        .map(|pv| pv.value.to_datatype())
+                        .collect();
+                    self.execute_insert(&q, values, results)
                 }
                 _ => unimplemented!(),
             }

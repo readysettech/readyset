@@ -4,8 +4,9 @@ version = "0.1.0"
 authors = ["Malte Schwarzkopf <malte@csail.mit.edu>"]
 
 [dependencies]
+arccstr = "1.0.4"
 clap = "2.24.0"
-msql-srv = "0.5"
+msql-srv = "0.6"
 #distributary = { path = "../distributary" }
 distributary = { git = "https://github.com/mit-pdos/distributary.git", rev = "d35ae8c663bcc5f0bc2adc5236910d16d7bbaf88" }
 lazy_static = "1.0.0"
