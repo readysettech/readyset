@@ -8,7 +8,7 @@ use local::single_state::SingleState;
 
 use bincode;
 use rand::{self, Rng};
-use rocksdb::{self, DBIterator, MemtableFactory, SliceTransform, DB};
+use rocksdb::{self, MemtableFactory, SliceTransform, DB};
 
 pub enum State {
     InMemory(MemoryState),
@@ -195,14 +195,70 @@ impl PersistentState {
         }
     }
 
-    // Slices out the prefix from `key`.
+    // Selects a prefix of `key` without the sequence number.
     // Keys are on the form (KeyIndex, Key, Sequence), with the types (u64, Vec<DataType>, u64).
-    // We'd like to retrieve the prefix (KeyIndex, Key), so we'll effectively slice away the
-    // sequence number.
+    // We'd like to retrieve the prefix (KeyIndex, Key).
+    //
+    // The RocksDB docs state the following:
+    // > If non-nullptr, use the specified function to determine the
+    // > prefixes for keys.  These prefixes will be placed in the filter.
+    // > Depending on the workload, this can reduce the number of read-IOP
+    // > cost for scans when a prefix is passed via ReadOptions to
+    // > db.NewIterator(). For prefix filtering to work properly,
+    // > "prefix_extractor" and "comparator" must be such that the following
+    // > properties hold:
+    //
+    // > 1) key.starts_with(prefix(key))
+    // > 2) Compare(prefix(key), key) <= 0.
+    // > 3) If Compare(k1, k2) <= 0, then Compare(prefix(k1), prefix(k2)) <= 0
+    // > 4) prefix(prefix(key)) == prefix(key)
+    //
+    // Ideally we'd want to do this without any deserialization at all. My initial idea was to
+    // simply throw away the last 8 bytes of the key (the sequence number), however how do we do
+    // that while still following point 4?
+    //
+    // We know the key looks something like this in memory:
+    // |--------
+    //  KeyIndex (u64)
+    //  8 bytes
+    //
+    //          -------- ...
+    //          Key (Vec<DataType>)
+    //          At least 8 bytes to
+    //          encode the length (u64)
+    //
+    //                      --------|
+    //                      KeySeq (u64)
+    //                      8 bytes
+    //
+    // We could achieve point 4 by zeroing out the last 8 bytes instead of simply throwing them
+    // out, but then we'd fail point 1 instead. For now we'll throw out the 8 last bytes, but check
+    // to make sure that we haven't already done so first.
     fn transform_fn(key: &[u8]) -> Vec<u8> {
-        let mut bytes = Vec::from(key);
-        bytes.truncate(key.len() - 8);
-        bytes
+        let start = 8;
+        let end = key.len() - 8;
+
+        // TODO(ekmartin): It'd be nice to find a better way of doing this.
+        // Right now we're trying to deserialize to see if we've already truncated this key,
+        // so that `key` is in reality a prefix. One way would be to first deserialize the length
+        // of our Vec<DataType> (the first 8 bytes), and then manually go along the bytes and
+        // deserialize the variant index to then jump forward the amount of bytes that variant
+        // needs (i.e. a DataType::Int would need 4 bytes).
+        //
+        // That seems like a bit of a hassle though, and at that point we might start looking into
+        // a better key format altogether (possibly inspired by MyRocks).
+        match bincode::deserialize::<Vec<DataType>>(&key[start..end]) {
+            Ok(_) => {
+                // Strip away the sequence number:
+                let mut bytes = Vec::from(key);
+                bytes.truncate(end);
+                bytes
+            }
+            Err(_) => {
+                // We've already truncated this key:
+                Vec::from(key)
+            }
+        }
     }
 
     // A key is built up of three components:
@@ -237,13 +293,18 @@ impl PersistentState {
             (pk_index.seq, pk)
         };
 
-        let serialized_pk = Self::serialize_key(0, &pk, pk_seq);
         let db = self.db.as_ref().unwrap();
         let mut write_opts = rocksdb::WriteOptions::default();
         write_opts.set_sync(false);
         write_opts.disable_wal(true);
+
+        // First insert the actual value for our primary index:
+        let serialized_pk = Self::serialize_key(0, &pk, pk_seq);
         let pk_value = bincode::serialize(&r).unwrap();
         db.put_opt(&serialized_pk, &pk_value, &write_opts).unwrap();
+
+        // Then insert pointers for all the secondary indices. Note that we're not including the
+        // KeyIndex or KeySeq here, since we only need the actual value to do a lookup:
         let serialized_pk_only = bincode::serialize(&pk).unwrap();
         for (i, index) in self.indices[1..].iter_mut().enumerate() {
             index.seq += 1;
@@ -858,17 +919,30 @@ mod tests {
         };
 
         let row: Vec<DataType> = vec![1.into(), 10.into()];
+        let i = 5;
         let r = row.iter().collect();
-        let k = PersistentState::serialize_key(0, &r, index.seq);
-        let t = PersistentState::transform_fn(&k);
-        let (key_out, row_out): (KeyIndex, Vec<DataType>) = bincode::deserialize(&t).unwrap();
-        assert_eq!(0, key_out);
+        let k = PersistentState::serialize_key(i, &r, index.seq);
+        let prefix = PersistentState::transform_fn(&k);
+        let (key_out, row_out): (KeyIndex, Vec<DataType>) = bincode::deserialize(&prefix).unwrap();
+        assert_eq!(i, key_out);
         assert_eq!(row[0], row_out[0]);
         assert_eq!(row[1], row_out[1]);
 
-        // Make sure we're actually slicing away the sequence number:
-        let full_key: Result<(KeyIndex, Vec<DataType>, KeySeq), _> = bincode::deserialize(&t);
-        assert!(full_key.is_err());
+        // prefix_extractor requirements:
+        // 1) key.starts_with(prefix(key))
+        assert!(k.starts_with(&prefix));
+
+        // 2) Compare(prefix(key), key) <= 0.
+        assert!(&prefix <= &k);
+
+        // 3) If Compare(k1, k2) <= 0, then Compare(prefix(k1), prefix(k2)) <= 0
+        let other_k = PersistentState::serialize_key(i * 2, &r, index.seq);
+        let other_prefix = PersistentState::transform_fn(&other_k);
+        assert!(k <= other_k);
+        assert!(prefix <= other_prefix);
+
+        // 4) prefix(prefix(key)) == prefix(key)
+        assert_eq!(prefix, PersistentState::transform_fn(&prefix));
     }
 
     #[test]
