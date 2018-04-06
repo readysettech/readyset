@@ -139,88 +139,13 @@ impl SoupBackend {
         q: nom_sql::InsertStatement,
         results: QueryResultWriter<W>,
     ) -> io::Result<()> {
-        let table = q.table.name.clone();
-
-        // create a mutator if we don't have one for this table already
-        let putter = self.inputs
-            .entry(table.clone())
-            .or_insert(self.soup.get_mutator(&table).unwrap());
-
-        let schema: Vec<String> = putter.columns().to_vec();
         // allocate space for rows
-        let mut data: Vec<Vec<DataType>> = vec![vec![DataType::None; schema.len()]; q.data.len()];
-
-        // handle auto increment
-        let ts_lock = self.table_schemas.lock().unwrap();
-        let auto_increment_columns: Vec<_> = ts_lock[&table]
-            .fields
+        let data: Vec<Vec<DataType>> = q.data
             .iter()
-            .filter(|c| c.constraints.contains(&ColumnConstraint::AutoIncrement))
-            .collect();
-        // can only have zero or one AUTO_INCREMENT columns
-        assert!(auto_increment_columns.len() <= 1);
-        let mut ai_lock = self.auto_increments.lock().unwrap();
-        let auto_increment: &mut u64 = &mut (*ai_lock).entry(table.clone()).or_insert(0);
-        let last_insert_id = *auto_increment + 1;
-
-        // handle default values
-        let mut default_value_columns: Vec<_> = ts_lock[&table]
-            .fields
-            .iter()
-            .filter_map(|ref c| {
-                for cc in &c.constraints {
-                    match *cc {
-                        ColumnConstraint::DefaultValue(ref v) => {
-                            return Some((c.column.clone(), v.clone()))
-                        }
-                        _ => (),
-                    }
-                }
-                None
-            })
+            .map(|row| row.iter().map(|v| DataType::from(v)).collect())
             .collect();
 
-        for (ri, ref row) in q.data.iter().enumerate() {
-            if let Some(col) = auto_increment_columns.iter().next() {
-                let idx = schema
-                    .iter()
-                    .position(|f| *f == col.column.name)
-                    .expect(&format!("no column named '{}'", col.column.name));
-                *auto_increment += 1;
-                data[ri][idx] = DataType::from(*auto_increment as i64);
-            }
-
-            for (c, v) in default_value_columns.drain(..) {
-                let idx = schema
-                    .iter()
-                    .position(|f| *f == c.name)
-                    .expect(&format!("no column named '{}'", c.name));
-                data[ri][idx] = v.into();
-            }
-
-            for (ci, c) in q.fields.iter().enumerate() {
-                let idx = schema
-                    .iter()
-                    .position(|f| *f == c.name)
-                    .expect(&format!("no column named '{}'", c.name));
-                data[ri][idx] = DataType::from(row.get(ci).unwrap());
-            }
-        }
-
-        match putter.multi_put(data) {
-            Ok(_) => {
-                // XXX(malte): last_insert_id needs to be set correctly
-                // Could we have put more than one row?
-                results.completed(q.data.len() as u64, last_insert_id)
-            }
-            Err(e) => {
-                error!(self.log, "put error: {:?}", e);
-                results.error(
-                    msql_srv::ErrorKind::ER_UNKNOWN_ERROR,
-                    format!("{:?}", e).as_bytes(),
-                )
-            }
-        }
+        self.do_insert(&q.table.name, &q.fields, data, results)
     }
 
     fn handle_select<W: io::Write>(
@@ -485,36 +410,14 @@ impl SoupBackend {
         }
     }
 
-    #[allow(dead_code)]
     fn execute_insert<W: io::Write>(
         &mut self,
         q: &InsertStatement,
-        datas: Vec<DataType>,
+        data: Vec<DataType>,
         results: QueryResultWriter<W>,
     ) -> io::Result<()> {
-        // talk to Soup
-        let mutator = self.inputs.entry(q.table.name.to_owned()).or_insert(
-            self.soup
-                .get_mutator(&q.table.name)
-                .expect(&format!("no table named '{}'", q.table)),
-        );
-        let ts_lock = self.table_schemas.lock().unwrap();
-        let schema = schema_for_insert(&(*ts_lock), &q);
-
-        match mutator.put(datas) {
-            Ok(_) => {
-                // XXX(malte): last_insert_id needs to be set correctly
-                // Could we have put more than one row?
-                results.completed(1 as u64, 1u64)
-            }
-            Err(e) => {
-                error!(self.log, "put error: {:?}", e);
-                results.error(
-                    msql_srv::ErrorKind::ER_UNKNOWN_ERROR,
-                    format!("{:?}", e).as_bytes(),
-                )
-            }
-        }
+        assert_eq!(q.fields.len(), data.len());
+        self.do_insert(&q.table.name, &q.fields, vec![data], results)
     }
 
     fn execute_select<W: io::Write>(
@@ -563,6 +466,100 @@ impl SoupBackend {
                 results.error(
                     msql_srv::ErrorKind::ER_UNKNOWN_ERROR,
                     "Soup returned an error".as_bytes(),
+                )
+            }
+        }
+    }
+
+    fn do_insert<W: io::Write>(
+        &mut self,
+        table: &str,
+        columns_specified: &Vec<nom_sql::Column>,
+        data: Vec<Vec<DataType>>,
+        results: QueryResultWriter<W>,
+    ) -> io::Result<()> {
+        // create a mutator if we don't have one for this table already
+        let putter = self.inputs
+            .entry(table.to_owned())
+            .or_insert(self.soup.get_mutator(table).unwrap());
+        let schema: Vec<String> = putter.columns().to_vec();
+
+        // handle auto increment
+        let ts_lock = self.table_schemas.lock().unwrap();
+        let auto_increment_columns: Vec<_> = ts_lock[table]
+            .fields
+            .iter()
+            .filter(|c| c.constraints.contains(&ColumnConstraint::AutoIncrement))
+            .collect();
+        // can only have zero or one AUTO_INCREMENT columns
+        assert!(auto_increment_columns.len() <= 1);
+        let mut ai_lock = self.auto_increments.lock().unwrap();
+        let auto_increment: &mut u64 = &mut (*ai_lock).entry(table.to_owned()).or_insert(0);
+        let last_insert_id = *auto_increment + 1;
+
+        // handle default values
+        let mut default_value_columns: Vec<_> = ts_lock[table]
+            .fields
+            .iter()
+            .filter_map(|ref c| {
+                for cc in &c.constraints {
+                    match *cc {
+                        ColumnConstraint::DefaultValue(ref v) => {
+                            return Some((c.column.clone(), v.clone()))
+                        }
+                        _ => (),
+                    }
+                }
+                None
+            })
+            .collect();
+
+        let mut buf = vec![vec![DataType::None; schema.len()]; data.len()];
+
+        for (ri, ref row) in data.iter().enumerate() {
+            if let Some(col) = auto_increment_columns.iter().next() {
+                let idx = schema
+                    .iter()
+                    .position(|f| *f == col.column.name)
+                    .expect(&format!("no column named '{}'", col.column.name));
+                *auto_increment += 1;
+                // query can specify an explicit AUTO_INCREMENT value
+                if !columns_specified.contains(&col.column) {
+                    buf[ri][idx] = DataType::from(*auto_increment as i64);
+                }
+            }
+
+            for (c, v) in default_value_columns.drain(..) {
+                let idx = schema
+                    .iter()
+                    .position(|f| *f == c.name)
+                    .expect(&format!("no column named '{}'", c.name));
+                // only use default value if query doesn't specify one
+                if !columns_specified.contains(&c) {
+                    buf[ri][idx] = v.into();
+                }
+            }
+
+            for (ci, c) in columns_specified.iter().enumerate() {
+                let idx = schema
+                    .iter()
+                    .position(|f| *f == c.name)
+                    .expect(&format!("no column named '{}'", c.name));
+                buf[ri][idx] = row.get(ci).unwrap().clone();
+            }
+        }
+
+        info!(self.log, "inserting {:?}", buf);
+        match putter.multi_put(buf) {
+            Ok(_) => {
+                info!(self.log, "put completed");
+                results.completed(data.len() as u64, last_insert_id)
+            }
+            Err(e) => {
+                error!(self.log, "put error: {:?}", e);
+                results.error(
+                    msql_srv::ErrorKind::ER_UNKNOWN_ERROR,
+                    format!("{:?}", e).as_bytes(),
                 )
             }
         }
@@ -665,7 +662,7 @@ impl<W: io::Write> MysqlShim<W> for SoupBackend {
         error!(self.log, "exec: {}", id);
         // TODO(malte): unfortunate clone here, but we can't call execute_select(&mut self) if we
         // have self.prepared borrowed
-        if let Some((qname, q, types)) = self.prepared.get(&id).map(|e| e.clone()) {
+        if let Some((qname, q, _)) = self.prepared.get(&id).map(|e| e.clone()) {
             match q {
                 nom_sql::SqlQuery::Select(ref q) => {
                     let key: Vec<_> = params
