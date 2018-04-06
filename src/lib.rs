@@ -132,7 +132,7 @@ pub struct Column {
 pub use errorcodes::ErrorKind;
 pub use params::{ParamParser, ParamValue, Params};
 pub use resultset::{QueryResultWriter, RowWriter, StatementMetaWriter};
-pub use value::{ToMysqlValue, Value};
+pub use value::{ToMysqlValue, Value, ValueInner};
 
 /// Implementors of this trait can be used to drive a MySQL-compatible database backend.
 pub trait MysqlShim<W: Write> {
