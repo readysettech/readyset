@@ -467,9 +467,6 @@ impl<'a> Plan<'a> {
             // this function should only be called when there's a choice
             assert!(parents.len() > 1);
 
-            assert_eq!(cols.len(), 1);
-            let col = cols[0];
-
             // and only internal nodes have multiple parents
             let n = &self.graph[node];
             assert!(n.is_internal());
@@ -483,26 +480,40 @@ impl<'a> Plan<'a> {
             parents.retain(|&parent| options.contains(&parent));
             assert!(!parents.is_empty());
 
-            // we want to prefer source paths where we can translate the key
-            if let Some(c) = col {
-                let srcs = n.parent_columns(c);
-                let has = |p: &NodeIndex| {
-                    for &(ref src, ref col) in &srcs {
-                        if src == p && col.is_some() {
-                            return true;
-                        }
-                    }
-                    false
-                };
+            // we want to prefer source paths where we can translate all keys for the purposes of
+            // partial -- but this only matters if we haven't already lost some keys.
+            if cols.iter().all(|c| c.is_some()) {
+                let first = cols[0].unwrap();
 
-                // we only want to prune non-resolving parents if there's at least one resolving.
-                // otherwise, we might end up pruning all the parents!
-                if parents.iter().any(&has) {
-                    parents.retain(&has);
+                let mut universal_src = Vec::new();
+                for (src, col) in n.parent_columns(first) {
+                    if src == node || col.is_none() {
+                        continue;
+                    }
+
+                    // if all other columns resolve into this src, then only keep those srcs
+                    // XXX: this is pretty inefficient, but meh...
+                    let also_to_src = cols.iter().skip(1).map(|c| c.unwrap()).all(|c| {
+                        n.parent_columns(c)
+                            .into_iter()
+                            .find(|&(this_src, _)| this_src == src)
+                            .and_then(|(_, c)| c)
+                            .is_some()
+                    });
+
+                    if also_to_src {
+                        universal_src.push(src);
+                    }
                 }
+
+                if !universal_src.is_empty() {
+                    parents = universal_src;
+                }
+            } else {
+                // no ancestor has all the index columns, so any will do (and we won't be partial).
             }
 
-            // if there is only one left, we don't have a choice
+            // if there is only one left, we don't really have a choice
             if parents.len() == 1 {
                 // no need to pick
                 return parents.pop();

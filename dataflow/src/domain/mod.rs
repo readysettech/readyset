@@ -283,7 +283,7 @@ impl Domain {
     fn find_tags_and_replay(
         &mut self,
         miss_key: Vec<DataType>,
-        miss_column: usize,
+        miss_columns: &[usize],
         miss_in: LocalNodeIndex,
         sends: &mut EnqueuedSends,
     ) {
@@ -300,8 +300,7 @@ impl Domain {
                 }
                 assert!(p.partial_key.is_some());
                 let pkey = p.partial_key.as_ref().unwrap();
-                assert_eq!(pkey.len(), 1);
-                if pkey[0] != miss_column {
+                if &pkey[..] != miss_columns {
                     continue;
                 }
             }
@@ -331,7 +330,7 @@ impl Domain {
         if !found {
             unreachable!(format!(
                 "no tag found to fill missing value {:?} in {}.{:?}",
-                miss_key, miss_in, miss_column
+                miss_key, miss_in, miss_columns
             ));
         }
     }
@@ -384,7 +383,7 @@ impl Domain {
         }
 
         assert_eq!(miss_columns.len(), 1);
-        self.find_tags_and_replay(miss_key, miss_columns[0], miss_in, sends);
+        self.find_tags_and_replay(miss_key, miss_columns, miss_in, sends);
     }
 
     fn send_partial_replay_request(&mut self, tag: Tag, key: Vec<DataType>) {
@@ -1016,7 +1015,7 @@ impl Domain {
                                             // if this because multi-column, also modify [0] in
                                             // handling of Packet::RequestReaderReplay
                                             key: vec![key.clone()],
-                                            col: key_col,
+                                            cols: vec![key_col],
                                             node: node,
                                         };
 
@@ -1123,7 +1122,11 @@ impl Domain {
                             },
                         );
                     }
-                    Packet::RequestReaderReplay { key, col, node } => {
+                    Packet::RequestReaderReplay { key, cols, node } => {
+                        // TODO: compound reader keys
+                        assert_eq!(key.len(), 1);
+                        assert_eq!(cols.len(), 1);
+
                         // the reader could have raced with us filling in the key after some
                         // *other* reader requested it, so let's double check that it indeed still
                         // misses!
@@ -1146,7 +1149,7 @@ impl Domain {
                                 .or_default()
                                 .insert(key[0].clone())
                         {
-                            self.find_tags_and_replay(key, col, node, sends);
+                            self.find_tags_and_replay(key, &cols[..], node, sends);
                         }
                     }
                     Packet::RequestPartialReplay { tag, key } => {

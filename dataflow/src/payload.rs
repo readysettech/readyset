@@ -241,7 +241,7 @@ pub enum Packet {
     /// Ask domain (nicely) to replay a particular key.
     RequestReaderReplay {
         node: LocalNodeIndex,
-        col: usize,
+        cols: Vec<usize>,
         key: Vec<DataType>,
     },
 

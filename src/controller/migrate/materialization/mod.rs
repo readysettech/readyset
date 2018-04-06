@@ -344,11 +344,6 @@ impl Materializations {
                     break;
                 }
 
-                if index.len() != 1 {
-                    // FIXME TODO FIXME TODO
-                    able = false;
-                    break;
-                }
                 let paths = {
                     let mut on_join = plan::Plan::partial_on_join(graph);
                     keys::provenance_of(graph, ni, &index[..], &mut *on_join)
@@ -356,13 +351,11 @@ impl Materializations {
 
                 for path in paths {
                     for (ni, cols) in path.into_iter().skip(1) {
-                        assert_eq!(cols.len(), 1);
-                        let col = cols[0];
-                        if col.is_none() {
+                        if cols.iter().any(|c| c.is_none()) {
                             able = false;
                             break 'try;
                         }
-                        let index = vec![col.unwrap()];
+                        let index: Vec<_> = cols.into_iter().map(|c| c.unwrap()).collect();
                         if let Some(m) = self.have.get(&ni) {
                             if !m.contains(&index) {
                                 // we'd need to add an index to this view,
