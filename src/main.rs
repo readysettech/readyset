@@ -17,6 +17,7 @@ extern crate regex;
 
 mod convert;
 mod utils;
+mod rewrite;
 mod soup_backend;
 mod schema;
 
