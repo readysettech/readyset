@@ -147,22 +147,38 @@ impl SoupBackend {
             .or_insert(self.soup.get_mutator(&table).unwrap());
 
         let schema: Vec<String> = putter.columns().to_vec();
-        let mut data: Vec<Vec<DataType>> =
-            vec![vec![DataType::from(0 as i32); schema.len()]; q.data.len()];
+        // allocate space for rows
+        let mut data: Vec<Vec<DataType>> = vec![vec![DataType::None; schema.len()]; q.data.len()];
 
+        // handle auto increment
         let ts_lock = self.table_schemas.lock().unwrap();
         let auto_increment_columns: Vec<_> = ts_lock[&table]
             .fields
             .iter()
             .filter(|c| c.constraints.contains(&ColumnConstraint::AutoIncrement))
             .collect();
-
         // can only have zero or one AUTO_INCREMENT columns
         assert!(auto_increment_columns.len() <= 1);
-
         let mut ai_lock = self.auto_increments.lock().unwrap();
         let auto_increment: &mut u64 = &mut (*ai_lock).entry(table.clone()).or_insert(0);
         let last_insert_id = *auto_increment + 1;
+
+        // handle default values
+        let mut default_value_columns: Vec<_> = ts_lock[&table]
+            .fields
+            .iter()
+            .filter_map(|ref c| {
+                for cc in &c.constraints {
+                    match *cc {
+                        ColumnConstraint::DefaultValue(ref v) => {
+                            return Some((c.column.clone(), v.clone()))
+                        }
+                        _ => (),
+                    }
+                }
+                None
+            })
+            .collect();
 
         for (ri, ref row) in q.data.iter().enumerate() {
             if let Some(col) = auto_increment_columns.iter().next() {
@@ -172,6 +188,14 @@ impl SoupBackend {
                     .expect(&format!("no column named '{}'", col.column.name));
                 *auto_increment += 1;
                 data[ri][idx] = DataType::from(*auto_increment as i64);
+            }
+
+            for (c, v) in default_value_columns.drain(..) {
+                let idx = schema
+                    .iter()
+                    .position(|f| *f == c.name)
+                    .expect(&format!("no column named '{}'", c.name));
+                data[ri][idx] = v.into();
             }
 
             for (ci, c) in q.fields.iter().enumerate() {
