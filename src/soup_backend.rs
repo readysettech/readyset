@@ -439,7 +439,7 @@ impl SoupBackend {
         assert_eq!(key.len(), 1);
         match getter.lookup(&key[0], true) {
             Ok(d) => {
-                info!(self.log, "exec({:?}) returning {:?}", key, d);
+                trace!(self.log, "exec({:?}) returning {:?}", key, d);
                 let num_rows = d.len();
                 if num_rows > 0 {
                     let mut rw = results.start(schema.as_slice()).unwrap();
@@ -548,12 +548,9 @@ impl SoupBackend {
             }
         }
 
-        info!(self.log, "inserting {:?}", buf);
+        trace!(self.log, "inserting {:?}", buf);
         match putter.multi_put(buf) {
-            Ok(_) => {
-                info!(self.log, "put completed");
-                results.completed(data.len() as u64, last_insert_id)
-            }
+            Ok(_) => results.completed(data.len() as u64, last_insert_id),
             Err(e) => {
                 error!(self.log, "put error: {:?}", e);
                 results.error(
@@ -658,7 +655,6 @@ impl<W: io::Write> MysqlShim<W> for SoupBackend {
         params: ParamParser,
         results: QueryResultWriter<W>,
     ) -> io::Result<()> {
-        error!(self.log, "exec: {}", id);
         // TODO(malte): unfortunate clone here, but we can't call execute_select(&mut self) if we
         // have self.prepared borrowed
         if let Some((qname, q, _)) = self.prepared.get(&id).map(|e| e.clone()) {
