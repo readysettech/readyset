@@ -1,3 +1,4 @@
+extern crate chrono;
 extern crate msql_srv;
 extern crate mysql;
 extern crate mysql_common as myc;
@@ -355,6 +356,124 @@ fn it_prepares() {
                 .unwrap()
                 .unwrap();
             assert_eq!(row.get::<i16, _>(0), Some(1024i16));
+        })
+}
+
+#[test]
+fn insert_exec() {
+    let params = vec![
+        Column {
+            table: String::new(),
+            column: "username".to_owned(),
+            coltype: myc::constants::ColumnType::MYSQL_TYPE_VARCHAR,
+            colflags: myc::constants::ColumnFlags::empty(),
+        },
+        Column {
+            table: String::new(),
+            column: "email".to_owned(),
+            coltype: myc::constants::ColumnType::MYSQL_TYPE_VARCHAR,
+            colflags: myc::constants::ColumnFlags::empty(),
+        },
+        Column {
+            table: String::new(),
+            column: "pw".to_owned(),
+            coltype: myc::constants::ColumnType::MYSQL_TYPE_VARCHAR,
+            colflags: myc::constants::ColumnFlags::empty(),
+        },
+        Column {
+            table: String::new(),
+            column: "created".to_owned(),
+            coltype: myc::constants::ColumnType::MYSQL_TYPE_DATETIME,
+            colflags: myc::constants::ColumnFlags::empty(),
+        },
+        Column {
+            table: String::new(),
+            column: "session".to_owned(),
+            coltype: myc::constants::ColumnType::MYSQL_TYPE_VARCHAR,
+            colflags: myc::constants::ColumnFlags::empty(),
+        },
+        Column {
+            table: String::new(),
+            column: "rss".to_owned(),
+            coltype: myc::constants::ColumnType::MYSQL_TYPE_VARCHAR,
+            colflags: myc::constants::ColumnFlags::empty(),
+        },
+        Column {
+            table: String::new(),
+            column: "mail".to_owned(),
+            coltype: myc::constants::ColumnType::MYSQL_TYPE_VARCHAR,
+            colflags: myc::constants::ColumnFlags::empty(),
+        },
+    ];
+
+    TestingShim::new(
+        |_, _| unreachable!(),
+        |_| 1,
+        move |_, params, w| {
+            assert_eq!(params.len(), 7);
+            assert_eq!(
+                params[0].coltype,
+                myc::constants::ColumnType::MYSQL_TYPE_VAR_STRING
+            );
+            assert_eq!(
+                params[1].coltype,
+                myc::constants::ColumnType::MYSQL_TYPE_VAR_STRING
+            );
+            assert_eq!(
+                params[2].coltype,
+                myc::constants::ColumnType::MYSQL_TYPE_VAR_STRING
+            );
+            assert_eq!(
+                params[3].coltype,
+                myc::constants::ColumnType::MYSQL_TYPE_DATETIME
+            );
+            assert_eq!(
+                params[4].coltype,
+                myc::constants::ColumnType::MYSQL_TYPE_VAR_STRING
+            );
+            assert_eq!(
+                params[5].coltype,
+                myc::constants::ColumnType::MYSQL_TYPE_VAR_STRING
+            );
+            assert_eq!(
+                params[6].coltype,
+                myc::constants::ColumnType::MYSQL_TYPE_VAR_STRING
+            );
+            assert_eq!(Into::<&str>::into(params[0].value), "user199");
+            assert_eq!(Into::<&str>::into(params[1].value), "user199@example.com");
+            assert_eq!(
+                Into::<&str>::into(params[2].value),
+                "$2a$10$Tq3wrGeC0xtgzuxqOlc3v.07VTUvxvwI70kuoVihoO2cE5qj7ooka"
+            );
+            assert_eq!(
+                Into::<chrono::NaiveDateTime>::into(params[3].value),
+                chrono::NaiveDate::from_ymd(2018, 4, 6).and_hms(13, 0, 56)
+            );
+            assert_eq!(Into::<&str>::into(params[4].value), "token199");
+            assert_eq!(Into::<&str>::into(params[5].value), "rsstoken199");
+            assert_eq!(Into::<&str>::into(params[6].value), "mtok199");
+
+            w.completed(42, 1)
+        },
+    ).with_params(params)
+        .test(|db| {
+            let res = db.prep_exec(
+                "INSERT INTO `users` \
+                 (`username`, `email`, `password_digest`, `created_at`, \
+                 `session_token`, `rss_token`, `mailing_list_token`) \
+                 VALUES (?, ?, ?, ?, ?, ?, ?)",
+                (
+                    "user199",
+                    "user199@example.com",
+                    "$2a$10$Tq3wrGeC0xtgzuxqOlc3v.07VTUvxvwI70kuoVihoO2cE5qj7ooka",
+                    mysql::Value::Date(2018, 4, 6, 13, 0, 56, 0),
+                    "token199",
+                    "rsstoken199",
+                    "mtok199",
+                ),
+            ).unwrap();
+            assert_eq!(res.affected_rows(), 42);
+            assert_eq!(res.last_insert_id(), 1);
         })
 }
 
