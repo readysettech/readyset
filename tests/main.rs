@@ -22,7 +22,7 @@ impl<Q, P, E> MysqlShim<net::TcpStream> for TestingShim<Q, P, E>
 where
     Q: FnMut(&str, QueryResultWriter<net::TcpStream>) -> io::Result<()>,
     P: FnMut(&str) -> u32,
-    E: FnMut(u32, Vec<msql_srv::Value>, QueryResultWriter<net::TcpStream>) -> io::Result<()>,
+    E: FnMut(u32, Vec<msql_srv::ParamValue>, QueryResultWriter<net::TcpStream>) -> io::Result<()>,
 {
     fn on_prepare(
         &mut self,
@@ -39,7 +39,7 @@ where
         params: ParamParser,
         results: QueryResultWriter<net::TcpStream>,
     ) -> io::Result<()> {
-        (self.on_e)(id, params.iter(&self.params[..]).collect(), results)
+        (self.on_e)(id, params.into_iter().collect(), results)
     }
 
     fn on_close(&mut self, _: u32) {}
@@ -59,7 +59,7 @@ where
     P: 'static + Send + FnMut(&str) -> u32,
     E: 'static
         + Send
-        + FnMut(u32, Vec<msql_srv::Value>, QueryResultWriter<net::TcpStream>) -> io::Result<()>,
+        + FnMut(u32, Vec<msql_srv::ParamValue>, QueryResultWriter<net::TcpStream>) -> io::Result<()>,
 {
     fn new(on_q: Q, on_p: P, on_e: E) -> Self {
         TestingShim {
@@ -335,7 +335,12 @@ fn it_prepares() {
         move |stmt, params, w| {
             assert_eq!(stmt, 41);
             assert_eq!(params.len(), 1);
-            assert_eq!(Into::<i8>::into(params[0]), 42i8);
+            // rust-mysql sends all numbers as LONGLONG
+            assert_eq!(
+                params[0].coltype,
+                myc::constants::ColumnType::MYSQL_TYPE_LONGLONG
+            );
+            assert_eq!(Into::<i8>::into(params[0].value), 42i8);
 
             let mut w = w.start(&cols)?;
             w.write_col(1024i16)?;
@@ -382,7 +387,12 @@ fn send_long() {
         move |stmt, params, w| {
             assert_eq!(stmt, 41);
             assert_eq!(params.len(), 1);
-            assert_eq!(Into::<&[u8]>::into(params[0]), b"Hello world");
+            // rust-mysql sends all strings as VAR_STRING
+            assert_eq!(
+                params[0].coltype,
+                myc::constants::ColumnType::MYSQL_TYPE_VAR_STRING
+            );
+            assert_eq!(Into::<&[u8]>::into(params[0].value), b"Hello world");
 
             let mut w = w.start(&cols)?;
             w.write_col(1024i16)?;
@@ -555,8 +565,18 @@ fn prepared_nulls() {
         |_| 0,
         move |_, params, w| {
             assert_eq!(params.len(), 2);
-            assert!(params[0].is_null());
-            assert_eq!(Into::<i8>::into(params[1]), 42i8);
+            assert!(params[0].value.is_null());
+            assert!(!params[1].value.is_null());
+            assert_eq!(
+                params[0].coltype,
+                myc::constants::ColumnType::MYSQL_TYPE_SHORT
+            );
+            // rust-mysql sends all numbers as LONGLONG :'(
+            assert_eq!(
+                params[1].coltype,
+                myc::constants::ColumnType::MYSQL_TYPE_LONGLONG
+            );
+            assert_eq!(Into::<i8>::into(params[1].value), 42i8);
 
             let mut w = w.start(&cols)?;
             w.write_row(vec![None::<i16>, Some(42)])?;

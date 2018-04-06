@@ -1,71 +1,89 @@
 use myc;
-use std::borrow::Borrow;
 use std::collections::HashMap;
-use {Column, Value};
+use {StatementData, Value};
 
 /// A `ParamParser` decodes query parameters included in a client's `EXECUTE` command given
 /// type information for the expected parameters.
 ///
 /// Users should invoke [`iter`](struct.ParamParser.html#method.iter) method to iterate over the
 /// provided parameters.
-pub struct ParamParser<'a>(
-    pub(crate) &'a [u8],
-    pub(crate) Option<&'a HashMap<u16, Vec<u8>>>,
-);
+pub struct ParamParser<'a> {
+    pub(crate) params: u16,
+    pub(crate) bytes: &'a [u8],
+    pub(crate) long_data: &'a HashMap<u16, Vec<u8>>,
+    pub(crate) bound_types: &'a mut Vec<(myc::constants::ColumnType, bool)>,
+}
 
 impl<'a> ParamParser<'a> {
-    /// Produces an iterator over the parameters supplied by the client given the expected types of
-    /// those parameters.
-    ///
-    /// This method may be called multiple times to generate multiple independent iterators, but
-    /// beware that this will also parse the underlying client byte-stream again.
-    pub fn iter<I, E>(&self, types: I) -> Params<'a, <I as IntoIterator>::IntoIter>
-    where
-        I: IntoIterator<Item = E>,
-        E: Borrow<Column>,
-    {
+    pub(crate) fn new(input: &'a [u8], stmt: &'a mut StatementData) -> Self {
+        ParamParser {
+            params: stmt.params,
+            bytes: input,
+            long_data: &stmt.long_data,
+            bound_types: &mut stmt.bound_types,
+        }
+    }
+}
+
+impl<'a> IntoIterator for ParamParser<'a> {
+    type IntoIter = Params<'a>;
+    type Item = ParamValue<'a>;
+    fn into_iter(self) -> Params<'a> {
         Params {
-            input: self.0,
+            params: self.params,
+            input: self.bytes,
             nullmap: None,
-            typmap: None,
-            types: types.into_iter(),
             col: 0,
-            long_data: self.1,
+            long_data: self.long_data,
+            bound_types: self.bound_types,
         }
     }
 }
 
 /// An iterator over parameters provided by a client in an `EXECUTE` command.
-pub struct Params<'a, I> {
+pub struct Params<'a> {
+    params: u16,
     input: &'a [u8],
     nullmap: Option<&'a [u8]>,
-    typmap: Option<&'a [u8]>,
-    types: I,
     col: u16,
-    long_data: Option<&'a HashMap<u16, Vec<u8>>>,
+    long_data: &'a HashMap<u16, Vec<u8>>,
+    bound_types: &'a mut Vec<(myc::constants::ColumnType, bool)>,
 }
 
-impl<'a, I, E> Iterator for Params<'a, I>
-where
-    I: Iterator<Item = E> + ExactSizeIterator,
-    E: Borrow<Column>,
-{
-    type Item = Value<'a>;
+/// A single parameter value provided by a client when issuing an `EXECUTE` command.
+pub struct ParamValue<'a> {
+    /// The value provided for this parameter.
+    pub value: Value<'a>,
+    /// The column type assigned to this parameter.
+    pub coltype: myc::constants::ColumnType,
+}
+
+impl<'a> Iterator for Params<'a> {
+    type Item = ParamValue<'a>;
     fn next(&mut self) -> Option<Self::Item> {
         if self.nullmap.is_none() {
-            let nullmap_len = (self.types.len() + 7) / 8;
+            let nullmap_len = (self.params as usize + 7) / 8;
             let (nullmap, rest) = self.input.split_at(nullmap_len);
             self.nullmap = Some(nullmap);
             self.input = rest;
 
             if !rest.is_empty() && rest[0] != 0x00 {
-                let (typmap, rest) = rest[1..].split_at(2 * self.types.len());
-                self.typmap = Some(typmap);
+                let (typmap, rest) = rest[1..].split_at(2 * self.params as usize);
+                self.bound_types.clear();
+                for i in 0..self.params as usize {
+                    self.bound_types.push((
+                        myc::constants::ColumnType::from(typmap[2 * i as usize]),
+                        (typmap[2 * i as usize + 1] & 128) != 0,
+                    ));
+                }
                 self.input = rest;
             }
         }
 
-        let pt = self.types.next()?;
+        if self.col >= self.params {
+            return None;
+        }
+        let pt = &self.bound_types[self.col as usize];
 
         // https://web.archive.org/web/20170404144156/https://dev.mysql.com/doc/internals/en/null-bitmap.html
         // NULL-bitmap-byte = ((field-pos + offset) / 8)
@@ -77,34 +95,24 @@ where
             }
             if (nullmap[byte] & 1u8 << (self.col % 8)) != 0 {
                 self.col += 1;
-                return Some(Value::null());
+                return Some(ParamValue {
+                    value: Value::null(),
+                    coltype: pt.0,
+                });
             }
         } else {
             unreachable!();
         }
 
-        let pt = self.typmap
-            .map(|typmap| {
-                (
-                    myc::constants::ColumnType::from(typmap[2 * self.col as usize]),
-                    (typmap[2 * self.col as usize + 1] & 128) != 0,
-                )
-            })
-            .unwrap_or_else(move || {
-                let pt = pt.borrow();
-                (
-                    pt.coltype,
-                    pt.colflags
-                        .contains(myc::constants::ColumnFlags::UNSIGNED_FLAG),
-                )
-            });
-
-        let v = if let Some(data) = self.long_data.and_then(|d| d.get(&self.col)) {
+        let v = if let Some(data) = self.long_data.get(&self.col) {
             Value::bytes(&data[..])
         } else {
             Value::parse_from(&mut self.input, pt.0, pt.1).unwrap()
         };
         self.col += 1;
-        Some(v)
+        Some(ParamValue {
+            value: v,
+            coltype: pt.0,
+        })
     }
 }

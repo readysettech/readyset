@@ -2,10 +2,11 @@ use byteorder::WriteBytesExt;
 use myc::constants::{ColumnFlags, StatusFlags};
 use packet::PacketWriter;
 use std::borrow::Borrow;
+use std::collections::HashMap;
 use std::io::{self, Write};
 use value::ToMysqlValue;
 use writers;
-use {Column, ErrorKind};
+use {Column, ErrorKind, StatementData};
 
 /// Convenience type for responding to a client `PREPARE` command.
 ///
@@ -15,6 +16,7 @@ use {Column, ErrorKind};
 #[must_use]
 pub struct StatementMetaWriter<'a, W: Write + 'a> {
     pub(crate) writer: &'a mut PacketWriter<W>,
+    pub(crate) stmts: &'a mut HashMap<u32, StatementData>,
 }
 
 impl<'a, W: Write + 'a> StatementMetaWriter<'a, W> {
@@ -32,6 +34,14 @@ impl<'a, W: Write + 'a> StatementMetaWriter<'a, W> {
         <PI as IntoIterator>::IntoIter: ExactSizeIterator,
         <CI as IntoIterator>::IntoIter: ExactSizeIterator,
     {
+        let params = params.into_iter();
+        self.stmts.insert(
+            id,
+            StatementData {
+                params: params.len() as u16,
+                ..Default::default()
+            },
+        );
         writers::write_prepare_ok(id, params, columns, self.writer)
     }
 
