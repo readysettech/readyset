@@ -85,7 +85,7 @@ impl SlackNotifier {
         let check = |title: &str, result: bool| {
             let mut out = format!("{}: ", title);
             if result {
-                out.push_str(":white_check_mark:");
+                out.push_str(":heavy_check_mark:");
             } else {
                 out.push_str(":x:");
             }
