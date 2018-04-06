@@ -13,6 +13,7 @@ extern crate lazy_static;
 extern crate slog;
 
 mod convert;
+mod rewrite;
 mod schema;
 mod soup_backend;
 mod utils;
