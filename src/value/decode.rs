@@ -7,19 +7,42 @@ use std::io;
 #[derive(Debug, PartialEq, Copy, Clone)]
 pub struct Value<'a>(ValueInner<'a>);
 
+/// A representation of a concrete, typed MySQL value.
 #[derive(Debug, PartialEq, Copy, Clone)]
-enum ValueInner<'a> {
+pub enum ValueInner<'a> {
+    /// The MySQL `NULL` value.
     NULL,
+    /// An untyped sequence of bytes (usually a text type or `MYSQL_TYPE_BLOB`).
     Bytes(&'a [u8]),
+    /// A signed integer.
     Int(i64),
+    /// An unsigned integer.
     UInt(u64),
+    /// A floating point number.
     Double(f64),
+    /// A [binary encoding](https://mariadb.com/kb/en/library/resultset-row/#date-binary-encoding)
+    /// of a `MYSQL_TYPE_DATE`.
     Date(&'a [u8]),
+    /// A [binary encoding](https://mariadb.com/kb/en/library/resultset-row/#time-binary-encoding)
+    /// of a `MYSQL_TYPE_TIME`.
     Time(&'a [u8]),
+    /// A [binary
+    /// encoding](https://mariadb.com/kb/en/library/resultset-row/#timestamp-binary-encoding) of a
+    /// `MYSQL_TYPE_TIMESTAMP` or `MYSQL_TYPE_DATETIME`.
     Datetime(&'a [u8]),
 }
 
 impl<'a> Value<'a> {
+    /// Return the inner stored representation of this value.
+    ///
+    /// This may be useful for when you do not care about the exact data type used for a column,
+    /// but instead wish to introspect a value you are given at runtime. Note that the contained
+    /// value may be stored in a type that is more general than what the corresponding parameter
+    /// type allows (e.g., a `u8` will be stored as an `u64`).
+    pub fn into_inner(self) -> ValueInner<'a> {
+        self.0
+    }
+
     pub(crate) fn null() -> Self {
         Value(ValueInner::NULL)
     }
