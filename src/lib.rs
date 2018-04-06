@@ -316,6 +316,7 @@
 #![deny(unused_extern_crates)]
 #![feature(fnbox)]
 
+extern crate assert_infrequent;
 extern crate bincode;
 extern crate channel;
 extern crate consensus;

@@ -9,6 +9,7 @@ use std::sync::mpsc::Sender;
 use std::thread::{self, JoinHandle};
 use std::time::Duration;
 
+use assert_infrequent;
 use futures::Stream;
 use hyper::{self, Client};
 use serde::Serialize;
@@ -89,6 +90,11 @@ impl<A: Authority> ControllerHandle<A> {
     /// Obtain a `RemoteGetterBuilder` that can be sent to a client and then used to query a given
     /// (already maintained) reader node.
     pub fn get_getter_builder(&mut self, name: &str) -> Option<RemoteGetterBuilder> {
+        // This call attempts to detect if `get_getter_builder` is being called in a loop. If this
+        // is getting false positives, then it is safe to increase the allowed hit count.
+        #[cfg(debug_assertions)]
+        assert_infrequent::at_most(200);
+
         let rgb: Option<RemoteGetterBuilder> = self.rpc("getter_builder", &name);
         rgb.map(|mut rgb| {
             for &mut (_, ref mut is_local) in &mut rgb.shards {
@@ -106,6 +112,11 @@ impl<A: Authority> ControllerHandle<A> {
     /// Obtain a MutatorBuild that can be used to construct a Mutator to perform writes and deletes
     /// from the given base node.
     pub fn get_mutator_builder(&mut self, base: &str) -> Option<MutatorBuilder> {
+        // This call attempts to detect if `get_mutator_builder` is being called in a loop. If this
+        // is getting false positives, then it is safe to increase the allowed hit count.
+        #[cfg(debug_assertions)]
+        assert_infrequent::at_most(200);
+
         self.rpc("mutator_builder", &base)
     }
 
@@ -230,6 +241,23 @@ impl<A: Authority> Drop for ControllerHandle<A> {
         if let Some((sender, join_handle)) = self.local_worker.take() {
             let _ = sender.send(WorkerEvent::Shutdown);
             let _ = join_handle.join();
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    #[test]
+    #[should_panic]
+    fn limit_mutator_creation() {
+        use controller::ControllerBuilder;
+        let r_txt = "CREATE TABLE a (x int, y int, z int);\n
+                     CREATE TABLE b (r int, s int);\n";
+
+        let mut c = ControllerBuilder::default().build_local();
+        assert!(c.install_recipe(r_txt.to_owned()).is_ok());
+        for _ in 0..250 {
+            let _ = c.get_mutator_builder("a").unwrap();
         }
     }
 }

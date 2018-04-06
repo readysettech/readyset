@@ -618,7 +618,7 @@ fn mutator_churn() {
 
     let mut vc_state = g.get_getter("votecount").unwrap();
 
-    let ids = 1000;
+    let ids = 10;
     let votes = 7;
 
     // continuously write to vote with new mutators
