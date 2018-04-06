@@ -75,12 +75,17 @@ pub(crate) fn schema_for_column(
         table: table.clone(),
         column: c.name.clone(),
         coltype: match col_schema.sql_type {
+            SqlType::Mediumtext => msql_srv::ColumnType::MYSQL_TYPE_VAR_STRING,
             SqlType::Longtext => msql_srv::ColumnType::MYSQL_TYPE_BLOB,
             SqlType::Text => msql_srv::ColumnType::MYSQL_TYPE_STRING,
             SqlType::Varchar(_) => msql_srv::ColumnType::MYSQL_TYPE_VAR_STRING,
             SqlType::Int(_) => msql_srv::ColumnType::MYSQL_TYPE_LONG,
+            SqlType::Bigint(_) => msql_srv::ColumnType::MYSQL_TYPE_LONG,
+            SqlType::Tinyint(_) => msql_srv::ColumnType::MYSQL_TYPE_TINY,
+            SqlType::Bool => msql_srv::ColumnType::MYSQL_TYPE_BIT,
             SqlType::DateTime => msql_srv::ColumnType::MYSQL_TYPE_DATETIME,
-            SqlType::Bool => msql_srv::ColumnType::MYSQL_TYPE_TINY,
+            SqlType::Float => msql_srv::ColumnType::MYSQL_TYPE_FLOAT,
+            SqlType::Decimal(_, _) => msql_srv::ColumnType::MYSQL_TYPE_DECIMAL,
             _ => unimplemented!(),
         },
         colflags: {

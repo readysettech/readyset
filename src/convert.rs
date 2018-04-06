@@ -13,7 +13,9 @@ impl<'a> ToDataType for Value<'a> {
         match self.into_inner() {
             ValueInner::NULL => DataType::None,
             ValueInner::Bytes(b) => DataType::Text(ArcCStr::try_from(b).unwrap()),
-            ValueInner::Int(i) => DataType::BigInt(i),
+            ValueInner::Int(i) => i.into(),
+            ValueInner::UInt(i) => (i as i64).into(),
+            ValueInner::Double(f) => f.into(),
             ValueInner::Datetime(_) => DataType::Timestamp(self.into()),
             _ => unimplemented!(),
         }
