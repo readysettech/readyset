@@ -26,6 +26,7 @@ use std::collections::HashMap;
 use std::net;
 use std::sync::{Arc, Mutex};
 use std::sync::atomic::AtomicUsize;
+use std::thread;
 
 use soup_backend::SoupBackend;
 
@@ -85,6 +86,9 @@ fn main() {
             query_counter.clone(),
             log.clone(),
         );
-        MysqlIntermediary::run_on_tcp(soup, s).unwrap();
+
+        thread::spawn(move || {
+            MysqlIntermediary::run_on_tcp(soup, s).unwrap();
+        });
     }
 }
