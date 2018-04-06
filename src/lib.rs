@@ -130,7 +130,7 @@ pub struct Column {
 }
 
 pub use errorcodes::ErrorKind;
-pub use params::{ParamParser, Params};
+pub use params::{ParamParser, ParamValue, Params};
 pub use resultset::{QueryResultWriter, RowWriter, StatementMetaWriter};
 pub use value::{ToMysqlValue, Value};
 
@@ -193,6 +193,13 @@ impl<B: MysqlShim<S>, S: Read + Write + Clone> MysqlIntermediary<B, S, S> {
     }
 }
 
+#[derive(Default)]
+struct StatementData {
+    long_data: HashMap<u16, Vec<u8>>,
+    bound_types: Vec<(myc::constants::ColumnType, bool)>,
+    params: u16,
+}
+
 impl<B: MysqlShim<W>, R: Read, W: Write> MysqlIntermediary<B, R, W> {
     /// Create a new server over two one-way channels and process client commands until the client
     /// disconnects or an error occurs.
@@ -239,7 +246,7 @@ impl<B: MysqlShim<W>, R: Read, W: Write> MysqlIntermediary<B, R, W> {
     fn run(mut self) -> io::Result<()> {
         use commands::Command;
 
-        let mut long_data: HashMap<u32, _> = HashMap::new();
+        let mut stmts: HashMap<u32, _> = HashMap::new();
         while let Some((seq, packet)) = self.reader.next()? {
             self.writer.set_seq(seq + 1);
             let cmd = commands::parse(&packet).unwrap().1;
@@ -290,6 +297,7 @@ impl<B: MysqlShim<W>, R: Read, W: Write> MysqlIntermediary<B, R, W> {
                 Command::Prepare(q) => {
                     let w = StatementMetaWriter {
                         writer: &mut self.writer,
+                        stmts: &mut stmts,
                     };
 
                     self.shim.on_prepare(
@@ -299,8 +307,12 @@ impl<B: MysqlShim<W>, R: Read, W: Write> MysqlIntermediary<B, R, W> {
                     )?;
                 }
                 Command::Execute { stmt, params } => {
+                    let state = stmts.get_mut(&stmt).ok_or(io::Error::new(
+                        io::ErrorKind::InvalidData,
+                        format!("asked to execute unknown statement {}", stmt),
+                    ))?;
                     {
-                        let params = params::ParamParser(params, long_data.get(&stmt));
+                        let params = params::ParamParser::new(params, state);
 
                         let w = QueryResultWriter {
                             is_bin: true,
@@ -309,18 +321,23 @@ impl<B: MysqlShim<W>, R: Read, W: Write> MysqlIntermediary<B, R, W> {
 
                         self.shim.on_execute(stmt, params, w)?;
                     }
-                    long_data.remove(&stmt);
+                    state.long_data.clear();
                 }
                 Command::SendLongData { stmt, param, data } => {
-                    long_data
-                        .entry(stmt)
-                        .or_insert_with(HashMap::new)
+                    stmts
+                        .get_mut(&stmt)
+                        .ok_or(io::Error::new(
+                            io::ErrorKind::InvalidData,
+                            format!("got long data packet for unknown statement {}", stmt),
+                        ))?
+                        .long_data
                         .entry(param)
                         .or_insert_with(Vec::new)
                         .extend(data);
                 }
                 Command::Close(stmt) => {
                     self.shim.on_close(stmt);
+                    stmts.remove(&stmt);
                     // NOTE: spec dictates no response from server
                 }
                 Command::Init(_) | Command::Ping => {

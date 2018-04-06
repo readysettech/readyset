@@ -177,24 +177,32 @@ impl<W: io::Write> MysqlShim<W> for Postgres {
     ) -> io::Result<()> {
         match self.prepared.get_mut(id as usize) {
             None => results.error(ErrorKind::ER_NO, b"no such prepared statement"),
-            Some(&mut Prepared {
-                ref mut stmt,
-                ref params,
-            }) => {
+            Some(&mut Prepared { ref mut stmt, .. }) => {
                 // this is a little nasty because we have to take MySQL-encoded arguments and
                 // massage them into &ToSql things, which is what postgres::Statement::query takes.
                 // we can only do that by first boxing all the values (so they can be kept in a
                 // single vec), and then collecting a *second* vec with references to those, and
                 // *then* take a slice of that vec.
-                let args: Vec<Box<postgres::types::ToSql>> = ps.iter(params)
-                    .enumerate()
-                    .map(|(i, p)| match params[i].coltype {
-                        ColumnType::MYSQL_TYPE_SHORT => Box::new(Into::<i16>::into(p)) as Box<_>,
-                        ColumnType::MYSQL_TYPE_LONG => Box::new(Into::<i32>::into(p)) as Box<_>,
-                        ColumnType::MYSQL_TYPE_LONGLONG => Box::new(Into::<i64>::into(p)) as Box<_>,
-                        ColumnType::MYSQL_TYPE_FLOAT => Box::new(Into::<f32>::into(p)) as Box<_>,
-                        ColumnType::MYSQL_TYPE_DOUBLE => Box::new(Into::<f64>::into(p)) as Box<_>,
-                        ColumnType::MYSQL_TYPE_STRING => Box::new(Into::<&str>::into(p)) as Box<_>,
+                let args: Vec<Box<postgres::types::ToSql>> = ps.into_iter()
+                    .map(|p| match p.coltype {
+                        ColumnType::MYSQL_TYPE_SHORT => {
+                            Box::new(Into::<i16>::into(p.value)) as Box<_>
+                        }
+                        ColumnType::MYSQL_TYPE_LONG => {
+                            Box::new(Into::<i32>::into(p.value)) as Box<_>
+                        }
+                        ColumnType::MYSQL_TYPE_LONGLONG => {
+                            Box::new(Into::<i64>::into(p.value)) as Box<_>
+                        }
+                        ColumnType::MYSQL_TYPE_FLOAT => {
+                            Box::new(Into::<f32>::into(p.value)) as Box<_>
+                        }
+                        ColumnType::MYSQL_TYPE_DOUBLE => {
+                            Box::new(Into::<f64>::into(p.value)) as Box<_>
+                        }
+                        ColumnType::MYSQL_TYPE_STRING => {
+                            Box::new(Into::<&str>::into(p.value)) as Box<_>
+                        }
                         ct => unimplemented!(
                             "don't know how to translate PostgreSQL \
                              argument type {:?} into MySQL value",
