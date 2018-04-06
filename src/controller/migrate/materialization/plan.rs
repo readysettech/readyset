@@ -52,16 +52,15 @@ impl<'a> Plan<'a> {
         }
     }
 
-    fn paths(&mut self, columns: &[usize]) -> Vec<Vec<(NodeIndex, Option<usize>)>> {
+    fn paths(&mut self, columns: &[usize]) -> Vec<Vec<(NodeIndex, Vec<Option<usize>>)>> {
         let graph = self.graph;
         let ni = self.node;
         let paths = if self.partial {
-            // FIXME: compound key
             let mut on_join = Plan::partial_on_join(graph);
-            keys::provenance_of(graph, ni, columns[0], &mut *on_join)
+            keys::provenance_of(graph, ni, &columns[..], &mut *on_join)
         } else {
             let mut on_join = self.full_on_join();
-            keys::provenance_of(graph, ni, columns[0], &mut *on_join)
+            keys::provenance_of(graph, ni, &columns[..], &mut *on_join)
         };
 
         // cut paths so they only reach to the the closest materialized node
@@ -104,7 +103,7 @@ impl<'a> Plan<'a> {
         paths.dedup();
 
         // all columns better resolve if we're doing partial
-        assert!(!self.partial || paths.iter().all(|p| p[0].1.is_some()));
+        assert!(!self.partial || paths.iter().all(|p| p[0].1.iter().all(|c| c.is_some())));
 
         paths
     }
@@ -131,8 +130,10 @@ impl<'a> Plan<'a> {
             // what key are we using for partial materialization (if any)?
             let mut partial = None;
             if self.partial {
-                if let Some(&(_, Some(ref key))) = path.first() {
-                    partial = Some(key.clone());
+                if let Some(&(_, ref cols)) = path.first() {
+                    assert!(cols.iter().all(|c| c.is_some()));
+                    let key: Vec<_> = cols.iter().map(|c| c.unwrap()).collect();
+                    partial = Some(key);
                 } else {
                     unreachable!();
                 }
@@ -141,7 +142,7 @@ impl<'a> Plan<'a> {
             // first, find out which domains we are crossing
             let mut segments = Vec::new();
             let mut last_domain = None;
-            for (node, key) in path {
+            for (node, cols) in path {
                 let domain = self.graph[node].domain();
                 if last_domain.is_none() || domain != last_domain.unwrap() {
                     segments.push((domain, Vec::new()));
@@ -155,6 +156,12 @@ impl<'a> Plan<'a> {
                             .push(domain);
                     }
                 }
+
+                let key = if self.partial {
+                    Some(cols.into_iter().map(|c| c.unwrap()).collect::<Vec<_>>())
+                } else {
+                    None
+                };
 
                 segments.last_mut().unwrap().1.push((node, key));
             }
@@ -184,9 +191,9 @@ impl<'a> Plan<'a> {
                 let locals: Vec<_> = nodes
                     .iter()
                     .skip(skip_first)
-                    .map(|&(ni, key)| ReplayPathSegment {
+                    .map(|&(ni, ref key)| ReplayPathSegment {
                         node: *self.graph[ni].local_addr(),
-                        partial_key: key,
+                        partial_key: key.clone(),
                     })
                     .collect();
 
@@ -221,10 +228,10 @@ impl<'a> Plan<'a> {
                     {
                         if segments.len() == 1 {
                             // replay is entirely contained within one domain
-                            *trigger = TriggerEndpoint::Local(vec![*key]);
+                            *trigger = TriggerEndpoint::Local(key.clone());
                         } else if i == 0 {
                             // first domain needs to be told about partial replay trigger
-                            *trigger = TriggerEndpoint::Start(vec![*key]);
+                            *trigger = TriggerEndpoint::Start(key.clone());
                         } else if i == segments.len() - 1 {
                             // otherwise, should know how to trigger partial replay
                             // this means knowing how many sources there are (in the case of
@@ -235,7 +242,10 @@ impl<'a> Plan<'a> {
                             let shards = sharding.shards();
                             let shuffled = match sharding {
                                 Sharding::Random(..) => true,
-                                Sharding::ByColumn(c, _) => c != *key,
+                                Sharding::ByColumn(c, _) => {
+                                    assert_eq!(key.len(), 1);
+                                    c != key[0]
+                                }
                                 _ => false,
                             };
 
@@ -403,8 +413,8 @@ impl<'a> Plan<'a> {
 
     pub(crate) fn partial_on_join<'b>(
         graph: &'b Graph,
-    ) -> Box<FnMut(NodeIndex, Option<usize>, &[NodeIndex]) -> Option<NodeIndex> + 'b> {
-        Box::new(move |node, col, parents| {
+    ) -> Box<FnMut(NodeIndex, &[Option<usize>], &[NodeIndex]) -> Option<NodeIndex> + 'b> {
+        Box::new(move |node, cols, parents| {
             // we hit a join and need to choose a branch to follow.
             //
             // it turns out that this is slightlyc complicated:
@@ -414,6 +424,8 @@ impl<'a> Plan<'a> {
             //    can't do partial.
             //
             // NOTE: it is *not* okay for us to return None here
+            assert_eq!(cols.len(), 1);
+            let col = cols[0];
             if col.is_none() {
                 // we've already failed to resolve, and so won't do partial anyway
                 // can pick any ancestor
@@ -450,10 +462,13 @@ impl<'a> Plan<'a> {
 
     fn full_on_join<'b>(
         &'b mut self,
-    ) -> Box<FnMut(NodeIndex, Option<usize>, &[NodeIndex]) -> Option<NodeIndex> + 'b> {
-        Box::new(move |node, col, parents| {
+    ) -> Box<FnMut(NodeIndex, &[Option<usize>], &[NodeIndex]) -> Option<NodeIndex> + 'b> {
+        Box::new(move |node, cols, parents| {
             // this function should only be called when there's a choice
             assert!(parents.len() > 1);
+
+            assert_eq!(cols.len(), 1);
+            let col = cols[0];
 
             // and only internal nodes have multiple parents
             let n = &self.graph[node];

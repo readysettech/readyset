@@ -233,7 +233,7 @@ impl Ingredient for TopK {
         from: LocalNodeIndex,
         rs: Records,
         _: &mut Tracer,
-        replay_key_col: Option<usize>,
+        replay_key_cols: Option<&[usize]>,
         _: &DomainNodes,
         state: &StateMap,
     ) -> ProcessingResult {
@@ -280,17 +280,11 @@ impl Ingredient for TopK {
                 match db.lookup(group_by, &KeyType::from(&group[..])) {
                     LookupResult::Some(rs) => Some((group, diffs, rs)),
                     LookupResult::Missing => {
-                        misses.extend(diffs.into_iter().map(|r| {
-                            Miss {
-                                on: *us,
-                                lookup_cols: Vec::from(group_by),
-                                replay_cols: replay_key_col.map(|col| {
-                                    // since topk is an identity, we don't need to map this output
-                                    // column to an input column.
-                                    vec![col]
-                                }),
-                                record: r.extract().0,
-                            }
+                        misses.extend(diffs.into_iter().map(|r| Miss {
+                            on: *us,
+                            lookup_cols: Vec::from(group_by),
+                            replay_cols: replay_key_cols.map(Vec::from),
+                            record: r.extract().0,
                         }));
                         None
                     }

@@ -101,8 +101,8 @@ struct ReplayPath {
     trigger: TriggerEndpoint,
 }
 
-type Hole = (usize, DataType);
-type Redo = (Tag, DataType);
+type Hole = (Vec<usize>, Vec<DataType>);
+type Redo = (Tag, Vec<DataType>);
 /// When a replay misses while being processed, it triggers a replay to backfill the hole that it
 /// missed in. We need to ensure that when this happens, we re-run the original replay to fill the
 /// hole we *originally* were trying to fill.
@@ -299,7 +299,9 @@ impl Domain {
                     continue;
                 }
                 assert!(p.partial_key.is_some());
-                if p.partial_key.unwrap() != miss_column {
+                let pkey = p.partial_key.as_ref().unwrap();
+                assert_eq!(pkey.len(), 1);
+                if pkey[0] != miss_column {
                     continue;
                 }
             }
@@ -354,8 +356,8 @@ impl Domain {
         assert_eq!(miss_key.len(), 1);
 
         let mut redundant = false;
-        let redo = (needed_for, replay_key[0].clone());
-        match w.redos.entry((miss_columns[0], miss_key[0].clone())) {
+        let redo = (needed_for, replay_key.clone());
+        match w.redos.entry((Vec::from(miss_columns), miss_key.clone())) {
             Entry::Occupied(e) => {
                 // we have already requested backfill of this key
                 // remember to notify this Redo when backfill completes
@@ -619,15 +621,19 @@ impl Domain {
                         rp.path
                             .iter()
                             .find(|rps| rps.node == me)
-                            .and_then(|rps| rps.partial_key)
-                            .map(|k| {
+                            .and_then(|rps| rps.partial_key.as_ref())
+                            .map(|keys| {
                                 // we need the *input* column that produces that output
-                                n.parent_columns(k)
-                                    .into_iter()
-                                    .find(|&(ni, _)| ni == from)
-                                    .unwrap()
-                                    .1
-                                    .unwrap()
+                                keys.iter()
+                                    .map(|&k| {
+                                        n.parent_columns(k)
+                                            .into_iter()
+                                            .find(|&(ni, _)| ni == from)
+                                            .unwrap()
+                                            .1
+                                            .unwrap()
+                                    })
+                                    .collect::<Vec<_>>()
                             })
                             .map(move |k| (tag, k))
                     })
@@ -635,11 +641,12 @@ impl Domain {
 
                 let mut evictions = HashMap::new();
                 for miss in misses {
-                    for &(tag, key) in &deps {
-                        evictions
-                            .entry(tag)
-                            .or_insert_with(HashSet::new)
-                            .insert(miss.record[key].clone());
+                    for &(tag, ref keys) in &deps {
+                        evictions.entry(tag).or_insert_with(HashSet::new).insert(
+                            keys.into_iter()
+                                .map(|&key| miss.record[key].clone())
+                                .collect(),
+                        );
                     }
                 }
 
@@ -656,7 +663,7 @@ impl Domain {
             for (tag, keys) in evictions {
                 self.handle_eviction(
                     Box::new(Packet::EvictKeys {
-                        keys: keys.into_iter().map(|dt| vec![dt]).collect(),
+                        keys: keys.into_iter().collect(),
                         link: Link::new(src, me),
                         tag: tag,
                     }),
@@ -1913,7 +1920,7 @@ impl Domain {
                         // process the current message in this node
                         let mut misses = n.process(
                             &mut m,
-                            segment.partial_key,
+                            segment.partial_key.as_ref(),
                             &mut self.state,
                             &self.nodes,
                             self.shard,
@@ -2069,13 +2076,17 @@ impl Domain {
                                 break 'outer;
                             }
 
-                            let partial_col = *partial_key_cols.unwrap();
+                            let partial_col = partial_key_cols.as_ref().unwrap();
                             m.as_mut().unwrap().map_data(|rs| {
                                 rs.retain(|r| {
                                     // XXX: don't we technically need to translate the columns a
                                     // bunch here? what if two key columns are reordered?
+                                    // XXX: this clone and collect here is *really* sad
                                     let r = r.rec();
-                                    !missed_on.contains(&vec![r[partial_col].clone()])
+                                    !missed_on.contains(&partial_col
+                                        .iter()
+                                        .map(|&c| r[c].clone())
+                                        .collect())
                                 })
                             });
                         }
@@ -2136,7 +2147,7 @@ impl Domain {
                             if dst_is_target {
                                 trace!(self.log, "partial replay completed"; "local" => dst.id());
                                 if finished_partial == 0 {
-                                    assert_eq!(for_keys, HashSet::<Vec<DataType>>::new());
+                                    assert!(for_keys.is_empty());
                                 }
                                 finished = Some((tag, dst, Some(for_keys)));
                             } else if dst_is_reader {
@@ -2184,20 +2195,19 @@ impl Domain {
                     "partial replay finished to node with waiting backfills"
                 );
 
-                let key_col = *self.replay_paths[&tag]
+                let key_cols = self.replay_paths[&tag]
                     .path
                     .last()
                     .unwrap()
                     .partial_key
-                    .as_ref()
+                    .clone()
                     .unwrap();
 
                 // we got a partial replay result that we were waiting for. it's time we let any
                 // downstream nodes that missed in us on that key know that they can (probably)
                 // continue with their replays.
                 for mut key in for_keys.unwrap() {
-                    assert_eq!(key.len(), 1);
-                    let hole = (key_col, key.swap_remove(0));
+                    let hole = (key_cols.clone(), key);
                     let replay = waiting
                         .redos
                         .remove(&hole)
@@ -2241,7 +2251,7 @@ impl Domain {
                     }
 
                     for (tag, replay_key) in replay {
-                        self.seed_replay(tag, &[replay_key], None, sends);
+                        self.seed_replay(tag, &replay_key[..], None, sends);
                     }
 
                     waiting = self.waiting.remove(&ni).unwrap_or_default();
@@ -2387,7 +2397,7 @@ impl Domain {
                         let target = replay_paths[&tag].path.last().unwrap();
                         state[&target.node].evict_keys(&tag, keys);
                         trigger_downstream_evictions(
-                            &[*target.partial_key.as_ref().unwrap()],
+                            &target.partial_key.as_ref().unwrap()[..],
                             keys,
                             target.node,
                             sends,
@@ -2411,7 +2421,7 @@ impl Domain {
         ) {
             for segment in path {
                 nodes[&segment.node].borrow_mut().process_eviction(
-                    &[*segment.partial_key.as_ref().unwrap()],
+                    &segment.partial_key.as_ref().unwrap()[..],
                     keys,
                     tag,
                     shard,

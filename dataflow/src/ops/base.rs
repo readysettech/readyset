@@ -133,7 +133,7 @@ impl Ingredient for Base {
         _: LocalNodeIndex,
         rs: Records,
         _: &mut Tracer,
-        _: Option<usize>,
+        _: Option<&[usize]>,
         _: &DomainNodes,
         state: &StateMap,
     ) -> ProcessingResult {

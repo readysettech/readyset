@@ -64,7 +64,7 @@ impl Ingredient for Latest {
         from: LocalNodeIndex,
         rs: Records,
         _: &mut Tracer,
-        replay_key_col: Option<usize>,
+        replay_key_cols: Option<&[usize]>,
         _: &DomainNodes,
         state: &StateMap,
     ) -> ProcessingResult {
@@ -99,12 +99,7 @@ impl Ingredient for Latest {
                         misses.push(Miss {
                             on: *us,
                             lookup_cols: vec![self.key[0]],
-                            replay_cols: replay_key_col.map(|col| {
-                                debug_assert_eq!(col, self.key[0]);
-                                // since latest is an identity, we don't need to map this output
-                                // column to an input column.
-                                vec![col]
-                            }),
+                            replay_cols: replay_key_cols.map(Vec::from),
                             record: r.extract().0,
                         });
                         None

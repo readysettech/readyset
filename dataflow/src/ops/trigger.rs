@@ -118,7 +118,7 @@ impl Ingredient for Trigger {
         from: LocalNodeIndex,
         rs: Records,
         _: &mut Tracer,
-        _: Option<usize>,
+        _: Option<&[usize]>,
         _: &DomainNodes,
         state: &StateMap,
     ) -> ProcessingResult {

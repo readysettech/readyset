@@ -262,11 +262,17 @@ impl<'a> Migration<'a> {
         // this node's column to cause a conflict. Is None for a given base node if any write to
         // that base node might cause a conflict.
         let base_columns: Vec<(_, Option<_>)> =
-            keys::provenance_of(&self.mainline.ingredients, n, key, |_, _, _| None)
+            keys::provenance_of(&self.mainline.ingredients, n, &[key], |_, _, _| None)
                 .into_iter()
                 .map(|path| {
                     // we want the base node corresponding to each path
-                    path.into_iter().last().unwrap()
+                    path.into_iter()
+                        .last()
+                        .map(|(n, mut cols)| {
+                            assert_eq!(cols.len(), 1);
+                            (n, cols.swap_remove(0))
+                        })
+                        .unwrap()
                 })
                 .collect();
 

@@ -143,7 +143,7 @@ impl Ingredient for NodeOperator {
         from: LocalNodeIndex,
         data: Records,
         tracer: &mut Tracer,
-        replay_key_col: Option<usize>,
+        replay_key_col: Option<&[usize]>,
         domain: &DomainNodes,
         states: &StateMap,
     ) -> ProcessingResult {

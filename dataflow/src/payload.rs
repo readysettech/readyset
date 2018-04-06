@@ -37,7 +37,7 @@ impl fmt::Debug for Link {
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct ReplayPathSegment {
     pub node: LocalNodeIndex,
-    pub partial_key: Option<usize>,
+    pub partial_key: Option<Vec<usize>>,
 }
 
 #[derive(Clone, Serialize, Deserialize)]

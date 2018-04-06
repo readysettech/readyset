@@ -145,7 +145,7 @@ where
         from: LocalNodeIndex,
         rs: Records,
         _: &mut Tracer,
-        replay_key_col: Option<usize>,
+        replay_key_cols: Option<&[usize]>,
         _: &DomainNodes,
         state: &StateMap,
     ) -> ProcessingResult {
@@ -210,20 +210,11 @@ where
                                 rs.get(0)
                             }
                             LookupResult::Missing => {
-                                misses.extend(group_rs.map(|r| {
-                                    Miss {
-                                        on: *us,
-                                        lookup_cols: out_key.clone(),
-                                        replay_cols: replay_key_col.map(|col| {
-                                            // since group columns go first in our output, and the
-                                            // replay key must be on our group by column (partial can't
-                                            // go through generated columns), this column should be
-                                            // < group.len()
-                                            debug_assert!(col < group.len());
-                                            vec![col]
-                                        }),
-                                        record: r.extract().0,
-                                    }
+                                misses.extend(group_rs.map(|r| Miss {
+                                    on: *us,
+                                    lookup_cols: out_key.clone(),
+                                    replay_cols: replay_key_cols.map(Vec::from),
+                                    record: r.extract().0,
                                 }));
                                 return;
                             }

@@ -345,18 +345,19 @@ impl Materializations {
                 }
 
                 if index.len() != 1 {
-                    // FIXME
+                    // FIXME TODO FIXME TODO
                     able = false;
                     break;
                 }
-                let index = index[0];
                 let paths = {
                     let mut on_join = plan::Plan::partial_on_join(graph);
-                    keys::provenance_of(graph, ni, index, &mut *on_join)
+                    keys::provenance_of(graph, ni, &index[..], &mut *on_join)
                 };
 
                 for path in paths {
-                    for (ni, col) in path.into_iter().skip(1) {
+                    for (ni, cols) in path.into_iter().skip(1) {
+                        assert_eq!(cols.len(), 1);
+                        let col = cols[0];
                         if col.is_none() {
                             able = false;
                             break 'try;

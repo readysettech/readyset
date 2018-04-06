@@ -7,7 +7,7 @@ impl Node {
     pub fn process(
         &mut self,
         m: &mut Option<Box<Packet>>,
-        keyed_by: Option<usize>,
+        keyed_by: Option<&Vec<usize>>,
         state: &mut StateMap,
         nodes: &DomainNodes,
         on_shard: Option<usize>,
@@ -65,7 +65,7 @@ impl Node {
                                 assert_eq!(key.len(), 1);
                             }
                             ReplayContext::Partial {
-                                key_col: keyed_by.unwrap(),
+                                key_cols: keyed_by.unwrap().clone(),
                                 keys: mem::replace(for_keys, HashSet::new()),
                             }
                         }
