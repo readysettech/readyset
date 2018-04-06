@@ -8,7 +8,7 @@ use local::single_state::SingleState;
 
 use bincode;
 use rand::{self, Rng};
-use rocksdb::{self, MemtableFactory, SliceTransform, DB};
+use rocksdb::{self, MemtableFactory, SliceTransform, DB, DBCompressionType};
 
 pub enum State {
     InMemory(MemoryState),
@@ -171,6 +171,7 @@ pub struct PersistentState {
 impl PersistentState {
     fn initialize(name: String, threads: i32, durability_mode: DurabilityMode) -> Self {
         let mut opts = rocksdb::Options::default();
+        opts.set_compression_type(DBCompressionType::Lz4);
         opts.create_if_missing(true);
         let transform = SliceTransform::create("key", Self::transform_fn, None);
         opts.set_prefix_extractor(transform);
