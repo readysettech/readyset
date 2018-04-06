@@ -292,7 +292,7 @@ impl SoupBackend {
         let where_clause = Some(ConditionExpression::ComparisonOp(ConditionTree {
             operator: Operator::Equal,
             left: box ConditionExpression::Base(ConditionBase::Field(key_values[0].clone())),
-            right: box ConditionExpression::Base(ConditionBase::Placeholder),
+            right: box ConditionExpression::Base(ConditionBase::Literal(Literal::Placeholder)),
         }));
 
         let select_q = SelectStatement {
