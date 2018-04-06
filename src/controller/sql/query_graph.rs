@@ -358,7 +358,13 @@ fn classify_conditionals(
                                 panic!("left hand side of comparison must be field");
                             }
                         }
-                        // right-hand side is a literal, so this is a predicate
+                        // right-hand side is a placeholder, so this must be a query parameter
+                        ConditionBase::Literal(Literal::Placeholder) => {
+                            if let ConditionBase::Field(ref lf) = *l {
+                                params.push(lf.clone());
+                            }
+                        }
+                        // right-hand side is a non-placeholder literal, so this is a predicate
                         ConditionBase::Literal(_) => {
                             if let ConditionBase::Field(ref lf) = *l {
                                 // we assume that implied table names have previously been expanded
@@ -368,10 +374,6 @@ fn classify_conditionals(
                                 e.push(ce.clone());
                             }
                         }
-                        // right-hand side is a placeholder, so this must be a query parameter
-                        ConditionBase::Placeholder => if let ConditionBase::Field(ref lf) = *l {
-                            params.push(lf.clone());
-                        },
                         ConditionBase::LiteralList(_) => (),
                         ConditionBase::NestedSelect(_) => unimplemented!(),
                     }
