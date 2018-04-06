@@ -192,7 +192,7 @@ mod tests {
             where_clause: Some(ConditionExpression::ComparisonOp(ConditionTree {
                 operator: Operator::Equal,
                 left: wrap(ConditionBase::Field(Column::from("t.id"))),
-                right: wrap(ConditionBase::Placeholder),
+                right: wrap(ConditionBase::Literal(Literal::Placeholder)),
             })),
             ..Default::default()
         };
@@ -211,7 +211,7 @@ mod tests {
                     Some(ConditionExpression::ComparisonOp(ConditionTree {
                         operator: Operator::Equal,
                         left: wrap(ConditionBase::Field(Column::from("PaperTag.id"))),
-                        right: wrap(ConditionBase::Placeholder),
+                        right: wrap(ConditionBase::Literal(Literal::Placeholder)),
                     }))
                 );
             }
