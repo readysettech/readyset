@@ -610,6 +610,8 @@ impl<W: io::Write> MysqlShim<W> for SoupBackend {
                     colflags: ColumnFlags::empty(),
                 },
             ];
+            // TODO(malte): we actually know what tables exist via self.table_schemas, so
+            //              return them here
             let writer = results.start(&cols)?;
             println!(" -> Ok({} rows)", 0);
             return writer.finish();
