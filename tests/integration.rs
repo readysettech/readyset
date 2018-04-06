@@ -136,6 +136,7 @@ fn delete_basic() {
     {
         let deleted = conn.query("DELETE FROM Cats WHERE Cats.id = 1").unwrap();
         assert_eq!(deleted.affected_rows(), 1);
+        sleep();
     }
 
     let row = conn.query("SELECT Cats.id FROM Cats WHERE Cats.id = 1")
@@ -161,6 +162,7 @@ fn delete_only_constraint() {
     {
         let deleted = conn.query("DELETE FROM Cats WHERE Cats.id = 1").unwrap();
         assert_eq!(deleted.affected_rows(), 1);
+        sleep();
     }
 
     let row = conn.query("SELECT Cats.id FROM Cats WHERE Cats.id = 1")
@@ -188,6 +190,7 @@ fn delete_multiple() {
         let deleted = conn.query("DELETE FROM Cats WHERE Cats.id = 1 OR Cats.id = 2")
             .unwrap();
         assert_eq!(deleted.affected_rows(), 2);
+        sleep();
     }
 
     for i in 1..3 {
@@ -239,6 +242,7 @@ fn delete_bogus_valid_and() {
         let deleted = conn.query("DELETE FROM Cats WHERE Cats.id = 1 AND Cats.id = 1")
             .unwrap();
         assert_eq!(deleted.affected_rows(), 1);
+        sleep();
     }
 
     let row = conn.query("SELECT Cats.id FROM Cats WHERE Cats.id = 1")
@@ -269,6 +273,7 @@ fn delete_bogus_valid_or() {
         let deleted = conn.query("DELETE FROM Cats WHERE Cats.id = 1 OR Cats.id = 1")
             .unwrap();
         assert_eq!(deleted.affected_rows(), 1);
+        sleep();
     }
 
     let row = conn.query("SELECT Cats.id FROM Cats WHERE Cats.id = 1")
@@ -323,6 +328,7 @@ fn delete_compound_primary_key() {
         let q = "DELETE FROM Vote WHERE Vote.aid = 1 AND Vote.uid = 2";
         let deleted = conn.query(q).unwrap();
         assert_eq!(deleted.affected_rows(), 1);
+        sleep();
     }
 
     let q = "SELECT Vote.uid FROM Vote WHERE Vote.aid = 1 AND Vote.uid = 2";
@@ -353,6 +359,7 @@ fn delete_multi_compound_primary_key() {
         let q = "DELETE FROM Vote WHERE (Vote.aid = 1 AND Vote.uid = 2) OR (Vote.aid = 1 AND Vote.uid = 3)";
         let deleted = conn.query(q).unwrap();
         assert_eq!(deleted.affected_rows(), 2);
+        sleep();
     }
 
     for _ in 2..4 {
@@ -379,6 +386,7 @@ fn update_basic() {
         let updated = conn.query("UPDATE Cats SET Cats.name = \"Rusty\" WHERE Cats.id = 1")
             .unwrap();
         assert_eq!(updated.affected_rows(), 1);
+        sleep();
     }
 
     let name: String = conn.first("SELECT Cats.name FROM Cats WHERE Cats.id = 1")
@@ -406,6 +414,7 @@ fn update_compound_primary_key() {
         let q = "UPDATE Vote SET Vote.reason = \"better\" WHERE Vote.aid = 1 AND Vote.uid = 2";
         let updated = conn.query(q).unwrap();
         assert_eq!(updated.affected_rows(), 1);
+        sleep();
     }
 
     let q = "SELECT Vote.reason FROM Vote WHERE Vote.aid = 1 AND Vote.uid = 2";
@@ -437,6 +446,7 @@ fn update_multi_compound_key() {
                  WHERE (Vote.aid = 1 AND Vote.uid = 2) OR (Vote.aid = 1 AND Vote.uid = 3)";
         let updated = conn.query(q).unwrap();
         assert_eq!(updated.affected_rows(), 2);
+        sleep();
     }
 
     for uid in 2..4 {
@@ -468,6 +478,7 @@ fn update_only_constraint() {
         let updated = conn.query("UPDATE Cats SET Cats.name = \"Rusty\" WHERE Cats.id = 1")
             .unwrap();
         assert_eq!(updated.affected_rows(), 1);
+        sleep();
     }
 
     let name: String = conn.first("SELECT Cats.name FROM Cats WHERE Cats.id = 1")
@@ -493,6 +504,7 @@ fn update_pkey() {
         let query = "UPDATE Cats SET Cats.name = \"Rusty\", Cats.id = 10 WHERE Cats.id = 1";
         let updated = conn.query(query).unwrap();
         assert_eq!(updated.affected_rows(), 1);
+        sleep();
     }
 
     let name: String = conn.first("SELECT Cats.name FROM Cats WHERE Cats.id = 10")
@@ -522,12 +534,14 @@ fn update_separate() {
         let updated = conn.query("UPDATE Cats SET Cats.name = \"Rusty\" WHERE Cats.id = 1")
             .unwrap();
         assert_eq!(updated.affected_rows(), 1);
+        sleep();
     }
 
     {
         let updated = conn.query("UPDATE Cats SET Cats.name = \"Rusty II\" WHERE Cats.id = 1")
             .unwrap();
         assert_eq!(updated.affected_rows(), 1);
+        sleep();
     }
 
     let name: String = conn.first("SELECT Cats.name FROM Cats WHERE Cats.id = 1")
@@ -555,6 +569,7 @@ fn update_multiple() {
         let query = "UPDATE Cats SET Cats.name = \"Rusty\" WHERE Cats.id = 1 OR Cats.id = 2";
         let updated = conn.query(query).unwrap();
         assert_eq!(updated.affected_rows(), 2);
+        sleep();
     }
 
     for i in 1..3 {
