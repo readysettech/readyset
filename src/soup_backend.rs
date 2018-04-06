@@ -198,10 +198,15 @@ impl SoupBackend {
                                 r.pop();
                                 for c in r {
                                     match c {
+                                        DataType::None => rw.write_col(None::<i32>)?,
                                         DataType::Int(i) => rw.write_col(i as i32)?,
                                         DataType::BigInt(i) => rw.write_col(i as i64)?,
                                         DataType::Text(t) => rw.write_col(t.to_str().unwrap())?,
                                         dt @ DataType::TinyText(_) => rw.write_col(dt.to_string())?,
+                                        dt @ DataType::Real(_, _) => {
+                                            let f: f64 = (&dt).into();
+                                            rw.write_col(f)?
+                                        }
                                         _ => unimplemented!(),
                                     }
                                 }
