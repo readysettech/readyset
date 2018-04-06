@@ -8,7 +8,7 @@ use local::single_state::SingleState;
 
 use bincode;
 use rand::{self, Rng};
-use rocksdb::{self, MemtableFactory, SliceTransform, DB};
+use rocksdb::{self, BlockBasedOptions, BlockBasedIndexType, MemtableFactory, SliceTransform, DB};
 
 pub enum State {
     InMemory(MemoryState),
@@ -174,8 +174,14 @@ impl PersistentState {
         opts.create_if_missing(true);
         let transform = SliceTransform::create("key", Self::transform_fn, None);
         opts.set_prefix_extractor(transform);
+        // Use a bloom filter for the SS-tables (on disk) as well:
+        let mut block_opts = BlockBasedOptions::default();
+        block_opts.set_index_type(BlockBasedIndexType::HashSearch);
+        opts.set_block_based_table_factory(&block_opts);
+
         // Assigns the number of threads for RocksDB's low priority background pool:
         opts.increase_parallelism(threads);
+
         // Use a hash skiplist since we're doing prefix seeks:
         opts.set_allow_concurrent_memtable_write(false);
         opts.set_memtable_factory(MemtableFactory::HashSkipList {
