@@ -1,5 +1,7 @@
 #![feature(box_syntax, box_patterns)]
+#![feature(try_from)]
 
+extern crate arccstr;
 #[macro_use]
 extern crate clap;
 extern crate distributary;
@@ -13,6 +15,7 @@ extern crate slog;
 
 extern crate regex;
 
+mod convert;
 mod utils;
 mod soup_backend;
 mod schema;
