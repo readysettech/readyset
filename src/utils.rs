@@ -2,7 +2,7 @@ use std::collections::HashSet;
 
 use distributary::DataType;
 use nom_sql::{Column, ColumnConstraint, ConditionBase, ConditionExpression, ConditionTree,
-              CreateTableStatement, Operator, SelectStatement, TableKey};
+              CreateTableStatement, Literal, Operator, SqlQuery, TableKey};
 use regex::Regex;
 
 lazy_static! {
@@ -221,11 +221,17 @@ fn get_parameter_columns_recurse(cond: &ConditionExpression) -> Vec<&Column> {
     }
 }
 
-pub(crate) fn get_parameter_columns(query: &SelectStatement) -> Vec<&Column> {
-    if let Some(ref wc) = query.where_clause {
-        get_parameter_columns_recurse(wc)
-    } else {
-        vec![]
+pub(crate) fn get_parameter_columns(query: &SqlQuery) -> Vec<&Column> {
+    match *query {
+        SqlQuery::Select(ref query) => {
+            if let Some(ref wc) = query.where_clause {
+                get_parameter_columns_recurse(wc)
+            } else {
+                vec![]
+            }
+        }
+        SqlQuery::Insert(ref query) => query.fields.iter().collect(),
+        _ => unimplemented!(),
     }
 }
 

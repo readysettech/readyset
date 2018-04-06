@@ -1,9 +1,36 @@
 use msql_srv;
-use nom_sql::{self, ColumnConstraint, CreateTableStatement, Literal, SelectStatement, SqlType};
+use nom_sql::{self, ColumnConstraint, CreateTableStatement, InsertStatement, Literal,
+              SelectStatement, SqlQuery, SqlType};
 
 use std::collections::HashMap;
 
 pub(crate) fn schema_for_query(
+    table_schemas: &HashMap<String, CreateTableStatement>,
+    q: &SqlQuery,
+) -> Vec<msql_srv::Column> {
+    match *q {
+        SqlQuery::Select(ref q) => schema_for_select(table_schemas, q),
+        SqlQuery::Insert(ref q) => schema_for_insert(table_schemas, q),
+
+        _ => unimplemented!(),
+    }
+}
+
+pub(crate) fn schema_for_insert(
+    table_schemas: &HashMap<String, CreateTableStatement>,
+    q: &InsertStatement,
+) -> Vec<msql_srv::Column> {
+    let mut schema = Vec::new();
+    for c in &q.fields {
+        // XXX(malte): ewww the hackery
+        let mut cc = c.clone();
+        cc.table = Some(q.table.name.clone());
+        schema.push(schema_for_column(table_schemas, &cc));
+    }
+    schema
+}
+
+pub(crate) fn schema_for_select(
     table_schemas: &HashMap<String, CreateTableStatement>,
     q: &SelectStatement,
 ) -> Vec<msql_srv::Column> {
