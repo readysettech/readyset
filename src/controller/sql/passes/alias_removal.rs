@@ -173,7 +173,7 @@ impl AliasRemoval for SqlQuery {
 mod tests {
     use super::AliasRemoval;
     use nom_sql::SelectStatement;
-    use nom_sql::{Column, FieldExpression, SqlQuery, Table};
+    use nom_sql::{Column, FieldExpression, Literal, SqlQuery, Table};
     use std::collections::HashMap;
 
     #[test]

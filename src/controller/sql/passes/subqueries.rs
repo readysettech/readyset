@@ -90,7 +90,6 @@ impl SubQueries for SqlQuery {
 mod tests {
     use super::*;
     use nom_sql::ConditionBase::*;
-    use nom_sql::ConditionExpression::*;
     use nom_sql::{Column, ConditionTree, FieldExpression, Operator, SelectStatement, SqlQuery,
                   Table};
 
