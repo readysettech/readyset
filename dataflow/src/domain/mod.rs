@@ -253,7 +253,7 @@ pub struct Domain {
     mode: DomainMode,
     waiting: Map<Waiting>,
     replay_paths: HashMap<Tag, ReplayPath>,
-    reader_triggered: Map<HashSet<DataType>>,
+    reader_triggered: Map<HashSet<Vec<DataType>>>,
 
     concurrent_replays: usize,
     max_concurrent_replays: usize,
@@ -988,7 +988,7 @@ impl Domain {
                             InitialState::PartialGlobal {
                                 gid,
                                 cols,
-                                key: key_col,
+                                key,
                                 trigger_domain: (trigger_domain, shards),
                             } => {
                                 use backlog;
@@ -1002,20 +1002,21 @@ impl Domain {
                                         .collect::<Vec<_>>(),
                                 );
                                 let (r_part, w_part) =
-                                    backlog::new_partial(cols, key_col, move |key| {
+                                    backlog::new_partial(cols, key.clone(), move |miss| {
                                         let mut txs = txs.lock().unwrap();
                                         let tx = if txs.len() == 1 {
                                             &mut txs[0]
                                         } else {
+                                            // TODO: compound reader
+                                            assert_eq!(miss.len(), 1);
+
                                             let n = txs.len();
-                                            &mut txs[::shard_by(key, n)]
+                                            &mut txs[::shard_by(&miss[0], n)]
                                         };
 
                                         let mut m = box Packet::RequestReaderReplay {
-                                            // if this because multi-column, also modify [0] in
-                                            // handling of Packet::RequestReaderReplay
-                                            key: vec![key.clone()],
-                                            cols: vec![key_col],
+                                            key: Vec::from(miss),
+                                            cols: key.clone(),
                                             node: node,
                                         };
 
@@ -1123,10 +1124,6 @@ impl Domain {
                         );
                     }
                     Packet::RequestReaderReplay { key, cols, node } => {
-                        // TODO: compound reader keys
-                        assert_eq!(key.len(), 1);
-                        assert_eq!(cols.len(), 1);
-
                         // the reader could have raced with us filling in the key after some
                         // *other* reader requested it, so let's double check that it indeed still
                         // misses!
@@ -1135,7 +1132,7 @@ impl Domain {
                             .with_reader(|r| {
                                 r.writer()
                                     .expect("reader replay requested for non-materialized reader")
-                                    .try_find_and(&key[0], |_| ())
+                                    .try_find_and(&key[..], |_| ())
                                     .expect("reader replay requested for non-ready reader")
                                     .0
                                     .is_none()
@@ -1147,7 +1144,7 @@ impl Domain {
                             && self.reader_triggered
                                 .entry(node)
                                 .or_default()
-                                .insert(key[0].clone())
+                                .insert(key.clone())
                         {
                             self.find_tags_and_replay(key, &cols[..], node, sends);
                         }
@@ -1913,8 +1910,7 @@ impl Domain {
                                     // filled, even if that hole is empty!
                                     r.writer_mut().map(|wh| {
                                         for key in backfill_keys.iter() {
-                                            // TODO: compound key reader
-                                            wh.mark_filled(&key[0]);
+                                            wh.mark_filled(&key[..]);
                                         }
                                     });
                                 });
@@ -1971,8 +1967,7 @@ impl Domain {
                                     n.with_reader_mut(|r| {
                                         r.writer_mut().map(|wh| {
                                             for miss in &missed_on {
-                                                // TODO: compound key reader
-                                                wh.mark_hole(&miss[0]);
+                                                wh.mark_hole(&miss[..]);
                                             }
                                         });
                                     });
@@ -1987,8 +1982,7 @@ impl Domain {
                                     self.reader_triggered.get_mut(&segment.node)
                                 {
                                     for key in backfill_keys.as_ref().unwrap().iter() {
-                                        // TODO: compound key reader
-                                        prev.remove(&key[0]);
+                                        prev.remove(&key[..]);
                                     }
                                 }
                             }

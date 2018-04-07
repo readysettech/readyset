@@ -130,7 +130,7 @@ impl Materializations {
                 // for a reader that will get lookups, we'd like to have an index above us
                 // somewhere on our key so that we can make the reader partial
                 let mut i = HashMap::new();
-                i.insert(ni, (vec![key.unwrap()], false));
+                i.insert(ni, (Vec::from(key.unwrap()), false));
                 i
             } else if !n.is_internal() {
                 // non-internal nodes cannot generate indexing obligations
@@ -637,7 +637,7 @@ impl Materializations {
                 .with_reader(|r| {
                     assert!(r.is_materialized());
                     if let Some(rh) = r.key() {
-                        index_on.insert(vec![rh]);
+                        index_on.insert(Vec::from(rh));
                     }
                 })
                 .unwrap();

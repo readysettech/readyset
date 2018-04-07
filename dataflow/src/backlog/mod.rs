@@ -5,24 +5,24 @@ use fnv::FnvBuildHasher;
 use std::sync::Arc;
 
 /// Allocate a new end-user facing result table.
-pub fn new(cols: usize, key: usize) -> (SingleReadHandle, WriteHandle) {
+pub fn new(cols: usize, key: Vec<usize>) -> (SingleReadHandle, WriteHandle) {
     new_inner(cols, key, None)
 }
 
 /// Allocate a new partially materialized end-user facing result table.
 ///
 /// Misses in this table will call `trigger` to populate the entry, and retry until successful.
-pub fn new_partial<F>(cols: usize, key: usize, trigger: F) -> (SingleReadHandle, WriteHandle)
+pub fn new_partial<F>(cols: usize, key: Vec<usize>, trigger: F) -> (SingleReadHandle, WriteHandle)
 where
-    F: Fn(&DataType) + 'static + Send + Sync,
+    F: Fn(&[DataType]) + 'static + Send + Sync,
 {
     new_inner(cols, key, Some(Arc::new(trigger)))
 }
 
 fn new_inner(
     cols: usize,
-    key: usize,
-    trigger: Option<Arc<Fn(&DataType) + Send + Sync>>,
+    key: Vec<usize>,
+    trigger: Option<Arc<Fn(&[DataType]) + Send + Sync>>,
 ) -> (SingleReadHandle, WriteHandle) {
     let (r, w) = evmap::Options::default()
         .with_meta(-1)
@@ -31,7 +31,7 @@ fn new_inner(
     let w = WriteHandle {
         partial: trigger.is_some(),
         handle: w,
-        key: key,
+        key: key.clone(),
         cols: cols,
     };
     let r = SingleReadHandle {
@@ -46,7 +46,7 @@ pub struct WriteHandle {
     handle: evmap::WriteHandle<DataType, Vec<DataType>, i64, FnvBuildHasher>,
     partial: bool,
     cols: usize,
-    key: usize,
+    key: Vec<usize>,
 }
 
 impl WriteHandle {
@@ -63,7 +63,12 @@ impl WriteHandle {
     {
         for r in rs {
             debug_assert!(r.len() >= self.cols);
-            let key = r[self.key].clone();
+            let mut key: Vec<_> = self.key.iter().map(|&c| r[c].clone()).collect();
+
+            // TODO: compound readers
+            assert_eq!(key.len(), 1);
+            let key = key.swap_remove(0);
+
             match r {
                 Record::Positive(r) => {
                     self.handle.insert(key, r);
@@ -83,23 +88,29 @@ impl WriteHandle {
         self.handle.set_meta(ts);
     }
 
-    pub fn mark_filled(&mut self, key: &DataType) {
-        self.handle.clear(key.clone());
+    pub fn mark_filled(&mut self, key: &[DataType]) {
+        // TODO: compound readers
+        assert_eq!(key.len(), 1);
+        self.handle.clear(key[0].clone());
     }
 
-    pub fn mark_hole(&mut self, key: &DataType) {
-        self.handle.empty(key.clone());
+    pub fn mark_hole(&mut self, key: &[DataType]) {
+        // TODO: compound readers
+        assert_eq!(key.len(), 1);
+        self.handle.empty(key[0].clone());
     }
 
-    pub fn try_find_and<F, T>(&self, key: &DataType, mut then: F) -> Result<(Option<T>, i64), ()>
+    pub fn try_find_and<F, T>(&self, key: &[DataType], mut then: F) -> Result<(Option<T>, i64), ()>
     where
         F: FnMut(&[Vec<DataType>]) -> T,
     {
-        self.handle.meta_get_and(key, &mut then).ok_or(())
+        // TODO: compound readers
+        assert_eq!(key.len(), 1);
+        self.handle.meta_get_and(&key[0], &mut then).ok_or(())
     }
 
-    pub fn key(&self) -> usize {
-        self.key
+    pub fn key(&self) -> &[usize] {
+        &self.key[..]
     }
 
     pub fn len(&self) -> usize {
@@ -115,8 +126,8 @@ impl WriteHandle {
 #[derive(Clone)]
 pub struct SingleReadHandle {
     handle: evmap::ReadHandle<DataType, Vec<DataType>, i64, FnvBuildHasher>,
-    trigger: Option<Arc<Fn(&DataType) + Send + Sync>>,
-    key: usize,
+    trigger: Option<Arc<Fn(&[DataType]) + Send + Sync>>,
+    key: Vec<usize>,
 }
 
 impl SingleReadHandle {
@@ -131,7 +142,7 @@ impl SingleReadHandle {
     /// state.
     pub fn find_and<F, T>(
         &self,
-        key: &DataType,
+        key: &[DataType],
         mut then: F,
         block: bool,
     ) -> Result<(Option<T>, i64), ()>
@@ -168,13 +179,15 @@ impl SingleReadHandle {
 
     pub(crate) fn try_find_and<F, T>(
         &self,
-        key: &DataType,
+        key: &[DataType],
         mut then: F,
     ) -> Result<(Option<T>, i64), ()>
     where
         F: FnMut(&[Vec<DataType>]) -> T,
     {
-        self.handle.meta_get_and(key, &mut then).ok_or(())
+        // TODO: compound readers
+        assert_eq!(key.len(), 1);
+        self.handle.meta_get_and(&key[0], &mut then).ok_or(())
     }
 
     #[allow(dead_code)]
@@ -210,7 +223,7 @@ impl ReadHandle {
     /// state.
     pub fn find_and<F, T>(
         &self,
-        key: &DataType,
+        key: &[DataType],
         then: F,
         block: bool,
     ) -> Result<(Option<T>, i64), ()>
@@ -218,24 +231,30 @@ impl ReadHandle {
         F: FnMut(&[Vec<DataType>]) -> T,
     {
         match *self {
-            ReadHandle::Sharded(ref shards) => shards[::shard_by(key, shards.len())]
-                .as_ref()
-                .unwrap()
-                .find_and(key, then, block),
+            ReadHandle::Sharded(ref shards) => {
+                assert_eq!(key.len(), 1);
+                shards[::shard_by(&key[0], shards.len())]
+                    .as_ref()
+                    .unwrap()
+                    .find_and(key, then, block)
+            }
             ReadHandle::Singleton(ref srh) => srh.as_ref().unwrap().find_and(key, then, block),
         }
     }
 
     #[allow(dead_code)]
-    pub fn try_find_and<F, T>(&self, key: &DataType, then: F) -> Result<(Option<T>, i64), ()>
+    pub fn try_find_and<F, T>(&self, key: &[DataType], then: F) -> Result<(Option<T>, i64), ()>
     where
         F: FnMut(&[Vec<DataType>]) -> T,
     {
         match *self {
-            ReadHandle::Sharded(ref shards) => shards[::shard_by(key, shards.len())]
-                .as_ref()
-                .unwrap()
-                .try_find_and(key, then),
+            ReadHandle::Sharded(ref shards) => {
+                assert_eq!(key.len(), 1);
+                shards[::shard_by(&key[0], shards.len())]
+                    .as_ref()
+                    .unwrap()
+                    .try_find_and(key, then)
+            }
             ReadHandle::Singleton(ref srh) => srh.as_ref().unwrap().try_find_and(key, then),
         }
     }

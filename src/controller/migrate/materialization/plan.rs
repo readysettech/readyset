@@ -341,13 +341,13 @@ impl<'a> Plan<'a> {
                     InitialState::PartialGlobal {
                         gid: self.node,
                         cols: self.graph[self.node].fields().len(),
-                        key: r.key().unwrap(),
+                        key: Vec::from(r.key().unwrap()),
                         trigger_domain: (last_domain, num_shards),
                     }
                 } else {
                     InitialState::Global {
                         cols: self.graph[self.node].fields().len(),
-                        key: r.key().unwrap(),
+                        key: Vec::from(r.key().unwrap()),
                         gid: self.node,
                     }
                 }

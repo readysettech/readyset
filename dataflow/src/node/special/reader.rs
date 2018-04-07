@@ -39,7 +39,7 @@ pub struct Reader {
     token_generator: Option<checktable::TokenGenerator>,
 
     for_node: NodeIndex,
-    state: Option<usize>,
+    state: Option<Vec<usize>>,
 }
 
 impl Clone for Reader {
@@ -108,13 +108,13 @@ impl Reader {
         self.writer = Some(wh);
     }
 
-    pub fn key(&self) -> Option<usize> {
-        self.state
+    pub fn key(&self) -> Option<&[usize]> {
+        self.state.as_ref().map(|s| &s[..])
     }
 
-    pub fn set_key(&mut self, key: usize) {
-        if let Some(skey) = self.state {
-            assert_eq!(skey, key);
+    pub fn set_key(&mut self, key: Vec<usize>) {
+        if let Some(ref skey) = self.state {
+            assert_eq!(skey, &key);
         } else {
             self.state = Some(key);
         }
@@ -132,9 +132,7 @@ impl Reader {
     pub fn on_eviction(&mut self, _key_columns: &[usize], keys: &[Vec<DataType>]) {
         let w = self.writer.as_mut().unwrap();
         for k in keys {
-            // TODO: compound key reader
-            assert_eq!(k.len(), 1);
-            w.mark_hole(&k[0]);
+            w.mark_hole(&k[..]);
         }
         w.swap();
     }
@@ -148,7 +146,9 @@ impl Reader {
                 let key = state.key();
                 m.map_data(|data| {
                     data.retain(|row| {
-                        match state.try_find_and(&row[key], |_| ()) {
+                        // XXX: sad clone + collect
+                        let key: Vec<_> = key.iter().map(|&c| row[c].clone()).collect();
+                        match state.try_find_and(&key[..], |_| ()) {
                             Ok((None, _)) => {
                                 // row would miss in partial state.
                                 // leave it blank so later lookup triggers replay.
@@ -172,7 +172,9 @@ impl Reader {
                 let key = state.key();
                 m.map_data(|data| {
                     data.retain(|row| {
-                        match state.try_find_and(&row[key], |_| ()) {
+                        // XXX: sad clone + collect
+                        let key: Vec<_> = key.iter().map(|&c| row[c].clone()).collect();
+                        match state.try_find_and(&key[..], |_| ()) {
                             Ok((None, _)) => {
                                 // filling a hole with replay -- ok
                                 true

@@ -57,12 +57,12 @@ pub(crate) fn handle_message(m: LocalOrNot<ReadQuery>, conn: &mut Rpc, s: &mut R
                         Ok(Some(rs)) => {
                             // immediate hit!
                             ret[i] = rs;
-                            *key = DataType::None;
+                            *key = vec![];
                         }
                         Err(()) => {
                             // map not yet ready
                             ready = false;
-                            *key = DataType::None;
+                            *key = vec![];
                             break;
                         }
                         Ok(None) => {
@@ -81,7 +81,7 @@ pub(crate) fn handle_message(m: LocalOrNot<ReadQuery>, conn: &mut Rpc, s: &mut R
 
                 // block on all remaining keys
                 for (i, key) in keys.iter().enumerate() {
-                    if let DataType::None = *key {
+                    if key.is_empty() {
                         // already have this value
                     } else {
                         // note that this *does* mean we'll trigger replay twice for things that
@@ -118,7 +118,7 @@ pub(crate) fn handle_message(m: LocalOrNot<ReadQuery>, conn: &mut Rpc, s: &mut R
                                     true,
                                 )
                                 .map(|r| (r.0.unwrap_or_else(Vec::new), r.1))
-                                .map(|r| (r.0, generator.as_ref().unwrap().generate(r.1, key)))
+                                .map(|r| (r.0, generator.as_ref().unwrap().generate(r.1, &key[..])))
                         })
                     })
                     .collect(),
