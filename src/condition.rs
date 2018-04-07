@@ -161,18 +161,42 @@ named!(boolean_primary<&[u8], ConditionExpression>,
         do_parse!(
             left: predicate >>
             opt_multispace >>
-            op: binary_comparison_operator >>
-            opt_multispace >>
-            right: predicate >>
+            rest: alt_complete!(
+                do_parse!(tag_no_case!("is") >>
+                          opt_multispace >>
+                          not: opt!(tag_no_case!("not")) >>
+                          opt_multispace >>
+                          tag_no_case!("null") >>
+                          (
+                              // XXX(malte): bit of a hack; would consumers ever need to know
+                              // // about "IS NULL" vs. "= NULL"?
+                              if not.is_some() {
+                                  Operator::NotEqual
+                              } else {
+                                  Operator::Equal
+                              },
+                              ConditionExpression::Base(
+                                  ConditionBase::Literal(Literal::Null)
+                              )
+                          )
+
+                ) |
+                do_parse!(op: binary_comparison_operator >>
+                          opt_multispace >>
+                          right: predicate >>
+                          (op, right)
+                )
+            ) >>
             (ConditionExpression::ComparisonOp(
-                ConditionTree {
-                    operator: op,
-                    left: Box::new(left),
-                    right: Box::new(right),
-                }
-            ))
-        )
-        | predicate)
+                    ConditionTree {
+                        operator: rest.0,
+                        left: Box::new(left),
+                        right: Box::new(rest.1),
+                    })
+            )
+        ) |
+        predicate
+    )
 );
 
 named!(predicate<&[u8], ConditionExpression>,
@@ -555,6 +579,29 @@ mod tests {
             LiteralList(vec![0.into()]),
         );
 
+        assert_eq!(res.unwrap().1, expected);
+    }
+
+    #[test]
+    fn is_null() {
+        use ConditionBase::*;
+        use common::Literal;
+
+        let cond = "bar IS NULL";
+
+        let res = condition_expr(cond.as_bytes());
+        let expected =
+            flat_condition_tree(Operator::Equal, Field("bar".into()), Literal(Literal::Null));
+        assert_eq!(res.unwrap().1, expected);
+
+        let cond = "bar IS NOT NULL";
+
+        let res = condition_expr(cond.as_bytes());
+        let expected = flat_condition_tree(
+            Operator::NotEqual,
+            Field("bar".into()),
+            Literal(Literal::Null),
+        );
         assert_eq!(res.unwrap().1, expected);
     }
 }
