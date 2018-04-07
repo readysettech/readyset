@@ -3,7 +3,7 @@ use distributary::{ControllerHandle, DataType, Mutator, RemoteGetter, ZookeeperA
 use msql_srv::{self, *};
 use nom_sql::{self, ColumnConstraint, ConditionBase, ConditionExpression, ConditionTree,
               CreateTableStatement, FieldExpression, InsertStatement, Literal, Operator,
-              SelectStatement};
+              SelectStatement, SqlQuery};
 
 use slog;
 use std::collections::{BTreeMap, HashMap};
@@ -11,7 +11,7 @@ use std::io;
 use std::sync::{self, Arc, Mutex};
 
 use convert::ToDataType;
-use utils;
+use utils::{self, QueryID};
 use rewrite;
 use schema::{schema_for_column, schema_for_insert, schema_for_select};
 
@@ -29,6 +29,8 @@ pub struct SoupBackend {
 
     prepared: HashMap<u32, (String, nom_sql::SqlQuery)>,
     prepared_count: u32,
+
+    cached: HashMap<QueryID, String>,
 }
 
 fn get_or_make_mutator<'a, 'b>(
@@ -93,6 +95,8 @@ impl SoupBackend {
 
             prepared: HashMap::new(),
             prepared_count: 0,
+
+            cached: HashMap::new(),
         }
     }
 
@@ -173,17 +177,32 @@ impl SoupBackend {
         q: nom_sql::SelectStatement,
         results: QueryResultWriter<W>,
     ) -> io::Result<()> {
-        let qc = self.query_count
-            .fetch_add(1, sync::atomic::Ordering::SeqCst);
-        let qname = format!("q_{}", qc);
+        // TODO(malte): ewww clone
+        let qhash = utils::hash_query(&SqlQuery::Select(q.clone()));
 
-        // first do a migration to add the query if it doesn't exist already
-        match self.soup.extend_recipe(format!("QUERY {}: {};", qname, q)) {
-            Ok(_) => {
-                // now read from the newly installed view
-                self.do_read(&qname, &q, None, results)
+        let (qname, cached) = match self.cached.get(&qhash) {
+            None => {
+                let qc = self.query_count
+                    .fetch_add(1, sync::atomic::Ordering::SeqCst);
+                (format!("q_{}", qc), false)
             }
-            Err(e) => Err(io::Error::new(io::ErrorKind::Other, e)),
+            Some(qname) => (qname.clone(), true),
+        };
+
+        if cached {
+            // we already have this query, so use existing getter etc.
+            self.do_read(&qname, &q, None, results)
+        } else {
+            // first do a migration to add the query if it doesn't exist already
+            match self.soup.extend_recipe(format!("QUERY {}: {};", qname, q)) {
+                Ok(_) => {
+                    // remember this query for the future, so we avoid unnecessary migrations
+                    self.cached.insert(qhash, qname.clone());
+                    // now read from the newly installed view
+                    self.do_read(&qname, &q, None, results)
+                }
+                Err(e) => Err(io::Error::new(io::ErrorKind::Other, e)),
+            }
         }
     }
 
