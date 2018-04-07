@@ -386,12 +386,6 @@ impl Recipe {
                 .unwrap()
                 .add_parsed_query(q, n.clone(), is_leaf, mig)?;
 
-            // we currently use a domain per query
-            // let d = mig.add_domain();
-            // for na in qfp.new_nodes.iter() {
-            //     mig.assign_domain(na.clone(), d);
-            // }
-
             // If the user provided us with a query name, use that.
             // If not, use the name internally used by the QFP.
             let query_name = match n {
