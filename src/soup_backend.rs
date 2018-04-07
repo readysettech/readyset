@@ -180,52 +180,8 @@ impl SoupBackend {
         // first do a migration to add the query if it doesn't exist already
         match self.soup.extend_recipe(format!("QUERY {}: {};", qname, q)) {
             Ok(_) => {
-                let ts_lock = self.table_schemas.lock().unwrap();
-                let schema = schema_for_select(&(*ts_lock), &q);
-
-                // create a getter if we don't have one for this query already
-                // TODO(malte): may need to make one anyway if the query has changed w.r.t. an
-                // earlier one of the same name
-                let getter = get_or_make_getter(&mut self.soup, &mut self.outputs, &qname);
-
-                // now "execute" the query via a bogokey lookup
-                match getter.lookup(&DataType::from(0 as i32), true) {
-                    Ok(d) => {
-                        let num_rows = d.len();
-                        if num_rows > 0 {
-                            let mut rw = results.start(schema.as_slice()).unwrap();
-                            for mut r in d {
-                                // drop bogokey
-                                r.pop();
-                                for c in r {
-                                    match c {
-                                        DataType::None => rw.write_col(None::<i32>)?,
-                                        DataType::Int(i) => rw.write_col(i as i32)?,
-                                        DataType::BigInt(i) => rw.write_col(i as i64)?,
-                                        DataType::Text(t) => rw.write_col(t.to_str().unwrap())?,
-                                        dt @ DataType::TinyText(_) => rw.write_col(dt.to_string())?,
-                                        dt @ DataType::Real(_, _) => {
-                                            let f: f64 = (&dt).into();
-                                            rw.write_col(f)?
-                                        }
-                                        _ => unimplemented!(),
-                                    }
-                                }
-                                rw.end_row()?;
-                            }
-                            rw.finish()
-                        } else {
-                            results.completed(0, 0)
-                        }
-                    }
-                    Err(_) => {
-                        error!(self.log, "error executing SELECT");
-                        results.error(
-                            msql_srv::ErrorKind::ER_UNKNOWN_ERROR,
-                            "Soup returned an error".as_bytes(),
-                        )
-                    }
-                }
+                // now read from the newly installed view
+                self.do_read(&qname, &q, None, results)
             }
             Err(e) => Err(io::Error::new(io::ErrorKind::Other, e)),
         }
@@ -439,47 +395,10 @@ impl SoupBackend {
         &mut self,
         qname: &str,
         q: &SelectStatement,
-        key: &Vec<DataType>,
+        key: Vec<DataType>,
         results: QueryResultWriter<W>,
     ) -> io::Result<()> {
-        // talk to Soup
-        let getter = get_or_make_getter(&mut self.soup, &mut self.outputs, qname);
-        let ts_lock = self.table_schemas.lock().unwrap();
-        let schema = schema_for_select(&(*ts_lock), &q);
-
-        // TODO(malte): support compound keys
-        assert_eq!(key.len(), 1);
-        match getter.lookup(&key[0], true) {
-            Ok(d) => {
-                trace!(self.log, "exec({:?}) returning {:?}", key, d);
-                let num_rows = d.len();
-                if num_rows > 0 {
-                    let mut rw = results.start(schema.as_slice()).unwrap();
-                    for mut r in d {
-                        for c in r {
-                            match c {
-                                DataType::Int(i) => rw.write_col(i as i32),
-                                DataType::BigInt(i) => rw.write_col(i as i64),
-                                DataType::Text(t) => rw.write_col(t.to_str().unwrap()),
-                                dt @ DataType::TinyText(_) => rw.write_col(dt.to_string()),
-                                _ => unimplemented!(),
-                            }.unwrap()
-                        }
-                        rw.end_row()?;
-                    }
-                    rw.finish()
-                } else {
-                    results.completed(0, 0)
-                }
-            }
-            Err(_) => {
-                error!(self.log, "error executing SELECT");
-                results.error(
-                    msql_srv::ErrorKind::ER_UNKNOWN_ERROR,
-                    "Soup returned an error".as_bytes(),
-                )
-            }
-        }
+        self.do_read(qname, q, Some(key), results)
     }
 
     fn do_insert<W: io::Write>(
@@ -566,6 +485,82 @@ impl SoupBackend {
                 results.error(
                     msql_srv::ErrorKind::ER_UNKNOWN_ERROR,
                     format!("{:?}", e).as_bytes(),
+                )
+            }
+        }
+    }
+
+    fn do_read<W: io::Write>(
+        &mut self,
+        qname: &str,
+        q: &SelectStatement,
+        key: Option<Vec<DataType>>,
+        results: QueryResultWriter<W>,
+    ) -> io::Result<()> {
+        // we need the schema for the result writer
+        // TODO(malte): cache?
+        let schema = {
+            let ts_lock = self.table_schemas.lock().unwrap();
+            schema_for_select(&(*ts_lock), q)
+        };
+
+        // create a getter if we don't have one for this query already
+        // TODO(malte): may need to make one anyway if the query has changed w.r.t. an
+        // earlier one of the same name
+        let getter = get_or_make_getter(&mut self.soup, &mut self.outputs, &qname);
+
+        // if there is no key specified, we "execute" the query via a bogokey lookup
+        let (key, is_bogo) = match key {
+            None => (vec![DataType::from(0 as i32)], true),
+            Some(k) => (k, false),
+        };
+
+        assert_eq!(key.len(), 1); // no compound keys yet
+
+        let write_column = |rw: &mut RowWriter<W>, c: DataType| {
+            let written = match c {
+                DataType::None => rw.write_col(None::<i32>),
+                DataType::Int(i) => rw.write_col(i as i32),
+                DataType::BigInt(i) => rw.write_col(i as i64),
+                DataType::Text(t) => rw.write_col(t.to_str().unwrap()),
+                dt @ DataType::TinyText(_) => rw.write_col(dt.to_string()),
+                dt @ DataType::Real(_, _) => {
+                    let f: f64 = (&dt).into();
+                    rw.write_col(f)
+                }
+                x => panic!("encountered unhanded data type {:?}", x),
+            };
+            match written {
+                Ok(_) => (),
+                Err(e) => panic!("failed to write column: {:?}", e),
+            }
+        };
+
+        match getter.lookup(&key[0], true) {
+            Ok(d) => {
+                let num_rows = d.len();
+                if num_rows > 0 {
+                    let mut rw = results.start(schema.as_slice()).unwrap();
+                    for mut r in d {
+                        if is_bogo {
+                            // drop bogokey
+                            r.pop();
+                        }
+                        for c in r {
+                            write_column(&mut rw, c);
+                        }
+                        rw.end_row()?;
+                    }
+                    rw.finish()
+                } else {
+                    results.completed(0, 0)
+                }
+            }
+            Err(e) => {
+                error!(self.log, "error executing SELECT: {:?}", e);
+                results.error(
+                    msql_srv::ErrorKind::ER_UNKNOWN_ERROR,
+                    "Soup returned an error".as_bytes(),
                 )
             }
         }
@@ -679,7 +674,7 @@ impl<W: io::Write> MysqlShim<W> for SoupBackend {
                         .into_iter()
                         .map(|pv| pv.value.to_datatype())
                         .collect();
-                    self.execute_select(&qname, &q, &key, results)
+                    self.execute_select(&qname, &q, key, results)
                 }
                 nom_sql::SqlQuery::Insert(ref q) => {
                     let values: Vec<DataType> = params
