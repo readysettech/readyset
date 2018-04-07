@@ -38,7 +38,7 @@ impl fmt::Display for SqlQuery {
     }
 }
 
-named!(sql_query<&[u8], SqlQuery>,
+named!(pub sql_query<&[u8], SqlQuery>,
     alt_complete!(
           do_parse!(c: creation >> (SqlQuery::CreateTable(c)))
         | do_parse!(i: insertion >> (SqlQuery::Insert(i)))
