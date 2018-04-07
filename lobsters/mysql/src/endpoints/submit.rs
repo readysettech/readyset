@@ -95,14 +95,16 @@ where
                         )).map(move |t| (t, story))
                     })
                     .and_then(move |(t, story)| {
-                        t.drop_query(&format!(
+                        let key = format!("user:{}:stories_submitted", user);
+                        t.prep_exec(
                             "SELECT  `keystores`.* \
                              FROM `keystores` \
-                             WHERE `keystores`.`key` = 'user:{}:stories_submitted' \
+                             WHERE `keystores`.`key` = ? \
                              ORDER BY `keystores`.`key` ASC LIMIT 1",
-                            user
-                        )).map(move |t| (t, story))
+                            (key,),
+                        ).map(move |t| (t, story))
                     })
+                    .and_then(move |(q, story)| q.drop_result().map(move |t| (t, story)))
                     .and_then(move |(t, story)| {
                         t.drop_exec(
                             "SELECT  `votes`.* FROM `votes` \
