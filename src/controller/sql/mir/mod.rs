@@ -124,6 +124,9 @@ impl SqlToMirConverter {
             ConditionExpression::Base(ConditionBase::Literal(Literal::String(ref s))) => {
                 FilterCondition::Equality(ct.operator.clone(), DataType::from(s.clone()))
             }
+            ConditionExpression::Base(ConditionBase::Literal(Literal::Null)) => {
+                FilterCondition::Equality(ct.operator.clone(), DataType::None)
+            }
             ConditionExpression::Base(ConditionBase::LiteralList(ref ll)) => {
                 FilterCondition::In(ll.iter().map(|l| DataType::from(l.clone())).collect())
             }
