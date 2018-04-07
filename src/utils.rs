@@ -224,7 +224,7 @@ fn get_parameter_columns_recurse(cond: &ConditionExpression) -> Vec<&Column> {
             let mut l = get_parameter_columns_recurse(left);
             let mut r = get_parameter_columns_recurse(right);
             l.append(&mut r);
-            r
+            l
         }
         ConditionExpression::NegationOp(ref expr) => get_parameter_columns_recurse(expr),
         _ => unimplemented!(),
