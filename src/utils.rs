@@ -240,7 +240,18 @@ pub(crate) fn get_parameter_columns(query: &SqlQuery) -> Vec<&Column> {
                 vec![]
             }
         }
-        SqlQuery::Insert(ref query) => query.fields.iter().collect(),
+        SqlQuery::Insert(ref query) => {
+            assert_eq!(query.data.len(), 1);
+            // need to find for which fields we *actually* have a parameter
+            query.data[0]
+                .iter()
+                .enumerate()
+                .filter_map(|(i, v)| match *v {
+                    Literal::Placeholder => Some(&query.fields[i]),
+                    _ => None,
+                })
+                .collect()
+        }
         _ => unimplemented!(),
     }
 }
