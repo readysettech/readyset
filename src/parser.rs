@@ -38,58 +38,29 @@ impl fmt::Display for SqlQuery {
     }
 }
 
-/// Parse sequence of SQL statements, divided by semicolons or newlines
-// named!(pub query_list<&[u8], Vec<SqlQuery> >,
-//    many1!(map_res!(selection, |s| { SqlQuery::Select(s) }))
-// );
+named!(sql_query<&[u8], SqlQuery>,
+    alt_complete!(
+          do_parse!(c: creation >> (SqlQuery::CreateTable(c)))
+        | do_parse!(i: insertion >> (SqlQuery::Insert(i)))
+        | do_parse!(c: compound_selection >> (SqlQuery::CompoundSelect(c)))
+        | do_parse!(s: selection >> (SqlQuery::Select(s)))
+        | do_parse!(d: deletion >> (SqlQuery::Delete(d)))
+        | do_parse!(dt: drop_table >> (SqlQuery::DropTable(dt)))
+        | do_parse!(u: updating >> (SqlQuery::Update(u)))
+        | do_parse!(s: set >> (SqlQuery::Set(s)))
+    )
+);
 
 pub fn parse_query(input: &str) -> Result<SqlQuery, &str> {
     // we process all queries in lowercase to avoid having to deal with capitalization in the
     // parser.
     let q_bytes = String::from(input.trim()).into_bytes();
 
-    // TODO(malte): appropriately pass through errors from nom
-    match creation(&q_bytes) {
-        IResult::Done(_, o) => return Ok(SqlQuery::CreateTable(o)),
-        _ => (),
-    };
-
-    match insertion(&q_bytes) {
-        IResult::Done(_, o) => return Ok(SqlQuery::Insert(o)),
-        _ => (),
-    };
-
-    match compound_selection(&q_bytes) {
-        IResult::Done(_, o) => return Ok(SqlQuery::CompoundSelect(o)),
-        _ => (),
-    };
-
-    match selection(&q_bytes) {
-        IResult::Done(_, o) => return Ok(SqlQuery::Select(o)),
-        _ => (),
-    };
-
-    match deletion(&q_bytes) {
-        IResult::Done(_, o) => return Ok(SqlQuery::Delete(o)),
-        _ => (),
-    };
-
-    match drop_table(&q_bytes) {
-        IResult::Done(_, o) => return Ok(SqlQuery::DropTable(o)),
-        _ => (),
-    };
-
-    match updating(&q_bytes) {
-        IResult::Done(_, o) => return Ok(SqlQuery::Update(o)),
-        _ => (),
-    };
-
-    match set(&q_bytes) {
-        IResult::Done(_, o) => return Ok(SqlQuery::Set(o)),
-        _ => (),
-    };
-
-    Err("failed to parse query")
+    match sql_query(&q_bytes) {
+        IResult::Done(_, o) => Ok(o),
+        IResult::Error(_) => Err("failed to parse query"),
+        IResult::Incomplete(_) => unreachable!(),
+    }
 }
 
 #[cfg(test)]
