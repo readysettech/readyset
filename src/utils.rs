@@ -508,4 +508,16 @@ mod tests {
             Some(vec![vec![1]]),
         );
     }
+
+    #[test]
+    fn test_parameter_column_extraction() {
+        let query = "SELECT  `votes`.* FROM `votes` WHERE `votes`.`user_id` = 1 \
+                     AND `votes`.`story_id` = ? AND `votes`.`comment_id` IS NULL \
+                     ORDER BY `votes`.`id` ASC LIMIT 1";
+        let q = nom_sql::parse_query(query).unwrap();
+
+        let pc = get_parameter_columns(&q);
+
+        assert_eq!(pc, vec![&Column::from("votes.story_id")]);
+    }
 }
