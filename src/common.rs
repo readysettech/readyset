@@ -155,6 +155,7 @@ pub enum Operator {
     Less,
     LessOrEqual,
     In,
+    Is,
 }
 
 impl Display for Operator {
@@ -172,6 +173,7 @@ impl Display for Operator {
             Operator::Less => "<",
             Operator::LessOrEqual => "<=",
             Operator::In => "IN",
+            Operator::Is => "IS",
         };
         write!(f, "{}", op)
     }
