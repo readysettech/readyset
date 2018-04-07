@@ -80,8 +80,8 @@ named!(query_expr<&[u8], (bool, Option<String>, SqlQuery)>,
         prefix: opt!(do_parse!(
             public: opt!(alt_complete!(tag_no_case!("query") | tag_no_case!("view"))) >>
             opt!(complete!(multispace)) >>
-            name: opt!(map_res!(take_while!(is_ident), str::from_utf8)) >>
-            opt!(complete!(multispace)) >>
+            name: opt!(terminated!(map_res!(take_while1!(is_ident), str::from_utf8),
+                                   opt!(complete!(multispace)))) >>
             tag!(":") >>
             opt!(complete!(multispace)) >>
             (public, name)
