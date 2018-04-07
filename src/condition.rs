@@ -4,8 +4,8 @@ use std::str;
 use std::fmt;
 
 use column::Column;
-use common::{binary_comparison_operator, column_identifier, integer_literal, opt_multispace,
-             string_literal, value_list, Literal, Operator};
+use common::{binary_comparison_operator, column_identifier, literal, opt_multispace, value_list,
+             Literal, Operator};
 
 use select::{nested_selection, SelectStatement};
 
@@ -237,18 +237,8 @@ named!(predicate<&[u8], ConditionExpression>,
 named!(simple_expr<&[u8], ConditionExpression>,
     alt_complete!(
             do_parse!(
-                tag!("?") >>
-                (ConditionExpression::Base(
-                    ConditionBase::Literal(Literal::Placeholder)
-                ))
-            )
-        |   do_parse!(
-                field: integer_literal >>
-                (ConditionExpression::Base(ConditionBase::Literal(field)))
-            )
-        |   do_parse!(
-                field: string_literal >>
-                (ConditionExpression::Base(ConditionBase::Literal(field)))
+                lit: literal >>
+                (ConditionExpression::Base(ConditionBase::Literal(lit)))
             )
         |   do_parse!(
                 field: column_identifier >>
