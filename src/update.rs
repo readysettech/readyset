@@ -59,7 +59,7 @@ mod tests {
     use super::*;
     use column::Column;
     use table::Table;
-    use common::{Literal, Operator};
+    use common::{Literal, Operator, Real};
     use condition::ConditionBase::*;
     use condition::ConditionExpression::*;
     use condition::ConditionTree;
@@ -81,6 +81,7 @@ mod tests {
             }
         );
     }
+
     #[test]
     fn update_with_where_clause() {
         let qstring = "UPDATE users SET id = 42, name = 'test' WHERE id = 1";
@@ -114,4 +115,33 @@ mod tests {
         assert_eq!(format!("{}", res.unwrap().1), expected);
     }
 
+    #[test]
+    fn updated_with_neg_float() {
+        let qstring = "UPDATE `stories` SET `hotness` = -19216.5479744 WHERE `stories`.`id` = ?";
+
+        let res = updating(qstring.as_bytes());
+        let expected_left = Base(Field(Column::from("stories.id")));
+        let expected_where_cond = Some(ComparisonOp(ConditionTree {
+            left: Box::new(expected_left),
+            right: Box::new(Base(Literal(Literal::Placeholder))),
+            operator: Operator::Equal,
+        }));
+        assert_eq!(
+            res.unwrap().1,
+            UpdateStatement {
+                table: Table::from("stories"),
+                fields: vec![
+                    (
+                        Column::from("hotness"),
+                        Literal::FixedPoint(Real {
+                            integral: -19216,
+                            fractional: 5479744,
+                        }),
+                    ),
+                ],
+                where_clause: expected_where_cond,
+                ..Default::default()
+            }
+        );
+    }
 }

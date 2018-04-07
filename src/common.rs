@@ -793,6 +793,29 @@ named!(pub integer_literal<&[u8], Literal>,
     )
 );
 
+/// Floating point literal value
+named!(pub float_literal<&[u8], Literal>,
+    do_parse!(
+        sign: opt!(tag!("-")) >>
+        mant: digit >>
+        tag!(".") >>
+        frac: digit >>
+        ({
+            let unpack = |v: &[u8]| -> i32 {
+                i32::from_str(str::from_utf8(v).unwrap()).unwrap()
+            };
+            Literal::FixedPoint(Real {
+                integral: if sign.is_some() {
+                    -1 * unpack(mant)
+                } else {
+                    unpack(mant)
+                },
+                fractional: unpack(frac) as u32,
+            })
+        })
+    )
+);
+
 /// String literal value
 named!(pub string_literal<&[u8], Literal>,
     do_parse!(
@@ -811,14 +834,14 @@ named!(pub string_literal<&[u8], Literal>,
 /// Any literal value.
 named!(pub literal<&[u8], Literal>,
     alt_complete!(
-          integer_literal
+          float_literal
+        | integer_literal
         | string_literal
         | do_parse!(tag_no_case!("NULL") >> (Literal::Null))
         | do_parse!(tag_no_case!("CURRENT_TIMESTAMP") >> (Literal::CurrentTimestamp))
         | do_parse!(tag_no_case!("CURRENT_DATE") >> (Literal::CurrentDate))
         | do_parse!(tag_no_case!("CURRENT_TIME") >> (Literal::CurrentTime))
         | do_parse!(tag_no_case!("?") >> (Literal::Placeholder))
-//        | float_literal
     )
 );
 
