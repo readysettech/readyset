@@ -169,7 +169,7 @@ named!(boolean_primary<&[u8], ConditionExpression>,
                           tag_no_case!("null") >>
                           (
                               // XXX(malte): bit of a hack; would consumers ever need to know
-                              // // about "IS NULL" vs. "= NULL"?
+                              // about "IS NULL" vs. "= NULL"?
                               if not.is_some() {
                                   Operator::NotEqual
                               } else {
