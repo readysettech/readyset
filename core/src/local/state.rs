@@ -8,7 +8,7 @@ use local::single_state::SingleState;
 
 use bincode;
 use rand::{self, Rng};
-use rocksdb::{self, MemtableFactory, SliceTransform, DB, DBCompressionType};
+use rocksdb::{self, DBCompressionType, MemtableFactory, SliceTransform, DB};
 
 pub enum State {
     InMemory(MemoryState),
@@ -321,16 +321,32 @@ impl PersistentState {
     }
 
     fn remove(&mut self, r: &[DataType]) -> bool {
+        let mut hit = false;
+        let pk = self.indices[0]
+            .columns
+            .iter()
+            .map(|i| &r[*i])
+            .collect::<Vec<_>>();
+        let prefix = Self::serialize_prefix(0, &pk);
         let db = self.db.as_ref().unwrap();
-        for (i, index) in self.indices.iter().enumerate() {
-            let index_row = index.columns.iter().map(|i| &r[*i]).collect::<Vec<_>>();
-            let serialized_key = Self::serialize_key(i as u64, &index_row, 0u64);
-            for (key, _value) in db.prefix_iterator(&serialized_key) {
-                db.delete(&key).unwrap();
+        // First attempt to delete the actual value (for the primary index).
+        for (key, _value) in db.prefix_iterator(&prefix) {
+            hit = true;
+            db.delete(&key).unwrap();
+        }
+
+        if hit {
+            // Then delete the secondary index pointers if this was a real row.
+            for (i, index) in self.indices[1..].iter().enumerate() {
+                let index_row = index.columns.iter().map(|i| &r[*i]).collect::<Vec<_>>();
+                let serialized_key = Self::serialize_prefix((i + 1) as u64, &index_row);
+                for (key, _value) in db.prefix_iterator(&serialized_key) {
+                    db.delete(&key).unwrap();
+                }
             }
         }
 
-        true
+        hit
     }
 
     fn add_key(&mut self, columns: &[usize], partial: Option<Vec<Tag>>) {
@@ -789,6 +805,7 @@ mod tests {
         assert!(state.insert(first.clone(), None));
         assert!(state.insert(second.clone(), None));
         assert!(state.remove(&first));
+        assert!(!state.remove(&first));
 
         match state.lookup(columns, &KeyType::Single(&first[0])) {
             LookupResult::Some(rows) => assert_eq!(rows.len(), 0),
