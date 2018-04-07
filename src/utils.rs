@@ -201,6 +201,16 @@ fn get_parameter_columns_recurse(cond: &ConditionExpression) -> Vec<&Column> {
             right: box ConditionExpression::Base(ConditionBase::Field(ref c)),
             operator: Operator::Equal,
         }) => vec![c],
+        ConditionExpression::ComparisonOp(ConditionTree {
+            left: box ConditionExpression::Base(ConditionBase::Field(_)),
+            right: box ConditionExpression::Base(ConditionBase::Literal(_)),
+            operator: _,
+        })
+        | ConditionExpression::ComparisonOp(ConditionTree {
+            left: box ConditionExpression::Base(ConditionBase::Literal(_)),
+            right: box ConditionExpression::Base(ConditionBase::Field(_)),
+            operator: _,
+        }) => vec![],
         ConditionExpression::LogicalOp(ConditionTree {
             operator: Operator::And,
             ref left,
