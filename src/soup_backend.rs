@@ -547,7 +547,7 @@ impl SoupBackend {
                     let f: f64 = (&dt).into();
                     rw.write_col(f)
                 }
-                x => panic!("encountered unhanded data type {:?}", x),
+                DataType::Timestamp(ts) => rw.write_col(ts),
             };
             match written {
                 Ok(_) => (),
