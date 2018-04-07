@@ -117,8 +117,8 @@ where
                     .and_then(move |(t, story)| {
                         t.drop_exec(
                             "INSERT INTO `votes` (`user_id`, `story_id`, `vote`) \
-                             VALUES (?, ?, 1)",
-                            (user, story),
+                             VALUES (?, ?, ?)",
+                            (user, story, 1),
                         ).map(move |t| (t, story))
                     })
                     .and_then(move |(t, story)| {
