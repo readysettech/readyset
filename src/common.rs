@@ -781,9 +781,13 @@ named!(pub table_list<&[u8], Vec<Table> >,
 /// Integer literal value
 named!(pub integer_literal<&[u8], Literal>,
     do_parse!(
+        sign: opt!(tag!("-")) >>
         val: digit >>
         ({
-            let intval = i64::from_str(str::from_utf8(val).unwrap()).unwrap();
+            let mut intval = i64::from_str(str::from_utf8(val).unwrap()).unwrap();
+            if sign.is_some() {
+                intval *= -1;
+            }
             Literal::Integer(intval)
         })
     )
