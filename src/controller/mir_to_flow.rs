@@ -673,10 +673,12 @@ pub(crate) fn make_latest_node(
         .map(|c| parent.borrow().column_id_for_column(c))
         .collect::<Vec<_>>();
 
+    // latest doesn't support compound group by
+    assert_eq!(group_col_indx.len(), 1);
     let na = mig.add_ingredient(
         String::from(name),
         column_names.as_slice(),
-        Latest::new(parent_na, group_col_indx),
+        Latest::new(parent_na, group_col_indx[0]),
     );
     FlowNode::New(na)
 }

@@ -132,7 +132,8 @@ impl Reader {
     pub fn on_eviction(&mut self, _key_columns: &[usize], keys: &[Vec<DataType>]) {
         let w = self.writer.as_mut().unwrap();
         for k in keys {
-            assert_eq!(k.len(), 1); // no compound keys yet
+            // TODO: compound key reader
+            assert_eq!(k.len(), 1);
             w.mark_hole(&k[0]);
         }
         w.swap();

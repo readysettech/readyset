@@ -426,7 +426,7 @@ impl Domain {
             let shard = if triggers.len() == 1 {
                 0
             } else {
-                assert!(key.len() == 1);
+                assert_eq!(key.len(), 1);
                 ::shard_by(&key[0], triggers.len())
             };
             self.concurrent_replays += 1;
@@ -1471,7 +1471,7 @@ impl Domain {
 
                 let mut rs = Vec::new();
                 let (keys, misses): (HashSet<_>, _) = keys.into_iter().partition(|key| match state
-                    .lookup(&cols[..], &KeyType::Single(&key[0]))
+                    .lookup(&cols[..], &KeyType::from(key))
                 {
                     LookupResult::Some(res) => {
                         rs.extend(res.into_iter().map(|r| self.seed_row(source, r)));
@@ -1599,7 +1599,7 @@ impl Domain {
                 let rs = self.state
                     .get(&source)
                     .expect("migration replay path started with non-materialized node")
-                    .lookup(&cols[..], &KeyType::Single(&key[0]));
+                    .lookup(&cols[..], &KeyType::from(&key[..]));
 
                 let mut k = HashSet::new();
                 k.insert(Vec::from(key));
@@ -1913,6 +1913,7 @@ impl Domain {
                                     // filled, even if that hole is empty!
                                     r.writer_mut().map(|wh| {
                                         for key in backfill_keys.iter() {
+                                            // TODO: compound key reader
                                             wh.mark_filled(&key[0]);
                                         }
                                     });
@@ -1970,6 +1971,7 @@ impl Domain {
                                     n.with_reader_mut(|r| {
                                         r.writer_mut().map(|wh| {
                                             for miss in &missed_on {
+                                                // TODO: compound key reader
                                                 wh.mark_hole(&miss[0]);
                                             }
                                         });
@@ -1985,6 +1987,7 @@ impl Domain {
                                     self.reader_triggered.get_mut(&segment.node)
                                 {
                                     for key in backfill_keys.as_ref().unwrap().iter() {
+                                        // TODO: compound key reader
                                         prev.remove(&key[0]);
                                     }
                                 }

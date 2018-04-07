@@ -17,7 +17,7 @@ pub struct Trigger {
     us: Option<IndexPair>,
     src: IndexPair,
     trigger: TriggerEvent,
-    key: Vec<usize>,
+    key: usize,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -35,8 +35,7 @@ impl Trigger {
     /// `src` is the parent node from which this node receives records.
     /// Whenever this node receives a record with a new value for `key`,
     /// it triggers the event specified by `trigger`
-    pub fn new(src: NodeIndex, trigger: TriggerEvent, key: Vec<usize>) -> Trigger {
-        assert_eq!(key.len(), 1);
+    pub fn new(src: NodeIndex, trigger: TriggerEvent, key: usize) -> Trigger {
         Trigger {
             us: None,
             src: src.into(),
@@ -129,7 +128,7 @@ impl Ingredient for Trigger {
             .get(&*us)
             .expect("trigger must have its own state materialized");
 
-        let mut trigger_keys: Vec<DataType> = rs.iter().map(|r| r[self.key[0]].clone()).collect();
+        let mut trigger_keys: Vec<DataType> = rs.iter().map(|r| r[self.key].clone()).collect();
 
         // sort and dedup to trigger just once for each key
         trigger_keys.sort();
@@ -137,7 +136,7 @@ impl Ingredient for Trigger {
 
         let keys = trigger_keys
             .iter()
-            .filter_map(|k| match db.lookup(&[self.key[0]], &KeyType::Single(&k)) {
+            .filter_map(|k| match db.lookup(&[self.key], &KeyType::Single(&k)) {
                 LookupResult::Some(rs) => {
                     if rs.len() == 0 {
                         Some(k)
@@ -160,7 +159,7 @@ impl Ingredient for Trigger {
 
     fn suggest_indexes(&self, this: NodeIndex) -> HashMap<NodeIndex, (Vec<usize>, bool)> {
         // index all key columns
-        Some((this, (self.key.clone(), true))).into_iter().collect()
+        Some((this, (vec![self.key], true))).into_iter().collect()
     }
 
     fn resolve(&self, col: usize) -> Option<Vec<(NodeIndex, usize)>> {
@@ -200,7 +199,7 @@ mod tests {
         g.set_op(
             "trigger",
             &["x", "y", "z"],
-            Trigger::new(s.as_global(), trigger_type, vec![0]),
+            Trigger::new(s.as_global(), trigger_type, 0),
             materialized,
         );
         g
