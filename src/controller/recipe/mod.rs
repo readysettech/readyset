@@ -10,6 +10,7 @@ use nom_sql::parser as sql_parser;
 
 use controller::security::SecurityConfig;
 
+use nom::{self, is_alphanumeric, multispace};
 use slog;
 use std::collections::HashMap;
 use std::str;
@@ -68,6 +69,30 @@ fn hash_query(q: &SqlQuery) -> QueryID {
     q.hash(&mut h);
     h.finish()
 }
+
+#[inline]
+fn is_ident(chr: u8) -> bool {
+    is_alphanumeric(chr) || chr == '_' as u8
+}
+
+named!(query_expr<&[u8], (bool, Option<String>, SqlQuery)>,
+    do_parse!(
+        prefix: opt!(do_parse!(
+            public: opt!(alt_complete!(tag_no_case!("query") | tag_no_case!("view"))) >>
+            opt!(complete!(multispace)) >>
+            name: opt!(map_res!(take_while!(is_ident), str::from_utf8)) >>
+            opt!(complete!(multispace)) >>
+            tag!(":") >>
+            opt!(complete!(multispace)) >>
+            (public, name)
+        )) >>
+        expr: apply!(sql_parser::sql_query,) >>
+        (match prefix {
+            None => (false, None, expr),
+            Some(p) => (p.0.is_some(), p.1.map(|s| s.to_owned()), expr)
+        })
+    )
+);
 
 #[allow(unused)]
 impl Recipe {
@@ -500,30 +525,17 @@ impl Recipe {
 
         let parsed_queries = query_strings
             .iter()
-            .map(|ref q| {
-                let r: Vec<&str> = q.splitn(2, ":").map(|s| s.trim()).collect();
-                if r.len() == 2 {
-                    // named query
-                    let q = r[1];
-                    let (is_leaf, name) = if r[0].to_lowercase().starts_with("query ") {
-                        (true, Some(String::from(&r[0][6..])))
-                    } else {
-                        (false, Some(String::from(r[0])))
-                    };
-                    (name, q.clone(), sql_parser::parse_query(q), is_leaf)
-                } else {
-                    // unnamed query
-                    let q = r[0];
-                    (None, q.clone(), sql_parser::parse_query(q), false)
-                }
-            })
+            .map(|ref q| (q.clone(), query_expr(q.as_bytes())))
             .collect::<Vec<_>>();
 
-        if !parsed_queries.iter().all(|pq| pq.2.is_ok()) {
+        if !parsed_queries.iter().all(|pq| pq.1.is_done()) {
             for pq in parsed_queries {
-                match pq.2 {
-                    Err(e) => return Err(format!("Query \"{}\", parse error: {}", pq.1, e)),
-                    Ok(_) => (),
+                match pq.1 {
+                    nom::IResult::Error(e) => {
+                        return Err(format!("Query \"{}\", parse error: {}", pq.0, e))
+                    }
+                    nom::IResult::Done(_, _) => (),
+                    nom::IResult::Incomplete(_) => unreachable!(),
                 }
             }
             return Err(format!("Failed to parse recipe!"));
@@ -531,7 +543,10 @@ impl Recipe {
 
         Ok(parsed_queries
             .into_iter()
-            .map(|t| (t.0, t.2.unwrap(), t.3))
+            .map(|(_, t)| {
+                let pr = t.unwrap().1;
+                (pr.1, pr.2, pr.0)
+            })
             .collect::<Vec<_>>())
     }
 

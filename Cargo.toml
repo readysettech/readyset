@@ -22,6 +22,7 @@ hostname = "0.1.3"
 hyper = "0.11.6"
 mio = "0.6.9"
 mio-pool = "0.5.4"
+nom = "^3.2.1"
 mysql = "12.2.0"
 rand = "0.4.0"
 serde_derive = "1.0.8"
@@ -43,7 +44,7 @@ serde = { version = "1.0.8", features = ["rc"] }
 assert_infrequent = { git = "https://github.com/fintelia/assert_infrequent.git", rev = "720e140bc8516d65dad7008abdc1d38796700c09" }
 petgraph = { version = "0.4.11", features = ["serde-1"] }
 memcached-rs = { git = "https://github.com/jonhoo/memcached-rs.git", branch = "expose-multi" }
-nom_sql = { git = "https://github.com/ms705/nom-sql.git", rev = "150437069ac936a95ad7d8049aafa3fc15b0ef3f" }
+nom_sql = { git = "https://github.com/ms705/nom-sql.git", rev = "88af33aacd62fc128a4a994024be18d8654195ec" }
 
 # local deps
 channel = { path = "channel" }

@@ -329,6 +329,8 @@ extern crate hyper;
 extern crate mio;
 extern crate mio_pool;
 extern crate mir;
+#[macro_use]
+extern crate nom;
 extern crate nom_sql;
 extern crate petgraph;
 extern crate rand;
