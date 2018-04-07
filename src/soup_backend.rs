@@ -27,7 +27,7 @@ pub struct SoupBackend {
 
     query_count: Arc<sync::atomic::AtomicUsize>,
 
-    prepared: HashMap<u32, (String, nom_sql::SqlQuery, Vec<msql_srv::Column>)>,
+    prepared: HashMap<u32, (String, nom_sql::SqlQuery)>,
     prepared_count: u32,
 }
 
@@ -603,10 +603,8 @@ impl<W: io::Write> MysqlShim<W> for SoupBackend {
                             Ok(_) => {
                                 // register a new prepared statement
                                 self.prepared_count += 1;
-                                self.prepared.insert(
-                                    self.prepared_count,
-                                    (qname, sql_q.clone(), params.clone()),
-                                );
+                                self.prepared
+                                    .insert(self.prepared_count, (qname, sql_q.clone()));
                                 // TODO(malte): proactively get getter, to avoid &mut ref on exec?
                                 info.reply(
                                     self.prepared_count,
@@ -635,7 +633,10 @@ impl<W: io::Write> MysqlShim<W> for SoupBackend {
                         self.prepared_count += 1;
                         self.prepared.insert(
                             self.prepared_count,
-                            ("".into(), sql_q.clone(), params.clone()), // XXX(malte): hack
+                            (
+                                format!("{}_{}", q.table.name.to_owned(), self.prepared_count),
+                                sql_q.clone(),
+                            ),
                         );
 
                         // nothing more to do for an insert
@@ -671,7 +672,7 @@ impl<W: io::Write> MysqlShim<W> for SoupBackend {
     ) -> io::Result<()> {
         // TODO(malte): unfortunate clone here, but we can't call execute_select(&mut self) if we
         // have self.prepared borrowed
-        if let Some((qname, q, _)) = self.prepared.get(&id).map(|e| e.clone()) {
+        if let Some((qname, q)) = self.prepared.get(&id).map(|e| e.clone()) {
             match q {
                 nom_sql::SqlQuery::Select(ref q) => {
                     let key: Vec<_> = params
