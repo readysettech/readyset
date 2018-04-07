@@ -80,7 +80,7 @@ pub(crate) fn schema_for_column(
             SqlType::Text => msql_srv::ColumnType::MYSQL_TYPE_STRING,
             SqlType::Varchar(_) => msql_srv::ColumnType::MYSQL_TYPE_VAR_STRING,
             SqlType::Int(_) => msql_srv::ColumnType::MYSQL_TYPE_LONG,
-            SqlType::Bigint(_) => msql_srv::ColumnType::MYSQL_TYPE_LONG,
+            SqlType::Bigint(_) => msql_srv::ColumnType::MYSQL_TYPE_LONGLONG,
             SqlType::Tinyint(_) => msql_srv::ColumnType::MYSQL_TYPE_TINY,
             SqlType::Bool => msql_srv::ColumnType::MYSQL_TYPE_BIT,
             SqlType::DateTime => msql_srv::ColumnType::MYSQL_TYPE_DATETIME,
