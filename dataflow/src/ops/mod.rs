@@ -437,11 +437,7 @@ pub mod test {
 
             // if the base node has state, keep it
             if let Some(ref mut state) = self.states.get_mut(&*base) {
-                match data.into() {
-                    Record::Positive(r) => state.insert(r, None),
-                    Record::Negative(_) => unreachable!(),
-                    Record::BaseOperation(..) => unreachable!(),
-                };
+                state.process_records(&mut vec![data].into(), None);
             } else {
                 assert!(
                     false,

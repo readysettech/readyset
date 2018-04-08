@@ -8,7 +8,7 @@ use local::single_state::SingleState;
 
 use bincode;
 use rand::{self, Rng};
-use rocksdb::{self, DBCompressionType, MemtableFactory, SliceTransform, DB};
+use rocksdb::{self, MemtableFactory, SliceTransform, DB, DBCompressionType};
 
 pub enum State {
     InMemory(MemoryState),
@@ -48,31 +48,17 @@ impl State {
         }
     }
 
-    pub fn process_records(&mut self, records: &Records) {
+    pub fn process_records(&mut self, records: &mut Records, partial_tag: Option<Tag>) {
         if records.len() == 0 {
             return;
         }
 
         match *self {
-            State::InMemory(ref mut s) => s.process_records(records),
-            State::Persistent(ref mut s) => s.process_records(records),
-        }
-    }
-
-    pub fn insert(&mut self, r: Vec<DataType>, partial_tag: Option<Tag>) -> bool {
-        match *self {
-            State::InMemory(ref mut s) => s.insert(r, partial_tag),
+            State::InMemory(ref mut s) => s.process_records(records, partial_tag),
             State::Persistent(ref mut s) => {
                 assert!(partial_tag.is_none(), "Bases can't be partial");
-                s.insert(r)
+                s.process_records(records)
             }
-        }
-    }
-
-    pub fn remove(&mut self, r: &[DataType]) -> bool {
-        match *self {
-            State::InMemory(ref mut s) => s.remove(r),
-            State::Persistent(ref mut s) => s.remove(r),
         }
     }
 
@@ -286,7 +272,7 @@ impl PersistentState {
 
     // Puts by primary key first, then retrieves the existing value for each index and appends the
     // newly created primary key value.
-    fn insert(&mut self, r: Vec<DataType>) -> bool {
+    fn insert(&mut self, r: Vec<DataType>) {
         let (pk_seq, pk) = {
             let pk_index = &mut self.indices[0];
             pk_index.seq += 1;
@@ -316,37 +302,17 @@ impl PersistentState {
             db.put_opt(&serialized_key, &serialized_pk_only, &write_opts)
                 .unwrap();
         }
-
-        true
     }
 
-    fn remove(&mut self, r: &[DataType]) -> bool {
-        let mut hit = false;
-        let pk = self.indices[0]
-            .columns
-            .iter()
-            .map(|i| &r[*i])
-            .collect::<Vec<_>>();
-        let prefix = Self::serialize_prefix(0, &pk);
+    fn remove(&mut self, r: &[DataType]) {
         let db = self.db.as_ref().unwrap();
-        // First attempt to delete the actual value (for the primary index).
-        for (key, _value) in db.prefix_iterator(&prefix) {
-            hit = true;
-            db.delete(&key).unwrap();
-        }
-
-        if hit {
-            // Then delete the secondary index pointers if this was a real row.
-            for (i, index) in self.indices[1..].iter().enumerate() {
-                let index_row = index.columns.iter().map(|i| &r[*i]).collect::<Vec<_>>();
-                let serialized_key = Self::serialize_prefix((i + 1) as u64, &index_row);
-                for (key, _value) in db.prefix_iterator(&serialized_key) {
-                    db.delete(&key).unwrap();
-                }
+        for (i, index) in self.indices.iter().enumerate() {
+            let index_row = index.columns.iter().map(|i| &r[*i]).collect::<Vec<_>>();
+            let serialized_key = Self::serialize_key(i as u64, &index_row, 0u64);
+            for (key, _value) in db.prefix_iterator(&serialized_key) {
+                db.delete(&key).unwrap();
             }
         }
-
-        hit
     }
 
     fn add_key(&mut self, columns: &[usize], partial: Option<Vec<Tag>>) {
@@ -537,20 +503,42 @@ impl MemoryState {
         self.state.iter().any(|s| s.partial())
     }
 
-    fn process_records(&mut self, records: &Records) {
-        // Might consider using a write batch if it helps here (might not help when we're not
-        // waiting for fsyncs).
-        for r in records.iter() {
-            match *r {
-                Record::Positive(ref r) => {
-                    let hit = self.insert(r.clone(), None);
-                    debug_assert!(hit);
+    fn process_records(&mut self, records: &mut Records, partial_tag: Option<Tag>) {
+        if self.is_partial() {
+            records.retain(|r| {
+                // we need to check that we're not erroneously filling any holes
+                // there are two cases here:
+                //
+                //  - if the incoming record is a partial replay (i.e., partial.is_some()), then we
+                //    *know* that we are the target of the replay, and therefore we *know* that the
+                //    materialization must already have marked the given key as "not a hole".
+                //  - if the incoming record is a normal message (i.e., partial.is_none()), then we
+                //    need to be careful. since this materialization is partial, it may be that we
+                //    haven't yet replayed this `r`'s key, in which case we shouldn't forward that
+                //    record! if all of our indices have holes for this record, there's no need for us
+                //    to forward it. it would just be wasted work.
+                //
+                //    XXX: we could potentially save come computation here in joins by not forcing
+                //    `right` to backfill the lookup key only to then throw the record away
+                match *r {
+                    Record::Positive(ref r) => self.insert(r.clone(), partial_tag),
+                    Record::Negative(ref r) => self.remove(r),
+                    Record::BaseOperation(..) => unreachable!(),
                 }
-                Record::Negative(ref r) => {
-                    let hit = self.remove(r);
-                    debug_assert!(hit);
+            });
+        } else {
+            for r in records.iter() {
+                match *r {
+                    Record::Positive(ref r) => {
+                        let hit = self.insert(r.clone(), None);
+                        debug_assert!(hit);
+                    }
+                    Record::Negative(ref r) => {
+                        let hit = self.remove(r);
+                        debug_assert!(hit);
+                    }
+                    Record::BaseOperation(..) => unreachable!(),
                 }
-                Record::BaseOperation(..) => unreachable!(),
             }
         }
     }
@@ -676,6 +664,11 @@ mod tests {
     use std::path::Path;
     use std::time::{SystemTime, UNIX_EPOCH};
 
+    fn insert(state: &mut State, row: Vec<DataType>) {
+        let record: Record = row.into();
+        state.process_records(&mut record.into(), None);
+    }
+
     fn setup_persistent(prefix: &str) -> State {
         let current_time = SystemTime::now().duration_since(UNIX_EPOCH).unwrap();
         let name = format!(
@@ -700,7 +693,7 @@ mod tests {
         let columns = &[0];
         let row: Vec<DataType> = vec![10.into(), "Cat".into()];
         state.add_key(columns, None);
-        state.insert(row, None);
+        insert(&mut state, row);
 
         match state.lookup(columns, &KeyType::Single(&5.into())) {
             LookupResult::Some(rows) => assert_eq!(rows.len(), 0),
@@ -723,7 +716,7 @@ mod tests {
         let columns = &[0, 2];
         let row: Vec<DataType> = vec![10.into(), "Cat".into(), 20.into()];
         state.add_key(columns, None);
-        assert!(state.insert(row.clone(), None));
+        insert(&mut state, row.clone());
 
         match state.lookup(columns, &KeyType::Double((1.into(), 2.into()))) {
             LookupResult::Some(rows) => assert_eq!(rows.len(), 0),
@@ -745,8 +738,7 @@ mod tests {
         let second: Vec<DataType> = vec![20.into(), "Cat".into(), 1.into()];
         state.add_key(&[0], None);
         state.add_key(&[1, 2], None);
-        assert!(state.insert(first.clone(), None));
-        assert!(state.insert(second.clone(), None));
+        state.process_records(&mut vec![first.clone(), second.clone()].into(), None);
 
         match state.lookup(&[0], &KeyType::Single(&10.into())) {
             LookupResult::Some(rows) => {
@@ -773,8 +765,7 @@ mod tests {
         let second: Vec<DataType> = vec![20.into(), "Bob".into()];
         state.add_key(&[0], None);
         state.add_key(&[1], None);
-        assert!(state.insert(first.clone(), None));
-        assert!(state.insert(second.clone(), None));
+        state.process_records(&mut vec![first.clone(), second.clone()].into(), None);
 
         match state.lookup(&[0], &KeyType::Single(&10.into())) {
             LookupResult::Some(rows) => {
@@ -800,10 +791,15 @@ mod tests {
         let first: Vec<DataType> = vec![10.into(), "Cat".into()];
         let second: Vec<DataType> = vec![20.into(), "Bob".into()];
         state.add_key(columns, None);
-        assert!(state.insert(first.clone(), None));
-        assert!(state.insert(second.clone(), None));
-        assert!(state.remove(&first));
-        assert!(!state.remove(&first));
+        state.process_records(
+            &mut vec![
+                (first.clone(), true),
+                (second.clone(), true),
+                (first.clone(), false),
+                (first.clone(), false),
+            ].into(),
+            None,
+        );
 
         match state.lookup(columns, &KeyType::Single(&first[0])) {
             LookupResult::Some(rows) => assert_eq!(rows.len(), 0),
@@ -835,9 +831,9 @@ mod tests {
         state.add_key(&[0], None);
         state.add_key(&[1], None);
         assert_eq!(state.rows(), 0);
-        assert!(state.insert(first.clone(), None));
+        insert(&mut state, first.clone());
         assert_eq!(state.rows(), 1);
-        assert!(state.insert(second.clone(), None));
+        insert(&mut state, second.clone());
         assert_eq!(state.rows(), 2);
     }
 
@@ -848,8 +844,8 @@ mod tests {
         let second: Vec<DataType> = vec![20.into(), "Cat".into()];
         state.add_key(&[0], None);
         state.add_key(&[1], None);
-        assert!(state.insert(first.clone(), None));
-        assert!(state.insert(second.clone(), None));
+        state.process_records(&mut vec![first.clone(), second.clone()].into(), None);
+
         assert_eq!(state.cloned_records(), vec![first, second]);
     }
 
@@ -860,8 +856,7 @@ mod tests {
         let first: Vec<DataType> = vec![10.into(), "Cat".into()];
         let second: Vec<DataType> = vec![20.into(), "Bob".into()];
         state.add_key(columns, None);
-        assert!(state.insert(first.clone(), None));
-        assert!(state.insert(second.clone(), None));
+        state.process_records(&mut vec![first.clone(), second.clone()].into(), None);
 
         state.clear();
         assert_eq!(state.rows(), 0);
@@ -885,7 +880,7 @@ mod tests {
         let mut state = setup_persistent("persistent_state_old_records_new_index");
         let row: Vec<DataType> = vec![10.into(), "Cat".into()];
         state.add_key(&[0], None);
-        assert!(state.insert(row.clone(), None));
+        insert(&mut state, row.clone());
         state.add_key(&[1], None);
 
         match state.lookup(&[1], &KeyType::Single(&row[1])) {
@@ -894,8 +889,8 @@ mod tests {
         };
     }
 
-    fn process_records(mut state: State) {
-        let records: Records = vec![
+    fn test_process_records(mut state: State) {
+        let mut records: Records = vec![
             (vec![1.into(), "A".into()], true),
             (vec![2.into(), "B".into()], true),
             (vec![3.into(), "C".into()], true),
@@ -903,7 +898,7 @@ mod tests {
         ].into();
 
         state.add_key(&[0], None);
-        state.process_records(&records);
+        state.process_records(&mut records, None);
 
         // Make sure the first record has been deleted:
         match state.lookup(&[0], &KeyType::Single(&records[0][0])) {
@@ -924,7 +919,7 @@ mod tests {
     #[test]
     fn persistent_state_process_records() {
         let state = setup_persistent("persistent_state_process_records");
-        process_records(state);
+        test_process_records(state);
     }
 
     #[test]
@@ -964,7 +959,7 @@ mod tests {
     #[test]
     fn memory_state_process_records() {
         let state = State::default();
-        process_records(state);
+        test_process_records(state);
     }
 
     #[test]
@@ -972,7 +967,7 @@ mod tests {
         let mut state = State::default();
         let row: Vec<DataType> = vec![10.into(), "Cat".into()];
         state.add_key(&[0], None);
-        assert!(state.insert(row.clone(), None));
+        insert(&mut state, row.clone());
         state.add_key(&[1], None);
 
         match state.lookup(&[1], &KeyType::Single(&row[1])) {
