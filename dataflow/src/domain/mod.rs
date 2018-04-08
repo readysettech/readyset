@@ -1001,8 +1001,9 @@ impl Domain {
                                         })
                                         .collect::<Vec<_>>(),
                                 );
+                                let k = key.clone(); // ugh
                                 let (r_part, w_part) =
-                                    backlog::new_partial(cols, key.clone(), move |miss| {
+                                    backlog::new_partial(cols, &k[..], move |miss| {
                                         let mut txs = txs.lock().unwrap();
                                         let tx = if txs.len() == 1 {
                                             &mut txs[0]
@@ -1046,7 +1047,7 @@ impl Domain {
                             }
                             InitialState::Global { gid, cols, key } => {
                                 use backlog;
-                                let (r_part, w_part) = backlog::new(cols, key);
+                                let (r_part, w_part) = backlog::new(cols, &key[..]);
 
                                 let mut n = self.nodes[&node].borrow_mut();
                                 n.with_reader_mut(|r| {

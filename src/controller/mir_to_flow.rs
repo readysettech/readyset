@@ -808,13 +808,13 @@ pub(crate) fn materialize_leaf_node(
     // TODO(malte): consider the case when the projected columns need reordering
 
     if !key_cols.is_empty() {
-        let key_cols = key_cols
+        let key_cols: Vec<_> = key_cols
             .iter()
             .map(|c| parent.borrow().column_id_for_column(c))
             .collect();
-        mig.maintain(name, na, key_cols);
+        mig.maintain(name, na, &key_cols[..]);
     } else {
         // if no key specified, default to the first column
-        mig.maintain(name, na, vec![0]);
+        mig.maintain(name, na, &[0]);
     }
 }

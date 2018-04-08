@@ -308,10 +308,10 @@ impl<'a> Migration<'a> {
     /// To query into the maintained state, use `ControllerInner::get_getter` or
     /// `ControllerInner::get_transactional_getter`
     #[cfg(test)]
-    pub fn maintain_anonymous(&mut self, n: NodeIndex, key: Vec<usize>) {
+    pub fn maintain_anonymous(&mut self, n: NodeIndex, key: &[usize]) {
         self.ensure_reader_for(n, None);
         if self.mainline.ingredients[n].is_transactional() {
-            self.ensure_token_generator(n, &key[..]);
+            self.ensure_token_generator(n, key);
         }
 
         let ri = self.readers[&n];
@@ -323,10 +323,10 @@ impl<'a> Migration<'a> {
     ///
     /// To query into the maintained state, use `ControllerInner::get_getter` or
     /// `ControllerInner::get_transactional_getter`
-    pub fn maintain(&mut self, name: String, n: NodeIndex, key: Vec<usize>) {
+    pub fn maintain(&mut self, name: String, n: NodeIndex, key: &[usize]) {
         self.ensure_reader_for(n, Some(name));
         if self.mainline.ingredients[n].is_transactional() {
-            self.ensure_token_generator(n, &key[..]);
+            self.ensure_token_generator(n, key);
         }
 
         let ri = self.readers[&n];

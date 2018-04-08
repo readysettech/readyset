@@ -49,7 +49,7 @@ fn main() {
     println!("Creating article...");
     let aid = 1;
     // Make sure the article exists:
-    if awvc.lookup(&aid.into(), true).unwrap().is_empty() {
+    if awvc.lookup(&[aid.into()], true).unwrap().is_empty() {
         println!("Creating new article...");
         let title = "test title";
         let url = "http://pdos.csail.mit.edu";
@@ -70,5 +70,5 @@ fn main() {
     thread::sleep(Duration::from_millis(1000));
 
     println!("Reading...");
-    println!("{:#?}", awvc.lookup(&1.into(), true))
+    println!("{:#?}", awvc.lookup(&[1.into()], true))
 }

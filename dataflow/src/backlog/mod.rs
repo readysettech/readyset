@@ -5,14 +5,14 @@ use fnv::FnvBuildHasher;
 use std::sync::Arc;
 
 /// Allocate a new end-user facing result table.
-pub fn new(cols: usize, key: Vec<usize>) -> (SingleReadHandle, WriteHandle) {
+pub fn new(cols: usize, key: &[usize]) -> (SingleReadHandle, WriteHandle) {
     new_inner(cols, key, None)
 }
 
 /// Allocate a new partially materialized end-user facing result table.
 ///
 /// Misses in this table will call `trigger` to populate the entry, and retry until successful.
-pub fn new_partial<F>(cols: usize, key: Vec<usize>, trigger: F) -> (SingleReadHandle, WriteHandle)
+pub fn new_partial<F>(cols: usize, key: &[usize], trigger: F) -> (SingleReadHandle, WriteHandle)
 where
     F: Fn(&[DataType]) + 'static + Send + Sync,
 {
@@ -21,7 +21,7 @@ where
 
 fn new_inner(
     cols: usize,
-    key: Vec<usize>,
+    key: &[usize],
     trigger: Option<Arc<Fn(&[DataType]) + Send + Sync>>,
 ) -> (SingleReadHandle, WriteHandle) {
     let (r, w) = evmap::Options::default()
@@ -31,13 +31,13 @@ fn new_inner(
     let w = WriteHandle {
         partial: trigger.is_some(),
         handle: w,
-        key: key.clone(),
+        key: Vec::from(key),
         cols: cols,
     };
     let r = SingleReadHandle {
         handle: r,
         trigger: trigger,
-        key: key,
+        key: Vec::from(key),
     };
     (r, w)
 }
@@ -298,28 +298,31 @@ mod tests {
     fn store_works() {
         let a = vec![1.into(), "a".into()];
 
-        let (r, mut w) = new(2, 0);
+        let (r, mut w) = new(2, &[0]);
 
         // initially, store is uninitialized
-        assert_eq!(r.find_and(&a[0], |rs| rs.len(), true), Err(()));
+        assert_eq!(r.find_and(&a[0..1], |rs| rs.len(), true), Err(()));
 
         w.swap();
 
         // after first swap, it is empty, but ready
-        assert_eq!(r.find_and(&a[0], |rs| rs.len(), true), Ok((None, -1)));
+        assert_eq!(r.find_and(&a[0..1], |rs| rs.len(), true), Ok((None, -1)));
 
         w.add(vec![Record::Positive(a.clone())]);
 
         // it is empty even after an add (we haven't swapped yet)
-        assert_eq!(r.find_and(&a[0], |rs| rs.len(), true), Ok((None, -1)));
+        assert_eq!(r.find_and(&a[0..1], |rs| rs.len(), true), Ok((None, -1)));
 
         w.swap();
 
         // but after the swap, the record is there!
-        assert_eq!(r.find_and(&a[0], |rs| rs.len(), true).unwrap().0, Some(1));
+        assert_eq!(
+            r.find_and(&a[0..1], |rs| rs.len(), true).unwrap().0,
+            Some(1)
+        );
         assert!(
             r.find_and(
-                &a[0],
+                &a[0..1],
                 |rs| rs.iter().any(|r| r[0] == a[0] && r[1] == a[1]),
                 true
             ).unwrap()
@@ -333,7 +336,7 @@ mod tests {
         use std::thread;
 
         let n = 10000;
-        let (r, mut w) = new(1, 0);
+        let (r, mut w) = new(1, &[0]);
         thread::spawn(move || {
             for i in 0..n {
                 w.add(vec![Record::Positive(vec![i.into()])]);
@@ -342,9 +345,9 @@ mod tests {
         });
 
         for i in 0..n {
-            let i = i.into();
+            let i = &[i.into()];
             loop {
-                match r.find_and(&i, |rs| rs.len(), true) {
+                match r.find_and(i, |rs| rs.len(), true) {
                     Ok((None, _)) => continue,
                     Ok((Some(1), _)) => break,
                     Ok((Some(i), _)) => assert_ne!(i, 1),
@@ -359,15 +362,18 @@ mod tests {
         let a = vec![1.into(), "a".into()];
         let b = vec![1.into(), "b".into()];
 
-        let (r, mut w) = new(2, 0);
+        let (r, mut w) = new(2, &[0]);
         w.add(vec![Record::Positive(a.clone())]);
         w.swap();
         w.add(vec![Record::Positive(b.clone())]);
 
-        assert_eq!(r.find_and(&a[0], |rs| rs.len(), true).unwrap().0, Some(1));
+        assert_eq!(
+            r.find_and(&a[0..1], |rs| rs.len(), true).unwrap().0,
+            Some(1)
+        );
         assert!(
             r.find_and(
-                &a[0],
+                &a[0..1],
                 |rs| rs.iter().any(|r| r[0] == a[0] && r[1] == a[1]),
                 true
             ).unwrap()
@@ -382,16 +388,19 @@ mod tests {
         let b = vec![1.into(), "b".into()];
         let c = vec![1.into(), "c".into()];
 
-        let (r, mut w) = new(2, 0);
+        let (r, mut w) = new(2, &[0]);
         w.add(vec![Record::Positive(a.clone())]);
         w.add(vec![Record::Positive(b.clone())]);
         w.swap();
         w.add(vec![Record::Positive(c.clone())]);
 
-        assert_eq!(r.find_and(&a[0], |rs| rs.len(), true).unwrap().0, Some(2));
+        assert_eq!(
+            r.find_and(&a[0..1], |rs| rs.len(), true).unwrap().0,
+            Some(2)
+        );
         assert!(
             r.find_and(
-                &a[0],
+                &a[0..1],
                 |rs| rs.iter().any(|r| r[0] == a[0] && r[1] == a[1]),
                 true
             ).unwrap()
@@ -400,7 +409,7 @@ mod tests {
         );
         assert!(
             r.find_and(
-                &a[0],
+                &a[0..1],
                 |rs| rs.iter().any(|r| r[0] == b[0] && r[1] == b[1]),
                 true
             ).unwrap()
@@ -414,16 +423,19 @@ mod tests {
         let a = vec![1.into(), "a".into()];
         let b = vec![1.into(), "b".into()];
 
-        let (r, mut w) = new(2, 0);
+        let (r, mut w) = new(2, &[0]);
         w.add(vec![Record::Positive(a.clone())]);
         w.add(vec![Record::Positive(b.clone())]);
         w.add(vec![Record::Negative(a.clone())]);
         w.swap();
 
-        assert_eq!(r.find_and(&a[0], |rs| rs.len(), true).unwrap().0, Some(1));
+        assert_eq!(
+            r.find_and(&a[0..1], |rs| rs.len(), true).unwrap().0,
+            Some(1)
+        );
         assert!(
             r.find_and(
-                &a[0],
+                &a[0..1],
                 |rs| rs.iter().any(|r| r[0] == b[0] && r[1] == b[1]),
                 true
             ).unwrap()
@@ -437,17 +449,20 @@ mod tests {
         let a = vec![1.into(), "a".into()];
         let b = vec![1.into(), "b".into()];
 
-        let (r, mut w) = new(2, 0);
+        let (r, mut w) = new(2, &[0]);
         w.add(vec![Record::Positive(a.clone())]);
         w.add(vec![Record::Positive(b.clone())]);
         w.swap();
         w.add(vec![Record::Negative(a.clone())]);
         w.swap();
 
-        assert_eq!(r.find_and(&a[0], |rs| rs.len(), true).unwrap().0, Some(1));
+        assert_eq!(
+            r.find_and(&a[0..1], |rs| rs.len(), true).unwrap().0,
+            Some(1)
+        );
         assert!(
             r.find_and(
-                &a[0],
+                &a[0..1],
                 |rs| rs.iter().any(|r| r[0] == b[0] && r[1] == b[1]),
                 true
             ).unwrap()
@@ -462,17 +477,20 @@ mod tests {
         let b = vec![1.into(), "b".into()];
         let c = vec![1.into(), "c".into()];
 
-        let (r, mut w) = new(2, 0);
+        let (r, mut w) = new(2, &[0]);
         w.add(vec![
             Record::Positive(a.clone()),
             Record::Positive(b.clone()),
         ]);
         w.swap();
 
-        assert_eq!(r.find_and(&a[0], |rs| rs.len(), true).unwrap().0, Some(2));
+        assert_eq!(
+            r.find_and(&a[0..1], |rs| rs.len(), true).unwrap().0,
+            Some(2)
+        );
         assert!(
             r.find_and(
-                &a[0],
+                &a[0..1],
                 |rs| rs.iter().any(|r| r[0] == a[0] && r[1] == a[1]),
                 true
             ).unwrap()
@@ -481,7 +499,7 @@ mod tests {
         );
         assert!(
             r.find_and(
-                &a[0],
+                &a[0..1],
                 |rs| rs.iter().any(|r| r[0] == b[0] && r[1] == b[1]),
                 true
             ).unwrap()
@@ -496,10 +514,13 @@ mod tests {
         ]);
         w.swap();
 
-        assert_eq!(r.find_and(&a[0], |rs| rs.len(), true).unwrap().0, Some(1));
+        assert_eq!(
+            r.find_and(&a[0..1], |rs| rs.len(), true).unwrap().0,
+            Some(1)
+        );
         assert!(
             r.find_and(
-                &a[0],
+                &a[0..1],
                 |rs| rs.iter().any(|r| r[0] == b[0] && r[1] == b[1]),
                 true
             ).unwrap()

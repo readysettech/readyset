@@ -91,7 +91,7 @@ fn it_works_basic() {
         emits.insert(b, vec![0, 1]);
         let u = Union::new(emits);
         let c = mig.add_ingredient("c", &["a", "b"], u);
-        mig.maintain_anonymous(c, 0);
+        mig.maintain_anonymous(c, &[0]);
         (a, b, c)
     });
 
@@ -110,7 +110,10 @@ fn it_works_basic() {
     sleep();
 
     // send a query to c
-    assert_eq!(cq.lookup(&id, true), Ok(vec![vec![1.into(), 2.into()]]));
+    assert_eq!(
+        cq.lookup(&[id.clone()], true),
+        Ok(vec![vec![1.into(), 2.into()]])
+    );
 
     // update value again
     mutb.put(vec![id.clone(), 4.into()]).unwrap();
@@ -119,7 +122,7 @@ fn it_works_basic() {
     sleep();
 
     // check that value was updated again
-    let res = cq.lookup(&id, true).unwrap();
+    let res = cq.lookup(&[id.clone()], true).unwrap();
     assert!(res.iter().any(|r| r == &vec![id.clone(), 2.into()]));
     assert!(res.iter().any(|r| r == &vec![id.clone(), 4.into()]));
 
@@ -130,7 +133,10 @@ fn it_works_basic() {
     sleep();
 
     // send a query to c
-    assert_eq!(cq.lookup(&id, true), Ok(vec![vec![1.into(), 4.into()]]));
+    assert_eq!(
+        cq.lookup(&[id.clone()], true),
+        Ok(vec![vec![1.into(), 4.into()]])
+    );
 
     // Update second record
     // TODO(malte): disabled until we have update support on bases; the current way of doing this
@@ -141,7 +147,7 @@ fn it_works_basic() {
     //sleep();
 
     // send a query to c
-    //assert_eq!(cq.lookup(&id, true), Ok(vec![vec![1.into(), 6.into()]]));
+    //assert_eq!(cq.lookup(&[id.clone()], true), Ok(vec![vec![1.into(), 6.into()]]));
 }
 
 #[test]
@@ -156,11 +162,11 @@ fn shared_interdomain_ancestor() {
 
         let u = Union::new(emits.clone());
         let b = mig.add_ingredient("b", &["a", "b"], u);
-        mig.maintain_anonymous(b, 0);
+        mig.maintain_anonymous(b, &[0]);
 
         let u = Union::new(emits);
         let c = mig.add_ingredient("c", &["a", "b"], u);
-        mig.maintain_anonymous(c, 0);
+        mig.maintain_anonymous(c, &[0]);
         (a, b, c)
     });
 
@@ -173,11 +179,11 @@ fn shared_interdomain_ancestor() {
     muta.put(vec![id.clone(), 2.into()]).unwrap();
     sleep();
     assert_eq!(
-        bq.lookup(&id, true),
+        bq.lookup(&[id.clone()], true),
         Ok(vec![vec![id.clone(), 2.into()].into()])
     );
     assert_eq!(
-        cq.lookup(&id, true),
+        cq.lookup(&[id.clone()], true),
         Ok(vec![vec![id.clone(), 2.into()].into()])
     );
 
@@ -186,11 +192,11 @@ fn shared_interdomain_ancestor() {
     muta.put(vec![id.clone(), 4.into()]).unwrap();
     sleep();
     assert_eq!(
-        bq.lookup(&id, true),
+        bq.lookup(&[id.clone()], true),
         Ok(vec![vec![id.clone(), 4.into()].into()])
     );
     assert_eq!(
-        cq.lookup(&id, true),
+        cq.lookup(&[id.clone()], true),
         Ok(vec![vec![id.clone(), 4.into()].into()])
     );
 }
@@ -208,7 +214,7 @@ fn it_works_w_mat() {
         emits.insert(b, vec![0, 1]);
         let u = Union::new(emits);
         let c = mig.add_ingredient("c", &["a", "b"], u);
-        mig.maintain_anonymous(c, 0);
+        mig.maintain_anonymous(c, &[0]);
         (a, b, c)
     });
 
@@ -227,7 +233,7 @@ fn it_works_w_mat() {
 
     // send a query to c
     // we should see all the a values
-    let res = cq.lookup(&id, true).unwrap();
+    let res = cq.lookup(&[id.clone()], true).unwrap();
     assert_eq!(res.len(), 3);
     assert!(res.iter().any(|r| r == &vec![id.clone(), 1.into()]));
     assert!(res.iter().any(|r| r == &vec![id.clone(), 2.into()]));
@@ -242,7 +248,7 @@ fn it_works_w_mat() {
     sleep();
 
     // check that value was updated again
-    let res = cq.lookup(&id, true).unwrap();
+    let res = cq.lookup(&[id.clone()], true).unwrap();
     assert_eq!(res.len(), 6);
     assert!(res.iter().any(|r| r == &vec![id.clone(), 1.into()]));
     assert!(res.iter().any(|r| r == &vec![id.clone(), 2.into()]));
@@ -280,7 +286,7 @@ fn it_works_w_partial_mat() {
         emits.insert(b, vec![0, 1]);
         let u = Union::new(emits);
         let c = mig.add_ingredient("c", &["a", "b"], u);
-        mig.maintain_anonymous(c, 0);
+        mig.maintain_anonymous(c, &[0]);
         c
     });
 
@@ -293,7 +299,7 @@ fn it_works_w_partial_mat() {
     assert_eq!(cq.len().unwrap(), 0);
 
     // now do some reads
-    let res = cq.lookup(&id, true).unwrap();
+    let res = cq.lookup(&[id.clone()], true).unwrap();
     assert_eq!(res.len(), 3);
     assert!(res.iter().any(|r| r == &vec![id.clone(), 1.into()]));
     assert!(res.iter().any(|r| r == &vec![id.clone(), 2.into()]));
@@ -317,7 +323,7 @@ fn it_works_w_partial_mat_below_empty() {
         emits.insert(b, vec![0, 1]);
         let u = Union::new(emits);
         let c = mig.add_ingredient("c", &["a", "b"], u);
-        mig.maintain_anonymous(c, 0);
+        mig.maintain_anonymous(c, &[0]);
         (a, b, c)
     });
 
@@ -339,7 +345,7 @@ fn it_works_w_partial_mat_below_empty() {
     assert_eq!(cq.len().unwrap(), 0);
 
     // now do some reads
-    let res = cq.lookup(&id, true).unwrap();
+    let res = cq.lookup(&[id.clone()], true).unwrap();
     assert_eq!(res.len(), 3);
     assert!(res.iter().any(|r| r == &vec![id.clone(), 1.into()]));
     assert!(res.iter().any(|r| r == &vec![id.clone(), 2.into()]));
@@ -362,7 +368,7 @@ fn it_works_deletion() {
         emits.insert(b, vec![1, 2]);
         let u = Union::new(emits);
         let c = mig.add_ingredient("c", &["x", "y"], u);
-        mig.maintain_anonymous(c, 0);
+        mig.maintain_anonymous(c, &[0]);
         (a, b, c)
     });
 
@@ -374,7 +380,7 @@ fn it_works_deletion() {
     muta.put(vec![1.into(), 2.into()]).unwrap();
     sleep();
     assert_eq!(
-        cq.lookup(&1.into(), true),
+        cq.lookup(&[1.into()], true),
         Ok(vec![vec![1.into(), 2.into()].into()])
     );
 
@@ -382,7 +388,7 @@ fn it_works_deletion() {
     mutb.put(vec![0.into(), 1.into(), 4.into()]).unwrap();
     sleep();
 
-    let res = cq.lookup(&1.into(), true).unwrap();
+    let res = cq.lookup(&[1.into()], true).unwrap();
     assert_eq!(res.len(), 2);
     assert!(res.contains(&vec![1.into(), 2.into()]));
     assert!(res.contains(&vec![1.into(), 4.into()]));
@@ -391,7 +397,7 @@ fn it_works_deletion() {
     muta.delete(vec![2.into()]).unwrap();
     sleep();
     assert_eq!(
-        cq.lookup(&1.into(), true),
+        cq.lookup(&[1.into()], true),
         Ok(vec![vec![1.into(), 4.into()]])
     );
 }
@@ -420,7 +426,7 @@ fn it_works_with_sql_recipe() {
     sleep();
 
     // Retrieve the result of the count query:
-    let result = getter.lookup(&"Volvo".into(), true).unwrap();
+    let result = getter.lookup(&["Volvo".into()], true).unwrap();
     assert_eq!(result.len(), 1);
     assert_eq!(result[0][0], 2.into());
 }
@@ -446,7 +452,7 @@ fn it_works_with_reads_before_writes() {
 
     // TODO: This lookup results in the partial key being populated
     // with an empty result, which leads to the second read not replaying correctly.
-    assert!(awvc.lookup(&aid.into(), true).unwrap().is_empty());
+    assert!(awvc.lookup(&[aid.into()], true).unwrap().is_empty());
 
     article.put(vec![aid.into()]).unwrap();
     sleep();
@@ -454,7 +460,7 @@ fn it_works_with_reads_before_writes() {
     vote.put(vec![aid.into(), uid.into()]).unwrap();
     sleep();
 
-    let result = awvc.lookup(&aid.into(), true).unwrap();
+    let result = awvc.lookup(&[aid.into()], true).unwrap();
     assert_eq!(result.len(), 1);
     assert_eq!(result[0], vec![aid.into(), uid.into()]);
 }
@@ -488,7 +494,7 @@ fn forced_shuffle_despite_same_shard() {
     sleep();
 
     // Retrieve the result of the count query:
-    let result = getter.lookup(&cid.into(), true).unwrap();
+    let result = getter.lookup(&[cid.into()], true).unwrap();
     assert_eq!(result.len(), 1);
     assert_eq!(result[0][1], price.into());
 }
@@ -519,7 +525,7 @@ fn double_shuffle() {
     sleep();
 
     // Retrieve the result of the count query:
-    let result = getter.lookup(&cid.into(), true).unwrap();
+    let result = getter.lookup(&[cid.into()], true).unwrap();
     assert_eq!(result.len(), 1);
     assert_eq!(result[0][1], price.into());
 }
@@ -544,7 +550,7 @@ fn it_works_with_arithmetic_aliases() {
     sleep();
 
     // Retrieve the result of the count query:
-    let result = getter.lookup(&pid.into(), true).unwrap();
+    let result = getter.lookup(&[pid.into()], true).unwrap();
     assert_eq!(result.len(), 1);
     assert_eq!(result[0][1], (price / 100).into());
 }
@@ -590,7 +596,7 @@ fn it_recovers_persisted_logs() {
     // Make sure that the new graph contains the old writes
     for i in 1..10 {
         let price = i * 10;
-        let result = getter.lookup(&i.into(), true).unwrap();
+        let result = getter.lookup(&[i.into()], true).unwrap();
         assert_eq!(result.len(), 1);
         assert_eq!(result[0][0], price.into());
     }
@@ -612,7 +618,7 @@ fn mutator_churn() {
             Aggregation::COUNT.over(vote, 0, &[1]),
         );
 
-        mig.maintain_anonymous(vc, 0);
+        mig.maintain_anonymous(vc, &[0]);
         (vote, vc)
     });
 
@@ -638,7 +644,7 @@ fn mutator_churn() {
     // check that all writes happened the right number of times
     for i in 0..ids {
         assert_eq!(
-            vc_state.lookup(&i.into(), true),
+            vc_state.lookup(&[i.into()], true),
             Ok(vec![vec![i.into(), votes.into()]])
         );
     }
@@ -685,7 +691,7 @@ fn it_recovers_persisted_logs_w_multiple_nodes() {
     let mut g = g.build(authority.clone());
     for (i, table) in tables.iter().enumerate() {
         let mut getter = g.get_getter(&format!("{}ID", table)).unwrap();
-        let result = getter.lookup(&i.into(), true).unwrap();
+        let result = getter.lookup(&[i.into()], true).unwrap();
         assert_eq!(result.len(), 1);
         assert_eq!(result[0][0], i.into());
     }
@@ -712,7 +718,7 @@ fn it_recovers_persisted_logs_w_transactions() {
         // persisted...)
         let _ = g.migrate(|mig| {
             let a = mig.add_transactional_base("a", &["a", "b"], Base::default());
-            mig.maintain_anonymous(a, 0);
+            mig.maintain_anonymous(a, &[0]);
             a
         });
 
@@ -735,7 +741,7 @@ fn it_recovers_persisted_logs_w_transactions() {
     let mut getter = g.get_getter("a").unwrap();
     for i in 1..10 {
         let b = i * 10;
-        let (result, _token) = getter.transactional_lookup(&i.into()).unwrap();
+        let (result, _token) = getter.transactional_lookup(&[i.into()]).unwrap();
         assert_eq!(result.len(), 1);
         assert_eq!(result[0][0], i.into());
         assert_eq!(result[0][1], b.into());
@@ -763,7 +769,7 @@ fn it_works_with_simple_arithmetic() {
     sleep();
 
     // Retrieve the result of the count query:
-    let result = getter.lookup(&id, true).unwrap();
+    let result = getter.lookup(&[id.clone()], true).unwrap();
     assert_eq!(result.len(), 1);
     assert_eq!(result[0][1], 246.into());
 }
@@ -786,7 +792,7 @@ fn it_works_with_multiple_arithmetic_expressions() {
     sleep();
 
     // Retrieve the result of the count query:
-    let result = getter.lookup(&id, true).unwrap();
+    let result = getter.lookup(&[id.clone()], true).unwrap();
     assert_eq!(result.len(), 1);
     assert_eq!(result[0][1], 100.into());
     assert_eq!(result[0][2], 246.into());
@@ -825,7 +831,7 @@ fn it_works_with_join_arithmetic() {
     sleep();
 
     // Retrieve the result of the count query:
-    let result = getter.lookup(&id.into(), true).unwrap();
+    let result = getter.lookup(&[id.into()], true).unwrap();
     assert_eq!(result.len(), 1);
     assert_eq!(result[0][1], (price as f64 * fraction).into());
 }
@@ -852,7 +858,7 @@ fn it_works_with_function_arithmetic() {
 
     // Retrieve the result of the count query:
     let key = DataType::BigInt(max_price * 2);
-    let result = getter.lookup(&key, true).unwrap();
+    let result = getter.lookup(&[key.clone()], true).unwrap();
     assert_eq!(result.len(), 1);
     assert_eq!(result[0][0], key);
 }
@@ -872,7 +878,7 @@ fn votes() {
         emits.insert(article2, vec![0, 1]);
         let u = Union::new(emits);
         let article = mig.add_ingredient("article", &["id", "title"], u);
-        mig.maintain_anonymous(article, 0);
+        mig.maintain_anonymous(article, &[0]);
 
         // add vote base table
         let vote = mig.add_ingredient("vote", &["user", "id"], Base::default());
@@ -883,12 +889,12 @@ fn votes() {
             &["id", "votes"],
             Aggregation::COUNT.over(vote, 0, &[1]),
         );
-        mig.maintain_anonymous(vc, 0);
+        mig.maintain_anonymous(vc, &[0]);
 
         // add final join using first field from article and first from vc
         let j = Join::new(article, vc, JoinType::Inner, vec![B(0, 0), L(1), R(1)]);
         let end = mig.add_ingredient("end", &["id", "title", "votes"], j);
-        mig.maintain_anonymous(end, 0);
+        mig.maintain_anonymous(end, &[0]);
 
         (article1, article2, vote, article, vc, end)
     });
@@ -912,7 +918,7 @@ fn votes() {
 
     // query articles to see that it was updated
     assert_eq!(
-        articleq.lookup(&a1, true),
+        articleq.lookup(&[a1.clone()], true),
         Ok(vec![vec![a1.clone(), 2.into()]])
     );
 
@@ -925,11 +931,11 @@ fn votes() {
     // query articles again to see that the new article was absorbed
     // and that the old one is still present
     assert_eq!(
-        articleq.lookup(&a1, true),
+        articleq.lookup(&[a1.clone()], true),
         Ok(vec![vec![a1.clone(), 2.into()]])
     );
     assert_eq!(
-        articleq.lookup(&a2, true),
+        articleq.lookup(&[a2.clone()], true),
         Ok(vec![vec![a2.clone(), 4.into()]])
     );
 
@@ -940,12 +946,12 @@ fn votes() {
     sleep();
 
     // query vote count to see that the count was updated
-    let res = vcq.lookup(&a1, true).unwrap();
+    let res = vcq.lookup(&[a1.clone()], true).unwrap();
     assert!(res.iter().all(|r| r[0] == a1.clone() && r[1] == 1.into()));
     assert_eq!(res.len(), 1);
 
     // check that article 1 appears in the join view with a vote count of one
-    let res = endq.lookup(&a1, true).unwrap();
+    let res = endq.lookup(&[a1.clone()], true).unwrap();
     assert!(
         res.iter()
             .any(|r| r[0] == a1.clone() && r[1] == 2.into() && r[2] == 1.into()),
@@ -955,7 +961,7 @@ fn votes() {
     assert_eq!(res.len(), 1);
 
     // check that article 2 doesn't have any votes
-    let res = endq.lookup(&a2, true).unwrap();
+    let res = endq.lookup(&[a2.clone()], true).unwrap();
     assert!(res.len() <= 1) // could be 1 if we had zero-rows
 }
 
@@ -978,7 +984,7 @@ fn transactional_vote() {
         emits.insert(article2, vec![0, 1]);
         let u = Union::new(emits);
         let article = mig.add_ingredient("article", &["id", "title"], u);
-        mig.maintain_anonymous(article, 0);
+        mig.maintain_anonymous(article, &[0]);
 
         // add vote base table
         let vote = mig.add_transactional_base("vote", &["user", "id"], Base::default());
@@ -989,7 +995,7 @@ fn transactional_vote() {
             &["id", "votes"],
             Aggregation::COUNT.over(vote, 0, &[1]),
         );
-        mig.maintain_anonymous(vc, 0);
+        mig.maintain_anonymous(vc, &[0]);
 
         // add final join using first field from article and first from vc
         let j = Join::new(article, vc, JoinType::Inner, vec![B(0, 0), L(1), R(1)]);
@@ -999,9 +1005,9 @@ fn transactional_vote() {
         let end_votes =
             mig.add_ingredient("end_votes", &["id", "title", "votes"], Identity::new(end));
 
-        mig.maintain_anonymous(end, 0);
-        mig.maintain_anonymous(end_title, 1);
-        mig.maintain_anonymous(end_votes, 2);
+        mig.maintain_anonymous(end, &[0]);
+        mig.maintain_anonymous(end_title, &[1]);
+        mig.maintain_anonymous(end_votes, &[2]);
 
         (
             article1,
@@ -1028,11 +1034,11 @@ fn transactional_vote() {
     let a1: DataType = 1.into();
     let a2: DataType = 2.into();
 
-    let token = articleq.transactional_lookup(&a1).unwrap().1;
+    let token = articleq.transactional_lookup(&[a1.clone()]).unwrap().1;
 
-    let endq_token = endq.transactional_lookup(&a2).unwrap().1;
-    let endq_title_token = endq_title.transactional_lookup(&4.into()).unwrap().1;
-    let endq_votes_token = endq_votes.transactional_lookup(&0.into()).unwrap().1;
+    let endq_token = endq.transactional_lookup(&[a2.clone()]).unwrap().1;
+    let endq_title_token = endq_title.transactional_lookup(&[4.into()]).unwrap().1;
+    let endq_votes_token = endq_votes.transactional_lookup(&[0.into()]).unwrap().1;
 
     // make one article
     assert!(
@@ -1044,7 +1050,7 @@ fn transactional_vote() {
     sleep();
 
     // query articles to see that it was absorbed
-    let (res, token) = articleq.transactional_lookup(&a1).unwrap();
+    let (res, token) = articleq.transactional_lookup(&[a1.clone()]).unwrap();
     assert_eq!(res, vec![vec![a1.clone(), 2.into()]]);
 
     // check endq tokens are as expected
@@ -1063,9 +1069,9 @@ fn transactional_vote() {
 
     // query articles again to see that the new article was absorbed
     // and that the old one is still present
-    let (res, mut token) = articleq.transactional_lookup(&a1).unwrap();
+    let (res, mut token) = articleq.transactional_lookup(&[a1.clone()]).unwrap();
     assert_eq!(res, vec![vec![a1.clone(), 2.into()]]);
-    let (res, token2) = articleq.transactional_lookup(&a2).unwrap();
+    let (res, token2) = articleq.transactional_lookup(&[a2.clone()]).unwrap();
     assert_eq!(res, vec![vec![a2.clone(), 4.into()]]);
     // check endq tokens are as expected
     assert!(!validate(&endq_token));
@@ -1076,9 +1082,9 @@ fn transactional_vote() {
     token.merge(token2);
     assert!(validate(&token));
 
-    let endq_token = endq.transactional_lookup(&a1).unwrap().1;
-    let endq_title_token = endq_title.transactional_lookup(&4.into()).unwrap().1;
-    let endq_votes_token = endq_votes.transactional_lookup(&0.into()).unwrap().1;
+    let endq_token = endq.transactional_lookup(&[a1.clone()]).unwrap().1;
+    let endq_title_token = endq_title.transactional_lookup(&[4.into()]).unwrap().1;
+    let endq_votes_token = endq_votes.transactional_lookup(&[0.into()]).unwrap().1;
 
     // create a vote (user 1 votes for article 1)
     assert!(
@@ -1095,12 +1101,12 @@ fn transactional_vote() {
     assert!(!validate(&endq_votes_token));
 
     // query vote count to see that the count was updated
-    let res = vcq.lookup(&a1, true).unwrap();
+    let res = vcq.lookup(&[a1.clone()], true).unwrap();
     assert!(res.iter().all(|r| r[0] == a1.clone() && r[1] == 1.into()));
     assert_eq!(res.len(), 1);
 
     // check that article 1 appears in the join view with a vote count of one
-    let res = endq.transactional_lookup(&a1).unwrap().0;
+    let res = endq.transactional_lookup(&[a1.clone()]).unwrap().0;
     assert_eq!(res.len(), 1);
     assert!(
         res.iter()
@@ -1110,7 +1116,7 @@ fn transactional_vote() {
     );
 
     // check that article 2 doesn't have any votes
-    let res = endq.transactional_lookup(&a2).unwrap().0;
+    let res = endq.transactional_lookup(&[a2.clone()]).unwrap().0;
     assert!(res.len() <= 1); // could be 1 if we had zero-rows
 }
 
@@ -1129,7 +1135,7 @@ fn empty_migration() {
         emits.insert(b, vec![0, 1]);
         let u = Union::new(emits);
         let c = mig.add_ingredient("c", &["a", "b"], u);
-        mig.maintain_anonymous(c, 0);
+        mig.maintain_anonymous(c, &[0]);
         (a, b, c)
     });
 
@@ -1145,7 +1151,10 @@ fn empty_migration() {
     sleep();
 
     // send a query to c
-    assert_eq!(cq.lookup(&id, true), Ok(vec![vec![1.into(), 2.into()]]));
+    assert_eq!(
+        cq.lookup(&[id.clone()], true),
+        Ok(vec![vec![1.into(), 2.into()]])
+    );
 
     // update value again
     mutb.put(vec![id.clone(), 4.into()]).unwrap();
@@ -1154,7 +1163,7 @@ fn empty_migration() {
     sleep();
 
     // check that value was updated again
-    let res = cq.lookup(&id, true).unwrap();
+    let res = cq.lookup(&[id.clone()], true).unwrap();
     assert!(res.iter().any(|r| r == &vec![id.clone(), 2.into()]));
     assert!(res.iter().any(|r| r == &vec![id.clone(), 4.into()]));
 }
@@ -1167,7 +1176,7 @@ fn simple_migration() {
     let mut g = ControllerBuilder::default().build_local();
     let _ = g.migrate(|mig| {
         let a = mig.add_ingredient("a", &["a", "b"], Base::default());
-        mig.maintain_anonymous(a, 0);
+        mig.maintain_anonymous(a, &[0]);
         a
     });
 
@@ -1181,12 +1190,15 @@ fn simple_migration() {
     sleep();
 
     // check that a got it
-    assert_eq!(aq.lookup(&id, true), Ok(vec![vec![1.into(), 2.into()]]));
+    assert_eq!(
+        aq.lookup(&[id.clone()], true),
+        Ok(vec![vec![1.into(), 2.into()]])
+    );
 
     // add unrelated node b in a migration
     let _ = g.migrate(|mig| {
         let b = mig.add_ingredient("b", &["a", "b"], Base::default());
-        mig.maintain_anonymous(b, 0);
+        mig.maintain_anonymous(b, &[0]);
         b
     });
 
@@ -1200,7 +1212,10 @@ fn simple_migration() {
     sleep();
 
     // check that b got it
-    assert_eq!(bq.lookup(&id, true), Ok(vec![vec![1.into(), 4.into()]]));
+    assert_eq!(
+        bq.lookup(&[id.clone()], true),
+        Ok(vec![vec![1.into(), 4.into()]])
+    );
 }
 
 #[test]
@@ -1211,7 +1226,7 @@ fn add_columns() {
     let mut g = ControllerBuilder::default().build_local();
     let a = g.migrate(|mig| {
         let a = mig.add_ingredient("a", &["a", "b"], Base::new(vec![1.into(), 2.into()]));
-        mig.maintain_anonymous(a, 0);
+        mig.maintain_anonymous(a, &[0]);
         a
     });
     let mut aq = g.get_getter("a").unwrap();
@@ -1223,7 +1238,7 @@ fn add_columns() {
 
     // check that a got it
     assert_eq!(
-        aq.lookup(&id, true),
+        aq.lookup(&[id.clone()], true),
         Ok(vec![vec![id.clone(), "y".into()].into()])
     );
 
@@ -1238,7 +1253,7 @@ fn add_columns() {
     sleep();
 
     // check that a got it, and added the new, third column's default
-    let res = aq.lookup(&id, true).unwrap();
+    let res = aq.lookup(&[id.clone()], true).unwrap();
     assert_eq!(res.len(), 2);
     assert!(res.contains(&vec![id.clone(), "y".into()]));
     assert!(res.contains(&vec![id.clone(), "z".into(), 3.into()]));
@@ -1249,7 +1264,7 @@ fn add_columns() {
     sleep();
 
     // check that a got it, and included the third column
-    let res = aq.lookup(&id, true).unwrap();
+    let res = aq.lookup(&[id.clone()], true).unwrap();
     assert_eq!(res.len(), 3);
     assert!(res.contains(&vec![id.clone(), "y".into()]));
     assert!(res.contains(&vec![id.clone(), "z".into(), 3.into()]));
@@ -1276,7 +1291,7 @@ fn migrate_added_columns() {
     let _ = g.migrate(move |mig| {
         mig.add_column(a, "c", 3.into());
         let b = mig.add_ingredient("x", &["c", "b"], Project::new(a, &[2, 0], None, None));
-        mig.maintain_anonymous(b, 1);
+        mig.maintain_anonymous(b, &[1]);
         b
     });
 
@@ -1293,7 +1308,7 @@ fn migrate_added_columns() {
 
     // we should now see the pre-migration write and the old post-migration write with the default
     // value, and the new post-migration write with the value it contained.
-    let res = bq.lookup(&id, true).unwrap();
+    let res = bq.lookup(&[id.clone()], true).unwrap();
     assert_eq!(res.len(), 3);
     assert_eq!(
         res.iter()
@@ -1312,7 +1327,7 @@ fn migrate_drop_columns() {
     let mut g = ControllerBuilder::default().build_local();
     let a = g.migrate(|mig| {
         let a = mig.add_ingredient("a", &["a", "b"], Base::new(vec!["a".into(), "b".into()]));
-        mig.maintain_anonymous(a, 0);
+        mig.maintain_anonymous(a, &[0]);
         a
     });
     let mut aq = g.get_getter("a").unwrap();
@@ -1323,14 +1338,14 @@ fn migrate_drop_columns() {
 
     // check that it's there
     sleep();
-    let res = aq.lookup(&id.clone(), true).unwrap();
+    let res = aq.lookup(&[id.clone()], true).unwrap();
     assert_eq!(res.len(), 1);
     assert!(res.contains(&vec![id.clone(), "bx".into()]));
 
     // drop a column
     g.migrate(move |mig| {
         mig.drop_column(a, 1);
-        mig.maintain_anonymous(a, 0);
+        mig.maintain_anonymous(a, &[0]);
     });
 
     // new mutator should only require one column
@@ -1340,7 +1355,7 @@ fn migrate_drop_columns() {
 
     // so two rows now!
     sleep();
-    let res = aq.lookup(&id.clone(), true).unwrap();
+    let res = aq.lookup(&[id.clone()], true).unwrap();
     assert_eq!(res.len(), 2);
     assert!(res.contains(&vec![id.clone(), "bx".into()]));
     assert!(res.contains(&vec![id.clone(), "b".into()]));
@@ -1361,7 +1376,7 @@ fn migrate_drop_columns() {
     muta2.put(vec![id.clone()]).unwrap();
     sleep();
 
-    let res = aq.lookup(&id.clone(), true).unwrap();
+    let res = aq.lookup(&[id.clone()], true).unwrap();
     assert_eq!(res.len(), 5);
     // NOTE: if we *hadn't* read bx and b above, they would have also have c because it would have
     // been added when the lookups caused partial backfills.
@@ -1385,13 +1400,13 @@ fn key_on_added() {
     let _ = g.migrate(move |mig| {
         mig.add_column(a, "c", 3.into());
         let b = mig.add_ingredient("x", &["c", "b"], Project::new(a, &[2, 1], None, None));
-        mig.maintain_anonymous(b, 0);
+        mig.maintain_anonymous(b, &[0]);
         b
     });
 
     // make sure we can read (may trigger a replay)
     let mut bq = g.get_getter("x").unwrap();
-    assert!(bq.lookup(&3.into(), true).unwrap().is_empty());
+    assert!(bq.lookup(&[3.into()], true).unwrap().is_empty());
 }
 
 #[test]
@@ -1423,7 +1438,7 @@ fn replay_during_replay() {
         let u = mig.add_ingredient("u", &["u", "a"], j);
         let j = Join::new(a, u, JoinType::Left, vec![B(0, 1), R(0)]);
         let end = mig.add_ingredient("end", &["a", "u"], j);
-        mig.maintain_anonymous(end, 0);
+        mig.maintain_anonymous(end, &[0]);
         (u, end)
     });
 
@@ -1457,14 +1472,14 @@ fn replay_during_replay() {
     let mut r = g.get_getter("end").unwrap();
 
     assert_eq!(
-        r.lookup(&1.into(), true),
+        r.lookup(&[1.into()], true),
         Ok(vec![vec![1.into(), "a".into()]])
     );
 
     // we now know that u has key a=1 in its index
     // now we add a secondary index on u.u
     g.migrate(move |mig| {
-        mig.maintain_anonymous(u, 0);
+        mig.maintain_anonymous(u, &[0]);
     });
 
     let mut second = g.get_getter("u").unwrap();
@@ -1472,7 +1487,7 @@ fn replay_during_replay() {
     // second is partial and empty, so any read should trigger a replay.
     // though that shouldn't interact with target in any way.
     assert_eq!(
-        second.lookup(&"a".into(), true),
+        second.lookup(&["a".into()], true),
         Ok(vec![vec!["a".into(), 1.into()]])
     );
 
@@ -1482,7 +1497,7 @@ fn replay_during_replay() {
     // "a" value for which u has a hole. that record is then going to be forwarded to *both*
     // children, and it'll be interesting to see what the join then does.
     assert_eq!(
-        second.lookup(&"b".into(), true),
+        second.lookup(&["b".into()], true),
         Ok(vec![vec!["b".into(), 2.into()]])
     );
 
@@ -1493,7 +1508,7 @@ fn replay_during_replay() {
 
     // what happens if we now query for 2?
     assert_eq!(
-        r.lookup(&2.into(), true),
+        r.lookup(&[2.into()], true),
         Ok(vec![vec![2.into(), "b".into()], vec![2.into(), "b".into()]])
     );
 }
@@ -1517,7 +1532,7 @@ fn full_aggregation_with_bogokey() {
             &["bogo", "count"],
             Aggregation::COUNT.over(bogo, 0, &[1]),
         );
-        mig.maintain_anonymous(agg, 0);
+        mig.maintain_anonymous(agg, &[0]);
         agg
     });
 
@@ -1534,7 +1549,7 @@ fn full_aggregation_with_bogokey() {
 
     // send a query to aggregation materialization
     assert_eq!(
-        aggq.lookup(&0.into(), true),
+        aggq.lookup(&[0.into()], true),
         Ok(vec![vec![0.into(), 3.into()]])
     );
 
@@ -1546,7 +1561,7 @@ fn full_aggregation_with_bogokey() {
 
     // check that value was updated again
     assert_eq!(
-        aggq.lookup(&0.into(), true),
+        aggq.lookup(&[0.into()], true),
         Ok(vec![vec![0.into(), 4.into()]])
     );
 }
@@ -1557,7 +1572,7 @@ fn transactional_migration() {
     let mut g = ControllerBuilder::default().build_local();
     let a = g.migrate(|mig| {
         let a = mig.add_transactional_base("a", &["a", "b"], Base::default());
-        mig.maintain_anonymous(a, 0);
+        mig.maintain_anonymous(a, &[0]);
         a
     });
 
@@ -1573,14 +1588,14 @@ fn transactional_migration() {
 
     // check that a got it
     assert_eq!(
-        aq.transactional_lookup(&1.into()).unwrap().0,
+        aq.transactional_lookup(&[1.into()]).unwrap().0,
         vec![vec![1.into(), 2.into()]]
     );
 
     // add unrelated node b in a migration
     let b = g.migrate(|mig| {
         let b = mig.add_transactional_base("b", &["a", "b"], Base::default());
-        mig.maintain_anonymous(b, 0);
+        mig.maintain_anonymous(b, &[0]);
         b
     });
 
@@ -1596,7 +1611,7 @@ fn transactional_migration() {
 
     // check that b got it
     assert_eq!(
-        bq.transactional_lookup(&2.into()).unwrap().0,
+        bq.transactional_lookup(&[2.into()]).unwrap().0,
         vec![vec![2.into(), 4.into()]]
     );
 
@@ -1606,7 +1621,7 @@ fn transactional_migration() {
         emits.insert(b, vec![0, 1]);
         let u = Union::new(emits);
         let c = mig.add_ingredient("c", &["a", "b"], u);
-        mig.maintain_anonymous(c, 0);
+        mig.maintain_anonymous(c, &[0]);
         c
     });
 
@@ -1614,11 +1629,11 @@ fn transactional_migration() {
 
     // check that c has both previous entries
     assert_eq!(
-        aq.transactional_lookup(&1.into()).unwrap().0,
+        aq.transactional_lookup(&[1.into()]).unwrap().0,
         vec![vec![1.into(), 2.into()]]
     );
     assert_eq!(
-        bq.transactional_lookup(&2.into()).unwrap().0,
+        bq.transactional_lookup(&[2.into()]).unwrap().0,
         vec![vec![2.into(), 4.into()]]
     );
 
@@ -1632,7 +1647,7 @@ fn transactional_migration() {
     sleep();
 
     // check that c got them
-    let res = cq.transactional_lookup(&3.into()).unwrap().0;
+    let res = cq.transactional_lookup(&[3.into()]).unwrap().0;
 
     assert_eq!(res.len(), 2);
     assert!(res.contains(&vec![3.into(), 5.into()]));
@@ -1658,7 +1673,7 @@ fn crossing_migration() {
         emits.insert(b, vec![0, 1]);
         let u = Union::new(emits);
         let c = mig.add_ingredient("c", &["a", "b"], u);
-        mig.maintain_anonymous(c, 0);
+        mig.maintain_anonymous(c, &[0]);
         c
     });
 
@@ -1671,7 +1686,7 @@ fn crossing_migration() {
     sleep();
 
     assert_eq!(
-        cq.lookup(&id, true),
+        cq.lookup(&[id.clone()], true),
         Ok(vec![vec![id.clone(), 2.into()].into()])
     );
 
@@ -1679,7 +1694,7 @@ fn crossing_migration() {
     mutb.put(vec![id.clone(), 4.into()]).unwrap();
     sleep();
 
-    let res = cq.lookup(&id, true).unwrap();
+    let res = cq.lookup(&[id.clone()], true).unwrap();
     assert_eq!(res.len(), 2);
     assert!(res.contains(&vec![id.clone(), 2.into()]));
     assert!(res.contains(&vec![id.clone(), 4.into()]));
@@ -1693,7 +1708,7 @@ fn independent_domain_migration() {
     let mut g = ControllerBuilder::default().build_local();
     let _ = g.migrate(|mig| {
         let a = mig.add_ingredient("a", &["a", "b"], Base::default());
-        mig.maintain_anonymous(a, 0);
+        mig.maintain_anonymous(a, &[0]);
         a
     });
 
@@ -1707,12 +1722,15 @@ fn independent_domain_migration() {
     sleep();
 
     // check that a got it
-    assert_eq!(aq.lookup(&id, true), Ok(vec![vec![1.into(), 2.into()]]));
+    assert_eq!(
+        aq.lookup(&[id.clone()], true),
+        Ok(vec![vec![1.into(), 2.into()]])
+    );
 
     // add unrelated node b in a migration
     let _ = g.migrate(|mig| {
         let b = mig.add_ingredient("b", &["a", "b"], Base::default());
-        mig.maintain_anonymous(b, 0);
+        mig.maintain_anonymous(b, &[0]);
         b
     });
 
@@ -1726,7 +1744,10 @@ fn independent_domain_migration() {
     sleep();
 
     // check that a got it
-    assert_eq!(bq.lookup(&id, true), Ok(vec![vec![1.into(), 4.into()]]));
+    assert_eq!(
+        bq.lookup(&[id.clone()], true),
+        Ok(vec![vec![1.into(), 4.into()]])
+    );
 }
 
 #[test]
@@ -1747,7 +1768,7 @@ fn domain_amend_migration() {
         emits.insert(b, vec![0, 1]);
         let u = Union::new(emits);
         let c = mig.add_ingredient("c", &["a", "b"], u);
-        mig.maintain_anonymous(c, 0);
+        mig.maintain_anonymous(c, &[0]);
         c
     });
     let mut cq = g.get_getter("c").unwrap();
@@ -1759,7 +1780,7 @@ fn domain_amend_migration() {
     sleep();
 
     assert_eq!(
-        cq.lookup(&id, true),
+        cq.lookup(&[id.clone()], true),
         Ok(vec![vec![id.clone(), 2.into()].into()])
     );
 
@@ -1767,7 +1788,7 @@ fn domain_amend_migration() {
     mutb.put(vec![id.clone(), 4.into()]).unwrap();
     sleep();
 
-    let res = cq.lookup(&id, true).unwrap();
+    let res = cq.lookup(&[id.clone()], true).unwrap();
     assert_eq!(res.len(), 2);
     assert!(res.contains(&vec![id.clone(), 2.into()]));
     assert!(res.contains(&vec![id.clone(), 4.into()]));
@@ -1833,7 +1854,7 @@ fn do_full_vote_migration(old_puts_after: bool) {
         let j = Join::new(article, vc, JoinType::Left, vec![B(0, 0), L(1), R(1)]);
         let end = mig.add_ingredient("awvc", &["id", "title", "votes"], j);
 
-        mig.maintain_anonymous(end, 0);
+        mig.maintain_anonymous(end, &[0]);
         (article, vote, vc, end)
     });
     let mut muta = g.get_mutator("article").unwrap();
@@ -1853,7 +1874,7 @@ fn do_full_vote_migration(old_puts_after: bool) {
     let mut last = g.get_getter("awvc").unwrap();
     thread::sleep(get_settle_time().checked_mul(3).unwrap());
     for i in 0..n {
-        let rows = last.lookup(&i.into(), true).unwrap();
+        let rows = last.lookup(&[i.into()], true).unwrap();
         assert!(!rows.is_empty(), "every article should be voted for");
         assert_eq!(rows.len(), 1, "every article should have only one entry");
         let row = rows.into_iter().next().unwrap();
@@ -1890,7 +1911,7 @@ fn do_full_vote_migration(old_puts_after: bool) {
             vec![B(0, 0), L(1), R(1), R(2)],
         );
         let newend = mig.add_ingredient("awr", &["id", "title", "ratings", "votes"], j);
-        mig.maintain_anonymous(newend, 0);
+        mig.maintain_anonymous(newend, &[0]);
         (rating, newend)
     });
 
@@ -1905,7 +1926,7 @@ fn do_full_vote_migration(old_puts_after: bool) {
 
     thread::sleep(get_settle_time().checked_mul(3).unwrap());
     for i in 0..n {
-        let rows = last.lookup(&i.into(), true).unwrap();
+        let rows = last.lookup(&[i.into()], true).unwrap();
         assert!(!rows.is_empty(), "every article should be voted for");
         assert_eq!(rows.len(), 1, "every article should have only one entry");
         let row = rows.into_iter().next().unwrap();
@@ -1950,7 +1971,7 @@ fn live_writes() {
             Aggregation::COUNT.over(vote, 0, &[1]),
         );
 
-        mig.maintain_anonymous(vc, 0);
+        mig.maintain_anonymous(vc, &[0]);
         (vote, vc)
     });
 
@@ -1978,7 +1999,7 @@ fn live_writes() {
             &["id", "votes"],
             Aggregation::SUM.over(vc, 1, &[0]),
         );
-        mig.maintain_anonymous(vc2, 0);
+        mig.maintain_anonymous(vc2, &[0]);
         vc2
     });
 
@@ -1995,11 +2016,11 @@ fn live_writes() {
     // check that all writes happened the right number of times
     for i in 0..ids {
         assert_eq!(
-            vc_state.lookup(&i.into(), true),
+            vc_state.lookup(&[i.into()], true),
             Ok(vec![vec![i.into(), votes.into()]])
         );
         assert_eq!(
-            vc2_state.lookup(&i.into(), true),
+            vc2_state.lookup(&[i.into()], true),
             Ok(vec![vec![i.into(), votes.into()]])
         );
     }
@@ -2034,7 +2055,7 @@ fn state_replay_migration_query() {
         let j = mig.add_ingredient("j", &["x", "y", "z"], j);
 
         // we want to observe what comes out of the join
-        mig.maintain_anonymous(j, 0);
+        mig.maintain_anonymous(j, &[0]);
         j
     });
     let mut out = g.get_getter("j").unwrap();
@@ -2043,7 +2064,7 @@ fn state_replay_migration_query() {
     // if all went according to plan, the join should now be fully populated!
     // there are (/should be) two records in a with x == 1
     // they may appear in any order
-    let res = out.lookup(&1.into(), true).unwrap();
+    let res = out.lookup(&[1.into()], true).unwrap();
     assert!(
         res.iter()
             .any(|r| r == &vec![1.into(), "a".into(), "n".into()])
@@ -2055,12 +2076,12 @@ fn state_replay_migration_query() {
 
     // there are (/should be) one record in a with x == 2
     assert_eq!(
-        out.lookup(&2.into(), true),
+        out.lookup(&[2.into()], true),
         Ok(vec![vec![2.into(), "c".into(), "o".into()]])
     );
 
     // there are (/should be) no records with x == 3
-    assert!(out.lookup(&3.into(), true).unwrap().is_empty());
+    assert!(out.lookup(&[3.into()], true).unwrap().is_empty());
 }
 
 #[test]
