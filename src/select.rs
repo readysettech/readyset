@@ -44,6 +44,15 @@ pub struct JoinClause {
     pub constraint: JoinConstraint,
 }
 
+impl fmt::Display for JoinClause {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        write!(f, "{}", self.operator)?;
+        write!(f, " {}", self.right)?;
+        write!(f, " {}", self.constraint)?;
+        Ok(())
+    }
+}
+
 #[derive(Clone, Debug, Hash, PartialEq, Serialize, Deserialize)]
 pub struct LimitClause {
     pub limit: u64,
@@ -99,6 +108,9 @@ impl fmt::Display for SelectStatement {
                     .collect::<Vec<_>>()
                     .join(", ")
             )?;
+        }
+        for jc in &self.join {
+            write!(f, " {}", jc)?;
         }
         if let Some(ref where_clause) = self.where_clause {
             write!(f, " WHERE ")?;
