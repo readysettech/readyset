@@ -544,7 +544,7 @@ impl SoupBackend {
                 DataType::Text(t) => rw.write_col(t.to_str().unwrap()),
                 dt @ DataType::TinyText(_) => rw.write_col(dt.to_string()),
                 dt @ DataType::Real(_, _) => {
-                    let f: f64 = (&dt).into();
+                    let f: &str = &dt.to_string();
                     rw.write_col(f)
                 }
                 DataType::Timestamp(ts) => rw.write_col(ts),
