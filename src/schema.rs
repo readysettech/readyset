@@ -93,7 +93,7 @@ pub(crate) fn schema_for_column(
             SqlType::Tinyint(_) => msql_srv::ColumnType::MYSQL_TYPE_TINY,
             SqlType::Bool => msql_srv::ColumnType::MYSQL_TYPE_BIT,
             SqlType::DateTime => msql_srv::ColumnType::MYSQL_TYPE_DATETIME,
-            SqlType::Float => msql_srv::ColumnType::MYSQL_TYPE_FLOAT,
+            SqlType::Float => msql_srv::ColumnType::MYSQL_TYPE_DOUBLE,
             SqlType::Decimal(_, _) => msql_srv::ColumnType::MYSQL_TYPE_DECIMAL,
             _ => unimplemented!(),
         },
