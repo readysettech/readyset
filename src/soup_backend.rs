@@ -536,17 +536,24 @@ impl SoupBackend {
 
         assert_eq!(key.len(), 1); // no compound keys yet
 
-        let write_column = |rw: &mut RowWriter<W>, c: DataType| {
+        let write_column = |rw: &mut RowWriter<W>, c: DataType, cs: &msql_srv::Column| {
             let written = match c {
                 DataType::None => rw.write_col(None::<i32>),
                 DataType::Int(i) => rw.write_col(i as isize),
                 DataType::BigInt(i) => rw.write_col(i as isize),
                 DataType::Text(t) => rw.write_col(t.to_str().unwrap()),
                 dt @ DataType::TinyText(_) => rw.write_col(dt.to_string()),
-                dt @ DataType::Real(_, _) => {
-                    let f: &str = &dt.to_string();
-                    rw.write_col(f)
-                }
+                dt @ DataType::Real(_, _) => match cs.coltype {
+                    msql_srv::ColumnType::MYSQL_TYPE_DECIMAL => {
+                        let f: &str = &dt.to_string();
+                        rw.write_col(f)
+                    }
+                    msql_srv::ColumnType::MYSQL_TYPE_DOUBLE => {
+                        let f: f64 = (&dt).into();
+                        rw.write_col(f)
+                    }
+                    _ => unreachable!(),
+                },
                 DataType::Timestamp(ts) => rw.write_col(ts),
             };
             match written {
@@ -565,8 +572,7 @@ impl SoupBackend {
                             // drop bogokey
                             r.pop();
                         }
-                        for c in r {
-                            write_column(&mut rw, c);
+                            write_column(&mut rw, c, &schema[i]);
                         }
                         rw.end_row()?;
                     }
