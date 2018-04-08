@@ -572,7 +572,12 @@ impl SoupBackend {
                             // drop bogokey
                             r.pop();
                         }
-                            write_column(&mut rw, c, &schema[i]);
+                        for (i, c) in r.into_iter().enumerate() {
+                            // XXX TODO XXX
+                            // Need to drop parameter columns
+                            if i < schema.len() {
+                                write_column(&mut rw, c, &schema[i]);
+                            }
                         }
                         rw.end_row()?;
                     }
