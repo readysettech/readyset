@@ -1133,7 +1133,8 @@ impl Domain {
                             .with_reader(|r| {
                                 r.writer()
                                     .expect("reader replay requested for non-materialized reader")
-                                    .try_find_and(&key[..], |_| ())
+                                    .with_key(&key[..])
+                                    .try_find_and(|_| ())
                                     .expect("reader replay requested for non-ready reader")
                                     .0
                                     .is_none()
@@ -1911,7 +1912,7 @@ impl Domain {
                                     // filled, even if that hole is empty!
                                     r.writer_mut().map(|wh| {
                                         for key in backfill_keys.iter() {
-                                            wh.mark_filled(&key[..]);
+                                            wh.mut_with_key(&key[..]).mark_filled();
                                         }
                                     });
                                 });
@@ -1968,7 +1969,7 @@ impl Domain {
                                     n.with_reader_mut(|r| {
                                         r.writer_mut().map(|wh| {
                                             for miss in &missed_on {
-                                                wh.mark_hole(&miss[..]);
+                                                wh.mut_with_key(&miss[..]).mark_hole();
                                             }
                                         });
                                     });

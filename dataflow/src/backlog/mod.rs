@@ -1,18 +1,21 @@
 use core::{DataType, Record};
-use evmap;
 use fnv::FnvBuildHasher;
-
+use std::borrow::Cow;
 use std::sync::Arc;
 
 /// Allocate a new end-user facing result table.
-pub fn new(cols: usize, key: &[usize]) -> (SingleReadHandle, WriteHandle) {
+pub(crate) fn new(cols: usize, key: &[usize]) -> (SingleReadHandle, WriteHandle) {
     new_inner(cols, key, None)
 }
 
 /// Allocate a new partially materialized end-user facing result table.
 ///
 /// Misses in this table will call `trigger` to populate the entry, and retry until successful.
-pub fn new_partial<F>(cols: usize, key: &[usize], trigger: F) -> (SingleReadHandle, WriteHandle)
+pub(crate) fn new_partial<F>(
+    cols: usize,
+    key: &[usize],
+    trigger: F,
+) -> (SingleReadHandle, WriteHandle)
 where
     F: Fn(&[DataType]) + 'static + Send + Sync,
 {
@@ -24,100 +27,202 @@ fn new_inner(
     key: &[usize],
     trigger: Option<Arc<Fn(&[DataType]) + Send + Sync>>,
 ) -> (SingleReadHandle, WriteHandle) {
-    let (r, w) = evmap::Options::default()
-        .with_meta(-1)
-        .with_hasher(FnvBuildHasher::default())
-        .construct();
+    let contiguous = {
+        let mut contiguous = true;
+        let mut last = None;
+        for &k in key {
+            if let Some(last) = last {
+                if k != last + 1 {
+                    contiguous = false;
+                    break;
+                }
+            }
+            last = Some(k);
+        }
+        contiguous
+    };
+
+    macro_rules! make {
+        ($variant:tt) => {{
+            use evmap;
+            let (r, w) = evmap::Options::default()
+                .with_meta(-1)
+                .with_hasher(FnvBuildHasher::default())
+                .construct();
+
+            (multir::Handle::$variant(r), multiw::Handle::$variant(w))
+        }};
+    }
+
+    let (r, w) = match key.len() {
+        0 => unreachable!(),
+        1 => make!(Single),
+        2 => make!(Double),
+        _ => make!(Many),
+    };
+
     let w = WriteHandle {
         partial: trigger.is_some(),
         handle: w,
         key: Vec::from(key),
         cols: cols,
+        contiguous,
     };
     let r = SingleReadHandle {
         handle: r,
         trigger: trigger,
         key: Vec::from(key),
     };
+
     (r, w)
 }
 
-pub struct WriteHandle {
-    handle: evmap::WriteHandle<DataType, Vec<DataType>, i64, FnvBuildHasher>,
+mod multir;
+mod multiw;
+
+fn key_to_single<'a>(k: Key<'a>) -> Cow<'a, DataType> {
+    assert_eq!(k.len(), 1);
+    match k {
+        Cow::Owned(mut k) => Cow::Owned(k.swap_remove(0)),
+        Cow::Borrowed(k) => Cow::Borrowed(&k[0]),
+    }
+}
+
+fn key_to_double<'a>(k: Key<'a>) -> Cow<'a, (DataType, DataType)> {
+    assert_eq!(k.len(), 2);
+    match k {
+        Cow::Owned(k) => {
+            let mut k = k.into_iter();
+            let k1 = k.next().unwrap();
+            let k2 = k.next().unwrap();
+            Cow::Owned((k1, k2))
+        }
+        Cow::Borrowed(k) => Cow::Owned((k[0].clone(), k[1].clone())),
+    }
+}
+
+pub(crate) struct WriteHandle {
+    handle: multiw::Handle,
     partial: bool,
     cols: usize,
     key: Vec<usize>,
+    contiguous: bool,
+}
+
+type Key<'a> = Cow<'a, [DataType]>;
+pub(crate) struct MutWriteHandleEntry<'a> {
+    handle: &'a mut multiw::Handle,
+    key: Key<'a>,
+}
+pub(crate) struct WriteHandleEntry<'a> {
+    handle: &'a multiw::Handle,
+    key: Key<'a>,
+}
+
+impl<'a> MutWriteHandleEntry<'a> {
+    pub fn mark_filled(self) {
+        self.handle.clear(self.key)
+    }
+
+    pub fn mark_hole(self) {
+        self.handle.empty(self.key)
+    }
+}
+
+impl<'a> WriteHandleEntry<'a> {
+    pub(crate) fn try_find_and<F, T>(self, mut then: F) -> Result<(Option<T>, i64), ()>
+    where
+        F: FnMut(&[Vec<DataType>]) -> T,
+    {
+        self.handle.meta_get_and(self.key, &mut then).ok_or(())
+    }
+}
+
+fn key_from_record<'a, R>(key: &[usize], contiguous: bool, record: R) -> Key<'a>
+where
+    R: Into<Cow<'a, [DataType]>>,
+{
+    match record.into() {
+        Cow::Owned(mut record) => {
+            let mut i = 0;
+            let mut keep = key.into_iter().peekable();
+            record.retain(|_| {
+                i += 1;
+                if let Some(&&next) = keep.peek() {
+                    if next != i - 1 {
+                        return false;
+                    }
+                } else {
+                    return false;
+                }
+
+                assert_eq!(*keep.next().unwrap(), i - 1);
+                true
+            });
+            Cow::Owned(record)
+        }
+        Cow::Borrowed(record) if contiguous => Cow::Borrowed(&record[key[0]..(key[0] + key.len())]),
+        Cow::Borrowed(record) => Cow::Owned(key.iter().map(|&i| &record[i]).cloned().collect()),
+    }
 }
 
 impl WriteHandle {
-    pub fn swap(&mut self) {
+    pub(crate) fn mut_with_key<'a, K>(&'a mut self, key: K) -> MutWriteHandleEntry<'a>
+    where
+        K: Into<Key<'a>>,
+    {
+        MutWriteHandleEntry {
+            handle: &mut self.handle,
+            key: key.into(),
+        }
+    }
+
+    pub(crate) fn with_key<'a, K>(&'a self, key: K) -> WriteHandleEntry<'a>
+    where
+        K: Into<Key<'a>>,
+    {
+        WriteHandleEntry {
+            handle: &self.handle,
+            key: key.into(),
+        }
+    }
+
+    #[allow(dead_code)]
+    pub(crate) fn mut_entry_from_record<'a, R>(&'a mut self, record: R) -> MutWriteHandleEntry<'a>
+    where
+        R: Into<Cow<'a, [DataType]>>,
+    {
+        let key = key_from_record(&self.key[..], self.contiguous, record);
+        self.mut_with_key(key)
+    }
+
+    pub(crate) fn entry_from_record<'a, R>(&'a self, record: R) -> WriteHandleEntry<'a>
+    where
+        R: Into<Cow<'a, [DataType]>>,
+    {
+        let key = key_from_record(&self.key[..], self.contiguous, record);
+        self.with_key(key)
+    }
+
+    pub(crate) fn swap(&mut self) {
         self.handle.refresh();
     }
 
     /// Add a new set of records to the backlog.
     ///
     /// These will be made visible to readers after the next call to `swap()`.
-    pub fn add<I>(&mut self, rs: I)
+    pub(crate) fn add<I>(&mut self, rs: I)
     where
         I: IntoIterator<Item = Record>,
     {
-        for r in rs {
-            debug_assert!(r.len() >= self.cols);
-            let mut key: Vec<_> = self.key.iter().map(|&c| r[c].clone()).collect();
-
-            // TODO: compound readers
-            assert_eq!(key.len(), 1);
-            let key = key.swap_remove(0);
-
-            match r {
-                Record::Positive(r) => {
-                    self.handle.insert(key, r);
-                }
-                Record::Negative(r) => {
-                    // TODO: evmap will remove the empty vec for a key if we remove the last
-                    // record. this means that future lookups will fail, and cause a replay, which
-                    // will produce an empty result. this will work, but is somewhat inefficient.
-                    self.handle.remove(key, r);
-                }
-                Record::DeleteRequest(..) => unreachable!(),
-            }
-        }
+        self.handle.add(&self.key[..], self.cols, rs)
     }
 
-    pub fn update_ts(&mut self, ts: i64) {
+    pub(crate) fn update_ts(&mut self, ts: i64) {
         self.handle.set_meta(ts);
     }
 
-    pub fn mark_filled(&mut self, key: &[DataType]) {
-        // TODO: compound readers
-        assert_eq!(key.len(), 1);
-        self.handle.clear(key[0].clone());
-    }
-
-    pub fn mark_hole(&mut self, key: &[DataType]) {
-        // TODO: compound readers
-        assert_eq!(key.len(), 1);
-        self.handle.empty(key[0].clone());
-    }
-
-    pub fn try_find_and<F, T>(&self, key: &[DataType], mut then: F) -> Result<(Option<T>, i64), ()>
-    where
-        F: FnMut(&[Vec<DataType>]) -> T,
-    {
-        // TODO: compound readers
-        assert_eq!(key.len(), 1);
-        self.handle.meta_get_and(&key[0], &mut then).ok_or(())
-    }
-
-    pub fn key(&self) -> &[usize] {
-        &self.key[..]
-    }
-
-    pub fn len(&self) -> usize {
-        self.handle.len()
-    }
-
-    pub fn is_partial(&self) -> bool {
+    pub(crate) fn is_partial(&self) -> bool {
         self.partial
     }
 }
@@ -125,7 +230,7 @@ impl WriteHandle {
 /// Handle to get the state of a single shard of a reader.
 #[derive(Clone)]
 pub struct SingleReadHandle {
-    handle: evmap::ReadHandle<DataType, Vec<DataType>, i64, FnvBuildHasher>,
+    handle: multir::Handle,
     trigger: Option<Arc<Fn(&[DataType]) + Send + Sync>>,
     key: Vec<usize>,
 }
@@ -185,9 +290,7 @@ impl SingleReadHandle {
     where
         F: FnMut(&[Vec<DataType>]) -> T,
     {
-        // TODO: compound readers
-        assert_eq!(key.len(), 1);
-        self.handle.meta_get_and(&key[0], &mut then).ok_or(())
+        self.handle.meta_get_and(key, &mut then).ok_or(())
     }
 
     #[allow(dead_code)]
@@ -200,7 +303,7 @@ impl SingleReadHandle {
     /// hold up writers until all rows are iterated through.
     pub fn count_rows(&self) -> usize {
         let mut nrows = 0;
-        self.handle.for_each(|_, v| nrows += v.len());
+        self.handle.for_each(|v| nrows += v.len());
         nrows
     }
 }
