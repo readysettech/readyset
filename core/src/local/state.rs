@@ -107,7 +107,9 @@ impl State for PersistentState {
         }
 
         // Sync the writes to RocksDB's WAL:
-        self.db.as_ref().unwrap().write(batch).unwrap();
+        let mut opts = rocksdb::WriteOptions::default();
+        opts.set_sync(true);
+        self.db.as_ref().unwrap().write_opt(batch, &opts).unwrap();
     }
 
     fn lookup(&self, columns: &[usize], key: &KeyType) -> LookupResult {
