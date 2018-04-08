@@ -53,6 +53,15 @@ pub(crate) fn schema_for_select(
                 },
                 colflags: msql_srv::ColumnFlags::empty(),
             }),
+            nom_sql::FieldExpression::Arithmetic(ref ae) => schema.push(msql_srv::Column {
+                table: "".to_owned(),
+                column: match ae.alias {
+                    Some(ref a) => a.to_owned(),
+                    None => format!("{}", ae),
+                },
+                coltype: msql_srv::ColumnType::MYSQL_TYPE_LONG,
+                colflags: msql_srv::ColumnFlags::empty(),
+            }),
             _ => unimplemented!(),
         }
     }
