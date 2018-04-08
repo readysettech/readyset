@@ -85,8 +85,12 @@ impl SizeOf for PersistentState {
 
 impl State for PersistentState {
     fn process_records(&mut self, records: &mut Records, partial_tag: Option<Tag>) {
-        let mut batch = WriteBatch::default();
         assert!(partial_tag.is_none(), "PersistentState can't be partial");
+        if records.len() == 0 {
+            return;
+        }
+
+        let mut batch = WriteBatch::default();
 
         // TODO(ekmartin): .remove won't work for inserts in the same batch, since it needs to seek
         // for the values it's deleting before doing so, and values we're inserting in this batch
