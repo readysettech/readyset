@@ -4,7 +4,7 @@ run.sh
 *-log-*.json
 *.png
 *.log
-soup.db
+*.db
 plotting/*.png
 
 callgrind.out.*

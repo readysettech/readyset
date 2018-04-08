@@ -401,28 +401,26 @@ impl PersistentState {
             .position(|index| &index.columns[..] == columns)
             .expect("could not find index for columns");
         let prefix = Self::serialize_prefix(index as u64, &values);
-        let db = self.db.as_ref().unwrap();
-        let data = if index > 0 {
-            let mut rows = vec![];
-            for (_key, value) in db.prefix_iterator(&prefix) {
-                let row: Vec<DataType> = bincode::deserialize(&*value).unwrap();
-                let row_key = KeyType::from(&row[..]);
-                match self.lookup(&self.indices[0].columns, &row_key) {
-                    LookupResult::Some(Cow::Owned(ref mut rs)) => rows.append(rs),
-                    _ => unreachable!(),
-                };
-            }
-            rows
-        } else {
-            let mut rows = vec![];
-            for (_key, value) in db.prefix_iterator(&prefix) {
-                let row: Vec<DataType> = bincode::deserialize(&*value).unwrap();
-                rows.push(row);
-            }
+        let values = self.db
+            .as_ref()
+            .unwrap()
+            .prefix_iterator(&prefix)
+            .map(|(_key, value)| bincode::deserialize::<Vec<DataType>>(&*value).unwrap());
 
-            rows.into_iter()
-                .map(|row| Row(Rc::new(row)))
-                .collect::<Vec<_>>()
+        let data = if index > 0 {
+            // For non-primary indices we need to first retrieve the primary index key
+            // through our secondary indices, and then call `.lookup` again on that.
+            values
+                .flat_map(|value| {
+                    let row_key = KeyType::from(&value[..]);
+                    match self.lookup(&self.indices[0].columns, &row_key) {
+                        LookupResult::Some(Cow::Owned(rs)) => rs,
+                        _ => unreachable!(),
+                    }
+                })
+                .collect()
+        } else {
+            values.map(|row| Row(Rc::new(row))).collect()
         };
 
         LookupResult::Some(Cow::Owned(data))
