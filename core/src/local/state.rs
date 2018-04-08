@@ -8,7 +8,7 @@ use local::single_state::SingleState;
 
 use bincode;
 use rand::{self, Rng};
-use rocksdb::{self, DBCompressionType, MemtableFactory, SliceTransform, DB};
+use rocksdb::{self, WriteBatch, DB};
 
 pub trait State: SizeOf + Send {
     /// Add an index keyed by the given columns and replayed to by the given partial tags.
@@ -85,18 +85,29 @@ impl SizeOf for PersistentState {
 
 impl State for PersistentState {
     fn process_records(&mut self, records: &mut Records, partial_tag: Option<Tag>) {
+        let mut batch = WriteBatch::default();
         assert!(partial_tag.is_none(), "PersistentState can't be partial");
+
+        // TODO(ekmartin): .remove won't work for inserts in the same batch, since it needs to seek
+        // for the values it's deleting before doing so, and values we're inserting in this batch
+        // only become available _after_ we've written it.
+        //
+        // Can solve this by going through and removing unnecessary records, but should make sure
+        // that's not being done somewhere else already, prior to this.
         for r in records.iter() {
             match *r {
                 Record::Positive(ref r) => {
-                    self.insert(r.clone());
+                    self.insert(&mut batch, r.clone());
                 }
                 Record::Negative(ref r) => {
-                    self.remove(r);
+                    self.remove(&mut batch, r);
                 }
                 Record::BaseOperation(..) => unreachable!(),
             }
         }
+
+        // Sync the writes to RocksDB's WAL:
+        self.db.as_ref().unwrap().write(batch).unwrap();
     }
 
     fn lookup(&self, columns: &[usize], key: &KeyType) -> LookupResult {
@@ -156,9 +167,12 @@ impl State for PersistentState {
             // We wouldn't have to clear everything here, could just retrieve all the primary key
             // rows and then insert them with the new index:
             self.clear();
+            let mut batch = WriteBatch::default();
             for row in rows {
-                self.insert(row);
+                self.insert(&mut batch, row);
             }
+
+            self.db.as_ref().unwrap().write(batch).unwrap();
         }
     }
 
@@ -232,9 +246,9 @@ impl State for PersistentState {
 impl PersistentState {
     pub fn new(name: String, threads: i32, durability_mode: DurabilityMode) -> Self {
         let mut opts = rocksdb::Options::default();
-        opts.set_compression_type(DBCompressionType::Lz4);
+        opts.set_compression_type(rocksdb::DBCompressionType::Lz4);
         opts.create_if_missing(true);
-        let transform = SliceTransform::create("key", Self::transform_fn, None);
+        let transform = rocksdb::SliceTransform::create("key", Self::transform_fn, None);
         opts.set_prefix_extractor(transform);
 
         // Assigns the number of threads for RocksDB's low priority background pool:
@@ -242,7 +256,7 @@ impl PersistentState {
 
         // Use a hash linked list since we're doing prefix seeks.
         opts.set_allow_concurrent_memtable_write(false);
-        opts.set_memtable_factory(MemtableFactory::HashLinkList {
+        opts.set_memtable_factory(rocksdb::MemtableFactory::HashLinkList {
             bucket_count: 1_000_000,
         });
 
@@ -347,7 +361,7 @@ impl PersistentState {
 
     // Puts by primary key first, then retrieves the existing value for each index and appends the
     // newly created primary key value.
-    fn insert(&mut self, r: Vec<DataType>) {
+    fn insert(&mut self, batch: &mut WriteBatch, r: Vec<DataType>) {
         let (pk_seq, pk) = {
             let pk_index = &mut self.indices[0];
             pk_index.seq += 1;
@@ -355,15 +369,10 @@ impl PersistentState {
             (pk_index.seq, pk)
         };
 
-        let db = self.db.as_ref().unwrap();
-        let mut write_opts = rocksdb::WriteOptions::default();
-        write_opts.set_sync(false);
-        write_opts.disable_wal(true);
-
         // First insert the actual value for our primary index:
         let serialized_pk = Self::serialize_key(0, &pk, pk_seq);
         let pk_value = bincode::serialize(&r).unwrap();
-        db.put_opt(&serialized_pk, &pk_value, &write_opts).unwrap();
+        batch.put(&serialized_pk, &pk_value).unwrap();
 
         // Then insert pointers for all the secondary indices. Note that we're not including the
         // KeyIndex or KeySeq here, since we only need the actual value to do a lookup:
@@ -374,18 +383,17 @@ impl PersistentState {
             let key = index.columns.iter().map(|i| &r[*i]).collect::<Vec<_>>();
             // Add 1 to i since we're slicing indices by 1..:
             let serialized_key = Self::serialize_key((i + 1) as u64, &key, index.seq);
-            db.put_opt(&serialized_key, &serialized_pk_only, &write_opts)
-                .unwrap();
+            batch.put(&serialized_key, &serialized_pk_only).unwrap();
         }
     }
 
-    fn remove(&mut self, r: &[DataType]) {
+    fn remove(&self, batch: &mut WriteBatch, r: &[DataType]) {
         let db = self.db.as_ref().unwrap();
         for (i, index) in self.indices.iter().enumerate() {
             let index_row = index.columns.iter().map(|i| &r[*i]).collect::<Vec<_>>();
             let serialized_key = Self::serialize_key(i as u64, &index_row, 0u64);
             for (key, _value) in db.prefix_iterator(&serialized_key) {
-                db.delete(&key).unwrap();
+                batch.delete(&key).unwrap();
             }
         }
     }
@@ -745,13 +753,9 @@ mod tests {
         let first: Vec<DataType> = vec![10.into(), "Cat".into()];
         let second: Vec<DataType> = vec![20.into(), "Bob".into()];
         state.add_key(columns, None);
+        state.process_records(&mut vec![first.clone(), second.clone()].into(), None);
         state.process_records(
-            &mut vec![
-                (first.clone(), true),
-                (second.clone(), true),
-                (first.clone(), false),
-                (first.clone(), false),
-            ].into(),
+            &mut vec![(first.clone(), false), (first.clone(), false)].into(),
             None,
         );
 
@@ -852,7 +856,8 @@ mod tests {
         ].into();
 
         state.add_key(&[0], None);
-        state.process_records(&mut records, None);
+        state.process_records(&mut Vec::from(&records[..3]).into(), None);
+        state.process_records(&mut records[3].clone().into(), None);
 
         // Make sure the first record has been deleted:
         match state.lookup(&[0], &KeyType::Single(&records[0][0])) {
