@@ -952,7 +952,6 @@ impl Domain {
                             .unwrap();
                     }
                     Packet::StateSizeProbe { node } => {
-                        use core::data::SizeOf;
                         let row_count =
                             self.state.get(&node).map(|state| state.rows()).unwrap_or(0);
                         let mem_size = self.state
@@ -968,7 +967,7 @@ impl Domain {
                         match state {
                             InitialState::PartialLocal(index) => {
                                 if !self.state.contains_key(&node) {
-                                    self.state.insert(node, State::default());
+                                    self.state.insert(node, box MemoryState::default());
                                 }
                                 let state = self.state.get_mut(&node).unwrap();
                                 for (key, tags) in index {
@@ -980,7 +979,7 @@ impl Domain {
                             }
                             InitialState::IndexedLocal(index) => {
                                 if !self.state.contains_key(&node) {
-                                    self.state.insert(node, State::default());
+                                    self.state.insert(node, box MemoryState::default());
                                 }
                                 let state = self.state.get_mut(&node).unwrap();
                                 for idx in index {
@@ -1302,7 +1301,7 @@ impl Domain {
                         assert_eq!(self.mode, DomainMode::Forwarding);
 
                         if !index.is_empty() {
-                            let mut s = {
+                            let mut s: Box<State> = {
                                 let n = self.nodes[&node].borrow();
                                 let params = &self.persistence_parameters;
                                 if n.is_internal() && n.get_base().is_some()
@@ -1315,13 +1314,13 @@ impl Domain {
                                         self.shard.unwrap_or(0),
                                     );
 
-                                    State::base(
+                                    box PersistentState::new(
                                         base_name,
                                         params.persistence_threads,
                                         params.mode.clone(),
                                     )
                                 } else {
-                                    State::default()
+                                    box MemoryState::default()
                                 }
                             };
                             for idx in index {
@@ -1365,8 +1364,6 @@ impl Domain {
                         let node_stats = self.nodes
                             .values()
                             .filter_map(|nd| {
-                                use core::data::SizeOf;
-
                                 let ref n = *nd.borrow();
                                 let local_index: LocalNodeIndex = *n.local_addr();
                                 let node_index: NodeIndex = n.global_addr();
@@ -1408,8 +1405,6 @@ impl Domain {
                         let total: u64 = self.nodes
                             .values()
                             .map(|nd| {
-                                use core::data::SizeOf;
-
                                 let ref n = *nd.borrow();
                                 let local_index: LocalNodeIndex = *n.local_addr();
 
@@ -2529,8 +2524,6 @@ impl Domain {
                     self.nodes
                         .values()
                         .filter_map(|nd| {
-                            use core::data::SizeOf;
-
                             let ref n = *nd.borrow();
                             let local_index: LocalNodeIndex = *n.local_addr();
 
@@ -2560,8 +2553,6 @@ impl Domain {
                 if let Some((node, num_bytes)) = node {
                     let mut freed = 0u64;
                     while freed < num_bytes as u64 {
-                        use core::data::SizeOf;
-
                         if self.nodes[&node].borrow().is_reader() {
                             // we can only evict one key a time here because the freed memory
                             // calculation is based on the key that *will* be evicted. We may count

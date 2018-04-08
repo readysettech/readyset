@@ -286,7 +286,7 @@ pub mod test {
                 .node_weight_mut(global)
                 .unwrap()
                 .on_commit(&remap);
-            self.states.insert(local, State::default());
+            self.states.insert(local, box MemoryState::default());
             self.remap.insert(global, ip);
             ip
         }
@@ -355,7 +355,7 @@ pub mod test {
             let global = self.graph.add_node(Node::new(name, fields, i, false));
             let local = unsafe { LocalNodeIndex::make(self.remap.len() as u32) };
             if materialized {
-                self.states.insert(local, State::default());
+                self.states.insert(local, box MemoryState::default());
             }
             for parent in parents {
                 self.graph.add_edge(parent, global, ());

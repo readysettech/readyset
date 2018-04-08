@@ -24,11 +24,11 @@ pub mod map;
 
 pub use addressing::{IndexPair, LocalNodeIndex};
 pub use data::{BaseOperation, DataType, Datas, Modification, Operation, Record, Records};
-pub use local::{KeyType, LookupResult, Row, State, Tag};
+pub use local::{KeyType, LookupResult, MemoryState, PersistentState, Row, State, Tag};
 pub use map::Map;
 pub use petgraph::graph::NodeIndex;
 
-pub type StateMap = map::Map<State>;
+pub type StateMap = map::Map<Box<State>>;
 
 /// Indicates to what degree updates should be persisted.
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]

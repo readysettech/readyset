@@ -8,125 +8,42 @@ use local::single_state::SingleState;
 
 use bincode;
 use rand::{self, Rng};
-use rocksdb::{self, MemtableFactory, SliceTransform, DB, DBCompressionType};
+use rocksdb::{self, DBCompressionType, MemtableFactory, SliceTransform, DB};
 
-pub enum State {
-    InMemory(MemoryState),
-    Persistent(PersistentState),
-}
-
-impl State {
-    pub fn default() -> Self {
-        State::InMemory(MemoryState::default())
-    }
-
-    pub fn base(name: String, threads: i32, durability_mode: DurabilityMode) -> Self {
-        let persistent = PersistentState::initialize(name, threads, durability_mode);
-        State::Persistent(persistent)
-    }
-
+pub trait State: SizeOf + Send {
     /// Add an index keyed by the given columns and replayed to by the given partial tags.
-    pub fn add_key(&mut self, columns: &[usize], partial: Option<Vec<Tag>>) {
-        match *self {
-            State::InMemory(ref mut s) => s.add_key(columns, partial),
-            State::Persistent(ref mut s) => s.add_key(columns, partial),
-        }
-    }
+    fn add_key(&mut self, columns: &[usize], partial: Option<Vec<Tag>>);
 
-    pub fn is_useful(&self) -> bool {
-        match *self {
-            State::InMemory(ref s) => s.is_useful(),
-            State::Persistent(ref s) => s.indices.len() > 0,
-        }
-    }
+    /// Returns whether this state is currently keyed on anything. If not, then it cannot store any
+    /// infromation and is thus "not useful".
+    fn is_useful(&self) -> bool;
 
-    pub fn is_partial(&self) -> bool {
-        match *self {
-            State::InMemory(ref s) => s.is_partial(),
-            // PersistentStates can't be partial:
-            State::Persistent(..) => false,
-        }
-    }
+    fn is_partial(&self) -> bool;
 
-    pub fn process_records(&mut self, records: &mut Records, partial_tag: Option<Tag>) {
-        if records.len() == 0 {
-            return;
-        }
+    fn process_records(&mut self, records: &mut Records, partial_tag: Option<Tag>);
 
-        match *self {
-            State::InMemory(ref mut s) => s.process_records(records, partial_tag),
-            State::Persistent(ref mut s) => {
-                assert!(partial_tag.is_none(), "Bases can't be partial");
-                s.process_records(records)
-            }
-        }
-    }
+    fn mark_hole(&mut self, key: &[DataType], tag: &Tag);
 
-    pub fn mark_hole(&mut self, key: &[DataType], tag: &Tag) {
-        match *self {
-            State::InMemory(ref mut s) => s.mark_hole(key, tag),
-            // PersistentStates can't be partial:
-            _ => unreachable!(),
-        }
-    }
+    fn mark_filled(&mut self, key: Vec<DataType>, tag: &Tag);
 
-    pub fn mark_filled(&mut self, key: Vec<DataType>, tag: &Tag) {
-        match *self {
-            State::InMemory(ref mut s) => s.mark_filled(key, tag),
-            // PersistentStates can't be partial:
-            _ => unreachable!(),
-        }
-    }
+    fn lookup<'a>(&'a self, columns: &[usize], key: &KeyType) -> LookupResult<'a>;
 
-    pub fn lookup<'a>(&'a self, columns: &[usize], key: &KeyType) -> LookupResult<'a> {
-        match *self {
-            State::InMemory(ref s) => s.lookup(columns, key),
-            State::Persistent(ref s) => s.lookup(columns, key),
-        }
-    }
+    fn rows(&self) -> usize;
 
-    pub fn rows(&self) -> usize {
-        match *self {
-            State::InMemory(ref s) => s.rows(),
-            State::Persistent(ref s) => s.rows(),
-        }
-    }
+    fn keys(&self) -> Vec<Vec<usize>>;
 
-    pub fn keys(&self) -> Vec<Vec<usize>> {
-        match *self {
-            State::InMemory(ref s) => s.keys(),
-            _ => unimplemented!(),
-        }
-    }
+    /// Return a copy of all records. Panics if the state is only partially materialized.
+    fn cloned_records(&self) -> Vec<Vec<DataType>>;
 
-    pub fn cloned_records(&self) -> Vec<Vec<DataType>> {
-        match *self {
-            State::InMemory(ref s) => s.cloned_records(),
-            State::Persistent(ref s) => s.cloned_records(),
-        }
-    }
+    fn clear(&mut self);
 
-    pub fn clear(&mut self) {
-        match *self {
-            State::InMemory(ref mut s) => s.clear(),
-            State::Persistent(ref mut s) => s.clear(),
-        }
-    }
+    /// Evict `count` randomly selected keys, returning key colunms of the index chosen to evict
+    /// from along with the keys evicted and the number of bytes evicted.
+    fn evict_random_keys(&mut self, count: usize) -> (&[usize], Vec<Vec<DataType>>, u64);
 
-    pub fn evict_random_keys(&mut self, count: usize) -> (&[usize], Vec<Vec<DataType>>, u64) {
-        match *self {
-            State::InMemory(ref mut s) => s.evict_random_keys(count),
-            _ => unreachable!(),
-        }
-    }
-
-    /// Evict the listed keys from the materialization targeted by `tag`.
-    pub fn evict_keys(&mut self, tag: &Tag, keys: &[Vec<DataType>]) -> (&[usize], u64) {
-        match *self {
-            State::InMemory(ref mut s) => s.evict_keys(tag, keys),
-            _ => unreachable!(),
-        }
-    }
+    /// Evict the listed keys from the materialization targeted by `tag`, returning the key columns
+    /// of the index that was evicted from and the number of bytes evicted.
+    fn evict_keys(&mut self, tag: &Tag, keys: &[Vec<DataType>]) -> (&[usize], u64);
 }
 
 // Index in PersistentState.indices
@@ -154,8 +71,166 @@ pub struct PersistentState {
     indices: Vec<PersistentIndex>,
 }
 
+impl SizeOf for PersistentState {
+    fn size_of(&self) -> u64 {
+        use std::mem::size_of;
+
+        size_of::<Self>() as u64
+    }
+
+    fn deep_size_of(&self) -> u64 {
+        self.size_of()
+    }
+}
+
+impl State for PersistentState {
+    fn process_records(&mut self, records: &mut Records, partial_tag: Option<Tag>) {
+        assert!(partial_tag.is_none(), "PersistentState can't be partial");
+        for r in records.iter() {
+            match *r {
+                Record::Positive(ref r) => {
+                    self.insert(r.clone());
+                }
+                Record::Negative(ref r) => {
+                    self.remove(r);
+                }
+                Record::BaseOperation(..) => unreachable!(),
+            }
+        }
+    }
+
+    fn lookup(&self, columns: &[usize], key: &KeyType) -> LookupResult {
+        let values = match *key {
+            KeyType::Single(a) => vec![a],
+            KeyType::Double(ref r) => vec![&r.0, &r.1],
+            KeyType::Tri(ref r) => vec![&r.0, &r.1, &r.2],
+            KeyType::Quad(ref r) => vec![&r.0, &r.1, &r.2, &r.3],
+            KeyType::Quin(ref r) => vec![&r.0, &r.1, &r.2, &r.3, &r.4],
+            KeyType::Sex(ref r) => vec![&r.0, &r.1, &r.2, &r.3, &r.4, &r.5],
+        };
+
+        let index = self.indices
+            .iter()
+            .position(|index| &index.columns[..] == columns)
+            .expect("could not find index for columns");
+        let prefix = Self::serialize_prefix(index as u64, &values);
+        let values = self.db
+            .as_ref()
+            .unwrap()
+            .prefix_iterator(&prefix)
+            .map(|(_key, value)| bincode::deserialize::<Vec<DataType>>(&*value).unwrap());
+
+        let data = if index > 0 {
+            // For non-primary indices we need to first retrieve the primary index key
+            // through our secondary indices, and then call `.lookup` again on that.
+            values
+                .flat_map(|value| {
+                    let row_key = KeyType::from(&value[..]);
+                    match self.lookup(&self.indices[0].columns, &row_key) {
+                        LookupResult::Some(Cow::Owned(rs)) => rs,
+                        _ => unreachable!(),
+                    }
+                })
+                .collect()
+        } else {
+            values.map(|row| Row(Rc::new(row))).collect()
+        };
+
+        LookupResult::Some(Cow::Owned(data))
+    }
+
+    fn add_key(&mut self, columns: &[usize], partial: Option<Vec<Tag>>) {
+        assert!(partial.is_none(), "Bases can't be partial");
+        let existing = self.indices
+            .iter()
+            .any(|index| &index.columns[..] == columns);
+        if !existing {
+            self.indices.push(PersistentIndex {
+                columns: Vec::from(columns),
+                seq: 0,
+            });
+        }
+
+        if self.rows() > 0 {
+            let rows = self.cloned_records();
+            // We wouldn't have to clear everything here, could just retrieve all the primary key
+            // rows and then insert them with the new index:
+            self.clear();
+            for row in rows {
+                self.insert(row);
+            }
+        }
+    }
+
+    fn keys(&self) -> Vec<Vec<usize>> {
+        self.indices
+            .iter()
+            .map(|index| index.columns.clone())
+            .collect()
+    }
+
+    fn cloned_records(&self) -> Vec<Vec<DataType>> {
+        self.db
+            .as_ref()
+            .unwrap()
+            .full_iterator(rocksdb::IteratorMode::Start)
+            .filter(|&(ref key, _)| {
+                // Filter out non-pk indices:
+                let i: KeyIndex = bincode::deserialize(&key).unwrap();
+                i == 0
+            })
+            .map(|(_, ref value)| bincode::deserialize(&value).unwrap())
+            .collect()
+    }
+
+    fn rows(&self) -> usize {
+        self.db
+            .as_ref()
+            .unwrap()
+            .full_iterator(rocksdb::IteratorMode::Start)
+            .filter(|&(ref key, _)| {
+                // Filter out non-pk indices:
+                let i: KeyIndex = bincode::deserialize(&key).unwrap();
+                i == 0
+            })
+            .count()
+    }
+
+    fn clear(&mut self) {
+        // Would potentially be faster to just drop self.db and call DB::Destroy:
+        let db = self.db.as_ref().unwrap();
+        for (key, _) in db.full_iterator(rocksdb::IteratorMode::Start) {
+            db.delete(&key).unwrap();
+        }
+    }
+
+    fn is_useful(&self) -> bool {
+        self.indices.len() > 0
+    }
+
+    fn is_partial(&self) -> bool {
+        false
+    }
+
+    fn mark_filled(&mut self, _: Vec<DataType>, _: &Tag) {
+        unreachable!("PersistentBase can't be partial")
+    }
+
+    fn mark_hole(&mut self, _: &[DataType], _: &Tag) {
+        unreachable!("PersistentBase can't be partial")
+    }
+
+    fn evict_random_keys(&mut self, _: usize) -> (&[usize], Vec<Vec<DataType>>, u64) {
+        unreachable!("can't evict keys from PersistentBase")
+    }
+
+    fn evict_keys(&mut self, _: &Tag, _: &[Vec<DataType>]) -> (&[usize], u64) {
+        unreachable!("can't evict keys from PersistentBase")
+    }
+}
+
 impl PersistentState {
-    fn initialize(name: String, threads: i32, durability_mode: DurabilityMode) -> Self {
+    pub fn new(name: String, threads: i32, durability_mode: DurabilityMode) -> Self {
         let mut opts = rocksdb::Options::default();
         opts.set_compression_type(DBCompressionType::Lz4);
         opts.create_if_missing(true);
@@ -314,118 +389,6 @@ impl PersistentState {
             }
         }
     }
-
-    fn add_key(&mut self, columns: &[usize], partial: Option<Vec<Tag>>) {
-        assert!(partial.is_none(), "Bases can't be partial");
-        let existing = self.indices
-            .iter()
-            .any(|index| &index.columns[..] == columns);
-        if !existing {
-            self.indices.push(PersistentIndex {
-                columns: Vec::from(columns),
-                seq: 0,
-            });
-        }
-
-        if self.rows() > 0 {
-            let rows = self.cloned_records();
-            // We wouldn't have to clear everything here, could just retrieve all the primary key
-            // rows and then insert them with the new index:
-            self.clear();
-            for row in rows {
-                self.insert(row);
-            }
-        }
-    }
-
-    fn process_records(&mut self, records: &Records) {
-        for r in records.iter() {
-            match *r {
-                Record::Positive(ref r) => {
-                    self.insert(r.clone());
-                }
-                Record::Negative(ref r) => {
-                    self.remove(r);
-                }
-                Record::BaseOperation(..) => unreachable!(),
-            }
-        }
-    }
-
-    fn lookup(&self, columns: &[usize], key: &KeyType) -> LookupResult {
-        let values = match *key {
-            KeyType::Single(a) => vec![a],
-            KeyType::Double(ref r) => vec![&r.0, &r.1],
-            KeyType::Tri(ref r) => vec![&r.0, &r.1, &r.2],
-            KeyType::Quad(ref r) => vec![&r.0, &r.1, &r.2, &r.3],
-            KeyType::Quin(ref r) => vec![&r.0, &r.1, &r.2, &r.3, &r.4],
-            KeyType::Sex(ref r) => vec![&r.0, &r.1, &r.2, &r.3, &r.4, &r.5],
-        };
-
-        let index = self.indices
-            .iter()
-            .position(|index| &index.columns[..] == columns)
-            .expect("could not find index for columns");
-        let prefix = Self::serialize_prefix(index as u64, &values);
-        let values = self.db
-            .as_ref()
-            .unwrap()
-            .prefix_iterator(&prefix)
-            .map(|(_key, value)| bincode::deserialize::<Vec<DataType>>(&*value).unwrap());
-
-        let data = if index > 0 {
-            // For non-primary indices we need to first retrieve the primary index key
-            // through our secondary indices, and then call `.lookup` again on that.
-            values
-                .flat_map(|value| {
-                    let row_key = KeyType::from(&value[..]);
-                    match self.lookup(&self.indices[0].columns, &row_key) {
-                        LookupResult::Some(Cow::Owned(rs)) => rs,
-                        _ => unreachable!(),
-                    }
-                })
-                .collect()
-        } else {
-            values.map(|row| Row(Rc::new(row))).collect()
-        };
-
-        LookupResult::Some(Cow::Owned(data))
-    }
-
-    fn cloned_records(&self) -> Vec<Vec<DataType>> {
-        self.db
-            .as_ref()
-            .unwrap()
-            .full_iterator(rocksdb::IteratorMode::Start)
-            .filter(|&(ref key, _)| {
-                // Filter out non-pk indices:
-                let i: KeyIndex = bincode::deserialize(&key).unwrap();
-                i == 0
-            })
-            .map(|(_, ref value)| bincode::deserialize(&value).unwrap())
-            .collect()
-    }
-
-    fn rows(&self) -> usize {
-        self.db
-            .as_ref()
-            .unwrap()
-            .full_iterator(rocksdb::IteratorMode::Start)
-            .filter(|&(ref key, _)| {
-                // Filter out non-pk indices:
-                let i: KeyIndex = bincode::deserialize(&key).unwrap();
-                i == 0
-            })
-            .count()
-    }
-
-    fn clear(&self) {
-        // Would potentially be faster to just drop self.db and call DB::Destroy:
-        let db = self.db.as_ref().unwrap();
-        for (key, _) in db.full_iterator(rocksdb::IteratorMode::Start) {
-            db.delete(&key).unwrap();
-        }
-    }
 }
 
 impl Drop for PersistentState {
@@ -444,13 +407,19 @@ pub struct MemoryState {
     mem_size: u64,
 }
 
-impl MemoryState {
-    /// Returns the index in `self.state` of the index keyed on `cols`, or None if no such index
-    /// exists.
-    fn state_for(&self, cols: &[usize]) -> Option<usize> {
-        self.state.iter().position(|s| s.key() == cols)
+impl SizeOf for MemoryState {
+    fn size_of(&self) -> u64 {
+        use std::mem::size_of;
+
+        size_of::<Self>() as u64
     }
 
+    fn deep_size_of(&self) -> u64 {
+        self.mem_size
+    }
+}
+
+impl State for MemoryState {
     fn add_key(&mut self, columns: &[usize], partial: Option<Vec<Tag>>) {
         let (i, exists) = if let Some(i) = self.state_for(columns) {
             // already keyed by this key; just adding tags
@@ -488,13 +457,6 @@ impl MemoryState {
         }
     }
 
-    /// Returns a Vec of all keys that currently exist on this materialization.
-    fn keys(&self) -> Vec<Vec<usize>> {
-        self.state.iter().map(|s| s.key().to_vec()).collect()
-    }
-
-    /// Returns whether this state is currently keyed on anything. If not, then it cannot store any
-    /// infromation and is thus "not useful".
     fn is_useful(&self) -> bool {
         !self.state.is_empty()
     }
@@ -543,6 +505,72 @@ impl MemoryState {
         }
     }
 
+    fn rows(&self) -> usize {
+        self.state.iter().map(|s| s.rows()).sum()
+    }
+
+    fn mark_filled(&mut self, key: Vec<DataType>, tag: &Tag) {
+        debug_assert!(!self.state.is_empty(), "filling uninitialized index");
+        let index = self.by_tag[tag];
+        self.state[index].mark_filled(key);
+    }
+
+    fn mark_hole(&mut self, key: &[DataType], tag: &Tag) {
+        debug_assert!(!self.state.is_empty(), "filling uninitialized index");
+        let index = self.by_tag[tag];
+        self.state[index].mark_hole(key);
+    }
+
+    fn lookup<'a>(&'a self, columns: &[usize], key: &KeyType) -> LookupResult<'a> {
+        debug_assert!(!self.state.is_empty(), "lookup on uninitialized index");
+        let index = self.state_for(columns)
+            .expect("lookup on non-indexed column set");
+        self.state[index].lookup(key)
+    }
+
+    fn keys(&self) -> Vec<Vec<usize>> {
+        self.state.iter().map(|s| s.key().to_vec()).collect()
+    }
+
+    fn cloned_records(&self) -> Vec<Vec<DataType>> {
+        fn fix<'a>(rs: &'a Vec<Row>) -> impl Iterator<Item = Vec<DataType>> + 'a {
+            rs.iter().map(|r| Vec::clone(&**r))
+        }
+
+        assert!(!self.state[0].partial());
+        self.state[0].values().flat_map(fix).collect()
+    }
+
+    fn clear(&mut self) {
+        for s in &mut self.state {
+            s.clear();
+        }
+        self.mem_size = 0;
+    }
+
+    fn evict_random_keys(&mut self, count: usize) -> (&[usize], Vec<Vec<DataType>>, u64) {
+        let mut rng = rand::thread_rng();
+        let index = rng.gen_range(0, self.state.len());
+        let (bytes_freed, keys) = self.state[index].evict_random_keys(count, &mut rng);
+        self.mem_size = self.mem_size.saturating_sub(bytes_freed);
+        (self.state[index].key(), keys, bytes_freed)
+    }
+
+    fn evict_keys(&mut self, tag: &Tag, keys: &[Vec<DataType>]) -> (&[usize], u64) {
+        let index = self.by_tag[tag];
+        let bytes = self.state[index].evict_keys(keys);
+        self.mem_size = self.mem_size.saturating_sub(bytes);
+        (self.state[index].key(), bytes)
+    }
+}
+
+impl MemoryState {
+    /// Returns the index in `self.state` of the index keyed on `cols`, or None if no such index
+    /// exists.
+    fn state_for(&self, cols: &[usize]) -> Option<usize> {
+        self.state.iter().position(|s| s.key() == cols)
+    }
+
     fn insert(&mut self, r: Vec<DataType>, partial_tag: Option<Tag>) -> bool {
         let r = Rc::new(r);
 
@@ -582,80 +610,6 @@ impl MemoryState {
 
         hit
     }
-
-    fn rows(&self) -> usize {
-        self.state.iter().map(|s| s.rows()).sum()
-    }
-
-    fn mark_filled(&mut self, key: Vec<DataType>, tag: &Tag) {
-        debug_assert!(!self.state.is_empty(), "filling uninitialized index");
-        let index = self.by_tag[tag];
-        self.state[index].mark_filled(key);
-    }
-
-    fn mark_hole(&mut self, key: &[DataType], tag: &Tag) {
-        debug_assert!(!self.state.is_empty(), "filling uninitialized index");
-        let index = self.by_tag[tag];
-        self.state[index].mark_hole(key);
-    }
-
-    fn lookup<'a>(&'a self, columns: &[usize], key: &KeyType) -> LookupResult<'a> {
-        debug_assert!(!self.state.is_empty(), "lookup on uninitialized index");
-        let index = self.state_for(columns)
-            .expect("lookup on non-indexed column set");
-        self.state[index].lookup(key)
-    }
-
-    /// Return a copy of all records. Panics if the state is only partially materialized.
-    fn cloned_records(&self) -> Vec<Vec<DataType>> {
-        fn fix<'a>(rs: &'a Vec<Row>) -> impl Iterator<Item = Vec<DataType>> + 'a {
-            rs.iter().map(|r| Vec::clone(&**r))
-        }
-
-        assert!(!self.state[0].partial());
-        self.state[0].values().flat_map(fix).collect()
-    }
-
-    fn clear(&mut self) {
-        for s in &mut self.state {
-            s.clear();
-        }
-        self.mem_size = 0;
-    }
-
-    /// Evict `count` randomly selected keys, returning key colunms of the index chosen to evict
-    /// from along with the keys evicted and the number of bytes evicted.
-    fn evict_random_keys(&mut self, count: usize) -> (&[usize], Vec<Vec<DataType>>, u64) {
-        let mut rng = rand::thread_rng();
-        let index = rng.gen_range(0, self.state.len());
-        let (bytes_freed, keys) = self.state[index].evict_random_keys(count, &mut rng);
-        self.mem_size = self.mem_size.saturating_sub(bytes_freed);
-        (self.state[index].key(), keys, bytes_freed)
-    }
-
-    /// Evict the listed keys from the materialization targeted by `tag`, returning the key columns
-    /// of the index that was evicted from and the number of bytes evicted.
-    fn evict_keys(&mut self, tag: &Tag, keys: &[Vec<DataType>]) -> (&[usize], u64) {
-        let index = self.by_tag[tag];
-        let bytes = self.state[index].evict_keys(keys);
-        self.mem_size = self.mem_size.saturating_sub(bytes);
-        (self.state[index].key(), bytes)
-    }
-}
-
-impl SizeOf for State {
-    fn size_of(&self) -> u64 {
-        use std::mem::size_of;
-
-        size_of::<Self>() as u64
-    }
-
-    fn deep_size_of(&self) -> u64 {
-        match *self {
-            State::InMemory(ref s) => s.mem_size,
-            State::Persistent(..) => self.size_of(),
-        }
-    }
 }
 
 #[cfg(test)]
@@ -664,12 +618,12 @@ mod tests {
     use std::path::Path;
     use std::time::{SystemTime, UNIX_EPOCH};
 
-    fn insert(state: &mut State, row: Vec<DataType>) {
+    fn insert<S: State>(state: &mut S, row: Vec<DataType>) {
         let record: Record = row.into();
         state.process_records(&mut record.into(), None);
     }
 
-    fn setup_persistent(prefix: &str) -> State {
+    fn setup_persistent(prefix: &str) -> PersistentState {
         let current_time = SystemTime::now().duration_since(UNIX_EPOCH).unwrap();
         let name = format!(
             "{}.{}.{}",
@@ -678,7 +632,7 @@ mod tests {
             current_time.subsec_nanos()
         );
 
-        State::base(name, 1, DurabilityMode::MemoryOnly)
+        PersistentState::new(name, 1, DurabilityMode::MemoryOnly)
     }
 
     #[test]
@@ -868,7 +822,7 @@ mod tests {
         let db_name = format!("{}.db", name);
         let path = Path::new(&db_name);
         {
-            let _state = State::base(String::from(name), 1, DurabilityMode::DeleteOnExit);
+            let _state = PersistentState::new(String::from(name), 1, DurabilityMode::DeleteOnExit);
             assert!(path.exists());
         }
 
@@ -889,7 +843,7 @@ mod tests {
         };
     }
 
-    fn test_process_records(mut state: State) {
+    fn test_process_records<S: State>(state: &mut S) {
         let mut records: Records = vec![
             (vec![1.into(), "A".into()], true),
             (vec![2.into(), "B".into()], true),
@@ -918,8 +872,8 @@ mod tests {
 
     #[test]
     fn persistent_state_process_records() {
-        let state = setup_persistent("persistent_state_process_records");
-        test_process_records(state);
+        let mut state = setup_persistent("persistent_state_process_records");
+        test_process_records(&mut state);
     }
 
     #[test]
@@ -958,13 +912,13 @@ mod tests {
 
     #[test]
     fn memory_state_process_records() {
-        let state = State::default();
-        test_process_records(state);
+        let mut state = MemoryState::default();
+        test_process_records(&mut state);
     }
 
     #[test]
     fn memory_state_old_records_new_index() {
-        let mut state = State::default();
+        let mut state = MemoryState::default();
         let row: Vec<DataType> = vec![10.into(), "Cat".into()];
         state.add_key(&[0], None);
         insert(&mut state, row.clone());

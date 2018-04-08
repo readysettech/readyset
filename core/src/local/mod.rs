@@ -7,7 +7,7 @@ mod state;
 mod keyed_state;
 
 pub use data::{DataType, SizeOf};
-pub use self::state::{MemoryState, State};
+pub use self::state::{MemoryState, PersistentState, State};
 
 #[derive(Clone, Copy, Eq, PartialEq, Ord, PartialOrd, Hash, Debug, Serialize, Deserialize)]
 pub struct Tag(pub u32);

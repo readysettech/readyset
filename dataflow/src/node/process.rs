@@ -266,7 +266,7 @@ impl Node {
     }
 }
 
-pub fn materialize(rs: &mut Records, partial: Option<Tag>, state: Option<&mut State>) {
+pub fn materialize(rs: &mut Records, partial: Option<Tag>, state: Option<&mut Box<State>>) {
     // our output changed -- do we need to modify materialized state?
     if state.is_none() {
         // nope
