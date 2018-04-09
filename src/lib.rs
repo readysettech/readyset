@@ -315,6 +315,7 @@
 #![plugin(tarpc_plugins)]
 #![deny(unused_extern_crates)]
 #![feature(fnbox)]
+#![feature(conservative_impl_trait)]
 
 extern crate assert_infrequent;
 extern crate bincode;
