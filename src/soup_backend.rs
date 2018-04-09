@@ -354,10 +354,7 @@ impl SoupBackend {
                     _ => unreachable!(),
                 };
 
-                // NOTE: Soup doesn't support compound primary key reads yet,
-                // so we'll use only part of the key and filter out what we get later.
-                let keys = flattened.clone();
-                let lookup_results = match getter.multi_lookup(keys, true) {
+                let lookup_results = match getter.multi_lookup(flattened, true) {
                     Ok(r) => r,
                     Err(e) => {
                         error!(self.log, "update: {:?}", e);
@@ -383,17 +380,6 @@ impl SoupBackend {
                         result
                             .into_iter()
                             .filter_map(|row| {
-                                // NOTE: Since Soup doesn't support reads on compound primary keys
-                                // yet, we have to filter out rows where only part of the key
-                                // matches:
-                                if pkey.len() > 1
-                                    && key_indices
-                                        .iter()
-                                        .any(|key_i| row[*key_i] != flattened[i][*key_i])
-                                {
-                                    return None;
-                                }
-
                                 let new_row = row.clone()
                                     .into_iter()
                                     .enumerate()
