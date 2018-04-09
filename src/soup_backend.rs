@@ -203,6 +203,7 @@ impl SoupBackend {
                             .fetch_add(1, sync::atomic::Ordering::SeqCst);
                         let qname = format!("q_{}", qc);
                         // first do a migration to add the query if it doesn't exist already
+                        info!(self.log, "Adding ad-hoc query \"{}\" to Soup", q);
                         match self.soup.extend_recipe(format!("QUERY {}: {};", qname, q)) {
                             Ok(_) => {
                                 // and also in the global cache
@@ -324,6 +325,10 @@ impl SoupBackend {
                             };
 
                         if !cached {
+                            info!(
+                                self.log,
+                                "Adding ad-hoc query \"{}\" from update to Soup", select_q
+                            );
                             match self.soup
                                 .extend_recipe(format!("QUERY {}: {};", qname, select_q))
                             {
@@ -693,6 +698,10 @@ impl<W: io::Write> MysqlShim<W> for SoupBackend {
 
                                 if !cached {
                                     // add the query to Soup
+                                    info!(
+                                        self.log,
+                                        "Adding parameterized query \"{}\" to Soup", query
+                                    );
                                     match self.soup
                                         .extend_recipe(format!("QUERY {}: {};", qname, q))
                                     {
