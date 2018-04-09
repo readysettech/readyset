@@ -146,8 +146,8 @@ where
                         t.drop_exec(
                             "INSERT INTO `votes` \
                              (`user_id`, `story_id`, `comment_id`, `vote`) \
-                             VALUES (?, ?, ?, 1)",
-                            (user, story, comment),
+                             VALUES (?, ?, ?, ?)",
+                            (user, story, comment, 1),
                         )
                     })
                     .and_then(move |t| {
