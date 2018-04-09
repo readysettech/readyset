@@ -4,7 +4,8 @@ use std::cell;
 // core types
 pub use core::*;
 pub use ops::NodeOperator;
-pub use processing::{Ingredient, Miss, ProcessingResult, RawProcessingResult, ReplayContext};
+pub use processing::Ingredient;
+pub(crate) use processing::{Miss, ProcessingResult, RawProcessingResult, ReplayContext};
 
 // graph types
 pub use node::{MaterializationStatus, Node};

@@ -7,11 +7,11 @@ use prelude;
 // TODO: make a Key type that is an ArrayVec<DataType>
 
 #[derive(PartialEq, Eq, Debug)]
-pub struct Miss {
-    pub on: prelude::LocalNodeIndex,
-    pub lookup_cols: Vec<usize>,
-    pub replay_cols: Option<Vec<usize>>,
-    pub record: Vec<prelude::DataType>,
+pub(crate) struct Miss {
+    pub(crate) on: prelude::LocalNodeIndex,
+    pub(crate) lookup_cols: Vec<usize>,
+    pub(crate) replay_cols: Option<Vec<usize>>,
+    pub(crate) record: Vec<prelude::DataType>,
 }
 
 impl Miss {
@@ -43,8 +43,8 @@ impl Miss {
 }
 
 pub struct ProcessingResult {
-    pub results: prelude::Records,
-    pub misses: Vec<Miss>,
+    pub(crate) results: prelude::Records,
+    pub(crate) misses: Vec<Miss>,
 }
 
 pub enum RawProcessingResult {

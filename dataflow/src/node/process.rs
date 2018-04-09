@@ -4,7 +4,7 @@ use prelude::*;
 use std::collections::HashSet;
 
 impl Node {
-    pub fn process(
+    pub(crate) fn process(
         &mut self,
         m: &mut Option<Box<Packet>>,
         keyed_by: Option<usize>,
