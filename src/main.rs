@@ -78,6 +78,8 @@ fn main() {
     let auto_increments: Arc<Mutex<HashMap<String, u64>>> =
         Arc::new(Mutex::new(HashMap::default()));
 
+    let mut threads = Vec::new();
+    let mut i = 0;
     while let Ok((s, _)) = listener.accept() {
         let soup = SoupBackend::new(
             zk_addr,
@@ -88,8 +90,17 @@ fn main() {
             log.clone(),
         );
 
-        thread::spawn(move || {
-            MysqlIntermediary::run_on_tcp(soup, s).unwrap();
-        });
+        let builder = thread::Builder::new().name(format!("handler{}", i));
+        let jh = builder
+            .spawn(move || {
+                MysqlIntermediary::run_on_tcp(soup, s).unwrap();
+            })
+            .unwrap();
+        threads.push(jh);
+        i += 1;
+    }
+
+    for t in threads.drain(..) {
+        t.join().unwrap();
     }
 }
