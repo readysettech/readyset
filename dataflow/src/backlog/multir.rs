@@ -53,12 +53,12 @@ impl Handle {
                     ptr::copy_nonoverlapping(
                         &key[0] as *const DataType,
                         &mut stack_key.0 as *mut DataType,
-                        mem::size_of::<DataType>(),
+                        1,
                     );
                     ptr::copy_nonoverlapping(
                         &key[1] as *const DataType,
                         &mut stack_key.1 as *mut DataType,
-                        mem::size_of::<DataType>(),
+                        1,
                     );
                     let v = h.meta_get_and(&stack_key, then);
                     mem::forget(stack_key);
