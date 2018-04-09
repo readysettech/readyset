@@ -350,10 +350,6 @@ impl Domain {
         // when the replay eventually succeeds, we want to re-do the replay.
         let mut w = self.waiting.remove(&miss_in).unwrap_or_default();
 
-        assert_eq!(miss_columns.len(), 1);
-        assert_eq!(replay_key.len(), 1);
-        assert_eq!(miss_key.len(), 1);
-
         let mut redundant = false;
         let redo = (needed_for, replay_key.clone());
         match w.redos.entry((Vec::from(miss_columns), miss_key.clone())) {
@@ -382,7 +378,6 @@ impl Domain {
             return;
         }
 
-        assert_eq!(miss_columns.len(), 1);
         self.find_tags_and_replay(miss_key, miss_columns, miss_in, sends);
     }
 
