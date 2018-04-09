@@ -29,7 +29,8 @@ use std::sync::{Arc, Mutex};
 use std::sync::atomic::AtomicUsize;
 use std::thread;
 
-use soup_backend::SoupBackend;
+use soup_backend::{Cached, SoupBackend};
+use utils::QueryID;
 
 fn main() {
     use clap::{App, Arg};
@@ -77,6 +78,8 @@ fn main() {
         Arc::new(Mutex::new(HashMap::default()));
     let auto_increments: Arc<Mutex<HashMap<String, u64>>> =
         Arc::new(Mutex::new(HashMap::default()));
+    let query_cache: Arc<Mutex<HashMap<QueryID, Cached>>> =
+        Arc::new(Mutex::new(HashMap::default()));
 
     let mut threads = Vec::new();
     let mut i = 0;
@@ -86,6 +89,7 @@ fn main() {
             deployment,
             schemas.clone(),
             auto_increments.clone(),
+            query_cache.clone(),
             query_counter.clone(),
             log.clone(),
         );

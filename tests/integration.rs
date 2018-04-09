@@ -21,7 +21,7 @@ use msql_srv::MysqlIntermediary;
 use nom_sql::CreateTableStatement;
 use zookeeper::{WatchedEvent, ZooKeeper, ZooKeeperExt};
 
-use mysoupql::SoupBackend;
+use mysoupql::{Cached, QueryID, SoupBackend};
 
 // Appends a unique ID to deployment strings, to avoid collisions between tests.
 struct Deployment {
@@ -94,11 +94,14 @@ fn setup(deployment: &Deployment) -> mysql::Opts {
         Arc::new(Mutex::new(HashMap::default()));
     let auto_increments: Arc<Mutex<HashMap<String, u64>>> =
         Arc::new(Mutex::new(HashMap::default()));
+    let query_cache: Arc<Mutex<HashMap<QueryID, Cached>>> =
+        Arc::new(Mutex::new(HashMap::default()));
     let soup = SoupBackend::new(
         zk_addr,
         &deployment.name,
         schemas,
         auto_increments,
+        query_cache,
         query_counter,
         logger,
     );
