@@ -356,7 +356,7 @@ impl SoupBackend {
 
                 // NOTE: Soup doesn't support compound primary key reads yet,
                 // so we'll use only part of the key and filter out what we get later.
-                let keys = flattened.iter().map(|key| key[0].clone()).collect();
+                let keys = flattened.clone();
                 let lookup_results = match getter.multi_lookup(keys, true) {
                     Ok(r) => r,
                     Err(e) => {
@@ -592,8 +592,6 @@ impl SoupBackend {
             Some(k) => (k, false),
         };
 
-        assert_eq!(key.len(), 1); // no compound keys yet
-
         let write_column = |rw: &mut RowWriter<W>, c: DataType, cs: &msql_srv::Column| {
             let written = match c {
                 DataType::None => rw.write_col(None::<i32>),
@@ -620,7 +618,7 @@ impl SoupBackend {
             }
         };
 
-        match getter.lookup(&key[0], true) {
+        match getter.lookup(&key, true) {
             Ok(d) => {
                 let num_rows = d.len();
                 if num_rows > 0 {
