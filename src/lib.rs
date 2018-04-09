@@ -18,4 +18,5 @@ mod schema;
 mod soup_backend;
 mod utils;
 
-pub use soup_backend::SoupBackend;
+pub use soup_backend::{Cached, SoupBackend};
+pub use utils::QueryID;
