@@ -76,7 +76,7 @@ impl Ingredient for Rewrite {
         from: LocalNodeIndex,
         rs: Records,
         _: &mut Tracer,
-        replay_key_col: Option<usize>,
+        replay_key_cols: Option<&[usize]>,
         nodes: &DomainNodes,
         state: &StateMap,
     ) -> ProcessingResult {
@@ -105,7 +105,7 @@ impl Ingredient for Rewrite {
                         on: *self.signal,
                         lookup_idx: vec![0],
                         lookup_cols: vec![self.signal_key],
-                        replay_cols: replay_key_col.map(|col| vec![col]),
+                        replay_cols: replay_key_cols.map(Vec::from),
                         record: r.extract().0,
                     });
                     continue;
@@ -132,12 +132,12 @@ impl Ingredient for Rewrite {
                 if other_rows.is_none() {
                     // replays always happen from the `src` side,
                     // so replay_key_col must be None
-                    assert_eq!(replay_key_col, None);
+                    assert_eq!(replay_key_cols, None);
                     misses.push(Miss {
                         on: *self.src,
                         lookup_idx: vec![self.signal_key],
                         lookup_cols: vec![0],
-                        replay_cols: replay_key_col.map(|col| vec![col]),
+                        replay_cols: replay_key_cols.map(Vec::from),
                         record: r.extract().0,
                     });
                     continue;

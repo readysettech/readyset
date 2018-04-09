@@ -604,12 +604,13 @@ impl ControllerInner {
             .get("id")
             .expect("Universe context must have id")
             .clone();
+        let uid = &[uid];
         if context.get("group").is_none() {
             for g in groups {
                 let rgb: Option<RemoteGetterBuilder> = self.getter_builder(&g);
                 let mut getter = rgb.map(|rgb| rgb.build()).unwrap();
                 let my_groups: Vec<DataType> = getter
-                    .lookup(&uid, true)
+                    .lookup(uid, true)
                     .unwrap()
                     .iter()
                     .map(|v| v[1].clone())

@@ -386,7 +386,7 @@ impl Recipe {
                     controller_url: config.url.clone(),
                     group: group.name(),
                 };
-                let trigger = Trigger::new(qfp.query_leaf, group_creation, vec![1]);
+                let trigger = Trigger::new(qfp.query_leaf, group_creation, 1);
                 mig.add_ingredient(
                     &format!("{}-trigger", group.name()),
                     &["uid", "gid"],

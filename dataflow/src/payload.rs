@@ -37,7 +37,7 @@ impl fmt::Debug for Link {
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct ReplayPathSegment {
     pub node: LocalNodeIndex,
-    pub partial_key: Option<usize>,
+    pub partial_key: Option<Vec<usize>>,
 }
 
 #[derive(Clone, Serialize, Deserialize)]
@@ -55,13 +55,13 @@ pub enum InitialState {
     PartialGlobal {
         gid: petgraph::graph::NodeIndex,
         cols: usize,
-        key: usize,
+        key: Vec<usize>,
         trigger_domain: (domain::Index, usize),
     },
     Global {
         gid: petgraph::graph::NodeIndex,
         cols: usize,
-        key: usize,
+        key: Vec<usize>,
     },
 }
 
@@ -241,7 +241,7 @@ pub enum Packet {
     /// Ask domain (nicely) to replay a particular key.
     RequestReaderReplay {
         node: LocalNodeIndex,
-        col: usize,
+        cols: Vec<usize>,
         key: Vec<DataType>,
     },
 

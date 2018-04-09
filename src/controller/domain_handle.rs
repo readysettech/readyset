@@ -323,17 +323,6 @@ impl DomainHandle {
         Ok(())
     }
 
-    pub fn wait_for_state_size(&mut self) -> Result<usize, WaitError> {
-        let mut size = 0;
-        for _ in 0..self.shards() {
-            match self.wait_for_next_reply() {
-                ControlReplyPacket::StateSize(n, _) => size += n,
-                r => return Err(WaitError::WrongReply(r)),
-            }
-        }
-        Ok(size)
-    }
-
     pub fn wait_for_statistics(
         &mut self,
     ) -> Result<Vec<(DomainStats, HashMap<NodeIndex, NodeStats>)>, WaitError> {

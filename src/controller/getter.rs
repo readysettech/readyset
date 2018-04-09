@@ -14,7 +14,7 @@ pub enum ReadQuery {
         /// Where to read from
         target: (NodeIndex, usize),
         /// Keys to read with
-        keys: Vec<DataType>,
+        keys: Vec<Vec<DataType>>,
         /// Whether to block if a partial replay is triggered
         block: bool,
     },
@@ -23,7 +23,7 @@ pub enum ReadQuery {
         /// Where to read from
         target: (NodeIndex, usize),
         /// Keys to read with
-        keys: Vec<DataType>,
+        keys: Vec<Vec<DataType>>,
     },
     /// Read the size of a leaf view
     Size {
@@ -153,7 +153,11 @@ impl RemoteGetter {
     }
 
     /// Query for the results for the given keys, optionally blocking if it is not yet available.
-    pub fn multi_lookup(&mut self, keys: Vec<DataType>, block: bool) -> Result<Vec<Datas>, ()> {
+    pub fn multi_lookup(
+        &mut self,
+        keys: Vec<Vec<DataType>>,
+        block: bool,
+    ) -> Result<Vec<Datas>, ()> {
         if self.shards.len() == 1 {
             let shard = &mut self.shards[0];
             let is_local = shard.is_local();
@@ -172,9 +176,10 @@ impl RemoteGetter {
                 _ => unreachable!(),
             }
         } else {
+            assert!(keys.iter().all(|k| k.len() == 1));
             let mut shard_queries = vec![Vec::new(); self.shards.len()];
             for key in keys {
-                let shard = dataflow::shard_by(&key, self.shards.len());
+                let shard = dataflow::shard_by(&key[0], self.shards.len());
                 shard_queries[shard].push(key);
             }
 
@@ -219,7 +224,7 @@ impl RemoteGetter {
     /// Query for the results for the given keys, optionally blocking if it is not yet available.
     pub fn transactional_multi_lookup(
         &mut self,
-        keys: Vec<DataType>,
+        keys: Vec<Vec<DataType>>,
     ) -> Result<Vec<(Datas, checktable::Token)>, ()> {
         if self.shards.len() == 1 {
             let shard = &mut self.shards[0];
@@ -238,9 +243,10 @@ impl RemoteGetter {
                 _ => unreachable!(),
             }
         } else {
+            assert!(keys.iter().all(|k| k.len() == 1));
             let mut shard_queries = vec![Vec::new(); self.shards.len()];
             for key in keys {
-                let shard = dataflow::shard_by(&key, self.shards.len());
+                let shard = dataflow::shard_by(&key[0], self.shards.len());
                 shard_queries[shard].push(key);
             }
 
@@ -280,19 +286,19 @@ impl RemoteGetter {
     }
 
     /// Lookup a single key.
-    pub fn lookup(&mut self, key: &DataType, block: bool) -> Result<Datas, ()> {
+    pub fn lookup(&mut self, key: &[DataType], block: bool) -> Result<Datas, ()> {
         // TODO: Optimized version of this function?
-        self.multi_lookup(vec![key.clone()], block)
+        self.multi_lookup(vec![Vec::from(key)], block)
             .map(|rs| rs.into_iter().next().unwrap())
     }
 
     /// Do a transactional lookup for a single key.
     pub fn transactional_lookup(
         &mut self,
-        key: &DataType,
+        key: &[DataType],
     ) -> Result<(Datas, checktable::Token), ()> {
         // TODO: Optimized version of this function?
-        self.transactional_multi_lookup(vec![key.clone()])
+        self.transactional_multi_lookup(vec![Vec::from(key)])
             .map(|rs| rs.into_iter().next().unwrap())
     }
 }
@@ -360,7 +366,7 @@ impl Getter {
     ///
     /// If you need to clone values out of the returned rows, make sure to use
     /// `DataType::deep_clone` to avoid contention on internally de-duplicated strings!
-    pub fn lookup_map<F, T>(&self, q: &DataType, mut f: F, block: bool) -> Result<Option<T>, ()>
+    pub fn lookup_map<F, T>(&self, q: &[DataType], mut f: F, block: bool) -> Result<Option<T>, ()>
     where
         F: FnMut(&[Vec<DataType>]) -> T,
     {
@@ -368,7 +374,7 @@ impl Getter {
     }
 
     /// Query for the results for the given key, optionally blocking if it is not yet available.
-    pub fn lookup(&self, q: &DataType, block: bool) -> Result<Datas, ()> {
+    pub fn lookup(&self, q: &[DataType], block: bool) -> Result<Datas, ()> {
         self.lookup_map(
             q,
             |rs| {
@@ -381,7 +387,10 @@ impl Getter {
     }
 
     /// Transactionally query for the given key, blocking if it is not yet available.
-    pub fn transactional_lookup(&mut self, q: &DataType) -> Result<(Datas, checktable::Token), ()> {
+    pub fn transactional_lookup(
+        &mut self,
+        q: &[DataType],
+    ) -> Result<(Datas, checktable::Token), ()> {
         match self.generator {
             None => Err(()),
             Some(ref g) => {

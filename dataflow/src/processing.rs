@@ -63,7 +63,7 @@ pub enum RawProcessingResult {
 pub enum ReplayContext {
     None,
     Partial {
-        key_col: usize,
+        key_cols: Vec<usize>,
         keys: HashSet<Vec<prelude::DataType>>,
     },
     Full {
@@ -72,9 +72,9 @@ pub enum ReplayContext {
 }
 
 impl ReplayContext {
-    fn key(&self) -> Option<usize> {
-        if let ReplayContext::Partial { key_col, .. } = *self {
-            Some(key_col)
+    fn key(&self) -> Option<&[usize]> {
+        if let ReplayContext::Partial { ref key_cols, .. } = *self {
+            Some(&key_cols[..])
         } else {
             None
         }
@@ -163,7 +163,7 @@ where
         from: prelude::LocalNodeIndex,
         data: prelude::Records,
         tracer: &mut prelude::Tracer,
-        replay_key_col: Option<usize>,
+        replay_key_cols: Option<&[usize]>,
         domain: &prelude::DomainNodes,
         states: &prelude::StateMap,
     ) -> ProcessingResult;

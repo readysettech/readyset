@@ -130,7 +130,7 @@ impl Materializations {
                 // for a reader that will get lookups, we'd like to have an index above us
                 // somewhere on our key so that we can make the reader partial
                 let mut i = HashMap::new();
-                i.insert(ni, (vec![key.unwrap()], false));
+                i.insert(ni, (Vec::from(key.unwrap()), false));
                 i
             } else if !n.is_internal() {
                 // non-internal nodes cannot generate indexing obligations
@@ -344,24 +344,15 @@ impl Materializations {
                     break;
                 }
 
-                if index.len() != 1 {
-                    // FIXME
-                    able = false;
-                    break;
-                }
-                let index = index[0];
-                let paths = {
-                    let mut on_join = plan::Plan::partial_on_join(graph);
-                    keys::provenance_of(graph, ni, index, &mut *on_join)
-                };
+                let paths = keys::provenance_of(graph, ni, &index[..], plan::Plan::on_join(graph));
 
                 for path in paths {
-                    for (ni, col) in path.into_iter().skip(1) {
-                        if col.is_none() {
+                    for (ni, cols) in path.into_iter().skip(1) {
+                        if cols.iter().any(|c| c.is_none()) {
                             able = false;
                             break 'try;
                         }
-                        let index = vec![col.unwrap()];
+                        let index: Vec<_> = cols.into_iter().map(|c| c.unwrap()).collect();
                         if let Some(m) = self.have.get(&ni) {
                             if !m.contains(&index) {
                                 // we'd need to add an index to this view,
@@ -480,7 +471,6 @@ impl Materializations {
         let mut reindex = Vec::with_capacity(new.len());
         let mut make = Vec::with_capacity(new.len());
         let mut topo = petgraph::visit::Topo::new(graph);
-        let mut empty = HashSet::new();
         while let Some(node) = topo.next(graph) {
             if graph[node].is_source() {
                 continue;
@@ -512,7 +502,7 @@ impl Materializations {
                 info!(self.log, "adding partial index to existing {:?}", n);
                 let log = self.log.new(o!("node" => node.index()));
                 let log = mem::replace(&mut self.log, log);
-                self.setup(node, &mut index_on, graph, &empty, domains);
+                self.setup(node, &mut index_on, graph, domains);
                 mem::replace(&mut self.log, log);
                 index_on.clear();
             } else if !n.sharded_by().is_none() {
@@ -546,7 +536,7 @@ impl Materializations {
                 .unwrap_or_else(HashSet::new);
 
             let start = ::std::time::Instant::now();
-            self.ready_one(ni, &mut index_on, graph, &mut empty, domains);
+            self.ready_one(ni, &mut index_on, graph, domains);
             let reconstructed = index_on.is_empty();
 
             // communicate to the domain in charge of a particular node that it should start
@@ -583,7 +573,6 @@ impl Materializations {
         ni: NodeIndex,
         index_on: &mut HashSet<Vec<usize>>,
         graph: &Graph,
-        empty: &mut HashSet<NodeIndex>,
         domains: &mut HashMap<DomainIndex, DomainHandle>,
     ) {
         let n = &graph[ni];
@@ -623,7 +612,7 @@ impl Materializations {
         info!(self.log, "beginning reconstruction of {:?}", n);
         let log = self.log.new(o!("node" => ni.index()));
         let log = mem::replace(&mut self.log, log);
-        self.setup(ni, index_on, graph, &empty, domains);
+        self.setup(ni, index_on, graph, domains);
         mem::replace(&mut self.log, log);
 
         // NOTE: the state has already been marked ready by the replay completing, but we want to
@@ -639,7 +628,6 @@ impl Materializations {
         ni: NodeIndex,
         index_on: &mut HashSet<Vec<usize>>,
         graph: &Graph,
-        empty: &HashSet<NodeIndex>,
         domains: &mut HashMap<DomainIndex, DomainHandle>,
     ) {
         if index_on.is_empty() {
@@ -649,7 +637,7 @@ impl Materializations {
                 .with_reader(|r| {
                     assert!(r.is_materialized());
                     if let Some(rh) = r.key() {
-                        index_on.insert(vec![rh]);
+                        index_on.insert(Vec::from(rh));
                     }
                 })
                 .unwrap();
@@ -657,7 +645,7 @@ impl Materializations {
 
         // construct and disseminate a plan for each index
         let pending = {
-            let mut plan = plan::Plan::new(self, graph, ni, empty, domains);
+            let mut plan = plan::Plan::new(self, graph, ni, domains);
             for index in index_on.drain() {
                 plan.add(index);
             }

@@ -39,7 +39,7 @@ pub struct Reader {
     token_generator: Option<checktable::TokenGenerator>,
 
     for_node: NodeIndex,
-    state: Option<usize>,
+    state: Option<Vec<usize>>,
 }
 
 impl Clone for Reader {
@@ -72,11 +72,11 @@ impl Reader {
         self.for_node
     }
 
-    pub fn writer(&self) -> Option<&backlog::WriteHandle> {
+    pub(crate) fn writer(&self) -> Option<&backlog::WriteHandle> {
         self.writer.as_ref()
     }
 
-    pub fn writer_mut(&mut self) -> Option<&mut backlog::WriteHandle> {
+    pub(crate) fn writer_mut(&mut self) -> Option<&mut backlog::WriteHandle> {
         self.writer.as_mut()
     }
 
@@ -103,20 +103,20 @@ impl Reader {
         self.state.is_some()
     }
 
-    pub fn set_write_handle(&mut self, wh: backlog::WriteHandle) {
+    pub(crate) fn set_write_handle(&mut self, wh: backlog::WriteHandle) {
         assert!(self.writer.is_none());
         self.writer = Some(wh);
     }
 
-    pub fn key(&self) -> Option<usize> {
-        self.state
+    pub fn key(&self) -> Option<&[usize]> {
+        self.state.as_ref().map(|s| &s[..])
     }
 
-    pub fn set_key(&mut self, key: usize) {
-        if let Some(skey) = self.state {
-            assert_eq!(skey, key);
+    pub fn set_key(&mut self, key: &[usize]) {
+        if let Some(ref skey) = self.state {
+            assert_eq!(&skey[..], key);
         } else {
-            self.state = Some(key);
+            self.state = Some(Vec::from(key));
         }
     }
 
@@ -132,8 +132,7 @@ impl Reader {
     pub fn on_eviction(&mut self, _key_columns: &[usize], keys: &[Vec<DataType>]) {
         let w = self.writer.as_mut().unwrap();
         for k in keys {
-            assert_eq!(k.len(), 1); // no compound keys yet
-            w.mark_hole(&k[0]);
+            w.mut_with_key(&k[..]).mark_hole();
         }
         w.swap();
     }
@@ -144,10 +143,9 @@ impl Reader {
             // make sure we don't fill a partial materialization
             // hole with incomplete (i.e., non-replay) state.
             if m.is_regular() && state.is_partial() {
-                let key = state.key();
                 m.map_data(|data| {
                     data.retain(|row| {
-                        match state.try_find_and(&row[key], |_| ()) {
+                        match state.entry_from_record(&row[..]).try_find_and(|_| ()) {
                             Ok((None, _)) => {
                                 // row would miss in partial state.
                                 // leave it blank so later lookup triggers replay.
@@ -168,10 +166,9 @@ impl Reader {
             // same hole at the same time. we need to make sure that we ignore any such
             // duplicated replay.
             if !m.is_regular() && state.is_partial() {
-                let key = state.key();
                 m.map_data(|data| {
                     data.retain(|row| {
-                        match state.try_find_and(&row[key], |_| ()) {
+                        match state.entry_from_record(&row[..]).try_find_and(|_| ()) {
                             Ok((None, _)) => {
                                 // filling a hole with replay -- ok
                                 true

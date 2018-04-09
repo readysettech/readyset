@@ -673,10 +673,12 @@ pub(crate) fn make_latest_node(
         .map(|c| parent.borrow().column_id_for_column(c))
         .collect::<Vec<_>>();
 
+    // latest doesn't support compound group by
+    assert_eq!(group_col_indx.len(), 1);
     let na = mig.add_ingredient(
         String::from(name),
         column_names.as_slice(),
-        Latest::new(parent_na, group_col_indx),
+        Latest::new(parent_na, group_col_indx[0]),
     );
     FlowNode::New(na)
 }
@@ -806,15 +808,13 @@ pub(crate) fn materialize_leaf_node(
     // TODO(malte): consider the case when the projected columns need reordering
 
     if !key_cols.is_empty() {
-        // TODO(malte): this does not yet cover the case when there are multiple query
-        // parameters, which requires compound key support on Reader nodes.
-        assert_eq!(key_cols.len(), 1);
-        let first_key_col_id = parent
-            .borrow()
-            .column_id_for_column(key_cols.iter().next().unwrap());
-        mig.maintain(name, na, first_key_col_id);
+        let key_cols: Vec<_> = key_cols
+            .iter()
+            .map(|c| parent.borrow().column_id_for_column(c))
+            .collect();
+        mig.maintain(name, na, &key_cols[..]);
     } else {
         // if no key specified, default to the first column
-        mig.maintain(name, na, 0);
+        mig.maintain(name, na, &[0]);
     }
 }

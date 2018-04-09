@@ -29,8 +29,8 @@ enum FullWait {
 #[derive(Debug, Serialize, Deserialize)]
 pub struct Union {
     emit: Emit,
-    replay_key: Option<HashMap<LocalNodeIndex, usize>>,
-    replay_pieces: HashMap<DataType, Map<Records>>,
+    replay_key: Option<HashMap<LocalNodeIndex, Vec<usize>>>,
+    replay_pieces: HashMap<Vec<DataType>, Map<Records>>,
 
     required: usize,
 
@@ -163,7 +163,7 @@ impl Ingredient for Union {
         from: LocalNodeIndex,
         rs: Records,
         _: &mut Tracer,
-        _: Option<usize>,
+        _: Option<&[usize]>,
         _: &DomainNodes,
         _: &StateMap,
     ) -> ProcessingResult {
@@ -277,8 +277,11 @@ impl Ingredient for Union {
                 // in the downstream node. in fact, we *must* forward them, becuase there may be
                 // *other* nodes downstream that do *not* have holes for the key in question.
                 for r in &rs {
-                    let k = self.replay_key.as_ref().unwrap()[&from];
-                    if let Some(ref mut pieces) = self.replay_pieces.get_mut(&r[k]) {
+                    let k = &self.replay_key.as_ref().unwrap()[&from];
+                    // XXX: the clone + collect here is really sad
+                    if let Some(ref mut pieces) = self.replay_pieces
+                        .get_mut(&k.iter().map(|&c| r[c].clone()).collect::<Vec<_>>())
+                    {
                         if let Some(ref mut rs) = pieces.get_mut(&from) {
                             // we've received a replay piece from this ancestor already for this
                             // key, and are waiting for replay pieces from other ancestors. we need
@@ -418,13 +421,17 @@ impl Ingredient for Union {
                 self.full_wait_state = FullWait::None;
                 exit
             }
-            ReplayContext::Partial { key_col, ref keys } => {
+            ReplayContext::Partial {
+                ref key_cols,
+                ref keys,
+            } => {
                 // FIXME: with multi-partial indices, we may now need to track *multiple* ongoing
                 // replays!
 
                 // TODO: which node is key_col an index of?
                 if let Emit::AllFrom(_, Sharding::ByColumn(shard_col, _)) = self.emit {
-                    if shard_col == key_col {
+                    assert_eq!(key_cols.len(), 1);
+                    if shard_col == key_cols[0] {
                         // No need to buffer since request should only be for one shard
                         assert!(self.replay_pieces.is_empty());
                         return RawProcessingResult::ReplayPiece(
@@ -439,26 +446,33 @@ impl Ingredient for Union {
                     // which might translate to different columns in our inputs
                     match self.emit {
                         Emit::AllFrom(..) => {
-                            self.replay_key = Some(Some((from, key_col)).into_iter().collect());
+                            self.replay_key =
+                                Some(Some((from, key_cols.clone())).into_iter().collect());
                         }
                         Emit::Project { ref emit_l, .. } => {
                             self.replay_key = Some(
                                 emit_l
                                     .iter()
-                                    .map(|(src, emit)| (*src, emit[key_col]))
+                                    .map(|(src, emit)| {
+                                        (*src, key_cols.iter().map(|&c| emit[c]).collect())
+                                    })
                                     .collect(),
                             );
                         }
                     }
                 }
 
-                let mut rs_by_key = rs.into_iter().map(|r| (r[key_col].clone(), r)).fold(
-                    HashMap::new(),
-                    |mut hm, (key, r)| {
+                let mut rs_by_key = rs.into_iter()
+                    .map(|r| {
+                        (
+                            key_cols.iter().map(|&c| r[c].clone()).collect::<Vec<_>>(),
+                            r,
+                        )
+                    })
+                    .fold(HashMap::new(), |mut hm, (key, r)| {
                         hm.entry(key).or_insert_with(Records::default).push(r);
                         hm
-                    },
-                );
+                    });
 
                 // we're going to pull a little hack here for the sake of performance.
                 // (heard that before...)
@@ -473,9 +487,7 @@ impl Ingredient for Union {
                 let rs = {
                     keys.iter()
                         .filter_map(|key| {
-                            debug_assert_eq!(key.len(), 1);
-                            let key = &key[0];
-                            let rs = rs_by_key.remove(key).unwrap_or_else(Records::default);
+                            let rs = rs_by_key.remove(&key[..]).unwrap_or_else(Records::default);
 
                             // store this replay piece
                             use std::collections::hash_map::Entry;
@@ -505,11 +517,12 @@ impl Ingredient for Union {
                             }
                         })
                         .flat_map(|(key, map)| {
-                            released.insert(vec![key.clone()]);
+                            released.insert(key.clone());
                             map.into_iter()
                         })
                         .flat_map(|(from, rs)| {
-                            self.on_input(from, rs, tracer, Some(key_col), n, s).results
+                            self.on_input(from, rs, tracer, Some(&key_cols[..]), n, s)
+                                .results
                         })
                         .collect()
                 };

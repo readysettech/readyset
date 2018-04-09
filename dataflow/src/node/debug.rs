@@ -68,7 +68,7 @@ impl Node {
             NodeType::Reader(ref r) => {
                 let key = match r.key() {
                     None => String::from("none"),
-                    Some(k) => format!("{}", k),
+                    Some(k) => format!("{:?}", k),
                 };
                 s.push_str(&format!(
                     "{{ {{ {} / {} {} }} | (reader / ⚷: {}) }}",

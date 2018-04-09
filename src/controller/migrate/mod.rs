@@ -249,7 +249,7 @@ impl<'a> Migration<'a> {
         }
     }
 
-    fn ensure_token_generator(&mut self, n: NodeIndex, key: usize) {
+    fn ensure_token_generator(&mut self, n: NodeIndex, key: &[usize]) {
         let ri = self.readers[&n];
         if self.mainline.ingredients[ri]
             .with_reader(|r| r.token_generator().is_some())
@@ -261,8 +261,8 @@ impl<'a> Migration<'a> {
         // A map from base node to the column in that base node whose value must match the value of
         // this node's column to cause a conflict. Is None for a given base node if any write to
         // that base node might cause a conflict.
-        let base_columns: Vec<(_, Option<_>)> =
-            keys::provenance_of(&self.mainline.ingredients, n, key, |_, _, _| None)
+        let base_columns: Vec<_> =
+            keys::provenance_of(&self.mainline.ingredients, n, &key[..], |_, _, _| None)
                 .into_iter()
                 .map(|path| {
                     // we want the base node corresponding to each path
@@ -272,14 +272,20 @@ impl<'a> Migration<'a> {
 
         let coarse_parents = base_columns
             .iter()
-            .filter_map(|&(ni, o)| if o.is_none() { Some(ni) } else { None })
+            .filter_map(|&(ni, ref o)| {
+                if o.iter().any(|c| c.is_none()) {
+                    Some(ni)
+                } else {
+                    None
+                }
+            })
             .collect();
 
         let granular_parents = base_columns
             .into_iter()
-            .filter_map(|(ni, o)| {
-                if o.is_some() {
-                    Some((ni, o.unwrap()))
+            .filter_map(|(ni, ref o)| {
+                if o.iter().all(|c| c.is_some()) {
+                    Some((ni, o.iter().map(|c| c.unwrap()).collect()))
                 } else {
                     None
                 }
@@ -302,7 +308,7 @@ impl<'a> Migration<'a> {
     /// To query into the maintained state, use `ControllerInner::get_getter` or
     /// `ControllerInner::get_transactional_getter`
     #[cfg(test)]
-    pub fn maintain_anonymous(&mut self, n: NodeIndex, key: usize) {
+    pub fn maintain_anonymous(&mut self, n: NodeIndex, key: &[usize]) {
         self.ensure_reader_for(n, None);
         if self.mainline.ingredients[n].is_transactional() {
             self.ensure_token_generator(n, key);
@@ -317,7 +323,7 @@ impl<'a> Migration<'a> {
     ///
     /// To query into the maintained state, use `ControllerInner::get_getter` or
     /// `ControllerInner::get_transactional_getter`
-    pub fn maintain(&mut self, name: String, n: NodeIndex, key: usize) {
+    pub fn maintain(&mut self, name: String, n: NodeIndex, key: &[usize]) {
         self.ensure_reader_for(n, Some(name));
         if self.mainline.ingredients[n].is_transactional() {
             self.ensure_token_generator(n, key);

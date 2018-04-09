@@ -230,7 +230,7 @@ impl Ingredient for Join {
         from: LocalNodeIndex,
         rs: Records,
         _: &mut Tracer,
-        replay_key_col: Option<usize>,
+        replay_key_cols: Option<&[usize]>,
         nodes: &DomainNodes,
         state: &StateMap,
     ) -> ProcessingResult {
@@ -249,25 +249,29 @@ impl Ingredient for Join {
             (*self.left, self.on.1, self.on.0)
         };
 
-        let replay_key_col = replay_key_col.map(|col| {
-            match self.emit[col] {
-                (true, l) if from == *self.left => l,
-                (false, r) if from == *self.right => r,
-                (true, l) if l == self.on.0 => {
-                    // since we didn't hit the case above, we know that the message
-                    // *isn't* from left.
-                    self.on.1
-                }
-                (false, r) if r == self.on.1 => {
-                    // same
-                    self.on.0
-                }
-                _ => {
-                    // we're getting a partial replay, but the replay key doesn't exist
-                    // in the parent we're getting the replay from?!
-                    unreachable!()
-                }
-            }
+        let replay_key_cols = replay_key_cols.map(|cols| {
+            cols.into_iter()
+                .map(|&col| {
+                    match self.emit[col] {
+                        (true, l) if from == *self.left => l,
+                        (false, r) if from == *self.right => r,
+                        (true, l) if l == self.on.0 => {
+                            // since we didn't hit the case above, we know that the message
+                            // *isn't* from left.
+                            self.on.1
+                        }
+                        (false, r) if r == self.on.1 => {
+                            // same
+                            self.on.0
+                        }
+                        _ => {
+                            // we're getting a partial replay, but the replay key doesn't exist
+                            // in the parent we're getting the replay from?!
+                            unreachable!()
+                        }
+                    }
+                })
+                .collect()
         });
 
         // First, we want to be smart about multiple added/removed rows with the same join key
@@ -338,8 +342,8 @@ impl Ingredient for Join {
                 misses.extend((from..at).map(|i| Miss {
                     on: other,
                     lookup_idx: vec![other_key],
-                    replay_cols: replay_key_col.map(|c| vec![c]),
                     lookup_cols: vec![from_key],
+                    replay_cols: replay_key_cols.clone(),
                     // NOTE: we're stealing data here!
                     record: mem::replace(&mut *rs[i], Vec::new()),
                 }));
@@ -382,8 +386,8 @@ impl Ingredient for Join {
                     misses.extend((start..at).map(|i| Miss {
                         on: from,
                         lookup_idx: vec![self.on.1],
-                        replay_cols: replay_key_col.map(|c| vec![c]),
                         lookup_cols: vec![from_key],
+                        replay_cols: replay_key_cols.clone(),
                         // NOTE: we're stealing data here!
                         record: mem::replace(&mut *rs[i], Vec::new()),
                     }));

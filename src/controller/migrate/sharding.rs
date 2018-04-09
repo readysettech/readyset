@@ -51,7 +51,13 @@ pub fn shard(
             let s = graph[node]
                 .with_reader(|r| r.key())
                 .unwrap()
-                .map(|c| Sharding::ByColumn(c, sharding_factor))
+                .and_then(|c| {
+                    if c.len() == 1 {
+                        Some(Sharding::ByColumn(c[0], sharding_factor))
+                    } else {
+                        None
+                    }
+                })
                 .unwrap_or(Sharding::ForcedNone);
             if s.is_none() {
                 info!(log, "de-sharding prior to stream-only reader"; "node" => ?node);
