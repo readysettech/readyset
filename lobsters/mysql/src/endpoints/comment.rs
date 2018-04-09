@@ -224,22 +224,23 @@ where
                         )
                     })
                     .and_then(move |t| {
-                        t.drop_query(&format!(
+                        let key = format!("user:{}:comments_posted", user);
+                        t.drop_exec(
                             "INSERT INTO keystores (`key`, `value`) \
-                             VALUES \
-                             ('user:{}:comments_posted', 1) \
+                             VALUES (?, ?) \
                              ON DUPLICATE KEY UPDATE `value` = `value` + 1",
-                            user
-                        ))
+                            (key, 1)
+                        )
                     })
                     .and_then(move |t| {
-                        t.drop_query(&format!(
+                        let key = format!("user:{}:comments_posted", user);
+                        t.drop_exec(
                             "SELECT  `keystores`.* \
                              FROM `keystores` \
-                             WHERE `keystores`.`key` = 'user:{}:comments_posted' \
+                             WHERE `keystores`.`key` = ? \
                              ORDER BY `keystores`.`key` ASC LIMIT 1",
-                            user
-                        ))
+                            (key,)
+                        )
                         // TODO: technically it also selects from users for the
                         // author of the parent comment here..
                     })

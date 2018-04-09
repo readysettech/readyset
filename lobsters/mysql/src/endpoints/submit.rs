@@ -86,13 +86,13 @@ where
                         ).map(move |t| (t, story))
                     })
                     .and_then(move |(t, story)| {
-                        t.drop_query(&format!(
+                        let key = format!("user:{}:stories_submitted", user);
+                        t.drop_exec(
                             "INSERT INTO keystores (`key`, `value`) \
-                             VALUES \
-                             ('user:{}:stories_submitted', 1) \
+                             VALUES (?, ?) \
                              ON DUPLICATE KEY UPDATE `value` = `value` + 1",
-                            user
-                        )).map(move |t| (t, story))
+                            (key, 1)
+                        ).map(move |t| (t, story))
                     })
                     .and_then(move |(t, story)| {
                         let key = format!("user:{}:stories_submitted", user);
