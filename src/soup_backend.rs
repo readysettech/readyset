@@ -15,6 +15,14 @@ use utils::{self, QueryID};
 use rewrite;
 use schema::{schema_for_column, schema_for_insert, schema_for_select};
 
+/// Differentiate between different kinds of cached queries.
+enum Cached {
+    /// Prepared statement ID
+    Prepared(u32),
+    /// Name of ad-hoc query view
+    AdHoc(String),
+}
+
 pub struct SoupBackend {
     soup: ControllerHandle<ZookeeperAuthority>,
     log: slog::Logger,
@@ -30,7 +38,7 @@ pub struct SoupBackend {
     prepared: HashMap<u32, (String, nom_sql::SqlQuery)>,
     prepared_count: u32,
 
-    cached: HashMap<QueryID, String>,
+    cached: HashMap<QueryID, Cached>,
 }
 
 fn get_or_make_mutator<'a, 'b>(
@@ -186,7 +194,8 @@ impl SoupBackend {
                     .fetch_add(1, sync::atomic::Ordering::SeqCst);
                 (format!("q_{}", qc), false)
             }
-            Some(qname) => (qname.clone(), true),
+            Some(&Cached::AdHoc(ref qname)) => (qname.clone(), true),
+            Some(&Cached::Prepared(_)) => unreachable!(),
         };
 
         if cached {
@@ -197,7 +206,7 @@ impl SoupBackend {
             match self.soup.extend_recipe(format!("QUERY {}: {};", qname, q)) {
                 Ok(_) => {
                     // remember this query for the future, so we avoid unnecessary migrations
-                    self.cached.insert(qhash, qname.clone());
+                    self.cached.insert(qhash, Cached::AdHoc(qname.clone()));
                     // now read from the newly installed view
                     self.do_read(&qname, &q, None, results)
                 }
@@ -620,24 +629,39 @@ impl<W: io::Write> MysqlShim<W> for SoupBackend {
                         // extract result schema
                         let schema = schema_for_select(table_schemas, &q);
 
-                        // add the query to Soup
-                        let qc = self.query_count
-                            .fetch_add(1, sync::atomic::Ordering::SeqCst);
-                        let qname = format!("q_{}", qc);
-                        match self.soup.extend_recipe(format!("QUERY {}: {};", qname, q)) {
-                            Ok(_) => {
-                                // register a new prepared statement
-                                self.prepared_count += 1;
-                                self.prepared
-                                    .insert(self.prepared_count, (qname, sql_q.clone()));
-                                // TODO(malte): proactively get getter, to avoid &mut ref on exec?
-                                info.reply(
-                                    self.prepared_count,
-                                    params.as_slice(),
-                                    schema.as_slice(),
-                                )
+                        // check if we already have this query prepared
+                        let qhash = utils::hash_query(&SqlQuery::Select(q.clone()));
+
+                        match self.cached.get(&qhash) {
+                            None => {
+                                let qc = self.query_count
+                                    .fetch_add(1, sync::atomic::Ordering::SeqCst);
+                                let qname = format!("q_{}", qc);
+
+                                // add the query to Soup
+                                match self.soup.extend_recipe(format!("QUERY {}: {};", qname, q)) {
+                                    Ok(_) => {
+                                        // register a new prepared statement
+                                        self.prepared_count += 1;
+                                        self.prepared
+                                            .insert(self.prepared_count, (qname, sql_q.clone()));
+                                        self.cached
+                                            .insert(qhash, Cached::Prepared(self.prepared_count));
+                                        // TODO(malte): proactively get getter, to avoid &mut ref on exec?
+                                        info.reply(
+                                            self.prepared_count,
+                                            params.as_slice(),
+                                            schema.as_slice(),
+                                        )
+                                    }
+                                    Err(e) => return Err(io::Error::new(io::ErrorKind::Other, e)),
+                                }
                             }
-                            Err(e) => return Err(io::Error::new(io::ErrorKind::Other, e)),
+                            Some(&Cached::Prepared(id)) => {
+                                // reuse existing prepared statement
+                                info.reply(id, params.as_slice(), schema.as_slice())
+                            }
+                            Some(&Cached::AdHoc(_)) => unreachable!(),
                         }
                     }
                     nom_sql::SqlQuery::Insert(ref q) => {
