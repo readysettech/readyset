@@ -98,6 +98,7 @@ impl Ingredient for Latest {
                         // empty set before processing!
                         misses.push(Miss {
                             on: *us,
+                            lookup_idx: vec![self.key[0]],
                             lookup_cols: vec![self.key[0]],
                             replay_cols: replay_key_col.map(|col| {
                                 debug_assert_eq!(col, self.key[0]);

@@ -8,9 +8,15 @@ use prelude;
 
 #[derive(PartialEq, Eq, Debug)]
 pub(crate) struct Miss {
+    /// The node we missed when looking up into.
     pub(crate) on: prelude::LocalNodeIndex,
+    /// The columns of `on` we were looking up on.
+    pub(crate) lookup_idx: Vec<usize>,
+    /// The columns of `record` we were using for the lookup.
     pub(crate) lookup_cols: Vec<usize>,
+    /// The columns of `record` that identify the replay key (if any).
     pub(crate) replay_cols: Option<Vec<usize>>,
+    /// The record we were processing when we missed.
     pub(crate) record: Vec<prelude::DataType>,
 }
 

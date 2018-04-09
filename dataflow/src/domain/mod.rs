@@ -1927,6 +1927,7 @@ impl Domain {
                             a.on
                                 .cmp(&b.on)
                                 .then_with(|| a.replay_cols.cmp(&b.replay_cols))
+                                .then_with(|| a.lookup_idx.cmp(&b.lookup_idx))
                                 .then_with(|| a.lookup_cols.cmp(&b.lookup_cols))
                                 .then_with(|| a.lookup_key().cmp(b.lookup_key()))
                                 .then_with(|| a.replay_key().unwrap().cmp(b.replay_key().unwrap()))
@@ -2055,7 +2056,7 @@ impl Domain {
                                     miss.on,
                                     miss.replay_key_vec().unwrap(),
                                     miss.lookup_key_vec(),
-                                    miss.lookup_cols,
+                                    miss.lookup_idx,
                                     tag,
                                 ));
                             }

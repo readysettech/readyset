@@ -337,8 +337,9 @@ impl Ingredient for Join {
                     .unwrap_or(rs.len());
                 misses.extend((from..at).map(|i| Miss {
                     on: other,
+                    lookup_idx: vec![other_key],
                     replay_cols: replay_key_col.map(|c| vec![c]),
-                    lookup_cols: vec![other_key],
+                    lookup_cols: vec![from_key],
                     // NOTE: we're stealing data here!
                     record: mem::replace(&mut *rs[i], Vec::new()),
                 }));
@@ -380,8 +381,9 @@ impl Ingredient for Join {
                         .unwrap_or(rs.len());
                     misses.extend((start..at).map(|i| Miss {
                         on: from,
+                        lookup_idx: vec![self.on.1],
                         replay_cols: replay_key_col.map(|c| vec![c]),
-                        lookup_cols: vec![self.on.1],
+                        lookup_cols: vec![from_key],
                         // NOTE: we're stealing data here!
                         record: mem::replace(&mut *rs[i], Vec::new()),
                     }));

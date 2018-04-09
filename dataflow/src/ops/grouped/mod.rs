@@ -213,7 +213,8 @@ where
                                 misses.extend(group_rs.map(|r| {
                                     Miss {
                                         on: *us,
-                                        lookup_cols: out_key.clone(),
+                                        lookup_idx: out_key.clone(),
+                                        lookup_cols: group_by.clone(),
                                         replay_cols: replay_key_col.map(|col| {
                                             // since group columns go first in our output, and the
                                             // replay key must be on our group by column (partial can't

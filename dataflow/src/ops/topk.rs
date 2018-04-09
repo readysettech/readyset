@@ -283,6 +283,7 @@ impl Ingredient for TopK {
                         misses.extend(diffs.into_iter().map(|r| {
                             Miss {
                                 on: *us,
+                                lookup_idx: Vec::from(group_by),
                                 lookup_cols: Vec::from(group_by),
                                 replay_cols: replay_key_col.map(|col| {
                                     // since topk is an identity, we don't need to map this output

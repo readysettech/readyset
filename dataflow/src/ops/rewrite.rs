@@ -103,7 +103,8 @@ impl Ingredient for Rewrite {
                 if rc.is_none() {
                     misses.push(Miss {
                         on: *self.signal,
-                        lookup_cols: vec![0],
+                        lookup_idx: vec![0],
+                        lookup_cols: vec![self.signal_key],
                         replay_cols: replay_key_col.map(|col| vec![col]),
                         record: r.extract().0,
                     });
@@ -134,7 +135,8 @@ impl Ingredient for Rewrite {
                     assert_eq!(replay_key_col, None);
                     misses.push(Miss {
                         on: *self.src,
-                        lookup_cols: vec![self.signal_key],
+                        lookup_idx: vec![self.signal_key],
+                        lookup_cols: vec![0],
                         replay_cols: replay_key_col.map(|col| vec![col]),
                         record: r.extract().0,
                     });
