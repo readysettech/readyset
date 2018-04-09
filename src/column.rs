@@ -31,7 +31,7 @@ impl Display for FunctionExpression {
 
             FunctionExpression::Avg(ref col, _) => write!(f, "avg({})", col.name.as_str()),
             FunctionExpression::Count(ref col, _) => write!(f, "count({})", col.name.as_str()),
-            FunctionExpression::CountStar => write!(f, "count(all)"),
+            FunctionExpression::CountStar => write!(f, "count(*)"),
             FunctionExpression::Sum(ref col, _) => write!(f, "sum({})", col.name.as_str()),
             FunctionExpression::Max(ref col) => write!(f, "max({})", col.name.as_str()),
             FunctionExpression::Min(ref col) => write!(f, "min({})", col.name.as_str()),
