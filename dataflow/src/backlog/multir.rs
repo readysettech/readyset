@@ -34,8 +34,12 @@ impl Handle {
         F: FnOnce(&[Vec<DataType>]) -> T,
     {
         match *self {
-            Handle::Single(ref h) => h.meta_get_and(&key[0], then),
+            Handle::Single(ref h) => {
+                assert_eq!(key.len(), 1);
+                h.meta_get_and(&key[0], then)
+            }
             Handle::Double(ref h) => {
+                assert_eq!(key.len(), 2);
                 // we want to transmute &[T; 2] to &(T, T), but that's not actually safe
                 // we're not guaranteed that they have the same memory layout
                 // we *could* just clone DataType, but that would mean dealing with string refcounts
