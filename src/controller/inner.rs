@@ -25,6 +25,7 @@ use mio::net::TcpListener;
 use petgraph;
 use petgraph::visit::Bfs;
 use slog;
+use std::mem;
 use tarpc::sync::client::{self, ClientExt};
 
 /// `Controller` is the core component of the alternate Soup implementation.
@@ -656,7 +657,12 @@ impl ControllerInner {
             Ok(_) => {
                 self.recipe = new;
             }
-            Err(ref e) => crit!(self.log, "{}", e.description()),
+            Err(ref e) => {
+                crit!(self.log, "{}", e.description());
+                // TODO(malte): a little yucky, since we don't really need the blank recipe
+                let recipe = mem::replace(&mut self.recipe, Recipe::blank(None));
+                self.recipe = recipe.revert();
+            }
         }
 
         err
@@ -667,7 +673,8 @@ impl ControllerInner {
         authority: &Arc<A>,
         add_txt: String,
     ) -> Result<ActivationResult, RpcError> {
-        let new = self.recipe.clone();
+        // needed because self.apply_recipe needs to mutate self.recipe, so can't have it borrowed
+        let new = mem::replace(&mut self.recipe, Recipe::blank(None));
         match new.extend(&add_txt) {
             Ok(new) => {
                 let activation_result = self.apply_recipe(new);
@@ -690,8 +697,10 @@ impl ControllerInner {
 
                 activation_result
             }
-            Err(e) => {
+            Err((old, e)) => {
+                // need to restore the old recipe
                 crit!(self.log, "failed to extend recipe: {:?}", e);
+                self.recipe = old;
                 Err(RpcError::Other("failed to extend recipe".to_owned()))
             }
         }
@@ -704,7 +713,7 @@ impl ControllerInner {
     ) -> Result<ActivationResult, RpcError> {
         match Recipe::from_str(&r_txt, Some(self.log.clone())) {
             Ok(r) => {
-                let old = self.recipe.clone();
+                let old = mem::replace(&mut self.recipe, Recipe::blank(None));
                 let mut new = old.replace(r).unwrap();
                 let activation_result = self.apply_recipe(new);
                 if authority

@@ -463,9 +463,12 @@ impl Recipe {
     /// `additions`, and if successful, will extend the recipe. No expressions are removed from the
     /// recipe; use `replace` if removal of unused expressions is desired.
     /// Consumes `self` and returns a replacement recipe.
-    pub fn extend(mut self, additions: &str) -> Result<Recipe, String> {
+    pub fn extend(mut self, additions: &str) -> Result<Recipe, (Recipe, String)> {
         // parse and compute differences to current recipe
-        let add_rp = Recipe::from_str(additions, None)?;
+        let add_rp = match Recipe::from_str(additions, None) {
+            Ok(rp) => rp,
+            Err(e) => return Err((self, e)),
+        };
         let (added, _) = add_rp.compute_delta(&self);
 
         // move the incorporator state from the old recipe to the new one
@@ -584,6 +587,15 @@ impl Recipe {
     /// Returns the version number of this recipe.
     pub fn version(&self) -> usize {
         self.version
+    }
+
+    /// Reverts to prior version of recipe
+    pub fn revert(self) -> Recipe {
+        if let Some(prior) = self.prior {
+            *prior
+        } else {
+            Recipe::blank(Some(self.log))
+        }
     }
 }
 
