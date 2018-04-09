@@ -1,9 +1,10 @@
 use channel::tcp::TcpSender;
 use consensus::{Authority, Epoch, STATE_KEY};
+use core::PersistenceParameters;
 use dataflow::payload::{EgressForBase, IngressFromBase};
 use dataflow::prelude::*;
 use dataflow::statistics::GraphStats;
-use dataflow::{checktable, node, payload, DomainConfig, PersistenceParameters};
+use dataflow::{checktable, node, payload, DomainConfig};
 
 use std::collections::{BTreeMap, HashMap};
 use std::error::Error;

@@ -1,5 +1,5 @@
 use consensus::{Authority, LocalAuthority};
-use dataflow::PersistenceParameters;
+use core::PersistenceParameters;
 
 use std::net::IpAddr;
 use std::sync::Arc;

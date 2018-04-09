@@ -9,10 +9,11 @@ use slog::Logger;
 use channel::poll::{KeepPolling, PollEvent, PollingLoop, StopPolling};
 use channel::{tcp, TcpReceiver, TcpSender};
 use consensus::Epoch;
+use core::PersistenceParameters;
 use dataflow::payload::ControlReplyPacket;
 use dataflow::prelude::*;
 use dataflow::statistics::{DomainStats, NodeStats};
-use dataflow::{self, DomainBuilder, DomainConfig, PersistenceParameters};
+use dataflow::{self, DomainBuilder, DomainConfig};
 
 use controller::{WorkerEndpoint, WorkerIdentifier};
 use coordination::{CoordinationMessage, CoordinationPayload};

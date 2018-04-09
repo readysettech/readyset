@@ -142,7 +142,7 @@ pub struct DomainBuilder {
     /// The nodes in the domain.
     pub nodes: DomainNodes,
     /// The domain's persistence setting.
-    pub persistence_parameters: persistence::Parameters,
+    pub persistence_parameters: PersistenceParameters,
     /// The starting timestamp.
     pub ts: i64,
     /// The socket address at which this domain receives control messages.
@@ -249,7 +249,7 @@ pub struct Domain {
     ingress_inject: Map<(usize, Vec<DataType>)>,
 
     transaction_state: transactions::DomainState,
-    persistence_parameters: persistence::Parameters,
+    persistence_parameters: PersistenceParameters,
 
     mode: DomainMode,
     waiting: Map<Waiting>,
@@ -1314,11 +1314,7 @@ impl Domain {
                                         self.shard.unwrap_or(0),
                                     );
 
-                                    box PersistentState::new(
-                                        base_name,
-                                        params.persistence_threads,
-                                        params.mode.clone(),
-                                    )
+                                    box PersistentState::new(base_name, &params)
                                 } else {
                                     box MemoryState::default()
                                 }

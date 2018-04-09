@@ -233,9 +233,10 @@ where
         states
             .get(&parent)
             .and_then(move |state| match state.lookup(columns, key) {
-                prelude::LookupResult::Some(Cow::Owned(rs)) => {
-                    Some(Some(Box::new(rs.into_iter().map(|r| Cow::Owned(r.unpack()))) as Box<_>))
-                }
+                prelude::LookupResult::Some(Cow::Owned(rs)) => Some(Some(Box::new(
+                    rs.into_iter().map(|r| Cow::Owned(r.unpack())),
+                )
+                    as Box<_>)),
                 prelude::LookupResult::Some(Cow::Borrowed(rs)) => {
                     Some(Some(Box::new(rs.iter().map(|r| Cow::Borrowed(&r[..]))) as Box<_>))
                 }

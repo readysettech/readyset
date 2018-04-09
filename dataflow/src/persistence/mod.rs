@@ -14,81 +14,6 @@ use debug::DebugEventType;
 use domain;
 use prelude::*;
 
-/// Parameters to control the operation of GroupCommitQueue.
-#[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
-pub struct Parameters {
-    /// Number of elements to buffer before flushing.
-    pub queue_capacity: usize,
-    /// Amount of time to wait before flushing despite not reaching `queue_capacity`.
-    pub flush_timeout: time::Duration,
-    /// Whether the output files should be deleted when the GroupCommitQueue is dropped.
-    pub mode: DurabilityMode,
-    /// Filename prefix for persistent log entries.
-    pub log_prefix: String,
-    /// Whether PersistentState or MemoryState should be used for base nodes.
-    pub persist_base_nodes: bool,
-    /// Number of background threads PersistentState can use (shared acrosss all worker threads).
-    pub persistence_threads: i32,
-}
-
-impl Default for Parameters {
-    fn default() -> Self {
-        Self {
-            queue_capacity: 256,
-            flush_timeout: time::Duration::new(0, 100_000),
-            mode: DurabilityMode::MemoryOnly,
-            log_prefix: String::from("soup"),
-            persist_base_nodes: true,
-            persistence_threads: 1,
-        }
-    }
-}
-
-impl Parameters {
-    /// Parameters to control the persistence mode, and parameters related to persistence.
-    ///
-    /// Three modes are available:
-    ///
-    ///  1. `DurabilityMode::Permanent`: all writes to base nodes should be written to disk.
-    ///  2. `DurabilityMode::DeleteOnExit`: all writes are written to disk, but the log is
-    ///     deleted once the `Blender` is dropped. Useful for tests.
-    ///  3. `DurabilityMode::MemoryOnly`: no writes to disk, store all writes in memory.
-    ///     Useful for baseline numbers.
-    ///
-    /// `queue_capacity` indicates the number of packets that should be buffered until
-    /// flushing, and `flush_timeout` indicates the length of time to wait before flushing
-    /// anyway.
-    pub fn new(
-        mode: DurabilityMode,
-        queue_capacity: usize,
-        flush_timeout: time::Duration,
-        log_prefix: Option<String>,
-        persist_base_nodes: bool,
-    ) -> Self {
-        let log_prefix = log_prefix.unwrap_or(String::from("soup"));
-        assert!(!log_prefix.contains("-"));
-
-        Self {
-            queue_capacity,
-            flush_timeout,
-            mode,
-            log_prefix,
-            persist_base_nodes,
-            ..Default::default()
-        }
-    }
-
-    /// The path that would be used for the given domain/shard pair's logs.
-    pub fn log_path(&self, table_name: &str, domain_shard: usize) -> PathBuf {
-        assert!(!table_name.contains("-"));
-
-        PathBuf::from(&format!(
-            "{}-log-{}-{}.json",
-            self.log_prefix, table_name, domain_shard,
-        ))
-    }
-}
-
 pub struct GroupCommitQueueSet {
     /// Packets that are queued to be persisted.
     pending_packets: Map<Vec<Box<Packet>>>,
@@ -103,12 +28,16 @@ pub struct GroupCommitQueueSet {
     _domain_index: domain::Index,
     domain_shard: usize,
 
-    params: Parameters,
+    params: PersistenceParameters,
 }
 
 impl GroupCommitQueueSet {
     /// Create a new `GroupCommitQueue`.
-    pub fn new(domain_index: domain::Index, domain_shard: usize, params: &Parameters) -> Self {
+    pub fn new(
+        domain_index: domain::Index,
+        domain_shard: usize,
+        params: &PersistenceParameters,
+    ) -> Self {
         assert!(params.queue_capacity > 0);
 
         Self {

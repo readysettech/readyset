@@ -63,6 +63,7 @@ struct PersistentIndex {
 /// PersistentState stores data in SQlite.
 pub struct PersistentState {
     name: String,
+    db_opts: rocksdb::Options,
     // We don't really want DB to be an option, but doing so lets us drop it manually in
     // PersistenState's Drop by setting `self.db = None` - after which we can then discard the
     // persisted files if we want to.
@@ -250,15 +251,23 @@ impl State for PersistentState {
 }
 
 impl PersistentState {
-    pub fn new(name: String, threads: i32, durability_mode: DurabilityMode) -> Self {
+    pub fn new(name: String, params: &PersistenceParameters) -> Self {
         let mut opts = rocksdb::Options::default();
         opts.set_compression_type(rocksdb::DBCompressionType::Lz4);
         opts.create_if_missing(true);
+
+        if let Some(ref path) = params.log_dir {
+            // Append the db name to the WAL path to ensure
+            // that we create a directory for each base shard:
+            opts.set_wal_dir(path.join(&name));
+        }
+
+        // Create prefixes by Self::transform_fn on all new inserted keys:
         let transform = rocksdb::SliceTransform::create("key", Self::transform_fn, None);
         opts.set_prefix_extractor(transform);
 
         // Assigns the number of threads for RocksDB's low priority background pool:
-        opts.increase_parallelism(threads);
+        opts.increase_parallelism(params.persistence_threads);
 
         // Use a hash linked list since we're doing prefix seeks.
         opts.set_allow_concurrent_memtable_write(false);
@@ -271,7 +280,8 @@ impl PersistentState {
 
         Self {
             db,
-            durability_mode,
+            db_opts: opts,
+            durability_mode: params.mode.clone(),
             name: full_name,
             indices: Default::default(),
         }
@@ -409,7 +419,7 @@ impl Drop for PersistentState {
     fn drop(&mut self) {
         if self.durability_mode != DurabilityMode::Permanent {
             self.db = None;
-            DB::destroy(&rocksdb::Options::default(), &self.name).unwrap()
+            DB::destroy(&self.db_opts, &self.name).unwrap()
         }
     }
 }
@@ -646,7 +656,7 @@ mod tests {
             current_time.subsec_nanos()
         );
 
-        PersistentState::new(name, 1, DurabilityMode::MemoryOnly)
+        PersistentState::new(name, &PersistenceParameters::default())
     }
 
     #[test]
@@ -832,7 +842,8 @@ mod tests {
         let db_name = format!("{}.db", name);
         let path = Path::new(&db_name);
         {
-            let _state = PersistentState::new(String::from(name), 1, DurabilityMode::DeleteOnExit);
+            let _state =
+                PersistentState::new(String::from(name), &PersistenceParameters::default());
             assert!(path.exists());
         }
 

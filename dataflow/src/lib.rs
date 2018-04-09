@@ -55,7 +55,6 @@ use checktable::TokenGenerator;
 pub type Readers = Arc<
     Mutex<HashMap<(core::NodeIndex, usize), (backlog::SingleReadHandle, Option<TokenGenerator>)>>,
 >;
-pub type PersistenceParameters = persistence::Parameters;
 pub type DomainConfig = domain::Config;
 
 pub use checktable::connect_thread_checktable;
