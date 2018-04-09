@@ -61,9 +61,6 @@ impl Node {
                             use std::mem;
                             assert!(!ignore);
                             assert!(keyed_by.is_some());
-                            for key in &*for_keys {
-                                assert_eq!(key.len(), 1);
-                            }
                             ReplayContext::Partial {
                                 key_cols: keyed_by.unwrap().clone(),
                                 keys: mem::replace(for_keys, HashSet::new()),
