@@ -608,7 +608,7 @@ impl SoupBackend {
 
 impl<W: io::Write> MysqlShim<W> for SoupBackend {
     fn on_prepare(&mut self, query: &str, info: StatementMetaWriter<W>) -> io::Result<()> {
-        debug!(self.log, "prepare: {}", query);
+        trace!(self.log, "prepare: {}", query);
 
         let query = utils::sanitize_query(query);
 
@@ -750,7 +750,7 @@ impl<W: io::Write> MysqlShim<W> for SoupBackend {
     fn on_close(&mut self, _: u32) {}
 
     fn on_query(&mut self, query: &str, results: QueryResultWriter<W>) -> io::Result<()> {
-        debug!(self.log, "query: {}", query);
+        trace!(self.log, "query: {}", query);
 
         let query = utils::sanitize_query(query);
 
