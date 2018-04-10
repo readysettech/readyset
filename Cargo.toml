@@ -3,6 +3,10 @@ name = "nom-sql"
 version = "0.0.1"
 authors = ["Malte Schwarzkopf <malte@csail.mit.edu>"]
 
+documentation = "https://docs.rs/nom-sql"
+homepage = "https://github.com/ms705/nom-sql"
+repository = "https://github.com/ms705/nom-sql.git"
+
 description = "A SQL parser written using nom."
 
 license = "MIT"
