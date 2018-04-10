@@ -228,7 +228,7 @@ named!(pub column_constraint<&[u8], Option<ColumnConstraint>>,
                               f: map_res!(digit, str::from_utf8) >> (
                               Literal::FixedPoint(Real {
                                   integral: i32::from_str(i).unwrap(),
-                                  fractional: u32::from_str(f).unwrap()
+                                  fractional: i32::from_str(f).unwrap()
                               })
                     ))
                   | do_parse!(d: map_res!(digit, str::from_utf8) >> (

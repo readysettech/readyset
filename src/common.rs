@@ -70,7 +70,7 @@ impl fmt::Display for SqlType {
 #[derive(Clone, Debug, Eq, Hash, PartialEq, Serialize, Deserialize)]
 pub struct Real {
     pub integral: i32,
-    pub fractional: u32,
+    pub fractional: i32,
 }
 
 #[derive(Clone, Debug, Eq, Hash, PartialEq, Serialize, Deserialize)]
@@ -810,7 +810,7 @@ named!(pub float_literal<&[u8], Literal>,
                 } else {
                     unpack(mant)
                 },
-                fractional: unpack(frac) as u32,
+                fractional: unpack(frac) as i32,
             })
         })
     )
