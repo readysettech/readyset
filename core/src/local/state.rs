@@ -118,7 +118,7 @@ impl State for PersistentState {
     }
 
     fn lookup(&self, columns: &[usize], key: &KeyType) -> LookupResult {
-        let values = match *key {
+        let key_values = match *key {
             KeyType::Single(a) => vec![a],
             KeyType::Double(ref r) => vec![&r.0, &r.1],
             KeyType::Tri(ref r) => vec![&r.0, &r.1, &r.2],
@@ -131,7 +131,7 @@ impl State for PersistentState {
             .iter()
             .position(|index| &index.columns[..] == columns)
             .expect("could not find index for columns");
-        let prefix = Self::serialize_prefix(index as u64, &values);
+        let prefix = Self::serialize_prefix(index as u64, &key_values);
         let db = self.db.as_ref().unwrap();
         let values = db.prefix_iterator(&prefix);
 
@@ -379,6 +379,9 @@ impl PersistentState {
 
     // Puts by primary key first, then retrieves the existing value for each index and appends the
     // newly created primary key value.
+    // TODO(ekmartin): This will put exactly the values that are given, and can only be retrieved
+    // with exactly those values. I think the regular state implementation supports inserting
+    // something like an Int and retrieving with a BigInt.
     fn insert(&mut self, batch: &mut WriteBatch, r: Vec<DataType>) {
         let serialized_pk = {
             let pk_index = &mut self.indices[0];
