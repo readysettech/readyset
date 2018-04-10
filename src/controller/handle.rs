@@ -242,6 +242,8 @@ impl ControllerHandle<LocalAuthority> {
 }
 impl<A: Authority> Drop for ControllerHandle<A> {
     fn drop(&mut self) {
+        self.getters.clear();
+        self.domains.clear();
         if let Some((sender, join_handle)) = self.local_controller.take() {
             let _ = sender.send(ControlEvent::Shutdown);
             let _ = join_handle.join();
