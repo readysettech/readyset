@@ -4,6 +4,7 @@ use dataflow::prelude::*;
 use dataflow::statistics::GraphStats;
 
 use std::collections::{BTreeMap, HashMap};
+use std::net::SocketAddr;
 use std::sync::Arc;
 use std::sync::mpsc::Sender;
 use std::thread::{self, JoinHandle};
@@ -18,9 +19,9 @@ use serde_json;
 use tarpc::sync::client::{self, ClientExt};
 use tokio_core::reactor::Core;
 
-use controller::getter::{RemoteGetter, RemoteGetterBuilder};
+use controller::getter::{GetterRpc, RemoteGetter, RemoteGetterBuilder};
 use controller::inner::RpcError;
-use controller::mutator::{Mutator, MutatorBuilder};
+use controller::mutator::{Mutator, MutatorBuilder, MutatorRpc};
 use controller::recipe::ActivationResult;
 use controller::{ControlEvent, ControllerDescriptor, WorkerEvent};
 
@@ -30,7 +31,10 @@ pub struct ControllerHandle<A: Authority> {
     pub(super) authority: Arc<A>,
     pub(super) local_controller: Option<(Sender<ControlEvent>, JoinHandle<()>)>,
     pub(super) local_worker: Option<(Sender<WorkerEvent>, JoinHandle<()>)>,
+    pub(super) getters: HashMap<SocketAddr, GetterRpc>,
+    pub(super) domains: HashMap<Vec<SocketAddr>, MutatorRpc>,
 }
+
 impl<A: Authority> ControllerHandle<A> {
     /// Creates a `ControllerHandle` that bootstraps a connection to Soup via the configuration
     /// stored in the `Authority` passed as an argument.
@@ -40,6 +44,8 @@ impl<A: Authority> ControllerHandle<A> {
             authority: Arc::new(authority),
             local_controller: None,
             local_worker: None,
+            getters: Default::default(),
+            domains: Default::default(),
         }
     }
 
@@ -89,7 +95,7 @@ impl<A: Authority> ControllerHandle<A> {
 
     /// Obtain a `RemoteGetterBuilder` that can be sent to a client and then used to query a given
     /// (already maintained) reader node.
-    pub fn get_getter_builder(&mut self, name: &str) -> Option<RemoteGetterBuilder> {
+    fn get_getter_builder(&mut self, name: &str) -> Option<RemoteGetterBuilder> {
         // This call attempts to detect if `get_getter_builder` is being called in a loop. If this
         // is getting false positives, then it is safe to increase the allowed hit count.
         #[cfg(debug_assertions)]
@@ -106,12 +112,13 @@ impl<A: Authority> ControllerHandle<A> {
 
     /// Obtain a `RemoteGetter`.
     pub fn get_getter(&mut self, name: &str) -> Option<RemoteGetter> {
-        self.get_getter_builder(name).map(|g| g.build())
+        self.get_getter_builder(name)
+            .map(|g| g.build(&mut self.getters))
     }
 
     /// Obtain a MutatorBuild that can be used to construct a Mutator to perform writes and deletes
     /// from the given base node.
-    pub fn get_mutator_builder(&mut self, base: &str) -> Option<MutatorBuilder> {
+    fn get_mutator_builder(&mut self, base: &str) -> Option<MutatorBuilder> {
         // This call attempts to detect if `get_mutator_builder` is being called in a loop. If this
         // is getting false positives, then it is safe to increase the allowed hit count.
         #[cfg(debug_assertions)]
@@ -122,7 +129,8 @@ impl<A: Authority> ControllerHandle<A> {
 
     /// Obtain a Mutator
     pub fn get_mutator(&mut self, base: &str) -> Option<Mutator> {
-        self.get_mutator_builder(base).map(|m| m.build())
+        self.get_mutator_builder(base)
+            .map(|m| m.build(&mut self.domains))
     }
 
     /// Get statistics about the time spent processing different parts of the graph.

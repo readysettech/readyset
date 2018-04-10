@@ -608,7 +608,7 @@ impl ControllerInner {
         if context.get("group").is_none() {
             for g in groups {
                 let rgb: Option<RemoteGetterBuilder> = self.getter_builder(&g);
-                let mut getter = rgb.map(|rgb| rgb.build()).unwrap();
+                let mut getter = rgb.map(|rgb| rgb.build_exclusive()).unwrap();
                 let my_groups: Vec<DataType> = getter
                     .lookup(uid, true)
                     .unwrap()

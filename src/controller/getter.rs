@@ -1,10 +1,16 @@
 use channel::rpc::RpcClient;
+use controller::{ExclusiveConnection, SharedConnection};
 
 use dataflow::backlog::{self, ReadHandle};
 use dataflow::prelude::*;
 use dataflow::{self, checktable, LocalBypass, Readers};
 
+use std::cell::RefCell;
+use std::collections::HashMap;
 use std::net::SocketAddr;
+use std::rc::Rc;
+
+pub(crate) type GetterRpc = Rc<RefCell<RpcClient<LocalOrNot<ReadQuery>, LocalOrNot<ReadReply>>>>;
 
 /// A request to read a specific key.
 #[derive(Serialize, Deserialize, Debug)]
@@ -86,26 +92,93 @@ pub struct RemoteGetterBuilder {
 
 impl RemoteGetterBuilder {
     /// Build a `RemoteGetter` out of a `RemoteGetterBuilder`
-    pub fn build(self) -> RemoteGetter {
+    pub(crate) fn build_exclusive(self) -> RemoteGetter<ExclusiveConnection> {
+        let conns = self.shards
+            .iter()
+            .map(move |&(ref addr, is_local)| {
+                Rc::new(RefCell::new(RpcClient::connect(addr, is_local).unwrap()))
+            })
+            .collect();
+
         RemoteGetter {
             node: self.node,
             columns: self.columns,
-            shards: self.shards
-                .iter()
-                .map(|&(ref addr, is_local)| RpcClient::connect(addr, is_local).unwrap())
-                .collect(),
+            shard_addrs: self.shards,
+            shards: conns,
+            exclusivity: ExclusiveConnection,
+        }
+    }
+
+    /// Build a `RemoteGetter` out of a `RemoteGetterBuilder`
+    pub(crate) fn build(
+        self,
+        rpcs: &mut HashMap<SocketAddr, GetterRpc>,
+    ) -> RemoteGetter<SharedConnection> {
+        let conns = self.shards
+            .iter()
+            .map(move |&(ref addr, is_local)| {
+                use std::collections::hash_map::Entry;
+
+                match rpcs.entry(*addr) {
+                    Entry::Occupied(e) => Rc::clone(e.get()),
+                    Entry::Vacant(h) => {
+                        let c = RpcClient::connect(addr, is_local).unwrap();
+                        let c = Rc::new(RefCell::new(c));
+                        h.insert(Rc::clone(&c));
+                        c
+                    }
+                }
+            })
+            .collect();
+
+        RemoteGetter {
+            node: self.node,
+            columns: self.columns,
+            shard_addrs: self.shards,
+            shards: conns,
+            exclusivity: SharedConnection,
         }
     }
 }
 
 /// Struct to query the contents of a materialized view.
-pub struct RemoteGetter {
+pub struct RemoteGetter<E = SharedConnection> {
     node: NodeIndex,
     columns: Vec<String>,
-    shards: Vec<RpcClient<LocalOrNot<ReadQuery>, LocalOrNot<ReadReply>>>,
+    shards: Vec<GetterRpc>,
+    shard_addrs: Vec<(SocketAddr, bool)>,
+
+    #[allow(dead_code)]
+    exclusivity: E,
 }
 
-impl RemoteGetter {
+impl Clone for RemoteGetter<SharedConnection> {
+    fn clone(&self) -> Self {
+        RemoteGetter {
+            node: self.node,
+            columns: self.columns.clone(),
+            shards: self.shards.clone(),
+            shard_addrs: self.shard_addrs.clone(),
+            exclusivity: SharedConnection,
+        }
+    }
+}
+
+unsafe impl Send for RemoteGetter<ExclusiveConnection> {}
+
+impl RemoteGetter<SharedConnection> {
+    /// Change this getter into one with a dedicated connection the server so it can be sent across
+    /// threads.
+    pub fn into_exclusive(self) -> RemoteGetter<ExclusiveConnection> {
+        RemoteGetterBuilder {
+            node: self.node,
+            columns: self.columns,
+            shards: self.shard_addrs,
+        }.build_exclusive()
+    }
+}
+
+impl<E> RemoteGetter<E> {
     /// Return the column schema of the view this getter is associated with.
     pub fn columns(&self) -> &[String] {
         self.columns.as_slice()
@@ -114,7 +187,7 @@ impl RemoteGetter {
     /// Query for the size of a specific view.
     pub fn len(&mut self) -> Result<usize, ()> {
         if self.shards.len() == 1 {
-            let shard = &mut self.shards[0];
+            let mut shard = self.shards[0].borrow_mut();
             let is_local = shard.is_local();
             let reply = shard
                 .send(&LocalOrNot::make(
@@ -132,7 +205,7 @@ impl RemoteGetter {
             let shard_queries = 0..self.shards.len();
 
             let len = shard_queries.into_iter().fold(0, |acc, shardi| {
-                let shard = &mut self.shards[shardi];
+                let mut shard = self.shards[shardi].borrow_mut();
                 let is_local = shard.is_local();
                 let reply = shard
                     .send(&LocalOrNot::make(
@@ -159,7 +232,7 @@ impl RemoteGetter {
         block: bool,
     ) -> Result<Vec<Datas>, ()> {
         if self.shards.len() == 1 {
-            let shard = &mut self.shards[0];
+            let mut shard = self.shards[0].borrow_mut();
             let is_local = shard.is_local();
             let reply = shard
                 .send(&LocalOrNot::make(
@@ -189,7 +262,7 @@ impl RemoteGetter {
                 .enumerate()
                 .filter(|&(_, ref keys)| !keys.is_empty())
                 .flat_map(|(shardi, keys)| {
-                    let shard = &mut self.shards[shardi];
+                    let mut shard = self.shards[shardi].borrow_mut();
                     let is_local = shard.is_local();
                     let reply = shard
                         .send(&LocalOrNot::make(
@@ -227,7 +300,7 @@ impl RemoteGetter {
         keys: Vec<Vec<DataType>>,
     ) -> Result<Vec<(Datas, checktable::Token)>, ()> {
         if self.shards.len() == 1 {
-            let shard = &mut self.shards[0];
+            let mut shard = self.shards[0].borrow_mut();
             let is_local = shard.is_local();
             let reply = shard
                 .send(&LocalOrNot::make(
@@ -255,7 +328,7 @@ impl RemoteGetter {
                 .into_iter()
                 .enumerate()
                 .flat_map(|(shardi, keys)| {
-                    let shard = &mut self.shards[shardi];
+                    let mut shard = self.shards[shardi].borrow_mut();
                     let is_local = shard.is_local();
                     let reply = shard
                         .send(&LocalOrNot::make(

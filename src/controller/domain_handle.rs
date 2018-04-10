@@ -107,8 +107,10 @@ impl<'a> BatchSendHandle<'a> {
 }
 
 impl DomainInputHandle {
-    pub(crate) fn new(txs: Vec<SocketAddr>) -> Result<Self, io::Error> {
-        let txs: Result<Vec<_>, _> = txs.iter().map(|addr| TcpSender::connect(addr)).collect();
+    pub(crate) fn new(txs: &[SocketAddr]) -> Result<Self, io::Error> {
+        let txs: Result<Vec<_>, _> = txs.into_iter()
+            .map(|addr| TcpSender::connect(addr))
+            .collect();
 
         Ok(Self { txs: txs? })
     }

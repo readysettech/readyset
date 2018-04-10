@@ -56,6 +56,13 @@ pub use controller::migrate::Migration;
 pub use controller::mutator::{Mutator, MutatorBuilder, MutatorError};
 use controller::worker_inner::WorkerInner;
 
+/// Marker for a handle that has an exclusive connection to the backend(s).
+pub struct ExclusiveConnection;
+
+/// Marker for a handle that shares its underlying connection with other handles owned by the same
+/// thread.
+pub struct SharedConnection;
+
 type WorkerIdentifier = SocketAddr;
 type WorkerEndpoint = Arc<Mutex<TcpSender<CoordinationMessage>>>;
 
@@ -267,6 +274,8 @@ fn start_instance<A: Authority + 'static>(
         authority: authority2,
         local_controller: Some((controller_event_tx2, controller_join_handle)),
         local_worker: Some((worker_event_tx3, worker_join_handle)),
+        getters: Default::default(),
+        domains: Default::default(),
     }
 }
 fn instance_campaign<A: Authority + 'static>(

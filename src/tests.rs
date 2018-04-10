@@ -1976,7 +1976,7 @@ fn live_writes() {
     });
 
     let mut vc_state = g.get_getter("votecount").unwrap();
-    let mut add = g.get_mutator("vote").unwrap();
+    let mut add = g.get_mutator("vote").unwrap().into_exclusive();
 
     let ids = 1000;
     let votes = 7;

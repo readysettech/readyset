@@ -365,9 +365,9 @@ pub use dataflow::prelude::DomainIndex;
 pub use dataflow::{DurabilityMode, PersistenceParameters};
 
 pub use controller::sql::reuse::ReuseConfigType;
-pub use controller::{Controller, ControllerBuilder, ControllerHandle, Mutator, MutatorBuilder,
-                     MutatorError, ReadQuery, ReadReply, RemoteGetter, RemoteGetterBuilder,
-                     RpcError};
+pub use controller::{Controller, ControllerBuilder, ControllerHandle, ExclusiveConnection,
+                     Mutator, MutatorBuilder, MutatorError, ReadQuery, ReadReply, RemoteGetter,
+                     RemoteGetterBuilder, RpcError, SharedConnection};
 
 pub use controller::recipe::ActivationResult;
 

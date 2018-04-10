@@ -1,9 +1,12 @@
 use controller::domain_handle::DomainInputHandle;
+use controller::{ExclusiveConnection, SharedConnection};
 use dataflow::checktable;
 use dataflow::prelude::*;
 
 use std::cell::RefCell;
+use std::collections::HashMap;
 use std::net::SocketAddr;
+use std::rc::Rc;
 use vec_map::VecMap;
 
 /// Indicates why a Mutator operation failed.
@@ -33,11 +36,29 @@ pub struct MutatorBuilder {
     pub(crate) is_local: bool,
 }
 
+pub(crate) type MutatorRpc = Rc<RefCell<DomainInputHandle>>;
+
 impl MutatorBuilder {
     /// Construct a `Mutator`.
-    pub fn build(self) -> Mutator {
+    pub fn build(
+        self,
+        rpcs: &mut HashMap<Vec<SocketAddr>, MutatorRpc>,
+    ) -> Mutator<SharedConnection> {
+        use std::collections::hash_map::Entry;
+
+        let dih = match rpcs.entry(self.txs.clone()) {
+            Entry::Occupied(e) => Rc::clone(e.get()),
+            Entry::Vacant(h) => {
+                let c = DomainInputHandle::new(h.key()).unwrap();
+                let c = Rc::new(RefCell::new(c));
+                h.insert(Rc::clone(&c));
+                c
+            }
+        };
+
         Mutator {
-            domain_input_handle: RefCell::new(DomainInputHandle::new(self.txs).unwrap()),
+            domain_input_handle: dih,
+            shard_addrs: self.txs,
             addr: self.addr,
             key: self.key,
             key_is_primary: self.key_is_primary,
@@ -47,14 +68,15 @@ impl MutatorBuilder {
             table_name: self.table_name,
             columns: self.columns,
             is_local: self.is_local,
+            exclusivity: SharedConnection,
         }
     }
 }
 
 /// A `Mutator` is used to perform reads and writes to base nodes.
-pub struct Mutator {
-    // the RefCell is *just* there so we can use ::sender()
-    domain_input_handle: RefCell<DomainInputHandle>,
+pub struct Mutator<E = SharedConnection> {
+    domain_input_handle: MutatorRpc,
+    shard_addrs: Vec<SocketAddr>,
     addr: LocalNodeIndex,
     key_is_primary: bool,
     key: Vec<usize>,
@@ -64,9 +86,57 @@ pub struct Mutator {
     table_name: String,
     columns: Vec<String>,
     is_local: bool,
+
+    #[allow(dead_code)]
+    exclusivity: E,
 }
 
-impl Mutator {
+impl Clone for Mutator<SharedConnection> {
+    fn clone(&self) -> Self {
+        Mutator {
+            domain_input_handle: self.domain_input_handle.clone(),
+            shard_addrs: self.shard_addrs.clone(),
+            addr: self.addr,
+            key_is_primary: self.key_is_primary,
+            key: self.key.clone(),
+            transactional: self.transactional,
+            dropped: self.dropped.clone(),
+            tracer: self.tracer.clone(),
+            table_name: self.table_name.clone(),
+            columns: self.columns.clone(),
+            is_local: self.is_local,
+            exclusivity: SharedConnection,
+        }
+    }
+}
+
+unsafe impl Send for Mutator<ExclusiveConnection> {}
+
+impl Mutator<SharedConnection> {
+    /// Change this mutator into one with a dedicated connection the server so it can be sent
+    /// across threads.
+    pub fn into_exclusive(self) -> Mutator<ExclusiveConnection> {
+        let c = DomainInputHandle::new(&self.shard_addrs[..]).unwrap();
+        let c = Rc::new(RefCell::new(c));
+
+        Mutator {
+            domain_input_handle: c,
+            shard_addrs: self.shard_addrs,
+            addr: self.addr,
+            key_is_primary: self.key_is_primary,
+            key: self.key.clone(),
+            transactional: self.transactional,
+            dropped: self.dropped.clone(),
+            tracer: self.tracer.clone(),
+            table_name: self.table_name.clone(),
+            columns: self.columns.clone(),
+            is_local: self.is_local,
+            exclusivity: ExclusiveConnection,
+        }
+    }
+}
+
+impl<E> Mutator<E> {
     fn inject_dropped_cols(&self, rs: &mut Records) {
         let ndropped = self.dropped.len();
         if ndropped != 0 {
