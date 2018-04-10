@@ -132,26 +132,28 @@ impl State for PersistentState {
             .position(|index| &index.columns[..] == columns)
             .expect("could not find index for columns");
         let prefix = Self::serialize_prefix(index as u64, &values);
-        let values = self.db
-            .as_ref()
-            .unwrap()
-            .prefix_iterator(&prefix)
-            .map(|(_key, value)| bincode::deserialize::<Vec<DataType>>(&*value).unwrap());
+        let db = self.db.as_ref().unwrap();
+        let values = db.prefix_iterator(&prefix);
 
         let data = if index > 0 {
             // For non-primary indices we need to first retrieve the primary index key
-            // through our secondary indices, and then call `.lookup` again on that.
+            // through our secondary indices, and then call `.get` again on that.
             values
-                .flat_map(|value| {
-                    let row_key = KeyType::from(&value[..]);
-                    match self.lookup(&self.indices[0].columns, &row_key) {
-                        LookupResult::Some(Cow::Owned(rs)) => rs,
-                        _ => unreachable!(),
-                    }
+                .map(|(_key, value)| {
+                    let raw_row = db.get(&value)
+                        .unwrap()
+                        .expect("secondary index pointed to missing primary key value");
+                    let row: Vec<DataType> = bincode::deserialize(&*raw_row).unwrap();
+                    Row(Rc::new(row))
                 })
                 .collect()
         } else {
-            values.map(|row| Row(Rc::new(row))).collect()
+            values
+                .map(|(_key, value)| {
+                    let row: Vec<DataType> = bincode::deserialize(&*value).unwrap();
+                    Row(Rc::new(row))
+                })
+                .collect()
         };
 
         LookupResult::Some(Cow::Owned(data))
@@ -378,28 +380,25 @@ impl PersistentState {
     // Puts by primary key first, then retrieves the existing value for each index and appends the
     // newly created primary key value.
     fn insert(&mut self, batch: &mut WriteBatch, r: Vec<DataType>) {
-        let (pk_seq, pk) = {
+        let serialized_pk = {
             let pk_index = &mut self.indices[0];
             pk_index.seq += 1;
             let pk = pk_index.columns.iter().map(|i| &r[*i]).collect::<Vec<_>>();
-            (pk_index.seq, pk)
+            Self::serialize_key(0, &pk, pk_index.seq)
         };
 
         // First insert the actual value for our primary index:
-        let serialized_pk = Self::serialize_key(0, &pk, pk_seq);
         let pk_value = bincode::serialize(&r).unwrap();
         batch.put(&serialized_pk, &pk_value).unwrap();
 
-        // Then insert pointers for all the secondary indices. Note that we're not including the
-        // KeyIndex or KeySeq here, since we only need the actual value to do a lookup:
-        let serialized_pk_only = bincode::serialize(&pk).unwrap();
+        // Then insert primary key pointers for all the secondary indices:
         for (i, index) in self.indices[1..].iter_mut().enumerate() {
             index.seq += 1;
             // Construct a key with the index values, and serialize it with bincode:
             let key = index.columns.iter().map(|i| &r[*i]).collect::<Vec<_>>();
-            // Add 1 to i since we're slicing indices by 1..:
+            // Add 1 to i since we're slicing self.indices by 1..:
             let serialized_key = Self::serialize_key((i + 1) as u64, &key, index.seq);
-            batch.put(&serialized_key, &serialized_pk_only).unwrap();
+            batch.put(&serialized_key, &serialized_pk).unwrap();
         }
     }
 
@@ -684,7 +683,7 @@ mod tests {
                 assert_eq!(data[0], 10.into());
                 assert_eq!(data[1], "Cat".into());
             }
-            _ => panic!(),
+            _ => unreachable!(),
         }
     }
 
@@ -705,7 +704,7 @@ mod tests {
             LookupResult::Some(rows) => {
                 assert_eq!(&*rows[0], &row);
             }
-            _ => panic!(),
+            _ => unreachable!(),
         }
     }
 
@@ -723,7 +722,7 @@ mod tests {
                 assert_eq!(rows.len(), 1);
                 assert_eq!(&*rows[0], &first);
             }
-            _ => panic!(),
+            _ => unreachable!(),
         }
 
         match state.lookup(&[1, 2], &KeyType::Double(("Cat".into(), 1.into()))) {
@@ -732,7 +731,34 @@ mod tests {
                 assert_eq!(&*rows[0], &first);
                 assert_eq!(&*rows[1], &second);
             }
-            _ => panic!(),
+            _ => unreachable!(),
+        }
+    }
+
+    #[test]
+    fn persistent_state_not_unique_primary() {
+        let mut state = setup_persistent("persistent_state_multiple_indices");
+        let first: Vec<DataType> = vec![0.into(), 0.into()];
+        let second: Vec<DataType> = vec![0.into(), 1.into()];
+        state.add_key(&[0], None);
+        state.add_key(&[1], None);
+        state.process_records(&mut vec![first.clone(), second.clone()].into(), None);
+
+        match state.lookup(&[0], &KeyType::Single(&0.into())) {
+            LookupResult::Some(rows) => {
+                assert_eq!(rows.len(), 2);
+                assert_eq!(&*rows[0], &first);
+                assert_eq!(&*rows[1], &second);
+            }
+            _ => unreachable!(),
+        }
+
+        match state.lookup(&[1], &KeyType::Single(&0.into())) {
+            LookupResult::Some(rows) => {
+                assert_eq!(rows.len(), 1);
+                assert_eq!(&*rows[0], &first);
+            }
+            _ => unreachable!(),
         }
     }
 
@@ -750,7 +776,7 @@ mod tests {
                 assert_eq!(rows.len(), 1);
                 assert_eq!(&*rows[0], &first);
             }
-            _ => panic!(),
+            _ => unreachable!(),
         }
 
         match state.lookup(&[1], &KeyType::Single(&"Bob".into())) {
@@ -758,7 +784,7 @@ mod tests {
                 assert_eq!(rows.len(), 1);
                 assert_eq!(&*rows[0], &second);
             }
-            _ => panic!(),
+            _ => unreachable!(),
         }
     }
 
@@ -784,7 +810,7 @@ mod tests {
             LookupResult::Some(rows) => {
                 assert_eq!(&*rows[0], &second);
             }
-            _ => panic!(),
+            _ => unreachable!(),
         }
     }
 
