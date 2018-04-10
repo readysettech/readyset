@@ -1,5 +1,5 @@
 [package]
-name = "nom_sql"
+name = "nom-sql"
 version = "0.0.1"
 authors = ["Malte Schwarzkopf <malte@csail.mit.edu>"]
 
