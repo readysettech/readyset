@@ -173,7 +173,7 @@ mod tests {
     #[test]
     fn format_select_query_with_function() {
         let qstring1 = "select count(*) from users";
-        let expected1 = "SELECT count(all) FROM users";
+        let expected1 = "SELECT count(*) FROM users";
 
         let res1 = parse_query(qstring1);
         assert!(res1.is_ok());

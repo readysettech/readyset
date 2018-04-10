@@ -697,7 +697,7 @@ mod tests {
             tables: vec![Table::from("votes")],
             fields: vec![
                 FieldExpression::Col(Column {
-                    name: String::from("count(all)"),
+                    name: String::from("count(*)"),
                     alias: None,
                     table: None,
                     function: Some(Box::new(agg_expr)),
