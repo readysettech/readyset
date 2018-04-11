@@ -85,6 +85,8 @@ fn main() {
     let mut threads = Vec::new();
     let mut i = 0;
     while let Ok((s, _)) = listener.accept() {
+        s.set_nodelay(true).unwrap();
+
         let builder = thread::Builder::new().name(format!("handler{}", i));
 
         let (schemas, auto_increments, query_cache, query_counter, log) = (
