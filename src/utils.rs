@@ -2,8 +2,10 @@ use std::collections::HashSet;
 
 use distributary::DataType;
 use nom_sql::{Column, ColumnConstraint, ConditionBase, ConditionExpression, ConditionTree,
-              CreateTableStatement, Literal, Operator, SqlQuery, TableKey};
+              CreateTableStatement, FieldExpression, Literal, Operator, SelectStatement, SqlQuery,
+              TableKey, UpdateStatement};
 use regex::Regex;
+use std::collections::HashMap;
 
 lazy_static! {
     pub(crate) static ref HARD_CODED_REPLIES: Vec<(Regex, Vec<(&'static str, &'static str)>)> = vec![
@@ -279,6 +281,64 @@ pub(crate) fn get_parameter_columns(query: &SqlQuery) -> Vec<&Column> {
         }
         _ => unimplemented!(),
     }
+}
+
+pub(crate) fn select_for_update_on(
+    q: &mut UpdateStatement,
+    schema: &CreateTableStatement,
+) -> (SelectStatement, HashMap<usize, DataType>) {
+    let table = &q.table.name;
+    let pkey = get_primary_key(schema);
+    let key_values: Vec<_> = pkey.iter().map(|&(_, c)| c).collect();
+
+    let mut where_clauses = key_values.iter().map(|&kv| {
+        ConditionExpression::ComparisonOp(ConditionTree {
+            operator: Operator::Equal,
+            left: box ConditionExpression::Base(ConditionBase::Field(kv.clone())),
+            right: box ConditionExpression::Base(ConditionBase::Literal(Literal::Placeholder)),
+        })
+    });
+
+    let mut top_clause = where_clauses.next().unwrap();
+    for clause in where_clauses {
+        top_clause = ConditionExpression::LogicalOp(ConditionTree {
+            operator: Operator::And,
+            left: box top_clause,
+            right: box clause,
+        });
+    }
+    let where_clause = Some(top_clause);
+
+    let sq = SelectStatement {
+        tables: vec![q.table.clone()],
+        fields: schema
+            .fields
+            .iter()
+            .map(|cs| FieldExpression::Col(cs.column.clone()))
+            .collect(),
+        distinct: false,
+        join: vec![],
+        where_clause,
+        group_by: None,
+        order: None,
+        limit: None,
+    };
+
+    // update_columns maps column indices to the value they should be updated to:
+    let mut update_columns = HashMap::new();
+    for (i, field) in schema.fields.iter().enumerate() {
+        for &mut (ref mut update_column, ref value) in q.fields.iter_mut() {
+            // we must ensure that all columns have their table set because the schema we're
+            // comparing against sets it; the parser does not itself guarantee this.
+            if update_column.table.is_none() {
+                update_column.table = Some(table.to_owned());
+            }
+            if update_column == &field.column {
+                update_columns.insert(i, DataType::from(value));
+            }
+        }
+    }
+    (sq, update_columns)
 }
 
 #[cfg(test)]

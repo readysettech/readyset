@@ -1,8 +1,7 @@
 use distributary::{ControllerHandle, DataType, Mutator, RemoteGetter, ZookeeperAuthority};
 
 use msql_srv::{self, *};
-use nom_sql::{self, ColumnConstraint, ConditionBase, ConditionExpression, ConditionTree,
-              CreateTableStatement, FieldExpression, InsertStatement, Literal, Operator,
+use nom_sql::{self, ColumnConstraint, CreateTableStatement, InsertStatement, Literal,
               SelectStatement};
 
 use slog;
@@ -251,11 +250,7 @@ impl SoupBackend {
         mut q: nom_sql::UpdateStatement,
         results: QueryResultWriter<W>,
     ) -> io::Result<()> {
-        let cond = q.where_clause
-            .expect("only supports UPDATEs with WHERE-clauses");
-
         let ts = self.table_schemas.lock().unwrap();
-        let CreateTableStatement { ref fields, .. } = ts[&q.table.name];
         let pkey = utils::get_primary_key(&ts[&q.table.name]);
         let key_indices: Vec<_> = pkey.iter().map(|&(i, _)| i).collect();
         let key_values: Vec<_> = pkey.iter().map(|&(_, c)| c).collect();
@@ -267,52 +262,11 @@ impl SoupBackend {
         //
         // To accomplish the first step we need to buld a getter that retrieves
         // all the columns in the table:
-        let mut where_clauses = key_values.iter().map(|&kv| {
-            ConditionExpression::ComparisonOp(ConditionTree {
-                operator: Operator::Equal,
-                left: box ConditionExpression::Base(ConditionBase::Field(kv.clone())),
-                right: box ConditionExpression::Base(ConditionBase::Literal(Literal::Placeholder)),
-            })
-        });
+        let schema = &ts[&q.table.name];
+        let (select_q, update_columns) = utils::select_for_update_on(&mut q, schema);
 
-        let mut top_clause = where_clauses.next().unwrap();
-        for clause in where_clauses {
-            top_clause = ConditionExpression::LogicalOp(ConditionTree {
-                operator: Operator::And,
-                left: box top_clause,
-                right: box clause,
-            });
-        }
-        let where_clause = Some(top_clause);
-
-        let select_q = SelectStatement {
-            tables: vec![q.table.clone()],
-            fields: fields
-                .into_iter()
-                .map(|cs| FieldExpression::Col(cs.column.clone()))
-                .collect(),
-            distinct: false,
-            join: vec![],
-            where_clause,
-            group_by: None,
-            order: None,
-            limit: None,
-        };
-
-        // update_columns maps column indices to the value they should be updated to:
-        let mut update_columns = HashMap::new();
-        for (i, field) in fields.into_iter().enumerate() {
-            for &mut (ref mut update_column, ref value) in q.fields.iter_mut() {
-                // we must ensure that all columns have their table set because the schema we're
-                // comparing against sets it; the parser does not itself guarantee this.
-                if update_column.table.is_none() {
-                    update_column.table = Some(q.table.name.clone());
-                }
-                if update_column == &field.column {
-                    update_columns.insert(i, DataType::from(value));
-                }
-            }
-        }
+        let cond = q.where_clause
+            .expect("only supports UPDATEs with WHERE-clauses");
 
         // create a mutator if we don't have one for this table already
         match utils::flatten_conditional(&cond, &key_values) {
