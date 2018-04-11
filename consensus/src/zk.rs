@@ -44,7 +44,13 @@ pub struct ZookeeperAuthority {
 impl ZookeeperAuthority {
     /// Create a new instance.
     pub fn new(connect_string: &str) -> Self {
-        let zk = ZooKeeper::connect(connect_string, Duration::from_secs(1), EventWatcher).unwrap();
+        let zk = ZooKeeper::connect(connect_string, Duration::from_secs(1), EventWatcher).expect(
+            &format!(
+                "Failed to connect to ZooKeeper at {}. Do you have \"maxClientCnxns\" set \
+                 correctly in /etc/zookeeper/conf/zoo.conf?",
+                connect_string
+            ),
+        );
         let _ = zk.create(
             "/",
             vec![],
