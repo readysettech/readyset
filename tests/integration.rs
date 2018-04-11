@@ -654,3 +654,73 @@ fn update_bogus() {
     ).unwrap();
     assert_eq!(deleted.affected_rows(), 0);
 }
+
+#[test]
+fn select_collapse_where_in() {
+    let d = Deployment::new("collapsed_where");
+    let opts = setup(&d);
+    let mut conn = mysql::Conn::new(opts).unwrap();
+    conn.query("CREATE TABLE Cats (id int PRIMARY KEY, name VARCHAR(255), PRIMARY KEY(id))")
+        .unwrap();
+    sleep();
+
+    conn.query("INSERT INTO Cats (id, name) VALUES (1, \"Bob\")")
+        .unwrap();
+    conn.query("INSERT INTO Cats (id, name) VALUES (2, \"Jane\")")
+        .unwrap();
+    sleep();
+
+    let names: Vec<String> = conn.query("SELECT Cats.name FROM Cats WHERE Cats.id IN (1, 2)")
+        .unwrap()
+        .map(|row| row.unwrap().take::<String, _>(0).unwrap())
+        .collect();
+    assert_eq!(names.len(), 2);
+    assert!(names.iter().any(|s| s == "Bob"));
+    assert!(names.iter().any(|s| s == "Jane"));
+
+    let names: Vec<String> =
+        conn.prep_exec("SELECT Cats.name FROM Cats WHERE Cats.id IN (?, ?)", (1, 2))
+            .unwrap()
+            .map(|row| row.unwrap().take::<String, _>(0).unwrap())
+            .collect();
+    assert_eq!(names.len(), 2);
+    assert!(names.iter().any(|s| s == "Bob"));
+    assert!(names.iter().any(|s| s == "Jane"));
+
+    // some lookups give empty results
+    let names: Vec<String> = conn.query("SELECT Cats.name FROM Cats WHERE Cats.id IN (1, 2, 3)")
+        .unwrap()
+        .map(|row| row.unwrap().take::<String, _>(0).unwrap())
+        .collect();
+    assert_eq!(names.len(), 2);
+    assert!(names.iter().any(|s| s == "Bob"));
+    assert!(names.iter().any(|s| s == "Jane"));
+
+    let names: Vec<String> = conn.prep_exec(
+        "SELECT Cats.name FROM Cats WHERE Cats.id IN (?, ?, ?)",
+        (1, 2, 3),
+    ).unwrap()
+        .map(|row| row.unwrap().take::<String, _>(0).unwrap())
+        .collect();
+    assert_eq!(names.len(), 2);
+    assert!(names.iter().any(|s| s == "Bob"));
+    assert!(names.iter().any(|s| s == "Jane"));
+
+    // also track another parameter
+    let names: Vec<String> = conn.query(
+        "SELECT Cats.name FROM Cats WHERE Cats.name = 'Bob' AND Cats.id IN (1, 2)",
+    ).unwrap()
+        .map(|row| row.unwrap().take::<String, _>(0).unwrap())
+        .collect();
+    assert_eq!(names.len(), 1);
+    assert!(names.iter().any(|s| s == "Bob"));
+
+    let names: Vec<String> = conn.prep_exec(
+        "SELECT Cats.name FROM Cats WHERE Cats.name = ? AND Cats.id IN (?, ?)",
+        ("Bob", 1, 2),
+    ).unwrap()
+        .map(|row| row.unwrap().take::<String, _>(0).unwrap())
+        .collect();
+    assert_eq!(names.len(), 1);
+    assert!(names.iter().any(|s| s == "Bob"));
+}
