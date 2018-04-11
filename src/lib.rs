@@ -2,6 +2,7 @@
 #![feature(try_from)]
 
 extern crate arccstr;
+extern crate chrono;
 extern crate distributary;
 extern crate msql_srv;
 extern crate nom_sql;
