@@ -123,11 +123,14 @@ where
                     })
                     /*.and_then(move |(t, story)| {
                         t.drop_exec(
-                            "SELECT `comments`.`upvotes`, `comments`.`downvotes` \
-                             FROM `comments` \
-                             WHERE `comments`.`story_id` = ? \
-                             AND (user_id <> ?)",
-                            (story, user),
+                            &format!(
+                                "SELECT `comments`.`upvotes`, `comments`.`downvotes` \
+                                 FROM `comments` \
+                                 WHERE `comments`.`story_id` = ? \
+                                 AND (user_id <> {})",
+                                user,
+                            ),
+                            (story,),
                         ).map(move |t| (t, story))
                     })*/
                     /*.and_then(move |(t, story)| {
