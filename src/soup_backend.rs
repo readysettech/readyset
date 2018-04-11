@@ -23,12 +23,57 @@ pub enum Cached {
     AdHoc(String),
 }
 
-pub struct SoupBackend {
+struct SoupBackendInner {
     soup: ControllerHandle<ZookeeperAuthority>,
-    log: slog::Logger,
-
     inputs: BTreeMap<String, Mutator>,
     outputs: BTreeMap<String, RemoteGetter>,
+}
+
+impl SoupBackendInner {
+    fn new(zk_addr: &str, deployment: &str, log: &slog::Logger) -> Self {
+        let mut zk_auth = ZookeeperAuthority::new(&format!("{}/{}", zk_addr, deployment));
+        zk_auth.log_with(log.clone());
+
+        debug!(log, "Connecting to Soup...",);
+        let mut ch = ControllerHandle::new(zk_auth);
+
+        let soup = SoupBackendInner {
+            inputs: ch.inputs()
+                .into_iter()
+                .map(|(n, _)| (n.clone(), ch.get_mutator(&n).unwrap()))
+                .collect::<BTreeMap<String, Mutator>>(),
+            outputs: ch.outputs()
+                .into_iter()
+                .map(|(n, _)| (n.clone(), ch.get_getter(&n).unwrap()))
+                .collect::<BTreeMap<String, RemoteGetter>>(),
+            soup: ch,
+        };
+
+        debug!(log, "Connected!");
+
+        soup
+    }
+
+    fn get_or_make_mutator<'a, 'b>(&'a mut self, table: &'b str) -> &'a mut Mutator {
+        let soup = &mut self.soup;
+        self.inputs.entry(table.to_owned()).or_insert_with(|| {
+            soup.get_mutator(table)
+                .expect(&format!("no table named {}", table))
+        })
+    }
+
+    fn get_or_make_getter<'a, 'b>(&'a mut self, view: &'b str) -> &'a mut RemoteGetter {
+        let soup = &mut self.soup;
+        self.outputs.entry(view.to_owned()).or_insert_with(|| {
+            soup.get_getter(view)
+                .expect(&format!("no view named '{}'", view))
+        })
+    }
+}
+
+pub struct SoupBackend {
+    inner: SoupBackendInner,
+    log: slog::Logger,
 
     table_schemas: Arc<Mutex<HashMap<String, CreateTableStatement>>>,
     auto_increments: Arc<Mutex<HashMap<String, u64>>>,
@@ -44,61 +89,19 @@ pub struct SoupBackend {
     tl_cached: HashMap<QueryID, Cached>,
 }
 
-fn get_or_make_mutator<'a, 'b>(
-    soup: &'b mut ControllerHandle<ZookeeperAuthority>,
-    inputs: &'a mut BTreeMap<String, Mutator>,
-    table: &'b str,
-) -> &'a mut Mutator {
-    inputs.entry(table.to_owned()).or_insert_with(|| {
-        soup.get_mutator(table)
-            .expect(&format!("no table named {}", table))
-    })
-}
-
-fn get_or_make_getter<'a, 'b>(
-    soup: &'b mut ControllerHandle<ZookeeperAuthority>,
-    outputs: &'a mut BTreeMap<String, RemoteGetter>,
-    view: &'b str,
-) -> &'a mut RemoteGetter {
-    outputs.entry(view.to_owned()).or_insert_with(|| {
-        soup.get_getter(view)
-            .expect(&format!("no view named '{}'", view))
-    })
-}
-
 impl SoupBackend {
     pub fn new(
         zk_addr: &str,
-        deployment_id: &str,
+        deployment: &str,
         schemas: Arc<Mutex<HashMap<String, CreateTableStatement>>>,
         auto_increments: Arc<Mutex<HashMap<String, u64>>>,
         query_cache: Arc<Mutex<HashMap<QueryID, Cached>>>,
         query_counter: Arc<sync::atomic::AtomicUsize>,
         log: slog::Logger,
     ) -> Self {
-        let mut zk_auth = ZookeeperAuthority::new(&format!("{}/{}", zk_addr, deployment_id));
-        zk_auth.log_with(log.clone());
-
-        debug!(log, "Connecting to Soup...",);
-        let mut ch = ControllerHandle::new(zk_auth);
-
-        let inputs = ch.inputs()
-            .into_iter()
-            .map(|(n, _)| (n.clone(), ch.get_mutator(&n).unwrap()))
-            .collect::<BTreeMap<String, Mutator>>();
-        let outputs = ch.outputs()
-            .into_iter()
-            .map(|(n, _)| (n.clone(), ch.get_getter(&n).unwrap()))
-            .collect::<BTreeMap<String, RemoteGetter>>();
-
-        debug!(log, "Connected!");
-
         SoupBackend {
-            soup: ch,
+            inner: SoupBackendInner::new(zk_addr, deployment, &log),
             log: log,
-
-            inputs: inputs,
-            outputs: outputs,
 
             table_schemas: schemas,
             auto_increments: auto_increments,
@@ -118,7 +121,7 @@ impl SoupBackend {
         q: nom_sql::CreateTableStatement,
         results: QueryResultWriter<W>,
     ) -> io::Result<()> {
-        match self.soup.extend_recipe(format!("{};", q)) {
+        match self.inner.soup.extend_recipe(format!("{};", q)) {
             Ok(_) => {
                 let mut ts_lock = self.table_schemas.lock().unwrap();
                 ts_lock.insert(q.table.name.clone(), q);
@@ -145,7 +148,7 @@ impl SoupBackend {
             .collect();
 
         // create a mutator if we don't have one for this table already
-        let mutator = get_or_make_mutator(&mut self.soup, &mut self.inputs, &q.table.name);
+        let mutator = self.inner.get_or_make_mutator(&q.table.name);
 
         match utils::flatten_conditional(&cond, &pkey) {
             None => results.completed(0, 0),
@@ -204,7 +207,10 @@ impl SoupBackend {
                         let qname = format!("q_{}", qc);
                         // first do a migration to add the query if it doesn't exist already
                         info!(self.log, "Adding ad-hoc query \"{}\" to Soup", q);
-                        match self.soup.extend_recipe(format!("QUERY {}: {};", qname, q)) {
+                        match self.inner
+                            .soup
+                            .extend_recipe(format!("QUERY {}: {};", qname, q))
+                        {
                             Ok(_) => {
                                 // and also in the global cache
                                 (qname, false)
@@ -298,8 +304,6 @@ impl SoupBackend {
         }
 
         // create a mutator if we don't have one for this table already
-        let mutator = get_or_make_mutator(&mut self.soup, &mut self.inputs, &q.table.name);
-
         match utils::flatten_conditional(&cond, &key_values) {
             None => results.completed(0, 0),
             Some(ref flattened) if flattened.len() == 0 => {
@@ -309,50 +313,50 @@ impl SoupBackend {
                 let qhash = utils::hash_query(&SqlQuery::Select(select_q.clone()));
 
                 // read rows, adding query if necessary
-                let getter = match self.tl_cached.get(&qhash) {
-                    None => {
-                        // not in thread-local cache, check global cache
-                        let mut gc = self.cached.lock().unwrap();
-                        let (qname, cached) =
-                            if let Some(&Cached::AdHoc(ref qname)) = gc.get(&qhash) {
-                                (qname.clone(), true)
+                let lookup_results = {
+                    let getter = match self.tl_cached.get(&qhash) {
+                        None => {
+                            // not in thread-local cache, check global cache
+                            let mut gc = self.cached.lock().unwrap();
+                            let (qname, cached) =
+                                if let Some(&Cached::AdHoc(ref qname)) = gc.get(&qhash) {
+                                    (qname.clone(), true)
+                                } else {
+                                    let qc = self.query_count
+                                        .fetch_add(1, sync::atomic::Ordering::SeqCst);
+                                    let qname = format!("q_{}", qc);
+
+                                    (qname, false)
+                                };
+
+                            if !cached {
+                                info!(
+                                    self.log,
+                                    "Adding ad-hoc query \"{}\" from update to Soup", select_q
+                                );
+                                match self.inner
+                                    .soup
+                                    .extend_recipe(format!("QUERY {}: {};", qname, select_q))
+                                {
+                                    Ok(_) => {
+                                        gc.insert(qhash, Cached::Prepared(qname.clone(), 0));
+                                        self.inner.get_or_make_getter(&qname)
+                                    }
+                                    Err(e) => {
+                                        error!(self.log, "update: {:?}", e);
+                                        return results.error(
+                                            msql_srv::ErrorKind::ER_UNKNOWN_ERROR,
+                                            format!("{:?}", e).as_bytes(),
+                                        );
+                                    }
+                                }
                             } else {
-                                let qc = self.query_count
-                                    .fetch_add(1, sync::atomic::Ordering::SeqCst);
-                                let qname = format!("q_{}", qc);
-
-                                (qname, false)
-                            };
-
-                        if !cached {
-                            info!(
-                                self.log,
-                                "Adding ad-hoc query \"{}\" from update to Soup", select_q
-                            );
-                            match self.soup
-                                .extend_recipe(format!("QUERY {}: {};", qname, select_q))
-                            {
-                                Ok(_) => {
-                                    gc.insert(qhash, Cached::Prepared(qname.clone(), 0));
-                                    get_or_make_getter(&mut self.soup, &mut self.outputs, &qname)
-                                }
-                                Err(e) => {
-                                    error!(self.log, "update: {:?}", e);
-                                    return results.error(
-                                        msql_srv::ErrorKind::ER_UNKNOWN_ERROR,
-                                        format!("{:?}", e).as_bytes(),
-                                    );
-                                }
+                                self.inner.get_or_make_getter(&qname)
                             }
-                        } else {
-                            get_or_make_getter(&mut self.soup, &mut self.outputs, &qname)
                         }
-                    }
-                    Some(&Cached::AdHoc(ref qname)) => {
-                        get_or_make_getter(&mut self.soup, &mut self.outputs, qname)
-                    }
-                    _ => unreachable!(),
-                };
+                        Some(&Cached::AdHoc(ref qname)) => self.inner.get_or_make_getter(&qname),
+                        _ => unreachable!(),
+                    };
 
                 let lookup_results = match getter.multi_lookup(flattened, true) {
                     Ok(r) => r,
@@ -412,32 +416,35 @@ impl SoupBackend {
                 }
 
                 // Then we want to delete the old rows:
-                let mut new_rows = vec![];
-                for (old_row, new_row) in changed_rows.into_iter() {
-                    new_rows.push(new_row);
-                    let key: Vec<_> = key_indices.iter().map(|i| old_row[*i].clone()).collect();
-                    match mutator.delete(key) {
-                        Ok(..) => {}
+                {
+                    let mutator = self.inner.get_or_make_mutator(&q.table.name);
+                    let mut new_rows = vec![];
+                    for (old_row, new_row) in changed_rows.into_iter() {
+                        new_rows.push(new_row);
+                        let key: Vec<_> = key_indices.iter().map(|i| old_row[*i].clone()).collect();
+                        match mutator.delete(key) {
+                            Ok(..) => {}
+                            Err(e) => {
+                                error!(self.log, "update: {:?}", e);
+                                return results.error(
+                                    msql_srv::ErrorKind::ER_UNKNOWN_ERROR,
+                                    format!("{:?}", e).as_bytes(),
+                                );
+                            }
+                        };
+                    }
+
+                    // And finally, insert the updated rows:
+                    let count = new_rows.len() as u64;
+                    match mutator.multi_put(new_rows) {
+                        Ok(..) => results.completed(count, 0),
                         Err(e) => {
                             error!(self.log, "update: {:?}", e);
-                            return results.error(
+                            results.error(
                                 msql_srv::ErrorKind::ER_UNKNOWN_ERROR,
                                 format!("{:?}", e).as_bytes(),
-                            );
+                            )
                         }
-                    };
-                }
-
-                // And finally, insert the updated rows:
-                let count = new_rows.len() as u64;
-                match mutator.multi_put(new_rows) {
-                    Ok(..) => results.completed(count, 0),
-                    Err(e) => {
-                        error!(self.log, "update: {:?}", e);
-                        results.error(
-                            msql_srv::ErrorKind::ER_UNKNOWN_ERROR,
-                            format!("{:?}", e).as_bytes(),
-                        )
                     }
                 }
             }
@@ -472,7 +479,7 @@ impl SoupBackend {
         results: QueryResultWriter<W>,
     ) -> io::Result<()> {
         // create a mutator if we don't have one for this table already
-        let putter = get_or_make_mutator(&mut self.soup, &mut self.inputs, table);
+        let putter = self.inner.get_or_make_mutator(table);
         let schema: Vec<String> = putter.columns().to_vec();
 
         // handle auto increment
@@ -570,7 +577,7 @@ impl SoupBackend {
         // create a getter if we don't have one for this query already
         // TODO(malte): may need to make one anyway if the query has changed w.r.t. an
         // earlier one of the same name
-        let getter = get_or_make_getter(&mut self.soup, &mut self.outputs, &qname);
+        let getter = self.inner.get_or_make_getter(&qname);
 
         // if there is no key specified, we "execute" the query via a bogokey lookup
         let (key, is_bogo) = match key {
@@ -686,7 +693,8 @@ impl<W: io::Write> MysqlShim<W> for SoupBackend {
                                         self.log,
                                         "Adding parameterized query \"{}\" to Soup", query
                                     );
-                                    match self.soup
+                                    match self.inner
+                                        .soup
                                         .extend_recipe(format!("QUERY {}: {};", qname, q))
                                     {
                                         Ok(_) => {

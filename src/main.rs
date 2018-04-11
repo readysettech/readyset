@@ -63,9 +63,9 @@ fn main() {
         .arg(Arg::with_name("verbose").long("verbose").short("v"))
         .get_matches();
 
-    let deployment = matches.value_of("deployment").unwrap();
+    let deployment = matches.value_of("deployment").unwrap().to_owned();
     let port = value_t_or_exit!(matches, "port", u16);
-    let zk_addr = matches.value_of("zk_addr").unwrap();
+    let zk_addr = matches.value_of("zk_addr").unwrap().to_owned();
 
     let listener = net::TcpListener::bind(format!("127.0.0.1:{}", port)).unwrap();
 
@@ -84,9 +84,9 @@ fn main() {
     let mut threads = Vec::new();
     let mut i = 0;
     while let Ok((s, _)) = listener.accept() {
-        let soup = SoupBackend::new(
-            zk_addr,
-            deployment,
+        let builder = thread::Builder::new().name(format!("handler{}", i));
+
+        let (schemas, auto_increments, query_cache, query_counter, log) = (
             schemas.clone(),
             auto_increments.clone(),
             query_cache.clone(),
@@ -94,9 +94,20 @@ fn main() {
             log.clone(),
         );
 
-        let builder = thread::Builder::new().name(format!("handler{}", i));
+        let zk_addr = zk_addr.clone();
+        let deployment = deployment.clone();
+
         let jh = builder
             .spawn(move || {
+                let mut soup = SoupBackend::new(
+                    &zk_addr,
+                    &deployment,
+                    schemas,
+                    auto_increments,
+                    query_cache,
+                    query_counter,
+                    log,
+                );
                 MysqlIntermediary::run_on_tcp(soup, s).unwrap();
             })
             .unwrap();
