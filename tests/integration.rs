@@ -18,10 +18,10 @@ use std::thread;
 
 use distributary::{ControllerBuilder, ZookeeperAuthority};
 use msql_srv::MysqlIntermediary;
-use nom_sql::CreateTableStatement;
+use nom_sql::{CreateTableStatement, SelectStatement};
 use zookeeper::{WatchedEvent, ZooKeeper, ZooKeeperExt};
 
-use mysoupql::{Cached, QueryID, SoupBackend};
+use mysoupql::SoupBackend;
 
 // Appends a unique ID to deployment strings, to avoid collisions between tests.
 struct Deployment {
@@ -94,7 +94,7 @@ fn setup(deployment: &Deployment) -> mysql::Opts {
         Arc::new(Mutex::new(HashMap::default()));
     let auto_increments: Arc<Mutex<HashMap<String, u64>>> =
         Arc::new(Mutex::new(HashMap::default()));
-    let query_cache: Arc<Mutex<HashMap<QueryID, Cached>>> =
+    let query_cache: Arc<Mutex<HashMap<SelectStatement, String>>> =
         Arc::new(Mutex::new(HashMap::default()));
     let listener = TcpListener::bind("127.0.0.1:0").unwrap();
     let addr = listener.local_addr().unwrap();

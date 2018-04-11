@@ -1,4 +1,5 @@
 #![feature(box_syntax, box_patterns)]
+#![feature(nll)]
 #![feature(try_from)]
 
 extern crate arccstr;
@@ -23,15 +24,14 @@ mod soup_backend;
 mod schema;
 
 use msql_srv::MysqlIntermediary;
-use nom_sql::CreateTableStatement;
+use nom_sql::{CreateTableStatement, SelectStatement};
 use std::collections::HashMap;
 use std::net;
 use std::sync::{Arc, Mutex};
 use std::sync::atomic::AtomicUsize;
 use std::thread;
 
-use soup_backend::{Cached, SoupBackend};
-use utils::QueryID;
+use soup_backend::SoupBackend;
 
 fn main() {
     use clap::{App, Arg};
@@ -79,7 +79,7 @@ fn main() {
         Arc::new(Mutex::new(HashMap::default()));
     let auto_increments: Arc<Mutex<HashMap<String, u64>>> =
         Arc::new(Mutex::new(HashMap::default()));
-    let query_cache: Arc<Mutex<HashMap<QueryID, Cached>>> =
+    let query_cache: Arc<Mutex<HashMap<SelectStatement, String>>> =
         Arc::new(Mutex::new(HashMap::default()));
 
     let mut threads = Vec::new();

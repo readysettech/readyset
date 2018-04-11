@@ -26,17 +26,6 @@ lazy_static! {
     ];
 }
 
-pub type QueryID = u64;
-
-pub(crate) fn hash_query(q: &SqlQuery) -> QueryID {
-    use std::collections::hash_map::DefaultHasher;
-    use std::hash::{Hash, Hasher};
-
-    let mut h = DefaultHasher::new();
-    q.hash(&mut h);
-    h.finish()
-}
-
 pub(crate) fn sanitize_query(query: &str) -> String {
     let query = Regex::new(r"(?s)/\*.*\*/").unwrap().replace_all(query, "");
     let query = Regex::new(r"--.*\n").unwrap().replace_all(&query, "\n");
