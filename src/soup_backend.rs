@@ -15,6 +15,13 @@ use rewrite;
 use schema::{schema_for_column, schema_for_insert, schema_for_select};
 use utils;
 
+#[derive(Clone)]
+enum PreparedStatement {
+    Select(String, nom_sql::SelectStatement, Option<(usize, usize)>),
+    Insert(nom_sql::InsertStatement),
+    Update(String, String, nom_sql::UpdateStatement),
+}
+
 struct SoupBackendInner {
     soup: ControllerHandle<ZookeeperAuthority>,
     inputs: BTreeMap<String, Mutator>,
@@ -72,7 +79,7 @@ pub struct SoupBackend {
 
     query_count: Arc<sync::atomic::AtomicUsize>,
 
-    prepared: HashMap<u32, (String, nom_sql::SqlQuery, Option<(usize, usize)>)>,
+    prepared: HashMap<u32, PreparedStatement>,
     prepared_count: u32,
 
     /// global cache of view endpoints and prepared statements
@@ -481,14 +488,8 @@ impl SoupBackend {
 
         // register a new prepared statement
         self.prepared_count += 1;
-        self.prepared.insert(
-            self.prepared_count,
-            (
-                format!("{}_{}", q.table.name.to_owned(), self.prepared_count),
-                sql_q.clone(),
-                None,
-            ),
-        );
+        self.prepared
+            .insert(self.prepared_count, PreparedStatement::Insert(q.clone()));
 
         // nothing more to do for an insert
         // TODO(malte): proactively get mutator?
@@ -555,9 +556,9 @@ impl SoupBackend {
                 self.prepared_count += 1;
                 self.prepared.insert(
                     self.prepared_count,
-                    (
+                    PreparedStatement::Select(
                         qname.clone(),
-                        sql_q.clone(),
+                        q.clone(),
                         rewritten.map(|(a, b)| (a, b.len())),
                     ),
                 );
@@ -570,9 +571,9 @@ impl SoupBackend {
                 self.prepared_count += 1;
                 self.prepared.insert(
                     self.prepared_count,
-                    (
+                    PreparedStatement::Select(
                         qname.clone(),
-                        sql_q.clone(),
+                        q.clone(),
                         rewritten.map(|(a, b)| (a, b.len())),
                     ),
                 );
@@ -835,58 +836,61 @@ impl<W: io::Write> MysqlShim<W> for SoupBackend {
     ) -> io::Result<()> {
         // TODO(malte): unfortunate clone here, but we can't call execute_select(&mut self) if we
         // have self.prepared borrowed
-        if let Some((qname, q, rewritten)) = self.prepared.get(&id).map(|e| e.clone()) {
-            match q {
-                nom_sql::SqlQuery::Select(ref q) => {
-                    let key = match rewritten {
-                        Some((first_rewritten, nrewritten)) => {
-                            // this is a little tricky
-                            // the user is giving us some params [a, b, c, d]
-                            // for the query WHERE x = ? AND y IN (?, ?) AND z = ?
-                            // that we rewrote to WHERE x = ? AND y = ? AND z = ?
-                            // so we need to turn that into the keys:
-                            // [[a, b, d], [a, c, d]]
-                            let params: Vec<_> = params
-                                .into_iter()
-                                .map(|pv| pv.value.to_datatype())
-                                .collect::<Vec<_>>();
-                            (0..nrewritten)
-                                .map(|poffset| {
-                                    params
-                                        .iter()
-                                        .take(first_rewritten)
-                                        .chain(
-                                            params.iter().skip(first_rewritten + poffset).take(1),
-                                        )
-                                        .chain(params.iter().skip(first_rewritten + nrewritten))
-                                        .cloned()
-                                        .collect()
-                                })
-                                .collect()
-                        }
-                        None => vec![
-                            params
-                                .into_iter()
-                                .map(|pv| pv.value.to_datatype())
-                                .collect::<Vec<_>>(),
-                        ],
-                    };
-                    self.execute_select(&qname, &q, &key[..], results)
+        let prep: PreparedStatement = {
+            match self.prepared.get(&id) {
+                Some(e) => e.clone(),
+                None => {
+                    return results.error(
+                        msql_srv::ErrorKind::ER_UNKNOWN_ERROR,
+                        "non-existent statement".as_bytes(),
+                    )
                 }
-                nom_sql::SqlQuery::Insert(ref q) => {
-                    let values: Vec<DataType> = params
-                        .into_iter()
-                        .map(|pv| pv.value.to_datatype())
-                        .collect();
-                    self.execute_insert(&q, values, results)
-                }
-                _ => unimplemented!(),
             }
-        } else {
-            results.error(
-                msql_srv::ErrorKind::ER_UNKNOWN_ERROR,
-                "non-existent statement".as_bytes(),
-            )
+        };
+
+        match prep {
+            PreparedStatement::Select(ref qname, ref q, ref rewritten) => {
+                let key = match rewritten {
+                    Some((first_rewritten, nrewritten)) => {
+                        // this is a little tricky
+                        // the user is giving us some params [a, b, c, d]
+                        // for the query WHERE x = ? AND y IN (?, ?) AND z = ?
+                        // that we rewrote to WHERE x = ? AND y = ? AND z = ?
+                        // so we need to turn that into the keys:
+                        // [[a, b, d], [a, c, d]]
+                        let params: Vec<_> = params
+                            .into_iter()
+                            .map(|pv| pv.value.to_datatype())
+                            .collect::<Vec<_>>();
+                        (0..*nrewritten)
+                            .map(|poffset| {
+                                params
+                                    .iter()
+                                    .take(*first_rewritten)
+                                    .chain(params.iter().skip(first_rewritten + poffset).take(1))
+                                    .chain(params.iter().skip(first_rewritten + nrewritten))
+                                    .cloned()
+                                    .collect()
+                            })
+                            .collect()
+                    }
+                    None => vec![
+                        params
+                            .into_iter()
+                            .map(|pv| pv.value.to_datatype())
+                            .collect::<Vec<_>>(),
+                    ],
+                };
+                self.execute_select(&qname, &q, &key[..], results)
+            }
+            PreparedStatement::Insert(ref q) => {
+                let values: Vec<DataType> = params
+                    .into_iter()
+                    .map(|pv| pv.value.to_datatype())
+                    .collect();
+                self.execute_insert(&q, values, results)
+            }
+            _ => unimplemented!(),
         }
     }
 
