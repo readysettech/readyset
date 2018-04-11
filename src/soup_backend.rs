@@ -381,7 +381,7 @@ impl SoupBackend {
                 let changed_rows: Vec<(Vec<DataType>, Vec<DataType>)> = lookup_results
                     .into_iter()
                     .enumerate()
-                    .map(|(i, result)| {
+                    .map(|(_i, result)| {
                         result
                             .into_iter()
                             .filter_map(|row| {
