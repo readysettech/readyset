@@ -18,17 +18,17 @@ extern crate slog;
 extern crate regex;
 
 mod convert;
-mod utils;
 mod rewrite;
-mod soup_backend;
 mod schema;
+mod soup_backend;
+mod utils;
 
 use msql_srv::MysqlIntermediary;
 use nom_sql::{CreateTableStatement, SelectStatement};
 use std::collections::HashMap;
 use std::net;
-use std::sync::{Arc, Mutex};
 use std::sync::atomic::AtomicUsize;
+use std::sync::{Arc, Mutex};
 use std::thread;
 
 use soup_backend::SoupBackend;
