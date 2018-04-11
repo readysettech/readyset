@@ -34,14 +34,12 @@ where
                         .collect::<Vec<_>>()
                         .join(",");
                     c.query(&format!(
-                        "SELECT  `stories`.* FROM `stories` \
+                        "SELECT  `stories`.*, \
+                         `stories`.`upvotes` - `stories`.`downvotes` AS saldo \
+                         FROM `stories` \
                          WHERE `stories`.`merged_story_id` IS NULL \
                          AND `stories`.`is_expired` = 0 \
-                         AND ((\
-                         CAST(upvotes AS signed) \
-                         - \
-                         CAST(downvotes AS signed))\
-                         >= 0) \
+                         AND (saldo >= 0) \
                          AND (`stories`.`id` NOT IN \
                          (SELECT `hidden_stories`.`story_id` \
                          FROM `hidden_stories` \
@@ -69,10 +67,12 @@ where
         None => Either::B(c.and_then(|c| {
             // public front page
             c.query(
-                "SELECT  `stories`.* FROM `stories` \
+                "SELECT  `stories`.*, \
+                 `stories`.`upvotes` - `stories`.`downvotes` AS saldo \
+                 FROM `stories` \
                  WHERE `stories`.`merged_story_id` IS NULL \
                  AND `stories`.`is_expired` = 0 \
-                 AND ((CAST(upvotes AS signed) - CAST(downvotes AS signed)) >= 0) \
+                 AND (saldo >= 0) \
                  ORDER BY hotness LIMIT 26 OFFSET 0",
             )
         })),

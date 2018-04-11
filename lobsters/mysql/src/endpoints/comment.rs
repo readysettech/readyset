@@ -161,11 +161,12 @@ where
                     .and_then(move |t| {
                         // why are these ordered?
                         t.prep_exec(
-                            "SELECT `comments`.* \
+                            "SELECT `comments`.*, \
+                             `comments`.`upvotes` - `comments`.`downvotes` AS saldo \
                              FROM `comments` \
                              WHERE `comments`.`story_id` = ? \
                              ORDER BY \
-                             (upvotes - downvotes) < 0 ASC, \
+                             saldo ASC, \
                              confidence DESC",
                             (story,),
                         ).and_then(|q| q.reduce_and_drop(0, |rows, _| rows + 1))

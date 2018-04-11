@@ -89,11 +89,12 @@ where
             })
             .and_then(|(c, story)| {
                 c.prep_exec(
-                    "SELECT `comments`.* \
+                    "SELECT `comments`.*, \
+                     `comments`.`upvotes` - `comments`.`downvotes` AS saldo \
                      FROM `comments` \
                      WHERE `comments`.`story_id` = ? \
                      ORDER BY \
-                     (CAST(upvotes AS signed) - CAST(downvotes AS signed)) < 0 ASC, \
+                     saldo ASC, \
                      confidence DESC",
                     (story,),
                 ).map(move |comments| (comments, story))
