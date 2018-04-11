@@ -121,7 +121,7 @@ where
                             (user, story, 1),
                         ).map(move |t| (t, story))
                     })
-                    .and_then(move |(t, story)| {
+                    /*.and_then(move |(t, story)| {
                         t.drop_exec(
                             "SELECT `comments`.`upvotes`, `comments`.`downvotes` \
                              FROM `comments` \
@@ -129,8 +129,8 @@ where
                              AND (user_id <> ?)",
                             (story, user),
                         ).map(move |t| (t, story))
-                    })
-                    .and_then(move |(t, story)| {
+                    })*/
+                    /*.and_then(move |(t, story)| {
                         // why oh why is story hotness *updated* here?!
                         t.drop_exec(
                             &format!(
@@ -141,8 +141,8 @@ where
                             ),
                             (story,),
                         )
-                    })
-                    .and_then(|t| t.commit())
+                    })*/
+                    .and_then(|t| t.0.commit())
             })
             .map(|c| (c, false)),
     )
