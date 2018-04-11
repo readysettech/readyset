@@ -41,14 +41,14 @@ where
                     Some(uid) => {
                         // keep track of when the user last saw this story
                         // NOTE: *technically* the update only happens at the end...
-                        Either::B(c.first::<_, my::Row>(&format!(
+                        Either::B(c.first_exec::<_, _, my::Row>(
                             "SELECT  `read_ribbons`.* \
                              FROM `read_ribbons` \
-                             WHERE `read_ribbons`.`user_id` = {} \
-                             AND `read_ribbons`.`story_id` = {} \
+                             WHERE `read_ribbons`.`user_id` = ? \
+                             AND `read_ribbons`.`story_id` = ? \
                              ORDER BY `read_ribbons`.`id` ASC LIMIT 1",
-                            uid, story
-                        )).and_then(move |(c, rr)| {
+                            (&uid, &story),
+                        ).and_then(move |(c, rr)| {
                             let now = chrono::Local::now().naive_local();
                             match rr {
                                 None => Either::A(c.drop_exec(
