@@ -660,18 +660,21 @@ impl<W: io::Write> MysqlShim<W> for SoupBackend {
                 let sql_q = rewrite::expand_stars(sql_q, table_schemas);
                 match sql_q {
                     mut sql_q @ nom_sql::SqlQuery::Select(_) => {
+                        // extract parameter columns
+                        // note that we have to do this *before* collapsing WHERE IN, otherwise the
+                        // client will be confused about the number of parameters it's supposed to
+                        // give.
+                        let params: Vec<msql_srv::Column> = utils::get_parameter_columns(&sql_q)
+                            .into_iter()
+                            .map(|c| schema_for_column(table_schemas, c))
+                            .collect();
+
                         let rewritten = rewrite::collapse_where_in(&mut sql_q, false);
                         let q = if let nom_sql::SqlQuery::Select(ref q) = sql_q {
                             q
                         } else {
                             unreachable!();
                         };
-
-                        // extract parameter columns
-                        let params: Vec<msql_srv::Column> = utils::get_parameter_columns(&sql_q)
-                            .into_iter()
-                            .map(|c| schema_for_column(table_schemas, c))
-                            .collect();
 
                         // extract result schema
                         let schema = schema_for_select(table_schemas, &q);
