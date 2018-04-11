@@ -3,7 +3,7 @@ use distributary::{ControllerHandle, DataType, Mutator, RemoteGetter, ZookeeperA
 use msql_srv::{self, *};
 use nom_sql::{self, ColumnConstraint, ConditionBase, ConditionExpression, ConditionTree,
               CreateTableStatement, FieldExpression, InsertStatement, Literal, Operator,
-              SelectStatement, SqlQuery};
+              SelectStatement};
 
 use slog;
 use std::collections::{BTreeMap, HashMap};
@@ -11,17 +11,9 @@ use std::io;
 use std::sync::{self, Arc, Mutex};
 
 use convert::ToDataType;
-use utils::{self, QueryID};
 use rewrite;
 use schema::{schema_for_column, schema_for_insert, schema_for_select};
-
-/// Differentiate between different kinds of cached queries.
-pub enum Cached {
-    /// Prepared statement ID
-    Prepared(String, u32),
-    /// Name of ad-hoc query view
-    AdHoc(String),
-}
+use utils;
 
 struct SoupBackendInner {
     soup: ControllerHandle<ZookeeperAuthority>,
@@ -84,9 +76,9 @@ pub struct SoupBackend {
     prepared_count: u32,
 
     /// global cache of view endpoints and prepared statements
-    cached: Arc<Mutex<HashMap<QueryID, Cached>>>,
+    cached: Arc<Mutex<HashMap<SelectStatement, String>>>,
     /// thread-local version of `cached` (consulted first)
-    tl_cached: HashMap<QueryID, Cached>,
+    tl_cached: HashMap<SelectStatement, String>,
 }
 
 impl SoupBackend {
@@ -95,7 +87,7 @@ impl SoupBackend {
         deployment: &str,
         schemas: Arc<Mutex<HashMap<String, CreateTableStatement>>>,
         auto_increments: Arc<Mutex<HashMap<String, u64>>>,
-        query_cache: Arc<Mutex<HashMap<QueryID, Cached>>>,
+        query_cache: Arc<Mutex<HashMap<SelectStatement, String>>>,
         query_counter: Arc<sync::atomic::AtomicUsize>,
         log: slog::Logger,
     ) -> Self {
@@ -194,14 +186,11 @@ impl SoupBackend {
         use_params: Vec<Literal>,
         results: QueryResultWriter<W>,
     ) -> io::Result<()> {
-        // TODO(malte): ewww clone
-        let qhash = utils::hash_query(&SqlQuery::Select(q.clone()));
-
-        let (qname, locally_cached) = match self.tl_cached.get(&qhash) {
+        let (qname, locally_cached) = match self.tl_cached.get(&q) {
             None => {
                 // consult global cache
                 let mut gc = self.cached.lock().unwrap();
-                let (qname, cached) = match gc.get(&qhash) {
+                let (qname, cached) = match gc.get(&q) {
                     None => {
                         let qc = self.query_count
                             .fetch_add(1, sync::atomic::Ordering::SeqCst);
@@ -219,21 +208,19 @@ impl SoupBackend {
                             Err(e) => return Err(io::Error::new(io::ErrorKind::Other, e)),
                         }
                     }
-                    Some(&Cached::AdHoc(ref qname)) => (qname.clone(), false),
-                    Some(&Cached::Prepared(_, _)) => unreachable!(),
+                    Some(qname) => (qname.clone(), false),
                 };
                 if !cached {
-                    gc.insert(qhash, Cached::AdHoc(qname.clone()));
+                    gc.insert(q.clone(), qname.clone());
                 }
                 (qname, false)
             }
-            Some(&Cached::AdHoc(ref qname)) => (qname.clone(), true),
-            Some(&Cached::Prepared(_, _)) => unreachable!(),
+            Some(qname) => (qname.clone(), true),
         };
 
         if !locally_cached {
             // remember this query for the future, so we avoid unnecessary migrations
-            self.tl_cached.insert(qhash, Cached::AdHoc(qname.clone()));
+            self.tl_cached.insert(q.clone(), qname.clone());
         }
 
         let keys: Vec<_> = use_params
@@ -315,24 +302,21 @@ impl SoupBackend {
                 panic!("UPDATE only supports WHERE-clauses on primary keys");
             }
             Some(flattened) => {
-                let qhash = utils::hash_query(&SqlQuery::Select(select_q.clone()));
-
                 // read rows, adding query if necessary
                 let lookup_results = {
-                    let getter = match self.tl_cached.get(&qhash) {
+                    let getter = match self.tl_cached.get(&select_q) {
                         None => {
                             // not in thread-local cache, check global cache
                             let mut gc = self.cached.lock().unwrap();
-                            let (qname, cached) =
-                                if let Some(&Cached::AdHoc(ref qname)) = gc.get(&qhash) {
-                                    (qname.clone(), true)
-                                } else {
-                                    let qc = self.query_count
-                                        .fetch_add(1, sync::atomic::Ordering::SeqCst);
-                                    let qname = format!("q_{}", qc);
+                            let (qname, cached) = if let Some(qname) = gc.get(&select_q) {
+                                (qname.clone(), true)
+                            } else {
+                                let qc = self.query_count
+                                    .fetch_add(1, sync::atomic::Ordering::SeqCst);
+                                let qname = format!("q_{}", qc);
 
-                                    (qname, false)
-                                };
+                                (qname, false)
+                            };
 
                             if !cached {
                                 info!(
@@ -344,7 +328,7 @@ impl SoupBackend {
                                     .extend_recipe(format!("QUERY {}: {};", qname, select_q))
                                 {
                                     Ok(_) => {
-                                        gc.insert(qhash, Cached::Prepared(qname.clone(), 0));
+                                        gc.insert(select_q.clone(), qname.clone());
                                         self.inner.get_or_make_getter(&qname)
                                     }
                                     Err(e) => {
@@ -359,8 +343,7 @@ impl SoupBackend {
                                 self.inner.get_or_make_getter(&qname)
                             }
                         }
-                        Some(&Cached::AdHoc(ref qname)) => self.inner.get_or_make_getter(&qname),
-                        _ => unreachable!(),
+                        Some(qname) => self.inner.get_or_make_getter(&qname),
                     };
 
                     match getter.multi_lookup(flattened, true) {
@@ -694,22 +677,19 @@ impl<W: io::Write> MysqlShim<W> for SoupBackend {
                         let schema = schema_for_select(table_schemas, &q);
 
                         // check if we already have this query prepared
-                        let qhash = utils::hash_query(&SqlQuery::Select(q.clone()));
-
-                        match self.tl_cached.get(&qhash) {
+                        match self.tl_cached.get(q) {
                             None => {
                                 // check global cache
                                 let mut gc = self.cached.lock().unwrap();
-                                let (qname, cached) =
-                                    if let Some(&Cached::Prepared(ref qname, _)) = gc.get(&qhash) {
-                                        (qname.clone(), true)
-                                    } else {
-                                        let qc = self.query_count
-                                            .fetch_add(1, sync::atomic::Ordering::SeqCst);
-                                        let qname = format!("q_{}", qc);
+                                let (qname, cached) = if let Some(qname) = gc.get(q) {
+                                    (qname.clone(), true)
+                                } else {
+                                    let qc = self.query_count
+                                        .fetch_add(1, sync::atomic::Ordering::SeqCst);
+                                    let qname = format!("q_{}", qc);
 
-                                        (qname, false)
-                                    };
+                                    (qname, false)
+                                };
 
                                 if !cached {
                                     // add the query to Soup
@@ -723,7 +703,7 @@ impl<W: io::Write> MysqlShim<W> for SoupBackend {
                                     {
                                         Ok(_) => {
                                             // add to global cache
-                                            gc.insert(qhash, Cached::Prepared(qname.clone(), 0));
+                                            gc.insert(q.clone(), qname.clone());
                                         }
                                         Err(e) => {
                                             return Err(io::Error::new(io::ErrorKind::Other, e))
@@ -740,8 +720,7 @@ impl<W: io::Write> MysqlShim<W> for SoupBackend {
                                         rewritten.map(|(a, b)| (a, b.len())),
                                     ),
                                 );
-                                self.tl_cached
-                                    .insert(qhash, Cached::Prepared(qname, self.prepared_count));
+                                self.tl_cached.insert(q.clone(), qname);
                                 // TODO(malte): proactively get getter, to avoid &mut ref on exec?
                                 info.reply(
                                     self.prepared_count,
@@ -749,11 +728,25 @@ impl<W: io::Write> MysqlShim<W> for SoupBackend {
                                     schema.as_slice(),
                                 )
                             }
-                            Some(&Cached::Prepared(_, id)) => {
-                                // reuse existing prepared statement in this thread
-                                info.reply(id, params.as_slice(), schema.as_slice())
+                            Some(qname) => {
+                                // register a new prepared statement without doing a migration
+                                self.prepared_count += 1;
+                                self.prepared.insert(
+                                    self.prepared_count,
+                                    (
+                                        qname.clone(),
+                                        sql_q.clone(),
+                                        rewritten.map(|(a, b)| (a, b.len())),
+                                    ),
+                                );
+                                self.tl_cached.insert(q.clone(), qname.clone());
+                                // TODO(malte): proactively get getter, to avoid &mut ref on exec?
+                                info.reply(
+                                    self.prepared_count,
+                                    params.as_slice(),
+                                    schema.as_slice(),
+                                )
                             }
-                            Some(&Cached::AdHoc(_)) => unreachable!(),
                         }
                     }
                     nom_sql::SqlQuery::Insert(ref q) => {

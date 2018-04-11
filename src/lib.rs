@@ -1,4 +1,5 @@
 #![feature(box_syntax, box_patterns)]
+#![feature(nll)]
 #![feature(try_from)]
 
 extern crate arccstr;
@@ -19,5 +20,4 @@ mod schema;
 mod soup_backend;
 mod utils;
 
-pub use soup_backend::{Cached, SoupBackend};
-pub use utils::QueryID;
+pub use soup_backend::SoupBackend;
