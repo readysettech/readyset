@@ -1,5 +1,6 @@
 use std::borrow::Cow;
 use std::collections::HashMap;
+use std::mem;
 use std::rc::Rc;
 
 use ::*;
@@ -47,7 +48,7 @@ pub trait State: SizeOf + Send {
 }
 
 // Index in PersistentState.indices
-type KeyIndex = u64;
+type KeyIndex = u32;
 
 // Sequence number in PersistentIndex
 type KeySeq = u64;
@@ -131,7 +132,7 @@ impl State for PersistentState {
             .iter()
             .position(|index| &index.columns[..] == columns)
             .expect("could not find index for columns");
-        let prefix = Self::serialize_prefix(index as u64, &key_values);
+        let prefix = Self::serialize_prefix(index as u32, &key_values);
         let db = self.db.as_ref().unwrap();
         let values = db.prefix_iterator(&prefix);
 
@@ -329,8 +330,8 @@ impl PersistentState {
     // out, but then we'd fail point 1 instead. For now we'll throw out the 8 last bytes, but check
     // to make sure that we haven't already done so first.
     fn transform_fn(key: &[u8]) -> Vec<u8> {
-        let start = 8;
-        let end = key.len() - 8;
+        let start = mem::size_of::<KeyIndex>();
+        let end = key.len() - mem::size_of::<KeySeq>();
 
         // TODO(ekmartin): It'd be nice to find a better way of doing this.
         // Right now we're trying to deserialize to see if we've already truncated this key,
@@ -400,7 +401,7 @@ impl PersistentState {
             // Construct a key with the index values, and serialize it with bincode:
             let key = index.columns.iter().map(|i| &r[*i]).collect::<Vec<_>>();
             // Add 1 to i since we're slicing self.indices by 1..:
-            let serialized_key = Self::serialize_key((i + 1) as u64, &key, index.seq);
+            let serialized_key = Self::serialize_key((i + 1) as u32, &key, index.seq);
             batch.put(&serialized_key, &serialized_pk).unwrap();
         }
     }
@@ -409,7 +410,7 @@ impl PersistentState {
         let db = self.db.as_ref().unwrap();
         for (i, index) in self.indices.iter().enumerate() {
             let index_row = index.columns.iter().map(|i| &r[*i]).collect::<Vec<_>>();
-            let serialized_key = Self::serialize_key(i as u64, &index_row, 0u64);
+            let serialized_key = Self::serialize_key(i as u32, &index_row, 0u64);
             for (key, _value) in db.prefix_iterator(&serialized_key) {
                 batch.delete(&key).unwrap();
             }
