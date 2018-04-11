@@ -200,8 +200,8 @@ where
                              `comments`.`downvotes` \
                              FROM `comments` \
                              WHERE `comments`.`story_id` = ? \
-                             AND user_id <> ?",
-                            (story, author),
+                             AND user_id <> 1",
+                            (story,),
                         )
                     })
                     .and_then(move |t| {
