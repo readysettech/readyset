@@ -99,7 +99,7 @@ fn main() {
 
         let jh = builder
             .spawn(move || {
-                let mut soup = SoupBackend::new(
+                let soup = SoupBackend::new(
                     &zk_addr,
                     &deployment,
                     schemas,
