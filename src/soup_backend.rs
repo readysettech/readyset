@@ -358,14 +358,15 @@ impl SoupBackend {
                         _ => unreachable!(),
                     };
 
-                let lookup_results = match getter.multi_lookup(flattened, true) {
-                    Ok(r) => r,
-                    Err(e) => {
-                        error!(self.log, "update: {:?}", e);
-                        return results.error(
-                            msql_srv::ErrorKind::ER_UNKNOWN_ERROR,
-                            format!("{:?}", e).as_bytes(),
-                        );
+                    match getter.multi_lookup(flattened, true) {
+                        Ok(r) => r,
+                        Err(e) => {
+                            error!(self.log, "update: {:?}", e);
+                            return results.error(
+                                msql_srv::ErrorKind::ER_UNKNOWN_ERROR,
+                                format!("{:?}", e).as_bytes(),
+                            );
+                        }
                     }
                 };
 
