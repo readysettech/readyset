@@ -11,7 +11,7 @@ use drop::{drop_table, DropTableStatement};
 use update::{updating, UpdateStatement};
 use set::{set, SetStatement};
 
-#[derive(Clone, Debug, Hash, PartialEq, Serialize, Deserialize)]
+#[derive(Clone, Debug, Eq, Hash, PartialEq, Serialize, Deserialize)]
 pub enum SqlQuery {
     CreateTable(CreateTableStatement),
     Insert(InsertStatement),

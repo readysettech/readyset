@@ -5,7 +5,7 @@ use common::opt_multispace;
 use select::{limit_clause, nested_selection, LimitClause, SelectStatement};
 use order::{order_clause, OrderClause};
 
-#[derive(Clone, Debug, Hash, PartialEq, Deserialize, Serialize)]
+#[derive(Clone, Debug, Eq, Hash, PartialEq, Deserialize, Serialize)]
 pub enum CompoundSelectOperator {
     Union,
     DistinctUnion,
@@ -13,7 +13,7 @@ pub enum CompoundSelectOperator {
     Except,
 }
 
-#[derive(Clone, Debug, Hash, PartialEq, Deserialize, Serialize)]
+#[derive(Clone, Debug, Eq, Hash, PartialEq, Deserialize, Serialize)]
 pub struct CompoundSelectStatement {
     pub selects: Vec<(Option<CompoundSelectOperator>, SelectStatement)>,
     pub order: Option<OrderClause>,

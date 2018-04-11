@@ -9,7 +9,7 @@ use common::{binary_comparison_operator, column_identifier, literal, opt_multisp
 
 use select::{nested_selection, SelectStatement};
 
-#[derive(Clone, Debug, Hash, PartialEq, Serialize, Deserialize)]
+#[derive(Clone, Debug, Eq, Hash, PartialEq, Serialize, Deserialize)]
 pub enum ConditionBase {
     Field(Column),
     Literal(Literal),
@@ -35,7 +35,7 @@ impl fmt::Display for ConditionBase {
     }
 }
 
-#[derive(Clone, Debug, Hash, PartialEq, Serialize, Deserialize)]
+#[derive(Clone, Debug, Eq, Hash, PartialEq, Serialize, Deserialize)]
 pub struct ConditionTree {
     pub operator: Operator,
     pub left: Box<ConditionExpression>,
@@ -77,7 +77,7 @@ impl fmt::Display for ConditionTree {
     }
 }
 
-#[derive(Clone, Debug, Hash, PartialEq, Serialize, Deserialize)]
+#[derive(Clone, Debug, Eq, Hash, PartialEq, Serialize, Deserialize)]
 pub enum ConditionExpression {
     ComparisonOp(ConditionTree),
     LogicalOp(ConditionTree),

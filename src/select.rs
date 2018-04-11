@@ -12,7 +12,7 @@ use order::{order_clause, OrderClause};
 use join::{join_operator, JoinConstraint, JoinOperator, JoinRightSide};
 use table::Table;
 
-#[derive(Clone, Debug, Hash, PartialEq, Serialize, Deserialize)]
+#[derive(Clone, Debug, Eq, Hash, PartialEq, Serialize, Deserialize)]
 pub struct GroupByClause {
     pub columns: Vec<Column>,
     pub having: Option<ConditionExpression>,
@@ -37,7 +37,7 @@ impl fmt::Display for GroupByClause {
     }
 }
 
-#[derive(Clone, Debug, Hash, PartialEq, Serialize, Deserialize)]
+#[derive(Clone, Debug, Eq, Hash, PartialEq, Serialize, Deserialize)]
 pub struct JoinClause {
     pub operator: JoinOperator,
     pub right: JoinRightSide,
@@ -53,7 +53,7 @@ impl fmt::Display for JoinClause {
     }
 }
 
-#[derive(Clone, Debug, Hash, PartialEq, Serialize, Deserialize)]
+#[derive(Clone, Debug, Eq, Hash, PartialEq, Serialize, Deserialize)]
 pub struct LimitClause {
     pub limit: u64,
     pub offset: u64,
@@ -69,7 +69,7 @@ impl fmt::Display for LimitClause {
     }
 }
 
-#[derive(Clone, Debug, Default, Hash, PartialEq, Serialize, Deserialize)]
+#[derive(Clone, Debug, Default, Eq, Hash, PartialEq, Serialize, Deserialize)]
 pub struct SelectStatement {
     pub tables: Vec<Table>,
     pub distinct: bool,

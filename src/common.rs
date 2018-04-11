@@ -141,7 +141,7 @@ impl From<Literal> for LiteralExpression {
     }
 }
 
-#[derive(Clone, Debug, Hash, PartialEq, Serialize, Deserialize)]
+#[derive(Clone, Debug, Eq, Hash, PartialEq, Serialize, Deserialize)]
 pub enum Operator {
     Not,
     And,
@@ -179,7 +179,7 @@ impl Display for Operator {
     }
 }
 
-#[derive(Clone, Debug, Hash, PartialEq, Serialize, Deserialize)]
+#[derive(Clone, Debug, Eq, Hash, PartialEq, Serialize, Deserialize)]
 pub enum TableKey {
     PrimaryKey(Vec<Column>),
     UniqueKey(Option<String>, Vec<Column>),

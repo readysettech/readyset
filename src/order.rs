@@ -6,7 +6,7 @@ use common::{column_identifier_no_alias, opt_multispace};
 use column::Column;
 use keywords::escape_if_keyword;
 
-#[derive(Clone, Debug, Hash, PartialEq, Serialize, Deserialize)]
+#[derive(Clone, Debug, Eq, Hash, PartialEq, Serialize, Deserialize)]
 pub enum OrderType {
     OrderAscending,
     OrderDescending,
@@ -21,7 +21,7 @@ impl fmt::Display for OrderType {
     }
 }
 
-#[derive(Clone, Debug, Hash, PartialEq, Serialize, Deserialize)]
+#[derive(Clone, Debug, Eq, Hash, PartialEq, Serialize, Deserialize)]
 pub struct OrderClause {
     pub columns: Vec<(Column, OrderType)>, // TODO(malte): can this be an arbitrary expr?
 }

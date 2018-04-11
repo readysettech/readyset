@@ -3,7 +3,7 @@ use std::{fmt, str};
 
 use common::{literal, opt_multispace, sql_identifier, Literal};
 
-#[derive(Clone, Debug, Hash, PartialEq, Serialize, Deserialize)]
+#[derive(Clone, Debug, Eq, Hash, PartialEq, Serialize, Deserialize)]
 pub struct SetStatement {
     pub variable: String,
     pub value: Literal,

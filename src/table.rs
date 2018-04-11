@@ -3,7 +3,7 @@ use std::fmt;
 
 use keywords::escape_if_keyword;
 
-#[derive(Clone, Debug, Default, Hash, PartialEq, Serialize, Deserialize)]
+#[derive(Clone, Debug, Default, Eq, Hash, PartialEq, Serialize, Deserialize)]
 pub struct Table {
     pub name: String,
     pub alias: Option<String>,
