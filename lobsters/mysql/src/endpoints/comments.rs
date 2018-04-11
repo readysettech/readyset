@@ -4,6 +4,7 @@ use futures::future::Either;
 use my;
 use my::prelude::*;
 use std::collections::HashSet;
+use std::iter;
 use trawler::UserId;
 
 pub(crate) fn handle<F>(
@@ -80,17 +81,19 @@ where
             .and_then(move |(c, authors, comments)| match acting_as {
                 None => Either::A(futures::future::ok((c, authors))),
                 Some(uid) => {
-                    let comments = comments
-                        .into_iter()
-                        .map(|id| format!("{}", id))
-                        .collect::<Vec<_>>()
-                        .join(",");
-                    Either::B(c.drop_query(&format!(
-                        "SELECT `votes`.* FROM `votes` \
-                         WHERE `votes`.`user_id` = {} \
-                         AND `votes`.`comment_id` IN ({})",
-                        uid, comments
-                    )).map(move |c| (c, authors)))
+                    let params = comments.iter().map(|_| "?").collect::<Vec<_>>().join(",");
+                    let comments: Vec<_> = iter::once(&uid as &_)
+                        .chain(comments.iter().map(|c| c as &_))
+                        .collect();
+                    Either::B(c.drop_exec(
+                        &format!(
+                            "SELECT `votes`.* FROM `votes` \
+                             WHERE `votes`.`user_id` = ? \
+                             AND `votes`.`comment_id` IN ({})",
+                            params
+                        ),
+                        comments,
+                    ).map(move |c| (c, authors)))
                 }
             })
             .and_then(|(c, authors)| {

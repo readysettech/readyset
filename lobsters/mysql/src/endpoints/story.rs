@@ -139,33 +139,33 @@ where
             .and_then(move |(c, story)| match acting_as {
                 None => Either::A(futures::future::ok((c, story))),
                 Some(uid) => Either::B(
-                    c.drop_query(&format!(
+                    c.drop_exec(
                         "SELECT `votes`.* \
                          FROM `votes` \
-                         WHERE `votes`.`user_id` = {} \
-                         AND `votes`.`story_id` = {} \
+                         WHERE `votes`.`user_id` = ? \
+                         AND `votes`.`story_id` = ? \
                          AND `votes`.`comment_id` IS NULL \
                          ORDER BY `votes`.`id` ASC LIMIT 1",
-                        uid, story
-                    )).and_then(move |c| {
-                            c.drop_query(&format!(
+                        (uid, story),
+                    ).and_then(move |c| {
+                            c.drop_exec(
                                 "SELECT `hidden_stories`.* \
                                  FROM `hidden_stories` \
-                                 WHERE `hidden_stories`.`user_id` = {} \
-                                 AND `hidden_stories`.`story_id` = {} \
+                                 WHERE `hidden_stories`.`user_id` = ? \
+                                 AND `hidden_stories`.`story_id` = ? \
                                  ORDER BY `hidden_stories`.`id` ASC LIMIT 1",
-                                uid, story
-                            ))
+                                (uid, story),
+                            )
                         })
                         .and_then(move |c| {
-                            c.drop_query(&format!(
+                            c.drop_exec(
                                 "SELECT `saved_stories`.* \
                                  FROM `saved_stories` \
-                                 WHERE `saved_stories`.`user_id` = {} \
-                                 AND `saved_stories`.`story_id` = {} \
+                                 WHERE `saved_stories`.`user_id` = ? \
+                                 AND `saved_stories`.`story_id` = ? \
                                  ORDER BY `saved_stories`.`id` ASC LIMIT 1",
-                                uid, story
-                            ))
+                                (uid, story),
+                            )
                         })
                         .map(move |c| (c, story)),
                 ),
