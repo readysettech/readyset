@@ -6,7 +6,7 @@ use keywords::escape_if_keyword;
 use table::Table;
 use select::where_clause;
 
-#[derive(Clone, Debug, Default, Hash, PartialEq, Serialize, Deserialize)]
+#[derive(Clone, Debug, Default, Eq, Hash, PartialEq, Serialize, Deserialize)]
 pub struct DeleteStatement {
     pub table: Table,
     pub where_clause: Option<ConditionExpression>,

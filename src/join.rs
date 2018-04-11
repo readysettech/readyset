@@ -6,7 +6,7 @@ use condition::ConditionExpression;
 use select::{JoinClause, SelectStatement};
 use table::Table;
 
-#[derive(Clone, Debug, Hash, PartialEq, Serialize, Deserialize)]
+#[derive(Clone, Debug, Eq, Hash, PartialEq, Serialize, Deserialize)]
 pub enum JoinRightSide {
     /// A single table.
     Table(Table),
@@ -35,7 +35,7 @@ impl fmt::Display for JoinRightSide {
     }
 }
 
-#[derive(Clone, Debug, Hash, PartialEq, Serialize, Deserialize)]
+#[derive(Clone, Debug, Eq, Hash, PartialEq, Serialize, Deserialize)]
 pub enum JoinOperator {
     Join,
     LeftJoin,
@@ -59,7 +59,7 @@ impl fmt::Display for JoinOperator {
     }
 }
 
-#[derive(Clone, Debug, Hash, PartialEq, Serialize, Deserialize)]
+#[derive(Clone, Debug, Eq, Hash, PartialEq, Serialize, Deserialize)]
 pub enum JoinConstraint {
     On(ConditionExpression),
     Using(Vec<Column>),

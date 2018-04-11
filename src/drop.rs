@@ -4,7 +4,7 @@ use common::{opt_multispace, table_list};
 use keywords::escape_if_keyword;
 use table::Table;
 
-#[derive(Clone, Debug, Default, Hash, PartialEq, Serialize, Deserialize)]
+#[derive(Clone, Debug, Default, Eq, Hash, PartialEq, Serialize, Deserialize)]
 pub struct DropTableStatement {
     pub tables: Vec<Table>,
     pub if_exists: bool,
