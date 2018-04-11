@@ -80,7 +80,7 @@ pub struct SoupBackend {
 
     query_count: Arc<sync::atomic::AtomicUsize>,
 
-    prepared: HashMap<u32, (String, nom_sql::SqlQuery)>,
+    prepared: HashMap<u32, (String, nom_sql::SqlQuery, Option<(usize, usize)>)>,
     prepared_count: u32,
 
     /// global cache of view endpoints and prepared statements
@@ -191,6 +191,7 @@ impl SoupBackend {
     fn handle_select<W: io::Write>(
         &mut self,
         q: nom_sql::SelectStatement,
+        use_params: Vec<Literal>,
         results: QueryResultWriter<W>,
     ) -> io::Result<()> {
         // TODO(malte): ewww clone
@@ -235,7 +236,11 @@ impl SoupBackend {
             self.tl_cached.insert(qhash, Cached::AdHoc(qname.clone()));
         }
 
-        self.do_read(&qname, &q, None, results)
+        let keys: Vec<_> = use_params
+            .into_iter()
+            .map(|l| vec![l.to_datatype()])
+            .collect();
+        self.do_read(&qname, &q, &keys[..], results)
     }
 
     fn handle_set<W: io::Write>(
@@ -466,10 +471,10 @@ impl SoupBackend {
         &mut self,
         qname: &str,
         q: &SelectStatement,
-        key: Vec<DataType>,
+        keys: &[Vec<DataType>],
         results: QueryResultWriter<W>,
     ) -> io::Result<()> {
-        self.do_read(qname, q, Some(key), results)
+        self.do_read(qname, q, keys, results)
     }
 
     fn do_insert<W: io::Write>(
@@ -565,7 +570,7 @@ impl SoupBackend {
         &mut self,
         qname: &str,
         q: &SelectStatement,
-        key: Option<Vec<DataType>>,
+        keys: &[Vec<DataType>],
         results: QueryResultWriter<W>,
     ) -> io::Result<()> {
         // we need the schema for the result writer
@@ -579,12 +584,6 @@ impl SoupBackend {
         // TODO(malte): may need to make one anyway if the query has changed w.r.t. an
         // earlier one of the same name
         let getter = self.inner.get_or_make_getter(&qname);
-
-        // if there is no key specified, we "execute" the query via a bogokey lookup
-        let (key, is_bogo) = match key {
-            None => (vec![DataType::from(0 as i32)], true),
-            Some(k) => (k, false),
-        };
 
         let write_column = |rw: &mut RowWriter<W>, c: DataType, cs: &msql_srv::Column| {
             let written = match c {
@@ -612,29 +611,46 @@ impl SoupBackend {
             }
         };
 
-        match getter.lookup(&key, true) {
+        let bogo = vec![vec![DataType::from(0 as i32)]];
+        let is_bogo = keys.is_empty();
+        let keys = if is_bogo { &bogo[..] } else { &keys[..] };
+
+        // if first lookup fails, there's no reason to try the others
+        match getter.lookup(&keys[0], true) {
             Ok(d) => {
-                let num_rows = d.len();
-                if num_rows > 0 {
-                    let mut rw = results.start(schema.as_slice()).unwrap();
-                    for mut r in d {
-                        if is_bogo {
-                            // drop bogokey
-                            r.pop();
+                let mut rw = results.start(schema.as_slice()).unwrap();
+                {
+                    let mut write = |d: Vec<Vec<DataType>>| -> io::Result<()> {
+                        for mut r in d {
+                            if is_bogo {
+                                // drop bogokey
+                                r.pop();
+                            }
+                            for (i, c) in r.into_iter().enumerate() {
+                                // XXX TODO XXX
+                                // Need to drop parameter columns
+                                if i < schema.len() {
+                                    write_column(&mut rw, c, &schema[i]);
+                                }
+                            }
+                            rw.end_row()?;
                         }
-                        for (i, c) in r.into_iter().enumerate() {
-                            // XXX TODO XXX
-                            // Need to drop parameter columns
-                            if i < schema.len() {
-                                write_column(&mut rw, c, &schema[i]);
+
+                        Ok(())
+                    };
+
+                    write(d)?;
+                    for key in &keys[1..] {
+                        match getter.lookup(key, true) {
+                            Ok(d) => write(d)?,
+                            Err(e) => {
+                                crit!(self.log, "subsequent error executing SELECT: {:?}", e);
+                                // This should *never* happen
                             }
                         }
-                        rw.end_row()?;
                     }
-                    rw.finish()
-                } else {
-                    results.completed(0, 0)
                 }
+                rw.finish()
             }
             Err(e) => {
                 error!(self.log, "error executing SELECT: {:?}", e);
@@ -660,7 +676,14 @@ impl<W: io::Write> MysqlShim<W> for SoupBackend {
             Ok(sql_q) => {
                 let sql_q = rewrite::expand_stars(sql_q, table_schemas);
                 match sql_q {
-                    nom_sql::SqlQuery::Select(ref q) => {
+                    mut sql_q @ nom_sql::SqlQuery::Select(_) => {
+                        let rewritten = rewrite::collapse_where_in(&mut sql_q, false);
+                        let q = if let nom_sql::SqlQuery::Select(ref q) = sql_q {
+                            q
+                        } else {
+                            unreachable!();
+                        };
+
                         // extract parameter columns
                         let params: Vec<msql_srv::Column> = utils::get_parameter_columns(&sql_q)
                             .into_iter()
@@ -709,8 +732,14 @@ impl<W: io::Write> MysqlShim<W> for SoupBackend {
                                 }
                                 // register a new prepared statement
                                 self.prepared_count += 1;
-                                self.prepared
-                                    .insert(self.prepared_count, (qname.clone(), sql_q.clone()));
+                                self.prepared.insert(
+                                    self.prepared_count,
+                                    (
+                                        qname.clone(),
+                                        sql_q.clone(),
+                                        rewritten.map(|(a, b)| (a, b.len())),
+                                    ),
+                                );
                                 self.tl_cached
                                     .insert(qhash, Cached::Prepared(qname, self.prepared_count));
                                 // TODO(malte): proactively get getter, to avoid &mut ref on exec?
@@ -748,6 +777,7 @@ impl<W: io::Write> MysqlShim<W> for SoupBackend {
                             (
                                 format!("{}_{}", q.table.name.to_owned(), self.prepared_count),
                                 sql_q.clone(),
+                                None,
                             ),
                         );
 
@@ -784,14 +814,43 @@ impl<W: io::Write> MysqlShim<W> for SoupBackend {
     ) -> io::Result<()> {
         // TODO(malte): unfortunate clone here, but we can't call execute_select(&mut self) if we
         // have self.prepared borrowed
-        if let Some((qname, q)) = self.prepared.get(&id).map(|e| e.clone()) {
+        if let Some((qname, q, rewritten)) = self.prepared.get(&id).map(|e| e.clone()) {
             match q {
                 nom_sql::SqlQuery::Select(ref q) => {
-                    let key: Vec<_> = params
-                        .into_iter()
-                        .map(|pv| pv.value.to_datatype())
-                        .collect();
-                    self.execute_select(&qname, &q, key, results)
+                    let key = match rewritten {
+                        Some((first_rewritten, nrewritten)) => {
+                            // this is a little tricky
+                            // the user is giving us some params [a, b, c, d]
+                            // for the query WHERE x = ? AND y IN (?, ?) AND z = ?
+                            // that we rewrote to WHERE x = ? AND y = ? AND z = ?
+                            // so we need to turn that into the keys:
+                            // [[a, b, d], [a, c, d]]
+                            let params: Vec<_> = params
+                                .into_iter()
+                                .map(|pv| pv.value.to_datatype())
+                                .collect::<Vec<_>>();
+                            (0..nrewritten)
+                                .map(|poffset| {
+                                    params
+                                        .iter()
+                                        .take(first_rewritten)
+                                        .chain(
+                                            params.iter().skip(first_rewritten + poffset).take(1),
+                                        )
+                                        .chain(params.iter().skip(first_rewritten + nrewritten))
+                                        .cloned()
+                                        .collect()
+                                })
+                                .collect()
+                        }
+                        None => vec![
+                            params
+                                .into_iter()
+                                .map(|pv| pv.value.to_datatype())
+                                .collect::<Vec<_>>(),
+                        ],
+                    };
+                    self.execute_select(&qname, &q, &key[..], results)
                 }
                 nom_sql::SqlQuery::Insert(ref q) => {
                     let values: Vec<DataType> = params
@@ -871,16 +930,21 @@ impl<W: io::Write> MysqlShim<W> for SoupBackend {
 
         match nom_sql::parse_query(&query) {
             Ok(q) => {
-                let q = {
+                let mut q = {
                     let ts_lock = self.table_schemas.lock().unwrap();
                     let table_schemas = &(*ts_lock);
                     rewrite::expand_stars(q, table_schemas)
                 };
 
+                let mut use_params = Vec::new();
+                if let Some((_, p)) = rewrite::collapse_where_in(&mut q, true) {
+                    use_params = p;
+                }
+
                 match q {
                     nom_sql::SqlQuery::CreateTable(q) => self.handle_create_table(q, results),
                     nom_sql::SqlQuery::Insert(q) => self.handle_insert(q, results),
-                    nom_sql::SqlQuery::Select(q) => self.handle_select(q, results),
+                    nom_sql::SqlQuery::Select(q) => self.handle_select(q, use_params, results),
                     nom_sql::SqlQuery::Set(q) => self.handle_set(q, results),
                     nom_sql::SqlQuery::Update(q) => self.handle_update(q, results),
                     nom_sql::SqlQuery::Delete(q) => self.handle_delete(q, results),
