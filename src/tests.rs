@@ -432,6 +432,42 @@ fn it_works_with_sql_recipe() {
 }
 
 #[test]
+fn it_works_with_vote() {
+    let mut g = ControllerBuilder::default().build_local();
+    let sql = "
+        # base tables
+        CREATE TABLE Article (id int, title varchar(255), PRIMARY KEY(id));
+        CREATE TABLE Vote (article_id int, user int);
+
+        # read queries
+        QUERY ArticleWithVoteCount: SELECT Article.id, title, VoteCount.votes AS votes \
+                    FROM Article \
+                    LEFT JOIN (SELECT Vote.article_id, COUNT(user) AS votes \
+                               FROM Vote GROUP BY Vote.article_id) AS VoteCount \
+                    ON (Article.id = VoteCount.article_id) WHERE Article.id = ?;
+    ";
+
+    g.install_recipe(sql.to_owned()).unwrap();
+    let mut article = g.get_mutator("Article").unwrap();
+    let mut vote = g.get_mutator("Vote").unwrap();
+    let mut awvc = g.get_getter("ArticleWithVoteCount").unwrap();
+
+    article.put(vec![0i64.into(), "Article".into()]).unwrap();
+    article.put(vec![1i64.into(), "Article".into()]).unwrap();
+    vote.put(vec![0i64.into(), 0.into()]).unwrap();
+
+    sleep();
+
+    let rs = awvc.lookup(&[0i64.into()], true).unwrap();
+    assert_eq!(rs.len(), 1);
+    assert_eq!(rs[0], vec![0i64.into(), "Article".into(), 1.into()]);
+
+    let empty = awvc.lookup(&[1i64.into()], true).unwrap();
+    assert_eq!(empty.len(), 1);
+    assert_eq!(empty[0], vec![1i64.into(), "Article".into(), DataType::None]);
+}
+
+#[test]
 fn it_works_with_reads_before_writes() {
     let mut g = ControllerBuilder::default().build_local();
     let sql = "
@@ -450,10 +486,7 @@ fn it_works_with_reads_before_writes() {
     let aid = 1;
     let uid = 10;
 
-    // TODO: This lookup results in the partial key being populated
-    // with an empty result, which leads to the second read not replaying correctly.
     assert!(awvc.lookup(&[aid.into()], true).unwrap().is_empty());
-
     article.put(vec![aid.into()]).unwrap();
     sleep();
 
