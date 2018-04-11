@@ -14,6 +14,7 @@ where
 {
     let initial = match acting_as {
         Some(uid) => Either::A(
+            // logged-in front page
             c.and_then(move |c| {
                 c.query(&format!(
                     "SELECT `tag_filters`.* FROM `tag_filters` \
@@ -65,6 +66,7 @@ where
                 }),
         ),
         None => Either::B(c.and_then(|c| {
+            // public front page
             c.query(
                 "SELECT  `stories`.* FROM `stories` \
                  WHERE `stories`.`merged_story_id` IS NULL \
