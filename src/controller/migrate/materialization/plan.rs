@@ -429,6 +429,10 @@ impl<'a> Plan<'a> {
                     if src == node || col.is_none() {
                         continue;
                     }
+                    if !options.contains(&src) {
+                        // we can't choose to use this parent anyway
+                        continue;
+                    }
 
                     // if all other columns resolve into this src, then only keep those srcs
                     // XXX: this is pretty inefficient, but meh...
