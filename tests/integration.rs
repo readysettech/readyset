@@ -96,21 +96,24 @@ fn setup(deployment: &Deployment) -> mysql::Opts {
         Arc::new(Mutex::new(HashMap::default()));
     let query_cache: Arc<Mutex<HashMap<QueryID, Cached>>> =
         Arc::new(Mutex::new(HashMap::default()));
-    let soup = SoupBackend::new(
-        zk_addr,
-        &deployment.name,
-        schemas,
-        auto_increments,
-        query_cache,
-        query_counter,
-        logger,
-    );
-
     let listener = TcpListener::bind("127.0.0.1:0").unwrap();
     let addr = listener.local_addr().unwrap();
 
+    let deployment_id = deployment.name.clone();
+
     thread::spawn(move || {
         let (s, _) = listener.accept().unwrap();
+
+        let soup = SoupBackend::new(
+            zk_addr,
+            &deployment_id,
+            schemas,
+            auto_increments,
+            query_cache,
+            query_counter,
+            logger,
+        );
+
         MysqlIntermediary::run_on_tcp(soup, s).unwrap();
     });
 
