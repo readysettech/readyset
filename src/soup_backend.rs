@@ -260,11 +260,23 @@ impl SoupBackend {
         //
         // To accomplish the first step we need to buld a getter that retrieves
         // all the columns in the table:
-        let where_clause = Some(ConditionExpression::ComparisonOp(ConditionTree {
-            operator: Operator::Equal,
-            left: box ConditionExpression::Base(ConditionBase::Field(key_values[0].clone())),
-            right: box ConditionExpression::Base(ConditionBase::Literal(Literal::Placeholder)),
-        }));
+        let mut where_clauses = key_values.iter().map(|&kv| {
+            ConditionExpression::ComparisonOp(ConditionTree {
+                operator: Operator::Equal,
+                left: box ConditionExpression::Base(ConditionBase::Field(kv.clone())),
+                right: box ConditionExpression::Base(ConditionBase::Literal(Literal::Placeholder)),
+            })
+        });
+
+        let mut top_clause = where_clauses.next().unwrap();
+        for clause in where_clauses {
+            top_clause = ConditionExpression::LogicalOp(ConditionTree {
+                operator: Operator::And,
+                left: box top_clause,
+                right: box clause,
+            });
+        }
+        let where_clause = Some(top_clause);
 
         let select_q = SelectStatement {
             tables: vec![q.table.clone()],
