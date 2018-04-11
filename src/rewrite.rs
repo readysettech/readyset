@@ -61,12 +61,20 @@ fn collapse_where_in_recursive(
             *leftmost_param_index += 1;
             None
         }
-        ConditionExpression::Base(ConditionBase::NestedSelect(_)) => {
-            unimplemented!();
+        ConditionExpression::Base(ConditionBase::NestedSelect(ref mut sq)) => {
+            if let Some(ref mut w) = sq.where_clause {
+                collapse_where_in_recursive(leftmost_param_index, w, rewrite_literals)
+            } else {
+                None
+            }
         }
         ConditionExpression::Base(ConditionBase::LiteralList(ref list)) => {
             *leftmost_param_index += list.iter().filter(|&l| *l == Literal::Placeholder).count();
             None
+        }
+        ConditionExpression::Base(_) => None,
+        ConditionExpression::NegationOp(ref mut ct) => {
+            collapse_where_in_recursive(leftmost_param_index, ct, rewrite_literals)
         }
         ConditionExpression::LogicalOp(ref mut ct) => {
             collapse_where_in_recursive(leftmost_param_index, &mut *ct.left, rewrite_literals)
@@ -146,7 +154,6 @@ fn collapse_where_in_recursive(
 
             Some((*leftmost_param_index, literals))
         }
-        _ => None,
     }
 }
 
@@ -205,6 +212,32 @@ mod tests {
         assert_eq!(
             q,
             nom_sql::parse_query("SELECT * FROM t WHERE x = ? AND y = ? OR z = ?").unwrap()
+        );
+
+        let mut q = nom_sql::parse_query(
+            "SELECT * FROM t WHERE x IN (SELECT * FROM z WHERE a = ?) AND y IN (?, ?) OR z = ?",
+        ).unwrap();
+        let rewritten = collapse_where_in(&mut q, false).unwrap();
+        assert_eq!(rewritten.0, 1);
+        assert_eq!(rewritten.1.len(), 2);
+        assert_eq!(
+            q,
+            nom_sql::parse_query(
+                "SELECT * FROM t WHERE x IN (SELECT * FROM z WHERE a = ?) AND y = ? OR z = ?"
+            ).unwrap()
+        );
+
+        let mut q = nom_sql::parse_query(
+            "SELECT * FROM t WHERE x IN (SELECT * FROM z WHERE b = ? AND a IN (?, ?)) OR z = ?",
+        ).unwrap();
+        let rewritten = collapse_where_in(&mut q, false).unwrap();
+        assert_eq!(rewritten.0, 1);
+        assert_eq!(rewritten.1.len(), 2);
+        assert_eq!(
+            q,
+            nom_sql::parse_query(
+                "SELECT * FROM t WHERE x IN (SELECT * FROM z WHERE b = ? AND a = ?) OR z = ?",
+            ).unwrap()
         );
     }
 
