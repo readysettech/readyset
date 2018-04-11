@@ -4,6 +4,7 @@ use nom_sql::{self, ColumnConstraint, CreateTableStatement, InsertStatement, Lit
 
 use std::collections::HashMap;
 
+#[allow(dead_code)]
 pub(crate) fn schema_for_query(
     table_schemas: &HashMap<String, CreateTableStatement>,
     q: &SqlQuery,
