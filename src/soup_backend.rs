@@ -452,6 +452,137 @@ impl SoupBackend {
         }
     }
 
+    fn prepare_insert<W: io::Write>(
+        &mut self,
+        sql_q: nom_sql::SqlQuery,
+        info: StatementMetaWriter<W>,
+    ) -> io::Result<()> {
+        let ts_lock = self.table_schemas.lock().unwrap();
+        let table_schemas = &(*ts_lock);
+
+        let q = if let nom_sql::SqlQuery::Insert(ref q) = sql_q {
+            q
+        } else {
+            unreachable!()
+        };
+
+        // extract parameter columns
+        let params: Vec<msql_srv::Column> = utils::get_parameter_columns(&sql_q)
+            .into_iter()
+            .map(|c| {
+                let mut cc = c.clone();
+                cc.table = Some(q.table.name.clone());
+                schema_for_column(table_schemas, &cc)
+            })
+            .collect();
+
+        // extract result schema
+        let schema = schema_for_insert(table_schemas, q);
+
+        // register a new prepared statement
+        self.prepared_count += 1;
+        self.prepared.insert(
+            self.prepared_count,
+            (
+                format!("{}_{}", q.table.name.to_owned(), self.prepared_count),
+                sql_q.clone(),
+                None,
+            ),
+        );
+
+        // nothing more to do for an insert
+        // TODO(malte): proactively get mutator?
+        info.reply(self.prepared_count, params.as_slice(), schema.as_slice())
+    }
+
+    fn prepare_select<W: io::Write>(
+        &mut self,
+        mut sql_q: nom_sql::SqlQuery,
+        info: StatementMetaWriter<W>,
+    ) -> io::Result<()> {
+        let ts_lock = self.table_schemas.lock().unwrap();
+        let table_schemas = &(*ts_lock);
+
+        // extract parameter columns
+        // note that we have to do this *before* collapsing WHERE IN, otherwise the
+        // client will be confused about the number of parameters it's supposed to
+        // give.
+        let params: Vec<msql_srv::Column> = utils::get_parameter_columns(&sql_q)
+            .into_iter()
+            .map(|c| schema_for_column(table_schemas, c))
+            .collect();
+
+        let rewritten = rewrite::collapse_where_in(&mut sql_q, false);
+        let q = if let nom_sql::SqlQuery::Select(ref q) = sql_q {
+            q
+        } else {
+            unreachable!();
+        };
+
+        // extract result schema
+        let schema = schema_for_select(table_schemas, &q);
+
+        // check if we already have this query prepared
+        match self.tl_cached.get(q) {
+            None => {
+                // check global cache
+                let mut gc = self.cached.lock().unwrap();
+                let (qname, cached) = if let Some(qname) = gc.get(q) {
+                    (qname.clone(), true)
+                } else {
+                    let qc = self.query_count
+                        .fetch_add(1, sync::atomic::Ordering::SeqCst);
+                    let qname = format!("q_{}", qc);
+
+                    (qname, false)
+                };
+
+                if !cached {
+                    // add the query to Soup
+                    info!(self.log, "Adding parameterized query \"{}\" to Soup", q);
+                    match self.inner
+                        .soup
+                        .extend_recipe(format!("QUERY {}: {};", qname, q))
+                    {
+                        Ok(_) => {
+                            // add to global cache
+                            gc.insert(q.clone(), qname.clone());
+                        }
+                        Err(e) => return Err(io::Error::new(io::ErrorKind::Other, e)),
+                    }
+                }
+                // register a new prepared statement
+                self.prepared_count += 1;
+                self.prepared.insert(
+                    self.prepared_count,
+                    (
+                        qname.clone(),
+                        sql_q.clone(),
+                        rewritten.map(|(a, b)| (a, b.len())),
+                    ),
+                );
+                self.tl_cached.insert(q.clone(), qname);
+                // TODO(malte): proactively get getter, to avoid &mut ref on exec?
+                info.reply(self.prepared_count, params.as_slice(), schema.as_slice())
+            }
+            Some(qname) => {
+                // register a new prepared statement without doing a migration
+                self.prepared_count += 1;
+                self.prepared.insert(
+                    self.prepared_count,
+                    (
+                        qname.clone(),
+                        sql_q.clone(),
+                        rewritten.map(|(a, b)| (a, b.len())),
+                    ),
+                );
+                self.tl_cached.insert(q.clone(), qname.clone());
+                // TODO(malte): proactively get getter, to avoid &mut ref on exec?
+                info.reply(self.prepared_count, params.as_slice(), schema.as_slice())
+            }
+        }
+    }
+
     fn execute_insert<W: io::Write>(
         &mut self,
         q: &InsertStatement,
@@ -664,135 +795,17 @@ impl<W: io::Write> MysqlShim<W> for SoupBackend {
 
         let query = utils::sanitize_query(query);
 
-        let ts_lock = self.table_schemas.lock().unwrap();
-        let table_schemas = &(*ts_lock);
-
         match nom_sql::parse_query(&query) {
             Ok(sql_q) => {
-                let sql_q = rewrite::expand_stars(sql_q, table_schemas);
+                let sql_q = {
+                    let ts_lock = self.table_schemas.lock().unwrap();
+                    let table_schemas = &(*ts_lock);
+                    rewrite::expand_stars(sql_q, table_schemas)
+                };
+
                 match sql_q {
-                    mut sql_q @ nom_sql::SqlQuery::Select(_) => {
-                        // extract parameter columns
-                        // note that we have to do this *before* collapsing WHERE IN, otherwise the
-                        // client will be confused about the number of parameters it's supposed to
-                        // give.
-                        let params: Vec<msql_srv::Column> = utils::get_parameter_columns(&sql_q)
-                            .into_iter()
-                            .map(|c| schema_for_column(table_schemas, c))
-                            .collect();
-
-                        let rewritten = rewrite::collapse_where_in(&mut sql_q, false);
-                        let q = if let nom_sql::SqlQuery::Select(ref q) = sql_q {
-                            q
-                        } else {
-                            unreachable!();
-                        };
-
-                        // extract result schema
-                        let schema = schema_for_select(table_schemas, &q);
-
-                        // check if we already have this query prepared
-                        match self.tl_cached.get(q) {
-                            None => {
-                                // check global cache
-                                let mut gc = self.cached.lock().unwrap();
-                                let (qname, cached) = if let Some(qname) = gc.get(q) {
-                                    (qname.clone(), true)
-                                } else {
-                                    let qc = self.query_count
-                                        .fetch_add(1, sync::atomic::Ordering::SeqCst);
-                                    let qname = format!("q_{}", qc);
-
-                                    (qname, false)
-                                };
-
-                                if !cached {
-                                    // add the query to Soup
-                                    info!(
-                                        self.log,
-                                        "Adding parameterized query \"{}\" to Soup", query
-                                    );
-                                    match self.inner
-                                        .soup
-                                        .extend_recipe(format!("QUERY {}: {};", qname, q))
-                                    {
-                                        Ok(_) => {
-                                            // add to global cache
-                                            gc.insert(q.clone(), qname.clone());
-                                        }
-                                        Err(e) => {
-                                            return Err(io::Error::new(io::ErrorKind::Other, e))
-                                        }
-                                    }
-                                }
-                                // register a new prepared statement
-                                self.prepared_count += 1;
-                                self.prepared.insert(
-                                    self.prepared_count,
-                                    (
-                                        qname.clone(),
-                                        sql_q.clone(),
-                                        rewritten.map(|(a, b)| (a, b.len())),
-                                    ),
-                                );
-                                self.tl_cached.insert(q.clone(), qname);
-                                // TODO(malte): proactively get getter, to avoid &mut ref on exec?
-                                info.reply(
-                                    self.prepared_count,
-                                    params.as_slice(),
-                                    schema.as_slice(),
-                                )
-                            }
-                            Some(qname) => {
-                                // register a new prepared statement without doing a migration
-                                self.prepared_count += 1;
-                                self.prepared.insert(
-                                    self.prepared_count,
-                                    (
-                                        qname.clone(),
-                                        sql_q.clone(),
-                                        rewritten.map(|(a, b)| (a, b.len())),
-                                    ),
-                                );
-                                self.tl_cached.insert(q.clone(), qname.clone());
-                                // TODO(malte): proactively get getter, to avoid &mut ref on exec?
-                                info.reply(
-                                    self.prepared_count,
-                                    params.as_slice(),
-                                    schema.as_slice(),
-                                )
-                            }
-                        }
-                    }
-                    nom_sql::SqlQuery::Insert(ref q) => {
-                        // extract parameter columns
-                        let params: Vec<msql_srv::Column> = utils::get_parameter_columns(&sql_q)
-                            .into_iter()
-                            .map(|c| {
-                                let mut cc = c.clone();
-                                cc.table = Some(q.table.name.clone());
-                                schema_for_column(table_schemas, &cc)
-                            })
-                            .collect();
-
-                        // extract result schema
-                        let schema = schema_for_insert(table_schemas, &q);
-
-                        // register a new prepared statement
-                        self.prepared_count += 1;
-                        self.prepared.insert(
-                            self.prepared_count,
-                            (
-                                format!("{}_{}", q.table.name.to_owned(), self.prepared_count),
-                                sql_q.clone(),
-                                None,
-                            ),
-                        );
-
-                        // nothing more to do for an insert
-                        // TODO(malte): proactively get mutator?
-                        info.reply(self.prepared_count, params.as_slice(), schema.as_slice())
-                    }
+                    mut sql_q @ nom_sql::SqlQuery::Select(_) => self.prepare_select(sql_q, info),
+                    mut sql_q @ nom_sql::SqlQuery::Insert(_) => self.prepare_insert(sql_q, info),
                     _ => {
                         // Soup only supports prepared SELECT statements at the moment
                         error!(
