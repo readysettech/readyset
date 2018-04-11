@@ -196,7 +196,7 @@ impl trawler::LobstersClient for MysqlTrawler {
         };
 
         // notifications
-        let c = if let Some(uid) = acting_as {
+        /*let c = if let Some(uid) = acting_as {
             Either::A(c.and_then(move |(c, with_notifications)| {
                 if !with_notifications {
                     return Either::A(futures::future::ok(c));
@@ -220,7 +220,7 @@ impl trawler::LobstersClient for MysqlTrawler {
             }))
         } else {
             Either::B(c.map(|(c, _)| c))
-        };
+        };*/
 
         Box::new(c.map_err(|e| {
             eprintln!("{:?}", e);
