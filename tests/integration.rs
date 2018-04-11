@@ -11,10 +11,10 @@ extern crate mysoupql;
 use std::collections::HashMap;
 use std::env;
 use std::net::TcpListener;
-use std::sync::{Arc, Mutex};
 use std::sync::atomic::AtomicUsize;
-use std::time::{Duration, SystemTime, UNIX_EPOCH};
+use std::sync::{Arc, Mutex};
 use std::thread;
+use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 use distributary::{ControllerBuilder, ZookeeperAuthority};
 use msql_srv::MysqlIntermediary;
