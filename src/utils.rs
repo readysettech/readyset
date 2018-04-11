@@ -217,6 +217,16 @@ fn get_parameter_columns_recurse(cond: &ConditionExpression) -> Vec<&Column> {
             operator: Operator::Equal,
         }) => vec![c],
         ConditionExpression::ComparisonOp(ConditionTree {
+            left: box ConditionExpression::Base(ConditionBase::Field(ref c)),
+            right: box ConditionExpression::Base(ConditionBase::LiteralList(ref literals)),
+            operator: Operator::In,
+        }) if (|| literals.iter().all(|l| *l == Literal::Placeholder))() =>
+        {
+            // the weird extra closure above is due to
+            // https://github.com/rust-lang/rfcs/issues/1006
+            vec![c; literals.len()]
+        }
+        ConditionExpression::ComparisonOp(ConditionTree {
             left: box ConditionExpression::Base(ConditionBase::Field(_)),
             right: box ConditionExpression::Base(ConditionBase::Literal(_)),
             operator: _,
