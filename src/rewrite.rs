@@ -152,6 +152,10 @@ fn collapse_where_in_recursive(
                 },
             );
 
+            if literals.is_empty() {
+                eprintln!("spotted empty WHERE IN ()");
+            }
+
             Some((*leftmost_param_index, literals))
         }
     }
