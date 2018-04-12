@@ -149,8 +149,8 @@ where
                         t.drop_exec(
                             &format!(
                                 "UPDATE stories SET \
-                                 upvotes = COALESCE(upvotes, 0) {}, \
-                                 downvotes = COALESCE(downvotes, 0) {}, \
+                                 upvotes = upvotes {}, \
+                                 downvotes = downvotes {}, \
                                  hotness = '{}' \
                                  WHERE id = ?",
                                 match v {
