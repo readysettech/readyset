@@ -72,7 +72,7 @@ impl fmt::Display for ArithmeticExpression {
 }
 
 named!(pub arithmetic_cast<&[u8], (ArithmeticBase, Option<SqlType>)>,
-    dbg_dmp!(alt_complete!(
+    alt_complete!(
         do_parse!(
             tag_no_case!("cast") >>
             opt_multispace >>
@@ -93,7 +93,7 @@ named!(pub arithmetic_cast<&[u8], (ArithmeticBase, Option<SqlType>)>,
             v: arithmetic_base >>
             (v, None)
         )
-    ))
+    )
 );
 
 /// Parse standard math operators.
