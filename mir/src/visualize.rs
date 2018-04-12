@@ -155,8 +155,8 @@ impl GraphViz for MirNodeType {
                         .enumerate()
                         .filter_map(|(i, ref e)| match e.as_ref() {
                             Some(cond) => match *cond {
-                                FilterCondition::Equality(ref op, ref x) => {
-                                    Some(format!("f{} {} {}", i, escape(&format!("{}", op)), x))
+                                FilterCondition::Comparison(ref op, ref x) => {
+                                    Some(format!("f{} {} {:?}", i, escape(&format!("{}", op)), x))
                                 }
                                 FilterCondition::In(ref xs) => Some(format!(
                                     "f{} IN ({})",

@@ -117,18 +117,35 @@ impl SqlToMirConverter {
             ConditionExpression::Base(ConditionBase::Field(ref f)) => f.clone(),
             _ => unimplemented!(),
         };
+        use dataflow::ops::filter;
         let f = Some(match *ct.right.as_ref() {
             ConditionExpression::Base(ConditionBase::Literal(Literal::Integer(ref i))) => {
-                FilterCondition::Equality(ct.operator.clone(), DataType::from(*i))
+                FilterCondition::Comparison(
+                    ct.operator.clone(),
+                    filter::Value::Constant(DataType::from(*i)),
+                )
             }
             ConditionExpression::Base(ConditionBase::Literal(Literal::String(ref s))) => {
-                FilterCondition::Equality(ct.operator.clone(), DataType::from(s.clone()))
+                FilterCondition::Comparison(
+                    ct.operator.clone(),
+                    filter::Value::Constant(DataType::from(s.clone())),
+                )
             }
             ConditionExpression::Base(ConditionBase::Literal(Literal::Null)) => {
-                FilterCondition::Equality(ct.operator.clone(), DataType::None)
+                FilterCondition::Comparison(
+                    ct.operator.clone(),
+                    filter::Value::Constant(DataType::None),
+                )
             }
             ConditionExpression::Base(ConditionBase::LiteralList(ref ll)) => {
                 FilterCondition::In(ll.iter().map(|l| DataType::from(l.clone())).collect())
+            }
+            ConditionExpression::Base(ConditionBase::Field(ref f)) => {
+                // NOTE(jon): the uwnrap here is almost certainly wrong given the business
+                // that goes on further down where it appens a column in magical circumstances.
+                // also, what if two columns share a name, but differ in .table?
+                let fi = columns.iter().rposition(|c| *c.name == f.name).unwrap();
+                FilterCondition::Comparison(ct.operator.clone(), filter::Value::Column(fi))
             }
             _ => unimplemented!(),
         });
