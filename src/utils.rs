@@ -279,6 +279,20 @@ pub(crate) fn get_parameter_columns(query: &SqlQuery) -> Vec<&Column> {
                 })
                 .collect()
         }
+        SqlQuery::Update(ref query) => {
+            assert!(
+                query.fields.iter().all(|(_, ref l)| match *l {
+                    Literal::Placeholder => false,
+                    _ => true,
+                }),
+                "parameters in SET part of UPDATE query are unsupported"
+            );
+            if let Some(ref wc) = query.where_clause {
+                get_parameter_columns_recurse(wc)
+            } else {
+                vec![]
+            }
+        }
         _ => unimplemented!(),
     }
 }
