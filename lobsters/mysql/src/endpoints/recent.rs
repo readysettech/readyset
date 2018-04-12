@@ -38,9 +38,9 @@ where
                 },
             )
         })
-        .and_then(move |(c, x)| {
-            if x.1.is_empty() {
-                panic!("got no stories from /recent: {:?}", x);
+        .and_then(move |(c, (users, stories))| {
+            if stories.is_empty() {
+                panic!("got no stories from /recent");
             }
 
             match acting_as {
@@ -65,33 +65,30 @@ where
                         })
                         .and_then(move |(c, tags)| {
                             if tags.is_empty() {
-                                return Either::A(future::ok(c));
+                                return Either::A(future::ok((c, (users, stories))));
                             }
 
+                            let s = stories
+                                .iter()
+                                .map(|id| format!("{}", id))
+                                .collect::<Vec<_>>()
+                                .join(",");
                             let tags = tags.into_iter()
                                 .map(|id| format!("{}", id))
                                 .collect::<Vec<_>>()
                                 .join(",");
 
-                            // NOTE: this is pretty bad for us. there may be *many* stories with a
-                            // given tag. really what we want to do is
-                            //
-                            //   story_id IN (..) AND tag_id IN (..)
-                            //
-                            // but that doesn't currently work as it would require doing a cross-product lookup.
-                            //
-                            // maybe we could *join* this with the frontpage?
-                            // that'd be pretty neat...
                             Either::B(c.drop_query(format!(
                                 "SELECT `taggings`.`story_id` \
                                  FROM `taggings` \
-                                 WHERE `taggings`.`tag_id` IN ({})",
-                                tags
-                            )))
+                                 WHERE `taggings`.`story_id` IN ({}) \
+                                 AND `taggings`.`tag_id` IN ({})",
+                                s, tags
+                            )).map(move |c| (c, (users, stories))))
                         }),
                 ),
-                None => Either::B(future::ok(c)),
-            }.map(move |c| (c, x))
+                None => Either::B(future::ok((c, (users, stories)))),
+            }
         })
         .and_then(|(c, (users, stories))| {
             let users = users
