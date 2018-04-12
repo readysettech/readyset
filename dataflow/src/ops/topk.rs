@@ -300,7 +300,7 @@ impl Ingredient for TopK {
                     .map(|r| match r {
                         &Record::Positive(..) => 1,
                         &Record::Negative(..) => -1,
-                        &Record::DeleteRequest(..) => unreachable!(),
+                        &Record::BaseOperation(..) => unreachable!(),
                     })
                     .sum();
 

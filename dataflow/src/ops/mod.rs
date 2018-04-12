@@ -385,7 +385,7 @@ pub mod test {
                 match data.into() {
                     Record::Positive(r) => state.insert(r, None),
                     Record::Negative(_) => unreachable!(),
-                    Record::DeleteRequest(..) => unreachable!(),
+                    Record::BaseOperation(..) => unreachable!(),
                 };
             } else {
                 assert!(

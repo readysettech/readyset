@@ -65,7 +65,11 @@ impl<'a> BatchSendHandle<'a> {
                 let shard = {
                     let key = match r {
                         Record::Positive(ref r) | Record::Negative(ref r) => &r[key_col],
-                        Record::DeleteRequest(ref k) => &k[0],
+                        Record::BaseOperation(BaseOperation::Delete { ref key }) => &key[0],
+                        Record::BaseOperation(BaseOperation::Update { ref key, .. }) => &key[0],
+                        Record::BaseOperation(BaseOperation::InsertOrUpdate {
+                            ref row, ..
+                        }) => &row[key_col],
                     };
                     dataflow::shard_by(key, self.dih.txs.len())
                 };

@@ -102,7 +102,7 @@ impl Handle {
                             // somewhat inefficient.
                             h.remove(r[key[0]].clone(), r);
                         }
-                        Record::DeleteRequest(..) => unreachable!(),
+                        Record::BaseOperation(..) => unreachable!(),
                     }
                 }
             }
@@ -117,7 +117,7 @@ impl Handle {
                         Record::Negative(r) => {
                             h.remove((r[key[0]].clone(), r[key[1]].clone()), r);
                         }
-                        Record::DeleteRequest(..) => unreachable!(),
+                        Record::BaseOperation(..) => unreachable!(),
                     }
                 }
             }
@@ -132,7 +132,7 @@ impl Handle {
                         Record::Negative(r) => {
                             h.remove(key, r);
                         }
-                        Record::DeleteRequest(..) => unreachable!(),
+                        Record::BaseOperation(..) => unreachable!(),
                     }
                 }
             }

@@ -443,19 +443,48 @@ impl fmt::Display for DataType {
     }
 }
 
+#[derive(Clone, PartialEq, Eq, Debug, Serialize, Deserialize)]
+pub enum Operation {
+    Add,
+    Sub,
+}
+
+#[derive(Clone, PartialEq, Eq, Debug, Serialize, Deserialize)]
+pub enum Modification {
+    Set(DataType),
+    Apply(Operation, DataType),
+    None,
+}
+
+#[derive(Clone, PartialEq, Eq, Debug, Serialize, Deserialize)]
+pub enum BaseOperation {
+    Delete {
+        key: Vec<DataType>,
+    },
+    InsertOrUpdate {
+        row: Vec<DataType>,
+        update: Vec<Modification>,
+    },
+    Update {
+        set: Vec<Modification>,
+        key: Vec<DataType>,
+    },
+}
+
 /// A record is a single positive or negative data record with an associated time stamp.
 #[derive(Clone, PartialEq, Eq, Debug, Serialize, Deserialize)]
+#[warn(variant_size_differences)]
 pub enum Record {
     Positive(Vec<DataType>),
     Negative(Vec<DataType>),
-    DeleteRequest(Vec<DataType>),
+    BaseOperation(BaseOperation),
 }
 
 impl Record {
     pub fn rec(&self) -> &[DataType] {
         match *self {
             Record::Positive(ref v) | Record::Negative(ref v) => &v[..],
-            Record::DeleteRequest(..) => unreachable!(),
+            Record::BaseOperation(..) => unreachable!(),
         }
     }
 
@@ -471,7 +500,7 @@ impl Record {
         match self {
             Record::Positive(v) => (v, true),
             Record::Negative(v) => (v, false),
-            Record::DeleteRequest(..) => unreachable!(),
+            Record::BaseOperation(..) => unreachable!(),
         }
     }
 }
@@ -481,7 +510,7 @@ impl Deref for Record {
     fn deref(&self) -> &Self::Target {
         match *self {
             Record::Positive(ref r) | Record::Negative(ref r) => r,
-            Record::DeleteRequest(..) => unreachable!(),
+            Record::BaseOperation(..) => unreachable!(),
         }
     }
 }
@@ -490,7 +519,7 @@ impl DerefMut for Record {
     fn deref_mut(&mut self) -> &mut Self::Target {
         match *self {
             Record::Positive(ref mut r) | Record::Negative(ref mut r) => r,
-            Record::DeleteRequest(..) => unreachable!(),
+            Record::BaseOperation(..) => unreachable!(),
         }
     }
 }

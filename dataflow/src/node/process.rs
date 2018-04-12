@@ -270,7 +270,7 @@ pub fn materialize(rs: &mut Records, partial: Option<Tag>, state: Option<&mut St
             match *r {
                 Record::Positive(ref r) => state.insert(r.clone(), partial),
                 Record::Negative(ref r) => state.remove(r),
-                Record::DeleteRequest(..) => unreachable!(),
+                Record::BaseOperation(..) => unreachable!(),
             }
         });
     } else {
@@ -284,7 +284,7 @@ pub fn materialize(rs: &mut Records, partial: Option<Tag>, state: Option<&mut St
                     let hit = state.remove(r);
                     debug_assert!(hit);
                 }
-                Record::DeleteRequest(..) => unreachable!(),
+                Record::BaseOperation(..) => unreachable!(),
             }
         }
     }

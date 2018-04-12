@@ -357,7 +357,7 @@ mod tests;
 
 pub use consensus::{LocalAuthority, ZookeeperAuthority};
 
-pub use core::{DataType, Datas, NodeIndex};
+pub use core::{DataType, Datas, Modification, NodeIndex, Operation};
 
 pub use dataflow::checktable::{Token, TransactionResult};
 pub use dataflow::debug::{DebugEvent, DebugEventType};

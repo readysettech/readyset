@@ -21,8 +21,8 @@ pub mod data;
 pub mod local;
 pub mod map;
 
-pub use data::{DataType, Datas, Record, Records};
 pub use addressing::{IndexPair, LocalNodeIndex};
+pub use data::{BaseOperation, DataType, Datas, Modification, Operation, Record, Records};
 pub use local::{KeyType, LookupResult, Row, State, Tag};
 pub use map::Map;
 pub use petgraph::graph::NodeIndex;

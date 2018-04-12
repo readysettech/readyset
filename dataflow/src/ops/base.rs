@@ -137,8 +137,8 @@ impl Ingredient for Base {
         _: &DomainNodes,
         state: &StateMap,
     ) -> ProcessingResult {
-        let results = rs.into_iter().filter_map(|r| {
-            //rustfmt
+        let mut results = Vec::with_capacity(rs.len());
+        for r in rs {
             match r {
                 Record::Positive(u) => {
                     if let Some(ref key) = self.primary_key {
@@ -151,19 +151,17 @@ impl Ingredient for Base {
                         match db.lookup(cols.as_slice(), &KeyType::from(&keyval[..])) {
                             LookupResult::Some(rows) => {
                                 if rows.is_empty() {
-                                    Some(Record::Positive(u))
-                                } else {
-                                    None
+                                    results.push(Record::Positive(u));
                                 }
                             }
                             LookupResult::Missing => unreachable!(), // base can't be partial
                         }
                     } else {
-                        Some(Record::Positive(u))
+                        results.push(Record::Positive(u));
                     }
                 }
-                Record::Negative(u) => Some(Record::Negative(u)),
-                Record::DeleteRequest(key) => {
+                Record::Negative(u) => results.push(Record::Negative(u)),
+                Record::BaseOperation(op) => {
                     let cols = self.primary_key
                         .as_ref()
                         .expect("base must have a primary key to support deletions");
@@ -171,24 +169,83 @@ impl Ingredient for Base {
                         .get(&*self.us.unwrap())
                         .expect("base must have its own state materialized to support deletions");
 
-                    match db.lookup(cols.as_slice(), &KeyType::from(&key[..])) {
-                        LookupResult::Some(rows) => {
-                            assert_eq!(rows.len(), 1);
-                            Some(Record::Negative((*rows[0]).clone()))
+                    let current = {
+                        let key = match op {
+                            BaseOperation::Delete { ref key } => KeyType::from(&key[..]),
+                            BaseOperation::Update { ref key, .. } => KeyType::from(&key[..]),
+                            BaseOperation::InsertOrUpdate { ref row, .. } => {
+                                KeyType::from(cols.iter().map(|&c| &row[c]))
+                            }
+                        };
+
+                        match db.lookup(cols.as_slice(), &key) {
+                            LookupResult::Some(rows) => {
+                                match rows.len() {
+                                    0 => None,
+                                    1 => Some((*rows[0]).clone()),
+                                    n => {
+                                        // primary key, so better be unique!
+                                        assert_eq!(n, 1);
+                                        unreachable!();
+                                    }
+                                }
+                            }
+                            LookupResult::Missing => unreachable!(),
                         }
-                        LookupResult::Missing => unreachable!(),
+                    };
+
+                    let update = match op {
+                        BaseOperation::Delete { .. } => {
+                            if let Some(r) = current {
+                                results.push(Record::Negative(r));
+                            } else {
+                                // TODO: warn?
+                            }
+                            continue;
+                        }
+                        BaseOperation::Update { set, .. } => set,
+                        BaseOperation::InsertOrUpdate { row, update } => {
+                            if current.is_none() {
+                                results.push(Record::Positive(row));
+                                continue;
+                            }
+                            update
+                        }
+                    };
+
+                    if current.is_none() {
+                        // TODO: also warn here?
+                        continue;
                     }
+                    let mut current = current.unwrap();
+                    results.push(Record::Negative(current.clone()));
+
+                    for (col, op) in update.into_iter().enumerate() {
+                        // XXX: make sure user doesn't update primary key?
+                        match op {
+                            Modification::Set(v) => current[col] = v,
+                            Modification::Apply(op, v) => {
+                                let old: i64 = current[col].clone().into();
+                                let delta: i64 = v.into();
+                                current[col] = match op {
+                                    Operation::Add => (old + delta).into(),
+                                    Operation::Sub => (old - delta).into(),
+                                };
+                            }
+                            Modification::None => {}
+                        }
+                    }
+                    results.push(Record::Positive(current));
                 }
             }
-        });
+        }
+
+        for r in &mut results {
+            self.fix(r);
+        }
 
         ProcessingResult {
-            results: results
-                .map(|mut r| {
-                    self.fix(&mut r);
-                    r
-                })
-                .collect(),
+            results: results.into(),
             misses: Vec::new(),
         }
     }

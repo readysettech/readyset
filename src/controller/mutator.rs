@@ -14,6 +14,8 @@ use vec_map::VecMap;
 pub enum MutatorError {
     /// Incorrect number of columns specified for operations: (expected, got).
     WrongColumnCount(usize, usize),
+    /// Incorrect number of key columns specified for operations: (expected, got).
+    WrongKeyColumnCount(usize, usize),
     /// Transaction was unable to complete due to a conflict.
     TransactionFailed,
 }
@@ -341,7 +343,11 @@ impl<E> Mutator<E> {
     where
         I: Into<Vec<DataType>>,
     {
-        Ok(self.send(vec![Record::DeleteRequest(key.into())].into()))
+        Ok(self.send(
+            vec![
+                Record::BaseOperation(BaseOperation::Delete { key: key.into() }),
+            ].into(),
+        ))
     }
 
     /// Perform a transactional delete from the base node this Mutator was generated for.
@@ -353,60 +359,76 @@ impl<E> Mutator<E> {
     where
         I: Into<Vec<DataType>>,
     {
-        self.tx_send(vec![Record::DeleteRequest(key.into())].into(), t)
-            .map_err(|()| MutatorError::TransactionFailed)
+        self.tx_send(
+            vec![
+                Record::BaseOperation(BaseOperation::Delete { key: key.into() }),
+            ].into(),
+            t,
+        ).map_err(|()| MutatorError::TransactionFailed)
     }
 
-    /// Perform a non-transactional update (delete followed by put) to the base node this Mutator
-    /// was generated for.
-    #[allow(unreachable_code)]
-    pub fn update<V>(&mut self, _u: V) -> Result<(), MutatorError>
+    /// Perform a non-transactional update to the base node this Mutator was generated for.
+    pub fn update<V>(&mut self, key: Vec<DataType>, u: V) -> Result<(), MutatorError>
     where
-        V: Into<Vec<DataType>>,
+        V: IntoIterator<Item = (usize, Modification)>,
     {
-        // See 869c59974349bbc6c0cab314285c35376906cba4.
-        panic!("Not currently working correctly due to primary key uniqueness constraint!");
-
         assert!(
             !self.key.is_empty() && self.key_is_primary,
             "update operations can only be applied to base nodes with key columns"
         );
 
-        let u = _u.into();
-        if u.len() != self.columns.len() {
-            return Err(MutatorError::WrongColumnCount(self.columns.len(), u.len()));
+        if key.len() != self.key.len() {
+            return Err(MutatorError::WrongKeyColumnCount(self.key.len(), key.len()));
         }
 
-        let pkey = self.key.iter().map(|&col| &u[col]).cloned().collect();
-        Ok(self.send(vec![Record::DeleteRequest(pkey), u.into()].into()))
+        let mut set = vec![Modification::None; self.columns.len()];
+        for (coli, m) in u {
+            if coli >= self.columns.len() {
+                return Err(MutatorError::WrongColumnCount(self.columns.len(), coli + 1));
+            }
+            set[coli] = m;
+        }
+        Ok(self.send(vec![Record::BaseOperation(BaseOperation::Update { key, set })].into()))
     }
 
-    /// Perform a transactional update (delete followed by put) to the base node this Mutator was
-    /// generated for.
-    pub fn transactional_update<V>(
+    /// Perform a non-transactional insert-or-update to the base node this Mutator was generated
+    /// for. If a record already exists for the key of the given record, the existing record will
+    /// instead be updated with the modifications in `u`.
+    pub fn insert_or_update<V>(
         &mut self,
-        u: V,
-        t: checktable::Token,
-    ) -> Result<i64, MutatorError>
+        insert: Vec<DataType>,
+        update: V,
+    ) -> Result<(), MutatorError>
     where
-        V: Into<Vec<DataType>>,
+        V: IntoIterator<Item = (usize, Modification)>,
     {
         assert!(
             !self.key.is_empty() && self.key_is_primary,
             "update operations can only be applied to base nodes with key columns"
         );
 
-        let u: Vec<_> = u.into();
-        if u.len() != self.columns.len() {
-            return Err(MutatorError::WrongColumnCount(self.columns.len(), u.len()));
+        if insert.len() != self.columns.len() {
+            return Err(MutatorError::WrongColumnCount(
+                self.columns.len(),
+                insert.len(),
+            ));
         }
 
-        let m = vec![
-            Record::DeleteRequest(self.key.iter().map(|&col| &u[col]).cloned().collect()),
-            u.into(),
-        ].into();
-        self.tx_send(m, t)
-            .map_err(|()| MutatorError::TransactionFailed)
+        let mut set = vec![Modification::None; self.columns.len()];
+        for (coli, m) in update {
+            if coli >= self.columns.len() {
+                return Err(MutatorError::WrongColumnCount(self.columns.len(), coli + 1));
+            }
+            set[coli] = m;
+        }
+        Ok(self.send(
+            vec![
+                Record::BaseOperation(BaseOperation::InsertOrUpdate {
+                    row: insert,
+                    update: set,
+                }),
+            ].into(),
+        ))
     }
 
     /// Trace subsequent packets by sending events on the global debug channel until `stop_tracing`

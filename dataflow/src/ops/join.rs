@@ -409,7 +409,7 @@ impl Ingredient for Join {
                 use std::mem;
 
                 // put something bogus in rs (which will be discarded anyway) so we can take r.
-                let r = mem::replace(&mut rs[ri], Record::DeleteRequest(Vec::new()));
+                let r = mem::replace(&mut rs[ri], Record::Positive(Vec::new()));
                 let (row, positive) = r.extract();
 
                 if let Some(other_rows) = other_rows.take() {
