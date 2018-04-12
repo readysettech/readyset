@@ -32,6 +32,10 @@ where
             )
         })
         .and_then(move |(c, x)| {
+            if x.1.is_empty() {
+                panic!("got no stories from front page: {:?}", x);
+            }
+
             match acting_as {
                 Some(uid) => Either::A(
                     c.drop_exec(
