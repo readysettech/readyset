@@ -24,13 +24,13 @@ where
 
                 // most popular tag
                 c.drop_exec(
-                    "SELECT  `tags`.* FROM `tags` \
+                    "SELECT  `tags`.*, COUNT(*) AS `count` FROM `tags` \
                      INNER JOIN `taggings` ON `taggings`.`tag_id` = `tags`.`id` \
                      INNER JOIN `stories` ON `stories`.`id` = `taggings`.`story_id` \
                      WHERE `tags`.`inactive` = 0 \
                      AND `stories`.`user_id` = ? \
                      GROUP BY `tags`.`id` \
-                     ORDER BY COUNT(*) desc LIMIT 1",
+                     ORDER BY `count` desc LIMIT 1",
                     (uid,),
                 ).and_then(move |c| {
                         c.drop_exec(
