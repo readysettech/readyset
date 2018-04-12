@@ -207,7 +207,10 @@ impl SoupBackend {
                             .fetch_add(1, sync::atomic::Ordering::SeqCst);
                         let qname = format!("q_{}", qc);
                         // first do a migration to add the query if it doesn't exist already
-                        info!(self.log, "Adding ad-hoc query \"{}\" to Soup", q);
+                        info!(
+                            self.log,
+                            "Adding ad-hoc query \"{}\" to Soup as {}", q, qname
+                        );
                         match self.inner
                             .soup
                             .extend_recipe(format!("QUERY {}: {};", qname, q))
@@ -286,7 +289,7 @@ impl SoupBackend {
                 if !cached {
                     info!(
                         self.log,
-                        "Adding ad-hoc query \"{}\" from update to Soup", select_q
+                        "Adding ad-hoc query \"{}\" from update to Soup as {}", select_q, qname
                     );
                     match self.inner
                         .soup
@@ -413,7 +416,10 @@ impl SoupBackend {
 
                 if !cached {
                     // add the query to Soup
-                    info!(self.log, "Adding parameterized query \"{}\" to Soup", q);
+                    info!(
+                        self.log,
+                        "Adding parameterized query \"{}\" to Soup as {}", q, qname
+                    );
                     match self.inner
                         .soup
                         .extend_recipe(format!("QUERY {}: {};", qname, q))
@@ -519,7 +525,9 @@ impl SoupBackend {
                 if !cached {
                     info!(
                         self.log,
-                        "Adding parameterized query \"{}\" from update to Soup", select_q
+                        "Adding parameterized query \"{}\" from update to Soup as {}",
+                        select_q,
+                        qname
                     );
                     match self.inner
                         .soup
