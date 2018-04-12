@@ -1,3 +1,4 @@
+use nom::multispace;
 use std::{fmt, str};
 
 use common::{as_alias, column_identifier_no_alias, integer_literal, opt_multispace,
@@ -80,19 +81,16 @@ named!(pub arithmetic_cast<&[u8], (ArithmeticBase, Option<SqlType>)>,
             opt_multispace >>
             // TODO(malte): should be arbitrary expr
             v: arithmetic_base >>
-            opt_multispace >>
+            multispace >>
             tag_no_case!("as") >>
-            opt_multispace >>
-            _sign: opt!(terminated!(tag_no_case!("signed"), opt_multispace)) >>
+            multispace >>
+            _sign: opt!(terminated!(tag_no_case!("signed"), multispace)) >>
             typ: type_identifier >>
             opt_multispace >>
             tag!(")") >>
             (v, Some(typ))
         ) |
-        do_parse!(
-            v: arithmetic_base >>
-            (v, None)
-        )
+        map!(arithmetic_base, |v| (v, None))
     )
 );
 
@@ -257,6 +255,7 @@ mod tests {
         let exprs = [
             "CAST(`t`.`foo` AS signed int) + CAST(`t`.`bar` AS signed int) ",
             "CAST(5 AS bigint) - foo ",
+            "CAST(5 AS bigint) - foo AS 5_minus_foo",
         ];
 
         // XXX(malte): currently discards the cast and type information!
@@ -268,6 +267,12 @@ mod tests {
                 None,
             ),
             ArithmeticExpression::new(Subtract, Scalar(5.into()), ABColumn("foo".into()), None),
+            ArithmeticExpression::new(
+                Subtract,
+                Scalar(5.into()),
+                ABColumn("foo".into()),
+                Some("5_minus_foo".into()),
+            ),
         ];
 
         for (i, e) in exprs.iter().enumerate() {
