@@ -1,4 +1,5 @@
 use std::collections::HashMap;
+use std::fmt::{self, Display};
 use std::sync;
 
 pub use nom_sql::Operator;
@@ -20,6 +21,15 @@ pub enum Value {
 impl From<DataType> for Value {
     fn from(dt: DataType) -> Self {
         Value::Constant(dt)
+    }
+}
+
+impl Display for Value {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        match *self {
+            Value::Constant(ref c) => write!(f, "{}", c),
+            Value::Column(ref ci) => write!(f, "col: {}", ci),
+        }
     }
 }
 
@@ -132,7 +142,7 @@ impl Ingredient for Filter {
                 .filter_map(|(i, ref e)| match e.as_ref() {
                     Some(cond) => match *cond {
                         FilterCondition::Comparison(ref op, ref x) => {
-                            Some(format!("f{} {} {:?}", i, escape(&format!("{}", op)), x))
+                            Some(format!("f{} {} {}", i, escape(&format!("{}", op)), x))
                         }
                         FilterCondition::In(ref xs) => Some(format!(
                             "f{} IN ({})",
