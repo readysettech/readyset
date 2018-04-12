@@ -51,40 +51,27 @@ where
                          WHERE `hidden_stories`.`user_id` = ?",
                         (uid,),
                     ).and_then(move |c| {
-                            c.prep_exec(
+                            c.drop_exec(
                                 "SELECT `tag_filters`.* FROM `tag_filters` \
                                  WHERE `tag_filters`.`user_id` = ?",
                                 (uid,),
                             )
                         })
-                        .and_then(|tags| {
-                            tags.reduce_and_drop(Vec::new(), |mut tags, tag| {
-                                tags.push(tag.get::<u32, _>("tag_id").unwrap());
-                                tags
-                            })
-                        })
-                        .and_then(move |(c, tags)| {
-                            if tags.is_empty() {
-                                return Either::A(future::ok((c, (users, stories))));
-                            }
-
+                        .and_then(move |c| {
                             let s = stories
                                 .iter()
                                 .map(|id| format!("{}", id))
                                 .collect::<Vec<_>>()
                                 .join(",");
-                            let tags = tags.into_iter()
-                                .map(|id| format!("{}", id))
-                                .collect::<Vec<_>>()
-                                .join(",");
 
-                            Either::B(c.drop_query(format!(
+                            c.drop_query(format!(
                                 "SELECT `taggings`.`story_id` \
                                  FROM `taggings` \
-                                 WHERE `taggings`.`story_id` IN ({}) \
-                                 AND `taggings`.`tag_id` IN ({})",
-                                s, tags
-                            )).map(move |c| (c, (users, stories))))
+                                 WHERE `taggings`.`story_id` IN ({})",
+                                //AND `taggings`.`tag_id` IN ({})",
+                                s,
+                                //tags
+                            )).map(move |c| (c, (users, stories)))
                         }),
                 ),
                 None => Either::B(future::ok((c, (users, stories)))),
