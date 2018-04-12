@@ -53,6 +53,10 @@ where
                             })
                         })
                         .and_then(move |(c, tags)| {
+                            if tags.is_empty() {
+                                return Either::A(future::ok(c));
+                            }
+
                             let tags = tags.into_iter()
                                 .map(|id| format!("{}", id))
                                 .collect::<Vec<_>>()
@@ -67,12 +71,12 @@ where
                             //
                             // maybe we could *join* this with the frontpage?
                             // that'd be pretty neat...
-                            c.drop_query(format!(
+                            Either::B(c.drop_query(format!(
                                 "SELECT `taggings`.`story_id` \
                                  FROM `taggings` \
                                  WHERE `taggings`.`tag_id` IN ({})",
                                 tags
-                            ))
+                            )))
                         }),
                 ),
                 None => Either::B(future::ok(c)),
