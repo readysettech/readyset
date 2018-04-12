@@ -65,13 +65,16 @@ where
                                     (now, now, uid, story),
                                 )),
                                 Some(rr) => Either::B(c.drop_exec(
-                                    "UPDATE `read_ribbons` \
-                                     SET \
-                                     `read_ribbons`.`updated_at` \
-                                     = ? \
-                                     WHERE \
-                                     `read_ribbons`.`id` = ?",
-                                    (now, rr.get::<u32, _>("id").unwrap()),
+                                    format!(
+                                        "UPDATE `read_ribbons` \
+                                         SET \
+                                         `read_ribbons`.`updated_at` \
+                                         = {} \
+                                         WHERE \
+                                         `read_ribbons`.`id` = ?",
+                                        now
+                                    ),
+                                    (rr.get::<u32, _>("id").unwrap(),),
                                 )),
                             }
                         }))

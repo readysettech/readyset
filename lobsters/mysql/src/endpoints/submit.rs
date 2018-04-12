@@ -133,7 +133,7 @@ where
                             (story,),
                         ).map(move |t| (t, story))
                     })*/
-                    /*.and_then(move |(t, story)| {
+                    .and_then(move |(t, story)| {
                         // why oh why is story hotness *updated* here?!
                         t.drop_exec(
                             &format!(
@@ -144,8 +144,8 @@ where
                             ),
                             (story,),
                         )
-                    })*/
-                    .and_then(|t| t.0.commit())
+                    })
+                    .and_then(|t| t.commit())
             })
             .map(|c| (c, false)),
     )

@@ -171,7 +171,7 @@ where
                             (story,),
                         ).and_then(|q| q.reduce_and_drop(0, |rows, _| rows + 1))
                     })
-                    /*.and_then(move |(t, count)| {
+                    .and_then(move |(t, count)| {
                         t.drop_exec(
                             &format!(
                                 "UPDATE `stories` \
@@ -181,8 +181,8 @@ where
                             ),
                             (story,),
                         )
-                    })*/
-                    .and_then(move |(t, count)| {
+                    })
+                    .and_then(move |t| {
                         // get all the stuff needed to compute updated hotness
                         t.drop_exec(
                             "SELECT `tags`.* \
@@ -213,7 +213,7 @@ where
                             (story,),
                         )
                     })
-                    /*.and_then(move |t| {
+                    .and_then(move |t| {
                         // why oh why is story hotness *updated* here?!
                         t.drop_exec(
                             &format!(
@@ -224,7 +224,7 @@ where
                             ),
                             (story,),
                         )
-                    })*/
+                    })
                     .and_then(move |t| {
                         let key = format!("user:{}:comments_posted", user);
                         t.drop_exec(
