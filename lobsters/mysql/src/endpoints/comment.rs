@@ -230,20 +230,8 @@ where
                             "INSERT INTO keystores (`key`, `value`) \
                              VALUES (?, ?) \
                              ON DUPLICATE KEY UPDATE `value` = `value` + 1",
-                            (key, 1)
+                            (key, 1),
                         )
-                    })
-                    .and_then(move |t| {
-                        let key = format!("user:{}:comments_posted", user);
-                        t.drop_exec(
-                            "SELECT  `keystores`.* \
-                             FROM `keystores` \
-                             WHERE `keystores`.`key` = ? \
-                             ORDER BY `keystores`.`key` ASC LIMIT 1",
-                            (key,)
-                        )
-                        // TODO: technically it also selects from users for the
-                        // author of the parent comment here..
                     })
                     .and_then(|t| t.commit())
             })
