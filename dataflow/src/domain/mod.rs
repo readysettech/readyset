@@ -2399,6 +2399,11 @@ impl Domain {
 
                     if let TriggerEndpoint::Local(_) = path.trigger {
                         let target = replay_paths[&tag].path.last().unwrap();
+                        if nodes[&target.node].borrow().is_reader() {
+                            // already evicted from in walk_path
+                            continue;
+                        }
+
                         state[&target.node].evict_keys(&tag, keys);
                         trigger_downstream_evictions(
                             &target.partial_key.as_ref().unwrap()[..],
