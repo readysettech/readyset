@@ -1870,6 +1870,7 @@ fn do_full_vote_migration(old_puts_after: bool) {
         let article = mig.add_ingredient("article", &["id", "title"], Base::default());
 
         // add vote base table
+        // NOTE: the double-column key here means that we can't shard vote
         let vote = mig.add_ingredient(
             "vote",
             &["user", "id"],
