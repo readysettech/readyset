@@ -1,6 +1,7 @@
 use std::{fmt, str};
 
-use common::{as_alias, column_identifier_no_alias, integer_literal, opt_multispace, Literal};
+use common::{as_alias, column_identifier_no_alias, integer_literal, opt_multispace,
+             type_identifier, Literal, SqlType};
 use column::Column;
 
 #[derive(Debug, Clone, Deserialize, Eq, Hash, PartialEq, Serialize)]
@@ -70,6 +71,31 @@ impl fmt::Display for ArithmeticExpression {
     }
 }
 
+named!(pub arithmetic_cast<&[u8], (ArithmeticBase, Option<SqlType>)>,
+    dbg_dmp!(alt_complete!(
+        do_parse!(
+            tag_no_case!("cast") >>
+            opt_multispace >>
+            tag!("(") >>
+            opt_multispace >>
+            // TODO(malte): should be arbitrary expr
+            v: arithmetic_base >>
+            opt_multispace >>
+            tag_no_case!("as") >>
+            opt_multispace >>
+            _sign: opt!(terminated!(tag_no_case!("signed"), opt_multispace)) >>
+            typ: type_identifier >>
+            opt_multispace >>
+            tag!(")") >>
+            (v, Some(typ))
+        ) |
+        do_parse!(
+            v: arithmetic_base >>
+            (v, None)
+        )
+    ))
+);
+
 /// Parse standard math operators.
 /// TODO(malte): this doesn't currently observe operator precedence.
 named!(pub arithmetic_operator<&[u8], ArithmeticOperator>,
@@ -93,16 +119,17 @@ named!(pub arithmetic_base<&[u8], ArithmeticBase>,
 /// TODO(malte): this doesn't currently support nested expressions.
 named!(pub arithmetic_expression<&[u8], ArithmeticExpression>,
     complete!(do_parse!(
-        left: arithmetic_base >>
+        left: arithmetic_cast >>
         opt_multispace >>
         op: arithmetic_operator >>
         opt_multispace >>
-        right: arithmetic_base >>
+        right: arithmetic_cast >>
         alias: opt!(as_alias) >>
         (ArithmeticExpression {
             op: op,
-            left: left,
-            right: right,
+            // TODO(malte): discards casts
+            left: left.0,
+            right: right.0,
             alias: match alias {
                 None => None,
                 Some(a) => Some(String::from(a)),
@@ -220,4 +247,29 @@ mod tests {
             assert_eq!(expected_strings[i], format!("{}", e));
         }
     }
+
+    #[test]
+    fn it_parses_arithmetic_casts() {
+        use super::ArithmeticOperator::*;
+        use super::ArithmeticBase::Scalar;
+        use super::ArithmeticBase::Column as ABColumn;
+
+        let exprs = [
+            "CAST(foo AS signed int) + CAST(bar AS signed int) ",
+            "CAST(5 AS bigint) - foo ",
+        ];
+
+        // XXX(malte): currently discards the cast and type information!
+        let expected = [
+            ArithmeticExpression::new(Add, ABColumn("foo".into()), ABColumn("bar".into()), None),
+            ArithmeticExpression::new(Subtract, Scalar(5.into()), ABColumn("foo".into()), None),
+        ];
+
+        for (i, e) in exprs.iter().enumerate() {
+            let res = arithmetic_expression(e.as_bytes());
+            assert!(res.is_done(), "{} failed to parse", e);
+            assert_eq!(res.unwrap().1, expected[i]);
+        }
+    }
+
 }
