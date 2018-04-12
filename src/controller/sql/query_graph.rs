@@ -368,10 +368,14 @@ fn classify_conditionals(
                         ConditionBase::Literal(_) => {
                             if let ConditionBase::Field(ref lf) = *l {
                                 // we assume that implied table names have previously been expanded
-                                // and thus all columns carry table names
-                                assert!(lf.table.is_some());
-                                let e = local.entry(lf.table.clone().unwrap()).or_default();
-                                e.push(ce.clone());
+                                // and thus all non-computed columns carry table names
+                                if lf.table.is_some() {
+                                    let e = local.entry(lf.table.clone().unwrap()).or_default();
+                                    e.push(ce.clone());
+                                } else {
+                                    // TODO(malte): not entirely clear what we should do for
+                                    // computed columns here
+                                }
                             }
                         }
                         ConditionBase::LiteralList(_) => (),
