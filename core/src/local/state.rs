@@ -290,8 +290,10 @@ impl PersistentState {
     }
 
     // Selects a prefix of `key` without the sequence number.
-    // Keys are on the form (IndexID, Key, Sequence), with the types (u64, Vec<DataType>, u64).
-    // We'd like to retrieve the prefix (IndexID, Key).
+    // Keys are on the form (IndexID, KeySize, Key, IndexTimestamp), with the types
+    // (u64, u64, Vec<DataType>, (u64, u32)).
+    //
+    // We'd like to retrieve the prefix (IndexID, KeySize, Key).
     //
     // The RocksDB docs state the following:
     // > If non-nullptr, use the specified function to determine the
@@ -306,33 +308,24 @@ impl PersistentState {
     // > 2) Compare(prefix(key), key) <= 0.
     // > 3) If Compare(k1, k2) <= 0, then Compare(prefix(k1), prefix(k2)) <= 0
     // > 4) prefix(prefix(key)) == prefix(key)
+    //
+    // To make sure that both 1 and 4 hold, we use the KeySize we've encoded earlier to
+    // trim away the IndexTimestamp.
     fn transform_fn(key: &[u8]) -> Vec<u8> {
         // IndexID is a u32, so bincode uses 4 bytes to serialize it:
         let start = 4;
-        // IndexSequence is a (u64, u32), which is 8 + 4 = 12 bytes:
-        let end = key.len() - 12;
+        // We encoded the size of the key itself with a u64, which bincode uses 8 bytes to encode:
+        let size_offset = start + 8;
+        let key_size: u64 = bincode::deserialize(&key[start..size_offset]).unwrap();
+        let prefix_len = size_offset + key_size as usize;
+        let mut bytes = Vec::from(key);
 
-        // TODO(ekmartin): It'd be nice to find a better way of doing this.
-        // Right now we're trying to deserialize to see if we've already truncated this key,
-        // so that `key` is in reality a prefix. One way would be to first deserialize the length
-        // of our Vec<DataType> (the first 8 bytes), and then manually go along the bytes and
-        // deserialize the variant index to then jump forward the amount of bytes that variant
-        // needs (i.e. a DataType::Int would need 4 bytes).
-        //
-        // That seems like a bit of a hassle though, and at that point we might start looking into
-        // a better key format altogether (possibly inspired by MyRocks).
-        match bincode::deserialize::<Vec<DataType>>(&key[start..end]) {
-            Ok(_) => {
-                // Strip away the sequence number:
-                let mut bytes = Vec::from(key);
-                bytes.truncate(end);
-                bytes
-            }
-            Err(_) => {
-                // We've already truncated this key:
-                Vec::from(key)
-            }
+        // Strip away the IndexTimestamp if we haven't already done so:
+        if key.len() > prefix_len {
+            bytes.truncate(prefix_len);
         }
+
+        bytes
     }
 
     // A key is built up of three components:
@@ -342,13 +335,17 @@ impl PersistentState {
     //      How would we differ between an index on [0, 1] and [0, 2]?
     //      We'd either have to include placeholders for all the columns, or, as we have done,
     //      prefix each row with an identifier for that index.
+    //  * `row_size`
+    //      The size of `row`.
+    //      This lets us create prefixes with (index, row_size, row) in Self::transform_fn.
     //  * `row`
-    //      The actual index values
+    //      The actual index values.
     //  * `ts`
     //      Maintained for each index in `self.indices` and incremented on inserts. This lets us
     //      store multiple values for a single key.
     fn serialize_key(index: IndexID, row: &Vec<&DataType>, ts: IndexTimestamp) -> Vec<u8> {
-        bincode::serialize(&(index, row, ts)).unwrap()
+        let size: u64 = bincode::serialized_size(&row).unwrap();
+        bincode::serialize(&(index, size, row, ts)).unwrap()
     }
 
     // When reading keys we ignore the sequence number, but for the logic in Self::transform_fn to
@@ -937,8 +934,10 @@ mod tests {
         let r = row.iter().collect();
         let k = PersistentState::serialize_key(i, &r, index.last_insert);
         let prefix = PersistentState::transform_fn(&k);
-        let (key_out, row_out): (IndexID, Vec<DataType>) = bincode::deserialize(&prefix).unwrap();
+        let (key_out, size, row_out): (IndexID, u64, Vec<DataType>) =
+            bincode::deserialize(&prefix).unwrap();
         assert_eq!(i, key_out);
+        assert_eq!(size, bincode::serialized_size(&row_out).unwrap());
         assert_eq!(row[0], row_out[0]);
         assert_eq!(row[1], row_out[1]);
 
