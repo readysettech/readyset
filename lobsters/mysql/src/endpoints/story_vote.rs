@@ -87,9 +87,10 @@ where
                              `comments`.`upvotes`, \
                              `comments`.`downvotes` \
                              FROM `comments` \
+                             JOIN `stories` ON (`stories`.`id` = `comments`.`story_id`) \
                              WHERE `comments`.`story_id` = ? \
-                             AND user_id <> ?",
-                            (story, author),
+                             AND `comments`.`user_id` <> `stories`.`user_id`",
+                            (story,),
                         )
                     })
                     .and_then(move |t| {

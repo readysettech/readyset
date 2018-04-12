@@ -108,31 +108,28 @@ where
                             (story,),
                         ).map(|(c, story)| {
                             let story = story.unwrap();
-                            (
-                                c,
-                                story.get::<u32, _>("user_id").unwrap(),
-                                story.get::<f64, _>("hotness").unwrap(),
-                            )
+                            (c, story.get::<f64, _>("hotness").unwrap())
                         })
                     })
-                    .and_then(move |(t, story_author, score)| {
+                    .and_then(move |(t, score)| {
                         t.drop_exec(
                             "SELECT `tags`.* \
                              FROM `tags` \
                              INNER JOIN `taggings` ON `tags`.`id` = `taggings`.`tag_id` \
                              WHERE `taggings`.`story_id` = ?",
                             (story,),
-                        ).map(move |t| (t, story_author, score))
+                        ).map(move |t| (t, score))
                     })
-                    .and_then(move |(t, story_author, score)| {
+                    .and_then(move |(t, score)| {
                         t.drop_exec(
                             "SELECT \
                              `comments`.`upvotes`, \
                              `comments`.`downvotes` \
                              FROM `comments` \
+                             JOIN `stories` ON (`stories`.`id` = `comments`.`story_id`) \
                              WHERE `comments`.`story_id` = ? \
-                             AND user_id <> ?",
-                            (story, story_author),
+                             AND `comments`.`user_id` <> `stories`.`user_id`",
+                            (story,),
                         ).map(move |t| (t, score))
                     })
                     .and_then(move |(t, score)| {
