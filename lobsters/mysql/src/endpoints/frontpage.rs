@@ -1,9 +1,9 @@
 use futures::Future;
-use futures::future::Either;
+use futures::future::{self, Either};
 use my;
 use my::prelude::*;
-use std::iter;
 use std::collections::HashSet;
+use std::iter;
 use trawler::UserId;
 
 pub(crate) fn handle<F>(
@@ -13,73 +13,15 @@ pub(crate) fn handle<F>(
 where
     F: 'static + Future<Item = my::Conn, Error = my::errors::Error>,
 {
-    let initial = match acting_as {
-        Some(uid) => Either::A(
-            // logged-in front page
-            c.and_then(move |c| {
-                c.prep_exec(
-                    "SELECT `tag_filters`.* FROM `tag_filters` \
-                     WHERE `tag_filters`.`user_id` = ?",
-                    (uid,),
-                )
-            }).and_then(|tags| {
-                    tags.reduce_and_drop(Vec::new(), |mut tags, tag| {
-                        tags.push(tag.get::<u32, _>("tag_id").unwrap());
-                        tags
-                    })
-                })
-                .and_then(move |(c, tags)| {
-                    let tags = tags.into_iter()
-                        .map(|id| format!("{}", id))
-                        .collect::<Vec<_>>()
-                        .join(",");
-                    c.query(&format!(
-                        "SELECT  `stories`.*, \
-                         `stories`.`upvotes` - `stories`.`downvotes` AS saldo \
-                         FROM `stories` \
-                         WHERE `stories`.`merged_story_id` IS NULL \
-                         AND `stories`.`is_expired` = 0 \
-                         AND (saldo >= 0) \
-                         AND (`stories`.`id` NOT IN \
-                         (SELECT `hidden_stories`.`story_id` \
-                         FROM `hidden_stories` \
-                         WHERE `hidden_stories`.`user_id` = {}\
-                         )\
-                         ) {} \
-                         ORDER BY hotness LIMIT 26 OFFSET 0",
-                        uid,
-                        if tags.is_empty() {
-                            String::from("")
-                        } else {
-                            // should probably just inline tag_filters here instead
-                            format!(
-                                " AND (`stories`.`id` NOT IN (\
-                                 SELECT `taggings`.`story_id` \
-                                 FROM `taggings` \
-                                 WHERE `taggings`.`tag_id` IN ({}) \
-                                 )) ",
-                                tags
-                            )
-                        },
-                    ))
-                }),
-        ),
-        None => Either::B(c.and_then(|c| {
-            // public front page
-            c.query(
-                "SELECT  `stories`.*, \
-                 `stories`.`upvotes` - `stories`.`downvotes` AS saldo \
-                 FROM `stories` \
-                 WHERE `stories`.`merged_story_id` IS NULL \
-                 AND `stories`.`is_expired` = 0 \
-                 AND (saldo >= 0) \
-                 ORDER BY hotness LIMIT 26 OFFSET 0",
-            )
-        })),
-    };
-
-    let main = initial
-        .and_then(|stories| {
+    let main = c.and_then(|c| {
+        c.query(
+            "SELECT  `stories`.* FROM `stories` \
+             WHERE `stories`.`merged_story_id` IS NULL \
+             AND `stories`.`is_expired` = 0 \
+             AND ((CAST(upvotes AS signed) - CAST(downvotes AS signed)) >= 0) \
+             ORDER BY hotness LIMIT 52 OFFSET 0",
+        )
+    }).and_then(|stories| {
             stories.reduce_and_drop(
                 (HashSet::new(), HashSet::new()),
                 |(mut users, mut stories), story| {
@@ -88,6 +30,53 @@ where
                     (users, stories)
                 },
             )
+        })
+        .and_then(move |(c, x)| {
+            match acting_as {
+                Some(uid) => Either::A(
+                    c.drop_exec(
+                        "SELECT `hidden_stories`.`story_id` \
+                         FROM `hidden_stories` \
+                         WHERE `hidden_stories`.`user_id` = ?",
+                        (uid,),
+                    ).and_then(move |c| {
+                            c.prep_exec(
+                                "SELECT `tag_filters`.* FROM `tag_filters` \
+                                 WHERE `tag_filters`.`user_id` = ?",
+                                (uid,),
+                            )
+                        })
+                        .and_then(|tags| {
+                            tags.reduce_and_drop(Vec::new(), |mut tags, tag| {
+                                tags.push(tag.get::<u32, _>("tag_id").unwrap());
+                                tags
+                            })
+                        })
+                        .and_then(move |(c, tags)| {
+                            let tags = tags.into_iter()
+                                .map(|id| format!("{}", id))
+                                .collect::<Vec<_>>()
+                                .join(",");
+
+                            // NOTE: this is pretty bad for us. there may be *many* stories with a
+                            // given tag. really what we want to do is
+                            //
+                            //   story_id IN (..) AND tag_id IN (..)
+                            //
+                            // but that doesn't currently work as it would require doing a cross-product lookup.
+                            //
+                            // maybe we could *join* this with the frontpage?
+                            // that'd be pretty neat...
+                            c.drop_query(format!(
+                                "SELECT `taggings`.`story_id` \
+                                 FROM `taggings` \
+                                 WHERE `taggings`.`tag_id` IN ({})",
+                                tags
+                            ))
+                        }),
+                ),
+                None => Either::B(future::ok(c)),
+            }.map(move |c| (c, x))
         })
         .and_then(|(c, (users, stories))| {
             let users = users
