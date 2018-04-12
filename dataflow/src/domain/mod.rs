@@ -616,18 +616,24 @@ impl Domain {
                             .iter()
                             .find(|rps| rps.node == me)
                             .and_then(|rps| rps.partial_key.as_ref())
-                            .map(|keys| {
-                                // we need the *input* column that produces that output
+                            .and_then(|keys| {
+                                // we need to find the *input* column that produces that output.
+                                //
+                                // if one of the columns for this replay path's keys does not
+                                // resolve into the ancestor we got the update from, we don't need
+                                // to issue an eviction for that path. this is because we *missed*
+                                // on the join column in the other side, so we *know* it can't have
+                                // forwarded anything related to the write we're now handling.
                                 keys.iter()
                                     .map(|&k| {
                                         n.parent_columns(k)
                                             .into_iter()
                                             .find(|&(ni, _)| ni == from)
-                                            .unwrap()
-                                            .1
-                                            .unwrap()
+                                            .ok_or(())
+                                            .map(|k| k.1.unwrap())
                                     })
-                                    .collect::<Vec<_>>()
+                                    .collect::<Result<Vec<_>, _>>()
+                                    .ok()
                             })
                             .map(move |k| (tag, k))
                     })
