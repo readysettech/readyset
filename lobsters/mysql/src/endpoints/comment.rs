@@ -193,7 +193,7 @@ where
                             (story,),
                         )
                     })
-                    .and_then(move |t| {
+                    /*.and_then(move |t| {
                         t.drop_exec(
                             "SELECT \
                              `comments`.`upvotes`, \
@@ -204,7 +204,7 @@ where
                              AND `comments`.`user_id` <> `stories`.`user_id`",
                             (story,),
                         )
-                    })
+                    })*/
                     .and_then(move |t| {
                         t.drop_exec(
                             "SELECT `stories`.`id` \
