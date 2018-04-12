@@ -134,7 +134,8 @@ impl Ingredient for Project {
         // the inputs, so we don't needlessly perform extra work on each
         // update.
         self.emit = self.emit.take().and_then(|emit| {
-            let complete = emit.len() == self.cols && self.additional.is_none();
+            let complete =
+                emit.len() == self.cols && self.additional.is_none() && self.expressions.is_none();
             let sequential = emit.iter().enumerate().all(|(i, &j)| i == j);
             if complete && sequential {
                 None
@@ -154,33 +155,30 @@ impl Ingredient for Project {
         _: &StateMap,
     ) -> ProcessingResult {
         debug_assert_eq!(from, *self.src);
-
-        if self.emit.is_some() {
+        if let Some(ref emit) = self.emit {
             for r in &mut *rs {
-                if self.emit.is_none() {
-                    continue;
+                let mut new_r = Vec::with_capacity(r.len());
+
+                for &i in emit {
+                    new_r.push(r[i].clone());
                 }
 
-                let mut new_r = Vec::with_capacity(r.len());
-                let e = self.emit.as_ref().unwrap();
-                for i in e {
-                    new_r.push(r[*i].clone());
-                }
-                match self.expressions {
-                    Some(ref e) => for i in e {
+                if let Some(ref e) = self.expressions {
+                    for i in e {
                         new_r.push(self.eval_expression(i, r));
-                    },
-                    None => (),
+                    }
                 }
-                match self.additional {
-                    Some(ref a) => for i in a {
+
+                if let Some(ref a) = self.additional {
+                    for i in a {
                         new_r.push(i.clone());
-                    },
-                    None => (),
+                    }
                 }
+
                 **r = new_r;
             }
         }
+
         ProcessingResult {
             results: rs,
             misses: Vec::new(),
