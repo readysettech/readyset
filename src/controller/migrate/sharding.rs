@@ -349,7 +349,10 @@ pub fn shard(
     let mut gone = HashSet::new();
     while !new_sharders.is_empty() {
         'sharders: for n in new_sharders.split_off(0) {
+            trace!(log, "can we eliminate sharder {:?}?", n);
+
             if gone.contains(&n) {
+                trace!(log, "no, parent is weird (already eliminated)");
                 continue;
             }
 
@@ -370,19 +373,24 @@ pub fn shard(
 
             // we can only push sharding above newly created nodes that are not already sharded.
             if !new.contains(&p) || graph[p].sharded_by() != Sharding::None {
+                trace!(log, "no, parent is weird (not new or already sharded)");
                 continue;
             }
 
             // if the parent is a base, the only option we have is to shard the base.
             if graph[p].get_base().is_some() {
+                trace!(log, "well, its parent is a base");
+
                 // sharded transactional bases are hard
                 if graph[p].is_transactional() {
+                    trace!(log, "no, parent is weird (transactional)");
                     continue;
                 }
 
                 // we can't shard compound bases (yet)
                 if let Some(k) = graph[p].get_base().unwrap().key() {
                     if k.len() != 1 {
+                        trace!(log, "no, parent is weird (has compound key)");
                         continue;
                     }
                 }
@@ -394,6 +402,7 @@ pub fn shard(
                 {
                     // TODO: technically we could still do this if the other children were
                     // sharded by the same column.
+                    trace!(log, "no, parent is weird (has other children)");
                     continue;
                 }
 
