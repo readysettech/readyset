@@ -255,13 +255,18 @@ mod tests {
         use super::ArithmeticBase::Column as ABColumn;
 
         let exprs = [
-            "CAST(foo AS signed int) + CAST(bar AS signed int) ",
+            "CAST(`t`.`foo` AS signed int) + CAST(`t`.`bar` AS signed int) ",
             "CAST(5 AS bigint) - foo ",
         ];
 
         // XXX(malte): currently discards the cast and type information!
         let expected = [
-            ArithmeticExpression::new(Add, ABColumn("foo".into()), ABColumn("bar".into()), None),
+            ArithmeticExpression::new(
+                Add,
+                ABColumn(Column::from("t.foo")),
+                ABColumn(Column::from("t.bar")),
+                None,
+            ),
             ArithmeticExpression::new(Subtract, Scalar(5.into()), ABColumn("foo".into()), None),
         ];
 
