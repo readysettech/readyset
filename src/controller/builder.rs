@@ -102,13 +102,6 @@ impl ControllerBuilder {
         self.config.reuse = reuse_type;
     }
 
-    /// Set the number of fixed domains for all subsequent migration.
-    /// `None` disables fixed domains, and allows migrations to change
-    /// the number of domains as they see fit.
-    pub fn set_fixed_domains(&mut self, ndomains: Option<usize>) {
-        self.config.fixed_domains = ndomains;
-    }
-
     /// Build a controller and return a handle to it.
     pub fn build<A: Authority + 'static>(self, authority: Arc<A>) -> ControllerHandle<A> {
         controller::start_instance(

@@ -133,7 +133,6 @@ pub(crate) struct ControllerConfig {
     pub heartbeat_every: Duration,
     pub healthcheck_every: Duration,
     pub quorum: usize,
-    pub fixed_domains: Option<usize>,
     pub reuse: ReuseConfigType,
 }
 impl Default for ControllerConfig {
@@ -152,7 +151,6 @@ impl Default for ControllerConfig {
             heartbeat_every: Duration::from_secs(1),
             healthcheck_every: Duration::from_secs(10),
             quorum: 1,
-            fixed_domains: None,
             reuse: ReuseConfigType::Finkelstein,
         }
     }

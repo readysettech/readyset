@@ -74,7 +74,6 @@ pub struct ControllerInner {
     healthcheck_every: Duration,
     last_checked_workers: Instant,
 
-    pub(super) fixed_domains: bool,
     log: slog::Logger,
 }
 
@@ -279,15 +278,10 @@ impl ControllerInner {
         let mut recipe = Recipe::blank(Some(log.clone()));
         recipe.enable_reuse(state.config.reuse);
 
-        let (fixed_domains, ndomains) = match state.config.fixed_domains {
-            Some(n) => (true, n),
-            None => (false, 0),
-        };
-
         ControllerInner {
             ingredients: g,
             source: source,
-            ndomains: ndomains,
+            ndomains: 0,
             checktable,
             checktable_addr,
             listen_addr,
@@ -315,8 +309,6 @@ impl ControllerInner {
 
             pending_recovery,
             last_checked_workers: Instant::now(),
-
-            fixed_domains: fixed_domains,
         }
     }
 
