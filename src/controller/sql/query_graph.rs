@@ -1,7 +1,7 @@
 use nom_sql::SelectStatement;
 use nom_sql::{ArithmeticBase, ArithmeticExpression, Column, ConditionBase, ConditionExpression,
               ConditionTree, FieldExpression, JoinConstraint, JoinOperator, JoinRightSide,
-              Literal, Operator};
+              Literal, Operator, Table};
 
 use std::cmp::Ordering;
 use std::collections::HashMap;
@@ -240,6 +240,7 @@ fn split_conjunctions(ces: Vec<ConditionExpression>) -> Vec<ConditionExpression>
 // 4. Collect remaining predicates as global predicates
 fn classify_conditionals(
     ce: &ConditionExpression,
+    tables: &Vec<Table>,
     local: &mut HashMap<String, Vec<ConditionExpression>>,
     join: &mut Vec<ConditionTree>,
     global: &mut Vec<ConditionTree>,
@@ -265,6 +266,7 @@ fn classify_conditionals(
             let mut new_local = HashMap::new();
             classify_conditionals(
                 ct.left.as_ref(),
+                tables,
                 &mut new_local,
                 &mut new_join,
                 global,
@@ -272,6 +274,7 @@ fn classify_conditionals(
             );
             classify_conditionals(
                 ct.right.as_ref(),
+                tables,
                 &mut new_local,
                 &mut new_join,
                 global,
@@ -335,24 +338,40 @@ fn classify_conditionals(
             if let ConditionExpression::Base(ref l) = *ct.left.as_ref() {
                 if let ConditionExpression::Base(ref r) = *ct.right.as_ref() {
                     match *r {
-                        // right-hand side is field, so this must be a comma join
+                        // right-hand side is field, so this could be a comma join
                         // or a security policy using UserContext
                         ConditionBase::Field(ref rf) => {
-                            // column/column comparison --> comma join
+                            // column/column comparison
                             if let ConditionBase::Field(ref lf) = *l {
-                                if ct.operator == Operator::Equal || ct.operator == Operator::In {
-                                    // equi-join between two tables
-                                    let mut join_ct = ct.clone();
-                                    if let Ordering::Less =
-                                        rf.table.as_ref().cmp(&lf.table.as_ref())
+                                if lf.table.is_some()
+                                    && tables
+                                        .contains(&Table::from(lf.table.as_ref().unwrap().as_str()))
+                                    && rf.table.is_some()
+                                    && tables
+                                        .contains(&Table::from(rf.table.as_ref().unwrap().as_str()))
+                                {
+                                    // both columns' tables appear in table list --> comma join
+                                    if ct.operator == Operator::Equal || ct.operator == Operator::In
                                     {
-                                        use std::mem;
-                                        mem::swap(&mut join_ct.left, &mut join_ct.right);
+                                        // equi-join between two tables
+                                        let mut join_ct = ct.clone();
+                                        if let Ordering::Less =
+                                            rf.table.as_ref().cmp(&lf.table.as_ref())
+                                        {
+                                            use std::mem;
+                                            mem::swap(&mut join_ct.left, &mut join_ct.right);
+                                        }
+                                        join.push(join_ct);
+                                    } else {
+                                        // non-equi-join?
+                                        unimplemented!();
                                     }
-                                    join.push(join_ct);
                                 } else {
-                                    // non-equi-join?
-                                    unimplemented!();
+                                    // not a comma join, just an ordinary comparison
+                                    // XXX(malte): should this be a global predicate?
+                                    if !global.contains(ct) {
+                                        global.push(ct.clone());
+                                    }
                                 }
                             } else {
                                 panic!("left hand side of comparison must be field");
@@ -561,6 +580,7 @@ pub fn to_query_graph(st: &SelectStatement) -> Result<QueryGraph, String> {
         // Let's classify the predicates we have in the query
         classify_conditionals(
             cond,
+            &st.tables,
             &mut local_predicates,
             &mut join_predicates,
             &mut global_predicates,
