@@ -901,10 +901,10 @@ impl SqlToMirConverter {
     ) -> MirNodeRef {
         //assert!(proj_cols.iter().all(|c| c.table == parent_name));
 
-        let names: Vec<String> = literals
+        let names: Vec<String> = arithmetic
             .iter()
             .map(|&(ref n, _)| n.clone())
-            .chain(arithmetic.iter().map(|&(ref n, _)| n.clone()))
+            .chain(literals.iter().map(|&(ref n, _)| n.clone()))
             .collect();
 
         let fields = proj_cols
