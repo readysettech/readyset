@@ -151,6 +151,82 @@ fn it_works_basic() {
 }
 
 #[test]
+fn base_mutation() {
+    use core::{Modification, Operation};
+
+    let mut g = ControllerBuilder::default().build_local();
+    g.migrate(|mig| {
+        let a = mig.add_ingredient("a", &["a", "b"], Base::new(vec![]).with_key(vec![0]));
+        mig.maintain_anonymous(a, &[0]);
+    });
+
+    let mut read = g.get_getter("a").unwrap();
+    let mut write = g.get_mutator("a").unwrap();
+
+    // insert a new record
+    write.put(vec![1.into(), 2.into()]).unwrap();
+    sleep();
+    assert_eq!(
+        read.lookup(&[1.into()], true),
+        Ok(vec![vec![1.into(), 2.into()]])
+    );
+
+    // update that record in place (set)
+    write
+        .update(vec![1.into()], vec![(1, Modification::Set(3.into()))])
+        .unwrap();
+    sleep();
+    assert_eq!(
+        read.lookup(&[1.into()], true),
+        Ok(vec![vec![1.into(), 3.into()]])
+    );
+
+    // update that record in place (add)
+    write
+        .update(
+            vec![1.into()],
+            vec![(1, Modification::Apply(Operation::Add, 1.into()))],
+        )
+        .unwrap();
+    sleep();
+    assert_eq!(
+        read.lookup(&[1.into()], true),
+        Ok(vec![vec![1.into(), 4.into()]])
+    );
+
+    // insert or update should update
+    write
+        .insert_or_update(
+            vec![1.into(), 2.into()],
+            vec![(1, Modification::Apply(Operation::Add, 1.into()))],
+        )
+        .unwrap();
+    sleep();
+    assert_eq!(
+        read.lookup(&[1.into()], true),
+        Ok(vec![vec![1.into(), 5.into()]])
+    );
+
+    // delete should, well, delete
+    write.delete(vec![1.into()]).unwrap();
+    sleep();
+    assert_eq!(read.lookup(&[1.into()], true), Ok(vec![]));
+
+    // insert or update should insert
+    write
+        .insert_or_update(
+            vec![1.into(), 2.into()],
+            vec![(1, Modification::Apply(Operation::Add, 1.into()))],
+        )
+        .unwrap();
+    sleep();
+    assert_eq!(
+        read.lookup(&[1.into()], true),
+        Ok(vec![vec![1.into(), 2.into()]])
+    );
+}
+
+#[test]
 fn shared_interdomain_ancestor() {
     // set up graph
     let mut g = ControllerBuilder::default().build_local();
