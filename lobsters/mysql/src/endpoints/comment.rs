@@ -32,9 +32,9 @@ where
                 c.drop_exec(
                     "SELECT `users`.* FROM `users` WHERE `users`.`id` = ? LIMIT 1",
                     (author,),
-                ).map(move |c| (c, author, id, hotness))
+                ).map(move |c| (c, id, hotness))
             })
-            .and_then(move |(c, author, story, hotness)| {
+            .and_then(move |(c, story, hotness)| {
                 let fut = if let Some(parent) = parent {
                     // check that parent exists
                     futures::future::Either::A(c.first_exec::<_, _, my::Row>(
@@ -64,22 +64,22 @@ where
                 } else {
                     futures::future::Either::B(futures::future::ok((c, None)))
                 };
-                fut.map(move |(c, parent)| (c, author, story, parent, hotness))
+                fut.map(move |(c, parent)| (c, story, parent, hotness))
             })
             .map(|c| {
                 // TODO: real site checks for recent comments by same author with same
                 // parent to ensure we don't double-post accidentally
                 c
             })
-            .and_then(move |(c, author, story, parent, hotness)| {
+            .and_then(move |(c, story, parent, hotness)| {
                 // check that short id is available
                 c.drop_exec(
                     "SELECT  1 AS one FROM `comments` \
                      WHERE `comments`.`short_id` = ? LIMIT 1",
                     (::std::str::from_utf8(&id[..]).unwrap(),),
-                ).map(move |c| (c, author, story, parent, hotness))
+                ).map(move |c| (c, story, parent, hotness))
             })
-            .and_then(move |(c, author, story, parent, hotness)| {
+            .and_then(move |(c, story, parent, hotness)| {
                 // TODO: real impl checks *new* short_id *again*
                 c.start_transaction(my::TransactionOptions::new())
                     .and_then(move |t| {
@@ -199,8 +199,9 @@ where
                              `comments`.`upvotes`, \
                              `comments`.`downvotes` \
                              FROM `comments` \
+                             JOIN `stories` ON (`stories`.`id` = `comments`.`story_id`) \
                              WHERE `comments`.`story_id` = ? \
-                             AND user_id <> 1",
+                             AND `comments`.`user_id` <> `stories`.`user_id`",
                             (story,),
                         )
                     })
@@ -232,18 +233,6 @@ where
                              //ON DUPLICATE KEY UPDATE `value` = `value` + 1",
                             (key, 1)
                         )
-                    })
-                    .and_then(move |t| {
-                        let key = format!("user:{}:comments_posted", user);
-                        t.drop_exec(
-                            "SELECT  `keystores`.* \
-                             FROM `keystores` \
-                             WHERE `keystores`.`key` = ? \
-                             ORDER BY `keystores`.`key` ASC LIMIT 1",
-                            (key,)
-                        )
-                        // TODO: technically it also selects from users for the
-                        // author of the parent comment here..
                     })
                     .and_then(|t| t.commit())
             })

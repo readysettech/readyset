@@ -1,5 +1,5 @@
 use futures::Future;
-use futures::future::Either;
+use futures::future::{self, Either};
 use my;
 use my::prelude::*;
 use std::collections::HashSet;
@@ -19,84 +19,16 @@ where
     // but it *basically* just looks for stories in the past few days
     // because all our stories are for the same day, we add a LIMIT
     // also note the `NOW()` hack to support dbs primed a while ago
-    let q_start = "SELECT `stories`.`id`, \
-                   `stories`.`upvotes`, \
-                   `stories`.`downvotes`, \
-                   `stories`.`user_id` \
-                   FROM `stories` \
-                   WHERE `stories`.`merged_story_id` IS NULL \
-                   AND `stories`.`is_expired` = 0 \
-                   AND CAST(upvotes AS signed) - CAST(downvotes AS signed) <= 5";
-    let q_end = "ORDER BY stories.id DESC LIMIT 25";
-
-    let initial = match acting_as {
-        Some(uid) => Either::A(
-            c.and_then(move |c| {
-                c.query(&format!(
-                    "SELECT `tag_filters`.* FROM `tag_filters` \
-                     WHERE `tag_filters`.`user_id` = {}",
-                    uid
-                ))
-            }).and_then(|tags| {
-                    tags.reduce_and_drop(Vec::new(), |mut tags, tag| {
-                        tags.push(tag.get::<u32, _>("tag_id").unwrap());
-                        tags
-                    })
-                })
-                .and_then(move |(c, tags)| {
-                    let tags = tags.into_iter()
-                        .map(|id| format!("{}", id))
-                        .collect::<Vec<_>>()
-                        .join(",");
-                    c.query(&format!(
-                        "{} \
-                         AND (`stories`.`id` NOT IN (\
-                         SELECT `hidden_stories`.`story_id` \
-                         FROM `hidden_stories` \
-                         WHERE `hidden_stories`.`user_id` = {})) \
-                         {} \
-                         {}",
-                        q_start,
-                        uid,
-                        if tags.is_empty() {
-                            String::from("")
-                        } else {
-                            // should probably just inline tag_filters here instead
-                            format!(
-                                " AND (`stories`.`id` NOT IN (\
-                                 SELECT `taggings`.`story_id` \
-                                 FROM `taggings` \
-                                 WHERE `taggings`.`tag_id` IN ({}) \
-                                 )) ",
-                                tags
-                            )
-                        },
-                        q_end,
-                    ))
-                }),
-        ),
-        None => Either::B(c.and_then(move |c| c.query(&format!("{} {}", q_start, q_end)))),
-    };
-
-    let main = initial
-        .and_then(|stories| {
-            stories.reduce_and_drop(Vec::new(), |mut stories, story| {
-                stories.push(story.get::<u32, _>("id").unwrap());
-                stories
-            })
-        })
-        .and_then(|(c, stories)| {
-            let stories = stories
-                .into_iter()
-                .map(|id| format!("{}", id))
-                .collect::<Vec<_>>()
-                .join(",");
-            c.query(&format!(
-                "SELECT  `stories`.* FROM `stories` WHERE `stories`.`id` IN ({})",
-                stories
-            ))
-        })
-        .and_then(|stories| {
+    let main = c.and_then(|c| {
+        c.query(
+            "SELECT `stories`.* \
+             FROM `stories` \
+             WHERE `stories`.`merged_story_id` IS NULL \
+             AND `stories`.`is_expired` = 0 \
+             AND CAST(upvotes AS signed) - CAST(downvotes AS signed) <= 5 \
+             ORDER BY stories.id DESC LIMIT 51",
+        )
+    }).and_then(|stories| {
             stories.reduce_and_drop(
                 (HashSet::new(), HashSet::new()),
                 |(mut users, mut stories), story| {
@@ -105,6 +37,61 @@ where
                     (users, stories)
                 },
             )
+        })
+        .and_then(move |(c, x)| {
+            if x.1.is_empty() {
+                panic!("got no stories from /recent: {:?}", x);
+            }
+
+            match acting_as {
+                Some(uid) => Either::A(
+                    c.drop_exec(
+                        "SELECT `hidden_stories`.`story_id` \
+                         FROM `hidden_stories` \
+                         WHERE `hidden_stories`.`user_id` = ?",
+                        (uid,),
+                    ).and_then(move |c| {
+                            c.prep_exec(
+                                "SELECT `tag_filters`.* FROM `tag_filters` \
+                                 WHERE `tag_filters`.`user_id` = ?",
+                                (uid,),
+                            )
+                        })
+                        .and_then(|tags| {
+                            tags.reduce_and_drop(Vec::new(), |mut tags, tag| {
+                                tags.push(tag.get::<u32, _>("tag_id").unwrap());
+                                tags
+                            })
+                        })
+                        .and_then(move |(c, tags)| {
+                            if tags.is_empty() {
+                                return Either::A(future::ok(c));
+                            }
+
+                            let tags = tags.into_iter()
+                                .map(|id| format!("{}", id))
+                                .collect::<Vec<_>>()
+                                .join(",");
+
+                            // NOTE: this is pretty bad for us. there may be *many* stories with a
+                            // given tag. really what we want to do is
+                            //
+                            //   story_id IN (..) AND tag_id IN (..)
+                            //
+                            // but that doesn't currently work as it would require doing a cross-product lookup.
+                            //
+                            // maybe we could *join* this with the frontpage?
+                            // that'd be pretty neat...
+                            Either::B(c.drop_query(format!(
+                                "SELECT `taggings`.`story_id` \
+                                 FROM `taggings` \
+                                 WHERE `taggings`.`tag_id` IN ({})",
+                                tags
+                            )))
+                        }),
+                ),
+                None => Either::B(future::ok(c)),
+            }.map(move |c| (c, x))
         })
         .and_then(|(c, (users, stories))| {
             let users = users

@@ -1,6 +1,6 @@
 use futures;
 use futures::Future;
-use futures::future::Either;
+use futures::future::{self, Either};
 use my;
 use my::prelude::*;
 use std::collections::HashSet;
@@ -21,19 +21,8 @@ where
                  FROM `comments` \
                  WHERE `comments`.`is_deleted` = 0 \
                  AND `comments`.`is_moderated` = 0 \
-                 {} \
                  ORDER BY id DESC \
-                 LIMIT 20 OFFSET 0",
-                match acting_as {
-                    None => String::from(""),
-                    Some(uid) => format!(
-                        " AND (NOT EXISTS (\
-                         SELECT 1 FROM hidden_stories \
-                         WHERE user_id = {} \
-                         AND hidden_stories.story_id = comments.story_id)) ",
-                        uid
-                    ),
-                }
+                 LIMIT 40 OFFSET 0",
             ))
         }).and_then(|comments| {
                 comments.reduce_and_drop(
@@ -45,6 +34,27 @@ where
                         (comments, users, stories)
                     },
                 )
+            })
+            .and_then(move |(c, (comments, users, stories))| match acting_as {
+                None => Either::A(future::ok((c, (comments, users, stories)))),
+                Some(uid) => {
+                    let params = stories.iter().map(|_| "?").collect::<Vec<_>>().join(",");
+                    let fut = {
+                        let args: Vec<_> = iter::once(&uid as &_)
+                            .chain(stories.iter().map(|c| c as &_))
+                            .collect();
+                        c.drop_exec(
+                            &format!(
+                                "SELECT 1 FROM hidden_stories \
+                                 WHERE user_id = ? \
+                                 AND hidden_stories.story_id IN ({})",
+                                params
+                            ),
+                            args,
+                        )
+                    };
+                    Either::B(fut.map(move |c| (c, (comments, users, stories))))
+                }
             })
             .and_then(|(c, (comments, users, stories))| {
                 let users = users
