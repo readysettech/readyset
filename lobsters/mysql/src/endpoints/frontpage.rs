@@ -15,10 +15,12 @@ where
 {
     let main = c.and_then(|c| {
         c.query(
-            "SELECT  `stories`.* FROM `stories` \
+            "SELECT  `stories`.*, CAST(`stories`.`upvotes` AS signed int) - \
+             CAST(`stories`.`downvotes` AS signed int) AS `saldo` \
+             FROM `stories` \
              WHERE `stories`.`merged_story_id` IS NULL \
              AND `stories`.`is_expired` = 0 \
-             AND ((CAST(upvotes AS signed) - CAST(downvotes AS signed)) >= 0) \
+             AND `saldo` >= 0 \
              ORDER BY hotness LIMIT 51 OFFSET 0",
         )
     }).and_then(|stories| {
