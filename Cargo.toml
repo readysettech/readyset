@@ -8,9 +8,9 @@ arccstr = "1.0.4"
 clap = "2.24.0"
 msql-srv = "0.6"
 #distributary = { path = "../distributary" }
-distributary = { git = "https://github.com/mit-pdos/distributary.git", rev = "2f35860aafefbfea720f59963cc438724f9ad09f" }
+distributary = { git = "https://github.com/mit-pdos/distributary.git", rev = "d0eb0a86be13332805ed9cb65932430874ba9294" }
 lazy_static = "1.0.0"
-nom-sql = { git = "https://github.com/ms705/nom-sql.git", rev = "de14eaa8e20179475c470ffe5ad77d5763946325" }
+nom-sql = { git = "https://github.com/ms705/nom-sql.git", rev = "a9fc1583705e6b8131cfb1b1d53f74afa3416cb9" }
 slog = "2.2.2"
 #slog = { version = "2.2.2", features = ["max_level_trace", "release_max_level_trace"] }
 slog-term = "2.3.0"
