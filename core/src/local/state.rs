@@ -1,7 +1,7 @@
 use std::borrow::Cow;
 use std::collections::HashMap;
-use std::mem;
 use std::rc::Rc;
+use std::time::{SystemTime, UNIX_EPOCH};
 
 use ::*;
 use data::SizeOf;
@@ -47,18 +47,17 @@ pub trait State: SizeOf + Send {
     fn evict_keys(&mut self, tag: &Tag, keys: &[Vec<DataType>]) -> (&[usize], u64);
 }
 
-// Index in PersistentState.indices
-type KeyIndex = u32;
+// Uniquely identifies an index for each base (the numeral index in PersistentState.indices).
+type IndexID = u32;
 
-// Sequence number in PersistentIndex
-type KeySeq = u64;
+// Used by bases without a primary key to uniquely identify a row.
+// The first component is a UNIX timestamp in seconds, and the second
+// is a monotonically increasing value reset every new second.
+type IndexTimestamp = (u64, u32);
 
 struct PersistentIndex {
     columns: Vec<usize>,
-    // TODO(ekmartin): seq is incremented each time a row is inserted for this index, which is
-    // probably not optimal. Should probably look into something like the MyRocks record format:
-    // https://github.com/facebook/mysql-5.6/wiki/MyRocks-record-format
-    seq: KeySeq,
+    last_insert: IndexTimestamp,
 }
 
 /// PersistentState stores data in SQlite.
@@ -168,7 +167,7 @@ impl State for PersistentState {
         if !existing {
             self.indices.push(PersistentIndex {
                 columns: Vec::from(columns),
-                seq: 0,
+                last_insert: (0, 0),
             });
         }
 
@@ -200,7 +199,7 @@ impl State for PersistentState {
             .full_iterator(rocksdb::IteratorMode::Start)
             .filter(|&(ref key, _)| {
                 // Filter out non-pk indices:
-                let i: KeyIndex = bincode::deserialize(&key).unwrap();
+                let i: IndexID = bincode::deserialize(&key).unwrap();
                 i == 0
             })
             .map(|(_, ref value)| bincode::deserialize(&value).unwrap())
@@ -214,7 +213,7 @@ impl State for PersistentState {
             .full_iterator(rocksdb::IteratorMode::Start)
             .filter(|&(ref key, _)| {
                 // Filter out non-pk indices:
-                let i: KeyIndex = bincode::deserialize(&key).unwrap();
+                let i: IndexID = bincode::deserialize(&key).unwrap();
                 i == 0
             })
             .count()
@@ -291,8 +290,8 @@ impl PersistentState {
     }
 
     // Selects a prefix of `key` without the sequence number.
-    // Keys are on the form (KeyIndex, Key, Sequence), with the types (u64, Vec<DataType>, u64).
-    // We'd like to retrieve the prefix (KeyIndex, Key).
+    // Keys are on the form (IndexID, Key, Sequence), with the types (u64, Vec<DataType>, u64).
+    // We'd like to retrieve the prefix (IndexID, Key).
     //
     // The RocksDB docs state the following:
     // > If non-nullptr, use the specified function to determine the
@@ -307,31 +306,11 @@ impl PersistentState {
     // > 2) Compare(prefix(key), key) <= 0.
     // > 3) If Compare(k1, k2) <= 0, then Compare(prefix(k1), prefix(k2)) <= 0
     // > 4) prefix(prefix(key)) == prefix(key)
-    //
-    // Ideally we'd want to do this without any deserialization at all. My initial idea was to
-    // simply throw away the last 8 bytes of the key (the sequence number), however how do we do
-    // that while still following point 4?
-    //
-    // We know the key looks something like this in memory:
-    // |--------
-    //  KeyIndex (u64)
-    //  8 bytes
-    //
-    //          -------- ...
-    //          Key (Vec<DataType>)
-    //          At least 8 bytes to
-    //          encode the length (u64)
-    //
-    //                      --------|
-    //                      KeySeq (u64)
-    //                      8 bytes
-    //
-    // We could achieve point 4 by zeroing out the last 8 bytes instead of simply throwing them
-    // out, but then we'd fail point 1 instead. For now we'll throw out the 8 last bytes, but check
-    // to make sure that we haven't already done so first.
     fn transform_fn(key: &[u8]) -> Vec<u8> {
-        let start = mem::size_of::<KeyIndex>();
-        let end = key.len() - mem::size_of::<KeySeq>();
+        // IndexID is a u32, so bincode uses 4 bytes to serialize it:
+        let start = 4;
+        // IndexSequence is a (u64, u32), which is 8 + 4 = 12 bytes:
+        let end = key.len() - 12;
 
         // TODO(ekmartin): It'd be nice to find a better way of doing this.
         // Right now we're trying to deserialize to see if we've already truncated this key,
@@ -365,17 +344,35 @@ impl PersistentState {
     //      prefix each row with an identifier for that index.
     //  * `row`
     //      The actual index values
-    //  * `seq`
+    //  * `ts`
     //      Maintained for each index in `self.indices` and incremented on inserts. This lets us
     //      store multiple values for a single key.
-    fn serialize_key(index: KeyIndex, row: &Vec<&DataType>, seq: KeySeq) -> Vec<u8> {
-        bincode::serialize(&(index, row, seq)).unwrap()
+    fn serialize_key(index: IndexID, row: &Vec<&DataType>, ts: IndexTimestamp) -> Vec<u8> {
+        bincode::serialize(&(index, row, ts)).unwrap()
     }
 
     // When reading keys we ignore the sequence number, but for the logic in Self::transform_fn to
-    // work correctly we need a placeholder value, which is 0.
-    fn serialize_prefix(index: KeyIndex, row: &Vec<&DataType>) -> Vec<u8> {
-        Self::serialize_key(index, row, 0)
+    // work correctly we need a placeholder value.
+    fn serialize_prefix(index: IndexID, row: &Vec<&DataType>) -> Vec<u8> {
+        Self::serialize_key(index, row, (0, 0))
+    }
+
+    // Increments the sequence number portion of IndexTimestamp if we're still within
+    // a second of the last timestamp. Resets the sequence counter to 0 otherwise.
+    fn increment_sequence(last_insert: IndexTimestamp) -> IndexTimestamp {
+        let secs = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap()
+            .as_secs();
+
+        let (last_secs, seq) = last_insert;
+        if last_secs < secs {
+            (secs, 0)
+        } else {
+            // We've inserted at least one row already this second,
+            // so increment the sequence number instead:
+            (secs, seq + 1)
+        }
     }
 
     // Puts by primary key first, then retrieves the existing value for each index and appends the
@@ -386,9 +383,9 @@ impl PersistentState {
     fn insert(&mut self, batch: &mut WriteBatch, r: Vec<DataType>) {
         let serialized_pk = {
             let pk_index = &mut self.indices[0];
-            pk_index.seq += 1;
+            pk_index.last_insert = Self::increment_sequence(pk_index.last_insert);
             let pk = pk_index.columns.iter().map(|i| &r[*i]).collect::<Vec<_>>();
-            Self::serialize_key(0, &pk, pk_index.seq)
+            Self::serialize_key(0, &pk, pk_index.last_insert)
         };
 
         // First insert the actual value for our primary index:
@@ -397,11 +394,11 @@ impl PersistentState {
 
         // Then insert primary key pointers for all the secondary indices:
         for (i, index) in self.indices[1..].iter_mut().enumerate() {
-            index.seq += 1;
+            index.last_insert = Self::increment_sequence(index.last_insert);
             // Construct a key with the index values, and serialize it with bincode:
             let key = index.columns.iter().map(|i| &r[*i]).collect::<Vec<_>>();
             // Add 1 to i since we're slicing self.indices by 1..:
-            let serialized_key = Self::serialize_key((i + 1) as u32, &key, index.seq);
+            let serialized_key = Self::serialize_key((i + 1) as u32, &key, index.last_insert);
             batch.put(&serialized_key, &serialized_pk).unwrap();
         }
     }
@@ -410,7 +407,7 @@ impl PersistentState {
         let db = self.db.as_ref().unwrap();
         for (i, index) in self.indices.iter().enumerate() {
             let index_row = index.columns.iter().map(|i| &r[*i]).collect::<Vec<_>>();
-            let serialized_key = Self::serialize_key(i as u32, &index_row, 0u64);
+            let serialized_key = Self::serialize_prefix(i as u32, &index_row);
             for (key, _value) in db.prefix_iterator(&serialized_key) {
                 batch.delete(&key).unwrap();
             }
@@ -931,16 +928,16 @@ mod tests {
     #[test]
     fn persistent_state_transform_fn() {
         let index = PersistentIndex {
-            seq: 10,
+            last_insert: (0, 0),
             columns: Default::default(),
         };
 
         let row: Vec<DataType> = vec![1.into(), 10.into()];
         let i = 5;
         let r = row.iter().collect();
-        let k = PersistentState::serialize_key(i, &r, index.seq);
+        let k = PersistentState::serialize_key(i, &r, index.last_insert);
         let prefix = PersistentState::transform_fn(&k);
-        let (key_out, row_out): (KeyIndex, Vec<DataType>) = bincode::deserialize(&prefix).unwrap();
+        let (key_out, row_out): (IndexID, Vec<DataType>) = bincode::deserialize(&prefix).unwrap();
         assert_eq!(i, key_out);
         assert_eq!(row[0], row_out[0]);
         assert_eq!(row[1], row_out[1]);
@@ -953,7 +950,7 @@ mod tests {
         assert!(&prefix <= &k);
 
         // 3) If Compare(k1, k2) <= 0, then Compare(prefix(k1), prefix(k2)) <= 0
-        let other_k = PersistentState::serialize_key(i * 2, &r, index.seq);
+        let other_k = PersistentState::serialize_key(i * 2, &r, index.last_insert);
         let other_prefix = PersistentState::transform_fn(&other_k);
         assert!(k <= other_k);
         assert!(prefix <= other_prefix);
