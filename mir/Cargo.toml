@@ -8,7 +8,7 @@ regex = "0.2.2"
 slog = "2.2.2"
 
 # git deps
-nom-sql = { git = "https://github.com/ms705/nom-sql.git", rev = "a9fc1583705e6b8131cfb1b1d53f74afa3416cb9" }
+nom-sql = { git = "https://github.com/ms705/nom-sql.git", rev = "9505d04a27cc9b1987c5bf62af198d3cef70d11d" }
 
 # local deps
 core = { path = "../core" }
