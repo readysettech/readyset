@@ -7,6 +7,7 @@ use nom_sql::{self, ColumnConstraint, CreateTableStatement, InsertStatement, Lit
 use slog;
 use std::borrow::Cow;
 use std::collections::{BTreeMap, HashMap};
+use std::fmt;
 use std::io;
 use std::sync::atomic;
 use std::sync::{self, Arc, RwLock};
@@ -17,11 +18,21 @@ use rewrite;
 use schema::{schema_for_column, schema_for_insert, schema_for_select};
 use utils;
 
-#[derive(Clone, Debug)]
+#[derive(Clone)]
 enum PreparedStatement {
     Select(String, nom_sql::SelectStatement, Option<(usize, usize)>),
     Insert(nom_sql::InsertStatement),
     Update(nom_sql::UpdateStatement),
+}
+
+impl fmt::Debug for PreparedStatement {
+    fn fmt(&self, f: &mut fmt::Formatter) -> Result<(), fmt::Error> {
+        match *self {
+            PreparedStatement::Select(ref qname, ref s, _) => write!(f, "{}: {}", qname, s),
+            PreparedStatement::Insert(ref s) => write!(f, "{}", s),
+            PreparedStatement::Update(ref s) => write!(f, "{}", s),
+        }
+    }
 }
 
 struct SoupBackendInner {
