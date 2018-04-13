@@ -61,11 +61,17 @@ fn main() {
                 .takes_value(true)
                 .help("Port to listen on."),
         )
+        .arg(
+            Arg::with_name("slowlog")
+                .long("log-slow")
+                .help("Log slow queries (> 5ms)"),
+        )
         .arg(Arg::with_name("verbose").long("verbose").short("v"))
         .get_matches();
 
     let deployment = matches.value_of("deployment").unwrap().to_owned();
     let port = value_t_or_exit!(matches, "port", u16);
+    let slowlog = matches.is_present("slowlog");
     let zk_addr = matches.value_of("zk_addr").unwrap().to_owned();
 
     let listener = net::TcpListener::bind(format!("127.0.0.1:{}", port)).unwrap();
@@ -106,6 +112,7 @@ fn main() {
                     auto_increments,
                     query_cache,
                     query_counter,
+                    slowlog,
                     log,
                 );
                 MysqlIntermediary::run_on_tcp(soup, s).unwrap();

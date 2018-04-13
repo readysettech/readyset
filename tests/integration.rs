@@ -108,6 +108,7 @@ fn setup(deployment: &Deployment) -> mysql::Opts {
             auto_increments,
             query_cache,
             query_counter,
+            false,
             logger,
         );
 

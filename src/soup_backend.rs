@@ -10,13 +10,14 @@ use std::collections::{BTreeMap, HashMap};
 use std::io;
 use std::sync::atomic;
 use std::sync::{self, Arc, RwLock};
+use std::time;
 
 use convert::ToDataType;
 use rewrite;
 use schema::{schema_for_column, schema_for_insert, schema_for_select};
 use utils;
 
-#[derive(Clone)]
+#[derive(Clone, Debug)]
 enum PreparedStatement {
     Select(String, nom_sql::SelectStatement, Option<(usize, usize)>),
     Insert(nom_sql::InsertStatement),
@@ -87,6 +88,8 @@ pub struct SoupBackend {
     cached: Arc<RwLock<HashMap<SelectStatement, String>>>,
     /// thread-local version of `cached` (consulted first)
     tl_cached: HashMap<SelectStatement, String>,
+
+    slowlog: bool,
 }
 
 impl SoupBackend {
@@ -97,6 +100,7 @@ impl SoupBackend {
         auto_increments: Arc<RwLock<HashMap<String, atomic::AtomicUsize>>>,
         query_cache: Arc<RwLock<HashMap<SelectStatement, String>>>,
         query_counter: Arc<atomic::AtomicUsize>,
+        slowlog: bool,
         log: slog::Logger,
     ) -> Self {
         SoupBackend {
@@ -113,6 +117,8 @@ impl SoupBackend {
 
             cached: query_cache,
             tl_cached: HashMap::new(),
+
+            slowlog,
         }
     }
 
@@ -676,6 +682,8 @@ impl<W: io::Write> MysqlShim<W> for SoupBackend {
         params: ParamParser,
         results: QueryResultWriter<W>,
     ) -> io::Result<()> {
+        let start = time::Instant::now();
+
         // TODO(malte): unfortunate clone here, but we can't call execute_select(&mut self) if we
         // have self.prepared borrowed
         let prep: PreparedStatement = {
@@ -690,7 +698,7 @@ impl<W: io::Write> MysqlShim<W> for SoupBackend {
             }
         };
 
-        match prep {
+        let res = match prep {
             PreparedStatement::Select(ref qname, ref q, ref rewritten) => {
                 let key = match rewritten {
                     Some((first_rewritten, nrewritten)) => {
@@ -733,7 +741,21 @@ impl<W: io::Write> MysqlShim<W> for SoupBackend {
                 self.execute_insert(&q, values, results)
             }
             PreparedStatement::Update(ref q) => self.execute_update(&q, params, results),
+        };
+
+        if self.slowlog {
+            let took = start.elapsed();
+            if took.as_secs() > 0 || took.subsec_nanos() > 5_000_000 {
+                warn!(
+                    self.log,
+                    "{:?} took {}ms",
+                    prep,
+                    took.as_secs() * 1_000 + took.subsec_nanos() as u64 / 1_000_000
+                );
+            }
         }
+
+        res
     }
 
     fn on_close(&mut self, _: u32) {}
@@ -741,6 +763,7 @@ impl<W: io::Write> MysqlShim<W> for SoupBackend {
     fn on_query(&mut self, query: &str, results: QueryResultWriter<W>) -> io::Result<()> {
         trace!(self.log, "query: {}", query);
 
+        let start = time::Instant::now();
         let query = utils::sanitize_query(query);
 
         if query.to_lowercase().starts_with("begin")
@@ -812,7 +835,7 @@ impl<W: io::Write> MysqlShim<W> for SoupBackend {
                     use_params = p;
                 }
 
-                match q {
+                let res = match q {
                     nom_sql::SqlQuery::CreateTable(q) => self.handle_create_table(q, results),
                     nom_sql::SqlQuery::Insert(q) => self.handle_insert(q, results),
                     nom_sql::SqlQuery::Select(q) => self.handle_select(q, use_params, results),
@@ -830,7 +853,21 @@ impl<W: io::Write> MysqlShim<W> for SoupBackend {
                             "unsupported query".as_bytes(),
                         );
                     }
+                };
+
+                if self.slowlog {
+                    let took = start.elapsed();
+                    if took.as_secs() > 0 || took.subsec_nanos() > 5_000_000 {
+                        warn!(
+                            self.log,
+                            "{} took {}ms",
+                            query,
+                            took.as_secs() * 1_000 + took.subsec_nanos() as u64 / 1_000_000
+                        );
+                    }
                 }
+
+                res
             }
             Err(_e) => {
                 // if nom-sql rejects the query, there is no chance Soup will like it
