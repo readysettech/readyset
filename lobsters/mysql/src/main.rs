@@ -202,20 +202,20 @@ impl trawler::LobstersClient for MysqlTrawler {
                     return Either::A(futures::future::ok(c));
                 }
 
-                Either::B(c.drop_query(&format!(
+                Either::B(c.drop_exec(
                     "SELECT COUNT(*) \
                      FROM `replying_comments` \
-                     WHERE `replying_comments`.`user_id` = {} \
+                     WHERE `replying_comments`.`user_id` = ? \
                      AND `replying_comments`.`is_unread` = 1",
-                    uid
-                )).and_then(move |c| {
-                    c.drop_query(&format!(
+                    (uid,),
+                ).and_then(move |c| {
+                    c.drop_exec(
                         "SELECT `keystores`.* \
                          FROM `keystores` \
-                         WHERE `keystores`.`key` = 'user:{}:unread_messages' \
+                         WHERE `keystores`.`key` = ? \
                          ORDER BY `keystores`.`key` ASC LIMIT 1",
-                        uid
-                    ))
+                        (format!("user:{}:unread_messages", uid),),
+                    )
                 }))
             }))
         } else {
