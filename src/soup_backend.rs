@@ -743,12 +743,16 @@ impl<W: io::Write> MysqlShim<W> for SoupBackend {
 
         let query = utils::sanitize_query(query);
 
-        if query.to_lowercase().contains("show databases")
-            || query.to_lowercase().starts_with("begin")
+        if query.to_lowercase().starts_with("begin")
             || query.to_lowercase().starts_with("start transaction")
+            || query.to_lowercase().starts_with("commit")
+        {
+            return results.completed(0, 0);
+        }
+
+        if query.to_lowercase().contains("show databases")
             || query.to_lowercase().starts_with("rollback")
             || query.to_lowercase().starts_with("alter table")
-            || query.to_lowercase().starts_with("commit")
             || query.to_lowercase().starts_with("create index")
             || query.to_lowercase().starts_with("create unique index")
             || query.to_lowercase().starts_with("create fulltext index")
