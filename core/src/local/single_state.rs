@@ -112,7 +112,7 @@ impl SingleState {
         let mut do_remove = |self_rows: &mut usize, rs: &mut Vec<Row>| -> Option<Row> {
             *hit = true;
             if let Some(i) = rs.iter().position(|rsr| &rsr[..] == r) {
-                self_rows.checked_sub(1).unwrap();
+                *self_rows = self_rows.checked_sub(1).unwrap();
                 Some(rs.swap_remove(i))
             } else {
                 None
