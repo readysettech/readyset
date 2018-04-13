@@ -249,7 +249,7 @@ fn start_instance<A: Authority + 'static>(
         .unwrap();
 
     let worker_join_handle = thread::Builder::new()
-        .name("ctrl-main".to_owned())
+        .name("worker-pool".to_owned())
         .spawn(move || {
             let internal =
                 Worker::listen_internal(worker_event_tx2, SocketAddr::new(listen_addr, 0));

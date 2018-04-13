@@ -303,6 +303,7 @@ impl WorkerInner {
         let addr = listener.local_addr().unwrap();
         let pool = PoolBuilder::from(listener).unwrap();
         let h = pool.with_state(readers.clone())
+            .set_thread_name_prefix("reader-")
             .with_adapter(RpcServiceEndpoint::new)
             .run(
                 reader_threads,
