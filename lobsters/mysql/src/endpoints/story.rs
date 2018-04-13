@@ -21,8 +21,7 @@ where
             c.prep_exec(
                 "SELECT `stories`.* \
                  FROM `stories` \
-                 WHERE `stories`.`short_id` = ? \
-                 ORDER BY `stories`.`id` ASC LIMIT 1",
+                 WHERE `stories`.`short_id` = ?",
                 (::std::str::from_utf8(&id[..]).unwrap(),),
             ).and_then(|result| result.collect_and_drop::<my::Row>())
                 .map(|(c, mut story)| (c, story.swap_remove(0)))
@@ -30,7 +29,7 @@ where
                 let author = story.get::<u32, _>("user_id").unwrap();
                 let id = story.get::<u32, _>("id").unwrap();
                 c.drop_exec(
-                    "SELECT `users`.* FROM `users` WHERE `users`.`id` = ? LIMIT 1",
+                    "SELECT `users`.* FROM `users` WHERE `users`.`id` = ?",
                     (author,),
                 ).map(move |c| (c, id))
             })
@@ -45,8 +44,7 @@ where
                             "SELECT  `read_ribbons`.* \
                              FROM `read_ribbons` \
                              WHERE `read_ribbons`.`user_id` = ? \
-                             AND `read_ribbons`.`story_id` = ? \
-                             ORDER BY `read_ribbons`.`id` ASC LIMIT 1",
+                             AND `read_ribbons`.`story_id` = ?",
                             (&uid, &story),
                         ).and_then(move |(c, rr)| {
                             let now = chrono::Local::now().naive_local();
@@ -144,16 +142,14 @@ where
                          FROM `votes` \
                          WHERE `votes`.`user_id` = ? \
                          AND `votes`.`story_id` = ? \
-                         AND `votes`.`comment_id` IS NULL \
-                         ORDER BY `votes`.`id` ASC LIMIT 1",
+                         AND `votes`.`comment_id` IS NULL",
                         (uid, story),
                     ).and_then(move |c| {
                             c.drop_exec(
                                 "SELECT `hidden_stories`.* \
                                  FROM `hidden_stories` \
                                  WHERE `hidden_stories`.`user_id` = ? \
-                                 AND `hidden_stories`.`story_id` = ? \
-                                 ORDER BY `hidden_stories`.`id` ASC LIMIT 1",
+                                 AND `hidden_stories`.`story_id` = ?",
                                 (uid, story),
                             )
                         })
@@ -162,8 +158,7 @@ where
                                 "SELECT `saved_stories`.* \
                                  FROM `saved_stories` \
                                  WHERE `saved_stories`.`user_id` = ? \
-                                 AND `saved_stories`.`story_id` = ? \
-                                 ORDER BY `saved_stories`.`id` ASC LIMIT 1",
+                                 AND `saved_stories`.`story_id` = ?",
                                 (uid, story),
                             )
                         })

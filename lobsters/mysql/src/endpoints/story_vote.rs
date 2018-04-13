@@ -18,8 +18,7 @@ where
             c.prep_exec(
                 "SELECT `stories`.* \
                  FROM `stories` \
-                 WHERE `stories`.`short_id` = ? \
-                 ORDER BY `stories`.`id` ASC LIMIT 1",
+                 WHERE `stories`.`short_id` = ?",
                 (::std::str::from_utf8(&story[..]).unwrap(),),
             ).and_then(|result| result.collect_and_drop::<my::Row>())
                 .map(|(c, mut story)| (c, story.swap_remove(0)))
@@ -32,8 +31,7 @@ where
                      FROM `votes` \
                      WHERE `votes`.`user_id` = ? \
                      AND `votes`.`story_id` = ? \
-                     AND `votes`.`comment_id` IS NULL \
-                     ORDER BY `votes`.`id` ASC LIMIT 1",
+                     AND `votes`.`comment_id` IS NULL",
                     (user, id),
                 ).map(move |c| (c, author, id, score))
             })

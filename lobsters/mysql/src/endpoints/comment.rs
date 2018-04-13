@@ -21,8 +21,7 @@ where
             c.first_exec::<_, _, my::Row>(
                 "SELECT `stories`.* \
                  FROM `stories` \
-                 WHERE `stories`.`short_id` = ? \
-                 ORDER BY `stories`.`id` ASC LIMIT 1",
+                 WHERE `stories`.`short_id` = ?",
                 (::std::str::from_utf8(&story[..]).unwrap(),),
             ).map(|(c, story)| (c, story.unwrap()))
         }).and_then(|(c, story)| {
@@ -30,7 +29,7 @@ where
                 let hotness = story.get::<f64, _>("hotness").unwrap();
                 let id = story.get::<u32, _>("id").unwrap();
                 c.drop_exec(
-                    "SELECT `users`.* FROM `users` WHERE `users`.`id` = ? LIMIT 1",
+                    "SELECT `users`.* FROM `users` WHERE `users`.`id` = ?",
                     (author,),
                 ).map(move |c| (c, id, hotness))
             })
@@ -40,8 +39,7 @@ where
                     futures::future::Either::A(c.first_exec::<_, _, my::Row>(
                         "SELECT  `comments`.* FROM `comments` \
                          WHERE `comments`.`story_id` = ? \
-                         AND `comments`.`short_id` = ? \
-                         ORDER BY `comments`.`id` ASC LIMIT 1",
+                         AND `comments`.`short_id` = ?",
                         (story, ::std::str::from_utf8(&parent[..]).unwrap()),
                     ).map(move |(c, p)| {
                         if let Some(p) = p {
@@ -75,7 +73,7 @@ where
                 // check that short id is available
                 c.drop_exec(
                     "SELECT  1 AS one FROM `comments` \
-                     WHERE `comments`.`short_id` = ? LIMIT 1",
+                     WHERE `comments`.`short_id` = ?",
                     (::std::str::from_utf8(&id[..]).unwrap(),),
                 ).map(move |c| (c, story, parent, hotness))
             })
@@ -137,8 +135,7 @@ where
                             "SELECT  `votes`.* FROM `votes` \
                              WHERE `votes`.`user_id` = ? \
                              AND `votes`.`story_id` = ? \
-                             AND `votes`.`comment_id` = ? \
-                             ORDER BY `votes`.`id` ASC LIMIT 1",
+                             AND `votes`.`comment_id` = ?",
                             (user, story, comment),
                         ).map(move |t| (t, comment))
                     })

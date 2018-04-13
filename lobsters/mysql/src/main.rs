@@ -88,10 +88,8 @@ impl trawler::LobstersClient for MysqlTrawler {
                 let tokens = this.tokens.borrow();
                 if let Some(u) = tokens.get(&u) {
                     Either::A(c.drop_exec(
-                        "\
-                         SELECT users.* \
-                         FROM users WHERE users.session_token = ? \
-                         ORDER BY users.id ASC LIMIT 1",
+                        "SELECT users.* \
+                         FROM users WHERE users.session_token = ?",
                         (u,),
                     ))
                 } else {
@@ -110,15 +108,13 @@ impl trawler::LobstersClient for MysqlTrawler {
                 .and_then(|t| {
                     t.drop_query(
                         "SELECT keystores.* FROM keystores \
-                         WHERE keystores.key = 'traffic:date' \
-                         ORDER BY keystores.key ASC LIMIT 1 FOR UPDATE",
+                         WHERE keystores.key = 'traffic:date' FOR UPDATE",
                     )
                 })
                 .and_then(|t| {
                     t.drop_query(
                         "SELECT keystores.* FROM keystores \
-                         WHERE keystores.key = 'traffic:hits' \
-                         ORDER BY keystores.key ASC LIMIT 1 FOR UPDATE",
+                         WHERE keystores.key = 'traffic:hits' FOR UPDATE",
                     )
                 })
                 .and_then(|t| {
@@ -149,8 +145,7 @@ impl trawler::LobstersClient for MysqlTrawler {
                             "\
                              SELECT  1 as one \
                              FROM `users` \
-                             WHERE `users`.`username` = ? \
-                             ORDER BY `users`.`id` ASC LIMIT 1",
+                             WHERE `users`.`username` = ?",
                             (format!("user{}", acting_as.unwrap()),),
                         )
                     }).and_then(move |(c, user)| {
@@ -212,8 +207,7 @@ impl trawler::LobstersClient for MysqlTrawler {
                     c.drop_exec(
                         "SELECT `keystores`.* \
                          FROM `keystores` \
-                         WHERE `keystores`.`key` = ? \
-                         ORDER BY `keystores`.`key` ASC LIMIT 1",
+                         WHERE `keystores`.`key` = ?",
                         (format!("user:{}:unread_messages", uid),),
                     )
                 }))

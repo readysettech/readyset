@@ -19,15 +19,14 @@ where
             // check that tags are active
             c.first::<_, my::Row>(
                 "SELECT  `tags`.* FROM `tags` \
-                 WHERE `tags`.`inactive` = 0 AND `tags`.`tag` IN ('test') \
-                 ORDER BY `tags`.`id` ASC LIMIT 1",
+                 WHERE `tags`.`inactive` = 0 AND `tags`.`tag` IN ('test')",
             )
         }).map(|(c, tag)| (c, tag.unwrap().get::<u32, _>("id")))
             .and_then(move |(c, tag)| {
                 // check that story id isn't already assigned
                 c.drop_exec(
                     "SELECT  1 AS one FROM `stories` \
-                     WHERE `stories`.`short_id` = ? LIMIT 1",
+                     WHERE `stories`.`short_id` = ?",
                     (::std::str::from_utf8(&id[..]).unwrap(),),
                 ).map(move |c| (c, tag))
             })
@@ -43,7 +42,6 @@ where
                 //  ... etc
                 // )
                 // AND (is_expired = 0 OR is_moderated = 1)
-                // ORDER BY id DESC LIMIT 1
                 c
             })
             .map(|c| {
@@ -99,8 +97,7 @@ where
                         t.drop_exec(
                             "SELECT  `keystores`.* \
                              FROM `keystores` \
-                             WHERE `keystores`.`key` = ? \
-                             ORDER BY `keystores`.`key` ASC LIMIT 1",
+                             WHERE `keystores`.`key` = ?",
                             (key,),
                         ).map(move |t| (t, story))
                     })
@@ -109,8 +106,7 @@ where
                             "SELECT  `votes`.* FROM `votes` \
                              WHERE `votes`.`user_id` = ? \
                              AND `votes`.`story_id` = ? \
-                             AND `votes`.`comment_id` IS NULL \
-                             ORDER BY `votes`.`id` ASC LIMIT 1",
+                             AND `votes`.`comment_id` IS NULL",
                             (user, story),
                         ).map(move |t| (t, story))
                     })
