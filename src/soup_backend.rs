@@ -241,7 +241,7 @@ impl SoupBackend {
             .into_iter()
             .map(|l| vec![l.to_datatype()])
             .collect();
-        self.do_read(&qname, &q, &keys[..], results)
+        self.do_read(&qname, &q, keys, results)
     }
 
     fn handle_set<W: io::Write>(
@@ -580,7 +580,7 @@ impl SoupBackend {
         &mut self,
         qname: &str,
         q: &SelectStatement,
-        keys: &[Vec<DataType>],
+        keys: Vec<Vec<DataType>>,
         results: QueryResultWriter<W>,
     ) -> io::Result<()> {
         self.do_read(qname, q, keys, results)
@@ -690,7 +690,7 @@ impl SoupBackend {
         &mut self,
         qname: &str,
         q: &SelectStatement,
-        keys: &[Vec<DataType>],
+        keys: Vec<Vec<DataType>>,
         results: QueryResultWriter<W>,
     ) -> io::Result<()> {
         // we need the schema for the result writer
@@ -734,41 +734,26 @@ impl SoupBackend {
         let cols = Vec::from(getter.columns());
         let bogo = vec![vec![DataType::from(0 as i32)]];
         let is_bogo = keys.is_empty();
-        let keys = if is_bogo { &bogo[..] } else { &keys[..] };
+        let keys = if is_bogo { bogo } else { keys };
 
         // if first lookup fails, there's no reason to try the others
-        match getter.lookup(&keys[0], true) {
+        match getter.multi_lookup(keys, true) {
             Ok(d) => {
                 let mut rw = results.start(schema.as_slice()).unwrap();
-                {
-                    let mut write = |d: Vec<Vec<DataType>>| -> io::Result<()> {
-                        for mut r in d {
-                            if is_bogo {
-                                // drop bogokey
-                                r.pop();
-                            }
-
-                            for c in &*schema {
-                                let coli = cols.iter()
-                                    .position(|f| f == &c.column)
-                                    .expect("tried to emit column not in getter");
-                                write_column(&mut rw, &r[coli], c);
-                            }
-                            rw.end_row()?;
+                for resultsets in d {
+                    for mut r in resultsets {
+                        if is_bogo {
+                            // drop bogokey
+                            r.pop();
                         }
 
-                        Ok(())
-                    };
-
-                    write(d)?;
-                    for key in &keys[1..] {
-                        match getter.lookup(key, true) {
-                            Ok(d) => write(d)?,
-                            Err(e) => {
-                                crit!(self.log, "subsequent error executing SELECT: {:?}", e);
-                                // This should *never* happen
-                            }
+                        for c in &*schema {
+                            let coli = cols.iter()
+                                .position(|f| f == &c.column)
+                                .expect("tried to emit column not in getter");
+                            write_column(&mut rw, &r[coli], c);
                         }
+                        rw.end_row()?;
                     }
                 }
                 rw.finish()
@@ -983,7 +968,7 @@ impl<W: io::Write> MysqlShim<W> for SoupBackend {
                             .collect::<Vec<_>>(),
                     ],
                 };
-                self.execute_select(&qname, &q, &key[..], results)
+                self.execute_select(&qname, &q, key, results)
             }
             PreparedStatement::Insert(ref q) => {
                 let values: Vec<DataType> = params
