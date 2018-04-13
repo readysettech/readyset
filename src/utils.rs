@@ -1,9 +1,10 @@
 use std::collections::HashSet;
 
-use distributary::DataType;
+use convert::ToDataType;
+use distributary::{DataType, Modification};
+use msql_srv::ParamParser;
 use nom_sql::{Column, ColumnConstraint, ConditionBase, ConditionExpression, ConditionTree,
-              CreateTableStatement, FieldExpression, Literal, Operator, SelectStatement, SqlQuery,
-              TableKey, UpdateStatement};
+              CreateTableStatement, Literal, Operator, SqlQuery, TableKey, UpdateStatement};
 use regex::Regex;
 use std::collections::HashMap;
 
@@ -286,79 +287,99 @@ pub(crate) fn get_parameter_columns(query: &SqlQuery) -> Vec<&Column> {
                 .collect()
         }
         SqlQuery::Update(ref query) => {
-            assert!(
-                query.fields.iter().all(|(_, ref l)| match *l {
-                    Literal::Placeholder => false,
-                    _ => true,
-                }),
-                "parameters in SET part of UPDATE query are unsupported"
-            );
-            if let Some(ref wc) = query.where_clause {
+            let mut field_params = query.fields.iter().filter_map(|f| {
+                if let Literal::Placeholder = f.1 {
+                    Some(&f.0)
+                } else {
+                    None
+                }
+            });
+
+            let where_params = if let Some(ref wc) = query.where_clause {
                 get_parameter_columns_recurse(wc)
             } else {
                 vec![]
-            }
+            };
+
+            field_params.chain(where_params.into_iter()).collect()
         }
         _ => unimplemented!(),
     }
 }
 
-pub(crate) fn select_for_update_on(
-    q: &mut UpdateStatement,
-    schema: &CreateTableStatement,
-) -> (SelectStatement, HashMap<usize, DataType>) {
-    let table = &q.table.name;
-    let pkey = get_primary_key(schema);
-    let key_values: Vec<_> = pkey.iter().map(|&(_, c)| c).collect();
-
-    let mut where_clauses = key_values.iter().map(|&kv| {
+fn walk_update_where(
+    col2v: &mut HashMap<String, DataType>,
+    params: &mut Option<<ParamParser as IntoIterator>::IntoIter>,
+    expr: ConditionExpression,
+) {
+    match expr {
         ConditionExpression::ComparisonOp(ConditionTree {
             operator: Operator::Equal,
-            left: box ConditionExpression::Base(ConditionBase::Field(kv.clone())),
-            right: box ConditionExpression::Base(ConditionBase::Literal(Literal::Placeholder)),
-        })
-    });
-
-    let mut top_clause = where_clauses.next().unwrap();
-    for clause in where_clauses {
-        top_clause = ConditionExpression::LogicalOp(ConditionTree {
+            left: box ConditionExpression::Base(ConditionBase::Field(c)),
+            right: box ConditionExpression::Base(ConditionBase::Literal(l)),
+        }) => {
+            let v = match l {
+                Literal::Placeholder => params
+                    .as_mut()
+                    .expect("Found placeholder in ad-hoc query")
+                    .next()
+                    .map(|pv| pv.value.to_datatype())
+                    .expect("Not enough parameter values given in EXECUTE"),
+                v => DataType::from(v),
+            };
+            let oldv = col2v.insert(c.name, v);
+            assert!(oldv.is_none());
+        }
+        ConditionExpression::LogicalOp(ConditionTree {
             operator: Operator::And,
-            left: box top_clause,
-            right: box clause,
-        });
+            left,
+            right,
+        }) => {
+            // recurse
+            walk_update_where(col2v, params, *left);
+            walk_update_where(col2v, params, *right);
+        }
+        _ => unimplemented!("Fancy high-brow UPDATEs are not supported"),
     }
-    let where_clause = Some(top_clause);
+}
 
-    let sq = SelectStatement {
-        tables: vec![q.table.clone()],
-        fields: schema
-            .fields
-            .iter()
-            .map(|cs| FieldExpression::Col(cs.column.clone()))
-            .collect(),
-        distinct: false,
-        join: vec![],
-        where_clause,
-        group_by: None,
-        order: None,
-        limit: None,
-    };
-
-    // update_columns maps column indices to the value they should be updated to:
-    let mut update_columns = HashMap::new();
+pub(crate) fn extract_update(
+    mut q: UpdateStatement,
+    params: Option<ParamParser>,
+    schema: &CreateTableStatement,
+) -> (Vec<DataType>, Vec<(usize, Modification)>) {
+    let mut params = params.map(|p| p.into_iter());
+    let mut updates = Vec::new();
     for (i, field) in schema.fields.iter().enumerate() {
-        for &mut (ref mut update_column, ref value) in q.fields.iter_mut() {
-            // we must ensure that all columns have their table set because the schema we're
-            // comparing against sets it; the parser does not itself guarantee this.
-            if update_column.table.is_none() {
-                update_column.table = Some(table.to_owned());
-            }
-            if update_column == &field.column {
-                update_columns.insert(i, DataType::from(value));
-            }
+        if let Some(sets) = q.fields
+            .iter()
+            .position(|&(ref f, _)| f.name == field.column.name)
+        {
+            let v = match q.fields.swap_remove(sets).1 {
+                Literal::Placeholder => params
+                    .as_mut()
+                    .expect("Found placeholder in ad-hoc query")
+                    .next()
+                    .map(|pv| pv.value.to_datatype())
+                    .expect("Not enough parameter values given in EXECUTE"),
+                v => DataType::from(v),
+            };
+
+            updates.push((i, Modification::Set(v)));
         }
     }
-    (sq, update_columns)
+
+    let pkey = get_primary_key(schema);
+    let where_clause = q.where_clause
+        .expect("UPDATE without WHERE is not supported");
+    let mut col_to_val: HashMap<_, _> = HashMap::new();
+    walk_update_where(&mut col_to_val, &mut params, where_clause);
+
+    let key: Vec<_> = pkey.iter()
+        .map(|&(_, c)| col_to_val.remove(&c.name).unwrap())
+        .collect();
+
+    (key, updates)
 }
 
 #[cfg(test)]
