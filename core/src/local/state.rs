@@ -316,6 +316,16 @@ impl PersistentState {
         let start = 4;
         // We encoded the size of the key itself with a u64, which bincode uses 8 bytes to encode:
         let size_offset = start + 8;
+        // NOTE(ekmartin): Encoding the key size in the key increases the total size with 4 bytes.
+        // If we really wanted to avoid this while still maintaining the same serialization scheme
+        // we could do so by figuring out how many bytes our bincode serialized Vec<DataType> takes
+        // up here in transform_fn. Example:
+        // [DataType::Int(1), DataType::BigInt(10)] would be serialized as:
+        // 2u64 (vec length), 0u32 (enum variant), 1i32 (value), 1u32 (enum variant), 1i64 (value)
+        // By stepping through the serialized bytes and checking each enum variant we would know
+        // when we reached the end, and could then with certainty say whether we'd already
+        // prefix transformed this key before or not
+        // (without including the byte size of Vec<DataType>).
         let key_size: u64 = bincode::deserialize(&key[start..size_offset]).unwrap();
         let prefix_len = size_offset + key_size as usize;
         let mut bytes = Vec::from(key);
