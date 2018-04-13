@@ -297,10 +297,8 @@ fn delete_other_column() {
         .unwrap();
     sleep();
 
-    assert!(
-        conn.query("DELETE FROM Cats WHERE Cats.id = 1 OR Cats.name = \"Bob\"")
-            .is_err()
-    );
+    conn.query("DELETE FROM Cats WHERE Cats.id = 1 OR Cats.name = \"Bob\"")
+        .unwrap_err();
 }
 
 #[test]
@@ -312,7 +310,7 @@ fn delete_no_keys() {
         .unwrap();
     sleep();
 
-    assert!(conn.query("DELETE FROM Cats WHERE 1 = 1").is_err());
+    conn.query("DELETE FROM Cats WHERE 1 = 1").unwrap_err();
 }
 
 #[test]
@@ -601,7 +599,7 @@ fn update_no_keys() {
     sleep();
 
     let query = "UPDATE Cats SET Cats.name = \"Rusty\" WHERE 1 = 1";
-    assert!(conn.query(query).is_err());
+    conn.query(query).unwrap_err();
 }
 
 #[test]
@@ -614,7 +612,7 @@ fn update_other_column() {
     sleep();
 
     let query = "UPDATE Cats SET Cats.name = \"Rusty\" WHERE Cats.name = \"Bob\"";
-    assert!(conn.query(query).is_err());
+    conn.query(query).unwrap_err();
 }
 
 #[test]
