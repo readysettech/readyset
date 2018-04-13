@@ -5,7 +5,7 @@ extern crate distributary;
 extern crate slog;
 
 use consensus::ZookeeperAuthority;
-use distributary::ControllerBuilder;
+use distributary::{ControllerBuilder, ReuseConfigType};
 use std::sync::Arc;
 use std::time::Duration;
 
@@ -60,6 +60,11 @@ fn main() {
                 .takes_value(true)
                 .default_value("0")
                 .help("Memory, in bytes, available for materialized state [0 = unlimited]."),
+        )
+        .arg(
+            Arg::with_name("noreuse")
+                .long("no-reuse")
+                .help("Disable reuse"),
         )
         .arg(
             Arg::with_name("readers")
@@ -119,6 +124,9 @@ fn main() {
     builder.set_read_threads(readers);
     builder.set_sharding(sharding);
     builder.set_quorum(quorum);
+    if matches.is_present("noreuse") {
+        builder.set_reuse(ReuseConfigType::NoReuse);
+    }
 
     let persistence_params = distributary::PersistenceParameters::new(
         match durability {
