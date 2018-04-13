@@ -89,7 +89,7 @@ where
                             "INSERT INTO keystores (`key`, `value`) \
                              VALUES (?, ?) \
                              ON DUPLICATE KEY UPDATE `value` = `value` + 1",
-                            (key, 1)
+                            (key, 1),
                         ).map(move |t| (t, story))
                     })
                     .and_then(move |(t, story)| {
