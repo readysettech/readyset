@@ -705,20 +705,20 @@ impl SoupBackend {
         // earlier one of the same name
         let getter = self.inner.get_or_make_getter(&qname);
 
-        let write_column = |rw: &mut RowWriter<W>, c: DataType, cs: &msql_srv::Column| {
-            let written = match c {
+        let write_column = |rw: &mut RowWriter<W>, c: &DataType, cs: &msql_srv::Column| {
+            let written = match *c {
                 DataType::None => rw.write_col(None::<i32>),
                 DataType::Int(i) => rw.write_col(i as isize),
                 DataType::BigInt(i) => rw.write_col(i as isize),
-                DataType::Text(t) => rw.write_col(t.to_str().unwrap()),
-                dt @ DataType::TinyText(_) => rw.write_col(dt.to_string()),
-                dt @ DataType::Real(_, _) => match cs.coltype {
+                DataType::Text(ref t) => rw.write_col(t.to_str().unwrap()),
+                ref dt @ DataType::TinyText(_) => rw.write_col(dt.to_string()),
+                ref dt @ DataType::Real(_, _) => match cs.coltype {
                     msql_srv::ColumnType::MYSQL_TYPE_DECIMAL => {
-                        let f: &str = &dt.to_string();
+                        let f = dt.to_string();
                         rw.write_col(f)
                     }
                     msql_srv::ColumnType::MYSQL_TYPE_DOUBLE => {
-                        let f: f64 = (&dt).into();
+                        let f: f64 = dt.into();
                         rw.write_col(f)
                     }
                     _ => unreachable!(),
@@ -731,6 +731,7 @@ impl SoupBackend {
             }
         };
 
+        let cols = Vec::from(getter.columns());
         let bogo = vec![vec![DataType::from(0 as i32)]];
         let is_bogo = keys.is_empty();
         let keys = if is_bogo { &bogo[..] } else { &keys[..] };
@@ -746,12 +747,12 @@ impl SoupBackend {
                                 // drop bogokey
                                 r.pop();
                             }
-                            for (i, c) in r.into_iter().enumerate() {
-                                // XXX TODO XXX
-                                // Need to drop parameter columns
-                                if i < schema.len() {
-                                    write_column(&mut rw, c, &schema[i]);
-                                }
+
+                            for c in &*schema {
+                                let coli = cols.iter()
+                                    .position(|f| f == &c.column)
+                                    .expect("tried to emit column not in getter");
+                                write_column(&mut rw, &r[coli], c);
                             }
                             rw.end_row()?;
                         }
