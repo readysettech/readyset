@@ -92,13 +92,6 @@ impl State for PersistentState {
         }
 
         let mut batch = WriteBatch::default();
-
-        // TODO(ekmartin): .remove won't work for inserts in the same batch, since it needs to seek
-        // for the values it's deleting before doing so, and values we're inserting in this batch
-        // only become available _after_ we've written it.
-        //
-        // Can solve this by going through and removing unnecessary records, but should make sure
-        // that's not being done somewhere else already, prior to this.
         for r in records.iter() {
             match *r {
                 Record::Positive(ref r) => {
