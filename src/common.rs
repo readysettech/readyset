@@ -258,29 +258,44 @@ impl fmt::Display for TableKey {
 }
 
 #[derive(Clone, Debug, Eq, Hash, PartialEq, Serialize, Deserialize)]
-pub enum FieldExpression {
+pub enum FieldDefinitionExpression {
     All,
     AllInTable(String),
-    Arithmetic(ArithmeticExpression),
     Col(Column),
-    Literal(LiteralExpression),
+    Value(FieldValueExpression),
 }
 
-impl Display for FieldExpression {
+impl Display for FieldDefinitionExpression {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         match *self {
-            FieldExpression::All => write!(f, "*"),
-            FieldExpression::AllInTable(ref table) => write!(f, "{}.*", escape_if_keyword(table)),
-            FieldExpression::Arithmetic(ref expr) => write!(f, "{}", expr),
-            FieldExpression::Col(ref col) => write!(f, "{}", col),
-            FieldExpression::Literal(ref lit) => write!(f, "{}", lit),
+            FieldDefinitionExpression::All => write!(f, "*"),
+            FieldDefinitionExpression::AllInTable(ref table) => {
+                write!(f, "{}.*", escape_if_keyword(table))
+            }
+            FieldDefinitionExpression::Col(ref col) => write!(f, "{}", col),
+            FieldDefinitionExpression::Value(ref val) => write!(f, "{}", val),
         }
     }
 }
 
-impl Default for FieldExpression {
-    fn default() -> FieldExpression {
-        FieldExpression::All
+impl Default for FieldDefinitionExpression {
+    fn default() -> FieldDefinitionExpression {
+        FieldDefinitionExpression::All
+    }
+}
+
+#[derive(Clone, Debug, Eq, Hash, PartialEq, Serialize, Deserialize)]
+pub enum FieldValueExpression {
+    Arithmetic(ArithmeticExpression),
+    Literal(LiteralExpression),
+}
+
+impl Display for FieldValueExpression {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        match *self {
+            FieldValueExpression::Arithmetic(ref expr) => write!(f, "{}", expr),
+            FieldValueExpression::Literal(ref lit) => write!(f, "{}", lit),
+        }
     }
 }
 
@@ -682,7 +697,7 @@ named!(pub as_alias<&[u8], &str>,
     )
 );
 
-named!(field_value<&[u8], (Column,Literal) >,
+named!(field_value_or_expr<&[u8], (Column, Literal) >,
     do_parse!(
         column: column_identifier_no_alias >>
         opt_multispace >>
@@ -693,10 +708,10 @@ named!(field_value<&[u8], (Column,Literal) >,
     )
 );
 
-named!(pub field_value_list<&[u8], Vec<(Column,Literal)> >,
+named!(pub field_value_or_expr_list<&[u8], Vec<(Column, Literal)> >,
        many1!(
            do_parse!(
-               field_value: field_value >>
+               field_value: field_value_or_expr >>
                opt!(
                    complete!(do_parse!(
                        opt_multispace >>
@@ -729,30 +744,32 @@ named!(pub field_list<&[u8], Vec<Column> >,
 );
 
 /// Parse list of column/field definitions.
-named!(pub field_definition_expr<&[u8], Vec<FieldExpression>>,
+named!(pub field_definition_expr<&[u8], Vec<FieldDefinitionExpression>>,
        many0!(
            do_parse!(
                field: alt_complete!(
                    do_parse!(
                        tag!("*") >>
-                       (FieldExpression::All)
+                       (FieldDefinitionExpression::All)
                    )
                  | do_parse!(
                      table: table_reference >>
                      tag!(".*") >>
-                     (FieldExpression::AllInTable(table.name.clone()))
+                     (FieldDefinitionExpression::AllInTable(table.name.clone()))
                  )
                  | do_parse!(
                      expr: arithmetic_expression >>
-                     (FieldExpression::Arithmetic(expr))
+                     (FieldDefinitionExpression::Value(
+                             FieldValueExpression::Arithmetic(expr)))
                  )
                  | do_parse!(
                      literal: literal_expression >>
-                     (FieldExpression::Literal(literal))
+                     (FieldDefinitionExpression::Value(
+                             FieldValueExpression::Literal(literal)))
                  )
                  | do_parse!(
                      column: column_identifier >>
-                     (FieldExpression::Col(column))
+                     (FieldDefinitionExpression::Col(column))
                  )
                ) >>
                opt!(

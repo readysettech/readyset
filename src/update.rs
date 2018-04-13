@@ -1,7 +1,7 @@
 use nom::multispace;
 use std::{fmt, str};
 
-use common::{field_value_list, statement_terminator, table_reference, Literal};
+use common::{field_value_or_expr_list, statement_terminator, table_reference, Literal};
 use condition::ConditionExpression;
 use keywords::escape_if_keyword;
 use table::Table;
@@ -44,7 +44,7 @@ named!(pub updating<&[u8], UpdateStatement>,
         multispace >>
         tag_no_case!("set") >>
         multispace >>
-        fields: field_value_list >>
+        fields: field_value_or_expr_list >>
         cond: opt!(where_clause) >>
         statement_terminator >>
         (UpdateStatement {
