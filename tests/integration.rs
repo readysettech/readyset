@@ -12,7 +12,7 @@ use std::collections::HashMap;
 use std::env;
 use std::net::TcpListener;
 use std::sync::atomic::AtomicUsize;
-use std::sync::{Arc, Mutex};
+use std::sync::{Arc, RwLock};
 use std::thread;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
@@ -90,12 +90,9 @@ fn setup(deployment: &Deployment) -> mysql::Opts {
     });
 
     let query_counter = Arc::new(AtomicUsize::new(0));
-    let schemas: Arc<Mutex<HashMap<String, CreateTableStatement>>> =
-        Arc::new(Mutex::new(HashMap::default()));
-    let auto_increments: Arc<Mutex<HashMap<String, u64>>> =
-        Arc::new(Mutex::new(HashMap::default()));
-    let query_cache: Arc<Mutex<HashMap<SelectStatement, String>>> =
-        Arc::new(Mutex::new(HashMap::default()));
+    let schemas: Arc<RwLock<HashMap<String, CreateTableStatement>>> = Arc::default();
+    let auto_increments: Arc<RwLock<HashMap<String, AtomicUsize>>> = Arc::default();
+    let query_cache: Arc<RwLock<HashMap<SelectStatement, String>>> = Arc::default();
     let listener = TcpListener::bind("127.0.0.1:0").unwrap();
     let addr = listener.local_addr().unwrap();
 

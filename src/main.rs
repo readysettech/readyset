@@ -28,7 +28,7 @@ use nom_sql::{CreateTableStatement, SelectStatement};
 use std::collections::HashMap;
 use std::net;
 use std::sync::atomic::AtomicUsize;
-use std::sync::{Arc, Mutex};
+use std::sync::{Arc, RwLock};
 use std::thread;
 
 use soup_backend::SoupBackend;
@@ -75,12 +75,9 @@ fn main() {
     info!(log, "listening on port {}", port);
 
     let query_counter = Arc::new(AtomicUsize::new(0));
-    let schemas: Arc<Mutex<HashMap<String, CreateTableStatement>>> =
-        Arc::new(Mutex::new(HashMap::default()));
-    let auto_increments: Arc<Mutex<HashMap<String, u64>>> =
-        Arc::new(Mutex::new(HashMap::default()));
-    let query_cache: Arc<Mutex<HashMap<SelectStatement, String>>> =
-        Arc::new(Mutex::new(HashMap::default()));
+    let schemas: Arc<RwLock<HashMap<String, CreateTableStatement>>> = Arc::default();
+    let auto_increments: Arc<RwLock<HashMap<String, AtomicUsize>>> = Arc::default();
+    let query_cache: Arc<RwLock<HashMap<SelectStatement, String>>> = Arc::default();
 
     let mut threads = Vec::new();
     let mut i = 0;

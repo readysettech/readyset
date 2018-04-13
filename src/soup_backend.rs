@@ -8,7 +8,8 @@ use slog;
 use std::borrow::Cow;
 use std::collections::{BTreeMap, HashMap};
 use std::io;
-use std::sync::{self, Arc, Mutex};
+use std::sync::atomic;
+use std::sync::{self, Arc, RwLock};
 
 use convert::ToDataType;
 use rewrite;
@@ -74,16 +75,16 @@ pub struct SoupBackend {
     inner: SoupBackendInner,
     log: slog::Logger,
 
-    table_schemas: Arc<Mutex<HashMap<String, CreateTableStatement>>>,
-    auto_increments: Arc<Mutex<HashMap<String, u64>>>,
+    table_schemas: Arc<RwLock<HashMap<String, CreateTableStatement>>>,
+    auto_increments: Arc<RwLock<HashMap<String, atomic::AtomicUsize>>>,
 
-    query_count: Arc<sync::atomic::AtomicUsize>,
+    query_count: Arc<atomic::AtomicUsize>,
 
     prepared: HashMap<u32, PreparedStatement>,
     prepared_count: u32,
 
     /// global cache of view endpoints and prepared statements
-    cached: Arc<Mutex<HashMap<SelectStatement, String>>>,
+    cached: Arc<RwLock<HashMap<SelectStatement, String>>>,
     /// thread-local version of `cached` (consulted first)
     tl_cached: HashMap<SelectStatement, String>,
 }
@@ -92,10 +93,10 @@ impl SoupBackend {
     pub fn new(
         zk_addr: &str,
         deployment: &str,
-        schemas: Arc<Mutex<HashMap<String, CreateTableStatement>>>,
-        auto_increments: Arc<Mutex<HashMap<String, u64>>>,
-        query_cache: Arc<Mutex<HashMap<SelectStatement, String>>>,
-        query_counter: Arc<sync::atomic::AtomicUsize>,
+        schemas: Arc<RwLock<HashMap<String, CreateTableStatement>>>,
+        auto_increments: Arc<RwLock<HashMap<String, atomic::AtomicUsize>>>,
+        query_cache: Arc<RwLock<HashMap<SelectStatement, String>>>,
+        query_counter: Arc<atomic::AtomicUsize>,
         log: slog::Logger,
     ) -> Self {
         SoupBackend {
@@ -122,7 +123,7 @@ impl SoupBackend {
     ) -> io::Result<()> {
         match self.inner.soup.extend_recipe(format!("{};", q)) {
             Ok(_) => {
-                let mut ts_lock = self.table_schemas.lock().unwrap();
+                let mut ts_lock = self.table_schemas.write().unwrap();
                 ts_lock.insert(q.table.name.clone(), q);
                 // no rows to return
                 // TODO(malte): potentially eagerly cache the mutator for this table
@@ -140,7 +141,7 @@ impl SoupBackend {
         let cond = q.where_clause
             .expect("only supports DELETEs with WHERE-clauses");
 
-        let ts = self.table_schemas.lock().unwrap();
+        let ts = self.table_schemas.read().unwrap();
         let pkey = utils::get_primary_key(&ts[&q.table.name])
             .into_iter()
             .map(|(_, c)| c)
@@ -196,7 +197,7 @@ impl SoupBackend {
         let (qname, locally_cached) = match self.tl_cached.get(&q) {
             None => {
                 // consult global cache
-                let mut gc = self.cached.lock().unwrap();
+                let mut gc = self.cached.read().unwrap();
                 let (qname, cached) = match gc.get(&q) {
                     None => {
                         let qc = self.query_count
@@ -221,7 +222,11 @@ impl SoupBackend {
                     Some(qname) => (qname.clone(), false),
                 };
                 if !cached {
-                    gc.insert(q.clone(), qname.clone());
+                    drop(gc);
+                    self.cached
+                        .write()
+                        .unwrap()
+                        .insert(q.clone(), qname.clone());
                 }
                 (qname, false)
             }
@@ -262,7 +267,7 @@ impl SoupBackend {
         sql_q: nom_sql::SqlQuery,
         info: StatementMetaWriter<W>,
     ) -> io::Result<()> {
-        let ts_lock = self.table_schemas.lock().unwrap();
+        let ts_lock = self.table_schemas.read().unwrap();
         let table_schemas = &(*ts_lock);
 
         let q = if let nom_sql::SqlQuery::Insert(ref q) = sql_q {
@@ -299,7 +304,7 @@ impl SoupBackend {
         mut sql_q: nom_sql::SqlQuery,
         info: StatementMetaWriter<W>,
     ) -> io::Result<()> {
-        let ts_lock = self.table_schemas.lock().unwrap();
+        let ts_lock = self.table_schemas.read().unwrap();
         let table_schemas = &(*ts_lock);
 
         // extract parameter columns
@@ -325,7 +330,7 @@ impl SoupBackend {
         let qname = match self.tl_cached.get(q) {
             None => {
                 // check global cache
-                let mut gc = self.cached.lock().unwrap();
+                let mut gc = self.cached.read().unwrap();
                 let (qname, cached) = if let Some(qname) = gc.get(q) {
                     (qname.clone(), true)
                 } else {
@@ -348,7 +353,11 @@ impl SoupBackend {
                     {
                         Ok(_) => {
                             // add to global cache
-                            gc.insert(q.clone(), qname.clone());
+                            drop(gc);
+                            self.cached
+                                .write()
+                                .unwrap()
+                                .insert(q.clone(), qname.clone());
                         }
                         Err(e) => return Err(io::Error::new(io::ErrorKind::Other, e)),
                     }
@@ -377,7 +386,7 @@ impl SoupBackend {
     ) -> io::Result<()> {
         // extract parameter columns
         let params: Vec<msql_srv::Column> = {
-            let ts = self.table_schemas.lock().unwrap();
+            let ts = self.table_schemas.read().unwrap();
             utils::get_parameter_columns(&sql_q)
                 .into_iter()
                 .map(|c| schema_for_column(&*ts, c))
@@ -439,7 +448,7 @@ impl SoupBackend {
         let schema: Vec<String> = putter.columns().to_vec();
 
         // handle auto increment
-        let ts_lock = self.table_schemas.lock().unwrap();
+        let ts_lock = self.table_schemas.read().unwrap();
         let auto_increment_columns: Vec<_> = ts_lock[table]
             .fields
             .iter()
@@ -447,9 +456,20 @@ impl SoupBackend {
             .collect();
         // can only have zero or one AUTO_INCREMENT columns
         assert!(auto_increment_columns.len() <= 1);
-        let mut ai_lock = self.auto_increments.lock().unwrap();
-        let auto_increment: &mut u64 = &mut (*ai_lock).entry(table.to_owned()).or_insert(0);
-        let last_insert_id = *auto_increment + 1;
+
+        {
+            let ai_lock = self.auto_increments.read().unwrap();
+            if ai_lock.get(table).is_none() {
+                drop(ai_lock);
+                self.auto_increments
+                    .write()
+                    .unwrap()
+                    .entry(table.to_owned())
+                    .or_insert(atomic::AtomicUsize::new(0));
+            }
+        };
+        let ai_lock = self.auto_increments.read().unwrap();
+        let last_insert_id = &ai_lock[table];
 
         // handle default values
         let mut default_value_columns: Vec<_> = ts_lock[table]
@@ -470,16 +490,20 @@ impl SoupBackend {
 
         let mut buf = vec![vec![DataType::None; schema.len()]; data.len()];
 
+        let mut first_inserted_id = None;
         for (ri, ref row) in data.iter().enumerate() {
             if let Some(col) = auto_increment_columns.iter().next() {
                 let idx = schema
                     .iter()
                     .position(|f| *f == col.column.name)
                     .expect(&format!("no column named '{}'", col.column.name));
-                *auto_increment += 1;
                 // query can specify an explicit AUTO_INCREMENT value
                 if !columns_specified.contains(&col.column) {
-                    buf[ri][idx] = DataType::from(*auto_increment as i64);
+                    let id = last_insert_id.fetch_add(1, atomic::Ordering::SeqCst) as i64 + 1;
+                    if first_inserted_id.is_none() {
+                        first_inserted_id = Some(id);
+                    }
+                    buf[ri][idx] = DataType::from(id);
                 }
             }
 
@@ -505,7 +529,7 @@ impl SoupBackend {
 
         trace!(self.log, "inserting {:?}", buf);
         match putter.multi_put(buf) {
-            Ok(_) => results.completed(data.len() as u64, last_insert_id),
+            Ok(_) => results.completed(data.len() as u64, first_inserted_id.unwrap_or(0) as u64),
             Err(e) => {
                 error!(self.log, "put error: {:?}", e);
                 results.error(
@@ -526,7 +550,7 @@ impl SoupBackend {
         // we need the schema for the result writer
         // TODO(malte): cache?
         let schema = {
-            let ts_lock = self.table_schemas.lock().unwrap();
+            let ts_lock = self.table_schemas.read().unwrap();
             schema_for_select(&(*ts_lock), q)
         };
 
@@ -608,7 +632,7 @@ impl SoupBackend {
 
         let q = q.into_owned();
         let (key, updates) = {
-            let ts = self.table_schemas.lock().unwrap();
+            let ts = self.table_schemas.read().unwrap();
             let schema = &ts[&q.table.name];
             utils::extract_update(q, params, schema)
         };
@@ -635,7 +659,7 @@ impl<W: io::Write> MysqlShim<W> for SoupBackend {
         match nom_sql::parse_query(&query) {
             Ok(sql_q) => {
                 let sql_q = {
-                    let ts_lock = self.table_schemas.lock().unwrap();
+                    let ts_lock = self.table_schemas.read().unwrap();
                     let table_schemas = &(*ts_lock);
                     rewrite::expand_stars(sql_q, table_schemas)
                 };
@@ -793,7 +817,7 @@ impl<W: io::Write> MysqlShim<W> for SoupBackend {
         match nom_sql::parse_query(&query) {
             Ok(q) => {
                 let mut q = {
-                    let ts_lock = self.table_schemas.lock().unwrap();
+                    let ts_lock = self.table_schemas.read().unwrap();
                     let table_schemas = &(*ts_lock);
                     rewrite::expand_stars(q, table_schemas)
                 };
