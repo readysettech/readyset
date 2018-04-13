@@ -7,6 +7,9 @@ authors = ["Jon Gjengset <jon@thesquareplanet.com>"]
 orchestration = ["tsunami", "rusoto_core", "rusoto_sts"]
 default = []
 
+[profile.release]
+debug = true
+
 [dependencies]
 trawler = "0.5.3"
 mysql_async = "0.14"
