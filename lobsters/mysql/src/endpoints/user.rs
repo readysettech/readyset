@@ -15,8 +15,7 @@ where
         c.and_then(move |c| {
             c.first_exec::<_, _, my::Row>(
                 "SELECT  `users`.* FROM `users` \
-                 WHERE `users`.`username` = ? \
-                 ORDER BY `users`.`id` ASC LIMIT 1",
+                 WHERE `users`.`username` = ?",
                 (format!("user{}", uid),),
             )
         }).and_then(move |(c, user)| {
@@ -36,8 +35,7 @@ where
                         c.drop_exec(
                             "SELECT  `keystores`.* \
                              FROM `keystores` \
-                             WHERE `keystores`.`key` = ? \
-                             ORDER BY `keystores`.`key` ASC LIMIT 1",
+                             WHERE `keystores`.`key` = ?",
                             (format!("user:{}:stories_submitted", uid),),
                         )
                     })
@@ -45,8 +43,7 @@ where
                         c.drop_exec(
                             "SELECT  `keystores`.* \
                              FROM `keystores` \
-                             WHERE `keystores`.`key` = ? \
-                             ORDER BY `keystores`.`key` ASC LIMIT 1",
+                             WHERE `keystores`.`key` = ?",
                             (format!("user:{}:comments_posted", uid),),
                         )
                     })

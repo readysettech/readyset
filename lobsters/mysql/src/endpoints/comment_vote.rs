@@ -18,8 +18,7 @@ where
             c.first_exec::<_, _, my::Row>(
                 "SELECT `comments`.* \
                  FROM `comments` \
-                 WHERE `comments`.`short_id` = ? \
-                 ORDER BY `comments`.`id` ASC LIMIT 1",
+                 WHERE `comments`.`short_id` = ?",
                 (::std::str::from_utf8(&comment[..]).unwrap(),),
             )
         }).and_then(move |(c, comment)| {
@@ -34,8 +33,7 @@ where
                      FROM `votes` \
                      WHERE `votes`.`user_id` = ? \
                      AND `votes`.`story_id` = ? \
-                     AND `votes`.`comment_id` = ? \
-                     ORDER BY `votes`.`id` ASC LIMIT 1",
+                     AND `votes`.`comment_id` = ?",
                     (user, story, id),
                 ).map(move |c| (c, author, id, story, upvotes, downvotes))
             })
@@ -103,8 +101,7 @@ where
                         c.first_exec::<_, _, my::Row>(
                             "SELECT `stories`.* \
                              FROM `stories` \
-                             WHERE `stories`.`id` = ? \
-                             ORDER BY `stories`.`id` ASC LIMIT 1",
+                             WHERE `stories`.`id` = ?",
                             (story,),
                         ).map(|(c, story)| {
                             let story = story.unwrap();
