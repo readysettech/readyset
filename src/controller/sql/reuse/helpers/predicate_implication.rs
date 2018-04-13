@@ -161,13 +161,11 @@ fn predicate_implies(np: &ConditionTree, ep: &ConditionTree) -> bool {
                 _ => panic!("right-hand side of predicate must currently be literal"),
             }
         }
-        ConditionExpression::Base(ConditionBase::Literal(Literal::Null)) => {
-            match *ep.right {
-                ConditionExpression::Base(ConditionBase::Literal(Literal::Null)) => true,
-                ConditionExpression::Base(ConditionBase::Literal(_)) => false,
-                _ => panic!("right-hand side of predicate must currently be literal"),
-            }
-        }
+        ConditionExpression::Base(ConditionBase::Literal(Literal::Null)) => match *ep.right {
+            ConditionExpression::Base(ConditionBase::Literal(Literal::Null)) => true,
+            ConditionExpression::Base(ConditionBase::Literal(_)) => false,
+            _ => panic!("right-hand side of predicate must currently be literal"),
+        },
         _ => panic!("right-hand side of predicate must currently be literal"),
     }
 }
