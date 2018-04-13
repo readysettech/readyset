@@ -45,12 +45,15 @@ impl LogName {
     }
 }
 
-// Removes the log files matching the glob ./{log_name}-*.json.
-// Used to clean up after recovery tests, where a persistent log is created.
+// Removes persistent files created by Soup during test runs.
 impl Drop for LogName {
     fn drop(&mut self) {
-        for log_path in glob::glob(&format!("./{}-*.json", self.name)).unwrap() {
+        for log_path in glob::glob(&format!("./{}-log-*.json", self.name)).unwrap() {
             fs::remove_file(log_path.unwrap()).unwrap();
+        }
+
+        for db_path in glob::glob(&format!("./{}_*.db", self.name)).unwrap() {
+            fs::remove_dir_all(db_path.unwrap()).unwrap();
         }
     }
 }
@@ -555,7 +558,10 @@ fn it_works_with_vote() {
 
     let empty = awvc.lookup(&[1i64.into()], true).unwrap();
     assert_eq!(empty.len(), 1);
-    assert_eq!(empty[0], vec![1i64.into(), "Article".into(), DataType::None]);
+    assert_eq!(
+        empty[0],
+        vec![1i64.into(), "Article".into(), DataType::None]
+    );
 }
 
 #[test]
@@ -689,6 +695,54 @@ fn it_recovers_persisted_logs() {
         Duration::from_millis(1),
         Some(log_name.name.clone()),
         false,
+    );
+
+    {
+        let mut g = ControllerBuilder::default();
+        g.set_persistence(persistence_params.clone());
+        let mut g = g.build(authority.clone());
+
+        let sql = "
+            CREATE TABLE Car (id int, price int, PRIMARY KEY(id));
+            QUERY CarPrice: SELECT price FROM Car WHERE id = ?;
+        ";
+        g.install_recipe(sql.to_owned()).unwrap();
+
+        let mut mutator = g.get_mutator("Car").unwrap();
+
+        for i in 1..10 {
+            let price = i * 10;
+            mutator.put(vec![i.into(), price.into()]).unwrap();
+        }
+
+        // Let writes propagate:
+        sleep();
+    }
+
+    let mut g = ControllerBuilder::default();
+    g.set_persistence(persistence_params);
+    let mut g = g.build(authority.clone());
+    let mut getter = g.get_getter("CarPrice").unwrap();
+
+    // Make sure that the new graph contains the old writes
+    for i in 1..10 {
+        let price = i * 10;
+        let result = getter.lookup(&[i.into()], true).unwrap();
+        assert_eq!(result.len(), 1);
+        assert_eq!(result[0][0], price.into());
+    }
+}
+
+#[test]
+fn it_recovers_persisted_bases() {
+    let authority = Arc::new(LocalAuthority::new());
+    let log_name = LogName::new("it_recovers_persisted_bases");
+    let persistence_params = PersistenceParameters::new(
+        DurabilityMode::Permanent,
+        128,
+        Duration::from_millis(1),
+        Some(log_name.name.clone()),
+        true,
     );
 
     {
