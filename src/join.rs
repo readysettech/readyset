@@ -99,7 +99,7 @@ named!(pub join_operator<&[u8], JoinOperator>,
 mod tests {
     use super::*;
     use select::{selection, JoinClause, SelectStatement};
-    use common::{FieldExpression, Operator};
+    use common::{FieldDefinitionExpression, Operator};
     use condition::ConditionBase::*;
     use condition::ConditionTree;
     use condition::ConditionExpression::{self, *};
@@ -119,7 +119,7 @@ mod tests {
         let join_cond = ConditionExpression::ComparisonOp(ct);
         let expected_stmt = SelectStatement {
             tables: vec![Table::from("tags")],
-            fields: vec![FieldExpression::AllInTable("tags".into())],
+            fields: vec![FieldDefinitionExpression::AllInTable("tags".into())],
             join: vec![
                 JoinClause {
                     operator: JoinOperator::InnerJoin,

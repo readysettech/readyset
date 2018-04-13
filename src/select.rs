@@ -3,7 +3,7 @@ use std::str;
 use std::fmt;
 
 use column::Column;
-use common::FieldExpression;
+use common::{FieldDefinitionExpression, FieldValueExpression};
 use common::{as_alias, field_definition_expr, field_list, opt_multispace, statement_terminator,
              table_list, table_reference, unsigned_number};
 use condition::{condition_expr, ConditionExpression};
@@ -73,7 +73,7 @@ impl fmt::Display for LimitClause {
 pub struct SelectStatement {
     pub tables: Vec<Table>,
     pub distinct: bool,
-    pub fields: Vec<FieldExpression>,
+    pub fields: Vec<FieldDefinitionExpression>,
     pub join: Vec<JoinClause>,
     pub where_clause: Option<ConditionExpression>,
     pub group_by: Option<GroupByClause>,
@@ -283,16 +283,16 @@ named!(pub nested_selection<&[u8], SelectStatement>,
 mod tests {
     use super::*;
     use column::{Column, FunctionExpression};
-    use common::{FieldExpression, Literal, Operator};
+    use common::{FieldDefinitionExpression, FieldValueExpression, Literal, Operator};
     use condition::ConditionBase::*;
     use condition::ConditionExpression::*;
     use condition::ConditionTree;
     use order::OrderType;
     use table::Table;
 
-    fn columns(cols: &[&str]) -> Vec<FieldExpression> {
+    fn columns(cols: &[&str]) -> Vec<FieldDefinitionExpression> {
         cols.iter()
-            .map(|c| FieldExpression::Col(Column::from(*c)))
+            .map(|c| FieldDefinitionExpression::Col(Column::from(*c)))
             .collect()
     }
 
@@ -338,10 +338,18 @@ mod tests {
             SelectStatement {
                 tables: vec![Table::from("users")],
                 fields: vec![
-                    FieldExpression::Literal(Literal::Null.into()),
-                    FieldExpression::Literal(Literal::Integer(1).into()),
-                    FieldExpression::Literal(Literal::String("foo".to_owned()).into()),
-                    FieldExpression::Literal(Literal::CurrentTime.into()),
+                    FieldDefinitionExpression::Value(FieldValueExpression::Literal(
+                        Literal::Null.into(),
+                    )),
+                    FieldDefinitionExpression::Value(FieldValueExpression::Literal(
+                        Literal::Integer(1).into(),
+                    )),
+                    FieldDefinitionExpression::Value(FieldValueExpression::Literal(
+                        Literal::String("foo".to_owned()).into(),
+                    )),
+                    FieldDefinitionExpression::Value(FieldValueExpression::Literal(
+                        Literal::CurrentTime.into(),
+                    )),
                 ],
                 ..Default::default()
             }
@@ -357,7 +365,7 @@ mod tests {
             res.unwrap().1,
             SelectStatement {
                 tables: vec![Table::from("users")],
-                fields: vec![FieldExpression::All],
+                fields: vec![FieldDefinitionExpression::All],
                 ..Default::default()
             }
         );
@@ -372,7 +380,7 @@ mod tests {
             res.unwrap().1,
             SelectStatement {
                 tables: vec![Table::from("users"), Table::from("votes")],
-                fields: vec![FieldExpression::AllInTable(String::from("users"))],
+                fields: vec![FieldDefinitionExpression::AllInTable(String::from("users"))],
                 ..Default::default()
             }
         );
@@ -430,7 +438,7 @@ mod tests {
             res.unwrap().1,
             SelectStatement {
                 tables: vec![Table::from("ContactInfo")],
-                fields: vec![FieldExpression::All],
+                fields: vec![FieldDefinitionExpression::All],
                 where_clause: expected_where_cond,
                 ..Default::default()
             }
@@ -472,7 +480,7 @@ mod tests {
                         alias: Some(String::from("t")),
                     },
                 ],
-                fields: vec![FieldExpression::All],
+                fields: vec![FieldDefinitionExpression::All],
                 ..Default::default()
             }
         );
@@ -491,7 +499,7 @@ mod tests {
             SelectStatement {
                 tables: vec![Table::from("PaperTag")],
                 fields: vec![
-                    FieldExpression::Col(Column {
+                    FieldDefinitionExpression::Col(Column {
                         name: String::from("name"),
                         alias: Some(String::from("TagName")),
                         table: None,
@@ -507,7 +515,7 @@ mod tests {
             SelectStatement {
                 tables: vec![Table::from("PaperTag")],
                 fields: vec![
-                    FieldExpression::Col(Column {
+                    FieldDefinitionExpression::Col(Column {
                         name: String::from("name"),
                         alias: Some(String::from("TagName")),
                         table: Some(String::from("PaperTag")),
@@ -530,7 +538,7 @@ mod tests {
             SelectStatement {
                 tables: vec![Table::from("PaperTag")],
                 fields: vec![
-                    FieldExpression::Col(Column {
+                    FieldDefinitionExpression::Col(Column {
                         name: String::from("name"),
                         alias: Some(String::from("TagName")),
                         table: None,
@@ -546,7 +554,7 @@ mod tests {
             SelectStatement {
                 tables: vec![Table::from("PaperTag")],
                 fields: vec![
-                    FieldExpression::Col(Column {
+                    FieldDefinitionExpression::Col(Column {
                         name: String::from("name"),
                         alias: Some(String::from("TagName")),
                         table: Some(String::from("PaperTag")),
@@ -635,7 +643,7 @@ mod tests {
             res.unwrap().1,
             SelectStatement {
                 tables: vec![Table::from("users")],
-                fields: vec![FieldExpression::All],
+                fields: vec![FieldDefinitionExpression::All],
                 where_clause: expected_where_cond,
                 limit: expected_lim,
                 ..Default::default()
@@ -654,7 +662,7 @@ mod tests {
             SelectStatement {
                 tables: vec![Table::from("address")],
                 fields: vec![
-                    FieldExpression::Col(Column {
+                    FieldDefinitionExpression::Col(Column {
                         name: String::from("max(addr_id)"),
                         alias: None,
                         table: None,
@@ -675,7 +683,7 @@ mod tests {
         let expected_stmt = SelectStatement {
             tables: vec![Table::from("address")],
             fields: vec![
-                FieldExpression::Col(Column {
+                FieldDefinitionExpression::Col(Column {
                     name: String::from("max_addr"),
                     alias: Some(String::from("max_addr")),
                     table: None,
@@ -696,7 +704,7 @@ mod tests {
         let expected_stmt = SelectStatement {
             tables: vec![Table::from("votes")],
             fields: vec![
-                FieldExpression::Col(Column {
+                FieldDefinitionExpression::Col(Column {
                     name: String::from("count(*)"),
                     alias: None,
                     table: None,
@@ -721,7 +729,7 @@ mod tests {
         let expected_stmt = SelectStatement {
             tables: vec![Table::from("votes")],
             fields: vec![
-                FieldExpression::Col(Column {
+                FieldDefinitionExpression::Col(Column {
                     name: String::from("count(distinct vote_id)"),
                     alias: None,
                     table: None,
@@ -760,7 +768,7 @@ mod tests {
             res.unwrap().1,
             SelectStatement {
                 tables: vec![Table::from("item"), Table::from("author")],
-                fields: vec![FieldExpression::All],
+                fields: vec![FieldDefinitionExpression::All],
                 where_clause: expected_where_cond,
                 order: Some(OrderClause {
                     columns: vec![("item.i_title".into(), OrderType::OrderAscending)],
@@ -936,7 +944,7 @@ mod tests {
         let recursive_select = SelectStatement {
             tables: vec![Table::from("orders")],
             fields: vec![
-                FieldExpression::Col(Column {
+                FieldDefinitionExpression::Col(Column {
                     name: String::from("max(o_id)"),
                     alias: None,
                     table: None,
@@ -1043,17 +1051,19 @@ mod tests {
         let expected = SelectStatement {
             tables: vec![Table::from("orders")],
             fields: vec![
-                FieldExpression::Arithmetic(ArithmeticExpression {
-                    alias: None,
-                    op: ArithmeticOperator::Subtract,
-                    left: ArithmeticBase::Column(Column {
-                        name: String::from("max(o_id)"),
+                FieldDefinitionExpression::Value(FieldValueExpression::Arithmetic(
+                    ArithmeticExpression {
                         alias: None,
-                        table: None,
-                        function: Some(Box::new(FunctionExpression::Max("o_id".into()))),
-                    }),
-                    right: ArithmeticBase::Scalar(3333.into()),
-                }),
+                        op: ArithmeticOperator::Subtract,
+                        left: ArithmeticBase::Column(Column {
+                            name: String::from("max(o_id)"),
+                            alias: None,
+                            table: None,
+                            function: Some(Box::new(FunctionExpression::Max("o_id".into()))),
+                        }),
+                        right: ArithmeticBase::Scalar(3333.into()),
+                    },
+                )),
             ],
             ..Default::default()
         };
@@ -1071,17 +1081,19 @@ mod tests {
         let expected = SelectStatement {
             tables: vec![Table::from("orders")],
             fields: vec![
-                FieldExpression::Arithmetic(ArithmeticExpression {
-                    alias: Some(String::from("double_max")),
-                    op: ArithmeticOperator::Multiply,
-                    left: ArithmeticBase::Column(Column {
-                        name: String::from("max(o_id)"),
-                        alias: None,
-                        table: None,
-                        function: Some(Box::new(FunctionExpression::Max("o_id".into()))),
-                    }),
-                    right: ArithmeticBase::Scalar(2.into()),
-                }),
+                FieldDefinitionExpression::Value(FieldValueExpression::Arithmetic(
+                    ArithmeticExpression {
+                        alias: Some(String::from("double_max")),
+                        op: ArithmeticOperator::Multiply,
+                        left: ArithmeticBase::Column(Column {
+                            name: String::from("max(o_id)"),
+                            alias: None,
+                            table: None,
+                            function: Some(Box::new(FunctionExpression::Max("o_id".into()))),
+                        }),
+                        right: ArithmeticBase::Scalar(2.into()),
+                    },
+                )),
             ],
             ..Default::default()
         };
@@ -1107,8 +1119,8 @@ mod tests {
         let expected = SelectStatement {
             tables: vec![Table::from("auth_permission")],
             fields: vec![
-                FieldExpression::Col(Column::from("auth_permission.content_type_id")),
-                FieldExpression::Col(Column::from("auth_permission.codename")),
+                FieldDefinitionExpression::Col(Column::from("auth_permission.content_type_id")),
+                FieldDefinitionExpression::Col(Column::from("auth_permission.codename")),
             ],
             join: vec![
                 JoinClause {

@@ -259,11 +259,11 @@ named!(simple_expr<&[u8], ConditionExpression>,
 mod tests {
     use super::*;
     use column::Column;
-    use common::{FieldExpression, Literal, Operator};
+    use common::{FieldDefinitionExpression, Literal, Operator};
 
-    fn columns(cols: &[&str]) -> Vec<FieldExpression> {
+    fn columns(cols: &[&str]) -> Vec<FieldDefinitionExpression> {
         cols.iter()
-            .map(|c| FieldExpression::Col(Column::from(*c)))
+            .map(|c| FieldDefinitionExpression::Col(Column::from(*c)))
             .collect()
     }
 
