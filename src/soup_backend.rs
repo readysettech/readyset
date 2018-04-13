@@ -194,50 +194,7 @@ impl SoupBackend {
         use_params: Vec<Literal>,
         results: QueryResultWriter<W>,
     ) -> io::Result<()> {
-        let (qname, locally_cached) = match self.tl_cached.get(&q) {
-            None => {
-                // consult global cache
-                let mut gc = self.cached.read().unwrap();
-                let (qname, cached) = match gc.get(&q) {
-                    None => {
-                        let qc = self.query_count
-                            .fetch_add(1, sync::atomic::Ordering::SeqCst);
-                        let qname = format!("q_{}", qc);
-                        // first do a migration to add the query if it doesn't exist already
-                        info!(
-                            self.log,
-                            "Adding ad-hoc query \"{}\" to Soup as {}", q, qname
-                        );
-                        match self.inner
-                            .soup
-                            .extend_recipe(format!("QUERY {}: {};", qname, q))
-                        {
-                            Ok(_) => {
-                                // and also in the global cache
-                                (qname, false)
-                            }
-                            Err(e) => return Err(io::Error::new(io::ErrorKind::Other, e)),
-                        }
-                    }
-                    Some(qname) => (qname.clone(), false),
-                };
-                if !cached {
-                    drop(gc);
-                    self.cached
-                        .write()
-                        .unwrap()
-                        .insert(q.clone(), qname.clone());
-                }
-                (qname, false)
-            }
-            Some(qname) => (qname.clone(), true),
-        };
-
-        if !locally_cached {
-            // remember this query for the future, so we avoid unnecessary migrations
-            self.tl_cached.insert(q.clone(), qname.clone());
-        }
-
+        let qname = self.get_or_create_view(&q, false)?;
         let keys: Vec<_> = use_params
             .into_iter()
             .map(|l| vec![l.to_datatype()])
@@ -299,22 +256,89 @@ impl SoupBackend {
         info.reply(self.prepared_count, params.as_slice(), schema.as_slice())
     }
 
+    fn get_or_create_view(
+        &mut self,
+        q: &nom_sql::SelectStatement,
+        prepared: bool,
+    ) -> io::Result<String> {
+        let qname = match self.tl_cached.get(q) {
+            None => {
+                // check global cache
+                let gc = self.cached.read().unwrap();
+                let qname = match gc.get(q) {
+                    Some(qname) => qname.clone(),
+                    None => {
+                        drop(gc);
+                        let mut gc = self.cached.write().unwrap();
+                        if let Some(qname) = gc.get(q) {
+                            qname.clone()
+                        } else {
+                            let qc = self.query_count
+                                .fetch_add(1, sync::atomic::Ordering::SeqCst);
+                            let qname = format!("q_{}", qc);
+
+                            // add the query to Soup
+                            if prepared {
+                                info!(
+                                    self.log,
+                                    "Adding parameterized query \"{}\" to Soup as {}", q, qname
+                                );
+                            } else {
+                                info!(
+                                    self.log,
+                                    "Adding ad-hoc query \"{}\" to Soup as {}", q, qname
+                                );
+                            }
+                            if let Err(e) = self.inner
+                                .soup
+                                .extend_recipe(format!("QUERY {}: {};", qname, q))
+                            {
+                                return Err(io::Error::new(io::ErrorKind::Other, e));
+                            }
+
+                            gc.insert(q.clone(), qname.clone());
+                            qname
+                        }
+                    }
+                };
+
+                self.tl_cached.insert(q.clone(), qname.clone());
+
+                qname
+            }
+            Some(qname) => qname.to_owned(),
+        };
+        Ok(qname)
+    }
+
     fn prepare_select<W: io::Write>(
         &mut self,
         mut sql_q: nom_sql::SqlQuery,
         info: StatementMetaWriter<W>,
     ) -> io::Result<()> {
-        let ts_lock = self.table_schemas.read().unwrap();
-        let table_schemas = &(*ts_lock);
+        let (params, schema) = {
+            let ts_lock = self.table_schemas.read().unwrap();
+            let table_schemas = &(*ts_lock);
 
-        // extract parameter columns
-        // note that we have to do this *before* collapsing WHERE IN, otherwise the
-        // client will be confused about the number of parameters it's supposed to
-        // give.
-        let params: Vec<msql_srv::Column> = utils::get_parameter_columns(&sql_q)
-            .into_iter()
-            .map(|c| schema_for_column(table_schemas, c))
-            .collect();
+            // extract parameter columns
+            // note that we have to do this *before* collapsing WHERE IN, otherwise the
+            // client will be confused about the number of parameters it's supposed to
+            // give.
+            let params: Vec<msql_srv::Column> = utils::get_parameter_columns(&sql_q)
+                .into_iter()
+                .map(|c| schema_for_column(table_schemas, c))
+                .collect();
+
+            let q = if let nom_sql::SqlQuery::Select(ref q) = sql_q {
+                q
+            } else {
+                unreachable!();
+            };
+
+            // extract result schema
+            let schema = schema_for_select(table_schemas, &q);
+            (params, schema)
+        };
 
         let rewritten = rewrite::collapse_where_in(&mut sql_q, false);
         let q = if let nom_sql::SqlQuery::Select(ref q) = sql_q {
@@ -323,51 +347,8 @@ impl SoupBackend {
             unreachable!();
         };
 
-        // extract result schema
-        let schema = schema_for_select(table_schemas, &q);
-
         // check if we already have this query prepared
-        let qname = match self.tl_cached.get(q) {
-            None => {
-                // check global cache
-                let mut gc = self.cached.read().unwrap();
-                let (qname, cached) = if let Some(qname) = gc.get(q) {
-                    (qname.clone(), true)
-                } else {
-                    let qc = self.query_count
-                        .fetch_add(1, sync::atomic::Ordering::SeqCst);
-                    let qname = format!("q_{}", qc);
-
-                    (qname, false)
-                };
-
-                if !cached {
-                    // add the query to Soup
-                    info!(
-                        self.log,
-                        "Adding parameterized query \"{}\" to Soup as {}", q, qname
-                    );
-                    match self.inner
-                        .soup
-                        .extend_recipe(format!("QUERY {}: {};", qname, q))
-                    {
-                        Ok(_) => {
-                            // add to global cache
-                            drop(gc);
-                            self.cached
-                                .write()
-                                .unwrap()
-                                .insert(q.clone(), qname.clone());
-                        }
-                        Err(e) => return Err(io::Error::new(io::ErrorKind::Other, e)),
-                    }
-                }
-                self.tl_cached.insert(q.clone(), qname.clone());
-
-                qname
-            }
-            Some(qname) => qname.to_owned(),
-        };
+        let qname = self.get_or_create_view(q, true)?;
 
         // register a new prepared statement
         self.prepared_count += 1;
