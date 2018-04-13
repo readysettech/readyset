@@ -227,7 +227,7 @@ pub mod test {
         graph: Graph,
         source: NodeIndex,
         nut: Option<IndexPair>, // node under test
-        states: StateMap,
+        pub states: StateMap,
         nodes: DomainNodes,
         remap: HashMap<NodeIndex, IndexPair>,
     }

@@ -361,10 +361,10 @@ mod tests {
     use ops;
 
     fn setup(reversed: bool) -> (ops::test::MockGraph, IndexPair) {
-        let cmp_rows = if !reversed {
-            vec![(2, OrderType::OrderAscending)]
-        } else {
+        let cmp_rows = if reversed {
             vec![(2, OrderType::OrderDescending)]
+        } else {
+            vec![(2, OrderType::OrderAscending)]
         };
 
         let mut g = ops::test::MockGraph::new();
@@ -376,6 +376,31 @@ mod tests {
             true,
         );
         (g, s)
+    }
+
+    #[test]
+    fn it_keeps_topk() {
+        let (mut g, _) = setup(false);
+        let ni = *g.node().local_addr();
+
+        let r12: Vec<DataType> = vec![1.into(), "z".into(), 12.into()];
+        let r10: Vec<DataType> = vec![2.into(), "z".into(), 10.into()];
+        let r11: Vec<DataType> = vec![3.into(), "z".into(), 11.into()];
+        let r5: Vec<DataType> = vec![4.into(), "z".into(), 5.into()];
+        let r15: Vec<DataType> = vec![5.into(), "z".into(), 15.into()];
+        let r10b: Vec<DataType> = vec![6.into(), "z".into(), 10.into()];
+        let r10c: Vec<DataType> = vec![7.into(), "z".into(), 10.into()];
+
+        g.narrow_one_row(r12.clone(), true);
+        g.narrow_one_row(r11.clone(), true);
+        g.narrow_one_row(r5.clone(), true);
+        g.narrow_one_row(r10b.clone(), true);
+        g.narrow_one_row(r10c.clone(), true);
+        assert_eq!(g.states[&ni].rows(), 3);
+
+        g.narrow_one_row(r15.clone(), true);
+        g.narrow_one_row(r10.clone(), true);
+        assert_eq!(g.states[&ni].rows(), 3);
     }
 
     #[test]
