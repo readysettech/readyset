@@ -1,7 +1,7 @@
 use nom::multispace;
 use std::str;
 
-use common::opt_multispace;
+use common::{opt_multispace, statement_terminator};
 use select::{limit_clause, nested_selection, LimitClause, SelectStatement};
 use order::{order_clause, OrderClause};
 
@@ -68,6 +68,7 @@ named!(pub compound_selection<&[u8], CompoundSelectStatement>,
         opt_multispace >>
         order: opt!(order_clause) >>
         limit: opt!(limit_clause) >>
+        statement_terminator >>
         ({
             let mut v = vec![(None, first_select)];
             v.extend(other_selects);

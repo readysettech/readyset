@@ -1,7 +1,7 @@
 use nom::multispace;
 use std::{fmt, str};
 
-use common::{literal, opt_multispace, sql_identifier, Literal};
+use common::{literal, opt_multispace, sql_identifier, statement_terminator, Literal};
 
 #[derive(Clone, Debug, Eq, Hash, PartialEq, Serialize, Deserialize)]
 pub struct SetStatement {
@@ -26,6 +26,7 @@ named!(pub set<&[u8], SetStatement>,
         tag_no_case!("=") >>
         opt_multispace >>
         val: literal >>
+        statement_terminator >>
         (SetStatement {
             variable: String::from(var),
             value: val,

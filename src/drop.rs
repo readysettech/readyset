@@ -1,6 +1,6 @@
 use std::{fmt, str};
 
-use common::{opt_multispace, table_list};
+use common::{opt_multispace, statement_terminator, table_list};
 use keywords::escape_if_keyword;
 use table::Table;
 
@@ -38,6 +38,7 @@ named!(pub drop_table<&[u8], DropTableStatement>,
         // other database systems.
         opt!(delimited!(opt_multispace, tag_no_case!("restricted"), opt_multispace)) >>
         opt!(delimited!(opt_multispace, tag_no_case!("cascade"), opt_multispace)) >>
+        statement_terminator >>
         ({
             DropTableStatement {
                 tables: tables,
