@@ -141,6 +141,15 @@ impl From<Literal> for LiteralExpression {
     }
 }
 
+impl fmt::Display for LiteralExpression {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        match self.alias {
+            Some(ref alias) => write!(f, "{} AS {}", self.value.to_string(), alias),
+            None => write!(f, "{}", self.value.to_string()),
+        }
+    }
+}
+
 #[derive(Clone, Debug, Eq, Hash, PartialEq, Serialize, Deserialize)]
 pub enum Operator {
     Not,
@@ -264,7 +273,7 @@ impl Display for FieldExpression {
             FieldExpression::AllInTable(ref table) => write!(f, "{}.*", escape_if_keyword(table)),
             FieldExpression::Arithmetic(ref expr) => write!(f, "{}", expr),
             FieldExpression::Col(ref col) => write!(f, "{}", col),
-            FieldExpression::Literal(ref lit) => write!(f, "{}", lit.value.to_string()),
+            FieldExpression::Literal(ref lit) => write!(f, "{}", lit),
         }
     }
 }
