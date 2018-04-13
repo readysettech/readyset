@@ -1,6 +1,6 @@
 use std::{fmt, str};
 
-use common::{opt_multispace, table_reference};
+use common::{opt_multispace, statement_terminator, table_reference};
 use condition::ConditionExpression;
 use keywords::escape_if_keyword;
 use table::Table;
@@ -30,6 +30,7 @@ named!(pub deletion<&[u8], DeleteStatement>,
         delimited!(opt_multispace, tag_no_case!("from"), opt_multispace) >>
         table: table_reference >>
         cond: opt!(where_clause) >>
+        statement_terminator >>
         ({
             DeleteStatement {
                 table: table,
