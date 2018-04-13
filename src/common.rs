@@ -110,7 +110,7 @@ impl ToString for Literal {
             Literal::Null => "NULL".to_string(),
             Literal::Integer(ref i) => format!("{}", i),
             Literal::FixedPoint(ref f) => format!("{}.{}", f.integral, f.fractional),
-            Literal::String(ref s) => format!("'{}'", s),
+            Literal::String(ref s) => format!("'{}'", s.replace('\'', "''")),
             Literal::Blob(ref bv) => format!(
                 "{}",
                 bv.iter()
