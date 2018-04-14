@@ -87,8 +87,8 @@ where
                         let key = format!("user:{}:stories_submitted", user);
                         t.drop_exec(
                             "INSERT INTO keystores (`key`, `value`) \
-                             VALUES (?, ?)",
-                            //ON DUPLICATE KEY UPDATE `value` = `value` + 1",
+                             VALUES (?, ?) \
+                             ON DUPLICATE KEY UPDATE `value` = `value` + 1",
                             (key, 1),
                         ).map(move |t| (t, story))
                     })
