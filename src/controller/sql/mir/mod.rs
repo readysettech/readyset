@@ -1332,18 +1332,40 @@ impl SqlToMirConverter {
                 };
 
                 // 6. Potentially insert TopK node below the final node
+                // XXX(malte): this adds a bogokey if there are no parameter columns to do the TopK
+                // over, but we could end up in a stick place if we reconcile/combine multiple
+                // queries (due to security universes or due to compound select queries) that do
+                // not all have the bogokey!
                 if let Some(ref limit) = st.limit {
-                    let group_by = qg.parameters();
+                    let group_by = if qg.parameters().is_empty() {
+                        // need to add another projection to introduce a bogokey to group by
+                        let cols: Vec<_> = final_node.borrow().columns().iter().cloned().collect();
+                        let bogo_project = self.make_project_node(
+                            &format!("q_{:x}_n{}{}", qg.signature().hash, new_node_count, uformat),
+                            final_node.clone(),
+                            cols.iter().collect(),
+                            vec![],
+                            vec![("bogokey".into(), DataType::from(0 as i32))],
+                            false,
+                        );
+                        new_node_count += 1;
+                        nodes_added.push(bogo_project.clone());
+                        final_node = bogo_project;
 
-                    let node = self.make_topk_node(
+                        vec![Column::from("bogokey")]
+                    } else {
+                        qg.parameters().into_iter().cloned().collect()
+                    };
+
+                    let topk_node = self.make_topk_node(
                         &format!("q_{:x}_n{}{}", qg.signature().hash, new_node_count, uformat),
                         final_node,
-                        group_by,
+                        group_by.iter().collect(),
                         &st.order,
                         limit,
                     );
-                    func_nodes.push(node.clone());
-                    final_node = node;
+                    func_nodes.push(topk_node.clone());
+                    final_node = topk_node;
                     new_node_count += 1;
                 }
 
@@ -1373,7 +1395,7 @@ impl SqlToMirConverter {
             let final_node_cols: Vec<Column> =
                 final_node.borrow().columns().iter().cloned().collect();
             // 5. Generate leaf views that expose the query result
-            let mut projected_columns: Vec<&Column> = if universe.1.is_none() {
+            let mut projected_columns: Vec<Column> = if universe.1.is_none() {
                 qg.columns
                     .iter()
                     .filter_map(|oc| match *oc {
@@ -1381,18 +1403,19 @@ impl SqlToMirConverter {
                         OutputColumn::Data(ref c) => Some(c),
                         OutputColumn::Literal(_) => None,
                     })
+                    .cloned()
                     .collect()
             } else {
                 // If we are creating a query for a group universe, we project
                 // all columns in the final node. When a user universe that
                 // belongs to this group, the proper projection and leaf node
                 // will be added.
-                final_node_cols.iter().collect()
+                final_node_cols.iter().cloned().collect()
             };
 
             for pc in qg.parameters() {
-                if !projected_columns.contains(&pc) {
-                    projected_columns.push(pc);
+                if !projected_columns.contains(pc) {
+                    projected_columns.push(pc.clone());
                 }
             }
             let projected_arithmetic: Vec<(String, ArithmeticExpression)> = qg.columns
@@ -1418,7 +1441,10 @@ impl SqlToMirConverter {
 
             // if this query does not have any parameters, we must add a bogokey
             let has_bogokey = if has_leaf && qg.parameters().is_empty() {
-                projected_literals.push(("bogokey".into(), DataType::from(0 as i32)));
+                // only add the bogokey if we haven't already added it prior to a TopK above
+                if !projected_columns.contains(&Column::from("bogokey")) {
+                    projected_literals.push(("bogokey".into(), DataType::from(0 as i32)));
+                }
                 true
             } else {
                 false
@@ -1433,7 +1459,7 @@ impl SqlToMirConverter {
             let leaf_project_node = self.make_project_node(
                 &ident,
                 final_node,
-                projected_columns,
+                projected_columns.iter().collect(),
                 projected_arithmetic,
                 projected_literals,
                 !has_leaf,

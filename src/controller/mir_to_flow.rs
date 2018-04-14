@@ -752,15 +752,15 @@ pub(crate) fn make_topk_node(
     let parent_na = parent.borrow().flow_node_addr().unwrap();
     let column_names = column_names(columns);
 
-    let group_by_indx = if group_by.is_empty() {
-        // no query parameters, so we index on the first column
-        vec![0 as usize]
-    } else {
-        group_by
-            .iter()
-            .map(|c| parent.borrow().column_id_for_column(c))
-            .collect::<Vec<_>>()
-    };
+    assert!(
+        !group_by.is_empty(),
+        "need bogokey for TopK without group columns"
+    );
+
+    let group_by_indx = group_by
+        .iter()
+        .map(|c| parent.borrow().column_id_for_column(c))
+        .collect::<Vec<_>>();
 
     let cmp_rows = match *order {
         Some(ref o) => {
