@@ -25,7 +25,7 @@ serde = { version = "1.0.8", features = ["rc"] }
 timekeeper = {version = "0.3.0", default-features = false }
 
 # git deps
-nom-sql = { git = "https://github.com/ms705/nom-sql.git", rev = "61c5df813445f950b18fc5a1a766bddf469d7464" }
+nom-sql = { git = "https://github.com/ms705/nom-sql.git", rev = "e41443a5e4038a531286c0a0498134e7ad0971a3" }
 
 # local deps
 channel = { path = "../channel" }
