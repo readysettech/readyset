@@ -1,11 +1,12 @@
 use std::collections::HashSet;
 
 use convert::ToDataType;
-use distributary::{DataType, Modification};
+use distributary::{DataType, Modification, Operation};
 use msql_srv::ParamParser;
-use nom_sql::{Column, ColumnConstraint, ConditionBase, ConditionExpression, ConditionTree,
-              CreateTableStatement, FieldValueExpression, Literal, LiteralExpression, Operator,
-              SqlQuery, TableKey, UpdateStatement};
+use nom_sql::{ArithmeticBase, ArithmeticExpression, ArithmeticOperator, Column, ColumnConstraint,
+              ConditionBase, ConditionExpression, ConditionTree, CreateTableStatement,
+              FieldValueExpression, Literal, LiteralExpression, Operator, SqlQuery, TableKey,
+              UpdateStatement};
 use regex::Regex;
 use std::collections::HashMap;
 
@@ -360,28 +361,50 @@ pub(crate) fn extract_update(
             .iter()
             .position(|&(ref f, _)| f.name == field.column.name)
         {
-            let v = match q.fields.swap_remove(sets).1 {
+            match q.fields.swap_remove(sets).1 {
                 FieldValueExpression::Literal(LiteralExpression {
                     value: Literal::Placeholder,
                     alias: None,
-                }) => params
-                    .as_mut()
-                    .expect("Found placeholder in ad-hoc query")
-                    .next()
-                    .map(|pv| pv.value.to_datatype())
-                    .expect("Not enough parameter values given in EXECUTE"),
+                }) => {
+                    let v = params
+                        .as_mut()
+                        .expect("Found placeholder in ad-hoc query")
+                        .next()
+                        .map(|pv| pv.value.to_datatype())
+                        .expect("Not enough parameter values given in EXECUTE");
+                    updates.push((i, Modification::Set(v)));
+                }
                 FieldValueExpression::Literal(LiteralExpression {
                     value: ref v,
                     alias: None,
-                }) => DataType::from(v),
+                }) => {
+                    updates.push((i, Modification::Set(DataType::from(v))));
+                }
                 FieldValueExpression::Arithmetic(ref ae) => {
-                    // XXX TODO XXX
-                    unimplemented!()
+                    // we only support "column = column +/- literal"
+                    match ae {
+                        ArithmeticExpression {
+                            op,
+                            left: ArithmeticBase::Column(ref c),
+                            right: ArithmeticBase::Scalar(ref l),
+                            alias: None,
+                        } => {
+                            assert_eq!(c, &field.column);
+                            match op {
+                                ArithmeticOperator::Add => {
+                                    updates.push((i, Modification::Apply(Operation::Add, l.into())))
+                                }
+                                ArithmeticOperator::Subtract => {
+                                    updates.push((i, Modification::Apply(Operation::Sub, l.into())))
+                                }
+                                _ => unimplemented!(),
+                            }
+                        }
+                        _ => unreachable!(),
+                    }
                 }
                 _ => unreachable!(),
-            };
-
-            updates.push((i, Modification::Set(v)));
+            }
         }
     }
 
