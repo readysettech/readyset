@@ -2,8 +2,8 @@ use nom::multispace;
 use std::str;
 use std::fmt;
 
-use common::{field_list, opt_multispace, statement_terminator, table_reference, value_list,
-             Literal};
+use common::{assignment_expr_list, field_list, opt_multispace, statement_terminator,
+             table_reference, value_list, FieldValueExpression, Literal};
 use column::Column;
 use keywords::escape_if_keyword;
 use table::Table;
@@ -14,6 +14,7 @@ pub struct InsertStatement {
     pub fields: Vec<Column>,
     pub data: Vec<Vec<Literal>>,
     pub ignore: bool,
+    pub on_duplicate: Option<Vec<(Column, FieldValueExpression)>>,
 }
 
 impl fmt::Display for InsertStatement {
@@ -86,6 +87,13 @@ named!(pub insertion<&[u8], InsertStatement>,
                 (values)
             )
         ) >>
+        upd_if_dup: opt!(complete!(do_parse!(
+                opt_multispace >>
+                tag_no_case!("on duplicate key update") >>
+                multispace >>
+                assigns: assignment_expr_list >>
+                (assigns)
+        ))) >>
         statement_terminator >>
         ({
             // "table AS alias" isn't legal in INSERT statements
@@ -107,6 +115,7 @@ named!(pub insertion<&[u8], InsertStatement>,
                 },
                 data: data,
                 ignore: ignore.is_some(),
+                on_duplicate: upd_if_dup,
             }
         })
     ))
@@ -115,6 +124,7 @@ named!(pub insertion<&[u8], InsertStatement>,
 #[cfg(test)]
 mod tests {
     use super::*;
+    use arithmetic::{ArithmeticBase, ArithmeticExpression, ArithmeticOperator};
     use column::Column;
     use table::Table;
 
@@ -229,4 +239,34 @@ mod tests {
             }
         );
     }
+
+    #[test]
+    fn insert_with_on_dup_update() {
+        let qstring = "INSERT INTO keystores (`key`, `value`) VALUES (?, ?) \
+                       ON DUPLICATE KEY UPDATE `value` = `value` + 1";
+
+        let res = insertion(qstring.as_bytes());
+        let expected_ae = ArithmeticExpression {
+            op: ArithmeticOperator::Add,
+            left: ArithmeticBase::Column(Column::from("value")),
+            right: ArithmeticBase::Scalar(1.into()),
+            alias: None,
+        };
+        assert_eq!(
+            res.unwrap().1,
+            InsertStatement {
+                table: Table::from("keystores"),
+                fields: vec![Column::from("key"), Column::from("value")],
+                data: vec![vec![Literal::Placeholder, Literal::Placeholder]],
+                on_duplicate: Some(vec![
+                    (
+                        Column::from("value"),
+                        FieldValueExpression::Arithmetic(expected_ae),
+                    ),
+                ]),
+                ..Default::default()
+            }
+        );
+    }
+
 }
