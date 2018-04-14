@@ -11,7 +11,7 @@ serde_derive = "1.0.8"
 serde_json = "1.0.2"
 slog = "2.2.2"
 #slog = { version = "2.2.2", features = ["max_level_trace", "release_max_level_debug"] }
-slog-term = "2.3.0"
+slog-term = "2.4.0"
 zookeeper = "0.4.0"
 
 [[bin]]
