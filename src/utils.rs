@@ -4,7 +4,8 @@ use convert::ToDataType;
 use distributary::{DataType, Modification};
 use msql_srv::ParamParser;
 use nom_sql::{Column, ColumnConstraint, ConditionBase, ConditionExpression, ConditionTree,
-              CreateTableStatement, Literal, Operator, SqlQuery, TableKey, UpdateStatement};
+              CreateTableStatement, FieldValueExpression, Literal, LiteralExpression, Operator,
+              SqlQuery, TableKey, UpdateStatement};
 use regex::Regex;
 use std::collections::HashMap;
 
@@ -288,7 +289,11 @@ pub(crate) fn get_parameter_columns(query: &SqlQuery) -> Vec<&Column> {
         }
         SqlQuery::Update(ref query) => {
             let mut field_params = query.fields.iter().filter_map(|f| {
-                if let Literal::Placeholder = f.1 {
+                if let FieldValueExpression::Literal(LiteralExpression {
+                    value: Literal::Placeholder,
+                    alias: None,
+                }) = f.1
+                {
                     Some(&f.0)
                 } else {
                     None
@@ -356,13 +361,24 @@ pub(crate) fn extract_update(
             .position(|&(ref f, _)| f.name == field.column.name)
         {
             let v = match q.fields.swap_remove(sets).1 {
-                Literal::Placeholder => params
+                FieldValueExpression::Literal(LiteralExpression {
+                    value: Literal::Placeholder,
+                    alias: None,
+                }) => params
                     .as_mut()
                     .expect("Found placeholder in ad-hoc query")
                     .next()
                     .map(|pv| pv.value.to_datatype())
                     .expect("Not enough parameter values given in EXECUTE"),
-                v => DataType::from(v),
+                FieldValueExpression::Literal(LiteralExpression {
+                    value: ref v,
+                    alias: None,
+                }) => DataType::from(v),
+                FieldValueExpression::Arithmetic(ref ae) => {
+                    // XXX TODO XXX
+                    unimplemented!()
+                }
+                _ => unreachable!(),
             };
 
             updates.push((i, Modification::Set(v)));
