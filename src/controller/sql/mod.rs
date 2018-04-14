@@ -1424,7 +1424,7 @@ mod tests {
 
             // leaf view node
             let edge = get_node(&inc, mig, &res.unwrap().name);
-            assert_eq!(edge.fields(), &["bogokey", "2 * users.age", "twenty"]);
+            assert_eq!(edge.fields(), &["2 * users.age", "twenty", "bogokey"]);
             assert_eq!(
                 edge.description(),
                 format!("π[(lit: 2) * 1, (lit: 2) * (lit: 10), lit: 0]")
