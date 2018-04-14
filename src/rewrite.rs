@@ -1,5 +1,5 @@
 use nom_sql::{Column, ConditionBase, ConditionExpression, ConditionTree, CreateTableStatement,
-              FieldExpression, Literal, Operator, SqlQuery};
+              FieldDefinitionExpression, FieldValueExpression, Literal, Operator, SqlQuery};
 
 use std::collections::HashMap;
 use std::mem;
@@ -16,7 +16,7 @@ pub(crate) fn expand_stars(
             .fields
             .into_iter()
             .map(move |f| {
-                FieldExpression::Col(Column {
+                FieldDefinitionExpression::Col(Column {
                     table: Some(table_name.clone()),
                     name: f.column.name.clone(),
                     alias: None,
@@ -30,7 +30,7 @@ pub(crate) fn expand_stars(
         sq.fields = old_fields
             .into_iter()
             .flat_map(|field| match field {
-                FieldExpression::All => {
+                FieldDefinitionExpression::All => {
                     let v: Vec<_> = sq.tables
                         .iter()
                         .map(|t| t.name.clone())
@@ -38,13 +38,14 @@ pub(crate) fn expand_stars(
                         .collect();
                     v.into_iter()
                 }
-                FieldExpression::AllInTable(t) => {
+                FieldDefinitionExpression::AllInTable(t) => {
                     let v: Vec<_> = expand_table(t).collect();
                     v.into_iter()
                 }
-                FieldExpression::Arithmetic(a) => vec![FieldExpression::Arithmetic(a)].into_iter(),
-                FieldExpression::Literal(l) => vec![FieldExpression::Literal(l)].into_iter(),
-                FieldExpression::Col(c) => vec![FieldExpression::Col(c)].into_iter(),
+                e @ FieldDefinitionExpression::Value(_) => vec![e].into_iter(),
+                FieldDefinitionExpression::Col(c) => {
+                    vec![FieldDefinitionExpression::Col(c)].into_iter()
+                }
             })
             .collect();
     }

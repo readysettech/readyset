@@ -1,6 +1,6 @@
 use msql_srv;
-use nom_sql::{self, ColumnConstraint, CreateTableStatement, InsertStatement, Literal,
-              SelectStatement, SqlQuery, SqlType};
+use nom_sql::{self, ColumnConstraint, CreateTableStatement, FieldDefinitionExpression,
+              FieldValueExpression, InsertStatement, Literal, SelectStatement, SqlQuery, SqlType};
 
 use std::collections::HashMap;
 
@@ -38,31 +38,35 @@ pub(crate) fn schema_for_select(
     let mut schema = Vec::new();
     for fe in &q.fields {
         match *fe {
-            nom_sql::FieldExpression::Col(ref c) => {
+            nom_sql::FieldDefinitionExpression::Col(ref c) => {
                 schema.push(schema_for_column(table_schemas, &c));
             }
-            nom_sql::FieldExpression::Literal(ref le) => schema.push(msql_srv::Column {
-                table: "".to_owned(),
-                column: match le.alias {
-                    Some(ref a) => a.to_owned(),
-                    None => le.value.to_string(),
-                },
-                coltype: match le.value {
-                    Literal::Integer(_) => msql_srv::ColumnType::MYSQL_TYPE_LONG,
-                    Literal::String(_) => msql_srv::ColumnType::MYSQL_TYPE_VAR_STRING,
-                    _ => unimplemented!(),
-                },
-                colflags: msql_srv::ColumnFlags::empty(),
-            }),
-            nom_sql::FieldExpression::Arithmetic(ref ae) => schema.push(msql_srv::Column {
-                table: "".to_owned(),
-                column: match ae.alias {
-                    Some(ref a) => a.to_owned(),
-                    None => format!("{}", ae),
-                },
-                coltype: msql_srv::ColumnType::MYSQL_TYPE_LONG,
-                colflags: msql_srv::ColumnFlags::empty(),
-            }),
+            nom_sql::FieldDefinitionExpression::Value(FieldValueExpression::Literal(ref le)) => {
+                schema.push(msql_srv::Column {
+                    table: "".to_owned(),
+                    column: match le.alias {
+                        Some(ref a) => a.to_owned(),
+                        None => le.value.to_string(),
+                    },
+                    coltype: match le.value {
+                        Literal::Integer(_) => msql_srv::ColumnType::MYSQL_TYPE_LONG,
+                        Literal::String(_) => msql_srv::ColumnType::MYSQL_TYPE_VAR_STRING,
+                        _ => unimplemented!(),
+                    },
+                    colflags: msql_srv::ColumnFlags::empty(),
+                })
+            }
+            nom_sql::FieldDefinitionExpression::Value(FieldValueExpression::Arithmetic(ref ae)) => {
+                schema.push(msql_srv::Column {
+                    table: "".to_owned(),
+                    column: match ae.alias {
+                        Some(ref a) => a.to_owned(),
+                        None => format!("{}", ae),
+                    },
+                    coltype: msql_srv::ColumnType::MYSQL_TYPE_LONG,
+                    colflags: msql_srv::ColumnFlags::empty(),
+                })
+            }
             _ => unimplemented!(),
         }
     }
