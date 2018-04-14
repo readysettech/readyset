@@ -3,7 +3,7 @@ use std::str;
 use std::fmt;
 
 use column::Column;
-use common::{FieldDefinitionExpression, FieldValueExpression};
+use common::FieldDefinitionExpression;
 use common::{as_alias, field_definition_expr, field_list, opt_multispace, statement_terminator,
              table_list, table_reference, unsigned_number};
 use condition::{condition_expr, ConditionExpression};

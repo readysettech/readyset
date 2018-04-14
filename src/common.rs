@@ -697,18 +697,24 @@ named!(pub as_alias<&[u8], &str>,
     )
 );
 
-named!(field_value_or_expr<&[u8], (Column, Literal) >,
+named!(field_value_or_expr<&[u8], (Column, FieldValueExpression) >,
     do_parse!(
         column: column_identifier_no_alias >>
         opt_multispace >>
         tag!("=") >>
         opt_multispace >>
-        value: literal >>
+        value: alt_complete!(
+              map!(literal, |l| FieldValueExpression::Literal(LiteralExpression {
+                  value: l.into(),
+                  alias: None,
+              }))
+            | map!(arithmetic_expression, |ae| FieldValueExpression::Arithmetic(ae))
+        ) >>
         (column, value)
     )
 );
 
-named!(pub field_value_or_expr_list<&[u8], Vec<(Column, Literal)> >,
+named!(pub field_value_or_expr_list<&[u8], Vec<(Column, FieldValueExpression)> >,
        many1!(
            do_parse!(
                field_value: field_value_or_expr >>
