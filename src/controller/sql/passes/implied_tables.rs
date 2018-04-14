@@ -1,5 +1,6 @@
-use nom_sql::{ArithmeticBase, Column, ConditionExpression, ConditionTree, FieldExpression,
-              JoinRightSide, SelectStatement, SqlQuery, Table};
+use nom_sql::{ArithmeticBase, Column, ConditionExpression, ConditionTree,
+              FieldDefinitionExpression, FieldValueExpression, JoinRightSide, SelectStatement,
+              SqlQuery, Table};
 
 use std::collections::HashMap;
 
@@ -169,10 +170,10 @@ fn rewrite_selection(
     // Expand within field list
     for field in sq.fields.iter_mut() {
         match field {
-            &mut FieldExpression::All => panic!(err),
-            &mut FieldExpression::AllInTable(_) => panic!(err),
-            &mut FieldExpression::Literal(_) => (),
-            &mut FieldExpression::Arithmetic(ref mut e) => {
+            &mut FieldDefinitionExpression::All => panic!(err),
+            &mut FieldDefinitionExpression::AllInTable(_) => panic!(err),
+            &mut FieldDefinitionExpression::Value(FieldValueExpression::Literal(_)) => (),
+            &mut FieldDefinitionExpression::Value(FieldValueExpression::Arithmetic(ref mut e)) => {
                 if let ArithmeticBase::Column(ref mut c) = e.left {
                     *c = expand_columns(c.clone(), &tables);
                 }
@@ -181,7 +182,7 @@ fn rewrite_selection(
                     *c = expand_columns(c.clone(), &tables);
                 }
             }
-            &mut FieldExpression::Col(ref mut f) => {
+            &mut FieldDefinitionExpression::Col(ref mut f) => {
                 *f = expand_columns(f.clone(), &tables);
             }
         }
@@ -248,7 +249,7 @@ impl ImpliedTableExpansion for SqlQuery {
 #[cfg(test)]
 mod tests {
     use super::ImpliedTableExpansion;
-    use nom_sql::{Column, FieldExpression, SqlQuery, Table};
+    use nom_sql::{Column, FieldDefinitionExpression, SqlQuery, Table};
     use std::collections::HashMap;
 
     #[test]
@@ -263,8 +264,8 @@ mod tests {
         let q = SelectStatement {
             tables: vec![Table::from("users"), Table::from("articles")],
             fields: vec![
-                FieldExpression::Col(Column::from("name")),
-                FieldExpression::Col(Column::from("title")),
+                FieldDefinitionExpression::Col(Column::from("name")),
+                FieldDefinitionExpression::Col(Column::from("title")),
             ],
             where_clause: Some(ConditionExpression::ComparisonOp(ConditionTree {
                 operator: Operator::Equal,
@@ -289,8 +290,8 @@ mod tests {
                 assert_eq!(
                     tq.fields,
                     vec![
-                        FieldExpression::Col(Column::from("users.name")),
-                        FieldExpression::Col(Column::from("articles.title")),
+                        FieldDefinitionExpression::Col(Column::from("users.name")),
+                        FieldDefinitionExpression::Col(Column::from("articles.title")),
                     ]
                 );
                 assert_eq!(

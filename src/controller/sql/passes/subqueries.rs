@@ -39,7 +39,7 @@ pub fn field_with_table_name(name: String, column: Column) -> ConditionBase {
 
 pub fn query_from_condition_base(cond: &ConditionBase) -> (SqlQuery, Column) {
     use nom_sql::ConditionBase::NestedSelect;
-    use nom_sql::FieldExpression;
+    use nom_sql::FieldDefinitionExpression;
     let (sq, column);
     match *cond {
         NestedSelect(ref bst) => {
@@ -47,7 +47,7 @@ pub fn query_from_condition_base(cond: &ConditionBase) -> (SqlQuery, Column) {
             column = bst.fields
                 .iter()
                 .map(|fe| match *fe {
-                    FieldExpression::Col(ref c) => c.clone(),
+                    FieldDefinitionExpression::Col(ref c) => c.clone(),
                     _ => unreachable!(),
                 })
                 .nth(0)
@@ -90,8 +90,8 @@ impl SubQueries for SqlQuery {
 mod tests {
     use super::*;
     use nom_sql::ConditionBase::*;
-    use nom_sql::{Column, ConditionTree, FieldExpression, Operator, SelectStatement, SqlQuery,
-                  Table};
+    use nom_sql::{Column, ConditionTree, FieldDefinitionExpression, Operator, SelectStatement,
+                  SqlQuery, Table};
 
     fn wrap(cb: ConditionBase) -> Box<ConditionExpression> {
         Box::new(Base(cb))
@@ -101,7 +101,7 @@ mod tests {
         // select userid from role where type=1
         let sq = SelectStatement {
             tables: vec![Table::from("role")],
-            fields: vec![FieldExpression::Col(Column::from("userid"))],
+            fields: vec![FieldDefinitionExpression::Col(Column::from("userid"))],
             where_clause: Some(ComparisonOp(ConditionTree {
                 operator: Operator::Equal,
                 left: wrap(Field(Column::from("type"))),
@@ -115,7 +115,7 @@ mod tests {
         // select pid from post where author in (select userid from role where type=1)
         let st = SelectStatement {
             tables: vec![Table::from("post")],
-            fields: vec![FieldExpression::Col(Column::from("pid"))],
+            fields: vec![FieldDefinitionExpression::Col(Column::from("pid"))],
             where_clause: Some(ComparisonOp(ConditionTree {
                 operator: Operator::In,
                 left: wrap(Field(Column::from("author"))),
@@ -135,7 +135,7 @@ mod tests {
         // select userid from role where type=1
         let mut q = SqlQuery::Select(SelectStatement {
             tables: vec![Table::from("role")],
-            fields: vec![FieldExpression::Col(Column::from("userid"))],
+            fields: vec![FieldDefinitionExpression::Col(Column::from("userid"))],
             where_clause: Some(ComparisonOp(ConditionTree {
                 operator: Operator::Equal,
                 left: wrap(Field(Column::from("type"))),
@@ -164,9 +164,9 @@ mod tests {
                 Table::from("votes"),
             ],
             fields: vec![
-                FieldExpression::Col(Column::from("users.name")),
-                FieldExpression::Col(Column::from("articles.title")),
-                FieldExpression::Col(Column::from("votes.uid")),
+                FieldDefinitionExpression::Col(Column::from("users.name")),
+                FieldDefinitionExpression::Col(Column::from("articles.title")),
+                FieldDefinitionExpression::Col(Column::from("votes.uid")),
             ],
             where_clause: Some(LogicalOp(ConditionTree {
                 left: Box::new(ComparisonOp(ConditionTree {

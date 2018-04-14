@@ -1,5 +1,5 @@
-use nom_sql::{Column, ConditionBase, ConditionExpression, ConditionTree, FieldExpression,
-              JoinConstraint, JoinRightSide, SqlQuery};
+use nom_sql::{Column, ConditionBase, ConditionExpression, ConditionTree,
+              FieldDefinitionExpression, JoinConstraint, JoinRightSide, SqlQuery};
 
 use std::collections::HashMap;
 
@@ -123,7 +123,7 @@ impl AliasRemoval for SqlQuery {
                     .into_iter()
                     .map(|field| match field {
                         // WTF rustfmt?
-                        FieldExpression::Col(mut col) => {
+                        FieldDefinitionExpression::Col(mut col) => {
                             if col.table.is_some() {
                                 let t = col.table.take().unwrap();
                                 col.table = if table_aliases.contains_key(&t) {
@@ -133,13 +133,15 @@ impl AliasRemoval for SqlQuery {
                                 };
                                 col.function = None;
                             }
-                            FieldExpression::Col(col)
+                            FieldDefinitionExpression::Col(col)
                         }
-                        FieldExpression::AllInTable(t) => if table_aliases.contains_key(&t) {
-                            FieldExpression::AllInTable(table_aliases[&t].clone())
-                        } else {
-                            FieldExpression::AllInTable(t)
-                        },
+                        FieldDefinitionExpression::AllInTable(t) => {
+                            if table_aliases.contains_key(&t) {
+                                FieldDefinitionExpression::AllInTable(table_aliases[&t].clone())
+                            } else {
+                                FieldDefinitionExpression::AllInTable(t)
+                            }
+                        }
                         f => f,
                     })
                     .collect();
@@ -173,7 +175,7 @@ impl AliasRemoval for SqlQuery {
 mod tests {
     use super::AliasRemoval;
     use nom_sql::SelectStatement;
-    use nom_sql::{Column, FieldExpression, Literal, SqlQuery, Table};
+    use nom_sql::{Column, FieldDefinitionExpression, Literal, SqlQuery, Table};
     use std::collections::HashMap;
 
     #[test]
@@ -188,7 +190,7 @@ mod tests {
                     alias: Some(String::from("t")),
                 },
             ],
-            fields: vec![FieldExpression::Col(Column::from("t.id"))],
+            fields: vec![FieldDefinitionExpression::Col(Column::from("t.id"))],
             where_clause: Some(ConditionExpression::ComparisonOp(ConditionTree {
                 operator: Operator::Equal,
                 left: wrap(ConditionBase::Field(Column::from("t.id"))),
@@ -204,7 +206,7 @@ mod tests {
             SqlQuery::Select(tq) => {
                 assert_eq!(
                     tq.fields,
-                    vec![FieldExpression::Col(Column::from("PaperTag.id"))]
+                    vec![FieldDefinitionExpression::Col(Column::from("PaperTag.id"))]
                 );
                 assert_eq!(
                     tq.where_clause,

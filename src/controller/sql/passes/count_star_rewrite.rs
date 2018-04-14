@@ -1,5 +1,5 @@
-use nom_sql::{Column, ConditionBase, ConditionExpression, ConditionTree, FieldExpression,
-              SqlQuery, Table};
+use nom_sql::{Column, ConditionBase, ConditionExpression, ConditionTree,
+              FieldDefinitionExpression, SqlQuery, Table};
 
 use std::collections::HashMap;
 
@@ -91,11 +91,10 @@ impl CountStarRewrite for SqlQuery {
                 }
                 for field in sq.fields.iter_mut() {
                     match field {
-                        &mut FieldExpression::All => panic!(err),
-                        &mut FieldExpression::AllInTable(_) => panic!(err),
-                        &mut FieldExpression::Literal(_) => (),
-                        &mut FieldExpression::Arithmetic(_) => (),
-                        &mut FieldExpression::Col(ref mut c) => {
+                        &mut FieldDefinitionExpression::All => panic!(err),
+                        &mut FieldDefinitionExpression::AllInTable(_) => panic!(err),
+                        &mut FieldDefinitionExpression::Value(_) => (),
+                        &mut FieldDefinitionExpression::Col(ref mut c) => {
                             rewrite_count_star(c, &tables, &avoid_cols)
                         }
                     }
@@ -112,7 +111,7 @@ impl CountStarRewrite for SqlQuery {
 #[cfg(test)]
 mod tests {
     use super::CountStarRewrite;
-    use nom_sql::{Column, FieldExpression, SqlQuery};
+    use nom_sql::{Column, FieldDefinitionExpression, SqlQuery};
     use std::collections::HashMap;
 
     #[test]
@@ -136,7 +135,7 @@ mod tests {
                 assert_eq!(
                     tq.fields,
                     vec![
-                        FieldExpression::Col(Column {
+                        FieldDefinitionExpression::Col(Column {
                             name: String::from("count(*)"),
                             alias: None,
                             table: None,
@@ -174,7 +173,7 @@ mod tests {
                 assert_eq!(
                     tq.fields,
                     vec![
-                        FieldExpression::Col(Column {
+                        FieldDefinitionExpression::Col(Column {
                             name: String::from("count(*)"),
                             alias: None,
                             table: None,

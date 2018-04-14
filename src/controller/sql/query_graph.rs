@@ -1,7 +1,7 @@
 use nom_sql::SelectStatement;
 use nom_sql::{ArithmeticBase, ArithmeticExpression, Column, ConditionBase, ConditionExpression,
-              ConditionTree, FieldExpression, JoinConstraint, JoinOperator, JoinRightSide,
-              Literal, Operator, Table};
+              ConditionTree, FieldDefinitionExpression, FieldValueExpression, JoinConstraint,
+              JoinOperator, JoinRightSide, Literal, Operator, Table};
 
 use std::cmp::Ordering;
 use std::collections::HashMap;
@@ -429,13 +429,12 @@ pub fn to_query_graph(st: &SelectStatement) -> Result<QueryGraph, String> {
                 .iter()
                 .filter_map(|field| match *field {
                     // unreachable because SQL rewrite passes will have expanded these already
-                    FieldExpression::All => unreachable!(),
-                    FieldExpression::AllInTable(_) => unreachable!(),
-                    // No need to do anything for literals here, as they aren't associated with a
-                    // relation (and thus have no QGN)
-                    FieldExpression::Literal(_) => None,
-                    FieldExpression::Arithmetic(_) => None,
-                    FieldExpression::Col(ref c) => {
+                    FieldDefinitionExpression::All => unreachable!(),
+                    FieldDefinitionExpression::AllInTable(_) => unreachable!(),
+                    // No need to do anything for literals and arithmetic expressions here, as they
+                    // aren't associated with a relation (and thus have no QGN)
+                    FieldDefinitionExpression::Value(_) => None,
+                    FieldDefinitionExpression::Col(ref c) => {
                         match c.table.as_ref() {
                             None => {
                                 match c.function {
@@ -678,10 +677,10 @@ pub fn to_query_graph(st: &SelectStatement) -> Result<QueryGraph, String> {
     //    nodes corresponding to individual relations.
     for field in st.fields.iter() {
         match *field {
-            FieldExpression::All | FieldExpression::AllInTable(_) => {
+            FieldDefinitionExpression::All | FieldDefinitionExpression::AllInTable(_) => {
                 panic!("Stars should have been expanded by now!")
             }
-            FieldExpression::Literal(ref l) => {
+            FieldDefinitionExpression::Value(FieldValueExpression::Literal(ref l)) => {
                 qg.columns.push(OutputColumn::Literal(LiteralColumn {
                     name: match l.alias {
                         Some(ref a) => a.to_string(),
@@ -691,7 +690,7 @@ pub fn to_query_graph(st: &SelectStatement) -> Result<QueryGraph, String> {
                     value: l.value.clone(),
                 }));
             }
-            FieldExpression::Arithmetic(ref a) => {
+            FieldDefinitionExpression::Value(FieldValueExpression::Arithmetic(ref a)) => {
                 if let ArithmeticBase::Column(ref c) = a.left {
                     add_computed_column(&mut qg, c);
                 }
@@ -706,7 +705,7 @@ pub fn to_query_graph(st: &SelectStatement) -> Result<QueryGraph, String> {
                     expression: a.clone(),
                 }));
             }
-            FieldExpression::Col(ref c) => {
+            FieldDefinitionExpression::Col(ref c) => {
                 add_computed_column(&mut qg, c);
                 qg.columns.push(OutputColumn::Data(c.clone()));
             }
