@@ -8,7 +8,7 @@ use local::single_state::SingleState;
 
 use bincode;
 use rand::{self, Rng};
-use rocksdb::{self, ColumnFamilyDescriptor, WriteBatch, DB};
+use rocksdb::{self, WriteBatch, DB};
 
 pub trait State: SizeOf + Send {
     /// Add an index keyed by the given columns and replayed to by the given partial tags.
@@ -56,8 +56,7 @@ type IndexEpoch = u64;
 // Monotonically increasing sequence number since last IndexEpoch used to uniquely identify a row.
 type IndexSeq = u64;
 
-// RocksDB column family used for storing meta information (like indices).
-const META_CF: &'static str = "meta";
+// RocksDB key used for storing meta information (like indices).
 const META_KEY: &'static [u8] = b"meta";
 
 struct PersistentIndex {
@@ -282,7 +281,6 @@ impl State for PersistentState {
 impl PersistentState {
     pub fn new(name: String, params: &PersistenceParameters) -> Self {
         let mut opts = rocksdb::Options::default();
-        let mut default_opts = rocksdb::Options::default();
         opts.set_compression_type(rocksdb::DBCompressionType::Lz4);
         opts.create_if_missing(true);
         opts.create_missing_column_families(true);
@@ -295,7 +293,7 @@ impl PersistentState {
 
         // Create prefixes by Self::transform_fn on all new inserted keys:
         let transform = rocksdb::SliceTransform::create("key", Self::transform_fn, None);
-        default_opts.set_prefix_extractor(transform);
+        opts.set_prefix_extractor(transform);
 
         // Assigns the number of threads for RocksDB's low priority background pool:
         opts.increase_parallelism(params.persistence_threads);
@@ -307,12 +305,7 @@ impl PersistentState {
         });
 
         let full_name = format!("{}.db", name);
-        let column_families = vec![
-            ColumnFamilyDescriptor::new("default", default_opts),
-            ColumnFamilyDescriptor::new("meta", rocksdb::Options::default()),
-        ];
-
-        let db = DB::open_cf_descriptors(&opts, &full_name, column_families).unwrap();
+        let db = DB::open(&opts, &full_name).unwrap();
         let meta = Self::retrieve_and_update_meta(&db);
         let indices = meta.indices
             .into_iter()
@@ -330,8 +323,7 @@ impl PersistentState {
     }
 
     fn retrieve_and_update_meta(db: &DB) -> PersistentMeta {
-        let cf = db.cf_handle(META_CF).unwrap();
-        let indices = db.get_cf(cf, META_KEY).unwrap();
+        let indices = db.get(META_KEY).unwrap();
         let mut meta = match indices {
             Some(data) => bincode::deserialize(&*data).unwrap(),
             None => PersistentMeta::default(),
@@ -339,7 +331,7 @@ impl PersistentState {
 
         meta.epoch += 1;
         let data = bincode::serialize(&meta).unwrap();
-        db.put_cf(cf, META_KEY, &data).unwrap();
+        db.put(META_KEY, &data).unwrap();
         meta
     }
 
@@ -353,8 +345,7 @@ impl PersistentState {
 
         let data = bincode::serialize(&meta).unwrap();
         let db = self.db.as_ref().unwrap();
-        let cf = db.cf_handle(META_CF).unwrap();
-        db.put_cf(cf, META_KEY, &data).unwrap();
+        db.put(META_KEY, &data).unwrap();
     }
 
     // Selects a prefix of `key` without the epoch or sequence number.
@@ -384,6 +375,10 @@ impl PersistentState {
     // prefix transformed this key before or not
     // (without including the byte size of Vec<DataType>).
     fn transform_fn(key: &[u8]) -> Vec<u8> {
+        if key == META_KEY {
+            return Vec::from(key);
+        }
+
         // IndexID is a u32, so bincode uses 4 bytes to serialize it (which we'll skip past):
         let start = 4;
         // We encoded the size of the key itself with a u64, which bincode uses 8 bytes to encode:
