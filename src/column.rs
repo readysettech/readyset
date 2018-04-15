@@ -59,6 +59,8 @@ impl fmt::Display for Column {
                 escape_if_keyword(table),
                 escape_if_keyword(&self.name)
             )?;
+        } else if let Some(ref function) = self.function {
+            write!(f, "{}", *function)?;
         } else {
             write!(f, "{}", escape_if_keyword(&self.name))?;
         }
@@ -204,4 +206,24 @@ mod tests {
             }
         );
     }
+
+    #[test]
+    fn print_function_column() {
+        let c1 = Column {
+            name: "".into(), // must be present, but will be ignored
+            alias: Some("foo".into()),
+            table: None,
+            function: Some(Box::new(FunctionExpression::CountStar)),
+        };
+        let c2 = Column {
+            name: "".into(), // must be present, but will be ignored
+            alias: None,
+            table: None,
+            function: Some(Box::new(FunctionExpression::CountStar)),
+        };
+
+        assert_eq!(format!("{}", c1), "count(*) AS foo");
+        assert_eq!(format!("{}", c2), "count(*)");
+    }
+
 }
