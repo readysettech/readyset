@@ -14,6 +14,7 @@ use tsunami::*;
 
 const AMI: &str = "ami-2cbf1953";
 
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 enum Backend {
     Mysql,
     Soup,
@@ -143,8 +144,15 @@ fn main() {
         let mut server = vms.remove("server").unwrap().swap_remove(0);
         let mut trawler = vms.remove("trawler").unwrap().swap_remove(0);
 
+        let backends = [Backend::Mysql, Backend::Soup];
+        let mut survived_last: HashMap<_, _> = backends.iter().map(|b| (b, true)).collect();
+
         for scale in scales {
-            for backend in &[Backend::Mysql, Backend::Soup] {
+            for backend in &backends {
+                if !survived_last[backend] {
+                    continue;
+                }
+
                 eprintln!("==> benchmark {} w/ {}x load", backend, scale);
 
                 match backend {
@@ -371,7 +379,24 @@ fn main() {
                     }
                 }
 
-                // TODO: stop iterating through scales for this backend if it's not keeping up
+                // stop iterating through scales for this backend if it's not keeping up
+                let sload: f64 = sload
+                    .split_whitespace()
+                    .next()
+                    .and_then(|l| l.parse().ok())
+                    .unwrap_or(0.0);
+                let cload: f64 = cload
+                    .split_whitespace()
+                    .next()
+                    .and_then(|l| l.parse().ok())
+                    .unwrap_or(0.0);
+                if sload > 16.0 || cload > 36.0 {
+                    eprintln!(
+                        " -> backend is not keeping up (s: {}/16, c: {}/36)",
+                        sload, cload
+                    );
+                    *survived_last.get_mut(backend).unwrap() = false;
+                }
             }
         }
 
