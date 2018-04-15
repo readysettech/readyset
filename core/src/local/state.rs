@@ -181,24 +181,35 @@ impl State for PersistentState {
         }
 
         let cols = Vec::from(columns);
-        self.indices.push(PersistentIndex {
-            columns: cols,
-            seq: 0,
-        });
+        let index_id = self.indices.len() as u32;
+        let mut seq = 0;
+        let mut batch = None;
 
-        self.persist_meta();
-        if self.rows() > 0 {
-            let rows = self.cloned_records();
-            // We wouldn't have to clear everything here, could just retrieve all the primary key
-            // rows and then insert them with the new index:
-            self.clear();
-            let mut batch = WriteBatch::default();
-            for row in rows {
-                self.insert(&mut batch, row);
-            }
+        // Build the new index for existing values:
+        self.db
+            .as_ref()
+            .unwrap()
+            .full_iterator(rocksdb::IteratorMode::Start)
+            .filter(|&(ref key, _)| {
+                // Filter out non-pk indices:
+                let i: IndexID = bincode::deserialize(&key).unwrap();
+                i == 0
+            })
+            .for_each(|(ref pk, ref value)| {
+                seq += 1;
+                let row: Vec<DataType> = bincode::deserialize(&value).unwrap();
+                let index_key = columns.iter().map(|i| &row[*i]).collect::<Vec<_>>();
+                let key = self.serialize_key(index_id, &index_key, seq);
+                let b = batch.get_or_insert_with(|| WriteBatch::default());
+                b.put(&key, &pk).unwrap();
+            });
 
-            self.db.as_ref().unwrap().write(batch).unwrap();
+        if let Some(b) = batch {
+            self.db.as_ref().unwrap().write(b).unwrap();
         }
+
+        self.indices.push(PersistentIndex { columns: cols, seq });
+        self.persist_meta();
     }
 
     fn keys(&self) -> Vec<Vec<usize>> {
