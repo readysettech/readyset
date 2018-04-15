@@ -1,8 +1,8 @@
-use std::collections::HashMap;
-
-use vec_map::VecMap;
-
 use prelude::*;
+use std::borrow::Cow;
+use std::cmp::Ordering;
+use std::collections::HashMap;
+use vec_map::VecMap;
 
 /// Base is used to represent the root nodes of the distributary data flow graph.
 ///
@@ -113,6 +113,22 @@ impl Default for Base {
     }
 }
 
+fn key_val(i: usize, col: usize, r: &Record) -> &DataType {
+    match *r {
+        Record::Positive(ref r) | Record::Negative(ref r) => &r[col],
+        Record::BaseOperation(BaseOperation::Delete { ref key }) => &key[i],
+        Record::BaseOperation(BaseOperation::Update { ref key, .. }) => &key[i],
+        Record::BaseOperation(BaseOperation::InsertOrUpdate { ref row, .. }) => &row[col],
+    }
+}
+
+fn key_of<'a>(key_cols: &'a [usize], r: &'a Record) -> impl Iterator<Item = &'a DataType> {
+    key_cols
+        .iter()
+        .enumerate()
+        .map(move |(i, col)| key_val(i, *col, r))
+}
+
 impl Ingredient for Base {
     fn take(&mut self) -> NodeOperator {
         Clone::clone(self).into()
@@ -131,74 +147,92 @@ impl Ingredient for Base {
     fn on_input(
         &mut self,
         _: LocalNodeIndex,
-        rs: Records,
+        mut rs: Records,
         _: &mut Tracer,
         _: Option<&[usize]>,
         _: &DomainNodes,
         state: &StateMap,
     ) -> ProcessingResult {
-        let mut results = Vec::with_capacity(rs.len());
-        for r in rs {
-            match r {
-                Record::Positive(u) => {
-                    if let Some(ref key) = self.primary_key {
-                        let cols = self.primary_key.as_ref().unwrap();
-                        let db = state
-                            .get(&*self.us.unwrap())
-                            .expect("base with primary key must be materialized");
+        if self.primary_key.is_none() || rs.is_empty() {
+            for r in &mut *rs {
+                self.fix(r);
+            }
 
-                        let keyval: Vec<DataType> = key.iter().map(|kc| u[*kc].clone()).collect();
-                        match db.lookup(cols.as_slice(), &KeyType::from(&keyval[..])) {
-                            LookupResult::Some(rows) => {
-                                if rows.is_empty() {
-                                    results.push(Record::Positive(u));
-                                }
-                            }
-                            LookupResult::Missing => unreachable!(), // base can't be partial
+            return ProcessingResult {
+                results: rs,
+                misses: Vec::new(),
+            };
+        }
+
+        let key_cols = &self.primary_key.as_ref().unwrap()[..];
+
+        let mut rs: Vec<_> = rs.into();
+        rs.sort_by(|a, b| key_of(key_cols, a).cmp(key_of(key_cols, b)));
+
+        // starting key
+        let mut this_key: Vec<_> = key_of(key_cols, &rs[0]).cloned().collect();
+
+        // starting record state
+        let db = state
+            .get(&*self.us.unwrap())
+            .expect("base with primary key must be materialized");
+
+        let get_current = |current_key: &'_ _| {
+            match db.lookup(key_cols, &KeyType::from(current_key)) {
+                LookupResult::Some(rows) => {
+                    match rows.len() {
+                        0 => None,
+                        1 => Some(Cow::Borrowed(&*rows[0])),
+                        n => {
+                            // primary key, so better be unique!
+                            assert_eq!(n, 1, "key {:?} not unique (n = {})!", current_key, n);
+                            unreachable!();
                         }
-                    } else {
-                        results.push(Record::Positive(u));
                     }
                 }
-                Record::Negative(u) => results.push(Record::Negative(u)),
+                LookupResult::Missing => unreachable!(),
+            }
+        };
+        let mut current = get_current(&this_key);
+        let mut was = current.clone();
+
+        let mut results = Vec::with_capacity(rs.len());
+        for r in rs {
+            if this_key.iter().cmp(key_of(key_cols, &r)) != Ordering::Equal {
+                if current != was {
+                    if let Some(was) = was {
+                        results.push(Record::Negative(was.into_owned()));
+                    }
+                    if let Some(current) = current {
+                        results.push(Record::Positive(current.into_owned()));
+                    }
+                }
+
+                this_key = key_of(key_cols, &r).cloned().collect();
+                current = get_current(&this_key);
+                was = current.clone();
+            }
+
+            match r {
+                Record::Positive(u) => {
+                    assert!(was.is_none());
+                    current = Some(Cow::Owned(u));
+                }
+                Record::Negative(u) => {
+                    assert_eq!(current, Some(Cow::Borrowed(&u)));
+                    if current == was {
+                        // save us a clone in a common case
+                        was = Some(Cow::Owned(u));
+                    }
+                    current = None;
+                }
                 Record::BaseOperation(op) => {
-                    let cols = self.primary_key
-                        .as_ref()
-                        .expect("base must have a primary key to support deletions");
-                    let db = state
-                        .get(&*self.us.unwrap())
-                        .expect("base must have its own state materialized to support deletions");
-
-                    let current = {
-                        let key = match op {
-                            BaseOperation::Delete { ref key } => KeyType::from(&key[..]),
-                            BaseOperation::Update { ref key, .. } => KeyType::from(&key[..]),
-                            BaseOperation::InsertOrUpdate { ref row, .. } => {
-                                KeyType::from(cols.iter().map(|&c| &row[c]))
-                            }
-                        };
-
-                        match db.lookup(cols.as_slice(), &key) {
-                            LookupResult::Some(rows) => {
-                                match rows.len() {
-                                    0 => None,
-                                    1 => Some((*rows[0]).clone()),
-                                    n => {
-                                        // primary key, so better be unique!
-                                        assert_eq!(n, 1, "key {:?} not unique!", key);
-                                        unreachable!();
-                                    }
-                                }
-                            }
-                            LookupResult::Missing => unreachable!(),
-                        }
-                    };
-
                     let update = match op {
                         BaseOperation::Delete { .. } => {
-                            if let Some(r) = current {
-                                results.push(Record::Negative(r));
+                            if current.is_some() {
+                                current = None;
                             } else {
+                                // supposed to delete a non-existing row?
                                 // TODO: warn?
                             }
                             continue;
@@ -206,7 +240,7 @@ impl Ingredient for Base {
                         BaseOperation::Update { set, .. } => set,
                         BaseOperation::InsertOrUpdate { row, update } => {
                             if current.is_none() {
-                                results.push(Record::Positive(row));
+                                current = Some(Cow::Owned(row));
                                 continue;
                             }
                             update
@@ -214,20 +248,20 @@ impl Ingredient for Base {
                     };
 
                     if current.is_none() {
+                        // supposed to update a non-existing row?
                         // TODO: also warn here?
                         continue;
                     }
-                    let mut current = current.unwrap();
-                    results.push(Record::Negative(current.clone()));
 
+                    let mut future = current.unwrap().into_owned();
                     for (col, op) in update.into_iter().enumerate() {
                         // XXX: make sure user doesn't update primary key?
                         match op {
-                            Modification::Set(v) => current[col] = v,
+                            Modification::Set(v) => future[col] = v,
                             Modification::Apply(op, v) => {
-                                let old: i64 = current[col].clone().into();
+                                let old: i64 = future[col].clone().into();
                                 let delta: i64 = v.into();
-                                current[col] = match op {
+                                future[col] = match op {
                                     Operation::Add => (old + delta).into(),
                                     Operation::Sub => (old - delta).into(),
                                 };
@@ -235,8 +269,18 @@ impl Ingredient for Base {
                             Modification::None => {}
                         }
                     }
-                    results.push(Record::Positive(current));
+                    current = Some(Cow::Owned(future));
                 }
+            }
+        }
+
+        // we may have changed things in the last iteration of the loop above
+        if current != was {
+            if let Some(was) = was {
+                results.push(Record::Negative(was.into_owned()));
+            }
+            if let Some(current) = current {
+                results.push(Record::Positive(current.into_owned()));
             }
         }
 
@@ -308,4 +352,105 @@ mod tests {
         assert_eq!(b.dropped.len(), 0);
         assert_eq!(b.unmodified, true);
     }
+
+    #[test]
+    fn lots_of_changes_in_same_batch() {
+        use node;
+        use ops::base::Base;
+        use prelude::*;
+        use std::collections::HashMap;
+
+        // most of this is from MockGraph
+        let mut graph = Graph::new();
+        let source = graph.add_node(Node::new(
+            "source",
+            &["because-type-inference"],
+            node::NodeType::Source,
+            true,
+        ));
+
+        let mut b = Base::new(vec![]).with_key(vec![0, 2]);
+        b.on_connected(&graph);
+        let b: NodeOperator = b.into();
+        let global = graph.add_node(Node::new("b", &["x", "y", "z"], b, false));
+        graph.add_edge(source, global, ());
+        let local = unsafe { LocalNodeIndex::make(0 as u32) };
+        let mut ip: IndexPair = global.into();
+        ip.set_local(local);
+        graph
+            .node_weight_mut(global)
+            .unwrap()
+            .set_finalized_addr(ip);
+
+        let mut remap = HashMap::new();
+        remap.insert(global, ip);
+        graph.node_weight_mut(global).unwrap().on_commit(&remap);
+        graph.node_weight_mut(global).unwrap().add_to(0.into());
+
+        let mut state = State::default();
+        for (_, (col, _)) in graph[global].suggest_indexes(global) {
+            state.add_key(&col[..], None);
+        }
+
+        let mut states = StateMap::new();
+        states.insert(local, state);
+        let n = graph[global].take();
+        let mut n = n.finalize(&graph);
+
+        let nodes = DomainNodes::new();
+        let mut one = move |u: Vec<Record>| {
+            let mut m = n.on_input(local, u.into(), &mut None, None, &nodes, &states)
+                .results;
+            node::materialize(&mut m, None, states.get_mut(&local));
+            m
+        };
+
+        assert_eq!(
+            one(vec![
+                Record::Positive(vec![1.into(), "a".into(), 1.into()]),
+                Record::Positive(vec![2.into(), "2a".into(), 1.into()]),
+                Record::Negative(vec![1.into(), "a".into(), 1.into()]),
+                Record::Positive(vec![1.into(), "b".into(), 1.into()]),
+                Record::BaseOperation(BaseOperation::Delete {
+                    key: vec![1.into(), 1.into()],
+                }),
+                Record::BaseOperation(BaseOperation::InsertOrUpdate {
+                    row: vec![1.into(), "c".into(), 1.into()],
+                    update: vec![
+                        Modification::None,
+                        Modification::Set("never".into()),
+                        Modification::None,
+                    ],
+                }),
+                Record::BaseOperation(BaseOperation::InsertOrUpdate {
+                    row: vec![1.into(), "also never".into(), 1.into()],
+                    update: vec![
+                        Modification::None,
+                        Modification::Set("d".into()),
+                        Modification::None,
+                    ],
+                }),
+                Record::BaseOperation(BaseOperation::Update {
+                    key: vec![1.into(), 1.into()],
+                    set: vec![
+                        Modification::None,
+                        Modification::Set("e".into()),
+                        Modification::None,
+                    ],
+                }),
+                Record::BaseOperation(BaseOperation::Update {
+                    key: vec![2.into(), 1.into()],
+                    set: vec![
+                        Modification::None,
+                        Modification::Set("2x".into()),
+                        Modification::None,
+                    ],
+                }),
+                Record::Negative(vec![1.into(), "e".into(), 1.into()]),
+                Record::Negative(vec![2.into(), "2x".into(), 1.into()]),
+            ]),
+            Records::default()
+        );
+    }
+
 }
