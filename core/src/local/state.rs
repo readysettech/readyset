@@ -88,6 +88,7 @@ pub struct PersistentState {
     durability_mode: DurabilityMode,
     indices: Vec<PersistentIndex>,
     epoch: IndexEpoch,
+    primary_key: Option<Vec<usize>>,
 }
 
 impl SizeOf for PersistentState {
@@ -138,33 +139,46 @@ impl State for PersistentState {
             KeyType::Sex(ref r) => vec![&r.0, &r.1, &r.2, &r.3, &r.4, &r.5],
         };
 
-        let index = self.indices
-            .iter()
-            .position(|index| &index.columns[..] == columns)
-            .expect("could not find index for columns");
-        let prefix = self.serialize_prefix(index as u32, &key_values);
         let db = self.db.as_ref().unwrap();
-        let values = db.prefix_iterator(&prefix);
-
-        let data = if index > 0 {
-            // For non-primary indices we need to first retrieve the primary index key
-            // through our secondary indices, and then call `.get` again on that.
-            values
-                .map(|(_key, value)| {
-                    let raw_row = db.get(&value)
-                        .unwrap()
-                        .expect("secondary index pointed to missing primary key value");
-                    let row: Vec<DataType> = bincode::deserialize(&*raw_row).unwrap();
-                    Row(Rc::new(row))
-                })
-                .collect()
-        } else {
-            values
-                .map(|(_key, value)| {
-                    let row: Vec<DataType> = bincode::deserialize(&*value).unwrap();
-                    Row(Rc::new(row))
-                })
-                .collect()
+        let data = match self.primary_key {
+            Some(ref pk) if &pk[..] == columns => {
+                let prefix = Self::serialize_prefix(0, &key_values);
+                // This is a primary key, so we know there's only one row to retrieve
+                // (no need to use prefix_iterator).
+                let raw_row = db.get(&prefix).unwrap();
+                if let Some(raw) = raw_row {
+                    let row: Vec<DataType> = bincode::deserialize(&*raw).unwrap();
+                    vec![Row(Rc::new(row))]
+                } else {
+                    vec![]
+                }
+            }
+            _ => {
+                let index_id = self.get_index_id(columns)
+                    .expect("lookup on non-indexed column set");
+                let prefix = Self::serialize_prefix(index_id, &key_values);
+                let values = db.prefix_iterator(&prefix);
+                if index_id > 0 {
+                    // For non-primary indices we need to first retrieve the primary index key
+                    // through our secondary indices, and then call `.get` again on that.
+                    values
+                        .map(|(_key, value)| {
+                            let raw_row = db.get(&value)
+                                .unwrap()
+                                .expect("secondary index pointed to missing primary key value");
+                            let row: Vec<DataType> = bincode::deserialize(&*raw_row).unwrap();
+                            Row(Rc::new(row))
+                        })
+                        .collect()
+                } else {
+                    values
+                        .map(|(_key, value)| {
+                            let row: Vec<DataType> = bincode::deserialize(&*value).unwrap();
+                            Row(Rc::new(row))
+                        })
+                        .collect()
+                }
+            }
         };
 
         LookupResult::Some(Cow::Owned(data))
@@ -175,7 +189,12 @@ impl State for PersistentState {
         let existing = self.indices
             .iter()
             .any(|index| &index.columns[..] == columns);
-        if existing {
+        let is_pk = match self.primary_key {
+            Some(ref pk) => &pk[..] == columns,
+            _ => false,
+        };
+
+        if existing || is_pk {
             return;
         }
 
@@ -279,7 +298,11 @@ impl State for PersistentState {
 }
 
 impl PersistentState {
-    pub fn new(name: String, params: &PersistenceParameters) -> Self {
+    pub fn new(
+        name: String,
+        primary_key: Option<&[usize]>,
+        params: &PersistenceParameters,
+    ) -> Self {
         let mut opts = rocksdb::Options::default();
         opts.set_compression_type(rocksdb::DBCompressionType::Lz4);
         opts.create_if_missing(true);
@@ -314,6 +337,7 @@ impl PersistentState {
 
         Self {
             indices,
+            primary_key: primary_key.and_then(|cols| Some(Vec::from(cols))),
             epoch: meta.epoch,
             db_opts: opts,
             db: Some(db),
@@ -346,6 +370,21 @@ impl PersistentState {
         let data = bincode::serialize(&meta).unwrap();
         let db = self.db.as_ref().unwrap();
         db.put(META_KEY, &data).unwrap();
+    }
+
+    fn get_index_id(&self, columns: &[usize]) -> Option<IndexID> {
+        self.indices
+            .iter()
+            .position(|index| &index.columns[..] == columns)
+            .and_then(|id| {
+                let id = id as IndexID;
+                // Increment the index ID with one if we have a primary key,
+                // as that'll always be index 0:
+                Some(match self.primary_key {
+                    Some(..) => id + 1,
+                    None => id,
+                })
+            })
     }
 
     // Selects a prefix of `key` without the epoch or sequence number.
@@ -412,7 +451,7 @@ impl PersistentState {
     }
 
     // Used with DB::prefix_iterator to go through all the rows for a given .
-    fn serialize_prefix(&self, index: IndexID, key: &Vec<&DataType>) -> Vec<u8> {
+    fn serialize_prefix(index: IndexID, key: &Vec<&DataType>) -> Vec<u8> {
         let size: u64 = bincode::serialized_size(&key).unwrap();
         bincode::serialize(&(index, size, key)).unwrap()
     }
@@ -423,21 +462,28 @@ impl PersistentState {
     // with exactly those values. I think the regular state implementation supports inserting
     // something like an Int and retrieving with a BigInt.
     fn insert(&mut self, batch: &mut WriteBatch, r: Vec<DataType>) {
-        // Increment sequence numbers for all indices:
         for index in self.indices.iter_mut() {
-            index.seq += 1;
+            index.seq +=1;
         }
 
-        let pk_index = &self.indices[0];
-        let pk = pk_index.columns.iter().map(|i| &r[*i]).collect::<Vec<_>>();
-        let serialized_pk = self.serialize_key(0, &pk, pk_index.seq);
+        let (secondary_indices, serialized_pk) = if let Some(ref pk_cols) = self.primary_key {
+            let pk = pk_cols.iter().map(|i| &r[*i]).collect::<Vec<_>>();
+            (&self.indices[..], Self::serialize_prefix(0, &pk))
+        } else {
+            // For bases without primary keys we store the actual row values keyed by the index
+            // that was added first. This means that we can't consider the keys unique though, so
+            // we'll append a sequence number.
+            let pk_index = &self.indices[0];
+            let pk = pk_index.columns.iter().map(|i| &r[*i]).collect::<Vec<_>>();
+            (&self.indices[1..], self.serialize_key(0, &pk, pk_index.seq))
+        };
 
         // First insert the actual value for our primary index:
         let pk_value = bincode::serialize(&r).unwrap();
         batch.put(&serialized_pk, &pk_value).unwrap();
 
         // Then insert primary key pointers for all the secondary indices:
-        for (i, index) in self.indices[1..].iter().enumerate() {
+        for (i, index) in secondary_indices.iter().enumerate() {
             // Construct a key with the index values, and serialize it with bincode:
             let key = index.columns.iter().map(|i| &r[*i]).collect::<Vec<_>>();
             // Add 1 to i since we're slicing self.indices by 1..:
@@ -450,7 +496,7 @@ impl PersistentState {
         let db = self.db.as_ref().unwrap();
         for (i, index) in self.indices.iter().enumerate() {
             let index_row = index.columns.iter().map(|i| &r[*i]).collect::<Vec<_>>();
-            let serialized_key = self.serialize_prefix(i as u32, &index_row);
+            let serialized_key = Self::serialize_prefix(i as u32, &index_row);
             for (key, _value) in db.prefix_iterator(&serialized_key) {
                 batch.delete(&key).unwrap();
             }
@@ -690,16 +736,18 @@ mod tests {
         state.process_records(&mut record.into(), None);
     }
 
-    fn setup_persistent(prefix: &str) -> PersistentState {
+    fn get_name(prefix: &str) -> String {
         let current_time = SystemTime::now().duration_since(UNIX_EPOCH).unwrap();
-        let name = format!(
+        format!(
             "{}.{}.{}",
             prefix,
             current_time.as_secs(),
             current_time.subsec_nanos()
-        );
+        )
+    }
 
-        PersistentState::new(name, &PersistenceParameters::default())
+    fn setup_persistent(prefix: &str) -> PersistentState {
+        PersistentState::new(get_name(prefix), None, &PersistenceParameters::default())
     }
 
     #[test]
@@ -770,6 +818,50 @@ mod tests {
         }
 
         match state.lookup(&[1, 2], &KeyType::Double(("Cat".into(), 1.into()))) {
+            LookupResult::Some(rows) => {
+                assert_eq!(rows.len(), 2);
+                assert_eq!(&*rows[0], &first);
+                assert_eq!(&*rows[1], &second);
+            }
+            _ => unreachable!(),
+        }
+    }
+
+    #[test]
+    fn persistent_state_primary_key() {
+        let pk = &[0, 1];
+        let name = get_name("persistent_state_primary_key");
+        let mut state = PersistentState::new(name, Some(pk), &PersistenceParameters::default());
+        let first: Vec<DataType> = vec![1.into(), 2.into(), "Cat".into()];
+        let second: Vec<DataType> = vec![10.into(), 20.into(), "Cat".into()];
+        state.add_key(pk, None);
+        state.add_key(&[2], None);
+        state.process_records(&mut vec![first.clone(), second.clone()].into(), None);
+
+        match state.lookup(pk, &KeyType::Double((1.into(), 2.into()))) {
+            LookupResult::Some(rows) => {
+                assert_eq!(rows.len(), 1);
+                assert_eq!(&*rows[0], &first);
+            }
+            _ => unreachable!(),
+        }
+
+        match state.lookup(pk, &KeyType::Double((10.into(), 20.into()))) {
+            LookupResult::Some(rows) => {
+                assert_eq!(rows.len(), 1);
+                assert_eq!(&*rows[0], &second);
+            }
+            _ => unreachable!(),
+        }
+
+        match state.lookup(pk, &KeyType::Double((1.into(), 20.into()))) {
+            LookupResult::Some(rows) => {
+                assert_eq!(rows.len(), 0);
+            }
+            _ => unreachable!(),
+        }
+
+        match state.lookup(&[2], &KeyType::Single(&"Cat".into())) {
             LookupResult::Some(rows) => {
                 assert_eq!(rows.len(), 2);
                 assert_eq!(&*rows[0], &first);
@@ -913,7 +1005,7 @@ mod tests {
         let path = Path::new(&db_name);
         {
             let _state =
-                PersistentState::new(String::from(name), &PersistenceParameters::default());
+                PersistentState::new(String::from(name), None, &PersistenceParameters::default());
             assert!(path.exists());
         }
 

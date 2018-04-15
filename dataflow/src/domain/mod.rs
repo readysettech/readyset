@@ -1304,19 +1304,18 @@ impl Domain {
                             let mut s: Box<State> = {
                                 let n = self.nodes[&node].borrow();
                                 let params = &self.persistence_parameters;
-                                if n.is_internal() && n.get_base().is_some()
-                                    && params.persist_base_nodes
-                                {
-                                    let base_name = format!(
-                                        "{}-{}-{}",
-                                        params.log_prefix,
-                                        n.name(),
-                                        self.shard.unwrap_or(0),
-                                    );
+                                match (n.get_base(), params.persist_base_nodes) {
+                                    (Some(base), true) => {
+                                        let base_name = format!(
+                                            "{}-{}-{}",
+                                            params.log_prefix,
+                                            n.name(),
+                                            self.shard.unwrap_or(0),
+                                        );
 
-                                    box PersistentState::new(base_name, &params)
-                                } else {
-                                    box MemoryState::default()
+                                        box PersistentState::new(base_name, base.key(), &params)
+                                    }
+                                    _ => box MemoryState::default(),
                                 }
                             };
                             for idx in index {
