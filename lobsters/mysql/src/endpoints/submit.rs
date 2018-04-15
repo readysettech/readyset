@@ -88,7 +88,7 @@ where
                         t.drop_exec(
                             "INSERT INTO keystores (`key`, `value`) \
                              VALUES (?, ?) \
-                             ON DUPLICATE KEY UPDATE `value` = `value` + 1",
+                             ON DUPLICATE KEY UPDATE `keystores`.`value` = `keystores`.`value` + 1",
                             (key, 1),
                         ).map(move |t| (t, story))
                     })
