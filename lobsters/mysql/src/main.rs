@@ -1,3 +1,5 @@
+#![feature(nll)]
+
 extern crate chrono;
 #[macro_use]
 extern crate clap;
