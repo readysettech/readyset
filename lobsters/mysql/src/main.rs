@@ -297,7 +297,7 @@ fn main() {
             time::Duration::from_secs(value_t_or_exit!(args, "warmup", u64)),
             time::Duration::from_secs(value_t_or_exit!(args, "runtime", u64)),
         )
-        .in_flight(200);
+        .in_flight(50);
 
     if let Some(h) = args.value_of("histogram") {
         wl.with_histogram(h);
@@ -306,8 +306,8 @@ fn main() {
     // check that we can indeed connect
     let mut opts = my::OptsBuilder::from_opts(args.value_of("dbn").unwrap());
     opts.tcp_nodelay(true);
-    opts.pool_min(Some(200usize));
-    opts.pool_max(Some(200usize));
+    opts.pool_min(Some(50usize));
+    opts.pool_max(Some(50usize));
     let mut s = MysqlSpawner::new(opts);
 
     if !args.is_present("prime") {
