@@ -185,7 +185,7 @@ impl Ingredient for Base {
                                     1 => Some((*rows[0]).clone()),
                                     n => {
                                         // primary key, so better be unique!
-                                        assert_eq!(n, 1);
+                                        assert_eq!(n, 1, "key {:?} not unique!", key);
                                         unreachable!();
                                     }
                                 }
