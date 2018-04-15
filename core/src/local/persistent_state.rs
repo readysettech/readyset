@@ -2,7 +2,7 @@ use std::borrow::Cow;
 use std::rc::Rc;
 
 use bincode;
-use rocksdb::{self, WriteBatch, DB};
+use rocksdb::{self, SliceTransform, WriteBatch, DB};
 
 use ::*;
 use data::SizeOf;
@@ -268,6 +268,9 @@ impl PersistentState {
         opts.set_compression_type(rocksdb::DBCompressionType::Lz4);
         opts.create_if_missing(true);
         opts.create_missing_column_families(true);
+        let mut block_opts = rocksdb::BlockBasedOptions::default();
+        block_opts.set_bloom_filter(10, true);
+        opts.set_block_based_table_factory(&block_opts);
 
         if let Some(ref path) = params.log_dir {
             // Append the db name to the WAL path to ensure
@@ -276,7 +279,7 @@ impl PersistentState {
         }
 
         // Create prefixes by Self::transform_fn on all new inserted keys:
-        let transform = rocksdb::SliceTransform::create("key", Self::transform_fn, None);
+        let transform = SliceTransform::create("key", Self::transform_fn, Some(Self::in_domain_fn));
         opts.set_prefix_extractor(transform);
 
         // Assigns the number of threads for RocksDB's low priority background pool:
@@ -393,6 +396,11 @@ impl PersistentState {
         }
 
         bytes
+    }
+
+    // Decides which keys the prefix transform should apply to.
+    fn in_domain_fn(key: &[u8]) -> bool {
+        key != META_KEY
     }
 
     // A key is built up of five components:
