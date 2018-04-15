@@ -82,13 +82,10 @@ impl trawler::LobstersClient for MysqlTrawler {
     ) -> Box<futures::Future<Item = time::Duration, Error = ()>> {
         let sent = time::Instant::now();
 
-        let req = match req {
-            req @ trawler::LobstersRequest::Login
-            | req @ trawler::LobstersRequest::Submit { .. }
-            | req @ trawler::LobstersRequest::Comment { .. }
-            | req @ trawler::LobstersRequest::Story(..)
-            | req @ trawler::LobstersRequest::Frontpage => req,
-            _ => trawler::LobstersRequest::Story(['0' as u8; 6]),
+        let req = if let trawler::LobstersRequest::User(..) = req {
+            trawler::LobstersRequest::Story(['0' as u8; 6])
+        } else {
+            req
         };
 
         let c = this.c.get_conn();
