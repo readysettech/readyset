@@ -1,7 +1,6 @@
 use std::borrow::Cow;
 use std::collections::HashMap;
 use std::rc::Rc;
-use std::time::{SystemTime, UNIX_EPOCH};
 
 use ::*;
 use data::SizeOf;
@@ -9,7 +8,7 @@ use local::single_state::SingleState;
 
 use bincode;
 use rand::{self, Rng};
-use rocksdb::{self, WriteBatch, DB};
+use rocksdb::{self, ColumnFamilyDescriptor, WriteBatch, DB};
 
 pub trait State: SizeOf + Send {
     /// Add an index keyed by the given columns and replayed to by the given partial tags.
@@ -50,13 +49,33 @@ pub trait State: SizeOf + Send {
 // Uniquely identifies an index for each base (the numeral index in PersistentState.indices).
 type IndexID = u32;
 
-// Monotonically increasing sequence number used to uniquely identify a row.
-// Prefixed by the UNIX timestamp at startup, so that it can be reset to 0 without consequences.
+// Incremented on each PersistentState initialization so that IndexSeq
+// can be used to create unique identifiers for rows.
+type IndexEpoch = u64;
+
+// Monotonically increasing sequence number since last IndexEpoch used to uniquely identify a row.
 type IndexSeq = u64;
+
+// RocksDB column family used for storing meta information (like indices).
+const META_CF: &'static str = "meta";
+const META_KEY: &'static [u8] = b"meta";
 
 struct PersistentIndex {
     columns: Vec<usize>,
     seq: IndexSeq,
+}
+
+// Store index information in RocksDB to avoid rebuilding indices on recovery.
+#[derive(Default, Serialize, Deserialize)]
+struct PersistentMeta {
+    indices: Vec<Vec<usize>>,
+    epoch: IndexEpoch,
+}
+
+impl PersistentIndex {
+    fn new(columns: Vec<usize>) -> Self {
+        Self { columns, seq: 0 }
+    }
 }
 
 /// PersistentState stores data in SQlite.
@@ -69,9 +88,7 @@ pub struct PersistentState {
     db: Option<DB>,
     durability_mode: DurabilityMode,
     indices: Vec<PersistentIndex>,
-    // UNIX timestamp in seconds measured at startup.
-    // Used together with IndexSeq to uniquely identify a row.
-    timestamp: u64,
+    epoch: IndexEpoch,
 }
 
 impl SizeOf for PersistentState {
@@ -159,13 +176,17 @@ impl State for PersistentState {
         let existing = self.indices
             .iter()
             .any(|index| &index.columns[..] == columns);
-        if !existing {
-            self.indices.push(PersistentIndex {
-                columns: Vec::from(columns),
-                seq: 0,
-            });
+        if existing {
+            return;
         }
 
+        let cols = Vec::from(columns);
+        self.indices.push(PersistentIndex {
+            columns: cols,
+            seq: 0,
+        });
+
+        self.persist_meta();
         if self.rows() > 0 {
             let rows = self.cloned_records();
             // We wouldn't have to clear everything here, could just retrieve all the primary key
@@ -250,8 +271,10 @@ impl State for PersistentState {
 impl PersistentState {
     pub fn new(name: String, params: &PersistenceParameters) -> Self {
         let mut opts = rocksdb::Options::default();
+        let mut default_opts = rocksdb::Options::default();
         opts.set_compression_type(rocksdb::DBCompressionType::Lz4);
         opts.create_if_missing(true);
+        opts.create_missing_column_families(true);
 
         if let Some(ref path) = params.log_dir {
             // Append the db name to the WAL path to ensure
@@ -261,7 +284,7 @@ impl PersistentState {
 
         // Create prefixes by Self::transform_fn on all new inserted keys:
         let transform = rocksdb::SliceTransform::create("key", Self::transform_fn, None);
-        opts.set_prefix_extractor(transform);
+        default_opts.set_prefix_extractor(transform);
 
         // Assigns the number of threads for RocksDB's low priority background pool:
         opts.increase_parallelism(params.persistence_threads);
@@ -273,27 +296,57 @@ impl PersistentState {
         });
 
         let full_name = format!("{}.db", name);
-        let db = Some(DB::open(&opts, &full_name).unwrap());
-        let timestamp = SystemTime::now()
-            .duration_since(UNIX_EPOCH)
-            .unwrap()
-            .as_secs();
+        let column_families = vec![
+            ColumnFamilyDescriptor::new("default", default_opts),
+            ColumnFamilyDescriptor::new("meta", rocksdb::Options::default()),
+        ];
+
+        let db = DB::open_cf_descriptors(&opts, &full_name, column_families).unwrap();
+        let meta = Self::retrieve_and_update_meta(&db);
+        let indices = meta.indices
+            .into_iter()
+            .map(|columns| PersistentIndex::new(columns))
+            .collect();
 
         Self {
-            db,
-            timestamp,
+            indices,
+            epoch: meta.epoch,
             db_opts: opts,
+            db: Some(db),
             durability_mode: params.mode.clone(),
             name: full_name,
-            indices: Default::default(),
         }
     }
 
-    // Selects a prefix of `key` without the sequence number.
-    // Keys are on the form (IndexID, KeySize, Key, IndexTimestamp), with the types
-    // (u64, u64, Vec<DataType>, (u64, u32)).
-    //
-    // We'd like to retrieve the prefix (IndexID, KeySize, Key).
+    fn retrieve_and_update_meta(db: &DB) -> PersistentMeta {
+        let cf = db.cf_handle(META_CF).unwrap();
+        let indices = db.get_cf(cf, META_KEY).unwrap();
+        let mut meta = match indices {
+            Some(data) => bincode::deserialize(&*data).unwrap(),
+            None => PersistentMeta::default(),
+        };
+
+        meta.epoch += 1;
+        let data = bincode::serialize(&meta).unwrap();
+        db.put_cf(cf, META_KEY, &data).unwrap();
+        meta
+    }
+
+    fn persist_meta(&mut self) {
+        // Stores the columns of self.indices in RocksDB so that we don't rebuild indices on recovery.
+        let indices: Vec<Vec<usize>> = self.indices.iter().map(|i| i.columns.clone()).collect();
+        let meta = PersistentMeta {
+            indices,
+            epoch: self.epoch,
+        };
+
+        let data = bincode::serialize(&meta).unwrap();
+        let db = self.db.as_ref().unwrap();
+        let cf = db.cf_handle(META_CF).unwrap();
+        db.put_cf(cf, META_KEY, &data).unwrap();
+    }
+
+    // Selects a prefix of `key` without the epoch or sequence number.
     //
     // The RocksDB docs state the following:
     // > If non-nullptr, use the specified function to determine the
@@ -309,28 +362,26 @@ impl PersistentState {
     // > 3) If Compare(k1, k2) <= 0, then Compare(prefix(k1), prefix(k2)) <= 0
     // > 4) prefix(prefix(key)) == prefix(key)
     //
-    // To make sure that both 1 and 4 hold, we use the KeySize we've encoded earlier to
-    // trim away the IndexTimestamp.
+    // NOTE(ekmartin): Encoding the key size in the key increases the total size with 4 bytes.
+    // If we really wanted to avoid this while still maintaining the same serialization scheme
+    // we could do so by figuring out how many bytes our bincode serialized Vec<DataType> takes
+    // up here in transform_fn. Example:
+    // [DataType::Int(1), DataType::BigInt(10)] would be serialized as:
+    // 2u64 (vec length), 0u32 (enum variant), 1i32 (value), 1u32 (enum variant), 1i64 (value)
+    // By stepping through the serialized bytes and checking each enum variant we would know
+    // when we reached the end, and could then with certainty say whether we'd already
+    // prefix transformed this key before or not
+    // (without including the byte size of Vec<DataType>).
     fn transform_fn(key: &[u8]) -> Vec<u8> {
-        // IndexID is a u32, so bincode uses 4 bytes to serialize it:
+        // IndexID is a u32, so bincode uses 4 bytes to serialize it (which we'll skip past):
         let start = 4;
         // We encoded the size of the key itself with a u64, which bincode uses 8 bytes to encode:
         let size_offset = start + 8;
-        // NOTE(ekmartin): Encoding the key size in the key increases the total size with 4 bytes.
-        // If we really wanted to avoid this while still maintaining the same serialization scheme
-        // we could do so by figuring out how many bytes our bincode serialized Vec<DataType> takes
-        // up here in transform_fn. Example:
-        // [DataType::Int(1), DataType::BigInt(10)] would be serialized as:
-        // 2u64 (vec length), 0u32 (enum variant), 1i32 (value), 1u32 (enum variant), 1i64 (value)
-        // By stepping through the serialized bytes and checking each enum variant we would know
-        // when we reached the end, and could then with certainty say whether we'd already
-        // prefix transformed this key before or not
-        // (without including the byte size of Vec<DataType>).
         let key_size: u64 = bincode::deserialize(&key[start..size_offset]).unwrap();
         let prefix_len = size_offset + key_size as usize;
         let mut bytes = Vec::from(key);
 
-        // Strip away the IndexTimestamp if we haven't already done so:
+        // Strip away the IndexEpoch and IndexSeq if we haven't already done so:
         if key.len() > prefix_len {
             bytes.truncate(prefix_len);
         }
@@ -338,30 +389,26 @@ impl PersistentState {
         bytes
     }
 
-    // A key is built up of three components:
-    //   * `index`
-    //      This lets us lookup equally sized and typed indices correctly.
-    //      As an example, imagine if we have a table with the columns (Int, Int, Int).
-    //      How would we differ between an index on [0, 1] and [0, 2]?
-    //      We'd either have to include placeholders for all the columns, or, as we have done,
-    //      prefix each row with an identifier for that index.
+    // A key is built up of five components:
+    //  * `index_id`
+    //     Uniquely identifies the index in self.indices.
     //  * `row_size`
-    //      The size of `row`.
-    //      This lets us create prefixes with (index, row_size, row) in Self::transform_fn.
+    //      The byte size of `row` when serialized with binode.
     //  * `row`
     //      The actual index values.
-    //  * `ts`
-    //      Maintained for each index in `self.indices` and incremented on inserts. This lets us
-    //      store multiple values for a single key.
-    fn serialize_key(&self, index: IndexID, row: &Vec<&DataType>, seq: IndexSeq) -> Vec<u8> {
+    //  * `epoch`
+    //      Incremented on each PersistentState initialization.
+    //  * `seq`
+    //      Sequence number since last epoch.
+    fn serialize_key(&self, index_id: IndexID, row: &Vec<&DataType>, seq: IndexSeq) -> Vec<u8> {
         let size: u64 = bincode::serialized_size(&row).unwrap();
-        bincode::serialize(&(index, size, row, self.timestamp, seq)).unwrap()
+        bincode::serialize(&(index_id, size, row, self.epoch, seq)).unwrap()
     }
 
-    // When reading keys we ignore the sequence number, but for the logic in Self::transform_fn to
-    // work correctly we need a placeholder value.
-    fn serialize_prefix(&self, index: IndexID, row: &Vec<&DataType>) -> Vec<u8> {
-        self.serialize_key(index, row, 0)
+    // Used with DB::prefix_iterator to go through all the rows for a given .
+    fn serialize_prefix(&self, index: IndexID, key: &Vec<&DataType>) -> Vec<u8> {
+        let size: u64 = bincode::serialized_size(&key).unwrap();
+        bincode::serialize(&(index, size, key)).unwrap()
     }
 
     // Puts by primary key first, then retrieves the existing value for each index and appends the
