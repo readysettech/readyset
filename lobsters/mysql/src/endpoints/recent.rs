@@ -22,7 +22,7 @@ where
     let main = c.and_then(|c| {
         c.query(
             "SELECT `stories`.*, \
-             CAST(upvotes AS signed) - CAST(downvotes AS signed) AS saldo \
+             CAST(upvotes AS signed int) - CAST(downvotes AS signed int) AS saldo \
              FROM `stories` \
              WHERE `stories`.`merged_story_id` IS NULL \
              AND `stories`.`is_expired` = 0 \
