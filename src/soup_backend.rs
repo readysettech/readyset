@@ -202,7 +202,7 @@ impl SoupBackend {
             .map(|row| row.iter().map(|v| DataType::from(v)).collect())
             .collect();
 
-        self.do_insert(&q.table.name, &q.fields, data, results)
+        self.do_insert(&q, data, results)
     }
 
     fn handle_select<W: io::Write>(
@@ -412,7 +412,7 @@ impl SoupBackend {
         results: QueryResultWriter<W>,
     ) -> io::Result<()> {
         assert_eq!(q.fields.len(), data.len());
-        self.do_insert(&q.table.name, &q.fields, vec![data], results)
+        self.do_insert(&q, vec![data], results)
     }
 
     fn execute_select<W: io::Write>(
@@ -436,11 +436,13 @@ impl SoupBackend {
 
     fn do_insert<W: io::Write>(
         &mut self,
-        table: &str,
-        columns_specified: &Vec<nom_sql::Column>,
+        q: &InsertStatement,
         data: Vec<Vec<DataType>>,
         results: QueryResultWriter<W>,
     ) -> io::Result<()> {
+        let table = &q.table.name;
+        let columns_specified = &q.fields;
+
         // create a mutator if we don't have one for this table already
         let putter = self.inner.get_or_make_mutator(table);
         let schema: Vec<String> = putter.columns().to_vec();
@@ -525,8 +527,30 @@ impl SoupBackend {
             }
         }
 
-        trace!(self.log, "inserting {:?}", buf);
-        match putter.multi_put(buf) {
+        let result = if let Some(ref update_fields) = q.on_duplicate {
+            trace!(self.log, "inserting-or-updating {:?}", buf);
+            assert_eq!(buf.len(), 1);
+
+            let updates = {
+                let ts = self.table_schemas.read().unwrap();
+                let schema = &ts[&q.table.name];
+                // fake out an update query
+                let mut uq = UpdateStatement {
+                    table: nom_sql::Table::from(table.as_str()),
+                    fields: update_fields.clone(),
+                    where_clause: None,
+                };
+                utils::extract_update_params_and_fields(&mut uq, &mut None, schema)
+            };
+
+            // TODO(malte): why can't I consume buf here?
+            putter.insert_or_update(buf[0].clone(), updates)
+        } else {
+            trace!(self.log, "inserting {:?}", buf);
+            putter.multi_put(buf)
+        };
+
+        match result {
             Ok(_) => results.completed(data.len() as u64, first_inserted_id.unwrap_or(0) as u64),
             Err(e) => {
                 error!(self.log, "put error: {:?}", e);

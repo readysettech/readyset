@@ -349,12 +349,11 @@ fn walk_update_where(
     }
 }
 
-pub(crate) fn extract_update(
-    mut q: UpdateStatement,
-    params: Option<ParamParser>,
+pub(crate) fn extract_update_params_and_fields(
+    q: &mut UpdateStatement,
+    params: &mut Option<<ParamParser as IntoIterator>::IntoIter>,
     schema: &CreateTableStatement,
-) -> (Vec<DataType>, Vec<(usize, Modification)>) {
-    let mut params = params.map(|p| p.into_iter());
+) -> Vec<(usize, Modification)> {
     let mut updates = Vec::new();
     for (i, field) in schema.fields.iter().enumerate() {
         if let Some(sets) = q.fields
@@ -407,6 +406,16 @@ pub(crate) fn extract_update(
             }
         }
     }
+    updates
+}
+
+pub(crate) fn extract_update(
+    mut q: UpdateStatement,
+    params: Option<ParamParser>,
+    schema: &CreateTableStatement,
+) -> (Vec<DataType>, Vec<(usize, Modification)>) {
+    let mut params = params.map(|p| p.into_iter());
+    let updates = extract_update_params_and_fields(&mut q, &mut params, schema);
 
     let pkey = get_primary_key(schema);
     let where_clause = q.where_clause
