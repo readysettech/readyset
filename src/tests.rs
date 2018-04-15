@@ -52,7 +52,7 @@ impl Drop for LogName {
             fs::remove_file(log_path.unwrap()).unwrap();
         }
 
-        for db_path in glob::glob(&format!("./{}_*.db", self.name)).unwrap() {
+        for db_path in glob::glob(&format!("./{}-*.db", self.name)).unwrap() {
             fs::remove_dir_all(db_path.unwrap()).unwrap();
         }
     }

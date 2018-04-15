@@ -1308,7 +1308,7 @@ impl Domain {
                                     && params.persist_base_nodes
                                 {
                                     let base_name = format!(
-                                        "{}_{}_{}",
+                                        "{}-{}-{}",
                                         params.log_prefix,
                                         n.name(),
                                         self.shard.unwrap_or(0),
