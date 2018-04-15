@@ -59,7 +59,7 @@ where
                         t.drop_exec(
                             &format!(
                                 "UPDATE `users` \
-                                 SET `karma` = `karma` {} \
+                                 SET `users`.`karma` = `users`.`karma` {} \
                                  WHERE `users`.`id` = ?",
                                 match v {
                                     Vote::Up => "+ 1",
@@ -108,10 +108,10 @@ where
                         t.drop_exec(
                             &format!(
                                 "UPDATE stories SET \
-                                 upvotes = upvotes {}, \
-                                 downvotes = downvotes {}, \
-                                 hotness = ? \
-                                 WHERE id = ?",
+                                 stories.upvotes = stories.upvotes {}, \
+                                 stories.downvotes = stories.downvotes {}, \
+                                 stories.hotness = ? \
+                                 WHERE stories.id = ?",
                                 match v {
                                     Vote::Up => "+ 1",
                                     Vote::Down => "+ 0",

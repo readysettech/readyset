@@ -62,8 +62,8 @@ where
                         t.drop_exec(
                             &format!(
                                 "UPDATE `users` \
-                                 SET `karma` = `karma` {} \
-                                 WHERE `id` = ?",
+                                 SET `users`.`karma` = `users`.`karma` {} \
+                                 WHERE `users`.`id` = ?",
                                 match v {
                                     Vote::Up => "+ 1",
                                     Vote::Down => "- 1",
@@ -78,11 +78,11 @@ where
                         t.drop_exec(
                             &format!(
                                 "UPDATE `comments` \
-                                             SET \
-                                             `upvotes` = `upvotes` {}, \
-                                             `downvotes` = `downvotes` {}, \
-                                             `confidence` = ?
-                                             WHERE `id` = ?",
+                                 SET \
+                                 `comments`.`upvotes` = `comments`.`upvotes` {}, \
+                                 `comments`.`downvotes` = `comments`.`downvotes` {}, \
+                                 `comments`.`confidence` = ? \
+                                 WHERE `id` = ?",
                                 match v {
                                     Vote::Up => "+ 1",
                                     Vote::Down => "+ 0",
@@ -145,9 +145,9 @@ where
                         t.drop_exec(
                             &format!(
                                 "UPDATE stories SET \
-                                 upvotes = upvotes {}, \
-                                 downvotes = downvotes {}, \
-                                 hotness = ? \
+                                 stories.upvotes = stories.upvotes {}, \
+                                 stories.downvotes = stories.downvotes {}, \
+                                 stories.hotness = ? \
                                  WHERE id = ?",
                                 match v {
                                     Vote::Up => "+ 1",
