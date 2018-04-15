@@ -21,11 +21,12 @@ where
     // also note the `NOW()` hack to support dbs primed a while ago
     let main = c.and_then(|c| {
         c.query(
-            "SELECT `stories`.* \
+            "SELECT `stories`.*, \
+             CAST(upvotes AS signed) - CAST(downvotes AS signed) AS saldo \
              FROM `stories` \
              WHERE `stories`.`merged_story_id` IS NULL \
              AND `stories`.`is_expired` = 0 \
-             AND CAST(upvotes AS signed) - CAST(downvotes AS signed) <= 5 \
+             AND saldo <= 5 \
              ORDER BY stories.id DESC LIMIT 51",
         )
     }).and_then(|stories| {
