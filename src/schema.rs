@@ -78,7 +78,9 @@ pub(crate) fn schema_for_column(
     c: &nom_sql::Column,
 ) -> msql_srv::Column {
     if let Some(ref table) = c.table {
-        let col_schema = table_schemas[table]
+        let col_schema = table_schemas
+            .get(table)
+            .expect(&format!("Table {} not found!", table))
             .fields
             .iter()
             .find(|cc| cc.column.name == c.name)
