@@ -88,7 +88,7 @@ where
                         t.drop_exec(
                             "INSERT INTO keystores (`key`, `value`) \
                              VALUES (?, ?) \
-                             ON DUPLICATE KEY UPDATE `value` = `value` + 1",
+                             ON DUPLICATE KEY UPDATE `keystores`.`value` = `keystores`.`value` + 1",
                             (key, 1),
                         ).map(move |t| (t, story))
                     })
@@ -132,13 +132,10 @@ where
                     .and_then(move |(t, story)| {
                         // why oh why is story hotness *updated* here?!
                         t.drop_exec(
-                            &format!(
-                                "UPDATE `stories` \
-                                             SET `hotness` = {}
-                                             WHERE `stories`.`id` = ?",
-                                -19216.5479744,
-                            ),
-                            (story,),
+                            "UPDATE `stories` \
+                             SET `hotness` = ? \
+                             WHERE `stories`.`id` = ?",
+                            (-19216.5479744, story),
                         )
                     })
                     .and_then(|t| t.commit())

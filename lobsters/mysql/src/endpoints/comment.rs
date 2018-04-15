@@ -169,13 +169,10 @@ where
                     })
                     .and_then(move |(t, count)| {
                         t.drop_exec(
-                            &format!(
-                                "UPDATE `stories` \
-                                             SET `comments_count` = {}
+                            "UPDATE `stories` \
+                                             SET `comments_count` = ?
                                              WHERE `stories`.`id` = ?",
-                                count,
-                            ),
-                            (story,),
+                            (count, story),
                         )
                     })
                     .and_then(move |t| {
@@ -212,13 +209,10 @@ where
                     .and_then(move |t| {
                         // why oh why is story hotness *updated* here?!
                         t.drop_exec(
-                            &format!(
-                                "UPDATE `stories` \
-                                             SET `hotness` = {} - 1
-                                             WHERE `stories`.`id` = ?",
-                                hotness,
-                            ),
-                            (story,),
+                            "UPDATE `stories` \
+                             SET `hotness` = ? \
+                             WHERE `stories`.`id` = ?",
+                            (hotness - 1.0, story),
                         )
                     })
                     .and_then(move |t| {
@@ -226,7 +220,7 @@ where
                         t.drop_exec(
                             "INSERT INTO keystores (`key`, `value`) \
                              VALUES (?, ?) \
-                             ON DUPLICATE KEY UPDATE `value` = `value` + 1",
+                             ON DUPLICATE KEY UPDATE `keystores`.`value` = `keystores`.`value` + 1",
                             (key, 1),
                         )
                     })

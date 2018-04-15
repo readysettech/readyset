@@ -81,7 +81,7 @@ where
                                              SET \
                                              `upvotes` = `upvotes` {}, \
                                              `downvotes` = `downvotes` {}, \
-                                             `confidence` = {}
+                                             `confidence` = ?
                                              WHERE `id` = ?",
                                 match v {
                                     Vote::Up => "+ 1",
@@ -91,9 +91,8 @@ where
                                     Vote::Up => "+ 0",
                                     Vote::Down => "+ 1",
                                 },
-                                confidence,
                             ),
-                            (comment,),
+                            (confidence, comment),
                         )
                     })
                     .and_then(move |c| {
@@ -148,7 +147,7 @@ where
                                 "UPDATE stories SET \
                                  upvotes = upvotes {}, \
                                  downvotes = downvotes {}, \
-                                 hotness = '{}' \
+                                 hotness = ? \
                                  WHERE id = ?",
                                 match v {
                                     Vote::Up => "+ 1",
@@ -158,12 +157,14 @@ where
                                     Vote::Up => "+ 0",
                                     Vote::Down => "+ 1",
                                 },
+                            ),
+                            (
                                 score - match v {
                                     Vote::Up => 1.0,
                                     Vote::Down => -1.0,
-                                }
+                                },
+                                story,
                             ),
-                            (story,),
                         )
                     })
                     .and_then(|t| t.commit())
