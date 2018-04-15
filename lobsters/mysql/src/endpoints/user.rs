@@ -1,4 +1,5 @@
 use futures::Future;
+use futures::future::{self, Either};
 use my;
 use my::prelude::*;
 use trawler::UserId;
@@ -22,8 +23,8 @@ where
                 let uid = user.unwrap().get::<u32, _>("id").unwrap();
 
                 // most popular tag
-                c.drop_exec(
-                    "SELECT  `tags`.*, COUNT(*) AS `count` FROM `tags` \
+                c.prep_exec(
+                    "SELECT  `tags`.`id`, COUNT(*) AS `count` FROM `tags` \
                      INNER JOIN `taggings` ON `taggings`.`tag_id` = `tags`.`id` \
                      INNER JOIN `stories` ON `stories`.`id` = `taggings`.`story_id` \
                      WHERE `tags`.`inactive` = 0 \
@@ -31,29 +32,47 @@ where
                      GROUP BY `tags`.`id` \
                      ORDER BY `count` desc LIMIT 1",
                     (uid,),
-                ).and_then(move |c| {
-                        c.drop_exec(
-                            "SELECT  `keystores`.* \
-                             FROM `keystores` \
-                             WHERE `keystores`.`key` = ?",
-                            (format!("user:{}:stories_submitted", uid),),
-                        )
-                    })
-                    .and_then(move |c| {
-                        c.drop_exec(
-                            "SELECT  `keystores`.* \
-                             FROM `keystores` \
-                             WHERE `keystores`.`key` = ?",
-                            (format!("user:{}:comments_posted", uid),),
-                        )
-                    })
-                    .and_then(move |c| {
-                        c.drop_exec(
-                            "SELECT  1 AS one FROM `hats` \
-                             WHERE `hats`.`user_id` = ? LIMIT 1",
-                            (uid,),
-                        )
-                    })
+                )
+            })
+            .and_then(|result| result.collect_and_drop::<my::Row>())
+            .map(|(c, mut rows)| {
+                if rows.is_empty() {
+                    (c, None)
+                } else {
+                    (c, Some(rows.swap_remove(0)))
+                }
+            })
+            .and_then(move |(c, tag)| match tag {
+                Some(tag) => Either::A(c.drop_exec(
+                    "SELECT  `tags`.* \
+                     FROM `tags` \
+                     WHERE `tags`.`id` = ?",
+                    (tag.get::<u32, _>("id").unwrap(),),
+                )),
+                None => Either::B(future::ok(c)),
+            })
+            .and_then(move |c| {
+                c.drop_exec(
+                    "SELECT  `keystores`.* \
+                     FROM `keystores` \
+                     WHERE `keystores`.`key` = ?",
+                    (format!("user:{}:stories_submitted", uid),),
+                )
+            })
+            .and_then(move |c| {
+                c.drop_exec(
+                    "SELECT  `keystores`.* \
+                     FROM `keystores` \
+                     WHERE `keystores`.`key` = ?",
+                    (format!("user:{}:comments_posted", uid),),
+                )
+            })
+            .and_then(move |c| {
+                c.drop_exec(
+                    "SELECT  1 AS one FROM `hats` \
+                     WHERE `hats`.`user_id` = ? LIMIT 1",
+                    (uid,),
+                )
             })
             .map(|c| (c, true)),
     )
