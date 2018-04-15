@@ -1,5 +1,6 @@
 extern crate chrono;
 extern crate clap;
+extern crate failure;
 extern crate rusoto_core;
 extern crate rusoto_sts;
 extern crate tsunami;
@@ -10,6 +11,8 @@ use std::fs::{File, OpenOptions};
 use std::io::prelude::*;
 use std::{fmt, thread, time};
 use tsunami::*;
+
+const AMI: &str = "ami-2cbf1953";
 
 enum Backend {
     Mysql,
@@ -25,7 +28,8 @@ impl fmt::Display for Backend {
     }
 }
 
-fn git_and_cargo(ssh: &mut Session, dir: &str, bin: &str) -> io::Result<()> {
+fn git_and_cargo(ssh: &mut Session, dir: &str, bin: &str) -> Result<(), failure::Error> {
+    /*
     eprintln!(" -> git update");
     ssh.cmd(&format!("git -C {} pull", dir)).map(|out| {
         let out = out.trim_right();
@@ -33,6 +37,7 @@ fn git_and_cargo(ssh: &mut Session, dir: &str, bin: &str) -> io::Result<()> {
             eprintln!("{}", out);
         }
     })?;
+    */
 
     eprintln!(" -> rebuild");
     ssh.cmd(&format!(
@@ -67,17 +72,18 @@ fn main() {
     b.add_set(
         "server",
         1,
-        MachineSetup::new("c5.4xlarge", "ami-e7f65198", |ssh| {
+        MachineSetup::new("c5.4xlarge", AMI, |ssh| {
             eprintln!("==> setting up souplet");
             git_and_cargo(ssh, "distributary", "souplet")?;
             eprintln!("==> setting up zk-util");
             git_and_cargo(ssh, "distributary/consensus", "zk-util")?;
+            Ok(())
         }).as_user("ubuntu"),
     );
     b.add_set(
         "trawler",
         1,
-        MachineSetup::new("c5.9xlarge", "ami-e7f65198", |ssh| {
+        MachineSetup::new("c5.9xlarge", AMI, |ssh| {
             eprintln!("==> setting up trawler");
             git_and_cargo(ssh, "benchmarks/lobsters/mysql", "trawler-mysql")?;
             eprintln!("==> setting up trawler w/ soup hacks");
@@ -239,13 +245,13 @@ fn main() {
                     Local::now().time().format("%H:%M:%S")
                 );
 
-                let dir = match benchmark {
-                    Benchmark::Mysql => "benchmarks",
-                    Benchmark::Soup => "benchmarks-soup",
+                let dir = match backend {
+                    Backend::Mysql => "benchmarks",
+                    Backend::Soup => "benchmarks-soup",
                 };
 
                 let ip = match backend {
-                    Backend::Mysql => server.private_ip,
+                    Backend::Mysql => &*server.private_ip,
                     Backend::Soup => "127.0.0.1",
                 };
 
@@ -257,7 +263,7 @@ fn main() {
                         "{}/lobsters/mysql/target/release/trawler-mysql \
                          --warmup 0 \
                          --runtime 0 \
-                         --issuers 35 \
+                         --issuers 15 \
                          --prime \
                          \"mysql://lobsters:$(cat ~/mysql.pass)@{}/lobsters\"",
                         dir, ip
@@ -281,10 +287,10 @@ fn main() {
                          --reqscale {} \
                          --warmup 60 \
                          --runtime 30 \
-                         --issuers 35 \
+                         --issuers 15 \
                          --histogram lobsters-mysql-{}.hist \
                          \"mysql://lobsters:$(cat ~/mysql.pass)@{}/lobsters\"",
-                        scale, scale, ip
+                        dir, scale, scale, ip
                     ))
                     .and_then(|out| Ok(output.write_all(&out[..]).map(|_| ())?))?;
 
@@ -334,7 +340,7 @@ fn main() {
                                     eprintln!(" -> stopped mysql...\n{}", out);
                                 }
                             })?;
-                        ssh.cmd("sudo umount /mnt")?;
+                        server.ssh.as_mut().unwrap().cmd("sudo umount /mnt")?;
                     }
                     Backend::Soup => {
                         server
