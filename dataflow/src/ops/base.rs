@@ -394,13 +394,13 @@ mod tests {
         graph.node_weight_mut(global).unwrap().on_commit(&remap);
         graph.node_weight_mut(global).unwrap().add_to(0.into());
 
-        let mut state = State::default();
+        let mut state = MemoryState::default();
         for (_, (col, _)) in graph[global].suggest_indexes(global) {
             state.add_key(&col[..], None);
         }
 
         let mut states = StateMap::new();
-        states.insert(local, state);
+        states.insert(local, box state);
         let n = graph[global].take();
         let mut n = n.finalize(&graph);
 
