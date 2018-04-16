@@ -23,15 +23,15 @@ mod schema;
 mod soup_backend;
 mod utils;
 
-use distributary::{ExclusiveConnection, Mutator};
 use msql_srv::MysqlIntermediary;
 use nom_sql::{CreateTableStatement, SelectStatement};
-use soup_backend::SoupBackend;
-use std::collections::{BTreeMap, HashMap};
+use std::collections::HashMap;
 use std::net;
 use std::sync::atomic::AtomicUsize;
-use std::sync::{Arc, Mutex, RwLock};
+use std::sync::{Arc, RwLock};
 use std::thread;
+
+use soup_backend::SoupBackend;
 
 fn main() {
     use clap::{App, Arg};
@@ -84,8 +84,6 @@ fn main() {
     let schemas: Arc<RwLock<HashMap<String, CreateTableStatement>>> = Arc::default();
     let auto_increments: Arc<RwLock<HashMap<String, AtomicUsize>>> = Arc::default();
     let query_cache: Arc<RwLock<HashMap<SelectStatement, String>>> = Arc::default();
-    let mutators: Arc<RwLock<BTreeMap<String, Mutex<Vec<Mutator<ExclusiveConnection>>>>>> =
-        Arc::default();
 
     let mut threads = Vec::new();
     let mut i = 0;
@@ -94,11 +92,10 @@ fn main() {
 
         let builder = thread::Builder::new().name(format!("handler{}", i));
 
-        let (schemas, auto_increments, query_cache, mutators, query_counter, log) = (
+        let (schemas, auto_increments, query_cache, query_counter, log) = (
             schemas.clone(),
             auto_increments.clone(),
             query_cache.clone(),
-            mutators.clone(),
             query_counter.clone(),
             log.clone(),
         );
@@ -114,7 +111,6 @@ fn main() {
                     schemas,
                     auto_increments,
                     query_cache,
-                    mutators,
                     query_counter,
                     slowlog,
                     log,
