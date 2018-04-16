@@ -5,6 +5,10 @@ extern crate serde;
 #[macro_use]
 extern crate serde_derive;
 
+#[cfg(test)]
+#[macro_use]
+extern crate pretty_assertions;
+
 pub use self::arithmetic::{ArithmeticBase, ArithmeticExpression, ArithmeticOperator};
 pub use self::common::{FieldDefinitionExpression, FieldValueExpression, Literal,
                        LiteralExpression, Operator, Real, SqlType, TableKey};
