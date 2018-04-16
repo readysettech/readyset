@@ -165,23 +165,14 @@ impl State for PersistentState {
         let mut batch = None;
 
         // Build the new index for existing values:
-        self.db
-            .as_ref()
-            .unwrap()
-            .full_iterator(rocksdb::IteratorMode::Start)
-            .filter(|&(ref key, _)| {
-                // Filter out non-pk indices:
-                let i: IndexID = bincode::deserialize(&key).unwrap();
-                i == 0
-            })
-            .for_each(|(ref pk, ref value)| {
-                seq += 1;
-                let row: Vec<DataType> = bincode::deserialize(&value).unwrap();
-                let index_key = columns.iter().map(|i| &row[*i]).collect::<Vec<_>>();
-                let key = self.serialize_key(index_id, &index_key, seq);
-                let b = batch.get_or_insert_with(|| WriteBatch::default());
-                b.put(&key, &pk).unwrap();
-            });
+        self.all_rows().for_each(|(ref pk, ref value)| {
+            seq += 1;
+            let row: Vec<DataType> = bincode::deserialize(&value).unwrap();
+            let index_key = columns.iter().map(|i| &row[*i]).collect::<Vec<_>>();
+            let key = self.serialize_key(index_id, &index_key, seq);
+            let b = batch.get_or_insert_with(|| WriteBatch::default());
+            b.put(&key, &pk).unwrap();
+        });
 
         if let Some(b) = batch {
             self.db.as_ref().unwrap().write(b).unwrap();
@@ -199,30 +190,13 @@ impl State for PersistentState {
     }
 
     fn cloned_records(&self) -> Vec<Vec<DataType>> {
-        self.db
-            .as_ref()
-            .unwrap()
-            .full_iterator(rocksdb::IteratorMode::Start)
-            .filter(|&(ref key, _)| {
-                // Filter out non-pk indices:
-                let i: IndexID = bincode::deserialize(&key).unwrap();
-                i == 0
-            })
+        self.all_rows()
             .map(|(_, ref value)| bincode::deserialize(&value).unwrap())
             .collect()
     }
 
     fn rows(&self) -> usize {
-        self.db
-            .as_ref()
-            .unwrap()
-            .full_iterator(rocksdb::IteratorMode::Start)
-            .filter(|&(ref key, _)| {
-                // Filter out non-pk indices:
-                let i: IndexID = bincode::deserialize(&key).unwrap();
-                i == 0
-            })
-            .count()
+        self.all_rows().count()
     }
 
     fn clear(&mut self) {
@@ -242,19 +216,19 @@ impl State for PersistentState {
     }
 
     fn mark_filled(&mut self, _: Vec<DataType>, _: &Tag) {
-        unreachable!("PersistentBase can't be partial")
+        unreachable!("PersistentState can't be partial")
     }
 
     fn mark_hole(&mut self, _: &[DataType], _: &Tag) {
-        unreachable!("PersistentBase can't be partial")
+        unreachable!("PersistentState can't be partial")
     }
 
     fn evict_random_keys(&mut self, _: usize) -> (&[usize], Vec<Vec<DataType>>, u64) {
-        unreachable!("can't evict keys from PersistentBase")
+        unreachable!("can't evict keys from PersistentState")
     }
 
     fn evict_keys(&mut self, _: &Tag, _: &[Vec<DataType>]) -> (&[usize], u64) {
-        unreachable!("can't evict keys from PersistentBase")
+        unreachable!("can't evict keys from PersistentState")
     }
 }
 
@@ -419,10 +393,23 @@ impl PersistentState {
         bincode::serialize(&(index_id, size, row, self.epoch, seq)).unwrap()
     }
 
-    // Used with DB::prefix_iterator to go through all the rows for a given .
+    // Used with DB::prefix_iterator to go through all the rows for a given key.
     fn serialize_prefix(index: IndexID, key: &Vec<&DataType>) -> Vec<u8> {
         let size: u64 = bincode::serialized_size(&key).unwrap();
         bincode::serialize(&(index, size, key)).unwrap()
+    }
+
+    // Filters out secondary indices to return an iterator for the actual key-value pairs.
+    fn all_rows(&self) -> impl Iterator<Item = (Box<[u8]>, Box<[u8]>)> {
+        self.db
+            .as_ref()
+            .unwrap()
+            .full_iterator(rocksdb::IteratorMode::Start)
+            .filter(|&(ref key, _)| {
+                // Filter out non-pk indices:
+                let i: IndexID = bincode::deserialize(&key).unwrap();
+                i == 0
+            })
     }
 
     // Puts by primary key first, then retrieves the existing value for each index and appends the

@@ -1513,7 +1513,7 @@ mod tests {
     #[test]
     fn it_distinguishes_predicates() {
         // set up graph
-        let mut g = tests::build_local("it_distinguishes_predicatesit_distinguishes_predicates");
+        let mut g = tests::build_local("it_distinguishes_predicates");
         g.migrate(|mig| {
             let mut inc = SqlIncorporator::default();
             // Establish a base write type
