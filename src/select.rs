@@ -7,7 +7,6 @@ use common::FieldDefinitionExpression;
 use common::{as_alias, field_definition_expr, field_list, opt_multispace, statement_terminator,
              table_list, table_reference, unsigned_number};
 use condition::{condition_expr, ConditionExpression};
-use keywords::escape_if_keyword;
 use order::{order_clause, OrderClause};
 use join::{join_operator, JoinConstraint, JoinOperator, JoinRightSide};
 use table::Table;
