@@ -21,7 +21,13 @@ use utils;
 
 #[derive(Clone)]
 enum PreparedStatement {
-    Select(String, nom_sql::SelectStatement, Option<(usize, usize)>),
+    /// Query name, Query, result schema, optional parameter rewrite map
+    Select(
+        String,
+        nom_sql::SelectStatement,
+        Vec<msql_srv::Column>,
+        Option<(usize, usize)>,
+    ),
     Insert(nom_sql::InsertStatement),
     Update(nom_sql::UpdateStatement),
 }
@@ -29,7 +35,7 @@ enum PreparedStatement {
 impl fmt::Debug for PreparedStatement {
     fn fmt(&self, f: &mut fmt::Formatter) -> Result<(), fmt::Error> {
         match *self {
-            PreparedStatement::Select(ref qname, ref s, _) => write!(f, "{}: {}", qname, s),
+            PreparedStatement::Select(ref qname, ref s, _, _) => write!(f, "{}: {}", qname, s),
             PreparedStatement::Insert(ref s) => write!(f, "{}", s),
             PreparedStatement::Update(ref s) => write!(f, "{}", s),
         }
@@ -243,7 +249,12 @@ impl SoupBackend {
             .into_iter()
             .map(|l| vec![l.to_datatype()])
             .collect();
-        self.do_read(&qname, &q, keys, results)
+        // we need the schema for the result writer
+        let schema = {
+            let ts_lock = self.table_schemas.read().unwrap();
+            schema_for_select(&(*ts_lock), &q)
+        };
+        self.do_read(&qname, keys, schema.as_slice(), results)
     }
 
     fn handle_set<W: io::Write>(
@@ -398,7 +409,12 @@ impl SoupBackend {
         self.prepared_count += 1;
         self.prepared.insert(
             self.prepared_count,
-            PreparedStatement::Select(qname, q.clone(), rewritten.map(|(a, b)| (a, b.len()))),
+            PreparedStatement::Select(
+                qname,
+                q.clone(),
+                schema.clone(),
+                rewritten.map(|(a, b)| (a, b.len())),
+            ),
         );
         // TODO(malte): proactively get getter, to avoid &mut ref on exec?
         info.reply(self.prepared_count, params.as_slice(), schema.as_slice())
@@ -445,11 +461,11 @@ impl SoupBackend {
     fn execute_select<W: io::Write>(
         &mut self,
         qname: &str,
-        q: &SelectStatement,
         keys: Vec<Vec<DataType>>,
+        schema: &[msql_srv::Column],
         results: QueryResultWriter<W>,
     ) -> io::Result<()> {
-        self.do_read(qname, q, keys, results)
+        self.do_read(qname, keys, schema, results)
     }
 
     fn execute_update<W: io::Write>(
@@ -596,17 +612,10 @@ impl SoupBackend {
     fn do_read<W: io::Write>(
         &mut self,
         qname: &str,
-        q: &SelectStatement,
         keys: Vec<Vec<DataType>>,
+        schema: &[msql_srv::Column],
         results: QueryResultWriter<W>,
     ) -> io::Result<()> {
-        // we need the schema for the result writer
-        // TODO(malte): cache?
-        let schema = {
-            let ts_lock = self.table_schemas.read().unwrap();
-            schema_for_select(&(*ts_lock), q)
-        };
-
         // create a getter if we don't have one for this query already
         // TODO(malte): may need to make one anyway if the query has changed w.r.t. an
         // earlier one of the same name
@@ -646,7 +655,7 @@ impl SoupBackend {
         // if first lookup fails, there's no reason to try the others
         match getter.multi_lookup(keys, true) {
             Ok(d) => {
-                let mut rw = results.start(schema.as_slice()).unwrap();
+                let mut rw = results.start(schema).unwrap();
                 for resultsets in d {
                     for mut r in resultsets {
                         if is_bogo {
@@ -654,7 +663,7 @@ impl SoupBackend {
                             r.pop();
                         }
 
-                        for c in &*schema {
+                        for c in schema {
                             let coli = cols.iter()
                                 .position(|f| f == &c.column)
                                 .expect("tried to emit column not in getter");
@@ -767,7 +776,7 @@ impl<W: io::Write> MysqlShim<W> for SoupBackend {
         };
 
         let res = match prep {
-            PreparedStatement::Select(ref qname, ref q, ref rewritten) => {
+            PreparedStatement::Select(ref qname, ref _q, ref schema, ref rewritten) => {
                 let key = match rewritten {
                     Some((first_rewritten, nrewritten)) => {
                         // this is a little tricky
@@ -799,7 +808,7 @@ impl<W: io::Write> MysqlShim<W> for SoupBackend {
                             .collect::<Vec<_>>(),
                     ],
                 };
-                self.execute_select(&qname, &q, key, results)
+                self.execute_select(&qname, key, schema, results)
             }
             PreparedStatement::Insert(ref q) => {
                 let values: Vec<DataType> = params
