@@ -406,11 +406,11 @@ mod tests {
             right: Box::new(Base(Literal(Literal::Integer(12.into())))),
         });
 
-        let left = LogicalOp(ConditionTree {
+        let left = Bracketed(Box::new(LogicalOp(ConditionTree {
             operator: Operator::Or,
             left: Box::new(a),
             right: Box::new(b),
-        });
+        })));
 
         let right = ComparisonOp(ConditionTree {
             operator: Operator::Equal,

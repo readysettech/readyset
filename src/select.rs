@@ -190,14 +190,23 @@ named!(join_clause<&[u8], JoinClause>,
               do_parse!(
                   tag_no_case!("using") >>
                   multispace >>
-                  fields: delimited!(tag!("("), field_list, tag!(")")) >>
+                  fields: delimited!(
+                      terminated!(tag!("("), opt_multispace),
+                      field_list,
+                      preceded!(opt_multispace, tag!(")"))
+                  ) >>
                   (JoinConstraint::Using(fields))
               )
             | do_parse!(
                   tag_no_case!("on") >>
                   multispace >>
-                  cond: alt_complete!(delimited!(tag!("("), condition_expr, tag!(")"))
-                                      | condition_expr) >>
+                  cond: alt_complete!(
+                      delimited!(
+                          terminated!(tag!("("), opt_multispace),
+                          condition_expr,
+                          preceded!(opt_multispace, tag!(")"))
+                      )
+                      | condition_expr) >>
                   (JoinConstraint::On(cond))
               )
         ) >>
