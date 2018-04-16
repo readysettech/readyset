@@ -57,6 +57,9 @@ fn normalize_condition_expr(ce: &mut ConditionExpression, negate: bool) {
             mem::replace(ce, inner);
             normalize_condition_expr(ce, !negate);
         }
+        ConditionExpression::Bracketed(ref mut inner) => {
+            normalize_condition_expr(inner, negate);
+        }
         ConditionExpression::Base(_) => {}
     }
 }

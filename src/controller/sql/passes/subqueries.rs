@@ -21,6 +21,7 @@ fn extract_subqueries_from_condition<'a>(ce: &'a mut ConditionExpression) -> Vec
             lb.into_iter().chain(rb.into_iter()).collect()
         }
         NegationOp(ref mut bce) => extract_subqueries_from_condition(&mut *bce),
+        Bracketed(ref mut bce) => extract_subqueries_from_condition(&mut *bce),
         Base(ref mut cb) => match *cb {
             NestedSelect(_) => vec![Subquery::InComparison(cb)],
             _ => vec![],

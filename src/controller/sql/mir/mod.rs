@@ -1065,6 +1065,9 @@ impl SqlToMirConverter {
 
                 pred_nodes.push(f);
             }
+            Bracketed(ref inner) => {
+                pred_nodes.extend(self.make_predicate_nodes(name, parent, &*inner, nc));
+            }
             NegationOp(_) => unreachable!("negation should have been removed earlier"),
             Base(_) => unreachable!("dangling base predicate"),
         }

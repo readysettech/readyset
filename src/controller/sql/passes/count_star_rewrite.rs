@@ -13,12 +13,10 @@ fn extract_condition_columns(ce: &ConditionExpression) -> Vec<Column> {
             box ref left,
             box ref right,
             ..
-        }) => {
-            return extract_condition_columns(left)
-                .into_iter()
-                .chain(extract_condition_columns(right).into_iter())
-                .collect();
-        }
+        }) => extract_condition_columns(left)
+            .into_iter()
+            .chain(extract_condition_columns(right).into_iter())
+            .collect(),
         ConditionExpression::ComparisonOp(ConditionTree {
             box ref left,
             box ref right,
@@ -34,11 +32,10 @@ fn extract_condition_columns(ce: &ConditionExpression) -> Vec<Column> {
                 _ => (),
             }
 
-            return cols;
+            cols
         }
-        ConditionExpression::NegationOp(ref inner) => {
-            return extract_condition_columns(inner);
-        }
+        ConditionExpression::NegationOp(ref inner) => extract_condition_columns(inner),
+        ConditionExpression::Bracketed(ref inner) => extract_condition_columns(inner),
         ConditionExpression::Base(_) => unreachable!(),
     }
 }

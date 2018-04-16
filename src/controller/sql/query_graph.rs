@@ -403,6 +403,7 @@ fn classify_conditionals(
                 };
             };
         }
+        ConditionExpression::Bracketed(_) => unimplemented!(),
         ConditionExpression::Base(_) => {
             // don't expect to see a base here: we ought to exit when classifying its
             // parent selection predicate
