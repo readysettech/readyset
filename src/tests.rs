@@ -965,11 +965,9 @@ fn it_works_with_function_arithmetic() {
     // Let writes propagate:
     sleep();
 
-    // Retrieve the result of the count query:
-    let key = DataType::BigInt(max_price * 2);
-    let result = getter.lookup(&[key.clone()], true).unwrap();
+    let result = getter.lookup(&[0.into()], true).unwrap();
     assert_eq!(result.len(), 1);
-    assert_eq!(result[0][0], key);
+    assert_eq!(result[0][0], DataType::from(max_price * 2));
 }
 
 #[test]
