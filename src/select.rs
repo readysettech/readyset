@@ -26,7 +26,7 @@ impl fmt::Display for GroupByClause {
             "{}",
             self.columns
                 .iter()
-                .map(|c| format!("{}", escape_if_keyword(&c.name)))
+                .map(|c| format!("{}", c))
                 .collect::<Vec<_>>()
                 .join(", ")
         )?;
