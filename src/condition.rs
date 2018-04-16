@@ -83,6 +83,7 @@ pub enum ConditionExpression {
     LogicalOp(ConditionTree),
     NegationOp(Box<ConditionExpression>),
     Base(ConditionBase),
+    Bracketed(Box<ConditionExpression>),
 }
 
 impl fmt::Display for ConditionExpression {
@@ -91,6 +92,7 @@ impl fmt::Display for ConditionExpression {
             ConditionExpression::ComparisonOp(ref tree) => write!(f, "{}", tree),
             ConditionExpression::LogicalOp(ref tree) => write!(f, "{}", tree),
             ConditionExpression::NegationOp(ref expr) => write!(f, "NOT {}", expr),
+            ConditionExpression::Bracketed(ref expr) => write!(f, "({})", expr),
             ConditionExpression::Base(ref base) => write!(f, "{}", base),
         }
     }
@@ -137,10 +139,13 @@ named!(pub and_expr<&[u8], ConditionExpression>,
 
 named!(pub parenthetical_expr<&[u8], ConditionExpression>,
        alt_complete!(
-           delimited!(
-               do_parse!(tag!("(") >> opt_multispace >> ()),
-               condition_expr,
-               do_parse!(opt_multispace >> tag!(")") >> opt_multispace >> ())
+           map!(
+               delimited!(
+                   do_parse!(tag!("(") >> opt_multispace >> ()),
+                   condition_expr,
+                   do_parse!(opt_multispace >> tag!(")") >> opt_multispace >> ())
+               ),
+               |inner| (ConditionExpression::Bracketed(Box::new(inner)))
             )
        |   not_expr)
 );
@@ -593,5 +598,101 @@ mod tests {
             Literal(Literal::Null),
         );
         assert_eq!(res.unwrap().1, expected);
+    }
+
+    #[test]
+    fn complex_bracketing() {
+        use ConditionBase::*;
+        use common::Literal;
+
+        let cond = "`read_ribbons`.`is_following` = 1 \
+                    AND `comments`.`user_id` <> `read_ribbons`.`user_id` \
+                    AND `saldo` >= 0 \
+                    AND ( `parent_comments`.`user_id` = `read_ribbons`.`user_id` \
+                    OR ( `parent_comments`.`user_id` IS NULL \
+                    AND `stories`.`user_id` = `read_ribbons`.`user_id` ) ) \
+                    AND ( `parent_comments`.`id` IS NULL \
+                    OR `saldo` >= 0 ) \
+                    AND `read_ribbons`.`user_id` = ?";
+
+        let res = condition_expr(cond.as_bytes());
+        let expected = ConditionExpression::LogicalOp(ConditionTree {
+            operator: Operator::And,
+            left: Box::new(flat_condition_tree(
+                Operator::Equal,
+                Field("read_ribbons.is_following".into()),
+                Literal(Literal::Integer(1.into())),
+            )),
+            right: Box::new(ConditionExpression::LogicalOp(ConditionTree {
+                operator: Operator::And,
+                left: Box::new(flat_condition_tree(
+                    Operator::NotEqual,
+                    Field("comments.user_id".into()),
+                    Field("read_ribbons.user_id".into()),
+                )),
+                right: Box::new(ConditionExpression::LogicalOp(ConditionTree {
+                    operator: Operator::And,
+                    left: Box::new(flat_condition_tree(
+                        Operator::GreaterOrEqual,
+                        Field("saldo".into()),
+                        Literal(Literal::Integer(0.into())),
+                    )),
+                    right: Box::new(ConditionExpression::LogicalOp(ConditionTree {
+                        operator: Operator::And,
+                        left: Box::new(ConditionExpression::Bracketed(Box::new(
+                            ConditionExpression::LogicalOp(ConditionTree {
+                                operator: Operator::Or,
+                                left: Box::new(flat_condition_tree(
+                                    Operator::Equal,
+                                    Field("parent_comments.user_id".into()),
+                                    Field("read_ribbons.user_id".into()),
+                                )),
+                                right: Box::new(ConditionExpression::Bracketed(Box::new(
+                                    ConditionExpression::LogicalOp(ConditionTree {
+                                        operator: Operator::And,
+                                        left: Box::new(flat_condition_tree(
+                                            Operator::Equal,
+                                            Field("parent_comments.user_id".into()),
+                                            Literal(Literal::Null),
+                                        )),
+                                        right: Box::new(flat_condition_tree(
+                                            Operator::Equal,
+                                            Field("stories.user_id".into()),
+                                            Field("read_ribbons.user_id".into()),
+                                        )),
+                                    }),
+                                ))),
+                            }),
+                        ))),
+                        right: Box::new(ConditionExpression::LogicalOp(ConditionTree {
+                            operator: Operator::And,
+                            left: Box::new(ConditionExpression::Bracketed(Box::new(
+                                ConditionExpression::LogicalOp(ConditionTree {
+                                    operator: Operator::Or,
+                                    left: Box::new(flat_condition_tree(
+                                        Operator::Equal,
+                                        Field("parent_comments.id".into()),
+                                        Literal(Literal::Null),
+                                    )),
+                                    right: Box::new(flat_condition_tree(
+                                        Operator::GreaterOrEqual,
+                                        Field("saldo".into()),
+                                        Literal(Literal::Integer(0)),
+                                    )),
+                                }),
+                            ))),
+                            right: Box::new(flat_condition_tree(
+                                Operator::Equal,
+                                Field("read_ribbons.user_id".into()),
+                                Literal(Literal::Placeholder),
+                            )),
+                        })),
+                    })),
+                })),
+            })),
+        });
+        let res = res.unwrap().1;
+        println!("{:#?}", res);
+        assert_eq!(res, expected);
     }
 }
