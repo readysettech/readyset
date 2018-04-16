@@ -174,7 +174,7 @@ fn it_works_basic() {
 fn base_mutation() {
     use core::{Modification, Operation};
 
-    let mut g = ControllerBuilder::default().build_local();
+    let mut g = build_local("base_mutation");
     g.migrate(|mig| {
         let a = mig.add_ingredient("a", &["a", "b"], Base::new(vec![]).with_key(vec![0]));
         mig.maintain_anonymous(a, &[0]);
@@ -527,7 +527,7 @@ fn it_works_with_sql_recipe() {
 
 #[test]
 fn it_works_with_vote() {
-    let mut g = ControllerBuilder::default().build_local();
+    let mut g = build_local("it_works_with_vote");
     let sql = "
         # base tables
         CREATE TABLE Article (id int, title varchar(255), PRIMARY KEY(id));

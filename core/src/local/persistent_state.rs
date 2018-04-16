@@ -463,8 +463,24 @@ impl PersistentState {
 
     fn remove(&self, batch: &mut WriteBatch, r: &[DataType]) {
         let db = self.db.as_ref().unwrap();
-        for (i, index) in self.indices.iter().enumerate() {
-            let index_row = index.columns.iter().map(|i| &r[*i]).collect::<Vec<_>>();
+        let mut delete_cols: Vec<_> = self.indices
+            .iter()
+            .enumerate()
+            .map(|(i, index)| {
+                if self.primary_key.is_some() {
+                    (i + 1, &index.columns)
+                } else {
+                    (i, &index.columns)
+                }
+            })
+            .collect();
+
+        if let Some(ref pk_cols) = self.primary_key {
+            delete_cols.push((0, pk_cols));
+        }
+
+        for (i, columns) in delete_cols.into_iter() {
+            let index_row = columns.iter().map(|i| &r[*i]).collect::<Vec<_>>();
             let serialized_key = Self::serialize_prefix(i as u32, &index_row);
             for (key, _value) in db.prefix_iterator(&serialized_key) {
                 batch.delete(&key).unwrap();
@@ -625,6 +641,40 @@ mod tests {
                 assert_eq!(rows.len(), 2);
                 assert_eq!(&*rows[0], &first);
                 assert_eq!(&*rows[1], &second);
+            }
+            _ => unreachable!(),
+        }
+    }
+
+    #[test]
+    fn persistent_state_primary_key_delete() {
+        let pk = &[0];
+        let name = get_name("persistent_state_primary_key_delete");
+        let mut state = PersistentState::new(name, Some(pk), &PersistenceParameters::default());
+        let first: Vec<DataType> = vec![1.into(), 2.into()];
+        let second: Vec<DataType> = vec![10.into(), 20.into()];
+        state.add_key(pk, None);
+        state.process_records(&mut vec![first.clone(), second.clone()].into(), None);
+        match state.lookup(&[0], &KeyType::Single(&1.into())) {
+            LookupResult::Some(rows) => {
+                assert_eq!(rows.len(), 1);
+                assert_eq!(&*rows[0], &first);
+            }
+            _ => unreachable!(),
+        }
+
+        state.process_records(&mut vec![(first.clone(), false)].into(), None);
+        match state.lookup(&[0], &KeyType::Single(&1.into())) {
+            LookupResult::Some(rows) => {
+                assert_eq!(rows.len(), 0);
+            }
+            _ => unreachable!(),
+        }
+
+        match state.lookup(&[0], &KeyType::Single(&10.into())) {
+            LookupResult::Some(rows) => {
+                assert_eq!(rows.len(), 1);
+                assert_eq!(&*rows[0], &second);
             }
             _ => unreachable!(),
         }

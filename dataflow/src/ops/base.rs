@@ -360,8 +360,7 @@ mod tests {
         assert_eq!(b.unmodified, true);
     }
 
-    #[test]
-    fn lots_of_changes_in_same_batch() {
+    fn test_lots_of_changes_in_same_batch(mut state: Box<State>) {
         use node;
         use ops::base::Base;
         use prelude::*;
@@ -394,13 +393,12 @@ mod tests {
         graph.node_weight_mut(global).unwrap().on_commit(&remap);
         graph.node_weight_mut(global).unwrap().add_to(0.into());
 
-        let mut state = MemoryState::default();
         for (_, (col, _)) in graph[global].suggest_indexes(global) {
             state.add_key(&col[..], None);
         }
 
         let mut states = StateMap::new();
-        states.insert(local, box state);
+        states.insert(local, state);
         let n = graph[global].take();
         let mut n = n.finalize(&graph);
 
@@ -460,4 +458,20 @@ mod tests {
         );
     }
 
+    #[test]
+    fn lots_of_changes_in_same_batch() {
+        let state = MemoryState::default();
+        test_lots_of_changes_in_same_batch(box state);
+    }
+
+    #[test]
+    fn lots_of_changes_in_same_batch_persistent() {
+        let state = PersistentState::new(
+            String::from("lots_of_changes_in_same_batch_persistent"),
+            None,
+            &PersistenceParameters::default(),
+        );
+
+        test_lots_of_changes_in_same_batch(box state);
+    }
 }
