@@ -1,5 +1,4 @@
-use distributary::{ControllerHandle, DataType, ExclusiveConnection, Mutator, RemoteGetter,
-                   ZookeeperAuthority};
+use distributary::{ControllerHandle, DataType, Mutator, RemoteGetter, ZookeeperAuthority};
 
 use msql_srv::{self, *};
 use nom_sql::{self, ColumnConstraint, CreateTableStatement, InsertStatement, Literal,
@@ -11,7 +10,7 @@ use std::collections::{BTreeMap, HashMap};
 use std::fmt;
 use std::io;
 use std::sync::atomic;
-use std::sync::{self, Arc, Mutex, RwLock};
+use std::sync::{self, Arc, RwLock};
 use std::time;
 
 use convert::ToDataType;
@@ -44,6 +43,7 @@ impl fmt::Debug for PreparedStatement {
 
 struct SoupBackendInner {
     soup: ControllerHandle<ZookeeperAuthority>,
+    inputs: BTreeMap<String, Mutator>,
     outputs: BTreeMap<String, RemoteGetter>,
 }
 
@@ -56,6 +56,10 @@ impl SoupBackendInner {
         let mut ch = ControllerHandle::new(zk_auth);
 
         let soup = SoupBackendInner {
+            inputs: ch.inputs()
+                .into_iter()
+                .map(|(n, _)| (n.clone(), ch.get_mutator(&n).unwrap()))
+                .collect::<BTreeMap<String, Mutator>>(),
             outputs: ch.outputs()
                 .into_iter()
                 .map(|(n, _)| (n.clone(), ch.get_getter(&n).unwrap()))
@@ -66,6 +70,14 @@ impl SoupBackendInner {
         debug!(log, "Connected!");
 
         soup
+    }
+
+    fn get_or_make_mutator<'a, 'b>(&'a mut self, table: &'b str) -> &'a mut Mutator {
+        let soup = &mut self.soup;
+        self.inputs.entry(table.to_owned()).or_insert_with(|| {
+            soup.get_mutator(table)
+                .expect(&format!("no table named {}", table))
+        })
     }
 
     fn get_or_make_getter<'a, 'b>(&'a mut self, view: &'b str) -> &'a mut RemoteGetter {
@@ -83,7 +95,6 @@ pub struct SoupBackend {
 
     table_schemas: Arc<RwLock<HashMap<String, CreateTableStatement>>>,
     auto_increments: Arc<RwLock<HashMap<String, atomic::AtomicUsize>>>,
-    mutators: Arc<RwLock<BTreeMap<String, Mutex<Vec<Mutator<ExclusiveConnection>>>>>>,
 
     query_count: Arc<atomic::AtomicUsize>,
 
@@ -105,7 +116,6 @@ impl SoupBackend {
         schemas: Arc<RwLock<HashMap<String, CreateTableStatement>>>,
         auto_increments: Arc<RwLock<HashMap<String, atomic::AtomicUsize>>>,
         query_cache: Arc<RwLock<HashMap<SelectStatement, String>>>,
-        mutators: Arc<RwLock<BTreeMap<String, Mutex<Vec<Mutator<ExclusiveConnection>>>>>>,
         query_counter: Arc<atomic::AtomicUsize>,
         slowlog: bool,
         log: slog::Logger,
@@ -116,7 +126,6 @@ impl SoupBackend {
 
             table_schemas: schemas,
             auto_increments: auto_increments,
-            mutators: mutators,
 
             query_count: query_counter,
 
@@ -128,38 +137,6 @@ impl SoupBackend {
 
             slowlog,
         }
-    }
-
-    fn get_or_make_mutator(&mut self, table: &str) -> Mutator<ExclusiveConnection> {
-        let ms = self.mutators.read().unwrap();
-        if let Some(ms) = ms.get(table) {
-            let mut ms = ms.lock().unwrap();
-            if !ms.is_empty() {
-                ms.pop().unwrap()
-            } else {
-                drop(ms);
-                self.inner
-                    .soup
-                    .get_mutator(table)
-                    .expect(&format!("no table named {}", table))
-                    .into_exclusive()
-            }
-        } else {
-            drop(ms);
-            self.inner
-                .soup
-                .get_mutator(table)
-                .expect(&format!("no table named {}", table))
-                .into_exclusive()
-        }
-    }
-
-    fn return_mutator(&mut self, table: &str, m: Mutator<ExclusiveConnection>) {
-        let table = table.to_owned();
-        let mut ms = self.mutators.write().unwrap();
-        let ms = ms.entry(table).or_insert_with(Mutex::default);
-        let mut ms = ms.lock().unwrap();
-        ms.push(m);
     }
 
     fn handle_create_table<W: io::Write>(
@@ -187,17 +164,17 @@ impl SoupBackend {
         let cond = q.where_clause
             .expect("only supports DELETEs with WHERE-clauses");
 
-        // create a mutator if we don't have one for this table already
-        let mut mutator = self.get_or_make_mutator(&q.table.name);
-
         let ts = self.table_schemas.read().unwrap();
         let pkey = utils::get_primary_key(&ts[&q.table.name])
             .into_iter()
             .map(|(_, c)| c)
             .collect();
 
+        // create a mutator if we don't have one for this table already
+        let mutator = self.inner.get_or_make_mutator(&q.table.name);
+
         match utils::flatten_conditional(&cond, &pkey) {
-            None => results.completed(0, 0)?,
+            None => results.completed(0, 0),
             Some(ref flattened) if flattened.len() == 0 => {
                 panic!("DELETE only supports WHERE-clauses on primary keys");
             }
@@ -216,13 +193,9 @@ impl SoupBackend {
                     };
                 }
 
-                results.completed(count, 0)?
+                results.completed(count, 0)
             }
         }
-
-        drop(ts);
-        self.return_mutator(&q.table.name, mutator);
-        Ok(())
     }
 
     fn handle_insert<W: io::Write>(
@@ -487,7 +460,7 @@ impl SoupBackend {
         let columns_specified = &q.fields;
 
         // create a mutator if we don't have one for this table already
-        let mut putter = self.get_or_make_mutator(table);
+        let putter = self.inner.get_or_make_mutator(table);
         let schema: Vec<String> = putter.columns().to_vec();
 
         // handle auto increment
@@ -593,10 +566,6 @@ impl SoupBackend {
             putter.multi_put(buf)
         };
 
-        drop(ts_lock);
-        drop(ai_lock);
-        self.return_mutator(table, putter);
-
         match result {
             Ok(_) => results.completed(data.len() as u64, first_inserted_id.unwrap_or(0) as u64),
             Err(e) => {
@@ -690,27 +659,25 @@ impl SoupBackend {
         params: Option<ParamParser>,
         results: QueryResultWriter<W>,
     ) -> io::Result<()> {
-        let mut mutator = self.get_or_make_mutator(&q.table.name);
+        let mutator = self.inner.get_or_make_mutator(&q.table.name);
 
         let q = q.into_owned();
-        let (table, key, updates) = {
+        let (key, updates) = {
             let ts = self.table_schemas.read().unwrap();
             let schema = &ts[&q.table.name];
             utils::extract_update(q, params, schema)
         };
 
         match mutator.update(key, updates) {
-            Ok(..) => results.completed(1 /* TODO */, 0)?,
+            Ok(..) => results.completed(1 /* TODO */, 0),
             Err(e) => {
                 error!(self.log, "update: {:?}", e);
                 results.error(
                     msql_srv::ErrorKind::ER_UNKNOWN_ERROR,
                     format!("{:?}", e).as_bytes(),
-                )?
+                )
             }
         }
-        self.return_mutator(&table, mutator);
-        Ok(())
     }
 }
 

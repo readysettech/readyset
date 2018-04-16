@@ -413,7 +413,7 @@ pub(crate) fn extract_update(
     mut q: UpdateStatement,
     params: Option<ParamParser>,
     schema: &CreateTableStatement,
-) -> (String, Vec<DataType>, Vec<(usize, Modification)>) {
+) -> (Vec<DataType>, Vec<(usize, Modification)>) {
     let mut params = params.map(|p| p.into_iter());
     let updates = extract_update_params_and_fields(&mut q, &mut params, schema);
 
@@ -427,7 +427,7 @@ pub(crate) fn extract_update(
         .map(|&(_, c)| col_to_val.remove(&c.name).unwrap())
         .collect();
 
-    (q.table.name, key, updates)
+    (key, updates)
 }
 
 #[cfg(test)]
