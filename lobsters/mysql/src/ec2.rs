@@ -1,5 +1,6 @@
 extern crate chrono;
 extern crate clap;
+extern crate failure;
 extern crate rusoto_core;
 extern crate rusoto_sts;
 extern crate tsunami;
@@ -11,6 +12,9 @@ use std::io::prelude::*;
 use std::{fmt, thread, time};
 use tsunami::*;
 
+const AMI: &str = "ami-dab81ea5";
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 enum Backend {
     Mysql,
     Soup,
@@ -25,7 +29,8 @@ impl fmt::Display for Backend {
     }
 }
 
-fn git_and_cargo(ssh: &mut Session, dir: &str, bin: &str) -> io::Result<()> {
+fn git_and_cargo(ssh: &mut Session, dir: &str, bin: &str) -> Result<(), failure::Error> {
+    /*
     eprintln!(" -> git update");
     ssh.cmd(&format!("git -C {} pull", dir)).map(|out| {
         let out = out.trim_right();
@@ -33,6 +38,7 @@ fn git_and_cargo(ssh: &mut Session, dir: &str, bin: &str) -> io::Result<()> {
             eprintln!("{}", out);
         }
     })?;
+    */
 
     eprintln!(" -> rebuild");
     ssh.cmd(&format!(
@@ -67,17 +73,18 @@ fn main() {
     b.add_set(
         "server",
         1,
-        MachineSetup::new("c5.4xlarge", "ami-e7f65198", |ssh| {
+        MachineSetup::new("c5.4xlarge", AMI, |ssh| {
             eprintln!("==> setting up souplet");
             git_and_cargo(ssh, "distributary", "souplet")?;
             eprintln!("==> setting up zk-util");
             git_and_cargo(ssh, "distributary/consensus", "zk-util")?;
+            Ok(())
         }).as_user("ubuntu"),
     );
     b.add_set(
         "trawler",
         1,
-        MachineSetup::new("c5.9xlarge", "ami-e7f65198", |ssh| {
+        MachineSetup::new("c5.18xlarge", AMI, |ssh| {
             eprintln!("==> setting up trawler");
             git_and_cargo(ssh, "benchmarks/lobsters/mysql", "trawler-mysql")?;
             eprintln!("==> setting up trawler w/ soup hacks");
@@ -127,7 +134,7 @@ fn main() {
             .unwrap()
     } else {
         let mut f = File::create("load.log").unwrap();
-        f.write_all(b"# reqscale sload1 sload5 cload1 cload5\n")
+        f.write_all(b"#reqscale backend sload1 sload5 cload1 cload5\n")
             .unwrap();
         f
     };
@@ -137,8 +144,22 @@ fn main() {
         let mut server = vms.remove("server").unwrap().swap_remove(0);
         let mut trawler = vms.remove("trawler").unwrap().swap_remove(0);
 
+        let backends = [Backend::Mysql, Backend::Soup];
+        let mut survived_last: HashMap<_, _> = backends.iter().map(|b| (b, true)).collect();
+
+        // allow reuse of time-wait ports
+        trawler
+            .ssh
+            .as_mut()
+            .unwrap()
+            .cmd("sh -c 'echo 1 | sudo tee /proc/sys/net/ipv4/tcp_tw_reuse'")?;
+
         for scale in scales {
-            for backend in &[Backend::Mysql, Backend::Soup] {
+            for backend in &backends {
+                if !survived_last[backend] {
+                    continue;
+                }
+
                 eprintln!("==> benchmark {} w/ {}x load", backend, scale);
 
                 match backend {
@@ -191,21 +212,17 @@ fn main() {
                             .as_mut()
                             .unwrap()
                             .cmd(&format!(
-                                "sh -c 'distributary/target/release/souplet \
+                                "sh -c 'nohup \
+                                 distributary/target/release/souplet \
                                  --deployment trawler \
                                  --durability memory \
                                  --address {} \
                                  --readers 14 -w 2 \
                                  --shards 0 \
-                                 &'",
+                                 > souplet.log 2>&1 &'",
                                 server.private_ip,
                             ))
-                            .map(|out| {
-                                let out = out.trim_right();
-                                if !out.is_empty() {
-                                    eprintln!(" -> soup didn't start...\n{}", out);
-                                }
-                            })?;
+                            .map(|_| ())?;
 
                         // start the shim (which will block until soup is available)
                         trawler
@@ -213,19 +230,15 @@ fn main() {
                             .as_mut()
                             .unwrap()
                             .cmd(&format!(
-                                "sh -c 'shim/target/release/distributary-mysql \
+                                "sh -c 'nohup \
+                                 shim/target/release/distributary-mysql \
                                  --deployment trawler \
                                  -z {}:2181 \
                                  -p 3306 \
-                                 &'",
+                                 > shim.log 2>&1 &'",
                                 server.private_ip,
                             ))
-                            .map(|out| {
-                                let out = out.trim_right();
-                                if !out.is_empty() {
-                                    eprintln!(" -> shim didn't start...\n{}", out);
-                                }
-                            })?;
+                            .map(|_| ())?;
 
                         // give soup a chance to start
                         thread::sleep(time::Duration::from_secs(5));
@@ -239,13 +252,13 @@ fn main() {
                     Local::now().time().format("%H:%M:%S")
                 );
 
-                let dir = match benchmark {
-                    Benchmark::Mysql => "benchmarks",
-                    Benchmark::Soup => "benchmarks-soup",
+                let dir = match backend {
+                    Backend::Mysql => "benchmarks",
+                    Backend::Soup => "benchmarks-soup",
                 };
 
                 let ip = match backend {
-                    Backend::Mysql => server.private_ip,
+                    Backend::Mysql => &*server.private_ip,
                     Backend::Soup => "127.0.0.1",
                 };
 
@@ -257,7 +270,7 @@ fn main() {
                         "{}/lobsters/mysql/target/release/trawler-mysql \
                          --warmup 0 \
                          --runtime 0 \
-                         --issuers 35 \
+                         --issuers 15 \
                          --prime \
                          \"mysql://lobsters:$(cat ~/mysql.pass)@{}/lobsters\"",
                         dir, ip
@@ -281,10 +294,10 @@ fn main() {
                          --reqscale {} \
                          --warmup 60 \
                          --runtime 30 \
-                         --issuers 35 \
-                         --histogram lobsters-mysql-{}.hist \
+                         --issuers 15 \
+                         --histogram lobsters-{}-{}.hist \
                          \"mysql://lobsters:$(cat ~/mysql.pass)@{}/lobsters\"",
-                        scale, scale, ip
+                        dir, scale, backend, scale, ip
                     ))
                     .and_then(|out| Ok(output.write_all(&out[..]).map(|_| ())?))?;
 
@@ -306,7 +319,7 @@ fn main() {
                     .cmd("awk '{print $1\" \"$2}' /proc/loadavg")?;
                 let cload = cload.trim_right();
 
-                load.write_all(format!("{} ", scale).as_bytes())?;
+                load.write_all(format!("{} {} ", scale, backend).as_bytes())?;
                 load.write_all(sload.as_bytes())?;
                 load.write_all(b" ")?;
                 load.write_all(cload.as_bytes())?;
@@ -334,14 +347,14 @@ fn main() {
                                     eprintln!(" -> stopped mysql...\n{}", out);
                                 }
                             })?;
-                        ssh.cmd("sudo umount /mnt")?;
+                        server.ssh.as_mut().unwrap().cmd("sudo umount /mnt")?;
                     }
                     Backend::Soup => {
                         server
                             .ssh
                             .as_mut()
                             .unwrap()
-                            .cmd("sh -c 'pkill -af souplet 2>&1'")
+                            .cmd("sh -c 'pkill -f souplet 2>&1'")
                             .map(|out| {
                                 let out = out.trim_right();
                                 if !out.is_empty() {
@@ -352,7 +365,7 @@ fn main() {
                             .ssh
                             .as_mut()
                             .unwrap()
-                            .cmd("sh -c 'pkill -af distributary-mysql 2>&1'")
+                            .cmd("sh -c 'pkill -f distributary-mysql 2>&1'")
                             .map(|out| {
                                 let out = out.trim_right();
                                 if !out.is_empty() {
@@ -365,7 +378,24 @@ fn main() {
                     }
                 }
 
-                // TODO: stop iterating through scales for this backend if it's not keeping up
+                // stop iterating through scales for this backend if it's not keeping up
+                let sload: f64 = sload
+                    .split_whitespace()
+                    .next()
+                    .and_then(|l| l.parse().ok())
+                    .unwrap_or(0.0);
+                let cload: f64 = cload
+                    .split_whitespace()
+                    .next()
+                    .and_then(|l| l.parse().ok())
+                    .unwrap_or(0.0);
+                if sload > 16.5 || cload > 72.5 {
+                    eprintln!(
+                        " -> backend is not keeping up (s: {}/16, c: {}/36)",
+                        sload, cload
+                    );
+                    *survived_last.get_mut(backend).unwrap() = false;
+                }
             }
         }
 
