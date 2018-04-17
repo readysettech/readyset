@@ -118,9 +118,8 @@ fn main() {
     let scales: Box<Iterator<Item = usize>> = args.values_of("SCALE")
         .map(|it| Box::new(it.map(|s| s.parse().unwrap())) as Box<_>)
         .unwrap_or(Box::new(
-            [
-                1usize, 100, 200, 400, 600, 800, 850, 900, 950, 1000, 1050, 1100, 1200, 1400, 1600
-            ].into_iter()
+            [4000usize, 6000, 8000, 10000, 12000, 14000, 9000, 1000, 2000]
+                .into_iter()
                 .map(|&s| s),
         ) as Box<_>);
 
@@ -233,6 +232,7 @@ fn main() {
                                 "sh -c 'nohup \
                                  shim/target/release/distributary-mysql \
                                  --deployment trawler \
+                                 --no-sanitize --no-static-responses \
                                  -z {}:2181 \
                                  -p 3306 \
                                  > shim.log 2>&1 &'",
@@ -270,7 +270,7 @@ fn main() {
                         "{}/lobsters/mysql/target/release/trawler-mysql \
                          --warmup 0 \
                          --runtime 0 \
-                         --issuers 15 \
+                         --issuers 20 \
                          --prime \
                          \"mysql://lobsters:$(cat ~/mysql.pass)@{}/lobsters\"",
                         dir, ip
@@ -294,7 +294,7 @@ fn main() {
                          --reqscale {} \
                          --warmup 60 \
                          --runtime 30 \
-                         --issuers 15 \
+                         --issuers 20 \
                          --histogram lobsters-{}-{}.hist \
                          \"mysql://lobsters:$(cat ~/mysql.pass)@{}/lobsters\"",
                         dir, scale, backend, scale, ip
@@ -391,7 +391,7 @@ fn main() {
                     .unwrap_or(0.0);
                 if sload > 16.5 || cload > 72.5 {
                     eprintln!(
-                        " -> backend is not keeping up (s: {}/16, c: {}/36)",
+                        " -> backend is not keeping up (s: {}/16, c: {}/72)",
                         sload, cload
                     );
                     *survived_last.get_mut(backend).unwrap() = false;
