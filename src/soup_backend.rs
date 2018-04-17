@@ -2,7 +2,7 @@ use distributary::{ControllerHandle, DataType, Mutator, RemoteGetter, ZookeeperA
 
 use msql_srv::{self, *};
 use nom_sql::{self, ColumnConstraint, CreateTableStatement, InsertStatement, Literal,
-              SelectStatement, UpdateStatement};
+              SelectStatement, UpdateStatement, SqlQuery};
 
 use slog;
 use std::borrow::Cow;
@@ -106,6 +106,8 @@ pub struct SoupBackend {
     /// thread-local version of `cached` (consulted first)
     tl_cached: HashMap<SelectStatement, String>,
 
+    parsed: HashMap<String, (SqlQuery, Vec<nom_sql::Literal>)>,
+
     sanitize: bool,
     slowlog: bool,
     static_responses: bool,
@@ -138,6 +140,8 @@ impl SoupBackend {
 
             cached: query_cache,
             tl_cached: HashMap::new(),
+
+            parsed: HashMap::new(),
 
             sanitize,
             slowlog,
@@ -697,35 +701,44 @@ impl<W: io::Write> MysqlShim<W> for SoupBackend {
             query.to_owned()
         };
 
-        match nom_sql::parse_query(&query) {
-            Ok(sql_q) => {
-                let sql_q = {
-                    let ts_lock = self.table_schemas.read().unwrap();
-                    let table_schemas = &(*ts_lock);
-                    rewrite::expand_stars(sql_q, table_schemas)
-                };
+        let sql_q = match self.parsed.get(&query) {
+            None =>
+                match nom_sql::parse_query(&query) {
+                    Ok(sql_q) => {
+                        let sql_q = {
+                            let ts_lock = self.table_schemas.read().unwrap();
+                            let table_schemas = &(*ts_lock);
+                            rewrite::expand_stars(sql_q, table_schemas)
+                        };
 
-                match sql_q {
-                    mut sql_q @ nom_sql::SqlQuery::Select(_) => self.prepare_select(sql_q, info),
-                    mut sql_q @ nom_sql::SqlQuery::Insert(_) => self.prepare_insert(sql_q, info),
-                    mut sql_q @ nom_sql::SqlQuery::Update(_) => self.prepare_update(sql_q, info),
-                    _ => {
-                        // Soup only supports prepared SELECT statements at the moment
-                        error!(
-                            self.log,
-                            "unsupported query for prepared statement: {}", query
-                        );
-                        return info.error(
-                            msql_srv::ErrorKind::ER_NOT_SUPPORTED_YET,
-                            "unsupported query".as_bytes(),
-                        );
+                        self.parsed.insert(query.to_owned(), (sql_q.clone(), vec![]));
+
+                        sql_q
+
+                    }
+                    Err(e) => {
+                        // if nom-sql rejects the query, there is no chance Soup will like it
+                        error!(self.log, "query can't be parsed: \"{}\"", query);
+                        return info.error(msql_srv::ErrorKind::ER_PARSE_ERROR, e.as_bytes())
                     }
                 }
-            }
-            Err(e) => {
-                // if nom-sql rejects the query, there is no chance Soup will like it
-                error!(self.log, "query can't be parsed: \"{}\"", query);
-                info.error(msql_srv::ErrorKind::ER_PARSE_ERROR, e.as_bytes())
+            Some((q, _)) => q.clone(),
+        };
+
+        match sql_q {
+            mut sql_q @ nom_sql::SqlQuery::Select(_) => self.prepare_select(sql_q, info),
+            mut sql_q @ nom_sql::SqlQuery::Insert(_) => self.prepare_insert(sql_q, info),
+            mut sql_q @ nom_sql::SqlQuery::Update(_) => self.prepare_update(sql_q, info),
+            _ => {
+                // Soup only supports prepared SELECT statements at the moment
+                error!(
+                    self.log,
+                    "unsupported query for prepared statement: {}", query
+                );
+                return info.error(
+                    msql_srv::ErrorKind::ER_NOT_SUPPORTED_YET,
+                    "unsupported query".as_bytes(),
+                );
             }
         }
     }
@@ -882,59 +895,68 @@ impl<W: io::Write> MysqlShim<W> for SoupBackend {
             }
         }
 
-        match nom_sql::parse_query(&query) {
-            Ok(q) => {
-                let mut q = {
-                    let ts_lock = self.table_schemas.read().unwrap();
-                    let table_schemas = &(*ts_lock);
-                    rewrite::expand_stars(q, table_schemas)
-                };
+        let (q, use_params) = match self.parsed.get(&query) {
+            None => {
+                match nom_sql::parse_query(&query) {
+                    Ok(q) => {
+                        let mut q = {
+                            let ts_lock = self.table_schemas.read().unwrap();
+                            let table_schemas = &(*ts_lock);
+                            rewrite::expand_stars(q, table_schemas)
+                        };
 
-                let mut use_params = Vec::new();
-                if let Some((_, p)) = rewrite::collapse_where_in(&mut q, true) {
-                    use_params = p;
-                }
+                        let mut use_params = Vec::new();
+                        if let Some((_, p)) = rewrite::collapse_where_in(&mut q, true) {
+                            use_params = p;
+                        }
 
-                let res = match q {
-                    nom_sql::SqlQuery::CreateTable(q) => self.handle_create_table(q, results),
-                    nom_sql::SqlQuery::Insert(q) => self.handle_insert(q, results),
-                    nom_sql::SqlQuery::Select(q) => self.handle_select(q, use_params, results),
-                    nom_sql::SqlQuery::Set(q) => self.handle_set(q, results),
-                    nom_sql::SqlQuery::Update(q) => self.handle_update(q, results),
-                    nom_sql::SqlQuery::Delete(q) => self.handle_delete(q, results),
-                    nom_sql::SqlQuery::DropTable(q) => {
-                        warn!(self.log, "Ignoring DROP TABLE query: \"{}\"", q);
+                        self.parsed.insert(query.to_owned(), (q.clone(), use_params.clone()));
+
+                        (q, use_params)
+                    },
+                    Err(_e) => {
+                        // if nom-sql rejects the query, there is no chance Soup will like it
+                        error!(self.log, "query can't be parsed: \"{}\"", query);
                         return results.completed(0, 0);
-                    }
-                    _ => {
-                        error!(self.log, "Unsupported query: {}", query);
-                        return results.error(
-                            msql_srv::ErrorKind::ER_NOT_SUPPORTED_YET,
-                            "unsupported query".as_bytes(),
-                        );
-                    }
-                };
-
-                if self.slowlog {
-                    let took = start.elapsed();
-                    if took.as_secs() > 0 || took.subsec_nanos() > 5_000_000 {
-                        warn!(
-                            self.log,
-                            "{} took {}ms",
-                            query,
-                            took.as_secs() * 1_000 + took.subsec_nanos() as u64 / 1_000_000
-                        );
-                    }
+                        //return results.error(msql_srv::ErrorKind::ER_PARSE_ERROR, e.as_bytes());
+                    },
                 }
+            },
+            Some((q, use_params)) => (q.clone(), use_params.clone()),
+        };
 
-                res
+        let res = match q {
+            nom_sql::SqlQuery::CreateTable(q) => self.handle_create_table(q, results),
+            nom_sql::SqlQuery::Insert(q) => self.handle_insert(q, results),
+            nom_sql::SqlQuery::Select(q) => self.handle_select(q, use_params, results),
+            nom_sql::SqlQuery::Set(q) => self.handle_set(q, results),
+            nom_sql::SqlQuery::Update(q) => self.handle_update(q, results),
+            nom_sql::SqlQuery::Delete(q) => self.handle_delete(q, results),
+            nom_sql::SqlQuery::DropTable(q) => {
+                warn!(self.log, "Ignoring DROP TABLE query: \"{}\"", q);
+                return results.completed(0, 0);
             }
-            Err(_e) => {
-                // if nom-sql rejects the query, there is no chance Soup will like it
-                error!(self.log, "query can't be parsed: \"{}\"", query);
-                results.completed(0, 0)
-                //return results.error(msql_srv::ErrorKind::ER_PARSE_ERROR, e.as_bytes());
+            _ => {
+                error!(self.log, "Unsupported query: {}", query);
+                return results.error(
+                    msql_srv::ErrorKind::ER_NOT_SUPPORTED_YET,
+                    "unsupported query".as_bytes(),
+                );
+            }
+        };
+
+        if self.slowlog {
+            let took = start.elapsed();
+            if took.as_secs() > 0 || took.subsec_nanos() > 5_000_000 {
+                warn!(
+                    self.log,
+                    "{} took {}ms",
+                    query,
+                    took.as_secs() * 1_000 + took.subsec_nanos() as u64 / 1_000_000
+                );
             }
         }
+
+        res
     }
 }
