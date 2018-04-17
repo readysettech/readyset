@@ -691,7 +691,11 @@ impl<W: io::Write> MysqlShim<W> for SoupBackend {
     fn on_prepare(&mut self, query: &str, info: StatementMetaWriter<W>) -> io::Result<()> {
         trace!(self.log, "prepare: {}", query);
 
-        let query = utils::sanitize_query(query);
+        let query = if self.sanitize {
+            utils::sanitize_query(query)
+        } else {
+            query.to_owned();
+        };
 
         match nom_sql::parse_query(&query) {
             Ok(sql_q) => {
