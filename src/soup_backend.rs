@@ -820,19 +820,19 @@ impl<W: io::Write> MysqlShim<W> for SoupBackend {
             query.to_owned()
         };
 
-        if query.to_lowercase().starts_with("begin")
-            || query.to_lowercase().starts_with("start transaction")
-            || query.to_lowercase().starts_with("commit")
+        let query_lc = query.to_lowercase();
+
+        if query_lc.starts_with("begin") || query_lc.starts_with("start transaction")
+            || query_lc.starts_with("commit")
         {
             return results.completed(0, 0);
         }
 
-        if query.to_lowercase().contains("show databases")
-            || query.to_lowercase().starts_with("rollback")
-            || query.to_lowercase().starts_with("alter table")
-            || query.to_lowercase().starts_with("create index")
-            || query.to_lowercase().starts_with("create unique index")
-            || query.to_lowercase().starts_with("create fulltext index")
+        if query_lc.starts_with("show databases") || query_lc.starts_with("rollback")
+            || query_lc.starts_with("alter table")
+            || query_lc.starts_with("create index")
+            || query_lc.starts_with("create unique index")
+            || query_lc.starts_with("create fulltext index")
         {
             warn!(
                 self.log,
@@ -841,7 +841,7 @@ impl<W: io::Write> MysqlShim<W> for SoupBackend {
             return results.completed(0, 0);
         }
 
-        if query.to_lowercase().contains("show tables") {
+        if query_lc.starts_with("show tables") {
             let cols = [
                 Column {
                     table: String::from(""),
