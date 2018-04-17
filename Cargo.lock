@@ -360,7 +360,7 @@ dependencies = [
  "clap 2.31.2 (registry+https://github.com/rust-lang/crates.io-index)",
  "distributary 0.1.0 (git+https://github.com/mit-pdos/distributary.git?rev=10291488b9e159f156444155d8bed370d2bf0243)",
  "lazy_static 1.0.0 (registry+https://github.com/rust-lang/crates.io-index)",
- "msql-srv 0.6.1 (registry+https://github.com/rust-lang/crates.io-index)",
+ "msql-srv 0.6.2 (registry+https://github.com/rust-lang/crates.io-index)",
  "mysql 12.3.1 (registry+https://github.com/rust-lang/crates.io-index)",
  "nom-sql 0.0.3 (git+https://github.com/ms705/nom-sql.git?rev=488fad25f379de6c47e1eb86d15a3b18eb91f501)",
  "regex 0.2.10 (registry+https://github.com/rust-lang/crates.io-index)",
@@ -710,7 +710,7 @@ dependencies = [
 
 [[package]]
 name = "msql-srv"
-version = "0.6.1"
+version = "0.6.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 dependencies = [
  "byteorder 1.2.2 (registry+https://github.com/rust-lang/crates.io-index)",
@@ -1739,7 +1739,7 @@ dependencies = [
 "checksum miow 0.1.5 (registry+https://github.com/rust-lang/crates.io-index)" = "3e690c5df6b2f60acd45d56378981e827ff8295562fc8d34f573deb267a59cd1"
 "checksum miow 0.2.1 (registry+https://github.com/rust-lang/crates.io-index)" = "8c1f2f3b1cf331de6896aabf6e9d55dca90356cc9960cca7eaaf408a355ae919"
 "checksum mir 0.1.0 (git+https://github.com/mit-pdos/distributary.git?rev=10291488b9e159f156444155d8bed370d2bf0243)" = "<none>"
-"checksum msql-srv 0.6.1 (registry+https://github.com/rust-lang/crates.io-index)" = "49e27888e60552593925311bde5e2b35e0dc0a217b6dec127bc94cb3c471a55c"
+"checksum msql-srv 0.6.2 (registry+https://github.com/rust-lang/crates.io-index)" = "799f1224e798183d9970cf719d917604b92a5311df2c8f7b54049791d3ad4acc"
 "checksum mysql 12.3.1 (registry+https://github.com/rust-lang/crates.io-index)" = "f916d63851d87a1c989722a6e165cd7e88dafbd0ecddf9ee5da230950da1f588"
 "checksum mysql_common 0.5.0 (registry+https://github.com/rust-lang/crates.io-index)" = "82937dbd5b340ef85f59d4f0422402a91c5aec81b391fb7e5fcb39bc39ba45f4"
 "checksum named_pipe 0.3.0 (registry+https://github.com/rust-lang/crates.io-index)" = "8ed10a5ac4f5f7e5d75552b12c1d5d542debca81e573279dd1e4c19fde6efa6d"

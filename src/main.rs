@@ -26,6 +26,7 @@ mod utils;
 use msql_srv::MysqlIntermediary;
 use nom_sql::{CreateTableStatement, SelectStatement};
 use std::collections::HashMap;
+use std::io::{BufReader, BufWriter};
 use std::net;
 use std::sync::atomic::AtomicUsize;
 use std::sync::{Arc, RwLock};
@@ -131,7 +132,8 @@ fn main() {
                     sanitize,
                     log,
                 );
-                MysqlIntermediary::run_on_tcp(soup, s).unwrap();
+                let rs = s.try_clone().unwrap();
+                MysqlIntermediary::run_on(soup, BufReader::new(rs), BufWriter::new(s)).unwrap();
             })
             .unwrap();
         threads.push(jh);
