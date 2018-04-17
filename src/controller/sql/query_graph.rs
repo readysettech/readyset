@@ -403,7 +403,21 @@ fn classify_conditionals(
                 };
             };
         }
-        ConditionExpression::Bracketed(_) => unimplemented!(),
+        ConditionExpression::Bracketed(ref inner) => {
+            let mut new_params = Vec::new();
+            let mut new_join = Vec::new();
+            let mut new_local = HashMap::new();
+            classify_conditionals(
+                inner.as_ref(),
+                tables,
+                &mut new_local,
+                &mut new_join,
+                global,
+                &mut new_params,
+            );
+            join.extend(new_join);
+            params.extend(new_params);
+        }
         ConditionExpression::Base(_) => {
             // don't expect to see a base here: we ought to exit when classifying its
             // parent selection predicate
