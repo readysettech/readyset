@@ -252,46 +252,37 @@ impl<B: MysqlShim<W>, R: Read, W: Write> MysqlIntermediary<B, R, W> {
             let cmd = commands::parse(&packet).unwrap().1;
             match cmd {
                 Command::Query(q) => {
-                    let skip = {
-                        let w = QueryResultWriter {
-                            is_bin: false,
-                            writer: &mut self.writer,
-                        };
-
-                        if q.starts_with(b"SELECT @@") || q.starts_with(b"select @@") {
-                            let var = &q[b"SELECT @@".len()..];
-                            match var {
-                                b"max_allowed_packet" => {
-                                    let cols = &[
-                                        Column {
-                                            table: String::new(),
-                                            column: "@@max_allowed_packet".to_owned(),
-                                            coltype: myc::constants::ColumnType::MYSQL_TYPE_SHORT,
-                                            colflags: myc::constants::ColumnFlags::UNSIGNED_FLAG,
-                                        },
-                                    ];
-                                    let mut w = w.start(cols)?;
-                                    w.write_row(iter::once(1024u16))?;
-                                    w.finish()?;
-                                }
-                                _ => {
-                                    w.completed(0, 0)?;
-                                }
-                            }
-                            true
-                        } else {
-                            self.shim.on_query(
-                                ::std::str::from_utf8(q)
-                                    .map_err(|e| io::Error::new(io::ErrorKind::InvalidData, e))?,
-                                w,
-                            )?;
-                            false
-                        }
+                    let w = QueryResultWriter {
+                        is_bin: false,
+                        writer: &mut self.writer,
                     };
 
-                    if skip {
-                        self.writer.flush()?;
-                        continue;
+                    if q.starts_with(b"SELECT @@") || q.starts_with(b"select @@") {
+                        let var = &q[b"SELECT @@".len()..];
+                        match var {
+                            b"max_allowed_packet" => {
+                                let cols = &[
+                                    Column {
+                                        table: String::new(),
+                                        column: "@@max_allowed_packet".to_owned(),
+                                        coltype: myc::constants::ColumnType::MYSQL_TYPE_SHORT,
+                                        colflags: myc::constants::ColumnFlags::UNSIGNED_FLAG,
+                                    },
+                                ];
+                                let mut w = w.start(cols)?;
+                                w.write_row(iter::once(1024u16))?;
+                                w.finish()?;
+                            }
+                            _ => {
+                                w.completed(0, 0)?;
+                            }
+                        }
+                    } else {
+                        self.shim.on_query(
+                            ::std::str::from_utf8(q)
+                                .map_err(|e| io::Error::new(io::ErrorKind::InvalidData, e))?,
+                            w,
+                        )?;
                     }
                 }
                 Command::Prepare(q) => {
@@ -347,7 +338,8 @@ impl<B: MysqlShim<W>, R: Read, W: Write> MysqlIntermediary<B, R, W> {
                     break;
                 }
             }
+            self.writer.flush()?;
         }
-        self.writer.flush()
+        Ok(())
     }
 }
