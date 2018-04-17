@@ -262,7 +262,9 @@ fn get_parameter_columns_recurse(cond: &ConditionExpression) -> Vec<&Column> {
             l.append(&mut r);
             l
         }
-        ConditionExpression::NegationOp(ref expr) => get_parameter_columns_recurse(expr),
+        ConditionExpression::NegationOp(ref expr) | ConditionExpression::Bracketed(ref expr) => {
+            get_parameter_columns_recurse(expr)
+        }
         _ => unimplemented!(),
     }
 }

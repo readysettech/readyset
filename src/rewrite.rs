@@ -74,8 +74,9 @@ fn collapse_where_in_recursive(
             None
         }
         ConditionExpression::Base(_) => None,
-        ConditionExpression::NegationOp(ref mut ct) => {
-            collapse_where_in_recursive(leftmost_param_index, ct, rewrite_literals)
+        ConditionExpression::NegationOp(ref mut ce)
+        | ConditionExpression::Bracketed(ref mut ce) => {
+            collapse_where_in_recursive(leftmost_param_index, ce, rewrite_literals)
         }
         ConditionExpression::LogicalOp(ref mut ct) => {
             collapse_where_in_recursive(leftmost_param_index, &mut *ct.left, rewrite_literals)
