@@ -2,7 +2,7 @@ use distributary::{ControllerHandle, DataType, Mutator, RemoteGetter, ZookeeperA
 
 use msql_srv::{self, *};
 use nom_sql::{self, ColumnConstraint, CreateTableStatement, InsertStatement, Literal,
-              SelectStatement, UpdateStatement, SqlQuery};
+              SelectStatement, SqlQuery, UpdateStatement};
 
 use slog;
 use std::borrow::Cow;
@@ -265,33 +265,45 @@ impl SoupBackend {
         let ts_lock = self.table_schemas.read().unwrap();
         let table_schemas = &(*ts_lock);
 
-        let q = if let nom_sql::SqlQuery::Insert(ref q) = sql_q {
+        let params: Vec<_> = {
+            let q = if let nom_sql::SqlQuery::Insert(ref q) = sql_q {
+                q
+            } else {
+                unreachable!()
+            };
+
+            // extract parameter columns
+            let param_cols = utils::get_parameter_columns(&sql_q);
+            param_cols
+                .into_iter()
+                .map(|c| {
+                    let mut cc = c.clone();
+                    cc.table = Some(q.table.name.clone());
+                    schema_for_column(table_schemas, &cc)
+                })
+                .collect()
+        };
+
+        let q = if let nom_sql::SqlQuery::Insert(q) = sql_q {
             q
         } else {
             unreachable!()
         };
 
-        // extract parameter columns
-        let params: Vec<msql_srv::Column> = utils::get_parameter_columns(&sql_q)
-            .into_iter()
-            .map(|c| {
-                let mut cc = c.clone();
-                cc.table = Some(q.table.name.clone());
-                schema_for_column(table_schemas, &cc)
-            })
-            .collect();
-
         // extract result schema
-        let schema = schema_for_insert(table_schemas, q);
+        let schema = schema_for_insert(table_schemas, &q);
 
-        // register a new prepared statement
         self.prepared_count += 1;
-        self.prepared
-            .insert(self.prepared_count, PreparedStatement::Insert(q.clone()));
 
         // nothing more to do for an insert
         // TODO(malte): proactively get mutator?
-        info.reply(self.prepared_count, params.as_slice(), schema.as_slice())
+        info.reply(self.prepared_count, params.as_slice(), schema.as_slice())?;
+
+        // register a new prepared statement
+        self.prepared
+            .insert(self.prepared_count, PreparedStatement::Insert(q));
+
+        Ok(())
     }
 
     fn get_or_create_view(
@@ -379,28 +391,27 @@ impl SoupBackend {
         };
 
         let rewritten = rewrite::collapse_where_in(&mut sql_q, false);
-        let q = if let nom_sql::SqlQuery::Select(ref q) = sql_q {
+        let q = if let nom_sql::SqlQuery::Select(q) = sql_q {
             q
         } else {
             unreachable!();
         };
 
         // check if we already have this query prepared
-        let qname = self.get_or_create_view(q, true)?;
+        let qname = self.get_or_create_view(&q, true)?;
+
+        self.prepared_count += 1;
+
+        // TODO(malte): proactively get getter, to avoid &mut ref on exec?
+        info.reply(self.prepared_count, params.as_slice(), schema.as_slice())?;
 
         // register a new prepared statement
-        self.prepared_count += 1;
         self.prepared.insert(
             self.prepared_count,
-            PreparedStatement::Select(
-                qname,
-                q.clone(),
-                schema.clone(),
-                rewritten.map(|(a, b)| (a, b.len())),
-            ),
+            PreparedStatement::Select(qname, q, schema, rewritten.map(|(a, b)| (a, b.len()))),
         );
-        // TODO(malte): proactively get getter, to avoid &mut ref on exec?
-        info.reply(self.prepared_count, params.as_slice(), schema.as_slice())
+
+        Ok(())
     }
 
     fn prepare_update<W: io::Write>(
@@ -702,33 +713,32 @@ impl<W: io::Write> MysqlShim<W> for SoupBackend {
         };
 
         let sql_q = match self.parsed.get(&query) {
-            None =>
-                match nom_sql::parse_query(&query) {
-                    Ok(sql_q) => {
-                        let sql_q = {
-                            let ts_lock = self.table_schemas.read().unwrap();
-                            let table_schemas = &(*ts_lock);
-                            rewrite::expand_stars(sql_q, table_schemas)
-                        };
+            None => match nom_sql::parse_query(&query) {
+                Ok(sql_q) => {
+                    let sql_q = {
+                        let ts_lock = self.table_schemas.read().unwrap();
+                        let table_schemas = &(*ts_lock);
+                        rewrite::expand_stars(sql_q, table_schemas)
+                    };
 
-                        self.parsed.insert(query.to_owned(), (sql_q.clone(), vec![]));
+                    self.parsed
+                        .insert(query.to_owned(), (sql_q.clone(), vec![]));
 
-                        sql_q
-
-                    }
-                    Err(e) => {
-                        // if nom-sql rejects the query, there is no chance Soup will like it
-                        error!(self.log, "query can't be parsed: \"{}\"", query);
-                        return info.error(msql_srv::ErrorKind::ER_PARSE_ERROR, e.as_bytes())
-                    }
+                    sql_q
                 }
+                Err(e) => {
+                    // if nom-sql rejects the query, there is no chance Soup will like it
+                    error!(self.log, "query can't be parsed: \"{}\"", query);
+                    return info.error(msql_srv::ErrorKind::ER_PARSE_ERROR, e.as_bytes());
+                }
+            },
             Some((q, _)) => q.clone(),
         };
 
         match sql_q {
-            mut sql_q @ nom_sql::SqlQuery::Select(_) => self.prepare_select(sql_q, info),
-            mut sql_q @ nom_sql::SqlQuery::Insert(_) => self.prepare_insert(sql_q, info),
-            mut sql_q @ nom_sql::SqlQuery::Update(_) => self.prepare_update(sql_q, info),
+            nom_sql::SqlQuery::Select(_) => self.prepare_select(sql_q, info),
+            nom_sql::SqlQuery::Insert(_) => self.prepare_insert(sql_q, info),
+            nom_sql::SqlQuery::Update(_) => self.prepare_update(sql_q, info),
             _ => {
                 // Soup only supports prepared SELECT statements at the moment
                 error!(
@@ -910,18 +920,19 @@ impl<W: io::Write> MysqlShim<W> for SoupBackend {
                             use_params = p;
                         }
 
-                        self.parsed.insert(query.to_owned(), (q.clone(), use_params.clone()));
+                        self.parsed
+                            .insert(query.to_owned(), (q.clone(), use_params.clone()));
 
                         (q, use_params)
-                    },
+                    }
                     Err(_e) => {
                         // if nom-sql rejects the query, there is no chance Soup will like it
                         error!(self.log, "query can't be parsed: \"{}\"", query);
                         return results.completed(0, 0);
                         //return results.error(msql_srv::ErrorKind::ER_PARSE_ERROR, e.as_bytes());
-                    },
+                    }
                 }
-            },
+            }
             Some((q, use_params)) => (q.clone(), use_params.clone()),
         };
 
