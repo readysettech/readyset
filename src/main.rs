@@ -66,6 +66,18 @@ fn main() {
                 .long("log-slow")
                 .help("Log slow queries (> 5ms)"),
         )
+        .arg(
+            Arg::with_name("no-static-responses")
+                .long("no-static-responses")
+                .takes_value(false)
+                .help("Disable checking for queries requiring static responses. Improves latency."),
+        )
+        .arg(
+            Arg::with_name("no-sanitize")
+                .long("no-sanitize")
+                .takes_value(false)
+                .help("Disable query sanitization. Improves latency."),
+        )
         .arg(Arg::with_name("verbose").long("verbose").short("v"))
         .get_matches();
 
@@ -73,6 +85,8 @@ fn main() {
     let port = value_t_or_exit!(matches, "port", u16);
     let slowlog = matches.is_present("slowlog");
     let zk_addr = matches.value_of("zk_addr").unwrap().to_owned();
+    let sanitize = !matches.is_present("no-sanitize");
+    let static_responses = !matches.is_present("no-static-responses");
 
     let listener = net::TcpListener::bind(format!("127.0.0.1:{}", port)).unwrap();
 
@@ -113,6 +127,8 @@ fn main() {
                     query_cache,
                     query_counter,
                     slowlog,
+                    static_responses,
+                    sanitize,
                     log,
                 );
                 MysqlIntermediary::run_on_tcp(soup, s).unwrap();
