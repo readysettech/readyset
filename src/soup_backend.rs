@@ -106,7 +106,9 @@ pub struct SoupBackend {
     /// thread-local version of `cached` (consulted first)
     tl_cached: HashMap<SelectStatement, String>,
 
+    sanitize: bool,
     slowlog: bool,
+    static_responses: bool,
 }
 
 impl SoupBackend {
@@ -118,6 +120,8 @@ impl SoupBackend {
         query_cache: Arc<RwLock<HashMap<SelectStatement, String>>>,
         query_counter: Arc<atomic::AtomicUsize>,
         slowlog: bool,
+        static_responses: bool,
+        sanitize: bool,
         log: slog::Logger,
     ) -> Self {
         SoupBackend {
@@ -135,7 +139,9 @@ impl SoupBackend {
             cached: query_cache,
             tl_cached: HashMap::new(),
 
+            sanitize,
             slowlog,
+            static_responses,
         }
     }
 
@@ -808,7 +814,11 @@ impl<W: io::Write> MysqlShim<W> for SoupBackend {
         trace!(self.log, "query: {}", query);
 
         let start = time::Instant::now();
-        let query = utils::sanitize_query(query);
+        let query = if self.sanitize {
+            utils::sanitize_query(query)
+        } else {
+            query.to_owned()
+        };
 
         if query.to_lowercase().starts_with("begin")
             || query.to_lowercase().starts_with("start transaction")
@@ -847,22 +857,24 @@ impl<W: io::Write> MysqlShim<W> for SoupBackend {
             return writer.finish();
         }
 
-        for &(ref pattern, ref columns) in &*utils::HARD_CODED_REPLIES {
-            if pattern.is_match(&query) {
-                let cols: Vec<_> = columns
-                    .iter()
-                    .map(|c| Column {
-                        table: String::from(""),
-                        column: String::from(c.0),
-                        coltype: ColumnType::MYSQL_TYPE_STRING,
-                        colflags: ColumnFlags::empty(),
-                    })
-                    .collect();
-                let mut writer = results.start(&cols[..])?;
-                for &(_, ref r) in columns {
-                    writer.write_col(String::from(*r))?;
+        if self.static_responses {
+            for &(ref pattern, ref columns) in &*utils::HARD_CODED_REPLIES {
+                if pattern.is_match(&query) {
+                    let cols: Vec<_> = columns
+                        .iter()
+                        .map(|c| Column {
+                            table: String::from(""),
+                            column: String::from(c.0),
+                            coltype: ColumnType::MYSQL_TYPE_STRING,
+                            colflags: ColumnFlags::empty(),
+                        })
+                        .collect();
+                    let mut writer = results.start(&cols[..])?;
+                    for &(_, ref r) in columns {
+                        writer.write_col(String::from(*r))?;
+                    }
+                    return writer.end_row();
                 }
-                return writer.end_row();
             }
         }
 
