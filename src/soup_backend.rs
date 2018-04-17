@@ -694,7 +694,7 @@ impl<W: io::Write> MysqlShim<W> for SoupBackend {
         let query = if self.sanitize {
             utils::sanitize_query(query)
         } else {
-            query.to_owned();
+            query.to_owned()
         };
 
         match nom_sql::parse_query(&query) {
