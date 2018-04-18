@@ -132,9 +132,7 @@ impl ControllerInner {
         match (&method, path.as_ref()) {
             (&Get, "/graph") => return Ok(self.graphviz()),
             (&Post, "/graphviz") => return Ok(json::to_string(&self.graphviz()).unwrap()),
-            (&Post, "/get_statistics") => {
-                return Ok(json::to_string(&self.get_statistics()).unwrap())
-            }
+            (&Get, "/get_statistics") => return Ok(format!("{:?}", self.get_statistics())),
             _ => {}
         }
 
