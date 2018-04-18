@@ -10,8 +10,8 @@ use mio::{self, Evented, Poll, PollOpt, Ready, Token};
 use net2;
 use serde::{Deserialize, Serialize};
 
-use tcp::{SendError, TryRecvError};
 use super::{DeserializeReceiver, NonBlockingWriter, ReceiveError};
+use tcp::{SendError, TryRecvError};
 
 pub struct RpcClient<Q, R> {
     stream: BufStream<std::net::TcpStream>,

@@ -18,18 +18,18 @@ extern crate throttled_reader;
 use std::collections::HashMap;
 use std::hash::Hash;
 use std::io::{self, Read, Write};
-use std::sync::Mutex;
-use std::sync::mpsc::{self, SendError};
+use std::marker::PhantomData;
 use std::net::SocketAddr;
 use std::ops::{Deref, DerefMut};
-use std::marker::PhantomData;
+use std::sync::Mutex;
+use std::sync::mpsc::{self, SendError};
 
 use byteorder::{ByteOrder, NetworkEndian};
 use serde::{Deserialize, Deserializer, Serialize, Serializer};
 
-pub mod tcp;
 pub mod poll;
 pub mod rpc;
+pub mod tcp;
 
 pub use tcp::{channel, TcpReceiver, TcpSender};
 
@@ -142,12 +142,8 @@ impl<K: Eq + Hash + Clone> ChannelCoordinator<K> {
     }
 
     pub fn get_tx<T: Serialize>(&self, key: &K) -> Option<(TcpSender<T>, bool)> {
-        let val = {
-            self.inner.lock().unwrap().addrs.get(key).cloned()
-        };
-        val.and_then(|(addr, local)| {
-            TcpSender::connect(&addr).ok().map(|s| (s, local))
-        })
+        let val = { self.inner.lock().unwrap().addrs.get(key).cloned() };
+        val.and_then(|(addr, local)| TcpSender::connect(&addr).ok().map(|s| (s, local)))
     }
 
     pub fn get_input_tx<T: Serialize>(&self, key: &K) -> Option<(TcpSender<T>, bool)> {

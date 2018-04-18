@@ -34,15 +34,15 @@ impl From<io::Error> for SendError {
 }
 
 macro_rules! poisoning_try {
-    ( $self_:ident, $e:expr ) => {
+    ($self_:ident, $e:expr) => {
         match $e {
             Ok(v) => v,
             Err(r) => {
                 $self_.poisoned = true;
-                return Err(r.into())
+                return Err(r.into());
             }
         }
-    }
+    };
 }
 
 pub struct TcpSender<T> {
@@ -250,8 +250,8 @@ where
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::thread;
     use mio::Events;
+    use std::thread;
 
     #[test]
     fn it_works() {
