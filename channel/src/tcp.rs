@@ -154,7 +154,7 @@ where
     }
 
     pub fn is_empty(&self) -> bool {
-        self.stream.is_empty()
+        self.stream.buffer().is_empty()
     }
 
     pub fn syscall_limit(&mut self, limit: Option<usize>) {

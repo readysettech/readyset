@@ -1,4 +1,4 @@
-#![feature(bufreader_is_empty)]
+#![feature(bufreader_buffer)]
 #![feature(ip_constructors)]
 #![feature(custom_attribute)]
 #![feature(try_from)]
