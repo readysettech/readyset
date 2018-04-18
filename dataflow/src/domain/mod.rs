@@ -1368,6 +1368,7 @@ impl Domain {
                                     Some((
                                         node_index,
                                         statistics::NodeStats {
+                                            desc: format!("{:?}", n),
                                             process_time: time.unwrap(),
                                             process_ptime: ptime.unwrap(),
                                             mem_size: mem_size,

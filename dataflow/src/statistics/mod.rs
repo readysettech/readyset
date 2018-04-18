@@ -17,6 +17,7 @@ pub struct DomainStats {
 /// Struct holding statistics about a node. All times are in nanoseconds.
 #[derive(Debug, Serialize, Deserialize)]
 pub struct NodeStats {
+    pub desc: String,
     pub process_time: u64,
     pub process_ptime: u64,
     pub mem_size: u64,
