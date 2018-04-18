@@ -5,6 +5,7 @@ use dataflow::prelude::*;
 
 use std::cell::RefCell;
 use std::collections::HashMap;
+use std::io;
 use std::net::SocketAddr;
 use std::rc::Rc;
 use vec_map::VecMap;
@@ -147,6 +148,11 @@ impl Mutator<SharedConnection> {
 }
 
 impl<E> Mutator<E> {
+    /// Get the local address this mutator is bound to.
+    pub fn local_addr(&self) -> io::Result<SocketAddr> {
+        self.domain_input_handle.borrow().local_addr()
+    }
+
     fn inject_dropped_cols(&self, rs: &mut Records) {
         let ndropped = self.dropped.len();
         if ndropped != 0 {

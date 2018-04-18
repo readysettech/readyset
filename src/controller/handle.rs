@@ -51,22 +51,6 @@ impl<A: Authority> ControllerHandle<A> {
         }
     }
 
-    /// Creates a `ControllerHandle` that bootstraps a connection to Soup via the configuration
-    /// stored in the `Authority` passed as an argument. All connections will be made from the
-    /// given port, which must be unique among the processes on *this* machine that connect to the
-    /// given Soup instance.
-    pub fn new_on_port(authority: A, port: u16) -> Self {
-        ControllerHandle {
-            url: None,
-            local_port: port,
-            authority: Arc::new(authority),
-            local_controller: None,
-            local_worker: None,
-            getters: Default::default(),
-            domains: Default::default(),
-        }
-    }
-
     fn rpc<Q: Serialize, R: DeserializeOwned>(&mut self, path: &str, request: &Q) -> R {
         let mut core = Core::new().unwrap();
         let client = Client::new(&core.handle());
@@ -135,7 +119,13 @@ impl<A: Authority> ControllerHandle<A> {
                 g = g.with_local_port(port);
             }
 
-            g.build(&mut self.getters)
+            let g = g.build(&mut self.getters);
+
+            if self.local_port.is_none() {
+                self.local_port = Some(g.local_addr().unwrap().port());
+            }
+
+            g
         })
     }
 
@@ -157,7 +147,13 @@ impl<A: Authority> ControllerHandle<A> {
                 m = m.with_local_port(port);
             }
 
-            m.build(&mut self.domains)
+            let m = m.build(&mut self.domains);
+
+            if self.local_port.is_none() {
+                self.local_port = Some(m.local_addr().unwrap().port());
+            }
+
+            m
         })
     }
 

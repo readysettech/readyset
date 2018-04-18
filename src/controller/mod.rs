@@ -269,6 +269,7 @@ fn start_instance<A: Authority + 'static>(
 
     ControllerHandle {
         url: None,
+        local_port: None,
         authority: authority2,
         local_controller: Some((controller_event_tx2, controller_join_handle)),
         local_worker: Some((worker_event_tx3, worker_join_handle)),

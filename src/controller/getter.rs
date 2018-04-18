@@ -7,6 +7,7 @@ use dataflow::{self, checktable, LocalBypass, Readers};
 
 use std::cell::RefCell;
 use std::collections::HashMap;
+use std::io;
 use std::net::SocketAddr;
 use std::rc::Rc;
 
@@ -118,9 +119,10 @@ impl RemoteGetterBuilder {
 
     /// Build a `RemoteGetter` out of a `RemoteGetterBuilder`
     pub(crate) fn build(
-        self,
+        mut self,
         rpcs: &mut HashMap<SocketAddr, GetterRpc>,
     ) -> RemoteGetter<SharedConnection> {
+        let sport = &mut self.local_port;
         let conns = self.shards
             .iter()
             .map(move |&(ref addr, is_local)| {
@@ -129,10 +131,11 @@ impl RemoteGetterBuilder {
                 match rpcs.entry(*addr) {
                     Entry::Occupied(e) => Rc::clone(e.get()),
                     Entry::Vacant(h) => {
-                        let c = match self.local_port {
-                            Some(port) => RpcClient::connect_from(port, addr, is_local).unwrap(),
-                            None => RpcClient::connect(addr, is_local).unwrap(),
-                        };
+                        let c = RpcClient::connect_from(*sport, addr, is_local).unwrap();
+                        if sport.is_none() {
+                            *sport = Some(c.local_addr().unwrap().port());
+                        }
+
                         let c = Rc::new(RefCell::new(c));
                         h.insert(Rc::clone(&c));
                         c
@@ -182,6 +185,7 @@ impl RemoteGetter<SharedConnection> {
     pub fn into_exclusive(self) -> RemoteGetter<ExclusiveConnection> {
         RemoteGetterBuilder {
             node: self.node,
+            local_port: None,
             columns: self.columns,
             shards: self.shard_addrs,
         }.build_exclusive()
@@ -189,6 +193,11 @@ impl RemoteGetter<SharedConnection> {
 }
 
 impl<E> RemoteGetter<E> {
+    /// Get the local address this getter is bound to.
+    pub fn local_addr(&self) -> io::Result<SocketAddr> {
+        self.shards[0].borrow().local_addr()
+    }
+
     /// Return the column schema of the view this getter is associated with.
     pub fn columns(&self) -> &[String] {
         self.columns.as_slice()

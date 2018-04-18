@@ -492,6 +492,7 @@ impl ControllerInner {
                 .collect();
 
             RemoteGetterBuilder {
+                local_port: None,
                 node: r,
                 columns,
                 shards,
@@ -546,6 +547,7 @@ impl ControllerInner {
         );
 
         Some(MutatorBuilder {
+            local_port: None,
             txs,
             addr: (*node.local_addr()).into(),
             key: key,
