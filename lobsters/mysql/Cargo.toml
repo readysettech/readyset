@@ -11,7 +11,7 @@ default = []
 debug = true
 
 [dependencies]
-trawler = "0.5.7"
+trawler = "0.5.8"
 mysql_async = "0.14"
 tokio-core = "0.1"
 clap = "2.31"
