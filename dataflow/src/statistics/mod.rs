@@ -1,7 +1,10 @@
 use std::collections::HashMap;
+use serde::{Deserialize, Deserializer, Serialize, Serializer};
 
 use domain;
 use prelude::*;
+
+type DomainMap = HashMap<(domain::Index, usize), (DomainStats, HashMap<NodeIndex, NodeStats>)>;
 
 /// Struct holding statistics about a domain. All times are in nanoseconds.
 #[derive(Debug, Serialize, Deserialize)]
@@ -22,5 +25,27 @@ pub struct NodeStats {
 /// Struct holding statistics about an entire graph.
 #[derive(Debug, Serialize, Deserialize)]
 pub struct GraphStats {
-    pub domains: HashMap<(domain::Index, usize), (DomainStats, HashMap<NodeIndex, NodeStats>)>,
+    #[serde(serialize_with = "serialize_domainmap")]
+    #[serde(deserialize_with = "deserialize_domainmap")]
+    pub domains: DomainMap,
+}
+
+fn serialize_domainmap<S: Serializer>(map: &DomainMap, s: S) -> Result<S::Ok, S::Error> {
+    map.iter()
+        .map(|((di, shard), v)| (format!("{}.{}", di.index(), shard), v.clone()))
+        .collect::<HashMap<_, _>>()
+        .serialize(s)
+}
+
+fn deserialize_domainmap<'de, D: Deserializer<'de>>(d: D) -> Result<DomainMap, D::Error> {
+    use std::str::FromStr;
+
+    let dm = <HashMap<String, (DomainStats, HashMap<NodeIndex, NodeStats>)>>::deserialize(d)?;
+    let mut map = DomainMap::default();
+    for (k, v) in dm {
+        let di = usize::from_str(&k[..k.find(".").unwrap()]).unwrap().into();
+        let shard = usize::from_str(&k[k.find(".").unwrap() + 1..]).unwrap();
+        map.insert((di, shard), v);
+    }
+    Ok(map)
 }
