@@ -1354,10 +1354,16 @@ impl Domain {
 
                                 let time = self.process_times.num_nanoseconds(local_index);
                                 let ptime = self.process_ptimes.num_nanoseconds(local_index);
-                                let mem_size = self.state
-                                    .get(&local_index)
-                                    .map(|state| state.deep_size_of())
-                                    .unwrap_or(0);
+                                let mem_size = if n.is_reader() {
+                                    let mut size = 0;
+                                    n.with_reader(|r| size = r.state_size().unwrap_or(0));
+                                    size
+                                } else {
+                                    self.state
+                                        .get(&local_index)
+                                        .map(|state| state.deep_size_of())
+                                        .unwrap_or(0)
+                                };
                                 if time.is_some() && ptime.is_some() {
                                     Some((
                                         node_index,
