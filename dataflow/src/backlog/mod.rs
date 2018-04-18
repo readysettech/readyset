@@ -2,7 +2,6 @@ use core::{DataType, Record};
 use core::data::SizeOf;
 use fnv::FnvBuildHasher;
 use std::borrow::Cow;
-use evmap;
 
 use rand::{Rng, ThreadRng};
 use std::sync::Arc;
@@ -112,7 +111,7 @@ pub(crate) struct WriteHandle {
     cols: usize,
     key: Vec<usize>,
     contiguous: bool,
-    mem_size: usize,
+    pub mem_size: usize,
 }
 
 type Key<'a> = Cow<'a, [DataType]>;
@@ -244,7 +243,7 @@ impl WriteHandle {
         if self.mem_size > 0 {
             match self.handle.empty_at_index(rng.gen()) {
                 None => (),
-                Some((_k, vs)) => {
+                Some(vs) => {
                     let size: u64 = vs.into_iter().map(|r| r.deep_size_of() as u64).sum();
                     bytes_to_be_freed += size;
                 }

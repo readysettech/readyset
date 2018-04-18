@@ -1919,11 +1919,16 @@ impl Domain {
                                     // we must be filling a hole in a Reader. we need to ensure
                                     // that the hole for the key we're replaying ends up being
                                     // filled, even if that hole is empty!
-                                    r.writer_mut().map(|mut wh| {
+                                    r.writer_mut().map(|wh| {
+                                        use core::data::SizeOf;
+
                                         for key in backfill_keys.iter() {
-                                            let size = wh.try_find_and(key, |rs| {
-                                                rs.iter().map(|r| r.deep_size_of()).sum()
-                                            }).unwrap_or(0);
+                                            let size = wh.with_key(&key[..])
+                                                .try_find_and(|rs| {
+                                                    rs.iter().map(|r| r.deep_size_of()).sum()
+                                                })
+                                                .map(|r| r.0.unwrap_or(0))
+                                                .unwrap_or(0);
                                             wh.mem_size =
                                                 wh.mem_size.checked_sub(size as usize).unwrap();
 
@@ -1983,11 +1988,17 @@ impl Domain {
                                     }
                                 } else {
                                     n.with_reader_mut(|r| {
-                                        r.writer_mut().map(|mut wh| {
+                                        r.writer_mut().map(|wh| {
                                             for miss in &missed_on {
-                                                let size = wh.try_find_and(key, |rs| {
-                                                    rs.iter().map(|r| r.deep_size_of()).sum()
-                                                }).unwrap_or(0);
+                                                use core::data::SizeOf;
+
+                                                let size = wh.with_key(&miss[..])
+                                                    .try_find_and(|rs| {
+                                                        rs.iter().map(|r| r.deep_size_of()).sum()
+                                                    })
+                                                    .map(|r| r.0.unwrap_or(0))
+                                                    .unwrap_or(0);
+
                                                 wh.mem_size =
                                                     wh.mem_size.checked_sub(size as usize).unwrap();
 

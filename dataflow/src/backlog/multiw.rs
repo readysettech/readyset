@@ -1,5 +1,6 @@
 use super::{key_to_double, key_to_single, Key};
 use core::{DataType, Record};
+use core::data::SizeOf;
 use evmap;
 use fnv::FnvBuildHasher;
 
@@ -28,11 +29,11 @@ impl Handle {
 
     /// Evict `count` randomly selected keys from state and return them along with the number of
     /// bytes freed.
-    pub fn empty_at_index(&mut self, index: usize) {
+    pub fn empty_at_index(&mut self, index: usize) -> Option<&Vec<Vec<DataType>>> {
         match *self {
-            Handle::Single(ref mut h) | Handle::Double(ref mut h) | Handle::Many(ref mut h) => {
-                h.empty_at_index(index)
-            }
+            Handle::Single(ref mut h) => h.empty_at_index(index).map(|r| r.1),
+            Handle::Double(ref mut h) => h.empty_at_index(index).map(|r| r.1),
+            Handle::Many(ref mut h) => h.empty_at_index(index).map(|r| r.1),
         }
     }
 
@@ -96,7 +97,7 @@ impl Handle {
     where
         I: IntoIterator<Item = Record>,
     {
-        let mut memory_delta = 0;
+        let mut memory_delta = 0isize;
         match *self {
             Handle::Single(ref mut h) => {
                 assert_eq!(key.len(), 1);
@@ -104,7 +105,7 @@ impl Handle {
                     debug_assert!(r.len() >= cols);
                     match r {
                         Record::Positive(r) => {
-                            memory_delta += r.deep_size_of() as usize;
+                            memory_delta += r.deep_size_of() as isize;
                             h.insert(r[key[0]].clone(), r);
                         }
                         Record::Negative(r) => {
@@ -112,7 +113,7 @@ impl Handle {
                             // last record. this means that future lookups will fail, and cause a
                             // replay, which will produce an empty result. this will work, but is
                             // somewhat inefficient.
-                            memory_delta - r.deep_size_of() as usize;
+                            memory_delta - r.deep_size_of() as isize;
                             h.remove(r[key[0]].clone(), r);
                         }
                         Record::BaseOperation(..) => unreachable!(),
@@ -125,11 +126,11 @@ impl Handle {
                     debug_assert!(r.len() >= cols);
                     match r {
                         Record::Positive(r) => {
-                            memory_delta += r.deep_size_of() as usize;
+                            memory_delta += r.deep_size_of() as isize;
                             h.insert((r[key[0]].clone(), r[key[1]].clone()), r);
                         }
                         Record::Negative(r) => {
-                            memory_delta - r.deep_size_of() as usize;
+                            memory_delta - r.deep_size_of() as isize;
                             h.remove((r[key[0]].clone(), r[key[1]].clone()), r);
                         }
                         Record::BaseOperation(..) => unreachable!(),
@@ -141,11 +142,11 @@ impl Handle {
                 let key = key.iter().map(|&k| &r[k]).cloned().collect();
                 match r {
                     Record::Positive(r) => {
-                        memory_delta += r.deep_size_of() as usize;
+                        memory_delta += r.deep_size_of() as isize;
                         h.insert(key, r);
                     }
                     Record::Negative(r) => {
-                        memory_delta - r.deep_size_of() as usize;
+                        memory_delta - r.deep_size_of() as isize;
                         h.remove(key, r);
                     }
                     Record::BaseOperation(..) => unreachable!(),
