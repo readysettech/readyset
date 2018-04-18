@@ -1,4 +1,5 @@
 #![feature(bufreader_is_empty)]
+#![feature(ip_constructors)]
 #![feature(custom_attribute)]
 #![feature(try_from)]
 #![feature(conservative_impl_trait)]
@@ -8,6 +9,7 @@ extern crate bincode;
 extern crate bufstream;
 extern crate byteorder;
 extern crate mio;
+extern crate net2;
 extern crate serde;
 #[macro_use]
 extern crate serde_derive;

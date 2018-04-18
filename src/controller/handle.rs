@@ -28,6 +28,7 @@ use controller::{ControlEvent, ControllerDescriptor, WorkerEvent};
 /// `ControllerHandle` is a handle to a Controller.
 pub struct ControllerHandle<A: Authority> {
     pub(super) url: Option<String>,
+    pub(super) local_port: Option<u16>,
     pub(super) authority: Arc<A>,
     pub(super) local_controller: Option<(Sender<ControlEvent>, JoinHandle<()>)>,
     pub(super) local_worker: Option<(Sender<WorkerEvent>, JoinHandle<()>)>,
@@ -41,6 +42,23 @@ impl<A: Authority> ControllerHandle<A> {
     pub fn new(authority: A) -> Self {
         ControllerHandle {
             url: None,
+            local_port: None,
+            authority: Arc::new(authority),
+            local_controller: None,
+            local_worker: None,
+            getters: Default::default(),
+            domains: Default::default(),
+        }
+    }
+
+    /// Creates a `ControllerHandle` that bootstraps a connection to Soup via the configuration
+    /// stored in the `Authority` passed as an argument. All connections will be made from the
+    /// given port, which must be unique among the processes on *this* machine that connect to the
+    /// given Soup instance.
+    pub fn new_on_port(authority: A, port: u16) -> Self {
+        ControllerHandle {
+            url: None,
+            local_port: port,
             authority: Arc::new(authority),
             local_controller: None,
             local_worker: None,
@@ -112,8 +130,13 @@ impl<A: Authority> ControllerHandle<A> {
 
     /// Obtain a `RemoteGetter`.
     pub fn get_getter(&mut self, name: &str) -> Option<RemoteGetter> {
-        self.get_getter_builder(name)
-            .map(|g| g.build(&mut self.getters))
+        self.get_getter_builder(name).map(|mut g| {
+            if let Some(port) = self.local_port {
+                g = g.with_local_port(port);
+            }
+
+            g.build(&mut self.getters)
+        })
     }
 
     /// Obtain a MutatorBuild that can be used to construct a Mutator to perform writes and deletes
@@ -129,8 +152,13 @@ impl<A: Authority> ControllerHandle<A> {
 
     /// Obtain a Mutator
     pub fn get_mutator(&mut self, base: &str) -> Option<Mutator> {
-        self.get_mutator_builder(base)
-            .map(|m| m.build(&mut self.domains))
+        self.get_mutator_builder(base).map(|mut m| {
+            if let Some(port) = self.local_port {
+                m = m.with_local_port(port);
+            }
+
+            m.build(&mut self.domains)
+        })
     }
 
     /// Get statistics about the time spent processing different parts of the graph.

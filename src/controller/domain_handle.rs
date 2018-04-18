@@ -111,12 +111,19 @@ impl<'a> BatchSendHandle<'a> {
 }
 
 impl DomainInputHandle {
-    pub(crate) fn new(txs: &[SocketAddr]) -> Result<Self, io::Error> {
+    pub(crate) fn new_on(local_port: Option<u16>, txs: &[SocketAddr]) -> Result<Self, io::Error> {
         let txs: Result<Vec<_>, _> = txs.into_iter()
-            .map(|addr| TcpSender::connect(addr))
+            .map(|addr| match local_port {
+                Some(port) => TcpSender::connect(addr),
+                None => TcpSender::connect(addr),
+            })
             .collect();
 
         Ok(Self { txs: txs? })
+    }
+
+    pub(crate) fn new(txs: &[SocketAddr]) -> Result<Self, io::Error> {
+        Self::new_on(None, txs)
     }
 
     pub(crate) fn sender(&mut self) -> BatchSendHandle {

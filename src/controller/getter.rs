@@ -88,6 +88,7 @@ pub struct RemoteGetterBuilder {
     pub(crate) node: NodeIndex,
     pub(crate) columns: Vec<String>,
     pub(crate) shards: Vec<(SocketAddr, bool)>,
+    pub(crate) local_port: Option<u16>,
 }
 
 impl RemoteGetterBuilder {
@@ -109,6 +110,12 @@ impl RemoteGetterBuilder {
         }
     }
 
+    /// Set the local port to bind to when making the shared connection.
+    pub(crate) fn with_local_port(mut self, port: u16) -> RemoteGetterBuilder {
+        self.local_port = Some(port);
+        self
+    }
+
     /// Build a `RemoteGetter` out of a `RemoteGetterBuilder`
     pub(crate) fn build(
         self,
@@ -122,7 +129,10 @@ impl RemoteGetterBuilder {
                 match rpcs.entry(*addr) {
                     Entry::Occupied(e) => Rc::clone(e.get()),
                     Entry::Vacant(h) => {
-                        let c = RpcClient::connect(addr, is_local).unwrap();
+                        let c = match self.local_port {
+                            Some(port) => RpcClient::connect_from(port, addr, is_local).unwrap(),
+                            None => RpcClient::connect(addr, is_local).unwrap(),
+                        };
                         let c = Rc::new(RefCell::new(c));
                         h.insert(Rc::clone(&c));
                         c
