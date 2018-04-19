@@ -2,6 +2,9 @@ use core::{DataType, Record};
 use fnv::FnvBuildHasher;
 use std::borrow::Cow;
 use std::sync::Arc;
+use std::time;
+
+const RETRY_TIMEOUT_US: u64 = 1_000;
 
 /// Allocate a new end-user facing result table.
 pub(crate) fn new(cols: usize, key: &[usize]) -> (SingleReadHandle, WriteHandle) {
@@ -258,21 +261,28 @@ impl SingleReadHandle {
             Ok((None, ts)) if self.trigger.is_some() => {
                 if let Some(ref trigger) = self.trigger {
                     use std::thread;
+                    let retry_timeout = time::Duration::from_micros(RETRY_TIMEOUT_US);
 
-                    // trigger a replay to populate
-                    (*trigger)(key);
+                    'retry: loop {
+                        // trigger a replay to populate
+                        (*trigger)(key);
 
-                    if block {
+                        if !block {
+                            break 'retry Ok((None, ts));
+                        }
+
                         // wait for result to come through
-                        loop {
+                        let now = time::Instant::now();
+                        while now.elapsed() < retry_timeout {
                             thread::yield_now();
                             match self.try_find_and(key, &mut then) {
                                 Ok((None, _)) => {}
-                                r => return r,
+                                r => break 'retry r,
                             }
                         }
-                    } else {
-                        Ok((None, ts))
+
+                        // we've waited for a while
+                        // maybe the key was filled but then evicted, and we missed it?
                     }
                 } else {
                     unreachable!()
