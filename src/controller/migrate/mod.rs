@@ -298,9 +298,11 @@ impl<'a> Migration<'a> {
             .track(token_generator.clone())
             .unwrap();
 
-        self.mainline.ingredients[ri].with_reader_mut(|r| {
-            r.set_token_generator(token_generator);
-        });
+        self.mainline.ingredients[ri]
+            .with_reader_mut(|r| {
+                r.set_token_generator(token_generator);
+            })
+            .unwrap();
     }
 
     /// Set up the given node such that its output can be efficiently queried.
@@ -316,7 +318,9 @@ impl<'a> Migration<'a> {
 
         let ri = self.readers[&n];
 
-        self.mainline.ingredients[ri].with_reader_mut(|r| r.set_key(key));
+        self.mainline.ingredients[ri]
+            .with_reader_mut(|r| r.set_key(key))
+            .unwrap();
     }
 
     /// Set up the given node such that its output can be efficiently queried.
@@ -331,7 +335,9 @@ impl<'a> Migration<'a> {
 
         let ri = self.readers[&n];
 
-        self.mainline.ingredients[ri].with_reader_mut(|r| r.set_key(key));
+        self.mainline.ingredients[ri]
+            .with_reader_mut(|r| r.set_key(key))
+            .unwrap();
     }
 
     /// Commit the changes introduced by this `Migration` to the master `Soup`.

@@ -325,7 +325,7 @@ impl Materializations {
                         stack.clear();
                         able = false
                     }
-                } else if let Some(Some(_)) = graph[child].with_reader(|r| r.key()) {
+                } else if let Ok(Some(_)) = graph[child].with_reader(|r| r.key()) {
                     // reader child (which is effectively materialized)
                     if !self.partial.contains(&child) {
                         // reader is full, so we can't be partial
@@ -601,7 +601,7 @@ impl Materializations {
             if r.is_materialized() {
                 has_state = true;
             }
-        });
+        }).unwrap();
 
         if !has_state {
             debug!(self.log, "no need to replay non-materialized view"; "node" => ni.index());

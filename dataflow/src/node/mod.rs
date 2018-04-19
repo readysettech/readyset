@@ -157,24 +157,25 @@ impl Node {
         }
     }
 
-    pub fn with_reader_mut<F>(&mut self, f: F)
+    pub fn with_reader_mut<'a, F, R>(&'a mut self, f: F) -> Result<R, ()>
     where
-        F: FnOnce(&mut special::Reader),
+        F: FnOnce(&'a mut special::Reader) -> R,
+        R: 'a,
     {
         match self.inner {
-            NodeType::Reader(ref mut r) => f(r),
-            _ => unreachable!(),
+            NodeType::Reader(ref mut r) => Ok(f(r)),
+            _ => Err(()),
         }
     }
 
-    pub fn with_reader<'a, F, R>(&'a self, f: F) -> Option<R>
+    pub fn with_reader<'a, F, R>(&'a self, f: F) -> Result<R, ()>
     where
         F: FnOnce(&'a special::Reader) -> R,
         R: 'a,
     {
         match self.inner {
-            NodeType::Reader(ref r) => Some(f(r)),
-            _ => None,
+            NodeType::Reader(ref r) => Ok(f(r)),
+            _ => Err(()),
         }
     }
 

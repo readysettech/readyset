@@ -432,6 +432,7 @@ impl Getter {
 
         let gen = ingredients[node]
             .with_reader(|r| r)
+            .ok()
             .and_then(|r| r.token_generator().cloned());
         assert_eq!(ingredients[node].is_transactional(), gen.is_some());
         Some(Getter {

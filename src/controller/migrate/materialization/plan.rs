@@ -352,6 +352,7 @@ impl<'a> Plan<'a> {
                     }
                 }
             })
+            .ok()
             .unwrap_or_else(|| {
                 // not a reader
                 if self.partial {
