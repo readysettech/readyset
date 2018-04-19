@@ -134,7 +134,7 @@ impl<'a> MutWriteHandleEntry<'a> {
     pub fn mark_filled(self) {
         if let Some((None, _)) = self.handle
             .handle
-            .meta_get_and(self.key.clone(), |rs| rs.is_empty())
+            .meta_get_and(Cow::Borrowed(&*self.key), |rs| rs.is_empty())
         {
             self.handle.handle.clear(self.key)
         } else {
@@ -145,7 +145,7 @@ impl<'a> MutWriteHandleEntry<'a> {
     pub fn mark_hole(self) {
         let size = self.handle
             .handle
-            .meta_get_and(self.key.clone(), |rs| {
+            .meta_get_and(Cow::Borrowed(&*self.key), |rs| {
                 rs.iter().map(|r| r.deep_size_of()).sum()
             })
             .map(|r| r.0.unwrap_or(0))
