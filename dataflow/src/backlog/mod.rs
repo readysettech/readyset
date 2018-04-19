@@ -5,6 +5,12 @@ use std::borrow::Cow;
 
 use rand::{Rng, ThreadRng};
 use std::sync::Arc;
+use std::time;
+
+/// If a blocking reader finds itself waiting this long for a backfill to complete, it will
+/// re-issue the replay request. To avoid the system falling over if replays are slow for a little
+/// while, waiting readers will use exponential backoff on this delay if they continue to miss.
+const RETRY_TIMEOUT_US: u64 = 1_000;
 
 /// Allocate a new end-user facing result table.
 pub(crate) fn new(cols: usize, key: &[usize]) -> (SingleReadHandle, WriteHandle) {
@@ -299,21 +305,29 @@ impl SingleReadHandle {
             Ok((None, ts)) if self.trigger.is_some() => {
                 if let Some(ref trigger) = self.trigger {
                     use std::thread;
+                    let mut retry_timeout = time::Duration::from_micros(RETRY_TIMEOUT_US);
 
-                    // trigger a replay to populate
-                    (*trigger)(key);
+                    'retry: loop {
+                        // trigger a replay to populate
+                        (*trigger)(key);
 
-                    if block {
+                        if !block {
+                            break 'retry Ok((None, ts));
+                        }
+
                         // wait for result to come through
-                        loop {
+                        let now = time::Instant::now();
+                        while now.elapsed() < retry_timeout {
                             thread::yield_now();
                             match self.try_find_and(key, &mut then) {
                                 Ok((None, _)) => {}
-                                r => return r,
+                                r => break 'retry r,
                             }
                         }
-                    } else {
-                        Ok((None, ts))
+
+                        // we've waited for a while
+                        // maybe the key was filled but then evicted, and we missed it?
+                        retry_timeout *= 2;
                     }
                 } else {
                     unreachable!()

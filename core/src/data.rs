@@ -77,6 +77,16 @@ impl DataType {
 
 impl PartialEq for DataType {
     fn eq(&self, other: &DataType) -> bool {
+        unsafe {
+            use std::{mem, slice};
+            // if the two datatypes are byte-for-byte identical, they're the same.
+            let a: &[u8] = slice::from_raw_parts(mem::transmute(self), mem::size_of::<Self>());
+            let b: &[u8] = slice::from_raw_parts(mem::transmute(other), mem::size_of::<Self>());
+            if a == b {
+                return true;
+            }
+        }
+
         match (self, other) {
             (&DataType::Text(ref a), &DataType::Text(ref b)) => a == b,
             (&DataType::TinyText(ref a), &DataType::TinyText(ref b)) => a == b,
@@ -344,6 +354,7 @@ impl<'a> From<&'a str> for DataType {
 macro_rules! arithmetic_operation (
     ($op:tt, $first:ident, $second:ident) => (
         match ($first, $second) {
+            (&DataType::None, _) | (_, &DataType::None) => DataType::None,
             (&DataType::Int(a), &DataType::Int(b)) => (a $op b).into(),
             (&DataType::BigInt(a), &DataType::BigInt(b)) => (a $op b).into(),
             (&DataType::Int(a), &DataType::BigInt(b)) => ((a as i64) $op b).into(),

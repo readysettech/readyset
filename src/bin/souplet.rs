@@ -67,6 +67,11 @@ fn main() {
                 .help("Disable reuse"),
         )
         .arg(
+            Arg::with_name("nopartial")
+                .long("no-partial")
+                .help("Disable partial"),
+        )
+        .arg(
             Arg::with_name("readers")
                 .short("r")
                 .long("readers")
@@ -124,6 +129,9 @@ fn main() {
     builder.set_read_threads(readers);
     builder.set_sharding(sharding);
     builder.set_quorum(quorum);
+    if matches.is_present("nopartial") {
+        builder.disable_partial();
+    }
     if matches.is_present("noreuse") {
         builder.set_reuse(ReuseConfigType::NoReuse);
     }

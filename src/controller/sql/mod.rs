@@ -688,7 +688,10 @@ impl SqlIncorporator {
             // if we're just about to create the table, we don't need to check if it exists. If it
             // does, we will amend or reuse it; if it does not, we create it.
             SqlQuery::CreateTable(_) => (),
+            |
+            SqlQuery::CreateView(_) => (),
             // other kinds of queries *do* require their referred tables to exist!
+            |
             ref q @ SqlQuery::CompoundSelect(_)
             | ref q @ SqlQuery::Select(_)
             | ref q @ SqlQuery::Set(_)
