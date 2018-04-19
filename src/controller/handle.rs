@@ -38,7 +38,28 @@ pub struct ControllerHandle<A: Authority> {
     client: Client<hyper::client::HttpConnector>,
 }
 
+/// A pointer that lets you construct a new `ControllerHandle` from an existing one.
+#[derive(Clone)]
+pub struct ControllerPointer<A: Authority>(Arc<A>);
+
+impl<A: Authority> ControllerPointer<A> {
+    /// Construct another `ControllerHandle` to the controller this recipe
+    pub fn connect(&self) -> ControllerHandle<A> {
+        ControllerHandle::make(self.0.clone())
+    }
+}
+
 impl<A: Authority> ControllerHandle<A> {
+    /// Create a pointer to the controller pointed to by this handle.
+    ///
+    /// This method is safe to call from other threads than the one that made the
+    /// `ControllerHandle`. Note however that if `A = LocalAuthority` then dropping the original
+    /// `ControllerHandle` will still cause the controller threads to shut down, and thus any other
+    /// `ControllerHandle` instances will stop working.
+    pub fn pointer(&self) -> ControllerPointer<A> {
+        ControllerPointer(self.authority.clone())
+    }
+
     pub(super) fn make(authority: Arc<A>) -> Self {
         let core = Core::new().unwrap();
         let client = Client::new(&core.handle());
