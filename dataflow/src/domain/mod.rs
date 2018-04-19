@@ -1936,18 +1936,7 @@ impl Domain {
                                     // that the hole for the key we're replaying ends up being
                                     // filled, even if that hole is empty!
                                     r.writer_mut().map(|wh| {
-                                        use core::data::SizeOf;
-
                                         for key in backfill_keys.iter() {
-                                            let size = wh.with_key(&key[..])
-                                                .try_find_and(|rs| {
-                                                    rs.iter().map(|r| r.deep_size_of()).sum()
-                                                })
-                                                .map(|r| r.0.unwrap_or(0))
-                                                .unwrap_or(0);
-                                            wh.mem_size =
-                                                wh.mem_size.checked_sub(size as usize).unwrap();
-
                                             wh.mut_with_key(&key[..]).mark_filled();
                                         }
                                     });
@@ -2006,18 +1995,6 @@ impl Domain {
                                     n.with_reader_mut(|r| {
                                         r.writer_mut().map(|wh| {
                                             for miss in &missed_on {
-                                                use core::data::SizeOf;
-
-                                                let size = wh.with_key(&miss[..])
-                                                    .try_find_and(|rs| {
-                                                        rs.iter().map(|r| r.deep_size_of()).sum()
-                                                    })
-                                                    .map(|r| r.0.unwrap_or(0))
-                                                    .unwrap_or(0);
-
-                                                wh.mem_size =
-                                                    wh.mem_size.checked_sub(size as usize).unwrap();
-
                                                 wh.mut_with_key(&miss[..]).mark_hole();
                                             }
                                         });

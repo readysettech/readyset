@@ -122,21 +122,36 @@ pub(crate) struct WriteHandle {
 
 type Key<'a> = Cow<'a, [DataType]>;
 pub(crate) struct MutWriteHandleEntry<'a> {
-    handle: &'a mut multiw::Handle,
+    handle: &'a mut WriteHandle,
     key: Key<'a>,
 }
 pub(crate) struct WriteHandleEntry<'a> {
-    handle: &'a multiw::Handle,
+    handle: &'a WriteHandle,
     key: Key<'a>,
 }
 
 impl<'a> MutWriteHandleEntry<'a> {
     pub fn mark_filled(self) {
-        self.handle.clear(self.key)
+        if let Some((None, _)) = self.handle
+            .handle
+            .meta_get_and(self.key.clone(), |rs| rs.is_empty())
+        {
+            self.handle.handle.clear(self.key)
+        } else {
+            unreachable!("attempted to fill already-filled key");
+        }
     }
 
     pub fn mark_hole(self) {
-        self.handle.empty(self.key)
+        let size = self.handle
+            .handle
+            .meta_get_and(self.key.clone(), |rs| {
+                rs.iter().map(|r| r.deep_size_of()).sum()
+            })
+            .map(|r| r.0.unwrap_or(0))
+            .unwrap_or(0);
+        self.handle.mem_size = self.handle.mem_size.checked_sub(size as usize).unwrap();
+        self.handle.handle.empty(self.key)
     }
 }
 
@@ -145,7 +160,10 @@ impl<'a> WriteHandleEntry<'a> {
     where
         F: FnMut(&[Vec<DataType>]) -> T,
     {
-        self.handle.meta_get_and(self.key, &mut then).ok_or(())
+        self.handle
+            .handle
+            .meta_get_and(self.key, &mut then)
+            .ok_or(())
     }
 }
 
@@ -183,7 +201,7 @@ impl WriteHandle {
         K: Into<Key<'a>>,
     {
         MutWriteHandleEntry {
-            handle: &mut self.handle,
+            handle: self,
             key: key.into(),
         }
     }
@@ -193,7 +211,7 @@ impl WriteHandle {
         K: Into<Key<'a>>,
     {
         WriteHandleEntry {
-            handle: &self.handle,
+            handle: self,
             key: key.into(),
         }
     }
