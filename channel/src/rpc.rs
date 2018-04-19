@@ -1,16 +1,17 @@
 use std;
 use std::io::{self, Write};
 use std::marker::PhantomData;
-use std::net::SocketAddr;
+use std::net::{Ipv4Addr, SocketAddr};
 
 use bincode;
 use bufstream::BufStream;
 use byteorder::{NetworkEndian, WriteBytesExt};
 use mio::{self, Evented, Poll, PollOpt, Ready, Token};
+use net2;
 use serde::{Deserialize, Serialize};
 
-use tcp::{SendError, TryRecvError};
 use super::{DeserializeReceiver, NonBlockingWriter, ReceiveError};
+use tcp::{SendError, TryRecvError};
 
 pub struct RpcClient<Q, R> {
     stream: BufStream<std::net::TcpStream>,
@@ -39,8 +40,20 @@ where
         self.is_local
     }
 
+    pub fn connect_from(
+        sport: Option<u16>,
+        addr: &SocketAddr,
+        is_local: bool,
+    ) -> Result<Self, io::Error> {
+        let s = net2::TcpBuilder::new_v4()?
+            .reuse_address(true)?
+            .bind((Ipv4Addr::unspecified(), sport.unwrap_or(0)))?
+            .connect(addr)?;
+        Self::new(s, is_local)
+    }
+
     pub fn connect(addr: &SocketAddr, is_local: bool) -> Result<Self, io::Error> {
-        Self::new(std::net::TcpStream::connect(addr)?, is_local)
+        Self::connect_from(None, addr, is_local)
     }
 
     pub fn local_addr(&self) -> io::Result<SocketAddr> {

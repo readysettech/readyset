@@ -63,7 +63,9 @@ pub fn shard(
                 info!(log, "de-sharding prior to stream-only reader"; "node" => ?node);
             } else {
                 info!(log, "sharding reader"; "node" => ?node);
-                graph[node].with_reader_mut(|r| r.shard(sharding_factor));
+                graph[node]
+                    .with_reader_mut(|r| r.shard(sharding_factor))
+                    .unwrap();
             }
 
             if s != input_shardings[&ni] {

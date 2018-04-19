@@ -5,6 +5,7 @@ use dataflow::prelude::*;
 
 use std::cell::RefCell;
 use std::collections::HashMap;
+use std::io;
 use std::net::SocketAddr;
 use std::rc::Rc;
 use vec_map::VecMap;
@@ -33,6 +34,8 @@ pub struct MutatorBuilder {
     pub(crate) table_name: String,
     pub(crate) columns: Vec<String>,
 
+    pub(crate) local_port: Option<u16>,
+
     // skip so that serde will set value to default (which is false) when serializing
     #[serde(skip)]
     pub(crate) is_local: bool,
@@ -41,6 +44,12 @@ pub struct MutatorBuilder {
 pub(crate) type MutatorRpc = Rc<RefCell<DomainInputHandle>>;
 
 impl MutatorBuilder {
+    /// Set the local port to bind to when making the shared connection.
+    pub(crate) fn with_local_port(mut self, port: u16) -> MutatorBuilder {
+        self.local_port = Some(port);
+        self
+    }
+
     /// Construct a `Mutator`.
     pub fn build(
         self,
@@ -51,7 +60,7 @@ impl MutatorBuilder {
         let dih = match rpcs.entry(self.txs.clone()) {
             Entry::Occupied(e) => Rc::clone(e.get()),
             Entry::Vacant(h) => {
-                let c = DomainInputHandle::new(h.key()).unwrap();
+                let c = DomainInputHandle::new_on(self.local_port, h.key()).unwrap();
                 let c = Rc::new(RefCell::new(c));
                 h.insert(Rc::clone(&c));
                 c
@@ -139,6 +148,11 @@ impl Mutator<SharedConnection> {
 }
 
 impl<E> Mutator<E> {
+    /// Get the local address this mutator is bound to.
+    pub fn local_addr(&self) -> io::Result<SocketAddr> {
+        self.domain_input_handle.borrow().local_addr()
+    }
+
     fn inject_dropped_cols(&self, rs: &mut Records) {
         let ndropped = self.dropped.len();
         if ndropped != 0 {

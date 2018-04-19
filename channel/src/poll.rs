@@ -1,12 +1,12 @@
-use tcp::*;
 use rpc::*;
+use tcp::*;
 
 use std;
 use std::net::SocketAddr;
 use std::time::Duration;
 
-use mio::{Events, Poll, PollOpt, Ready, Token};
 use mio::net::{TcpListener, TcpStream};
+use mio::{Events, Poll, PollOpt, Ready, Token};
 
 use serde::Serialize;
 use serde::de::DeserializeOwned;

@@ -947,7 +947,8 @@ impl Domain {
                     }
                     Packet::AddStreamer { node, new_streamer } => {
                         let mut n = self.nodes[&node].borrow_mut();
-                        n.with_reader_mut(|r| r.add_streamer(new_streamer).unwrap());
+                        n.with_reader_mut(|r| r.add_streamer(new_streamer).unwrap())
+                            .unwrap();
                     }
                     Packet::StateSizeProbe { node } => {
                         use core::data::SizeOf;
@@ -1045,7 +1046,7 @@ impl Domain {
 
                                     // make sure Reader is actually prepared to receive state
                                     r.set_write_handle(w_part)
-                                });
+                                }).unwrap();
                             }
                             InitialState::Global { gid, cols, key } => {
                                 use backlog;
@@ -1067,7 +1068,7 @@ impl Domain {
 
                                     // make sure Reader is actually prepared to receive state
                                     r.set_write_handle(w_part)
-                                });
+                                }).unwrap();
                             }
                         }
                     }
@@ -1131,11 +1132,13 @@ impl Domain {
                         // *other* reader requested it, so let's double check that it indeed still
                         // misses!
                         let still_miss = self.nodes[&node]
-                            .borrow()
-                            .with_reader(|r| {
-                                r.writer()
-                                    .expect("reader replay requested for non-materialized reader")
-                                    .with_key(&key[..])
+                            .borrow_mut()
+                            .with_reader_mut(|r| {
+                                let w = r.writer_mut()
+                                    .expect("reader replay requested for non-materialized reader");
+                                // ensure that all writes have been applied
+                                w.swap();
+                                w.with_key(&key[..])
                                     .try_find_and(|_| ())
                                     .expect("reader replay requested for non-ready reader")
                                     .0
@@ -1329,7 +1332,7 @@ impl Domain {
                                         state.swap();
                                         trace!(self.log, "state swapped"; "local" => node.id());
                                     }
-                                });
+                                }).unwrap();
                             }
                         }
 
@@ -1943,7 +1946,7 @@ impl Domain {
                                             wh.mut_with_key(&key[..]).mark_filled();
                                         }
                                     });
-                                });
+                                }).unwrap();
                             }
                         }
 
@@ -2019,7 +2022,7 @@ impl Domain {
                                 // we filled a hole! swap the reader.
                                 n.with_reader_mut(|r| {
                                     r.writer_mut().map(|wh| wh.swap());
-                                });
+                                }).unwrap();
                                 // and also unmark the replay request
                                 if let Some(ref mut prev) =
                                     self.reader_triggered.get_mut(&segment.node)

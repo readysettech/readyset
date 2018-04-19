@@ -267,14 +267,10 @@ fn start_instance<A: Authority + 'static>(
         })
         .unwrap();
 
-    ControllerHandle {
-        url: None,
-        authority: authority2,
-        local_controller: Some((controller_event_tx2, controller_join_handle)),
-        local_worker: Some((worker_event_tx3, worker_join_handle)),
-        getters: Default::default(),
-        domains: Default::default(),
-    }
+    let mut ch = ControllerHandle::make(authority2);
+    ch.local_controller = Some((controller_event_tx2, controller_join_handle));
+    ch.local_worker = Some((worker_event_tx3, worker_join_handle));
+    ch
 }
 fn instance_campaign<A: Authority + 'static>(
     controller_event_tx: Sender<ControlEvent>,

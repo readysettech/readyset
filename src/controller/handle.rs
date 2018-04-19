@@ -27,31 +27,41 @@ use controller::{ControlEvent, ControllerDescriptor, WorkerEvent};
 
 /// `ControllerHandle` is a handle to a Controller.
 pub struct ControllerHandle<A: Authority> {
-    pub(super) url: Option<String>,
-    pub(super) authority: Arc<A>,
+    url: Option<String>,
+    local_port: Option<u16>,
+    authority: Arc<A>,
     pub(super) local_controller: Option<(Sender<ControlEvent>, JoinHandle<()>)>,
     pub(super) local_worker: Option<(Sender<WorkerEvent>, JoinHandle<()>)>,
-    pub(super) getters: HashMap<SocketAddr, GetterRpc>,
-    pub(super) domains: HashMap<Vec<SocketAddr>, MutatorRpc>,
+    getters: HashMap<SocketAddr, GetterRpc>,
+    domains: HashMap<Vec<SocketAddr>, MutatorRpc>,
+    reactor: Core,
+    client: Client<hyper::client::HttpConnector>,
 }
 
 impl<A: Authority> ControllerHandle<A> {
-    /// Creates a `ControllerHandle` that bootstraps a connection to Soup via the configuration
-    /// stored in the `Authority` passed as an argument.
-    pub fn new(authority: A) -> Self {
+    pub(super) fn make(authority: Arc<A>) -> Self {
+        let core = Core::new().unwrap();
+        let client = Client::new(&core.handle());
         ControllerHandle {
             url: None,
-            authority: Arc::new(authority),
+            local_port: None,
+            authority: authority,
             local_controller: None,
             local_worker: None,
             getters: Default::default(),
             domains: Default::default(),
+            reactor: core,
+            client: client,
         }
     }
 
+    /// Creates a `ControllerHandle` that bootstraps a connection to Soup via the configuration
+    /// stored in the `Authority` passed as an argument.
+    pub fn new(authority: A) -> Self {
+        Self::make(Arc::new(authority))
+    }
+
     fn rpc<Q: Serialize, R: DeserializeOwned>(&mut self, path: &str, request: &Q) -> R {
-        let mut core = Core::new().unwrap();
-        let client = Client::new(&core.handle());
         loop {
             if self.url.is_none() {
                 let descriptor: ControllerDescriptor =
@@ -62,7 +72,7 @@ impl<A: Authority> ControllerHandle<A> {
 
             let mut r = hyper::Request::new(hyper::Method::Post, url.parse().unwrap());
             r.set_body(serde_json::to_vec(request).unwrap());
-            let res = core.run(client.request(r)).unwrap();
+            let res = self.reactor.run(self.client.request(r)).unwrap();
             if res.status() == hyper::StatusCode::ServiceUnavailable {
                 thread::sleep(Duration::from_millis(100));
                 continue;
@@ -72,7 +82,7 @@ impl<A: Authority> ControllerHandle<A> {
                 continue;
             }
 
-            let body = core.run(res.body().concat2()).unwrap();
+            let body = self.reactor.run(res.body().concat2()).unwrap();
             return serde_json::from_slice(&body).unwrap();
         }
     }
@@ -112,8 +122,19 @@ impl<A: Authority> ControllerHandle<A> {
 
     /// Obtain a `RemoteGetter`.
     pub fn get_getter(&mut self, name: &str) -> Option<RemoteGetter> {
-        self.get_getter_builder(name)
-            .map(|g| g.build(&mut self.getters))
+        self.get_getter_builder(name).map(|mut g| {
+            if let Some(port) = self.local_port {
+                g = g.with_local_port(port);
+            }
+
+            let g = g.build(&mut self.getters);
+
+            if self.local_port.is_none() {
+                self.local_port = Some(g.local_addr().unwrap().port());
+            }
+
+            g
+        })
     }
 
     /// Obtain a MutatorBuild that can be used to construct a Mutator to perform writes and deletes
@@ -129,8 +150,19 @@ impl<A: Authority> ControllerHandle<A> {
 
     /// Obtain a Mutator
     pub fn get_mutator(&mut self, base: &str) -> Option<Mutator> {
-        self.get_mutator_builder(base)
-            .map(|m| m.build(&mut self.domains))
+        self.get_mutator_builder(base).map(|mut m| {
+            if let Some(port) = self.local_port {
+                m = m.with_local_port(port);
+            }
+
+            let m = m.build(&mut self.domains);
+
+            if self.local_port.is_none() {
+                self.local_port = Some(m.local_addr().unwrap().port());
+            }
+
+            m
+        })
     }
 
     /// Get statistics about the time spent processing different parts of the graph.

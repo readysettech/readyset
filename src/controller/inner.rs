@@ -435,11 +435,13 @@ impl ControllerInner {
             .externals(petgraph::EdgeDirection::Outgoing)
             .filter_map(|n| {
                 let name = self.ingredients[n].name().to_owned();
-                self.ingredients[n].with_reader(|r| {
-                    // we want to give the the node address that is being materialized not that of
-                    // the reader node itself.
-                    (name, r.is_for())
-                })
+                self.ingredients[n]
+                    .with_reader(|r| {
+                        // we want to give the the node address that is being materialized not that of
+                        // the reader node itself.
+                        (name, r.is_for())
+                    })
+                    .ok()
             })
             .collect()
     }
@@ -494,6 +496,7 @@ impl ControllerInner {
                 .collect();
 
             RemoteGetterBuilder {
+                local_port: None,
                 node: r,
                 columns,
                 shards,
@@ -548,6 +551,7 @@ impl ControllerInner {
         );
 
         Some(MutatorBuilder {
+            local_port: None,
             txs,
             addr: (*node.local_addr()).into(),
             key: key,
