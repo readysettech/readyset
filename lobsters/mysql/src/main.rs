@@ -204,29 +204,9 @@ impl trawler::LobstersClient for MysqlTrawler {
 
                 Either::B(c.drop_exec(
                     "SELECT COUNT(*) \
-                     FROM `read_ribbons` \
-                     \
-                     JOIN `comments` ON (`comments`.`story_id` = `read_ribbons`.`story_id`) \
-                     JOIN `stories` ON (`stories`.`id` = `comments`.`story_id`) \
-                     LEFT JOIN `comments` `parent_comments` \
-                     ON (`parent_comments`.`id` = `comments`.`parent_comment_id`) \
-                     \
-                     WHERE `read_ribbons`.`is_following` = 1 \
-                     AND `comments`.`user_id` <> `read_ribbons`.`user_id` \
-                     AND `comments`.`is_deleted` = 0 \
-                     AND `comments`.`is_moderated` = 0 \
-                     AND ( `comments`.`upvotes` - `comments`.`downvotes` ) >= 0 \
-                     AND `read_ribbons`.`updated_at` < `comments`.`created_at` \
-                     \
-                     AND ( `parent_comments`.`user_id` = `read_ribbons`.`user_id` \
-                     OR ( `parent_comments`.`user_id` IS NULL \
-                     AND `stories`.`user_id` = `read_ribbons`.`user_id` ) ) \
-                     \
-                     AND ( `parent_comments`.`id` IS NULL \
-                     OR ( `parent_comments`.`upvotes` - `parent_comments`.`downvotes` ) >= 0 ) \
-                     \
-                     AND `read_ribbons`.`user_id` = ? \
-                     GROUP BY `read_ribbons`.`user_id` \
+                     FROM `replying_comments_for_count`
+                     WHERE `replying_comments_for_count`.`user_id` = ? \
+                     GROUP BY `replying_comments_for_count`.`user_id` \
                      ",
                     (uid,),
                 ).and_then(move |c| {
