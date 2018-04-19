@@ -354,6 +354,7 @@ impl<'a> From<&'a str> for DataType {
 macro_rules! arithmetic_operation (
     ($op:tt, $first:ident, $second:ident) => (
         match ($first, $second) {
+            (&DataType::None, _) | (_, &DataType::None) => DataType::None,
             (&DataType::Int(a), &DataType::Int(b)) => (a $op b).into(),
             (&DataType::BigInt(a), &DataType::BigInt(b)) => (a $op b).into(),
             (&DataType::Int(a), &DataType::BigInt(b)) => ((a as i64) $op b).into(),
