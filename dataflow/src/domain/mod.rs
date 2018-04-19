@@ -1,4 +1,5 @@
 use petgraph::graph::NodeIndex;
+use std::cmp;
 use std::cell;
 use std::collections::hash_map::Entry;
 use std::collections::{HashMap, HashSet, VecDeque};
@@ -2479,7 +2480,7 @@ impl Domain {
 
         match (*m,) {
             (Packet::Evict { node, num_bytes },) => {
-                let node = node.or_else(|| {
+                let node = node.map(|n| (n, num_bytes)).or_else(|| {
                     self.nodes
                         .values()
                         .filter_map(|nd| {
@@ -2503,11 +2504,11 @@ impl Domain {
                         .max_by_key(|&(_, s)| s)
                         .map(|(n, s)| {
                             trace!(self.log, "chose to evict from node {:?} with size {}", n, s);
-                            n
+                            (n, cmp::min(num_bytes, s as usize))
                         })
                 });
 
-                if let Some(node) = node {
+                if let Some((node, num_bytes)) = node {
                     let mut freed = 0u64;
                     while freed < num_bytes as u64 {
                         use core::data::SizeOf;
