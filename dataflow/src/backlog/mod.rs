@@ -230,7 +230,9 @@ impl WriteHandle {
         if mem_delta > 0 {
             self.mem_size += mem_delta as usize;
         } else if mem_delta < 0 {
-            self.mem_size = self.mem_size.checked_sub(mem_delta as usize).unwrap();
+            self.mem_size = self.mem_size
+                .checked_sub(mem_delta.checked_abs().unwrap() as usize)
+                .unwrap();
         }
     }
 
