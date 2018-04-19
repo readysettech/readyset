@@ -111,12 +111,22 @@ impl SingleState {
     pub fn remove_row(&mut self, r: &[DataType], hit: &mut bool) -> Option<Row> {
         let mut do_remove = |self_rows: &mut usize, rs: &mut Vec<Row>| -> Option<Row> {
             *hit = true;
-            if let Some(i) = rs.iter().position(|rsr| &rsr[..] == r) {
-                *self_rows = self_rows.checked_sub(1).unwrap();
-                Some(rs.swap_remove(i))
+            let rm = if rs.len() == 1 {
+                // it *should* be impossible to get a negative for a record that we don't have
+                debug_assert_eq!(r, &rs[0][..]);
+                Some(rs.swap_remove(0))
             } else {
-                None
+                if let Some(i) = rs.iter().position(|rsr| &rsr[..] == r) {
+                    Some(rs.swap_remove(i))
+                } else {
+                    None
+                }
+            };
+
+            if rm.is_some() {
+                *self_rows = self_rows.checked_sub(1).unwrap();
             }
+            rm
         };
 
         match self.state {
