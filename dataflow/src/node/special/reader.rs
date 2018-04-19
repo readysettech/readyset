@@ -72,6 +72,7 @@ impl Reader {
         self.for_node
     }
 
+    #[allow(dead_code)]
     pub(crate) fn writer(&self) -> Option<&backlog::WriteHandle> {
         self.writer.as_ref()
     }

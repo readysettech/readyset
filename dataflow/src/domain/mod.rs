@@ -1977,7 +1977,7 @@ impl Domain {
                                                 wh.mut_with_key(&miss[..]).mark_hole();
                                             }
                                         });
-                                    });
+                                    }).unwrap();
                                 }
                             } else if is_reader {
                                 // we filled a hole! swap the reader.
