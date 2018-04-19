@@ -2319,3 +2319,72 @@ fn tpc_w() {
         }
     });
 }
+
+#[test]
+fn node_removal() {
+    // set up graph
+    let mut b = ControllerBuilder::default();
+    b.set_persistence(PersistenceParameters::new(
+        DurabilityMode::DeleteOnExit,
+        128,
+        Duration::from_millis(1),
+        Some(get_log_name("domain_removal")),
+    ));
+    let mut g = b.build_local();
+    let cid = g.migrate(|mig| {
+        let a = mig.add_ingredient("a", &["a", "b"], Base::new(vec![]).with_key(vec![0]));
+        let b = mig.add_ingredient("b", &["a", "b"], Base::new(vec![]).with_key(vec![0]));
+
+        let mut emits = HashMap::new();
+        emits.insert(a, vec![0, 1]);
+        emits.insert(b, vec![0, 1]);
+        let u = Union::new(emits);
+        let c = mig.add_ingredient("c", &["a", "b"], u);
+        mig.maintain_anonymous(c, &[0])
+    });
+
+    let mut cq = g.get_getter("c").unwrap();
+    let mut muta = g.get_mutator("a").unwrap();
+    let mut mutb = g.get_mutator("b").unwrap();
+    let id: DataType = 1.into();
+
+    assert_eq!(muta.table_name(), "a");
+    assert_eq!(muta.columns(), &["a", "b"]);
+
+    // send a value on a
+    muta.put(vec![id.clone(), 2.into()]).unwrap();
+
+    // give it some time to propagate
+    sleep();
+
+    // send a query to c
+    assert_eq!(
+        cq.lookup(&[id.clone()], true),
+        Ok(vec![vec![1.into(), 2.into()]])
+    );
+
+    g.remove_node(cid);
+
+    // update value again
+    mutb.put(vec![id.clone(), 4.into()]).unwrap();
+
+    // give it some time to propagate
+    sleep();
+
+    // // check that value was updated again
+    // let res = cq.lookup(&[id.clone()], true).unwrap();
+    // assert!(res.iter().any(|r| r == &vec![id.clone(), 2.into()]));
+    // assert!(res.iter().any(|r| r == &vec![id.clone(), 4.into()]));
+
+    // Delete first record
+    muta.delete(vec![id.clone()]).unwrap();
+
+    // give it some time to propagate
+    sleep();
+
+    // // send a query to c
+    // assert_eq!(
+    //     cq.lookup(&[id.clone()], true),
+    //     Ok(vec![vec![1.into(), 4.into()]])
+    // );
+}

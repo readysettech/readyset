@@ -176,6 +176,11 @@ pub enum Packet {
         parents: Vec<LocalNodeIndex>,
     },
 
+    /// Direct domain to remove some nodes.
+    RemoveNodes {
+        nodes: Vec<LocalNodeIndex>,
+    },
+
     /// Add a new column to an existing `Base` node.
     AddBaseColumn {
         node: LocalNodeIndex,

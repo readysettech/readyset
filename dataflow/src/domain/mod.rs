@@ -12,9 +12,8 @@ use std::time;
 
 use std::net::SocketAddr;
 
-use Readers;
-use channel::TcpSender;
 use channel::poll::{PollEvent, ProcessResult};
+use channel::TcpSender;
 use checktable;
 use debug;
 use itertools::Itertools;
@@ -26,6 +25,7 @@ use slog::Logger;
 use statistics;
 use timekeeper::{RealTime, SimpleTracker, ThreadTime, Timer, TimerSet};
 use transactions;
+use Readers;
 
 type EnqueuedSends = Vec<(ReplicaAddr, Box<Packet>)>;
 
@@ -892,6 +892,19 @@ impl Domain {
                         }
                         self.nodes.insert(addr, cell::RefCell::new(node));
                         trace!(self.log, "new node incorporated"; "local" => addr.id());
+                    }
+                    Packet::RemoveNodes { nodes } => {
+                        for node in &nodes {
+                            self.nodes.remove(node);
+                            self.state.remove(node);
+                            trace!(self.log, "node removed"; "local" => node.id());
+                        }
+
+                        for node in nodes {
+                            for cn in self.nodes.iter_mut() {
+                                cn.1.borrow_mut().try_remove_child(node);
+                            }
+                        }
                     }
                     Packet::AddBaseColumn {
                         node,

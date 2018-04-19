@@ -238,6 +238,16 @@ impl Node {
         self.children.push(child);
     }
 
+    pub fn try_remove_child(&mut self, child: LocalNodeIndex) -> bool {
+        for i in 0..self.children.len() {
+            if self.children[i] == child {
+                self.children.swap_remove(i);
+                return true;
+            }
+        }
+        false
+    }
+
     pub fn add_column(&mut self, field: &str) -> usize {
         self.fields.push(field.to_string());
         self.fields.len() - 1

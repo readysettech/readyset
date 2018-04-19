@@ -310,7 +310,7 @@ impl<'a> Migration<'a> {
     /// To query into the maintained state, use `ControllerInner::get_getter` or
     /// `ControllerInner::get_transactional_getter`
     #[cfg(test)]
-    pub fn maintain_anonymous(&mut self, n: NodeIndex, key: &[usize]) {
+    pub fn maintain_anonymous(&mut self, n: NodeIndex, key: &[usize]) -> NodeIndex {
         self.ensure_reader_for(n, None);
         if self.mainline.ingredients[n].is_transactional() {
             self.ensure_token_generator(n, key);
@@ -321,6 +321,8 @@ impl<'a> Migration<'a> {
         self.mainline.ingredients[ri]
             .with_reader_mut(|r| r.set_key(key))
             .unwrap();
+
+        ri
     }
 
     /// Set up the given node such that its output can be efficiently queried.
