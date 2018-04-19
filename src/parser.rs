@@ -2,7 +2,7 @@ use nom::IResult;
 use std::str;
 use std::fmt;
 
-use create::{creation, CreateTableStatement};
+use create::{creation, view_creation, CreateTableStatement, CreateViewStatement};
 use insert::{insertion, InsertStatement};
 use compound_select::{compound_selection, CompoundSelectStatement};
 use select::{selection, SelectStatement};
@@ -14,6 +14,7 @@ use set::{set, SetStatement};
 #[derive(Clone, Debug, Eq, Hash, PartialEq, Serialize, Deserialize)]
 pub enum SqlQuery {
     CreateTable(CreateTableStatement),
+    CreateView(CreateViewStatement),
     Insert(InsertStatement),
     CompoundSelect(CompoundSelectStatement),
     Select(SelectStatement),
@@ -29,6 +30,7 @@ impl fmt::Display for SqlQuery {
             SqlQuery::Select(ref select) => write!(f, "{}", select),
             SqlQuery::Insert(ref insert) => write!(f, "{}", insert),
             SqlQuery::CreateTable(ref create) => write!(f, "{}", create),
+            SqlQuery::CreateView(ref create) => write!(f, "{}", create),
             SqlQuery::Delete(ref delete) => write!(f, "{}", delete),
             SqlQuery::DropTable(ref drop) => write!(f, "{}", drop),
             SqlQuery::Update(ref update) => write!(f, "{}", update),
@@ -48,6 +50,7 @@ named!(pub sql_query<&[u8], SqlQuery>,
         | do_parse!(dt: drop_table >> (SqlQuery::DropTable(dt)))
         | do_parse!(u: updating >> (SqlQuery::Update(u)))
         | do_parse!(s: set >> (SqlQuery::Set(s)))
+        | do_parse!(c: view_creation >> (SqlQuery::CreateView(c)))
     )
 );
 
