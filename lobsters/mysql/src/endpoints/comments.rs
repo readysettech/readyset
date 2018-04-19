@@ -1,6 +1,6 @@
 use futures;
-use futures::Future;
 use futures::future::{self, Either};
+use futures::Future;
 use my;
 use my::prelude::*;
 use std::collections::HashSet;

@@ -9,8 +9,8 @@ extern crate tokio_core;
 extern crate trawler;
 
 use clap::{App, Arg};
-use futures::Future;
 use futures::future::Either;
+use futures::Future;
 use my::prelude::*;
 use std::cell::RefCell;
 use std::collections::HashMap;
