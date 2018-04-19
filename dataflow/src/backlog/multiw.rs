@@ -30,6 +30,7 @@ impl Handle {
     /// Evict `count` randomly selected keys from state and return them along with the number of
     /// bytes freed.
     pub fn empty_at_index(&mut self, index: usize) -> Option<&Vec<Vec<DataType>>> {
+        self.refresh();
         match *self {
             Handle::Single(ref mut h) => h.empty_at_index(index).map(|r| r.1),
             Handle::Double(ref mut h) => h.empty_at_index(index).map(|r| r.1),
