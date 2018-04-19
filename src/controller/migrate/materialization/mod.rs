@@ -601,7 +601,7 @@ impl Materializations {
             if r.is_materialized() {
                 has_state = true;
             }
-        }).unwrap();
+        }).unwrap_or(());
 
         if !has_state {
             debug!(self.log, "no need to replay non-materialized view"; "node" => ni.index());
