@@ -12,7 +12,7 @@ use std::io::prelude::*;
 use std::{fmt, thread, time};
 use tsunami::*;
 
-const AMI: &str = "ami-106fcc6f";
+const AMI: &str = "ami-6675d819";
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 enum Backend {
@@ -270,7 +270,7 @@ fn main() {
                         "{}/lobsters/mysql/target/release/trawler-mysql \
                          --warmup 0 \
                          --runtime 0 \
-                         --issuers 20 \
+                         --issuers 24 \
                          --prime \
                          \"mysql://lobsters:$(cat ~/mysql.pass)@{}/lobsters\"",
                         dir, ip
@@ -294,7 +294,7 @@ fn main() {
                          --reqscale {} \
                          --warmup 60 \
                          --runtime 30 \
-                         --issuers 20 \
+                         --issuers 24 \
                          --histogram lobsters-{}-{}.hist \
                          \"mysql://lobsters:$(cat ~/mysql.pass)@{}/lobsters\"",
                         dir, scale, backend, scale, ip

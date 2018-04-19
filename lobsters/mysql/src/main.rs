@@ -9,8 +9,8 @@ extern crate tokio_core;
 extern crate trawler;
 
 use clap::{App, Arg};
-use futures::Future;
 use futures::future::Either;
+use futures::Future;
 use my::prelude::*;
 use std::cell::RefCell;
 use std::collections::HashMap;
@@ -204,33 +204,9 @@ impl trawler::LobstersClient for MysqlTrawler {
 
                 Either::B(c.drop_exec(
                     "SELECT COUNT(*) \
-                     FROM `read_ribbons` \
-                     \
-                     JOIN (SELECT `comments`.*, `comments`.`upvotes` - `comments`.`downvotes` AS `saldo` \
-                           FROM `comments`) AS `comments_s` \
-                     ON (`comments_s`.`story_id` = `read_ribbons`.`story_id`) \
-                     JOIN `stories` ON (`stories`.`id` = `comments_s`.`story_id`) \
-                     LEFT JOIN (SELECT `comments`.`id`, `comments`.`user_id`, \
-                                `comments`.`upvotes` - `comments`.`downvotes` AS `saldo` \
-                                FROM `comments`) AS `parent_comments` \
-                     ON (`parent_comments`.`id` = `comments_s`.`parent_comment_id`) \
-                     \
-                     WHERE `read_ribbons`.`is_following` = 1 \
-                     AND `comments_s`.`user_id` <> `read_ribbons`.`user_id` \
-                     AND `comments_s`.`is_deleted` = 0 \
-                     AND `comments_s`.`is_moderated` = 0 \
-                     AND `comments_s`.`saldo` >= 0 \
-                     AND `read_ribbons`.`updated_at` < `comments_s`.`created_at` \
-                     \
-                     AND ( `parent_comments`.`user_id` = `read_ribbons`.`user_id` \
-                     OR ( `parent_comments`.`user_id` IS NULL \
-                     AND `stories`.`user_id` = `read_ribbons`.`user_id` ) ) \
-                     \
-                     AND ( `parent_comments`.`id` IS NULL \
-                     OR `parent_comments`.`saldo` >= 0 ) \
-                     \
-                     AND `read_ribbons`.`user_id` = ? \
-                     GROUP BY `read_ribbons`.`user_id` \
+                     FROM `replying_comments_for_count`
+                     WHERE `replying_comments_for_count`.`user_id` = ? \
+                     GROUP BY `replying_comments_for_count`.`user_id` \
                      ",
                     (uid,),
                 ).and_then(move |c| {

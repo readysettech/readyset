@@ -1,7 +1,7 @@
 use chrono;
 use futures;
-use futures::Future;
 use futures::future::Either;
+use futures::Future;
 use my;
 use my::prelude::*;
 use std::collections::HashSet;
