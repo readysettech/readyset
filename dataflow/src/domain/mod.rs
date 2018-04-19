@@ -1401,8 +1401,11 @@ impl Domain {
                                 if n.is_reader() {
                                     // We are a reader, which has its own kind of state
                                     let mut size = 0;
-                                    n.with_reader(|r| size = r.state_size().unwrap_or(0))
-                                        .unwrap();
+                                    n.with_reader(|r| {
+                                        if r.is_partial() {
+                                            size = r.state_size().unwrap_or(0)
+                                        }
+                                    }).unwrap();
                                     size
                                 } else {
                                     // Not a reader, state is with domain
@@ -2496,8 +2499,11 @@ impl Domain {
 
                             if n.is_reader() {
                                 let mut size = 0;
-                                n.with_reader(|r| size = r.state_size().unwrap_or(0))
-                                    .unwrap();
+                                n.with_reader(|r| {
+                                    if r.is_partial() {
+                                        size = r.state_size().unwrap_or(0)
+                                    }
+                                }).unwrap();
                                 Some((local_index, size))
                             } else {
                                 self.state

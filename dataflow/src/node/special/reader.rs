@@ -104,6 +104,13 @@ impl Reader {
         self.state.is_some()
     }
 
+    pub fn is_partial(&self) -> bool {
+        match self.writer {
+            None => false,
+            Some(ref state) => state.is_partial(),
+        }
+    }
+
     pub(crate) fn set_write_handle(&mut self, wh: backlog::WriteHandle) {
         assert!(self.writer.is_none());
         self.writer = Some(wh);
