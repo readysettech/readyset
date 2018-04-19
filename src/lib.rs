@@ -14,7 +14,7 @@ pub use self::common::{FieldDefinitionExpression, FieldValueExpression, Literal,
                        LiteralExpression, Operator, Real, SqlType, TableKey};
 pub use self::column::{Column, ColumnConstraint, ColumnSpecification, FunctionExpression};
 pub use self::condition::{ConditionBase, ConditionExpression, ConditionTree};
-pub use self::create::CreateTableStatement;
+pub use self::create::{CreateTableStatement, CreateViewStatement};
 pub use self::delete::DeleteStatement;
 pub use self::insert::InsertStatement;
 pub use self::join::{JoinConstraint, JoinOperator, JoinRightSide};
