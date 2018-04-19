@@ -1360,7 +1360,8 @@ impl Domain {
                                 let ptime = self.process_ptimes.num_nanoseconds(local_index);
                                 let mem_size = if n.is_reader() {
                                     let mut size = 0;
-                                    n.with_reader(|r| size = r.state_size().unwrap_or(0));
+                                    n.with_reader(|r| size = r.state_size().unwrap_or(0))
+                                        .unwrap();
                                     size
                                 } else {
                                     self.state
@@ -1400,7 +1401,8 @@ impl Domain {
                                 if n.is_reader() {
                                     // We are a reader, which has its own kind of state
                                     let mut size = 0;
-                                    n.with_reader(|r| size = r.state_size().unwrap_or(0));
+                                    n.with_reader(|r| size = r.state_size().unwrap_or(0))
+                                        .unwrap();
                                     size
                                 } else {
                                     // Not a reader, state is with domain
@@ -2016,7 +2018,7 @@ impl Domain {
                                                 wh.mut_with_key(&miss[..]).mark_hole();
                                             }
                                         });
-                                    });
+                                    }).unwrap();
                                 }
                             } else if is_reader {
                                 // we filled a hole! swap the reader.
@@ -2494,7 +2496,8 @@ impl Domain {
 
                             if n.is_reader() {
                                 let mut size = 0;
-                                n.with_reader(|r| size = r.state_size().unwrap_or(0));
+                                n.with_reader(|r| size = r.state_size().unwrap_or(0))
+                                    .unwrap();
                                 Some((local_index, size))
                             } else {
                                 self.state
@@ -2522,7 +2525,10 @@ impl Domain {
                             // the same individual key twice if we batch evictions here.
                             self.nodes[&node]
                                 .borrow_mut()
-                                .with_reader_mut(|r| freed += r.evict_random_key());
+                                .with_reader_mut(|r| {
+                                    freed += r.evict_random_key();
+                                })
+                                .unwrap();
                         } else {
                             let (key_columns, keys, bytes) = {
                                 let k = self.state[&node].evict_random_keys(100);
