@@ -1131,11 +1131,13 @@ impl Domain {
                         // *other* reader requested it, so let's double check that it indeed still
                         // misses!
                         let still_miss = self.nodes[&node]
-                            .borrow()
-                            .with_reader(|r| {
-                                r.writer()
-                                    .expect("reader replay requested for non-materialized reader")
-                                    .with_key(&key[..])
+                            .borrow_mut()
+                            .with_reader_mut(|r| {
+                                let w = r.writer_mut()
+                                    .expect("reader replay requested for non-materialized reader");
+                                // ensure that all writes have been applied
+                                w.swap();
+                                w.with_key(&key[..])
                                     .try_find_and(|_| ())
                                     .expect("reader replay requested for non-ready reader")
                                     .0
