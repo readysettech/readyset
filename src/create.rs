@@ -8,6 +8,7 @@ use common::{column_identifier_no_alias, integer_literal, opt_multispace, sql_id
              TableKey};
 use column::{Column, ColumnConstraint, ColumnSpecification};
 use keywords::escape_if_keyword;
+use select::{nested_selection, SelectStatement};
 use order::{order_type, OrderType};
 use table::Table;
 
@@ -42,6 +43,34 @@ impl fmt::Display for CreateTableStatement {
             )?;
         }
         write!(f, ")")
+    }
+}
+
+#[derive(Clone, Debug, Default, Eq, Hash, PartialEq, Serialize, Deserialize)]
+pub struct CreateViewStatement {
+    pub name: String,
+    pub fields: Vec<Column>,
+    pub definition: Box<SelectStatement>,
+}
+
+impl fmt::Display for CreateViewStatement {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        write!(f, "CREATE VIEW {} ", escape_if_keyword(&self.name))?;
+        if !self.fields.is_empty() {
+            write!(f, "(")?;
+            write!(
+                f,
+                "{}",
+                self.fields
+                    .iter()
+                    .map(|field| format!("{}", field))
+                    .collect::<Vec<_>>()
+                    .join(", ")
+            )?;
+            write!(f, ") ")?;
+        }
+        write!(f, "AS ")?;
+        write!(f, "{}", self.definition)
     }
 }
 
@@ -420,6 +449,29 @@ named!(pub creation<&[u8], CreateTableStatement>,
     ))
 );
 
+/// Parse rule for a SQL CREATE VIEW query.
+named!(pub view_creation<&[u8], CreateViewStatement>,
+    complete!(do_parse!(
+        tag_no_case!("create") >>
+        multispace >>
+        tag_no_case!("view") >>
+        multispace >>
+        name: sql_identifier >>
+        multispace >>
+        tag_no_case!("as") >>
+        multispace >>
+        definition: nested_selection >>
+        statement_terminator >>
+        ({
+            CreateViewStatement {
+                name: String::from(str::from_utf8(name).unwrap()),
+                fields: vec![],  // TODO(malte): support
+                definition: Box::new(definition),
+            }
+        })
+    ))
+);
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -685,6 +737,45 @@ mod tests {
                         id INT(32) AUTO_INCREMENT NOT NULL PRIMARY KEY, \
                         name VARCHAR(80) NOT NULL UNIQUE)";
         let res = creation(qstring.as_bytes());
+        assert_eq!(format!("{}", res.unwrap().1), expected);
+    }
+
+    #[test]
+    fn simple_create_view() {
+        use condition::{ConditionBase, ConditionExpression, ConditionTree};
+        use common::{FieldDefinitionExpression, Operator};
+
+        let qstring = "CREATE VIEW v AS SELECT * FROM users WHERE username = \"bob\";";
+
+        let res = view_creation(qstring.as_bytes());
+        assert_eq!(
+            res.unwrap().1,
+            CreateViewStatement {
+                name: String::from("v"),
+                fields: vec![],
+                definition: Box::new(SelectStatement {
+                    tables: vec![Table::from("users")],
+                    fields: vec![FieldDefinitionExpression::All],
+                    where_clause: Some(ConditionExpression::ComparisonOp(ConditionTree {
+                        left: Box::new(ConditionExpression::Base(ConditionBase::Field(
+                            "username".into()
+                        ))),
+                        right: Box::new(ConditionExpression::Base(ConditionBase::Literal(
+                            Literal::String("bob".into())
+                        ))),
+                        operator: Operator::Equal,
+                    })),
+                    ..Default::default()
+                }),
+            }
+        );
+    }
+
+    #[test]
+    fn format_create_view() {
+        let qstring = "CREATE VIEW `v` AS SELECT * FROM `t`;";
+        let expected = "CREATE VIEW v AS SELECT * FROM t";
+        let res = view_creation(qstring.as_bytes());
         assert_eq!(format!("{}", res.unwrap().1), expected);
     }
 }
