@@ -428,11 +428,11 @@ impl Recipe {
         result.removed_leaves = removed
             .iter()
             .filter_map(|qid| {
-                let (ref n, ref q, _) = self.prior.as_ref().unwrap().expressions[qid];
+                let (ref n, _, _) = self.prior.as_ref().unwrap().expressions[qid];
                 self.inc
                     .as_mut()
                     .unwrap()
-                    .remove_query(n.as_ref().unwrap(), q, mig)
+                    .remove_query(n.as_ref().unwrap(), mig)
             })
             .collect();
 

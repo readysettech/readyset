@@ -517,12 +517,7 @@ impl SqlIncorporator {
         (qfp, mir)
     }
 
-    pub fn remove_query(
-        &mut self,
-        query_name: &str,
-        q: &SqlQuery,
-        mig: &Migration,
-    ) -> Option<NodeIndex> {
+    pub fn remove_query(&mut self, query_name: &str, mig: &Migration) -> Option<NodeIndex> {
         let nodeid = self.leaf_addresses
             .remove(query_name)
             .expect("tried to remove unknown query");
