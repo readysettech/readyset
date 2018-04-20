@@ -241,7 +241,8 @@ impl Node {
                 r.on_eviction(key_columns, keys);
             }
             NodeType::Ingress => {}
-            NodeType::Egress(None) | NodeType::Source | NodeType::Dropped => unreachable!(),
+            NodeType::Dropped => {}
+            NodeType::Egress(None) | NodeType::Source => unreachable!(),
         }
     }
 }

@@ -1,6 +1,6 @@
 use petgraph::graph::NodeIndex;
-use std::cmp;
 use std::cell;
+use std::cmp;
 use std::collections::hash_map::Entry;
 use std::collections::{HashMap, HashSet, VecDeque};
 use std::fs::File;
@@ -1786,6 +1786,13 @@ impl Domain {
 
     fn handle_replay(&mut self, m: Box<Packet>, sends: &mut EnqueuedSends) {
         let tag = m.tag().unwrap();
+        if self.nodes[&self.replay_paths[&tag].path.last().unwrap().node]
+            .borrow()
+            .is_dropped()
+        {
+            return;
+        }
+
         let mut finished = None;
         let mut need_replay = Vec::new();
         let mut finished_partial = 0;
@@ -2515,7 +2522,10 @@ impl Domain {
                     while freed < num_bytes as u64 {
                         use core::data::SizeOf;
 
-                        if self.nodes[&node].borrow().is_reader() {
+                        if self.nodes[&node].borrow().is_dropped() {
+                            break; // Node was dropped. Give up.
+                        }
+                        else if self.nodes[&node].borrow().is_reader() {
                             // we can only evict one key a time here because the freed memory
                             // calculation is based on the key that *will* be evicted. We may count
                             // the same individual key twice if we batch evictions here.
@@ -2576,6 +2586,10 @@ impl Domain {
                         let target = self.replay_paths[&tag].path.last().unwrap().node;
                         // We've already evicted from readers in walk_path
                         if self.nodes[&target].borrow().is_reader() {
+                            return;
+                        }
+                        // No need to continue if node was dropped.
+                        if self.nodes[&target].borrow().is_dropped() {
                             return;
                         }
                         let key_columns = self.state[&target].evict_keys(&tag, &keys).0.to_vec();
