@@ -652,7 +652,13 @@ impl ControllerInner {
         match err {
             Ok(ref ra) => {
                 for leaf in &ra.removed_leaves {
-                    self.remove_node(*leaf);
+                    // There should be exactly one reader attached to each "leaf" node. Find it and
+                    // remove it along with any now unneeded ancestors.
+                    let readers: Vec<_> = self.ingredients
+                        .neighbors_directed(*leaf, petgraph::EdgeDirection::Outgoing)
+                        .collect();
+                    assert_eq!(readers.len(), 1);
+                    self.remove_node(readers[0]);
                 }
                 self.recipe = new;
             }
