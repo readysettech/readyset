@@ -121,7 +121,7 @@ impl Handle {
                             // last record. this means that future lookups will fail, and cause a
                             // replay, which will produce an empty result. this will work, but is
                             // somewhat inefficient.
-                            memory_delta - r.deep_size_of() as isize;
+                            memory_delta -= r.deep_size_of() as isize;
                             h.remove(r[key[0]].clone(), r);
                         }
                         Record::BaseOperation(..) => unreachable!(),
@@ -138,7 +138,7 @@ impl Handle {
                             h.insert((r[key[0]].clone(), r[key[1]].clone()), r);
                         }
                         Record::Negative(r) => {
-                            memory_delta - r.deep_size_of() as isize;
+                            memory_delta -= r.deep_size_of() as isize;
                             h.remove((r[key[0]].clone(), r[key[1]].clone()), r);
                         }
                         Record::BaseOperation(..) => unreachable!(),
@@ -154,7 +154,7 @@ impl Handle {
                         h.insert(key, r);
                     }
                     Record::Negative(r) => {
-                        memory_delta - r.deep_size_of() as isize;
+                        memory_delta -= r.deep_size_of() as isize;
                         h.remove(key, r);
                     }
                     Record::BaseOperation(..) => unreachable!(),
