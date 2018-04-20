@@ -128,6 +128,17 @@ impl Signature for QueryGraph {
             }
         }
 
+        // Global predicates are part of the attributes too
+        for p in &self.global_predicates {
+            match *p {
+                ComparisonOp(ref ct) | LogicalOp(ref ct) => for c in &ct.contained_columns() {
+                    attrs_vec.push(c);
+                    attrs.insert(c);
+                },
+                _ => unreachable!(),
+            }
+        }
+
         // Compute attributes part of hash
         attrs_vec.sort();
         for a in &attrs_vec {

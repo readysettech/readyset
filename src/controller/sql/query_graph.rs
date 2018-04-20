@@ -156,6 +156,8 @@ pub struct QueryGraph {
     /// Establishes an order for join predicates. Each join predicate can be identified by
     /// its (src, dst) pair, and its index in the array of predicates.
     pub join_order: Vec<JoinRef>,
+    /// Global predicates (not associated with a particular relation)
+    pub global_predicates: Vec<ConditionExpression>,
 }
 
 impl QueryGraph {
@@ -165,6 +167,7 @@ impl QueryGraph {
             edges: HashMap::new(),
             columns: Vec::new(),
             join_order: Vec::new(),
+            global_predicates: Vec::new(),
         }
     }
 
@@ -204,6 +207,7 @@ impl Hash for QueryGraph {
         // columns and join_order are Vecs, so already ordered
         self.columns.hash(state);
         self.join_order.hash(state);
+        self.global_predicates.hash(state);
     }
 }
 
@@ -243,7 +247,7 @@ fn classify_conditionals(
     tables: &Vec<Table>,
     local: &mut HashMap<String, Vec<ConditionExpression>>,
     join: &mut Vec<ConditionTree>,
-    global: &mut Vec<ConditionTree>,
+    global: &mut Vec<ConditionExpression>,
     params: &mut Vec<Column>,
 ) {
     use std::cmp::Ordering;
@@ -339,7 +343,7 @@ fn classify_conditionals(
                         e.push(new_ce);
                     } else {
                         // OR between different tables => global predicate
-                        global.push(ct.clone())
+                        global.push(ce.clone())
                     }
                 }
                 _ => unreachable!(),
@@ -386,7 +390,7 @@ fn classify_conditionals(
                                     // computed column. This must be a global predicate because it
                                     // crosses "tables" (the computed column has no associated
                                     // table)
-                                    global.push(ct.clone());
+                                    global.push(ce.clone());
                                 }
                             } else {
                                 panic!("left hand side of comparison must be field");
@@ -409,7 +413,7 @@ fn classify_conditionals(
                                 } else {
                                     // comparisons between computed columns and literals are global
                                     // predicates
-                                    global.push(ct.clone());
+                                    global.push(ce.clone());
                                 }
                             }
                         }
@@ -605,7 +609,7 @@ pub fn to_query_graph(st: &SelectStatement) -> Result<QueryGraph, String> {
 
     if let Some(ref cond) = st.where_clause {
         let mut local_predicates = HashMap::new();
-        let mut global_predicates = Vec::<ConditionTree>::new();
+        let mut global_predicates = Vec::new();
         let mut query_parameters = Vec::new();
         // Let's classify the predicates we have in the query
         classify_conditionals(
@@ -685,6 +689,9 @@ pub fn to_query_graph(st: &SelectStatement) -> Result<QueryGraph, String> {
                 }
             }
         }
+
+        // 4. Add global predicates
+        qg.global_predicates = global_predicates;
     }
 
     // Adds a computed column to the query graph if the given column has a function:
