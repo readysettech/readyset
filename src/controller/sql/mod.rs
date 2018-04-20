@@ -10,8 +10,8 @@ use self::mir::{MirNodeRef, SqlToMirConverter};
 use self::query_graph::{to_query_graph, QueryGraph};
 use self::query_signature::Signature;
 use self::reuse::{ReuseConfig, ReuseConfigType};
-use controller::Migration;
 use controller::mir_to_flow::mir_query_to_flow_parts;
+use controller::Migration;
 use core::NodeIndex;
 use dataflow::prelude::DataType;
 use mir::query::{MirQuery, QueryFlowParts};
@@ -47,6 +47,7 @@ pub struct SqlIncorporator {
     num_queries: usize,
     query_graphs: HashMap<u64, QueryGraph>,
     mir_queries: HashMap<(u64, UniverseId), MirQuery>,
+    named_queries: HashMap<String, u64>,
     schema_version: usize,
     view_schemas: HashMap<String, Vec<String>>,
     transactional: bool,
@@ -66,6 +67,7 @@ impl Default for SqlIncorporator {
             num_queries: 0,
             query_graphs: HashMap::default(),
             mir_queries: HashMap::default(),
+            named_queries: HashMap::default(),
             schema_version: 0,
             view_schemas: HashMap::default(),
             transactional: false,
@@ -525,19 +527,9 @@ impl SqlIncorporator {
             .remove(query_name)
             .expect("tried to remove unknown query");
 
-        let q = if let SqlQuery::Select(ref sq) = q {
-            sq
-        } else {
-            unreachable!();
-        };
-
-        // TODO(malte): unfortunate to recompute this, can cache
-        let mut qg = match to_query_graph(q) {
-            Ok(qg) => qg,
-            Err(e) => panic!(e),
-        };
-
-        let qg_hash = qg.signature().hash;
+        let qg_hash = self.named_queries
+            .remove(query_name)
+            .expect("missing query hash for named query");
         let mir = self.mir_queries.get(&(qg_hash, mig.universe())).unwrap();
 
         // traverse self.leaf__addresses
@@ -605,6 +597,7 @@ impl SqlIncorporator {
                 let qg_hash = qg.signature().hash;
                 self.query_graphs.insert(qg_hash, qg);
                 self.mir_queries.insert((qg_hash, universe), mir.clone());
+                self.named_queries.insert(query_name.to_owned(), qg_hash);
             }
             None => (),
         }
@@ -750,11 +743,9 @@ impl SqlIncorporator {
             // if we're just about to create the table, we don't need to check if it exists. If it
             // does, we will amend or reuse it; if it does not, we create it.
             SqlQuery::CreateTable(_) => (),
-            |
-            SqlQuery::CreateView(_) => (),
+            | SqlQuery::CreateView(_) => (),
             // other kinds of queries *do* require their referred tables to exist!
-            |
-            ref q @ SqlQuery::CompoundSelect(_)
+            | ref q @ SqlQuery::CompoundSelect(_)
             | ref q @ SqlQuery::Select(_)
             | ref q @ SqlQuery::Set(_)
             | ref q @ SqlQuery::Update(_)
@@ -1070,14 +1061,12 @@ mod tests {
             let qid = query_id_hash(
                 &["computed_columns", "votes"],
                 &[&Column::from("votes.aid")],
-                &[
-                    &Column {
-                        name: String::from("votes"),
-                        alias: Some(String::from("votes")),
-                        table: None,
-                        function: Some(f),
-                    },
-                ],
+                &[&Column {
+                    name: String::from("votes"),
+                    alias: Some(String::from("votes")),
+                    table: None,
+                    function: Some(f),
+                }],
             );
             let agg_view = get_node(&inc, mig, &format!("q_{:x}_n0", qid));
             assert_eq!(agg_view.fields(), &["aid", "votes"]);
@@ -1258,14 +1247,12 @@ mod tests {
             let qid = query_id_hash(
                 &["computed_columns", "votes"],
                 &[],
-                &[
-                    &Column {
-                        name: String::from("count"),
-                        alias: Some(String::from("count")),
-                        table: None,
-                        function: Some(f),
-                    },
-                ],
+                &[&Column {
+                    name: String::from("count"),
+                    alias: Some(String::from("count")),
+                    table: None,
+                    function: Some(f),
+                }],
             );
             let proj_helper_view = get_node(&inc, mig, &format!("q_{:x}_n0_prj_hlpr", qid));
             assert_eq!(proj_helper_view.fields(), &["userid", "grp"]);
@@ -1313,14 +1300,12 @@ mod tests {
             let qid = query_id_hash(
                 &["computed_columns", "votes"],
                 &[&Column::from("votes.userid")],
-                &[
-                    &Column {
-                        name: String::from("count"),
-                        alias: Some(String::from("count")),
-                        table: None,
-                        function: Some(f),
-                    },
-                ],
+                &[&Column {
+                    name: String::from("count"),
+                    alias: Some(String::from("count")),
+                    table: None,
+                    function: Some(f),
+                }],
             );
             let agg_view = get_node(&inc, mig, &format!("q_{:x}_n0", qid));
             assert_eq!(agg_view.fields(), &["userid", "count"]);
