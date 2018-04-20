@@ -267,6 +267,10 @@ impl WriteHandle {
     pub fn evict_random_key(&mut self, rng: &mut ThreadRng) -> u64 {
         let mut bytes_to_be_freed = 0;
         if self.mem_size > 0 {
+            if self.handle.is_empty() {
+                unreachable!("mem size is {}, but map is empty", self.mem_size);
+            }
+
             match self.handle.empty_at_index(rng.gen()) {
                 None => (),
                 Some(vs) => {

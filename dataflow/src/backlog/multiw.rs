@@ -11,6 +11,14 @@ pub(super) enum Handle {
 }
 
 impl Handle {
+    pub fn is_empty(&self) -> bool {
+        match *self {
+            Handle::Single(ref h) => h.is_empty(),
+            Handle::Double(ref h) => h.is_empty(),
+            Handle::Many(ref h) => h.is_empty(),
+        }
+    }
+
     pub fn clear(&mut self, k: Key) {
         match *self {
             Handle::Single(ref mut h) => h.clear(key_to_single(k).into_owned()),
