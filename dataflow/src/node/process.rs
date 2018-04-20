@@ -199,7 +199,11 @@ impl Node {
 
                 misses
             }
-            NodeType::Source | NodeType::Dropped => unreachable!(),
+            NodeType::Dropped => {
+                *m = None;
+                vec![]
+            }
+            NodeType::Source => unreachable!(),
         }
     }
 

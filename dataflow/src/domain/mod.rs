@@ -895,7 +895,7 @@ impl Domain {
                     }
                     Packet::RemoveNodes { nodes } => {
                         for node in &nodes {
-                            self.nodes.remove(node);
+                            self.nodes[node].borrow_mut().remove();
                             self.state.remove(node);
                             trace!(self.log, "node removed"; "local" => node.id());
                         }
