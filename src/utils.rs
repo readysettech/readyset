@@ -187,16 +187,12 @@ pub(crate) fn flatten_conditional(
 // Finds the primary for the given table, both by looking at constraints on individual
 // columns and by searching through keys.
 pub(crate) fn get_primary_key(schema: &CreateTableStatement) -> Vec<(usize, &Column)> {
-    let &CreateTableStatement {
-        ref keys,
-        ref fields,
-        ..
-    } = schema;
-    fields
-        .into_iter()
+    schema
+        .fields
+        .iter()
         .enumerate()
-        .filter(|&(_, cs)| {
-            cs.constraints.contains(&ColumnConstraint::PrimaryKey) || match *keys {
+        .filter(|&(_, ref cs)| {
+            cs.constraints.contains(&ColumnConstraint::PrimaryKey) || match schema.keys {
                 // Try finding PRIMARY KEY constraints in keys as well:
                 Some(ref keys) => keys.iter().any(|key| match *key {
                     TableKey::PrimaryKey(ref cols) => cols.iter().any(|c| c == &cs.column),
