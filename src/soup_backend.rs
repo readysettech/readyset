@@ -1,8 +1,8 @@
 use distributary::{ControllerHandle, DataType, Mutator, RemoteGetter, ZookeeperAuthority};
 
 use msql_srv::{self, *};
-use nom_sql::{self, ColumnConstraint, CreateTableStatement, InsertStatement, Literal,
-              SelectStatement, SqlQuery, UpdateStatement};
+use nom_sql::{self, ColumnConstraint, InsertStatement, Literal, SelectStatement, SqlQuery,
+              UpdateStatement};
 
 use slog;
 use std::borrow::Cow;
@@ -15,7 +15,7 @@ use std::time;
 
 use convert::ToDataType;
 use rewrite;
-use schema::{schema_for_column, schema_for_insert, schema_for_select};
+use schema::{schema_for_column, schema_for_insert, schema_for_select, Schema};
 use utils;
 
 #[derive(Clone)]
@@ -93,7 +93,7 @@ pub struct SoupBackend {
     inner: SoupBackendInner,
     log: slog::Logger,
 
-    table_schemas: Arc<RwLock<HashMap<String, CreateTableStatement>>>,
+    table_schemas: Arc<RwLock<HashMap<String, Schema>>>,
     auto_increments: Arc<RwLock<HashMap<String, atomic::AtomicUsize>>>,
 
     query_count: Arc<atomic::AtomicUsize>,
@@ -117,7 +117,7 @@ impl SoupBackend {
     pub fn new(
         zk_addr: &str,
         deployment: &str,
-        schemas: Arc<RwLock<HashMap<String, CreateTableStatement>>>,
+        schemas: Arc<RwLock<HashMap<String, Schema>>>,
         auto_increments: Arc<RwLock<HashMap<String, atomic::AtomicUsize>>>,
         query_cache: Arc<RwLock<HashMap<SelectStatement, String>>>,
         query_counter: Arc<atomic::AtomicUsize>,
@@ -154,12 +154,35 @@ impl SoupBackend {
         q: nom_sql::CreateTableStatement,
         results: QueryResultWriter<W>,
     ) -> io::Result<()> {
+        // TODO(malte): we should perhaps check our usual caches here, rather than just blindly
+        // doing a migration on Soup ever time. On the other hand, CREATE TABLE is rare...
         match self.inner.soup.extend_recipe(format!("{};", q)) {
             Ok(_) => {
                 let mut ts_lock = self.table_schemas.write().unwrap();
-                ts_lock.insert(q.table.name.clone(), q);
+                ts_lock.insert(q.table.name.clone(), Schema::Table(q));
                 // no rows to return
                 // TODO(malte): potentially eagerly cache the mutator for this table
+                results.completed(0, 0)
+            }
+            Err(e) => Err(io::Error::new(io::ErrorKind::Other, e)),
+        }
+    }
+
+    fn handle_create_view<W: io::Write>(
+        &mut self,
+        q: nom_sql::CreateViewStatement,
+        results: QueryResultWriter<W>,
+    ) -> io::Result<()> {
+        // TODO(malte): we should perhaps check our usual caches here, rather than just blindly
+        // doing a migration on Soup ever time. On the other hand, CREATE VIEW is rare...
+        match self.inner
+            .soup
+            .extend_recipe(format!("VIEW {}: {};", q.name, q.definition))
+        {
+            Ok(_) => {
+                let mut ts_lock = self.table_schemas.write().unwrap();
+                ts_lock.insert(q.name.clone(), Schema::View(q));
+                // no rows to return
                 results.completed(0, 0)
             }
             Err(e) => Err(io::Error::new(io::ErrorKind::Other, e)),
@@ -175,10 +198,15 @@ impl SoupBackend {
             .expect("only supports DELETEs with WHERE-clauses");
 
         let ts = self.table_schemas.read().unwrap();
-        let pkey = utils::get_primary_key(&ts[&q.table.name])
-            .into_iter()
-            .map(|(_, c)| c)
-            .collect();
+        let pkey = if let Some(Schema::Table(ref cts)) = ts.get(&q.table.name) {
+            utils::get_primary_key(cts)
+                .into_iter()
+                .map(|(_, c)| c)
+                .collect()
+        } else {
+            // cannot delete from view
+            unimplemented!();
+        };
 
         // create a mutator if we don't have one for this table already
         let mutator = self.inner.get_or_make_mutator(&q.table.name);
@@ -486,7 +514,13 @@ impl SoupBackend {
 
         // handle auto increment
         let ts_lock = self.table_schemas.read().unwrap();
-        let auto_increment_columns: Vec<_> = ts_lock[table]
+        let table_schema = if let Some(Schema::Table(ref cts)) = ts_lock.get(table) {
+            cts
+        } else {
+            // cannot insert into a view!
+            unimplemented!();
+        };
+        let auto_increment_columns: Vec<_> = table_schema
             .fields
             .iter()
             .filter(|c| c.constraints.contains(&ColumnConstraint::AutoIncrement))
@@ -509,7 +543,7 @@ impl SoupBackend {
         let last_insert_id = &ai_lock[table];
 
         // handle default values
-        let mut default_value_columns: Vec<_> = ts_lock[table]
+        let mut default_value_columns: Vec<_> = table_schema
             .fields
             .iter()
             .filter_map(|ref c| {
@@ -569,15 +603,13 @@ impl SoupBackend {
             assert_eq!(buf.len(), 1);
 
             let updates = {
-                let ts = self.table_schemas.read().unwrap();
-                let schema = &ts[&q.table.name];
                 // fake out an update query
                 let mut uq = UpdateStatement {
                     table: nom_sql::Table::from(table.as_str()),
                     fields: update_fields.clone(),
                     where_clause: None,
                 };
-                utils::extract_update_params_and_fields(&mut uq, &mut None, schema)
+                utils::extract_update_params_and_fields(&mut uq, &mut None, table_schema)
             };
 
             // TODO(malte): why can't I consume buf here?
@@ -685,7 +717,12 @@ impl SoupBackend {
         let q = q.into_owned();
         let (key, updates) = {
             let ts = self.table_schemas.read().unwrap();
-            let schema = &ts[&q.table.name];
+            let schema = if let Some(Schema::Table(ref cts)) = ts.get(&q.table.name) {
+                cts
+            } else {
+                // no update on views
+                unimplemented!();
+            };
             utils::extract_update(q, params, schema)
         };
 
@@ -938,6 +975,7 @@ impl<W: io::Write> MysqlShim<W> for SoupBackend {
 
         let res = match q {
             nom_sql::SqlQuery::CreateTable(q) => self.handle_create_table(q, results),
+            nom_sql::SqlQuery::CreateView(q) => self.handle_create_view(q, results),
             nom_sql::SqlQuery::Insert(q) => self.handle_insert(q, results),
             nom_sql::SqlQuery::Select(q) => self.handle_select(q, use_params, results),
             nom_sql::SqlQuery::Set(q) => self.handle_set(q, results),

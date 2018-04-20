@@ -24,7 +24,7 @@ mod soup_backend;
 mod utils;
 
 use msql_srv::MysqlIntermediary;
-use nom_sql::{CreateTableStatement, SelectStatement};
+use nom_sql::SelectStatement;
 use std::collections::HashMap;
 use std::io::{BufReader, BufWriter};
 use std::net;
@@ -33,6 +33,7 @@ use std::sync::{Arc, RwLock};
 use std::thread;
 
 use soup_backend::SoupBackend;
+use schema::Schema;
 
 fn main() {
     use clap::{App, Arg};
@@ -96,7 +97,7 @@ fn main() {
     info!(log, "listening on port {}", port);
 
     let query_counter = Arc::new(AtomicUsize::new(0));
-    let schemas: Arc<RwLock<HashMap<String, CreateTableStatement>>> = Arc::default();
+    let schemas: Arc<RwLock<HashMap<String, Schema>>> = Arc::default();
     let auto_increments: Arc<RwLock<HashMap<String, AtomicUsize>>> = Arc::default();
     let query_cache: Arc<RwLock<HashMap<SelectStatement, String>>> = Arc::default();
 

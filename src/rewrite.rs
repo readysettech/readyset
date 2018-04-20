@@ -1,28 +1,48 @@
 use nom_sql::{Column, ConditionBase, ConditionExpression, ConditionTree, CreateTableStatement,
-              FieldDefinitionExpression, Literal, Operator, SqlQuery};
+              CreateViewStatement, FieldDefinitionExpression, Literal, Operator, SqlQuery};
 
 use std::collections::HashMap;
 use std::mem;
 
+use schema::Schema;
+
 pub(crate) fn expand_stars(
     mut query: SqlQuery,
-    table_schemas: &HashMap<String, CreateTableStatement>,
+    table_schemas: &HashMap<String, Schema>,
 ) -> SqlQuery {
-    let expand_table = |table_name: String| {
-        table_schemas
-            .get(&table_name)
-            .expect(&format!("table name `{}` does not exist", table_name))
-            .clone()
-            .fields
-            .into_iter()
+    let expand_table = |table_name: String| match table_schemas
+        .get(&table_name)
+        .expect(&format!("table/view named `{}` does not exist", table_name))
+    {
+        Schema::Table(CreateTableStatement { ref fields, .. }) => fields
+            .iter()
+            .cloned()
             .map(move |f| {
                 FieldDefinitionExpression::Col(Column {
-                    table: Some(table_name.clone()),
+                    table: Some(table_name.to_owned()),
                     name: f.column.name.clone(),
                     alias: None,
                     function: None,
                 })
             })
+            .collect::<Vec<_>>(),
+        Schema::View(CreateViewStatement {
+            ref name,
+            ref definition,
+            ..
+        }) => definition
+            .fields
+            .iter()
+            .map(|ref f| match *f {
+                FieldDefinitionExpression::Col(ref c) => FieldDefinitionExpression::Col(Column {
+                    table: Some(name.to_owned()),
+                    name: c.alias.as_ref().unwrap_or(&c.name).to_owned(),
+                    alias: None,
+                    function: None,
+                }),
+                _ => unimplemented!(),
+            })
+            .collect::<Vec<_>>(),
     };
 
     if let SqlQuery::Select(ref mut sq) = query {
@@ -39,7 +59,7 @@ pub(crate) fn expand_stars(
                     v.into_iter()
                 }
                 FieldDefinitionExpression::AllInTable(t) => {
-                    let v: Vec<_> = expand_table(t).collect();
+                    let v: Vec<_> = expand_table(t);
                     v.into_iter()
                 }
                 e @ FieldDefinitionExpression::Value(_) => vec![e].into_iter(),
