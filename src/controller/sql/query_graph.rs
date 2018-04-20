@@ -259,17 +259,24 @@ fn classify_conditionals(
 
     match *ce {
         ConditionExpression::LogicalOp(ref ct) => {
-            // conjunction, check both sides (which must be selection predicates or
-            // atomatic selection predicates)
+            // first, we recurse on both sides, collected the result of nested predicate analysis
+            // in separate collections. What do do with these depends on whether we're an AND or an
+            // OR clause:
+            //  1) AND can be split into separate local predicates one one or more tables
+            //  2) OR predictes must be preserved in their entirety, and we only use the nested
+            //     local predicates discovered to decide if the OR is over one table (so it can
+            //     remain a local predicate) or over several (so it must be a global predicate)
             let mut new_params = Vec::new();
             let mut new_join = Vec::new();
             let mut new_local = HashMap::new();
+            let mut new_global = Vec::new();
+
             classify_conditionals(
                 ct.left.as_ref(),
                 tables,
                 &mut new_local,
                 &mut new_join,
-                global,
+                &mut new_global,
                 &mut new_params,
             );
             classify_conditionals(
@@ -277,30 +284,38 @@ fn classify_conditionals(
                 tables,
                 &mut new_local,
                 &mut new_join,
-                global,
+                &mut new_global,
                 &mut new_params,
             );
 
             match ct.operator {
-                Operator::And => for (t, ces) in new_local {
-                    assert!(
-                        ces.len() <= 2,
-                        "can only combine two or fewer ConditionExpression's"
-                    );
-                    if ces.len() == 2 {
-                        let new_ce = ConditionExpression::LogicalOp(ConditionTree {
-                            operator: Operator::And,
-                            left: Box::new(ces.first().unwrap().clone()),
-                            right: Box::new(ces.last().unwrap().clone()),
-                        });
+                Operator::And => {
+                    //
+                    for (t, ces) in new_local {
+                        // conjunction, check if either side had a local predicate
+                        assert!(
+                            ces.len() <= 2,
+                            "can only combine two or fewer ConditionExpression's"
+                        );
+                        if ces.len() == 2 {
+                            let new_ce = ConditionExpression::LogicalOp(ConditionTree {
+                                operator: Operator::And,
+                                left: Box::new(ces.first().unwrap().clone()),
+                                right: Box::new(ces.last().unwrap().clone()),
+                            });
 
-                        let e = local.entry(t.to_string()).or_default();
-                        e.push(new_ce);
-                    } else {
-                        let e = local.entry(t.to_string()).or_default();
-                        e.extend(ces);
+                            let e = local.entry(t.to_string()).or_default();
+                            e.push(new_ce);
+                        } else {
+                            let e = local.entry(t.to_string()).or_default();
+                            e.extend(ces);
+                        }
                     }
-                },
+
+                    // one side of the AND might be a global predicate, so we need to keep
+                    // new_global around
+                    global.extend(new_global);
+                }
                 Operator::Or => {
                     assert!(
                         new_join.is_empty(),
@@ -310,13 +325,10 @@ fn classify_conditionals(
                         new_params.is_empty(),
                         "can't handle OR expressions between query parameter predicates"
                     );
-                    assert_eq!(
-                        new_local.keys().len(),
-                        1,
-                        "can't handle OR expressions between different tables"
-                    );
-                    for (t, ces) in new_local {
-                        assert_eq!(ces.len(), 2, "should combine only 2 ConditionExpression's");
+                    if new_local.keys().len() == 1 && new_global.is_empty() {
+                        // OR over a single table => local predicate
+                        let (t, ces) = new_local.into_iter().next().unwrap();
+                        assert_eq!(ces.len(), 2, "should combine only 2 ConditionExpressions");
                         let new_ce = ConditionExpression::LogicalOp(ConditionTree {
                             operator: Operator::Or,
                             left: Box::new(ces.first().unwrap().clone()),
@@ -325,6 +337,9 @@ fn classify_conditionals(
 
                         let e = local.entry(t.to_string()).or_default();
                         e.push(new_ce);
+                    } else {
+                        // OR between different tables => global predicate
+                        global.push(ct.clone())
                     }
                 }
                 _ => unreachable!(),
@@ -367,11 +382,11 @@ fn classify_conditionals(
                                         unimplemented!();
                                     }
                                 } else {
-                                    // not a comma join, just an ordinary comparison
-                                    // XXX(malte): should this be a global predicate?
-                                    if !global.contains(ct) {
-                                        global.push(ct.clone());
-                                    }
+                                    // not a comma join, just an ordinary comparison with a
+                                    // computed column. This must be a global predicate because it
+                                    // crosses "tables" (the computed column has no associated
+                                    // table)
+                                    global.push(ct.clone());
                                 }
                             } else {
                                 panic!("left hand side of comparison must be field");
@@ -392,8 +407,9 @@ fn classify_conditionals(
                                     let e = local.entry(lf.table.clone().unwrap()).or_default();
                                     e.push(ce.clone());
                                 } else {
-                                    // TODO(malte): not entirely clear what we should do for
-                                    // computed columns here
+                                    // comparisons between computed columns and literals are global
+                                    // predicates
+                                    global.push(ct.clone());
                                 }
                             }
                         }
