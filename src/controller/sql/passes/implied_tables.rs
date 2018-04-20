@@ -143,12 +143,13 @@ fn rewrite_selection(
                             | &mut Sum(ref mut fe, _)
                             | &mut Min(ref mut fe)
                             | &mut Max(ref mut fe)
-                            | &mut GroupConcat(ref mut fe, _) => {
+                            | &mut GroupConcat(ref mut fe, _) if fe.table.is_none() =>
+                            {
                                 fe.table = find_table(fe, tables_in_query);
-                                None
                             }
-                            &mut CountStar => None,
+                            _ => {}
                         }
+                        None
                     }
                     None => find_table(&f, tables_in_query),
                 }
