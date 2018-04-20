@@ -644,17 +644,16 @@ impl ControllerInner {
 
     fn apply_recipe(&mut self, mut new: Recipe) -> Result<ActivationResult, RpcError> {
         let mut err = Err(RpcError::Other("".to_owned())); // <3 type inference
-        self.migrate(|mig| match new.activate(mig, false) {
-            Ok(ra) => {
-                err = Ok(ra);
-            }
-            Err(e) => {
-                err = Err(RpcError::Other(format!("failed to activate recipe: {}", e)));
-            }
+        self.migrate(|mig| {
+            err = new.activate(mig, false)
+                .map_err(|e| RpcError::Other(format!("failed to activate recipe: {}", e)))
         });
 
         match err {
-            Ok(_) => {
+            Ok(ref ra) => {
+                for leaf in &ra.removed_leaves {
+                    self.remove_node(*leaf);
+                }
                 self.recipe = new;
             }
             Err(ref e) => {

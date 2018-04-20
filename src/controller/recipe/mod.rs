@@ -1,12 +1,12 @@
-use controller::Migration;
-use controller::sql::SqlIncorporator;
 use controller::sql::reuse::ReuseConfigType;
+use controller::sql::SqlIncorporator;
+use controller::Migration;
 use core::NodeIndex;
 use dataflow::ops::trigger::Trigger;
 use dataflow::ops::trigger::TriggerEvent;
 use dataflow::prelude::DataType;
-use nom_sql::SqlQuery;
 use nom_sql::parser as sql_parser;
+use nom_sql::SqlQuery;
 
 use controller::security::SecurityConfig;
 
@@ -23,6 +23,8 @@ type QueryID = u64;
 pub struct ActivationResult {
     /// Map of query names to `NodeIndex` handles for reads/writes.
     pub new_nodes: HashMap<String, NodeIndex>,
+    /// List of leaf nodes that were removed.
+    pub removed_leaves: Vec<NodeIndex>,
     /// Number of expressions the recipe added compared to the prior recipe.
     pub expressions_added: usize,
     /// Number of expressions the recipe removed compared to the prior recipe.
@@ -267,6 +269,7 @@ impl Recipe {
 
         let mut result = ActivationResult {
             new_nodes: HashMap::default(),
+            removed_leaves: Vec::default(),
             expressions_added: 0,
             expressions_removed: 0,
         };
@@ -345,6 +348,7 @@ impl Recipe {
 
         let mut result = ActivationResult {
             new_nodes: HashMap::default(),
+            removed_leaves: Vec::default(),
             expressions_added: added.len(),
             expressions_removed: removed.len(),
         };
@@ -421,18 +425,16 @@ impl Recipe {
             result.new_nodes.insert(query_name, qfp.query_leaf);
         }
 
-        // TODO(malte): deal with removal.
-        for qid in removed {
-            let (ref n, ref q, _) = self.expressions[&qid];
-
-            self.inc
-                .as_mut()
-                .unwrap()
-                .remove_query(n.as_ref().unwrap(), q, mig);
-
-            error!(self.log, "Unhandled query removal of {:?}", qid; "version" => self.version);
-            //unimplemented!()
-        }
+        result.removed_leaves = removed
+            .iter()
+            .filter_map(|qid| {
+                let (ref n, ref q, _) = self.prior.as_ref().unwrap().expressions[qid];
+                self.inc
+                    .as_mut()
+                    .unwrap()
+                    .remove_query(n.as_ref().unwrap(), q, mig)
+            })
+            .collect();
 
         Ok(result)
     }

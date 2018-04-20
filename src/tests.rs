@@ -1,9 +1,9 @@
 extern crate glob;
 
 use consensus::LocalAuthority;
-use controller::ControllerBuilder;
 use controller::recipe::Recipe;
 use controller::sql::SqlIncorporator;
+use controller::ControllerBuilder;
 use core::DataType;
 use dataflow::checktable::Token;
 use dataflow::ops::base::Base;
@@ -540,7 +540,10 @@ fn it_works_with_vote() {
 
     let empty = awvc.lookup(&[1i64.into()], true).unwrap();
     assert_eq!(empty.len(), 1);
-    assert_eq!(empty[0], vec![1i64.into(), "Article".into(), DataType::None]);
+    assert_eq!(
+        empty[0],
+        vec![1i64.into(), "Article".into(), DataType::None]
+    );
 }
 
 #[test]
@@ -1117,14 +1120,7 @@ fn transactional_vote() {
         mig.maintain_anonymous(end_votes, &[2]);
 
         (
-            article1,
-            article2,
-            vote,
-            article,
-            vc,
-            end,
-            end_title,
-            end_votes,
+            article1, article2, vote, article, vc, end, end_title, end_votes,
         )
     });
 
@@ -2387,4 +2383,43 @@ fn node_removal() {
     //     cq.lookup(&[id.clone()], true),
     //     Ok(vec![vec![1.into(), 4.into()]])
     // );
+}
+
+#[test]
+fn remove_query() {
+    let r_txt = "CREATE TABLE b (a int, c text, x text);\n
+                 QUERY qa: SELECT a FROM b;\n
+                 QUERY qb: SELECT a, c FROM b WHERE a = 42;";
+
+    let r2_txt = "CREATE TABLE b (a int, c text, x text);\n
+                  QUERY qa: SELECT a FROM b;";
+
+    let mut g = ControllerBuilder::default().build_local();
+    g.install_recipe(r_txt.to_owned()).unwrap();
+    assert_eq!(g.inputs().len(), 1);
+    assert_eq!(g.outputs().len(), 2);
+
+    let mut mutb = g.get_mutator("b").unwrap();
+    let mut qa = g.get_getter("qa").unwrap();
+    let mut qb = g.get_getter("qb").unwrap();
+
+    mutb.put(vec![42.into(), "2".into(), "3".into()]).unwrap();
+    mutb.put(vec![1.into(), "4".into(), "5".into()]).unwrap();
+    sleep();
+
+    assert_eq!(qa.lookup(&[0.into()], true).unwrap().len(), 2);
+    assert_eq!(qb.lookup(&[0.into()], true).unwrap().len(), 1);
+
+    // Remove qb and check that the graph still functions as expected.
+    g.install_recipe(r2_txt.to_owned()).unwrap();
+    assert_eq!(g.inputs().len(), 1);
+    assert_eq!(g.outputs().len(), 1);
+    assert!(g.get_getter("qb").is_none());
+
+    mutb.put(vec![42.into(), "6".into(), "7".into()]).unwrap();
+    sleep();
+
+    assert_eq!(qa.lookup(&[0.into()], true).unwrap().len(), 3);
+    assert_eq!(qb.lookup(&[0.into()], true).unwrap().len(), 1);
+
 }
