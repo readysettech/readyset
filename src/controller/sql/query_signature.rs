@@ -147,7 +147,7 @@ impl Signature for QueryGraph {
 
         let proj_columns: Vec<&OutputColumn> = self.columns.iter().collect();
         // Compute projected columns part of hash. In the strict definition of the Finkelstein
-        // query graph equivalence problem, we should sort the columns here, since their order
+        // query graph equivalence problem, we should not sort the columns here, since their order
         // doesn't matter in the query graph. However, we would like to avoid spurious ExactMatch
         // reuse cases and reproject incorrectly ordered columns, so we actually reflect the
         // column order in the query signature.
