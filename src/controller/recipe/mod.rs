@@ -423,6 +423,13 @@ impl Recipe {
 
         // TODO(malte): deal with removal.
         for qid in removed {
+            let (ref n, ref q, _) = self.expressions[&qid];
+
+            self.inc
+                .as_mut()
+                .unwrap()
+                .remove_query(n.as_ref().unwrap(), q, mig);
+
             error!(self.log, "Unhandled query removal of {:?}", qid; "version" => self.version);
             //unimplemented!()
         }

@@ -515,6 +515,68 @@ impl SqlIncorporator {
         (qfp, mir)
     }
 
+    pub fn remove_query(
+        &mut self,
+        query_name: &str,
+        q: &SqlQuery,
+        mig: &Migration,
+    ) -> Option<NodeIndex> {
+        let nodeid = self.leaf_addresses
+            .remove(query_name)
+            .expect("tried to remove unknown query");
+
+        let q = if let SqlQuery::Select(ref sq) = q {
+            sq
+        } else {
+            unreachable!();
+        };
+
+        // TODO(malte): unfortunate to recompute this, can cache
+        let mut qg = match to_query_graph(q) {
+            Ok(qg) => qg,
+            Err(e) => panic!(e),
+        };
+
+        let qg_hash = qg.signature().hash;
+        let mir = self.mir_queries.get(&(qg_hash, mig.universe())).unwrap();
+
+        // traverse self.leaf__addresses
+        if self.leaf_addresses
+            .values()
+            .find(|&id| *id == nodeid)
+            .is_none()
+        {
+            // ok to remove
+
+            // remove local state for query
+
+            // traverse and remove MIR nodes
+            // TODO(malte): implement this
+            self.mir_converter.remove_query(query_name, mir);
+
+            // clean up local state
+            self.mir_queries.remove(&(qg_hash, mig.universe())).unwrap();
+            self.query_graphs.remove(&qg_hash).unwrap();
+            self.view_schemas.remove(query_name).unwrap();
+
+            // trigger reader node removal
+            Some(nodeid)
+        } else {
+            // more than one query uses this leaf
+            // don't remove node yet!
+
+            // TODO(malte): implement this
+            self.mir_converter.remove_query(query_name, mir);
+
+            // clean up state for this query
+            self.mir_queries.remove(&(qg_hash, mig.universe())).unwrap();
+            self.query_graphs.remove(&qg_hash).unwrap();
+            self.view_schemas.remove(query_name).unwrap();
+
+            None
+        }
+    }
+
     fn register_query(
         &mut self,
         query_name: &str,

@@ -371,6 +371,10 @@ impl SqlToMirConverter {
         }
     }
 
+    pub fn remove_query(&mut self, name: &str, mq: &MirQuery) {
+        unimplemented!();
+    }
+
     pub fn named_query_to_mir(
         &mut self,
         name: &str,
