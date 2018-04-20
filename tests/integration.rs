@@ -18,10 +18,10 @@ use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 use distributary::{ControllerBuilder, ZookeeperAuthority};
 use msql_srv::MysqlIntermediary;
-use nom_sql::{CreateTableStatement, SelectStatement};
+use nom_sql::SelectStatement;
 use zookeeper::{WatchedEvent, ZooKeeper, ZooKeeperExt};
 
-use mysoupql::SoupBackend;
+use mysoupql::{Schema, SoupBackend};
 
 // Appends a unique ID to deployment strings, to avoid collisions between tests.
 struct Deployment {
@@ -90,7 +90,7 @@ fn setup(deployment: &Deployment) -> mysql::Opts {
     });
 
     let query_counter = Arc::new(AtomicUsize::new(0));
-    let schemas: Arc<RwLock<HashMap<String, CreateTableStatement>>> = Arc::default();
+    let schemas: Arc<RwLock<HashMap<String, Schema>>> = Arc::default();
     let auto_increments: Arc<RwLock<HashMap<String, AtomicUsize>>> = Arc::default();
     let query_cache: Arc<RwLock<HashMap<SelectStatement, String>>> = Arc::default();
     let listener = TcpListener::bind("127.0.0.1:0").unwrap();
