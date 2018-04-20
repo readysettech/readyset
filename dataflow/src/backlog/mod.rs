@@ -117,7 +117,7 @@ pub(crate) struct WriteHandle {
     cols: usize,
     key: Vec<usize>,
     contiguous: bool,
-    pub mem_size: usize,
+    mem_size: usize,
 }
 
 type Key<'a> = Cow<'a, [DataType]>;
