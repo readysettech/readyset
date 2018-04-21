@@ -243,7 +243,7 @@ impl GraphViz for MirNodeType {
                             ", {}",
                             arithmetic
                                 .iter()
-                                .map(|&(ref n, ref e)| format!("{}: {:?}", n, e))
+                                .map(|&(ref n, ref e)| format!("{}: {}", n, e))
                                 .collect::<Vec<_>>()
                                 .join(", ")
                         )
