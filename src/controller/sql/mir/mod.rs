@@ -1496,8 +1496,10 @@ impl SqlToMirConverter {
                     let group_by = if qg.parameters().is_empty() {
                         // need to add another projection to introduce a bogokey to group by
                         let cols: Vec<_> = final_node.borrow().columns().iter().cloned().collect();
+                        let table =
+                            format!("q_{:x}_n{}{}", qg.signature().hash, new_node_count, uformat);
                         let bogo_project = self.make_project_node(
-                            &format!("q_{:x}_n{}{}", qg.signature().hash, new_node_count, uformat),
+                            &table,
                             final_node.clone(),
                             cols.iter().collect(),
                             vec![],
@@ -1508,7 +1510,12 @@ impl SqlToMirConverter {
                         nodes_added.push(bogo_project.clone());
                         final_node = bogo_project;
 
-                        vec![Column::from("bogokey")]
+                        vec![Column {
+                            name: "bogokey".to_owned(),
+                            table: Some(table),
+                            alias: None,
+                            function: None,
+                        }]
                     } else {
                         qg.parameters().into_iter().cloned().collect()
                     };
