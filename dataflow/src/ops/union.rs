@@ -29,6 +29,10 @@ enum FullWait {
 #[derive(Debug, Serialize, Deserialize)]
 pub struct Union {
     emit: Emit,
+
+    // to sanity check that we're not asked to manage multiple replay paths with different keys
+    replay_key_orig: Vec<usize>,
+
     replay_key: Option<HashMap<LocalNodeIndex, Vec<usize>>>,
     replay_pieces: HashMap<Vec<DataType>, Map<Records>>,
 
@@ -42,6 +46,7 @@ impl Clone for Union {
         Union {
             emit: self.emit.clone(),
             required: self.required,
+            replay_key_orig: Vec::new(),
             // nothing can have been received yet
             replay_key: None,
             replay_pieces: HashMap::new(),
@@ -76,6 +81,7 @@ impl Union {
                 cols_l: BTreeMap::new(),
             },
             required: parents,
+            replay_key_orig: Vec::new(),
             replay_key: None,
             replay_pieces: HashMap::new(),
             full_wait_state: FullWait::None,
@@ -88,6 +94,7 @@ impl Union {
         Union {
             emit: Emit::AllFrom(parent.into(), sharding),
             required: shards,
+            replay_key_orig: Vec::new(),
             replay_key: None,
             replay_pieces: HashMap::new(),
             full_wait_state: FullWait::None,
@@ -460,6 +467,12 @@ impl Ingredient for Union {
                                     .collect(),
                             );
                         }
+                    }
+                    self.replay_key_orig = key_cols.clone();
+                } else {
+                    // make sure multiple different replay paths aren't getting mixed
+                    if &self.replay_key_orig != key_cols {
+                        unimplemented!();
                     }
                 }
 
