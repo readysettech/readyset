@@ -57,6 +57,47 @@ fn predicate_columns(ce: ConditionExpression) -> HashSet<Column> {
     cols
 }
 
+fn value_columns_needed_for_predicates(
+    value_columns: &Vec<OutputColumn>,
+    predicates: &Vec<ConditionExpression>,
+) -> Vec<(Column, OutputColumn)> {
+    let pred_columns: HashSet<_> = predicates.iter().fold(HashSet::new(), |mut acc, p| {
+        match p {
+            ConditionExpression::LogicalOp(ref ct) | ConditionExpression::ComparisonOp(ref ct) => {
+                acc.extend(ct.contained_columns())
+            }
+            _ => unreachable!(),
+        }
+        acc
+    });
+
+    value_columns
+        .iter()
+        .filter_map(|oc| match *oc {
+            OutputColumn::Arithmetic(ref ac) => Some((
+                Column {
+                    name: ac.name.clone(),
+                    table: ac.table.clone(),
+                    alias: None,
+                    function: None,
+                },
+                oc.clone(),
+            )),
+            OutputColumn::Literal(ref lc) => Some((
+                Column {
+                    name: lc.name.clone(),
+                    table: lc.table.clone(),
+                    alias: None,
+                    function: None,
+                },
+                oc.clone(),
+            )),
+            OutputColumn::Data(_) => None,
+        })
+        .filter(|(c, _)| pred_columns.contains(c))
+        .collect()
+}
+
 #[derive(Clone, Debug)]
 pub struct SqlToMirConverter {
     base_schemas: HashMap<String, Vec<(usize, Vec<ColumnSpecification>)>>,
@@ -1125,6 +1166,63 @@ impl SqlToMirConverter {
         predicates_above_group_by_nodes
     }
 
+    fn make_value_project_node(
+        &mut self,
+        qg: &QueryGraph,
+        prev_node: Option<MirNodeRef>,
+        node_count: usize,
+        universe: &str,
+    ) -> Option<MirNodeRef> {
+        let arith_and_lit_columns_needed =
+            value_columns_needed_for_predicates(&qg.columns, &qg.global_predicates);
+
+        debug!(self.log, "NEED COLUMNS: {:?}", arith_and_lit_columns_needed);
+
+        if !arith_and_lit_columns_needed.is_empty() {
+            let projected_arithmetic: Vec<(String, ArithmeticExpression)> =
+                arith_and_lit_columns_needed
+                    .iter()
+                    .filter_map(|&(_, ref oc)| match oc {
+                        OutputColumn::Arithmetic(ref ac) => {
+                            Some((ac.name.clone(), ac.expression.clone()))
+                        }
+                        OutputColumn::Data(_) => None,
+                        OutputColumn::Literal(_) => None,
+                    })
+                    .collect();
+            let projected_literals: Vec<(String, DataType)> = arith_and_lit_columns_needed
+                .iter()
+                .filter_map(|&(_, ref oc)| match oc {
+                    OutputColumn::Arithmetic(_) => None,
+                    OutputColumn::Data(_) => None,
+                    OutputColumn::Literal(ref lc) => {
+                        Some((lc.name.clone(), DataType::from(&lc.value)))
+                    }
+                })
+                .collect();
+
+            // prev_node must be set at this point
+            let parent = match prev_node {
+                None => unreachable!(),
+                Some(pn) => pn,
+            };
+
+            let passthru_cols: Vec<_> = parent.borrow().columns().iter().cloned().collect();
+            let projected = self.make_project_node(
+                &format!("q_{:x}_n{}{}", qg.signature().hash, node_count, universe),
+                parent.clone(),
+                passthru_cols.iter().collect(),
+                projected_arithmetic,
+                projected_literals,
+                false,
+            );
+
+            Some(projected)
+        } else {
+            None
+        }
+    }
+
     /// Returns list of nodes added
     fn make_nodes_for_selection(
         &mut self,
@@ -1325,7 +1423,50 @@ impl SqlToMirConverter {
                     }
                 }
 
-                // 5. Get the final node
+                let num_local_predicates = predicate_nodes.len();
+
+                // 5. Determine literals and arithmetic expressions that global predicates depend
+                //    on and add them here; remembering that we've already added them-
+                if let Some(projected) =
+                    self.make_value_project_node(&qg, prev_node.clone(), new_node_count, &uformat)
+                {
+                    new_node_count += 1;
+                    nodes_added.push(projected.clone());
+                    prev_node = Some(projected);
+                }
+
+                // 5. Global predicates
+                for (i, ref p) in qg.global_predicates.iter().enumerate() {
+                    debug_assert!(
+                        !created_predicates.contains(p),
+                        "global predicate already exists?"
+                    );
+
+                    let parent = match prev_node {
+                        None => unimplemented!(),
+                        Some(pn) => pn,
+                    };
+
+                    let fns = self.make_predicate_nodes(
+                        &format!(
+                            "q_{:x}_n{}_{}{}",
+                            qg.signature().hash,
+                            new_node_count,
+                            num_local_predicates + i,
+                            uformat,
+                        ),
+                        parent,
+                        p,
+                        0,
+                    );
+
+                    assert!(fns.len() > 0);
+                    new_node_count += fns.len();
+                    prev_node = Some(fns.iter().last().unwrap().clone());
+                    predicate_nodes.extend(fns);
+                }
+
+                // 6. Get the final node
                 let mut final_node: MirNodeRef = if prev_node.is_some() {
                     prev_node.unwrap().clone()
                 } else {
