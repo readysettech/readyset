@@ -64,6 +64,7 @@ pub enum RawProcessingResult {
     },
 }
 
+#[derive(Debug)]
 pub enum ReplayContext {
     None,
     Partial {

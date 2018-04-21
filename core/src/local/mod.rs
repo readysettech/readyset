@@ -16,6 +16,7 @@ impl Tag {
     }
 }
 
+#[derive(Debug)]
 pub struct Row(pub(crate) Rc<Vec<DataType>>);
 
 unsafe impl Send for Row {}
