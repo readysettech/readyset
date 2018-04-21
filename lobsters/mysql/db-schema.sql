@@ -43,11 +43,11 @@ CREATE TABLE `votes` (`id` bigint unsigned NOT NULL AUTO_INCREMENT PRIMARY KEY, 
 -- CREATE VIEW `replying_comments_for_count` AS
 -- 	SELECT `read_ribbons`.`user_id`, `read_ribbons`.`story_id`, `comments`.`id`,
 -- 	    `comments`.`upvotes` - `comments`.`downvotes` AS saldo,
--- 		`parent_comments`.`upvotes` - `parent_comments`.`downvotes` AS psaldo
+-- 	    `parent_comments`.`upvotes` - `parent_comments`.`downvotes` AS psaldo
 -- 	FROM `read_ribbons`
 -- 	JOIN `stories` ON (`stories`.`id` = `read_ribbons`.`story_id`)
 -- 	JOIN `comments` ON (`comments`.`story_id` = `read_ribbons`.`story_id`)
--- 	LEFT JOIN `comments` AS `parent_comments`
+-- 	LEFT JOIN `parent_comments`
 -- 	ON (`parent_comments`.`id` = `comments`.`parent_comment_id`)
 -- 	WHERE `read_ribbons`.`is_following` = 1
 -- 	AND `comments`.`user_id` <> `read_ribbons`.`user_id`
@@ -56,15 +56,21 @@ CREATE TABLE `votes` (`id` bigint unsigned NOT NULL AUTO_INCREMENT PRIMARY KEY, 
 -- 	AND saldo >= 0
 -- 	AND `read_ribbons`.`updated_at` < `comments`.`created_at`
 -- 	AND (
--- 		`parent_comments`.`user_id` = `read_ribbons`.`user_id`
--- 		OR (
--- 			`parent_comments`.`user_id` IS NULL
--- 			AND `stories`.`user_id` = `read_ribbons`.`user_id`
--- 		)
--- 	)
--- 	AND (`parent_comments`.`id` IS NULL OR psaldo >= 0);
+--      (
+--      	`parent_comments`.`user_id` = `read_ribbons`.`user_id`
+--      	AND
+--      	psaldo >= 0
+--      )
+--      OR
+--      (
+--      	`parent_comments`.`id` IS NULL
+--      	AND
+--      	`stories`.`user_id` = `read_ribbons`.`user_id`
+--      )
+--      );
+
 --
 -- Without newlines:
 CREATE VIEW `parent_comments` AS SELECT `comments`.* FROM `comments`;
-CREATE VIEW `replying_comments_for_count` AS SELECT `read_ribbons`.`user_id`, `read_ribbons`.`story_id`, `comments`.`id`, `comments`.`upvotes` - `comments`.`downvotes` AS saldo, `parent_comments`.`upvotes` - `parent_comments`.`downvotes` AS psaldo FROM `read_ribbons` JOIN `stories` ON (`stories`.`id` = `read_ribbons`.`story_id`) JOIN `comments` ON (`comments`.`story_id` = `read_ribbons`.`story_id`) LEFT JOIN `parent_comments` ON (`parent_comments`.`id` = `comments`.`parent_comment_id`) WHERE `read_ribbons`.`is_following` = 1 AND `comments`.`user_id` <> `read_ribbons`.`user_id` AND `comments`.`is_deleted` = 0 AND `comments`.`is_moderated` = 0 AND saldo >= 0 AND `read_ribbons`.`updated_at` < `comments`.`created_at` AND ( `parent_comments`.`user_id` = `read_ribbons`.`user_id` OR ( `parent_comments`.`user_id` IS NULL AND `stories`.`user_id` = `read_ribbons`.`user_id`)) AND (`parent_comments`.`id` IS NULL OR psaldo >= 0);
+CREATE VIEW `replying_comments_for_count` AS SELECT `read_ribbons`.`user_id`, `read_ribbons`.`story_id`, `comments`.`id`, `comments`.`upvotes` - `comments`.`downvotes` AS saldo, `parent_comments`.`upvotes` - `parent_comments`.`downvotes` AS psaldo FROM `read_ribbons` JOIN `stories` ON (`stories`.`id` = `read_ribbons`.`story_id`) JOIN `comments` ON (`comments`.`story_id` = `read_ribbons`.`story_id`) LEFT JOIN `parent_comments` ON (`parent_comments`.`id` = `comments`.`parent_comment_id`) WHERE `read_ribbons`.`is_following` = 1 AND `comments`.`user_id` <> `read_ribbons`.`user_id` AND `comments`.`is_deleted` = 0 AND `comments`.`is_moderated` = 0 AND saldo >= 0 AND `read_ribbons`.`updated_at` < `comments`.`created_at` AND ( ( `parent_comments`.`user_id` = `read_ribbons`.`user_id` AND psaldo >= 0) OR ( `parent_comments`.`id` IS NULL AND `stories`.`user_id` = `read_ribbons`.`user_id`));
 INSERT INTO `tags` (`tag`) VALUES ('test');
