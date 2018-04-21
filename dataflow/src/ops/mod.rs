@@ -178,8 +178,13 @@ impl Ingredient for NodeOperator {
             states
         )
     }
-    fn on_eviction(&mut self, key_columns: &[usize], keys: &[Vec<DataType>]) {
-        impl_ingredient_fn_mut!(self, on_eviction, key_columns, keys)
+    fn on_eviction(
+        &mut self,
+        from: LocalNodeIndex,
+        key_columns: &[usize],
+        keys: &mut Vec<Vec<DataType>>,
+    ) {
+        impl_ingredient_fn_mut!(self, on_eviction, from, key_columns, keys)
     }
     fn can_query_through(&self) -> bool {
         impl_ingredient_fn_ref!(self, can_query_through,)

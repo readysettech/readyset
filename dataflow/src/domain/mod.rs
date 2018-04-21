@@ -2452,6 +2452,7 @@ impl Domain {
                     // Check whether this replay path is for the same key.
                     match path.trigger {
                         TriggerEndpoint::Local(ref key) | TriggerEndpoint::Start(ref key) => {
+                            // what if just key order changed?
                             if &key[..] != key_columns {
                                 continue;
                             }
@@ -2459,7 +2460,8 @@ impl Domain {
                         _ => unreachable!(),
                     };
 
-                    walk_path(&path.path[..], keys, *tag, shard, nodes, sends);
+                    let mut keys = Vec::from(keys);
+                    walk_path(&path.path[..], &mut keys, *tag, shard, nodes, sends);
 
                     if let TriggerEndpoint::Local(_) = path.trigger {
                         let target = replay_paths[&tag].path.last().unwrap();
@@ -2468,10 +2470,10 @@ impl Domain {
                             continue;
                         }
 
-                        state[&target.node].evict_keys(&tag, keys);
+                        state[&target.node].evict_keys(&tag, &keys[..]);
                         trigger_downstream_evictions(
                             &target.partial_key.as_ref().unwrap()[..],
-                            keys,
+                            &keys[..],
                             target.node,
                             sends,
                             replay_paths,
@@ -2486,20 +2488,23 @@ impl Domain {
 
         fn walk_path(
             path: &[ReplayPathSegment],
-            keys: &[Vec<DataType>],
+            keys: &mut Vec<Vec<DataType>>,
             tag: Tag,
             shard: Option<usize>,
             nodes: &mut DomainNodes,
             sends: &mut EnqueuedSends,
         ) {
+            let mut from = path[0].node;
             for segment in path {
                 nodes[&segment.node].borrow_mut().process_eviction(
+                    from,
                     &segment.partial_key.as_ref().unwrap()[..],
                     keys,
                     tag,
                     shard,
                     sends,
                 );
+                from = segment.node;
             }
         }
 
@@ -2582,7 +2587,7 @@ impl Domain {
             }
             (Packet::EvictKeys {
                 link: Link { dst, .. },
-                keys,
+                mut keys,
                 tag,
             },) => {
                 let i = self.replay_paths[&tag]
@@ -2592,7 +2597,7 @@ impl Domain {
                     .expect("got eviction for non-local node");
                 walk_path(
                     &self.replay_paths[&tag].path[i..],
-                    &keys[..],
+                    &mut keys,
                     tag,
                     self.shard,
                     &mut self.nodes,

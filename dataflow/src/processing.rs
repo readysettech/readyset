@@ -194,7 +194,13 @@ where
 
     /// Triggered whenever a replay occurs, to allow the operator to react evict from any auxillary
     /// state other than what is stored in its materialization.
-    fn on_eviction(&mut self, _key_columns: &[usize], _keys: &[Vec<prelude::DataType>]) {}
+    fn on_eviction(
+        &mut self,
+        _from: prelude::LocalNodeIndex,
+        _key_columns: &[usize],
+        _keys: &mut Vec<Vec<prelude::DataType>>,
+    ) {
+    }
 
     fn can_query_through(&self) -> bool {
         false

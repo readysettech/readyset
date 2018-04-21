@@ -210,8 +210,9 @@ impl Node {
 
     pub fn process_eviction(
         &mut self,
+        from: LocalNodeIndex,
         key_columns: &[usize],
-        keys: &[Vec<DataType>],
+        keys: &mut Vec<Vec<DataType>>,
         tag: Tag,
         on_shard: Option<usize>,
         output: &mut Vec<(ReplicaAddr, Box<Packet>)>,
@@ -236,10 +237,10 @@ impl Node {
                 s.process_eviction(key_columns, tag, keys, addr, on_shard.is_some(), output);
             }
             NodeType::Internal(ref mut i) => {
-                i.on_eviction(key_columns, keys);
+                i.on_eviction(from, key_columns, keys);
             }
             NodeType::Reader(ref mut r) => {
-                r.on_eviction(key_columns, keys);
+                r.on_eviction(key_columns, &keys[..]);
             }
             NodeType::Ingress => {}
             NodeType::Egress(None) | NodeType::Source | NodeType::Dropped => unreachable!(),
