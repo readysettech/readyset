@@ -679,22 +679,34 @@ impl SqlToMirConverter {
             .iter()
             .cloned()
             .collect();
+        let num_ucols = ucols.len();
 
         // Find columns present in all ancestors
+        // XXX(malte): this currently matches columns by **name** rather than by table and name,
+        // which can go wrong if there are multiple columns of the same name in the inputs to the
+        // union. Unfortunately, we have to do it by name here because the nested queries in
+        // compound SELECT rewrite the table name on their output columns.
         let mut selected_cols = HashSet::new();
         for c in ucols {
             if ancestors
                 .iter()
-                .all(|a| a.borrow().columns().iter().any(|ac| *ac == c))
+                .all(|a| a.borrow().columns().iter().any(|ac| *ac.name == c.name))
             {
-                selected_cols.insert(c.clone());
+                selected_cols.insert(c.name.clone());
             }
         }
+        assert_eq!(
+            num_ucols,
+            selected_cols.len(),
+            "union drops ancestor columns"
+        );
 
         for ancestor in ancestors.iter() {
             let mut acols: Vec<Column> = Vec::new();
             for ac in ancestor.borrow().columns() {
-                if selected_cols.contains(&ac) && acols.iter().find(|c| ac == *c).is_none() {
+                if selected_cols.contains(&ac.name)
+                    && acols.iter().find(|c| ac.name == *c.name).is_none()
+                {
                     acols.push(ac.clone());
                 }
             }
