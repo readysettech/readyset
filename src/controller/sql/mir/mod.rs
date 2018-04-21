@@ -38,17 +38,20 @@ fn sanitize_leaf_column(mut c: Column, view_name: &str) -> Column {
 }
 
 /// Returns all collumns used in a predicate
-fn predicate_columns(ce: ConditionExpression) -> HashSet<Column> {
+fn predicate_columns(ce: &ConditionExpression) -> HashSet<Column> {
     use nom_sql::ConditionExpression::*;
 
     let mut cols = HashSet::new();
-    match ce {
-        LogicalOp(ct) | ComparisonOp(ct) => {
-            cols.extend(predicate_columns(*ct.left));
-            cols.extend(predicate_columns(*ct.right));
+    match *ce {
+        LogicalOp(ref ct) | ComparisonOp(ref ct) => {
+            cols.extend(predicate_columns(&ct.left));
+            cols.extend(predicate_columns(&ct.right));
         }
-        Base(ConditionBase::Field(c)) => {
-            cols.insert(c);
+        Base(ConditionBase::Field(ref c)) => {
+            cols.insert(c.clone());
+        }
+        Bracketed(ref ce) => {
+            cols.extend(predicate_columns(&ce));
         }
         NegationOp(_) => unreachable!("negations should have been eliminated"),
         _ => (),
@@ -62,12 +65,7 @@ fn value_columns_needed_for_predicates(
     predicates: &Vec<ConditionExpression>,
 ) -> Vec<(Column, OutputColumn)> {
     let pred_columns: HashSet<_> = predicates.iter().fold(HashSet::new(), |mut acc, p| {
-        match p {
-            ConditionExpression::LogicalOp(ref ct) | ConditionExpression::ComparisonOp(ref ct) => {
-                acc.extend(ct.contained_columns())
-            }
-            _ => unreachable!(),
-        }
+        acc.extend(predicate_columns(p));
         acc
     });
 
@@ -1309,7 +1307,7 @@ impl SqlToMirConverter {
 
                 let qgn = &qg.relations[*rel];
                 for pred in &qgn.predicates {
-                    let cols = predicate_columns(pred.clone());
+                    let cols = predicate_columns(pred);
 
                     for col in cols {
                         column_to_predicates.entry(col).or_default().push(pred);
