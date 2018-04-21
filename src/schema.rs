@@ -142,7 +142,7 @@ pub(crate) fn schema_for_column(
                 .iter()
                 .filter_map(|f| match f {
                     FieldDefinitionExpression::Col(ref cc) => if cc.name == c.name {
-                        Some(schema_for_column(schemas, c))
+                        Some(schema_for_column(schemas, cc))
                     } else {
                         None
                     },
