@@ -442,29 +442,56 @@ impl PersistentState {
 
     fn remove(&self, batch: &mut WriteBatch, r: &[DataType]) {
         let db = self.db.as_ref().unwrap();
-        let mut delete_cols: Vec<_> = self.indices
-            .iter()
-            .enumerate()
-            .map(|(i, index)| {
-                if self.primary_key.is_some() {
-                    (i + 1, &index.columns)
-                } else {
-                    (i, &index.columns)
+        let mut do_remove = move |indices: &[PersistentIndex], primary_key: &[u8]| {
+            // First delete the actual primary key row:
+            batch.delete(&primary_key).unwrap();
+
+            // Then delete any references that point _exactly_ to
+            // that row (i.e. not all matching rows):
+            for (i, index) in indices.iter().enumerate() {
+                // Construct a key with the index values, and serialize it with bincode:
+                let key = KeyType::from(index.columns.iter().map(|i| &r[*i]));
+                // Add 1 to i since we're slicing self.indices by 1..:
+                let prefix = Self::serialize_prefix((i + 1) as u32, &key);
+                for (raw_key, raw_value) in db.prefix_iterator(&prefix) {
+                    if &*raw_value == &primary_key[..] {
+                        batch.delete(&raw_key).unwrap();
+                    }
                 }
-            })
-            .collect();
-
-        if let Some(ref pk_cols) = self.primary_key {
-            delete_cols.push((0, pk_cols));
-        }
-
-        for (i, columns) in delete_cols.into_iter() {
-            let index_row = KeyType::from(columns.iter().map(|i| &r[*i]));
-            let serialized_key = Self::serialize_prefix(i as u32, &index_row);
-            for (key, _value) in db.prefix_iterator(&serialized_key) {
-                batch.delete(&key).unwrap();
             }
-        }
+        };
+
+        // First retrieve the actual stored row that matches r:
+        if let Some(ref pk_cols) = self.primary_key {
+            let pk = KeyType::from(pk_cols.iter().map(|i| &r[*i]));
+            let prefix = Self::serialize_prefix(0, &pk);
+            let raw_value = db.get(&prefix).unwrap();
+            if let Some(raw) = raw_value {
+                let value: Vec<DataType> = bincode::deserialize(&*raw).unwrap();
+                if r != &value[..] {
+                    return;
+                }
+            } else {
+                return;
+            }
+
+            do_remove(&self.indices[..], &prefix[..]);
+        } else {
+            let pk_index = &self.indices[0];
+            let pk = KeyType::from(pk_index.columns.iter().map(|i| &r[*i]));
+            let prefix = Self::serialize_prefix(0, &pk);
+            let key = db.prefix_iterator(&prefix).find(|(_, raw_value)| {
+                let value: Vec<DataType> = bincode::deserialize(&*raw_value).unwrap();
+                r == &value[..]
+            });
+
+            if key.is_none() {
+                return;
+            }
+
+            let (raw_key, _) = key.unwrap();
+            do_remove(&self.indices[1..], &raw_key[..]);
+        };
     }
 }
 
@@ -715,23 +742,42 @@ mod tests {
     #[test]
     fn persistent_state_remove() {
         let mut state = setup_persistent("persistent_state_remove");
-        let columns = &[0];
         let first: Vec<DataType> = vec![10.into(), "Cat".into()];
-        let second: Vec<DataType> = vec![20.into(), "Bob".into()];
-        state.add_key(columns, None);
-        state.process_records(&mut vec![first.clone(), second.clone()].into(), None);
+        let duplicate: Vec<DataType> = vec![10.into(), "Other Cat".into()];
+        let second: Vec<DataType> = vec![20.into(), "Cat".into()];
+        state.add_key(&[0], None);
+        state.add_key(&[1], None);
+        state.process_records(
+            &mut vec![first.clone(), duplicate.clone(), second.clone()].into(),
+            None,
+        );
         state.process_records(
             &mut vec![(first.clone(), false), (first.clone(), false)].into(),
             None,
         );
 
-        match state.lookup(columns, &KeyType::Single(&first[0])) {
-            LookupResult::Some(rows) => assert_eq!(rows.len(), 0),
+        // We only want to remove rows that match exactly, not all rows that match the key:
+        match state.lookup(&[0], &KeyType::Single(&first[0])) {
+            LookupResult::Some(rows) => {
+                assert_eq!(rows.len(), 1);
+                assert_eq!(&*rows[0], &duplicate);
+            }
             LookupResult::Missing => panic!("PersistentStates can't be materialized"),
         };
 
-        match state.lookup(columns, &KeyType::Single(&second[0])) {
+        // Also shouldn't have removed other keys:
+        match state.lookup(&[0], &KeyType::Single(&second[0])) {
             LookupResult::Some(rows) => {
+                assert_eq!(rows.len(), 1);
+                assert_eq!(&*rows[0], &second);
+            }
+            _ => unreachable!(),
+        }
+
+        // Make sure we didn't remove secondary keys pointing to different rows:
+        match state.lookup(&[1], &KeyType::Single(&second[1])) {
+            LookupResult::Some(rows) => {
+                assert_eq!(rows.len(), 1);
                 assert_eq!(&*rows[0], &second);
             }
             _ => unreachable!(),
