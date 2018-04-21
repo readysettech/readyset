@@ -994,7 +994,7 @@ impl SqlToMirConverter {
                         c.table.clone()
                     },
                     alias: None,
-                    function: c.function.clone(),
+                    function: if is_leaf { None } else { c.function.clone() },
                 },
                 None => {
                     // if this is the leaf node of a query, it represents a view, so we rewrite the
