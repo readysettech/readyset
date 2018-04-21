@@ -685,18 +685,16 @@ impl SqlToMirConverter {
         for c in ucols {
             if ancestors
                 .iter()
-                .all(|a| a.borrow().columns().iter().any(|ac| ac.name == c.name))
+                .all(|a| a.borrow().columns().iter().any(|ac| *ac == c))
             {
-                selected_cols.insert(c.name.clone());
+                selected_cols.insert(c.clone());
             }
         }
 
         for ancestor in ancestors.iter() {
             let mut acols: Vec<Column> = Vec::new();
             for ac in ancestor.borrow().columns() {
-                if selected_cols.contains(&ac.name)
-                    && acols.iter().find(|ref c| ac.name == c.name).is_none()
-                {
+                if selected_cols.contains(&ac) && acols.iter().find(|c| ac == *c).is_none() {
                     acols.push(ac.clone());
                 }
             }

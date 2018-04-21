@@ -613,7 +613,7 @@ pub(crate) fn make_join_node(
     // at this point in the codebase, so the `r2.a = r1.b` will join on the wrong `a` column.
     let left_join_col_id = projected_cols_left
         .iter()
-        .position(|lc| lc.name == on_left.first().unwrap().name)
+        .position(|lc| lc == on_left.first().unwrap())
         .expect(&format!(
             "missing left-side join column {:?} in {:?}",
             on_left.first().unwrap(),
@@ -621,7 +621,7 @@ pub(crate) fn make_join_node(
         ));
     let right_join_col_id = projected_cols_right
         .iter()
-        .position(|rc| rc.name == on_right.first().unwrap().name)
+        .position(|rc| rc == on_right.first().unwrap())
         .expect(&format!(
             "missing right-side join column {:?} in {:?}",
             on_left.first().unwrap(),
