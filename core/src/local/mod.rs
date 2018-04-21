@@ -21,6 +21,8 @@ pub trait State: SizeOf + Send {
 
     fn is_partial(&self) -> bool;
 
+    // Inserts or removes each record into State. Records that miss all indices in partial state
+    // are removed from `records` (thus the mutable reference).
     fn process_records(&mut self, records: &mut Records, partial_tag: Option<Tag>);
 
     fn mark_hole(&mut self, key: &[DataType], tag: &Tag);

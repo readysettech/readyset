@@ -2,7 +2,7 @@ use std::borrow::Cow;
 use std::rc::Rc;
 
 use bincode;
-use rocksdb::{self, SliceTransform, WriteBatch, DB};
+use rocksdb::{self, SliceTransform, WriteBatch};
 
 use ::*;
 use data::SizeOf;
@@ -38,14 +38,14 @@ impl PersistentIndex {
     }
 }
 
-/// PersistentState stores data in SQlite.
+/// PersistentState stores data in RocksDB.
 pub struct PersistentState {
     name: String,
     db_opts: rocksdb::Options,
     // We don't really want DB to be an option, but doing so lets us drop it manually in
     // PersistenState's Drop by setting `self.db = None` - after which we can then discard the
     // persisted files if we want to.
-    db: Option<DB>,
+    db: Option<rocksdb::DB>,
     durability_mode: DurabilityMode,
     indices: Vec<PersistentIndex>,
     epoch: IndexEpoch,
@@ -75,7 +75,7 @@ impl State for PersistentState {
         for r in records.iter() {
             match *r {
                 Record::Positive(ref r) => {
-                    self.insert(&mut batch, r.clone());
+                    self.insert(&mut batch, r);
                 }
                 Record::Negative(ref r) => {
                     self.remove(&mut batch, r);
@@ -266,7 +266,7 @@ impl PersistentState {
         });
 
         let full_name = format!("{}.db", name);
-        let db = DB::open(&opts, &full_name).unwrap();
+        let db = rocksdb::DB::open(&opts, &full_name).unwrap();
         let meta = Self::retrieve_and_update_meta(&db);
         let indices = meta.indices
             .into_iter()
@@ -284,7 +284,7 @@ impl PersistentState {
         }
     }
 
-    fn retrieve_and_update_meta(db: &DB) -> PersistentMeta {
+    fn retrieve_and_update_meta(db: &rocksdb::DB) -> PersistentMeta {
         let indices = db.get(META_KEY).unwrap();
         let mut meta = match indices {
             Some(data) => bincode::deserialize(&*data).unwrap(),
@@ -417,7 +417,7 @@ impl PersistentState {
     // TODO(ekmartin): This will put exactly the values that are given, and can only be retrieved
     // with exactly those values. I think the regular state implementation supports inserting
     // something like an Int and retrieving with a BigInt.
-    fn insert(&mut self, batch: &mut WriteBatch, r: Vec<DataType>) {
+    fn insert(&mut self, batch: &mut WriteBatch, r: &[DataType]) {
         for index in self.indices.iter_mut() {
             index.seq += 1;
         }
@@ -480,7 +480,7 @@ impl Drop for PersistentState {
     fn drop(&mut self) {
         if self.durability_mode != DurabilityMode::Permanent {
             self.db = None;
-            DB::destroy(&self.db_opts, &self.name).unwrap()
+            rocksdb::DB::destroy(&self.db_opts, &self.name).unwrap()
         }
     }
 }

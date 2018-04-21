@@ -83,8 +83,8 @@ impl PersistenceParameters {
     /// Three modes are available:
     ///
     ///  1. `DurabilityMode::Permanent`: all writes to base nodes should be written to disk.
-    ///  2. `DurabilityMode::DeleteOnExit`: all writes are written to disk, but the log is
-    ///     deleted once the `Blender` is dropped. Useful for tests.
+    ///  2. `DurabilityMode::DeleteOnExit`: all writes to base nodes are written to disk, but the
+    ///     persistent files are deleted once the `ControllerHandle` is dropped. Useful for tests.
     ///  3. `DurabilityMode::MemoryOnly`: no writes to disk, store all writes in memory.
     ///     Useful for baseline numbers.
     ///
