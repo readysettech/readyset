@@ -1174,8 +1174,6 @@ impl SqlToMirConverter {
         let arith_and_lit_columns_needed =
             value_columns_needed_for_predicates(&qg.columns, &qg.global_predicates);
 
-        debug!(self.log, "NEED COLUMNS: {:?}", arith_and_lit_columns_needed);
-
         if !arith_and_lit_columns_needed.is_empty() {
             let projected_arithmetic: Vec<(String, ArithmeticExpression)> =
                 arith_and_lit_columns_needed
