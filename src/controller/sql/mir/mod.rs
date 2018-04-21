@@ -374,6 +374,7 @@ impl SqlToMirConverter {
                 vec![],
             )
         } else {
+            final_node.borrow_mut().columns = sanitized_columns;
             final_node
         };
 
