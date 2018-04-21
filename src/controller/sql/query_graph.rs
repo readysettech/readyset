@@ -542,13 +542,20 @@ pub fn to_query_graph(st: &SelectStatement) -> Result<QueryGraph, String> {
 
                         match *cond {
                             ConditionExpression::ComparisonOp(ref ct) => {
-                                assert_eq!(tables_mentioned.len(), 2);
                                 // XXX(malte): these should always be in query order; I think they
                                 // usually are in practice, but there is no guarantee since we just
                                 // extract them in whatever order they're mentiond in the join
                                 // predicate in
-                                left_table = tables_mentioned.remove(0);
-                                right_table = tables_mentioned.remove(0);
+                                if tables_mentioned.len() == 2 {
+                                    left_table = tables_mentioned.remove(0);
+                                    right_table = tables_mentioned.remove(0);
+                                } else if tables_mentioned.len() == 1 {
+                                    // just one table mentioned --> this is a self-join
+                                    left_table = tables_mentioned.remove(0);
+                                    right_table = left_table.clone();
+                                } else {
+                                    unreachable!("more than 2 tables mentioned in join condition!");
+                                };
 
                                 // the condition tree might specify tables in opposite order to
                                 // their join order in the query; if so, flip them
