@@ -37,6 +37,26 @@ fn sanitize_leaf_column(mut c: Column, view_name: &str) -> Column {
     c
 }
 
+/// Returns all collumns used in a predicate
+fn predicate_columns(ce: ConditionExpression) -> HashSet<Column> {
+    use nom_sql::ConditionExpression::*;
+
+    let mut cols = HashSet::new();
+    match ce {
+        LogicalOp(ct) | ComparisonOp(ct) => {
+            cols.extend(predicate_columns(*ct.left));
+            cols.extend(predicate_columns(*ct.right));
+        }
+        Base(ConditionBase::Field(c)) => {
+            cols.insert(c);
+        }
+        NegationOp(_) => unreachable!("negations should have been eliminated"),
+        _ => (),
+    }
+
+    cols
+}
+
 #[derive(Clone, Debug)]
 pub struct SqlToMirConverter {
     base_schemas: HashMap<String, Vec<(usize, Vec<ColumnSpecification>)>>,
@@ -1075,26 +1095,6 @@ impl SqlToMirConverter {
         pred_nodes
     }
 
-    /// Returns all collumns used in a predicate
-    fn predicate_columns(&self, ce: ConditionExpression) -> HashSet<Column> {
-        use nom_sql::ConditionExpression::*;
-
-        let mut cols = HashSet::new();
-        match ce {
-            LogicalOp(ct) | ComparisonOp(ct) => {
-                cols.extend(self.predicate_columns(*ct.left));
-                cols.extend(self.predicate_columns(*ct.right));
-            }
-            Base(ConditionBase::Field(c)) => {
-                cols.insert(c);
-            }
-            NegationOp(_) => unreachable!("negations should have been eliminated"),
-            _ => (),
-        }
-
-        cols
-    }
-
     fn predicates_above_group_by<'a>(
         &mut self,
         name: &str,
@@ -1200,7 +1200,7 @@ impl SqlToMirConverter {
 
                 let qgn = &qg.relations[*rel];
                 for pred in &qgn.predicates {
-                    let cols = self.predicate_columns(pred.clone());
+                    let cols = predicate_columns(pred.clone());
 
                     for col in cols {
                         column_to_predicates.entry(col).or_default().push(pred);
