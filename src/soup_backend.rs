@@ -177,7 +177,7 @@ impl SoupBackend {
         // doing a migration on Soup ever time. On the other hand, CREATE VIEW is rare...
         match self.inner
             .soup
-            .extend_recipe(format!("VIEW {}: {};", q.name, q.definition))
+            .extend_recipe(format!("{}: {};", q.name, q.definition))
         {
             Ok(_) => {
                 let mut ts_lock = self.table_schemas.write().unwrap();
