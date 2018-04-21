@@ -514,7 +514,13 @@ impl Ingredient for Union {
                             use std::collections::hash_map::Entry;
                             match replay_pieces_tmp.entry(key.clone()) {
                                 Entry::Occupied(e) => {
-                                    assert!(!e.get().buffered.contains_key(&from));
+                                    if e.get().buffered.contains_key(&from) {
+                                        // chained unions are not yet supported.
+                                        // we'd need to keep a queue of replays from each side,
+                                        // apply writes to all queued replays from that side, and
+                                        // then emit all front-of-queue replays in lock-step.
+                                        unimplemented!("detected chained union");
+                                    }
                                     if e.get().buffered.len() == required - 1 {
                                         // release!
                                         let mut m = e.remove();
