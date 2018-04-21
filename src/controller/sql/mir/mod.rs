@@ -1306,7 +1306,7 @@ impl SqlToMirConverter {
                 }
             }
 
-            // 2.5 Reorder some predicates before group by nodes
+            // 2a. Reorder some predicates before group by nodes
             let (created_predicates, predicates_above_group_by_nodes) =
                 make_predicates_above_grouped(
                     self,
@@ -1320,7 +1320,7 @@ impl SqlToMirConverter {
 
             new_node_count += predicates_above_group_by_nodes.len();
 
-            // Create security boundary
+            // 3. Create security boundary
             use controller::sql::mir::security::SecurityBoundary;
             let (last_policy_nodes, policy_nodes) =
                 self.make_security_boundary(universe.clone(), &mut node_for_rel, prev_node.clone());
@@ -1376,8 +1376,9 @@ impl SqlToMirConverter {
                 new_node_count += func_nodes.len();
 
                 let mut predicate_nodes = Vec::new();
-                // 4. Generate the necessary filter node for each relation node in the query graph.
-
+                // 4. Generate the necessary filter nodes for local predicates associated with each
+                // relation node in the query graph.
+                //
                 // Need to iterate over relations in a deterministic order, as otherwise nodes will be
                 // added in a different order every time, which will yield different node identifiers
                 // and make it difficult for applications to check what's going on.
@@ -1475,7 +1476,7 @@ impl SqlToMirConverter {
                     node_for_rel[sorted_rels.last().unwrap()].clone()
                 };
 
-                // 6. Potentially insert TopK node below the final node
+                // 7. Potentially insert TopK node below the final node
                 // XXX(malte): this adds a bogokey if there are no parameter columns to do the TopK
                 // over, but we could end up in a stick place if we reconcile/combine multiple
                 // queries (due to security universes or due to compound select queries) that do
@@ -1538,7 +1539,7 @@ impl SqlToMirConverter {
 
             let final_node_cols: Vec<Column> =
                 final_node.borrow().columns().iter().cloned().collect();
-            // 5. Generate leaf views that expose the query result
+            // 8. Generate leaf views that expose the query result
             let mut projected_columns: Vec<Column> = if universe.1.is_none() {
                 qg.columns
                     .iter()
