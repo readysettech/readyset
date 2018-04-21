@@ -715,7 +715,9 @@ impl SqlToMirConverter {
 
         assert!(
             emit.iter().all(|e| e.len() == selected_cols.len()),
-            "all ancestors columns must have the same size"
+            "all ancestors columns must have the same size, but got emit: {:?}, selected: {:?}",
+            emit,
+            selected_cols
         );
 
         MirNode::new(
