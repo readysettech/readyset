@@ -91,19 +91,10 @@ impl State for PersistentState {
     }
 
     fn lookup(&self, columns: &[usize], key: &KeyType) -> LookupResult {
-        let key_values = match *key {
-            KeyType::Single(a) => vec![a],
-            KeyType::Double(ref r) => vec![&r.0, &r.1],
-            KeyType::Tri(ref r) => vec![&r.0, &r.1, &r.2],
-            KeyType::Quad(ref r) => vec![&r.0, &r.1, &r.2, &r.3],
-            KeyType::Quin(ref r) => vec![&r.0, &r.1, &r.2, &r.3, &r.4],
-            KeyType::Sex(ref r) => vec![&r.0, &r.1, &r.2, &r.3, &r.4, &r.5],
-        };
-
         let db = self.db.as_ref().unwrap();
         let data = match self.primary_key {
             Some(ref pk) if &pk[..] == columns => {
-                let prefix = Self::serialize_prefix(0, &key_values);
+                let prefix = Self::serialize_prefix(0, &key);
                 // This is a primary key, so we know there's only one row to retrieve
                 // (no need to use prefix_iterator).
                 let raw_row = db.get(&prefix).unwrap();
@@ -117,7 +108,7 @@ impl State for PersistentState {
             _ => {
                 let index_id = self.get_index_id(columns)
                     .expect("lookup on non-indexed column set");
-                let prefix = Self::serialize_prefix(index_id, &key_values);
+                let prefix = Self::serialize_prefix(index_id, &key);
                 let values = db.prefix_iterator(&prefix);
                 if index_id > 0 {
                     // For non-primary indices we need to first retrieve the primary index key
@@ -168,7 +159,7 @@ impl State for PersistentState {
         self.all_rows().for_each(|(ref pk, ref value)| {
             seq += 1;
             let row: Vec<DataType> = bincode::deserialize(&value).unwrap();
-            let index_key = columns.iter().map(|i| &row[*i]).collect::<Vec<_>>();
+            let index_key = KeyType::from(columns.iter().map(|i| &row[*i]));
             let key = self.serialize_key(index_id, &index_key, seq);
             let b = batch.get_or_insert_with(|| WriteBatch::default());
             b.put(&key, &pk).unwrap();
@@ -341,17 +332,20 @@ impl PersistentState {
     // > 3) If Compare(k1, k2) <= 0, then Compare(prefix(k1), prefix(k2)) <= 0
     // > 4) prefix(prefix(key)) == prefix(key)
     //
-    // NOTE(ekmartin): Encoding the key size in the key increases the total size with 4 bytes.
+    // NOTE(ekmartin): Encoding the key size in the key increases the total size with 8 bytes.
     // If we really wanted to avoid this while still maintaining the same serialization scheme
-    // we could do so by figuring out how many bytes our bincode serialized Vec<DataType> takes
+    // we could do so by figuring out how many bytes our bincode serialized KeyType takes
     // up here in transform_fn. Example:
-    // [DataType::Int(1), DataType::BigInt(10)] would be serialized as:
-    // 2u64 (vec length), 0u32 (enum variant), 1i32 (value), 1u32 (enum variant), 1i64 (value)
+    // Double((DataType::Int(1), DataType::BigInt(10))) would be serialized as:
+    // 1u32 (enum type), 0u32 (enum variant), 1i32 (value), 1u32 (enum variant), 1i64 (value)
     // By stepping through the serialized bytes and checking each enum variant we would know
     // when we reached the end, and could then with certainty say whether we'd already
     // prefix transformed this key before or not
     // (without including the byte size of Vec<DataType>).
     fn transform_fn(key: &[u8]) -> Vec<u8> {
+        // We'll have to make sure this isn't the META_KEY even when we're filtering it out
+        // in Self::in_domain_fn, as the SliceTransform is used to make hashed keys for our
+        // HashLinkedList memtable factory.
         if key == META_KEY {
             return Vec::from(key);
         }
@@ -362,14 +356,8 @@ impl PersistentState {
         let size_offset = start + 8;
         let key_size: u64 = bincode::deserialize(&key[start..size_offset]).unwrap();
         let prefix_len = size_offset + key_size as usize;
-        let mut bytes = Vec::from(key);
-
         // Strip away the IndexEpoch and IndexSeq if we haven't already done so:
-        if key.len() > prefix_len {
-            bytes.truncate(prefix_len);
-        }
-
-        bytes
+        Vec::from(&key[..prefix_len])
     }
 
     // Decides which keys the prefix transform should apply to.
@@ -382,19 +370,19 @@ impl PersistentState {
     //     Uniquely identifies the index in self.indices.
     //  * `row_size`
     //      The byte size of `row` when serialized with binode.
-    //  * `row`
+    //  * `key`
     //      The actual index values.
     //  * `epoch`
     //      Incremented on each PersistentState initialization.
     //  * `seq`
     //      Sequence number since last epoch.
-    fn serialize_key(&self, index_id: IndexID, row: &Vec<&DataType>, seq: IndexSeq) -> Vec<u8> {
-        let size: u64 = bincode::serialized_size(&row).unwrap();
-        bincode::serialize(&(index_id, size, row, self.epoch, seq)).unwrap()
+    fn serialize_key(&self, index_id: IndexID, key: &KeyType, seq: IndexSeq) -> Vec<u8> {
+        let size: u64 = bincode::serialized_size(&key).unwrap();
+        bincode::serialize(&(index_id, size, key, self.epoch, seq)).unwrap()
     }
 
     // Used with DB::prefix_iterator to go through all the rows for a given key.
-    fn serialize_prefix(index: IndexID, key: &Vec<&DataType>) -> Vec<u8> {
+    fn serialize_prefix(index: IndexID, key: &KeyType) -> Vec<u8> {
         let size: u64 = bincode::serialized_size(&key).unwrap();
         bincode::serialize(&(index, size, key)).unwrap()
     }
@@ -423,14 +411,14 @@ impl PersistentState {
         }
 
         let (secondary_indices, serialized_pk) = if let Some(ref pk_cols) = self.primary_key {
-            let pk = pk_cols.iter().map(|i| &r[*i]).collect::<Vec<_>>();
+            let pk = KeyType::from(pk_cols.iter().map(|i| &r[*i]));
             (&self.indices[..], Self::serialize_prefix(0, &pk))
         } else {
             // For bases without primary keys we store the actual row values keyed by the index
             // that was added first. This means that we can't consider the keys unique though, so
             // we'll append a sequence number.
             let pk_index = &self.indices[0];
-            let pk = pk_index.columns.iter().map(|i| &r[*i]).collect::<Vec<_>>();
+            let pk = KeyType::from(pk_index.columns.iter().map(|i| &r[*i]));
             (&self.indices[1..], self.serialize_key(0, &pk, pk_index.seq))
         };
 
@@ -441,7 +429,7 @@ impl PersistentState {
         // Then insert primary key pointers for all the secondary indices:
         for (i, index) in secondary_indices.iter().enumerate() {
             // Construct a key with the index values, and serialize it with bincode:
-            let key = index.columns.iter().map(|i| &r[*i]).collect::<Vec<_>>();
+            let key = KeyType::from(index.columns.iter().map(|i| &r[*i]));
             // Add 1 to i since we're slicing self.indices by 1..:
             let serialized_key = self.serialize_key((i + 1) as u32, &key, index.seq);
             batch.put(&serialized_key, &serialized_pk).unwrap();
@@ -467,7 +455,7 @@ impl PersistentState {
         }
 
         for (i, columns) in delete_cols.into_iter() {
-            let index_row = columns.iter().map(|i| &r[*i]).collect::<Vec<_>>();
+            let index_row = KeyType::from(columns.iter().map(|i| &r[*i]));
             let serialized_key = Self::serialize_prefix(i as u32, &index_row);
             for (key, _value) in db.prefix_iterator(&serialized_key) {
                 batch.delete(&key).unwrap();
@@ -860,17 +848,13 @@ mod tests {
             columns: Default::default(),
         };
 
-        let row: Vec<DataType> = vec![1.into(), 10.into()];
+        let r = KeyType::Double((1.into(), 10.into()));
         let i = 5;
-        let r = row.iter().collect();
         let k = state.serialize_key(i, &r, index.seq);
         let prefix = PersistentState::transform_fn(&k);
-        let (key_out, size, row_out): (IndexID, u64, Vec<DataType>) =
-            bincode::deserialize(&prefix).unwrap();
+        let (key_out, size): (IndexID, u64) = bincode::deserialize(&prefix).unwrap();
         assert_eq!(i, key_out);
-        assert_eq!(size, bincode::serialized_size(&row_out).unwrap());
-        assert_eq!(row[0], row_out[0]);
-        assert_eq!(row[1], row_out[1]);
+        assert_eq!(size, bincode::serialized_size(&r).unwrap());
 
         // prefix_extractor requirements:
         // 1) key.starts_with(prefix(key))

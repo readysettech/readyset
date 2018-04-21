@@ -89,7 +89,7 @@ pub enum LookupResult<'a> {
     Missing,
 }
 
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, Serialize)]
 pub enum KeyType<'a> {
     Single(&'a DataType),
     Double((DataType, DataType)),
