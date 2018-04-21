@@ -8,6 +8,7 @@ extern crate arccstr;
 extern crate bincode;
 extern crate chrono;
 extern crate fnv;
+extern crate itertools;
 extern crate nom_sql;
 extern crate petgraph;
 extern crate rahashmap;

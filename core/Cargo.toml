@@ -7,6 +7,7 @@ authors = ["The Distributary Developers"]
 bincode = "1.0.0"
 arccstr = "1.1.0"
 fnv = "1.0.5"
+itertools = "0.7.2"
 serde_derive = "1.0.8"
 rahashmap = "0.2.6"
 rand = "0.4.2"

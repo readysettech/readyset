@@ -2,6 +2,7 @@ use std::borrow::Cow;
 use std::rc::Rc;
 
 use bincode;
+use itertools::Itertools;
 use rocksdb::{self, SliceTransform, WriteBatch};
 
 use ::*;
@@ -19,6 +20,9 @@ type IndexSeq = u64;
 
 // RocksDB key used for storing meta information (like indices).
 const META_KEY: &'static [u8] = b"meta";
+
+// Maximum rows per WriteBatch when building new indices for existing rows.
+const INDEX_BATCH_SIZE: usize = 512;
 
 struct PersistentIndex {
     columns: Vec<usize>,
@@ -153,20 +157,19 @@ impl State for PersistentState {
         let cols = Vec::from(columns);
         let index_id = self.indices.len() as u32;
         let mut seq = 0;
-        let mut batch = None;
 
         // Build the new index for existing values:
-        self.all_rows().for_each(|(ref pk, ref value)| {
-            seq += 1;
-            let row: Vec<DataType> = bincode::deserialize(&value).unwrap();
-            let index_key = KeyType::from(columns.iter().map(|i| &row[*i]));
-            let key = self.serialize_key(index_id, &index_key, seq);
-            let b = batch.get_or_insert_with(|| WriteBatch::default());
-            b.put(&key, &pk).unwrap();
-        });
+        for chunk in self.all_rows().chunks(INDEX_BATCH_SIZE).into_iter() {
+            let mut batch = WriteBatch::default();
+            for (ref pk, ref value) in chunk {
+                seq += 1;
+                let row: Vec<DataType> = bincode::deserialize(&value).unwrap();
+                let index_key = KeyType::from(columns.iter().map(|i| &row[*i]));
+                let key = self.serialize_key(index_id, &index_key, seq);
+                batch.put(&key, &pk).unwrap();
+            }
 
-        if let Some(b) = batch {
-            self.db.as_ref().unwrap().write(b).unwrap();
+            self.db.as_ref().unwrap().write(batch).unwrap();
         }
 
         self.indices.push(PersistentIndex { columns: cols, seq });
@@ -187,6 +190,7 @@ impl State for PersistentState {
     }
 
     fn rows(&self) -> usize {
+        // TODO(ekmartin): Use estimated property or return 0?
         self.all_rows().count()
     }
 
