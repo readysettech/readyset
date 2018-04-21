@@ -298,9 +298,6 @@ pub enum Packet {
     /// Ask domain to log its state size
     UpdateStateSize,
 
-    /// The packet was captured awaiting the receipt of other replays.
-    Captured,
-
     /// The packet is being sent locally, so a pointer is sent to avoid
     /// serialization/deserialization costs.
     Local(LocalBypass<Packet>),

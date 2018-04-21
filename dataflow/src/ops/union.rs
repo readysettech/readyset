@@ -369,7 +369,7 @@ impl Ingredient for Union {
                         finished: if last { 1 } else { 0 },
                         buffered: rs,
                     };
-                    return RawProcessingResult::Captured;
+                    return RawProcessingResult::CapturedFull;
                 }
 
                 let exit;
@@ -410,7 +410,7 @@ impl Ingredient for Union {
                             // if we fell through here, it means we're still missing the first
                             // replay from at least one ancestor, so we need to buffer
                             buffered.append(&mut *rs);
-                            return RawProcessingResult::Captured;
+                            return RawProcessingResult::CapturedFull;
                         }
                     }
                     _ => unreachable!(),
@@ -434,10 +434,11 @@ impl Ingredient for Union {
                     if shard_col == key_cols[0] {
                         // No need to buffer since request should only be for one shard
                         assert!(self.replay_pieces.is_empty());
-                        return RawProcessingResult::ReplayPiece(
-                            rs,
-                            keys.into_iter().cloned().collect(),
-                        );
+                        return RawProcessingResult::ReplayPiece {
+                            rows: rs,
+                            keys: keys.into_iter().cloned().collect(),
+                            captured: HashSet::new(),
+                        };
                     }
                 }
 
@@ -484,6 +485,7 @@ impl Ingredient for Union {
 
                 let required = self.required; // can't borrow self in closures below
                 let mut released = HashSet::new();
+                let mut captured = HashSet::new();
                 let rs = {
                     keys.iter()
                         .filter_map(|key| {
@@ -501,6 +503,7 @@ impl Ingredient for Union {
                                         Some((key, m))
                                     } else {
                                         e.into_mut().insert(from, rs);
+                                        captured.insert(key.clone());
                                         None
                                     }
                                 }
@@ -511,6 +514,7 @@ impl Ingredient for Union {
                                         Some((key, m))
                                     } else {
                                         h.insert(m);
+                                        captured.insert(key.clone());
                                         None
                                     }
                                 }
@@ -530,11 +534,10 @@ impl Ingredient for Union {
                 // and swap back replay pieces
                 mem::swap(&mut self.replay_pieces, &mut replay_pieces_tmp);
 
-                if !released.is_empty() {
-                    RawProcessingResult::ReplayPiece(rs, released)
-                } else {
-                    // no. need to keep buffering (and emit nothing)
-                    RawProcessingResult::Captured
+                RawProcessingResult::ReplayPiece {
+                    rows: rs,
+                    keys: released,
+                    captured: captured,
                 }
             }
         }

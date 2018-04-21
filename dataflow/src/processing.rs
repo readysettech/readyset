@@ -56,8 +56,12 @@ pub struct ProcessingResult {
 pub enum RawProcessingResult {
     Regular(ProcessingResult),
     FullReplay(prelude::Records, bool),
-    ReplayPiece(prelude::Records, HashSet<Vec<prelude::DataType>>),
-    Captured,
+    CapturedFull,
+    ReplayPiece {
+        rows: prelude::Records,
+        keys: HashSet<Vec<prelude::DataType>>,
+        captured: HashSet<Vec<prelude::DataType>>,
+    },
 }
 
 pub enum ReplayContext {

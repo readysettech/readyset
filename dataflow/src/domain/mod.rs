@@ -550,7 +550,7 @@ impl Domain {
             self.process_times.start(me);
             self.process_ptimes.start(me);
             let mut m = Some(m);
-            let misses = n.process(
+            let (misses, captured) = n.process(
                 &mut m,
                 None,
                 &mut self.state,
@@ -560,6 +560,7 @@ impl Domain {
                 sends,
                 executor,
             );
+            assert_eq!(captured.len(), 0);
             self.process_ptimes.stop();
             self.process_times.stop();
 
@@ -1421,9 +1422,6 @@ impl Domain {
                         self.state_size.store(total as usize, Ordering::Relaxed);
                         // no response sent, as worker will read the atomic
                     }
-                    Packet::Captured => {
-                        unreachable!("captured packets should never be sent around")
-                    }
                     Packet::Quit => unreachable!("Quit messages are handled by event loop"),
                     Packet::Spin => {
                         // spinning as instructed
@@ -1882,7 +1880,7 @@ impl Domain {
 
                         // keep track of whether we're filling any partial holes
                         let partial_key_cols = segment.partial_key.as_ref();
-                        let backfill_keys = if let ReplayPieceContext::Partial {
+                        let mut backfill_keys = if let ReplayPieceContext::Partial {
                             ref mut for_keys,
                             ..
                         } = context
@@ -1945,7 +1943,7 @@ impl Domain {
                         }
 
                         // process the current message in this node
-                        let mut misses = n.process(
+                        let (mut misses, captured) = n.process(
                             &mut m,
                             segment.partial_key.as_ref(),
                             &mut self.state,
@@ -2016,10 +2014,29 @@ impl Domain {
                             }
                         }
 
+                        if target && !captured.is_empty() {
+                            // materialized union ate some of our keys,
+                            // so we didn't *actually* fill those keys after all!
+                            if let Some(state) = self.state.get_mut(&segment.node) {
+                                for key in &captured {
+                                    state.mark_hole(&key[..], &tag);
+                                }
+                            } else {
+                                n.with_reader_mut(|r| {
+                                    r.writer_mut().map(|wh| {
+                                        for key in &captured {
+                                            wh.mut_with_key(&key[..]).mark_hole();
+                                        }
+                                    });
+                                }).unwrap();
+                            }
+                        }
+
                         // we're done with the node
                         drop(n);
 
-                        if let Some(box Packet::Captured) = m {
+                        if m.is_none() {
+                            // eaten full replay
                             assert_eq!(misses.len(), 0);
                             if backfill_keys.is_some() && is_transactional {
                                 let last_ni = path.last().unwrap().node;
@@ -2082,6 +2099,21 @@ impl Domain {
                             finished_partial = backfill_keys.as_ref().unwrap().len();
                         }
 
+                        // only continue with the keys that weren't captured
+                        if let box Packet::ReplayPiece {
+                            context:
+                                ReplayPieceContext::Partial {
+                                    ref mut for_keys, ..
+                                },
+                            ..
+                        } = m.as_mut().unwrap()
+                        {
+                            backfill_keys
+                                .as_mut()
+                                .unwrap()
+                                .retain(|k| for_keys.contains(&k[..]));
+                        }
+
                         // if we missed during replay, we need to do another replay
                         if backfill_keys.is_some() && !misses.is_empty() {
                             let misses = misses;
@@ -2095,15 +2127,14 @@ impl Domain {
                                 ));
                             }
 
-                            // we still need to finish the replays for any keys that *didn't* miss
-                            let backfill_keys = backfill_keys.map(|backfill_keys| {
-                                backfill_keys.retain(|k| !missed_on.contains(k));
-                                backfill_keys
-                            });
-                            if backfill_keys.as_ref().unwrap().is_empty() {
-                                break 'outer;
-                            }
+                            // we should only finish the replays for keys that *didn't* miss
+                            backfill_keys
+                                .as_mut()
+                                .unwrap()
+                                .retain(|k| !missed_on.contains(k));
 
+                            // prune all replayed records for keys where any replayed record for
+                            // that key missed.
                             let partial_col = partial_key_cols.as_ref().unwrap();
                             m.as_mut().unwrap().map_data(|rs| {
                                 rs.retain(|r| {
@@ -2117,6 +2148,15 @@ impl Domain {
                                         .collect())
                                 })
                             });
+                        }
+
+                        // no more keys to replay, so we might as well terminate early
+                        if backfill_keys
+                            .as_ref()
+                            .map(|b| b.is_empty())
+                            .unwrap_or(false)
+                        {
+                            break 'outer;
                         }
 
                         // we're all good -- continue propagating

@@ -14,7 +14,7 @@ impl Node {
         swap: bool,
         output: &mut Vec<(ReplicaAddr, Box<Packet>)>,
         executor: Option<&Executor>,
-    ) -> Vec<Miss> {
+    ) -> (Vec<Miss>, HashSet<Vec<DataType>>) {
         m.as_mut().unwrap().trace(PacketEvent::Process);
 
         let addr = *self.local_addr();
@@ -25,23 +25,24 @@ impl Node {
                 m.map_data(|rs| {
                     materialize(rs, tag, state.get_mut(&addr));
                 });
-                vec![]
+                (vec![], HashSet::new())
             }
             NodeType::Reader(ref mut r) => {
                 r.process(m, swap);
-                vec![]
+                (vec![], HashSet::new())
             }
             NodeType::Egress(None) => unreachable!(),
             NodeType::Egress(Some(ref mut e)) => {
                 e.process(m, on_shard.unwrap_or(0), output);
-                vec![]
+                (vec![], HashSet::new())
             }
             NodeType::Sharder(ref mut s) => {
                 s.process(m, addr, on_shard.is_some(), output);
-                vec![]
+                (vec![], HashSet::new())
             }
             NodeType::Internal(ref mut i) => {
-                let mut captured = false;
+                let mut captured_full = false;
+                let mut captured = HashSet::new();
                 let mut misses = Vec::new();
                 let mut tracer;
 
@@ -86,18 +87,23 @@ impl Node {
                                 mem::replace(data, m.results);
                                 misses = m.misses;
                             }
-                            RawProcessingResult::ReplayPiece(rs, emitted_keys) => {
+                            RawProcessingResult::CapturedFull => {
+                                captured_full = true;
+                            }
+                            RawProcessingResult::ReplayPiece {
+                                rows,
+                                keys: emitted_keys,
+                                captured: were_captured,
+                            } => {
                                 // we already know that m must be a ReplayPiece since only a
                                 // ReplayPiece can release a ReplayPiece.
-                                mem::replace(data, rs);
+                                mem::replace(data, rows);
+                                captured = were_captured;
                                 if let ReplayContext::Partial { ref mut keys, .. } = replay {
                                     *keys = emitted_keys;
                                 } else {
                                     unreachable!();
                                 }
-                            }
-                            RawProcessingResult::Captured => {
-                                captured = true;
                             }
                             RawProcessingResult::FullReplay(rs, last) => {
                                 // we already know that m must be a (full) ReplayPiece since only a
@@ -136,10 +142,9 @@ impl Node {
                     }
                 }
 
-                if captured {
-                    use std::mem;
-                    mem::replace(m, Some(box Packet::Captured));
-                    return misses;
+                if captured_full {
+                    *m = None;
+                    return (vec![], HashSet::new());
                 }
 
                 let m = m.as_mut().unwrap();
@@ -197,7 +202,7 @@ impl Node {
                     _ => {}
                 };
 
-                misses
+                (misses, captured)
             }
             NodeType::Source | NodeType::Dropped => unreachable!(),
         }
