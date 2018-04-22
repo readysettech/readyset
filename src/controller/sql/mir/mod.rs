@@ -1588,11 +1588,21 @@ impl SqlToMirConverter {
                     projected_columns.push(pc.clone());
                 }
             }
+
+            // We may already have added some of the arithmetic and literal columns
+            let (_, already_computed): (Vec<_>, Vec<_>) =
+                value_columns_needed_for_predicates(&qg.columns, &qg.global_predicates)
+                    .into_iter()
+                    .unzip();
             let projected_arithmetic: Vec<(String, ArithmeticExpression)> = qg.columns
                 .iter()
                 .filter_map(|oc| match *oc {
                     OutputColumn::Arithmetic(ref ac) => {
-                        Some((ac.name.clone(), ac.expression.clone()))
+                        if !already_computed.contains(oc) {
+                            Some((ac.name.clone(), ac.expression.clone()))
+                        } else {
+                            None
+                        }
                     }
                     OutputColumn::Data(_) => None,
                     OutputColumn::Literal(_) => None,
@@ -1604,7 +1614,11 @@ impl SqlToMirConverter {
                     OutputColumn::Arithmetic(_) => None,
                     OutputColumn::Data(_) => None,
                     OutputColumn::Literal(ref lc) => {
-                        Some((lc.name.clone(), DataType::from(&lc.value)))
+                        if !already_computed.contains(oc) {
+                            Some((lc.name.clone(), DataType::from(&lc.value)))
+                        } else {
+                            None
+                        }
                     }
                 })
                 .collect();
