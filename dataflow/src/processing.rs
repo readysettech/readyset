@@ -3,14 +3,14 @@ use std::collections::{HashMap, HashSet};
 
 use ops;
 use ops::base::Base;
-use prelude;
+use prelude::*;
 
 // TODO: make a Key type that is an ArrayVec<DataType>
 
 #[derive(PartialEq, Eq, Debug)]
 pub(crate) struct Miss {
     /// The node we missed when looking up into.
-    pub(crate) on: prelude::LocalNodeIndex,
+    pub(crate) on: LocalNodeIndex,
     /// The columns of `on` we were looking up on.
     pub(crate) lookup_idx: Vec<usize>,
     /// The columns of `record` we were using for the lookup.
@@ -18,29 +18,27 @@ pub(crate) struct Miss {
     /// The columns of `record` that identify the replay key (if any).
     pub(crate) replay_cols: Option<Vec<usize>>,
     /// The record we were processing when we missed.
-    pub(crate) record: Vec<prelude::DataType>,
+    pub(crate) record: Vec<DataType>,
 }
 
 impl Miss {
-    pub(crate) fn replay_key<'a>(
-        &'a self,
-    ) -> Option<impl Iterator<Item = &prelude::DataType> + 'a> {
+    pub(crate) fn replay_key<'a>(&'a self) -> Option<impl Iterator<Item = &DataType> + 'a> {
         self.replay_cols
             .as_ref()
             .map(move |rc| rc.iter().map(move |&rc| &self.record[rc]))
     }
 
-    pub(crate) fn replay_key_vec(&self) -> Option<Vec<prelude::DataType>> {
+    pub(crate) fn replay_key_vec(&self) -> Option<Vec<DataType>> {
         self.replay_cols
             .as_ref()
             .map(|rc| rc.iter().map(|&rc| &self.record[rc]).cloned().collect())
     }
 
-    pub(crate) fn lookup_key<'a>(&'a self) -> impl Iterator<Item = &prelude::DataType> + 'a {
+    pub(crate) fn lookup_key<'a>(&'a self) -> impl Iterator<Item = &DataType> + 'a {
         self.lookup_cols.iter().map(move |&rc| &self.record[rc])
     }
 
-    pub(crate) fn lookup_key_vec(&self) -> Vec<prelude::DataType> {
+    pub(crate) fn lookup_key_vec(&self) -> Vec<DataType> {
         self.lookup_cols
             .iter()
             .map(|&rc| &self.record[rc])
@@ -50,18 +48,18 @@ impl Miss {
 }
 
 pub struct ProcessingResult {
-    pub(crate) results: prelude::Records,
+    pub(crate) results: Records,
     pub(crate) misses: Vec<Miss>,
 }
 
 pub enum RawProcessingResult {
     Regular(ProcessingResult),
-    FullReplay(prelude::Records, bool),
+    FullReplay(Records, bool),
     CapturedFull,
     ReplayPiece {
-        rows: prelude::Records,
-        keys: HashSet<Vec<prelude::DataType>>,
-        captured: HashSet<Vec<prelude::DataType>>,
+        rows: Records,
+        keys: HashSet<Vec<DataType>>,
+        captured: HashSet<Vec<DataType>>,
     },
 }
 
@@ -70,7 +68,7 @@ pub enum ReplayContext {
     None,
     Partial {
         key_cols: Vec<usize>,
-        keys: HashSet<Vec<prelude::DataType>>,
+        keys: HashSet<Vec<DataType>>,
     },
     Full {
         last: bool,
@@ -95,11 +93,11 @@ where
     /// Whatever is left behind in self is what remains observable in the graph.
     fn take(&mut self) -> ops::NodeOperator;
 
-    fn ancestors(&self) -> Vec<prelude::NodeIndex>;
+    fn ancestors(&self) -> Vec<NodeIndex>;
 
     /// May return a set of nodes such that *one* of the given ancestors *must* be the one to be
     /// replayed if this node's state is to be initialized.
-    fn must_replay_among(&self) -> Option<HashSet<prelude::NodeIndex>> {
+    fn must_replay_among(&self) -> Option<HashSet<NodeIndex>> {
         None
     }
 
@@ -109,14 +107,11 @@ where
     /// *compound* key, *not* that multiple columns should be independently indexed. The bool in
     /// the return value specifies if the node wants to do *lookups* on that key; false would imply
     /// that this index will only be used for partial replay.
-    fn suggest_indexes(
-        &self,
-        you: prelude::NodeIndex,
-    ) -> HashMap<prelude::NodeIndex, (Vec<usize>, bool)>;
+    fn suggest_indexes(&self, you: NodeIndex) -> HashMap<NodeIndex, (Vec<usize>, bool)>;
 
     /// Resolve where the given field originates from. If the view is materialized, or the value is
     /// otherwise created by this view, None should be returned.
-    fn resolve(&self, i: usize) -> Option<Vec<(prelude::NodeIndex, usize)>>;
+    fn resolve(&self, i: usize) -> Option<Vec<(NodeIndex, usize)>>;
 
     /// Returns a reference to the underlying Base node (if any)
     fn get_base(&self) -> Option<&Base> {
@@ -151,37 +146,33 @@ where
     ///
     /// All its ancestors are present, but this node and its children may not have been connected
     /// yet.
-    fn on_connected(&mut self, graph: &prelude::Graph);
+    fn on_connected(&mut self, graph: &Graph);
 
     /// Called when a domain is finalized and is about to be booted.
     ///
     /// The provided arguments give mappings from global to local addresses.
-    fn on_commit(
-        &mut self,
-        you: prelude::NodeIndex,
-        remap: &HashMap<prelude::NodeIndex, prelude::IndexPair>,
-    );
+    fn on_commit(&mut self, you: NodeIndex, remap: &HashMap<NodeIndex, IndexPair>);
 
     /// Process a single incoming message, optionally producing an update to be propagated to
     /// children.
     fn on_input(
         &mut self,
-        from: prelude::LocalNodeIndex,
-        data: prelude::Records,
-        tracer: &mut prelude::Tracer,
+        from: LocalNodeIndex,
+        data: Records,
+        tracer: &mut Tracer,
         replay_key_cols: Option<&[usize]>,
-        domain: &prelude::DomainNodes,
-        states: &prelude::StateMap,
+        domain: &DomainNodes,
+        states: &StateMap,
     ) -> ProcessingResult;
 
     fn on_input_raw(
         &mut self,
-        from: prelude::LocalNodeIndex,
-        data: prelude::Records,
-        tracer: &mut prelude::Tracer,
+        from: LocalNodeIndex,
+        data: Records,
+        tracer: &mut Tracer,
         replay: &ReplayContext,
-        domain: &prelude::DomainNodes,
-        states: &prelude::StateMap,
+        domain: &DomainNodes,
+        states: &StateMap,
     ) -> RawProcessingResult {
         RawProcessingResult::Regular(self.on_input(
             from,
@@ -197,9 +188,9 @@ where
     /// state other than what is stored in its materialization.
     fn on_eviction(
         &mut self,
-        _from: prelude::LocalNodeIndex,
+        _from: LocalNodeIndex,
         _key_columns: &[usize],
-        _keys: &mut Vec<Vec<prelude::DataType>>,
+        _keys: &mut Vec<Vec<DataType>>,
     ) {
     }
 
@@ -210,9 +201,9 @@ where
     fn query_through<'a>(
         &self,
         _columns: &[usize],
-        _key: &prelude::KeyType,
-        _states: &'a prelude::StateMap,
-    ) -> Option<Option<Box<Iterator<Item = Cow<'a, [prelude::DataType]>> + 'a>>> {
+        _key: &KeyType,
+        _states: &'a StateMap,
+    ) -> Option<Option<Box<Iterator<Item = Cow<'a, [DataType]>> + 'a>>> {
         None
     }
 
@@ -224,23 +215,22 @@ where
     ///  - `Some(Some(rs))` => materialization exists, and got results rs
     fn lookup<'a>(
         &self,
-        parent: prelude::LocalNodeIndex,
+        parent: LocalNodeIndex,
         columns: &[usize],
-        key: &prelude::KeyType,
-        domain: &prelude::DomainNodes,
-        states: &'a prelude::StateMap,
-    ) -> Option<Option<Box<Iterator<Item = Cow<'a, [prelude::DataType]>> + 'a>>> {
+        key: &KeyType,
+        domain: &DomainNodes,
+        states: &'a StateMap,
+    ) -> Option<Option<Box<Iterator<Item = Cow<'a, [DataType]>> + 'a>>> {
         states
             .get(&parent)
             .and_then(move |state| match state.lookup(columns, key) {
-                prelude::LookupResult::Some(Cow::Owned(rs)) => Some(Some(Box::new(
+                LookupResult::Some(Cow::Owned(rs)) => Some(Some(Box::new(
                     rs.into_iter().map(|r| Cow::Owned(r.unpack())),
-                )
-                    as Box<_>)),
-                prelude::LookupResult::Some(Cow::Borrowed(rs)) => {
+                ) as Box<_>)),
+                LookupResult::Some(Cow::Borrowed(rs)) => {
                     Some(Some(Box::new(rs.iter().map(|r| Cow::Borrowed(&r[..]))) as Box<_>))
                 }
-                prelude::LookupResult::Missing => Some(None),
+                LookupResult::Missing => Some(None),
             })
             .or_else(|| {
                 // this is a long-shot.
@@ -258,7 +248,7 @@ where
     // parent ingredients. None for the column means that the parent doesn't
     // have an associated column. Similar to resolve, but does not depend on
     // materialization, and returns results even for computed columns.
-    fn parent_columns(&self, column: usize) -> Vec<(prelude::NodeIndex, Option<usize>)>;
+    fn parent_columns(&self, column: usize) -> Vec<(NodeIndex, Option<usize>)>;
 
     /// Performance hint: should return true if this operator reduces the size of its input
     fn is_selective(&self) -> bool {
