@@ -226,7 +226,10 @@ impl MirNode {
             },
             MirNodeType::Reuse { ref node } => node.borrow().column_id_for_column(c),
             // otherwise, just look up in the column set
-            _ => match self.columns.iter().position(|cc| cc == c) {
+            _ => match self.columns
+                .iter()
+                .position(|cc| cc.name == c.name && cc.table == c.table)
+            {
                 None => {
                     panic!(
                         "tried to look up non-existent column {:?} on node \"{}\" (columns: {:?})",
