@@ -38,24 +38,23 @@ where
             .and_then(move |(c, author, story, score)| {
                 // TODO: do something else if user has already voted
                 // TODO: technically need to re-load story under transaction
-                c.start_transaction(my::TransactionOptions::new())
-                    .and_then(move |t| {
-                        t.drop_exec(
-                            "INSERT INTO `votes` \
-                             (`user_id`, `story_id`, `vote`) \
-                             VALUES \
-                             (?, ?, ?)",
-                            (
-                                user,
-                                story,
-                                match v {
-                                    Vote::Up => 1,
-                                    Vote::Down => 0,
-                                },
-                            ),
-                        )
-                    })
-                    .and_then(move |t| {
+
+                // NOTE: MySQL technically does everything inside this and_then in a transaction,
+                // but let's be nice to it
+                c.drop_exec(
+                    "INSERT INTO `votes` \
+                     (`user_id`, `story_id`, `vote`) \
+                     VALUES \
+                     (?, ?, ?)",
+                    (
+                        user,
+                        story,
+                        match v {
+                            Vote::Up => 1,
+                            Vote::Down => 0,
+                        },
+                    ),
+                ).and_then(move |t| {
                         t.drop_exec(
                             &format!(
                                 "UPDATE `users` \
@@ -130,7 +129,6 @@ where
                             ),
                         )
                     })
-                    .and_then(|t| t.commit())
             })
             .map(|c| (c, false)),
     )

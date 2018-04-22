@@ -52,27 +52,26 @@ where
             .and_then(move |(c, tag)| {
                 // TODO: real impl checks *new* short_id and duplicate urls *again*
                 // TODO: sometimes submit url
-                c.start_transaction(my::TransactionOptions::new())
-                    .and_then(move |t| {
-                        t.prep_exec(
-                            "INSERT INTO `stories` \
-                             (`created_at`, `user_id`, `title`, \
-                             `description`, `short_id`, `upvotes`, `hotness`, \
-                             `markeddown_description`) \
-                             VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
-                            (
-                                chrono::Local::now().naive_local(),
-                                user,
-                                title,
-                                "to infinity", // lorem ipsum?
-                                ::std::str::from_utf8(&id[..]).unwrap(),
-                                1,
-                                -19216.2884921,
-                                "<p>to infinity</p>\n",
-                            ),
-                        )
-                    })
-                    .and_then(|q| {
+
+                // NOTE: MySQL technically does everything inside this and_then in a transaction,
+                // but let's be nice to it
+                c.prep_exec(
+                    "INSERT INTO `stories` \
+                     (`created_at`, `user_id`, `title`, \
+                     `description`, `short_id`, `upvotes`, `hotness`, \
+                     `markeddown_description`) \
+                     VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+                    (
+                        chrono::Local::now().naive_local(),
+                        user,
+                        title,
+                        "to infinity", // lorem ipsum?
+                        ::std::str::from_utf8(&id[..]).unwrap(),
+                        1,
+                        -19216.2884921,
+                        "<p>to infinity</p>\n",
+                    ),
+                ).and_then(|q| {
                         let story = q.last_insert_id().unwrap();
                         q.drop_result().map(move |t| (t, story))
                     })
@@ -138,7 +137,6 @@ where
                             (-19216.5479744, story),
                         )
                     })
-                    .and_then(|t| t.commit())
             })
             .map(|c| (c, false)),
     )

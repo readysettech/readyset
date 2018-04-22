@@ -79,56 +79,55 @@ where
             })
             .and_then(move |(c, story, parent, hotness)| {
                 // TODO: real impl checks *new* short_id *again*
-                c.start_transaction(my::TransactionOptions::new())
-                    .and_then(move |t| {
-                        let now = chrono::Local::now().naive_local();
-                        if let Some((parent, thread)) = parent {
-                            futures::future::Either::A(t.prep_exec(
-                                "INSERT INTO `comments` \
-                                 (`created_at`, `updated_at`, `short_id`, `story_id`, \
-                                 `user_id`, `parent_comment_id`, `thread_id`, \
-                                 `comment`, `upvotes`, `confidence`, \
-                                 `markeddown_comment`) \
-                                 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
-                                (
-                                    now,
-                                    now,
-                                    ::std::str::from_utf8(&id[..]).unwrap(),
-                                    story,
-                                    user,
-                                    parent,
-                                    thread,
-                                    "moar benchmarking", // lorem ipsum?
-                                    1,
-                                    0.1828847834138887,
-                                    "<p>moar benchmarking</p>\n",
-                                ),
-                            ))
-                        } else {
-                            futures::future::Either::B(t.prep_exec(
-                                "INSERT INTO `comments` \
-                                 (`created_at`, `updated_at`, `short_id`, `story_id`, \
-                                 `user_id`, `comment`, `upvotes`, `confidence`, \
-                                 `markeddown_comment`) \
-                                 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
-                                (
-                                    now,
-                                    now,
-                                    ::std::str::from_utf8(&id[..]).unwrap(),
-                                    story,
-                                    user,
-                                    "moar benchmarking", // lorem ipsum?
-                                    1,
-                                    0.1828847834138887,
-                                    "<p>moar benchmarking</p>\n",
-                                ),
-                            ))
-                        }
-                    })
-                    .and_then(|q| {
-                        let comment = q.last_insert_id().unwrap();
-                        q.drop_result().map(move |t| (t, comment))
-                    })
+
+                // NOTE: MySQL technically does everything inside this and_then in a transaction,
+                // but let's be nice to it
+                let now = chrono::Local::now().naive_local();
+                if let Some((parent, thread)) = parent {
+                    futures::future::Either::A(c.prep_exec(
+                        "INSERT INTO `comments` \
+                         (`created_at`, `updated_at`, `short_id`, `story_id`, \
+                         `user_id`, `parent_comment_id`, `thread_id`, \
+                         `comment`, `upvotes`, `confidence`, \
+                         `markeddown_comment`) \
+                         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                        (
+                            now,
+                            now,
+                            ::std::str::from_utf8(&id[..]).unwrap(),
+                            story,
+                            user,
+                            parent,
+                            thread,
+                            "moar benchmarking", // lorem ipsum?
+                            1,
+                            0.1828847834138887,
+                            "<p>moar benchmarking</p>\n",
+                        ),
+                    ))
+                } else {
+                    futures::future::Either::B(c.prep_exec(
+                        "INSERT INTO `comments` \
+                         (`created_at`, `updated_at`, `short_id`, `story_id`, \
+                         `user_id`, `comment`, `upvotes`, `confidence`, \
+                         `markeddown_comment`) \
+                         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                        (
+                            now,
+                            now,
+                            ::std::str::from_utf8(&id[..]).unwrap(),
+                            story,
+                            user,
+                            "moar benchmarking", // lorem ipsum?
+                            1,
+                            0.1828847834138887,
+                            "<p>moar benchmarking</p>\n",
+                        ),
+                    ))
+                }.and_then(|q| {
+                    let comment = q.last_insert_id().unwrap();
+                    q.drop_result().map(move |t| (t, comment))
+                })
                     .and_then(move |(t, comment)| {
                         // but why?!
                         t.drop_exec(
@@ -225,7 +224,6 @@ where
                             (key, 1),
                         )
                     })
-                    .and_then(|t| t.commit())
             })
             .map(|c| (c, false)),
     )
