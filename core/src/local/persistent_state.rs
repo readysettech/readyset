@@ -414,7 +414,7 @@ impl PersistentState {
             .as_ref()
             .unwrap()
             .full_iterator(rocksdb::IteratorMode::Start)
-            .filter(|&(ref key, _)| {
+            .take_while(|&(ref key, _)| {
                 // Filter out non-pk indices:
                 let i: IndexID = bincode::deserialize(&key).unwrap();
                 i == 0
@@ -812,6 +812,30 @@ mod tests {
         assert_eq!(state.rows(), 1);
         insert(&mut state, second.clone());
         assert_eq!(state.rows(), 2);
+    }
+
+    #[test]
+    fn persistent_state_all_rows() {
+        let mut state = setup_persistent("persistent_state_all_rows");
+        let mut rows = vec![];
+        for i in 0..10 {
+            let row = vec![DataType::from(i); 10];
+            rows.push(row);
+            // Add a bunch of indices to make sure the sorting in all_rows()
+            // correctly filters out non-primary indices:
+            state.add_key(&[i], None);
+        }
+
+        for row in rows.iter().cloned() {
+            insert(&mut state, row);
+        }
+
+        let actual_rows: Vec<Vec<DataType>> = state
+            .all_rows()
+            .map(|(_key, value)| bincode::deserialize(&value).unwrap())
+            .collect();
+
+        assert_eq!(actual_rows, rows);
     }
 
     #[test]

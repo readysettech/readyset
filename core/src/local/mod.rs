@@ -55,6 +55,8 @@ impl Tag {
     }
 }
 
+// TODO: Wrapping this in a Rc is unnecessary when rows are returned through a Cow::Owned from
+// PersistentState. This could be solved by having something similar to a Cow here.
 #[derive(Clone, Debug)]
 pub struct Row(pub(crate) Rc<Vec<DataType>>);
 
