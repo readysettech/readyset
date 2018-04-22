@@ -186,9 +186,15 @@ impl State for PersistentState {
             .collect()
     }
 
+    // Returns a row count estimate from RocksDB.
     fn rows(&self) -> usize {
-        // TODO(ekmartin): Use estimated property or return 0?
-        self.all_rows().count()
+        let total_keys = self.db
+            .as_ref()
+            .unwrap()
+            .property_int_value("rocksdb.estimate-num-keys")
+            .unwrap() as usize;
+
+        (total_keys / self.indices.len())
     }
 
     fn is_useful(&self) -> bool {
@@ -803,15 +809,21 @@ mod tests {
     #[test]
     fn persistent_state_rows() {
         let mut state = setup_persistent("persistent_state_rows");
-        let first: Vec<DataType> = vec![10.into(), "Cat".into()];
-        let second: Vec<DataType> = vec![20.into(), "Bob".into()];
-        state.add_key(&[0], None);
-        state.add_key(&[1], None);
-        assert_eq!(state.rows(), 0);
-        insert(&mut state, first.clone());
-        assert_eq!(state.rows(), 1);
-        insert(&mut state, second.clone());
-        assert_eq!(state.rows(), 2);
+        let mut rows = vec![];
+        for i in 0..30 {
+            let row = vec![DataType::from(i); 30];
+            rows.push(row);
+            state.add_key(&[i], None);
+        }
+
+        for row in rows.iter().cloned() {
+            insert(&mut state, row);
+        }
+
+        let count = state.rows();
+        // rows() is estimated, but we want to make sure we at least don't return
+        // self.indices.len() * rows.len() here.
+        assert!(count > 0 && count < rows.len() * 2);
     }
 
     #[test]
