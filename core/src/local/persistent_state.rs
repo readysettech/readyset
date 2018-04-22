@@ -68,7 +68,11 @@ impl SizeOf for PersistentState {
     }
 
     fn deep_size_of(&self) -> u64 {
-        self.size_of()
+        self.db
+            .as_ref()
+            .unwrap()
+            .property_int_value("rocksdb.estimate-live-data-size")
+            .unwrap()
     }
 }
 
@@ -824,6 +828,13 @@ mod tests {
         // rows() is estimated, but we want to make sure we at least don't return
         // self.indices.len() * rows.len() here.
         assert!(count > 0 && count < rows.len() * 2);
+    }
+
+    #[test]
+    fn persistent_state_deep_size_of() {
+        let state = setup_persistent("persistent_state_deep_size_of");
+        let size = state.deep_size_of();
+        assert_eq!(size, 0);
     }
 
     #[test]
