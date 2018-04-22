@@ -837,6 +837,65 @@ mod tests {
         assert_eq!(size, 0);
     }
 
+    // TODO(ekmartin): This can happen in cases where add_key crashes before calling
+    // self.persist_meta(). We'll need to remove any rows starting with the IndexID
+    // self.indices.len() during recovery.
+    #[test]
+    #[allow_fail]
+    fn persistent_state_dangling_indices() {
+        let name = get_name("persistent_state_dangling_indices");
+        let mut rows = vec![];
+        for i in 0..10 {
+            let row = vec![DataType::from(i); 10];
+            rows.push(row);
+        }
+
+        {
+            let mut params = PersistenceParameters::default();
+            params.mode = DurabilityMode::Permanent;
+            let mut state = PersistentState::new(name.clone(), None, &params);
+            state.add_key(&[0], None);
+            state.process_records(&mut rows.clone().into(), None);
+            // Add a second index that we'll have to build in add_key:
+            state.add_key(&[1], None);
+            // Make sure we actually built the index:
+            match state.lookup(&[1], &KeyType::Single(&0.into())) {
+                LookupResult::Some(rs) => {
+                    assert_eq!(rs.len(), 1);
+                    assert_eq!(&*rs[0], &rows[0]);
+                }
+                LookupResult::Missing => unreachable!(),
+            };
+
+            // Pretend we crashed right before calling self.persist_meta in self.add_key by
+            // removing the last index from indices:
+            let meta = PersistentMeta {
+                indices: vec![vec![0]],
+                epoch: 1,
+            };
+
+            let data = bincode::serialize(&meta).unwrap();
+            state.db.as_ref().unwrap().put(META_KEY, &data).unwrap();
+        }
+
+        // During recovery we should now remove all the rows for the second index,
+        // since it won't exist in PersistentMeta.indices:
+        let params = PersistenceParameters::default();
+        let mut state = PersistentState::new(name, None, &params);
+        assert_eq!(state.indices.len(), 1);
+        // Now, re-add the second index which should trigger an index build:
+        state.add_key(&[1], None);
+        // And finally, make sure we actually pruned the index
+        // (otherwise we'd get two rows from this .lookup):
+        match state.lookup(&[1], &KeyType::Single(&0.into())) {
+            LookupResult::Some(rs) => {
+                assert_eq!(rs.len(), 1);
+                assert_eq!(&*rs[0], &rows[0]);
+            }
+            LookupResult::Missing => unreachable!(),
+        };
+    }
+
     #[test]
     fn persistent_state_all_rows() {
         let mut state = setup_persistent("persistent_state_all_rows");
