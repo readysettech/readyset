@@ -369,14 +369,43 @@ impl PersistentState {
     //  * `seq`
     //      Sequence number since last epoch.
     fn serialize_key(&self, index_id: IndexID, key: &KeyType, seq: IndexSeq) -> Vec<u8> {
-        let size: u64 = bincode::serialized_size(&key).unwrap();
-        bincode::serialize(&(index_id, size, key, self.epoch, seq)).unwrap()
+        fn serialize<K: serde::Serialize>(
+            index_id: IndexID,
+            k: K,
+            epoch: u64,
+            seq: IndexSeq,
+        ) -> Vec<u8> {
+            let size: u64 = bincode::serialized_size(&k).unwrap();
+            bincode::serialize(&(index_id, size, k, epoch, seq)).unwrap()
+        }
+
+        // We don't deserialize the key anywhere, so we'll serialize the
+        // individual KeyType tuples to avoid the 4 byte enum variant:
+        match key {
+            KeyType::Single(k) => serialize(index_id, k, self.epoch, seq),
+            KeyType::Double(k) => serialize(index_id, k, self.epoch, seq),
+            KeyType::Tri(k) => serialize(index_id, k, self.epoch, seq),
+            KeyType::Quad(k) => serialize(index_id, k, self.epoch, seq),
+            KeyType::Quin(k) => serialize(index_id, k, self.epoch, seq),
+            KeyType::Sex(k) => serialize(index_id, k, self.epoch, seq),
+        }
     }
 
     // Used with DB::prefix_iterator to go through all the rows for a given key.
-    fn serialize_prefix(index: IndexID, key: &KeyType) -> Vec<u8> {
-        let size: u64 = bincode::serialized_size(&key).unwrap();
-        bincode::serialize(&(index, size, key)).unwrap()
+    fn serialize_prefix(index_id: IndexID, key: &KeyType) -> Vec<u8> {
+        fn serialize<K: serde::Serialize>(index_id: IndexID, k: K) -> Vec<u8> {
+            let size: u64 = bincode::serialized_size(&k).unwrap();
+            bincode::serialize(&(index_id, size, k)).unwrap()
+        }
+
+        match key {
+            KeyType::Single(k) => serialize(index_id, k),
+            KeyType::Double(k) => serialize(index_id, k),
+            KeyType::Tri(k) => serialize(index_id, k),
+            KeyType::Quad(k) => serialize(index_id, k),
+            KeyType::Quin(k) => serialize(index_id, k),
+            KeyType::Sex(k) => serialize(index_id, k),
+        }
     }
 
     // Filters out secondary indices to return an iterator for the actual key-value pairs.
@@ -863,13 +892,14 @@ mod tests {
             columns: Default::default(),
         };
 
-        let r = KeyType::Double((1.into(), 10.into()));
+        let data = (DataType::from(1), DataType::from(10));
+        let r = KeyType::Double(data.clone());
         let i = 5;
         let k = state.serialize_key(i, &r, index.seq);
         let prefix = PersistentState::transform_fn(&k);
         let (key_out, size): (IndexID, u64) = bincode::deserialize(&prefix).unwrap();
         assert_eq!(i, key_out);
-        assert_eq!(size, bincode::serialized_size(&r).unwrap());
+        assert_eq!(size, bincode::serialized_size(&data).unwrap());
 
         // prefix_extractor requirements:
         // 1) key.starts_with(prefix(key))
