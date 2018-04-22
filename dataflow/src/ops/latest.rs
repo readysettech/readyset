@@ -1,3 +1,4 @@
+use std::borrow::Cow;
 use std::collections::HashMap;
 
 use prelude::*;
@@ -95,8 +96,16 @@ impl Ingredient for Latest {
 
             // buffer emitted records
             for (r, current_row) in currents {
-                if let Some(current) = current_row.get(0) {
-                    out.push(Record::Negative((**current).clone()));
+                match current_row {
+                    Cow::Owned(mut rs) => {
+                        if rs.len() > 0 {
+                            out.push(Record::Negative(rs.swap_remove(0).unpack()));
+                        }
+                    }
+                    Cow::Borrowed(rs) if rs.len() > 0 => {
+                        out.push(Record::Negative((*rs[0]).clone()));
+                    }
+                    _ => {}
                 }
 
                 // if there was a previous latest for this key, revoke old record

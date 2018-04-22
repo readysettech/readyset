@@ -222,20 +222,16 @@ where
                         }
                     };
 
+                    // TODO: take advantage of rs possibly being a Cow::Owned to avoid cloning
+                    // further down.
                     let old = rs.get(0);
-                    let (current, new) = {
-                        use std::borrow::Cow;
+                    // current value is in the last output column
+                    // or "" if there is no current group
+                    let current = old.map(|r| &r[r.len() - 1]);
 
-                        // current value is in the last output column
-                        // or "" if there is no current group
-                        let current = old.map(|r| Cow::Borrowed(&r[r.len() - 1]));
-
-                        // new is the result of applying all diffs for the group to the current
-                        // value
-                        let new = inner.apply(current.as_ref().map(|v| &**v), &mut diffs as &mut _);
-                        (current, new)
-                    };
-
+                    // new is the result of applying all diffs for the group to the current
+                    // value
+                    let new = inner.apply(current.as_ref().map(|v| &**v), &mut diffs as &mut _);
                     match current {
                         Some(ref current) if new == **current => {
                             // no change
