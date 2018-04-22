@@ -51,9 +51,13 @@ pub struct PersistentState {
     // persisted files if we want to.
     db: Option<rocksdb::DB>,
     durability_mode: DurabilityMode,
+    // The first element is always considered the primary index, where the actual data is stored.
+    // Subsequent indices maintain pointers to the data in the first index, and cause an additional
+    // read during lookups. When `self.has_unique_index` is true the first index is a primary key,
+    // and all its keys are considered unique.
     indices: Vec<PersistentIndex>,
     epoch: IndexEpoch,
-    primary_key: Option<Vec<usize>>,
+    has_unique_index: bool,
 }
 
 impl SizeOf for PersistentState {
@@ -96,45 +100,42 @@ impl State for PersistentState {
 
     fn lookup(&self, columns: &[usize], key: &KeyType) -> LookupResult {
         let db = self.db.as_ref().unwrap();
-        let data = match self.primary_key {
-            Some(ref pk) if &pk[..] == columns => {
-                let prefix = Self::serialize_prefix(0, &key);
-                // This is a primary key, so we know there's only one row to retrieve
-                // (no need to use prefix_iterator).
-                let raw_row = db.get(&prefix).unwrap();
-                if let Some(raw) = raw_row {
-                    let row: Vec<DataType> = bincode::deserialize(&*raw).unwrap();
-                    vec![Row(Rc::new(row))]
-                } else {
-                    vec![]
-                }
+        let index_id = self.indices
+            .iter()
+            .position(|index| &index.columns[..] == columns)
+            .expect("lookup on non-indexed column set") as u32;
+
+        let prefix = Self::serialize_prefix(index_id, &key);
+        let data = if index_id == 0 && self.has_unique_index {
+            // This is a primary key, so we know there's only one row to retrieve
+            // (no need to use prefix_iterator).
+            let raw_row = db.get(&prefix).unwrap();
+            if let Some(raw) = raw_row {
+                let row: Vec<DataType> = bincode::deserialize(&*raw).unwrap();
+                vec![Row(Rc::new(row))]
+            } else {
+                vec![]
             }
-            _ => {
-                let index_id = self.get_index_id(columns)
-                    .expect("lookup on non-indexed column set");
-                let prefix = Self::serialize_prefix(index_id, &key);
-                let values = db.prefix_iterator(&prefix);
-                if index_id > 0 {
-                    // For non-primary indices we need to first retrieve the primary index key
-                    // through our secondary indices, and then call `.get` again on that.
-                    values
-                        .map(|(_key, value)| {
-                            let raw_row = db.get(&value)
-                                .unwrap()
-                                .expect("secondary index pointed to missing primary key value");
-                            let row: Vec<DataType> = bincode::deserialize(&*raw_row).unwrap();
-                            Row(Rc::new(row))
-                        })
-                        .collect()
-                } else {
-                    values
-                        .map(|(_key, value)| {
-                            let row: Vec<DataType> = bincode::deserialize(&*value).unwrap();
-                            Row(Rc::new(row))
-                        })
-                        .collect()
-                }
-            }
+        } else if index_id == 0 {
+            // The first index isn't unique, so we'll have to use a prefix_iterator.
+            db.prefix_iterator(&prefix)
+                .map(|(_key, value)| {
+                    let row: Vec<DataType> = bincode::deserialize(&*value).unwrap();
+                    Row(Rc::new(row))
+                })
+                .collect()
+        } else {
+            // For non-primary indices we need to first retrieve the primary index key
+            // through our secondary indices, and then call `.get` again on that.
+            db.prefix_iterator(&prefix)
+                .map(|(_key, value)| {
+                    let raw_row = db.get(&value)
+                        .unwrap()
+                        .expect("secondary index pointed to missing primary key value");
+                    let row: Vec<DataType> = bincode::deserialize(&*raw_row).unwrap();
+                    Row(Rc::new(row))
+                })
+                .collect()
         };
 
         LookupResult::Some(Cow::Owned(data))
@@ -145,12 +146,8 @@ impl State for PersistentState {
         let existing = self.indices
             .iter()
             .any(|index| &index.columns[..] == columns);
-        let is_pk = match self.primary_key {
-            Some(ref pk) => &pk[..] == columns,
-            _ => false,
-        };
 
-        if existing || is_pk {
+        if existing {
             return;
         }
 
@@ -263,14 +260,18 @@ impl PersistentState {
         let full_name = format!("{}.db", name);
         let db = rocksdb::DB::open(&opts, &full_name).unwrap();
         let meta = Self::retrieve_and_update_meta(&db);
-        let indices = meta.indices
+        let mut indices: Vec<PersistentIndex> = meta.indices
             .into_iter()
             .map(|columns| PersistentIndex::new(columns))
             .collect();
 
+        if let Some(pk_cols) = primary_key {
+            indices.insert(0, PersistentIndex::new(pk_cols.to_vec()));
+        }
+
         Self {
             indices,
-            primary_key: primary_key.and_then(|cols| Some(Vec::from(cols))),
+            has_unique_index: primary_key.is_some(),
             epoch: meta.epoch,
             db_opts: opts,
             db: Some(db),
@@ -294,30 +295,25 @@ impl PersistentState {
 
     fn persist_meta(&mut self) {
         // Stores the columns of self.indices in RocksDB so that we don't rebuild indices on recovery.
-        let indices: Vec<Vec<usize>> = self.indices.iter().map(|i| i.columns.clone()).collect();
+        let start_at = if self.has_unique_index {
+            // Skip the first index if it's a primary key, since we'll add it in Self::new anyway.
+            1
+        } else {
+            0
+        };
+
+        let columns = self.indices[start_at..]
+            .iter()
+            .map(|i| i.columns.clone())
+            .collect();
         let meta = PersistentMeta {
-            indices,
+            indices: columns,
             epoch: self.epoch,
         };
 
         let data = bincode::serialize(&meta).unwrap();
         let db = self.db.as_ref().unwrap();
         db.put(META_KEY, &data).unwrap();
-    }
-
-    fn get_index_id(&self, columns: &[usize]) -> Option<IndexID> {
-        self.indices
-            .iter()
-            .position(|index| &index.columns[..] == columns)
-            .and_then(|id| {
-                let id = id as IndexID;
-                // Increment the index ID with one if we have a primary key,
-                // as that'll always be index 0:
-                Some(match self.primary_key {
-                    Some(..) => id + 1,
-                    None => id,
-                })
-            })
     }
 
     // Selects a prefix of `key` without the epoch or sequence number.
@@ -410,20 +406,21 @@ impl PersistentState {
     // with exactly those values. I think the regular state implementation supports inserting
     // something like an Int and retrieving with a BigInt.
     fn insert(&mut self, batch: &mut WriteBatch, r: &[DataType]) {
-        for index in self.indices.iter_mut() {
+        for index in self.indices[1..].iter_mut() {
             index.seq += 1;
         }
 
-        let (secondary_indices, serialized_pk) = if let Some(ref pk_cols) = self.primary_key {
-            let pk = KeyType::from(pk_cols.iter().map(|i| &r[*i]));
-            (&self.indices[..], Self::serialize_prefix(0, &pk))
-        } else {
-            // For bases without primary keys we store the actual row values keyed by the index
-            // that was added first. This means that we can't consider the keys unique though, so
-            // we'll append a sequence number.
-            let pk_index = &self.indices[0];
-            let pk = KeyType::from(pk_index.columns.iter().map(|i| &r[*i]));
-            (&self.indices[1..], self.serialize_key(0, &pk, pk_index.seq))
+        let serialized_pk = {
+            let pk = KeyType::from(self.indices[0].columns.iter().map(|i| &r[*i]));
+            if self.has_unique_index {
+                Self::serialize_prefix(0, &pk)
+            } else {
+                // For bases without primary keys we store the actual row values keyed by the index
+                // that was added first. This means that we can't consider the keys unique though, so
+                // we'll append a sequence number.
+                self.indices[0].seq += 1;
+                self.serialize_key(0, &pk, self.indices[0].seq)
+            }
         };
 
         // First insert the actual value for our primary index:
@@ -431,7 +428,7 @@ impl PersistentState {
         batch.put(&serialized_pk, &pk_value).unwrap();
 
         // Then insert primary key pointers for all the secondary indices:
-        for (i, index) in secondary_indices.iter().enumerate() {
+        for (i, index) in self.indices[1..].iter().enumerate() {
             // Construct a key with the index values, and serialize it with bincode:
             let key = KeyType::from(index.columns.iter().map(|i| &r[*i]));
             // Add 1 to i since we're slicing self.indices by 1..:
@@ -462,9 +459,10 @@ impl PersistentState {
         };
 
         // First retrieve the actual stored row that matches r:
-        if let Some(ref pk_cols) = self.primary_key {
-            let pk = KeyType::from(pk_cols.iter().map(|i| &r[*i]));
-            let prefix = Self::serialize_prefix(0, &pk);
+        let pk_index = &self.indices[0];
+        let pk = KeyType::from(pk_index.columns.iter().map(|i| &r[*i]));
+        let prefix = Self::serialize_prefix(0, &pk);
+        if self.has_unique_index {
             let raw_value = db.get(&prefix).unwrap();
             if let Some(raw) = raw_value {
                 let value: Vec<DataType> = bincode::deserialize(&*raw).unwrap();
@@ -477,9 +475,6 @@ impl PersistentState {
 
             do_remove(&self.indices[..], &prefix[..]);
         } else {
-            let pk_index = &self.indices[0];
-            let pk = KeyType::from(pk_index.columns.iter().map(|i| &r[*i]));
-            let prefix = Self::serialize_prefix(0, &pk);
             let key = db.prefix_iterator(&prefix).find(|(_, raw_value)| {
                 let value: Vec<DataType> = bincode::deserialize(&*raw_value).unwrap();
                 r == &value[..]
