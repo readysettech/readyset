@@ -62,7 +62,13 @@ impl<A: Authority> ControllerHandle<A> {
 
     pub(super) fn make(authority: Arc<A>) -> Self {
         let core = Core::new().unwrap();
-        let client = Client::new(&core.handle());
+        let core_dns = Core::new().unwrap();
+        let client = Client::configure()
+            .connector(hyper::client::HttpConnector::new_with_executor(
+                core_dns,
+                &core.handle(),
+            ))
+            .build(&core.handle());
         ControllerHandle {
             url: None,
             local_port: None,
