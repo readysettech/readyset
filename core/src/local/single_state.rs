@@ -301,18 +301,6 @@ impl SingleState {
         keys.iter().map(|k| self.state.evict(k)).sum()
     }
 
-    pub fn clear(&mut self) {
-        self.rows = 0;
-        match self.state {
-            KeyedState::Single(ref mut map) => map.clear(),
-            KeyedState::Double(ref mut map) => map.clear(),
-            KeyedState::Tri(ref mut map) => map.clear(),
-            KeyedState::Quad(ref mut map) => map.clear(),
-            KeyedState::Quin(ref mut map) => map.clear(),
-            KeyedState::Sex(ref mut map) => map.clear(),
-        }
-    }
-
     pub fn values<'a>(&'a self) -> Box<Iterator<Item = &'a Vec<Row>> + 'a> {
         match self.state {
             KeyedState::Single(ref map) => Box::new(map.values()),

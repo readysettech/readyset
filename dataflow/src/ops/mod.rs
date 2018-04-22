@@ -449,7 +449,16 @@ pub mod test {
 
         pub fn unseed(&mut self, base: IndexPair) {
             assert!(self.nut.is_some(), "unseed must happen after set_op");
-            self.states.get_mut(&*base).unwrap().clear();
+            let global = self.nut.unwrap().as_global();
+            let idx = self.graph[global].suggest_indexes(global);
+            let mut state = MemoryState::default();
+            for (tbl, (col, _)) in idx {
+                if tbl == base.as_global() {
+                    state.add_key(&col[..], None);
+                }
+            }
+
+            self.states.insert(*base, box state);
         }
 
         pub fn one<U: Into<Records>>(&mut self, src: IndexPair, u: U, remember: bool) -> Records {

@@ -148,13 +148,6 @@ impl State for MemoryState {
         self.state[0].values().flat_map(fix).collect()
     }
 
-    fn clear(&mut self) {
-        for s in &mut self.state {
-            s.clear();
-        }
-        self.mem_size = 0;
-    }
-
     fn evict_random_keys(&mut self, count: usize) -> (&[usize], Vec<Vec<DataType>>, u64) {
         let mut rng = rand::thread_rng();
         let index = rng.gen_range(0, self.state.len());

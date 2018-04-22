@@ -191,14 +191,6 @@ impl State for PersistentState {
         self.all_rows().count()
     }
 
-    fn clear(&mut self) {
-        // Would potentially be faster to just drop self.db and call DB::Destroy:
-        let db = self.db.as_ref().unwrap();
-        for (key, _) in db.full_iterator(rocksdb::IteratorMode::Start) {
-            db.delete(&key).unwrap();
-        }
-    }
-
     fn is_useful(&self) -> bool {
         self.indices.len() > 0
     }
@@ -368,8 +360,8 @@ impl PersistentState {
     // A key is built up of five components:
     //  * `index_id`
     //     Uniquely identifies the index in self.indices.
-    //  * `row_size`
-    //      The byte size of `row` when serialized with binode.
+    //  * `key_size`
+    //      The byte size of `key` when serialized with bincode.
     //  * `key`
     //      The actual index values.
     //  * `epoch`
@@ -812,19 +804,6 @@ mod tests {
         state.process_records(&mut vec![first.clone(), second.clone()].into(), None);
 
         assert_eq!(state.cloned_records(), vec![first, second]);
-    }
-
-    #[test]
-    fn persistent_state_clear() {
-        let mut state = setup_persistent("persistent_state_clear");
-        let columns = &[0];
-        let first: Vec<DataType> = vec![10.into(), "Cat".into()];
-        let second: Vec<DataType> = vec![20.into(), "Bob".into()];
-        state.add_key(columns, None);
-        state.process_records(&mut vec![first.clone(), second.clone()].into(), None);
-
-        state.clear();
-        assert_eq!(state.rows(), 0);
     }
 
     #[test]
