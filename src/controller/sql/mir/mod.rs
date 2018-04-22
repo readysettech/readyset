@@ -1013,7 +1013,11 @@ impl SqlToMirConverter {
             .chain(names.into_iter().map(|n| Column {
                 name: n,
                 alias: None,
-                table: Some(String::from(name)),
+                table: if is_leaf {
+                    Some(String::from(name))
+                } else {
+                    None
+                },
                 function: None,
             }))
             .collect();
@@ -1601,6 +1605,12 @@ impl SqlToMirConverter {
                         if !already_computed.contains(oc) {
                             Some((ac.name.clone(), ac.expression.clone()))
                         } else {
+                            projected_columns.push(Column {
+                                name: ac.name.clone(),
+                                table: None,
+                                alias: None,
+                                function: None,
+                            });
                             None
                         }
                     }
@@ -1617,6 +1627,12 @@ impl SqlToMirConverter {
                         if !already_computed.contains(oc) {
                             Some((lc.name.clone(), DataType::from(&lc.value)))
                         } else {
+                            projected_columns.push(Column {
+                                name: lc.name.clone(),
+                                table: None,
+                                alias: None,
+                                function: None,
+                            });
                             None
                         }
                     }
@@ -1667,7 +1683,7 @@ impl SqlToMirConverter {
                         Column {
                             name: String::from("bogokey"),
                             alias: None,
-                            table: Some(ident.clone()),
+                            table: None,
                             function: None,
                         },
                     ]
