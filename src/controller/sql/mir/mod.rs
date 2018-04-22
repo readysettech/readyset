@@ -822,12 +822,17 @@ impl SqlToMirConverter {
         // move alias to name in computed column (which needs not to
         // match against a parent node column, and is often aliased)
         let computed_col = match computed_col.alias {
-            None => computed_col.clone(),
+            None => Column {
+                name: computed_col.name.clone(),
+                alias: None,
+                table: computed_col.table.clone(),
+                function: None,
+            },
             Some(ref a) => Column {
                 name: a.clone(),
                 alias: None,
                 table: computed_col.table.clone(),
-                function: computed_col.function.clone(),
+                function: None,
             },
         };
 
@@ -1561,10 +1566,14 @@ impl SqlToMirConverter {
                     .iter()
                     .filter_map(|oc| match *oc {
                         OutputColumn::Arithmetic(_) => None,
-                        OutputColumn::Data(ref c) => Some(c),
+                        OutputColumn::Data(ref c) => Some(Column {
+                            name: c.name.clone(),
+                            alias: c.alias.clone(),
+                            table: c.table.clone(),
+                            function: None,
+                        }),
                         OutputColumn::Literal(_) => None,
                     })
-                    .cloned()
                     .collect()
             } else {
                 // If we are creating a query for a group universe, we project
