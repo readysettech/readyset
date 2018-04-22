@@ -30,15 +30,23 @@ impl fmt::Display for Backend {
 }
 
 fn git_and_cargo(ssh: &mut Session, dir: &str, bin: &str) -> Result<(), failure::Error> {
-    /*
+    eprintln!(" -> git reset");
+    ssh.cmd(&format!("sh -c 'git -C {} reset --hard 2>&1'", dir))
+        .map(|out| {
+            let out = out.trim_right();
+            if !out.is_empty() && !out.contains("Already up-to-date.") {
+                eprintln!("{}", out);
+            }
+        })?;
+
     eprintln!(" -> git update");
-    ssh.cmd(&format!("git -C {} pull", dir)).map(|out| {
-        let out = out.trim_right();
-        if !out.is_empty() && !out.contains("Already up-to-date.") {
-            eprintln!("{}", out);
-        }
-    })?;
-    */
+    ssh.cmd(&format!("sh -c 'git -C {} pull 2>&1'", dir))
+        .map(|out| {
+            let out = out.trim_right();
+            if !out.is_empty() && !out.contains("Already up-to-date.") {
+                eprintln!("{}", out);
+            }
+        })?;
 
     eprintln!(" -> rebuild");
     ssh.cmd(&format!(
@@ -118,8 +126,9 @@ fn main() {
     let scales: Box<Iterator<Item = usize>> = args.values_of("SCALE")
         .map(|it| Box::new(it.map(|s| s.parse().unwrap())) as Box<_>)
         .unwrap_or(Box::new(
-            [4000usize, 6000, 8000, 10000, 12000, 14000, 9000, 1000, 2000]
-                .into_iter()
+            [
+                100, 200, 400, 800, 1000usize, 2000, 4000, 6000, 8000, 10000, 12000, 14000,
+            ].into_iter()
                 .map(|&s| s),
         ) as Box<_>);
 
