@@ -455,29 +455,20 @@ impl PersistentState {
         let pk = KeyType::from(pk_index.columns.iter().map(|i| &r[*i]));
         let prefix = Self::serialize_prefix(0, &pk);
         if self.has_unique_index {
-            let raw_value = db.get(&prefix).unwrap();
-            if let Some(raw) = raw_value {
-                let value: Vec<DataType> = bincode::deserialize(&*raw).unwrap();
-                if r != &value[..] {
-                    return;
-                }
-            } else {
-                return;
-            }
-
+            let raw = db.get(&prefix)
+                .unwrap()
+                .expect("tried removing non-existant primary key row");
+            let value: Vec<DataType> = bincode::deserialize(&*raw).unwrap();
+            assert_eq!(r, &value[..], "tried removing non-matching primary key row");
             do_remove(&self.indices[..], &prefix[..]);
         } else {
-            let key = db.prefix_iterator(&prefix).find(|(_, raw_value)| {
-                let value: Vec<DataType> = bincode::deserialize(&*raw_value).unwrap();
-                r == &value[..]
-            });
-
-            if key.is_none() {
-                return;
-            }
-
-            let (raw_key, _) = key.unwrap();
-            do_remove(&self.indices[1..], &raw_key[..]);
+            let (key, _value) = db.prefix_iterator(&prefix)
+                .find(|(_, raw_value)| {
+                    let value: Vec<DataType> = bincode::deserialize(&*raw_value).unwrap();
+                    r == &value[..]
+                })
+                .expect("tried removing non-existant row");
+            do_remove(&self.indices[1..], &key[..]);
         };
     }
 }
