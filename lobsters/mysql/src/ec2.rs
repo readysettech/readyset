@@ -30,15 +30,23 @@ impl fmt::Display for Backend {
 }
 
 fn git_and_cargo(ssh: &mut Session, dir: &str, bin: &str) -> Result<(), failure::Error> {
-    /*
+    eprintln!(" -> git reset");
+    ssh.cmd(&format!("sh -c 'git -C {} reset --hard 2>&1'", dir))
+        .map(|out| {
+            let out = out.trim_right();
+            if !out.is_empty() && !out.contains("Already up-to-date.") {
+                eprintln!("{}", out);
+            }
+        })?;
+
     eprintln!(" -> git update");
-    ssh.cmd(&format!("git -C {} pull", dir)).map(|out| {
-        let out = out.trim_right();
-        if !out.is_empty() && !out.contains("Already up-to-date.") {
-            eprintln!("{}", out);
-        }
-    })?;
-    */
+    ssh.cmd(&format!("sh -c 'git -C {} pull 2>&1'", dir))
+        .map(|out| {
+            let out = out.trim_right();
+            if !out.is_empty() && !out.contains("Already up-to-date.") {
+                eprintln!("{}", out);
+            }
+        })?;
 
     eprintln!(" -> rebuild");
     ssh.cmd(&format!(
