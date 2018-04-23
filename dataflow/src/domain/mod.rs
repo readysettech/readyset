@@ -3,8 +3,6 @@ use std::cmp;
 use std::cell;
 use std::collections::hash_map::Entry;
 use std::collections::{HashMap, HashSet, VecDeque};
-use std::fs::File;
-use std::io::{BufRead, BufReader, ErrorKind};
 use std::mem;
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex};
@@ -15,13 +13,10 @@ use std::net::SocketAddr;
 use Readers;
 use channel::TcpSender;
 use channel::poll::{PollEvent, ProcessResult};
-use checktable;
 use debug;
-use itertools::Itertools;
+use group_commit::{GroupCommitQueueSet};
 use payload::{ControlReplyPacket, ReplayPieceContext, ReplayTransactionState, TransactionState};
-use persistence;
 use prelude::*;
-use serde_json;
 use slog::Logger;
 use statistics;
 use timekeeper::{RealTime, SimpleTracker, ThreadTime, Timer, TimerSet};
@@ -36,7 +31,6 @@ pub struct Config {
 }
 
 const BATCH_SIZE: usize = 256;
-const RECOVERY_BATCH_SIZE: usize = 512;
 
 const NANOS_PER_SEC: u64 = 1_000_000_000;
 macro_rules! dur_to_ns {
@@ -183,11 +177,8 @@ impl DomainBuilder {
         let control_reply_tx = TcpSender::connect(&self.control_addr).unwrap();
 
         let transaction_state = transactions::DomainState::new(self.index, self.ts);
-        let group_commit_queues = persistence::GroupCommitQueueSet::new(
-            self.index,
-            shard.unwrap_or(0),
-            &self.persistence_parameters,
-        );
+        let group_commit_queues =
+            GroupCommitQueueSet::new(&self.persistence_parameters);
 
         Domain {
             index: self.index,
@@ -270,7 +261,7 @@ pub struct Domain {
     has_buffered_replay_requests: bool,
     replay_batch_timeout: time::Duration,
 
-    group_commit_queues: persistence::GroupCommitQueueSet,
+    group_commit_queues: GroupCommitQueueSet,
 
     state_size: Arc<AtomicUsize>,
     total_time: Timer<SimpleTracker, RealTime>,
@@ -874,9 +865,6 @@ impl Domain {
             Packet::Evict { .. } | Packet::EvictKeys { .. } => {
                 self.handle_eviction(m, sends);
             }
-            Packet::StartRecovery { .. } => {
-                self.handle_recovery(sends);
-            }
             consumed => {
                 match consumed {
                     // workaround #16223
@@ -1304,8 +1292,9 @@ impl Domain {
                             let mut s: Box<State> = {
                                 let n = self.nodes[&node].borrow();
                                 let params = &self.persistence_parameters;
-                                match (n.get_base(), params.persist_base_nodes) {
-                                    (Some(base), true) => {
+                                match (n.get_base(), &params.mode) {
+                                    (Some(base), &DurabilityMode::DeleteOnExit)
+                                    | (Some(base), &DurabilityMode::Permanent) => {
                                         let base_name = format!(
                                             "{}-{}-{}",
                                             params.log_prefix,
@@ -1689,88 +1678,6 @@ impl Domain {
         if let Some(m) = m {
             self.handle_replay(m, sends);
         }
-    }
-
-    fn handle_recovery(&mut self, sends: &mut EnqueuedSends) {
-        let node_info: Vec<_> = self.nodes
-            .iter()
-            .filter_map(|(index, node)| {
-                let n = node.borrow();
-                if n.is_internal() && n.get_base().is_some() {
-                    Some((index, n.global_addr(), n.is_transactional()))
-                } else {
-                    None
-                }
-            })
-            .collect();
-
-        for (local_addr, global_addr, is_transactional) in node_info {
-            let path = self.persistence_parameters.log_path(
-                self.nodes[&local_addr].borrow().name(),
-                self.shard.unwrap_or(0),
-            );
-
-            let file = match File::open(&path) {
-                Ok(f) => f,
-                Err(ref e) if e.kind() == ErrorKind::NotFound => {
-                    warn!(
-                        self.log,
-                        "No log file found for node {}, starting out empty", local_addr
-                    );
-
-                    continue;
-                }
-                Err(e) => panic!("Could not open log file {:?}: {}", path, e),
-            };
-
-            BufReader::new(file)
-                .lines()
-                .filter_map(|line| {
-                    let line = line
-                        .expect(&format!("Failed to read line from log file: {:?}", path));
-                    let entries: Result<Vec<Records>, _> = serde_json::from_str(&line);
-                    entries.ok()
-                })
-                // Parsing each individual line gives us an iterator over Vec<Records>.
-                // We're interested in chunking each record, so let's flat_map twice:
-                // Iter<Vec<Records>> -> Iter<Records> -> Iter<Record>
-                .flat_map(|r| r)
-                .flat_map(|r| r)
-                // Merge individual records into batches of RECOVERY_BATCH_SIZE:
-                .chunks(RECOVERY_BATCH_SIZE)
-                .into_iter()
-                // Then create Packet objects from the data:
-                .map(|chunk| {
-                    let data: Records = chunk.collect();
-                    let link = Link::new(local_addr, local_addr);
-                    if is_transactional {
-                        let (ts, prevs) = checktable::with_checktable(|ct| {
-                            ct.recover(global_addr).unwrap()
-                        });
-                        Packet::Transaction {
-                            link,
-                            src: None,
-                            data,
-                            tracer: None,
-                            state: TransactionState::Committed(ts, global_addr, prevs),
-                            senders: vec![],
-                        }
-                    } else {
-                        Packet::Message {
-                            link,
-                            src: None,
-                            data,
-                            tracer: None,
-                            senders: vec![],
-                        }
-                    }
-                })
-                .for_each(|packet| self.handle(box packet, sends, None));
-        }
-
-        self.control_reply_tx
-            .send(ControlReplyPacket::ack())
-            .unwrap();
     }
 
     fn handle_replay(&mut self, m: Box<Packet>, sends: &mut EnqueuedSends) {

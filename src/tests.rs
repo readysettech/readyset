@@ -48,10 +48,6 @@ impl LogName {
 // Removes persistent files created by Soup during test runs.
 impl Drop for LogName {
     fn drop(&mut self) {
-        for log_path in glob::glob(&format!("./{}-log-*.json", self.name)).unwrap() {
-            fs::remove_file(log_path.unwrap()).unwrap();
-        }
-
         for db_path in glob::glob(&format!("./{}-*.db", self.name)).unwrap() {
             fs::remove_dir_all(db_path.unwrap()).unwrap();
         }
@@ -99,7 +95,6 @@ fn it_works_basic() {
         128,
         Duration::from_millis(1),
         Some(get_log_name("it_works_basic")),
-        true,
     ));
     let mut g = b.build_local();
     let _ = g.migrate(|mig| {
@@ -686,54 +681,6 @@ fn it_works_with_arithmetic_aliases() {
 }
 
 #[test]
-fn it_recovers_persisted_logs() {
-    let authority = Arc::new(LocalAuthority::new());
-    let log_name = LogName::new("it_recovers_persisted_logs");
-    let persistence_params = PersistenceParameters::new(
-        DurabilityMode::Permanent,
-        128,
-        Duration::from_millis(1),
-        Some(log_name.name.clone()),
-        false,
-    );
-
-    {
-        let mut g = ControllerBuilder::default();
-        g.set_persistence(persistence_params.clone());
-        let mut g = g.build(authority.clone());
-
-        let sql = "
-            CREATE TABLE Car (id int, price int, PRIMARY KEY(id));
-            QUERY CarPrice: SELECT price FROM Car WHERE id = ?;
-        ";
-        g.install_recipe(sql.to_owned()).unwrap();
-
-        let mut mutator = g.get_mutator("Car").unwrap();
-
-        for i in 1..10 {
-            let price = i * 10;
-            mutator.put(vec![i.into(), price.into()]).unwrap();
-        }
-
-        // Let writes propagate:
-        sleep();
-    }
-
-    let mut g = ControllerBuilder::default();
-    g.set_persistence(persistence_params);
-    let mut g = g.build(authority.clone());
-    let mut getter = g.get_getter("CarPrice").unwrap();
-
-    // Make sure that the new graph contains the old writes
-    for i in 1..10 {
-        let price = i * 10;
-        let result = getter.lookup(&[i.into()], true).unwrap();
-        assert_eq!(result.len(), 1);
-        assert_eq!(result[0][0], price.into());
-    }
-}
-
-#[test]
 fn it_recovers_persisted_bases() {
     let authority = Arc::new(LocalAuthority::new());
     let log_name = LogName::new("it_recovers_persisted_bases");
@@ -742,7 +689,6 @@ fn it_recovers_persisted_bases() {
         128,
         Duration::from_millis(1),
         Some(log_name.name.clone()),
-        true,
     );
 
     {
@@ -830,54 +776,6 @@ fn mutator_churn() {
 }
 
 #[test]
-fn it_recovers_persisted_logs_w_multiple_nodes() {
-    let authority = Arc::new(LocalAuthority::new());
-    let log_name = LogName::new("it_recovers_persisted_logs_w_multiple_nodes");
-    let tables = vec!["A", "B", "C"];
-    let persistence_parameters = PersistenceParameters::new(
-        DurabilityMode::Permanent,
-        128,
-        Duration::from_millis(1),
-        Some(log_name.name.clone()),
-        false,
-    );
-
-    {
-        let mut g = ControllerBuilder::default();
-        g.set_persistence(persistence_parameters.clone());
-        let mut g = g.build(authority.clone());
-
-        let sql = "
-            CREATE TABLE A (id int, PRIMARY KEY(id));
-            CREATE TABLE B (id int, PRIMARY KEY(id));
-            CREATE TABLE C (id int, PRIMARY KEY(id));
-
-            QUERY AID: SELECT id FROM A WHERE id = ?;
-            QUERY BID: SELECT id FROM B WHERE id = ?;
-            QUERY CID: SELECT id FROM C WHERE id = ?;
-        ";
-        g.install_recipe(sql.to_owned()).unwrap();
-        for (i, table) in tables.iter().enumerate() {
-            let mut mutator = g.get_mutator(table.to_owned()).unwrap();
-            mutator.put(vec![i.into()]).unwrap();
-        }
-        sleep();
-    }
-
-    // Create a new controller with the same authority, and make sure that it recovers to the same
-    // state that the other one had.
-    let mut g = ControllerBuilder::default();
-    g.set_persistence(persistence_parameters);
-    let mut g = g.build(authority.clone());
-    for (i, table) in tables.iter().enumerate() {
-        let mut getter = g.get_getter(&format!("{}ID", table)).unwrap();
-        let result = getter.lookup(&[i.into()], true).unwrap();
-        assert_eq!(result.len(), 1);
-        assert_eq!(result[0][0], i.into());
-    }
-}
-
-#[test]
 fn it_recovers_persisted_bases_w_multiple_nodes() {
     let authority = Arc::new(LocalAuthority::new());
     let log_name = LogName::new("it_recovers_persisted_bases_w_multiple_nodes");
@@ -887,7 +785,6 @@ fn it_recovers_persisted_bases_w_multiple_nodes() {
         128,
         Duration::from_millis(1),
         Some(log_name.name.clone()),
-        true,
     );
 
     {
@@ -922,58 +819,6 @@ fn it_recovers_persisted_bases_w_multiple_nodes() {
         let result = getter.lookup(&[i.into()], true).unwrap();
         assert_eq!(result.len(), 1);
         assert_eq!(result[0][0], i.into());
-    }
-}
-
-#[test]
-#[ignore]
-fn it_recovers_persisted_logs_w_transactions() {
-    let authority = Arc::new(LocalAuthority::new());
-    let log_name = LogName::new("it_recovers_persisted_logs_w_transactions");
-    let persistence_params = PersistenceParameters::new(
-        DurabilityMode::Permanent,
-        128,
-        Duration::from_millis(1),
-        Some(log_name.name.clone()),
-        false,
-    );
-
-    {
-        let mut g = ControllerBuilder::default();
-        g.set_persistence(persistence_params.clone());
-        let mut g = g.build(authority.clone());
-
-        // TODO: Convert this to use SQL interface (because only migrations specified that way get
-        // persisted...)
-        let _ = g.migrate(|mig| {
-            let a = mig.add_transactional_base("a", &["a", "b"], Base::default());
-            mig.maintain_anonymous(a, &[0]);
-            a
-        });
-
-        let mut mutator = g.get_mutator("a").unwrap();
-
-        for i in 1..10 {
-            let b = i * 10;
-            mutator
-                .transactional_put(vec![i.into(), b.into()], Token::empty())
-                .unwrap();
-        }
-
-        // Let writes propagate:
-        sleep();
-    }
-
-    let mut g = ControllerBuilder::default();
-    g.set_persistence(persistence_params.clone());
-    let mut g = g.build(authority.clone());
-    let mut getter = g.get_getter("a").unwrap();
-    for i in 1..10 {
-        let b = i * 10;
-        let (result, _token) = getter.transactional_lookup(&[i.into()]).unwrap();
-        assert_eq!(result.len(), 1);
-        assert_eq!(result[0][0], i.into());
-        assert_eq!(result[0][1], b.into());
     }
 }
 
@@ -985,7 +830,6 @@ fn it_recovers_persisted_bases_w_transactions() {
         128,
         Duration::from_millis(1),
         Some(log_name.name.clone()),
-        true,
     );
 
     {

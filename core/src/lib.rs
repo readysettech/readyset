@@ -59,8 +59,6 @@ pub struct PersistenceParameters {
     pub log_prefix: String,
     /// Absolute path where the log will be written. Defaults to the current directory.
     pub log_dir: Option<PathBuf>,
-    /// Whether PersistentState or MemoryState should be used for base nodes.
-    pub persist_base_nodes: bool,
     /// Number of background threads PersistentState can use (shared acrosss all worker threads).
     pub persistence_threads: i32,
 }
@@ -73,7 +71,6 @@ impl Default for PersistenceParameters {
             mode: DurabilityMode::MemoryOnly,
             log_prefix: String::from("soup"),
             log_dir: None,
-            persist_base_nodes: true,
             persistence_threads: 1,
         }
     }
@@ -98,7 +95,6 @@ impl PersistenceParameters {
         queue_capacity: usize,
         flush_timeout: time::Duration,
         log_prefix: Option<String>,
-        persist_base_nodes: bool,
     ) -> Self {
         let log_prefix = log_prefix.unwrap_or(String::from("soup"));
         assert!(!log_prefix.contains("-"));
@@ -108,23 +104,7 @@ impl PersistenceParameters {
             flush_timeout,
             mode,
             log_prefix,
-            persist_base_nodes,
             ..Default::default()
-        }
-    }
-
-    /// The path that would be used for the given domain/shard pair's logs.
-    pub fn log_path(&self, table_name: &str, domain_shard: usize) -> PathBuf {
-        assert!(!table_name.contains("-"));
-        let filename = format!(
-            "{}-log-{}-{}.json",
-            self.log_prefix, table_name, domain_shard,
-        );
-
-        if let Some(ref path) = self.log_dir {
-            path.join(filename)
-        } else {
-            PathBuf::from(&filename)
         }
     }
 }

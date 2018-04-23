@@ -4,7 +4,6 @@ version = "0.1.0"
 authors = ["The Distributary Developers"]
 
 [dependencies]
-buf_redux = "0.6.1"
 evmap = { git = "https://github.com/ms705/rust-evmap" }
 fnv = "1.0.5"
 itertools = "0.7.2"

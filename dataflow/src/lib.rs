@@ -10,7 +10,6 @@
 
 #[allow(unused_extern_crates)]
 extern crate backtrace;
-extern crate buf_redux;
 extern crate channel;
 extern crate core;
 extern crate evmap;
@@ -43,7 +42,7 @@ pub mod prelude;
 pub mod statistics;
 
 mod domain;
-mod persistence;
+mod group_commit;
 mod processing;
 mod transactions;
 

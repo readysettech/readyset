@@ -201,19 +201,6 @@ impl ControllerInner {
                     self.apply_recipe(self.recipe.clone().extend(&r).unwrap())
                         .unwrap();
                 }
-
-                // No need to recover manually with persistent bases -
-                // they'll recover when they reconnect to the DB.
-                if !self.persistence.persist_base_nodes {
-                    info!(self.log, "Recovering from log");
-                    for (_name, index) in self.inputs().iter() {
-                        let node = &self.ingredients[*index];
-                        let domain = self.domains.get_mut(&node.domain()).unwrap();
-                        domain.send(box payload::Packet::StartRecovery).unwrap();
-                        domain.wait_for_ack().unwrap();
-                    }
-                    info!(self.log, "Recovery complete");
-                }
             }
         }
 

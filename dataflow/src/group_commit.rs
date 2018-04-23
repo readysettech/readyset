@@ -1,17 +1,7 @@
-use buf_redux::BufWriter;
-use buf_redux::strategy::WhenFull;
-
-use serde_json;
-
-use std::fs;
-use std::fs::{File, OpenOptions};
-use std::io::Write;
-use std::path::PathBuf;
 use std::time;
 
 use checktable;
 use debug::DebugEventType;
-use domain;
 use prelude::*;
 
 pub struct GroupCommitQueueSet {
@@ -22,52 +12,20 @@ pub struct GroupCommitQueueSet {
     /// empty. A flush should occur on or before wait_start + timeout.
     wait_start: Map<time::Instant>,
 
-    /// Name of, and handle to the files that packets should be persisted to.
-    files: Map<(PathBuf, BufWriter<File, WhenFull>)>,
-
-    _domain_index: domain::Index,
-    domain_shard: usize,
-
     params: PersistenceParameters,
 }
 
 impl GroupCommitQueueSet {
     /// Create a new `GroupCommitQueue`.
-    pub fn new(
-        domain_index: domain::Index,
-        domain_shard: usize,
-        params: &PersistenceParameters,
-    ) -> Self {
+    pub fn new(params: &PersistenceParameters) -> Self {
         assert!(params.queue_capacity > 0);
 
         Self {
             pending_packets: Map::default(),
             wait_start: Map::default(),
-            files: Map::default(),
 
-            _domain_index: domain_index,
-            domain_shard,
             params: params.clone(),
         }
-    }
-
-    fn get_or_create_file(
-        &self,
-        node: &LocalNodeIndex,
-        nodes: &DomainNodes,
-    ) -> (PathBuf, BufWriter<File, WhenFull>) {
-        let path = self.params
-            .log_path(nodes[node].borrow().name(), self.domain_shard);
-        let file = OpenOptions::new()
-            .append(true)
-            .create(true)
-            .open(&path)
-            .unwrap();
-
-        (
-            path,
-            BufWriter::with_capacity(self.params.queue_capacity * 1024, file),
-        )
     }
 
     /// Returns None for packet types not relevant to persistence, and the node the packet was
@@ -109,45 +67,13 @@ impl GroupCommitQueueSet {
         needs_flush.and_then(|node| self.flush_internal(&node, nodes, ex))
     }
 
-    /// Flush any pending packets for node to disk (if applicable), and return a merged packet.
+    /// Merge any pending packets.
     fn flush_internal(
         &mut self,
         node: &LocalNodeIndex,
         nodes: &DomainNodes,
         ex: &Executor,
     ) -> Option<Box<Packet>> {
-        // With persistent bases we're already maintaining a
-        // write-ahead log, so no need to log twice.
-        if !self.params.persist_base_nodes
-            && (self.params.mode == DurabilityMode::DeleteOnExit
-                || self.params.mode == DurabilityMode::Permanent)
-        {
-            if !self.files.contains_key(node) {
-                let file = self.get_or_create_file(node, nodes);
-                self.files.insert(node.clone(), file);
-            }
-
-            let mut file = &mut self.files[node].1;
-            {
-                let data_to_flush: Vec<_> = self.pending_packets[&node]
-                    .iter()
-                    .map(|p| match **p {
-                        Packet::Transaction { ref data, .. } | Packet::Message { ref data, .. } => {
-                            data
-                        }
-                        _ => unreachable!(),
-                    })
-                    .collect();
-                serde_json::to_writer(&mut file, &data_to_flush).unwrap();
-                // Separate log flushes with a newline so that the
-                // file can be easily parsed later on:
-                writeln!(&mut file, "").unwrap();
-            }
-
-            file.flush().unwrap();
-            file.get_mut().sync_data().unwrap();
-        }
-
         self.wait_start.remove(node);
         Self::merge_packets(&mut self.pending_packets[node], nodes, ex)
     }
@@ -382,16 +308,6 @@ impl GroupCommitQueueSet {
             box Packet::Message { .. } => Self::merge_committed_packets(packets.drain(..), None),
             box Packet::Transaction { .. } => Self::merge_transactional_packets(packets, nodes, ex),
             _ => unreachable!(),
-        }
-    }
-}
-
-impl Drop for GroupCommitQueueSet {
-    fn drop(&mut self) {
-        if let DurabilityMode::DeleteOnExit = self.params.mode {
-            for &(ref filename, _) in self.files.values() {
-                fs::remove_file(filename).unwrap();
-            }
         }
     }
 }
