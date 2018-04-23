@@ -22,8 +22,6 @@ const META_KEY: &'static [u8] = b"meta";
 // PersistentState::indices as name.
 const DEFAULT_CF: &'static str = "default";
 
-const EXISTING_CF_ERROR: &'static str = "Invalid argument: Column family already exists";
-
 // Maximum rows per WriteBatch when building new indices for existing rows.
 const INDEX_BATCH_SIZE: usize = 512;
 
@@ -173,24 +171,11 @@ impl State for PersistentState {
         // We'll store all the pointers (or values if this is index 0) for
         // this index in its own column family:
         let index_id = self.indices.len().to_string();
-        let column_family = {
-            let db = self.db.as_mut().unwrap();
-            match db.create_cf(&index_id, &self.db_opts) {
-                Ok(cf) => cf,
-                Err(e) => {
-                    let message = e.to_string();
-                    if &message == EXISTING_CF_ERROR {
-                        // This CF existed from before, which might mean that we started
-                        // building the index but crashed before self.persist_meta().
-                        // We'll throw away the old CF and create a new one:
-                        db.drop_cf(&index_id).unwrap();
-                        db.create_cf(&index_id, &self.db_opts).unwrap()
-                    } else {
-                        panic!(message)
-                    }
-                }
-            }
-        };
+        let column_family = self.db
+            .as_mut()
+            .unwrap()
+            .create_cf(&index_id, &self.db_opts)
+            .unwrap();
 
         // Build the new index for existing values:
         if self.indices.len() > 0 {
@@ -297,6 +282,13 @@ impl PersistentState {
                 PersistentIndex::new(cf, columns)
             })
             .collect();
+
+        // If there are more column families than indices (-1 to account for the default column
+        // family) we probably crashed while trying to build the last index (in Self::add_key), so
+        // we'll throw away our progress and try re-building it again later:
+        if column_family_names.len() - 1 > indices.len() {
+            db.drop_cf(&indices.len().to_string()).unwrap();
+        }
 
         if let Some(pk_cols) = primary_key {
             // Only create the initial column family if it doesn't exist from before.
