@@ -3,7 +3,7 @@ use std::rc::Rc;
 
 use bincode;
 use itertools::Itertools;
-use rocksdb::{self, SliceTransform, WriteBatch};
+use rocksdb::{self, ColumnFamily, SliceTransform, WriteBatch};
 
 use ::*;
 use data::SizeOf;
@@ -22,11 +22,6 @@ const META_CF: &'static str = "meta";
 // Maximum rows per WriteBatch when building new indices for existing rows.
 const INDEX_BATCH_SIZE: usize = 512;
 
-struct PersistentIndex {
-    columns: Vec<usize>,
-    seq: IndexSeq,
-}
-
 // Store index information in RocksDB to avoid rebuilding indices on recovery.
 #[derive(Default, Serialize, Deserialize)]
 struct PersistentMeta {
@@ -34,9 +29,20 @@ struct PersistentMeta {
     epoch: IndexEpoch,
 }
 
+#[derive(Clone)]
+struct PersistentIndex {
+    column_family: ColumnFamily,
+    columns: Vec<usize>,
+    seq: IndexSeq,
+}
+
 impl PersistentIndex {
-    fn new(columns: Vec<usize>) -> Self {
-        Self { columns, seq: 0 }
+    fn new(column_family: ColumnFamily, columns: Vec<usize>) -> Self {
+        Self {
+            column_family,
+            columns,
+            seq: 0,
+        }
     }
 }
 
@@ -102,11 +108,11 @@ impl State for PersistentState {
 
     fn lookup(&self, columns: &[usize], key: &KeyType) -> LookupResult {
         let db = self.db.as_ref().unwrap();
-        let value_cf = db.cf_handle("0").unwrap();
+        let value_cf = self.indices[0].column_family;
         let index_id = self.indices
             .iter()
             .position(|index| &index.columns[..] == columns)
-            .expect("lookup on non-indexed column set") as u32;
+            .expect("lookup on non-indexed column set");
 
         let prefix = Self::serialize_prefix(&key);
         let data = if index_id == 0 && self.has_unique_index {
@@ -129,7 +135,7 @@ impl State for PersistentState {
                 })
                 .collect()
         } else {
-            let cf = db.cf_handle(&index_id.to_string()).unwrap();
+            let cf = self.indices[index_id].column_family;
             // For non-primary indices we need to first retrieve the primary index key
             // through our secondary indices, and then call `.get` again on that.
             db.prefix_iterator_cf(cf, &prefix)
@@ -158,29 +164,35 @@ impl State for PersistentState {
         }
 
         let cols = Vec::from(columns);
-        let index_id = self.indices.len().to_string();
         let mut seq = 0;
-        let cf = self.db
+        let column_family = self.db
             .as_mut()
             .unwrap()
-            .create_cf(&index_id, &self.db_opts)
+            .create_cf(&self.indices.len().to_string(), &self.db_opts)
             .unwrap();
 
         // Build the new index for existing values:
-        for chunk in self.all_rows().chunks(INDEX_BATCH_SIZE).into_iter() {
-            let mut batch = WriteBatch::default();
-            for (ref pk, ref value) in chunk {
-                seq += 1;
-                let row: Vec<DataType> = bincode::deserialize(&value).unwrap();
-                let index_key = KeyType::from(columns.iter().map(|i| &row[*i]));
-                let key = self.serialize_key(&index_key, seq);
-                batch.put_cf(cf, &key, &pk).unwrap();
-            }
+        if self.indices.len() > 0 {
+            for chunk in self.all_rows().chunks(INDEX_BATCH_SIZE).into_iter() {
+                let mut batch = WriteBatch::default();
+                for (ref pk, ref value) in chunk {
+                    seq += 1;
+                    let row: Vec<DataType> = bincode::deserialize(&value).unwrap();
+                    let index_key = KeyType::from(columns.iter().map(|i| &row[*i]));
+                    let key = self.serialize_key(&index_key, seq);
+                    batch.put_cf(column_family, &key, &pk).unwrap();
+                }
 
-            self.db.as_ref().unwrap().write(batch).unwrap();
+                self.db.as_ref().unwrap().write(batch).unwrap();
+            }
         }
 
-        self.indices.push(PersistentIndex { columns: cols, seq });
+        self.indices.push(PersistentIndex {
+            columns: cols,
+            column_family,
+            seq,
+        });
+
         self.persist_meta();
     }
 
@@ -267,27 +279,33 @@ impl PersistentState {
         });
 
         let full_name = format!("{}.db", name);
-        let column_families = match DB::list_cf(&opts, &full_name) {
+        let column_family_names = match DB::list_cf(&opts, &full_name) {
             Ok(cfs) => cfs,
             Err(_err) => vec![META_CF.to_string()],
         };
 
-        let cfs: Vec<&str> = column_families.iter().map(|cf| &**cf).collect();
+        let cfs: Vec<&str> = column_family_names.iter().map(|cf| &**cf).collect();
         let mut db = DB::open_cf(&opts, &full_name, &cfs[..]).unwrap();
         let meta = Self::retrieve_and_update_meta(&db);
         let mut indices: Vec<PersistentIndex> = meta.indices
             .into_iter()
-            .map(|columns| PersistentIndex::new(columns))
+            .enumerate()
+            .map(|(i, columns)| {
+                let cf = db.cf_handle(&i.to_string()).unwrap();
+                PersistentIndex::new(cf, columns)
+            })
             .collect();
 
         if let Some(pk_cols) = primary_key {
             // Only create the initial column family if it doesn't exist from before.
             // For non-PK bases this will get taken care of in Self::add_key.
-            if column_families.len() == 1 {
-                db.create_cf("0", &opts).unwrap();
-            }
+            let cf = if column_family_names.len() == 1 {
+                db.create_cf("0", &opts).unwrap()
+            } else {
+                db.cf_handle("0").unwrap()
+            };
 
-            indices.insert(0, PersistentIndex::new(pk_cols.to_vec()));
+            indices.insert(0, PersistentIndex::new(cf, pk_cols.to_vec()));
         }
 
         Self {
@@ -433,7 +451,7 @@ impl PersistentState {
     // Filters out secondary indices to return an iterator for the actual key-value pairs.
     fn all_rows(&self) -> impl Iterator<Item = (Box<[u8]>, Box<[u8]>)> {
         let db = self.db.as_ref().unwrap();
-        let cf = db.cf_handle("0").unwrap();
+        let cf = self.indices[0].column_family;
         db.full_iterator_cf(cf, rocksdb::IteratorMode::Start)
             .unwrap()
     }
@@ -463,47 +481,46 @@ impl PersistentState {
 
         // First insert the actual value for our primary index:
         let pk_value = bincode::serialize(&r).unwrap();
-        let db = self.db.as_ref().unwrap();
-        let value_cf = db.cf_handle("0").unwrap();
+        let value_cf = self.indices[0].column_family;
         batch.put_cf(value_cf, &serialized_pk, &pk_value).unwrap();
 
         // Then insert primary key pointers for all the secondary indices:
-        for (i, index) in self.indices[1..].iter().enumerate() {
+        for index in self.indices[1..].iter() {
             // Construct a key with the index values, and serialize it with bincode:
             let key = KeyType::from(index.columns.iter().map(|i| &r[*i]));
             // Add 1 to i since we're slicing self.indices by 1..:
-            let index_id = (i + 1).to_string();
-            let cf = db.cf_handle(&index_id).unwrap();
             let serialized_key = self.serialize_key(&key, index.seq);
-            batch.put_cf(cf, &serialized_key, &serialized_pk).unwrap();
+            batch
+                .put_cf(index.column_family, &serialized_key, &serialized_pk)
+                .unwrap();
         }
     }
 
     fn remove(&self, batch: &mut WriteBatch, r: &[DataType]) {
         let db = self.db.as_ref().unwrap();
-        let value_cf = db.cf_handle("0").unwrap();
+        let pk_index = &self.indices[0];
+        let value_cf = pk_index.column_family;
         let mut do_remove = move |primary_key: &[u8]| {
             // Delete the value row first (primary index):
             batch.delete_cf(value_cf, &primary_key).unwrap();
 
             // Then delete any references that point _exactly_ to
             // that row (i.e. not all matching rows):
-            for (i, index) in self.indices[1..].iter().enumerate() {
+            for index in self.indices[1..].iter() {
                 // Construct a key with the index values, and serialize it with bincode:
                 let key = KeyType::from(index.columns.iter().map(|i| &r[*i]));
                 // Add 1 to i since we're slicing self.indices by 1..:
-                let index_id = (i + 1).to_string();
-                let cf = db.cf_handle(&index_id).unwrap();
                 let prefix = Self::serialize_prefix(&key);
-                for (raw_key, raw_value) in db.prefix_iterator_cf(cf, &prefix).unwrap() {
+                for (raw_key, raw_value) in
+                    db.prefix_iterator_cf(index.column_family, &prefix).unwrap()
+                {
                     if &*raw_value == &primary_key[..] {
-                        batch.delete_cf(cf, &raw_key).unwrap();
+                        batch.delete_cf(index.column_family, &raw_key).unwrap();
                     }
                 }
             }
         };
 
-        let pk_index = &self.indices[0];
         let pk = KeyType::from(pk_index.columns.iter().map(|i| &r[*i]));
         let prefix = Self::serialize_prefix(&pk);
         if self.has_unique_index {
@@ -529,6 +546,7 @@ impl PersistentState {
 impl Drop for PersistentState {
     fn drop(&mut self) {
         if self.durability_mode != DurabilityMode::Permanent {
+            self.indices.clear();
             self.db = None;
             rocksdb::DB::destroy(&self.db_opts, &self.name).unwrap()
         }
@@ -1006,12 +1024,9 @@ mod tests {
 
     #[test]
     fn persistent_state_transform_fn() {
-        let state = setup_persistent("persistent_state_transform_fn");
-        let index = PersistentIndex {
-            seq: 10,
-            columns: Default::default(),
-        };
-
+        let mut state = setup_persistent("persistent_state_transform_fn");
+        state.add_key(&[0], None);
+        let index = state.indices[0].clone();
         let data = (DataType::from(1), DataType::from(10));
         let r = KeyType::Double(data.clone());
         let k = state.serialize_key(&r, index.seq);
