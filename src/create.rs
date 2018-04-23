@@ -7,6 +7,7 @@ use common::{column_identifier_no_alias, integer_literal, opt_multispace, sql_id
              statement_terminator, table_reference, type_identifier, Literal, Real, SqlType,
              TableKey};
 use column::{Column, ColumnConstraint, ColumnSpecification};
+use compound_select::{compound_selection, CompoundSelectStatement};
 use keywords::escape_if_keyword;
 use select::{nested_selection, SelectStatement};
 use order::{order_type, OrderType};
@@ -46,11 +47,26 @@ impl fmt::Display for CreateTableStatement {
     }
 }
 
-#[derive(Clone, Debug, Default, Eq, Hash, PartialEq, Serialize, Deserialize)]
+#[derive(Clone, Debug, Eq, Hash, PartialEq, Serialize, Deserialize)]
+pub enum SelectSpecification {
+    Compound(CompoundSelectStatement),
+    Simple(SelectStatement),
+}
+
+impl fmt::Display for SelectSpecification {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        match *self {
+            SelectSpecification::Compound(ref csq) => write!(f, "{}", csq),
+            SelectSpecification::Simple(ref sq) => write!(f, "{}", sq),
+        }
+    }
+}
+
+#[derive(Clone, Debug, Eq, Hash, PartialEq, Serialize, Deserialize)]
 pub struct CreateViewStatement {
     pub name: String,
     pub fields: Vec<Column>,
-    pub definition: Box<SelectStatement>,
+    pub definition: Box<SelectSpecification>,
 }
 
 impl fmt::Display for CreateViewStatement {
@@ -460,7 +476,10 @@ named!(pub view_creation<&[u8], CreateViewStatement>,
         multispace >>
         tag_no_case!("as") >>
         multispace >>
-        definition: nested_selection >>
+        definition: alt_complete!(
+              map!(compound_selection, |s| SelectSpecification::Compound(s))
+            | map!(nested_selection, |s| SelectSpecification::Simple(s))
+        ) >>
         statement_terminator >>
         ({
             CreateViewStatement {
@@ -753,7 +772,7 @@ mod tests {
             CreateViewStatement {
                 name: String::from("v"),
                 fields: vec![],
-                definition: Box::new(SelectStatement {
+                definition: Box::new(SelectSpecification::Simple(SelectStatement {
                     tables: vec![Table::from("users")],
                     fields: vec![FieldDefinitionExpression::All],
                     where_clause: Some(ConditionExpression::ComparisonOp(ConditionTree {
@@ -766,7 +785,46 @@ mod tests {
                         operator: Operator::Equal,
                     })),
                     ..Default::default()
-                }),
+                })),
+            }
+        );
+    }
+
+    #[test]
+    fn compound_create_view() {
+        use common::FieldDefinitionExpression;
+        use compound_select::{CompoundSelectOperator, CompoundSelectStatement};
+
+        let qstring = "CREATE VIEW v AS SELECT * FROM users UNION SELECT * FROM old_users;";
+
+        let res = view_creation(qstring.as_bytes());
+        assert_eq!(
+            res.unwrap().1,
+            CreateViewStatement {
+                name: String::from("v"),
+                fields: vec![],
+                definition: Box::new(SelectSpecification::Compound(CompoundSelectStatement {
+                    selects: vec![
+                        (
+                            None,
+                            SelectStatement {
+                                tables: vec![Table::from("users")],
+                                fields: vec![FieldDefinitionExpression::All],
+                                ..Default::default()
+                            },
+                        ),
+                        (
+                            Some(CompoundSelectOperator::DistinctUnion),
+                            SelectStatement {
+                                tables: vec![Table::from("old_users")],
+                                fields: vec![FieldDefinitionExpression::All],
+                                ..Default::default()
+                            },
+                        ),
+                    ],
+                    order: None,
+                    limit: None,
+                })),
             }
         );
     }
