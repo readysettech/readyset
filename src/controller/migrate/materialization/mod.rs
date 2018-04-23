@@ -309,7 +309,11 @@ impl Materializations {
             }
 
             // we are already fully materialized, so can't be made partial
-            if !new.contains(&ni) && self.have.contains_key(&ni) && !self.partial.contains(&ni) {
+            if !new.contains(&ni)
+                && self.added.get(&ni).map(|i| i.len()).unwrap_or(0)
+                    != self.have.get(&ni).map(|i| i.len()).unwrap_or(0)
+                && !self.partial.contains(&ni)
+            {
                 able = false;
             }
 
