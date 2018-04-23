@@ -317,7 +317,7 @@ impl Materializations {
                 able = false;
             }
 
-            // we have a full materialization below us
+            // do we have a full materialization below us?
             let mut stack: Vec<_> = graph
                 .neighbors_directed(ni, petgraph::EdgeDirection::Outgoing)
                 .collect();
@@ -456,10 +456,8 @@ impl Materializations {
                 None
             }
 
-            // TODO: technically this is insufficient, because we could have made an existing
-            // node fully materialized (I think).
-            for &ni in new {
-                if self.partial.contains(&ni) || !self.have.contains_key(&ni) {
+            for (&ni, _) in &self.added {
+                if self.partial.contains(&ni) {
                     continue;
                 }
 
