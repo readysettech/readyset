@@ -268,35 +268,9 @@ impl PersistentState {
         primary_key: Option<&[usize]>,
         params: &PersistenceParameters,
     ) -> Self {
-        use rocksdb::DB;
-        let mut opts = rocksdb::Options::default();
-        opts.set_compression_type(rocksdb::DBCompressionType::Lz4);
-        opts.create_if_missing(true);
-        opts.create_missing_column_families(true);
-        let mut block_opts = rocksdb::BlockBasedOptions::default();
-        block_opts.set_bloom_filter(10, true);
-        opts.set_block_based_table_factory(&block_opts);
-
-        if let Some(ref path) = params.log_dir {
-            // Append the db name to the WAL path to ensure
-            // that we create a directory for each base shard:
-            opts.set_wal_dir(path.join(&name));
-        }
-
-        // Create prefixes by Self::transform_fn on all new inserted keys:
-        let transform = SliceTransform::create("key", Self::transform_fn, Some(Self::in_domain_fn));
-        opts.set_prefix_extractor(transform);
-
-        // Assigns the number of threads for RocksDB's low priority background pool:
-        opts.increase_parallelism(params.persistence_threads);
-
-        // Use a hash linked list since we're doing prefix seeks.
-        opts.set_allow_concurrent_memtable_write(false);
-        opts.set_memtable_factory(rocksdb::MemtableFactory::HashLinkList {
-            bucket_count: 1_000_000,
-        });
-
+        use rocksdb::{ColumnFamilyDescriptor, DB};
         let full_name = format!("{}.db", name);
+        let opts = Self::build_options(&name, params);
         // We use a column for each index, and one for meta information.
         // When opening the DB the exact same column families needs to be used,
         // so we'll have to retrieve the existing ones first:
@@ -305,8 +279,12 @@ impl PersistentState {
             Err(_err) => vec![META_CF.to_string()],
         };
 
-        let cfs: Vec<&str> = column_family_names.iter().map(|cf| &**cf).collect();
-        let mut db = DB::open_cf(&opts, &full_name, &cfs[..]).unwrap();
+        let cfs: Vec<_> = column_family_names
+            .iter()
+            .map(|cf| ColumnFamilyDescriptor::new(cf.clone(), Self::build_options(&name, &params)))
+            .collect();
+
+        let mut db = DB::open_cf_descriptors(&opts, &full_name, cfs).unwrap();
         let meta = Self::retrieve_and_update_meta(&db);
         let mut indices: Vec<PersistentIndex> = meta.indices
             .into_iter()
@@ -338,6 +316,37 @@ impl PersistentState {
             durability_mode: params.mode.clone(),
             name: full_name,
         }
+    }
+
+    fn build_options(name: &str, params: &PersistenceParameters) -> rocksdb::Options {
+        let mut opts = rocksdb::Options::default();
+        opts.set_compression_type(rocksdb::DBCompressionType::Lz4);
+        opts.create_if_missing(true);
+        opts.create_missing_column_families(true);
+        let mut block_opts = rocksdb::BlockBasedOptions::default();
+        block_opts.set_bloom_filter(10, true);
+        opts.set_block_based_table_factory(&block_opts);
+
+        if let Some(ref path) = params.log_dir {
+            // Append the db name to the WAL path to ensure
+            // that we create a directory for each base shard:
+            opts.set_wal_dir(path.join(&name));
+        }
+
+        // Create prefixes by Self::transform_fn on all new inserted keys:
+        let transform = SliceTransform::create("key", Self::transform_fn, Some(Self::in_domain_fn));
+        opts.set_prefix_extractor(transform);
+
+        // Assigns the number of threads for RocksDB's low priority background pool:
+        opts.increase_parallelism(params.persistence_threads);
+
+        // Use a hash linked list since we're doing prefix seeks.
+        opts.set_allow_concurrent_memtable_write(false);
+        opts.set_memtable_factory(rocksdb::MemtableFactory::HashLinkList {
+            bucket_count: 1_000_000,
+        });
+
+        opts
     }
 
     fn retrieve_and_update_meta(db: &rocksdb::DB) -> PersistentMeta {
@@ -792,6 +801,39 @@ mod tests {
         state.add_key(&[1], None);
         state.process_records(&mut vec![first.clone(), second.clone()].into(), None);
 
+        match state.lookup(&[0], &KeyType::Single(&10.into())) {
+            LookupResult::Some(rows) => {
+                assert_eq!(rows.len(), 1);
+                assert_eq!(&*rows[0], &first);
+            }
+            _ => unreachable!(),
+        }
+
+        match state.lookup(&[1], &KeyType::Single(&"Bob".into())) {
+            LookupResult::Some(rows) => {
+                assert_eq!(rows.len(), 1);
+                assert_eq!(&*rows[0], &second);
+            }
+            _ => unreachable!(),
+        }
+    }
+
+    #[test]
+    fn persistent_state_recover() {
+        let name = get_name("persistent_state_recover");
+        let mut params = PersistenceParameters::default();
+        params.mode = DurabilityMode::Permanent;
+        let first: Vec<DataType> = vec![10.into(), "Cat".into()];
+        let second: Vec<DataType> = vec![20.into(), "Bob".into()];
+        {
+            let mut state = PersistentState::new(name.clone(), None, &params);
+            state.add_key(&[0], None);
+            state.add_key(&[1], None);
+            state.process_records(&mut vec![first.clone(), second.clone()].into(), None);
+        }
+
+        params.mode = DurabilityMode::DeleteOnExit;
+        let state = PersistentState::new(name, None, &params);
         match state.lookup(&[0], &KeyType::Single(&10.into())) {
             LookupResult::Some(rows) => {
                 assert_eq!(rows.len(), 1);
