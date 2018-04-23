@@ -554,6 +554,15 @@ impl Materializations {
 
             // are they trying to make a non-materialized node materialized?
             if self.have[&node] == index_on {
+                if self.partial.contains(&node) {
+                    crit!(
+                        self.log,
+                        "attempting to make old non-materialized node partial";
+                        "node" => node.index(),
+                    );
+                    unimplemented!();
+                }
+
                 warn!(self.log, "materializing existing non-materialized node";
                       "node" => node.index(),
                       "cols" => ?index_on);
