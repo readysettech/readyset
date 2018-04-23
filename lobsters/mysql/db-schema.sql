@@ -81,46 +81,44 @@ SELECT stories.id, SUM(tags.hotness_mod) AS hotness FROM stories
  JOIN taggings ON (taggings.story_id = stories.id)
  JOIN tags ON (tags.id = taggings.tag_id);
 
+CREATE VIEW comment_upvotes AS SELECT votes.comment_id FROM votes WHERE votes.story_id IS NULL AND votes.vote = 1;
+CREATE VIEW comment_downvotes AS SELECT votes.comment_id FROM votes WHERE votes.story_id IS NULL AND votes.vote = 0;
+CREATE VIEW story_upvotes AS SELECT votes.story_id FROM votes WHERE votes.comment_id IS NULL AND votes.vote = 1;
+CREATE VIEW story_downvotes AS SELECT votes.story_id FROM votes WHERE votes.comment_id IS NULL AND votes.vote = 0;
+
 -- CREATE VIEW `comment_with_votes` AS
 -- SELECT comments.*,
 --        upvotes.votes AS upvotes, downvotes.votes AS downvotes,
 --        upvotes.votes - downvotes.votes AS score
 --  FROM comments
 -- LEFT JOIN (
--- 	SELECT votes.comment_id, COUNT(*) as votes
--- 	FROM votes
--- 	WHERE votes.story_id IS NULL
--- 	AND votes.vote = 1
--- 	GROUP BY votes.comment_id
+-- 	SELECT comment_upvotes.comment_id, COUNT(*) as votes
+-- 	FROM comment_upvotes
+-- 	GROUP BY comment_upvotes.comment_id
 -- ) AS upvotes ON (comments.id = upvotes.comment_id)
 -- LEFT JOIN (
--- 	SELECT votes.comment_id, COUNT(*) as votes
--- 	FROM votes
--- 	WHERE votes.story_id IS NULL
--- 	AND votes.vote = 0
--- 	GROUP BY votes.comment_id
+-- 	SELECT comment_downvotes.comment_id, COUNT(*) as votes
+-- 	FROM comment_downvotes
+-- 	GROUP BY comment_downvotes.comment_id
 -- ) AS downvotes ON (comments.id = downvotes.comment_id);
-CREATE VIEW `comment_with_votes` AS SELECT comments.*, upvotes.votes AS upvotes, downvotes.votes AS downvotes, upvotes.votes - downvotes.votes AS score FROM comments LEFT JOIN (SELECT votes.comment_id, COUNT(*) as votes FROM votes WHERE votes.story_id IS NULL AND votes.vote = 1 GROUP BY votes.comment_id) AS upvotes ON (comments.id = upvotes.comment_id) LEFT JOIN (SELECT votes.comment_id, COUNT(*) as votes FROM votes WHERE votes.story_id IS NULL AND votes.vote = 0 GROUP BY votes.comment_id) AS downvotes ON (comments.id = downvotes.comment_id);
+CREATE VIEW `comment_with_votes` AS SELECT comments.*, upvotes.votes AS upvotes, downvotes.votes AS downvotes, upvotes.votes - downvotes.votes AS score FROM comments LEFT JOIN (SELECT comment_upvotes.comment_id, COUNT(*) as votes FROM comment_upvotes GROUP BY comment_upvotes.comment_id) AS upvotes ON (comments.id = upvotes.comment_id) LEFT JOIN (SELECT comment_downvotes.comment_id, COUNT(*) as votes FROM comment_downvotes GROUP BY comment_downvotes.comment_id) AS downvotes ON (comments.id = downvotes.comment_id);
 
 -- CREATE VIEW `story_with_votes` AS
--- SELECT stories.id, upvotes.votes AS upvotes, downvotes.votes AS downvotes,
+-- SELECT stories.*,
+--        upvotes.votes AS upvotes, downvotes.votes AS downvotes,
 --        upvotes.votes - downvotes.votes AS score
 --  FROM stories
 -- LEFT JOIN (
--- 	SELECT votes.story_id, COUNT(*) as votes
--- 	FROM votes
--- 	WHERE votes.comment_id IS NULL
--- 	AND votes.vote = 1
--- 	GROUP BY votes.story_id
--- ) AS upvotes ON (story.id = upvotes.story_id)
+-- 	SELECT story_upvotes.story_id, COUNT(*) as votes
+-- 	FROM story_upvotes
+-- 	GROUP BY story_upvotes.story_id
+-- ) AS upvotes ON (comments.id = upvotes.story_id)
 -- LEFT JOIN (
--- 	SELECT votes.story_id, COUNT(*) as votes
--- 	FROM votes
--- 	WHERE votes.comment_id IS NULL
--- 	AND votes.vote = 0
--- 	GROUP BY votes.story_id
--- ) AS downvotes ON (story.id = downvotes.story_id);
-CREATE VIEW `story_with_votes` AS SELECT stories.id, upvotes.votes AS upvotes, downvotes.votes AS downvotes, upvotes.votes - downvotes.votes AS score FROM stories LEFT JOIN (SELECT votes.story_id, COUNT(*) as votes FROM votes WHERE votes.comment_id IS NULL AND votes.vote = 1 GROUP BY votes.story_id) AS upvotes ON (story.id = upvotes.story_id) LEFT JOIN (SELECT votes.story_id, COUNT(*) as votes FROM votes WHERE votes.comment_id IS NULL AND votes.vote = 0 GROUP BY votes.story_id) AS downvotes ON (story.id = downvotes.story_id);
+-- 	SELECT story_downvotes.story_id, COUNT(*) as votes
+-- 	FROM story_downvotes
+-- 	GROUP BY story_downvotes.story_id
+-- ) AS downvotes ON (comments.id = downvotes.story_id);
+CREATE VIEW `story_with_votes` AS SELECT stories.*, upvotes.votes AS upvotes, downvotes.votes AS downvotes, upvotes.votes - downvotes.votes AS score FROM stories LEFT JOIN (SELECT story_upvotes.story_id, COUNT(*) as votes FROM story_upvotes GROUP BY story_upvotes.story_id) AS upvotes ON (comments.id = upvotes.story_id) LEFT JOIN (SELECT story_downvotes.story_id, COUNT(*) as votes FROM story_downvotes GROUP BY story_downvotes.story_id) AS downvotes ON (comments.id = downvotes.story_id);
 
 CREATE VIEW story_comment_score AS
 SELECT stories.id, SUM(comment_with_votes.score) AS score
