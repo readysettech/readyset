@@ -83,24 +83,6 @@ where
                         ).map(move |t| (t, story))
                     })
                     .and_then(move |(t, story)| {
-                        let key = format!("user:{}:stories_submitted", user);
-                        t.drop_exec(
-                            "INSERT INTO keystores (`key`, `value`) \
-                             VALUES (?, ?) \
-                             ON DUPLICATE KEY UPDATE `keystores`.`value` = `keystores`.`value` + 1",
-                            (key, 1),
-                        ).map(move |t| (t, story))
-                    })
-                    .and_then(move |(t, story)| {
-                        let key = format!("user:{}:stories_submitted", user);
-                        t.drop_exec(
-                            "SELECT  `keystores`.* \
-                             FROM `keystores` \
-                             WHERE `keystores`.`key` = ?",
-                            (key,),
-                        ).map(move |t| (t, story))
-                    })
-                    .and_then(move |(t, story)| {
                         t.drop_exec(
                             "SELECT  `votes`.* FROM `votes` \
                              WHERE `votes`.`user_id` = ? \
@@ -114,27 +96,6 @@ where
                             "INSERT INTO `votes` (`user_id`, `story_id`, `vote`) \
                              VALUES (?, ?, ?)",
                             (user, story, 1),
-                        ).map(move |t| (t, story))
-                    })
-                    .and_then(move |(t, story)| {
-                        t.drop_exec(
-                            "SELECT \
-                             `comments`.`upvotes`, \
-                             `comments`.`downvotes` \
-                             FROM `comments` \
-                             JOIN `stories` ON (`stories`.`id` = `comments`.`story_id`) \
-                             WHERE `comments`.`story_id` = ? \
-                             AND `comments`.`user_id` <> `stories`.`user_id`",
-                            (story,),
-                        ).map(move |t| (t, story))
-                    })
-                    .and_then(move |(t, story)| {
-                        // why oh why is story hotness *updated* here?!
-                        t.drop_exec(
-                            "UPDATE `stories` \
-                             SET `hotness` = ? \
-                             WHERE `stories`.`id` = ?",
-                            (-19216.5479744, story),
                         )
                     })
             })

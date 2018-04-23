@@ -17,10 +17,10 @@ where
     Box::new(
         c.and_then(move |c| {
             c.query(&format!(
-                "SELECT  `comments`.* \
-                 FROM `comments` \
-                 WHERE `comments`.`is_deleted` = 0 \
-                 AND `comments`.`is_moderated` = 0 \
+                "SELECT  `comment_with_votes`.* \
+                 FROM `comment_with_votes` \
+                 WHERE `comment_with_votes`.`is_deleted` = 0 \
+                 AND `comment_with_votes`.`is_moderated` = 0 \
                  ORDER BY id DESC \
                  LIMIT 40 OFFSET 0",
             ))
@@ -75,8 +75,8 @@ where
                     .collect::<Vec<_>>()
                     .join(",");
                 c.query(&format!(
-                    "SELECT  `stories`.* FROM `stories` \
-                     WHERE `stories`.`id` IN ({})",
+                    "SELECT  `story_with_votes`.* FROM `story_with_votes` \
+                     WHERE `story_with_votes`.`id` IN ({})",
                     stories
                 )).map(move |stories| (stories, comments))
             })

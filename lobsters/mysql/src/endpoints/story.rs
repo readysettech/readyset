@@ -5,6 +5,7 @@ use futures::Future;
 use my;
 use my::prelude::*;
 use std::collections::HashSet;
+use std::iter;
 use trawler::{StoryId, UserId};
 
 pub(crate) fn handle<F>(
@@ -19,9 +20,9 @@ where
     Box::new(
         c.and_then(move |c| {
             c.prep_exec(
-                "SELECT `stories`.* \
-                 FROM `stories` \
-                 WHERE `stories`.`short_id` = ?",
+                "SELECT `story_with_votes`.* \
+                 FROM `story_with_votes` \
+                 WHERE `story_with_votes`.`short_id` = ?",
                 (::std::str::from_utf8(&id[..]).unwrap(),),
             ).and_then(|result| result.collect_and_drop::<my::Row>())
                 .map(|(c, mut story)| (c, story.swap_remove(0)))
@@ -84,13 +85,11 @@ where
             })
             .and_then(|(c, story)| {
                 c.prep_exec(
-                    "SELECT `comments`.*, \
-                     `comments`.`upvotes` - `comments`.`downvotes` AS saldo \
-                     FROM `comments` \
-                     WHERE `comments`.`story_id` = ? \
+                    "SELECT `comment_with_votes`.* \
+                     FROM `comment_with_votes` \
+                     WHERE `comment_with_votes`.`story_id` = ? \
                      ORDER BY \
-                     saldo ASC, \
-                     confidence DESC",
+                     comment_with_votes.score DESC",
                     (story,),
                 ).map(move |comments| (comments, story))
             })
@@ -118,18 +117,25 @@ where
                     users
                 )).map(move |c| (c, comments, story))
             })
-            .and_then(|(c, comments, story)| {
-                // get comment votes
-                // XXX: why?!
-                let comments = comments
-                    .into_iter()
-                    .map(|id| format!("{}", id))
-                    .collect::<Vec<_>>()
-                    .join(", ");
-                c.drop_query(&format!(
-                    "SELECT `votes`.* FROM `votes` WHERE `votes`.`comment_id` IN ({})",
-                    comments
-                )).map(move |c| (c, story))
+            .and_then(move |(c, comments, story)| {
+                match acting_as {
+                    Some(uid) => {
+                        let params = comments.iter().map(|_| "?").collect::<Vec<_>>().join(",");
+                        let values: Vec<_> = iter::once(&uid as &_)
+                            .chain(comments.iter().map(|s| s as &_))
+                            .collect();
+                        Either::A(c.drop_exec(
+                            &format!(
+                                "SELECT `votes`.* FROM `votes` \
+                                 WHERE `votes`.`user_id` = ? \
+                                 AND `votes`.`comment_id` IN ({})",
+                                params
+                            ),
+                            values,
+                        ))
+                    }
+                    None => Either::B(futures::future::ok(c)),
+                }.map(move |c| (c, story))
                 // NOTE: lobste.rs here fetches the user list again. unclear why?
             })
             .and_then(move |(c, story)| match acting_as {

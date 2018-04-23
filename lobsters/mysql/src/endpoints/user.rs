@@ -1,5 +1,5 @@
-use futures::Future;
 use futures::future::{self, Either};
+use futures::Future;
 use my;
 use my::prelude::*;
 use trawler::UserId;
@@ -15,7 +15,7 @@ where
     Box::new(
         c.and_then(move |c| {
             c.first_exec::<_, _, my::Row>(
-                "SELECT  `users`.* FROM `users` \
+                "SELECT  `user_with_stats`.* FROM `user_with_stats` \
                  WHERE `users`.`username` = ?",
                 (format!("user{}", uid),),
             )
@@ -50,22 +50,6 @@ where
                     (tag.get::<u32, _>("id").unwrap(),),
                 )),
                 None => Either::B(future::ok(c)),
-            })
-            .and_then(move |c| {
-                c.drop_exec(
-                    "SELECT  `keystores`.* \
-                     FROM `keystores` \
-                     WHERE `keystores`.`key` = ?",
-                    (format!("user:{}:stories_submitted", uid),),
-                )
-            })
-            .and_then(move |c| {
-                c.drop_exec(
-                    "SELECT  `keystores`.* \
-                     FROM `keystores` \
-                     WHERE `keystores`.`key` = ?",
-                    (format!("user:{}:comments_posted", uid),),
-                )
             })
             .and_then(move |c| {
                 c.drop_exec(

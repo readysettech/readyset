@@ -73,4 +73,81 @@ CREATE TABLE `votes` (`id` bigint unsigned NOT NULL AUTO_INCREMENT PRIMARY KEY, 
 -- Without newlines:
 CREATE VIEW `parent_comments` AS SELECT `comments`.* FROM `comments`;
 CREATE VIEW `replying_comments_for_count` AS SELECT `read_ribbons`.`user_id`, `read_ribbons`.`story_id`, `comments`.`id`, `comments`.`upvotes` - `comments`.`downvotes` AS saldo, `parent_comments`.`upvotes` - `parent_comments`.`downvotes` AS psaldo FROM `read_ribbons` JOIN `stories` ON (`stories`.`id` = `read_ribbons`.`story_id`) JOIN `comments` ON (`comments`.`story_id` = `read_ribbons`.`story_id`) LEFT JOIN `parent_comments` ON (`parent_comments`.`id` = `comments`.`parent_comment_id`) WHERE `read_ribbons`.`is_following` = 1 AND `comments`.`user_id` <> `read_ribbons`.`user_id` AND `comments`.`is_deleted` = 0 AND `comments`.`is_moderated` = 0 AND saldo >= 0 AND `read_ribbons`.`updated_at` < `comments`.`created_at` AND ( ( `parent_comments`.`user_id` = `read_ribbons`.`user_id` AND psaldo >= 0) OR ( `parent_comments`.`id` IS NULL AND `stories`.`user_id` = `read_ribbons`.`user_id`));
+
+-----------------------------------------------------
+-- Make views for all the computed columns
+CREATE VIEW `story_tag_hotness` AS
+SELECT stories.id, SUM(tags.hotness_mod) AS hotness FROM stories
+ JOIN taggings ON (taggings.story_id = stories.id)
+ JOIN tags ON (tags.id = taggings.tag_id);
+
+CREATE VIEW `comment_with_votes` AS
+SELECT comments.*,
+       upvotes.votes AS upvotes, downvotes.votes AS downvotes,
+       upvotes.votes - downvotes.votes AS score
+ FROM comments
+LEFT JOIN (SELECT votes.comment_id, COUNT(*) as votes FROM votes WHERE votes.story_id IS NULL AND votes.vote = 1) AS upvotes
+   ON (comments.id = upvotes.story_id)
+LEFT JOIN (SELECT votes.comment_id, COUNT(*) as votes FROM votes WHERE votes.story_id IS NULL AND votes.vote = 0) AS downvotes
+   ON (comments.id = downvotes.story_id);
+
+CREATE VIEW `story_with_votes` AS
+SELECT stories.id, upvotes.votes AS upvotes, downvotes.votes AS downvotes,
+       upvotes.votes - downvotes.votes AS score
+ FROM stories
+LEFT JOIN (SELECT votes.story_id, COUNT(*) as votes FROM votes WHERE votes.comment_id IS NULL AND votes.vote = 1) AS upvotes
+   ON (stories.id = upvotes.story_id)
+LEFT JOIN (SELECT votes.story_id, COUNT(*) as votes FROM votes WHERE votes.comment_id IS NULL AND votes.vote = 0) AS downvotes
+   ON (stories.id = downvotes.story_id);
+
+CREATE VIEW story_comment_score AS
+SELECT stories.id, SUM(comment_with_votes.score) AS score
+  FROM stories
+  JOIN comment_with_votes ON (comment_with_votes.story_id = stories.id)
+ WHERE comment_with_votes.user_id <> stories.user_id
+GROUP BY stories.id;
+
+CREATE VIEW combined_story_score AS
+SELECT stories.merged_story_id AS id, SUM(story_with_votes.score) AS score
+  FROM story_with_votes
+ WHERE story_with_votes.merged_story_id IS NOT NULL
+GROUP BY story_with_votes.merged_story_id;
+
+CREATE VIEW story_comments AS
+SELECT stories.id, COUNT(comments.id)
+FROM stories
+LEFT JOIN comments ON (stories.id = comments.story_id);
+
+CREATE VIEW story_hotness_parts AS
+SELECT story_with_votes.*,
+       combined_story_score.score + story_comment_score.score AS cscore,
+       story_tag_hotness.hotness AS tscore
+FROM story_with_votes
+LEFT JOIN combined_story_score ON (combined_story_score.id = story_with_votes.id)
+LEFT JOIN story_comment_score ON (story_comment_score.id = story_with_votes.id)
+LEFT JOIN story_tag_hotness ON (story_tag_hotness.id = story_with_votes.id);
+
+CREATE VIEW story_hotness_part1 AS
+SELECT story_hotness_parts.*, story_hotness_parts.cscore + story_hotness_parts.tscore AS extra
+FROM story_hotness_parts;
+
+CREATE VIEW story_with_hotness AS
+SELECT story_hotness_part1.*, story_hotness_part1.score + story_hotness_part1.extra AS hotness
+FROM story_hotness_part1;
+
+CREATE VIEW user_with_stats AS
+SELECT users.*, COUNT(comments.id) AS comments, COUNT(stories.id) AS stories
+  FROM users
+LEFT JOIN comments ON (comments.user_id = users.id)
+LEFT JOIN stories ON (stories.user_id = users.id)
+GROUP BY users.id;
+
+CREATE VIEW user_karma AS
+SELECT users.user_id, SUM(comment_with_votes.score) + SUM(story_with_votes.score) AS karma
+FROM users
+JOIN comment_with_votes ON (comment_with_votes.user_id = users.id)
+JOIN story_with_votes ON (story_with_votes.user_id = users.id)
+GROUP BY users.user_id;
+-----------------------------------------------------
+
 INSERT INTO `tags` (`tag`) VALUES ('test');

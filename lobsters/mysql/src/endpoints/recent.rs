@@ -22,13 +22,13 @@ where
     // also note the `NOW()` hack to support dbs primed a while ago
     let main = c.and_then(|c| {
         c.query(
-            "SELECT `stories`.*, \
-             CAST(upvotes AS signed int) - CAST(downvotes AS signed int) AS saldo \
-             FROM `stories` \
-             WHERE `stories`.`merged_story_id` IS NULL \
-             AND `stories`.`is_expired` = 0 \
-             AND saldo <= 5 \
-             ORDER BY stories.id DESC LIMIT 51",
+            "SELECT `story_with_votes`.*
+             FROM `story_with_votes` \
+             WHERE `story_with_votes`.`merged_story_id` IS NULL \
+             AND `story_with_votes`.`is_expired` = 0 \
+             AND story_with_votes.score <= 5 \
+             ORDER BY story_with_vote;
+             story_with_vote.id DESC LIMIT 51",
         )
     }).and_then(|stories| {
             stories.reduce_and_drop(
@@ -52,30 +52,20 @@ where
                 .join(",");
 
             match acting_as {
-                Some(uid) => Either::A(
-                    c.drop_exec(
-                        "SELECT `hidden_stories`.`story_id` \
-                         FROM `hidden_stories` \
-                         WHERE `hidden_stories`.`user_id` = ?",
-                        (uid,),
-                    ).and_then(move |c| {
-                            c.drop_exec(
-                                "SELECT `tag_filters`.* FROM `tag_filters` \
-                                 WHERE `tag_filters`.`user_id` = ?",
-                                (uid,),
-                            )
-                        })
-                        .and_then(move |c| {
-                            c.drop_query(format!(
-                                "SELECT `taggings`.`story_id` \
-                                 FROM `taggings` \
-                                 WHERE `taggings`.`story_id` IN ({})",
-                                //AND `taggings`.`tag_id` IN ({})",
-                                stories_in,
-                                //tags
-                            )).map(move |c| (c, (users, stories_in, stories)))
-                        }),
-                ),
+                Some(uid) => Either::A(c.drop_exec(
+                    "SELECT `tag_filters`.* FROM `tag_filters` \
+                     WHERE `tag_filters`.`user_id` = ?",
+                    (uid,),
+                ).and_then(move |c| {
+                    c.drop_query(format!(
+                        "SELECT `taggings`.`story_id` \
+                         FROM `taggings` \
+                         WHERE `taggings`.`story_id` IN ({})",
+                        //AND `taggings`.`tag_id` IN ({})",
+                        stories_in,
+                        //tags
+                    )).map(move |c| (c, (users, stories_in, stories)))
+                })),
                 None => Either::B(future::ok((c, (users, stories_in, stories)))),
             }
         })
