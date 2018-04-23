@@ -82,11 +82,11 @@ CREATE VIEW `comment_with_votes` AS SELECT comments.*, upvotes.votes AS upvotes,
 -- ) AS downvotes ON (stories.id = downvotes.story_id);
 CREATE VIEW `story_with_votes` AS SELECT stories.*, upvotes.votes AS upvotes, downvotes.votes AS downvotes, upvotes.votes - downvotes.votes AS score FROM stories LEFT JOIN (SELECT story_upvotes.story_id, COUNT(*) as votes FROM story_upvotes GROUP BY story_upvotes.story_id) AS upvotes ON (stories.id = upvotes.story_id) LEFT JOIN (SELECT story_downvotes.story_id, COUNT(*) as votes FROM story_downvotes GROUP BY story_downvotes.story_id) AS downvotes ON (stories.id = downvotes.story_id);
 
-CREATE VIEW non_author_comment_with_vote AS
-SELECT comment_with_vote.story_id,
-       comment_with_vote.score
-  FROM comment_with_vote
-  JOIN stories ON (comment_with_vote.story_id = stories.id)
+CREATE VIEW non_author_comment_with_votes AS
+SELECT comment_with_votes.story_id,
+       comment_with_votes.score
+  FROM comment_with_votes
+  JOIN stories ON (comment_with_votes.story_id = stories.id)
  WHERE comment_with_votes.user_id <> stories.user_id;
 
 CREATE VIEW story_comment_score AS
