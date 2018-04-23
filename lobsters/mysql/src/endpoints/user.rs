@@ -15,24 +15,29 @@ where
     Box::new(
         c.and_then(move |c| {
             c.first_exec::<_, _, my::Row>(
-                "SELECT  `user_with_stats`.* FROM `user_with_stats` \
+                "SELECT  `users`.* FROM `users` \
                  WHERE `users`.`username` = ?",
                 (format!("user{}", uid),),
             )
         }).and_then(move |(c, user)| {
                 let uid = user.unwrap().get::<u32, _>("id").unwrap();
 
-                // most popular tag
-                c.prep_exec(
-                    "SELECT  `tags`.`id`, COUNT(*) AS `count` FROM `tags` \
-                     INNER JOIN `taggings` ON `taggings`.`tag_id` = `tags`.`id` \
-                     INNER JOIN `stories` ON `stories`.`id` = `taggings`.`story_id` \
-                     WHERE `tags`.`inactive` = 0 \
-                     AND `stories`.`user_id` = ? \
-                     GROUP BY `tags`.`id` \
-                     ORDER BY `count` desc LIMIT 1",
+                c.drop_exec(
+                    "SELECT user_stats.* FROM user_stats WHERE user_stats.id = ?",
                     (uid,),
-                )
+                ).and_then(move |c| {
+                    // most popular tag
+                    c.prep_exec(
+                        "SELECT  `tags`.`id`, COUNT(*) AS `count` FROM `tags` \
+                         INNER JOIN `taggings` ON `taggings`.`tag_id` = `tags`.`id` \
+                         INNER JOIN `stories` ON `stories`.`id` = `taggings`.`story_id` \
+                         WHERE `tags`.`inactive` = 0 \
+                         AND `stories`.`user_id` = ? \
+                         GROUP BY `tags`.`id` \
+                         ORDER BY `count` desc LIMIT 1",
+                        (uid,),
+                    )
+                })
             })
             .and_then(|result| result.collect_and_drop::<my::Row>())
             .map(|(c, mut rows)| {

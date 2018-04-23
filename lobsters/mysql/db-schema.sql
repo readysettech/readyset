@@ -124,8 +124,8 @@ CREATE VIEW story_with_hotness AS
 SELECT story_hotness_part1.*, story_hotness_part1.score + story_hotness_part1.extra AS hotness
 FROM story_hotness_part1;
 
-CREATE VIEW user_with_stats AS
-SELECT users.*, COUNT(comments.id) AS comments, COUNT(stories.id) AS stories
+CREATE VIEW user_stats AS
+SELECT users.id, COUNT(comments.id) AS comments, COUNT(stories.id) AS stories
   FROM users
 LEFT JOIN comments ON (comments.user_id = users.id)
 LEFT JOIN stories ON (stories.user_id = users.id)
