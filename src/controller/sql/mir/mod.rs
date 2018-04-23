@@ -1517,12 +1517,14 @@ impl SqlToMirConverter {
                         nodes_added.push(bogo_project.clone());
                         final_node = bogo_project;
 
-                        vec![Column {
-                            name: "bogokey".to_owned(),
-                            table: Some(table),
-                            alias: None,
-                            function: None,
-                        }]
+                        vec![
+                            Column {
+                                name: "bogokey".to_owned(),
+                                table: None,
+                                alias: None,
+                                function: None,
+                            },
+                        ]
                     } else {
                         qg.parameters().into_iter().cloned().collect()
                     };

@@ -195,7 +195,7 @@ pub fn make_grouped(
                         func_nodes.push(proj.clone());
                         node_count += 1;
 
-                        let bogo_group_col = Column::from(format!("{}.grp", proj_name).as_str());
+                        let bogo_group_col = Column::from("grp");
                         (vec![bogo_group_col], proj)
                     } else {
                         (proj_cols_from_target_table.clone(), parent_node)
