@@ -147,7 +147,7 @@ SELECT story_with_votes.user_id AS id, SUM(story_with_votes.score) AS karma
 FROM story_with_votes GROUP BY story_with_votes.user_id;
 
 CREATE VIEW user_karma AS
-SELECT users.user_id, user_comment_karma.karma + user_story_karma.karma AS karma
+SELECT users.id, user_comment_karma.karma + user_story_karma.karma AS karma
 FROM users
 LEFT JOIN user_comment_karma ON (user_comment_karma.id = users.id)
 LEFT JOIN user_story_karma ON (user_story_karma.id = users.id);
