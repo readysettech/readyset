@@ -1,5 +1,6 @@
 use nom::multispace;
 use std::str;
+use std::fmt;
 
 use common::{opt_multispace, statement_terminator};
 use select::{limit_clause, nested_selection, LimitClause, SelectStatement};
@@ -13,11 +14,40 @@ pub enum CompoundSelectOperator {
     Except,
 }
 
+impl fmt::Display for CompoundSelectOperator {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        match *self {
+            CompoundSelectOperator::Union => write!(f, "UNION"),
+            CompoundSelectOperator::DistinctUnion => write!(f, "UNION DISTINCT"),
+            CompoundSelectOperator::Intersect => write!(f, "INTERSECT"),
+            CompoundSelectOperator::Except => write!(f, "EXCEPT"),
+        }
+    }
+}
+
 #[derive(Clone, Debug, Eq, Hash, PartialEq, Deserialize, Serialize)]
 pub struct CompoundSelectStatement {
     pub selects: Vec<(Option<CompoundSelectOperator>, SelectStatement)>,
     pub order: Option<OrderClause>,
     pub limit: Option<LimitClause>,
+}
+
+impl fmt::Display for CompoundSelectStatement {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        for (ref op, ref sel) in &self.selects {
+            write!(f, " {}", sel)?;
+            if op.is_some() {
+                write!(f, " {}", op.as_ref().unwrap())?;
+            }
+        }
+        if self.order.is_some() {
+            write!(f, " {}", self.order.as_ref().unwrap())?;
+        }
+        if self.limit.is_some() {
+            write!(f, " {}", self.order.as_ref().unwrap())?;
+        }
+        Ok(())
+    }
 }
 
 /// Parse compound operator
