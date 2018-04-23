@@ -17,7 +17,10 @@ type IndexSeq = u64;
 
 // RocksDB key used for storing meta information (like indices).
 const META_KEY: &'static [u8] = b"meta";
-const META_CF: &'static str = "meta";
+// A default column family is always created, so we'll make use of that for meta information.
+// The indices themselves are stored in a column family each, with their position in
+// PersistentState::indices as name.
+const DEFAULT_CF: &'static str = "default";
 
 const EXISTING_CF_ERROR: &'static str = "Invalid argument: Column family already exists";
 
@@ -276,7 +279,7 @@ impl PersistentState {
         // so we'll have to retrieve the existing ones first:
         let column_family_names = match DB::list_cf(&opts, &full_name) {
             Ok(cfs) => cfs,
-            Err(_err) => vec![META_CF.to_string()],
+            Err(_err) => vec![DEFAULT_CF.to_string()],
         };
 
         let cfs: Vec<_> = column_family_names
@@ -350,8 +353,7 @@ impl PersistentState {
     }
 
     fn retrieve_and_update_meta(db: &rocksdb::DB) -> PersistentMeta {
-        let cf = db.cf_handle(META_CF).unwrap();
-        let indices = db.get_cf(cf, META_KEY).unwrap();
+        let indices = db.get(META_KEY).unwrap();
         let mut meta = match indices {
             Some(data) => bincode::deserialize(&*data).unwrap(),
             None => PersistentMeta::default(),
@@ -359,13 +361,12 @@ impl PersistentState {
 
         meta.epoch += 1;
         let data = bincode::serialize(&meta).unwrap();
-        db.put_cf(cf, META_KEY, &data).unwrap();
+        db.put(META_KEY, &data).unwrap();
         meta
     }
 
     fn persist_meta(&mut self) {
         let db = self.db.as_ref().unwrap();
-        let cf = db.cf_handle(META_CF).unwrap();
         // Stores the columns of self.indices in RocksDB so that we don't rebuild indices on recovery.
         let start_at = if self.has_unique_index {
             // Skip the first index if it's a primary key, since we'll add it in Self::new anyway.
@@ -384,7 +385,7 @@ impl PersistentState {
         };
 
         let data = bincode::serialize(&meta).unwrap();
-        db.put_cf(cf, META_KEY, &data).unwrap();
+        db.put(META_KEY, &data).unwrap();
     }
 
     // Selects a prefix of `key` without the epoch or sequence number.
