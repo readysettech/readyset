@@ -96,7 +96,7 @@ SELECT non_author_comment_with_votes.story_id AS id,
 GROUP BY non_author_comment_with_votes.story_id;
 
 CREATE VIEW combined_story_score AS
-SELECT stories.merged_story_id AS id, SUM(story_with_votes.score) AS score
+SELECT story_with_votes.merged_story_id AS id, SUM(story_with_votes.score) AS score
   FROM story_with_votes
  WHERE story_with_votes.merged_story_id IS NOT NULL
 GROUP BY story_with_votes.merged_story_id;
