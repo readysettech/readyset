@@ -304,6 +304,11 @@ impl Materializations {
                 able = false;
             }
 
+            // allow views to force full (XXX)
+            if graph[ni].name().starts_with("FULL_") {
+                able = false;
+            }
+
             if graph[ni].is_internal() && graph[ni].requires_full_materialization() {
                 able = false;
             }
