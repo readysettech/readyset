@@ -1322,9 +1322,20 @@ impl SqlToMirConverter {
                         column_to_predicates.entry(col).or_default().push(pred);
                     }
                 }
+
+                for pred in &qg.global_predicates {
+                    let cols = predicate_columns(pred);
+
+                    for col in cols {
+                        column_to_predicates.entry(col).or_default().push(pred);
+                    }
+                }
             }
 
             // 2a. Reorder some predicates before group by nodes
+            // FIXME(malte): This doesn't currently work correctly with arithmetic and literal
+            // projections that form input to these filters -- these need to be lifted above them
+            // (and above the aggregations).
             let (created_predicates, predicates_above_group_by_nodes) =
                 make_predicates_above_grouped(
                     self,
@@ -1456,10 +1467,9 @@ impl SqlToMirConverter {
 
                 // 5. Global predicates
                 for (i, ref p) in qg.global_predicates.iter().enumerate() {
-                    debug_assert!(
-                        !created_predicates.contains(p),
-                        "global predicate already exists?"
-                    );
+                    if created_predicates.contains(p) {
+                        continue;
+                    }
 
                     let parent = match prev_node {
                         None => unimplemented!(),
