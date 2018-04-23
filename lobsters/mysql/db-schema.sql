@@ -87,9 +87,9 @@ SELECT comments.*,
        upvotes.votes - downvotes.votes AS score
  FROM comments
 LEFT JOIN (SELECT votes.comment_id, COUNT(*) as votes FROM votes WHERE votes.story_id IS NULL AND votes.vote = 1) AS upvotes
-   ON (comments.id = upvotes.story_id)
+   ON (comments.id = upvotes.comment_id)
 LEFT JOIN (SELECT votes.comment_id, COUNT(*) as votes FROM votes WHERE votes.story_id IS NULL AND votes.vote = 0) AS downvotes
-   ON (comments.id = downvotes.story_id);
+   ON (comments.id = downvotes.comment_id);
 
 CREATE VIEW `story_with_votes` AS
 SELECT stories.id, upvotes.votes AS upvotes, downvotes.votes AS downvotes,
