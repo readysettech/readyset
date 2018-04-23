@@ -90,10 +90,10 @@ SELECT comment_with_votes.story_id,
  WHERE comment_with_votes.user_id <> stories.user_id;
 
 CREATE VIEW story_comment_score AS
-SELECT non_author_comment_with_vote.story_id AS id,
-       SUM(non_author_comment_with_vote.score) AS score
-  FROM non_author_comment_with_vote
-GROUP BY non_author_comment_with_vote.story_id;
+SELECT non_author_comment_with_votes.story_id AS id,
+       SUM(non_author_comment_with_votes.score) AS score
+  FROM non_author_comment_with_votes
+GROUP BY non_author_comment_with_votes.story_id;
 
 CREATE VIEW combined_story_score AS
 SELECT stories.merged_story_id AS id, SUM(story_with_votes.score) AS score
