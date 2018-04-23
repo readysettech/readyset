@@ -1,5 +1,5 @@
 DROP TABLE IF EXISTS `comments` CASCADE;
-CREATE TABLE `comments` (`id` int unsigned NOT NULL AUTO_INCREMENT PRIMARY KEY, `created_at` datetime NOT NULL, `updated_at` datetime, `short_id` varchar(10) DEFAULT '' NOT NULL, `story_id` int unsigned NOT NULL, `user_id` int unsigned NOT NULL, `parent_comment_id` int unsigned, `thread_id` int unsigned, `comment` mediumtext NOT NULL, `upvotes` int DEFAULT 0 NOT NULL, `downvotes` int DEFAULT 0 NOT NULL, `confidence` decimal(20,19) DEFAULT '0.0' NOT NULL, `markeddown_comment` mediumtext, `is_deleted` tinyint(1) DEFAULT 0, `is_moderated` tinyint(1) DEFAULT 0, `is_from_email` tinyint(1) DEFAULT 0, `hat_id` int, fulltext INDEX `index_comments_on_comment`  (`comment`),  INDEX `confidence_idx`  (`confidence`), UNIQUE INDEX `short_id`  (`short_id`),  INDEX `story_id_short_id`  (`story_id`, `short_id`),  INDEX `thread_id`  (`thread_id`),  INDEX `index_comments_on_user_id`  (`user_id`)) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+CREATE TABLE `comments` (`id` int unsigned NOT NULL AUTO_INCREMENT PRIMARY KEY, `created_at` datetime NOT NULL, `updated_at` datetime, `short_id` varchar(10) DEFAULT '' NOT NULL, `story_id` int unsigned NOT NULL, `user_id` int unsigned NOT NULL, `parent_comment_id` int unsigned, `thread_id` int unsigned, `comment` mediumtext NOT NULL, `markeddown_comment` mediumtext, `is_deleted` tinyint(1) DEFAULT 0, `is_moderated` tinyint(1) DEFAULT 0, `is_from_email` tinyint(1) DEFAULT 0, `hat_id` int, fulltext INDEX `index_comments_on_comment`  (`comment`),  INDEX `confidence_idx`  (`confidence`), UNIQUE INDEX `short_id`  (`short_id`),  INDEX `story_id_short_id`  (`story_id`, `short_id`),  INDEX `thread_id`  (`thread_id`),  INDEX `index_comments_on_user_id`  (`user_id`)) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
 DROP TABLE IF EXISTS `hat_requests` CASCADE;
 CREATE TABLE `hat_requests` (`id` int NOT NULL AUTO_INCREMENT PRIMARY KEY, `created_at` datetime, `updated_at` datetime, `user_id` int, `hat` varchar(255) COLLATE utf8mb4_general_ci, `link` varchar(255) COLLATE utf8mb4_general_ci, `comment` text COLLATE utf8mb4_general_ci) ENGINE=InnoDB DEFAULT CHARSET=utf8;
 DROP TABLE IF EXISTS `hats` CASCADE;
@@ -21,7 +21,7 @@ CREATE TABLE `read_ribbons` (`id` bigint NOT NULL AUTO_INCREMENT PRIMARY KEY, `i
 DROP TABLE IF EXISTS `saved_stories` CASCADE;
 CREATE TABLE `saved_stories` (`id` bigint NOT NULL AUTO_INCREMENT PRIMARY KEY, `created_at` datetime NOT NULL, `updated_at` datetime NOT NULL, `user_id` int, `story_id` int, UNIQUE INDEX `index_saved_stories_on_user_id_and_story_id`  (`user_id`, `story_id`)) ENGINE=InnoDB DEFAULT CHARSET=utf8;
 DROP TABLE IF EXISTS `stories` CASCADE;
-CREATE TABLE `stories` (`id` int unsigned NOT NULL AUTO_INCREMENT PRIMARY KEY, `created_at` datetime, `user_id` int unsigned, `url` varchar(250) DEFAULT '', `title` varchar(150) DEFAULT '' NOT NULL, `description` mediumtext, `short_id` varchar(6) DEFAULT '' NOT NULL, `is_expired` tinyint(1) DEFAULT 0 NOT NULL, `upvotes` int unsigned DEFAULT 0 NOT NULL, `downvotes` int unsigned DEFAULT 0 NOT NULL, `is_moderated` tinyint(1) DEFAULT 0 NOT NULL, `hotness` decimal(20,10) DEFAULT '0.0' NOT NULL, `markeddown_description` mediumtext, `story_cache` mediumtext, `comments_count` int DEFAULT 0 NOT NULL, `merged_story_id` int, `unavailable_at` datetime, `twitter_id` varchar(20), `user_is_author` tinyint(1) DEFAULT 0,  INDEX `index_stories_on_created_at`  (`created_at`), fulltext INDEX `index_stories_on_description`  (`description`),  INDEX `hotness_idx`  (`hotness`),  INDEX `is_idxes`  (`is_expired`, `is_moderated`),  INDEX `index_stories_on_is_expired`  (`is_expired`),  INDEX `index_stories_on_is_moderated`  (`is_moderated`),  INDEX `index_stories_on_merged_story_id`  (`merged_story_id`), UNIQUE INDEX `unique_short_id`  (`short_id`), fulltext INDEX `index_stories_on_story_cache`  (`story_cache`), fulltext INDEX `index_stories_on_title`  (`title`),  INDEX `index_stories_on_twitter_id`  (`twitter_id`),  INDEX `url`  (`url`(191)),  INDEX `index_stories_on_user_id`  (`user_id`)) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+CREATE TABLE `stories` (`id` int unsigned NOT NULL AUTO_INCREMENT PRIMARY KEY, `created_at` datetime, `user_id` int unsigned, `url` varchar(250) DEFAULT '', `title` varchar(150) DEFAULT '' NOT NULL, `description` mediumtext, `short_id` varchar(6) DEFAULT '' NOT NULL, `is_expired` tinyint(1) DEFAULT 0 NOT NULL, `is_moderated` tinyint(1) DEFAULT 0 NOT NULL, `markeddown_description` mediumtext, `story_cache` mediumtext, `merged_story_id` int, `unavailable_at` datetime, `twitter_id` varchar(20), `user_is_author` tinyint(1) DEFAULT 0,  INDEX `index_stories_on_created_at`  (`created_at`), fulltext INDEX `index_stories_on_description`  (`description`),   INDEX `is_idxes`  (`is_expired`, `is_moderated`),  INDEX `index_stories_on_is_expired`  (`is_expired`),  INDEX `index_stories_on_is_moderated`  (`is_moderated`),  INDEX `index_stories_on_merged_story_id`  (`merged_story_id`), UNIQUE INDEX `unique_short_id`  (`short_id`), fulltext INDEX `index_stories_on_story_cache`  (`story_cache`), fulltext INDEX `index_stories_on_title`  (`title`),  INDEX `index_stories_on_twitter_id`  (`twitter_id`),  INDEX `url`  (`url`(191)),  INDEX `index_stories_on_user_id`  (`user_id`)) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
 DROP TABLE IF EXISTS `suggested_taggings` CASCADE;
 CREATE TABLE `suggested_taggings` (`id` int NOT NULL AUTO_INCREMENT PRIMARY KEY, `story_id` int, `tag_id` int, `user_id` int) ENGINE=InnoDB DEFAULT CHARSET=utf8;
 DROP TABLE IF EXISTS `suggested_titles` CASCADE;
@@ -41,25 +41,25 @@ CREATE TABLE `votes` (`id` bigint unsigned NOT NULL AUTO_INCREMENT PRIMARY KEY, 
 --
 -- Modified:
 -- CREATE VIEW `replying_comments_for_count` AS
--- 	SELECT `read_ribbons`.`user_id`, `read_ribbons`.`story_id`, `comments`.`id`,
--- 	    `comments`.`upvotes` - `comments`.`downvotes` AS saldo,
--- 	    `parent_comments`.`upvotes` - `parent_comments`.`downvotes` AS psaldo
+-- 	SELECT `read_ribbons`.`user_id`,
+-- 	       `read_ribbons`.`story_id`,
+-- 	       `comment_with_votes`.`id`,
 -- 	FROM `read_ribbons`
 -- 	JOIN `stories` ON (`stories`.`id` = `read_ribbons`.`story_id`)
--- 	JOIN `comments` ON (`comments`.`story_id` = `read_ribbons`.`story_id`)
+-- 	JOIN `comment_with_votes` ON (`comment_with_votes`.`story_id` = `read_ribbons`.`story_id`)
 -- 	LEFT JOIN `parent_comments`
--- 	ON (`parent_comments`.`id` = `comments`.`parent_comment_id`)
+-- 	ON (`parent_comments`.`id` = `comment_with_votes`.`parent_comment_id`)
 -- 	WHERE `read_ribbons`.`is_following` = 1
--- 	AND `comments`.`user_id` <> `read_ribbons`.`user_id`
--- 	AND `comments`.`is_deleted` = 0
--- 	AND `comments`.`is_moderated` = 0
--- 	AND saldo >= 0
--- 	AND `read_ribbons`.`updated_at` < `comments`.`created_at`
+-- 	AND `comment_with_votes`.`user_id` <> `read_ribbons`.`user_id`
+-- 	AND `comment_with_votes`.`is_deleted` = 0
+-- 	AND `comment_with_votes`.`is_moderated` = 0
+-- 	AND `comment_with_votes`.`score` >= 0
+-- 	AND `read_ribbons`.`updated_at` < `comment_with_votes`.`created_at`
 -- 	AND (
 --      (
 --      	`parent_comments`.`user_id` = `read_ribbons`.`user_id`
 --      	AND
---      	psaldo >= 0
+--      	`parent_`.`score` >= 0
 --      )
 --      OR
 --      (
@@ -71,8 +71,8 @@ CREATE TABLE `votes` (`id` bigint unsigned NOT NULL AUTO_INCREMENT PRIMARY KEY, 
 
 --
 -- Without newlines:
-CREATE VIEW `parent_comments` AS SELECT `comments`.* FROM `comments`;
-CREATE VIEW `replying_comments_for_count` AS SELECT `read_ribbons`.`user_id`, `read_ribbons`.`story_id`, `comments`.`id`, `comments`.`upvotes` - `comments`.`downvotes` AS saldo, `parent_comments`.`upvotes` - `parent_comments`.`downvotes` AS psaldo FROM `read_ribbons` JOIN `stories` ON (`stories`.`id` = `read_ribbons`.`story_id`) JOIN `comments` ON (`comments`.`story_id` = `read_ribbons`.`story_id`) LEFT JOIN `parent_comments` ON (`parent_comments`.`id` = `comments`.`parent_comment_id`) WHERE `read_ribbons`.`is_following` = 1 AND `comments`.`user_id` <> `read_ribbons`.`user_id` AND `comments`.`is_deleted` = 0 AND `comments`.`is_moderated` = 0 AND saldo >= 0 AND `read_ribbons`.`updated_at` < `comments`.`created_at` AND ( ( `parent_comments`.`user_id` = `read_ribbons`.`user_id` AND psaldo >= 0) OR ( `parent_comments`.`id` IS NULL AND `stories`.`user_id` = `read_ribbons`.`user_id`));
+CREATE VIEW `parent_comments` AS SELECT `comment_with_votes`.* FROM `comment_with_votes`;
+CREATE VIEW `replying_comments_for_count` AS SELECT `read_ribbons`.`user_id`, `read_ribbons`.`story_id`, `comment_with_votes`.`id`, FROM `read_ribbons` JOIN `stories` ON (`stories`.`id` = `read_ribbons`.`story_id`) JOIN `comment_with_votes` ON (`comment_with_votes`.`story_id` = `read_ribbons`.`story_id`) LEFT JOIN `parent_comments` ON (`parent_comments`.`id` = `comment_with_votes`.`parent_comment_id`) WHERE `read_ribbons`.`is_following` = 1 AND `comment_with_votes`.`user_id` <> `read_ribbons`.`user_id` AND `comment_with_votes`.`is_deleted` = 0 AND `comment_with_votes`.`is_moderated` = 0 AND `comment_with_votes`.`score` >= 0 AND `read_ribbons`.`updated_at` < `comment_with_votes`.`created_at` AND ( ( `parent_comments`.`user_id` = `read_ribbons`.`user_id` AND `parent_`.`score` >= 0) OR ( `parent_comments`.`id` IS NULL AND `stories`.`user_id` = `read_ribbons`.`user_id`));
 
 -----------------------------------------------------
 -- Make views for all the computed columns
