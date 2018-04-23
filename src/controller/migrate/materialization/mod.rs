@@ -304,15 +304,6 @@ impl Materializations {
                 able = false;
             }
 
-            // allow views to force full (XXX)
-            if graph[ni].name().starts_with("FULL_")
-                || graph
-                    .neighbors_directed(ni, petgraph::EdgeDirection::Outgoing)
-                    .any(|n| graph[n].name().starts_with("FULL_"))
-            {
-                able = false;
-            }
-
             if graph[ni].is_internal() && graph[ni].requires_full_materialization() {
                 able = false;
             }
@@ -331,6 +322,12 @@ impl Materializations {
                 .neighbors_directed(ni, petgraph::EdgeDirection::Outgoing)
                 .collect();
             while let Some(child) = stack.pop() {
+                // allow views to force full (XXX)
+                if graph[ni].name().starts_with("FULL_") {
+                    stack.clear();
+                    able = false;
+                }
+
                 if self.have.contains_key(&child) {
                     // materialized child -- don't need to keep walking along this path
                     if !self.partial.contains(&child) {
