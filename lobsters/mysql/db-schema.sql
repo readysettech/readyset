@@ -81,10 +81,10 @@ SELECT stories.id, SUM(tags.hotness_mod) AS hotness FROM stories
  JOIN taggings ON (taggings.story_id = stories.id)
  JOIN tags ON (tags.id = taggings.tag_id);
 
-CREATE VIEW comment_upvotes AS SELECT votes.comment_id FROM votes WHERE votes.story_id IS NULL AND votes.vote = 1;
-CREATE VIEW comment_downvotes AS SELECT votes.comment_id FROM votes WHERE votes.story_id IS NULL AND votes.vote = 0;
-CREATE VIEW story_upvotes AS SELECT votes.story_id FROM votes WHERE votes.comment_id IS NULL AND votes.vote = 1;
-CREATE VIEW story_downvotes AS SELECT votes.story_id FROM votes WHERE votes.comment_id IS NULL AND votes.vote = 0;
+CREATE VIEW comment_upvotes AS SELECT votes.comment_id, votes.user_id FROM votes WHERE votes.story_id IS NULL AND votes.vote = 1;
+CREATE VIEW comment_downvotes AS SELECT votes.comment_id, votes.user_id FROM votes WHERE votes.story_id IS NULL AND votes.vote = 0;
+CREATE VIEW story_upvotes AS SELECT votes.story_id, votes.user_id FROM votes WHERE votes.comment_id IS NULL AND votes.vote = 1;
+CREATE VIEW story_downvotes AS SELECT votes.story_id, votes.user_id FROM votes WHERE votes.comment_id IS NULL AND votes.vote = 0;
 
 -- CREATE VIEW `comment_with_votes` AS
 -- SELECT comments.*,
