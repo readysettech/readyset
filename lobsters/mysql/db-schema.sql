@@ -124,19 +124,33 @@ CREATE VIEW story_with_hotness AS
 SELECT story_hotness_part1.*, story_hotness_part1.score + story_hotness_part1.extra AS hotness
 FROM story_hotness_part1;
 
+CREATE VIEW user_comments AS
+SELECT comments.user_id AS id, COUNT(comments.id) AS comments
+FROM comments GROUP BY comments.user_id;
+
+CREATE VIEW user_stories AS
+SELECT stories.user_id AS id, COUNT(stories.id) AS stories
+FROM stories GROUP BY stories.user_id;
+
 CREATE VIEW user_stats AS
-SELECT users.id, COUNT(comments.id) AS comments, COUNT(stories.id) AS stories
+SELECT users.id, user_comments.comments, user_stories.stories
   FROM users
-LEFT JOIN comments ON (comments.user_id = users.id)
-LEFT JOIN stories ON (stories.user_id = users.id)
-GROUP BY users.id;
+LEFT JOIN user_comments ON (user_comments.id = users.id)
+LEFT JOIN user_stories ON (user_stories.id = users.id);
+
+CREATE VIEW user_comment_karma AS
+SELECT comment_with_votes.user_id AS id, SUM(comment_with_votes.score) AS karma
+FROM comment_with_votes GROUP BY comment_with_votes.user_id;
+
+CREATE VIEW user_story_karma AS
+SELECT story_with_votes.user_id AS id, SUM(story_with_votes.score) AS karma
+FROM story_with_votes GROUP BY story_with_votes.user_id;
 
 CREATE VIEW user_karma AS
-SELECT users.user_id, SUM(comment_with_votes.score) + SUM(story_with_votes.score) AS karma
+SELECT users.user_id, user_comment_karma.karma + user_story_karma.karma AS karma
 FROM users
-JOIN comment_with_votes ON (comment_with_votes.user_id = users.id)
-JOIN story_with_votes ON (story_with_votes.user_id = users.id)
-GROUP BY users.user_id;
+LEFT JOIN user_comment_karma ON (user_comment_karma.id = users.id)
+LEFT JOIN user_story_karma ON (user_story_karma.id = users.id);
 -----------------------------------------------------
 -- Original:
 -- CREATE VIEW `replying_comments` AS       select `read_ribbons`.`user_id` AS `user_id`,`comments`.`id` AS `comment_id`,`read_ribbons`.`story_id` AS `story_id`,`comments`.`parent_comment_id` AS `parent_comment_id`,`comments`.`created_at` AS `comment_created_at`,`parent_comments`.`user_id` AS `parent_comment_author_id`,`comments`.`user_id` AS `comment_author_id`,`stories`.`user_id` AS `story_author_id`,(`read_ribbons`.`updated_at` < `comments`.`created_at`) AS `is_unread`,(select `votes`.`vote` from `votes` where ((`votes`.`user_id` = `read_ribbons`.`user_id`) and (`votes`.`comment_id` = `comments`.`id`))) AS `current_vote_vote`,(select `votes`.`reason` from `votes` where ((`votes`.`user_id` = `read_ribbons`.`user_id`) and (`votes`.`comment_id` = `comments`.`id`))) AS `current_vote_reason` from (((`read_ribbons` join `comments` on((`comments`.`story_id` = `read_ribbons`.`story_id`))) join `stories` on((`stories`.`id` = `comments`.`story_id`))) left join `comments` `parent_comments` on((`parent_comments`.`id` = `comments`.`parent_comment_id`))) where ((`read_ribbons`.`is_following` = 1) and (`comments`.`user_id` <> `read_ribbons`.`user_id`) and (`comments`.`is_deleted` = 0) and (`comments`.`is_moderated` = 0) and ((`parent_comments`.`user_id` = `read_ribbons`.`user_id`) or (isnull(`parent_comments`.`user_id`) and (`stories`.`user_id` = `read_ribbons`.`user_id`))) and ((`comments`.`upvotes` - `comments`.`downvotes`) >= 0) and (isnull(`parent_comments`.`id`) or ((`parent_comments`.`upvotes` - `parent_comments`.`downvotes`) >= 0)));
