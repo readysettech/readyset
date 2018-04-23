@@ -104,7 +104,8 @@ GROUP BY story_with_votes.merged_story_id;
 CREATE VIEW story_comments AS
 SELECT stories.id, COUNT(comments.id)
 FROM stories
-LEFT JOIN comments ON (stories.id = comments.story_id);
+LEFT JOIN comments ON (stories.id = comments.story_id)
+GROUP BY stories.id;
 
 CREATE VIEW story_hotness_parts AS
 SELECT story_with_votes.*,
