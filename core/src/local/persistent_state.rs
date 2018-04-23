@@ -19,6 +19,8 @@ type IndexSeq = u64;
 const META_KEY: &'static [u8] = b"meta";
 const META_CF: &'static str = "meta";
 
+const EXISTING_CF_ERROR: &'static str = "Invalid argument: Column family already exists";
+
 // Maximum rows per WriteBatch when building new indices for existing rows.
 const INDEX_BATCH_SIZE: usize = 512;
 
@@ -165,11 +167,27 @@ impl State for PersistentState {
 
         let cols = Vec::from(columns);
         let mut seq = 0;
-        let column_family = self.db
-            .as_mut()
-            .unwrap()
-            .create_cf(&self.indices.len().to_string(), &self.db_opts)
-            .unwrap();
+        // We'll store all the pointers (or values if this is index 0) for
+        // this index in its own column family:
+        let index_id = self.indices.len().to_string();
+        let column_family = {
+            let db = self.db.as_mut().unwrap();
+            match db.create_cf(&index_id, &self.db_opts) {
+                Ok(cf) => cf,
+                Err(e) => {
+                    let message = e.to_string();
+                    if &message == EXISTING_CF_ERROR {
+                        // This CF existed from before, which might mean that we started
+                        // building the index but crashed before self.persist_meta().
+                        // We'll throw away the old CF and create a new one:
+                        db.drop_cf(&index_id).unwrap();
+                        db.create_cf(&index_id, &self.db_opts).unwrap()
+                    } else {
+                        panic!(message)
+                    }
+                }
+            }
+        };
 
         // Build the new index for existing values:
         if self.indices.len() > 0 {
@@ -279,6 +297,9 @@ impl PersistentState {
         });
 
         let full_name = format!("{}.db", name);
+        // We use a column for each index, and one for meta information.
+        // When opening the DB the exact same column families needs to be used,
+        // so we'll have to retrieve the existing ones first:
         let column_family_names = match DB::list_cf(&opts, &full_name) {
             Ok(cfs) => cfs,
             Err(_err) => vec![META_CF.to_string()],
@@ -869,11 +890,7 @@ mod tests {
         assert_eq!(size, 0);
     }
 
-    // TODO(ekmartin): This can happen in cases where add_key crashes before calling
-    // self.persist_meta(). We'll need to remove any rows starting with the IndexID
-    // self.indices.len() during recovery.
     #[test]
-    #[allow_fail]
     fn persistent_state_dangling_indices() {
         let name = get_name("persistent_state_dangling_indices");
         let mut rows = vec![];
@@ -901,13 +918,8 @@ mod tests {
 
             // Pretend we crashed right before calling self.persist_meta in self.add_key by
             // removing the last index from indices:
-            let meta = PersistentMeta {
-                indices: vec![vec![0]],
-                epoch: 1,
-            };
-
-            let data = bincode::serialize(&meta).unwrap();
-            state.db.as_ref().unwrap().put(META_KEY, &data).unwrap();
+            state.indices.truncate(1);
+            state.persist_meta();
         }
 
         // During recovery we should now remove all the rows for the second index,
