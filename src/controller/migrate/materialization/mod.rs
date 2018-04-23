@@ -305,7 +305,11 @@ impl Materializations {
             }
 
             // allow views to force full (XXX)
-            if graph[ni].name().starts_with("FULL_") {
+            if graph[ni].name().starts_with("FULL_")
+                || graph
+                    .neighbors_directed(ni, petgraph::EdgeDirection::Outgoing)
+                    .any(|n| graph[n].name().starts_with("FULL_"))
+            {
                 able = false;
             }
 
