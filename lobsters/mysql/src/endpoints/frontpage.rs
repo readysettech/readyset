@@ -14,13 +14,14 @@ where
     F: 'static + Future<Item = my::Conn, Error = my::errors::Error>,
 {
     let main = c.and_then(|c| {
+        // NOTE: the filters should be *before* the topk
         c.query(
-            "SELECT `story_with_hotness`.* \
-             FROM `story_with_hotness` \
-             WHERE `story_with_hotness`.`merged_story_id` IS NULL \
-             AND `story_with_hotness`.`is_expired` = 0 \
-             AND `story_with_hotness`.`score` >= 0 \
-             ORDER BY hotness LIMIT 51 OFFSET 0",
+            "SELECT `stories`.* \
+             FROM `frontpage_ids` \
+             JOIN `stories` ON (stories.id = frontpage_ids.id) \
+             WHERE `stories`.`merged_story_id` IS NULL \
+             AND `stories`.`is_expired` = 0 \
+             AND `stories`.`score` >= 0",
         )
     }).and_then(|stories| {
             stories.reduce_and_drop(

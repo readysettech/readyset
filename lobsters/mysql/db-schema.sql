@@ -36,94 +36,128 @@ DROP TABLE IF EXISTS `users` CASCADE;
 CREATE TABLE `users` (`id` int unsigned NOT NULL AUTO_INCREMENT PRIMARY KEY, `username` varchar(50) COLLATE utf8mb4_general_ci, `email` varchar(100) COLLATE utf8mb4_general_ci, `password_digest` varchar(75) COLLATE utf8mb4_general_ci, `created_at` datetime, `is_admin` tinyint(1) DEFAULT 0, `password_reset_token` varchar(75) COLLATE utf8mb4_general_ci, `session_token` varchar(75) COLLATE utf8mb4_general_ci DEFAULT '' NOT NULL, `about` mediumtext COLLATE utf8mb4_general_ci, `invited_by_user_id` int, `is_moderator` tinyint(1) DEFAULT 0, `pushover_mentions` tinyint(1) DEFAULT 0, `rss_token` varchar(75) COLLATE utf8mb4_general_ci, `mailing_list_token` varchar(75) COLLATE utf8mb4_general_ci, `mailing_list_mode` int DEFAULT 0, `karma` int DEFAULT 0 NOT NULL, `banned_at` datetime, `banned_by_user_id` int, `banned_reason` varchar(200) COLLATE utf8mb4_general_ci, `deleted_at` datetime, `disabled_invite_at` datetime, `disabled_invite_by_user_id` int, `disabled_invite_reason` varchar(200), `settings` text,  INDEX `mailing_list_enabled`  (`mailing_list_mode`), UNIQUE INDEX `mailing_list_token`  (`mailing_list_token`), UNIQUE INDEX `password_reset_token`  (`password_reset_token`), UNIQUE INDEX `rss_token`  (`rss_token`), UNIQUE INDEX `session_hash`  (`session_token`), UNIQUE INDEX `username`  (`username`)) ENGINE=InnoDB DEFAULT CHARSET=utf8;
 DROP TABLE IF EXISTS `votes` CASCADE;
 CREATE TABLE `votes` (`id` bigint unsigned NOT NULL AUTO_INCREMENT PRIMARY KEY, `user_id` int unsigned NOT NULL, `story_id` int unsigned NOT NULL, `comment_id` int unsigned, `vote` tinyint NOT NULL, `reason` varchar(1),  INDEX `index_votes_on_comment_id`  (`comment_id`),  INDEX `user_id_comment_id`  (`user_id`, `comment_id`),  INDEX `user_id_story_id`  (`user_id`, `story_id`)) ENGINE=InnoDB DEFAULT CHARSET=utf8;
+
 -----------------------------------------------------
 -- Make views for all the computed columns
-CREATE VIEW `story_tag_hotness` AS
-SELECT stories.id, SUM(tags.hotness_mod) AS hotness FROM stories
- JOIN taggings ON (taggings.story_id = stories.id)
+CREATE VIEW `FULL_story_tag_score` AS
+SELECT taggings.story_id AS id, SUM(tags.hotness_mod) AS score
+ FROM taggings
  JOIN tags ON (tags.id = taggings.tag_id)
-GROUP BY stories.id;
+GROUP BY taggings.story_id;
 
+-- Comment score tracking
 CREATE VIEW comment_upvotes AS SELECT votes.comment_id, votes.user_id FROM votes WHERE votes.story_id IS NULL AND votes.vote = 1;
 CREATE VIEW comment_downvotes AS SELECT votes.comment_id, votes.user_id FROM votes WHERE votes.story_id IS NULL AND votes.vote = 0;
+
+CREATE VIEW FULL_comment_upvotes AS
+SELECT comment_upvotes.comment_id AS id, COUNT(*) as votes
+FROM comment_upvotes GROUP BY comment_upvotes.comment_id;
+
+CREATE VIEW FULL_comment_downvotes AS
+SELECT comment_downvotes.comment_id AS id, COUNT(*) as votes
+FROM comment_downvotes GROUP BY comment_downvotes.comment_id;
+
+CREATE VIEW comment_votes AS
+(SELECT FULL_comment_upvotes.id, FULL_comment_upvotes.votes AS score FROM FULL_comment_upvotes)
+UNION
+(SELECT FULL_comment_downvotes.id, 0 - FULL_comment_downvotes.votes AS score FROM FULL_comment_downvotes);
+
+CREATE VIEW FULL_comment_score AS
+SELECT comment_votes.id, SUM(comment_votes.score) as score
+FROM comment_votes GROUP BY comment_votes.id;
+
+-- Story score tracking
 CREATE VIEW story_upvotes AS SELECT votes.story_id, votes.user_id FROM votes WHERE votes.comment_id IS NULL AND votes.vote = 1;
 CREATE VIEW story_downvotes AS SELECT votes.story_id, votes.user_id FROM votes WHERE votes.comment_id IS NULL AND votes.vote = 0;
 
--- CREATE VIEW `comment_with_votes` AS
--- SELECT comments.*,
---        upvotes.votes AS upvotes, downvotes.votes AS downvotes,
---        upvotes.votes - downvotes.votes AS score
---  FROM comments
--- LEFT JOIN (
--- 	SELECT comment_upvotes.comment_id, COUNT(*) as votes
--- 	FROM comment_upvotes
--- 	GROUP BY comment_upvotes.comment_id
--- ) AS upvotes ON (comments.id = upvotes.comment_id)
--- LEFT JOIN (
--- 	SELECT comment_downvotes.comment_id, COUNT(*) as votes
--- 	FROM comment_downvotes
--- 	GROUP BY comment_downvotes.comment_id
--- ) AS downvotes ON (comments.id = downvotes.comment_id);
-CREATE VIEW `comment_with_votes` AS SELECT comments.*, upvotes.votes AS upvotes, downvotes.votes AS downvotes, upvotes.votes - downvotes.votes AS score FROM comments LEFT JOIN (SELECT comment_upvotes.comment_id, COUNT(*) as votes FROM comment_upvotes GROUP BY comment_upvotes.comment_id) AS upvotes ON (comments.id = upvotes.comment_id) LEFT JOIN (SELECT comment_downvotes.comment_id, COUNT(*) as votes FROM comment_downvotes GROUP BY comment_downvotes.comment_id) AS downvotes ON (comments.id = downvotes.comment_id);
+CREATE VIEW FULL_story_upvotes AS
+SELECT story_upvotes.story_id AS id, COUNT(*) as votes
+FROM story_upvotes GROUP BY story_upvotes.story_id;
 
--- CREATE VIEW `story_with_votes` AS
--- SELECT stories.*,
---        upvotes.votes AS upvotes, downvotes.votes AS downvotes,
---        upvotes.votes - downvotes.votes AS score
---  FROM stories
--- LEFT JOIN (
--- 	SELECT story_upvotes.story_id, COUNT(*) as votes
--- 	FROM story_upvotes
--- 	GROUP BY story_upvotes.story_id
--- ) AS upvotes ON (stories.id = upvotes.story_id)
--- LEFT JOIN (
--- 	SELECT story_downvotes.story_id, COUNT(*) as votes
--- 	FROM story_downvotes
--- 	GROUP BY story_downvotes.story_id
--- ) AS downvotes ON (stories.id = downvotes.story_id);
-CREATE VIEW `story_with_votes` AS SELECT stories.*, upvotes.votes AS upvotes, downvotes.votes AS downvotes, upvotes.votes - downvotes.votes AS score FROM stories LEFT JOIN (SELECT story_upvotes.story_id, COUNT(*) as votes FROM story_upvotes GROUP BY story_upvotes.story_id) AS upvotes ON (stories.id = upvotes.story_id) LEFT JOIN (SELECT story_downvotes.story_id, COUNT(*) as votes FROM story_downvotes GROUP BY story_downvotes.story_id) AS downvotes ON (stories.id = downvotes.story_id);
+CREATE VIEW FULL_story_downvotes AS
+SELECT story_downvotes.story_id AS id, COUNT(*) as votes
+FROM story_downvotes GROUP BY story_downvotes.story_id;
 
-CREATE VIEW non_author_comment_with_votes AS
-SELECT comment_with_votes.story_id,
-       comment_with_votes.score
-  FROM comment_with_votes
-  JOIN stories ON (comment_with_votes.story_id = stories.id)
- WHERE comment_with_votes.user_id <> stories.user_id;
+CREATE VIEW story_votes AS
+(SELECT FULL_story_upvotes.id, FULL_story_upvotes.votes AS score FROM FULL_story_upvotes)
+UNION
+(SELECT FULL_story_downvotes.id, 0 - FULL_story_downvotes.votes AS score FROM FULL_story_downvotes);
 
-CREATE VIEW story_comment_score AS
-SELECT non_author_comment_with_votes.story_id AS id,
-       SUM(non_author_comment_with_votes.score) AS score
-  FROM non_author_comment_with_votes
-GROUP BY non_author_comment_with_votes.story_id;
+CREATE VIEW FULL_story_score AS
+SELECT story_votes.id, SUM(story_votes.score) as score
+FROM story_votes GROUP BY story_votes.id;
 
-CREATE VIEW combined_story_score AS
-SELECT story_with_votes.merged_story_id AS id, SUM(story_with_votes.score) AS score
-  FROM story_with_votes
- WHERE story_with_votes.merged_story_id IS NOT NULL
-GROUP BY story_with_votes.merged_story_id;
+-- Useful intermediate views
+CREATE VIEW `comment_with_votes` AS
+SELECT comments.*,
+       FULL_comment_upvotes.votes AS upvotes,
+       FULL_comment_downvotes.votes AS downvotes,
+       FULL_comment_upvotes.votes - FULL_comment_downvotes.votes AS score,
+FROM comments
+LEFT JOIN FULL_comment_upvotes ON (comments.id = FULL_comment_upvotes.id)
+LEFT JOIN FULL_comment_downvotes ON (comments.id = FULL_comment_downvotes.id);
 
+CREATE VIEW `story_with_votes` AS
+SELECT stories.*,
+       FULL_story_upvotes.votes AS upvotes,
+       FULL_story_downvotes.votes AS downvotes,
+       FULL_story_upvotes.votes - FULL_story_downvotes.votes AS score,
+FROM stories
+LEFT JOIN FULL_story_upvotes ON (stories.id = FULL_story_upvotes.id)
+LEFT JOIN FULL_story_downvotes ON (stories.id = FULL_story_downvotes.id);
+
+-- Hotness computation
+-- XXX: bah.. pretty sad that this join will end up full...
+CREATE VIEW FULL_non_author_comments AS
+SELECT comments.id, comments.story_id
+  FROM comments
+  JOIN stories ON (comments.story_id = stories.id)
+ WHERE comments.user_id <> stories.user_id;
+
+CREATE VIEW FULL_story_comment_score AS
+SELECT FULL_non_author_comments.story_id AS id,
+       SUM(FULL_comment_score.score) AS score
+FROM FULL_non_author_comments
+JOIN FULL_comment_score ON (FULL_comment_score.id = FULL_non_author_comments.id)
+GROUP BY FULL_non_author_comments.story_id;
+
+CREATE VIEW FULL_merged_story_score AS
+SELECT stories.merged_story_id AS id, FULL_story_score.score
+FROM stories
+JOIN FULL_story_score ON (FULL_story_score.id = stories.merged_story_id);
+
+CREATE VIEW all_hotness_components AS
+(SELECT FULL_story_tag_score.id, FULL_story_tag_score.score FROM FULL_story_tag_score)
+UNION
+(SELECT FULL_story_score.id, FULL_story_score.score FROM FULL_story_score)
+UNION
+(SELECT FULL_merged_story_score.id, FULL_merged_story_score.score FROM FULL_merged_story_score)
+UNION
+(SELECT FULL_story_comment_score.id, FULL_story_comment_score.score FROM FULL_story_comment_score);
+
+CREATE VIEW FULL_story_hotness AS
+SELECT all_hotness_components.id, SUM(all_hotness_components.score) as hotness
+FROM all_hotness_components GROUP BY all_hotness_components.id;
+
+-- Frontpage
+CREATE VIEW frontpage_ids AS
+SELECT FULL_story_hotness.*
+FROM FULL_story_hotness
+ORDER BY FULL_story_hotness.hotness
+LIMIT 51 OFFSET 0;
+
+-- Accessor views
+CREATE VIEW story_with_hotness AS
+SELECT stories.*, FULL_story_hotness.hotness
+FROM stories
+LEFT JOIN FULL_story_hotness ON (FULL_story_hotness.id = stories.id);
+
+-- Other derived stats
 CREATE VIEW story_comments AS
 SELECT stories.id, COUNT(comments.id)
 FROM stories
 LEFT JOIN comments ON (stories.id = comments.story_id)
 GROUP BY stories.id;
-
-CREATE VIEW story_hotness_parts AS
-SELECT story_with_votes.*,
-       combined_story_score.score + story_comment_score.score AS cscore,
-       story_tag_hotness.hotness AS tscore
-FROM story_with_votes
-LEFT JOIN combined_story_score ON (combined_story_score.id = story_with_votes.id)
-LEFT JOIN story_comment_score ON (story_comment_score.id = story_with_votes.id)
-LEFT JOIN story_tag_hotness ON (story_tag_hotness.id = story_with_votes.id);
-
-CREATE VIEW story_hotness_part1 AS
-SELECT story_hotness_parts.*, story_hotness_parts.cscore + story_hotness_parts.tscore AS extra
-FROM story_hotness_parts;
-
-CREATE VIEW story_with_hotness AS
-SELECT story_hotness_part1.*, story_hotness_part1.score + story_hotness_part1.extra AS hotness
-FROM story_hotness_part1;
 
 CREATE VIEW user_comments AS
 SELECT comments.user_id AS id, COUNT(comments.id) AS comments
@@ -152,6 +186,7 @@ SELECT users.id, user_comment_karma.karma + user_story_karma.karma AS karma
 FROM users
 LEFT JOIN user_comment_karma ON (user_comment_karma.id = users.id)
 LEFT JOIN user_story_karma ON (user_story_karma.id = users.id);
+
 -----------------------------------------------------
 -- Original:
 -- CREATE VIEW `replying_comments` AS       select `read_ribbons`.`user_id` AS `user_id`,`comments`.`id` AS `comment_id`,`read_ribbons`.`story_id` AS `story_id`,`comments`.`parent_comment_id` AS `parent_comment_id`,`comments`.`created_at` AS `comment_created_at`,`parent_comments`.`user_id` AS `parent_comment_author_id`,`comments`.`user_id` AS `comment_author_id`,`stories`.`user_id` AS `story_author_id`,(`read_ribbons`.`updated_at` < `comments`.`created_at`) AS `is_unread`,(select `votes`.`vote` from `votes` where ((`votes`.`user_id` = `read_ribbons`.`user_id`) and (`votes`.`comment_id` = `comments`.`id`))) AS `current_vote_vote`,(select `votes`.`reason` from `votes` where ((`votes`.`user_id` = `read_ribbons`.`user_id`) and (`votes`.`comment_id` = `comments`.`id`))) AS `current_vote_reason` from (((`read_ribbons` join `comments` on((`comments`.`story_id` = `read_ribbons`.`story_id`))) join `stories` on((`stories`.`id` = `comments`.`story_id`))) left join `comments` `parent_comments` on((`parent_comments`.`id` = `comments`.`parent_comment_id`))) where ((`read_ribbons`.`is_following` = 1) and (`comments`.`user_id` <> `read_ribbons`.`user_id`) and (`comments`.`is_deleted` = 0) and (`comments`.`is_moderated` = 0) and ((`parent_comments`.`user_id` = `read_ribbons`.`user_id`) or (isnull(`parent_comments`.`user_id`) and (`stories`.`user_id` = `read_ribbons`.`user_id`))) and ((`comments`.`upvotes` - `comments`.`downvotes`) >= 0) and (isnull(`parent_comments`.`id`) or ((`parent_comments`.`upvotes` - `parent_comments`.`downvotes`) >= 0)));
@@ -159,24 +194,25 @@ LEFT JOIN user_story_karma ON (user_story_karma.id = users.id);
 -- Modified:
 -- CREATE VIEW `replying_comments_for_count` AS
 -- 	SELECT `read_ribbons`.`user_id`,
--- 	       `read_ribbons`.`story_id`,
--- 	       `comment_with_votes`.`id`,
+-- 	       `comments`.`id`,
 -- 	FROM `read_ribbons`
 -- 	JOIN `stories` ON (`stories`.`id` = `read_ribbons`.`story_id`)
--- 	JOIN `comment_with_votes` ON (`comment_with_votes`.`story_id` = `read_ribbons`.`story_id`)
+-- 	JOIN `comments` ON (`comments`.`story_id` = `read_ribbons`.`story_id`)
 -- 	LEFT JOIN `parent_comments`
--- 	ON (`parent_comments`.`id` = `comment_with_votes`.`parent_comment_id`)
+-- 	ON (`parent_comments`.`id` = `comments`.`parent_comment_id`)
+--      LEFT JOIN FULL_comment_score ON (FULL_comment_score.id = comments.id)
+--      LEFT JOIN FULL_parent_comment_score ON (FULL_parent_comment_score.id = parent_comments.id)
 -- 	WHERE `read_ribbons`.`is_following` = 1
--- 	AND `comment_with_votes`.`user_id` <> `read_ribbons`.`user_id`
--- 	AND `comment_with_votes`.`is_deleted` = 0
--- 	AND `comment_with_votes`.`is_moderated` = 0
--- 	AND `comment_with_votes`.`score` >= 0
--- 	AND `read_ribbons`.`updated_at` < `comment_with_votes`.`created_at`
+-- 	AND `comments`.`user_id` <> `read_ribbons`.`user_id`
+-- 	AND `comments`.`is_deleted` = 0
+-- 	AND `comments`.`is_moderated` = 0
+-- 	AND `FULL_comment_score`.`score` >= 0
+-- 	AND `read_ribbons`.`updated_at` < `comments`.`created_at`
 -- 	AND (
 --      (
 --      	`parent_comments`.`user_id` = `read_ribbons`.`user_id`
 --      	AND
---      	`parent_`.`score` >= 0
+--      	`FULL_parent_comment_score`.`score` >= 0
 --      )
 --      OR
 --      (
@@ -188,7 +224,8 @@ LEFT JOIN user_story_karma ON (user_story_karma.id = users.id);
 
 --
 -- Without newlines:
-CREATE VIEW `parent_comments` AS SELECT `comment_with_votes`.* FROM `comment_with_votes`;
-CREATE VIEW `replying_comments_for_count` AS SELECT `read_ribbons`.`user_id`, `read_ribbons`.`story_id`, `comment_with_votes`.`id`, FROM `read_ribbons` JOIN `stories` ON (`stories`.`id` = `read_ribbons`.`story_id`) JOIN `comment_with_votes` ON (`comment_with_votes`.`story_id` = `read_ribbons`.`story_id`) LEFT JOIN `parent_comments` ON (`parent_comments`.`id` = `comment_with_votes`.`parent_comment_id`) WHERE `read_ribbons`.`is_following` = 1 AND `comment_with_votes`.`user_id` <> `read_ribbons`.`user_id` AND `comment_with_votes`.`is_deleted` = 0 AND `comment_with_votes`.`is_moderated` = 0 AND `comment_with_votes`.`score` >= 0 AND `read_ribbons`.`updated_at` < `comment_with_votes`.`created_at` AND ( ( `parent_comments`.`user_id` = `read_ribbons`.`user_id` AND `parent_`.`score` >= 0) OR ( `parent_comments`.`id` IS NULL AND `stories`.`user_id` = `read_ribbons`.`user_id`));
+CREATE VIEW `FULL_parent_comment_score` AS SELECT `FULL_comment_score`.* FROM `FULL_comment_score`;
+CREATE VIEW `parent_comments` AS SELECT `comments`.* FROM `comments`;
+CREATE VIEW `replying_comments_for_count` AS SELECT `read_ribbons`.`user_id`, `comments`.`id`, FROM `read_ribbons` JOIN `stories` ON (`stories`.`id` = `read_ribbons`.`story_id`) JOIN `comments` ON (`comments`.`story_id` = `read_ribbons`.`story_id`) LEFT JOIN `parent_comments` ON (`parent_comments`.`id` = `comments`.`parent_comment_id`) LEFT JOIN FULL_comment_score ON (FULL_comment_score.id = comments.id) LEFT JOIN FULL_parent_comment_score ON (FULL_parent_comment_score.id = parent_comments.id) WHERE `read_ribbons`.`is_following` = 1 AND `comments`.`user_id` <> `read_ribbons`.`user_id` AND `comments`.`is_deleted` = 0 AND `comments`.`is_moderated` = 0 AND `FULL_comment_score`.`score` >= 0 AND `read_ribbons`.`updated_at` < `comments`.`created_at` AND ( ( `parent_comments`.`user_id` = `read_ribbons`.`user_id` AND `FULL_parent_comment_score`.`score` >= 0) OR ( `parent_comments`.`id` IS NULL AND `stories`.`user_id` = `read_ribbons`.`user_id`));
 -----------------------------------------------------
 INSERT INTO `tags` (`tag`) VALUES ('test');
