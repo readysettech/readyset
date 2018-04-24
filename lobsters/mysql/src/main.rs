@@ -75,7 +75,9 @@ impl trawler::LobstersClient for MysqlTrawler {
             if q.starts_with("--") {
                 continue;
             }
-            current_query.push_str(" ");
+            if !current_query.is_empty() {
+                current_query.push_str(" ");
+            }
             current_query.push_str(q);
             if q.ends_with(";") {
                 core.run(c.get_conn().and_then(|c| c.drop_query(&current_query)))
