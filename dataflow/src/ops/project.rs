@@ -1,4 +1,6 @@
 use nom_sql::ArithmeticOperator;
+
+use std::borrow::Cow;
 use std::collections::HashMap;
 use std::fmt;
 
@@ -92,24 +94,24 @@ impl Project {
             self.emit.as_ref().map_or(col, |emit| emit[col])
         }
     }
+}
 
-    fn eval_expression(&self, expression: &ProjectExpression, record: &Record) -> DataType {
-        let left = match expression.left {
-            ProjectExpressionBase::Column(i) => &record[i],
-            ProjectExpressionBase::Literal(ref data) => data,
-        };
+fn eval_expression(expression: &ProjectExpression, record: &[DataType]) -> DataType {
+    let left = match expression.left {
+        ProjectExpressionBase::Column(i) => &record[i],
+        ProjectExpressionBase::Literal(ref data) => data,
+    };
 
-        let right = match expression.right {
-            ProjectExpressionBase::Column(i) => &record[i],
-            ProjectExpressionBase::Literal(ref data) => data,
-        };
+    let right = match expression.right {
+        ProjectExpressionBase::Column(i) => &record[i],
+        ProjectExpressionBase::Literal(ref data) => data,
+    };
 
-        match expression.op {
-            ArithmeticOperator::Add => left + right,
-            ArithmeticOperator::Subtract => left - right,
-            ArithmeticOperator::Multiply => left * right,
-            ArithmeticOperator::Divide => left / right,
-        }
+    match expression.op {
+        ArithmeticOperator::Add => left + right,
+        ArithmeticOperator::Subtract => left - right,
+        ArithmeticOperator::Multiply => left * right,
+        ArithmeticOperator::Divide => left / right,
     }
 }
 
@@ -120,6 +122,79 @@ impl Ingredient for Project {
 
     fn ancestors(&self) -> Vec<NodeIndex> {
         vec![self.src.as_global()]
+    }
+
+    fn can_query_through(&self) -> bool {
+        true
+    }
+
+    fn query_through<'a>(
+        &self,
+        columns: &[usize],
+        key: &KeyType,
+        states: &'a StateMap,
+    ) -> Option<Option<Box<Iterator<Item = Cow<'a, [DataType]>> + 'a>>> {
+        let emit = self.emit.clone();
+        let additional = self.additional.clone();
+        let expressions = self.expressions.clone();
+        states
+            .get(&*self.src)
+            .and_then(move |state| match state.lookup(columns, key) {
+                LookupResult::Some(Cow::Borrowed(rs)) => {
+                    let r = match emit {
+                        Some(emit) => Box::new(rs.iter().map(move |r| {
+                            let mut new_r = Vec::with_capacity(r.len());
+                            for i in emit.iter() {
+                                new_r.push(r[*i].clone());
+                            }
+
+                            if let Some(ref e) = expressions {
+                                new_r.extend(e.into_iter().map(|i| eval_expression(i, &r[..])));
+                            }
+
+                            if let Some(ref a) = additional {
+                                new_r.append(&mut a.clone());
+                            }
+
+                            Cow::from(new_r)
+                        })) as Box<_>,
+                        None => Box::new(rs.iter().map(|r| Cow::from(&r[..]))) as Box<_>,
+                    };
+
+                    Some(Some(r))
+                }
+                LookupResult::Some(Cow::Owned(rs)) => {
+                    let r = match emit {
+                        Some(emit) => Box::new(rs.into_iter().map(move |r| {
+                            let r = r.unpack();
+                            let mut new_r = Vec::with_capacity(r.len());
+                            let mut expr: Vec<DataType> = if let Some(ref e) = expressions {
+                                e.into_iter().map(|i| eval_expression(i, &r[..])).collect()
+                            } else {
+                                vec![]
+                            };
+
+                            new_r.extend(
+                                r.into_iter()
+                                    .enumerate()
+                                    .filter(|(i, _)| emit.iter().any(|e| e == i))
+                                    .map(|(_, c)| c),
+                            );
+
+                            new_r.append(&mut expr);
+                            if let Some(ref a) = additional {
+                                new_r.append(&mut a.clone());
+                            }
+
+                            Cow::from(new_r)
+                        })) as Box<_>,
+                        None => Box::new(rs.into_iter().map(|r| Cow::from(r.unpack()))) as Box<_>,
+                    };
+
+                    Some(Some(r))
+                }
+                LookupResult::Missing => Some(None),
+            })
     }
 
     fn on_connected(&mut self, g: &Graph) {
@@ -164,15 +239,11 @@ impl Ingredient for Project {
                 }
 
                 if let Some(ref e) = self.expressions {
-                    for i in e {
-                        new_r.push(self.eval_expression(i, r));
-                    }
+                    new_r.extend(e.into_iter().map(|i| eval_expression(i, &r[..])));
                 }
 
                 if let Some(ref a) = self.additional {
-                    for i in a {
-                        new_r.push(i.clone());
-                    }
+                    new_r.append(&mut a.clone());
                 }
 
                 **r = new_r;
@@ -425,6 +496,214 @@ mod tests {
         assert_eq!(
             p.narrow_one_row(rec, false),
             vec![vec![0.into(), 0.into(), 2.into()]].into()
+        );
+    }
+
+    fn setup_query_through(
+        mut state: Box<State>,
+        permutation: &[usize],
+        additional: Option<Vec<DataType>>,
+        expressions: Option<Vec<ProjectExpression>>,
+    ) -> (Project, StateMap) {
+        let global = NodeIndex::new(0);
+        let mut index: IndexPair = global.into();
+        let local = unsafe { LocalNodeIndex::make(0) };
+        index.set_local(local);
+
+        let mut states = StateMap::default();
+        let row: Record = vec![1.into(), 2.into(), 3.into()].into();
+        state.add_key(&[0], None);
+        state.process_records(&mut row.into(), None);
+        states.insert(local, state);
+
+        let mut project = Project::new(global, permutation, additional, expressions);
+        let mut remap = HashMap::new();
+        remap.insert(global, index);
+        project.on_commit(global, &remap);
+        (project, states)
+    }
+
+    #[test]
+    fn it_queries_through_all() {
+        let a: DataType = 1.into();
+        let key = KeyType::Single(&a);
+        let state = box MemoryState::default();
+        let (p, states) = setup_query_through(state, &[0, 1, 2], None, None);
+        let expected: Vec<DataType> = vec![1.into(), 2.into(), 3.into()];
+        assert_eq!(
+            expected,
+            p.query_through(&[0], &key, &states)
+                .unwrap()
+                .unwrap()
+                .next()
+                .unwrap()
+                .into_owned(),
+        );
+    }
+
+    #[test]
+    fn it_queries_through_all_persistent() {
+        let a: DataType = 1.into();
+        let key = KeyType::Single(&a);
+        let state = box PersistentState::new(
+            String::from("it_queries_through_all_persistent"),
+            None,
+            &PersistenceParameters::default(),
+        );
+
+        let (p, states) = setup_query_through(state, &[0, 1, 2], None, None);
+        let expected: Vec<DataType> = vec![1.into(), 2.into(), 3.into()];
+        assert_eq!(
+            expected,
+            p.query_through(&[0], &key, &states)
+                .unwrap()
+                .unwrap()
+                .next()
+                .unwrap()
+                .into_owned(),
+        );
+    }
+
+    #[test]
+    fn it_queries_through_some() {
+        let a: DataType = 1.into();
+        let key = KeyType::Single(&a);
+        let state = box MemoryState::default();
+        let (p, states) = setup_query_through(state, &[1], None, None);
+        let expected: Vec<DataType> = vec![2.into()];
+        assert_eq!(
+            expected,
+            p.query_through(&[0], &key, &states)
+                .unwrap()
+                .unwrap()
+                .next()
+                .unwrap()
+                .into_owned(),
+        );
+    }
+
+    #[test]
+    fn it_queries_through_some_persistent() {
+        let a: DataType = 1.into();
+        let key = KeyType::Single(&a);
+        let state = box PersistentState::new(
+            String::from("it_queries_through_some_persistent"),
+            None,
+            &PersistenceParameters::default(),
+        );
+
+        let (p, states) = setup_query_through(state, &[1], None, None);
+        let expected: Vec<DataType> = vec![2.into()];
+        assert_eq!(
+            expected,
+            p.query_through(&[0], &key, &states)
+                .unwrap()
+                .unwrap()
+                .next()
+                .unwrap()
+                .into_owned(),
+        );
+    }
+
+    #[test]
+    fn it_queries_through_w_literals() {
+        let additional = Some(vec![DataType::Int(42)]);
+        let a: DataType = 1.into();
+        let key = KeyType::Single(&a);
+        let state = box MemoryState::default();
+        let (p, states) = setup_query_through(state, &[1], additional, None);
+        let expected: Vec<DataType> = vec![2.into(), 42.into()];
+        assert_eq!(
+            expected,
+            p.query_through(&[0], &key, &states)
+                .unwrap()
+                .unwrap()
+                .next()
+                .unwrap()
+                .into_owned(),
+        );
+    }
+
+    #[test]
+    fn it_queries_through_w_literals_persistent() {
+        let additional = Some(vec![DataType::Int(42)]);
+        let a: DataType = 1.into();
+        let key = KeyType::Single(&a);
+        let state = box PersistentState::new(
+            String::from("it_queries_through_w_literals"),
+            None,
+            &PersistenceParameters::default(),
+        );
+
+        let (p, states) = setup_query_through(state, &[1], additional, None);
+        let expected: Vec<DataType> = vec![2.into(), 42.into()];
+        assert_eq!(
+            expected,
+            p.query_through(&[0], &key, &states)
+                .unwrap()
+                .unwrap()
+                .next()
+                .unwrap()
+                .into_owned(),
+        );
+    }
+
+    #[test]
+    fn it_queries_through_w_arithmetic_and_literals() {
+        let additional = Some(vec![DataType::Int(42)]);
+        let expressions = Some(vec![
+            ProjectExpression {
+                left: ProjectExpressionBase::Column(0),
+                right: ProjectExpressionBase::Column(1),
+                op: ArithmeticOperator::Add,
+            },
+        ]);
+
+        let a: DataType = 1.into();
+        let key = KeyType::Single(&a);
+        let state = box MemoryState::default();
+        let (p, states) = setup_query_through(state, &[1], additional, expressions);
+        let expected: Vec<DataType> = vec![2.into(), (1 + 2).into(), 42.into()];
+        assert_eq!(
+            expected,
+            p.query_through(&[0], &key, &states)
+                .unwrap()
+                .unwrap()
+                .next()
+                .unwrap()
+                .into_owned(),
+        );
+    }
+
+    #[test]
+    fn it_queries_through_w_arithmetic_and_literals_persistent() {
+        let additional = Some(vec![DataType::Int(42)]);
+        let expressions = Some(vec![
+            ProjectExpression {
+                left: ProjectExpressionBase::Column(0),
+                right: ProjectExpressionBase::Column(1),
+                op: ArithmeticOperator::Add,
+            },
+        ]);
+
+        let a: DataType = 1.into();
+        let key = KeyType::Single(&a);
+        let state = box PersistentState::new(
+            String::from("it_queries_through_w_arithmetic_and_literals_persistent"),
+            None,
+            &PersistenceParameters::default(),
+        );
+
+        let (p, states) = setup_query_through(state, &[1], additional, expressions);
+        let expected: Vec<DataType> = vec![2.into(), (1 + 2).into(), 42.into()];
+        assert_eq!(
+            expected,
+            p.query_through(&[0], &key, &states)
+                .unwrap()
+                .unwrap()
+                .next()
+                .unwrap()
+                .into_owned(),
         );
     }
 
