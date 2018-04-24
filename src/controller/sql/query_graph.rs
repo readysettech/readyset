@@ -156,6 +156,8 @@ pub struct QueryGraph {
     /// Establishes an order for join predicates. Each join predicate can be identified by
     /// its (src, dst) pair, and its index in the array of predicates.
     pub join_order: Vec<JoinRef>,
+    /// Global predicates (not associated with a particular relation)
+    pub global_predicates: Vec<ConditionExpression>,
 }
 
 impl QueryGraph {
@@ -165,6 +167,7 @@ impl QueryGraph {
             edges: HashMap::new(),
             columns: Vec::new(),
             join_order: Vec::new(),
+            global_predicates: Vec::new(),
         }
     }
 
@@ -204,6 +207,7 @@ impl Hash for QueryGraph {
         // columns and join_order are Vecs, so already ordered
         self.columns.hash(state);
         self.join_order.hash(state);
+        self.global_predicates.hash(state);
     }
 }
 
@@ -243,7 +247,7 @@ fn classify_conditionals(
     tables: &Vec<Table>,
     local: &mut HashMap<String, Vec<ConditionExpression>>,
     join: &mut Vec<ConditionTree>,
-    global: &mut Vec<ConditionTree>,
+    global: &mut Vec<ConditionExpression>,
     params: &mut Vec<Column>,
 ) {
     use std::cmp::Ordering;
@@ -259,17 +263,24 @@ fn classify_conditionals(
 
     match *ce {
         ConditionExpression::LogicalOp(ref ct) => {
-            // conjunction, check both sides (which must be selection predicates or
-            // atomatic selection predicates)
+            // first, we recurse on both sides, collected the result of nested predicate analysis
+            // in separate collections. What do do with these depends on whether we're an AND or an
+            // OR clause:
+            //  1) AND can be split into separate local predicates one one or more tables
+            //  2) OR predictes must be preserved in their entirety, and we only use the nested
+            //     local predicates discovered to decide if the OR is over one table (so it can
+            //     remain a local predicate) or over several (so it must be a global predicate)
             let mut new_params = Vec::new();
             let mut new_join = Vec::new();
             let mut new_local = HashMap::new();
+            let mut new_global = Vec::new();
+
             classify_conditionals(
                 ct.left.as_ref(),
                 tables,
                 &mut new_local,
                 &mut new_join,
-                global,
+                &mut new_global,
                 &mut new_params,
             );
             classify_conditionals(
@@ -277,30 +288,38 @@ fn classify_conditionals(
                 tables,
                 &mut new_local,
                 &mut new_join,
-                global,
+                &mut new_global,
                 &mut new_params,
             );
 
             match ct.operator {
-                Operator::And => for (t, ces) in new_local {
-                    assert!(
-                        ces.len() <= 2,
-                        "can only combine two or fewer ConditionExpression's"
-                    );
-                    if ces.len() == 2 {
-                        let new_ce = ConditionExpression::LogicalOp(ConditionTree {
-                            operator: Operator::And,
-                            left: Box::new(ces.first().unwrap().clone()),
-                            right: Box::new(ces.last().unwrap().clone()),
-                        });
+                Operator::And => {
+                    //
+                    for (t, ces) in new_local {
+                        // conjunction, check if either side had a local predicate
+                        assert!(
+                            ces.len() <= 2,
+                            "can only combine two or fewer ConditionExpression's"
+                        );
+                        if ces.len() == 2 {
+                            let new_ce = ConditionExpression::LogicalOp(ConditionTree {
+                                operator: Operator::And,
+                                left: Box::new(ces.first().unwrap().clone()),
+                                right: Box::new(ces.last().unwrap().clone()),
+                            });
 
-                        let e = local.entry(t.to_string()).or_default();
-                        e.push(new_ce);
-                    } else {
-                        let e = local.entry(t.to_string()).or_default();
-                        e.extend(ces);
+                            let e = local.entry(t.to_string()).or_default();
+                            e.push(new_ce);
+                        } else {
+                            let e = local.entry(t.to_string()).or_default();
+                            e.extend(ces);
+                        }
                     }
-                },
+
+                    // one side of the AND might be a global predicate, so we need to keep
+                    // new_global around
+                    global.extend(new_global);
+                }
                 Operator::Or => {
                     assert!(
                         new_join.is_empty(),
@@ -310,13 +329,10 @@ fn classify_conditionals(
                         new_params.is_empty(),
                         "can't handle OR expressions between query parameter predicates"
                     );
-                    assert_eq!(
-                        new_local.keys().len(),
-                        1,
-                        "can't handle OR expressions between different tables"
-                    );
-                    for (t, ces) in new_local {
-                        assert_eq!(ces.len(), 2, "should combine only 2 ConditionExpression's");
+                    if new_local.keys().len() == 1 && new_global.is_empty() {
+                        // OR over a single table => local predicate
+                        let (t, ces) = new_local.into_iter().next().unwrap();
+                        assert_eq!(ces.len(), 2, "should combine only 2 ConditionExpressions");
                         let new_ce = ConditionExpression::LogicalOp(ConditionTree {
                             operator: Operator::Or,
                             left: Box::new(ces.first().unwrap().clone()),
@@ -325,6 +341,9 @@ fn classify_conditionals(
 
                         let e = local.entry(t.to_string()).or_default();
                         e.push(new_ce);
+                    } else {
+                        // OR between different tables => global predicate
+                        global.push(ce.clone())
                     }
                 }
                 _ => unreachable!(),
@@ -367,11 +386,11 @@ fn classify_conditionals(
                                         unimplemented!();
                                     }
                                 } else {
-                                    // not a comma join, just an ordinary comparison
-                                    // XXX(malte): should this be a global predicate?
-                                    if !global.contains(ct) {
-                                        global.push(ct.clone());
-                                    }
+                                    // not a comma join, just an ordinary comparison with a
+                                    // computed column. This must be a global predicate because it
+                                    // crosses "tables" (the computed column has no associated
+                                    // table)
+                                    global.push(ce.clone());
                                 }
                             } else {
                                 panic!("left hand side of comparison must be field");
@@ -392,8 +411,9 @@ fn classify_conditionals(
                                     let e = local.entry(lf.table.clone().unwrap()).or_default();
                                     e.push(ce.clone());
                                 } else {
-                                    // TODO(malte): not entirely clear what we should do for
-                                    // computed columns here
+                                    // comparisons between computed columns and literals are global
+                                    // predicates
+                                    global.push(ce.clone());
                                 }
                             }
                         }
@@ -522,13 +542,20 @@ pub fn to_query_graph(st: &SelectStatement) -> Result<QueryGraph, String> {
 
                         match *cond {
                             ConditionExpression::ComparisonOp(ref ct) => {
-                                assert_eq!(tables_mentioned.len(), 2);
                                 // XXX(malte): these should always be in query order; I think they
                                 // usually are in practice, but there is no guarantee since we just
                                 // extract them in whatever order they're mentiond in the join
                                 // predicate in
-                                left_table = tables_mentioned.remove(0);
-                                right_table = tables_mentioned.remove(0);
+                                if tables_mentioned.len() == 2 {
+                                    left_table = tables_mentioned.remove(0);
+                                    right_table = tables_mentioned.remove(0);
+                                } else if tables_mentioned.len() == 1 {
+                                    // just one table mentioned --> this is a self-join
+                                    left_table = tables_mentioned.remove(0);
+                                    right_table = left_table.clone();
+                                } else {
+                                    unreachable!("more than 2 tables mentioned in join condition!");
+                                };
 
                                 // the condition tree might specify tables in opposite order to
                                 // their join order in the query; if so, flip them
@@ -589,7 +616,7 @@ pub fn to_query_graph(st: &SelectStatement) -> Result<QueryGraph, String> {
 
     if let Some(ref cond) = st.where_clause {
         let mut local_predicates = HashMap::new();
-        let mut global_predicates = Vec::<ConditionTree>::new();
+        let mut global_predicates = Vec::new();
         let mut query_parameters = Vec::new();
         // Let's classify the predicates we have in the query
         classify_conditionals(
@@ -669,6 +696,9 @@ pub fn to_query_graph(st: &SelectStatement) -> Result<QueryGraph, String> {
                 }
             }
         }
+
+        // 4. Add global predicates
+        qg.global_predicates = global_predicates;
     }
 
     // Adds a computed column to the query graph if the given column has a function:

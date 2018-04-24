@@ -309,15 +309,25 @@ impl Materializations {
             }
 
             // we are already fully materialized, so can't be made partial
-            if !new.contains(&ni) && self.have.contains_key(&ni) && !self.partial.contains(&ni) {
+            if !new.contains(&ni)
+                && self.added.get(&ni).map(|i| i.len()).unwrap_or(0)
+                    != self.have.get(&ni).map(|i| i.len()).unwrap_or(0)
+                && !self.partial.contains(&ni)
+            {
                 able = false;
             }
 
-            // we have a full materialization below us
+            // do we have a full materialization below us?
             let mut stack: Vec<_> = graph
                 .neighbors_directed(ni, petgraph::EdgeDirection::Outgoing)
                 .collect();
             while let Some(child) = stack.pop() {
+                // allow views to force full (XXX)
+                if graph[ni].name().starts_with("FULL_") {
+                    stack.clear();
+                    able = false;
+                }
+
                 if self.have.contains_key(&child) {
                     // materialized child -- don't need to keep walking along this path
                     if !self.partial.contains(&child) {
@@ -452,10 +462,8 @@ impl Materializations {
                 None
             }
 
-            // TODO: technically this is insufficient, because we could have made an existing
-            // node fully materialized (I think).
-            for &ni in new {
-                if self.partial.contains(&ni) || !self.have.contains_key(&ni) {
+            for (&ni, _) in &self.added {
+                if self.partial.contains(&ni) {
                     continue;
                 }
 
@@ -464,6 +472,64 @@ impl Materializations {
                               "full" => ni.index(),
                               "partial" => pi.index());
                     unimplemented!();
+                }
+            }
+        }
+
+        // check that no node is partial over a subset of the indices in its parent
+        {
+            for (&ni, added) in &self.added {
+                if !self.partial.contains(&ni) {
+                    continue;
+                }
+
+                for index in added {
+                    let paths =
+                        keys::provenance_of(graph, ni, &index[..], plan::Plan::on_join(graph));
+
+                    for path in paths {
+                        for (pni, columns) in path {
+                            if columns.iter().any(|c| c.is_none()) {
+                                break;
+                            } else if self.partial.contains(&pni) {
+                                for index in &self.have[&pni] {
+                                    // is this node partial over some of the child's partial
+                                    // columns, but not others? if so, we run into really sad
+                                    // situations where the parent could miss in its state despite
+                                    // the child having state present for that key.
+
+                                    // do we share a column?
+                                    if index.iter().all(|&c| !columns.contains(&Some(c))) {
+                                        continue;
+                                    }
+
+                                    // is there a column we *don't* share?
+                                    let unshared = index
+                                        .iter()
+                                        .map(|&c| c)
+                                        .find(|&c| !columns.contains(&Some(c)))
+                                        .or_else(|| {
+                                            columns
+                                                .iter()
+                                                .map(|c| c.unwrap())
+                                                .find(|c| !index.contains(&c))
+                                        });
+                                    if let Some(not_shared) = unshared {
+                                        crit!(self.log, "partially overlapping partial indices";
+                                                  "parent" => pni.index(),
+                                                  "pcols" => ?index,
+                                                  "child" => ni.index(),
+                                                  "cols" => ?columns,
+                                                  "conflict" => not_shared,
+                                        );
+                                        unimplemented!();
+                                    }
+                                }
+                            } else if self.have.contains_key(&ni) {
+                                break;
+                            }
+                        }
+                    }
                 }
             }
         }
@@ -492,6 +558,15 @@ impl Materializations {
 
             // are they trying to make a non-materialized node materialized?
             if self.have[&node] == index_on {
+                if self.partial.contains(&node) {
+                    crit!(
+                        self.log,
+                        "attempting to make old non-materialized node partial";
+                        "node" => node.index(),
+                    );
+                    unimplemented!();
+                }
+
                 warn!(self.log, "materializing existing non-materialized node";
                       "node" => node.index(),
                       "cols" => ?index_on);

@@ -95,10 +95,13 @@ impl AliasRemoval for SqlQuery {
                         }
                     }
 
-                    for t in &sq.tables {
+                    for t in &mut sq.tables {
                         match t.alias {
                             None => (),
-                            Some(ref a) => add_alias(a, &t.name),
+                            Some(ref a) => {
+                                add_alias(a, &t.name);
+                                t.alias = None;
+                            }
                         }
                     }
                     for jc in &sq.join {

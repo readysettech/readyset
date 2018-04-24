@@ -321,7 +321,12 @@ impl Ingredient for TopK {
         }
     }
 
-    fn on_eviction(&mut self, key_columns: &[usize], keys: &[Vec<DataType>]) {
+    fn on_eviction(
+        &mut self,
+        _: LocalNodeIndex,
+        key_columns: &[usize],
+        keys: &mut Vec<Vec<DataType>>,
+    ) {
         assert_eq!(key_columns, &self.group_by[..]);
         for key in keys {
             self.counts.remove(key);

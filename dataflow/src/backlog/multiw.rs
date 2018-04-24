@@ -11,6 +11,14 @@ pub(super) enum Handle {
 }
 
 impl Handle {
+    pub fn is_empty(&self) -> bool {
+        match *self {
+            Handle::Single(ref h) => h.is_empty(),
+            Handle::Double(ref h) => h.is_empty(),
+            Handle::Many(ref h) => h.is_empty(),
+        }
+    }
+
     pub fn clear(&mut self, k: Key) {
         match *self {
             Handle::Single(ref mut h) => h.clear(key_to_single(k).into_owned()),
@@ -113,7 +121,7 @@ impl Handle {
                             // last record. this means that future lookups will fail, and cause a
                             // replay, which will produce an empty result. this will work, but is
                             // somewhat inefficient.
-                            memory_delta - r.deep_size_of() as isize;
+                            memory_delta -= r.deep_size_of() as isize;
                             h.remove(r[key[0]].clone(), r);
                         }
                         Record::BaseOperation(..) => unreachable!(),
@@ -130,7 +138,7 @@ impl Handle {
                             h.insert((r[key[0]].clone(), r[key[1]].clone()), r);
                         }
                         Record::Negative(r) => {
-                            memory_delta - r.deep_size_of() as isize;
+                            memory_delta -= r.deep_size_of() as isize;
                             h.remove((r[key[0]].clone(), r[key[1]].clone()), r);
                         }
                         Record::BaseOperation(..) => unreachable!(),
@@ -146,7 +154,7 @@ impl Handle {
                         h.insert(key, r);
                     }
                     Record::Negative(r) => {
-                        memory_delta - r.deep_size_of() as isize;
+                        memory_delta -= r.deep_size_of() as isize;
                         h.remove(key, r);
                     }
                     Record::BaseOperation(..) => unreachable!(),

@@ -37,6 +37,65 @@ fn sanitize_leaf_column(mut c: Column, view_name: &str) -> Column {
     c
 }
 
+/// Returns all collumns used in a predicate
+fn predicate_columns(ce: &ConditionExpression) -> HashSet<Column> {
+    use nom_sql::ConditionExpression::*;
+
+    let mut cols = HashSet::new();
+    match *ce {
+        LogicalOp(ref ct) | ComparisonOp(ref ct) => {
+            cols.extend(predicate_columns(&ct.left));
+            cols.extend(predicate_columns(&ct.right));
+        }
+        Base(ConditionBase::Field(ref c)) => {
+            cols.insert(c.clone());
+        }
+        Bracketed(ref ce) => {
+            cols.extend(predicate_columns(&ce));
+        }
+        NegationOp(_) => unreachable!("negations should have been eliminated"),
+        _ => (),
+    }
+
+    cols
+}
+
+fn value_columns_needed_for_predicates(
+    value_columns: &Vec<OutputColumn>,
+    predicates: &Vec<ConditionExpression>,
+) -> Vec<(Column, OutputColumn)> {
+    let pred_columns: HashSet<_> = predicates.iter().fold(HashSet::new(), |mut acc, p| {
+        acc.extend(predicate_columns(p));
+        acc
+    });
+
+    value_columns
+        .iter()
+        .filter_map(|oc| match *oc {
+            OutputColumn::Arithmetic(ref ac) => Some((
+                Column {
+                    name: ac.name.clone(),
+                    table: ac.table.clone(),
+                    alias: None,
+                    function: None,
+                },
+                oc.clone(),
+            )),
+            OutputColumn::Literal(ref lc) => Some((
+                Column {
+                    name: lc.name.clone(),
+                    table: lc.table.clone(),
+                    alias: None,
+                    function: None,
+                },
+                oc.clone(),
+            )),
+            OutputColumn::Data(_) => None,
+        })
+        .filter(|(c, _)| pred_columns.contains(c))
+        .collect()
+}
+
 #[derive(Clone, Debug)]
 pub struct SqlToMirConverter {
     base_schemas: HashMap<String, Vec<(usize, Vec<ColumnSpecification>)>>,
@@ -313,6 +372,7 @@ impl SqlToMirConverter {
                 vec![],
             )
         } else {
+            final_node.borrow_mut().columns = sanitized_columns;
             final_node
         };
 
@@ -648,23 +708,33 @@ impl SqlToMirConverter {
             .iter()
             .cloned()
             .collect();
+        let num_ucols = ucols.len();
 
         // Find columns present in all ancestors
+        // XXX(malte): this currently matches columns by **name** rather than by table and name,
+        // which can go wrong if there are multiple columns of the same name in the inputs to the
+        // union. Unfortunately, we have to do it by name here because the nested queries in
+        // compound SELECT rewrite the table name on their output columns.
         let mut selected_cols = HashSet::new();
         for c in ucols {
             if ancestors
                 .iter()
-                .all(|a| a.borrow().columns().iter().any(|ac| ac.name == c.name))
+                .all(|a| a.borrow().columns().iter().any(|ac| *ac.name == c.name))
             {
                 selected_cols.insert(c.name.clone());
             }
         }
+        assert_eq!(
+            num_ucols,
+            selected_cols.len(),
+            "union drops ancestor columns"
+        );
 
         for ancestor in ancestors.iter() {
             let mut acols: Vec<Column> = Vec::new();
             for ac in ancestor.borrow().columns() {
                 if selected_cols.contains(&ac.name)
-                    && acols.iter().find(|ref c| ac.name == c.name).is_none()
+                    && acols.iter().find(|c| ac.name == *c.name).is_none()
                 {
                     acols.push(ac.clone());
                 }
@@ -674,7 +744,9 @@ impl SqlToMirConverter {
 
         assert!(
             emit.iter().all(|e| e.len() == selected_cols.len()),
-            "all ancestors columns must have the same size"
+            "all ancestors columns must have the same size, but got emit: {:?}, selected: {:?}",
+            emit,
+            selected_cols
         );
 
         MirNode::new(
@@ -780,12 +852,17 @@ impl SqlToMirConverter {
         // move alias to name in computed column (which needs not to
         // match against a parent node column, and is often aliased)
         let computed_col = match computed_col.alias {
-            None => computed_col.clone(),
+            None => Column {
+                name: computed_col.name.clone(),
+                alias: None,
+                table: computed_col.table.clone(),
+                function: None,
+            },
             Some(ref a) => Column {
                 name: a.clone(),
                 alias: None,
                 table: computed_col.table.clone(),
-                function: computed_col.function.clone(),
+                function: None,
             },
         };
 
@@ -951,7 +1028,7 @@ impl SqlToMirConverter {
                         c.table.clone()
                     },
                     alias: None,
-                    function: c.function.clone(),
+                    function: if is_leaf { None } else { c.function.clone() },
                 },
                 None => {
                     // if this is the leaf node of a query, it represents a view, so we rewrite the
@@ -966,7 +1043,11 @@ impl SqlToMirConverter {
             .chain(names.into_iter().map(|n| Column {
                 name: n,
                 alias: None,
-                table: Some(String::from(name)),
+                table: if is_leaf {
+                    Some(String::from(name))
+                } else {
+                    None
+                },
                 function: None,
             }))
             .collect();
@@ -1105,26 +1186,6 @@ impl SqlToMirConverter {
         pred_nodes
     }
 
-    /// Returns all collumns used in a predicate
-    fn predicate_columns(&self, ce: ConditionExpression) -> HashSet<Column> {
-        use nom_sql::ConditionExpression::*;
-
-        let mut cols = HashSet::new();
-        match ce {
-            LogicalOp(ct) | ComparisonOp(ct) => {
-                cols.extend(self.predicate_columns(*ct.left));
-                cols.extend(self.predicate_columns(*ct.right));
-            }
-            Base(ConditionBase::Field(c)) => {
-                cols.insert(c);
-            }
-            NegationOp(_) => unreachable!("negations should have been eliminated"),
-            _ => (),
-        }
-
-        cols
-    }
-
     fn predicates_above_group_by<'a>(
         &mut self,
         name: &str,
@@ -1153,6 +1214,61 @@ impl SqlToMirConverter {
         }
 
         predicates_above_group_by_nodes
+    }
+
+    fn make_value_project_node(
+        &mut self,
+        qg: &QueryGraph,
+        prev_node: Option<MirNodeRef>,
+        node_count: usize,
+        universe: &str,
+    ) -> Option<MirNodeRef> {
+        let arith_and_lit_columns_needed =
+            value_columns_needed_for_predicates(&qg.columns, &qg.global_predicates);
+
+        if !arith_and_lit_columns_needed.is_empty() {
+            let projected_arithmetic: Vec<(String, ArithmeticExpression)> =
+                arith_and_lit_columns_needed
+                    .iter()
+                    .filter_map(|&(_, ref oc)| match oc {
+                        OutputColumn::Arithmetic(ref ac) => {
+                            Some((ac.name.clone(), ac.expression.clone()))
+                        }
+                        OutputColumn::Data(_) => None,
+                        OutputColumn::Literal(_) => None,
+                    })
+                    .collect();
+            let projected_literals: Vec<(String, DataType)> = arith_and_lit_columns_needed
+                .iter()
+                .filter_map(|&(_, ref oc)| match oc {
+                    OutputColumn::Arithmetic(_) => None,
+                    OutputColumn::Data(_) => None,
+                    OutputColumn::Literal(ref lc) => {
+                        Some((lc.name.clone(), DataType::from(&lc.value)))
+                    }
+                })
+                .collect();
+
+            // prev_node must be set at this point
+            let parent = match prev_node {
+                None => unreachable!(),
+                Some(pn) => pn,
+            };
+
+            let passthru_cols: Vec<_> = parent.borrow().columns().iter().cloned().collect();
+            let projected = self.make_project_node(
+                &format!("q_{:x}_n{}{}", qg.signature().hash, node_count, universe),
+                parent.clone(),
+                passthru_cols.iter().collect(),
+                projected_arithmetic,
+                projected_literals,
+                false,
+            );
+
+            Some(projected)
+        } else {
+            None
+        }
     }
 
     /// Returns list of nodes added
@@ -1230,7 +1346,15 @@ impl SqlToMirConverter {
 
                 let qgn = &qg.relations[*rel];
                 for pred in &qgn.predicates {
-                    let cols = self.predicate_columns(pred.clone());
+                    let cols = predicate_columns(pred);
+
+                    for col in cols {
+                        column_to_predicates.entry(col).or_default().push(pred);
+                    }
+                }
+
+                for pred in &qg.global_predicates {
+                    let cols = predicate_columns(pred);
 
                     for col in cols {
                         column_to_predicates.entry(col).or_default().push(pred);
@@ -1238,7 +1362,10 @@ impl SqlToMirConverter {
                 }
             }
 
-            // 2.5 Reorder some predicates before group by nodes
+            // 2a. Reorder some predicates before group by nodes
+            // FIXME(malte): This doesn't currently work correctly with arithmetic and literal
+            // projections that form input to these filters -- these need to be lifted above them
+            // (and above the aggregations).
             let (created_predicates, predicates_above_group_by_nodes) =
                 make_predicates_above_grouped(
                     self,
@@ -1252,7 +1379,7 @@ impl SqlToMirConverter {
 
             new_node_count += predicates_above_group_by_nodes.len();
 
-            // Create security boundary
+            // 3. Create security boundary
             use controller::sql::mir::security::SecurityBoundary;
             let (last_policy_nodes, policy_nodes) =
                 self.make_security_boundary(universe.clone(), &mut node_for_rel, prev_node.clone());
@@ -1308,8 +1435,9 @@ impl SqlToMirConverter {
                 new_node_count += func_nodes.len();
 
                 let mut predicate_nodes = Vec::new();
-                // 4. Generate the necessary filter node for each relation node in the query graph.
-
+                // 4. Generate the necessary filter nodes for local predicates associated with each
+                // relation node in the query graph.
+                //
                 // Need to iterate over relations in a deterministic order, as otherwise nodes will be
                 // added in a different order every time, which will yield different node identifiers
                 // and make it difficult for applications to check what's going on.
@@ -1355,7 +1483,49 @@ impl SqlToMirConverter {
                     }
                 }
 
-                // 5. Get the final node
+                let num_local_predicates = predicate_nodes.len();
+
+                // 5. Determine literals and arithmetic expressions that global predicates depend
+                //    on and add them here; remembering that we've already added them-
+                if let Some(projected) =
+                    self.make_value_project_node(&qg, prev_node.clone(), new_node_count, &uformat)
+                {
+                    new_node_count += 1;
+                    nodes_added.push(projected.clone());
+                    prev_node = Some(projected);
+                }
+
+                // 5. Global predicates
+                for (i, ref p) in qg.global_predicates.iter().enumerate() {
+                    if created_predicates.contains(p) {
+                        continue;
+                    }
+
+                    let parent = match prev_node {
+                        None => unimplemented!(),
+                        Some(pn) => pn,
+                    };
+
+                    let fns = self.make_predicate_nodes(
+                        &format!(
+                            "q_{:x}_n{}_{}{}",
+                            qg.signature().hash,
+                            new_node_count,
+                            num_local_predicates + i,
+                            uformat,
+                        ),
+                        parent,
+                        p,
+                        0,
+                    );
+
+                    assert!(fns.len() > 0);
+                    new_node_count += fns.len();
+                    prev_node = Some(fns.iter().last().unwrap().clone());
+                    predicate_nodes.extend(fns);
+                }
+
+                // 6. Get the final node
                 let mut final_node: MirNodeRef = if prev_node.is_some() {
                     prev_node.unwrap().clone()
                 } else {
@@ -1364,7 +1534,7 @@ impl SqlToMirConverter {
                     node_for_rel[sorted_rels.last().unwrap()].clone()
                 };
 
-                // 6. Potentially insert TopK node below the final node
+                // 7. Potentially insert TopK node below the final node
                 // XXX(malte): this adds a bogokey if there are no parameter columns to do the TopK
                 // over, but we could end up in a stick place if we reconcile/combine multiple
                 // queries (due to security universes or due to compound select queries) that do
@@ -1373,8 +1543,10 @@ impl SqlToMirConverter {
                     let group_by = if qg.parameters().is_empty() {
                         // need to add another projection to introduce a bogokey to group by
                         let cols: Vec<_> = final_node.borrow().columns().iter().cloned().collect();
+                        let table =
+                            format!("q_{:x}_n{}{}", qg.signature().hash, new_node_count, uformat);
                         let bogo_project = self.make_project_node(
-                            &format!("q_{:x}_n{}{}", qg.signature().hash, new_node_count, uformat),
+                            &table,
                             final_node.clone(),
                             cols.iter().collect(),
                             vec![],
@@ -1385,7 +1557,14 @@ impl SqlToMirConverter {
                         nodes_added.push(bogo_project.clone());
                         final_node = bogo_project;
 
-                        vec![Column::from("bogokey")]
+                        vec![
+                            Column {
+                                name: "bogokey".to_owned(),
+                                table: None,
+                                alias: None,
+                                function: None,
+                            },
+                        ]
                     } else {
                         qg.parameters().into_iter().cloned().collect()
                     };
@@ -1427,16 +1606,20 @@ impl SqlToMirConverter {
 
             let final_node_cols: Vec<Column> =
                 final_node.borrow().columns().iter().cloned().collect();
-            // 5. Generate leaf views that expose the query result
+            // 8. Generate leaf views that expose the query result
             let mut projected_columns: Vec<Column> = if universe.1.is_none() {
                 qg.columns
                     .iter()
                     .filter_map(|oc| match *oc {
                         OutputColumn::Arithmetic(_) => None,
-                        OutputColumn::Data(ref c) => Some(c),
+                        OutputColumn::Data(ref c) => Some(Column {
+                            name: c.name.clone(),
+                            alias: c.alias.clone(),
+                            table: c.table.clone(),
+                            function: None,
+                        }),
                         OutputColumn::Literal(_) => None,
                     })
-                    .cloned()
                     .collect()
             } else {
                 // If we are creating a query for a group universe, we project
@@ -1451,11 +1634,27 @@ impl SqlToMirConverter {
                     projected_columns.push(pc.clone());
                 }
             }
+
+            // We may already have added some of the arithmetic and literal columns
+            let (_, already_computed): (Vec<_>, Vec<_>) =
+                value_columns_needed_for_predicates(&qg.columns, &qg.global_predicates)
+                    .into_iter()
+                    .unzip();
             let projected_arithmetic: Vec<(String, ArithmeticExpression)> = qg.columns
                 .iter()
                 .filter_map(|oc| match *oc {
                     OutputColumn::Arithmetic(ref ac) => {
-                        Some((ac.name.clone(), ac.expression.clone()))
+                        if !already_computed.contains(oc) {
+                            Some((ac.name.clone(), ac.expression.clone()))
+                        } else {
+                            projected_columns.push(Column {
+                                name: ac.name.clone(),
+                                table: None,
+                                alias: None,
+                                function: None,
+                            });
+                            None
+                        }
                     }
                     OutputColumn::Data(_) => None,
                     OutputColumn::Literal(_) => None,
@@ -1467,7 +1666,17 @@ impl SqlToMirConverter {
                     OutputColumn::Arithmetic(_) => None,
                     OutputColumn::Data(_) => None,
                     OutputColumn::Literal(ref lc) => {
-                        Some((lc.name.clone(), DataType::from(&lc.value)))
+                        if !already_computed.contains(oc) {
+                            Some((lc.name.clone(), DataType::from(&lc.value)))
+                        } else {
+                            projected_columns.push(Column {
+                                name: lc.name.clone(),
+                                table: None,
+                                alias: None,
+                                function: None,
+                            });
+                            None
+                        }
                     }
                 })
                 .collect();
@@ -1516,7 +1725,7 @@ impl SqlToMirConverter {
                         Column {
                             name: String::from("bogokey"),
                             alias: None,
-                            table: Some(ident.clone()),
+                            table: None,
                             function: None,
                         },
                     ]
