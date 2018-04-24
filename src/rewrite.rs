@@ -1,5 +1,6 @@
 use nom_sql::{Column, ConditionBase, ConditionExpression, ConditionTree, CreateTableStatement,
-              CreateViewStatement, FieldDefinitionExpression, Literal, Operator, SqlQuery};
+              CreateViewStatement, FieldDefinitionExpression, Literal, Operator,
+              SelectSpecification, SelectStatement, SqlQuery};
 
 use std::collections::HashMap;
 use std::mem;
@@ -10,6 +11,21 @@ pub(crate) fn expand_stars(
     mut query: SqlQuery,
     table_schemas: &HashMap<String, Schema>,
 ) -> SqlQuery {
+    let do_expand_select = |sq: &SelectStatement, table_name: &str| {
+        sq.fields
+            .iter()
+            .map(|ref f| match *f {
+                FieldDefinitionExpression::Col(ref c) => FieldDefinitionExpression::Col(Column {
+                    table: Some(table_name.to_owned()),
+                    name: c.alias.as_ref().unwrap_or(&c.name).to_owned(),
+                    alias: None,
+                    function: None,
+                }),
+                _ => unimplemented!(),
+            })
+            .collect::<Vec<_>>()
+    };
+
     let expand_table = |table_name: String| match table_schemas
         .get(&table_name)
         .expect(&format!("table/view named `{}` does not exist", table_name))
@@ -30,19 +46,13 @@ pub(crate) fn expand_stars(
             ref name,
             ref definition,
             ..
-        }) => definition
-            .fields
-            .iter()
-            .map(|ref f| match *f {
-                FieldDefinitionExpression::Col(ref c) => FieldDefinitionExpression::Col(Column {
-                    table: Some(name.to_owned()),
-                    name: c.alias.as_ref().unwrap_or(&c.name).to_owned(),
-                    alias: None,
-                    function: None,
-                }),
-                _ => unimplemented!(),
-            })
-            .collect::<Vec<_>>(),
+        }) => match **definition {
+            SelectSpecification::Compound(ref csq) => {
+                // use the first select's columns
+                do_expand_select(&csq.selects[0].1, name)
+            }
+            SelectSpecification::Simple(ref sq) => do_expand_select(sq, name),
+        },
     };
 
     if let SqlQuery::Select(ref mut sq) = query {
