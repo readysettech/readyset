@@ -175,6 +175,10 @@ impl SoupBackend {
     ) -> io::Result<()> {
         // TODO(malte): we should perhaps check our usual caches here, rather than just blindly
         // doing a migration on Soup ever time. On the other hand, CREATE VIEW is rare...
+        info!(
+            self.log,
+            "Adding view \"{}\" to Soup as {}", q.definition, q.name
+        );
         match self.inner
             .soup
             .extend_recipe(format!("{}: {};", q.name, q.definition))
