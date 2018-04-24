@@ -1,7 +1,7 @@
 use msql_srv;
 use nom_sql::{self, ColumnConstraint, CreateTableStatement, CreateViewStatement,
               FieldDefinitionExpression, FieldValueExpression, InsertStatement, Literal,
-              SelectStatement, SqlQuery, SqlType};
+              SelectSpecification, SelectStatement, SqlQuery, SqlType};
 
 use std::collections::HashMap;
 
@@ -84,6 +84,21 @@ pub(crate) fn schema_for_column(
     schemas: &HashMap<String, Schema>,
     c: &nom_sql::Column,
 ) -> msql_srv::Column {
+    let get_fields = |sq: &SelectStatement| {
+        sq.fields
+            .iter()
+            .filter_map(|f| match f {
+                FieldDefinitionExpression::Col(ref cc) => if cc.name == c.name {
+                    Some(schema_for_column(schemas, cc))
+                } else {
+                    None
+                },
+                _ => None,
+            })
+            .next()
+            .expect(&format!("column {} not found", c.name))
+    };
+
     if let Some(ref table) = c.table {
         match schemas
             .get(table)
@@ -137,19 +152,10 @@ pub(crate) fn schema_for_column(
                     },
                 }
             }
-            Schema::View(CreateViewStatement { ref definition, .. }) => definition
-                .fields
-                .iter()
-                .filter_map(|f| match f {
-                    FieldDefinitionExpression::Col(ref cc) => if cc.name == c.name {
-                        Some(schema_for_column(schemas, cc))
-                    } else {
-                        None
-                    },
-                    _ => None,
-                })
-                .next()
-                .expect(&format!("column {} not found", c.name)),
+            Schema::View(CreateViewStatement { ref definition, .. }) => match **definition {
+                SelectSpecification::Simple(ref sq) => get_fields(sq),
+                SelectSpecification::Compound(ref csq) => get_fields(&csq.selects[0].1),
+            },
         }
     } else {
         msql_srv::Column {
