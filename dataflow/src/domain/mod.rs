@@ -1,6 +1,6 @@
 use petgraph::graph::NodeIndex;
-use std::cmp;
 use std::cell;
+use std::cmp;
 use std::collections::hash_map::Entry;
 use std::collections::{HashMap, HashSet, VecDeque};
 use std::mem;
@@ -10,9 +10,8 @@ use std::time;
 
 use std::net::SocketAddr;
 
-use Readers;
-use channel::TcpSender;
 use channel::poll::{PollEvent, ProcessResult};
+use channel::TcpSender;
 use debug;
 use group_commit::{GroupCommitQueueSet};
 use payload::{ControlReplyPacket, ReplayPieceContext, ReplayTransactionState, TransactionState};
@@ -21,6 +20,7 @@ use slog::Logger;
 use statistics;
 use timekeeper::{RealTime, SimpleTracker, ThreadTime, Timer, TimerSet};
 use transactions;
+use Readers;
 
 type EnqueuedSends = Vec<(ReplicaAddr, Box<Packet>)>;
 
@@ -882,6 +882,19 @@ impl Domain {
                         self.nodes.insert(addr, cell::RefCell::new(node));
                         trace!(self.log, "new node incorporated"; "local" => addr.id());
                     }
+                    Packet::RemoveNodes { nodes } => {
+                        for node in &nodes {
+                            self.nodes[node].borrow_mut().remove();
+                            self.state.remove(node);
+                            trace!(self.log, "node removed"; "local" => node.id());
+                        }
+
+                        for node in nodes {
+                            for cn in self.nodes.iter_mut() {
+                                cn.1.borrow_mut().try_remove_child(node);
+                            }
+                        }
+                    }
                     Packet::AddBaseColumn {
                         node,
                         field,
@@ -1682,6 +1695,13 @@ impl Domain {
 
     fn handle_replay(&mut self, m: Box<Packet>, sends: &mut EnqueuedSends) {
         let tag = m.tag().unwrap();
+        if self.nodes[&self.replay_paths[&tag].path.last().unwrap().node]
+            .borrow()
+            .is_dropped()
+        {
+            return;
+        }
+
         let mut finished = None;
         let mut need_replay = Vec::new();
         let mut finished_partial = 0;
@@ -2454,7 +2474,10 @@ impl Domain {
                 if let Some((node, num_bytes)) = node {
                     let mut freed = 0u64;
                     while freed < num_bytes as u64 {
-                        if self.nodes[&node].borrow().is_reader() {
+                        if self.nodes[&node].borrow().is_dropped() {
+                            break; // Node was dropped. Give up.
+                        }
+                        else if self.nodes[&node].borrow().is_reader() {
                             // we can only evict one key a time here because the freed memory
                             // calculation is based on the key that *will* be evicted. We may count
                             // the same individual key twice if we batch evictions here.
@@ -2518,6 +2541,10 @@ impl Domain {
                         let target = self.replay_paths[&tag].path.last().unwrap().node;
                         // We've already evicted from readers in walk_path
                         if self.nodes[&target].borrow().is_reader() {
+                            return;
+                        }
+                        // No need to continue if node was dropped.
+                        if self.nodes[&target].borrow().is_dropped() {
                             return;
                         }
                         let key_columns = self.state[&target].evict_keys(&tag, &keys).0.to_vec();

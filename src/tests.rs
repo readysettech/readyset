@@ -1137,14 +1137,7 @@ fn transactional_vote() {
         mig.maintain_anonymous(end_votes, &[2]);
 
         (
-            article1,
-            article2,
-            vote,
-            article,
-            vc,
-            end,
-            end_title,
-            end_votes,
+            article1, article2, vote, article, vc, end, end_title, end_votes,
         )
     });
 
@@ -2339,4 +2332,112 @@ fn tpc_w() {
             }
         }
     });
+}
+
+#[test]
+fn node_removal() {
+    // set up graph
+    let mut b = ControllerBuilder::default();
+    b.set_persistence(PersistenceParameters::new(
+        DurabilityMode::DeleteOnExit,
+        128,
+        Duration::from_millis(1),
+        Some(get_log_name("domain_removal")),
+    ));
+    let mut g = b.build_local();
+    let cid = g.migrate(|mig| {
+        let a = mig.add_ingredient("a", &["a", "b"], Base::new(vec![]).with_key(vec![0]));
+        let b = mig.add_ingredient("b", &["a", "b"], Base::new(vec![]).with_key(vec![0]));
+
+        let mut emits = HashMap::new();
+        emits.insert(a, vec![0, 1]);
+        emits.insert(b, vec![0, 1]);
+        let u = Union::new(emits);
+        let c = mig.add_ingredient("c", &["a", "b"], u);
+        mig.maintain_anonymous(c, &[0])
+    });
+
+    let mut cq = g.get_getter("c").unwrap();
+    let mut muta = g.get_mutator("a").unwrap();
+    let mut mutb = g.get_mutator("b").unwrap();
+    let id: DataType = 1.into();
+
+    assert_eq!(muta.table_name(), "a");
+    assert_eq!(muta.columns(), &["a", "b"]);
+
+    // send a value on a
+    muta.put(vec![id.clone(), 2.into()]).unwrap();
+
+    // give it some time to propagate
+    sleep();
+
+    // send a query to c
+    assert_eq!(
+        cq.lookup(&[id.clone()], true),
+        Ok(vec![vec![1.into(), 2.into()]])
+    );
+
+    g.remove_node(cid);
+
+    // update value again
+    mutb.put(vec![id.clone(), 4.into()]).unwrap();
+
+    // give it some time to propagate
+    sleep();
+
+    // // check that value was updated again
+    // let res = cq.lookup(&[id.clone()], true).unwrap();
+    // assert!(res.iter().any(|r| r == &vec![id.clone(), 2.into()]));
+    // assert!(res.iter().any(|r| r == &vec![id.clone(), 4.into()]));
+
+    // Delete first record
+    muta.delete(vec![id.clone()]).unwrap();
+
+    // give it some time to propagate
+    sleep();
+
+    // // send a query to c
+    // assert_eq!(
+    //     cq.lookup(&[id.clone()], true),
+    //     Ok(vec![vec![1.into(), 4.into()]])
+    // );
+}
+
+#[test]
+fn remove_query() {
+    let r_txt = "CREATE TABLE b (a int, c text, x text);\n
+                 QUERY qa: SELECT a FROM b;\n
+                 QUERY qb: SELECT a, c FROM b WHERE a = 42;";
+
+    let r2_txt = "CREATE TABLE b (a int, c text, x text);\n
+                  QUERY qa: SELECT a FROM b;";
+
+    let mut g = ControllerBuilder::default().build_local();
+    g.install_recipe(r_txt.to_owned()).unwrap();
+    assert_eq!(g.inputs().len(), 1);
+    assert_eq!(g.outputs().len(), 2);
+
+    let mut mutb = g.get_mutator("b").unwrap();
+    let mut qa = g.get_getter("qa").unwrap();
+    let mut qb = g.get_getter("qb").unwrap();
+
+    mutb.put(vec![42.into(), "2".into(), "3".into()]).unwrap();
+    mutb.put(vec![1.into(), "4".into(), "5".into()]).unwrap();
+    sleep();
+
+    assert_eq!(qa.lookup(&[0.into()], true).unwrap().len(), 2);
+    assert_eq!(qb.lookup(&[0.into()], true).unwrap().len(), 1);
+
+    // Remove qb and check that the graph still functions as expected.
+    g.install_recipe(r2_txt.to_owned()).unwrap();
+    assert_eq!(g.inputs().len(), 1);
+    assert_eq!(g.outputs().len(), 1);
+    assert!(g.get_getter("qb").is_none());
+
+    mutb.put(vec![42.into(), "6".into(), "7".into()]).unwrap();
+    sleep();
+
+    assert_eq!(qa.lookup(&[0.into()], true).unwrap().len(), 3);
+    assert_eq!(qb.lookup(&[0.into()], true).unwrap().len(), 1);
+
 }

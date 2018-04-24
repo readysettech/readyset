@@ -431,6 +431,36 @@ impl SqlToMirConverter {
         }
     }
 
+    pub fn remove_query(&mut self, name: &str, mq: &MirQuery) {
+        use std::collections::VecDeque;
+
+        let v = self.current
+            .remove(name)
+            .expect(&format!("no query named \"{}\"?", name));
+
+        let nodeid = (name.to_owned(), v);
+        let leaf_mn = self.nodes.remove(&nodeid).unwrap();
+
+        assert_eq!(leaf_mn.borrow().name, mq.leaf.borrow().name);
+
+        // traverse the MIR query backwards, removing any nodes that we still have registered.
+        let mut q = VecDeque::new();
+        q.push_back(leaf_mn);
+
+        while !q.is_empty() {
+            let mnr = q.pop_front().unwrap();
+            let n = mnr.borrow_mut();
+            q.extend(n.ancestors.clone());
+            // node may not be registered, so don't bother checking return
+            match n.inner {
+                MirNodeType::Reuse { .. } | MirNodeType::Base { .. } => (),
+                _ => {
+                    self.nodes.remove(&(n.name.to_owned(), v));
+                }
+            }
+        }
+    }
+
     pub fn named_query_to_mir(
         &mut self,
         name: &str,

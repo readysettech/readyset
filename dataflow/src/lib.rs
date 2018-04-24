@@ -5,6 +5,7 @@
 #![feature(entry_or_default)]
 #![feature(if_while_or_patterns)]
 #![feature(plugin, use_extern_macros)]
+#![feature(duration_from_micros)]
 #![plugin(tarpc_plugins)]
 #![deny(unused_extern_crates)]
 

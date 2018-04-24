@@ -166,6 +166,9 @@ impl ControllerInner {
             (Post, "/create_universe") => {
                 json::to_string(&self.create_universe(json::from_slice(&body).unwrap())).unwrap()
             }
+            (Post, "/remove_node") => {
+                json::to_string(&self.remove_node(json::from_slice(&body).unwrap())).unwrap()
+            }
             _ => return Err(StatusCode::NotFound),
         })
     }
@@ -633,17 +636,22 @@ impl ControllerInner {
 
     fn apply_recipe(&mut self, mut new: Recipe) -> Result<ActivationResult, RpcError> {
         let mut err = Err(RpcError::Other("".to_owned())); // <3 type inference
-        self.migrate(|mig| match new.activate(mig, false) {
-            Ok(ra) => {
-                err = Ok(ra);
-            }
-            Err(e) => {
-                err = Err(RpcError::Other(format!("failed to activate recipe: {}", e)));
-            }
+        self.migrate(|mig| {
+            err = new.activate(mig, false)
+                .map_err(|e| RpcError::Other(format!("failed to activate recipe: {}", e)))
         });
 
         match err {
-            Ok(_) => {
+            Ok(ref ra) => {
+                for leaf in &ra.removed_leaves {
+                    // There should be exactly one reader attached to each "leaf" node. Find it and
+                    // remove it along with any now unneeded ancestors.
+                    let readers: Vec<_> = self.ingredients
+                        .neighbors_directed(*leaf, petgraph::EdgeDirection::Outgoing)
+                        .collect();
+                    assert_eq!(readers.len(), 1);
+                    self.remove_node(readers[0]);
+                }
                 self.recipe = new;
             }
             Err(ref e) => {
@@ -766,6 +774,51 @@ impl ControllerInner {
         s.push_str("}}");
 
         s
+    }
+
+    pub fn remove_node(&mut self, node: NodeIndex) {
+        // Node must node have any children.
+        assert_eq!(
+            self.ingredients
+                .neighbors_directed(node, petgraph::EdgeDirection::Outgoing)
+                .count(),
+            0
+        );
+        assert!(!self.ingredients[node].is_source());
+
+        let mut removals = HashMap::new();
+        let mut nodes = vec![node];
+        while let Some(node) = nodes.pop() {
+            let mut parents = self.ingredients
+                .neighbors_directed(node, petgraph::EdgeDirection::Incoming)
+                .detach();
+            while let Some(parent) = parents.next_node(&self.ingredients) {
+                let edge = self.ingredients.find_edge(parent, node).unwrap();
+                self.ingredients.remove_edge(edge);
+
+                if !self.ingredients[parent].is_source() && !self.ingredients[parent].is_base()
+                    && self.ingredients
+                        .neighbors_directed(parent, petgraph::EdgeDirection::Outgoing)
+                        .count() == 1
+                {
+                    nodes.push(parent);
+                }
+            }
+
+            removals
+                .entry(self.ingredients[node].domain())
+                .or_insert(Vec::new())
+                .push(*self.ingredients[node].local_addr());
+            self.ingredients[node].remove();
+        }
+
+        for (domain, nodes) in removals {
+            self.domains
+                .get_mut(&domain)
+                .unwrap()
+                .send(box payload::Packet::RemoveNodes { nodes })
+                .unwrap();
+        }
     }
 }
 

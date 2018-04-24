@@ -211,6 +211,11 @@ impl<A: Authority> ControllerHandle<A> {
         self.rpc("graphviz", &())
     }
 
+    /// Remove a specific node from the graph.
+    pub fn remove_node(&mut self, node: NodeIndex) {
+        self.rpc("remove_node", &node)
+    }
+
     /// Wait for associated local instance to exit (presumably forever).
     pub fn wait(mut self) {
         self.local_controller.take().unwrap().1.join().unwrap();
