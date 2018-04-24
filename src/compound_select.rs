@@ -35,10 +35,10 @@ pub struct CompoundSelectStatement {
 impl fmt::Display for CompoundSelectStatement {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         for (ref op, ref sel) in &self.selects {
-            write!(f, " {}", sel)?;
             if op.is_some() {
                 write!(f, " {}", op.as_ref().unwrap())?;
             }
+            write!(f, " {}", sel)?;
         }
         if self.order.is_some() {
             write!(f, " {}", self.order.as_ref().unwrap())?;
