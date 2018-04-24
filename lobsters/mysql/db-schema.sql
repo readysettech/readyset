@@ -31,7 +31,8 @@ CREATE TABLE `tag_filters` (`id` int NOT NULL AUTO_INCREMENT PRIMARY KEY, `creat
 DROP TABLE IF EXISTS `taggings` CASCADE;
 CREATE TABLE `taggings` (`id` int unsigned NOT NULL AUTO_INCREMENT PRIMARY KEY, `story_id` int unsigned NOT NULL, `tag_id` int unsigned NOT NULL, UNIQUE INDEX `story_id_tag_id`  (`story_id`, `tag_id`)) ENGINE=InnoDB DEFAULT CHARSET=utf8;
 DROP TABLE IF EXISTS `tags` CASCADE;
-CREATE TABLE `tags` (`id` int unsigned NOT NULL AUTO_INCREMENT PRIMARY KEY, `tag` varchar(25) DEFAULT '' NOT NULL, `description` varchar(100), `privileged` tinyint(1) DEFAULT 0, `is_media` tinyint(1) DEFAULT 0, `inactive` tinyint(1) DEFAULT 0, `hotness_mod` float(24) DEFAULT 0.0, UNIQUE INDEX `tag`  (`tag`)) ENGINE=InnoDB DEFAULT CHARSET=utf8;
+-- XXX: hotness_mod should be a float(24)
+CREATE TABLE `tags` (`id` int unsigned NOT NULL AUTO_INCREMENT PRIMARY KEY, `tag` varchar(25) DEFAULT '' NOT NULL, `description` varchar(100), `privileged` tinyint(1) DEFAULT 0, `is_media` tinyint(1) DEFAULT 0, `inactive` tinyint(1) DEFAULT 0, `hotness_mod` int DEFAULT 0, UNIQUE INDEX `tag`  (`tag`)) ENGINE=InnoDB DEFAULT CHARSET=utf8;
 DROP TABLE IF EXISTS `users` CASCADE;
 CREATE TABLE `users` (`id` int unsigned NOT NULL AUTO_INCREMENT PRIMARY KEY, `username` varchar(50) COLLATE utf8mb4_general_ci, `email` varchar(100) COLLATE utf8mb4_general_ci, `password_digest` varchar(75) COLLATE utf8mb4_general_ci, `created_at` datetime, `is_admin` tinyint(1) DEFAULT 0, `password_reset_token` varchar(75) COLLATE utf8mb4_general_ci, `session_token` varchar(75) COLLATE utf8mb4_general_ci DEFAULT '' NOT NULL, `about` mediumtext COLLATE utf8mb4_general_ci, `invited_by_user_id` int, `is_moderator` tinyint(1) DEFAULT 0, `pushover_mentions` tinyint(1) DEFAULT 0, `rss_token` varchar(75) COLLATE utf8mb4_general_ci, `mailing_list_token` varchar(75) COLLATE utf8mb4_general_ci, `mailing_list_mode` int DEFAULT 0, `karma` int DEFAULT 0 NOT NULL, `banned_at` datetime, `banned_by_user_id` int, `banned_reason` varchar(200) COLLATE utf8mb4_general_ci, `deleted_at` datetime, `disabled_invite_at` datetime, `disabled_invite_by_user_id` int, `disabled_invite_reason` varchar(200), `settings` text,  INDEX `mailing_list_enabled`  (`mailing_list_mode`), UNIQUE INDEX `mailing_list_token`  (`mailing_list_token`), UNIQUE INDEX `password_reset_token`  (`password_reset_token`), UNIQUE INDEX `rss_token`  (`rss_token`), UNIQUE INDEX `session_hash`  (`session_token`), UNIQUE INDEX `username`  (`username`)) ENGINE=InnoDB DEFAULT CHARSET=utf8;
 DROP TABLE IF EXISTS `votes` CASCADE;
@@ -126,6 +127,7 @@ SELECT stories.merged_story_id AS id, FULL_story_score.score
 FROM stories
 JOIN FULL_story_score ON (FULL_story_score.id = stories.merged_story_id);
 
+-- XXX: *technically* tag_score should be a multiplier
 CREATE VIEW all_hotness_components AS
 (SELECT FULL_story_tag_score.id, FULL_story_tag_score.score FROM FULL_story_tag_score)
 UNION
@@ -154,7 +156,7 @@ LEFT JOIN FULL_story_hotness ON (FULL_story_hotness.id = stories.id);
 
 -- Other derived stats
 CREATE VIEW story_comments AS
-SELECT stories.id, COUNT(comments.id)
+SELECT stories.id, COUNT(comments.id) as comments
 FROM stories
 LEFT JOIN comments ON (stories.id = comments.story_id)
 GROUP BY stories.id;
@@ -228,4 +230,4 @@ CREATE VIEW `FULL_parent_comment_score` AS SELECT `FULL_comment_score`.* FROM `F
 CREATE VIEW `parent_comments` AS SELECT `comments`.* FROM `comments`;
 CREATE VIEW `replying_comments_for_count` AS SELECT `read_ribbons`.`user_id`, `comments`.`id`, FROM `read_ribbons` JOIN `stories` ON (`stories`.`id` = `read_ribbons`.`story_id`) JOIN `comments` ON (`comments`.`story_id` = `read_ribbons`.`story_id`) LEFT JOIN `parent_comments` ON (`parent_comments`.`id` = `comments`.`parent_comment_id`) LEFT JOIN FULL_comment_score ON (FULL_comment_score.id = comments.id) LEFT JOIN FULL_parent_comment_score ON (FULL_parent_comment_score.id = parent_comments.id) WHERE `read_ribbons`.`is_following` = 1 AND `comments`.`user_id` <> `read_ribbons`.`user_id` AND `comments`.`is_deleted` = 0 AND `comments`.`is_moderated` = 0 AND `FULL_comment_score`.`score` >= 0 AND `read_ribbons`.`updated_at` < `comments`.`created_at` AND ( ( `parent_comments`.`user_id` = `read_ribbons`.`user_id` AND `FULL_parent_comment_score`.`score` >= 0) OR ( `parent_comments`.`id` IS NULL AND `stories`.`user_id` = `read_ribbons`.`user_id`));
 -----------------------------------------------------
-INSERT INTO `tags` (`tag`) VALUES ('test');
+INSERT INTO `tags` (`tag`, `hotness_mod`) VALUES ('test', 1);
