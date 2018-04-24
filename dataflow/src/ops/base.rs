@@ -215,8 +215,12 @@ impl Ingredient for Base {
 
             match r {
                 Record::Positive(u) => {
-                    assert!(was.is_none());
-                    current = Some(Cow::Owned(u));
+                    if let Some(ref was) = was {
+                        eprintln!("base ignoring {:?} since it already has {:?}", u, was);
+                    } else {
+                        //assert!(was.is_none());
+                        current = Some(Cow::Owned(u));
+                    }
                 }
                 Record::Negative(u) => {
                     assert_eq!(current, Some(Cow::Borrowed(&u)));
