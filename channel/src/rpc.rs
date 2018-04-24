@@ -21,6 +21,23 @@ pub struct RpcClient<Q, R> {
     is_local: bool,
 }
 
+pub struct Eventually<'a, Q: 'a, R: 'a>(&'a mut RpcClient<Q, R>);
+
+impl<'a, Q: 'a, R: 'a> Eventually<'a, Q, R>
+where
+    for<'de> R: Deserialize<'de>,
+{
+    pub fn wait(self) -> Result<R, SendError> {
+        match bincode::deserialize_from(&mut self.0.stream) {
+            Ok(r) => Ok(r),
+            Err(e) => {
+                self.0.poisoned = true;
+                Err(e.into())
+            }
+        }
+    }
+}
+
 impl<Q: Serialize, R> RpcClient<Q, R>
 where
     for<'de> R: Deserialize<'de>,
@@ -60,24 +77,24 @@ where
         self.stream.get_ref().local_addr()
     }
 
-    fn send_internal(&mut self, query: &Q) -> Result<R, SendError> {
-        let size: u32 = bincode::serialized_size(query).unwrap() as u32;
-        self.stream.write_u32::<NetworkEndian>(size)?;
-        bincode::serialize_into(&mut self.stream, query)?;
-        self.stream.flush()?;
-        Ok(bincode::deserialize_from(&mut self.stream)?)
-    }
-
-    pub fn send(&mut self, query: &Q) -> Result<R, SendError> {
+    fn send_internal(&mut self, query: &Q) -> Result<Eventually<Q, R>, SendError> {
         if self.poisoned {
             return Err(SendError::Poisoned);
         }
 
-        let reply = self.send_internal(query);
-        if reply.is_err() {
-            self.poisoned = true;
-        }
-        reply
+        let size: u32 = bincode::serialized_size(query).unwrap() as u32;
+        self.stream.write_u32::<NetworkEndian>(size)?;
+        bincode::serialize_into(&mut self.stream, query)?;
+        self.stream.flush()?;
+        Ok(Eventually(self))
+    }
+
+    pub fn send_async(&mut self, query: &Q) -> Result<Eventually<Q, R>, SendError> {
+        self.send_internal(query)
+    }
+
+    pub fn send(&mut self, query: &Q) -> Result<R, SendError> {
+        self.send_internal(query)?.wait()
     }
 }
 

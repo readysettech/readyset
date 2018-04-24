@@ -32,7 +32,7 @@ pub struct ControllerHandle<A: Authority> {
     authority: Arc<A>,
     pub(super) local_controller: Option<(Sender<ControlEvent>, JoinHandle<()>)>,
     pub(super) local_worker: Option<(Sender<WorkerEvent>, JoinHandle<()>)>,
-    getters: HashMap<SocketAddr, GetterRpc>,
+    getters: HashMap<(SocketAddr, usize), GetterRpc>,
     domains: HashMap<Vec<SocketAddr>, MutatorRpc>,
     reactor: Core,
     client: Client<hyper::client::HttpConnector>,

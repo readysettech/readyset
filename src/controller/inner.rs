@@ -491,7 +491,7 @@ impl ControllerInner {
                 .collect();
 
             RemoteGetterBuilder {
-                local_port: None,
+                local_ports: vec![],
                 node: r,
                 columns,
                 shards,
