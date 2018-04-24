@@ -44,7 +44,7 @@ serde = { version = "1.0.8", features = ["rc"] }
 assert_infrequent = { git = "https://github.com/fintelia/assert_infrequent.git", rev = "720e140bc8516d65dad7008abdc1d38796700c09" }
 petgraph = { version = "0.4.11", features = ["serde-1"] }
 memcached-rs = { git = "https://github.com/jonhoo/memcached-rs.git", branch = "expose-multi" }
-nom-sql = { git = "https://github.com/ms705/nom-sql.git", rev = "8971f8c899da178fefe6735e59d5d85b44ffc0f2" }
+nom-sql = { git = "https://github.com/ms705/nom-sql.git", rev = "9679b25da5752466a69dce34280bca40af533815" }
 
 # local deps
 channel = { path = "channel" }
