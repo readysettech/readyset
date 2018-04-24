@@ -309,7 +309,9 @@ impl PersistentState {
                 .unwrap()
                 .create_cf("0", &state.db_opts)
                 .unwrap();
-            state.indices.push(PersistentIndex::new(cf, primary_key.unwrap().to_vec()));
+            state
+                .indices
+                .push(PersistentIndex::new(cf, primary_key.unwrap().to_vec()));
             state.persist_meta();
         }
 
@@ -335,8 +337,21 @@ impl PersistentState {
         let transform = SliceTransform::create("key", Self::transform_fn, Some(Self::in_domain_fn));
         opts.set_prefix_extractor(transform);
 
-        // Assigns the number of threads for RocksDB's low priority background pool:
-        opts.increase_parallelism(params.persistence_threads);
+        // Assigns the number of threads for compactions and flushes in RocksDB.
+        // Optimally we'd like to use env->SetBackgroundThreads(n, Env::HIGH)
+        // and env->SetBackgroundThreads(n, Env::LOW) here, but that would force us to create our
+        // own env instead of relying on the default one that's shared across RocksDB instances
+        // (which isn't supported by rust-rocksdb yet either).
+        //
+        // Using opts.increase_parallelism here would only change the thread count in
+        // the low priority pool, so we'll rather use the deprecated max_background_compactions
+        // and max_background_flushes for now.
+        if params.persistence_threads > 1 {
+            // Split the threads between compactions and flushes,
+            // but round up for compactions and down for flushes:
+            opts.set_max_background_compactions((params.persistence_threads + 1) / 2);
+            opts.set_max_background_flushes(params.persistence_threads / 2);
+        }
 
         // Use a hash linked list since we're doing prefix seeks.
         opts.set_allow_concurrent_memtable_write(false);
