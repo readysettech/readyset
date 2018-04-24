@@ -59,6 +59,7 @@ impl Drop for LogName {
 // fail).
 fn get_persistence_params(prefix: &str) -> PersistenceParameters {
     let mut params = PersistenceParameters::default();
+    params.mode = DurabilityMode::DeleteOnExit;
     params.log_prefix = get_log_name(prefix);
     params
 }
