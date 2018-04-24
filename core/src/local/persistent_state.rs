@@ -274,7 +274,7 @@ impl PersistentState {
 
         let mut db = DB::open_cf_descriptors(&opts, &full_name, cfs).unwrap();
         let meta = Self::retrieve_and_update_meta(&db);
-        let mut indices: Vec<PersistentIndex> = meta.indices
+        let indices: Vec<PersistentIndex> = meta.indices
             .into_iter()
             .enumerate()
             .map(|(i, columns)| {
@@ -290,19 +290,7 @@ impl PersistentState {
             db.drop_cf(&indices.len().to_string()).unwrap();
         }
 
-        if let Some(pk_cols) = primary_key {
-            // Only create the initial column family if it doesn't exist from before.
-            // For non-PK bases this will get taken care of in Self::add_key.
-            let cf = if column_family_names.len() == 1 {
-                db.create_cf("0", &opts).unwrap()
-            } else {
-                db.cf_handle("0").unwrap()
-            };
-
-            indices.insert(0, PersistentIndex::new(cf, pk_cols.to_vec()));
-        }
-
-        Self {
+        let mut state = Self {
             indices,
             has_unique_index: primary_key.is_some(),
             epoch: meta.epoch,
@@ -310,7 +298,22 @@ impl PersistentState {
             db: Some(db),
             durability_mode: params.mode.clone(),
             name: full_name,
+        };
+
+        if primary_key.is_some() && state.indices.len() == 0 {
+            // This is the first time we're initializing this PersistentState,
+            // so persist the primary key index right away.
+            let cf = state
+                .db
+                .as_mut()
+                .unwrap()
+                .create_cf("0", &state.db_opts)
+                .unwrap();
+            state.indices.push(PersistentIndex::new(cf, primary_key.unwrap().to_vec()));
+            state.persist_meta();
         }
+
+        state
     }
 
     fn build_options(name: &str, params: &PersistenceParameters) -> rocksdb::Options {
@@ -360,17 +363,7 @@ impl PersistentState {
     fn persist_meta(&mut self) {
         let db = self.db.as_ref().unwrap();
         // Stores the columns of self.indices in RocksDB so that we don't rebuild indices on recovery.
-        let start_at = if self.has_unique_index {
-            // Skip the first index if it's a primary key, since we'll add it in Self::new anyway.
-            1
-        } else {
-            0
-        };
-
-        let columns = self.indices[start_at..]
-            .iter()
-            .map(|i| i.columns.clone())
-            .collect();
+        let columns = self.indices.iter().map(|i| i.columns.clone()).collect();
         let meta = PersistentMeta {
             indices: columns,
             epoch: self.epoch,
@@ -827,6 +820,39 @@ mod tests {
 
         params.mode = DurabilityMode::DeleteOnExit;
         let state = PersistentState::new(name, None, &params);
+        match state.lookup(&[0], &KeyType::Single(&10.into())) {
+            LookupResult::Some(rows) => {
+                assert_eq!(rows.len(), 1);
+                assert_eq!(&*rows[0], &first);
+            }
+            _ => unreachable!(),
+        }
+
+        match state.lookup(&[1], &KeyType::Single(&"Bob".into())) {
+            LookupResult::Some(rows) => {
+                assert_eq!(rows.len(), 1);
+                assert_eq!(&*rows[0], &second);
+            }
+            _ => unreachable!(),
+        }
+    }
+
+    #[test]
+    fn persistent_state_recover_unique_key() {
+        let name = get_name("persistent_state_recover_unique_key");
+        let mut params = PersistenceParameters::default();
+        params.mode = DurabilityMode::Permanent;
+        let first: Vec<DataType> = vec![10.into(), "Cat".into()];
+        let second: Vec<DataType> = vec![20.into(), "Bob".into()];
+        {
+            let mut state = PersistentState::new(name.clone(), Some(&[0]), &params);
+            state.add_key(&[0], None);
+            state.add_key(&[1], None);
+            state.process_records(&mut vec![first.clone(), second.clone()].into(), None);
+        }
+
+        params.mode = DurabilityMode::DeleteOnExit;
+        let state = PersistentState::new(name, Some(&[0]), &params);
         match state.lookup(&[0], &KeyType::Single(&10.into())) {
             LookupResult::Some(rows) => {
                 assert_eq!(rows.len(), 1);
