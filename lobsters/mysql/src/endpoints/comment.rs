@@ -87,9 +87,8 @@ where
                         "INSERT INTO `comments` \
                          (`created_at`, `updated_at`, `short_id`, `story_id`, \
                          `user_id`, `parent_comment_id`, `thread_id`, \
-                         `comment`, `upvotes`, `confidence`, \
-                         `markeddown_comment`) \
-                         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                         `comment`, `markeddown_comment`) \
+                         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
                         (
                             now,
                             now,
@@ -99,8 +98,6 @@ where
                             parent,
                             thread,
                             "moar benchmarking", // lorem ipsum?
-                            1,
-                            0.1828847834138887,
                             "<p>moar benchmarking</p>\n",
                         ),
                     ))
@@ -108,9 +105,8 @@ where
                     futures::future::Either::B(c.prep_exec(
                         "INSERT INTO `comments` \
                          (`created_at`, `updated_at`, `short_id`, `story_id`, \
-                         `user_id`, `comment`, `upvotes`, `confidence`, \
-                         `markeddown_comment`) \
-                         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                         `user_id`, `comment`, `markeddown_comment`) \
+                         VALUES (?, ?, ?, ?, ?, ?, ?)",
                         (
                             now,
                             now,
@@ -118,8 +114,6 @@ where
                             story,
                             user,
                             "moar benchmarking", // lorem ipsum?
-                            1,
-                            0.1828847834138887,
                             "<p>moar benchmarking</p>\n",
                         ),
                     ))

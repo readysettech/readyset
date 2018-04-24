@@ -58,17 +58,14 @@ where
                 c.prep_exec(
                     "INSERT INTO `stories` \
                      (`created_at`, `user_id`, `title`, \
-                     `description`, `short_id`, `upvotes`, `hotness`, \
-                     `markeddown_description`) \
-                     VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+                     `description`, `short_id`, `markeddown_description`) \
+                     VALUES (?, ?, ?, ?, ?, ?)",
                     (
                         chrono::Local::now().naive_local(),
                         user,
                         title,
                         "to infinity", // lorem ipsum?
                         ::std::str::from_utf8(&id[..]).unwrap(),
-                        1,
-                        -19216.2884921,
                         "<p>to infinity</p>\n",
                     ),
                 ).and_then(|q| {
