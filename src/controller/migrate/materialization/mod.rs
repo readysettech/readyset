@@ -323,7 +323,7 @@ impl Materializations {
                 .collect();
             while let Some(child) = stack.pop() {
                 // allow views to force full (XXX)
-                if graph[ni].name().starts_with("FULL_") {
+                if graph[child].name().starts_with("FULL_") {
                     stack.clear();
                     able = false;
                 }
