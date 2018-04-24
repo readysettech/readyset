@@ -206,7 +206,7 @@ impl Node {
             }
             NodeType::Dropped => {
                 *m = None;
-                vec![]
+                (vec![], HashSet::new())
             }
             NodeType::Source => unreachable!(),
         }
