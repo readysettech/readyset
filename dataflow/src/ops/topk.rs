@@ -237,12 +237,12 @@ impl Ingredient for TopK {
                         missed = false;
                         grpk = rs.len();
                         match rs {
-                            Cow::Borrowed(rs) => {
+                            RecordResult::Borrowed(rs) => {
                                 current.extend(rs.iter().map(|r| (Cow::Borrowed(&r[..]), false)));
                             }
-                            Cow::Owned(rs) => {
+                            RecordResult::Owned(rs) => {
                                 current.extend(
-                                    rs.into_iter().map(|r| (Cow::Owned(r.unpack()), false)),
+                                    rs.into_iter().map(|r| (Cow::Owned(r), false)),
                                 );
                             }
                         }

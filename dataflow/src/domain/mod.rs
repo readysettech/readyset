@@ -1,6 +1,7 @@
 use petgraph::graph::NodeIndex;
-use std::cell;
+use std::borrow::Cow;
 use std::cmp;
+use std::cell;
 use std::collections::hash_map::Entry;
 use std::collections::{HashMap, HashSet, VecDeque};
 use std::mem;
@@ -1501,7 +1502,7 @@ impl Domain {
         }
     }
 
-    fn seed_row(&self, source: LocalNodeIndex, row: &Row) -> Record {
+    fn seed_row<'a>(&self, source: LocalNodeIndex, row: Cow<'a, [DataType]>) -> Record {
         if let Some(&(start, ref defaults)) = self.ingress_inject.get(&source) {
             let mut v = Vec::with_capacity(start + defaults.len());
             v.extend(row.iter().cloned());
@@ -1512,13 +1513,13 @@ impl Domain {
         let n = self.nodes[&source].borrow();
         if n.is_internal() {
             if let Some(b) = n.get_base() {
-                let mut row = ((**row).clone(), true).into();
+                let mut row = row.into_owned().into();
                 b.fix(&mut row);
                 return row;
             }
         }
 
-        return ((**row).clone(), true).into();
+        return row.into_owned().into();
     }
 
     fn seed_all(&mut self, tag: Tag, keys: HashSet<Vec<DataType>>, sends: &mut EnqueuedSends) {
@@ -1537,8 +1538,15 @@ impl Domain {
                 let (keys, misses): (HashSet<_>, _) = keys.into_iter().partition(|key| match state
                     .lookup(&cols[..], &KeyType::from(key))
                 {
-                    LookupResult::Some(res) => {
-                        rs.extend(res.into_iter().map(|r| self.seed_row(source, r)));
+                    LookupResult::Some(RecordResult::Borrowed(res)) => {
+                        rs.extend(
+                            res.into_iter()
+                                .map(|r| self.seed_row(source, Cow::from(&r[..]))),
+                        );
+                        true
+                    }
+                    LookupResult::Some(RecordResult::Owned(res)) => {
+                        rs.extend(res.into_iter().map(|r| self.seed_row(source, Cow::from(r))));
                         true
                     }
                     LookupResult::Missing => false,
@@ -1669,6 +1677,16 @@ impl Domain {
                 k.insert(Vec::from(key));
                 if let LookupResult::Some(rs) = rs {
                     use std::iter::FromIterator;
+                    let data = match rs {
+                        RecordResult::Owned(rs) => Records::from_iter(
+                            rs.into_iter().map(|r| self.seed_row(source, Cow::from(r))),
+                        ),
+                        RecordResult::Borrowed(rs) => Records::from_iter(
+                            rs.into_iter()
+                                .map(|r| self.seed_row(source, Cow::from(&r[..]))),
+                        ),
+                    };
+
                     let m = Some(box Packet::ReplayPiece {
                         link: Link::new(source, path[0].node),
                         tag: tag,
@@ -1676,7 +1694,7 @@ impl Domain {
                             for_keys: k,
                             ignore: false,
                         },
-                        data: Records::from_iter(rs.into_iter().map(|r| self.seed_row(source, r))),
+                        data,
                         transaction_state: transaction_state,
                     });
                     (m, source, None)

@@ -189,10 +189,10 @@ impl Ingredient for Base {
                         }
                     }
                 }
-                LookupResult::Some(Cow::Owned(mut rows)) => {
-                    Some(Cow::from(rows.pop().unwrap().unpack()))
+                LookupResult::Some(RecordResult::Owned(mut rows)) => {
+                    Some(Cow::from(rows.pop().unwrap()))
                 }
-                LookupResult::Some(Cow::Borrowed(rows)) => Some(Cow::from(&rows[0][..])),
+                LookupResult::Some(RecordResult::Borrowed(rows)) => Some(Cow::from(&rows[0][..])),
                 LookupResult::Missing => unreachable!(),
             }
         };
