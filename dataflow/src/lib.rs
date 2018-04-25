@@ -12,7 +12,7 @@
 #[allow(unused_extern_crates)]
 extern crate backtrace;
 extern crate channel;
-extern crate core;
+extern crate basics;
 extern crate evmap;
 extern crate fnv;
 extern crate hyper;
@@ -53,7 +53,7 @@ use std::sync::{Arc, Mutex};
 use checktable::TokenGenerator;
 
 pub type Readers = Arc<
-    Mutex<HashMap<(core::NodeIndex, usize), (backlog::SingleReadHandle, Option<TokenGenerator>)>>,
+    Mutex<HashMap<(basics::NodeIndex, usize), (backlog::SingleReadHandle, Option<TokenGenerator>)>>,
 >;
 pub type DomainConfig = domain::Config;
 
@@ -86,11 +86,11 @@ impl Sharding {
 }
 
 #[inline]
-pub fn shard_by(dt: &core::DataType, shards: usize) -> usize {
+pub fn shard_by(dt: &basics::DataType, shards: usize) -> usize {
     match *dt {
-        core::DataType::Int(n) => n as usize % shards,
-        core::DataType::BigInt(n) => n as usize % shards,
-        core::DataType::Text(..) | core::DataType::TinyText(..) => {
+        basics::DataType::Int(n) => n as usize % shards,
+        basics::DataType::BigInt(n) => n as usize % shards,
+        basics::DataType::Text(..) | basics::DataType::TinyText(..) => {
             use std::borrow::Cow;
             use std::hash::Hasher;
             let mut hasher = fnv::FnvHasher::default();

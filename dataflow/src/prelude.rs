@@ -2,7 +2,7 @@ use petgraph;
 use std::cell;
 
 // core types
-pub use core::*;
+pub use basics::*;
 pub use ops::NodeOperator;
 pub use processing::Ingredient;
 pub(crate) use processing::{Miss, ProcessingResult, RawProcessingResult, ReplayContext};

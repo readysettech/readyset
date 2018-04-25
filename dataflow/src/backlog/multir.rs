@@ -1,4 +1,4 @@
-use core::DataType;
+use basics::DataType;
 use evmap;
 use fnv::FnvBuildHasher;
 

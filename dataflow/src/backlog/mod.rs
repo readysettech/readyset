@@ -1,5 +1,5 @@
-use core::{DataType, Record};
-use core::data::SizeOf;
+use basics::{DataType, Record};
+use basics::data::SizeOf;
 use fnv::FnvBuildHasher;
 use std::borrow::Cow;
 

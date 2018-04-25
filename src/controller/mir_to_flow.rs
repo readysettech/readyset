@@ -3,7 +3,7 @@ use nom_sql::{ArithmeticBase, ArithmeticExpression, Column, ColumnConstraint, Co
 use std::collections::HashMap;
 
 use controller::Migration;
-use core::{DataType, NodeIndex};
+use basics::{DataType, NodeIndex};
 use dataflow::ops;
 use dataflow::ops::filter::FilterCondition;
 use dataflow::ops::join::{Join, JoinType};

@@ -1,5 +1,5 @@
 [package]
-name = "core"
+name = "basics"
 version = "0.1.0"
 authors = ["The Distributary Developers"]
 

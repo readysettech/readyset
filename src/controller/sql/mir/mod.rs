@@ -1,4 +1,4 @@
-use core::{DataType, NodeIndex};
+use basics::{DataType, NodeIndex};
 pub use mir::MirNodeRef;
 use mir::node::{GroupedNodeType, MirNode, MirNodeType};
 use mir::query::MirQuery;

@@ -1,6 +1,6 @@
 use channel::tcp::TcpSender;
 use consensus::{Authority, Epoch, STATE_KEY};
-use core::PersistenceParameters;
+use basics::PersistenceParameters;
 use dataflow::payload::{EgressForBase, IngressFromBase};
 use dataflow::prelude::*;
 use dataflow::statistics::GraphStats;
