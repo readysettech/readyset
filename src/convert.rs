@@ -10,12 +10,26 @@ pub(crate) trait ToDataType {
     fn to_datatype(self) -> DataType;
 }
 
+const TINYTEXT_WIDTH: usize = 15;
+
 impl ToDataType for Literal {
     fn to_datatype(self) -> DataType {
         match self {
             Literal::Null => DataType::None,
-            Literal::String(b) => DataType::Text(ArcCStr::try_from(b).unwrap()),
-            Literal::Blob(b) => DataType::Text(ArcCStr::try_from(&b[..]).unwrap()),
+            Literal::String(b) => b.into(),
+            Literal::Blob(b) => {
+                let len = b.len();
+                if len <= TINYTEXT_WIDTH {
+                    let mut bytes = [0; TINYTEXT_WIDTH];
+                    if len != 0 {
+                        let bts = &mut bytes[0..len];
+                        bts.copy_from_slice(&b);
+                    }
+                    DataType::TinyText(bytes)
+                } else {
+                    DataType::Text(ArcCStr::try_from(&b[..]).unwrap())
+                }
+            }
             Literal::Integer(i) => i.into(),
             Literal::FixedPoint(Real {
                 integral,
