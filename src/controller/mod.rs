@@ -2,7 +2,7 @@ use channel::poll::{PollEvent, PollingLoop, ProcessResult};
 use channel::tcp::TcpSender;
 
 use consensus::{Authority, Epoch, STATE_KEY};
-use core::PersistenceParameters;
+use basics::PersistenceParameters;
 use dataflow::checktable::service::CheckTableServer;
 use dataflow::DomainConfig;
 

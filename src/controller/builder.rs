@@ -1,5 +1,5 @@
 use consensus::{Authority, LocalAuthority};
-use core::PersistenceParameters;
+use basics::PersistenceParameters;
 
 use std::net::IpAddr;
 use std::sync::Arc;

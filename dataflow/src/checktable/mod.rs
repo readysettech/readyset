@@ -10,7 +10,7 @@ use std::collections::HashMap;
 use std::fmt;
 use std::fmt::Debug;
 
-use core::local::Tag as ReplayPath;
+use basics::local::Tag as ReplayPath;
 use domain;
 use payload::{EgressForBase, IngressFromBase};
 use prelude::*;

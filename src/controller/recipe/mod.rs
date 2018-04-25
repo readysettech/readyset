@@ -1,7 +1,7 @@
 use controller::sql::reuse::ReuseConfigType;
 use controller::sql::SqlIncorporator;
 use controller::Migration;
-use core::NodeIndex;
+use basics::NodeIndex;
 use dataflow::ops::trigger::Trigger;
 use dataflow::ops::trigger::TriggerEvent;
 use dataflow::prelude::DataType;

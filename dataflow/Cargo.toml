@@ -29,5 +29,5 @@ nom-sql = { git = "https://github.com/ms705/nom-sql.git", rev = "3e7ae4c4d32b773
 
 # local deps
 channel = { path = "../channel" }
-core = { path = "../core" }
+basics = { path = "../basics" }
 

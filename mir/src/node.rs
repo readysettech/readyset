@@ -3,7 +3,7 @@ use std::cell::RefCell;
 use std::fmt::{Debug, Display, Error, Formatter};
 use std::rc::Rc;
 
-use core::{DataType, NodeIndex};
+use basics::{DataType, NodeIndex};
 use dataflow::ops;
 use dataflow::ops::filter::FilterCondition;
 use dataflow::ops::grouped::aggregate::Aggregation as AggregationKind;

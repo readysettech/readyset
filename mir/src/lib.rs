@@ -1,6 +1,6 @@
 #![deny(unused_extern_crates)]
 
-extern crate core;
+extern crate basics;
 extern crate dataflow;
 extern crate nom_sql;
 extern crate regex;
@@ -10,7 +10,7 @@ extern crate slog;
 use std::rc::Rc;
 use std::cell::RefCell;
 
-use core::*;
+use basics::*;
 
 pub mod reuse;
 pub mod node;

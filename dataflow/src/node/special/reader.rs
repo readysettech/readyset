@@ -129,7 +129,7 @@ impl Reader {
     }
 
     pub fn state_size(&self) -> Option<u64> {
-        use core::data::SizeOf;
+        use basics::data::SizeOf;
         self.writer.as_ref().map(|w| w.deep_size_of())
     }
 

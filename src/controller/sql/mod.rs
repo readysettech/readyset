@@ -12,7 +12,7 @@ use self::query_signature::Signature;
 use self::reuse::{ReuseConfig, ReuseConfigType};
 use controller::mir_to_flow::mir_query_to_flow_parts;
 use controller::Migration;
-use core::NodeIndex;
+use basics::NodeIndex;
 use dataflow::prelude::DataType;
 use mir::query::{MirQuery, QueryFlowParts};
 use mir::reuse as mir_reuse;

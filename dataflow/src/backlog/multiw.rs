@@ -1,6 +1,6 @@
 use super::{key_to_double, key_to_single, Key};
-use core::{DataType, Record};
-use core::data::SizeOf;
+use basics::{DataType, Record};
+use basics::data::SizeOf;
 use evmap;
 use fnv::FnvBuildHasher;
 

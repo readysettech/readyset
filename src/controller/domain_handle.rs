@@ -9,7 +9,7 @@ use slog::Logger;
 use channel::poll::{KeepPolling, PollEvent, PollingLoop, StopPolling};
 use channel::{tcp, TcpReceiver, TcpSender};
 use consensus::Epoch;
-use core::PersistenceParameters;
+use basics::PersistenceParameters;
 use dataflow::payload::ControlReplyPacket;
 use dataflow::prelude::*;
 use dataflow::statistics::{DomainStats, NodeStats};

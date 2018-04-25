@@ -4,7 +4,7 @@ use consensus::LocalAuthority;
 use controller::{ControllerBuilder, ControllerHandle};
 use controller::recipe::Recipe;
 use controller::sql::SqlIncorporator;
-use core::{DataType, DurabilityMode, PersistenceParameters};
+use basics::{DataType, DurabilityMode, PersistenceParameters};
 use dataflow::checktable::Token;
 use dataflow::ops::base::Base;
 use dataflow::ops::grouped::aggregate::Aggregation;
@@ -169,7 +169,7 @@ fn it_works_basic() {
 
 #[test]
 fn base_mutation() {
-    use core::{Modification, Operation};
+    use basics::{Modification, Operation};
 
     let mut g = build_local("base_mutation");
     g.migrate(|mig| {

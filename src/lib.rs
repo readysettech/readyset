@@ -320,7 +320,7 @@ extern crate assert_infrequent;
 extern crate bincode;
 extern crate channel;
 extern crate consensus;
-extern crate core;
+extern crate basics;
 extern crate dataflow;
 extern crate failure;
 extern crate fnv;
@@ -356,7 +356,7 @@ mod tests;
 
 pub use consensus::{LocalAuthority, ZookeeperAuthority};
 
-pub use core::{DataType, Datas, DurabilityMode, Modification, NodeIndex, Operation,
+pub use basics::{DataType, Datas, DurabilityMode, Modification, NodeIndex, Operation,
                PersistenceParameters};
 
 pub use dataflow::checktable::{Token, TransactionResult};

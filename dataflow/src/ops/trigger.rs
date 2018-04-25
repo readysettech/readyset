@@ -62,11 +62,11 @@ impl Trigger {
         // TODO: instead of spawing a thred for each request, we could have a
         // long running thread that we just send requests to.
         thread::spawn(move || {
-            let mut core = Core::new().unwrap();
-            let client = Client::new(&core.handle());
+            let mut basics = Core::new().unwrap();
+            let client = Client::new(&basics.handle());
             for r in requests {
                 let work = client.request(r);
-                core.run(work).unwrap();
+                basics.run(work).unwrap();
             }
         });
     }
