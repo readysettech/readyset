@@ -12,7 +12,7 @@ use std::io::prelude::*;
 use std::{fmt, thread, time};
 use tsunami::*;
 
-const AMI: &str = "ami-6675d819";
+const AMI: &str = "ami-4564d23a";
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 enum Backend {
@@ -180,6 +180,30 @@ fn main() {
                         ssh.cmd("sudo chown -R mysql:mysql /var/lib/mysql/")?;
                     }
                     Backend::Soup => {
+                        // just to make totally sure
+                        server
+                            .ssh
+                            .as_mut()
+                            .unwrap()
+                            .cmd("sh -c 'pkill -9 -f souplet 2>&1'")
+                            .map(|out| {
+                                let out = out.trim_right();
+                                if !out.is_empty() {
+                                    eprintln!(" -> force stopped soup...\n{}", out);
+                                }
+                            })?;
+                        trawler
+                            .ssh
+                            .as_mut()
+                            .unwrap()
+                            .cmd("sh -c 'pkill -9 -f distributary-mysql 2>&1'")
+                            .map(|out| {
+                                let out = out.trim_right();
+                                if !out.is_empty() {
+                                    eprintln!(" -> force stopped shim...\n{}", out);
+                                }
+                            })?;
+
                         // XXX: also delete log files if we later run with RocksDB?
                         server
                             .ssh
@@ -195,7 +219,6 @@ fn main() {
                                     eprintln!(" -> wiped soup state...\n{}", out);
                                 }
                             })?;
-
                         // Don't hit Soup listening timeout think
                         thread::sleep(time::Duration::from_secs(10));
                     }
@@ -221,13 +244,14 @@ fn main() {
                             .unwrap()
                             .cmd(&format!(
                                 "sh -c 'nohup \
+                                 env RUST_BACKTRACE=1 \
                                  distributary/target/release/souplet \
                                  --deployment trawler \
                                  --durability memory \
                                  --address {} \
                                  --readers 14 -w 2 \
                                  --shards 0 \
-                                 > souplet.log 2>&1 &'",
+                                 &> souplet.log &'",
                                 server.private_ip,
                             ))
                             .map(|_| ())?;
@@ -239,12 +263,13 @@ fn main() {
                             .unwrap()
                             .cmd(&format!(
                                 "sh -c 'nohup \
+                                 env RUST_BACKTRACE=1 \
                                  shim/target/release/distributary-mysql \
                                  --deployment trawler \
                                  --no-sanitize --no-static-responses \
                                  -z {}:2181 \
                                  -p 3306 \
-                                 > shim.log 2>&1 &'",
+                                 &> shim.log &'",
                                 server.private_ip,
                             ))
                             .map(|_| ())?;
@@ -276,7 +301,8 @@ fn main() {
                     .as_mut()
                     .unwrap()
                     .cmd(&format!(
-                        "{}/lobsters/mysql/target/release/trawler-mysql \
+                        "env RUST_BACKTRACE=1 \
+                         {}/lobsters/mysql/target/release/trawler-mysql \
                          --warmup 0 \
                          --runtime 0 \
                          --issuers 24 \
@@ -299,7 +325,8 @@ fn main() {
                     .as_mut()
                     .unwrap()
                     .cmd_raw(&format!(
-                        "{}/lobsters/mysql/target/release/trawler-mysql \
+                        "env RUST_BACKTRACE=1 \
+                         {}/lobsters/mysql/target/release/trawler-mysql \
                          --reqscale {} \
                          --warmup 60 \
                          --runtime 30 \
