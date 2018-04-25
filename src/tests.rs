@@ -96,6 +96,7 @@ fn it_works_basic() {
         128,
         Duration::from_millis(1),
         Some(get_log_name("it_works_basic")),
+        1,
     ));
     let mut g = b.build_local();
     let _ = g.migrate(|mig| {
@@ -690,6 +691,7 @@ fn it_recovers_persisted_bases() {
         128,
         Duration::from_millis(1),
         Some(log_name.name.clone()),
+        1,
     );
 
     {
@@ -786,6 +788,7 @@ fn it_recovers_persisted_bases_w_multiple_nodes() {
         128,
         Duration::from_millis(1),
         Some(log_name.name.clone()),
+        1,
     );
 
     {
@@ -831,6 +834,7 @@ fn it_recovers_persisted_bases_w_transactions() {
         128,
         Duration::from_millis(1),
         Some(log_name.name.clone()),
+        1,
     );
 
     {
@@ -1137,7 +1141,14 @@ fn transactional_vote() {
         mig.maintain_anonymous(end_votes, &[2]);
 
         (
-            article1, article2, vote, article, vc, end, end_title, end_votes,
+            article1,
+            article2,
+            vote,
+            article,
+            vc,
+            end,
+            end_title,
+            end_votes,
         )
     });
 
@@ -2343,6 +2354,7 @@ fn node_removal() {
         128,
         Duration::from_millis(1),
         Some(get_log_name("domain_removal")),
+        1,
     ));
     let mut g = b.build_local();
     let cid = g.migrate(|mig| {
@@ -2439,5 +2451,4 @@ fn remove_query() {
 
     assert_eq!(qa.lookup(&[0.into()], true).unwrap().len(), 3);
     assert_eq!(qb.lookup(&[0.into()], true).unwrap().len(), 1);
-
 }

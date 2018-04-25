@@ -25,6 +25,7 @@ fn main() {
         512,
         Duration::from_millis(1),
         Some(String::from("example")),
+        1,
     );
 
     // set up Soup via recipe

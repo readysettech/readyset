@@ -95,6 +95,7 @@ impl PersistenceParameters {
         queue_capacity: usize,
         flush_timeout: time::Duration,
         log_prefix: Option<String>,
+        persistence_threads: i32,
     ) -> Self {
         let log_prefix = log_prefix.unwrap_or(String::from("soup"));
         assert!(!log_prefix.contains("-"));
@@ -104,6 +105,7 @@ impl PersistenceParameters {
             flush_timeout,
             mode,
             log_prefix,
+            persistence_threads,
             ..Default::default()
         }
     }
