@@ -27,8 +27,8 @@ where
              FROM `stories` \
              WHERE `stories`.`merged_story_id` IS NULL \
              AND `stories`.`is_expired` = 0 \
-             AND saldo <= 5 \
              ORDER BY stories.id DESC LIMIT 51",
+             //AND saldo <= 5 \
         )
     }).and_then(|stories| {
             stories.reduce_and_drop(
