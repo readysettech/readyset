@@ -1,5 +1,7 @@
+use std::borrow::Cow;
 use std::ops::Deref;
 use std::rc::Rc;
+use std::{slice, vec};
 
 mod memory_state;
 mod persistent_state;
@@ -86,6 +88,33 @@ impl<'a> RecordResult<'a> {
         match *self {
             RecordResult::Borrowed(rs) => rs.len(),
             RecordResult::Owned(ref rs) => rs.len(),
+        }
+    }
+}
+
+impl<'a> IntoIterator for RecordResult<'a> {
+    type Item = Cow<'a, [DataType]>;
+    type IntoIter = RecordResultIterator<'a>;
+
+    fn into_iter(self) -> Self::IntoIter {
+        match self {
+            RecordResult::Borrowed(rs) => RecordResultIterator::Borrowed(rs.into_iter()),
+            RecordResult::Owned(rs) => RecordResultIterator::Owned(rs.into_iter()),
+        }
+    }
+}
+
+pub enum RecordResultIterator<'a> {
+    Owned(vec::IntoIter<Vec<DataType>>),
+    Borrowed(slice::Iter<'a, Row>),
+}
+
+impl<'a> Iterator for RecordResultIterator<'a> {
+    type Item = Cow<'a, [DataType]>;
+    fn next(&mut self) -> Option<Self::Item> {
+        match self {
+            RecordResultIterator::Borrowed(iter) => iter.next().map(|r| Cow::from(&r[..])),
+            RecordResultIterator::Owned(iter) => iter.next().map(|r| Cow::from(r)),
         }
     }
 }

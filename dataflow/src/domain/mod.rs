@@ -1538,15 +1538,11 @@ impl Domain {
                 let (keys, misses): (HashSet<_>, _) = keys.into_iter().partition(|key| match state
                     .lookup(&cols[..], &KeyType::from(key))
                 {
-                    LookupResult::Some(RecordResult::Borrowed(res)) => {
+                    LookupResult::Some(res) => {
                         rs.extend(
                             res.into_iter()
-                                .map(|r| self.seed_row(source, Cow::from(&r[..]))),
+                                .map(|r| self.seed_row(source, r)),
                         );
-                        true
-                    }
-                    LookupResult::Some(RecordResult::Owned(res)) => {
-                        rs.extend(res.into_iter().map(|r| self.seed_row(source, Cow::from(r))));
                         true
                     }
                     LookupResult::Missing => false,
@@ -1677,15 +1673,9 @@ impl Domain {
                 k.insert(Vec::from(key));
                 if let LookupResult::Some(rs) = rs {
                     use std::iter::FromIterator;
-                    let data = match rs {
-                        RecordResult::Owned(rs) => Records::from_iter(
-                            rs.into_iter().map(|r| self.seed_row(source, Cow::from(r))),
-                        ),
-                        RecordResult::Borrowed(rs) => Records::from_iter(
-                            rs.into_iter()
-                                .map(|r| self.seed_row(source, Cow::from(&r[..]))),
-                        ),
-                    };
+                    let data = Records::from_iter(
+                        rs.into_iter().map(|r| self.seed_row(source, r)),
+                    );
 
                     let m = Some(box Packet::ReplayPiece {
                         link: Link::new(source, path[0].node),
