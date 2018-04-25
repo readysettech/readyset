@@ -159,14 +159,32 @@ impl Ingredient for TopK {
             ($out:ident, $current:ident, $grpk:expr, $k:expr, $order:expr) => {{
                 $current.sort_unstable_by(|a, b| $order.cmp(&*a.0, &*b.0));
 
-                if $grpk == $k && $current.len() < $grpk {
-                    // there used to be k things in the group
-                    // now there are fewer than k
-                    // we don't know if querying would bring us back to k
-                    unimplemented!();
-                }
-
                 let start = $current.len().saturating_sub($k);
+
+                if $grpk == $k {
+                    if $current.len() < $grpk {
+                        // there used to be k things in the group
+                        // now there are fewer than k
+                        // we don't know if querying would bring us back to k
+                        unimplemented!();
+                    }
+
+                    // FIXME: if all the elements with the smallest value in the new topk are new,
+                    // then it *could* be that there exists some value that is greater than all
+                    // those values, and <= the smallest old value. we would only discover that by
+                    // querying. unfortunately, the check below isn't *quite* right because it does
+                    // not consider old rows that were removed in this batch (which should still be
+                    // counted for this condition).
+                    if false {
+                        let all_new_bottom = $current[start..]
+                            .iter()
+                            .take_while(|(ref r, _)| $order.cmp(r, &$current[start].0) == Ordering::Equal)
+                            .all(|&(_, is_new)| is_new);
+                        if all_new_bottom {
+                            eprintln!("topk is guesstimating bottom row");
+                        }
+                    }
+                }
 
                 // optimization: if we don't *have to* remove something, we don't
                 for i in start..$current.len() {
