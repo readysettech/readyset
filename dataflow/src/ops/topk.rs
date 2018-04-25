@@ -570,7 +570,7 @@ mod tests {
 
     #[test]
     fn it_handles_updates() {
-        let (mut g, _) = setup(true);
+        let (mut g, _) = setup(false);
         let ni = *g.node().local_addr();
 
         let r1: Vec<DataType> = vec![1.into(), "z".into(), 10.into()];
@@ -603,7 +603,9 @@ mod tests {
         assert_eq!(emit, Vec::<Record>::new().into());
 
         let emit = g.narrow_one(
-            Records::from(vec![Record::Negative(r4a.clone()), Record::Positive(r4b.clone())].into()),
+            Records::from(
+                vec![Record::Negative(r4a.clone()), Record::Positive(r4b.clone())].into(),
+            ),
             true,
         );
 
