@@ -148,6 +148,8 @@ fn main() {
     }
 
     for t in threads.drain(..) {
-        t.join().unwrap();
+        t.join()
+            .map_err(|e| e.downcast::<io::Error>().unwrap())
+            .unwrap();
     }
 }
