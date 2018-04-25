@@ -8,7 +8,7 @@ arccstr = "1.1.0"
 clap = "2.24.0"
 msql-srv = "0.6"
 #distributary = { path = "../distributary" }
-distributary = { git = "https://github.com/mit-pdos/distributary.git", rev = "bfcf80eaa511d0a9b0080ff337564e53b94722c8" }
+distributary = { git = "https://github.com/mit-pdos/distributary.git", rev = "3e4cbd15f91feaae024c71af47889c874c2fb2ee" }
 lazy_static = "1.0.0"
 nom-sql = { git = "https://github.com/ms705/nom-sql.git", rev = "3e7ae4c4d32b77342051d5c217549ab8fcb68e85" }
 slog = "2.2.2"
