@@ -13,3 +13,4 @@ addons:
     packages:
     - libhwloc-dev
     - zookeeperd
+    - liblz4-dev
