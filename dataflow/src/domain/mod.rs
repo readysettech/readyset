@@ -2369,10 +2369,12 @@ impl Domain {
 
     pub fn handle_eviction(&mut self, m: Box<Packet>, sends: &mut EnqueuedSends) {
         fn trigger_downstream_evictions(
+            log: &Logger,
             key_columns: &[usize],
             keys: &[Vec<DataType>],
             node: LocalNodeIndex,
             sends: &mut EnqueuedSends,
+            not_ready: &HashSet<LocalNodeIndex>,
             replay_paths: &HashMap<Tag, ReplayPath>,
             shard: Option<usize>,
             state: &mut StateMap,
@@ -2400,13 +2402,23 @@ impl Domain {
                             // already evicted from in walk_path
                             continue;
                         }
+                        if !state.contains_key(&target.node) {
+                            // this is probably because
+                            if !not_ready.contains(&target.node) {
+                                debug!(log, "got eviction for ready but stateless node";
+                                       "node" => target.node.id());
+                            }
+                            continue;
+                        }
 
                         state[&target.node].evict_keys(&tag, &keys[..]);
                         trigger_downstream_evictions(
+                            log,
                             &target.partial_key.as_ref().unwrap()[..],
                             &keys[..],
                             target.node,
                             sends,
+                            not_ready,
                             replay_paths,
                             shard,
                             state,
@@ -2502,10 +2514,12 @@ impl Domain {
                             }
 
                             trigger_downstream_evictions(
+                                &self.log,
                                 &key_columns[..],
                                 &keys[..],
                                 node,
                                 sends,
+                                &self.not_ready,
                                 &self.replay_paths,
                                 self.shard,
                                 &mut self.state,
@@ -2549,10 +2563,12 @@ impl Domain {
                         }
                         let key_columns = self.state[&target].evict_keys(&tag, &keys).0.to_vec();
                         trigger_downstream_evictions(
+                            &self.log,
                             &key_columns[..],
                             &keys[..],
                             target,
                             sends,
+                            &self.not_ready,
                             &self.replay_paths,
                             self.shard,
                             &mut self.state,
