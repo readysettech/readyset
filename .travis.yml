@@ -11,5 +11,4 @@ script:
 addons:
   apt:
     packages:
-    - libhwloc-dev
     - liblz4-dev
