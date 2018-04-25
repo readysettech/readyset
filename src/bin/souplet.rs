@@ -38,6 +38,13 @@ fn main() {
                 .help("How to maintain base logs."),
         )
         .arg(
+            Arg::with_name("persistence-threads")
+                .long("persistence-threads")
+                .takes_value(true)
+                .default_value("1")
+                .help("Number of background threads used by RocksDB."),
+        )
+        .arg(
             Arg::with_name("zookeeper")
                 .short("z")
                 .long("zookeeper")
@@ -112,6 +119,7 @@ fn main() {
     let memory = value_t_or_exit!(matches, "memory", usize);
     let readers = value_t_or_exit!(matches, "readers", usize);
     let quorum = value_t_or_exit!(matches, "quorum", usize);
+    let persistence_threads = value_t_or_exit!(matches, "persistence-threads", i32);
     let sharding = match value_t_or_exit!(matches, "shards", usize) {
         0 => None,
         x => Some(x),
@@ -146,7 +154,7 @@ fn main() {
         512,
         Duration::new(0, 100_000),
         Some(deployment_name.to_string()),
-        1,
+        persistence_threads,
     );
     builder.set_persistence(persistence_params);
 
