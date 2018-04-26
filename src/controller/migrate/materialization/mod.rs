@@ -573,10 +573,10 @@ impl Materializations {
                     {
                         println!("{}", graphviz(graph, &self));
                         crit!(
-                        self.log,
-                        "attempting to make old non-materialized node with children partial";
-                        "node" => node.index(),
-                    );
+                            self.log,
+                            "attempting to make old non-materialized node with children partial";
+                            "node" => node.index(),
+                        );
                         unimplemented!();
                     }
                 }

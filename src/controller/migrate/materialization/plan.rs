@@ -1,5 +1,5 @@
 use controller::domain_handle::DomainHandle;
-use controller::keys;
+use controller::{inner::graphviz, keys};
 use dataflow::payload::TriggerEndpoint;
 use dataflow::prelude::*;
 use std::collections::{HashMap, HashSet};
@@ -163,10 +163,11 @@ impl<'a> Plan<'a> {
                 // TODO:
                 //  a domain may appear multiple times in this list if a path crosses into the same
                 //  domain more than once. currently, that will cause a deadlock.
-                assert!(
-                    !seen.contains(&domain),
-                    "a-b-a domain replays are not yet supported"
-                );
+                if seen.contains(&domain) {
+                    println!("{}", graphviz(&self.graph, &self.m));
+                    crit!(self.m.log, "detected a-b-a domain replay path");
+                    unimplemented!();
+                }
                 seen.insert(domain);
 
                 // we're not replaying through the starter node
