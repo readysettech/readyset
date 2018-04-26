@@ -44,7 +44,7 @@ pub trait State: SizeOf + Send {
 
     /// Evict the listed keys from the materialization targeted by `tag`, returning the key columns
     /// of the index that was evicted from and the number of bytes evicted.
-    fn evict_keys(&mut self, tag: &Tag, keys: &[Vec<DataType>]) -> (&[usize], u64);
+    fn evict_keys(&mut self, tag: &Tag, keys: &[Vec<DataType>]) -> Option<(&[usize], u64)>;
 }
 
 #[derive(Clone, Copy, Eq, PartialEq, Ord, PartialOrd, Hash, Debug, Serialize, Deserialize)]

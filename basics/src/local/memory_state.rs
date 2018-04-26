@@ -156,11 +156,15 @@ impl State for MemoryState {
         (self.state[index].key(), keys, bytes_freed)
     }
 
-    fn evict_keys(&mut self, tag: &Tag, keys: &[Vec<DataType>]) -> (&[usize], u64) {
-        let index = self.by_tag[tag];
-        let bytes = self.state[index].evict_keys(keys);
-        self.mem_size = self.mem_size.saturating_sub(bytes);
-        (self.state[index].key(), bytes)
+    fn evict_keys(&mut self, tag: &Tag, keys: &[Vec<DataType>]) -> Option<(&[usize], u64)> {
+        // we may be told to evict from a tag that add_key hasn't been called for yet
+        // this can happen if an upstream domain issues an eviction for a replay path that we have
+        // been told about, but that has not yet been finalized.
+        self.by_tag.get(tag).cloned().map(move |index| {
+            let bytes = self.state[index].evict_keys(keys);
+            self.mem_size = self.mem_size.saturating_sub(bytes);
+            (self.state[index].key(), bytes)
+        })
     }
 }
 

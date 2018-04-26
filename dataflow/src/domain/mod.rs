@@ -2554,13 +2554,19 @@ impl Domain {
                 mut keys,
                 tag,
             },) => {
-                let i = self.replay_paths[&tag]
-                    .path
-                    .iter()
+                let (trigger, path) = if let Some(rp) = self.replay_paths.get(&tag) {
+                    (&rp.trigger, &rp.path)
+                } else {
+                    debug!(self.log, "got eviction for tag that has not yet been finalized";
+                           "tag" => tag.id());
+                    return;
+                };
+
+                let i = path.iter()
                     .position(|ps| ps.node == dst)
                     .expect("got eviction for non-local node");
                 walk_path(
-                    &self.replay_paths[&tag].path[i..],
+                    &path[i..],
                     &mut keys,
                     tag,
                     self.shard,
@@ -2568,11 +2574,11 @@ impl Domain {
                     sends,
                 );
 
-                match self.replay_paths[&tag].trigger {
+                match trigger {
                     TriggerEndpoint::End(..) | TriggerEndpoint::Local(..) => {
                         // This path terminates inside the domain. Find the target node, evict
                         // from it, and then propagate the eviction further downstream.
-                        let target = self.replay_paths[&tag].path.last().unwrap().node;
+                        let target = path.last().unwrap().node;
                         // We've already evicted from readers in walk_path
                         if self.nodes[&target].borrow().is_reader() {
                             return;
@@ -2581,19 +2587,21 @@ impl Domain {
                         if self.nodes[&target].borrow().is_dropped() {
                             return;
                         }
-                        let key_columns = self.state[&target].evict_keys(&tag, &keys).0.to_vec();
-                        trigger_downstream_evictions(
-                            &self.log,
-                            &key_columns[..],
-                            &keys[..],
-                            target,
-                            sends,
-                            &self.not_ready,
-                            &self.replay_paths,
-                            self.shard,
-                            &mut self.state,
-                            &mut self.nodes,
-                        );
+                        if let Some(evicted) = self.state[&target].evict_keys(&tag, &keys) {
+                            let key_columns = evicted.0.to_vec();
+                            trigger_downstream_evictions(
+                                &self.log,
+                                &key_columns[..],
+                                &keys[..],
+                                target,
+                                sends,
+                                &self.not_ready,
+                                &self.replay_paths,
+                                self.shard,
+                                &mut self.state,
+                                &mut self.nodes,
+                            );
+                        }
                     }
                     TriggerEndpoint::None | TriggerEndpoint::Start(..) => {}
                 }

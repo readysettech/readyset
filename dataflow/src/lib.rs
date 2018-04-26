@@ -1,3 +1,4 @@
+#![feature(nll)]
 #![feature(box_syntax)]
 #![feature(box_patterns)]
 #![feature(option_filter)]
