@@ -36,7 +36,7 @@ use tarpc::sync::client::{self, ClientExt};
 /// `Migration`, which can be performed using `ControllerInner::migrate`. Only one `Migration` can
 /// occur at any given point in time.
 pub struct ControllerInner {
-    pub(super) ingredients: petgraph::Graph<node::Node, Edge>,
+    pub(super) ingredients: Graph,
     pub(super) source: NodeIndex,
     pub(super) ndomains: usize,
     pub(super) checktable: checktable::CheckTableClient,
@@ -76,6 +76,44 @@ pub struct ControllerInner {
     last_checked_workers: Instant,
 
     log: slog::Logger,
+}
+
+pub(crate) fn graphviz(graph: &Graph, materializations: &Materializations) -> String {
+    let mut s = String::new();
+
+    let indentln = |s: &mut String| s.push_str("    ");
+
+    // header.
+    s.push_str("digraph {{\n");
+
+    // global formatting.
+    indentln(&mut s);
+    s.push_str("node [shape=record, fontsize=10]\n");
+
+    // node descriptions.
+    for index in graph.node_indices() {
+        let node = &graph[index];
+        let materialization_status = materializations.get_status(&index, node);
+        indentln(&mut s);
+        s.push_str(&format!("{}", index.index()));
+        s.push_str(&node.describe(index, materialization_status));
+    }
+
+    // edges.
+    for (_, edge) in graph.raw_edges().iter().enumerate() {
+        indentln(&mut s);
+        s.push_str(&format!(
+            "{} -> {}",
+            edge.source().index(),
+            edge.target().index()
+        ));
+        s.push_str("\n");
+    }
+
+    // footer.
+    s.push_str("}}");
+
+    s
 }
 
 /// Serializable error type for RPC that can fail.
@@ -782,41 +820,7 @@ impl ControllerInner {
     }
 
     pub fn graphviz(&self) -> String {
-        let mut s = String::new();
-
-        let indentln = |s: &mut String| s.push_str("    ");
-
-        // header.
-        s.push_str("digraph {{\n");
-
-        // global formatting.
-        indentln(&mut s);
-        s.push_str("node [shape=record, fontsize=10]\n");
-
-        // node descriptions.
-        for index in self.ingredients.node_indices() {
-            let node = &self.ingredients[index];
-            let materialization_status = self.materializations.get_status(&index, node);
-            indentln(&mut s);
-            s.push_str(&format!("{}", index.index()));
-            s.push_str(&node.describe(index, materialization_status));
-        }
-
-        // edges.
-        for (_, edge) in self.ingredients.raw_edges().iter().enumerate() {
-            indentln(&mut s);
-            s.push_str(&format!(
-                "{} -> {}",
-                edge.source().index(),
-                edge.target().index()
-            ));
-            s.push_str("\n");
-        }
-
-        // footer.
-        s.push_str("}}");
-
-        s
+        graphviz(&self.ingredients, &self.materializations)
     }
 
     pub fn remove_node(&mut self, node: NodeIndex) {

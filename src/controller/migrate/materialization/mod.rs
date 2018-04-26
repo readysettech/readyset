@@ -6,7 +6,7 @@
 //! module).
 
 use controller::domain_handle::DomainHandle;
-use controller::keys;
+use controller::{inner::graphviz, keys};
 use dataflow::prelude::*;
 use petgraph;
 use petgraph::graph::NodeIndex;
@@ -474,6 +474,7 @@ impl Materializations {
                 }
 
                 if let Some(pi) = any_partial(self, graph, ni) {
+                    println!("{}", graphviz(graph, &self));
                     crit!(self.log, "partial materializations above full materialization";
                               "full" => ni.index(),
                               "partial" => pi.index());
@@ -521,6 +522,7 @@ impl Materializations {
                                                 .find(|c| !index.contains(&c))
                                         });
                                     if let Some(not_shared) = unshared {
+                                        println!("{}", graphviz(graph, &self));
                                         crit!(self.log, "partially overlapping partial indices";
                                                   "parent" => pni.index(),
                                                   "pcols" => ?index,
@@ -565,6 +567,7 @@ impl Materializations {
             // are they trying to make a non-materialized node materialized?
             if self.have[&node] == index_on {
                 if self.partial.contains(&node) {
+                    println!("{}", graphviz(graph, &self));
                     crit!(
                         self.log,
                         "attempting to make old non-materialized node partial";
@@ -588,6 +591,7 @@ impl Materializations {
                 index_on.clear();
             } else if !n.sharded_by().is_none() {
                 // what do we even do here?!
+                println!("{}", graphviz(graph, &self));
                 crit!(self.log, "asked to add index to sharded node";
                            "node" => node.index(),
                            "cols" => ?index_on);
