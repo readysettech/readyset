@@ -109,6 +109,10 @@ pub fn assign(
                 };
             }
 
+            if graphs[node].name().starts_with("BOUNDARY_") {
+                return next_domain();
+            }
+
             let any_parents = move |prime: &Fn(&Node) -> bool, check: &Fn(&Node) -> bool| {
                 let mut stack: Vec<_> = graph
                     .neighbors_directed(node, petgraph::EdgeDirection::Incoming)
