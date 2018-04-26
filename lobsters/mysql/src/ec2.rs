@@ -31,7 +31,7 @@ impl fmt::Display for Backend {
 
 fn git_and_cargo(ssh: &mut Session, dir: &str, bin: &str) -> Result<(), failure::Error> {
     eprintln!(" -> git reset");
-    ssh.cmd(&format!("sh -c 'git -C {} reset --hard 2>&1'", dir))
+    ssh.cmd(&format!("bash -c 'git -C {} reset --hard 2>&1'", dir))
         .map(|out| {
             let out = out.trim_right();
             if !out.is_empty() && !out.contains("Already up-to-date.") {
@@ -40,7 +40,7 @@ fn git_and_cargo(ssh: &mut Session, dir: &str, bin: &str) -> Result<(), failure:
         })?;
 
     eprintln!(" -> git update");
-    ssh.cmd(&format!("sh -c 'git -C {} pull 2>&1'", dir))
+    ssh.cmd(&format!("bash -c 'git -C {} pull 2>&1'", dir))
         .map(|out| {
             let out = out.trim_right();
             if !out.is_empty() && !out.contains("Already up-to-date.") {
@@ -50,7 +50,7 @@ fn git_and_cargo(ssh: &mut Session, dir: &str, bin: &str) -> Result<(), failure:
 
     eprintln!(" -> rebuild");
     ssh.cmd(&format!(
-        "sh -c 'cd {} && cargo b --release --bin {} 2>&1'",
+        "bash -c 'cd {} && cargo b --release --bin {} 2>&1'",
         dir, bin
     )).map(|out| {
             let out = out.trim_right();
@@ -160,7 +160,7 @@ fn main() {
             .ssh
             .as_mut()
             .unwrap()
-            .cmd("sh -c 'echo 1 | sudo tee /proc/sys/net/ipv4/tcp_tw_reuse'")?;
+            .cmd("bash -c 'echo 1 | sudo tee /proc/sys/net/ipv4/tcp_tw_reuse'")?;
 
         for scale in scales {
             for backend in &backends {
@@ -185,7 +185,7 @@ fn main() {
                             .ssh
                             .as_mut()
                             .unwrap()
-                            .cmd("sh -c 'pkill -9 -f souplet 2>&1'")
+                            .cmd("bash -c 'pkill -9 -f souplet 2>&1'")
                             .map(|out| {
                                 let out = out.trim_right();
                                 if !out.is_empty() {
@@ -196,7 +196,7 @@ fn main() {
                             .ssh
                             .as_mut()
                             .unwrap()
-                            .cmd("sh -c 'pkill -9 -f distributary-mysql 2>&1'")
+                            .cmd("bash -c 'pkill -9 -f distributary-mysql 2>&1'")
                             .map(|out| {
                                 let out = out.trim_right();
                                 if !out.is_empty() {
@@ -230,7 +230,7 @@ fn main() {
                         .ssh
                         .as_mut()
                         .unwrap()
-                        .cmd("sh -c 'sudo systemctl start mysql 2>&1'")
+                        .cmd("bash -c 'sudo systemctl start mysql 2>&1'")
                         .map(|out| {
                             let out = out.trim_right();
                             if !out.is_empty() {
@@ -243,7 +243,7 @@ fn main() {
                             .as_mut()
                             .unwrap()
                             .cmd(&format!(
-                                "sh -c 'nohup \
+                                "bash -c 'nohup \
                                  env RUST_BACKTRACE=1 \
                                  distributary/target/release/souplet \
                                  --deployment trawler \
@@ -262,7 +262,7 @@ fn main() {
                             .as_mut()
                             .unwrap()
                             .cmd(&format!(
-                                "sh -c 'nohup \
+                                "bash -c 'nohup \
                                  env RUST_BACKTRACE=1 \
                                  shim/target/release/distributary-mysql \
                                  --deployment trawler \
@@ -376,7 +376,7 @@ fn main() {
                             .ssh
                             .as_mut()
                             .unwrap()
-                            .cmd("sh -c 'sudo systemctl stop mysql 2>&1'")
+                            .cmd("bash -c 'sudo systemctl stop mysql 2>&1'")
                             .map(|out| {
                                 let out = out.trim_right();
                                 if !out.is_empty() {
@@ -390,7 +390,7 @@ fn main() {
                             .ssh
                             .as_mut()
                             .unwrap()
-                            .cmd("sh -c 'pkill -f souplet 2>&1'")
+                            .cmd("bash -c 'pkill -f souplet 2>&1'")
                             .map(|out| {
                                 let out = out.trim_right();
                                 if !out.is_empty() {
@@ -401,7 +401,7 @@ fn main() {
                             .ssh
                             .as_mut()
                             .unwrap()
-                            .cmd("sh -c 'pkill -f distributary-mysql 2>&1'")
+                            .cmd("bash -c 'pkill -f distributary-mysql 2>&1'")
                             .map(|out| {
                                 let out = out.trim_right();
                                 if !out.is_empty() {
