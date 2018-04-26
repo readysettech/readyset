@@ -296,10 +296,8 @@ impl Ingredient for TopK {
     }
 
     fn suggest_indexes(&self, this: NodeIndex) -> HashMap<NodeIndex, (Vec<usize>, bool)> {
-        vec![
-            (this, (self.group_by.clone(), true)),
-            (self.src.as_global(), (self.group_by.clone(), true)),
-        ].into_iter()
+        vec![(this, (self.group_by.clone(), true))]
+            .into_iter()
             .collect()
     }
 
@@ -481,9 +479,8 @@ mod tests {
         let (g, _) = setup(false);
         let me = 2.into();
         let idx = g.node().suggest_indexes(me);
-        assert_eq!(idx.len(), 2);
+        assert_eq!(idx.len(), 1);
         assert_eq!(*idx.iter().next().unwrap().1, (vec![1], true));
-        assert_eq!(*idx.iter().skip(1).next().unwrap().1, (vec![1], true));
     }
 
     #[test]
