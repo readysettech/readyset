@@ -23,4 +23,4 @@ nom-sql = { git = "https://github.com/ms705/nom-sql.git", rev = "3e7ae4c4d32b773
 [dependencies.rocksdb]
 git = "https://github.com/ekmartin/rust-rocksdb.git"
 features = ["lz4"]
-rev = "cc049d688f288632ddbefbc93412985a3dcf649d"
+rev = "67974a40006ae87aadaff885a43670394e23020b"
