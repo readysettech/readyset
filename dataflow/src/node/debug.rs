@@ -43,7 +43,7 @@ impl Node {
 
         let materialized = match materialization_status {
             MaterializationStatus::Not => "",
-            MaterializationStatus::Partial => "| ▓",
+            MaterializationStatus::Partial => "| ░",
             MaterializationStatus::Full => "| █",
         };
 
