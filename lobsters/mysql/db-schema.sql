@@ -82,10 +82,10 @@ CREATE VIEW `replying_comments_for_count` AS SELECT `read_ribbons`.`user_id`, `r
 -- FROM comments;
 --
 -- CREATE VIEW heads AS
--- SELECT stories.user_id, stories.id AS story_id, NULL as pid FROM stories
+-- (SELECT stories.user_id, stories.id AS story_id, NULL as pid FROM stories)
 -- UNION
--- SELECT scored_comments.user_id, scored_comments.story_id, scored_comments.id AS pid
--- FROM scored_comments WHERE scored_comments.score >= 0;
+-- (SELECT scored_comments.user_id, scored_comments.story_id, scored_comments.id AS pid
+-- FROM scored_comments WHERE scored_comments.score >= 0);
 --
 -- CREATE VIEW tails AS
 -- SELECT heads.user_id, heads.story_id, scored_comments.created_at
@@ -103,7 +103,7 @@ CREATE VIEW `replying_comments_for_count` AS SELECT `read_ribbons`.`user_id`, `r
 --       `tails`.`user_id` <> `read_ribbons`.`user_id` AND
 --       `tails`.`created_at` > `read_ribbons`.`updated_at`;
 -- CREATE VIEW scored_comments AS SELECT comments.user_id, comments.story_id, comments.id, comments.created_at, comments.parent_comment_id, comments.upvotes - comments.downvotes AS score FROM comments;
--- CREATE VIEW heads AS SELECT stories.user_id, stories.id AS story_id, NULL as pid FROM stories UNION SELECT scored_comments.user_id, scored_comments.story_id, scored_comments.id AS pid FROM scored_comments WHERE scored_comments.score >= 0;
+-- CREATE VIEW heads AS (SELECT stories.user_id, stories.id AS story_id, NULL as pid FROM stories) UNION (SELECT scored_comments.user_id, scored_comments.story_id, scored_comments.id AS pid FROM scored_comments WHERE scored_comments.score >= 0);
 -- CREATE VIEW tails AS SELECT heads.user_id, heads.story_id, scored_comments.created_at FROM heads JOIN scored_comments ON (heads.pid = scored_comments.parent_comment_id) WHERE scored_comments.story_id = heads.story_id AND scored_comments.score >= 0 AND scored_comments.is_deleted = 0 AND scored_comments.is_moderated = 0;
 -- CREATE VIEW `replying_comments_for_count` AS SELECT `read_ribbons`.`user_id`, tails.created_at FROM `read_ribbons` JOIN `tails` ON (`tails`.`story_id` = `read_ribbons`.`story_id`) WHERE `read_ribbons`.`is_following` = 1 AND `tails`.`user_id` <> `read_ribbons`.`user_id` AND `tails`.`created_at` > `read_ribbons`.`updated_at`;
 
