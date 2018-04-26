@@ -211,11 +211,9 @@ impl trawler::LobstersClient for MysqlTrawler {
                 }
 
                 Either::B(c.drop_exec(
-                    "SELECT COUNT(*) \
-                     FROM `replying_comments_for_count`
-                     WHERE `replying_comments_for_count`.`user_id` = ? \
-                     GROUP BY `replying_comments_for_count`.`user_id` \
-                     ",
+                    "SELECT BOUNDARY_notifications.notifications
+                     FROM BOUNDARY_notifications
+                     WHERE `BOUNDARY_notifications.user_id = ?",
                     (uid,),
                 ).and_then(move |c| {
                     c.drop_exec(
