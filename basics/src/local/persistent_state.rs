@@ -3,7 +3,7 @@ use std::rc::Rc;
 
 use bincode;
 use itertools::Itertools;
-use rocksdb::{self, ColumnFamily, SliceTransform, WriteBatch};
+use rocksdb::{self, ColumnFamily, SliceTransform, SliceTransformFns, WriteBatch};
 
 use ::*;
 use data::SizeOf;
@@ -65,6 +65,59 @@ pub struct PersistentState {
     indices: Vec<PersistentIndex>,
     epoch: IndexEpoch,
     has_unique_index: bool,
+}
+
+struct PrefixTransform;
+
+// SliceTransforms are used to create prefixes of all inserted keys, which can then be used for
+// both bloom filters and hash structure lookups.
+impl SliceTransformFns for PrefixTransform {
+    // Selects a prefix of `key` without the epoch or sequence number.
+    //
+    // The RocksDB docs state the following:
+    // > If non-nullptr, use the specified function to determine the
+    // > prefixes for keys.  These prefixes will be placed in the filter.
+    // > Depending on the workload, this can reduce the number of read-IOP
+    // > cost for scans when a prefix is passed via ReadOptions to
+    // > db.NewIterator(). For prefix filtering to work properly,
+    // > "prefix_extractor" and "comparator" must be such that the following
+    // > properties hold:
+    //
+    // > 1) key.starts_with(prefix(key))
+    // > 2) Compare(prefix(key), key) <= 0.
+    // > 3) If Compare(k1, k2) <= 0, then Compare(prefix(k1), prefix(k2)) <= 0
+    // > 4) prefix(prefix(key)) == prefix(key)
+    //
+    // NOTE(ekmartin): Encoding the key size in the key increases the total size with 8 bytes.
+    // If we really wanted to avoid this while still maintaining the same serialization scheme
+    // we could do so by figuring out how many bytes our bincode serialized KeyType takes
+    // up here in transform_fn. Example:
+    // Double((DataType::Int(1), DataType::BigInt(10))) would be serialized as:
+    // 1u32 (enum type), 0u32 (enum variant), 1i32 (value), 1u32 (enum variant), 1i64 (value)
+    // By stepping through the serialized bytes and checking each enum variant we would know
+    // when we reached the end, and could then with certainty say whether we'd already
+    // prefix transformed this key before or not
+    // (without including the byte size of Vec<DataType>).
+    fn transform<'a>(&mut self, key: &'a [u8]) -> &'a [u8] {
+        // We'll have to make sure this isn't the META_KEY even when we're filtering it out
+        // in Self::in_domain_fn, as the SliceTransform is used to make hashed keys for our
+        // HashLinkedList memtable factory.
+        if key == META_KEY {
+            return key;
+        }
+
+        // We encoded the size of the key itself with a u64, which bincode uses 8 bytes to encode:
+        let size_offset = 8;
+        let key_size: u64 = bincode::deserialize(&key[..size_offset]).unwrap();
+        let prefix_len = size_offset + key_size as usize;
+        // Strip away the IndexEpoch and IndexSeq if we haven't already done so:
+        &key[..prefix_len]
+    }
+
+    // Decides which keys the prefix transform should apply to.
+    fn in_domain(&mut self, key: &[u8]) -> bool {
+        key != META_KEY
+    }
 }
 
 impl SizeOf for PersistentState {
@@ -333,8 +386,8 @@ impl PersistentState {
             opts.set_wal_dir(path.join(&name));
         }
 
-        // Create prefixes by Self::transform_fn on all new inserted keys:
-        let transform = SliceTransform::create("key", Self::transform_fn, Some(Self::in_domain_fn));
+        // Create prefixes with PrefixTransform on all new inserted keys:
+        let transform = SliceTransform::create("key", box PrefixTransform);
         opts.set_prefix_extractor(transform);
 
         // Assigns the number of threads for compactions and flushes in RocksDB.
@@ -386,53 +439,6 @@ impl PersistentState {
 
         let data = bincode::serialize(&meta).unwrap();
         db.put(META_KEY, &data).unwrap();
-    }
-
-    // Selects a prefix of `key` without the epoch or sequence number.
-    //
-    // The RocksDB docs state the following:
-    // > If non-nullptr, use the specified function to determine the
-    // > prefixes for keys.  These prefixes will be placed in the filter.
-    // > Depending on the workload, this can reduce the number of read-IOP
-    // > cost for scans when a prefix is passed via ReadOptions to
-    // > db.NewIterator(). For prefix filtering to work properly,
-    // > "prefix_extractor" and "comparator" must be such that the following
-    // > properties hold:
-    //
-    // > 1) key.starts_with(prefix(key))
-    // > 2) Compare(prefix(key), key) <= 0.
-    // > 3) If Compare(k1, k2) <= 0, then Compare(prefix(k1), prefix(k2)) <= 0
-    // > 4) prefix(prefix(key)) == prefix(key)
-    //
-    // NOTE(ekmartin): Encoding the key size in the key increases the total size with 8 bytes.
-    // If we really wanted to avoid this while still maintaining the same serialization scheme
-    // we could do so by figuring out how many bytes our bincode serialized KeyType takes
-    // up here in transform_fn. Example:
-    // Double((DataType::Int(1), DataType::BigInt(10))) would be serialized as:
-    // 1u32 (enum type), 0u32 (enum variant), 1i32 (value), 1u32 (enum variant), 1i64 (value)
-    // By stepping through the serialized bytes and checking each enum variant we would know
-    // when we reached the end, and could then with certainty say whether we'd already
-    // prefix transformed this key before or not
-    // (without including the byte size of Vec<DataType>).
-    fn transform_fn(key: &[u8]) -> Vec<u8> {
-        // We'll have to make sure this isn't the META_KEY even when we're filtering it out
-        // in Self::in_domain_fn, as the SliceTransform is used to make hashed keys for our
-        // HashLinkedList memtable factory.
-        if key == META_KEY {
-            return Vec::from(key);
-        }
-
-        // We encoded the size of the key itself with a u64, which bincode uses 8 bytes to encode:
-        let size_offset = 8;
-        let key_size: u64 = bincode::deserialize(&key[..size_offset]).unwrap();
-        let prefix_len = size_offset + key_size as usize;
-        // Strip away the IndexEpoch and IndexSeq if we haven't already done so:
-        Vec::from(&key[..prefix_len])
-    }
-
-    // Decides which keys the prefix transform should apply to.
-    fn in_domain_fn(key: &[u8]) -> bool {
-        key != META_KEY
     }
 
     // A key is built up of five components:
@@ -1111,14 +1117,15 @@ mod tests {
     }
 
     #[test]
-    fn persistent_state_transform_fn() {
-        let mut state = setup_persistent("persistent_state_transform_fn");
+    fn persistent_state_prefix_transform() {
+        let mut state = setup_persistent("persistent_state_prefix_transform");
         state.add_key(&[0], None);
         let index = state.indices[0].clone();
         let data = (DataType::from(1), DataType::from(10));
         let r = KeyType::Double(data.clone());
         let k = state.serialize_key(&r, index.seq);
-        let prefix = PersistentState::transform_fn(&k);
+        let mut transform_fns = PrefixTransform;
+        let prefix = transform_fns.transform(&k);
         let size: u64 = bincode::deserialize(&prefix).unwrap();
         assert_eq!(size, bincode::serialized_size(&data).unwrap());
 
@@ -1127,15 +1134,16 @@ mod tests {
         assert!(k.starts_with(&prefix));
 
         // 2) Compare(prefix(key), key) <= 0.
-        assert!(&prefix <= &k);
+        assert!(prefix <= &k);
 
         // 3) If Compare(k1, k2) <= 0, then Compare(prefix(k1), prefix(k2)) <= 0
         let other_k = state.serialize_key(&r, index.seq);
-        let other_prefix = PersistentState::transform_fn(&other_k);
+        let other_prefix = transform_fns.transform(&other_k);
         assert!(k <= other_k);
         assert!(prefix <= other_prefix);
 
         // 4) prefix(prefix(key)) == prefix(key)
-        assert_eq!(prefix, PersistentState::transform_fn(&prefix));
+        let p = prefix.clone();
+        assert_eq!(prefix, transform_fns.transform(&p));
     }
 }
