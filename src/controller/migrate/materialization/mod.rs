@@ -569,7 +569,7 @@ impl Materializations {
                 if self.partial.contains(&node) {
                     if graph
                         .neighbors_directed(node, petgraph::EdgeDirection::Outgoing)
-                        .count() != 0
+                        .any(|ni| !new.contains(&ni))
                     {
                         println!("{}", graphviz(graph, &self));
                         crit!(
