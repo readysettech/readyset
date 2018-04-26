@@ -567,13 +567,18 @@ impl Materializations {
             // are they trying to make a non-materialized node materialized?
             if self.have[&node] == index_on {
                 if self.partial.contains(&node) {
-                    println!("{}", graphviz(graph, &self));
-                    crit!(
+                    if graph
+                        .neighbors_directed(node, petgraph::EdgeDirection::Outgoing)
+                        .count() != 0
+                    {
+                        println!("{}", graphviz(graph, &self));
+                        crit!(
                         self.log,
-                        "attempting to make old non-materialized node partial";
+                        "attempting to make old non-materialized node with children partial";
                         "node" => node.index(),
                     );
-                    unimplemented!();
+                        unimplemented!();
+                    }
                 }
 
                 warn!(self.log, "materializing existing non-materialized node";
