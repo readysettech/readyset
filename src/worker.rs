@@ -16,7 +16,7 @@ use vec_map::VecMap;
 
 use channel::poll::{PollEvent, ProcessResult};
 use channel::tcp::{SendError, TryRecvError};
-use channel::{self, TcpReceiver, TcpSender};
+use channel::{self, DomainConnectionBuilder, TcpReceiver, TcpSender, CONNECTION_FROM_MUTATOR};
 use dataflow::payload::SourceChannelIdentifier;
 use dataflow::{self, Domain, Packet};
 
@@ -108,6 +108,16 @@ impl SharedWorkerState {
             truth,
         }
     }
+}
+
+// NOTE: mio::net::TcpStream doesn't expose underlying stream :(
+fn set_nonblocking(s: &::mio::net::TcpStream, on: bool) {
+    use std::net::TcpStream;
+    use std::os::unix::io::{AsRawFd, FromRawFd, IntoRawFd};
+    let t = unsafe { TcpStream::from_raw_fd(s.as_raw_fd()) };
+    t.set_nonblocking(on).unwrap();
+    // avoid closing on Drop
+    t.into_raw_fd();
 }
 
 pub struct WorkerPool {
@@ -239,11 +249,12 @@ impl Worker {
                     mut m: Box<Packet>|
          -> Result<(), SendError> {
             let &mut (ref mut tx, is_local) = outputs.entry(ri).or_insert_with(|| {
-                let mut tx = None;
-                while tx.is_none() {
-                    tx = cc.get_tx(&ri);
+                let mut dest = None;
+                while dest.is_none() {
+                    dest = cc.get_dest(&ri);
                 }
-                let (mut tx, is_local) = tx.unwrap();
+                let (addr, is_local) = dest.unwrap();
+                let mut tx = DomainConnectionBuilder::for_domain(addr).build().unwrap();
                 if is_local {
                     tx.send_ref(&Packet::Hey(me.0, me.1)).unwrap();
                 }
@@ -382,7 +393,22 @@ impl Worker {
             if sc.listening {
                 // listening socket -- we need to accept a new connection
                 let mut replica = replica.lock().unwrap();
-                if let Ok((stream, _src)) = replica.listener.as_mut().unwrap().accept() {
+
+                // NOTE: only really a while loop to let us break early
+                while let Ok((mut stream, _src)) = replica.listener.as_mut().unwrap().accept() {
+                    // we know that any new connection to a domain will first send a one-byte
+                    // token to indicate whether the connection is from a mutator or not.
+                    set_nonblocking(&stream, false);
+                    let mut tag = [0];
+                    use std::io::Read;
+                    if let Err(e) = stream.read_exact(&mut tag[..]) {
+                        // well.. that failed quickly..
+                        info!(self.log, "worker discarded new connection: {:?}", e);
+                        break;
+                    }
+                    let is_mutator = tag[0] == CONNECTION_FROM_MUTATOR;
+                    set_nonblocking(&stream, true);
+
                     // NOTE: we're taking two locks at the same time here! we need to be sure that
                     // anything that holds the `truth` lock will eventually relinquish it.
                     //
@@ -401,8 +427,13 @@ impl Worker {
 
                     self.all.register(&stream, Token(token)).unwrap();
 
-                    let tcp = TcpReceiver::new(stream);
+                    let tcp = if is_mutator {
+                        TcpReceiver::new(stream)
+                    } else {
+                        TcpReceiver::with_capacity(2 * 1024 * 1024, stream)
+                    };
                     replica.receivers.insert(token, RefCell::new((tcp, None)));
+                    break;
                 }
 
                 ready(replica.listener.as_ref().unwrap().as_raw_fd()).unwrap();
@@ -830,16 +861,6 @@ impl dataflow::prelude::Executor for ReplicaReceivers {
             // XXX: what if the token has been reused?
             let stream = ch.borrow();
             let mut stream = stream.0.get_ref();
-
-            // NOTE: mio::net::TcpStream doesn't expose underlying stream :(
-            let set_nonblocking = |s: &::mio::net::TcpStream, on: bool| {
-                use std::net::TcpStream;
-                use std::os::unix::io::{AsRawFd, FromRawFd, IntoRawFd};
-                let t = unsafe { TcpStream::from_raw_fd(s.as_raw_fd()) };
-                t.set_nonblocking(on).unwrap();
-                // avoid closing on Drop
-                t.into_raw_fd();
-            };
 
             let mut undo_blocking = false;
             while !bytes.is_empty() {

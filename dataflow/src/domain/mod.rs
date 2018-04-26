@@ -11,7 +11,7 @@ use std::time;
 use std::net::SocketAddr;
 
 use channel::poll::{PollEvent, ProcessResult};
-use channel::TcpSender;
+use channel::{DomainConnectionBuilder, TcpSender};
 use debug;
 use group_commit::GroupCommitQueueSet;
 use payload::{ControlReplyPacket, ReplayPieceContext, ReplayTransactionState, TransactionState};
@@ -999,7 +999,15 @@ impl Domain {
                                     (0..shards)
                                         .map(|shard| {
                                             self.channel_coordinator
-                                                .get_unbounded_tx(&(trigger_domain, shard))
+                                                .get_dest(&(trigger_domain, shard))
+                                                .map(|(addr, local)| {
+                                                    (
+                                                        DomainConnectionBuilder::for_domain(addr)
+                                                            .build()
+                                                            .unwrap(),
+                                                        local,
+                                                    )
+                                                })
                                                 .unwrap()
                                         })
                                         .collect::<Vec<_>>(),
@@ -1108,9 +1116,13 @@ impl Domain {
                                         .map(|shard| {
                                             // TODO: take advantage of local channels for replay paths.
                                             self.channel_coordinator
-                                                .get_unbounded_tx(&(domain, shard))
+                                                .get_addr(&(domain, shard))
+                                                .map(|addr| {
+                                                    DomainConnectionBuilder::for_domain(addr)
+                                                        .build()
+                                                        .unwrap()
+                                                })
                                                 .unwrap()
-                                                .0
                                         })
                                         .collect(),
                                 )
@@ -1252,8 +1264,10 @@ impl Domain {
                                 .spawn(move || {
                                     use itertools::Itertools;
 
-                                    let mut chunked_replay_tx =
-                                        TcpSender::connect(&domain_addr).unwrap();
+                                    let mut chunked_replay_tx = DomainConnectionBuilder::for_domain(
+                                        domain_addr,
+                                    ).build()
+                                        .unwrap();
 
                                     let start = time::Instant::now();
                                     debug!(log, "starting state chunker"; "node" => %link.dst);

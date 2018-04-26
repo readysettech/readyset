@@ -7,7 +7,7 @@ use mio;
 use slog::Logger;
 
 use channel::poll::{KeepPolling, PollEvent, PollingLoop, StopPolling};
-use channel::{tcp, TcpReceiver, TcpSender};
+use channel::{tcp, DomainConnectionBuilder, TcpReceiver, TcpSender};
 use consensus::Epoch;
 use basics::PersistenceParameters;
 use dataflow::payload::ControlReplyPacket;
@@ -115,7 +115,9 @@ impl DomainInputHandle {
     pub(crate) fn new_on(mut local_port: Option<u16>, txs: &[SocketAddr]) -> io::Result<Self> {
         let txs: io::Result<Vec<_>> = txs.into_iter()
             .map(|addr| {
-                let c = TcpSender::connect_from(local_port, addr)?;
+                let c = DomainConnectionBuilder::for_mutator(*addr)
+                    .maybe_on_port(local_port)
+                    .build()?;
                 if local_port.is_none() {
                     local_port = Some(c.local_addr()?.port());
                 }
@@ -241,7 +243,17 @@ impl DomainHandle {
             PollEvent::ResumePolling(_) => KeepPolling,
             PollEvent::Process(ControlReplyPacket::Booted(shard, addr)) => {
                 channel_coordinator.insert_addr((idx, shard), addr.clone(), false);
-                txs.push(channel_coordinator.get_tx(&(idx, shard)).unwrap());
+                txs.push(
+                    channel_coordinator
+                        .get_dest(&(idx, shard))
+                        .map(|(addr, is_local)| {
+                            (
+                                DomainConnectionBuilder::for_domain(addr).build().unwrap(),
+                                is_local,
+                            )
+                        })
+                        .unwrap(),
+                );
 
                 // TODO(malte): this is a hack, and not an especially neat one. In response to a
                 // domain boot message, we broadcast information about this new domain to all

@@ -1,6 +1,6 @@
-use channel;
 use channel::rpc::RpcServiceEndpoint;
 use channel::tcp::{TcpSender, TryRecvError};
+use channel::{self, DomainConnectionBuilder};
 use consensus::Epoch;
 use dataflow::payload;
 use dataflow::prelude::{ChannelCoordinator, DomainIndex};
@@ -236,12 +236,16 @@ impl WorkerInner {
                 None => {
                     // we're lax about failures here since missing an UpdateStateSize message has
                     // no correctness implications
-                    match self.channel_coordinator.get_tx(&(di, shard)) {
+                    match self.channel_coordinator.get_addr(&(di, shard)) {
                         // domain may already have exited
                         None => continue,
-                        Some(tx) => {
-                            self.domain_senders.insert((di, shard), tx.0);
-                            self.domain_senders.get_mut(&(di, shard)).unwrap()
+                        Some(addr) => {
+                            if let Ok(tx) = DomainConnectionBuilder::for_domain(addr).build() {
+                                self.domain_senders.insert((di, shard), tx);
+                                self.domain_senders.get_mut(&(di, shard)).unwrap()
+                            } else {
+                                continue;
+                            }
                         }
                     }
                 }

@@ -74,6 +74,10 @@ impl<T: Serialize> TcpSender<T> {
         Self::connect_from(None, addr)
     }
 
+    pub fn get_mut(&mut self) -> &mut BufStream<std::net::TcpStream> {
+        &mut self.stream
+    }
+
     pub fn local_addr(&self) -> io::Result<SocketAddr> {
         self.stream.get_ref().local_addr()
     }
@@ -131,9 +135,24 @@ where
     for<'de> T: Deserialize<'de>,
 {
     pub fn new(stream: mio::net::TcpStream) -> Self {
+        Self::new_inner(None, stream)
+    }
+
+    pub fn with_capacity(cap: usize, stream: mio::net::TcpStream) -> Self {
+        Self::new_inner(Some(cap), stream)
+    }
+
+    fn new_inner(cap: Option<usize>, stream: mio::net::TcpStream) -> Self {
         stream.set_nodelay(true).unwrap(); // for acks
+        let stream = ThrottledReader::new(NonBlockingWriter::new(stream));
+        let stream = if let Some(cap) = cap {
+            BufReader::with_capacity(cap, stream)
+        } else {
+            BufReader::new(stream)
+        };
+
         Self {
-            stream: BufReader::new(ThrottledReader::new(NonBlockingWriter::new(stream))),
+            stream: stream,
             poisoned: false,
             deserialize_receiver: DeserializeReceiver::new(),
             phantom: PhantomData,
