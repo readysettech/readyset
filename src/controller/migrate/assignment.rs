@@ -109,7 +109,7 @@ pub fn assign(
                 };
             }
 
-            if graphs[node].name().starts_with("BOUNDARY_") {
+            if graph[node].name().starts_with("BOUNDARY_") {
                 return next_domain();
             }
 
