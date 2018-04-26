@@ -13,7 +13,7 @@ use std::net::SocketAddr;
 use channel::poll::{PollEvent, ProcessResult};
 use channel::TcpSender;
 use debug;
-use group_commit::{GroupCommitQueueSet};
+use group_commit::GroupCommitQueueSet;
 use payload::{ControlReplyPacket, ReplayPieceContext, ReplayTransactionState, TransactionState};
 use prelude::*;
 use slog::Logger;
@@ -177,8 +177,7 @@ impl DomainBuilder {
         let control_reply_tx = TcpSender::connect(&self.control_addr).unwrap();
 
         let transaction_state = transactions::DomainState::new(self.index, self.ts);
-        let group_commit_queues =
-            GroupCommitQueueSet::new(&self.persistence_parameters);
+        let group_commit_queues = GroupCommitQueueSet::new(&self.persistence_parameters);
 
         Domain {
             index: self.index,
@@ -2488,8 +2487,7 @@ impl Domain {
                     while freed < num_bytes as u64 {
                         if self.nodes[&node].borrow().is_dropped() {
                             break; // Node was dropped. Give up.
-                        }
-                        else if self.nodes[&node].borrow().is_reader() {
+                        } else if self.nodes[&node].borrow().is_reader() {
                             // we can only evict one key a time here because the freed memory
                             // calculation is based on the key that *will* be evicted. We may count
                             // the same individual key twice if we batch evictions here.
