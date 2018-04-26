@@ -305,6 +305,7 @@ impl Materializations {
             }
 
             if graph[ni].is_internal() && graph[ni].requires_full_materialization() {
+                warn!(self.log, "full because required"; "node" => ni.index());
                 able = false;
             }
 
@@ -314,6 +315,7 @@ impl Materializations {
                     != self.have.get(&ni).map(|i| i.len()).unwrap_or(0)
                 && !self.partial.contains(&ni)
             {
+                warn!(self.log, "cannot turn full into partial"; "node" => ni.index());
                 able = false;
             }
 
@@ -332,6 +334,7 @@ impl Materializations {
                     // materialized child -- don't need to keep walking along this path
                     if !self.partial.contains(&child) {
                         // child is full, so we can't be partial
+                        warn!(self.log, "full because descendant is full"; "node" => ni.index(), "child" => child.index());
                         stack.clear();
                         able = false
                     }
@@ -339,6 +342,7 @@ impl Materializations {
                     // reader child (which is effectively materialized)
                     if !self.partial.contains(&child) {
                         // reader is full, so we can't be partial
+                        warn!(self.log, "full because reader below is full"; "node" => ni.index(), "reader" => child.index());
                         stack.clear();
                         able = false
                     }
@@ -357,16 +361,18 @@ impl Materializations {
                 let paths = keys::provenance_of(graph, ni, &index[..], plan::Plan::on_join(graph));
 
                 for path in paths {
-                    for (ni, cols) in path.into_iter().skip(1) {
-                        if cols.iter().any(|c| c.is_none()) {
+                    for (pni, cols) in path.into_iter().skip(1) {
+                        if let Some(p) = cols.iter().position(|c| c.is_none()) {
+                            warn!(self.log, "full because column {} does not resolve", index[p];
+                                  "node" => ni.index(), "broken at" => pni.index());
                             able = false;
                             break 'try;
                         }
                         let index: Vec<_> = cols.into_iter().map(|c| c.unwrap()).collect();
-                        if let Some(m) = self.have.get(&ni) {
+                        if let Some(m) = self.have.get(&pni) {
                             if !m.contains(&index) {
                                 // we'd need to add an index to this view,
-                                add.entry(ni)
+                                add.entry(pni)
                                     .or_insert_with(HashSet::new)
                                     .insert(index.clone());
                             }
