@@ -196,6 +196,11 @@ impl<A: Authority> ControllerHandle<A> {
         self.rpc("get_statistics", &())
     }
 
+    /// Flush all partial state, evicting all rows present.
+    pub fn flush_partial(&mut self) -> Result<(), RpcError> {
+        self.rpc("flush_partial", &())
+    }
+
     /// Extend the existing recipe on the controller by adding a new query.
     pub fn extend_recipe(&mut self, recipe_addition: String) -> Result<ActivationResult, RpcError> {
         self.rpc("extend_recipe", &recipe_addition)

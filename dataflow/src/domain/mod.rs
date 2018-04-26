@@ -1350,7 +1350,7 @@ impl Domain {
                             .send(ControlReplyPacket::ack())
                             .unwrap();
                     }
-                    Packet::GetStatistics => {
+                    Packet::GetStatistics(partial_only) => {
                         let domain_stats = statistics::DomainStats {
                             total_time: self.total_time.num_nanoseconds(),
                             total_ptime: self.total_ptime.num_nanoseconds(),
@@ -1377,7 +1377,13 @@ impl Domain {
                                         .map(|state| state.deep_size_of())
                                         .unwrap_or(0)
                                 };
-                                if time.is_some() && ptime.is_some() {
+                                if time.is_some() && ptime.is_some()
+                                    && (!partial_only || n.is_reader()
+                                        || self.state
+                                            .get(&local_index)
+                                            .map(|state| state.is_partial())
+                                            .unwrap_or(false))
+                                {
                                     Some((
                                         node_index,
                                         statistics::NodeStats {

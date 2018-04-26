@@ -295,7 +295,8 @@ pub enum Packet {
     },
 
     /// Request that a domain send usage statistics on the control reply channel.
-    GetStatistics,
+    /// Argument specifies if we wish to get the full state size or just the partial nodes.
+    GetStatistics(bool),
 
     /// Ask domain to log its state size
     UpdateStateSize,

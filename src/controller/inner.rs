@@ -144,6 +144,7 @@ impl ControllerInner {
         }
 
         Ok(match (method, path.as_ref()) {
+            (Get, "/flush_partial") => return Ok(json::to_string(&self.flush_partial()).unwrap()),
             (Post, "/inputs") => json::to_string(&self.inputs()).unwrap(),
             (Post, "/outputs") => json::to_string(&self.outputs()).unwrap(),
             (Post, "/mutator_builder") => {
@@ -565,7 +566,7 @@ impl ControllerInner {
         let domains = self.domains
             .iter_mut()
             .flat_map(|(di, s)| {
-                s.send(box payload::Packet::GetStatistics).unwrap();
+                s.send(box payload::Packet::GetStatistics(false)).unwrap();
                 s.wait_for_statistics()
                     .unwrap()
                     .into_iter()
@@ -582,6 +583,46 @@ impl ControllerInner {
             .collect();
 
         GraphStats { domains: domains }
+    }
+
+    pub fn flush_partial(&mut self) {
+        // get statistics for current domain sizes
+        // and evict all state from partial nodes
+        let to_evict: Vec<_> = self.domains
+            .iter_mut()
+            .map(|(di, s)| {
+                s.send(box payload::Packet::GetStatistics(true)).unwrap();
+                let to_evict: Vec<(NodeIndex, u64)> = s.wait_for_statistics()
+                    .unwrap()
+                    .into_iter()
+                    .flat_map(move |(_, node_stats)| {
+                        node_stats.into_iter().map(|(ni, ns)| (ni, ns.mem_size))
+                    })
+                    .collect();
+                (*di, to_evict)
+            })
+            .collect();
+
+        let mut total_evicted = 0;
+        for (di, nodes) in to_evict {
+            for (ni, bytes) in nodes {
+                let na = self.ingredients[ni].local_addr();
+                self.domains
+                    .get_mut(&di)
+                    .unwrap()
+                    .send(box payload::Packet::Evict {
+                        node: Some(*na),
+                        num_bytes: bytes as usize,
+                    })
+                    .expect("failed to send domain flush message");
+                total_evicted += bytes;
+            }
+        }
+
+        warn!(
+            self.log,
+            "flushed {} bytes of partial domain state", total_evicted
+        );
     }
 
     pub fn create_universe(&mut self, context: HashMap<String, DataType>) {
