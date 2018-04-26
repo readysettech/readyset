@@ -213,7 +213,7 @@ impl trawler::LobstersClient for MysqlTrawler {
                 Either::B(c.drop_exec(
                     "SELECT BOUNDARY_notifications.notifications
                      FROM BOUNDARY_notifications
-                     WHERE `BOUNDARY_notifications.user_id = ?",
+                     WHERE BOUNDARY_notifications.user_id = ?",
                     (uid,),
                 ).and_then(move |c| {
                     c.drop_exec(
