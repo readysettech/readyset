@@ -1391,12 +1391,13 @@ impl Domain {
                                         .map(|state| state.deep_size_of())
                                         .unwrap_or(0)
                                 };
+                                let partial = self.state
+                                    .get(&local_index)
+                                    .map(|state| state.is_partial())
+                                    .unwrap_or(false);
+
                                 if time.is_some() && ptime.is_some()
-                                    && (!partial_only || n.is_reader()
-                                        || self.state
-                                            .get(&local_index)
-                                            .map(|state| state.is_partial())
-                                            .unwrap_or(false))
+                                    && (!partial_only || n.is_reader() || partial)
                                 {
                                     Some((
                                         node_index,
@@ -1405,6 +1406,7 @@ impl Domain {
                                             process_time: time.unwrap(),
                                             process_ptime: ptime.unwrap(),
                                             mem_size: mem_size,
+                                            partial: partial,
                                         },
                                     ))
                                 } else {

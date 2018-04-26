@@ -585,7 +585,7 @@ impl ControllerInner {
         GraphStats { domains: domains }
     }
 
-    pub fn flush_partial(&mut self) {
+    pub fn flush_partial(&mut self) -> u64 {
         // get statistics for current domain sizes
         // and evict all state from partial nodes
         let to_evict: Vec<_> = self.domains
@@ -623,6 +623,8 @@ impl ControllerInner {
             self.log,
             "flushed {} bytes of partial domain state", total_evicted
         );
+
+        total_evicted
     }
 
     pub fn create_universe(&mut self, context: HashMap<String, DataType>) {
