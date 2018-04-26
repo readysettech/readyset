@@ -75,9 +75,9 @@ CREATE VIEW `parent_comments` AS SELECT `comments`.* FROM `comments`;
 CREATE VIEW `BOUNDARY_replying_comments_for_count` AS SELECT `read_ribbons`.`user_id`, `read_ribbons`.`story_id`, `comments`.`id`, `comments`.`upvotes` - `comments`.`downvotes` AS saldo, `parent_comments`.`upvotes` - `parent_comments`.`downvotes` AS psaldo FROM `read_ribbons` JOIN `stories` ON (`stories`.`id` = `read_ribbons`.`story_id`) JOIN `comments` ON (`comments`.`story_id` = `read_ribbons`.`story_id`) LEFT JOIN `parent_comments` ON (`parent_comments`.`id` = `comments`.`parent_comment_id`) WHERE `read_ribbons`.`is_following` = 1 AND `comments`.`user_id` <> `read_ribbons`.`user_id` AND `comments`.`is_deleted` = 0 AND `comments`.`is_moderated` = 0 AND saldo >= 0 AND `read_ribbons`.`updated_at` < `comments`.`created_at` AND ( ( `parent_comments`.`user_id` = `read_ribbons`.`user_id` AND psaldo >= 0) OR ( `parent_comments`.`id` IS NULL AND `stories`.`user_id` = `read_ribbons`.`user_id`));
 
 CREATE VIEW BOUNDARY_notifications AS
-SELECT replying_comments_for_count.user_id, COUNT(*) AS notifications,
-FROM `replying_comments_for_count`
-GROUP BY `replying_comments_for_count`.`user_id`;
+SELECT BOUNDRY_replying_comments_for_count.user_id, COUNT(*) AS notifications,
+FROM `BOUNDRY_replying_comments_for_count`
+GROUP BY `BOUNDRY_replying_comments_for_count`.`user_id`;
 
 -- Or alternatively:
 --CREATE VIEW scored_comments AS
