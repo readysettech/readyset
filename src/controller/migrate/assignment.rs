@@ -41,6 +41,7 @@ pub fn assign(
 
     for node in topo_list {
         let assignment = (|| {
+            let graph = &*graph;
             let n = &graph[node];
 
             if n.is_shard_merger() {
@@ -108,6 +109,23 @@ pub fn assign(
                 };
             }
 
+            let any_parents = move |prime: &Fn(&Node) -> bool, check: &Fn(&Node) -> bool| {
+                let mut stack: Vec<_> = graph
+                    .neighbors_directed(node, petgraph::EdgeDirection::Incoming)
+                    .filter(move |&p| prime(&graph[p]))
+                    .collect();
+                while let Some(p) = stack.pop() {
+                    if graph[p].is_source() {
+                        continue;
+                    }
+                    if check(&graph[p]) {
+                        return true;
+                    }
+                    stack.extend(graph.neighbors_directed(p, petgraph::EdgeDirection::Incoming));
+                }
+                return false;
+            };
+
             let parents: Vec<_> = graph
                 .neighbors_directed(node, petgraph::EdgeDirection::Incoming)
                 .map(|ni| (ni, &graph[ni]))
@@ -130,6 +148,18 @@ pub fn assign(
                         assignment = Some(p.domain().index())
                     }
                 }
+
+                if let Some(candidate) = assignment {
+                    // let's make sure we don't construct a-b-a path
+                    if any_parents(
+                        &|p| p.has_domain() && p.domain().index() != candidate,
+                        &|pp| pp.domain().index() == candidate,
+                    ) {
+                        assignment = None;
+                        continue;
+                    }
+                    break;
+                }
             }
 
             if assignment.is_none() {
@@ -146,7 +176,14 @@ pub fn assign(
                         if s.sharded_by().is_none() != n.sharded_by().is_none() {
                             continue;
                         }
-                        assignment = Some(s.domain().index());
+                        let candidate = s.domain().index();
+                        if any_parents(
+                            &|p| p.has_domain() && p.domain().index() != candidate,
+                            &|pp| pp.domain().index() == candidate,
+                        ) {
+                            continue;
+                        }
+                        assignment = Some(candidate);
                         break;
                     }
                 }
