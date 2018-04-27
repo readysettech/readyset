@@ -554,11 +554,17 @@ impl PersistentState {
         let pk = KeyType::from(pk_index.columns.iter().map(|i| &r[*i]));
         let prefix = Self::serialize_prefix(&pk);
         if self.has_unique_index {
-            let raw = db.get_cf(value_cf, &prefix)
-                .unwrap()
-                .expect("tried removing non-existant primary key row");
-            let value: Vec<DataType> = bincode::deserialize(&*raw).unwrap();
-            assert_eq!(r, &value[..], "tried removing non-matching primary key row");
+            if cfg!(debug_assertions) {
+                // This would imply that we're trying to delete a different row than the one we
+                // found when we resolved the DeleteRequest in Base. This really shouldn't happen,
+                // but we'll leave a check here in debug mode for now.
+                let raw = db.get_cf(value_cf, &prefix)
+                    .unwrap()
+                    .expect("tried removing non-existant primary key row");
+                let value: Vec<DataType> = bincode::deserialize(&*raw).unwrap();
+                assert_eq!(r, &value[..], "tried removing non-matching primary key row");
+            }
+
             do_remove(&prefix[..]);
         } else {
             let (key, _value) = db.prefix_iterator_cf(value_cf, &prefix)
