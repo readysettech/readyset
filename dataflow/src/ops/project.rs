@@ -140,33 +140,9 @@ impl Ingredient for Project {
         states
             .get(&*self.src)
             .and_then(move |state| match state.lookup(columns, key) {
-                LookupResult::Some(Cow::Borrowed(rs)) => {
-                    let r = match emit {
-                        Some(emit) => Box::new(rs.iter().map(move |r| {
-                            let mut new_r = Vec::with_capacity(r.len());
-                            for i in emit.iter() {
-                                new_r.push(r[*i].clone());
-                            }
-
-                            if let Some(ref e) = expressions {
-                                new_r.extend(e.into_iter().map(|i| eval_expression(i, &r[..])));
-                            }
-
-                            if let Some(ref a) = additional {
-                                new_r.append(&mut a.clone());
-                            }
-
-                            Cow::from(new_r)
-                        })) as Box<_>,
-                        None => Box::new(rs.iter().map(|r| Cow::from(&r[..]))) as Box<_>,
-                    };
-
-                    Some(Some(r))
-                }
-                LookupResult::Some(Cow::Owned(rs)) => {
+                LookupResult::Some(rs) => {
                     let r = match emit {
                         Some(emit) => Box::new(rs.into_iter().map(move |r| {
-                            let r = r.unpack();
                             let mut new_r = Vec::with_capacity(r.len());
                             let mut expr: Vec<DataType> = if let Some(ref e) = expressions {
                                 e.into_iter().map(|i| eval_expression(i, &r[..])).collect()
@@ -175,7 +151,8 @@ impl Ingredient for Project {
                             };
 
                             new_r.extend(
-                                r.into_iter()
+                                r.into_owned()
+                                    .into_iter()
                                     .enumerate()
                                     .filter(|(i, _)| emit.iter().any(|e| e == i))
                                     .map(|(_, c)| c),
@@ -188,7 +165,7 @@ impl Ingredient for Project {
 
                             Cow::from(new_r)
                         })) as Box<_>,
-                        None => Box::new(rs.into_iter().map(|r| Cow::from(r.unpack()))) as Box<_>,
+                        None => Box::new(rs.into_iter()) as Box<_>,
                     };
 
                     Some(Some(r))
@@ -412,15 +389,13 @@ mod tests {
         let rec = vec!["a".into(), "b".into(), "c".into()];
         assert_eq!(
             p.narrow_one_row(rec, false),
-            vec![
-                vec![
-                    "a".into(),
-                    "b".into(),
-                    "c".into(),
-                    "hello".into(),
-                    42.into(),
-                ],
-            ].into()
+            vec![vec![
+                "a".into(),
+                "b".into(),
+                "c".into(),
+                "hello".into(),
+                42.into(),
+            ]].into()
         );
     }
 
@@ -651,13 +626,11 @@ mod tests {
     #[test]
     fn it_queries_through_w_arithmetic_and_literals() {
         let additional = Some(vec![DataType::Int(42)]);
-        let expressions = Some(vec![
-            ProjectExpression {
-                left: ProjectExpressionBase::Column(0),
-                right: ProjectExpressionBase::Column(1),
-                op: ArithmeticOperator::Add,
-            },
-        ]);
+        let expressions = Some(vec![ProjectExpression {
+            left: ProjectExpressionBase::Column(0),
+            right: ProjectExpressionBase::Column(1),
+            op: ArithmeticOperator::Add,
+        }]);
 
         let a: DataType = 1.into();
         let key = KeyType::Single(&a);
@@ -678,13 +651,11 @@ mod tests {
     #[test]
     fn it_queries_through_w_arithmetic_and_literals_persistent() {
         let additional = Some(vec![DataType::Int(42)]);
-        let expressions = Some(vec![
-            ProjectExpression {
-                left: ProjectExpressionBase::Column(0),
-                right: ProjectExpressionBase::Column(1),
-                op: ArithmeticOperator::Add,
-            },
-        ]);
+        let expressions = Some(vec![ProjectExpression {
+            left: ProjectExpressionBase::Column(0),
+            right: ProjectExpressionBase::Column(1),
+            op: ArithmeticOperator::Add,
+        }]);
 
         let a: DataType = 1.into();
         let key = KeyType::Single(&a);
