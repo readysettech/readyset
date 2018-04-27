@@ -79,17 +79,6 @@ fn main() {
     let mut b = TsunamiBuilder::default();
     b.use_term_logger();
     b.add_set(
-        "server",
-        1,
-        MachineSetup::new("c5.4xlarge", AMI, |ssh| {
-            eprintln!("==> setting up souplet");
-            git_and_cargo(ssh, "distributary", "souplet")?;
-            eprintln!("==> setting up zk-util");
-            git_and_cargo(ssh, "distributary/consensus", "zk-util")?;
-            Ok(())
-        }).as_user("ubuntu"),
-    );
-    b.add_set(
         "trawler",
         1,
         MachineSetup::new("c5.18xlarge", AMI, |ssh| {
@@ -99,6 +88,17 @@ fn main() {
             git_and_cargo(ssh, "benchmarks-soup/lobsters/mysql", "trawler-mysql")?;
             eprintln!("==> setting up shim");
             git_and_cargo(ssh, "shim", "distributary-mysql")?;
+            Ok(())
+        }).as_user("ubuntu"),
+    );
+    b.add_set(
+        "server",
+        1,
+        MachineSetup::new("c5.4xlarge", AMI, |ssh| {
+            eprintln!("==> setting up souplet");
+            git_and_cargo(ssh, "distributary", "souplet")?;
+            eprintln!("==> setting up zk-util");
+            git_and_cargo(ssh, "distributary/consensus", "zk-util")?;
             Ok(())
         }).as_user("ubuntu"),
     );
