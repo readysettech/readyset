@@ -342,7 +342,7 @@ impl SingleReadHandle {
                         // wait for result to come through
                         let now = time::Instant::now();
                         while now.elapsed() < retry_timeout {
-                            thread::yield_now();
+                            thread::sleep(time::Duration::from_micros(10));
                             match self.try_find_and(key, &mut then) {
                                 Ok((None, _)) => {}
                                 r => break 'retry r,
