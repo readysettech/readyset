@@ -26,9 +26,9 @@ where
              FROM `story_with_votes` \
              WHERE `story_with_votes`.`merged_story_id` IS NULL \
              AND `story_with_votes`.`is_expired` = 0 \
-             AND story_with_votes.score <= 5 \
              ORDER BY story_with_vote;
              story_with_vote.id DESC LIMIT 51",
+            //AND story_with_votes.score <= 5 \
         )
     }).and_then(|stories| {
             stories.reduce_and_drop(

@@ -69,20 +69,19 @@ impl trawler::LobstersClient for MysqlTrawler {
                 .and_then(|c| c.drop_query(&format!("CREATE DATABASE {}", db)))
                 .and_then(|c| c.drop_query(&format!("USE {}", db))),
         ).unwrap();
-
-        let mut current_query = String::new();
+        let mut current_q = String::new();
         for q in include_str!("../db-schema.sql").lines() {
-            if q.starts_with("--") {
+            if q.starts_with("--") || q.is_empty() {
                 continue;
             }
-            if !current_query.is_empty() {
-                current_query.push_str(" ");
+            if !current_q.is_empty() {
+                current_q.push_str(" ");
             }
-            current_query.push_str(q);
-            if q.ends_with(";") {
-                core.run(c.get_conn().and_then(|c| c.drop_query(&current_query)))
+            current_q.push_str(q);
+            if current_q.ends_with(';') {
+                core.run(c.get_conn().and_then(|c| c.drop_query(&current_q)))
                     .unwrap();
-                current_query.clear();
+                current_q.clear();
             }
         }
     }
@@ -212,11 +211,9 @@ impl trawler::LobstersClient for MysqlTrawler {
                 }
 
                 Either::B(c.drop_exec(
-                    "SELECT COUNT(*) \
-                     FROM `replying_comments_for_count`
-                     WHERE `replying_comments_for_count`.`user_id` = ? \
-                     GROUP BY `replying_comments_for_count`.`user_id` \
-                     ",
+                    "SELECT BOUNDARY_notifications.notifications
+                     FROM BOUNDARY_notifications
+                     WHERE BOUNDARY_notifications.user_id = ?",
                     (uid,),
                 ).and_then(move |c| {
                     c.drop_exec(
