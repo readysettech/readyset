@@ -6,6 +6,7 @@ extern crate slog;
 
 use consensus::ZookeeperAuthority;
 use distributary::{ControllerBuilder, ReuseConfigType};
+use std::path::PathBuf;
 use std::sync::Arc;
 use std::time::Duration;
 
@@ -43,6 +44,12 @@ fn main() {
                 .takes_value(true)
                 .default_value("1")
                 .help("Number of background threads used by RocksDB."),
+        )
+        .arg(
+            Arg::with_name("log-dir")
+                .long("log-dir")
+                .takes_value(true)
+                .help("Absolute path to the directory where the log files will be written."),
         )
         .arg(
             Arg::with_name("zookeeper")
@@ -144,7 +151,7 @@ fn main() {
         builder.set_reuse(ReuseConfigType::NoReuse);
     }
 
-    let persistence_params = distributary::PersistenceParameters::new(
+    let mut persistence_params = distributary::PersistenceParameters::new(
         match durability {
             "persistent" => distributary::DurabilityMode::Permanent,
             "ephemeral" => distributary::DurabilityMode::DeleteOnExit,
@@ -156,6 +163,9 @@ fn main() {
         Some(deployment_name.to_string()),
         persistence_threads,
     );
+    persistence_params.log_dir = matches
+        .value_of("log-dir")
+        .and_then(|p| Some(PathBuf::from(p)));
     builder.set_persistence(persistence_params);
 
     if verbose {
