@@ -13,6 +13,7 @@ pub mod filter;
 pub mod topk;
 pub mod trigger;
 pub mod rewrite;
+pub mod distinct;
 
 #[derive(Clone, Serialize, Deserialize)]
 pub enum NodeOperator {
@@ -29,6 +30,7 @@ pub enum NodeOperator {
     TopK(topk::TopK),
     Trigger(trigger::Trigger),
     Rewrite(rewrite::Rewrite),
+    Distinct(distinct::Distinct),
 }
 
 macro_rules! nodeop_from_impl {
@@ -63,6 +65,7 @@ nodeop_from_impl!(NodeOperator::Filter, filter::Filter);
 nodeop_from_impl!(NodeOperator::TopK, topk::TopK);
 nodeop_from_impl!(NodeOperator::Trigger, trigger::Trigger);
 nodeop_from_impl!(NodeOperator::Rewrite, rewrite::Rewrite);
+nodeop_from_impl!(NodeOperator::Distinct, distinct::Distinct);
 
 macro_rules! impl_ingredient_fn_mut {
     ($self:ident, $fn:ident, $( $arg:ident ),* ) => {
@@ -80,6 +83,8 @@ macro_rules! impl_ingredient_fn_mut {
             NodeOperator::TopK(ref mut i) => i.$fn($($arg),*),
             NodeOperator::Trigger(ref mut i) => i.$fn($($arg),*),
             NodeOperator::Rewrite(ref mut i) => i.$fn($($arg),*),
+            NodeOperator::Distinct(ref mut i) => i.$fn($($arg),*),
+
         }
     }
 }
@@ -100,6 +105,7 @@ macro_rules! impl_ingredient_fn_ref {
             NodeOperator::TopK(ref i) => i.$fn($($arg),*),
             NodeOperator::Trigger(ref i) => i.$fn($($arg),*),
             NodeOperator::Rewrite(ref i) => i.$fn($($arg),*),
+            NodeOperator::Distinct(ref i) => i.$fn($($arg),*),
         }
     }
 }
