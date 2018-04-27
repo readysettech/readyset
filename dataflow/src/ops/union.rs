@@ -605,7 +605,10 @@ impl Ingredient for Union {
                     // monotonicity in the face of joins. instead, we have to *buffer* the eviction
                     // and emit it immediately after releasing the replay for this key. we do need
                     // to emit the replay, as downstream nodes are waiting for it.
-                    assert!(!e.evict);
+                    //
+                    // NOTE: e.evict may already be true here, as we have no guarantee that
+                    // upstream nodes won't send multiple evictions in a row (e.g., joins evictions
+                    // could cause this).
                     e.evict = true;
                     return false;
                 } else if !e.buffered.is_empty() {
