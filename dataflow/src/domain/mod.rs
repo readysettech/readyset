@@ -2552,10 +2552,6 @@ impl Domain {
                             };
                             freed += bytes;
 
-                            if self.state[&node].deep_size_of() == 0 {
-                                break;
-                            }
-
                             trigger_downstream_evictions(
                                 &self.log,
                                 &key_columns[..],
@@ -2568,6 +2564,10 @@ impl Domain {
                                 &mut self.state,
                                 &mut self.nodes,
                             );
+
+                            if self.state[&node].deep_size_of() == 0 {
+                                break;
+                            }
                         }
                     }
                 }
