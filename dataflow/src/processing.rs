@@ -224,12 +224,7 @@ where
         states
             .get(&parent)
             .and_then(move |state| match state.lookup(columns, key) {
-                LookupResult::Some(RecordResult::Owned(rs)) => Some(Some(Box::new(
-                    rs.into_iter().map(|r| Cow::Owned(r)),
-                ) as Box<_>)),
-                LookupResult::Some(RecordResult::Borrowed(rs)) => {
-                    Some(Some(Box::new(rs.iter().map(|r| Cow::Borrowed(&r[..]))) as Box<_>))
-                }
+                LookupResult::Some(rs) => Some(Some(Box::new(rs.into_iter()) as Box<_>)),
                 LookupResult::Missing => Some(None),
             })
             .or_else(|| {

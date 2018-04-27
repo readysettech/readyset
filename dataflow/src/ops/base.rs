@@ -179,9 +179,10 @@ impl Ingredient for Base {
 
         let get_current = |current_key: &'_ _| {
             match db.lookup(key_cols, &KeyType::from(current_key)) {
-                LookupResult::Some(ref rows) if rows.len() != 1 => {
+                LookupResult::Some(rows) => {
                     match rows.len() {
                         0 => None,
+                        1 => rows.into_iter().next(),
                         n => {
                             // primary key, so better be unique!
                             assert_eq!(n, 1, "key {:?} not unique (n = {})!", current_key, n);
@@ -189,10 +190,6 @@ impl Ingredient for Base {
                         }
                     }
                 }
-                LookupResult::Some(RecordResult::Owned(mut rows)) => {
-                    Some(Cow::from(rows.pop().unwrap()))
-                }
-                LookupResult::Some(RecordResult::Borrowed(rows)) => Some(Cow::from(&rows[0][..])),
                 LookupResult::Missing => unreachable!(),
             }
         };

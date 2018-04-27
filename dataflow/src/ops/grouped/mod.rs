@@ -223,15 +223,7 @@ where
                         }
                     };
 
-                    let old = match rs {
-                        RecordResult::Owned(rows) => {
-                            rows.into_iter().next().map(|rs| Cow::from(rs))
-                        }
-                        RecordResult::Borrowed(ref rows) => {
-                            rows.get(0).as_ref().map(|rs| Cow::from(&rs[..]))
-                        }
-                    };
-
+                    let old = rs.into_iter().next();
                     // current value is in the last output column
                     // or "" if there is no current group
                     let current = old.as_ref().map(|rows| match rows {

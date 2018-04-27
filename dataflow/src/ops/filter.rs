@@ -204,16 +204,8 @@ impl Ingredient for Filter {
             };
 
             match state.lookup(columns, key) {
-                LookupResult::Some(RecordResult::Borrowed(rs)) => {
-                    let r = Box::new(rs.iter().filter(move |r| filter(&r[..])).map(|r| Cow::from(&r[..]))) as Box<_>;
-                    Some(Some(r))
-                }
-                LookupResult::Some(RecordResult::Owned(rs)) => {
-                    let r = Box::new(
-                        rs.into_iter()
-                            .filter(move |ref r| filter(r))
-                            .map(|r| Cow::from(r)),
-                    ) as Box<_>;
+                LookupResult::Some(rs) => {
+                    let r = Box::new(rs.into_iter().filter(move |r| filter(r))) as Box<_>;
                     Some(Some(r))
                 }
                 LookupResult::Missing => Some(None),
