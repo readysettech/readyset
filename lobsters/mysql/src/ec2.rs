@@ -94,7 +94,7 @@ fn main() {
     b.add_set(
         "trawler",
         1,
-        MachineSetup::new("c5.18xlarge", AMI, |ssh| {
+        MachineSetup::new("m5.12xlarge", AMI, |ssh| {
             eprintln!("==> setting up trawler");
             git_and_cargo(ssh, "benchmarks/lobsters/mysql", "trawler-mysql")?;
             eprintln!("==> setting up trawler w/ soup hacks");
@@ -457,9 +457,9 @@ fn main() {
                     .next()
                     .and_then(|l| l.parse().ok())
                     .unwrap_or(0.0);
-                if sload > 16.5 || cload > 72.5 {
+                if sload > 16.5 {
                     eprintln!(
-                        " -> backend is not keeping up (s: {}/16, c: {}/72)",
+                        " -> backend is not keeping up (s: {}/16, c: {}/48)",
                         sload, cload
                     );
                     *survived_last.get_mut(backend).unwrap() = false;
