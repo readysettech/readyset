@@ -170,10 +170,10 @@ impl Ingredient for Filter {
         &self,
         columns: &[usize],
         key: &KeyType,
-        domains: &DomainNodes,
+        nodes: &DomainNodes,
         states: &'a StateMap,
     ) -> Option<Option<Box<Iterator<Item = Cow<'a, [DataType]>> + 'a>>> {
-        self.lookup(*self.src, columns, key, domains, states)
+        self.lookup(*self.src, columns, key, nodes, states)
             .and_then(|result| {
                 let f = self.filter.clone();
                 let filter = move |r: &[DataType]| {

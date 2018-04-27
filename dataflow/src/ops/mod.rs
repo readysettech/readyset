@@ -194,10 +194,10 @@ impl Ingredient for NodeOperator {
         &self,
         columns: &[usize],
         key: &KeyType,
-        domains: &DomainNodes,
+        nodes: &DomainNodes,
         states: &'a StateMap,
     ) -> Option<Option<Box<Iterator<Item = Cow<'a, [DataType]>> + 'a>>> {
-        impl_ingredient_fn_ref!(self, query_through, columns, key, domains, states)
+        impl_ingredient_fn_ref!(self, query_through, columns, key, nodes, states)
     }
     fn lookup<'a>(
         &self,

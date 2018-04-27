@@ -132,13 +132,13 @@ impl Ingredient for Project {
         &self,
         columns: &[usize],
         key: &KeyType,
-        domains: &DomainNodes,
+        nodes: &DomainNodes,
         states: &'a StateMap,
     ) -> Option<Option<Box<Iterator<Item = Cow<'a, [DataType]>> + 'a>>> {
         let emit = self.emit.clone();
         let additional = self.additional.clone();
         let expressions = self.expressions.clone();
-        self.lookup(*self.src, columns, key, domains, states)
+        self.lookup(*self.src, columns, key, nodes, states)
             .and_then(|result| match result {
                 Some(rs) => {
                     let r = match emit {
