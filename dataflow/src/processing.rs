@@ -202,6 +202,7 @@ where
         &self,
         _columns: &[usize],
         _key: &KeyType,
+        _domains: &DomainNodes,
         _states: &'a StateMap,
     ) -> Option<Option<Box<Iterator<Item = Cow<'a, [DataType]>> + 'a>>> {
         None
@@ -218,7 +219,7 @@ where
         parent: LocalNodeIndex,
         columns: &[usize],
         key: &KeyType,
-        domain: &DomainNodes,
+        domains: &DomainNodes,
         states: &'a StateMap,
     ) -> Option<Option<Box<Iterator<Item = Cow<'a, [DataType]>> + 'a>>> {
         states
@@ -230,9 +231,9 @@ where
             .or_else(|| {
                 // this is a long-shot.
                 // if our ancestor can be queried *through*, then we just use that state instead
-                let parent = domain.get(&parent).unwrap().borrow();
+                let parent = domains.get(&parent).unwrap().borrow();
                 if parent.is_internal() {
-                    parent.query_through(columns, key, states)
+                    parent.query_through(columns, key, domains, states)
                 } else {
                     None
                 }

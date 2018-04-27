@@ -170,47 +170,49 @@ impl Ingredient for Filter {
         &self,
         columns: &[usize],
         key: &KeyType,
+        domains: &DomainNodes,
         states: &'a StateMap,
     ) -> Option<Option<Box<Iterator<Item = Cow<'a, [DataType]>> + 'a>>> {
-        states.get(&*self.src).and_then(|state| {
-            let f = self.filter.clone();
-            let filter = move |r: &[DataType]| {
-                r.iter().enumerate().all(|(i, d)| {
-                    // check if this filter matches
-                    if let Some(ref cond) = f[i] {
-                        match *cond {
-                            FilterCondition::Comparison(ref op, ref f) => {
-                                let v = match *f {
-                                    Value::Constant(ref dt) => dt,
-                                    Value::Column(c) => &r[c],
-                                };
-                                match *op {
-                                    Operator::Equal => d == v,
-                                    Operator::NotEqual => d != v,
-                                    Operator::Greater => d > v,
-                                    Operator::GreaterOrEqual => d >= v,
-                                    Operator::Less => d < v,
-                                    Operator::LessOrEqual => d <= v,
-                                    _ => unimplemented!(),
+        self.lookup(*self.src, columns, key, domains, states)
+            .and_then(|result| {
+                let f = self.filter.clone();
+                let filter = move |r: &[DataType]| {
+                    r.iter().enumerate().all(|(i, d)| {
+                        // check if this filter matches
+                        if let Some(ref cond) = f[i] {
+                            match *cond {
+                                FilterCondition::Comparison(ref op, ref f) => {
+                                    let v = match *f {
+                                        Value::Constant(ref dt) => dt,
+                                        Value::Column(c) => &r[c],
+                                    };
+                                    match *op {
+                                        Operator::Equal => d == v,
+                                        Operator::NotEqual => d != v,
+                                        Operator::Greater => d > v,
+                                        Operator::GreaterOrEqual => d >= v,
+                                        Operator::Less => d < v,
+                                        Operator::LessOrEqual => d <= v,
+                                        _ => unimplemented!(),
+                                    }
                                 }
+                                FilterCondition::In(ref fs) => fs.contains(d),
                             }
-                            FilterCondition::In(ref fs) => fs.contains(d),
+                        } else {
+                            // everything matches no condition
+                            true
                         }
-                    } else {
-                        // everything matches no condition
-                        true
-                    }
-                })
-            };
+                    })
+                };
 
-            match state.lookup(columns, key) {
-                LookupResult::Some(rs) => {
-                    let r = Box::new(rs.into_iter().filter(move |r| filter(r))) as Box<_>;
-                    Some(Some(r))
+                match result {
+                    Some(rs) => {
+                        let r = Box::new(rs.into_iter().filter(move |r| filter(r))) as Box<_>;
+                        Some(Some(r))
+                    }
+                    None => Some(None),
                 }
-                LookupResult::Missing => Some(None),
-            }
-        })
+            })
     }
 
     fn parent_columns(&self, column: usize) -> Vec<(NodeIndex, Option<usize>)> {

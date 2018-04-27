@@ -202,37 +202,9 @@ impl Node {
                     _ => {}
                 };
 
-                // When we miss at a can_query_through node we have to replay from
-                // its parent instead of that node, so we'll update the misses:
-                let reroute_miss = |internal: &NodeOperator, miss: &mut Miss| {
-                    if internal.can_query_through() {
-                        for col in miss.lookup_idx.iter_mut() {
-                            let parents = internal.resolve(*col).unwrap();
-                            assert_eq!(
-                                parents.len(),
-                                1,
-                                "can't query_through with more than one parent"
-                            );
-
-                            let (parent, parent_col) = parents[0];
-                            let parent_node = nodes
-                                .values()
-                                .find(|n| n.borrow().global_addr() == parent)
-                                .unwrap();
-                            miss.on = *parent_node.borrow().local_addr();
-                            *col = parent_col;
-                        }
-                    }
-                };
-
                 for miss in misses.iter_mut() {
-                    if miss.on == addr {
-                        reroute_miss(i, miss);
-                    } else {
-                        let node = nodes[&miss.on].borrow();
-                        if node.is_internal() {
-                            reroute_miss(&*node, miss);
-                        }
+                    if miss.on != addr {
+                        reroute_miss(nodes, miss);
                     }
                 }
 
@@ -284,6 +256,34 @@ impl Node {
             NodeType::Dropped => {}
             NodeType::Egress(None) | NodeType::Source => unreachable!(),
         }
+    }
+}
+
+// When we miss at a can_query_through node we have to replay from
+// its parent instead of that node, so we'll update the misses:
+fn reroute_miss(nodes: &DomainNodes, miss: &mut Miss) {
+    let node = nodes[&miss.on].borrow();
+    if node.is_internal() && node.can_query_through() {
+        for col in miss.lookup_idx.iter_mut() {
+            let parents = node.resolve(*col).unwrap();
+            assert_eq!(
+                parents.len(),
+                1,
+                "can't query_through with more than one parent"
+            );
+
+            let (parent, parent_col) = parents[0];
+            let parent_node = nodes
+                .values()
+                .find(|n| n.borrow().global_addr() == parent)
+                .unwrap();
+
+            miss.on = *parent_node.borrow().local_addr();
+            *col = parent_col;
+        }
+
+        // Recurse in case the parent we landed at also is a query_through node:
+        reroute_miss(nodes, miss);
     }
 }
 

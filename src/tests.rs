@@ -562,6 +562,43 @@ fn it_works_with_vote() {
 }
 
 #[test]
+fn it_works_with_double_query_through() {
+    let mut g = build_local("it_works_with_double_query_through");
+    let sql = "
+        # base tables
+        CREATE TABLE A (id int, other int, PRIMARY KEY(id));
+        CREATE TABLE B (id int, PRIMARY KEY(id));
+
+        # read queries
+        QUERY ReadJoin: SELECT J.id, J.other \
+            FROM B \
+            LEFT JOIN (SELECT A.id, A.other FROM A \
+                WHERE A.other = 5) AS J \
+            ON (J.id = B.id) \
+            WHERE J.id = ?;
+    ";
+
+    g.install_recipe(sql.to_owned()).unwrap();
+    println!("{}", g.graphviz());
+    let mut a = g.get_mutator("A").unwrap();
+    let mut b = g.get_mutator("B").unwrap();
+    let mut getter = g.get_getter("ReadJoin").unwrap();
+
+    a.put(vec![1i64.into(), 5.into()]).unwrap();
+    a.put(vec![2i64.into(), 10.into()]).unwrap();
+    b.put(vec![1i64.into()]).unwrap();
+
+    sleep();
+
+    let rs = getter.lookup(&[1i64.into()], true).unwrap();
+    assert_eq!(rs.len(), 1);
+    assert_eq!(rs[0], vec![1i64.into(), 5.into()]);
+
+    let empty = getter.lookup(&[2i64.into()], true).unwrap();
+    assert_eq!(empty.len(), 0);
+}
+
+#[test]
 fn it_works_with_reads_before_writes() {
     let mut g = build_local("it_works_with_reads_before_writes");
     let sql = "
