@@ -236,16 +236,7 @@ impl Ingredient for TopK {
                     LookupResult::Some(rs) => {
                         missed = false;
                         grpk = rs.len();
-                        match rs {
-                            Cow::Borrowed(rs) => {
-                                current.extend(rs.iter().map(|r| (Cow::Borrowed(&r[..]), false)));
-                            }
-                            Cow::Owned(rs) => {
-                                current.extend(
-                                    rs.into_iter().map(|r| (Cow::Owned(r.unpack()), false)),
-                                );
-                            }
-                        }
+                        current.extend(rs.into_iter().map(|r| (r, false)))
                     }
                     LookupResult::Missing => {
                         missed = true;

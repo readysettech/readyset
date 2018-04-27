@@ -174,7 +174,7 @@ impl Ingredient for Filter {
     ) -> Option<Option<Box<Iterator<Item = Cow<'a, [DataType]>> + 'a>>> {
         states.get(&*self.src).and_then(|state| {
             let f = self.filter.clone();
-            let filter = move |r: &&Row| {
+            let filter = move |r: &[DataType]| {
                 r.iter().enumerate().all(|(i, d)| {
                     // check if this filter matches
                     if let Some(ref cond) = f[i] {
@@ -204,16 +204,8 @@ impl Ingredient for Filter {
             };
 
             match state.lookup(columns, key) {
-                LookupResult::Some(Cow::Borrowed(rs)) => {
-                    let r = Box::new(rs.iter().filter(filter).map(|r| Cow::from(&r[..]))) as Box<_>;
-                    Some(Some(r))
-                }
-                LookupResult::Some(Cow::Owned(rs)) => {
-                    let r = Box::new(
-                        rs.into_iter()
-                            .filter(move |ref r| filter(r))
-                            .map(|r| Cow::from(r.unpack())),
-                    ) as Box<_>;
+                LookupResult::Some(rs) => {
+                    let r = Box::new(rs.into_iter().filter(move |r| filter(r))) as Box<_>;
                     Some(Some(r))
                 }
                 LookupResult::Missing => Some(None),

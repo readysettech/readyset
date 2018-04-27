@@ -1,6 +1,7 @@
 use std::borrow::Cow;
 use std::ops::Deref;
 use std::rc::Rc;
+use std::{slice, vec};
 
 mod memory_state;
 mod persistent_state;
@@ -55,18 +56,10 @@ impl Tag {
     }
 }
 
-// TODO: Wrapping this in a Rc is unnecessary when rows are returned through a Cow::Owned from
-// PersistentState. This could be solved by having something similar to a Cow here.
 #[derive(Clone, Debug)]
 pub struct Row(pub(crate) Rc<Vec<DataType>>);
 
 unsafe impl Send for Row {}
-
-impl Row {
-    pub fn unpack(self) -> Vec<DataType> {
-        Rc::try_unwrap(self.0).unwrap()
-    }
-}
 
 impl Deref for Row {
     type Target = Vec<DataType>;
@@ -84,8 +77,50 @@ impl SizeOf for Row {
     }
 }
 
+/// An std::borrow::Cow-like wrapper around a collection of rows.
+pub enum RecordResult<'a> {
+    Borrowed(&'a [Row]),
+    Owned(Vec<Vec<DataType>>),
+}
+
+impl<'a> RecordResult<'a> {
+    pub fn len(&self) -> usize {
+        match *self {
+            RecordResult::Borrowed(rs) => rs.len(),
+            RecordResult::Owned(ref rs) => rs.len(),
+        }
+    }
+}
+
+impl<'a> IntoIterator for RecordResult<'a> {
+    type Item = Cow<'a, [DataType]>;
+    type IntoIter = RecordResultIterator<'a>;
+
+    fn into_iter(self) -> Self::IntoIter {
+        match self {
+            RecordResult::Borrowed(rs) => RecordResultIterator::Borrowed(rs.into_iter()),
+            RecordResult::Owned(rs) => RecordResultIterator::Owned(rs.into_iter()),
+        }
+    }
+}
+
+pub enum RecordResultIterator<'a> {
+    Owned(vec::IntoIter<Vec<DataType>>),
+    Borrowed(slice::Iter<'a, Row>),
+}
+
+impl<'a> Iterator for RecordResultIterator<'a> {
+    type Item = Cow<'a, [DataType]>;
+    fn next(&mut self) -> Option<Self::Item> {
+        match self {
+            RecordResultIterator::Borrowed(iter) => iter.next().map(|r| Cow::from(&r[..])),
+            RecordResultIterator::Owned(iter) => iter.next().map(|r| Cow::from(r)),
+        }
+    }
+}
+
 pub enum LookupResult<'a> {
-    Some(Cow<'a, [Row]>),
+    Some(RecordResult<'a>),
     Missing,
 }
 

@@ -241,7 +241,7 @@ mod tests {
 
         // Make sure the first record has been deleted:
         match state.lookup(&[0], &KeyType::Single(&records[0][0])) {
-            LookupResult::Some(rows) => assert_eq!(rows.len(), 0),
+            LookupResult::Some(RecordResult::Borrowed(rows)) => assert_eq!(rows.len(), 0),
             _ => unreachable!(),
         };
 
@@ -249,7 +249,9 @@ mod tests {
         for i in 1..3 {
             let record = &records[i];
             match state.lookup(&[0], &KeyType::Single(&record[0])) {
-                LookupResult::Some(rows) => assert_eq!(&*rows[0], &**record),
+                LookupResult::Some(RecordResult::Borrowed(rows)) => {
+                    assert_eq!(&*rows[0], &**record)
+                }
                 _ => unreachable!(),
             };
         }
@@ -264,7 +266,7 @@ mod tests {
         state.add_key(&[1], None);
 
         match state.lookup(&[1], &KeyType::Single(&row[1])) {
-            LookupResult::Some(rows) => assert_eq!(&*rows[0], &row),
+            LookupResult::Some(RecordResult::Borrowed(rows)) => assert_eq!(&*rows[0], &row),
             _ => unreachable!(),
         };
     }

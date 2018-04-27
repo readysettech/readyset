@@ -1,3 +1,4 @@
+use std::borrow::Cow;
 use std::cmp::Ordering;
 use std::collections::HashMap;
 use std::fmt;
@@ -222,15 +223,15 @@ where
                         }
                     };
 
-                    // TODO: take advantage of rs possibly being a Cow::Owned to avoid cloning
-                    // further down.
-                    let old = rs.get(0);
+                    let old = rs.into_iter().next();
                     // current value is in the last output column
                     // or "" if there is no current group
-                    let current = old.map(|r| &r[r.len() - 1]);
+                    let current = old.as_ref().map(|rows| match rows {
+                        Cow::Borrowed(rs) => Cow::Borrowed(&rs[rs.len() - 1]),
+                        Cow::Owned(rs) => Cow::Owned(rs[rs.len() - 1].clone()),
+                    });
 
-                    // new is the result of applying all diffs for the group to the current
-                    // value
+                    // new is the result of applying all diffs for the group to the current value
                     let new = inner.apply(current.as_ref().map(|v| &**v), &mut diffs as &mut _);
                     match current {
                         Some(ref current) if new == **current => {
@@ -240,7 +241,7 @@ where
                             if let Some(old) = old {
                                 // revoke old value
                                 debug_assert!(current.is_some());
-                                out.push(Record::Negative((**old).clone()));
+                                out.push(Record::Negative(old.into_owned()));
                             }
 
                             // emit positive, which is group + new.
