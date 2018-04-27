@@ -48,6 +48,19 @@ fn git_and_cargo(ssh: &mut Session, dir: &str, bin: &str) -> Result<(), failure:
             }
         })?;
 
+    /*
+    if bin == "trawler-mysql" {
+        eprintln!(" -> switch to alt");
+        ssh.cmd(&format!("bash -c 'git -C {} checkout alt 2>&1'", dir))
+            .map(|out| {
+                let out = out.trim_right();
+                if !out.is_empty() {
+                    eprintln!("{}", out);
+                }
+            })?;
+    }
+    */
+
     eprintln!(" -> rebuild");
     ssh.cmd(&format!(
         "bash -c 'cd {} && cargo b --release --bin {} 2>&1'",
