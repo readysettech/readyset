@@ -157,11 +157,13 @@ impl Reader {
     }
 
     pub fn on_eviction(&mut self, _key_columns: &[usize], keys: &[Vec<DataType>]) {
-        let w = self.writer.as_mut().unwrap();
-        for k in keys {
-            w.mut_with_key(&k[..]).mark_hole();
+        // NOTE: *could* be None if reader has been created but its state hasn't been built yet
+        if let Some(w) = self.writer.as_mut() {
+            for k in keys {
+                w.mut_with_key(&k[..]).mark_hole();
+            }
+            w.swap();
         }
-        w.swap();
     }
 
     pub fn process(&mut self, m: &mut Option<Box<Packet>>, swap: bool) {
