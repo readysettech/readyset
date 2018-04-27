@@ -79,17 +79,6 @@ fn main() {
     let mut b = TsunamiBuilder::default();
     b.use_term_logger();
     b.add_set(
-        "server",
-        1,
-        MachineSetup::new("c5.4xlarge", AMI, |ssh| {
-            eprintln!("==> setting up souplet");
-            git_and_cargo(ssh, "distributary", "souplet")?;
-            eprintln!("==> setting up zk-util");
-            git_and_cargo(ssh, "distributary/consensus", "zk-util")?;
-            Ok(())
-        }).as_user("ubuntu"),
-    );
-    b.add_set(
         "trawler",
         1,
         MachineSetup::new("c5.18xlarge", AMI, |ssh| {
@@ -99,6 +88,17 @@ fn main() {
             git_and_cargo(ssh, "benchmarks-soup/lobsters/mysql", "trawler-mysql")?;
             eprintln!("==> setting up shim");
             git_and_cargo(ssh, "shim", "distributary-mysql")?;
+            Ok(())
+        }).as_user("ubuntu"),
+    );
+    b.add_set(
+        "server",
+        1,
+        MachineSetup::new("c5.4xlarge", AMI, |ssh| {
+            eprintln!("==> setting up souplet");
+            git_and_cargo(ssh, "distributary", "souplet")?;
+            eprintln!("==> setting up zk-util");
+            git_and_cargo(ssh, "distributary/consensus", "zk-util")?;
             Ok(())
         }).as_user("ubuntu"),
     );
@@ -119,16 +119,15 @@ fn main() {
         None,
     );
 
-    b.set_max_duration(2);
+    b.set_max_duration(3);
     b.set_region(rusoto_core::Region::UsEast1);
-    b.wait_limit(time::Duration::from_secs(20));
+    b.wait_limit(time::Duration::from_secs(60));
 
     let scales: Box<Iterator<Item = usize>> = args.values_of("SCALE")
         .map(|it| Box::new(it.map(|s| s.parse().unwrap())) as Box<_>)
         .unwrap_or(Box::new(
-            [
-                100, 200, 400, 800, 1000usize, 2000, 4000, 6000, 8000, 10000, 12000, 14000,
-            ].into_iter()
+            [100, 200, 400, 800, 1000usize, 1500, 2000, 3000, 4000]
+                .into_iter()
                 .map(|&s| s),
         ) as Box<_>);
 
@@ -249,7 +248,7 @@ fn main() {
                                  --deployment trawler \
                                  --durability memory \
                                  --address {} \
-                                 --readers 14 -w 2 \
+                                 --readers 12 -w 4 \
                                  --shards 0 \
                                  &> souplet.log &'",
                                 server.private_ip,
@@ -281,10 +280,7 @@ fn main() {
 
                 // run priming
                 // XXX: with MySQL we *could* just reprime by copying over the old ramdisk again
-                eprintln!(
-                    " -> repriming at {}",
-                    Local::now().time().format("%H:%M:%S")
-                );
+                eprintln!(" -> priming at {}", Local::now().time().format("%H:%M:%S"));
 
                 let dir = match backend {
                     Backend::Mysql => "benchmarks",
@@ -313,7 +309,30 @@ fn main() {
                     .map(|out| {
                         let out = out.trim_right();
                         if !out.is_empty() {
-                            eprintln!(" -> reprime finished...\n{}", out);
+                            eprintln!(" -> priming finished...\n{}", out);
+                        }
+                    })?;
+
+                eprintln!(" -> warming at {}", Local::now().time().format("%H:%M:%S"));
+
+                trawler
+                    .ssh
+                    .as_mut()
+                    .unwrap()
+                    .cmd(&format!(
+                        "env RUST_BACKTRACE=1 \
+                         {}/lobsters/mysql/target/release/trawler-mysql \
+                         --reqscale 3000 \
+                         --warmup 300 \
+                         --runtime 0 \
+                         --issuers 24 \
+                         \"mysql://lobsters:$(cat ~/mysql.pass)@{}/lobsters\"",
+                        dir, ip
+                    ))
+                    .map(|out| {
+                        let out = out.trim_right();
+                        if !out.is_empty() {
+                            eprintln!(" -> warming finished...\n{}", out);
                         }
                     })?;
 
@@ -328,7 +347,7 @@ fn main() {
                         "env RUST_BACKTRACE=1 \
                          {}/lobsters/mysql/target/release/trawler-mysql \
                          --reqscale {} \
-                         --warmup 60 \
+                         --warmup 20 \
                          --runtime 30 \
                          --issuers 24 \
                          --histogram lobsters-{}-{}.hist \
