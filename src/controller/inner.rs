@@ -604,7 +604,7 @@ impl ControllerInner {
         let domains = self.domains
             .iter_mut()
             .flat_map(|(di, s)| {
-                s.send(box payload::Packet::GetStatistics(false)).unwrap();
+                s.send(box payload::Packet::GetStatistics).unwrap();
                 s.wait_for_statistics()
                     .unwrap()
                     .into_iter()
@@ -629,7 +629,7 @@ impl ControllerInner {
         let to_evict: Vec<_> = self.domains
             .iter_mut()
             .map(|(di, s)| {
-                s.send(box payload::Packet::GetStatistics(true)).unwrap();
+                s.send(box payload::Packet::GetStatistics).unwrap();
                 let to_evict: Vec<(NodeIndex, u64)> = s.wait_for_statistics()
                     .unwrap()
                     .into_iter()

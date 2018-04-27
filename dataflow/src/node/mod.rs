@@ -16,7 +16,7 @@ pub use self::ntype::NodeType;
 
 mod debug;
 
-#[derive(Debug)]
+#[derive(Debug, Serialize, Deserialize)]
 pub enum MaterializationStatus {
     Not,
     Full,

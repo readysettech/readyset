@@ -1,6 +1,7 @@
 use std::collections::HashMap;
 use serde::{Deserialize, Deserializer, Serialize, Serializer};
 
+use node::MaterializationStatus;
 use domain;
 use prelude::*;
 
@@ -21,7 +22,7 @@ pub struct NodeStats {
     pub process_time: u64,
     pub process_ptime: u64,
     pub mem_size: u64,
-    pub partial: bool,
+    pub materialized: MaterializationStatus,
 }
 
 /// Struct holding statistics about an entire graph.

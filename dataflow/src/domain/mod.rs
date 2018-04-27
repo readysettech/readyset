@@ -1364,7 +1364,7 @@ impl Domain {
                             .send(ControlReplyPacket::ack())
                             .unwrap();
                     }
-                    Packet::GetStatistics(partial_only) => {
+                    Packet::GetStatistics => {
                         let domain_stats = statistics::DomainStats {
                             total_time: self.total_time.num_nanoseconds(),
                             total_ptime: self.total_ptime.num_nanoseconds(),
@@ -1391,14 +1391,29 @@ impl Domain {
                                         .map(|state| state.deep_size_of())
                                         .unwrap_or(0)
                                 };
-                                let partial = self.state
-                                    .get(&local_index)
-                                    .map(|state| state.is_partial())
-                                    .unwrap_or(false);
 
-                                if time.is_some() && ptime.is_some()
-                                    && (!partial_only || n.is_reader() || partial)
-                                {
+                                let mat_state = if !n.is_reader() {
+                                    match self.state.get(&local_index) {
+                                        Some(ref s) => {
+                                            if s.is_partial() {
+                                                MaterializationStatus::Partial
+                                            } else {
+                                                MaterializationStatus::Full
+                                            }
+                                        }
+                                        None => MaterializationStatus::Not,
+                                    }
+                                } else {
+                                    n.with_reader(|r| {
+                                        if r.is_partial() {
+                                            MaterializationStatus::Partial
+                                        } else {
+                                            MaterializationStatus::Full
+                                        }
+                                    }).unwrap()
+                                };
+
+                                if time.is_some() && ptime.is_some() {
                                     Some((
                                         node_index,
                                         statistics::NodeStats {
@@ -1406,7 +1421,7 @@ impl Domain {
                                             process_time: time.unwrap(),
                                             process_ptime: ptime.unwrap(),
                                             mem_size: mem_size,
-                                            partial: partial,
+                                            materialized: mat_state,
                                         },
                                     ))
                                 } else {
