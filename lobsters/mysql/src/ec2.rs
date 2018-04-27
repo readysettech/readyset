@@ -12,7 +12,7 @@ use std::io::prelude::*;
 use std::{fmt, thread, time};
 use tsunami::*;
 
-const AMI: &str = "ami-4564d23a";
+const AMI: &str = "ami-e9893a96";
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 enum Backend {
@@ -48,6 +48,19 @@ fn git_and_cargo(ssh: &mut Session, dir: &str, bin: &str) -> Result<(), failure:
             }
         })?;
 
+    /*
+    if bin == "trawler-mysql" {
+        eprintln!(" -> switch to alt");
+        ssh.cmd(&format!("bash -c 'git -C {} checkout alt 2>&1'", dir))
+            .map(|out| {
+                let out = out.trim_right();
+                if !out.is_empty() {
+                    eprintln!("{}", out);
+                }
+            })?;
+    }
+    */
+
     eprintln!(" -> rebuild");
     ssh.cmd(&format!(
         "bash -c 'cd {} && cargo b --release --bin {} 2>&1'",
@@ -81,7 +94,7 @@ fn main() {
     b.add_set(
         "trawler",
         1,
-        MachineSetup::new("c5.18xlarge", AMI, |ssh| {
+        MachineSetup::new("m5.12xlarge", AMI, |ssh| {
             eprintln!("==> setting up trawler");
             git_and_cargo(ssh, "benchmarks/lobsters/mysql", "trawler-mysql")?;
             eprintln!("==> setting up trawler w/ soup hacks");
@@ -444,9 +457,9 @@ fn main() {
                     .next()
                     .and_then(|l| l.parse().ok())
                     .unwrap_or(0.0);
-                if sload > 16.5 || cload > 72.5 {
+                if sload > 16.5 {
                     eprintln!(
-                        " -> backend is not keeping up (s: {}/16, c: {}/72)",
+                        " -> backend is not keeping up (s: {}/16, c: {}/48)",
                         sload, cload
                     );
                     *survived_last.get_mut(backend).unwrap() = false;
