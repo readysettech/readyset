@@ -556,7 +556,8 @@ impl Ingredient for Union {
                         })
                         .flat_map(|(key, pieces)| {
                             if pieces.evict {
-                                unimplemented!("need to issue an eviction after replaying key");
+                                // TODO XXX TODO XXX TODO XXX TODO
+                                eprintln!("!!! need to issue an eviction after replaying key");
                             }
                             released.insert(key.clone());
                             pieces.buffered.into_iter()
