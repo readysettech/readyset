@@ -17,6 +17,7 @@ pub struct ControllerBuilder {
     nworker_threads: usize,
     nread_threads: usize,
     memory_limit: Option<usize>,
+    memory_check_frequency: Option<time::Duration>,
     listen_addr: IpAddr,
     log: slog::Logger,
 }
@@ -29,6 +30,7 @@ impl Default for ControllerBuilder {
             nworker_threads: 2,
             nread_threads: 1,
             memory_limit: None,
+            memory_check_frequency: None,
         }
     }
 }
@@ -81,10 +83,12 @@ impl ControllerBuilder {
         self.nread_threads = threads;
     }
 
-    /// Set the number of worker threads used by this instance.
-    pub fn set_memory_limit(&mut self, limit: usize) {
+    /// Set the memory limit (target) and how often we check it (in millis).
+    pub fn set_memory_limit(&mut self, limit: usize, check_freq: time::Duration) {
         assert_ne!(limit, 0);
+        assert_ne!(check_freq, time::Duration::from_millis(0));
         self.memory_limit = Some(limit);
+        self.memory_check_frequency = Some(check_freq);
     }
 
     /// Set the IP address that the controller should use for listening.
@@ -111,6 +115,7 @@ impl ControllerBuilder {
             self.nworker_threads,
             self.nread_threads,
             self.memory_limit,
+            self.memory_check_frequency,
             self.log,
         )
     }

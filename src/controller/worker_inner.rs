@@ -11,6 +11,7 @@ use coordination::{CoordinationMessage, CoordinationPayload};
 use worker;
 
 use std::collections::HashMap;
+use std::cmp;
 use std::fs;
 use std::io;
 use std::net::{IpAddr, SocketAddr};
@@ -38,6 +39,8 @@ pub(super) struct WorkerInner {
     listen_addr: IpAddr,
 
     memory_limit: Option<usize>,
+    evict_every: Option<Duration>,
+
     state_sizes: HashMap<(DomainIndex, usize), Arc<AtomicUsize>>,
     domain_senders: HashMap<(DomainIndex, usize), TcpSender<Box<payload::Packet>>>,
 
@@ -54,6 +57,7 @@ impl WorkerInner {
         nworker_threads: usize,
         nread_threads: usize,
         memory_limit: Option<usize>,
+        memory_check_frequency: Option<Duration>,
         log: slog::Logger,
     ) -> Result<WorkerInner, ()> {
         let channel_coordinator = Arc::new(ChannelCoordinator::new());
@@ -114,6 +118,7 @@ impl WorkerInner {
             sender_addr,
             heartbeat_every: state.config.heartbeat_every,
             last_heartbeat: Instant::now(),
+            evict_every: memory_check_frequency,
             listen_addr,
             memory_limit,
             state_sizes: HashMap::new(),
@@ -196,34 +201,49 @@ impl WorkerInner {
         Ok(())
     }
 
-    /// Perform a heartbeat if it is time, and return the amount of time until another one is
-    /// needed.
-    pub(super) fn heartbeat(&mut self) -> Duration {
-        let elapsed = self.last_heartbeat.elapsed();
-        if elapsed > self.heartbeat_every {
-            // check if we're about the memory limit, and trigger evictions if so
-            self.evict_if_too_large();
+    /// Perform housekeeping activities like evicting from domains and sending heartbeats to the
+    /// controller.
+    pub(super) fn do_housekeeping(&mut self) -> Duration {
+        // check if we're about the memory limit, and trigger evictions if so
+        self.evict_if_too_large();
 
-            let msg = CoordinationMessage {
-                source: self.sender_addr,
-                epoch: self.epoch,
-                payload: CoordinationPayload::Heartbeat,
-            };
-            match self.sender.send(msg) {
-                Err(e) => {
-                    // TODO(malte): probably should bail out and try to reconnect here if the
-                    // connection dropped?
-                    error!(self.log, "failed to send heartbeat to controller: {:?}", e);
-                    // try again in 100ms
-                    Duration::from_millis(100)
-                }
-                Ok(_) => {
-                    self.last_heartbeat = Instant::now();
-                    self.heartbeat_every
-                }
+        let elapsed = self.last_heartbeat.elapsed();
+        // do we need to send a heartbeat?
+        if elapsed > self.heartbeat_every {
+            if let Some(evict_every) = self.evict_every {
+                cmp::min(evict_every, self.heartbeat())
+            } else {
+                self.heartbeat()
             }
         } else {
-            self.heartbeat_every - elapsed
+            if let Some(evict_every) = self.evict_every {
+                cmp::min(evict_every, self.heartbeat_every - elapsed)
+            } else {
+                self.heartbeat_every - elapsed
+            }
+        }
+    }
+
+    /// Perform a heartbeat if it is time, and return the amount of time until another one is
+    /// needed.
+    fn heartbeat(&mut self) -> Duration {
+        let msg = CoordinationMessage {
+            source: self.sender_addr,
+            epoch: self.epoch,
+            payload: CoordinationPayload::Heartbeat,
+        };
+        match self.sender.send(msg) {
+            Err(e) => {
+                // TODO(malte): probably should bail out and try to reconnect here if the
+                // connection dropped?
+                error!(self.log, "failed to send heartbeat to controller: {:?}", e);
+                // try again in 100ms
+                Duration::from_millis(100)
+            }
+            Ok(_) => {
+                self.last_heartbeat = Instant::now();
+                self.heartbeat_every
+            }
         }
     }
 

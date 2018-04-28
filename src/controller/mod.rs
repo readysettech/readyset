@@ -195,6 +195,7 @@ fn start_instance<A: Authority + 'static>(
     nworker_threads: usize,
     nread_threads: usize,
     memory_limit: Option<usize>,
+    memory_check_frequency: Option<Duration>,
     log: slog::Logger,
 ) -> ControllerHandle<A> {
     let (controller_event_tx, controller_event_rx) = mpsc::channel();
@@ -260,6 +261,7 @@ fn start_instance<A: Authority + 'static>(
                 nworker_threads,
                 nread_threads,
                 memory_limit,
+                memory_check_frequency,
                 listen_addr,
                 internal,
                 log: log2,
@@ -391,6 +393,7 @@ pub struct Worker {
     nworker_threads: usize,
     nread_threads: usize,
     memory_limit: Option<usize>,
+    memory_check_frequency: Option<Duration>,
 
     listen_addr: IpAddr,
     internal: ServingThread,
@@ -588,13 +591,15 @@ impl Worker {
     fn main_loop(mut self) {
         loop {
             let event = match self.inner {
-                Some(ref mut worker) => match self.receiver.recv_timeout(worker.heartbeat()) {
-                    Ok(event) => event,
-                    Err(RecvTimeoutError::Timeout) => {
-                        continue;
+                Some(ref mut worker) => {
+                    match self.receiver.recv_timeout(worker.do_housekeeping()) {
+                        Ok(event) => event,
+                        Err(RecvTimeoutError::Timeout) => {
+                            continue;
+                        }
+                        Err(_) => break,
                     }
-                    Err(_) => break,
-                },
+                }
                 None => match self.receiver.recv() {
                     Ok(event) => event,
                     Err(_) => break,
@@ -615,6 +620,7 @@ impl Worker {
                         self.nworker_threads,
                         self.nread_threads,
                         self.memory_limit,
+                        self.memory_check_frequency,
                         self.log.clone(),
                     ) {
                         self.inner = Some(worker);

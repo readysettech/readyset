@@ -73,7 +73,16 @@ fn main() {
                 .long("memory")
                 .takes_value(true)
                 .default_value("0")
-                .help("Memory, in bytes, available for materialized state [0 = unlimited]."),
+                .help("Memory, in bytes, available for partially materialized state [0 = unlimited]."),
+        )
+        .arg(
+            Arg::with_name("memory_check_freq")
+                .short("m")
+                .long("memory-check-every")
+                .takes_value(true)
+                .default_value("10")
+                .requires("memory")
+                .help("Frequency at which to check the state size against the memory limit [in milliseconds]."),
         )
         .arg(
             Arg::with_name("noreuse")
@@ -124,6 +133,7 @@ fn main() {
     let zookeeper_addr = matches.value_of("zookeeper").unwrap();
     let workers = value_t_or_exit!(matches, "workers", usize);
     let memory = value_t_or_exit!(matches, "memory", usize);
+    let memory_check_freq = value_t_or_exit!(matches, "memory_check_freq", u64);
     let readers = value_t_or_exit!(matches, "readers", usize);
     let quorum = value_t_or_exit!(matches, "quorum", usize);
     let persistence_threads = value_t_or_exit!(matches, "persistence-threads", i32);
@@ -139,7 +149,7 @@ fn main() {
     builder.set_listen_addr(listen_addr);
     builder.set_worker_threads(workers);
     if memory > 0 {
-        builder.set_memory_limit(memory);
+        builder.set_memory_limit(memory, Duration::from_millis(memory_check_freq));
     }
     builder.set_read_threads(readers);
     builder.set_sharding(sharding);
