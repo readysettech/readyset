@@ -1,6 +1,6 @@
 use nom_sql::{Column, ConditionBase, ConditionExpression, ConditionTree, CreateTableStatement,
-              CreateViewStatement, FieldDefinitionExpression, Literal, Operator,
-              SelectSpecification, SelectStatement, SqlQuery};
+              CreateViewStatement, FieldDefinitionExpression, FieldValueExpression, Literal,
+              Operator, SelectSpecification, SelectStatement, SqlQuery};
 
 use std::collections::HashMap;
 use std::mem;
@@ -15,6 +15,16 @@ pub(crate) fn expand_stars(sq: &mut SelectStatement, table_schemas: &HashMap<Str
                 FieldDefinitionExpression::Col(ref c) => FieldDefinitionExpression::Col(Column {
                     table: Some(table_name.to_owned()),
                     name: c.alias.as_ref().unwrap_or(&c.name).to_owned(),
+                    alias: None,
+                    function: None,
+                }),
+                FieldDefinitionExpression::Value(ref v) => FieldDefinitionExpression::Col(Column {
+                    table: Some(table_name.to_owned()),
+                    name: match *v {
+                        FieldValueExpression::Arithmetic(ref a) => &a.alias,
+                        FieldValueExpression::Literal(ref l) => &l.alias,
+                    }.clone()
+                        .unwrap(),
                     alias: None,
                     function: None,
                 }),
