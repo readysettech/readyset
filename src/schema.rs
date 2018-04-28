@@ -91,7 +91,10 @@ pub(crate) fn schema_for_column(
                 FieldDefinitionExpression::Col(ref cc) => if cc.name == c.name
                     || (cc.alias.is_some() && &c.name == cc.alias.as_ref().unwrap())
                 {
-                    Some(schema_for_column(schemas, cc))
+                    let mut outc = schema_for_column(schemas, cc);
+                    // don't use the source table name
+                    outc.column = c.name.to_owned();
+                    Some(outc)
                 } else {
                     None
                 },
