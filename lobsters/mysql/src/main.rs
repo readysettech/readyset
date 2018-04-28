@@ -20,22 +20,32 @@ use trawler::{LobstersRequest, UserId};
 
 struct MysqlSpawner {
     opts: my::OptsBuilder,
+    simulate_shards: Option<u32>,
 }
 impl MysqlSpawner {
-    fn new(opts: my::OptsBuilder) -> Self {
-        MysqlSpawner { opts }
+    fn new(opts: my::OptsBuilder, simulate_shards: Option<u32>) -> Self {
+        MysqlSpawner {
+            opts,
+            simulate_shards,
+        }
     }
 }
 
 struct MysqlTrawler {
     c: my::Pool,
     tokens: RefCell<HashMap<u32, String>>,
+    simulate_shards: Option<u32>,
 }
 impl MysqlTrawler {
-    fn new(handle: &tokio_core::reactor::Handle, opts: my::Opts) -> Self {
+    fn new(
+        handle: &tokio_core::reactor::Handle,
+        opts: my::Opts,
+        simulate_shards: Option<u32>,
+    ) -> Self {
         MysqlTrawler {
             c: my::Pool::new(opts, handle),
             tokens: HashMap::new().into(),
+            simulate_shards,
         }
     }
 }
@@ -53,7 +63,7 @@ impl trawler::LobstersClient for MysqlTrawler {
     type Factory = MysqlSpawner;
 
     fn spawn(spawner: &mut Self::Factory, handle: &tokio_core::reactor::Handle) -> Self {
-        MysqlTrawler::new(handle, spawner.opts.clone().into())
+        MysqlTrawler::new(handle, spawner.opts.clone().into(), spawner.simulate_shards)
     }
 
     fn setup(spawner: &mut Self::Factory) {
@@ -188,7 +198,9 @@ impl trawler::LobstersClient for MysqlTrawler {
                 )
             }
             LobstersRequest::Logout => Box::new(c.map(|c| (c, false))),
-            LobstersRequest::Story(id) => endpoints::story::handle(c, acting_as, id),
+            LobstersRequest::Story(id) => {
+                endpoints::story::handle(c, acting_as, this.simulate_shards, id)
+            }
             LobstersRequest::StoryVote(story, v) => {
                 endpoints::story_vote::handle(c, acting_as, story, v)
             }
@@ -276,6 +288,13 @@ fn main() {
                 .help("Benchmark runtime in seconds"),
         )
         .arg(
+            Arg::with_name("fakeshards")
+                .long("simulate-shards")
+                .takes_value(true)
+                .conflicts_with("memscale")
+                .help("Simulate if read_ribbons base had N shards"),
+        )
+        .arg(
             Arg::with_name("warmup")
                 .long("warmup")
                 .takes_value(true)
@@ -302,6 +321,13 @@ fn main() {
         )
         .get_matches();
 
+    let simulate_shards = args.value_of("fakeshards")
+        .map(|_| value_t_or_exit!(args, "fakeshards", u32));
+    assert!(
+        simulate_shards.is_none() || value_t_or_exit!(args, "memscale", f64) == 1.0,
+        "cannot simulate sharding with memscale != 1 (b/c of NUM_STORIES)"
+    );
+
     let mut wl = trawler::WorkloadBuilder::default();
     wl.scale(
         value_t_or_exit!(args, "memscale", f64),
@@ -322,7 +348,7 @@ fn main() {
     opts.tcp_nodelay(true);
     opts.pool_min(Some(50usize));
     opts.pool_max(Some(50usize));
-    let mut s = MysqlSpawner::new(opts);
+    let mut s = MysqlSpawner::new(opts, simulate_shards);
 
     if !args.is_present("prime") {
         let mut core = tokio_core::reactor::Core::new().unwrap();
