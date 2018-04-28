@@ -125,7 +125,8 @@ impl State for MemoryState {
     fn mark_hole(&mut self, key: &[DataType], tag: &Tag) {
         debug_assert!(!self.state.is_empty(), "filling uninitialized index");
         let index = self.by_tag[tag];
-        self.state[index].mark_hole(key);
+        let freed_bytes = self.state[index].mark_hole(key);
+        self.mem_size = self.mem_size.checked_sub(freed_bytes).unwrap();
     }
 
     fn lookup<'a>(&'a self, columns: &[usize], key: &KeyType) -> LookupResult<'a> {

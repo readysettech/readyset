@@ -1,5 +1,7 @@
 use ::*;
+use std::rc::Rc;
 use rand::{Rng, ThreadRng};
+use data::SizeOf;
 use local::keyed_state::KeyedState;
 use local::Row;
 
@@ -241,7 +243,7 @@ impl SingleState {
         assert!(replaced.is_none());
     }
 
-    pub fn mark_hole(&mut self, key: &[DataType]) {
+    pub fn mark_hole(&mut self, key: &[DataType]) -> u64 {
         let removed = match self.state {
             KeyedState::Single(ref mut map) => map.remove(&key[0]),
             KeyedState::Double(ref mut map) => map.remove(&(key[0].clone(), key[1].clone())),
@@ -271,7 +273,12 @@ impl SingleState {
             )),
         };
         // mark_hole should only be called on keys we called mark_filled on
-        assert!(removed.is_some());
+        removed
+            .unwrap()
+            .iter()
+            .filter(|r| Rc::strong_count(&r.0) == 1)
+            .map(SizeOf::deep_size_of)
+            .sum()
     }
 
     /// Evict `count` randomly selected keys from state and return them along with the number of
