@@ -636,7 +636,12 @@ impl ControllerInner {
                     .unwrap()
                     .into_iter()
                     .flat_map(move |(_, node_stats)| {
-                        node_stats.into_iter().map(|(ni, ns)| (ni, ns.mem_size))
+                        node_stats
+                            .into_iter()
+                            .filter_map(|(ni, ns)| match ns.materialized {
+                                MaterializationStatus::Partial => Some((ni, ns.mem_size)),
+                                _ => None,
+                            })
                     })
                     .collect();
                 (*di, to_evict)
