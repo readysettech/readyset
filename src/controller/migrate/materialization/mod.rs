@@ -567,17 +567,38 @@ impl Materializations {
             // are they trying to make a non-materialized node materialized?
             if self.have[&node] == index_on {
                 if self.partial.contains(&node) {
-                    if graph
+                    // we can't make this node partial if any of its children are materialized, as
+                    // we might stop forwarding updates to them, which would make them very sad.
+                    //
+                    // the exception to this is for new children, or old children that are now
+                    // becoming materialized; those are necessarily empty, and so we won't be
+                    // violating key monotonicity.
+                    let mut stack: Vec<_> = graph
                         .neighbors_directed(node, petgraph::EdgeDirection::Outgoing)
-                        .any(|ni| !new.contains(&ni))
-                    {
-                        println!("{}", graphviz(graph, &self));
-                        crit!(
-                            self.log,
-                            "attempting to make old non-materialized node with children partial";
-                            "node" => node.index(),
+                        .collect();
+                    while let Some(child) = stack.pop() {
+                        if new.contains(&child) {
+                            // NOTE: no need to check its children either
+                            continue;
+                        }
+
+                        if self.added.get(&child).map(|i| i.len()).unwrap_or(0)
+                            != self.have.get(&child).map(|i| i.len()).unwrap_or(0)
+                        {
+                            // node was previously materialized!
+                            println!("{}", graphviz(graph, &self));
+                            crit!(
+                                self.log,
+                                "attempting to make old non-materialized node with children partial";
+                                "node" => node.index(),
+                                "child" => child.index(),
+                            );
+                            unimplemented!();
+                        }
+
+                        stack.extend(
+                            graph.neighbors_directed(child, petgraph::EdgeDirection::Outgoing),
                         );
-                        unimplemented!();
                     }
                 }
 
