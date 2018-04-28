@@ -2,8 +2,8 @@ use bincode;
 use itertools::Itertools;
 use rocksdb::{self, ColumnFamily, SliceTransform, SliceTransformFns, WriteBatch};
 
-use ::*;
 use data::SizeOf;
+use *;
 
 // Incremented on each PersistentState initialization so that IndexSeq
 // can be used to create unique identifiers for rows.
@@ -160,41 +160,27 @@ impl State for PersistentState {
 
     fn lookup(&self, columns: &[usize], key: &KeyType) -> LookupResult {
         let db = self.db.as_ref().unwrap();
-        let value_cf = self.indices[0].column_family;
         let index_id = self.indices
             .iter()
             .position(|index| &index.columns[..] == columns)
             .expect("lookup on non-indexed column set");
-
+        let cf = self.indices[index_id].column_family;
         let prefix = Self::serialize_prefix(&key);
         let data = if index_id == 0 && self.has_unique_index {
             // This is a primary key, so we know there's only one row to retrieve
             // (no need to use prefix_iterator).
-            let raw_row = db.get_cf(value_cf, &prefix).unwrap();
+            let raw_row = db.get_cf(cf, &prefix).unwrap();
             if let Some(raw) = raw_row {
                 let row = bincode::deserialize(&*raw).unwrap();
                 vec![row]
             } else {
                 vec![]
             }
-        } else if index_id == 0 {
-            // The first index isn't unique, so we'll have to use a prefix_iterator.
-            db.prefix_iterator_cf(value_cf, &prefix)
-                .unwrap()
-                .map(|(_key, value)| bincode::deserialize(&*value).unwrap())
-                .collect()
         } else {
-            let cf = self.indices[index_id].column_family;
-            // For non-primary indices we need to first retrieve the primary index key
-            // through our secondary indices, and then call `.get` again on that.
+            // This could correspond to more than one value, so we'll use a prefix_iterator:
             db.prefix_iterator_cf(cf, &prefix)
                 .unwrap()
-                .map(|(_key, value)| {
-                    let raw_row = db.get_cf(value_cf, &value)
-                        .unwrap()
-                        .expect("secondary index pointed to missing primary key value");
-                    bincode::deserialize(&*raw_row).unwrap()
-                })
+                .map(|(_key, value)| bincode::deserialize(&*value).unwrap())
                 .collect()
         };
 
@@ -229,7 +215,7 @@ impl State for PersistentState {
                     let row: Vec<DataType> = bincode::deserialize(&value).unwrap();
                     let index_key = Self::build_key(&row, columns);
                     let key = Self::serialize_secondary(&index_key, pk);
-                    batch.put_cf(column_family, &key, &pk).unwrap();
+                    batch.put_cf(column_family, &key, value).unwrap();
                 }
 
                 self.db.as_ref().unwrap().write(batch).unwrap();
@@ -517,7 +503,7 @@ impl PersistentState {
             let key = Self::build_key(&r, &index.columns);
             let serialized_key = Self::serialize_secondary(&key, &serialized_pk);
             batch
-                .put_cf(index.column_family, &serialized_key, &serialized_pk)
+                .put_cf(index.column_family, &serialized_key, &serialized_row)
                 .unwrap();
         }
     }
