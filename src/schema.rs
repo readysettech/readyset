@@ -88,11 +88,30 @@ pub(crate) fn schema_for_column(
         sq.fields
             .iter()
             .filter_map(|f| match f {
-                FieldDefinitionExpression::Col(ref cc) => if cc.name == c.name {
+                FieldDefinitionExpression::Col(ref cc) => if cc.name == c.name
+                    || (cc.alias.is_some() && &c.name == cc.alias.as_ref().unwrap())
+                {
                     Some(schema_for_column(schemas, cc))
                 } else {
                     None
                 },
+                FieldDefinitionExpression::Value(ref v) => {
+                    let alias = match *v {
+                        FieldValueExpression::Arithmetic(ref a) => &a.alias,
+                        FieldValueExpression::Literal(ref l) => &l.alias,
+                    };
+                    if let Some(a) = alias {
+                        if a == &c.name {
+                            return Some(msql_srv::Column {
+                                table: "".to_owned(),
+                                column: a.to_owned(),
+                                coltype: msql_srv::ColumnType::MYSQL_TYPE_LONG,
+                                colflags: msql_srv::ColumnFlags::empty(),
+                            });
+                        }
+                    }
+                    None
+                }
                 _ => None,
             })
             .next()
