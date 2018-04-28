@@ -143,7 +143,7 @@ FROM all_hotness_components GROUP BY all_hotness_components.id;
 
 -- Frontpage
 CREATE VIEW frontpage_ids AS
-SELECT FULL_story_hotness.*
+SELECT FULL_story_hotness.id
 FROM FULL_story_hotness
 ORDER BY FULL_story_hotness.hotness
 LIMIT 51 OFFSET 0;
@@ -192,43 +192,36 @@ LEFT JOIN user_story_karma ON (user_story_karma.id = users.id);
 -----------------------------------------------------
 -- Original:
 -- CREATE VIEW `replying_comments` AS       select `read_ribbons`.`user_id` AS `user_id`,`comments`.`id` AS `comment_id`,`read_ribbons`.`story_id` AS `story_id`,`comments`.`parent_comment_id` AS `parent_comment_id`,`comments`.`created_at` AS `comment_created_at`,`parent_comments`.`user_id` AS `parent_comment_author_id`,`comments`.`user_id` AS `comment_author_id`,`stories`.`user_id` AS `story_author_id`,(`read_ribbons`.`updated_at` < `comments`.`created_at`) AS `is_unread`,(select `votes`.`vote` from `votes` where ((`votes`.`user_id` = `read_ribbons`.`user_id`) and (`votes`.`comment_id` = `comments`.`id`))) AS `current_vote_vote`,(select `votes`.`reason` from `votes` where ((`votes`.`user_id` = `read_ribbons`.`user_id`) and (`votes`.`comment_id` = `comments`.`id`))) AS `current_vote_reason` from (((`read_ribbons` join `comments` on((`comments`.`story_id` = `read_ribbons`.`story_id`))) join `stories` on((`stories`.`id` = `comments`.`story_id`))) left join `comments` `parent_comments` on((`parent_comments`.`id` = `comments`.`parent_comment_id`))) where ((`read_ribbons`.`is_following` = 1) and (`comments`.`user_id` <> `read_ribbons`.`user_id`) and (`comments`.`is_deleted` = 0) and (`comments`.`is_moderated` = 0) and ((`parent_comments`.`user_id` = `read_ribbons`.`user_id`) or (isnull(`parent_comments`.`user_id`) and (`stories`.`user_id` = `read_ribbons`.`user_id`))) and ((`comments`.`upvotes` - `comments`.`downvotes`) >= 0) and (isnull(`parent_comments`.`id`) or ((`parent_comments`.`upvotes` - `parent_comments`.`downvotes`) >= 0)));
---
--- Modified:
--- CREATE VIEW `BOUNDARY_replying_comments_for_count` AS
--- 	SELECT `read_ribbons`.`user_id`,
--- 	       `comments`.`id`,
--- 	FROM `read_ribbons`
--- 	JOIN `stories` ON (`stories`.`id` = `read_ribbons`.`story_id`)
--- 	JOIN `comments` ON (`comments`.`story_id` = `read_ribbons`.`story_id`)
--- 	LEFT JOIN `parent_comments`
--- 	ON (`parent_comments`.`id` = `comments`.`parent_comment_id`)
---      LEFT JOIN FULL_comment_score ON (FULL_comment_score.id = comments.id)
---      LEFT JOIN FULL_parent_comment_score ON (FULL_parent_comment_score.id = parent_comments.id)
--- 	WHERE `read_ribbons`.`is_following` = 1
--- 	AND `comments`.`user_id` <> `read_ribbons`.`user_id`
--- 	AND `comments`.`is_deleted` = 0
--- 	AND `comments`.`is_moderated` = 0
--- 	AND `FULL_comment_score`.`score` >= 0
--- 	AND `read_ribbons`.`updated_at` < `comments`.`created_at`
--- 	AND (
---      (
---      	`parent_comments`.`user_id` = `read_ribbons`.`user_id`
---      	AND
---      	`FULL_parent_comment_score`.`score` >= 0
---      )
---      OR
---      (
---      	`parent_comments`.`id` IS NULL
---      	AND
---      	`stories`.`user_id` = `read_ribbons`.`user_id`
---      )
---      );
 
---
--- Without newlines:
-CREATE VIEW `FULL_parent_comment_score` AS SELECT `FULL_comment_score`.* FROM `FULL_comment_score`;
-CREATE VIEW `parent_comments` AS SELECT `comments`.* FROM `comments`;
-CREATE VIEW `BOUNDARY_replying_comments_for_count` AS SELECT `read_ribbons`.`user_id`, `comments`.`id`, FROM `read_ribbons` JOIN `stories` ON (`stories`.`id` = `read_ribbons`.`story_id`) JOIN `comments` ON (`comments`.`story_id` = `read_ribbons`.`story_id`) LEFT JOIN `parent_comments` ON (`parent_comments`.`id` = `comments`.`parent_comment_id`) LEFT JOIN FULL_comment_score ON (FULL_comment_score.id = comments.id) LEFT JOIN FULL_parent_comment_score ON (FULL_parent_comment_score.id = parent_comments.id) WHERE `read_ribbons`.`is_following` = 1 AND `comments`.`user_id` <> `read_ribbons`.`user_id` AND `comments`.`is_deleted` = 0 AND `comments`.`is_moderated` = 0 AND `FULL_comment_score`.`score` >= 0 AND `read_ribbons`.`updated_at` < `comments`.`created_at` AND ( ( `parent_comments`.`user_id` = `read_ribbons`.`user_id` AND `FULL_parent_comment_score`.`score` >= 0) OR ( `parent_comments`.`id` IS NULL AND `stories`.`user_id` = `read_ribbons`.`user_id`));
+CREATE VIEW `good_comments` AS
+SELECT comments.user_id, comments.story_id, comments.id,
+       comments.created_at, comments.parent_comment_id,
+       FULL_comment_upvotes.votes - FULL_comment_downvotes.votes AS score,
+FROM comments
+LEFT JOIN FULL_comment_upvotes ON (comments.id = FULL_comment_upvotes.id)
+LEFT JOIN FULL_comment_downvotes ON (comments.id = FULL_comment_downvotes.id)
+WHERE comments.is_deleted = 0 AND comments.is_moderated = 0;
+
+CREATE VIEW heads AS
+(SELECT stories.user_id, stories.id AS story_id, NULL as pid FROM stories)
+UNION
+(SELECT good_comments.user_id, good_comments.story_id, good_comments.id AS pid
+FROM good_comments WHERE good_comments.score >= 0);
+
+-- Need NULL as pid from stories, which can't be partial
+
+CREATE VIEW tails AS
+SELECT heads.user_id, heads.story_id, good_comments.created_at
+FROM heads JOIN good_comments ON (heads.pid = good_comments.parent_comment_id)
+WHERE good_comments.story_id = heads.story_id;
+
+CREATE VIEW `replying_comments_for_count` AS
+SELECT `read_ribbons`.`user_id`, tails.created_at
+FROM `read_ribbons`
+JOIN `tails` ON (`tails`.`story_id` = `read_ribbons`.`story_id`)
+WHERE `read_ribbons`.`is_following` = 1 AND
+      `tails`.`user_id` <> `read_ribbons`.`user_id` AND
+      `tails`.`created_at` > `read_ribbons`.`updated_at`;
 
 CREATE VIEW BOUNDARY_notifications AS
 SELECT BOUNDARY_replying_comments_for_count.user_id, COUNT(*) AS notifications,
