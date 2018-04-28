@@ -17,7 +17,7 @@ use dataflow::prelude::DataType;
 use mir::query::{MirQuery, QueryFlowParts};
 use mir::reuse as mir_reuse;
 use nom_sql::parser as sql_parser;
-use nom_sql::{ArithmeticBase, Column, SqlQuery};
+use nom_sql::{ArithmeticBase, Column, CreateTableStatement, SqlQuery};
 use nom_sql::{CompoundSelectOperator, CompoundSelectStatement, SelectStatement};
 
 use slog;
@@ -44,13 +44,18 @@ pub struct SqlIncorporator {
     log: slog::Logger,
     mir_converter: SqlToMirConverter,
     leaf_addresses: HashMap<String, NodeIndex>,
-    num_queries: usize,
+
+    named_queries: HashMap<String, u64>,
     query_graphs: HashMap<u64, QueryGraph>,
     mir_queries: HashMap<(u64, UniverseId), MirQuery>,
-    named_queries: HashMap<String, u64>,
-    schema_version: usize,
+    num_queries: usize,
+
+    base_schemas: HashMap<String, CreateTableStatement>,
     view_schemas: HashMap<String, Vec<String>>,
+
+    schema_version: usize,
     transactional: bool,
+
     reuse_type: ReuseConfigType,
 
     /// Active universes mapped to the group they belong to.
@@ -64,13 +69,18 @@ impl Default for SqlIncorporator {
             log: slog::Logger::root(slog::Discard, o!()),
             mir_converter: SqlToMirConverter::default(),
             leaf_addresses: HashMap::default(),
-            num_queries: 0,
+
+            named_queries: HashMap::default(),
             query_graphs: HashMap::default(),
             mir_queries: HashMap::default(),
-            named_queries: HashMap::default(),
-            schema_version: 0,
+            num_queries: 0,
+
+            base_schemas: HashMap::default(),
             view_schemas: HashMap::default(),
+
+            schema_version: 0,
             transactional: false,
+
             reuse_type: ReuseConfigType::Finkelstein,
             universes: HashMap::default(),
         }
@@ -141,6 +151,10 @@ impl SqlIncorporator {
             None => self.nodes_for_query(query, is_leaf, mig),
             Some(n) => self.nodes_for_named_query(query, n, is_leaf, mig),
         }
+    }
+
+    pub fn get_base_schema(&self, name: &str) -> Option<CreateTableStatement> {
+        self.base_schemas.get(name).cloned()
     }
 
     #[cfg(test)]
@@ -404,6 +418,16 @@ impl SqlIncorporator {
 
         // push it into the flow graph using the migration in `mig`, and obtain `QueryFlowParts`
         let qfp = mir_query_to_flow_parts(&mut mir, &mut mig);
+
+        // remember the schema in case we need it later
+        // on base table schema change, we will overwrite the existing schema here.
+        // TODO(malte): this means that requests for this will always return the *latest* schema
+        // for a base.
+        if let SqlQuery::CreateTable(ref ctq) = query {
+            self.base_schemas.insert(query_name.to_owned(), ctq.clone());
+        } else {
+            unimplemented!();
+        }
 
         self.register_query(query_name, None, &mir, mig.universe());
 

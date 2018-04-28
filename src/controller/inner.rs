@@ -583,6 +583,7 @@ impl ControllerInner {
             columns.len(),
             node.fields().len() - base_operator.get_dropped().len()
         );
+        let schema = self.recipe.get_base_schema(base);
 
         Some(MutatorBuilder {
             local_port: None,
@@ -594,6 +595,7 @@ impl ControllerInner {
             dropped: base_operator.get_dropped(),
             table_name: node.name().to_owned(),
             columns,
+            schema,
             is_local: true,
         })
     }

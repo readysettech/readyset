@@ -3,6 +3,7 @@ use controller::{ExclusiveConnection, SharedConnection};
 use dataflow::checktable;
 use dataflow::prelude::*;
 
+use nom_sql::CreateTableStatement;
 use std::cell::RefCell;
 use std::collections::HashMap;
 use std::io;
@@ -33,6 +34,7 @@ pub struct MutatorBuilder {
 
     pub(crate) table_name: String,
     pub(crate) columns: Vec<String>,
+    pub(crate) schema: Option<CreateTableStatement>,
 
     pub(crate) local_port: Option<u16>,
 
@@ -78,6 +80,7 @@ impl MutatorBuilder {
             tracer: None,
             table_name: self.table_name,
             columns: self.columns,
+            schema: self.schema,
             is_local: self.is_local,
             exclusivity: SharedConnection,
         }
@@ -96,6 +99,7 @@ pub struct Mutator<E = SharedConnection> {
     tracer: Tracer,
     table_name: String,
     columns: Vec<String>,
+    schema: Option<CreateTableStatement>,
     is_local: bool,
 
     #[allow(dead_code)]
@@ -115,6 +119,7 @@ impl Clone for Mutator<SharedConnection> {
             tracer: self.tracer.clone(),
             table_name: self.table_name.clone(),
             columns: self.columns.clone(),
+            schema: self.schema.clone(),
             is_local: self.is_local,
             exclusivity: SharedConnection,
         }
@@ -141,6 +146,7 @@ impl Mutator<SharedConnection> {
             tracer: self.tracer.clone(),
             table_name: self.table_name.clone(),
             columns: self.columns.clone(),
+            schema: self.schema.clone(),
             is_local: self.is_local,
             exclusivity: ExclusiveConnection,
         }
@@ -464,5 +470,10 @@ impl<E> Mutator<E> {
     /// Get the name of the columns in the base table this mutator is for.
     pub fn columns(&self) -> &[String] {
         &self.columns
+    }
+
+    /// Get the base table schema.
+    pub fn schema(&self) -> &CreateTableStatement {
+        self.schema.as_ref().unwrap()
     }
 }

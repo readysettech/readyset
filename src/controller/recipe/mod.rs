@@ -11,6 +11,7 @@ use nom_sql::SqlQuery;
 use controller::security::SecurityConfig;
 
 use nom::{self, is_alphanumeric, multispace};
+use nom_sql::CreateTableStatement;
 use slog;
 use std::collections::HashMap;
 use std::str;
@@ -154,6 +155,11 @@ impl Recipe {
     /// Enable reuse
     pub fn enable_reuse(&mut self, reuse_type: ReuseConfigType) {
         self.inc.as_mut().unwrap().enable_reuse(reuse_type)
+    }
+
+    /// Base table schema
+    pub fn get_base_schema(&self, name: &str) -> Option<CreateTableStatement> {
+        self.inc.as_ref().unwrap().get_base_schema(name)
     }
 
     /// Obtains the `NodeIndex` for the node corresponding to a named query or a write type.
