@@ -1,8 +1,8 @@
 use distributary::{ControllerHandle, DataType, Mutator, RemoteGetter, ZookeeperAuthority};
 
 use msql_srv::{self, *};
-use nom_sql::{self, ColumnConstraint, InsertStatement, Literal, SelectStatement, SqlQuery,
-              UpdateStatement};
+use nom_sql::{self, ColumnConstraint, InsertStatement, Literal, SelectSpecification,
+              SelectStatement, SqlQuery, UpdateStatement};
 
 use slog;
 use std::borrow::Cow;
@@ -170,11 +170,27 @@ impl SoupBackend {
 
     fn handle_create_view<W: io::Write>(
         &mut self,
-        q: nom_sql::CreateViewStatement,
+        mut q: nom_sql::CreateViewStatement,
         results: QueryResultWriter<W>,
     ) -> io::Result<()> {
         // TODO(malte): we should perhaps check our usual caches here, rather than just blindly
         // doing a migration on Soup ever time. On the other hand, CREATE VIEW is rare...
+
+        // NOTE(jon): expand stars here so that we don't have to recursively walk them when given a
+        // view.* at query-time.
+        {
+            let ts_lock = self.table_schemas.read().unwrap();
+            let table_schemas = &(*ts_lock);
+            match *q.definition {
+                SelectSpecification::Simple(ref mut q) => rewrite::expand_stars(q, table_schemas),
+                SelectSpecification::Compound(ref mut qs) => {
+                    for &mut (_, ref mut q) in &mut qs.selects {
+                        rewrite::expand_stars(q, table_schemas);
+                    }
+                }
+            };
+        }
+
         info!(
             self.log,
             "Adding view \"{}\" to Soup as {}", q.definition, q.name
@@ -755,12 +771,12 @@ impl<W: io::Write> MysqlShim<W> for SoupBackend {
 
         let sql_q = match self.parsed.get(&query) {
             None => match nom_sql::parse_query(&query) {
-                Ok(sql_q) => {
-                    let sql_q = {
+                Ok(mut sql_q) => {
+                    if let SqlQuery::Select(ref mut q) = sql_q {
                         let ts_lock = self.table_schemas.read().unwrap();
                         let table_schemas = &(*ts_lock);
-                        rewrite::expand_stars(sql_q, table_schemas)
-                    };
+                        rewrite::expand_stars(q, table_schemas)
+                    }
 
                     self.parsed
                         .insert(query.to_owned(), (sql_q.clone(), vec![]));
@@ -949,12 +965,12 @@ impl<W: io::Write> MysqlShim<W> for SoupBackend {
         let (q, use_params) = match self.parsed.get(&query) {
             None => {
                 match nom_sql::parse_query(&query) {
-                    Ok(q) => {
-                        let mut q = {
+                    Ok(mut q) => {
+                        if let SqlQuery::Select(ref mut q) = q {
                             let ts_lock = self.table_schemas.read().unwrap();
                             let table_schemas = &(*ts_lock);
-                            rewrite::expand_stars(q, table_schemas)
-                        };
+                            rewrite::expand_stars(q, table_schemas);
+                        }
 
                         let mut use_params = Vec::new();
                         if let Some((_, p)) = rewrite::collapse_where_in(&mut q, true) {
