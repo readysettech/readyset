@@ -300,7 +300,7 @@ impl WorkerInner {
                 if total >= limit {
                     // evict from the largest domain
                     let largest = sizes.into_iter().max_by_key(|&(_, s)| s).unwrap();
-                    info!(
+                    debug!(
                         self.log,
                         "memory footprint ({} bytes) exceeds limit ({} bytes); evicting from largest domain {}",
                         total,
