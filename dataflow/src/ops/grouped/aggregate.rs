@@ -81,7 +81,8 @@ impl GroupedOperation for Aggregator {
                 let v = match r[self.over] {
                     DataType::Int(n) => n as i64,
                     DataType::BigInt(n) => n,
-                    _ => unreachable!(),
+                    DataType::None => 0,
+                    ref x => unreachable!("tried to aggregate over {:?} on {:?}", x, r),
                 };
                 if pos {
                     v
