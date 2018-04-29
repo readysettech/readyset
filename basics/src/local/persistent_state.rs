@@ -20,7 +20,7 @@ const META_KEY: &'static [u8] = b"meta";
 const DEFAULT_CF: &'static str = "default";
 
 // Maximum rows per WriteBatch when building new indices for existing rows.
-const INDEX_BATCH_SIZE: usize = 512;
+const INDEX_BATCH_SIZE: usize = 100_000;
 
 // Store index information in RocksDB to avoid rebuilding indices on recovery.
 #[derive(Default, Serialize, Deserialize)]
