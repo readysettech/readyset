@@ -1948,18 +1948,14 @@ impl Domain {
                         misses.dedup();
 
                         let missed_on = if backfill_keys.is_some() {
-                            let mut prev = None;
-                            let mut missed_on = Vec::with_capacity(misses.len());
+                            let mut missed_on = HashSet::with_capacity(misses.len());
                             for miss in &misses {
                                 let k: Vec<_> = miss.replay_key_vec().unwrap();
-                                if prev.is_none() || &k != prev.as_ref().unwrap() {
-                                    missed_on.push(k.clone());
-                                    prev = Some(k);
-                                }
+                                missed_on.insert(k);
                             }
                             missed_on
                         } else {
-                            Vec::new()
+                            HashSet::new()
                         };
 
                         if target {
@@ -2125,7 +2121,7 @@ impl Domain {
                                     !missed_on.contains(&partial_col
                                         .iter()
                                         .map(|&c| r[c].clone())
-                                        .collect())
+                                        .collect::<Vec<_>>())
                                 })
                             });
                         }
