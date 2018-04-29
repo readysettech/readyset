@@ -12,7 +12,7 @@ use std::io::prelude::*;
 use std::{fmt, thread, time};
 use tsunami::*;
 
-const AMI: &str = "ami-e9893a96";
+const AMI: &str = "ami-7edd6001";
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 enum Backend {
@@ -132,15 +132,17 @@ fn main() {
         None,
     );
 
-    b.set_max_duration(3);
+    b.set_max_duration(5);
     b.set_region(rusoto_core::Region::UsEast1);
     b.wait_limit(time::Duration::from_secs(60));
 
     let scales: Box<Iterator<Item = usize>> = args.values_of("SCALE")
         .map(|it| Box::new(it.map(|s| s.parse().unwrap())) as Box<_>)
         .unwrap_or(Box::new(
-            [100, 200, 400, 800, 1000usize, 1500, 2000, 3000, 4000]
-                .into_iter()
+            [
+                100, 200, 400, 800, 1000usize, 1250, 1500, 2000, 3000, 4000, 4500, 5000, 5500,
+                6000, 6500, 7000, 8000, 8500, 9000
+            ].into_iter()
                 .map(|&s| s),
         ) as Box<_>);
 
@@ -336,7 +338,7 @@ fn main() {
                         "env RUST_BACKTRACE=1 \
                          {}/lobsters/mysql/target/release/trawler-mysql \
                          --reqscale 3000 \
-                         --warmup 300 \
+                         --warmup 120 \
                          --runtime 0 \
                          --issuers 24 \
                          \"mysql://lobsters:$(cat ~/mysql.pass)@{}/lobsters\"",
@@ -368,6 +370,8 @@ fn main() {
                         dir, scale, backend, scale, ip
                     ))
                     .and_then(|out| Ok(output.write_all(&out[..]).map(|_| ())?))?;
+
+                // TODO: parse achived ops/s to check if keeping up
 
                 eprintln!(" -> finished at {}", Local::now().time().format("%H:%M:%S"));
 
