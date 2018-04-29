@@ -138,7 +138,25 @@ impl Ingredient for Project {
         let emit = self.emit.clone();
         let additional = self.additional.clone();
         let expressions = self.expressions.clone();
-        self.lookup(*self.src, columns, key, nodes, states)
+
+        // translate output columns to input columns
+        let mut in_cols = Cow::Borrowed(columns);
+        if let Some(ref emit) = self.emit {
+            in_cols = Cow::Owned(
+                columns
+                    .into_iter()
+                    .map(|&outi| {
+                        assert!(
+                            outi <= emit.len(),
+                            "should never be queried for generated columns"
+                        );
+                        emit[outi]
+                    })
+                    .collect(),
+            );
+        }
+
+        self.lookup(*self.src, &*in_cols, key, nodes, states)
             .and_then(|result| match result {
                 Some(rs) => {
                     let r = match emit {
@@ -488,6 +506,7 @@ mod tests {
         let mut states = StateMap::default();
         let row: Record = vec![1.into(), 2.into(), 3.into()].into();
         state.add_key(&[0], None);
+        state.add_key(&[1], None);
         state.process_records(&mut row.into(), None);
         states.insert(local, state);
 
@@ -500,13 +519,14 @@ mod tests {
 
     fn assert_query_through(
         project: Project,
+        by_column: usize,
         key: DataType,
         states: StateMap,
         expected: Vec<DataType>,
     ) {
         let mut iter = project
             .query_through(
-                &[0],
+                &[by_column],
                 &KeyType::Single(&key),
                 &DomainNodes::default(),
                 &states,
@@ -518,16 +538,14 @@ mod tests {
 
     #[test]
     fn it_queries_through_all() {
-        let a: DataType = 1.into();
         let state = box MemoryState::default();
         let (p, states) = setup_query_through(state, &[0, 1, 2], None, None);
         let expected: Vec<DataType> = vec![1.into(), 2.into(), 3.into()];
-        assert_query_through(p, a, states, expected);
+        assert_query_through(p, 0, 1.into(), states, expected);
     }
 
     #[test]
     fn it_queries_through_all_persistent() {
-        let a: DataType = 1.into();
         let state = box PersistentState::new(
             String::from("it_queries_through_all_persistent"),
             None,
@@ -536,21 +554,19 @@ mod tests {
 
         let (p, states) = setup_query_through(state, &[0, 1, 2], None, None);
         let expected: Vec<DataType> = vec![1.into(), 2.into(), 3.into()];
-        assert_query_through(p, a, states, expected);
+        assert_query_through(p, 0, 1.into(), states, expected);
     }
 
     #[test]
     fn it_queries_through_some() {
-        let a: DataType = 1.into();
         let state = box MemoryState::default();
         let (p, states) = setup_query_through(state, &[1], None, None);
         let expected: Vec<DataType> = vec![2.into()];
-        assert_query_through(p, a, states, expected);
+        assert_query_through(p, 0, 2.into(), states, expected);
     }
 
     #[test]
     fn it_queries_through_some_persistent() {
-        let a: DataType = 1.into();
         let state = box PersistentState::new(
             String::from("it_queries_through_some_persistent"),
             None,
@@ -559,23 +575,21 @@ mod tests {
 
         let (p, states) = setup_query_through(state, &[1], None, None);
         let expected: Vec<DataType> = vec![2.into()];
-        assert_query_through(p, a, states, expected);
+        assert_query_through(p, 0, 2.into(), states, expected);
     }
 
     #[test]
     fn it_queries_through_w_literals() {
         let additional = Some(vec![DataType::Int(42)]);
-        let a: DataType = 1.into();
         let state = box MemoryState::default();
         let (p, states) = setup_query_through(state, &[1], additional, None);
         let expected: Vec<DataType> = vec![2.into(), 42.into()];
-        assert_query_through(p, a, states, expected);
+        assert_query_through(p, 0, 2.into(), states, expected);
     }
 
     #[test]
     fn it_queries_through_w_literals_persistent() {
         let additional = Some(vec![DataType::Int(42)]);
-        let a: DataType = 1.into();
         let state = box PersistentState::new(
             String::from("it_queries_through_w_literals"),
             None,
@@ -584,7 +598,7 @@ mod tests {
 
         let (p, states) = setup_query_through(state, &[1], additional, None);
         let expected: Vec<DataType> = vec![2.into(), 42.into()];
-        assert_query_through(p, a, states, expected);
+        assert_query_through(p, 0, 2.into(), states, expected);
     }
 
     #[test]
@@ -596,11 +610,10 @@ mod tests {
             op: ArithmeticOperator::Add,
         }]);
 
-        let a: DataType = 1.into();
         let state = box MemoryState::default();
         let (p, states) = setup_query_through(state, &[1], additional, expressions);
         let expected: Vec<DataType> = vec![2.into(), (1 + 2).into(), 42.into()];
-        assert_query_through(p, a, states, expected);
+        assert_query_through(p, 0, 2.into(), states, expected);
     }
 
     #[test]
@@ -612,7 +625,6 @@ mod tests {
             op: ArithmeticOperator::Add,
         }]);
 
-        let a: DataType = 1.into();
         let state = box PersistentState::new(
             String::from("it_queries_through_w_arithmetic_and_literals_persistent"),
             None,
@@ -621,7 +633,7 @@ mod tests {
 
         let (p, states) = setup_query_through(state, &[1], additional, expressions);
         let expected: Vec<DataType> = vec![2.into(), (1 + 2).into(), 42.into()];
-        assert_query_through(p, a, states, expected);
+        assert_query_through(p, 0, 2.into(), states, expected);
     }
 
     #[test]
