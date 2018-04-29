@@ -16,15 +16,34 @@ where
 {
     Box::new(
         c.and_then(move |c| {
-            c.query(&format!(
-                "SELECT  `comment_with_votes`.* \
-                 FROM `comment_with_votes` \
-                 WHERE `comment_with_votes`.`is_deleted` = 0 \
-                 AND `comment_with_votes`.`is_moderated` = 0 \
+            c.query(
+                "SELECT  `comments`.id \
+                 FROM `comments` \
+                 WHERE `comments`.`is_deleted` = 0 \
+                 AND `comments`.`is_moderated` = 0 \
                  ORDER BY id DESC \
                  LIMIT 40 OFFSET 0",
-            ))
-        }).and_then(|comments| {
+            )
+        }).and_then(|res| {
+                res.reduce_and_drop(Vec::new(), |mut xs, x| {
+                    xs.push(x.get::<u32, _>("id").unwrap());
+                    xs
+                })
+            })
+            .and_then(move |(c, ids)| {
+                let cids = ids.iter()
+                    .map(|id| format!("{}", id))
+                    .collect::<Vec<_>>()
+                    .join(",");
+
+                c.query(&format!(
+                    "SELECT `comment_with_votes`.* \
+                     FROM `comment_with_votes` \
+                     WHERE comment_with_votes.id IN ({})",
+                    cids
+                ))
+            })
+            .and_then(|comments| {
                 comments.reduce_and_drop(
                     (Vec::new(), HashSet::new(), HashSet::new()),
                     |(mut comments, mut users, mut stories), comment| {

@@ -13,43 +13,48 @@ pub(crate) fn handle<F>(
 where
     F: 'static + Future<Item = my::Conn, Error = my::errors::Error>,
 {
-    let main = c.and_then(|c| {
-        // NOTE: the filters should be *before* the topk
-        c.query(
-            "SELECT `stories`.* \
-             FROM `frontpage_ids` \
-             JOIN `stories` ON (stories.id = frontpage_ids.id) \
-             WHERE `stories`.`merged_story_id` IS NULL \
-             AND `stories`.`is_expired` = 0 \
-             AND `stories`.`score` >= 0",
-        )
-    }).and_then(|stories| {
-            stories.reduce_and_drop(
-                (HashSet::new(), HashSet::new()),
-                |(mut users, mut stories), story| {
-                    users.insert(story.get::<u32, _>("user_id").unwrap());
-                    stories.insert(story.get::<u32, _>("id").unwrap());
-                    (users, stories)
-                },
-            )
+    let main = c.and_then(|c| c.query("SELECT `frontpage_ids`.id FROM `frontpage_ids`"))
+        .and_then(|res| {
+            res.reduce_and_drop(Vec::new(), |mut xs, x| {
+                xs.push(x.get::<u32, _>("id").unwrap());
+                xs
+            })
         })
-        .and_then(move |(c, (users, stories))| {
+        .and_then(|(c, stories)| {
             if stories.is_empty() {
                 panic!("got no stories from /frontpage");
             }
 
+            let s = stories
+                .iter()
+                .map(|id| format!("{}", id))
+                .collect::<Vec<_>>()
+                .join(",");
+
+            // NOTE: the filters should be *before* the topk
+            c.query(&format!(
+                "SELECT `story_with_votes`.* \
+                 FROM `story_with_votes` \
+                 WHERE `story_with_votes`.`id` IN ({}) \
+                 AND `story_with_votes`.`merged_story_id` IS NULL \
+                 AND `story_with_votes`.`is_expired` = 0 \
+                 AND `story_with_votes`.`score` >= 0",
+                s
+            )).map(move |x| (x, stories, s))
+        })
+        .and_then(|(res, stories, s)| {
+            res.reduce_and_drop(HashSet::new(), |mut users, story| {
+                users.insert(story.get::<u32, _>("user_id").unwrap());
+                users
+            }).map(move |(c, users)| (c, users, stories, s))
+        })
+        .and_then(move |(c, users, stories, s)| {
             match acting_as {
                 Some(uid) => Either::A(c.drop_exec(
                     "SELECT `tag_filters`.* FROM `tag_filters` \
                      WHERE `tag_filters`.`user_id` = ?",
                     (uid,),
                 ).and_then(move |c| {
-                    let s = stories
-                        .iter()
-                        .map(|id| format!("{}", id))
-                        .collect::<Vec<_>>()
-                        .join(",");
-
                     c.drop_query(format!(
                         "SELECT `taggings`.`story_id` \
                          FROM `taggings` \
@@ -57,12 +62,12 @@ where
                         // AND `taggings`.`tag_id` IN ({})",
                         s,
                         //tags
-                    )).map(move |c| (c, (users, stories)))
+                    )).map(move |c| (c, (users, stories, s)))
                 })),
-                None => Either::B(future::ok((c, (users, stories)))),
+                None => Either::B(future::ok((c, (users, stories, s)))),
             }
         })
-        .and_then(|(c, (users, stories))| {
+        .and_then(|(c, (users, stories, s))| {
             let users = users
                 .into_iter()
                 .map(|id| format!("{}", id))
@@ -71,34 +76,29 @@ where
             c.drop_query(&format!(
                 "SELECT `users`.* FROM `users` WHERE `users`.`id` IN ({})",
                 users,
-            )).map(move |c| (c, stories))
+            )).map(move |c| (c, stories, s))
         })
-        .and_then(|(c, stories)| {
-            let stories_str = stories
-                .iter()
-                .map(|id| format!("{}", id))
-                .collect::<Vec<_>>()
-                .join(",");
+        .and_then(|(c, stories, s)| {
             c.drop_query(&format!(
                 "SELECT `suggested_titles`.* \
                  FROM `suggested_titles` \
                  WHERE `suggested_titles`.`story_id` IN ({})",
-                stories_str
-            )).map(move |c| (c, stories, stories_str))
+                s
+            )).map(move |c| (c, stories, s))
         })
-        .and_then(|(c, stories, stories_str)| {
+        .and_then(|(c, stories, s)| {
             c.drop_query(&format!(
                 "SELECT `suggested_taggings`.* \
                  FROM `suggested_taggings` \
                  WHERE `suggested_taggings`.`story_id` IN ({})",
-                stories_str
-            )).map(move |c| (c, stories, stories_str))
+                s
+            )).map(move |c| (c, stories, s))
         })
-        .and_then(|(c, stories, stories_str)| {
+        .and_then(|(c, stories, s)| {
             c.query(&format!(
                 "SELECT `taggings`.* FROM `taggings` \
                  WHERE `taggings`.`story_id` IN ({})",
-                stories_str
+                s
             )).map(move |t| (t, stories))
         })
         .and_then(|(taggings, stories)| {

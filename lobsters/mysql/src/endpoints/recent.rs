@@ -22,35 +22,42 @@ where
     // also note the `NOW()` hack to support dbs primed a while ago
     let main = c.and_then(|c| {
         c.query(
-            "SELECT `story_with_votes`.*
-             FROM `story_with_votes` \
-             WHERE `story_with_votes`.`merged_story_id` IS NULL \
-             AND `story_with_votes`.`is_expired` = 0 \
-             ORDER BY story_with_vote;
-             story_with_vote.id DESC LIMIT 51",
-            //AND story_with_votes.score <= 5 \
+            "SELECT `stories`.id FROM `stories` \
+             WHERE `stories`.`merged_story_id` IS NULL \
+             AND `stories`.`is_expired` = 0 \
+             ORDER BY stories.id DESC LIMIT 51",
         )
-    }).and_then(|stories| {
-            stories.reduce_and_drop(
-                (HashSet::new(), HashSet::new()),
-                |(mut users, mut stories), story| {
-                    users.insert(story.get::<u32, _>("user_id").unwrap());
-                    stories.insert(story.get::<u32, _>("id").unwrap());
-                    (users, stories)
-                },
-            )
+    }).and_then(|res| {
+            res.reduce_and_drop(Vec::new(), |mut xs, x| {
+                xs.push(x.get::<u32, _>("id").unwrap());
+                xs
+            })
         })
-        .and_then(move |(c, (users, stories))| {
+        .and_then(|(c, stories)| {
             if stories.is_empty() {
                 panic!("got no stories from /recent");
             }
 
-            let stories_in = stories
+            let s = stories
                 .iter()
                 .map(|id| format!("{}", id))
                 .collect::<Vec<_>>()
                 .join(",");
 
+            c.query(&format!(
+                "SELECT `story_with_votes`.* \
+                 FROM `story_with_votes` \
+                 WHERE `story_with_votes`.`id` IN ({})",
+                s
+            )).map(move |x| (x, stories, s))
+        })
+        .and_then(|(res, stories, s)| {
+            res.reduce_and_drop(HashSet::new(), |mut users, story| {
+                users.insert(story.get::<u32, _>("user_id").unwrap());
+                users
+            }).map(|(c, users)| (c, users, stories, s))
+        })
+        .and_then(move |(c, users, stories, stories_in)| {
             match acting_as {
                 Some(uid) => Either::A(c.drop_exec(
                     "SELECT `tag_filters`.* FROM `tag_filters` \
