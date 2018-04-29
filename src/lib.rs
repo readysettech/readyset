@@ -352,7 +352,7 @@ mod coordination;
 mod worker;
 
 #[cfg(test)]
-mod tests;
+mod integration;
 
 pub use consensus::{LocalAuthority, ZookeeperAuthority};
 
