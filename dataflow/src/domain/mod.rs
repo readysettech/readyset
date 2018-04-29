@@ -1,7 +1,7 @@
 use petgraph::graph::NodeIndex;
 use std::borrow::Cow;
-use std::cmp;
 use std::cell;
+use std::cmp;
 use std::collections::hash_map::Entry;
 use std::collections::{HashMap, HashSet, VecDeque};
 use std::mem;
