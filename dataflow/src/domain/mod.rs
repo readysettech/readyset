@@ -212,6 +212,7 @@ impl DomainBuilder {
             concurrent_replays: 0,
             max_concurrent_replays: self.config.concurrent_replays,
             replay_request_queue: Default::default(),
+            delayed_local_replays: Default::default(),
 
             group_commit_queues,
 
@@ -260,6 +261,7 @@ pub struct Domain {
     buffered_replay_requests: HashMap<Tag, (time::Instant, HashSet<Vec<DataType>>)>,
     has_buffered_replay_requests: bool,
     replay_batch_timeout: time::Duration,
+    delayed_local_replays: VecDeque<(Tag, Vec<DataType>)>,
 
     group_commit_queues: GroupCommitQueueSet,
 
@@ -277,7 +279,6 @@ impl Domain {
         miss_key: Vec<DataType>,
         miss_columns: &[usize],
         miss_in: LocalNodeIndex,
-        sends: &mut EnqueuedSends,
     ) {
         let mut found = false;
         let tags: Vec<Tag> = self.replay_paths.keys().cloned().collect();
@@ -301,12 +302,26 @@ impl Domain {
             // for the chosen tag so they'll start replay.
             let key = miss_key.clone(); // :(
             if let TriggerEndpoint::Local(..) = self.replay_paths[&tag].trigger {
-                trace!(self.log,
-                       "got replay request";
-                       "tag" => tag.id(),
-                       "key" => format!("{:?}", key)
-                );
-                self.seed_replay(tag, &key[..], None, sends);
+                // *in theory* we could just call self.seed_replay, and everything would be good.
+                // however, then we start recursing, which could get us into sad situations where
+                // we break invariants where some piece of code is assuming that it is the only
+                // thing processing at the time (think, e.g., borrow_mut()).
+                //
+                // for example, consider the case where two misses occurred on the same key.
+                // normally, those requests would be deduplicated so that we don't get two replay
+                // responses for the same key later. however, the way we do that is by tracking
+                // keys we have requested in self.waiting.redos (see `redundant` in
+                // `on_replay_miss`). in particular, on_replay_miss is called while looping over
+                // all the misses that need replays, and while the first miss of a given key will
+                // trigger a replay, the second will not. if we call `seed_replay` directly here,
+                // that might immediately fill in this key and remove the entry. when the next miss
+                // (for the same key) is then hit in the outer iteration, it will *also* request a
+                // replay of that same key, which gets us into trouble with `State::mark_filled`.
+                //
+                // so instead, we simply keep track of the fact that we have a replay to handle,
+                // and then get back to it after all processing has finished (at the bottom of
+                // `Self::handle()`)
+                self.delayed_local_replays.push_back((tag, key));
                 found = true;
                 continue;
             }
@@ -334,7 +349,6 @@ impl Domain {
         replay_key: Vec<DataType>,
         miss_key: Vec<DataType>,
         needed_for: Tag,
-        sends: &mut EnqueuedSends,
     ) {
         use std::collections::hash_map::Entry;
         use std::ops::AddAssign;
@@ -370,7 +384,7 @@ impl Domain {
             return;
         }
 
-        self.find_tags_and_replay(miss_key, miss_columns, miss_in, sends);
+        self.find_tags_and_replay(miss_key, miss_columns, miss_in);
     }
 
     fn send_partial_replay_request(&mut self, tag: Tag, key: Vec<DataType>) {
@@ -1166,7 +1180,7 @@ impl Domain {
                                 .or_default()
                                 .insert(key.clone())
                         {
-                            self.find_tags_and_replay(key, &cols[..], node, sends);
+                            self.find_tags_and_replay(key, &cols[..], node);
                         }
                     }
                     Packet::RequestPartialReplay { tag, key } => {
@@ -1500,6 +1514,15 @@ impl Domain {
                 self.seed_all(tag, keys, sends);
             }
         }
+
+        while let Some((tag, key)) = self.delayed_local_replays.pop_front() {
+            trace!(self.log,
+               "handling local replay request";
+               "tag" => tag.id(),
+               "key" => format!("{:?}", key)
+            );
+            self.seed_replay(tag, &key[..], None, sends);
+        }
     }
 
     fn seed_row<'a>(&self, source: LocalNodeIndex, row: Cow<'a, [DataType]>) -> Record {
@@ -1582,7 +1605,7 @@ impl Domain {
                        "missed during replay request";
                        "tag" => tag.id(),
                        "key" => ?key);
-                self.on_replay_miss(source, &cols[..], key.clone(), key, tag, sends);
+                self.on_replay_miss(source, &cols[..], key.clone(), key, tag);
             }
         }
 
@@ -1711,14 +1734,7 @@ impl Domain {
         if let Some(cols) = is_miss {
             // we have missed in our lookup, so we have a partial replay through a partial replay
             // trigger a replay to source node, and enqueue this request.
-            self.on_replay_miss(
-                source,
-                &cols[..],
-                Vec::from(key),
-                Vec::from(key),
-                tag,
-                sends,
-            );
+            self.on_replay_miss(source, &cols[..], Vec::from(key), Vec::from(key), tag);
             trace!(self.log,
                    "missed during replay request";
                    "tag" => tag.id(),
@@ -2218,14 +2234,7 @@ impl Domain {
                    "missed" => ?miss_key,
                    "on" => %node,
             );
-            self.on_replay_miss(
-                node,
-                &miss_cols[..],
-                while_replaying_key,
-                miss_key,
-                tag,
-                sends,
-            );
+            self.on_replay_miss(node, &miss_cols[..], while_replaying_key, miss_key, tag);
         }
 
         if let Some((tag, ni, for_keys)) = finished {
