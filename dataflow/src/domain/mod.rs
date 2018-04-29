@@ -1562,10 +1562,7 @@ impl Domain {
                     .lookup(&cols[..], &KeyType::from(key))
                 {
                     LookupResult::Some(res) => {
-                        rs.extend(
-                            res.into_iter()
-                                .map(|r| self.seed_row(source, r)),
-                        );
+                        rs.extend(res.into_iter().map(|r| self.seed_row(source, r)));
                         true
                     }
                     LookupResult::Missing => false,
@@ -1696,9 +1693,7 @@ impl Domain {
                 k.insert(Vec::from(key));
                 if let LookupResult::Some(rs) = rs {
                     use std::iter::FromIterator;
-                    let data = Records::from_iter(
-                        rs.into_iter().map(|r| self.seed_row(source, r)),
-                    );
+                    let data = Records::from_iter(rs.into_iter().map(|r| self.seed_row(source, r)));
 
                     let m = Some(box Packet::ReplayPiece {
                         link: Link::new(source, path[0].node),
@@ -2107,7 +2102,6 @@ impl Domain {
 
                         // if we missed during replay, we need to do another replay
                         if backfill_keys.is_some() && !misses.is_empty() {
-                            let misses = misses;
                             for miss in misses {
                                 need_replay.push((
                                     miss.on,

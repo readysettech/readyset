@@ -259,8 +259,9 @@ impl Node {
     }
 }
 
-// When we miss at a can_query_through node we have to replay from
-// its parent instead of that node, so we'll update the misses:
+// When we miss in can_query_through, that miss is *really* in the can_query_through node's
+// ancestor. We need to ensure that a replay is done to there, not the query_through node itself,
+// by translating the Miss into the right parent.
 fn reroute_miss(nodes: &DomainNodes, miss: &mut Miss) {
     let node = nodes[&miss.on].borrow();
     if node.is_internal() && node.can_query_through() {
