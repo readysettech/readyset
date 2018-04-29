@@ -200,7 +200,6 @@ impl DomainBuilder {
             ingress_inject: Default::default(),
 
             readers,
-            inject: None,
             _debug_tx: debug_tx,
             control_reply_tx,
             channel_coordinator,
@@ -212,7 +211,7 @@ impl DomainBuilder {
             concurrent_replays: 0,
             max_concurrent_replays: self.config.concurrent_replays,
             replay_request_queue: Default::default(),
-            delayed_local_replays: Default::default(),
+            delayed_for_self: Default::default(),
 
             group_commit_queues,
 
@@ -253,7 +252,6 @@ pub struct Domain {
     replay_request_queue: VecDeque<(Tag, Vec<DataType>)>,
 
     readers: Readers,
-    inject: Option<Box<Packet>>,
     _debug_tx: Option<TcpSender<debug::DebugEvent>>,
     control_reply_tx: TcpSender<ControlReplyPacket>,
     channel_coordinator: Arc<ChannelCoordinator>,
@@ -261,7 +259,7 @@ pub struct Domain {
     buffered_replay_requests: HashMap<Tag, (time::Instant, HashSet<Vec<DataType>>)>,
     has_buffered_replay_requests: bool,
     replay_batch_timeout: time::Duration,
-    delayed_local_replays: VecDeque<(Tag, Vec<DataType>)>,
+    delayed_for_self: VecDeque<Box<Packet>>,
 
     group_commit_queues: GroupCommitQueueSet,
 
@@ -321,7 +319,8 @@ impl Domain {
                 // so instead, we simply keep track of the fact that we have a replay to handle,
                 // and then get back to it after all processing has finished (at the bottom of
                 // `Self::handle()`)
-                self.delayed_local_replays.push_back((tag, key));
+                self.delayed_for_self
+                    .push_back(box Packet::RequestPartialReplay { tag, key });
                 found = true;
                 continue;
             }
@@ -1515,13 +1514,9 @@ impl Domain {
             }
         }
 
-        while let Some((tag, key)) = self.delayed_local_replays.pop_front() {
-            trace!(self.log,
-               "handling local replay request";
-               "tag" => tag.id(),
-               "key" => format!("{:?}", key)
-            );
-            self.seed_replay(tag, &key[..], None, sends);
+        if let Some(m) = self.delayed_for_self.pop_front() {
+            trace!(self.log, "handling local transmission");
+            return self.handle(m, sends, executor);
         }
     }
 
@@ -2286,7 +2281,11 @@ impl Domain {
                         .collect();
 
                     for (tag, replay_key) in replay {
-                        self.delayed_local_replays.push_back((tag, replay_key));
+                        self.delayed_for_self
+                            .push_back(box Packet::RequestPartialReplay {
+                                tag,
+                                key: replay_key,
+                            });
                     }
                 }
 
@@ -2309,12 +2308,7 @@ impl Domain {
             // replaying_to is still set, "normal" dispatch calls will continue to be buffered, but
             // this allows finish_replay to dispatch into the node by overriding replaying_to.
             self.not_ready.remove(&ni);
-            // NOTE: inject must be None because it is only set to Some in the main domain loop, it
-            // hasn't yet been set in the processing of the current packet, and it can't still be
-            // set from a previous iteration because then it would have been dealt with instead of
-            // the current packet.
-            assert!(self.inject.is_none());
-            self.inject = Some(box Packet::Finish(tag, ni));
+            self.delayed_for_self.push_back(box Packet::Finish(tag, ni));
         }
     }
 
@@ -2397,11 +2391,8 @@ impl Domain {
             }
         } else {
             // we're not done -- inject a request to continue handling buffered things
-            // NOTE: similarly to in handle_replay, inject can never be Some before this function
-            // because it is called directly from handle, which is always called with inject being
-            // None.
-            assert!(self.inject.is_none());
-            self.inject = Some(box Packet::Finish(tag, node));
+            self.delayed_for_self
+                .push_back(box Packet::Finish(tag, node));
         }
     }
 
@@ -2682,10 +2673,6 @@ impl Domain {
                     self.handle(packet, sends, Some(executor));
                 }
 
-                while let Some(p) = self.inject.take() {
-                    self.handle(p, sends, Some(executor));
-                }
-
                 ProcessResult::KeepPolling
             }
             PollEvent::Timeout => {
@@ -2693,9 +2680,6 @@ impl Domain {
                     .flush_if_necessary(&self.nodes, executor)
                 {
                     self.handle(m, sends, Some(executor));
-                    while let Some(p) = self.inject.take() {
-                        self.handle(p, sends, Some(executor));
-                    }
                 } else if self.has_buffered_replay_requests {
                     self.handle(box Packet::Spin, sends, Some(executor));
                 }
