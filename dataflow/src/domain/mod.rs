@@ -2285,28 +2285,19 @@ impl Domain {
                         })
                         .collect();
 
-                    if !waiting.holes.is_empty() {
-                        // there are still holes, so there must still be pending redos
-                        assert!(!waiting.redos.is_empty());
-
-                        // restore Waiting in case seeding triggers more replays
-                        self.waiting.insert(ni, waiting);
-                    } else {
-                        // there are no more holes that are filling, so there can't be more redos
-                        assert!(waiting.redos.is_empty());
-                    }
-
                     for (tag, replay_key) in replay {
-                        self.seed_replay(tag, &replay_key[..], None, sends);
+                        self.delayed_local_replays.push_back((tag, replay_key));
                     }
-
-                    waiting = self.waiting.remove(&ni).unwrap_or_default();
                 }
 
                 if !waiting.holes.is_empty() {
+                    // there are still holes, so there must still be pending redos
                     assert!(!waiting.redos.is_empty());
+
+                    // restore Waiting in case seeding triggers more replays
                     self.waiting.insert(ni, waiting);
                 } else {
+                    // there are no more holes that are filling, so there can't be more redos
                     assert!(waiting.redos.is_empty());
                 }
                 return;
