@@ -12,7 +12,7 @@ use std::io::prelude::*;
 use std::{fmt, thread, time};
 use tsunami::*;
 
-const AMI: &str = "ami-e9893a96";
+const AMI: &str = "ami-7edd6001";
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 enum Backend {
