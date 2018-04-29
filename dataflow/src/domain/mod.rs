@@ -2158,6 +2158,7 @@ impl Domain {
                             m.as_mut().unwrap().link_mut().dst = path[i + 1].node;
                         }
 
+                        // preserve whatever `last` flag that may have been set during processing
                         if let Some(box Packet::ReplayPiece {
                             context: ReplayPieceContext::Regular { last },
                             ..
@@ -2169,6 +2170,15 @@ impl Domain {
                             {
                                 *old_last = last;
                             }
+                        }
+
+                        // feed forward any changes to the context (e.g., backfill_keys)
+                        if let Some(box Packet::ReplayPiece {
+                            context: ref mut mcontext,
+                            ..
+                        }) = m
+                        {
+                            *mcontext = context.clone();
                         }
                     }
 
