@@ -153,7 +153,7 @@ LIMIT 51 OFFSET 0;
 CREATE VIEW story_with_hotness AS
 SELECT stories.*, FULL_story_hotness.hotness
 FROM stories
-LEFT JOIN FULL_story_hotness ON (FULL_story_hotness.id = stories.id);
+LEFT JOIN FULL_story_hotness ON (stories.id = FULL_story_hotness.id);
 
 -- Other derived stats
 CREATE VIEW story_comments AS
@@ -173,8 +173,8 @@ FROM stories GROUP BY stories.user_id;
 CREATE VIEW user_stats AS
 SELECT users.id, user_comments.comments, user_stories.stories
   FROM users
-LEFT JOIN user_comments ON (user_comments.id = users.id)
-LEFT JOIN user_stories ON (user_stories.id = users.id);
+LEFT JOIN user_comments ON (users.id = user_comments.id)
+LEFT JOIN user_stories ON (users.id = user_stories.id);
 
 CREATE VIEW user_comment_karma AS
 SELECT comment_with_votes.user_id AS id, SUM(comment_with_votes.score) AS karma
@@ -187,8 +187,8 @@ FROM story_with_votes GROUP BY story_with_votes.user_id;
 CREATE VIEW user_karma AS
 SELECT users.id, user_comment_karma.karma + user_story_karma.karma AS karma
 FROM users
-LEFT JOIN user_comment_karma ON (user_comment_karma.id = users.id)
-LEFT JOIN user_story_karma ON (user_story_karma.id = users.id);
+LEFT JOIN user_comment_karma ON (users.id = user_comment_karma.id)
+LEFT JOIN user_story_karma ON (users.id = user_story_karma.id);
 
 -----------------------------------------------------
 -- Original:
