@@ -1,10 +1,10 @@
 extern crate glob;
 
+use basics::{DataType, DurabilityMode, PersistenceParameters};
 use consensus::LocalAuthority;
-use controller::{ControllerBuilder, ControllerHandle};
 use controller::recipe::Recipe;
 use controller::sql::SqlIncorporator;
-use basics::{DataType, DurabilityMode, PersistenceParameters};
+use controller::{ControllerBuilder, ControllerHandle};
 use dataflow::checktable::Token;
 use dataflow::ops::base::Base;
 use dataflow::ops::grouped::aggregate::Aggregation;
@@ -563,23 +563,28 @@ fn it_works_with_vote() {
 
 #[test]
 fn it_works_with_double_query_through() {
-    let mut g = build_local("it_works_with_double_query_through");
+    let mut builder = ControllerBuilder::default();
+    builder.set_persistence(get_persistence_params("it_works_with_double_query_through"));
+    // TODO: sharding::shard picks the wrong column to shard on, since both aid and bid resolves to
+    // all ancestors (and bid comes first). The reader is on aid though, so the sharder should pick
+    // that as well (and not bid!).
+    builder.set_sharding(None);
+    let mut g = builder.build_local();
     let sql = "
         # base tables
-        CREATE TABLE A (id int, other int, PRIMARY KEY(id));
-        CREATE TABLE B (id int, PRIMARY KEY(id));
+        CREATE TABLE A (aid int, other int, PRIMARY KEY(aid));
+        CREATE TABLE B (bid int, PRIMARY KEY(bid));
 
         # read queries
-        QUERY ReadJoin: SELECT J.id, J.other \
+        QUERY ReadJoin: SELECT J.aid, J.other \
             FROM B \
-            LEFT JOIN (SELECT A.id, A.other FROM A \
+            LEFT JOIN (SELECT A.aid, A.other FROM A \
                 WHERE A.other = 5) AS J \
-            ON (J.id = B.id) \
-            WHERE J.id = ?;
+            ON (J.aid = B.bid) \
+            WHERE J.aid = ?;
     ";
 
     g.install_recipe(sql.to_owned()).unwrap();
-    println!("{}", g.graphviz());
     let mut a = g.get_mutator("A").unwrap();
     let mut b = g.get_mutator("B").unwrap();
     let mut getter = g.get_getter("ReadJoin").unwrap();
@@ -1178,14 +1183,7 @@ fn transactional_vote() {
         mig.maintain_anonymous(end_votes, &[2]);
 
         (
-            article1,
-            article2,
-            vote,
-            article,
-            vc,
-            end,
-            end_title,
-            end_votes,
+            article1, article2, vote, article, vc, end, end_title, end_votes,
         )
     });
 
