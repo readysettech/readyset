@@ -14,7 +14,7 @@ use std::io::BufReader;
 use std::{fmt, thread, time};
 use tsunami::*;
 
-const AMI: &str = "ami-fa7ac685";
+const AMI: &str = "ami-06219d79";
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 enum Backend {
