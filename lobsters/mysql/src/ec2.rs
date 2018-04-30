@@ -9,6 +9,7 @@ use clap::{App, Arg};
 use std::collections::HashMap;
 use std::fs::{File, OpenOptions};
 use std::io::prelude::*;
+use std::io::BufReader;
 use std::{fmt, thread, time};
 use tsunami::*;
 
@@ -32,23 +33,25 @@ impl fmt::Display for Backend {
 }
 
 fn git_and_cargo(ssh: &mut Session, dir: &str, bin: &str) -> Result<(), failure::Error> {
-    eprintln!(" -> git reset");
-    ssh.cmd(&format!("bash -c 'git -C {} reset --hard 2>&1'", dir))
-        .map(|out| {
-            let out = out.trim_right();
-            if !out.is_empty() && !out.contains("Already up-to-date.") {
-                eprintln!("{}", out);
-            }
-        })?;
+    if dir != "distributary" {
+        eprintln!(" -> git reset");
+        ssh.cmd(&format!("bash -c 'git -C {} reset --hard 2>&1'", dir))
+            .map(|out| {
+                let out = out.trim_right();
+                if !out.is_empty() && !out.contains("Already up-to-date.") {
+                    eprintln!("{}", out);
+                }
+            })?;
 
-    eprintln!(" -> git update");
-    ssh.cmd(&format!("bash -c 'git -C {} pull 2>&1'", dir))
-        .map(|out| {
-            let out = out.trim_right();
-            if !out.is_empty() && !out.contains("Already up-to-date.") {
-                eprintln!("{}", out);
-            }
-        })?;
+        eprintln!(" -> git update");
+        ssh.cmd(&format!("bash -c 'git -C {} pull 2>&1'", dir))
+            .map(|out| {
+                let out = out.trim_right();
+                if !out.is_empty() && !out.contains("Already up-to-date.") {
+                    eprintln!("{}", out);
+                }
+            })?;
+    }
 
     eprintln!(" -> rebuild");
     ssh.cmd(&format!(
@@ -344,7 +347,8 @@ fn main() {
 
                 eprintln!(" -> started at {}", Local::now().time().format("%H:%M:%S"));
 
-                let mut output = File::create(format!("lobsters-{}-{}.log", backend, scale))?;
+                let prefix = format!("lobsters-{}-{}", backend, scale);
+                let mut output = File::create(format!("{}.log", prefix))?;
                 trawler
                     .ssh
                     .as_mut()
@@ -362,8 +366,7 @@ fn main() {
                     ))
                     .and_then(|out| Ok(output.write_all(&out[..]).map(|_| ())?))?;
 
-                // TODO: parse achived ops/s to check if keeping up
-
+                drop(output);
                 eprintln!(" -> finished at {}", Local::now().time().format("%H:%M:%S"));
 
                 // gather server load
@@ -388,7 +391,7 @@ fn main() {
                 load.write_all(cload.as_bytes())?;
                 load.write_all(b"\n")?;
 
-                let mut hist = File::create(format!("lobsters-{}-{}.hist", backend, scale))?;
+                let mut hist = File::create(format!("{}.hist", prefix))?;
                 trawler
                     .ssh
                     .as_mut()
@@ -452,12 +455,37 @@ fn main() {
                     .next()
                     .and_then(|l| l.parse().ok())
                     .unwrap_or(0.0);
+
+                eprintln!(" -> backend load: s: {}/16, c: {}/48", sload, cload);
+
                 if sload > 16.5 {
-                    eprintln!(
-                        " -> backend is not keeping up (s: {}/16, c: {}/48)",
-                        sload, cload
-                    );
+                    eprintln!(" -> backend is not keeping up");
                     *survived_last.get_mut(backend).unwrap() = false;
+                }
+
+                // also parse achived ops/s to check that we're *really* keeping up
+                let log = File::open(format!("{}.log", prefix))?;
+                let log = BufReader::new(log);
+                let mut target = None;
+                let mut actual = None;
+                for line in log.lines() {
+                    let line = line?;
+                    if line.starts_with("# target ops/s") {
+                        target = Some(line.rsplitn(2, ' ').next().unwrap().parse::<f64>()?);
+                    } else if line.starts_with("# achieved ops/s") {
+                        actual = Some(line.rsplitn(2, ' ').next().unwrap().parse::<f64>()?);
+                    }
+                    match (target, actual) {
+                        (Some(target), Some(actual)) => {
+                            eprintln!(" -> achieved {} ops/s (target: {})", actual, target);
+                            if actual < target * 3.0 / 4.0 {
+                                eprintln!(" -> backend is really not keeping up");
+                                *survived_last.get_mut(backend).unwrap() = false;
+                            }
+                            break;
+                        }
+                        _ => {}
+                    }
                 }
             }
         }
