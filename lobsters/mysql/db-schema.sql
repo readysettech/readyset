@@ -125,8 +125,8 @@ GROUP BY FULL_non_author_comments.story_id;
 
 CREATE VIEW FULL_merged_story_score AS
 SELECT stories.merged_story_id AS id, FULL_story_score.score
-FROM stories
-JOIN FULL_story_score ON (FULL_story_score.id = stories.merged_story_id);
+FROM FULL_story_score
+JOIN stories ON (FULL_story_score.id = stories.merged_story_id);
 
 -- XXX: *technically* tag_score should be a multiplier
 CREATE VIEW all_hotness_components AS
