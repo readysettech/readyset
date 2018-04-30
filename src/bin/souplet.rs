@@ -46,6 +46,13 @@ fn main() {
                 .help("Number of background threads used by RocksDB."),
         )
         .arg(
+            Arg::with_name("flush-timeout")
+                .long("flush-timeout")
+                .takes_value(true)
+                .default_value("100000")
+                .help("Time to wait before processing a merged packet, in nanoseconds."),
+        )
+        .arg(
             Arg::with_name("log-dir")
                 .long("log-dir")
                 .takes_value(true)
@@ -137,6 +144,7 @@ fn main() {
     let readers = value_t_or_exit!(matches, "readers", usize);
     let quorum = value_t_or_exit!(matches, "quorum", usize);
     let persistence_threads = value_t_or_exit!(matches, "persistence-threads", i32);
+    let flush_ns = value_t_or_exit!(matches, "flush-timeout", u32);
     let sharding = match value_t_or_exit!(matches, "shards", usize) {
         0 => None,
         x => Some(x),
@@ -169,7 +177,7 @@ fn main() {
             _ => unreachable!(),
         },
         512,
-        Duration::new(0, 100_000),
+        Duration::new(0, flush_ns),
         Some(deployment_name.to_string()),
         persistence_threads,
     );
