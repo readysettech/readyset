@@ -84,7 +84,6 @@ fn main() {
         )
         .arg(
             Arg::with_name("memory_check_freq")
-                .short("m")
                 .long("memory-check-every")
                 .takes_value(true)
                 .default_value("10")
