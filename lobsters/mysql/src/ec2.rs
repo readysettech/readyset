@@ -268,7 +268,7 @@ fn main() {
                              --durability memory \
                              --no-reuse \
                              --address {} \
-                             --readers 12 -w 4 \
+                             --readers 60 -w 4 \
                              --shards 0 ",
                             server.private_ip
                         );
