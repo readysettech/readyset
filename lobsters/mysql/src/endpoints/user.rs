@@ -28,8 +28,8 @@ where
                 ).and_then(move |c| {
                     // most popular tag
                     c.prep_exec(
-                        "SELECT  `tags`.`id`, COUNT(*) AS `count` FROM `tags` \
-                         INNER JOIN `taggings` ON `taggings`.`tag_id` = `tags`.`id` \
+                        "SELECT  `tags`.`id`, COUNT(*) AS `count` FROM `taggings` \
+                         INNER JOIN `tags` ON `taggings`.`tag_id` = `tags`.`id` \
                          INNER JOIN `stories` ON `stories`.`id` = `taggings`.`story_id` \
                          WHERE `tags`.`inactive` = 0 \
                          AND `stories`.`user_id` = ? \
