@@ -1538,12 +1538,12 @@ mod tests {
             let new_join_view = get_node(&inc, mig, &format!("q_{:x}_n0", qid));
             assert_eq!(
                 new_join_view.fields(),
-                &["id", "name", "id", "author", "title"]
+                &["id", "author", "title", "id", "name"]
             );
             // leaf node
             let new_leaf_view = get_node(&inc, mig, &q.unwrap().name);
             assert_eq!(new_leaf_view.fields(), &["name", "title", "bogokey"]);
-            assert_eq!(new_leaf_view.description(), format!("π[1, 4, lit: 0]"));
+            assert_eq!(new_leaf_view.description(), format!("π[4, 2, lit: 0]"));
         });
     }
 
