@@ -855,7 +855,13 @@ impl Domain {
         }
     }
 
-    fn handle(&mut self, m: Box<Packet>, sends: &mut EnqueuedSends, executor: Option<&Executor>) {
+    fn handle(
+        &mut self,
+        m: Box<Packet>,
+        sends: &mut EnqueuedSends,
+        executor: Option<&Executor>,
+        top: bool,
+    ) {
         m.trace(PacketEvent::Handle);
 
         match *m {
@@ -1514,9 +1520,14 @@ impl Domain {
             }
         }
 
-        if let Some(m) = self.delayed_for_self.pop_front() {
-            trace!(self.log, "handling local transmission");
-            return self.handle(m, sends, executor);
+        if top {
+            while let Some(m) = self.delayed_for_self.pop_front() {
+                trace!(self.log, "handling local transmission");
+                // we really want this to just use tail recursion.
+                // but alas, the compiler doesn't seem to want to do that.
+                // instead, we ensure that only the topmost call to handle() walks delayed_for_self
+                self.handle(m, sends, executor, false);
+            }
         }
     }
 
@@ -2673,10 +2684,10 @@ impl Domain {
                         self.group_commit_queues
                             .append(packet, &self.nodes, executor);
                     if let Some(packet) = merged_packet {
-                        self.handle(packet, sends, Some(executor));
+                        self.handle(packet, sends, Some(executor), true);
                     }
                 } else {
-                    self.handle(packet, sends, Some(executor));
+                    self.handle(packet, sends, Some(executor), true);
                 }
 
                 ProcessResult::KeepPolling
@@ -2685,9 +2696,9 @@ impl Domain {
                 if let Some(m) = self.group_commit_queues
                     .flush_if_necessary(&self.nodes, executor)
                 {
-                    self.handle(m, sends, Some(executor));
+                    self.handle(m, sends, Some(executor), true);
                 } else if self.has_buffered_replay_requests {
-                    self.handle(box Packet::Spin, sends, Some(executor));
+                    self.handle(box Packet::Spin, sends, Some(executor), true);
                 }
                 ProcessResult::KeepPolling
             }
