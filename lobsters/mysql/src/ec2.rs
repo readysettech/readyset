@@ -251,6 +251,7 @@ fn main() {
                                  distributary/target/release/souplet \
                                  --deployment trawler \
                                  --durability memory \
+                                 --no-reuse \
                                  --address {} \
                                  --readers 12 -w 4 \
                                  --shards 0 \
