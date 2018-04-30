@@ -75,6 +75,12 @@ fn main() {
     let args = App::new("trawler-mysql ec2 orchestrator")
         .about("Run the MySQL trawler benchmark on ec2")
         .arg(
+            Arg::with_name("memory_limit")
+                .takes_value(true)
+                .long("memory-limit")
+                .help("Partial state size limit / eviction threshold [in bytes]."),
+        )
+        .arg(
             Arg::with_name("SCALE")
                 .help("Run the given scale(s).")
                 .multiple(true),
@@ -137,6 +143,8 @@ fn main() {
             ].into_iter()
                 .map(|&s| s),
         ) as Box<_>);
+
+    let mem_limit = args.value_of("memory_limit");
 
     let mut load = if args.is_present("SCALE") {
         OpenOptions::new()
@@ -244,11 +252,7 @@ fn main() {
                             }
                         })?,
                     Backend::Soup | Backend::Soupy => {
-                        server
-                            .ssh
-                            .as_mut()
-                            .unwrap()
-                            .cmd(&format!(
+                        let mut cmd = format!(
                                 "bash -c 'nohup \
                                  env RUST_BACKTRACE=1 \
                                  distributary/target/release/souplet \
@@ -257,10 +261,17 @@ fn main() {
                                  --no-reuse \
                                  --address {} \
                                  --readers 12 -w 4 \
-                                 --shards 0 \
-                                 &> souplet.log &'",
-                                server.private_ip,
-                            ))
+                                 --shards 0 ");
+                        if let Some(mem_limit) = mem_limit {
+                            cmd.push_str(&format!("--memory {} ", mem_limit));
+                        }
+                        let cmd.push_str(" &> souplet.log &'");
+
+                        server
+                            .ssh
+                            .as_mut()
+                            .unwrap()
+                            .cmd(cmd, server.private_ip)
                             .map(|_| ())?;
 
                         // start the shim (which will block until soup is available)
@@ -349,6 +360,11 @@ fn main() {
 
                 let prefix = format!("lobsters-{}-{}", backend, scale);
                 let mut output = File::create(format!("{}.log", prefix))?;
+                let hist_output = if let Some(mem_limit) = mem_limit {
+                    format!("--histogram lobsters-{}-{}-{}.hist ", backend, scale, mem_limit)
+                } else {
+                    format!("--histogram lobsters-{}-{}-unlimited.hist ", backend, scale)
+                };
                 trawler
                     .ssh
                     .as_mut()
@@ -360,9 +376,9 @@ fn main() {
                          --warmup 20 \
                          --runtime 30 \
                          --issuers 24 \
-                         --histogram lobsters-{}-{}.hist \
+                         {}
                          \"mysql://lobsters:$(cat ~/mysql.pass)@{}/lobsters\"",
-                        dir, scale, backend, scale, ip
+                        dir, scale, hist_output, ip
                     ))
                     .and_then(|out| Ok(output.write_all(&out[..]).map(|_| ())?))?;
 
@@ -392,11 +408,16 @@ fn main() {
                 load.write_all(b"\n")?;
 
                 let mut hist = File::create(format!("{}.hist", prefix))?;
+                let hist_cmd = if let Some(mem_limit) = mem_limit {
+                    format!("cat lobsters-{}-{}-{}.hist", backend, scale, mem_limit)
+                } else {
+                    format!("cat lobsters-{}-{}-unlimited.hist", backend, scale)
+                };
                 trawler
                     .ssh
                     .as_mut()
                     .unwrap()
-                    .cmd_raw(&format!("cat lobsters-{}-{}.hist", backend, scale))
+                    .cmd_raw(&hist_cmd)
                     .and_then(|out| Ok(hist.write_all(&out[..]).map(|_| ())?))?;
 
                 // stop old server
