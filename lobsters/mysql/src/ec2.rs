@@ -12,12 +12,13 @@ use std::io::prelude::*;
 use std::{fmt, thread, time};
 use tsunami::*;
 
-const AMI: &str = "ami-7edd6001";
+const AMI: &str = "ami-fa7ac685";
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 enum Backend {
     Mysql,
     Soup,
+    Soupy,
 }
 
 impl fmt::Display for Backend {
@@ -25,6 +26,7 @@ impl fmt::Display for Backend {
         match *self {
             Backend::Mysql => write!(f, "mysql"),
             Backend::Soup => write!(f, "soup"),
+            Backend::Soupy => write!(f, "soupy"),
         }
     }
 }
@@ -47,19 +49,6 @@ fn git_and_cargo(ssh: &mut Session, dir: &str, bin: &str) -> Result<(), failure:
                 eprintln!("{}", out);
             }
         })?;
-
-    /*
-    if bin == "trawler-mysql" {
-        eprintln!(" -> switch to alt");
-        ssh.cmd(&format!("bash -c 'git -C {} checkout alt 2>&1'", dir))
-            .map(|out| {
-                let out = out.trim_right();
-                if !out.is_empty() {
-                    eprintln!("{}", out);
-                }
-            })?;
-    }
-    */
 
     eprintln!(" -> rebuild");
     ssh.cmd(&format!(
@@ -141,7 +130,7 @@ fn main() {
         .unwrap_or(Box::new(
             [
                 100, 200, 400, 800, 1000usize, 1250, 1500, 2000, 3000, 4000, 4500, 5000, 5500,
-                6000, 6500, 7000, 8000, 8500, 9000
+                6000, 6500, 7000, 8000, 8500, 9000,
             ].into_iter()
                 .map(|&s| s),
         ) as Box<_>);
@@ -166,7 +155,7 @@ fn main() {
         let mut server = vms.remove("server").unwrap().swap_remove(0);
         let mut trawler = vms.remove("trawler").unwrap().swap_remove(0);
 
-        let backends = [Backend::Mysql, Backend::Soup];
+        let backends = [Backend::Mysql, Backend::Soup, Backend::Soupy];
         let mut survived_last: HashMap<_, _> = backends.iter().map(|b| (b, true)).collect();
 
         // allow reuse of time-wait ports
@@ -193,7 +182,7 @@ fn main() {
                         // sudo ln -s /mnt/mysql /var/lib/mysql
                         ssh.cmd("sudo chown -R mysql:mysql /var/lib/mysql/")?;
                     }
-                    Backend::Soup => {
+                    Backend::Soup | Backend::Soupy => {
                         // just to make totally sure
                         server
                             .ssh
@@ -251,7 +240,7 @@ fn main() {
                                 eprintln!(" -> started mysql...\n{}", out);
                             }
                         })?,
-                    Backend::Soup => {
+                    Backend::Soup | Backend::Soupy => {
                         server
                             .ssh
                             .as_mut()
@@ -300,11 +289,12 @@ fn main() {
                 let dir = match backend {
                     Backend::Mysql => "benchmarks",
                     Backend::Soup => "benchmarks-soup",
+                    Backend::Soupy => "benchmarks-soupy",
                 };
 
                 let ip = match backend {
                     Backend::Mysql => &*server.private_ip,
-                    Backend::Soup => "127.0.0.1",
+                    Backend::Soup | Backend::Soupy => "127.0.0.1",
                 };
 
                 trawler
@@ -421,7 +411,7 @@ fn main() {
                             })?;
                         server.ssh.as_mut().unwrap().cmd("sudo umount /mnt")?;
                     }
-                    Backend::Soup => {
+                    Backend::Soup | Backend::Soupy => {
                         server
                             .ssh
                             .as_mut()
