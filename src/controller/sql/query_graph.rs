@@ -542,11 +542,15 @@ pub fn to_query_graph(st: &SelectStatement) -> Result<QueryGraph, String> {
 
                         match *cond {
                             ConditionExpression::ComparisonOp(ref ct) => {
-                                // XXX(malte): these should always be in query order; I think they
-                                // usually are in practice, but there is no guarantee since we just
-                                // extract them in whatever order they're mentiond in the join
-                                // predicate in
                                 if tables_mentioned.len() == 2 {
+                                    // tables can appear in any order in the join predicate, but
+                                    // we cannot just rely on that order, since it may lead us to
+                                    // flip LEFT JOINs by accident (yes, this happened)
+                                    if tables_mentioned[1] != table.name {
+                                        // tables are in the wrong order in join predicate, swap
+                                        tables_mentioned.swap(0, 1);
+                                        assert_eq!(tables_mentioned[1], table.name);
+                                    }
                                     left_table = tables_mentioned.remove(0);
                                     right_table = tables_mentioned.remove(0);
                                 } else if tables_mentioned.len() == 1 {
