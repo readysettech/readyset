@@ -1,8 +1,8 @@
-use channel::rpc::RpcServiceEndpoint;
-use dataflow::Readers;
+use channel::rpc::{RpcSendError, RpcServiceEndpoint};
 use dataflow::backlog::SingleReadHandle;
 use dataflow::checktable::TokenGenerator;
 use dataflow::prelude::*;
+use dataflow::Readers;
 use std::cell::RefCell;
 use std::collections::HashMap;
 
@@ -19,7 +19,7 @@ thread_local! {
 
 pub(crate) fn handle_message(m: LocalOrNot<ReadQuery>, conn: &mut Rpc, s: &mut Readers) {
     let is_local = m.is_local();
-    conn.send(&LocalOrNot::make(
+    let mut res = conn.send(&LocalOrNot::make(
         match unsafe { m.take() } {
             ReadQuery::Normal {
                 target,
@@ -139,5 +139,10 @@ pub(crate) fn handle_message(m: LocalOrNot<ReadQuery>, conn: &mut Rpc, s: &mut R
             }
         },
         is_local,
-    )).unwrap();
+    ));
+
+    while let Err(RpcSendError::StillNeedsFlush) = res {
+        res = conn.flush();
+    }
+    res.unwrap();
 }
