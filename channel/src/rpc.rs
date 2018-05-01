@@ -170,9 +170,15 @@ where
             return Err(RpcSendError::StillNeedsFlush);
         }
 
-        self.stream.flush().unwrap();
-
-        Ok(())
+        match self.stream.flush() {
+            Ok(()) => Ok(()),
+            Err(ref e) if e.kind() == io::ErrorKind::WouldBlock => {
+                Err(RpcSendError::StillNeedsFlush)
+            }
+            Err(e) => {
+                panic!("{:?}", e);
+            }
+        }
     }
 
     pub fn flush(&mut self) -> Result<(), RpcSendError> {
