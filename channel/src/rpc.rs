@@ -100,7 +100,7 @@ where
 
 #[derive(Debug)]
 pub enum RpcSendError {
-    SerializationError,
+    SerializationError(bincode::Error),
     Disconnected,
     StillNeedsFlush,
 }
@@ -145,10 +145,19 @@ where
         match self.deserialize_receiver.try_recv(&mut self.stream) {
             Ok(msg) => Ok(msg),
             Err(ReceiveError::WouldBlock) => Err(TryRecvError::Empty),
-            Err(ReceiveError::IoError(_)) => {
-                self.poisoned = true;
-                Err(TryRecvError::Disconnected)
-            }
+            Err(ReceiveError::IoError(e)) => match e.kind() {
+                io::ErrorKind::BrokenPipe
+                | io::ErrorKind::NotConnected
+                | io::ErrorKind::UnexpectedEof
+                | io::ErrorKind::ConnectionAborted
+                | io::ErrorKind::ConnectionReset => {
+                    self.poisoned = true;
+                    Err(TryRecvError::Disconnected)
+                }
+                _ => {
+                    panic!("{:?}", e);
+                }
+            },
             Err(ReceiveError::DeserializationError(e)) => {
                 self.poisoned = true;
                 Err(TryRecvError::DeserializationError(e))
@@ -161,9 +170,24 @@ where
             return Err(RpcSendError::Disconnected);
         }
 
-        if bincode::serialize_into(&mut self.stream, reply).is_err() {
+        if let Err(e) = bincode::serialize_into(&mut self.stream, reply) {
+            if let bincode::ErrorKind::Io(e) = *e {
+                match e.kind() {
+                    io::ErrorKind::BrokenPipe
+                    | io::ErrorKind::NotConnected
+                    | io::ErrorKind::UnexpectedEof
+                    | io::ErrorKind::ConnectionAborted
+                    | io::ErrorKind::ConnectionReset => {
+                        self.poisoned = true;
+                        return Err(RpcSendError::Disconnected);
+                    }
+                    _ => {
+                        panic!("{:?}", e);
+                    }
+                }
+            }
             self.poisoned = true;
-            return Err(RpcSendError::SerializationError);
+            return Err(RpcSendError::SerializationError(e));
         }
 
         if self.stream.needs_flush_to_inner() {
@@ -175,9 +199,19 @@ where
             Err(ref e) if e.kind() == io::ErrorKind::WouldBlock => {
                 Err(RpcSendError::StillNeedsFlush)
             }
-            Err(e) => {
-                panic!("{:?}", e);
-            }
+            Err(e) => match e.kind() {
+                io::ErrorKind::BrokenPipe
+                | io::ErrorKind::NotConnected
+                | io::ErrorKind::UnexpectedEof
+                | io::ErrorKind::ConnectionAborted
+                | io::ErrorKind::ConnectionReset => {
+                    self.poisoned = true;
+                    Err(RpcSendError::Disconnected)
+                }
+                _ => {
+                    panic!("{:?}", e);
+                }
+            },
         }
     }
 
@@ -191,9 +225,18 @@ where
             Err(ref e) if e.kind() == io::ErrorKind::WouldBlock => {
                 Err(RpcSendError::StillNeedsFlush)
             }
-            Err(_) => {
-                self.poisoned = true;
-                Err(RpcSendError::Disconnected)
+            Err(e) => match e.kind() {
+                io::ErrorKind::BrokenPipe
+                | io::ErrorKind::NotConnected
+                | io::ErrorKind::UnexpectedEof
+                | io::ErrorKind::ConnectionAborted
+                | io::ErrorKind::ConnectionReset => {
+                    self.poisoned = true;
+                    Err(RpcSendError::Disconnected)
+                }
+                _ => {
+                    panic!("{:?}", e);
+                }
             },
         }
     }
