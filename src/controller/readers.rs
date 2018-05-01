@@ -144,5 +144,10 @@ pub(crate) fn handle_message(m: LocalOrNot<ReadQuery>, conn: &mut Rpc, s: &mut R
     while let Err(RpcSendError::StillNeedsFlush) = res {
         res = conn.flush();
     }
+    if let Err(RpcSendError::Disconnected) = res {
+        // something must have gone wrong on the other end...
+        // the client sent a request, and then didn't wait for the reply
+        return;
+    }
     res.unwrap();
 }
