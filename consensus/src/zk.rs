@@ -137,7 +137,7 @@ impl Authority for ZookeeperAuthority {
             };
 
             match self.zk.exists_w(CONTROLLER_KEY, UnparkWatcher::new()) {
-                Ok(ref stat) if is_new_epoch(stat) => {}
+                Ok(Some(ref stat)) if is_new_epoch(stat) => {}
                 Ok(_) | Err(ZkError::NoNode) => thread::park_timeout(Duration::from_secs(60)),
                 Err(e) => bail!(e),
             }
