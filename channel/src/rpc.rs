@@ -182,12 +182,20 @@ where
     }
 
     pub fn flush(&mut self) -> Result<(), RpcSendError> {
-        if self.poisoned || self.stream.flush().is_err() {
-            self.poisoned = true;
+        if self.poisoned {
             return Err(RpcSendError::Disconnected);
         }
 
-        Ok(())
+        match self.stream.flush() {
+            Ok(()) => Ok(()),
+            Err(ref e) if e.kind() == io::ErrorKind::WouldBlock => {
+                Err(RpcSendError::StillNeedsFlush)
+            }
+            Err(_) => {
+                self.poisoned = true;
+                Err(RpcSendError::Disconnected)
+            },
+        }
     }
 
     pub fn get_ref(&self) -> &mio::net::TcpStream {
