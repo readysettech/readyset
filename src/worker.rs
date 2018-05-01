@@ -575,7 +575,15 @@ impl Worker {
                             rearm = false;
                             break;
                         }
-                        Err(TryRecvError::DeserializationError(e)) => panic!("{}", e),
+                        Err(TryRecvError::DeserializationError(e)) => {
+                            error!(self.log, "connection deserialization error: {:?}", e);
+                            // just drop it.
+                            let rx = context.receivers.remove(token).unwrap();
+                            self.all.deregister(rx.borrow().0.get_ref()).is_err();
+                            self.shared.truth.lock().unwrap().remove(token);
+                            rearm = false;
+                            break;
+                        }
                     };
 
                     if let Packet::Hey(di, shard) = *m {
