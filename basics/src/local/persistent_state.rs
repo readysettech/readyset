@@ -382,6 +382,9 @@ impl PersistentState {
             opts.set_max_background_flushes(params.persistence_threads / 2);
         }
 
+        // 300MB rate limit
+        opts.set_ratelimiter(300 * 1024 * 1024);
+
         // Use a hash linked list since we're doing prefix seeks.
         opts.set_allow_concurrent_memtable_write(false);
         opts.set_memtable_factory(rocksdb::MemtableFactory::HashLinkList {
