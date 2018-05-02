@@ -383,7 +383,14 @@ impl PersistentState {
         }
 
         // 300MB rate limit
-        opts.set_ratelimiter(300 * 1024 * 1024);
+        // opts.set_ratelimiter(300 * 1024 * 1024);
+
+        // Increase a few default limits:
+        opts.set_max_bytes_for_level_base(2048 * 1024 * 1024);
+        opts.set_target_file_size_base(256 * 1024 * 1024);
+
+        // Keep up to 4 parallel memtables:
+        opts.set_max_write_buffer_number(4);
 
         // Use a hash linked list since we're doing prefix seeks.
         opts.set_allow_concurrent_memtable_write(false);
