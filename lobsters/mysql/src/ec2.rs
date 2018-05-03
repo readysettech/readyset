@@ -14,7 +14,7 @@ use std::io::BufReader;
 use std::{fmt, thread, time};
 use tsunami::*;
 
-const AMI: &str = "ami-06219d79";
+const AMI: &str = "ami-7342f90c";
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 enum Backend {
@@ -85,6 +85,7 @@ fn main() {
             Arg::with_name("memscale")
                 .takes_value(true)
                 .default_value("1")
+                .long("memscale")
                 .help("Memscale to use [default: 1]."),
         )
         .arg(
@@ -145,8 +146,31 @@ fn main() {
         .map(|it| Box::new(it.map(|s| s.parse().unwrap())) as Box<_>)
         .unwrap_or(Box::new(
             [
-                100, 200, 400, 800, 1000usize, 1250, 1500, 2000, 3000, 4000, 4500, 5000, 5500,
-                6000, 6500, 7000, 8000, 8500, 9000,
+                //100, 200, 400, 800, 1000usize, 1250, 1500, 2000, 3000, 4000, 4500, 5000, 5500,
+                //6000, 6500, 7000, 8000, 8500, 9000, 9500, 10_000,
+                100usize,
+                400,
+                800,
+                1000,
+                1250,
+                1500,
+                2000,
+                2500,
+                3000,
+                3500,
+                4000,
+                4500,
+                5000,
+                5500,
+                6000,
+                6500,
+                7000,
+                7500,
+                8000,
+                8500,
+                9000,
+                9500,
+                10_000,
             ].into_iter()
                 .map(|&s| s),
         ) as Box<_>);
@@ -268,7 +292,7 @@ fn main() {
                              --durability memory \
                              --no-reuse \
                              --address {} \
-                             --readers 60 -w 4 \
+                             --readers 60 -w 5 \
                              --shards 0 ",
                             server.private_ip
                         );
@@ -520,8 +544,8 @@ fn main() {
                 eprintln!(" -> backend load: s: {}/16, c: {}/48", sload, cload);
 
                 if sload > 16.5 {
-                    eprintln!(" -> backend is not keeping up");
-                    *survived_last.get_mut(backend).unwrap() = false;
+                    eprintln!(" -> backend is probably not keeping up");
+                    //*survived_last.get_mut(backend).unwrap() = false;
                 }
 
                 // also parse achived ops/s to check that we're *really* keeping up
