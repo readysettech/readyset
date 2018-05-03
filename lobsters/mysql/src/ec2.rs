@@ -1,4 +1,5 @@
 extern crate chrono;
+#[macro_use]
 extern crate clap;
 extern crate failure;
 extern crate rusoto_core;
@@ -13,7 +14,7 @@ use std::io::BufReader;
 use std::{fmt, thread, time};
 use tsunami::*;
 
-const AMI: &str = "ami-fa7ac685";
+const AMI: &str = "ami-7342f90c";
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 enum Backend {
@@ -75,6 +76,19 @@ fn main() {
     let args = App::new("trawler-mysql ec2 orchestrator")
         .about("Run the MySQL trawler benchmark on ec2")
         .arg(
+            Arg::with_name("memory_limit")
+                .takes_value(true)
+                .long("memory-limit")
+                .help("Partial state size limit / eviction threshold [in bytes]."),
+        )
+        .arg(
+            Arg::with_name("memscale")
+                .takes_value(true)
+                .default_value("1")
+                .long("memscale")
+                .help("Memscale to use [default: 1]."),
+        )
+        .arg(
             Arg::with_name("SCALE")
                 .help("Run the given scale(s).")
                 .multiple(true),
@@ -132,11 +146,37 @@ fn main() {
         .map(|it| Box::new(it.map(|s| s.parse().unwrap())) as Box<_>)
         .unwrap_or(Box::new(
             [
-                100, 200, 400, 800, 1000usize, 1250, 1500, 2000, 3000, 4000, 4500, 5000, 5500,
-                6000, 6500, 7000, 8000, 8500, 9000,
+                //100, 200, 400, 800, 1000usize, 1250, 1500, 2000, 3000, 4000, 4500, 5000, 5500,
+                //6000, 6500, 7000, 8000, 8500, 9000, 9500, 10_000,
+                100usize,
+                400,
+                800,
+                1000,
+                1250,
+                1500,
+                2000,
+                2500,
+                3000,
+                3500,
+                4000,
+                4500,
+                5000,
+                5500,
+                6000,
+                6500,
+                7000,
+                7500,
+                8000,
+                8500,
+                9000,
+                9500,
+                10_000,
             ].into_iter()
                 .map(|&s| s),
         ) as Box<_>);
+
+    let memscale = value_t_or_exit!(args, "memscale", usize);
+    let memlimit = args.value_of("memory_limit");
 
     let mut load = if args.is_present("SCALE") {
         OpenOptions::new()
@@ -244,24 +284,24 @@ fn main() {
                             }
                         })?,
                     Backend::Soup | Backend::Soupy => {
-                        server
-                            .ssh
-                            .as_mut()
-                            .unwrap()
-                            .cmd(&format!(
-                                "bash -c 'nohup \
-                                 env RUST_BACKTRACE=1 \
-                                 distributary/target/release/souplet \
-                                 --deployment trawler \
-                                 --durability memory \
-                                 --no-reuse \
-                                 --address {} \
-                                 --readers 12 -w 4 \
-                                 --shards 0 \
-                                 &> souplet.log &'",
-                                server.private_ip,
-                            ))
-                            .map(|_| ())?;
+                        let mut cmd = format!(
+                            "bash -c 'nohup \
+                             env RUST_BACKTRACE=1 \
+                             distributary/target/release/souplet \
+                             --deployment trawler \
+                             --durability memory \
+                             --no-reuse \
+                             --address {} \
+                             --readers 60 -w 5 \
+                             --shards 0 ",
+                            server.private_ip
+                        );
+                        if let Some(memlimit) = memlimit {
+                            cmd.push_str(&format!("--memory {} ", memlimit));
+                        }
+                        cmd.push_str(" &> souplet.log &'");
+
+                        server.ssh.as_mut().unwrap().cmd(&cmd).map(|_| ())?;
 
                         // start the shim (which will block until soup is available)
                         trawler
@@ -308,12 +348,13 @@ fn main() {
                     .cmd(&format!(
                         "env RUST_BACKTRACE=1 \
                          {}/lobsters/mysql/target/release/trawler-mysql \
+                         --memscale {} \
                          --warmup 0 \
                          --runtime 0 \
                          --issuers 24 \
                          --prime \
                          \"mysql://lobsters:$(cat ~/mysql.pass)@{}/lobsters\"",
-                        dir, ip
+                        dir, memscale, ip
                     ))
                     .map(|out| {
                         let out = out.trim_right();
@@ -332,11 +373,12 @@ fn main() {
                         "env RUST_BACKTRACE=1 \
                          {}/lobsters/mysql/target/release/trawler-mysql \
                          --reqscale 3000 \
+                         --memscale {} \
                          --warmup 120 \
                          --runtime 0 \
                          --issuers 24 \
                          \"mysql://lobsters:$(cat ~/mysql.pass)@{}/lobsters\"",
-                        dir, ip
+                        dir, memscale, ip
                     ))
                     .map(|out| {
                         let out = out.trim_right();
@@ -349,6 +391,17 @@ fn main() {
 
                 let prefix = format!("lobsters-{}-{}", backend, scale);
                 let mut output = File::create(format!("{}.log", prefix))?;
+                let hist_output = if let Some(memlimit) = memlimit {
+                    format!(
+                        "--histogram lobsters-{}-m{}-r{}-l{}.hist ",
+                        backend, memscale, scale, memlimit
+                    )
+                } else {
+                    format!(
+                        "--histogram lobsters-{}-m{}-r{}-unlimited.hist ",
+                        backend, memscale, scale
+                    )
+                };
                 trawler
                     .ssh
                     .as_mut()
@@ -357,12 +410,13 @@ fn main() {
                         "env RUST_BACKTRACE=1 \
                          {}/lobsters/mysql/target/release/trawler-mysql \
                          --reqscale {} \
+                         --memscale {} \
                          --warmup 20 \
                          --runtime 30 \
                          --issuers 24 \
-                         --histogram lobsters-{}-{}.hist \
+                         {}
                          \"mysql://lobsters:$(cat ~/mysql.pass)@{}/lobsters\"",
-                        dir, scale, backend, scale, ip
+                        dir, scale, memscale, hist_output, ip
                     ))
                     .and_then(|out| Ok(output.write_all(&out[..]).map(|_| ())?))?;
 
@@ -392,11 +446,22 @@ fn main() {
                 load.write_all(b"\n")?;
 
                 let mut hist = File::create(format!("{}.hist", prefix))?;
+                let hist_cmd = if let Some(memlimit) = memlimit {
+                    format!(
+                        "cat lobsters-{}-m{}-r{}-l{}.hist",
+                        backend, memscale, scale, memlimit
+                    )
+                } else {
+                    format!(
+                        "cat lobsters-{}-m{}-r{}-unlimited.hist",
+                        backend, memscale, scale
+                    )
+                };
                 trawler
                     .ssh
                     .as_mut()
                     .unwrap()
-                    .cmd_raw(&format!("cat lobsters-{}-{}.hist", backend, scale))
+                    .cmd_raw(&hist_cmd)
                     .and_then(|out| Ok(hist.write_all(&out[..]).map(|_| ())?))?;
 
                 // stop old server
@@ -416,6 +481,26 @@ fn main() {
                         server.ssh.as_mut().unwrap().cmd("sudo umount /mnt")?;
                     }
                     Backend::Soup | Backend::Soupy => {
+                        // gather state size
+                        let mem_limit = if let Some(limit) = memlimit {
+                            format!("l{}", limit)
+                        } else {
+                            "unlimited".to_owned()
+                        };
+                        let mut sizefile = File::create(format!(
+                            "lobsters-{}-m{}-r{}-{}.json",
+                            backend, memscale, scale, mem_limit
+                        ))?;
+                        trawler
+                            .ssh
+                            .as_mut()
+                            .unwrap()
+                            .cmd_raw(&format!(
+                                "wget http://{}:9000/get_statistics",
+                                server.private_ip
+                            ))
+                            .and_then(|out| Ok(sizefile.write_all(&out[..]).map(|_| ())?))?;
+
                         server
                             .ssh
                             .as_mut()
@@ -459,8 +544,8 @@ fn main() {
                 eprintln!(" -> backend load: s: {}/16, c: {}/48", sload, cload);
 
                 if sload > 16.5 {
-                    eprintln!(" -> backend is not keeping up");
-                    *survived_last.get_mut(backend).unwrap() = false;
+                    eprintln!(" -> backend is probably not keeping up");
+                    //*survived_last.get_mut(backend).unwrap() = false;
                 }
 
                 // also parse achived ops/s to check that we're *really* keeping up
