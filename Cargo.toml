@@ -22,7 +22,7 @@ appveyor = { repository = "jonhoo/msql-srv", branch = "master", service = "githu
 codecov = { repository = "jonhoo/msql-srv", branch = "master", service = "github" }
 
 [dependencies]
-nom = "4.0.0-alpha1"
+nom = "4.0.0-beta3"
 mysql_common = "0.5"
 byteorder = "1"
 chrono = "0.4"
