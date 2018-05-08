@@ -95,15 +95,8 @@ impl Ingredient for Latest {
 
             // buffer emitted records
             for (r, current_row) in currents {
-                if current_row.len() > 0 {
-                    match current_row {
-                        RecordResult::Owned(mut rs) => {
-                            out.push(Record::Negative(rs.swap_remove(0)));
-                        }
-                        RecordResult::Borrowed(rs) => {
-                            out.push(Record::Negative((*rs[0]).clone()));
-                        }
-                    }
+                if let Some(row) = current_row.into_iter().next() {
+                    out.push(Record::Negative(row.into_owned()));
                 }
 
                 // if there was a previous latest for this key, revoke old record
