@@ -269,6 +269,43 @@ fn it_queries() {
 }
 
 #[test]
+fn multi_result() {
+    TestingShim::new(
+        |_, w| {
+            let cols = &[Column {
+                table: String::new(),
+                column: "a".to_owned(),
+                coltype: myc::constants::ColumnType::MYSQL_TYPE_SHORT,
+                colflags: myc::constants::ColumnFlags::empty(),
+            }];
+            let mut row = w.start(cols)?;
+            row.write_col(1024i16)?;
+            let w = row.finish_one()?;
+            let mut row = w.start(cols)?;
+            row.write_col(1025i16)?;
+            row.finish()
+        },
+        |_| unreachable!(),
+        |_, _, _| unreachable!(),
+    ).test(|db| {
+        let mut result = db.query("SELECT a FROM foo; SELECT a FROM foo").unwrap();
+        assert!(result.more_results_exists());
+        let row1: Vec<_> = result
+            .by_ref()
+            .filter_map(|row| row.unwrap().get::<i16, _>(0))
+            .collect();
+        assert_eq!(row1, vec![1024]);
+        assert!(result.more_results_exists());
+        let row2: Vec<_> = result
+            .by_ref()
+            .filter_map(|row| row.unwrap().get::<i16, _>(0))
+            .collect();
+        assert_eq!(row2, vec![1025]);
+        assert!(!result.more_results_exists());
+    })
+}
+
+#[test]
 fn it_queries_many_rows() {
     TestingShim::new(
         |_, w| {
