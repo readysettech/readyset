@@ -204,16 +204,16 @@ pub fn make_grouped(
                     (parent_node, group_cols)
                 };
 
-                let n = mir_converter.make_function_node(
+                let mut nodes: Vec<MirNodeRef> = mir_converter.make_function_node(
                     name,
                     &computed_col,
                     group_cols.iter().collect(),
                     parent_node,
                 );
 
-                *prev_node = Some(n.clone());
-                func_nodes.push(n);
-                node_count += 1;
+                *prev_node = Some(nodes.last().unwrap().clone());
+                node_count += nodes.len();
+                func_nodes.extend(nodes);
             }
         }
     }

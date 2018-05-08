@@ -1,5 +1,4 @@
 use std::collections::HashMap;
-use std::cmp::Ordering;
 
 use prelude::*;
 
@@ -26,7 +25,8 @@ impl Distinct {
         ) -> Self {
 
         // TODO add implementation for group by
-        let group_by = group_by;
+        let mut group_by = group_by;
+        group_by.sort();
         Distinct {
             src: src.into(),
             us: None,
@@ -47,7 +47,6 @@ impl Ingredient for Distinct {
         vec![self.src.as_global()]
     }
 
-    /// TODO
     fn on_input(
         &mut self,
         from: LocalNodeIndex,
@@ -67,17 +66,44 @@ impl Ingredient for Distinct {
             };
         }
 
-        // TODO
-        // Preproc the records
-        // Sort to get the column we want
-        // check if we have seen it if so then keep it
         let us = self.us.unwrap();
         let db = state
             .get(&*us)
             .expect("Distinct must have its own state initialized");
 
-        let mut output = Vec::new();
+        let mut seen = HashMap::new();
+        let mut cleaned = Vec::new();
+
+        // Preprocess current batch to remove duplicates
+        // since those won't be caught by checking state below.
         for rec in rs.iter() {
+            let group = rec.iter()
+                .enumerate()
+                .filter_map(|(i, v)| {
+                    if self.group_by.iter().any(|col| col == &i) {
+                        Some(v)
+                    } else {
+                        None
+                    }
+                })
+                .cloned()
+                .collect::<Vec<_>>();
+
+            let positive = rec.is_positive();
+            if seen.contains_key(&group){
+                if !positive{
+                    seen.remove(&group);
+                    cleaned.push(rec.clone());
+                }
+            } else {
+                cleaned.push(rec.clone());
+                seen.insert(group.clone(), true);
+            }
+        }
+
+        let mut misses = Vec::new();
+        let mut output = Vec::new();
+        for rec in cleaned.iter() {
             let group_by = &self.group_by[..];
             let group = rec.iter()
                 .enumerate()
@@ -94,25 +120,44 @@ impl Ingredient for Distinct {
             if positive {
                 match db.lookup(group_by, &KeyType::from(&group[..])) {
                     LookupResult::Some(rs) => {
-                        println!("{}", rs.is_empty());
                         if rs.is_empty(){
                             output.push(rec.clone());
                         }
                     },
                     LookupResult::Missing => {
-                        // TODO
+                        println!("Missing");
+                        misses.push(Miss {
+                            node: *us,
+                            columns: Vec::from(group_by),
+                            replay_key: replay_key_col.map(|col| {
+                                // since topk is an identity, we don't need to map this output
+                                // column to an input column.
+                                vec![rec[col].clone()]
+                            }),
+                            key: group.clone(),
+                        });
                         ()
                     }
                 }
             } else {
                 match db.lookup(group_by, &KeyType::from(&group[..])) {
                     LookupResult::Some(_) => {
-                        println!("{}", rs.is_empty());
                         if !rs.is_empty(){
                             output.push(rec.clone());
                         }
                     },
                     LookupResult::Missing => {
+                        println!("Missing");
+                        misses.push(Miss {
+                            node: *us,
+                            columns: Vec::from(group_by),
+                            replay_key: replay_key_col.map(|col| {
+                                // since topk is an identity, we don't need to map this output
+                                // column to an input column.
+                                vec![rec[col].clone()]
+                            }),
+                            key: group.clone(),
+                        });
                         ()
                     }
                 }
@@ -120,47 +165,19 @@ impl Ingredient for Distinct {
 
         }
 
-        //for rec in rs.iter() {
-        //    let group = rec.iter()
-        //        .enumerate()
-        //        .filter_map(|(i, v)| {
-        //            if self.group_by.iter().any(|col| col == &i) {
-        //                Some(v)
-        //            } else {
-        //                None
-        //            }
-        //        })
-        //        .cloned()
-        //        .collect::<Vec<_>>();
-
-        //    let positive = rec.is_positive();
-        //    if self.seen.contains_key(&group){
-        //        if !positive{
-        //            self.seen.remove(&group);
-        //            //output.push(rec.clone());
-        //        }
-        //    } else {
-        //        if positive {
-        //            //output.push(rec.clone());
-        //            // self.seen.insert(group.clone(), true);
-        //        }
-        //    }
-        //}
-        //
+        
         ProcessingResult {
             results: output.into(),
-            misses: Vec::new(),
+            misses: misses,
         }
     }
 
     fn description(&self) -> String {
-        // TODO
         "Distinct".into()
     }
 
 
     fn on_connected(&mut self, _: &Graph) {
-        // TODO I think something is meant to go here, but I'm not sure what?
     }
 
     fn on_commit(&mut self, us: NodeIndex, remap: &HashMap<NodeIndex, IndexPair>) {
@@ -174,6 +191,10 @@ impl Ingredient for Distinct {
 
     fn resolve(&self, col: usize) -> Option<Vec<(NodeIndex, usize)>> {
         Some(vec![(self.src.as_global(), col)])
+    }
+
+    fn requires_full_materialization(&self) -> bool {
+        true
     }
 
     fn suggest_indexes(&self, this: NodeIndex) -> HashMap<NodeIndex, (Vec<usize>, bool)> {
@@ -196,11 +217,10 @@ mod tests {
 
 
         let s = g.add_base("source", &["x", "y", "z"]);
-        // TODO add groupby to test
         g.set_op(
             "distinct",
             &["x", "y", "z"],
-            Distinct::new(s.as_global(), vec![1]),
+            Distinct::new(s.as_global(), vec![1, 2]),
             materialized,
         );
         g
@@ -211,7 +231,7 @@ mod tests {
         let mut g = setup(true);
 
         let r1: Vec<DataType> = vec![1.into(), "z".into(), 1.into()];
-        let r2: Vec<DataType> = vec![1.into(), "z".into(), 2.into()];
+        let r2: Vec<DataType> = vec![1.into(), "z".into(), 1.into()];
         let r3: Vec<DataType> = vec![1.into(), "c".into(), 2.into()];
 
         let a = g.narrow_one_row(r1.clone(), true);

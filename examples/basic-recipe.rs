@@ -16,7 +16,7 @@ fn main() {
                VoteCount: SELECT Vote.aid, COUNT(uid) AS votes \
                             FROM Vote GROUP BY Vote.aid;
                QUERY ArticleWithVoteCount: \
-                            SELECT Article.aid, title, url, VoteCount.votes AS votes \
+                            SELECT DISTINCT Article.aid, title, url, VoteCount.votes AS votes \
                             FROM Article, VoteCount \
                             WHERE Article.aid = VoteCount.aid AND Article.aid = ?;";
 
@@ -68,4 +68,5 @@ fn main() {
 
     println!("Reading...");
     println!("{:#?}", awvc.lookup(&1.into(), true));
+    thread::sleep(Duration::from_millis(10000));
 }

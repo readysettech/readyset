@@ -3,7 +3,7 @@ extern crate distributary;
 use distributary::ControllerBuilder;
 
 use std::thread;
-use std::time::{Duration, SystemTime, UNIX_EPOCH};
+use std::time::{Duration};
 
 fn main() {
     // inline recipe definition
@@ -12,11 +12,11 @@ fn main() {
                                      url text, PRIMARY KEY(aid));
                CREATE TABLE Vote (aid int, uid int);
 
-               Create Table User (uid int, username text);
+               Create Table User (uid int, username text, test text);
 
 
                # read queries
-               VoteCount: SELECT Vote.aid, COUNT(uid) AS votes \
+               VoteCount: SELECT Vote.aid, COUNT(DISTINCT Vote.uid) AS votes \
                             FROM Vote GROUP BY Vote.aid;
 
                QUERY Karma: \
@@ -27,11 +27,9 @@ fn main() {
                             WHERE User.uid = ?
                             GROUP BY User.uid;";
     let user_view_extension = "
-
-                QUERY UserView: \
-                        SELECT uid, username \
-                        FROM User
-                        WHERE User.uid = ?;";
+                QUERY UserViewDist: \
+                        SELECT DISTINCT User.username \
+                        FROM User WHERE User.uid = ?;";
 
     let sql_extended = "
                QUERY ArticleWithVoteCount: \
@@ -39,6 +37,11 @@ fn main() {
                             FROM Article, VoteCount \
                             WHERE Article.aid = VoteCount.aid AND Article.aid = ?;";
 
+    //let article_distinct = "
+    //           QUERY DistinctArticles: \
+    //                        SELECT DISTINCT title\
+    //                        FROM Article
+    //                        WHERE Article.aid = ?;";
     let persistence_params = distributary::PersistenceParameters::new(
         distributary::DurabilityMode::Permanent,
         512,
@@ -58,6 +61,7 @@ fn main() {
     blender.install_recipe(sql.to_owned()).unwrap();
     blender.extend_recipe(user_view_extension.to_owned()).unwrap();
     blender.extend_recipe(sql_extended.to_owned()).unwrap();
+    //blender.extend_recipe(article_distinct.to_owned()).unwrap();
      println!("{}", blender.graphviz());
 
     // Get mutators and getter.
@@ -67,23 +71,25 @@ fn main() {
     let mut vote = blender.get_mutator("Vote").unwrap();
     let mut user = blender.get_mutator("User").unwrap();
     // let mut user_get = blender.get_getter("User").unwrap();
-    let mut karma = blender.get_getter("Karma").unwrap();
+    //let mut karma = blender.get_getter("Karma").unwrap();
     let mut awvc = blender.get_getter("ArticleWithVoteCount").unwrap();
-    let mut user_get = blender.get_getter("UserView").unwrap();
+    //let mut adist = blender.get_getter("DistinctArticles").unwrap();
+    // let mut user_get = blender.get_getter("UserView").unwrap();
+    // let mut user_get_dist = blender.get_getter("UserViewDist").unwrap();
 
     println!("Creating article...");
     let aid_first = 1;
-    let aid_second = 4;
-    // Make sure the article exists:
     let uid_jsegaran = 2;
     let uid_other = 3;
+    let aid_second = 4;
 
     // Check if a user exists, if not create it
     println!("Creating new user");
     let jsegaran = "jsegaran";
     let other = "other";
-    user.put(vec![uid_jsegaran.into(), jsegaran.into()]).unwrap();
-    user.put(vec![uid_other.into(), other.into()]).unwrap();
+
+    user.put(vec![uid_jsegaran.into(), jsegaran.into(), "a".into()]).unwrap();
+    user.put(vec![uid_other.into(), other.into(), "d".into()]).unwrap();
 
     // Check if the article exists. If not create it
     println!("Creating new article...");
@@ -100,15 +106,17 @@ fn main() {
     // Then create a new vote:
     println!("Casting vote...");
     vote.put(vec![aid_first.into(), uid_jsegaran.into()]).unwrap();
-    vote.put(vec![aid_first.into(), uid_other.into()]).unwrap();
     vote.put(vec![aid_second.into(), uid_jsegaran.into()]).unwrap();
+    vote.put(vec![aid_second.into(), uid_jsegaran.into()]).unwrap();
+    vote.put(vec![aid_second.into(), uid_other.into()]).unwrap();
     vote.put(vec![aid_second.into(), uid_other.into()]).unwrap();
 
     println!("Finished writing! Let's wait for things to propagate...");
-    thread::sleep(Duration::from_millis(1000));
+    thread::sleep(Duration::from_millis(3000));
 
     println!("Reading...");
-    println!("{:#?}", karma.lookup(&uid_jsegaran.into(), true));
-    println!("{:#?}", user_get.lookup(&uid_jsegaran.into(), true));
-    println!("{:#?}", awvc.lookup(&1.into(), true))
+    // println!("{:#?}", user_get_dist.lookup(&2.into(), true));
+    // println!("{:#?}", user_get_dist.lookup(&3.into(), true));
+    println!("{:#?}", awvc.lookup(&aid_first.into(), true));
+    println!("{:#?}", awvc.lookup(&aid_second.into(), true));
 }

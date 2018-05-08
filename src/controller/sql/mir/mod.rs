@@ -381,12 +381,14 @@ impl SqlToMirConverter {
                 leaves.push(mn);
             }
         }
+
         assert_eq!(
             leaves.len(),
             1,
             "expected just one leaf! leaves: {:?}",
             leaves
         );
+
         let leaf = leaves.into_iter().next().unwrap();
         self.current
             .insert(String::from(leaf.borrow().name()), self.schema_version);
@@ -680,19 +682,45 @@ impl SqlToMirConverter {
         func_col: &Column,
         group_cols: Vec<&Column>,
         parent: MirNodeRef,
-    ) -> MirNodeRef {
+    ) -> Vec<MirNodeRef> {
         use dataflow::ops::grouped::aggregate::Aggregation;
         use dataflow::ops::grouped::extremum::Extremum;
         use nom_sql::FunctionExpression::*;
 
-        let mknode = |over: &Column, t: GroupedNodeType| {
-            self.make_grouped_node(name, &func_col, (parent, &over), group_cols, t)
+        let mut out_nodes = Vec::new();
+
+        let mknode = |over: &Column, t: GroupedNodeType, d: bool| {
+            if d {
+                let new_name = name.clone().to_owned() + "distinct";
+
+                let computed_col = match func_col.alias {
+                    None => func_col.clone(),
+                    Some(ref a) => Column {
+                        name: a.clone(),
+                        alias: None,
+                        table: func_col.table.clone(),
+                        function: func_col.function.clone(),
+                    },
+                };
+                let mut dist_col = Vec::new();
+                dist_col.push(over);
+                dist_col.extend(group_cols.clone());
+                //println!("dist_cols {:?}", dist_col);
+                let node = self.make_distinct_node(&new_name, parent, dist_col.clone());
+                out_nodes.push(node.clone());
+                out_nodes.push(self.make_grouped_node(name, &func_col, (node, &over), group_cols, t));
+                out_nodes
+            } else {
+                out_nodes.push(self.make_grouped_node(name, &func_col, (parent, &over), group_cols, t));
+                out_nodes
+
+            }
         };
 
         let func = func_col.function.as_ref().unwrap();
         match *func.deref() {
-            Sum(ref col, _) => mknode(col, GroupedNodeType::Aggregation(Aggregation::SUM)),
-            Count(ref col, _) => mknode(col, GroupedNodeType::Aggregation(Aggregation::COUNT)),
+            Sum(ref col, ref d) => mknode(col, GroupedNodeType::Aggregation(Aggregation::SUM), *d),
+            Count(ref col, ref d) => mknode(col, GroupedNodeType::Aggregation(Aggregation::COUNT), *d),
             CountStar => {
                 // XXX(malte): there is no "over" column, but our aggregation operators' API
                 // requires one to be specified, so we earlier rewrote it to use the last parent
@@ -702,10 +730,10 @@ impl SqlToMirConverter {
                 // (but we also don't have a NULL value, so maybe we're okay).
                 panic!("COUNT(*) should have been rewritten earlier!")
             }
-            Max(ref col) => mknode(col, GroupedNodeType::Extremum(Extremum::MAX)),
-            Min(ref col) => mknode(col, GroupedNodeType::Extremum(Extremum::MIN)),
+            Max(ref col) => mknode(col, GroupedNodeType::Extremum(Extremum::MAX), false),
+            Min(ref col) => mknode(col, GroupedNodeType::Extremum(Extremum::MIN), false),
             GroupConcat(ref col, ref separator) => {
-                mknode(col, GroupedNodeType::GroupConcat(separator.clone()))
+                mknode(col, GroupedNodeType::GroupConcat(separator.clone()), false)
             }
             _ => unimplemented!(),
         }
@@ -947,6 +975,26 @@ impl SqlToMirConverter {
         )
     }
 
+    fn make_distinct_node(
+        &mut self,
+        name: &str,
+        parent: MirNodeRef,
+        group_by: Vec<&Column>,
+    ) -> MirNodeRef {
+        let combined_columns = parent.borrow().columns().iter().cloned().collect();
+
+        // make the new operator and record its metadata
+        MirNode::new(
+            name,
+            self.schema_version,
+            combined_columns,
+            MirNodeType::Distinct {
+                group_by: group_by.into_iter().cloned().collect(),
+            },
+            vec![parent.clone()],
+            vec![],
+        )
+    }
     fn make_topk_node(
         &mut self,
         name: &str,
@@ -1322,6 +1370,22 @@ impl SqlToMirConverter {
                     func_nodes.push(node.clone());
                     final_node = node;
                     new_node_count += 1;
+                }
+
+                info!(self.log, "distinct defined as {}", st.distinct);
+                if st.distinct {
+                    info!(self.log, "Adding distinct node to the query, distinct is set");
+                    let group_by = qg.parameters();
+
+                    let node = self.make_distinct_node(
+                        &format!("q_{:x}_n{}{}", qg.signature().hash, new_node_count, uformat),
+                        final_node,
+                        group_by,
+                    );
+                    func_nodes.push(node.clone());
+                    final_node = node;
+                    new_node_count += 1;
+
                 }
 
                 // we're now done with the query, so remember all the nodes we've added so far
