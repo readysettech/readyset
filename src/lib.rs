@@ -99,7 +99,7 @@ use std::io::prelude::*;
 use std::iter;
 use std::net;
 
-pub use myc::constants::{ColumnFlags, ColumnType};
+pub use myc::constants::{ColumnFlags, ColumnType, StatusFlags};
 
 mod commands;
 mod errorcodes;
@@ -239,7 +239,7 @@ impl<B: MysqlShim<W>, R: Read, W: Write> MysqlIntermediary<B, R, W> {
             self.writer.set_seq(seq + 1);
         }
 
-        writers::write_ok_packet(&mut self.writer, 0, 0)?;
+        writers::write_ok_packet(&mut self.writer, 0, 0, StatusFlags::empty())?;
         self.writer.flush()
     }
 
@@ -252,11 +252,7 @@ impl<B: MysqlShim<W>, R: Read, W: Write> MysqlIntermediary<B, R, W> {
             let cmd = commands::parse(&packet).unwrap().1;
             match cmd {
                 Command::Query(q) => {
-                    let w = QueryResultWriter {
-                        is_bin: false,
-                        writer: &mut self.writer,
-                    };
-
+                    let w = QueryResultWriter::new(&mut self.writer, false);
                     if q.starts_with(b"SELECT @@") || q.starts_with(b"select @@") {
                         let var = &q[b"SELECT @@".len()..];
                         match var {
@@ -304,12 +300,7 @@ impl<B: MysqlShim<W>, R: Read, W: Write> MysqlIntermediary<B, R, W> {
                     ))?;
                     {
                         let params = params::ParamParser::new(params, state);
-
-                        let w = QueryResultWriter {
-                            is_bin: true,
-                            writer: &mut self.writer,
-                        };
-
+                        let w = QueryResultWriter::new(&mut self.writer, true);
                         self.shim.on_execute(stmt, params, w)?;
                     }
                     state.long_data.clear();
@@ -332,7 +323,7 @@ impl<B: MysqlShim<W>, R: Read, W: Write> MysqlIntermediary<B, R, W> {
                     // NOTE: spec dictates no response from server
                 }
                 Command::Init(_) | Command::Ping => {
-                    writers::write_ok_packet(&mut self.writer, 0, 0)?;
+                    writers::write_ok_packet(&mut self.writer, 0, 0, StatusFlags::empty())?;
                 }
                 Command::Quit => {
                     break;

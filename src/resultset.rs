@@ -54,42 +54,108 @@ impl<'a, W: Write + 'a> StatementMetaWriter<'a, W> {
     }
 }
 
+enum Finalizer {
+    Ok { rows: u64, last_insert_id: u64 },
+    EOF,
+}
+
 /// Convenience type for providing query results to clients.
 ///
 /// This type should not be dropped without calling
 /// [`start`](struct.QueryResultWriter.html#method.start),
 /// [`completed`](struct.QueryResultWriter.html#method.completed), or
 /// [`error`](struct.QueryResultWriter.html#method.error).
+///
+/// To send multiple resultsets, use
+/// [`RowWriter::finish_one`](struct.RowWriter.html#method.finish_one) and
+/// [`complete_one`](struct.QueryResultWriter.html#method.complete_one). These are similar to
+/// `RowWriter::finish` and `completed`, but both eventually yield back the `QueryResultWriter` so
+/// that another resultset can be sent. To indicate that no more resultset will be sent, call
+/// [`no_more_results`](struct.QueryResultWriter.html#method.no_more_results). All methods on
+/// `QueryResultWriter` (except `no_more_results`) automatically start a new resultset. The
+/// `QueryResultWriter` *may* be dropped without calling `no_more_results`, but in this case the
+/// program may panic if an I/O error occurs when sending the end-of-records marker to the client.
+/// To handle such errors, call `no_more_results` explicitly.
 #[must_use]
 pub struct QueryResultWriter<'a, W: Write + 'a> {
     // XXX: specialization instead?
     pub(crate) is_bin: bool,
     pub(crate) writer: &'a mut PacketWriter<W>,
+    last_end: Option<Finalizer>,
 }
 
 impl<'a, W: Write> QueryResultWriter<'a, W> {
+    pub(crate) fn new(writer: &'a mut PacketWriter<W>, is_bin: bool) -> Self {
+        QueryResultWriter {
+            is_bin: is_bin,
+            writer: writer,
+            last_end: None,
+        }
+    }
+
+    fn finalize(&mut self, more_exists: bool) -> io::Result<()> {
+        let mut status = StatusFlags::empty();
+        if more_exists {
+            status.set(StatusFlags::SERVER_MORE_RESULTS_EXISTS, true);
+        }
+        match self.last_end.take() {
+            None => Ok(()),
+            Some(Finalizer::Ok {
+                rows,
+                last_insert_id,
+            }) => writers::write_ok_packet(self.writer, rows, last_insert_id, status),
+            Some(Finalizer::EOF) => writers::write_eof_packet(self.writer, status),
+        }
+    }
+
     /// Start a resultset response to the client that conforms to the given `columns`.
     ///
     /// Note that if no columns are emitted, any written rows are ignored.
     ///
     /// See [`RowWriter`](struct.RowWriter.html).
-    pub fn start(self, columns: &'a [Column]) -> io::Result<RowWriter<'a, W>> {
-        RowWriter::new(self.writer, columns, self.is_bin)
+    pub fn start(mut self, columns: &'a [Column]) -> io::Result<RowWriter<'a, W>> {
+        self.finalize(true)?;
+        RowWriter::new(self, columns)
+    }
+
+    /// Send an empty resultset response to the client indicating that `rows` rows were affected by
+    /// the query in this resultset. `last_insert_id` may be given to communiate an identifier for
+    /// a client's most recent insertion.
+    pub fn complete_one(mut self, rows: u64, last_insert_id: u64) -> io::Result<Self> {
+        self.finalize(true)?;
+        self.last_end = Some(Finalizer::Ok {
+            rows,
+            last_insert_id,
+        });
+        Ok(self)
     }
 
     /// Send an empty resultset response to the client indicating that `rows` rows were affected by
     /// the query. `last_insert_id` may be given to communiate an identifier for a client's most
     /// recent insertion.
     pub fn completed(self, rows: u64, last_insert_id: u64) -> io::Result<()> {
-        writers::write_ok_packet(self.writer, rows, last_insert_id)
+        self.complete_one(rows, last_insert_id)?.no_more_results()
     }
 
     /// Reply to the client's query with an error.
-    pub fn error<E>(self, kind: ErrorKind, msg: &E) -> io::Result<()>
+    pub fn error<E>(mut self, kind: ErrorKind, msg: &E) -> io::Result<()>
     where
         E: Borrow<[u8]> + ?Sized,
     {
+        self.finalize(true)?;
         writers::write_err(kind, msg.borrow(), self.writer)
+    }
+
+    /// Send the last bits of the last resultset to the client, and indicate that there are no more
+    /// resultsets coming.
+    pub fn no_more_results(mut self) -> io::Result<()> {
+        self.finalize(false)
+    }
+}
+
+impl<'a, W: Write> Drop for QueryResultWriter<'a, W> {
+    fn drop(&mut self) {
+        self.finalize(false).unwrap();
     }
 }
 
@@ -107,9 +173,7 @@ impl<'a, W: Write> QueryResultWriter<'a, W> {
 /// call [`finish`](struct.RowWriter.html#method.finish) explicitly.
 #[must_use]
 pub struct RowWriter<'a, W: Write + 'a> {
-    // XXX: specialization instead?
-    is_bin: bool,
-    writer: &'a mut PacketWriter<W>,
+    result: Option<QueryResultWriter<'a, W>>,
     bitmap_len: usize,
     data: Vec<u8>,
     columns: &'a [Column],
@@ -126,14 +190,12 @@ where
     W: Write + 'a,
 {
     fn new(
-        writer: &'a mut PacketWriter<W>,
+        result: QueryResultWriter<'a, W>,
         columns: &'a [Column],
-        is_bin: bool,
     ) -> io::Result<RowWriter<'a, W>> {
         let bitmap_len = (columns.len() + 7 + 2) / 8;
         let mut rw = RowWriter {
-            is_bin: is_bin,
-            writer: writer,
+            result: Some(result),
             columns: columns,
             bitmap_len,
             data: Vec::new(),
@@ -149,7 +211,7 @@ where
     #[inline]
     fn start(&mut self) -> io::Result<()> {
         if !self.columns.is_empty() {
-            writers::column_definitions(self.columns, self.writer)?;
+            writers::column_definitions(self.columns, self.result.as_mut().unwrap().writer)?;
         }
         Ok(())
     }
@@ -173,9 +235,9 @@ where
             return Ok(());
         }
 
-        if self.is_bin {
+        if self.result.as_mut().unwrap().is_bin {
             if self.col == 0 {
-                self.writer.write_u8(0x00)?;
+                self.result.as_mut().unwrap().writer.write_u8(0x00)?;
 
                 // leave space for nullmap
                 self.data.resize(self.bitmap_len, 0);
@@ -206,7 +268,7 @@ where
                 v.to_mysql_bin(&mut self.data, c)?;
             }
         } else {
-            v.to_mysql_text(self.writer)?;
+            v.to_mysql_text(self.result.as_mut().unwrap().writer)?;
         }
         self.col += 1;
         Ok(())
@@ -226,11 +288,15 @@ where
             ));
         }
 
-        if self.is_bin {
-            self.writer.write_all(&self.data[..])?;
+        if self.result.as_mut().unwrap().is_bin {
+            self.result
+                .as_mut()
+                .unwrap()
+                .writer
+                .write_all(&self.data[..])?;
             self.data.clear();
         }
-        self.writer.end_packet()?;
+        self.result.as_mut().unwrap().writer.end_packet()?;
         self.col = 0;
 
         Ok(())
@@ -258,6 +324,9 @@ where
 
 impl<'a, W: Write + 'a> RowWriter<'a, W> {
     fn finish_inner(&mut self) -> io::Result<()> {
+        if self.finished {
+            return Ok(());
+        }
         self.finished = true;
 
         if !self.columns.is_empty() && self.col != 0 {
@@ -267,23 +336,33 @@ impl<'a, W: Write + 'a> RowWriter<'a, W> {
         if self.columns.is_empty() {
             // response to no column query is always an OK packet
             // we've kept track of the number of rows in col (hacky, I know)
-            writers::write_ok_packet(self.writer, self.col as u64, 0)
+            self.result.as_mut().unwrap().last_end = Some(Finalizer::Ok {
+                rows: self.col as u64,
+                last_insert_id: 0,
+            });
         } else {
             // we wrote out at least one row
-            writers::write_eof_packet(self.writer, StatusFlags::empty())
+            self.result.as_mut().unwrap().last_end = Some(Finalizer::EOF);
         }
+        Ok(())
+    }
+
+    /// Indicate to the client that no more rows are coming.
+    pub fn finish(self) -> io::Result<()> {
+        self.finish_one()?.no_more_results()
     }
 
     /// End this resultset response, and indicate to the client that no more rows are coming.
-    pub fn finish(mut self) -> io::Result<()> {
-        self.finish_inner()
+    pub fn finish_one(mut self) -> io::Result<QueryResultWriter<'a, W>> {
+        self.finish_inner()?;
+        // we know that dropping self will see self.finished == true,
+        // and so Drop won't try to use self.result.
+        Ok(self.result.take().unwrap())
     }
 }
 
 impl<'a, W: Write + 'a> Drop for RowWriter<'a, W> {
     fn drop(&mut self) {
-        if !self.finished {
-            self.finish_inner().unwrap();
-        }
+        self.finish_inner().unwrap();
     }
 }
