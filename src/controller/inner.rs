@@ -185,6 +185,7 @@ impl ControllerInner {
             (Get, "/flush_partial") => return Ok(json::to_string(&self.flush_partial()).unwrap()),
             (Post, "/inputs") => json::to_string(&self.inputs()).unwrap(),
             (Post, "/outputs") => json::to_string(&self.outputs()).unwrap(),
+            (Get, "/instances") => return Ok(json::to_string(&self.get_instances()).unwrap()),
             (Post, "/mutator_builder") => {
                 json::to_string(&self.mutator_builder(json::from_slice(&body).unwrap())).unwrap()
             }
@@ -623,6 +624,13 @@ impl ControllerInner {
             .collect();
 
         GraphStats { domains: domains }
+    }
+
+    pub fn get_instances(&self) -> Vec<(WorkerIdentifier, bool, Duration)> {
+        self.workers
+            .iter()
+            .map(|(&id, ref status)| (id, status.healthy, status.last_heartbeat.elapsed()))
+            .collect()
     }
 
     pub fn flush_partial(&mut self) -> u64 {
