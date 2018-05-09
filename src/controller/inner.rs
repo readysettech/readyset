@@ -831,7 +831,7 @@ impl ControllerInner {
     }
 
     pub fn remove_node(&mut self, node: NodeIndex) {
-        // Node must node have any children.
+        // Node must not have any children.
         assert_eq!(
             self.ingredients
                 .neighbors_directed(node, petgraph::EdgeDirection::Outgoing)
