@@ -465,6 +465,9 @@ impl<A: Authority + 'static> Controller<A> {
 
             fn call(&self, req: Request) -> Self::Future {
                 let mut res = Response::new();
+                // disable CORS to allow use as API server
+                res.headers_mut()
+                    .set_raw("Access-Control-Allow-Origin", "*");
                 match (req.method().clone(), req.path().to_owned().as_ref()) {
                     (Method::Get, "/graph.html") => {
                         res.headers_mut().set(ContentType::html());
@@ -502,6 +505,8 @@ impl<A: Authority + 'static> Controller<A> {
                             ));
                             rx.and_then(|reply| {
                                 let mut res = Response::new();
+                                res.headers_mut()
+                                    .set_raw("Access-Control-Allow-Origin", "*");
                                 match reply {
                                     Ok(reply) => res.set_body(reply),
                                     Err(status_code) => {
@@ -511,6 +516,8 @@ impl<A: Authority + 'static> Controller<A> {
                                 Box::new(futures::future::ok(res))
                             }).or_else(|futures::Canceled| {
                                 let mut res = Response::new();
+                                res.headers_mut()
+                                    .set_raw("Access-Control-Allow-Origin", "*");
                                 res.set_status(StatusCode::NotFound);
                                 Box::new(futures::future::ok(res))
                             })
