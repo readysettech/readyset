@@ -7,6 +7,7 @@
 #![feature(if_while_or_patterns)]
 #![feature(plugin, use_extern_macros)]
 #![feature(duration_from_micros)]
+#![feature(proc_macro_path_invoc)]
 #![plugin(tarpc_plugins)]
 #![deny(unused_extern_crates)]
 
