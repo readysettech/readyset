@@ -2,6 +2,7 @@ use node::NodeType;
 use payload;
 use prelude::*;
 use std::collections::HashSet;
+use std::mem;
 
 impl Node {
     pub(crate) fn process(
@@ -25,6 +26,43 @@ impl Node {
                 m.map_data(|rs| {
                     materialize(rs, tag, state.get_mut(&addr));
                 });
+                (vec![], HashSet::new())
+            }
+            NodeType::Base(ref mut b) => {
+                let m = m.as_mut().unwrap();
+                m.map_data(|data| {
+                    let old_data = mem::replace(data, Records::default());
+                    let mut rs = b.process(addr, old_data, &*state);
+
+                    // When a replay originates at a base node, we replay the data *through* that
+                    // same base node because its column set may have changed. However, this replay
+                    // through the base node itself should *NOT* update the materialization,
+                    // because otherwise it would duplicate each record in the base table every
+                    // time a replay happens!
+                    //
+                    // So: only materialize if the message we're processing is not a replay!
+                    if keyed_by.is_none() {
+                        materialize(&mut rs, None, state.get_mut(&addr));
+                    }
+                    mem::replace(data, rs);
+                });
+
+                // Send write-ACKs to all the clients with updates that made
+                // it into this merged packet:
+                if let Some(ex) = executor {
+                    match m {
+                        &mut box Packet::Message {
+                            ref mut senders, ..
+                        } => senders.drain(..).for_each(|src| ex.send_back(src, Ok(0))),
+                        &mut box Packet::Transaction {
+                            ref mut senders,
+                            state: TransactionState::Committed(ts, ..),
+                            ..
+                        } => senders.drain(..).for_each(|src| ex.send_back(src, Ok(ts))),
+                        _ => {}
+                    }
+                }
+
                 (vec![], HashSet::new())
             }
             NodeType::Reader(ref mut r) => {
@@ -59,7 +97,6 @@ impl Node {
                                 },
                             ..
                         },) => {
-                            use std::mem;
                             assert!(!ignore);
                             assert!(keyed_by.is_some());
                             ReplayContext::Partial {
@@ -77,8 +114,6 @@ impl Node {
                     let mut set_replay_last = None;
                     tracer = m.tracer().and_then(|t| t.take());
                     m.map_data(|data| {
-                        use std::mem;
-
                         // we need to own the data
                         let old_data = mem::replace(data, Records::default());
 
@@ -152,55 +187,24 @@ impl Node {
                     *t = tracer.take();
                 }
 
-                // When a replay originates at a base node, we replay the data *through* that same
-                // base node because its column set may have changed. However, this replay through
-                // the base node itself should *NOT* update the materialization, because otherwise
-                // it would duplicate each record in the base table every time a replay happens!
-                //
-                // So: only materialize if either (1) the message we're processing is not a replay,
-                // or (2) if the node we're at is not a base.
-                if m.is_regular() || i.get_base().is_none() {
-                    let tag = match **m {
-                        Packet::ReplayPiece {
-                            tag,
-                            context: payload::ReplayPieceContext::Partial { .. },
-                            ..
-                        } => {
-                            // NOTE: non-partial replays shouldn't be materialized only for a
-                            // particular index, and so the tag shouldn't be forwarded to the
-                            // materialization code. this allows us to keep some asserts deeper in
-                            // the code to check that we don't do partial replays to non-partial
-                            // indices, or for unknown tags.
-                            Some(tag)
-                        }
-                        _ => None,
-                    };
-                    m.map_data(|rs| {
-                        materialize(rs, tag, state.get_mut(&addr));
-                    });
-                }
-
-                // Send write-ACKs to all the clients with updates that made
-                // it into this merged packet:
-                match (i.get_base(), executor, m) {
-                    (
-                        Some(..),
-                        Some(ex),
-                        &mut box Packet::Message {
-                            ref mut senders, ..
-                        },
-                    ) => senders.drain(..).for_each(|src| ex.send_back(src, Ok(0))),
-                    (
-                        Some(..),
-                        Some(ex),
-                        &mut box Packet::Transaction {
-                            ref mut senders,
-                            state: TransactionState::Committed(ts, ..),
-                            ..
-                        },
-                    ) => senders.drain(..).for_each(|src| ex.send_back(src, Ok(ts))),
-                    _ => {}
+                let tag = match **m {
+                    Packet::ReplayPiece {
+                        tag,
+                        context: payload::ReplayPieceContext::Partial { .. },
+                        ..
+                    } => {
+                        // NOTE: non-partial replays shouldn't be materialized only for a
+                        // particular index, and so the tag shouldn't be forwarded to the
+                        // materialization code. this allows us to keep some asserts deeper in
+                        // the code to check that we don't do partial replays to non-partial
+                        // indices, or for unknown tags.
+                        Some(tag)
+                    }
+                    _ => None,
                 };
+                m.map_data(|rs| {
+                    materialize(rs, tag, state.get_mut(&addr));
+                });
 
                 for miss in misses.iter_mut() {
                     if miss.on != addr {
@@ -229,6 +233,7 @@ impl Node {
     ) {
         let addr = *self.local_addr();
         match self.inner {
+            NodeType::Base(..) => {}
             NodeType::Egress(Some(ref mut e)) => {
                 e.process(
                     &mut Some(Box::new(Packet::EvictKeys {

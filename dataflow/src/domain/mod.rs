@@ -921,8 +921,8 @@ impl Domain {
                     } => {
                         let mut n = self.nodes[&node].borrow_mut();
                         n.add_column(&field);
-                        if n.is_internal() && n.get_base().is_some() {
-                            n.get_base_mut().unwrap().add_column(default);
+                        if let Some(b) = n.get_base_mut() {
+                            b.add_column(default);
                         } else if n.is_ingress() {
                             self.ingress_inject
                                 .entry(node)
@@ -1249,12 +1249,10 @@ impl Domain {
                             let default = {
                                 let n = self.nodes[&from].borrow();
                                 let mut default = None;
-                                if n.is_internal() {
-                                    if let Some(b) = n.get_base() {
-                                        let mut row = (Vec::new(), true).into();
-                                        b.fix(&mut row);
-                                        default = Some(row);
-                                    }
+                                if let Some(b) = n.get_base() {
+                                    let mut row = (Vec::new(), true).into();
+                                    b.fix(&mut row);
+                                    default = Some(row);
                                 }
                                 default
                             };
@@ -1540,12 +1538,10 @@ impl Domain {
         }
 
         let n = self.nodes[&source].borrow();
-        if n.is_internal() {
-            if let Some(b) = n.get_base() {
-                let mut row = row.into_owned().into();
-                b.fix(&mut row);
-                return row;
-            }
+        if let Some(b) = n.get_base() {
+            let mut row = row.into_owned().into();
+            b.fix(&mut row);
+            return row;
         }
 
         return row.into_owned().into();

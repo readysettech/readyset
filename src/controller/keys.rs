@@ -42,7 +42,7 @@ where
     let n = &graph[node];
 
     // have we reached a base node?
-    if n.is_internal() && n.get_base().is_some() {
+    if n.is_base() {
         return vec![path];
     }
 
@@ -197,7 +197,7 @@ mod tests {
         let a = g.add_node(node::Node::new(
             "a",
             &["a1", "a2"],
-            node::NodeType::from(ops::NodeOperator::Base(ops::base::Base::default())),
+            node::NodeType::from(node::special::Base::default()),
             true,
         ));
         g.add_edge(src, a, ());
@@ -205,7 +205,7 @@ mod tests {
         let b = g.add_node(node::Node::new(
             "b",
             &["b1", "b2"],
-            node::NodeType::from(ops::NodeOperator::Base(ops::base::Base::default())),
+            node::NodeType::from(node::special::Base::default()),
             true,
         ));
         g.add_edge(src, b, ());

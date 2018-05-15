@@ -964,7 +964,7 @@ mod tests {
             assert_eq!(mig.graph().node_count(), 2);
             assert_eq!(get_node(&inc, mig, "users").name(), "users");
             assert_eq!(get_node(&inc, mig, "users").fields(), &["id", "name"]);
-            assert_eq!(get_node(&inc, mig, "users").description(), "B");
+            assert!(get_node(&inc, mig, "users").is_base());
 
             // Establish a base write type for "articles"
             assert!(inc.add_query(
@@ -979,7 +979,7 @@ mod tests {
                 get_node(&inc, mig, "articles").fields(),
                 &["id", "author", "title"]
             );
-            assert_eq!(get_node(&inc, mig, "articles").description(), "B");
+            assert!(get_node(&inc, mig, "articles").is_base());
 
             // Try a simple equi-JOIN query
             let q = "SELECT users.name, articles.title \
@@ -1020,7 +1020,7 @@ mod tests {
             assert_eq!(mig.graph().node_count(), 2);
             assert_eq!(get_node(&inc, mig, "users").name(), "users");
             assert_eq!(get_node(&inc, mig, "users").fields(), &["id", "name"]);
-            assert_eq!(get_node(&inc, mig, "users").description(), "B");
+            assert!(get_node(&inc, mig, "users").is_base());
 
             // Try a simple query
             let res = inc.add_query(
@@ -1061,7 +1061,7 @@ mod tests {
             assert_eq!(mig.graph().node_count(), 2);
             assert_eq!(get_node(&inc, mig, "votes").name(), "votes");
             assert_eq!(get_node(&inc, mig, "votes").fields(), &["aid", "userid"]);
-            assert_eq!(get_node(&inc, mig, "votes").description(), "B");
+            assert!(get_node(&inc, mig, "votes").is_base());
 
             // Try a simple COUNT function
             let res = inc.add_query(
@@ -1142,7 +1142,7 @@ mod tests {
             assert_eq!(mig.graph().node_count(), 2);
             assert_eq!(get_node(&inc, mig, "users").name(), "users");
             assert_eq!(get_node(&inc, mig, "users").fields(), &["id", "name"]);
-            assert_eq!(get_node(&inc, mig, "users").description(), "B");
+            assert!(get_node(&inc, mig, "users").is_base());
 
             // Add a new query
             let res = inc.add_query("SELECT id, name FROM users WHERE users.id = 42;", None, mig);
@@ -1191,7 +1191,7 @@ mod tests {
                 get_node(&inc, mig, "users").fields(),
                 &["id", "name", "address"]
             );
-            assert_eq!(get_node(&inc, mig, "users").description(), "B");
+            assert!(get_node(&inc, mig, "users").is_base());
 
             // Add a new query
             let res = inc.add_query("SELECT id, name FROM users WHERE users.id = ?;", None, mig);
@@ -1253,7 +1253,7 @@ mod tests {
             assert_eq!(mig.graph().node_count(), 2);
             assert_eq!(get_node(&inc, mig, "votes").name(), "votes");
             assert_eq!(get_node(&inc, mig, "votes").fields(), &["aid", "userid"]);
-            assert_eq!(get_node(&inc, mig, "votes").description(), "B");
+            assert!(get_node(&inc, mig, "votes").is_base());
             // Try a simple COUNT function without a GROUP BY clause
             let res = inc.add_query("SELECT COUNT(votes.userid) AS count FROM votes;", None, mig);
             assert!(res.is_ok());
@@ -1305,7 +1305,7 @@ mod tests {
             assert_eq!(mig.graph().node_count(), 2);
             assert_eq!(get_node(&inc, mig, "votes").name(), "votes");
             assert_eq!(get_node(&inc, mig, "votes").fields(), &["userid", "aid"]);
-            assert_eq!(get_node(&inc, mig, "votes").description(), "B");
+            assert!(get_node(&inc, mig, "votes").is_base());
             // Try a simple COUNT function without a GROUP BY clause
             let res = inc.add_query(
                 "SELECT COUNT(*) AS count FROM votes GROUP BY votes.userid;",
@@ -1591,7 +1591,7 @@ mod tests {
             assert_eq!(mig.graph().node_count(), 2);
             assert_eq!(get_node(&inc, mig, "users").name(), "users");
             assert_eq!(get_node(&inc, mig, "users").fields(), &["id", "name"]);
-            assert_eq!(get_node(&inc, mig, "users").description(), "B");
+            assert!(get_node(&inc, mig, "users").is_base());
 
             // Add a new query
             let res = inc.add_query("SELECT id, name FROM users WHERE users.id = 42;", None, mig);

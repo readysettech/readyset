@@ -6,7 +6,7 @@ use controller::recipe::Recipe;
 use controller::sql::SqlIncorporator;
 use controller::{ControllerBuilder, ControllerHandle};
 use dataflow::checktable::Token;
-use dataflow::ops::base::Base;
+use dataflow::node::special::Base;
 use dataflow::ops::grouped::aggregate::Aggregation;
 use dataflow::ops::identity::Identity;
 use dataflow::ops::join::JoinSource::*;
@@ -100,8 +100,8 @@ fn it_works_basic() {
     ));
     let mut g = b.build_local();
     let _ = g.migrate(|mig| {
-        let a = mig.add_ingredient("a", &["a", "b"], Base::new(vec![]).with_key(vec![0]));
-        let b = mig.add_ingredient("b", &["a", "b"], Base::new(vec![]).with_key(vec![0]));
+        let a = mig.add_base("a", &["a", "b"], Base::new(vec![]).with_key(vec![0]), false);
+        let b = mig.add_base("b", &["a", "b"], Base::new(vec![]).with_key(vec![0]), false);
 
         let mut emits = HashMap::new();
         emits.insert(a, vec![0, 1]);
@@ -173,7 +173,7 @@ fn base_mutation() {
 
     let mut g = build_local("base_mutation");
     g.migrate(|mig| {
-        let a = mig.add_ingredient("a", &["a", "b"], Base::new(vec![]).with_key(vec![0]));
+        let a = mig.add_base("a", &["a", "b"], Base::new(vec![]).with_key(vec![0]), false);
         mig.maintain_anonymous(a, &[0]);
     });
 
@@ -248,7 +248,7 @@ fn shared_interdomain_ancestor() {
     // set up graph
     let mut g = build_local("shared_interdomain_ancestor");
     let _ = g.migrate(|mig| {
-        let a = mig.add_ingredient("a", &["a", "b"], Base::default());
+        let a = mig.add_base("a", &["a", "b"], Base::default(), false);
 
         let mut emits = HashMap::new();
         emits.insert(a, vec![0, 1]);
@@ -299,8 +299,8 @@ fn it_works_w_mat() {
     // set up graph
     let mut g = build_local("it_works_w_mat");
     let _ = g.migrate(|mig| {
-        let a = mig.add_ingredient("a", &["a", "b"], Base::default());
-        let b = mig.add_ingredient("b", &["a", "b"], Base::default());
+        let a = mig.add_base("a", &["a", "b"], Base::default(), false);
+        let b = mig.add_base("b", &["a", "b"], Base::default(), false);
 
         let mut emits = HashMap::new();
         emits.insert(a, vec![0, 1]);
@@ -356,8 +356,8 @@ fn it_works_w_partial_mat() {
     // set up graph
     let mut g = build_local("it_works_w_partial_mat");
     let (a, b) = g.migrate(|mig| {
-        let a = mig.add_ingredient("a", &["a", "b"], Base::default());
-        let b = mig.add_ingredient("b", &["a", "b"], Base::default());
+        let a = mig.add_base("a", &["a", "b"], Base::default(), false);
+        let b = mig.add_base("b", &["a", "b"], Base::default(), false);
         (a, b)
     });
 
@@ -407,8 +407,8 @@ fn it_works_w_partial_mat_below_empty() {
     // for now.
     let mut g = build_local("it_works_w_partial_mat_below_empty");
     let _ = g.migrate(|mig| {
-        let a = mig.add_ingredient("a", &["a", "b"], Base::default());
-        let b = mig.add_ingredient("b", &["a", "b"], Base::default());
+        let a = mig.add_base("a", &["a", "b"], Base::default(), false);
+        let b = mig.add_base("b", &["a", "b"], Base::default(), false);
         let mut emits = HashMap::new();
         emits.insert(a, vec![0, 1]);
         emits.insert(b, vec![0, 1]);
@@ -451,8 +451,13 @@ fn it_works_deletion() {
     // set up graph
     let mut g = build_local("it_works_deletion");
     let _ = g.migrate(|mig| {
-        let a = mig.add_ingredient("a", &["x", "y"], Base::new(vec![]).with_key(vec![1]));
-        let b = mig.add_ingredient("b", &["_", "x", "y"], Base::new(vec![]).with_key(vec![2]));
+        let a = mig.add_base("a", &["x", "y"], Base::new(vec![]).with_key(vec![1]), false);
+        let b = mig.add_base(
+            "b",
+            &["_", "x", "y"],
+            Base::new(vec![]).with_key(vec![2]),
+            false,
+        );
 
         let mut emits = HashMap::new();
         emits.insert(a, vec![0, 1]);
@@ -779,7 +784,7 @@ fn mutator_churn() {
         // migrate
 
         // add vote base table
-        let vote = mig.add_ingredient("vote", &["user", "id"], Base::default());
+        let vote = mig.add_base("vote", &["user", "id"], Base::default(), false);
 
         // add vote count
         let vc = mig.add_ingredient(
@@ -887,7 +892,7 @@ fn it_recovers_persisted_bases_w_transactions() {
         // TODO: Convert this to use SQL interface (because only migrations specified that way get
         // persisted...)
         g.migrate(|mig| {
-            let a = mig.add_transactional_base("a", &["a", "b"], Base::default());
+            let a = mig.add_base("a", &["a", "b"], Base::default(), true);
             mig.maintain_anonymous(a, &[0]);
         });
 
@@ -908,7 +913,7 @@ fn it_recovers_persisted_bases_w_transactions() {
     builder.set_persistence(persistence_params.clone());
     let mut g = builder.build_local();
     g.migrate(|mig| {
-        let a = mig.add_transactional_base("a", &["a", "b"], Base::default());
+        let a = mig.add_base("a", &["a", "b"], Base::default(), true);
         mig.maintain_anonymous(a, &[0]);
     });
 
@@ -1041,8 +1046,8 @@ fn votes() {
     let mut g = build_local("votes");
     let _ = g.migrate(|mig| {
         // add article base nodes (we use two so we can exercise unions too)
-        let article1 = mig.add_ingredient("article1", &["id", "title"], Base::default());
-        let article2 = mig.add_ingredient("article2", &["id", "title"], Base::default());
+        let article1 = mig.add_base("article1", &["id", "title"], Base::default(), false);
+        let article2 = mig.add_base("article2", &["id", "title"], Base::default(), false);
 
         // add a (stupid) union of article1 + article2
         let mut emits = HashMap::new();
@@ -1053,7 +1058,7 @@ fn votes() {
         mig.maintain_anonymous(article, &[0]);
 
         // add vote base table
-        let vote = mig.add_ingredient("vote", &["user", "id"], Base::default());
+        let vote = mig.add_base("vote", &["user", "id"], Base::default(), false);
 
         // add vote count
         let vc = mig.add_ingredient(
@@ -1148,8 +1153,8 @@ fn transactional_vote() {
 
     let _ = g.migrate(|mig| {
         // add article base nodes (we use two so we can exercise unions too)
-        let article1 = mig.add_transactional_base("article1", &["id", "title"], Base::default());
-        let article2 = mig.add_transactional_base("article2", &["id", "title"], Base::default());
+        let article1 = mig.add_base("article1", &["id", "title"], Base::default(), true);
+        let article2 = mig.add_base("article2", &["id", "title"], Base::default(), true);
 
         // add a (stupid) union of article1 + article2
         let mut emits = HashMap::new();
@@ -1160,7 +1165,7 @@ fn transactional_vote() {
         mig.maintain_anonymous(article, &[0]);
 
         // add vote base table
-        let vote = mig.add_transactional_base("vote", &["user", "id"], Base::default());
+        let vote = mig.add_base("vote", &["user", "id"], Base::default(), true);
 
         // add vote count
         let vc = mig.add_ingredient(
@@ -1293,8 +1298,8 @@ fn empty_migration() {
     g.migrate(|_| {});
 
     let _ = g.migrate(|mig| {
-        let a = mig.add_ingredient("a", &["a", "b"], Base::default());
-        let b = mig.add_ingredient("b", &["a", "b"], Base::default());
+        let a = mig.add_base("a", &["a", "b"], Base::default(), false);
+        let b = mig.add_base("b", &["a", "b"], Base::default(), false);
 
         let mut emits = HashMap::new();
         emits.insert(a, vec![0, 1]);
@@ -1341,7 +1346,7 @@ fn simple_migration() {
     // set up graph
     let mut g = build_local("simple_migration");
     let _ = g.migrate(|mig| {
-        let a = mig.add_ingredient("a", &["a", "b"], Base::default());
+        let a = mig.add_base("a", &["a", "b"], Base::default(), false);
         mig.maintain_anonymous(a, &[0]);
         a
     });
@@ -1363,7 +1368,7 @@ fn simple_migration() {
 
     // add unrelated node b in a migration
     let _ = g.migrate(|mig| {
-        let b = mig.add_ingredient("b", &["a", "b"], Base::default());
+        let b = mig.add_base("b", &["a", "b"], Base::default(), false);
         mig.maintain_anonymous(b, &[0]);
         b
     });
@@ -1391,7 +1396,7 @@ fn add_columns() {
     // set up graph
     let mut g = build_local("add_columns");
     let a = g.migrate(|mig| {
-        let a = mig.add_ingredient("a", &["a", "b"], Base::new(vec![1.into(), 2.into()]));
+        let a = mig.add_base("a", &["a", "b"], Base::new(vec![1.into(), 2.into()]), false);
         mig.maintain_anonymous(a, &[0]);
         a
     });
@@ -1444,7 +1449,7 @@ fn migrate_added_columns() {
     // set up graph
     let mut g = build_local("migrate_added_columns");
     let a = g.migrate(|mig| {
-        let a = mig.add_ingredient("a", &["a", "b"], Base::new(vec![1.into(), 2.into()]));
+        let a = mig.add_base("a", &["a", "b"], Base::new(vec![1.into(), 2.into()]), false);
         a
     });
     let mut muta = g.get_mutator("a").unwrap();
@@ -1492,7 +1497,12 @@ fn migrate_drop_columns() {
     // set up graph
     let mut g = build_local("migrate_drop_columns");
     let a = g.migrate(|mig| {
-        let a = mig.add_ingredient("a", &["a", "b"], Base::new(vec!["a".into(), "b".into()]));
+        let a = mig.add_base(
+            "a",
+            &["a", "b"],
+            Base::new(vec!["a".into(), "b".into()]),
+            false,
+        );
         mig.maintain_anonymous(a, &[0]);
         a
     });
@@ -1558,7 +1568,7 @@ fn key_on_added() {
     // set up graph
     let mut g = build_local("key_on_added");
     let a = g.migrate(|mig| {
-        let a = mig.add_ingredient("a", &["a", "b"], Base::new(vec![1.into(), 2.into()]));
+        let a = mig.add_base("a", &["a", "b"], Base::new(vec![1.into(), 2.into()]), false);
         a
     });
 
@@ -1592,9 +1602,14 @@ fn replay_during_replay() {
         //  - a will be the left side of the left join
         //  - u1 and u2 will be joined together with a regular one-to-one join to produce a partial
         //    view (remember, we need to miss in the source of the replay, so it must be partial).
-        let a = mig.add_ingredient("a", &["a"], Base::new(vec![1.into()]));
-        let u1 = mig.add_ingredient("u1", &["u"], Base::new(vec![1.into()]));
-        let u2 = mig.add_ingredient("u2", &["u", "a"], Base::new(vec![1.into(), 2.into()]));
+        let a = mig.add_base("a", &["a"], Base::new(vec![1.into()]), false);
+        let u1 = mig.add_base("u1", &["u"], Base::new(vec![1.into()]), false);
+        let u2 = mig.add_base(
+            "u2",
+            &["u", "a"],
+            Base::new(vec![1.into(), 2.into()]),
+            false,
+        );
         (a, u1, u2)
     });
 
@@ -1684,7 +1699,7 @@ fn replay_during_replay() {
 fn full_aggregation_with_bogokey() {
     // set up graph
     let mut g = build_local("full_aggregation_with_bogokey");
-    let base = g.migrate(|mig| mig.add_ingredient("base", &["x"], Base::new(vec![1.into()])));
+    let base = g.migrate(|mig| mig.add_base("base", &["x"], Base::new(vec![1.into()]), false));
 
     // add an aggregation over the base with a bogo key.
     // in other words, the aggregation is across all rows.
@@ -1738,7 +1753,7 @@ fn transactional_migration() {
     // set up graph
     let mut g = build_local("transactional_migration");
     let a = g.migrate(|mig| {
-        let a = mig.add_transactional_base("a", &["a", "b"], Base::default());
+        let a = mig.add_base("a", &["a", "b"], Base::default(), true);
         mig.maintain_anonymous(a, &[0]);
         a
     });
@@ -1761,7 +1776,7 @@ fn transactional_migration() {
 
     // add unrelated node b in a migration
     let b = g.migrate(|mig| {
-        let b = mig.add_transactional_base("b", &["a", "b"], Base::default());
+        let b = mig.add_base("b", &["a", "b"], Base::default(), true);
         mig.maintain_anonymous(b, &[0]);
         b
     });
@@ -1827,8 +1842,8 @@ fn crossing_migration() {
     // set up graph
     let mut g = build_local("crossing_migration");
     let (a, b) = g.migrate(|mig| {
-        let a = mig.add_ingredient("a", &["a", "b"], Base::default());
-        let b = mig.add_ingredient("b", &["a", "b"], Base::default());
+        let a = mig.add_base("a", &["a", "b"], Base::default(), false);
+        let b = mig.add_base("b", &["a", "b"], Base::default(), false);
         (a, b)
     });
     let mut muta = g.get_mutator("a").unwrap();
@@ -1874,7 +1889,7 @@ fn independent_domain_migration() {
     // set up graph
     let mut g = build_local("independent_domain_migration");
     let _ = g.migrate(|mig| {
-        let a = mig.add_ingredient("a", &["a", "b"], Base::default());
+        let a = mig.add_base("a", &["a", "b"], Base::default(), false);
         mig.maintain_anonymous(a, &[0]);
         a
     });
@@ -1896,7 +1911,7 @@ fn independent_domain_migration() {
 
     // add unrelated node b in a migration
     let _ = g.migrate(|mig| {
-        let b = mig.add_ingredient("b", &["a", "b"], Base::default());
+        let b = mig.add_base("b", &["a", "b"], Base::default(), false);
         mig.maintain_anonymous(b, &[0]);
         b
     });
@@ -1922,8 +1937,8 @@ fn domain_amend_migration() {
     // set up graph
     let mut g = build_local("domain_amend_migration");
     let (a, b) = g.migrate(|mig| {
-        let a = mig.add_ingredient("a", &["a", "b"], Base::default());
-        let b = mig.add_ingredient("b", &["a", "b"], Base::default());
+        let a = mig.add_base("a", &["a", "b"], Base::default(), false);
+        let b = mig.add_base("b", &["a", "b"], Base::default(), false);
         (a, b)
     });
     let mut muta = g.get_mutator("a").unwrap();
@@ -1973,7 +1988,7 @@ fn migration_depends_on_unchanged_domain() {
     let mut g = build_local("migration_depends_on_unchanged_domain");
     let left = g.migrate(|mig| {
         // base node, so will be materialized
-        let left = mig.add_ingredient("foo", &["a", "b"], Base::default());
+        let left = mig.add_base("foo", &["a", "b"], Base::default(), false);
 
         // node in different domain that depends on foo causes egress to be added
         mig.add_ingredient("bar", &["a", "b"], Identity::new(left));
@@ -1983,7 +1998,7 @@ fn migration_depends_on_unchanged_domain() {
     g.migrate(move |mig| {
         // joins require their inputs to be materialized
         // we need a new base as well so we can actually make a join
-        let tmp = mig.add_ingredient("tmp", &["a", "b"], Base::default());
+        let tmp = mig.add_base("tmp", &["a", "b"], Base::default(), false);
         let j = Join::new(
             left,
             tmp,
@@ -2001,14 +2016,15 @@ fn do_full_vote_migration(old_puts_after: bool) {
         // migrate
 
         // add article base node
-        let article = mig.add_ingredient("article", &["id", "title"], Base::default());
+        let article = mig.add_base("article", &["id", "title"], Base::default(), false);
 
         // add vote base table
         // NOTE: the double-column key here means that we can't shard vote
-        let vote = mig.add_ingredient(
+        let vote = mig.add_base(
             "vote",
             &["user", "id"],
             Base::default().with_key(vec![0, 1]),
+            false,
         );
 
         // add vote count
@@ -2058,7 +2074,7 @@ fn do_full_vote_migration(old_puts_after: bool) {
     // migrate
     let _ = g.migrate(move |mig| {
         // add new "ratings" base table
-        let rating = mig.add_ingredient("rating", &["user", "id", "stars"], Base::default());
+        let rating = mig.add_base("rating", &["user", "id", "stars"], Base::default(), false);
 
         // add sum of ratings
         let rs = mig.add_ingredient(
@@ -2130,7 +2146,7 @@ fn live_writes() {
         // migrate
 
         // add vote base table
-        let vote = mig.add_ingredient("vote", &["user", "id"], Base::default());
+        let vote = mig.add_base("vote", &["user", "id"], Base::default(), false);
 
         // add vote count
         let vc = mig.add_ingredient(
@@ -2202,8 +2218,8 @@ fn state_replay_migration_query() {
 
     let mut g = build_local("state_replay_migration_query");
     let (a, b) = g.migrate(|mig| {
-        let a = mig.add_ingredient("a", &["x", "y"], Base::default());
-        let b = mig.add_ingredient("b", &["x", "z"], Base::default());
+        let a = mig.add_base("a", &["x", "y"], Base::default(), false);
+        let b = mig.add_base("b", &["x", "z"], Base::default(), false);
 
         (a, b)
     });
@@ -2393,8 +2409,8 @@ fn node_removal() {
     ));
     let mut g = b.build_local();
     let cid = g.migrate(|mig| {
-        let a = mig.add_ingredient("a", &["a", "b"], Base::new(vec![]).with_key(vec![0]));
-        let b = mig.add_ingredient("b", &["a", "b"], Base::new(vec![]).with_key(vec![0]));
+        let a = mig.add_base("a", &["a", "b"], Base::new(vec![]).with_key(vec![0]), false);
+        let b = mig.add_base("b", &["a", "b"], Base::new(vec![]).with_key(vec![0]), false);
 
         let mut emits = HashMap::new();
         emits.insert(a, vec![0, 1]);

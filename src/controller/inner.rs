@@ -454,8 +454,7 @@ impl ControllerInner {
             .neighbors_directed(self.source, petgraph::EdgeDirection::Outgoing)
             .map(|n| {
                 let base = &self.ingredients[n];
-                assert!(base.is_internal());
-                assert!(base.get_base().is_some());
+                assert!(base.is_base());
                 (base.name().to_owned(), n.into())
             })
             .collect()

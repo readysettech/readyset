@@ -11,6 +11,7 @@ impl fmt::Debug for Node {
             NodeType::Egress { .. } => write!(f, "egress node"),
             NodeType::Sharder { .. } => write!(f, "sharder"),
             NodeType::Reader(..) => write!(f, "reader node"),
+            NodeType::Base(..) => write!(f, "B"),
             NodeType::Internal(ref i) => write!(f, "internal {} node", i.description()),
         }
     }
@@ -59,6 +60,16 @@ impl Node {
         match self.inner {
             NodeType::Source => s.push_str("(source)"),
             NodeType::Dropped => s.push_str("✗"),
+            NodeType::Base(..) => {
+                s.push_str(&format!(
+                    "{{ {{ {} / {} | {} {} }} | {} }}",
+                    addr,
+                    Self::escape(self.name()),
+                    "B",
+                    materialized,
+                    self.fields().join(", \\n")
+                ));
+            }
             NodeType::Ingress => s.push_str(&format!(
                 "{{ {{ {} {} }} | (ingress) }}",
                 addr, materialized

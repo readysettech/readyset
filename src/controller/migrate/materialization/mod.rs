@@ -132,14 +132,11 @@ impl Materializations {
                 let mut i = HashMap::new();
                 i.insert(ni, (Vec::from(key.unwrap()), false));
                 i
-            } else if !n.is_internal() {
-                // non-internal nodes cannot generate indexing obligations
-                continue;
             } else {
                 n.suggest_indexes(ni)
             };
 
-            if indices.is_empty() && n.get_base().is_some() {
+            if indices.is_empty() && n.is_base() {
                 // we must *always* materialize base nodes
                 // so, just make up some column to index on
                 indices.insert(ni, (vec![0], true));
@@ -178,6 +175,9 @@ impl Materializations {
                         .iter()
                         .map(|&col| {
                             if !n.is_internal() {
+                                if n.is_base() {
+                                    unreachable!();
+                                }
                                 return Ok(col);
                             }
 
@@ -300,7 +300,7 @@ impl Materializations {
             let mut add = HashMap::new();
 
             // bases can't be partial
-            if graph[ni].is_internal() && graph[ni].get_base().is_some() {
+            if graph[ni].is_base() {
                 able = false;
             }
 

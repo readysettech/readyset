@@ -42,10 +42,7 @@ impl GroupCommitQueueSet {
     /// Returns whether the given packet should be persisted.
     pub fn should_append(&self, p: &Box<Packet>, nodes: &DomainNodes) -> bool {
         match Self::packet_destination(p) {
-            Some(n) => {
-                let node = &nodes[&n].borrow();
-                node.is_internal() && node.get_base().is_some()
-            }
+            Some(n) => nodes[&n].borrow().is_base(),
             None => false,
         }
     }

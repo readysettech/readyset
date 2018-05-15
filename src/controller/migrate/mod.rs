@@ -20,7 +20,6 @@
 //!
 //! Beware, Here be dragons™
 
-use dataflow::ops::base::Base;
 use dataflow::prelude::*;
 use dataflow::{checktable, node, payload};
 
@@ -85,6 +84,7 @@ impl<'a> Migration<'a> {
     {
         i.on_connected(&self.mainline.ingredients);
         let parents = i.ancestors();
+        assert!(!parents.is_empty());
 
         let transactional = !parents.is_empty()
             && parents
@@ -107,15 +107,47 @@ impl<'a> Migration<'a> {
         // keep track of the fact that it's new
         self.added.push(ni);
         // insert it into the graph
-        if parents.is_empty() {
-            self.mainline
-                .ingredients
-                .add_edge(self.mainline.source, ni, ());
-        } else {
-            for parent in parents {
-                self.mainline.ingredients.add_edge(parent, ni, ());
-            }
+        for parent in parents {
+            self.mainline.ingredients.add_edge(parent, ni, ());
         }
+        // and tell the caller its id
+        ni.into()
+    }
+
+    /// Add the given `Base` to the Soup.
+    ///
+    /// The returned identifier can later be used to refer to the added ingredient.
+    pub fn add_base<S1, FS, S2>(
+        &mut self,
+        name: S1,
+        fields: FS,
+        mut b: node::special::Base,
+        transactional: bool,
+    ) -> NodeIndex
+    where
+        S1: ToString,
+        S2: ToString,
+        FS: IntoIterator<Item = S2>,
+    {
+        // add to the graph
+        let ni = self.mainline.ingredients.add_node(node::Node::new(
+            name.to_string(),
+            fields,
+            b,
+            transactional,
+        ));
+        info!(self.log,
+              "adding new base";
+              "node" => ni.index(),
+              "transactional" => ?transactional,
+        );
+
+        // keep track of the fact that it's new
+        self.added.push(ni);
+        // insert it into the graph
+        self.mainline
+            .ingredients
+            .add_edge(self.mainline.source, ni, ());
         // and tell the caller its id
         ni.into()
     }
@@ -141,42 +173,6 @@ impl<'a> Migration<'a> {
         (id, group)
     }
 
-    /// Add a transactional base node to the graph
-    pub fn add_transactional_base<S1, FS, S2>(
-        &mut self,
-        name: S1,
-        fields: FS,
-        mut b: Base,
-    ) -> NodeIndex
-    where
-        S1: ToString,
-        S2: ToString,
-        FS: IntoIterator<Item = S2>,
-    {
-        b.on_connected(&self.mainline.ingredients);
-        let b: NodeOperator = b.into();
-
-        // add to the graph
-        let ni =
-            self.mainline
-                .ingredients
-                .add_node(node::Node::new(name.to_string(), fields, b, true));
-        info!(self.log,
-              "adding new node";
-              "node" => ni.index(),
-              "type" => format!("{:?}", self.mainline.ingredients[ni])
-        );
-
-        // keep track of the fact that it's new
-        self.added.push(ni);
-        // insert it into the graph
-        self.mainline
-            .ingredients
-            .add_edge(self.mainline.source, ni, ());
-        // and tell the caller its id
-        ni.into()
-    }
-
     /// Add a new column to a base node.
     ///
     /// Note that a default value must be provided such that old writes can be converted into this
@@ -192,17 +188,14 @@ impl<'a> Migration<'a> {
 
         let field = field.to_string();
         let base = &mut self.mainline.ingredients[node];
-        assert!(base.is_internal() && base.get_base().is_some());
+        assert!(base.is_base());
 
         // we need to tell the base about its new column and its default, so that old writes that
         // do not have it get the additional value added to them.
         let col_i1 = base.add_column(&field);
         // we can't rely on DerefMut, since it disallows mutating Taken nodes
         {
-            let col_i2 = base.inner_mut()
-                .get_base_mut()
-                .unwrap()
-                .add_column(default.clone());
+            let col_i2 = base.get_base_mut().unwrap().add_column(default.clone());
             assert_eq!(col_i1, col_i2);
         }
 
@@ -218,12 +211,12 @@ impl<'a> Migration<'a> {
         assert!(!self.added.iter().any(|&ni| ni == node));
 
         let base = &mut self.mainline.ingredients[node];
-        assert!(base.is_internal() && base.get_base().is_some());
+        assert!(base.is_base());
 
         // we need to tell the base about the dropped column, so that old writes that contain that
         // column will have it filled in with default values (this is done in Mutator).
         // we can't rely on DerefMut, since it disallows mutating Taken nodes
-        base.inner_mut().get_base_mut().unwrap().drop_column(column);
+        base.get_base_mut().unwrap().drop_column(column);
 
         // also eventually propagate to domain clone
         self.columns.push((node, ColumnChange::Drop(column)));

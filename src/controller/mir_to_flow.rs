@@ -4,11 +4,11 @@ use std::collections::HashMap;
 
 use controller::Migration;
 use basics::{DataType, NodeIndex};
-use dataflow::ops;
 use dataflow::ops::filter::FilterCondition;
 use dataflow::ops::join::{Join, JoinType};
 use dataflow::ops::latest::Latest;
 use dataflow::ops::project::{Project, ProjectExpression, ProjectExpressionBase};
+use dataflow::{node, ops};
 use mir::node::{GroupedNodeType, MirNode, MirNodeType};
 use mir::query::{MirQuery, QueryFlowParts};
 use mir::{FlowNode, MirNodeRef};
@@ -401,16 +401,12 @@ pub(crate) fn make_base_node(
                     .unwrap()
             })
             .collect();
-        ops::base::Base::new(default_values).with_key(pkey_column_ids)
+        node::special::Base::new(default_values).with_key(pkey_column_ids)
     } else {
-        ops::base::Base::new(default_values)
+        node::special::Base::new(default_values)
     };
 
-    if transactional {
-        FlowNode::New(mig.add_transactional_base(name, column_names.as_slice(), base))
-    } else {
-        FlowNode::New(mig.add_ingredient(name, column_names.as_slice(), base))
-    }
+    FlowNode::New(mig.add_base(name, column_names.as_slice(), base, transactional))
 }
 
 pub(crate) fn make_union_node(

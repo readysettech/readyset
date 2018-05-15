@@ -12,7 +12,6 @@ use vec_map::VecMap;
 #[derive(Debug, Serialize, Deserialize)]
 pub struct Base {
     primary_key: Option<Vec<usize>>,
-    us: Option<IndexPair>,
 
     defaults: Vec<DataType>,
     dropped: Vec<usize>,
@@ -91,7 +90,6 @@ impl Clone for Base {
     fn clone(&self) -> Base {
         Base {
             primary_key: self.primary_key.clone(),
-            us: self.us,
 
             defaults: self.defaults.clone(),
             dropped: self.dropped.clone(),
@@ -104,7 +102,6 @@ impl Default for Base {
     fn default() -> Self {
         Base {
             primary_key: None,
-            us: None,
 
             defaults: Vec::new(),
             dropped: Vec::new(),
@@ -129,39 +126,23 @@ fn key_of<'a>(key_cols: &'a [usize], r: &'a Record) -> impl Iterator<Item = &'a 
         .map(move |(i, col)| key_val(i, *col, r))
 }
 
-impl Ingredient for Base {
-    fn take(&mut self) -> NodeOperator {
-        Clone::clone(self).into()
+impl Base {
+    pub(crate) fn take(&mut self) -> Self {
+        Clone::clone(self)
     }
 
-    fn ancestors(&self) -> Vec<NodeIndex> {
-        vec![]
-    }
-
-    fn on_connected(&mut self, _: &Graph) {}
-
-    fn on_commit(&mut self, us: NodeIndex, remap: &HashMap<NodeIndex, IndexPair>) {
-        self.us = Some(remap[&us]);
-    }
-
-    fn on_input(
+    pub(crate) fn process(
         &mut self,
-        _: LocalNodeIndex,
+        us: LocalNodeIndex,
         mut rs: Records,
-        _: &mut Tracer,
-        _: Option<&[usize]>,
-        _: &DomainNodes,
         state: &StateMap,
-    ) -> ProcessingResult {
+    ) -> Records {
         if self.primary_key.is_none() || rs.is_empty() {
             for r in &mut *rs {
                 self.fix(r);
             }
 
-            return ProcessingResult {
-                results: rs,
-                misses: Vec::new(),
-            };
+            return rs;
         }
 
         let key_cols = &self.primary_key.as_ref().unwrap()[..];
@@ -174,7 +155,7 @@ impl Ingredient for Base {
 
         // starting record state
         let db = state
-            .get(&*self.us.unwrap())
+            .get(&us)
             .expect("base with primary key must be materialized");
 
         let get_current = |current_key: &'_ _| {
@@ -292,13 +273,10 @@ impl Ingredient for Base {
             self.fix(r);
         }
 
-        ProcessingResult {
-            results: results.into(),
-            misses: Vec::new(),
-        }
+        results.into()
     }
 
-    fn suggest_indexes(&self, n: NodeIndex) -> HashMap<NodeIndex, (Vec<usize>, bool)> {
+    pub(crate) fn suggest_indexes(&self, n: NodeIndex) -> HashMap<NodeIndex, (Vec<usize>, bool)> {
         if self.primary_key.is_some() {
             Some((n, (self.primary_key.as_ref().unwrap().clone(), true)))
                 .into_iter()
@@ -306,26 +284,6 @@ impl Ingredient for Base {
         } else {
             HashMap::new()
         }
-    }
-
-    fn resolve(&self, _: usize) -> Option<Vec<(NodeIndex, usize)>> {
-        None
-    }
-
-    fn get_base(&self) -> Option<&Base> {
-        Some(self)
-    }
-
-    fn get_base_mut(&mut self) -> Option<&mut Base> {
-        Some(self)
-    }
-
-    fn description(&self) -> String {
-        "B".into()
-    }
-
-    fn parent_columns(&self, _: usize) -> Vec<(NodeIndex, Option<usize>)> {
-        unreachable!();
     }
 }
 
@@ -338,7 +296,6 @@ mod tests {
         let b = Base::default();
 
         assert!(b.primary_key.is_none());
-        assert!(b.us.is_none());
 
         assert_eq!(b.defaults.len(), 0);
         assert_eq!(b.dropped.len(), 0);
@@ -350,7 +307,6 @@ mod tests {
         let b = Base::new(vec![]);
 
         assert!(b.primary_key.is_none());
-        assert!(b.us.is_none());
 
         assert_eq!(b.defaults.len(), 0);
         assert_eq!(b.dropped.len(), 0);
@@ -359,7 +315,6 @@ mod tests {
 
     fn test_lots_of_changes_in_same_batch(mut state: Box<State>) {
         use node;
-        use ops::base::Base;
         use prelude::*;
         use std::collections::HashMap;
 
@@ -373,8 +328,6 @@ mod tests {
         ));
 
         let mut b = Base::new(vec![]).with_key(vec![0, 2]);
-        b.on_connected(&graph);
-        let b: NodeOperator = b.into();
         let global = graph.add_node(Node::new("b", &["x", "y", "z"], b, false));
         graph.add_edge(source, global, ());
         let local = unsafe { LocalNodeIndex::make(0 as u32) };
@@ -401,8 +354,7 @@ mod tests {
 
         let nodes = DomainNodes::new();
         let mut one = move |u: Vec<Record>| {
-            let mut m = n.on_input(local, u.into(), &mut None, None, &nodes, &states)
-                .results;
+            let mut m = n.get_base_mut().unwrap().process(local, u.into(), &states);
             node::materialize(&mut m, None, states.get_mut(&local));
             m
         };

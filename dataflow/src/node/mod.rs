@@ -93,7 +93,7 @@ impl Node {
     pub fn take(&mut self) -> DanglingDomainNode {
         assert!(!self.taken);
         assert!(
-            !self.is_internal() || self.domain.is_some(),
+            (!self.is_internal() && !self.is_base()) || self.domain.is_some(),
             "tried to take unassigned node"
         );
 
@@ -179,12 +179,11 @@ impl Node {
         }
     }
 
-    /// For mutating even though you *know* it's been taken
-    pub fn inner_mut(&mut self) -> &mut ops::NodeOperator {
-        assert!(self.taken);
+    pub fn suggest_indexes(&self, n: NodeIndex) -> HashMap<NodeIndex, (Vec<usize>, bool)> {
         match self.inner {
-            NodeType::Internal(ref mut i) => i,
-            _ => unreachable!(),
+            NodeType::Internal(ref i) => i.suggest_indexes(n),
+            NodeType::Base(ref b) => b.suggest_indexes(n),
+            _ => HashMap::new(),
         }
     }
 }
@@ -298,8 +297,28 @@ impl Node {
         self.index.as_ref().unwrap()
     }
 
+    pub fn get_base(&self) -> Option<&special::Base> {
+        if let NodeType::Base(ref b) = self.inner {
+            Some(b)
+        } else {
+            None
+        }
+    }
+
+    pub fn get_base_mut(&mut self) -> Option<&mut special::Base> {
+        if let NodeType::Base(ref mut b) = self.inner {
+            Some(b)
+        } else {
+            None
+        }
+    }
+
     pub fn is_base(&self) -> bool {
-        self.is_internal() && self.get_base().is_some()
+        if let NodeType::Base(..) = self.inner {
+            true
+        } else {
+            false
+        }
     }
 
     pub fn is_localized(&self) -> bool {

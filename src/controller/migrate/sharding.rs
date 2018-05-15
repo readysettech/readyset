@@ -37,7 +37,7 @@ pub fn shard(
             .map(|ni| (ni, graph[ni].sharded_by()))
             .collect();
 
-        let mut need_sharding = if graph[node].is_internal() {
+        let mut need_sharding = if graph[node].is_internal() || graph[node].is_base() {
             // suggest_indexes is okay because `node` *must* be new, and therefore will return
             // global node indices.
             graph[node].suggest_indexes(node.into())
@@ -74,6 +74,8 @@ pub fn shard(
             }
             graph.node_weight_mut(node).unwrap().shard_by(s);
             continue;
+        } else if graph[node].is_source() {
+            continue;
         } else {
             // non-internal nodes are always pass-through
             HashMap::new()
@@ -92,7 +94,7 @@ pub fn shard(
                   "node" => ?node,
                   "sharding" => ?s);
 
-            if graph[node].is_internal() {
+            if graph[node].is_internal() || graph[node].is_base() {
                 if let Sharding::ByColumn(c, shards) = s {
                     // remap c according to node's semantics
                     let n = &graph[node];
@@ -124,7 +126,7 @@ pub fn shard(
             }
         }
         if complex {
-            if graph[node].get_base().is_none() {
+            if !graph[node].is_base() {
                 // not supported yet -- force no sharding
                 // TODO: if we're sharding by a two-part key and need sharding by the *first* part
                 // of that key, we can probably re-use the existing sharding?
@@ -136,7 +138,7 @@ pub fn shard(
             continue;
         }
 
-        if graph[node].get_base().is_some() && graph[node].is_transactional() {
+        if graph[node].is_base() && graph[node].is_transactional() {
             error!(log, "not sharding transactional base node"; "node" => ?node);
             continue;
         }
@@ -150,6 +152,9 @@ pub fn shard(
 
             let resolved = if graph[node].is_internal() {
                 graph[node].resolve(want_sharding)
+            } else if graph[node].is_base() {
+                // nothing resolves through a base
+                None
             } else {
                 // non-internal nodes just pass through columns
                 assert_eq!(input_shardings.len(), 1);
@@ -161,7 +166,7 @@ pub fn shard(
                 )
             };
             match resolved {
-                None if !graph[node].is_internal() || graph[node].get_base().is_none() => {
+                None if !graph[node].is_base() => {
                     // weird operator -- needs an index in its output, which it generates.
                     // we need to have *no* sharding on our inputs!
                     info!(log, "de-sharding node that partitions by output key";
@@ -244,7 +249,7 @@ pub fn shard(
         // key. we then make sure all our inputs are sharded by that key too.
         debug!(log, "testing for sharding opportunities"; "node" => ?node);
         'outer: for col in 0..graph[node].fields().len() {
-            let srcs = if graph[node].get_base().is_some() {
+            let srcs = if graph[node].is_base() {
                 vec![(node.into(), None)]
             } else {
                 graph[node].parent_columns(col)
@@ -380,7 +385,7 @@ pub fn shard(
             }
 
             // if the parent is a base, the only option we have is to shard the base.
-            if graph[p].get_base().is_some() {
+            if graph[p].is_base() {
                 trace!(log, "well, its parent is a base");
 
                 // sharded transactional bases are hard
