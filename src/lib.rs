@@ -317,10 +317,10 @@
 #![feature(fnbox)]
 
 extern crate assert_infrequent;
+extern crate basics;
 extern crate bincode;
 extern crate channel;
 extern crate consensus;
-extern crate basics;
 extern crate dataflow;
 extern crate failure;
 extern crate fnv;
@@ -356,8 +356,9 @@ mod integration;
 
 pub use consensus::{LocalAuthority, ZookeeperAuthority};
 
-pub use basics::{DataType, Datas, DurabilityMode, Modification, NodeIndex, Operation,
-               PersistenceParameters};
+pub use basics::{
+    DataType, Datas, DurabilityMode, Modification, NodeIndex, Operation, PersistenceParameters,
+};
 
 pub use dataflow::checktable::{Token, TransactionResult};
 pub use dataflow::debug::{DebugEvent, DebugEventType};

@@ -160,7 +160,8 @@ impl State for PersistentState {
 
     fn lookup(&self, columns: &[usize], key: &KeyType) -> LookupResult {
         let db = self.db.as_ref().unwrap();
-        let index_id = self.indices
+        let index_id = self
+            .indices
             .iter()
             .position(|index| &index.columns[..] == columns)
             .expect("lookup on non-indexed column set");
@@ -189,7 +190,8 @@ impl State for PersistentState {
 
     fn add_key(&mut self, columns: &[usize], partial: Option<Vec<Tag>>) {
         assert!(partial.is_none(), "Bases can't be partial");
-        let existing = self.indices
+        let existing = self
+            .indices
             .iter()
             .any(|index| &index.columns[..] == columns);
 
@@ -201,7 +203,8 @@ impl State for PersistentState {
         // We'll store all the pointers (or values if this is index 0) for
         // this index in its own column family:
         let index_id = self.indices.len().to_string();
-        let column_family = self.db
+        let column_family = self
+            .db
             .as_mut()
             .unwrap()
             .create_cf(&index_id, &self.db_opts)
@@ -247,7 +250,8 @@ impl State for PersistentState {
     fn rows(&self) -> usize {
         let db = self.db.as_ref().unwrap();
         let cf = db.cf_handle("0").unwrap();
-        let total_keys = db.property_int_value_cf(cf, "rocksdb.estimate-num-keys")
+        let total_keys = db
+            .property_int_value_cf(cf, "rocksdb.estimate-num-keys")
             .unwrap() as usize;
 
         (total_keys / self.indices.len())
@@ -302,7 +306,8 @@ impl PersistentState {
 
         let mut db = DB::open_cf_descriptors(&opts, &full_name, cfs).unwrap();
         let meta = Self::retrieve_and_update_meta(&db);
-        let indices: Vec<PersistentIndex> = meta.indices
+        let indices: Vec<PersistentIndex> = meta
+            .indices
             .into_iter()
             .enumerate()
             .map(|(i, columns)| {
@@ -548,7 +553,8 @@ impl PersistentState {
                 // This would imply that we're trying to delete a different row than the one we
                 // found when we resolved the DeleteRequest in Base. This really shouldn't happen,
                 // but we'll leave a check here in debug mode for now.
-                let raw = db.get_cf(value_cf, &prefix)
+                let raw = db
+                    .get_cf(value_cf, &prefix)
                     .unwrap()
                     .expect("tried removing non-existant primary key row");
                 let value: Vec<DataType> = bincode::deserialize(&*raw).unwrap();
@@ -557,7 +563,8 @@ impl PersistentState {
 
             do_remove(&prefix[..]);
         } else {
-            let (key, _value) = db.prefix_iterator_cf(value_cf, &prefix)
+            let (key, _value) = db
+                .prefix_iterator_cf(value_cf, &prefix)
                 .unwrap()
                 .find(|(_, raw_value)| {
                     let value: Vec<DataType> = bincode::deserialize(&*raw_value).unwrap();

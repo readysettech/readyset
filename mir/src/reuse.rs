@@ -1,8 +1,8 @@
-use MirNodeRef;
 use node::{MirNode, MirNodeType};
-use query::MirQuery;
 use nom_sql::Column;
+use query::MirQuery;
 use slog;
+use MirNodeRef;
 
 pub fn rewind_until_columns_found(leaf: MirNodeRef, columns: &Vec<Column>) -> Option<MirNodeRef> {
     let mut cur = leaf;
@@ -11,7 +11,8 @@ pub fn rewind_until_columns_found(leaf: MirNodeRef, columns: &Vec<Column>) -> Op
             return None;
         }
         // silly, but the borrow checker doesn't let us do this in a single line
-        let next = cur.borrow()
+        let next = cur
+            .borrow()
             .ancestors()
             .iter()
             .next()
@@ -37,9 +38,9 @@ pub fn merge_mir_for_queries(
     new_query: &MirQuery,
     old_query: &MirQuery,
 ) -> (MirQuery, usize) {
+    use std::cell::RefCell;
     use std::collections::{HashMap, HashSet, VecDeque};
     use std::rc::Rc;
-    use std::cell::RefCell;
 
     let mut trace_nodes = VecDeque::new();
     for old_base in &old_query.roots {
@@ -154,7 +155,8 @@ pub fn merge_mir_for_queries(
     while let Some(n) = q.pop_front() {
         assert_eq!(in_edge_counts[&n.borrow().versioned_name()], 0);
 
-        let ancestors: Vec<_> = n.borrow()
+        let ancestors: Vec<_> = n
+            .borrow()
             .ancestors()
             .iter()
             .map(|a| match reuse.get(&a.borrow().versioned_name()) {
@@ -164,7 +166,8 @@ pub fn merge_mir_for_queries(
             .cloned()
             .collect();
         let original_children: Vec<_> = n.borrow().children().iter().cloned().collect();
-        let children: Vec<_> = n.borrow()
+        let children: Vec<_> = n
+            .borrow()
             .children()
             .iter()
             .map(|c| match reuse.get(&c.borrow().versioned_name()) {
@@ -219,8 +222,8 @@ pub fn merge_mir_for_queries(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use nom_sql::{Column, ColumnSpecification, SqlType};
     use node::{MirNode, MirNodeType};
+    use nom_sql::{Column, ColumnSpecification, SqlType};
     use MirNodeRef;
 
     fn make_nodes() -> (MirNodeRef, MirNodeRef, MirNodeRef, MirNodeRef) {

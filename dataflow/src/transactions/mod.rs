@@ -208,7 +208,8 @@ impl DomainState {
     }
 
     fn update_next_transaction(&mut self) {
-        let has_next = self.buffer
+        let has_next = self
+            .buffer
             .peek()
             .map(|e| e.prev_ts == self.ts)
             .unwrap_or(false);

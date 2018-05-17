@@ -45,7 +45,8 @@ pub fn query_from_condition_base(cond: &ConditionBase) -> (SqlQuery, Column) {
     match *cond {
         NestedSelect(ref bst) => {
             sq = SqlQuery::Select(*bst.clone());
-            column = bst.fields
+            column = bst
+                .fields
                 .iter()
                 .map(|fe| match *fe {
                     FieldDefinitionExpression::Col(ref c) => c.clone(),
@@ -91,8 +92,10 @@ impl SubQueries for SqlQuery {
 mod tests {
     use super::*;
     use nom_sql::ConditionBase::*;
-    use nom_sql::{Column, ConditionTree, FieldDefinitionExpression, Operator, SelectStatement,
-                  SqlQuery, Table};
+    use nom_sql::{
+        Column, ConditionTree, FieldDefinitionExpression, Operator, SelectStatement, SqlQuery,
+        Table,
+    };
 
     fn wrap(cb: ConditionBase) -> Box<ConditionExpression> {
         Box::new(Base(cb))

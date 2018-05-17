@@ -73,7 +73,8 @@ impl Sharder {
         let mut m = m.take().unwrap();
         for record in m.take_data() {
             let shard = self.to_shard(&record);
-            let p = self.sharded
+            let p = self
+                .sharded
                 .entry(shard)
                 .or_insert_with(|| box m.clone_data());
             p.map_data(|rs| rs.push(record));
@@ -146,7 +147,8 @@ impl Sharder {
             for key in keys {
                 let shard = self.shard(&key[0]);
                 let dst = self.txs[shard].0;
-                let p = self.sharded
+                let p = self
+                    .sharded
                     .entry(shard)
                     .or_insert_with(|| box Packet::EvictKeys {
                         link: Link { src, dst },

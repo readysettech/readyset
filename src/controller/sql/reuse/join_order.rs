@@ -44,7 +44,8 @@ impl JoinChain {
 
     fn merge_chain(self, other: JoinChain) -> JoinChain {
         let tables = self.tables.union(&other.tables).cloned().collect();
-        let join_order = self.join_order
+        let join_order = self
+            .join_order
             .into_iter()
             .chain(other.join_order.into_iter())
             .collect();

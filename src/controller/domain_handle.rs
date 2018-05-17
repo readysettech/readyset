@@ -6,10 +6,10 @@ use std::{self, cell, io};
 use mio;
 use slog::Logger;
 
+use basics::PersistenceParameters;
 use channel::poll::{KeepPolling, PollEvent, PollingLoop, StopPolling};
 use channel::{tcp, DomainConnectionBuilder, TcpReceiver, TcpSender};
 use consensus::Epoch;
-use basics::PersistenceParameters;
 use dataflow::payload::ControlReplyPacket;
 use dataflow::prelude::*;
 use dataflow::statistics::{DomainStats, NodeStats};

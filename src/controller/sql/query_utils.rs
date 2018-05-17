@@ -27,7 +27,8 @@ impl ReferredTables for ConditionExpression {
         let mut tables = Vec::new();
         match *self {
             ConditionExpression::LogicalOp(ref ct) | ConditionExpression::ComparisonOp(ref ct) => {
-                for t in ct.left
+                for t in ct
+                    .left
                     .referred_tables()
                     .into_iter()
                     .chain(ct.right.referred_tables().into_iter())

@@ -20,8 +20,8 @@ use std::io::{self, Read, Write};
 use std::marker::PhantomData;
 use std::net::SocketAddr;
 use std::ops::{Deref, DerefMut};
-use std::sync::Mutex;
 use std::sync::mpsc::{self, SendError};
+use std::sync::Mutex;
 
 use byteorder::{ByteOrder, NetworkEndian};
 use serde::{Deserialize, Deserializer, Serialize, Serializer};

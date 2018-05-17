@@ -3,14 +3,14 @@ use std::ops::Deref;
 use std::rc::Rc;
 use std::{slice, vec};
 
+mod keyed_state;
 mod memory_state;
 mod persistent_state;
 mod single_state;
-mod keyed_state;
 
-pub use data::{DataType, Records, SizeOf};
-pub use self::persistent_state::PersistentState;
 pub use self::memory_state::MemoryState;
+pub use self::persistent_state::PersistentState;
+pub use data::{DataType, Records, SizeOf};
 
 pub trait State: SizeOf + Send {
     /// Add an index keyed by the given columns and replayed to by the given partial tags.

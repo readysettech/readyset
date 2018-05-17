@@ -1,14 +1,13 @@
+use basics::NodeIndex;
+use controller::security::SecurityConfig;
 use controller::sql::reuse::ReuseConfigType;
 use controller::sql::SqlIncorporator;
 use controller::Migration;
-use basics::NodeIndex;
 use dataflow::ops::trigger::Trigger;
 use dataflow::ops::trigger::TriggerEvent;
 use dataflow::prelude::DataType;
 use nom_sql::parser as sql_parser;
 use nom_sql::SqlQuery;
-
-use controller::security::SecurityConfig;
 
 use nom::{self, is_alphanumeric, multispace};
 use nom_sql::CreateTableStatement;
@@ -58,8 +57,10 @@ pub struct Recipe {
 impl PartialEq for Recipe {
     /// Equality for recipes is defined in terms of all members apart from `inc`.
     fn eq(&self, other: &Recipe) -> bool {
-        self.expressions == other.expressions && self.expression_order == other.expression_order
-            && self.aliases == other.aliases && self.version == other.version
+        self.expressions == other.expressions
+            && self.expression_order == other.expression_order
+            && self.aliases == other.aliases
+            && self.version == other.version
             && self.prior == other.prior
     }
 }
@@ -223,7 +224,8 @@ impl Recipe {
         let mut aliases = HashMap::default();
         let mut expression_order = Vec::new();
         let mut duplicates = 0;
-        let expressions = qs.into_iter()
+        let expressions = qs
+            .into_iter()
             .map(|(n, q, is_leaf)| {
                 let qid = hash_query(&q);
                 if !expression_order.contains(&qid) {
@@ -314,7 +316,8 @@ impl Recipe {
 
             let is_leaf = if group.is_some() { false } else { is_leaf };
 
-            let qfp = self.inc
+            let qfp = self
+                .inc
                 .as_mut()
                 .unwrap()
                 .add_parsed_query(q, new_name, is_leaf, mig)?;
@@ -416,7 +419,8 @@ impl Recipe {
             let (n, q, is_leaf) = self.expressions[&qid].clone();
 
             // add the query
-            let qfp = self.inc
+            let qfp = self
+                .inc
                 .as_mut()
                 .unwrap()
                 .add_parsed_query(q, n.clone(), is_leaf, mig)?;

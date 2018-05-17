@@ -254,9 +254,10 @@ mod tests {
         );
         assert_eq!(
             provenance_of(&g, x, &[0, 1], |_, _, _| None),
-            vec![
-                vec![(x, vec![Some(0), Some(1)]), (a, vec![Some(0), Some(1)])],
-            ]
+            vec![vec![
+                (x, vec![Some(0), Some(1)]),
+                (a, vec![Some(0), Some(1)]),
+            ]]
         );
     }
 
@@ -283,9 +284,10 @@ mod tests {
         );
         assert_eq!(
             provenance_of(&g, x, &[0, 1], |_, _, _| None),
-            vec![
-                vec![(x, vec![Some(0), Some(1)]), (a, vec![Some(1), Some(0)])],
-            ]
+            vec![vec![
+                (x, vec![Some(0), Some(1)]),
+                (a, vec![Some(1), Some(0)]),
+            ]]
         );
     }
 

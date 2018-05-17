@@ -424,9 +424,8 @@ impl Materializations {
     /// Retrieves the materialization status of a given node, or None
     /// if the node isn't materialized.
     pub fn get_status(&self, index: &NodeIndex, node: &Node) -> MaterializationStatus {
-        let is_materialized = self.have.contains_key(index) || node.with_reader(|r| {
-            r.is_materialized()
-        }).unwrap_or(false);
+        let is_materialized = self.have.contains_key(index)
+            || node.with_reader(|r| r.is_materialized()).unwrap_or(false);
 
         if !is_materialized {
             MaterializationStatus::Not
@@ -638,7 +637,8 @@ impl Materializations {
         // then, we start prepping new nodes
         for ni in make {
             let n = &graph[ni];
-            let mut index_on = self.added
+            let mut index_on = self
+                .added
                 .remove(&ni)
                 .map(|idxs| {
                     assert!(!idxs.is_empty());

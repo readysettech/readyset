@@ -4,8 +4,8 @@ use nom_sql::Table;
 use std::collections::HashMap;
 use std::vec::Vec;
 
-use controller::sql::UniverseId;
 use controller::sql::reuse::join_order::reorder_joins;
+use controller::sql::UniverseId;
 
 use dataflow::prelude::DataType;
 
