@@ -4,9 +4,9 @@ use chrono::{self, NaiveDateTime};
 
 use nom_sql::Literal;
 
+use std::fmt;
 use std::hash::{Hash, Hasher};
 use std::ops::{Add, Deref, DerefMut, Div, Mul, Sub};
-use std::fmt;
 
 const FLOAT_PRECISION: f64 = 1000_000_000.0;
 const TINYTEXT_WIDTH: usize = 15;

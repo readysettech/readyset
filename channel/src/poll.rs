@@ -8,8 +8,8 @@ use std::time::Duration;
 use mio::net::{TcpListener, TcpStream};
 use mio::{Events, Poll, PollOpt, Ready, Token};
 
-use serde::Serialize;
 use serde::de::DeserializeOwned;
+use serde::Serialize;
 
 const LISTENER: usize = 0;
 
@@ -222,8 +222,7 @@ where
                     {
                         Ok(message) => {
                             stop = process_event(GeneralizedPollEvent::ProcessRpc(
-                                message,
-                                &mut reply,
+                                message, &mut reply,
                             ));
                             if let Some(reply) = reply {
                                 match self.inner.rpc_endpoints[endpoint]

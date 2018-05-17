@@ -3,9 +3,9 @@ use std::rc::Rc;
 
 use rand::{self, Rng};
 
-use ::*;
 use data::SizeOf;
 use local::single_state::SingleState;
+use *;
 
 #[derive(Default)]
 pub struct MemoryState {

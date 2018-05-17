@@ -1,8 +1,8 @@
-use ::*;
 use data::SizeOf;
 use fnv::FnvBuildHasher;
 use rahashmap::HashMap as RaHashMap;
 use std::rc::Rc;
+use *;
 
 type FnvHashMap<K, V> = RaHashMap<K, V, FnvBuildHasher>;
 
