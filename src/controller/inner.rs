@@ -1,6 +1,6 @@
+use basics::PersistenceParameters;
 use channel::tcp::TcpSender;
 use consensus::{Authority, Epoch, STATE_KEY};
-use basics::PersistenceParameters;
 use dataflow::payload::{EgressForBase, IngressFromBase};
 use dataflow::prelude::*;
 use dataflow::statistics::GraphStats;
@@ -17,8 +17,10 @@ use std::{io, time};
 use controller::migrate::materialization::Materializations;
 use controller::mutator::MutatorBuilder;
 use controller::recipe::ActivationResult;
-use controller::{ControllerState, DomainHandle, Migration, Recipe, RemoteGetterBuilder,
-                 WorkerIdentifier, WorkerStatus};
+use controller::{
+    ControllerState, DomainHandle, Migration, Recipe, RemoteGetterBuilder, WorkerIdentifier,
+    WorkerStatus,
+};
 use coordination::{CoordinationMessage, CoordinationPayload};
 
 use hyper::{Method, StatusCode};
@@ -880,6 +882,30 @@ impl ControllerInner {
                 .send(box payload::Packet::RemoveNodes { nodes })
                 .unwrap();
         }
+    }
+
+    fn get_failed_nodes(&self, lost_worker: &WorkerIdentifier) -> Vec<NodeIndex> {
+        // Find nodes directly impacted by worker failure.
+        let mut nodes: Vec<NodeIndex> = self.domains
+            .values()
+            .filter(|dh| dh.assigned_to_worker(lost_worker))
+            .flat_map(|dh| dh.nodes().iter())
+            .cloned()
+            .collect();
+
+        // Add any other downstream nodes.
+        let mut failed_nodes = Vec::new();
+        while let Some(node) = nodes.pop() {
+            failed_nodes.push(node);
+            for child in self.ingredients
+                .neighbors_directed(node, petgraph::EdgeDirection::Outgoing)
+            {
+                if !nodes.contains(&child) {
+                    nodes.push(child);
+                }
+            }
+        }
+        failed_nodes
     }
 }
 

@@ -162,6 +162,8 @@ pub struct DomainHandle {
 
     // Which worker each shard is assigned to, if any.
     assignments: Vec<WorkerIdentifier>,
+
+    nodes: Vec<NodeIndex>,
 }
 
 impl DomainHandle {
@@ -189,6 +191,7 @@ impl DomainHandle {
         let mut txs = Vec::new();
         let mut cr_rxs = Vec::new();
         let mut assignments = Vec::new();
+        let node_ids = nodes.iter().map(|(ni, _)| ni.clone()).collect();
         let mut nodes = Some(Self::build_descriptors(graph, nodes));
 
         for i in 0..num_shards {
@@ -292,6 +295,7 @@ impl DomainHandle {
             cr_poll,
             txs,
             assignments,
+            nodes: node_ids,
         }
     }
 
@@ -301,6 +305,14 @@ impl DomainHandle {
 
     pub fn assignment(&self, shard: usize) -> WorkerIdentifier {
         self.assignments[shard].clone()
+    }
+
+    pub fn assigned_to_worker(&self, worker: &WorkerIdentifier) -> bool {
+        self.assignments.contains(worker)
+    }
+
+    pub fn nodes(&self) -> &Vec<NodeIndex> {
+        &self.nodes
     }
 
     fn build_descriptors(graph: &mut Graph, nodes: Vec<(NodeIndex, bool)>) -> DomainNodes {
