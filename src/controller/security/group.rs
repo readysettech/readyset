@@ -1,8 +1,8 @@
+use controller::security::policy::Policy;
+use nom_sql::SqlQuery;
+use nom_sql::parser as sql_parser;
 use serde_json;
 use serde_json::Value;
-use nom_sql::parser as sql_parser;
-use nom_sql::SqlQuery;
-use controller::security::policy::Policy;
 
 #[derive(Clone, Debug, Hash, PartialEq, Serialize, Deserialize)]
 pub struct Group {
@@ -14,9 +14,9 @@ pub struct Group {
 impl Group {
     pub fn parse(grou_txt: &str) -> Vec<Group> {
         let groups: Vec<Value> = match serde_json::from_str(grou_txt) {
-                Ok(v) => v,
-                Err(e) => panic!(e.to_string()),
-            };
+            Ok(v) => v,
+            Err(e) => panic!(e.to_string()),
+        };
 
         groups
             .iter()
@@ -68,7 +68,9 @@ mod tests {
 
         assert_eq!(groups.len(), 1);
         assert_eq!(groups[0].name, "ta");
-        assert_eq!(groups[0].membership, sql_parser::parse_query(membership).unwrap());
+        assert_eq!(
+            groups[0].membership,
+            sql_parser::parse_query(membership).unwrap()
+        );
     }
 }
-

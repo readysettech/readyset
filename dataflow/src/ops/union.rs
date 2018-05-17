@@ -1,4 +1,4 @@
-use std::collections::{HashMap, HashSet, BTreeMap};
+use std::collections::{BTreeMap, HashMap, HashSet};
 
 use prelude::*;
 
@@ -25,12 +25,22 @@ enum FullWait {
     },
 }
 
+#[derive(Clone, Debug, Serialize, Deserialize)]
+struct ReplayPieces {
+    buffered: HashMap<LocalNodeIndex, Records>,
+    evict: bool,
+}
+
 /// A union of a set of views.
 #[derive(Debug, Serialize, Deserialize)]
 pub struct Union {
     emit: Emit,
-    replay_key: Option<HashMap<LocalNodeIndex, usize>>,
-    replay_pieces: HashMap<DataType, Map<Records>>,
+
+    // to sanity check that we're not asked to manage multiple replay paths with different keys
+    replay_key_orig: Vec<usize>,
+
+    replay_key: Option<HashMap<LocalNodeIndex, Vec<usize>>>,
+    replay_pieces: HashMap<Vec<DataType>, ReplayPieces>,
 
     required: usize,
 
@@ -42,6 +52,7 @@ impl Clone for Union {
         Union {
             emit: self.emit.clone(),
             required: self.required,
+            replay_key_orig: Vec::new(),
             // nothing can have been received yet
             replay_key: None,
             replay_pieces: HashMap::new(),
@@ -76,6 +87,7 @@ impl Union {
                 cols_l: BTreeMap::new(),
             },
             required: parents,
+            replay_key_orig: Vec::new(),
             replay_key: None,
             replay_pieces: HashMap::new(),
             full_wait_state: FullWait::None,
@@ -88,6 +100,7 @@ impl Union {
         Union {
             emit: Emit::AllFrom(parent.into(), sharding),
             required: shards,
+            replay_key_orig: Vec::new(),
             replay_key: None,
             replay_pieces: HashMap::new(),
             full_wait_state: FullWait::None,
@@ -163,7 +176,7 @@ impl Ingredient for Union {
         from: LocalNodeIndex,
         rs: Records,
         _: &mut Tracer,
-        _: Option<usize>,
+        _: Option<&[usize]>,
         _: &DomainNodes,
         _: &StateMap,
     ) -> ProcessingResult {
@@ -277,9 +290,12 @@ impl Ingredient for Union {
                 // in the downstream node. in fact, we *must* forward them, becuase there may be
                 // *other* nodes downstream that do *not* have holes for the key in question.
                 for r in &rs {
-                    let k = self.replay_key.as_ref().unwrap()[&from];
-                    if let Some(ref mut pieces) = self.replay_pieces.get_mut(&r[k]) {
-                        if let Some(ref mut rs) = pieces.get_mut(&from) {
+                    let k = &self.replay_key.as_ref().unwrap()[&from];
+                    // XXX: the clone + collect here is really sad
+                    if let Some(ref mut pieces) = self.replay_pieces
+                        .get_mut(&k.iter().map(|&c| r[c].clone()).collect::<Vec<_>>())
+                    {
+                        if let Some(ref mut rs) = pieces.buffered.get_mut(&from) {
                             // we've received a replay piece from this ancestor already for this
                             // key, and are waiting for replay pieces from other ancestors. we need
                             // to incorporate this record into the replay piece so that it doesn't
@@ -366,7 +382,7 @@ impl Ingredient for Union {
                         finished: if last { 1 } else { 0 },
                         buffered: rs,
                     };
-                    return RawProcessingResult::Captured;
+                    return RawProcessingResult::CapturedFull;
                 }
 
                 let exit;
@@ -407,7 +423,7 @@ impl Ingredient for Union {
                             // if we fell through here, it means we're still missing the first
                             // replay from at least one ancestor, so we need to buffer
                             buffered.append(&mut *rs);
-                            return RawProcessingResult::Captured;
+                            return RawProcessingResult::CapturedFull;
                         }
                     }
                     _ => unreachable!(),
@@ -418,19 +434,24 @@ impl Ingredient for Union {
                 self.full_wait_state = FullWait::None;
                 exit
             }
-            ReplayContext::Partial { key_col, ref keys } => {
+            ReplayContext::Partial {
+                ref key_cols,
+                ref keys,
+            } => {
                 // FIXME: with multi-partial indices, we may now need to track *multiple* ongoing
                 // replays!
 
                 // TODO: which node is key_col an index of?
                 if let Emit::AllFrom(_, Sharding::ByColumn(shard_col, _)) = self.emit {
-                    if shard_col == key_col {
+                    assert_eq!(key_cols.len(), 1);
+                    if shard_col == key_cols[0] {
                         // No need to buffer since request should only be for one shard
                         assert!(self.replay_pieces.is_empty());
-                        return RawProcessingResult::ReplayPiece(
-                            rs,
-                            keys.into_iter().cloned().collect(),
-                        );
+                        return RawProcessingResult::ReplayPiece {
+                            rows: rs,
+                            keys: keys.into_iter().cloned().collect(),
+                            captured: HashSet::new(),
+                        };
                     }
                 }
 
@@ -439,26 +460,39 @@ impl Ingredient for Union {
                     // which might translate to different columns in our inputs
                     match self.emit {
                         Emit::AllFrom(..) => {
-                            self.replay_key = Some(Some((from, key_col)).into_iter().collect());
+                            self.replay_key =
+                                Some(Some((from, key_cols.clone())).into_iter().collect());
                         }
                         Emit::Project { ref emit_l, .. } => {
                             self.replay_key = Some(
                                 emit_l
                                     .iter()
-                                    .map(|(src, emit)| (*src, emit[key_col]))
+                                    .map(|(src, emit)| {
+                                        (*src, key_cols.iter().map(|&c| emit[c]).collect())
+                                    })
                                     .collect(),
                             );
                         }
                     }
+                    self.replay_key_orig = key_cols.clone();
+                } else {
+                    // make sure multiple different replay paths aren't getting mixed
+                    if &self.replay_key_orig != key_cols {
+                        unimplemented!();
+                    }
                 }
 
-                let mut rs_by_key = rs.into_iter().map(|r| (r[key_col].clone(), r)).fold(
-                    HashMap::new(),
-                    |mut hm, (key, r)| {
+                let mut rs_by_key = rs.into_iter()
+                    .map(|r| {
+                        (
+                            key_cols.iter().map(|&c| r[c].clone()).collect::<Vec<_>>(),
+                            r,
+                        )
+                    })
+                    .fold(HashMap::new(), |mut hm, (key, r)| {
                         hm.entry(key).or_insert_with(Records::default).push(r);
                         hm
-                    },
-                );
+                    });
 
                 // we're going to pull a little hack here for the sake of performance.
                 // (heard that before...)
@@ -470,46 +504,67 @@ impl Ingredient for Union {
 
                 let required = self.required; // can't borrow self in closures below
                 let mut released = HashSet::new();
+                let mut captured = HashSet::new();
                 let rs = {
                     keys.iter()
                         .filter_map(|key| {
-                            debug_assert_eq!(key.len(), 1);
-                            let key = &key[0];
-                            let rs = rs_by_key.remove(key).unwrap_or_else(Records::default);
+                            let rs = rs_by_key.remove(&key[..]).unwrap_or_else(Records::default);
 
                             // store this replay piece
                             use std::collections::hash_map::Entry;
                             match replay_pieces_tmp.entry(key.clone()) {
                                 Entry::Occupied(e) => {
-                                    assert!(!e.get().contains_key(&from));
-                                    if e.get().len() == required - 1 {
+                                    if e.get().buffered.contains_key(&from) {
+                                        // chained unions are not yet supported.
+                                        // we'd need to keep a queue of replays from each side,
+                                        // apply writes to all queued replays from that side, and
+                                        // then emit all front-of-queue replays in lock-step.
+                                        unimplemented!("detected chained union");
+                                    }
+                                    if e.get().buffered.len() == required - 1 {
                                         // release!
                                         let mut m = e.remove();
-                                        m.insert(from, rs);
+                                        m.buffered.insert(from, rs);
                                         Some((key, m))
                                     } else {
-                                        e.into_mut().insert(from, rs);
+                                        e.into_mut().buffered.insert(from, rs);
+                                        captured.insert(key.clone());
                                         None
                                     }
                                 }
                                 Entry::Vacant(h) => {
-                                    let mut m = Map::new();
+                                    let mut m = HashMap::new();
                                     m.insert(from, rs);
                                     if required == 1 {
-                                        Some((key, m))
+                                        Some((
+                                            key,
+                                            ReplayPieces {
+                                                buffered: m,
+                                                evict: false,
+                                            },
+                                        ))
                                     } else {
-                                        h.insert(m);
+                                        h.insert(ReplayPieces {
+                                            buffered: m,
+                                            evict: false,
+                                        });
+                                        captured.insert(key.clone());
                                         None
                                     }
                                 }
                             }
                         })
-                        .flat_map(|(key, map)| {
-                            released.insert(vec![key.clone()]);
-                            map.into_iter()
+                        .flat_map(|(key, pieces)| {
+                            if pieces.evict {
+                                // TODO XXX TODO XXX TODO XXX TODO
+                                eprintln!("!!! need to issue an eviction after replaying key");
+                            }
+                            released.insert(key.clone());
+                            pieces.buffered.into_iter()
                         })
                         .flat_map(|(from, rs)| {
-                            self.on_input(from, rs, tracer, Some(key_col), n, s).results
+                            self.on_input(from, rs, tracer, Some(&key_cols[..]), n, s)
+                                .results
                         })
                         .collect()
                 };
@@ -517,14 +572,54 @@ impl Ingredient for Union {
                 // and swap back replay pieces
                 mem::swap(&mut self.replay_pieces, &mut replay_pieces_tmp);
 
-                if !released.is_empty() {
-                    RawProcessingResult::ReplayPiece(rs, released)
-                } else {
-                    // no. need to keep buffering (and emit nothing)
-                    RawProcessingResult::Captured
+                RawProcessingResult::ReplayPiece {
+                    rows: rs,
+                    keys: released,
+                    captured: captured,
                 }
             }
         }
+    }
+
+    fn on_eviction(
+        &mut self,
+        from: LocalNodeIndex,
+        key_columns: &[usize],
+        keys: &mut Vec<Vec<DataType>>,
+    ) {
+        if self.replay_key_orig.is_empty() {
+            return;
+        }
+
+        if &self.replay_key_orig[..] != key_columns {
+            unimplemented!("multiple different replay paths flowing through union");
+        }
+
+        keys.retain(|key| {
+            if let Some(e) = self.replay_pieces.get_mut(key) {
+                if e.buffered.contains_key(&from) {
+                    // we've already received something from left, but it has now been evicted.
+                    // we can't remove the buffered replay, since we'll then get confused when the
+                    // other parts of the replay arrive from the other sides. we also can't drop
+                    // the eviction, because the eviction might be there to, say, ensure key
+                    // monotonicity in the face of joins. instead, we have to *buffer* the eviction
+                    // and emit it immediately after releasing the replay for this key. we do need
+                    // to emit the replay, as downstream nodes are waiting for it.
+                    //
+                    // NOTE: e.evict may already be true here, as we have no guarantee that
+                    // upstream nodes won't send multiple evictions in a row (e.g., joins evictions
+                    // could cause this).
+                    e.evict = true;
+                    return false;
+                } else if !e.buffered.is_empty() {
+                    // we've received replay pieces for this key from other ancestors, but not from
+                    // this one. this indicates that the eviction happened logically before the
+                    // replay requset came in, so we do in fact want to do the replay first
+                    // downstream.
+                }
+            }
+            true
+        });
     }
 
     fn suggest_indexes(&self, _: NodeIndex) -> HashMap<NodeIndex, (Vec<usize>, bool)> {

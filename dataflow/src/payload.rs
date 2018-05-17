@@ -8,13 +8,13 @@ use checktable;
 use debug::{DebugEvent, DebugEventType};
 use domain;
 use node;
-use statistics;
 use prelude::*;
+use statistics;
 
-use std::fmt;
 use std::collections::{HashMap, HashSet};
-use std::time;
+use std::fmt;
 use std::net::SocketAddr;
+use std::time;
 
 #[derive(Clone, PartialEq, Serialize, Deserialize)]
 pub struct Link {
@@ -37,7 +37,7 @@ impl fmt::Debug for Link {
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct ReplayPathSegment {
     pub node: LocalNodeIndex,
-    pub partial_key: Option<usize>,
+    pub partial_key: Option<Vec<usize>>,
 }
 
 #[derive(Clone, Serialize, Deserialize)]
@@ -55,13 +55,13 @@ pub enum InitialState {
     PartialGlobal {
         gid: petgraph::graph::NodeIndex,
         cols: usize,
-        key: usize,
+        key: Vec<usize>,
         trigger_domain: (domain::Index, usize),
     },
     Global {
         gid: petgraph::graph::NodeIndex,
         cols: usize,
-        key: usize,
+        key: Vec<usize>,
     },
 }
 
@@ -127,6 +127,7 @@ pub enum Packet {
         src: Option<SourceChannelIdentifier>,
         data: Records,
         tracer: Tracer,
+        senders: Vec<SourceChannelIdentifier>,
     },
 
     /// Transactional data-flow update.
@@ -136,6 +137,7 @@ pub enum Packet {
         data: Records,
         state: TransactionState,
         tracer: Tracer,
+        senders: Vec<SourceChannelIdentifier>,
     },
 
     /// Update that is part of a tagged data-flow replay path.
@@ -145,6 +147,20 @@ pub enum Packet {
         data: Records,
         context: ReplayPieceContext,
         transaction_state: Option<ReplayTransactionState>,
+    },
+
+    /// Trigger an eviction from the target node.
+    Evict {
+        node: Option<LocalNodeIndex>,
+        num_bytes: usize,
+    },
+
+    /// Evict the indicated keys from the materialization targed by the replay path `tag` (along
+    /// with any other materializations below it).
+    EvictKeys {
+        link: Link,
+        tag: Tag,
+        keys: Vec<Vec<DataType>>,
     },
 
     //
@@ -158,6 +174,11 @@ pub enum Packet {
     AddNode {
         node: Node,
         parents: Vec<LocalNodeIndex>,
+    },
+
+    /// Direct domain to remove some nodes.
+    RemoveNodes {
+        nodes: Vec<LocalNodeIndex>,
     },
 
     /// Add a new column to an existing `Base` node.
@@ -225,7 +246,7 @@ pub enum Packet {
     /// Ask domain (nicely) to replay a particular key.
     RequestReaderReplay {
         node: LocalNodeIndex,
-        col: usize,
+        cols: Vec<usize>,
         key: Vec<DataType>,
     },
 
@@ -247,9 +268,6 @@ pub enum Packet {
 
     /// A packet used solely to drive the event loop forward.
     Spin,
-
-    /// Signal that a base node's domain should start replaying logs.
-    StartRecovery,
 
     // Transaction time messages
     //
@@ -277,10 +295,11 @@ pub enum Packet {
     },
 
     /// Request that a domain send usage statistics on the control reply channel.
+    /// Argument specifies if we wish to get the full state size or just the partial nodes.
     GetStatistics,
 
-    /// The packet was captured awaiting the receipt of other replays.
-    Captured,
+    /// Ask domain to log its state size
+    UpdateStateSize,
 
     /// The packet is being sent locally, so a pointer is sent to avoid
     /// serialization/deserialization costs.
@@ -305,6 +324,7 @@ impl Packet {
             Packet::Message { ref mut link, .. } => link,
             Packet::Transaction { ref mut link, .. } => link,
             Packet::ReplayPiece { ref mut link, .. } => link,
+            Packet::EvictKeys { ref mut link, .. } => link,
             _ => unreachable!(),
         }
     }
@@ -345,6 +365,7 @@ impl Packet {
     pub fn tag(&self) -> Option<Tag> {
         match *self {
             Packet::ReplayPiece { tag, .. } => Some(tag),
+            Packet::EvictKeys { tag, .. } => Some(tag),
             _ => None,
         }
     }
@@ -387,11 +408,13 @@ impl Packet {
                 src: _,
                 ref data,
                 ref tracer,
+                ref senders,
             } => Packet::Message {
                 link: link.clone(),
                 src: None,
                 data: data.clone(),
                 tracer: tracer.clone(),
+                senders: senders.clone(),
             },
             Packet::Transaction {
                 ref link,
@@ -399,12 +422,14 @@ impl Packet {
                 ref data,
                 ref state,
                 ref tracer,
+                ref senders,
             } => Packet::Transaction {
                 link: link.clone(),
                 src: None,
                 data: data.clone(),
                 state: state.clone(),
                 tracer: tracer.clone(),
+                senders: senders.clone(),
             },
             Packet::ReplayPiece {
                 ref link,
@@ -518,9 +543,12 @@ impl fmt::Debug for Packet {
 
 #[derive(Debug, Serialize, Deserialize)]
 pub enum ControlReplyPacket {
-    #[cfg(debug_assertions)] Ack(Backtrace),
-    #[cfg(not(debug_assertions))] Ack(()),
-    StateSize(usize),
+    #[cfg(debug_assertions)]
+    Ack(Backtrace),
+    #[cfg(not(debug_assertions))]
+    Ack(()),
+    /// (number of rows, size in bytes)
+    StateSize(usize, u64),
     Statistics(
         statistics::DomainStats,
         HashMap<petgraph::graph::NodeIndex, statistics::NodeStats>,

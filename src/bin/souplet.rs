@@ -5,7 +5,8 @@ extern crate distributary;
 extern crate slog;
 
 use consensus::ZookeeperAuthority;
-use distributary::ControllerBuilder;
+use distributary::{ControllerBuilder, ReuseConfigType};
+use std::path::PathBuf;
 use std::sync::Arc;
 use std::time::Duration;
 
@@ -38,6 +39,26 @@ fn main() {
                 .help("How to maintain base logs."),
         )
         .arg(
+            Arg::with_name("persistence-threads")
+                .long("persistence-threads")
+                .takes_value(true)
+                .default_value("1")
+                .help("Number of background threads used by RocksDB."),
+        )
+        .arg(
+            Arg::with_name("flush-timeout")
+                .long("flush-timeout")
+                .takes_value(true)
+                .default_value("100000")
+                .help("Time to wait before processing a merged packet, in nanoseconds."),
+        )
+        .arg(
+            Arg::with_name("log-dir")
+                .long("log-dir")
+                .takes_value(true)
+                .help("Absolute path to the directory where the log files will be written."),
+        )
+        .arg(
             Arg::with_name("zookeeper")
                 .short("z")
                 .long("zookeeper")
@@ -52,6 +73,32 @@ fn main() {
                 .takes_value(true)
                 .default_value("1")
                 .help("Number of worker threads to run on this souplet."),
+        )
+        .arg(
+            Arg::with_name("memory")
+                .short("m")
+                .long("memory")
+                .takes_value(true)
+                .default_value("0")
+                .help("Memory, in bytes, available for partially materialized state [0 = unlimited]."),
+        )
+        .arg(
+            Arg::with_name("memory_check_freq")
+                .long("memory-check-every")
+                .takes_value(true)
+                .default_value("10")
+                .requires("memory")
+                .help("Frequency at which to check the state size against the memory limit [in milliseconds]."),
+        )
+        .arg(
+            Arg::with_name("noreuse")
+                .long("no-reuse")
+                .help("Disable reuse"),
+        )
+        .arg(
+            Arg::with_name("nopartial")
+                .long("no-partial")
+                .help("Disable partial"),
         )
         .arg(
             Arg::with_name("readers")
@@ -91,8 +138,12 @@ fn main() {
     let listen_addr = matches.value_of("address").unwrap().parse().unwrap();
     let zookeeper_addr = matches.value_of("zookeeper").unwrap();
     let workers = value_t_or_exit!(matches, "workers", usize);
+    let memory = value_t_or_exit!(matches, "memory", usize);
+    let memory_check_freq = value_t_or_exit!(matches, "memory_check_freq", u64);
     let readers = value_t_or_exit!(matches, "readers", usize);
     let quorum = value_t_or_exit!(matches, "quorum", usize);
+    let persistence_threads = value_t_or_exit!(matches, "persistence-threads", i32);
+    let flush_ns = value_t_or_exit!(matches, "flush-timeout", u32);
     let sharding = match value_t_or_exit!(matches, "shards", usize) {
         0 => None,
         x => Some(x),
@@ -104,11 +155,20 @@ fn main() {
     let mut builder = ControllerBuilder::default();
     builder.set_listen_addr(listen_addr);
     builder.set_worker_threads(workers);
+    if memory > 0 {
+        builder.set_memory_limit(memory, Duration::from_millis(memory_check_freq));
+    }
     builder.set_read_threads(readers);
     builder.set_sharding(sharding);
     builder.set_quorum(quorum);
+    if matches.is_present("nopartial") {
+        builder.disable_partial();
+    }
+    if matches.is_present("noreuse") {
+        builder.set_reuse(ReuseConfigType::NoReuse);
+    }
 
-    let persistence_params = distributary::PersistenceParameters::new(
+    let mut persistence_params = distributary::PersistenceParameters::new(
         match durability {
             "persistent" => distributary::DurabilityMode::Permanent,
             "ephemeral" => distributary::DurabilityMode::DeleteOnExit,
@@ -116,9 +176,13 @@ fn main() {
             _ => unreachable!(),
         },
         512,
-        Duration::new(0, 100_000),
+        Duration::new(0, flush_ns),
         Some(deployment_name.to_string()),
+        persistence_threads,
     );
+    persistence_params.log_dir = matches
+        .value_of("log-dir")
+        .and_then(|p| Some(PathBuf::from(p)));
     builder.set_persistence(persistence_params);
 
     if verbose {

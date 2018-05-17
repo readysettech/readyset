@@ -1,5 +1,5 @@
-use nom_sql::{ConditionBase, ConditionExpression, ConditionTree, JoinConstraint, Operator,
-              SqlQuery};
+use nom_sql::{ConditionBase, ConditionExpression, ConditionTree, JoinConstraint, Literal,
+              Operator, SqlQuery};
 
 use std::mem;
 
@@ -47,12 +47,18 @@ fn normalize_condition_expr(ce: &mut ConditionExpression, negate: bool) {
         }
         ConditionExpression::NegationOp(_) => {
             let inner = if let &mut ConditionExpression::NegationOp(box ref mut inner) = ce {
-                mem::replace(inner, ConditionExpression::Base(ConditionBase::Placeholder))
+                mem::replace(
+                    inner,
+                    ConditionExpression::Base(ConditionBase::Literal(Literal::Placeholder)),
+                )
             } else {
                 unreachable!()
             };
             mem::replace(ce, inner);
             normalize_condition_expr(ce, !negate);
+        }
+        ConditionExpression::Bracketed(ref mut inner) => {
+            normalize_condition_expr(inner, negate);
         }
         ConditionExpression::Base(_) => {}
     }

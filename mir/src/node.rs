@@ -3,7 +3,7 @@ use std::cell::RefCell;
 use std::fmt::{Debug, Display, Error, Formatter};
 use std::rc::Rc;
 
-use core::{DataType, NodeIndex};
+use basics::{DataType, NodeIndex};
 use dataflow::ops;
 use dataflow::ops::filter::FilterCondition;
 use dataflow::ops::grouped::aggregate::Aggregation as AggregationKind;
@@ -226,9 +226,15 @@ impl MirNode {
             },
             MirNodeType::Reuse { ref node } => node.borrow().column_id_for_column(c),
             // otherwise, just look up in the column set
-            _ => match self.columns.iter().position(|cc| cc.name == c.name) {
+            _ => match self.columns
+                .iter()
+                .position(|cc| cc.name == c.name && cc.table == c.table)
+            {
                 None => {
-                    panic!("tried to look up non-existent column {:?}", c.name);
+                    panic!(
+                        "tried to look up non-existent column {:?} on node \"{}\" (columns: {:?})",
+                        c, self.name, self.columns
+                    );
                 }
                 Some(id) => id,
             },
@@ -744,8 +750,8 @@ impl Debug for MirNodeType {
                         .enumerate()
                         .filter_map(|(i, ref e)| match e.as_ref() {
                             Some(cond) => match *cond {
-                                FilterCondition::Equality(ref op, ref x) => {
-                                    Some(format!("f{} {} {}", i, escape(&format!("{}", op)), x))
+                                FilterCondition::Comparison(ref op, ref x) => {
+                                    Some(format!("f{} {} {:?}", i, escape(&format!("{}", op)), x))
                                 }
                                 FilterCondition::In(ref xs) => Some(format!(
                                     "f{} IN ({})",
@@ -845,7 +851,7 @@ impl Debug for MirNodeType {
                         ", {}",
                         arithmetic
                             .iter()
-                            .map(|&(ref n, ref e)| format!("{}: {:?}", n, e))
+                            .map(|&(ref n, ref e)| format!("{}: {}", n, e))
                             .collect::<Vec<_>>()
                             .join(", ")
                     )

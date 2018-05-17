@@ -1,12 +1,12 @@
-use tcp::*;
 use rpc::*;
+use tcp::*;
 
 use std;
 use std::net::SocketAddr;
 use std::time::Duration;
 
-use mio::{Events, Poll, PollOpt, Ready, Token};
 use mio::net::{TcpListener, TcpStream};
+use mio::{Events, Poll, PollOpt, Ready, Token};
 
 use serde::Serialize;
 use serde::de::DeserializeOwned;
@@ -235,7 +235,7 @@ where
                                     Err(RpcSendError::Disconnected) => {
                                         self.inner.remove_rpc_endpoint(endpoint)
                                     }
-                                    Err(RpcSendError::SerializationError) => unreachable!(),
+                                    Err(RpcSendError::SerializationError(_)) => unreachable!(),
                                     Err(RpcSendError::StillNeedsFlush) => {
                                         // TODO: register to receive wake-up when the connection is
                                         // writable again.

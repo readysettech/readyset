@@ -309,7 +309,6 @@
 #![feature(box_patterns)]
 #![feature(box_syntax)]
 #![feature(nll)]
-#![feature(conservative_impl_trait)]
 #![feature(entry_or_default)]
 #![deny(missing_docs)]
 #![feature(plugin, use_extern_macros)]
@@ -317,10 +316,11 @@
 #![deny(unused_extern_crates)]
 #![feature(fnbox)]
 
+extern crate assert_infrequent;
 extern crate bincode;
 extern crate channel;
 extern crate consensus;
-extern crate core;
+extern crate basics;
 extern crate dataflow;
 extern crate failure;
 extern crate fnv;
@@ -329,6 +329,8 @@ extern crate hyper;
 extern crate mio;
 extern crate mio_pool;
 extern crate mir;
+#[macro_use]
+extern crate nom;
 extern crate nom_sql;
 extern crate petgraph;
 extern crate rand;
@@ -350,21 +352,21 @@ mod coordination;
 mod worker;
 
 #[cfg(test)]
-mod tests;
+mod integration;
 
 pub use consensus::{LocalAuthority, ZookeeperAuthority};
 
-pub use core::{DataType, Datas, NodeIndex};
+pub use basics::{DataType, Datas, DurabilityMode, Modification, NodeIndex, Operation,
+               PersistenceParameters};
 
 pub use dataflow::checktable::{Token, TransactionResult};
 pub use dataflow::debug::{DebugEvent, DebugEventType};
 pub use dataflow::prelude::DomainIndex;
-pub use dataflow::{DurabilityMode, PersistenceParameters};
 
 pub use controller::sql::reuse::ReuseConfigType;
-pub use controller::{Controller, ControllerBuilder, ControllerHandle, Mutator, MutatorBuilder,
-                     MutatorError, ReadQuery, ReadReply, RemoteGetter, RemoteGetterBuilder,
-                     RpcError};
+pub use controller::{Controller, ControllerBuilder, ControllerHandle, ExclusiveConnection,
+                     Mutator, MutatorBuilder, MutatorError, ReadQuery, ReadReply, RemoteGetter,
+                     RemoteGetterBuilder, RpcError, SharedConnection};
 
 pub use controller::recipe::ActivationResult;
 

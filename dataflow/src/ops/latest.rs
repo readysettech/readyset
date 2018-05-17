@@ -10,9 +10,7 @@ use prelude::*;
 pub struct Latest {
     us: Option<IndexPair>,
     src: IndexPair,
-    // MUST be in reverse sorted order!
-    key: Vec<usize>,
-    key_m: HashMap<usize, usize>,
+    key: usize,
 }
 
 impl Latest {
@@ -21,24 +19,11 @@ impl Latest {
     /// `src` should be the ancestor the operation is performed over, and `keys` should be a list
     /// of fields used to group records by. The latest record *within each group* will be
     /// maintained.
-    pub fn new(src: NodeIndex, mut keys: Vec<usize>) -> Latest {
-        assert_eq!(
-            keys.len(),
-            1,
-            "only latest over a single column is supported"
-        );
-        keys.sort();
-        let key_m = keys.clone()
-            .into_iter()
-            .enumerate()
-            .map(|(idx, col)| (col, idx))
-            .collect();
-        keys.reverse();
+    pub fn new(src: NodeIndex, key: usize) -> Latest {
         Latest {
             us: None,
             src: src.into(),
-            key: keys,
-            key_m: key_m,
+            key: key,
         }
     }
 }
@@ -64,7 +49,7 @@ impl Ingredient for Latest {
         from: LocalNodeIndex,
         rs: Records,
         _: &mut Tracer,
-        replay_key_col: Option<usize>,
+        replay_key_cols: Option<&[usize]>,
         _: &DomainNodes,
         state: &StateMap,
     ) -> ProcessingResult {
@@ -87,25 +72,21 @@ impl Ingredient for Latest {
                     return None;
                 }
 
-                match db.lookup(&[self.key[0]], &KeyType::Single(&r[self.key[0]])) {
+                match db.lookup(&[self.key], &KeyType::Single(&r[self.key])) {
                     LookupResult::Some(rs) => {
                         debug_assert!(rs.len() <= 1, "a group had more than 1 result");
-                        Some((r, rs.get(0)))
+                        Some((r, rs))
                     }
                     LookupResult::Missing => {
                         // we don't actively materialize holes unless requested by a read. this
                         // can't be a read, because reads cause replay, which fill holes with an
                         // empty set before processing!
                         misses.push(Miss {
-                            node: *us,
-                            columns: vec![self.key[0]],
-                            replay_key: replay_key_col.map(|col| {
-                                debug_assert_eq!(col, self.key[0]);
-                                // since latest is an identity, we don't need to map this output
-                                // column to an input column.
-                                vec![r[col].clone()]
-                            }),
-                            key: vec![r[self.key[0]].clone()],
+                            on: *us,
+                            lookup_idx: vec![self.key],
+                            lookup_cols: vec![self.key],
+                            replay_cols: replay_key_cols.map(Vec::from),
+                            record: r.extract().0,
                         });
                         None
                     }
@@ -113,9 +94,9 @@ impl Ingredient for Latest {
             });
 
             // buffer emitted records
-            for (r, current) in currents {
-                if let Some(current) = current {
-                    out.push(Record::Negative((**current).clone()));
+            for (r, current_row) in currents {
+                if let Some(row) = current_row.into_iter().next() {
+                    out.push(Record::Negative(row.into_owned()));
                 }
 
                 // if there was a previous latest for this key, revoke old record
@@ -133,7 +114,7 @@ impl Ingredient for Latest {
 
     fn suggest_indexes(&self, this: NodeIndex) -> HashMap<NodeIndex, (Vec<usize>, bool)> {
         // index all key columns
-        Some((this, (self.key.clone(), true))).into_iter().collect()
+        Some((this, (vec![self.key], true))).into_iter().collect()
     }
 
     fn resolve(&self, col: usize) -> Option<Vec<(NodeIndex, usize)>> {
@@ -141,12 +122,7 @@ impl Ingredient for Latest {
     }
 
     fn description(&self) -> String {
-        let key_cols = self.key
-            .iter()
-            .map(|k| k.to_string())
-            .collect::<Vec<_>>()
-            .join(", ");
-        format!("⧖ γ[{}]", key_cols)
+        format!("⧖ γ[{}]", self.key)
     }
 
     fn parent_columns(&self, column: usize) -> Vec<(NodeIndex, Option<usize>)> {
@@ -163,12 +139,7 @@ mod tests {
     fn setup(key: usize, mat: bool) -> ops::test::MockGraph {
         let mut g = ops::test::MockGraph::new();
         let s = g.add_base("source", &["x", "y"]);
-        g.set_op(
-            "latest",
-            &["x", "y"],
-            Latest::new(s.as_global(), vec![key]),
-            mat,
-        );
+        g.set_op("latest", &["x", "y"], Latest::new(s.as_global(), key), mat);
         g
     }
 

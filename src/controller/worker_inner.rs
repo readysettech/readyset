@@ -1,20 +1,23 @@
-use channel;
-use channel::tcp::{TcpSender, TryRecvError};
 use channel::rpc::RpcServiceEndpoint;
+use channel::tcp::{TcpSender, TryRecvError};
+use channel::{self, DomainConnectionBuilder};
 use consensus::Epoch;
-use dataflow::{DomainBuilder, Readers};
+use dataflow::payload;
 use dataflow::prelude::{ChannelCoordinator, DomainIndex};
+use dataflow::{DomainBuilder, Readers};
 
 use controller::{readers, ControllerState};
 use coordination::{CoordinationMessage, CoordinationPayload};
 use worker;
 
 use std::collections::HashMap;
+use std::cmp;
+use std::fs;
 use std::io;
 use std::net::{IpAddr, SocketAddr};
-use std::time::{Duration, Instant};
+use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex};
-use std::fs;
+use std::time::{Duration, Instant};
 
 use mio::net::TcpListener;
 use mio_pool::{PoolBuilder, PoolHandle};
@@ -35,6 +38,12 @@ pub(super) struct WorkerInner {
 
     listen_addr: IpAddr,
 
+    memory_limit: Option<usize>,
+    evict_every: Option<Duration>,
+
+    state_sizes: HashMap<(DomainIndex, usize), Arc<AtomicUsize>>,
+    domain_senders: HashMap<(DomainIndex, usize), TcpSender<Box<payload::Packet>>>,
+
     log: slog::Logger,
 }
 
@@ -47,6 +56,8 @@ impl WorkerInner {
         state: &ControllerState,
         nworker_threads: usize,
         nread_threads: usize,
+        memory_limit: Option<usize>,
+        memory_check_frequency: Option<Duration>,
         log: slog::Logger,
     ) -> Result<WorkerInner, ()> {
         let channel_coordinator = Arc::new(ChannelCoordinator::new());
@@ -107,7 +118,11 @@ impl WorkerInner {
             sender_addr,
             heartbeat_every: state.config.heartbeat_every,
             last_heartbeat: Instant::now(),
+            evict_every: memory_check_frequency,
             listen_addr,
+            memory_limit,
+            state_sizes: HashMap::new(),
+            domain_senders: HashMap::new(),
             log,
         })
     }
@@ -130,11 +145,13 @@ impl WorkerInner {
 
         let idx = d.index;
         let shard = d.shard;
+        let state_size = Arc::new(AtomicUsize::new(0));
         let d = d.build(
             self.log.clone(),
             self.readers.clone(),
             self.channel_coordinator.clone(),
             addr,
+            state_size.clone(),
         );
 
         let listener = ::mio::net::TcpListener::from_std(listener).unwrap();
@@ -144,6 +161,7 @@ impl WorkerInner {
         // need to register the domain with the local channel coordinator
         self.channel_coordinator
             .insert_addr((idx, shard), addr, false);
+        self.state_sizes.insert((idx, shard), state_size);
 
         let msg = CoordinationMessage {
             source: self.sender_addr,
@@ -183,25 +201,120 @@ impl WorkerInner {
         Ok(())
     }
 
-    /// Perform a heartbeat if it is time, and return the amount of time until another one is
-    /// needed.
-    pub(super) fn heartbeat(&mut self) -> Duration {
+    /// Perform housekeeping activities like evicting from domains and sending heartbeats to the
+    /// controller.
+    pub(super) fn do_housekeeping(&mut self) -> Duration {
+        // check if we're about the memory limit, and trigger evictions if so
+        self.evict_if_too_large();
+
         let elapsed = self.last_heartbeat.elapsed();
+        // do we need to send a heartbeat?
         if elapsed > self.heartbeat_every {
-            let msg = CoordinationMessage {
-                source: self.sender_addr,
-                epoch: self.epoch,
-                payload: CoordinationPayload::Heartbeat,
-            };
-            match self.sender.send(msg) {
-                Err(_) => unimplemented!(),
-                Ok(_) => {
-                    self.last_heartbeat = Instant::now();
-                    self.heartbeat_every
-                }
+            if let Some(evict_every) = self.evict_every {
+                cmp::min(evict_every, self.heartbeat())
+            } else {
+                self.heartbeat()
             }
         } else {
-            self.heartbeat_every - elapsed
+            if let Some(evict_every) = self.evict_every {
+                cmp::min(evict_every, self.heartbeat_every - elapsed)
+            } else {
+                self.heartbeat_every - elapsed
+            }
+        }
+    }
+
+    /// Perform a heartbeat if it is time, and return the amount of time until another one is
+    /// needed.
+    fn heartbeat(&mut self) -> Duration {
+        let msg = CoordinationMessage {
+            source: self.sender_addr,
+            epoch: self.epoch,
+            payload: CoordinationPayload::Heartbeat,
+        };
+        match self.sender.send(msg) {
+            Err(e) => {
+                // TODO(malte): probably should bail out and try to reconnect here if the
+                // connection dropped?
+                error!(self.log, "failed to send heartbeat to controller: {:?}", e);
+                // try again in 100ms
+                Duration::from_millis(100)
+            }
+            Ok(_) => {
+                self.last_heartbeat = Instant::now();
+                self.heartbeat_every
+            }
+        }
+    }
+
+    fn evict_if_too_large(&mut self) {
+        use std::cmp;
+
+        // 1. tell domains to update state size
+        for &(di, shard) in self.state_sizes.keys() {
+            let mut tx = match self.domain_senders.get_mut(&(di, shard)) {
+                None => {
+                    // we're lax about failures here since missing an UpdateStateSize message has
+                    // no correctness implications
+                    match self.channel_coordinator.get_addr(&(di, shard)) {
+                        // domain may already have exited
+                        None => continue,
+                        Some(addr) => {
+                            if let Ok(tx) = DomainConnectionBuilder::for_domain(addr).build() {
+                                self.domain_senders.insert((di, shard), tx);
+                                self.domain_senders.get_mut(&(di, shard)).unwrap()
+                            } else {
+                                continue;
+                            }
+                        }
+                    }
+                }
+                Some(mut tx) => tx,
+            };
+            match tx.send(box payload::Packet::UpdateStateSize) {
+                Ok(_) => (),
+                Err(_) => error!(self.log, "failed to send UpdateStateSize to domain"),
+            }
+        }
+        // 2. add current state sizes (could be out of date, as packet sent below is not
+        //    necessarily received immediately)
+        let sizes: Vec<(&(DomainIndex, usize), usize)> = self.state_sizes
+            .iter()
+            .map(|(ds, sa)| {
+                let size = sa.load(Ordering::Relaxed);
+                trace!(
+                    self.log,
+                    "domain {}.{} state size is {} bytes",
+                    ds.0.index(),
+                    ds.1,
+                    size
+                );
+                (ds, size)
+            })
+            .collect();
+        let total: usize = sizes.iter().map(|&(_, s)| s).sum();
+        // 3. are we above the limit?
+        match self.memory_limit {
+            None => (),
+            Some(limit) => {
+                if total >= limit {
+                    // evict from the largest domain
+                    let largest = sizes.into_iter().max_by_key(|&(_, s)| s).unwrap();
+                    debug!(
+                        self.log,
+                        "memory footprint ({} bytes) exceeds limit ({} bytes); evicting from largest domain {}",
+                        total,
+                        limit,
+                        (largest.0).0.index(),
+                    );
+
+                    let tx = self.domain_senders.get_mut(largest.0).unwrap();
+                    tx.send(box payload::Packet::Evict {
+                        node: None,
+                        num_bytes: cmp::min(largest.1, total - limit),
+                    }).unwrap();
+                }
+            }
         }
     }
 
@@ -214,6 +327,7 @@ impl WorkerInner {
         let addr = listener.local_addr().unwrap();
         let pool = PoolBuilder::from(listener).unwrap();
         let h = pool.with_state(readers.clone())
+            .set_thread_name_prefix("reader-")
             .with_adapter(RpcServiceEndpoint::new)
             .run(
                 reader_threads,

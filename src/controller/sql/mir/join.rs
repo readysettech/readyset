@@ -1,9 +1,9 @@
-use controller::sql::query_graph::{JoinRef, QueryGraph, QueryGraphEdge};
 use controller::sql::mir::SqlToMirConverter;
-use std::collections::{HashMap, HashSet};
+use controller::sql::query_graph::{JoinRef, QueryGraph, QueryGraphEdge};
 use dataflow::ops::join::JoinType;
-use nom_sql::ConditionTree;
 use mir::MirNodeRef;
+use nom_sql::ConditionTree;
+use std::collections::{HashMap, HashSet};
 
 struct JoinChain {
     tables: HashSet<String>,

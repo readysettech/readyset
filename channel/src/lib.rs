@@ -1,13 +1,14 @@
-#![feature(bufreader_is_empty)]
+#![feature(bufreader_buffer)]
+#![feature(ip_constructors)]
 #![feature(custom_attribute)]
 #![feature(try_from)]
-#![feature(conservative_impl_trait)]
 #![deny(unused_extern_crates)]
 
 extern crate bincode;
 extern crate bufstream;
 extern crate byteorder;
 extern crate mio;
+extern crate net2;
 extern crate serde;
 #[macro_use]
 extern crate serde_derive;
@@ -16,20 +17,71 @@ extern crate throttled_reader;
 use std::collections::HashMap;
 use std::hash::Hash;
 use std::io::{self, Read, Write};
-use std::sync::Mutex;
-use std::sync::mpsc::{self, SendError};
+use std::marker::PhantomData;
 use std::net::SocketAddr;
 use std::ops::{Deref, DerefMut};
-use std::marker::PhantomData;
+use std::sync::Mutex;
+use std::sync::mpsc::{self, SendError};
 
 use byteorder::{ByteOrder, NetworkEndian};
 use serde::{Deserialize, Deserializer, Serialize, Serializer};
 
-pub mod tcp;
 pub mod poll;
 pub mod rpc;
+pub mod tcp;
 
 pub use tcp::{channel, TcpReceiver, TcpSender};
+
+pub const CONNECTION_FROM_MUTATOR: u8 = 1;
+pub const CONNECTION_FROM_DOMAIN: u8 = 0;
+
+pub struct DomainConnectionBuilder {
+    sport: Option<u16>,
+    addr: SocketAddr,
+    is_for_mutator: bool,
+}
+
+impl DomainConnectionBuilder {
+    pub fn for_mutator(addr: SocketAddr) -> Self {
+        DomainConnectionBuilder {
+            sport: None,
+            addr,
+            is_for_mutator: true,
+        }
+    }
+
+    pub fn for_domain(addr: SocketAddr) -> Self {
+        DomainConnectionBuilder {
+            sport: None,
+            addr,
+            is_for_mutator: false,
+        }
+    }
+
+    pub fn maybe_on_port(mut self, sport: Option<u16>) -> Self {
+        self.sport = sport;
+        self
+    }
+
+    pub fn on_port(mut self, sport: u16) -> Self {
+        self.sport = Some(sport);
+        self
+    }
+
+    pub fn build<T: serde::Serialize>(self) -> io::Result<TcpSender<T>> {
+        let mut s = TcpSender::connect_from(self.sport, &self.addr)?;
+        {
+            let s = s.get_mut();
+            s.write_all(&[if self.is_for_mutator {
+                CONNECTION_FROM_MUTATOR
+            } else {
+                CONNECTION_FROM_DOMAIN
+            }])?;
+            s.flush()?;
+        }
+        Ok(s)
+    }
+}
 
 #[derive(Debug)]
 pub enum ChannelSender<T> {
@@ -139,21 +191,8 @@ impl<K: Eq + Hash + Clone> ChannelCoordinator<K> {
         self.inner.lock().unwrap().addrs.get(key).map(|a| a.1)
     }
 
-    pub fn get_tx<T: Serialize>(&self, key: &K) -> Option<(TcpSender<T>, bool)> {
-        let val = {
-            self.inner.lock().unwrap().addrs.get(key).cloned()
-        };
-        val.and_then(|(addr, local)| {
-            TcpSender::connect(&addr).ok().map(|s| (s, local))
-        })
-    }
-
-    pub fn get_input_tx<T: Serialize>(&self, key: &K) -> Option<(TcpSender<T>, bool)> {
-        self.get_tx(key)
-    }
-
-    pub fn get_unbounded_tx<T: Serialize>(&self, key: &K) -> Option<(TcpSender<T>, bool)> {
-        self.get_tx(key)
+    pub fn get_dest(&self, key: &K) -> Option<(SocketAddr, bool)> {
+        self.inner.lock().unwrap().addrs.get(key).cloned()
     }
 }
 

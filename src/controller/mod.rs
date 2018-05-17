@@ -2,8 +2,9 @@ use channel::poll::{PollEvent, PollingLoop, ProcessResult};
 use channel::tcp::TcpSender;
 
 use consensus::{Authority, Epoch, STATE_KEY};
+use basics::PersistenceParameters;
 use dataflow::checktable::service::CheckTableServer;
-use dataflow::{DomainConfig, PersistenceParameters};
+use dataflow::DomainConfig;
 
 use controller::domain_handle::DomainHandle;
 use controller::inner::ControllerInner;
@@ -15,47 +16,53 @@ use coordination::CoordinationMessage;
 use std::boxed::FnBox;
 use std::io::{self, ErrorKind};
 use std::net::{IpAddr, SocketAddr};
-use std::time::{self, Duration, Instant};
-use std::thread::{self, JoinHandle};
-use std::sync::{Arc, Mutex};
 use std::sync::mpsc::{self, Receiver, RecvTimeoutError, Sender};
+use std::sync::{Arc, Mutex};
+use std::thread::{self, JoinHandle};
+use std::time::{self, Duration, Instant};
 
 use failure::{self, Error};
 use futures::{self, Future, Stream};
-use hyper::{self, Method, StatusCode};
 use hyper::header::ContentType;
 use hyper::server::{Http, NewService, Request, Response, Service};
+use hyper::{self, Method, StatusCode};
 use mio::net::TcpListener;
 use rand;
 use serde_json;
 use slog;
-
 
 pub mod domain_handle;
 pub mod keys;
 pub mod migrate;
 
 pub(crate) mod recipe;
-pub(crate) mod sql;
 pub(crate) mod security;
+pub(crate) mod sql;
 
 mod builder;
 mod getter;
 mod handle;
 mod inner;
-mod readers;
 mod mir_to_flow;
 mod mutator;
+mod readers;
 mod worker_inner;
 
 pub use controller::builder::ControllerBuilder;
+pub(crate) use controller::getter::LocalOrNot;
+pub use controller::getter::{Getter, ReadQuery, ReadReply, RemoteGetter, RemoteGetterBuilder};
 pub use controller::handle::ControllerHandle;
 pub use controller::inner::RpcError;
 pub use controller::migrate::Migration;
 pub use controller::mutator::{Mutator, MutatorBuilder, MutatorError};
-pub use controller::getter::{Getter, ReadQuery, ReadReply, RemoteGetter, RemoteGetterBuilder};
-pub(crate) use controller::getter::LocalOrNot;
 use controller::worker_inner::WorkerInner;
+
+/// Marker for a handle that has an exclusive connection to the backend(s).
+pub struct ExclusiveConnection;
+
+/// Marker for a handle that shares its underlying connection with other handles owned by the same
+/// thread.
+pub struct SharedConnection;
 
 type WorkerIdentifier = SocketAddr;
 type WorkerEndpoint = Arc<Mutex<TcpSender<CoordinationMessage>>>;
@@ -127,7 +134,6 @@ pub(crate) struct ControllerConfig {
     pub heartbeat_every: Duration,
     pub healthcheck_every: Duration,
     pub quorum: usize,
-    pub fixed_domains: Option<usize>,
     pub reuse: ReuseConfigType,
 }
 impl Default for ControllerConfig {
@@ -146,7 +152,6 @@ impl Default for ControllerConfig {
             heartbeat_every: Duration::from_secs(1),
             healthcheck_every: Duration::from_secs(10),
             quorum: 1,
-            fixed_domains: None,
             reuse: ReuseConfigType::Finkelstein,
         }
     }
@@ -189,6 +194,8 @@ fn start_instance<A: Authority + 'static>(
     config: ControllerConfig,
     nworker_threads: usize,
     nread_threads: usize,
+    memory_limit: Option<usize>,
+    memory_check_frequency: Option<Duration>,
     log: slog::Logger,
 ) -> ControllerHandle<A> {
     let (controller_event_tx, controller_event_rx) = mpsc::channel();
@@ -244,7 +251,7 @@ fn start_instance<A: Authority + 'static>(
         .unwrap();
 
     let worker_join_handle = thread::Builder::new()
-        .name("ctrl-main".to_owned())
+        .name("worker-pool".to_owned())
         .spawn(move || {
             let internal =
                 Worker::listen_internal(worker_event_tx2, SocketAddr::new(listen_addr, 0));
@@ -253,6 +260,8 @@ fn start_instance<A: Authority + 'static>(
                 receiver: worker_event_rx,
                 nworker_threads,
                 nread_threads,
+                memory_limit,
+                memory_check_frequency,
                 listen_addr,
                 internal,
                 log: log2,
@@ -261,12 +270,10 @@ fn start_instance<A: Authority + 'static>(
         })
         .unwrap();
 
-    ControllerHandle {
-        url: None,
-        authority: authority2,
-        local_controller: Some((controller_event_tx2, controller_join_handle)),
-        local_worker: Some((worker_event_tx3, worker_join_handle)),
-    }
+    let mut ch = ControllerHandle::make(authority2);
+    ch.local_controller = Some((controller_event_tx2, controller_join_handle));
+    ch.local_worker = Some((worker_event_tx3, worker_join_handle));
+    ch
 }
 fn instance_campaign<A: Authority + 'static>(
     controller_event_tx: Sender<ControlEvent>,
@@ -385,6 +392,8 @@ pub struct Worker {
 
     nworker_threads: usize,
     nread_threads: usize,
+    memory_limit: Option<usize>,
+    memory_check_frequency: Option<Duration>,
 
     listen_addr: IpAddr,
     internal: ServingThread,
@@ -456,6 +465,9 @@ impl<A: Authority + 'static> Controller<A> {
 
             fn call(&self, req: Request) -> Self::Future {
                 let mut res = Response::new();
+                // disable CORS to allow use as API server
+                res.headers_mut()
+                    .set_raw("Access-Control-Allow-Origin", "*");
                 match (req.method().clone(), req.path().to_owned().as_ref()) {
                     (Method::Get, "/graph.html") => {
                         res.headers_mut().set(ContentType::html());
@@ -493,6 +505,8 @@ impl<A: Authority + 'static> Controller<A> {
                             ));
                             rx.and_then(|reply| {
                                 let mut res = Response::new();
+                                res.headers_mut()
+                                    .set_raw("Access-Control-Allow-Origin", "*");
                                 match reply {
                                     Ok(reply) => res.set_body(reply),
                                     Err(status_code) => {
@@ -502,6 +516,8 @@ impl<A: Authority + 'static> Controller<A> {
                                 Box::new(futures::future::ok(res))
                             }).or_else(|futures::Canceled| {
                                 let mut res = Response::new();
+                                res.headers_mut()
+                                    .set_raw("Access-Control-Allow-Origin", "*");
                                 res.set_status(StatusCode::NotFound);
                                 Box::new(futures::future::ok(res))
                             })
@@ -582,13 +598,15 @@ impl Worker {
     fn main_loop(mut self) {
         loop {
             let event = match self.inner {
-                Some(ref mut worker) => match self.receiver.recv_timeout(worker.heartbeat()) {
-                    Ok(event) => event,
-                    Err(RecvTimeoutError::Timeout) => {
-                        continue;
+                Some(ref mut worker) => {
+                    match self.receiver.recv_timeout(worker.do_housekeeping()) {
+                        Ok(event) => event,
+                        Err(RecvTimeoutError::Timeout) => {
+                            continue;
+                        }
+                        Err(_) => break,
                     }
-                    Err(_) => break,
-                },
+                }
                 None => match self.receiver.recv() {
                     Ok(event) => event,
                     Err(_) => break,
@@ -608,6 +626,8 @@ impl Worker {
                         &state,
                         self.nworker_threads,
                         self.nread_threads,
+                        self.memory_limit,
+                        self.memory_check_frequency,
                         self.log.clone(),
                     ) {
                         self.inner = Some(worker);

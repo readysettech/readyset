@@ -1,10 +1,10 @@
-use std::collections::HashMap;
-use channel::rpc::RpcServiceEndpoint;
-use dataflow::Readers;
-use dataflow::checktable::TokenGenerator;
+use channel::rpc::{RpcSendError, RpcServiceEndpoint};
 use dataflow::backlog::SingleReadHandle;
+use dataflow::checktable::TokenGenerator;
 use dataflow::prelude::*;
+use dataflow::Readers;
 use std::cell::RefCell;
+use std::collections::HashMap;
 
 use controller::{LocalOrNot, ReadQuery, ReadReply};
 
@@ -19,7 +19,7 @@ thread_local! {
 
 pub(crate) fn handle_message(m: LocalOrNot<ReadQuery>, conn: &mut Rpc, s: &mut Readers) {
     let is_local = m.is_local();
-    conn.send(&LocalOrNot::make(
+    let mut res = conn.send(&LocalOrNot::make(
         match unsafe { m.take() } {
             ReadQuery::Normal {
                 target,
@@ -57,12 +57,12 @@ pub(crate) fn handle_message(m: LocalOrNot<ReadQuery>, conn: &mut Rpc, s: &mut R
                         Ok(Some(rs)) => {
                             // immediate hit!
                             ret[i] = rs;
-                            *key = DataType::None;
+                            *key = vec![];
                         }
                         Err(()) => {
                             // map not yet ready
                             ready = false;
-                            *key = DataType::None;
+                            *key = vec![];
                             break;
                         }
                         Ok(None) => {
@@ -81,7 +81,7 @@ pub(crate) fn handle_message(m: LocalOrNot<ReadQuery>, conn: &mut Rpc, s: &mut R
 
                 // block on all remaining keys
                 for (i, key) in keys.iter().enumerate() {
-                    if let DataType::None = *key {
+                    if key.is_empty() {
                         // already have this value
                     } else {
                         // note that this *does* mean we'll trigger replay twice for things that
@@ -118,7 +118,7 @@ pub(crate) fn handle_message(m: LocalOrNot<ReadQuery>, conn: &mut Rpc, s: &mut R
                                     true,
                                 )
                                 .map(|r| (r.0.unwrap_or_else(Vec::new), r.1))
-                                .map(|r| (r.0, generator.as_ref().unwrap().generate(r.1, key)))
+                                .map(|r| (r.0, generator.as_ref().unwrap().generate(r.1, &key[..])))
                         })
                     })
                     .collect(),
@@ -139,5 +139,15 @@ pub(crate) fn handle_message(m: LocalOrNot<ReadQuery>, conn: &mut Rpc, s: &mut R
             }
         },
         is_local,
-    )).unwrap();
+    ));
+
+    while let Err(RpcSendError::StillNeedsFlush) = res {
+        res = conn.flush();
+    }
+    if let Err(RpcSendError::Disconnected) = res {
+        // something must have gone wrong on the other end...
+        // the client sent a request, and then didn't wait for the reply
+        return;
+    }
+    res.unwrap();
 }

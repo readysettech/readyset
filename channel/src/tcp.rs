@@ -2,12 +2,13 @@ use std;
 use std::convert::TryFrom;
 use std::io::{self, BufReader, Write};
 use std::marker::PhantomData;
-use std::net::SocketAddr;
+use std::net::{Ipv4Addr, SocketAddr};
 
 use bincode;
 use bufstream::BufStream;
 use byteorder::{NetworkEndian, WriteBytesExt};
 use mio::{self, Evented, Poll, PollOpt, Ready, Token};
+use net2;
 use serde::{Deserialize, Serialize};
 use throttled_reader::ThrottledReader;
 
@@ -33,15 +34,15 @@ impl From<io::Error> for SendError {
 }
 
 macro_rules! poisoning_try {
-    ( $self_:ident, $e:expr ) => {
+    ($self_:ident, $e:expr) => {
         match $e {
             Ok(v) => v,
             Err(r) => {
                 $self_.poisoned = true;
-                return Err(r.into())
+                return Err(r.into());
             }
         }
-    }
+    };
 }
 
 pub struct TcpSender<T> {
@@ -61,8 +62,20 @@ impl<T: Serialize> TcpSender<T> {
         })
     }
 
+    pub fn connect_from(sport: Option<u16>, addr: &SocketAddr) -> Result<Self, io::Error> {
+        let s = net2::TcpBuilder::new_v4()?
+            .reuse_address(true)?
+            .bind((Ipv4Addr::unspecified(), sport.unwrap_or(0)))?
+            .connect(addr)?;
+        Self::new(s)
+    }
+
     pub fn connect(addr: &SocketAddr) -> Result<Self, io::Error> {
-        Self::new(std::net::TcpStream::connect(addr)?)
+        Self::connect_from(None, addr)
+    }
+
+    pub fn get_mut(&mut self) -> &mut BufStream<std::net::TcpStream> {
+        &mut self.stream
     }
 
     pub fn local_addr(&self) -> io::Result<SocketAddr> {
@@ -122,9 +135,24 @@ where
     for<'de> T: Deserialize<'de>,
 {
     pub fn new(stream: mio::net::TcpStream) -> Self {
+        Self::new_inner(None, stream)
+    }
+
+    pub fn with_capacity(cap: usize, stream: mio::net::TcpStream) -> Self {
+        Self::new_inner(Some(cap), stream)
+    }
+
+    fn new_inner(cap: Option<usize>, stream: mio::net::TcpStream) -> Self {
         stream.set_nodelay(true).unwrap(); // for acks
+        let stream = ThrottledReader::new(NonBlockingWriter::new(stream));
+        let stream = if let Some(cap) = cap {
+            BufReader::with_capacity(cap, stream)
+        } else {
+            BufReader::new(stream)
+        };
+
         Self {
-            stream: BufReader::new(ThrottledReader::new(NonBlockingWriter::new(stream))),
+            stream: stream,
             poisoned: false,
             deserialize_receiver: DeserializeReceiver::new(),
             phantom: PhantomData,
@@ -145,7 +173,7 @@ where
     }
 
     pub fn is_empty(&self) -> bool {
-        self.stream.is_empty()
+        self.stream.buffer().is_empty()
     }
 
     pub fn syscall_limit(&mut self, limit: Option<usize>) {
@@ -196,12 +224,10 @@ impl<T> Evented for TcpReceiver<T> {
         interest: Ready,
         opts: PollOpt,
     ) -> io::Result<()> {
-        self.stream.get_ref().get_ref().register(
-            poll,
-            token,
-            interest,
-            opts,
-        )
+        self.stream
+            .get_ref()
+            .get_ref()
+            .register(poll, token, interest, opts)
     }
 
     fn reregister(
@@ -211,12 +237,10 @@ impl<T> Evented for TcpReceiver<T> {
         interest: Ready,
         opts: PollOpt,
     ) -> io::Result<()> {
-        self.stream.get_ref().get_ref().reregister(
-            poll,
-            token,
-            interest,
-            opts,
-        )
+        self.stream
+            .get_ref()
+            .get_ref()
+            .reregister(poll, token, interest, opts)
     }
 
     fn deregister(&self, poll: &Poll) -> io::Result<()> {
@@ -245,8 +269,8 @@ where
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::thread;
     use mio::Events;
+    use std::thread;
 
     #[test]
     fn it_works() {

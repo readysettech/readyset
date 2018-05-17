@@ -1,19 +1,20 @@
-use prelude::*;
 use node::NodeType;
 use payload;
+use prelude::*;
 use std::collections::HashSet;
 
 impl Node {
-    pub fn process(
+    pub(crate) fn process(
         &mut self,
         m: &mut Option<Box<Packet>>,
-        keyed_by: Option<usize>,
+        keyed_by: Option<&Vec<usize>>,
         state: &mut StateMap,
         nodes: &DomainNodes,
         on_shard: Option<usize>,
         swap: bool,
         output: &mut Vec<(ReplicaAddr, Box<Packet>)>,
-    ) -> Vec<Miss> {
+        executor: Option<&Executor>,
+    ) -> (Vec<Miss>, HashSet<Vec<DataType>>) {
         m.as_mut().unwrap().trace(PacketEvent::Process);
 
         let addr = *self.local_addr();
@@ -24,23 +25,24 @@ impl Node {
                 m.map_data(|rs| {
                     materialize(rs, tag, state.get_mut(&addr));
                 });
-                vec![]
+                (vec![], HashSet::new())
             }
             NodeType::Reader(ref mut r) => {
                 r.process(m, swap);
-                vec![]
+                (vec![], HashSet::new())
             }
             NodeType::Egress(None) => unreachable!(),
             NodeType::Egress(Some(ref mut e)) => {
                 e.process(m, on_shard.unwrap_or(0), output);
-                vec![]
+                (vec![], HashSet::new())
             }
             NodeType::Sharder(ref mut s) => {
                 s.process(m, addr, on_shard.is_some(), output);
-                vec![]
+                (vec![], HashSet::new())
             }
             NodeType::Internal(ref mut i) => {
-                let mut captured = false;
+                let mut captured_full = false;
+                let mut captured = HashSet::new();
                 let mut misses = Vec::new();
                 let mut tracer;
 
@@ -60,11 +62,8 @@ impl Node {
                             use std::mem;
                             assert!(!ignore);
                             assert!(keyed_by.is_some());
-                            for key in &*for_keys {
-                                assert_eq!(key.len(), 1);
-                            }
                             ReplayContext::Partial {
-                                key_col: keyed_by.unwrap(),
+                                key_cols: keyed_by.unwrap().clone(),
                                 keys: mem::replace(for_keys, HashSet::new()),
                             }
                         }
@@ -88,18 +87,23 @@ impl Node {
                                 mem::replace(data, m.results);
                                 misses = m.misses;
                             }
-                            RawProcessingResult::ReplayPiece(rs, emitted_keys) => {
+                            RawProcessingResult::CapturedFull => {
+                                captured_full = true;
+                            }
+                            RawProcessingResult::ReplayPiece {
+                                rows,
+                                keys: emitted_keys,
+                                captured: were_captured,
+                            } => {
                                 // we already know that m must be a ReplayPiece since only a
                                 // ReplayPiece can release a ReplayPiece.
-                                mem::replace(data, rs);
+                                mem::replace(data, rows);
+                                captured = were_captured;
                                 if let ReplayContext::Partial { ref mut keys, .. } = replay {
                                     *keys = emitted_keys;
                                 } else {
                                     unreachable!();
                                 }
-                            }
-                            RawProcessingResult::Captured => {
-                                captured = true;
                             }
                             RawProcessingResult::FullReplay(rs, last) => {
                                 // we already know that m must be a (full) ReplayPiece since only a
@@ -138,10 +142,9 @@ impl Node {
                     }
                 }
 
-                if captured {
-                    use std::mem;
-                    mem::replace(m, Some(box Packet::Captured));
-                    return misses;
+                if captured_full {
+                    *m = None;
+                    return (vec![], HashSet::new());
                 }
 
                 let m = m.as_mut().unwrap();
@@ -177,14 +180,123 @@ impl Node {
                     });
                 }
 
-                misses
+                // Send write-ACKs to all the clients with updates that made
+                // it into this merged packet:
+                match (i.get_base(), executor, m) {
+                    (
+                        Some(..),
+                        Some(ex),
+                        &mut box Packet::Message {
+                            ref mut senders, ..
+                        },
+                    ) => senders.drain(..).for_each(|src| ex.send_back(src, Ok(0))),
+                    (
+                        Some(..),
+                        Some(ex),
+                        &mut box Packet::Transaction {
+                            ref mut senders,
+                            state: TransactionState::Committed(ts, ..),
+                            ..
+                        },
+                    ) => senders.drain(..).for_each(|src| ex.send_back(src, Ok(ts))),
+                    _ => {}
+                };
+
+                for miss in misses.iter_mut() {
+                    if miss.on != addr {
+                        reroute_miss(nodes, miss);
+                    }
+                }
+
+                (misses, captured)
             }
-            NodeType::Source | NodeType::Dropped => unreachable!(),
+            NodeType::Dropped => {
+                *m = None;
+                (vec![], HashSet::new())
+            }
+            NodeType::Source => unreachable!(),
+        }
+    }
+
+    pub fn process_eviction(
+        &mut self,
+        from: LocalNodeIndex,
+        key_columns: &[usize],
+        keys: &mut Vec<Vec<DataType>>,
+        tag: Tag,
+        on_shard: Option<usize>,
+        output: &mut Vec<(ReplicaAddr, Box<Packet>)>,
+    ) {
+        let addr = *self.local_addr();
+        match self.inner {
+            NodeType::Egress(Some(ref mut e)) => {
+                e.process(
+                    &mut Some(Box::new(Packet::EvictKeys {
+                        link: Link {
+                            src: addr,
+                            dst: addr,
+                        },
+                        tag,
+                        keys: keys.to_vec(),
+                    })),
+                    on_shard.unwrap_or(0),
+                    output,
+                );
+            }
+            NodeType::Sharder(ref mut s) => {
+                s.process_eviction(key_columns, tag, keys, addr, on_shard.is_some(), output);
+            }
+            NodeType::Internal(ref mut i) => {
+                i.on_eviction(from, key_columns, keys);
+            }
+            NodeType::Reader(ref mut r) => {
+                r.on_eviction(key_columns, &keys[..]);
+            }
+            NodeType::Ingress => {}
+            NodeType::Dropped => {}
+            NodeType::Egress(None) | NodeType::Source => unreachable!(),
         }
     }
 }
 
-pub fn materialize(rs: &mut Records, partial: Option<Tag>, state: Option<&mut State>) {
+// When we miss in can_query_through, that miss is *really* in the can_query_through node's
+// ancestor. We need to ensure that a replay is done to there, not the query_through node itself,
+// by translating the Miss into the right parent.
+fn reroute_miss(nodes: &DomainNodes, miss: &mut Miss) {
+    let node = nodes[&miss.on].borrow();
+    if node.is_internal() && node.can_query_through() {
+        let mut new_parent: Option<IndexPair> = None;
+        for col in miss.lookup_idx.iter_mut() {
+            let parents = node.resolve(*col).unwrap();
+            assert_eq!(parents.len(), 1, "query_through with more than one parent");
+
+            let (parent_global, parent_col) = parents[0];
+            if let Some(p) = new_parent {
+                assert_eq!(
+                    p.as_global(),
+                    parent_global,
+                    "query_through from different parents"
+                );
+            } else {
+                let parent_node = nodes
+                    .values()
+                    .find(|n| n.borrow().global_addr() == parent_global)
+                    .unwrap();
+                let mut pair: IndexPair = parent_global.into();
+                pair.set_local(*parent_node.borrow().local_addr());
+                new_parent = Some(pair);
+            }
+
+            *col = parent_col;
+        }
+
+        miss.on = *new_parent.unwrap();
+        // Recurse in case the parent we landed at also is a query_through node:
+        reroute_miss(nodes, miss);
+    }
+}
+
+pub fn materialize(rs: &mut Records, partial: Option<Tag>, state: Option<&mut Box<State>>) {
     // our output changed -- do we need to modify materialized state?
     if state.is_none() {
         // nope
@@ -192,42 +304,5 @@ pub fn materialize(rs: &mut Records, partial: Option<Tag>, state: Option<&mut St
     }
 
     // yes!
-    let state = state.unwrap();
-    if state.is_partial() {
-        rs.retain(|r| {
-            // we need to check that we're not erroneously filling any holes
-            // there are two cases here:
-            //
-            //  - if the incoming record is a partial replay (i.e., partial.is_some()), then we
-            //    *know* that we are the target of the replay, and therefore we *know* that the
-            //    materialization must already have marked the given key as "not a hole".
-            //  - if the incoming record is a normal message (i.e., partial.is_none()), then we
-            //    need to be careful. since this materialization is partial, it may be that we
-            //    haven't yet replayed this `r`'s key, in which case we shouldn't forward that
-            //    record! if all of our indices have holes for this record, there's no need for us
-            //    to forward it. it would just be wasted work.
-            //
-            //    XXX: we could potentially save come computation here in joins by not forcing
-            //    `right` to backfill the lookup key only to then throw the record away
-            match *r {
-                Record::Positive(ref r) => state.insert(r.clone(), partial),
-                Record::Negative(ref r) => state.remove(r),
-                Record::DeleteRequest(..) => unreachable!(),
-            }
-        });
-    } else {
-        for r in rs.iter() {
-            match *r {
-                Record::Positive(ref r) => {
-                    let hit = state.insert(r.clone(), None);
-                    debug_assert!(hit);
-                }
-                Record::Negative(ref r) => {
-                    let hit = state.remove(r);
-                    debug_assert!(hit);
-                }
-                Record::DeleteRequest(..) => unreachable!(),
-            }
-        }
-    }
+    state.unwrap().process_records(rs, partial);
 }

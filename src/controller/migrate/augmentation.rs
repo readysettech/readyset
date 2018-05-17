@@ -6,8 +6,8 @@
 //!  - Existing egress nodes that gain new children must gain channels to facilitate forwarding
 //!  - State must be replayed for materializations in other domains that need it
 
-use dataflow::prelude::*;
 use controller;
+use dataflow::prelude::*;
 
 use std::collections::{HashMap, HashSet};
 

@@ -1,10 +1,10 @@
-use controller::sql::reuse::helpers::predicate_implication::complex_predicate_implies;
-use controller::sql::reuse::{ReuseConfiguration, ReuseType};
 use controller::sql::query_graph::{QueryGraph, QueryGraphEdge};
 use controller::sql::query_signature::Signature;
+use controller::sql::reuse::helpers::predicate_implication::complex_predicate_implies;
+use controller::sql::reuse::{ReuseConfiguration, ReuseType};
 
-use std::vec::Vec;
 use std::collections::HashMap;
+use std::vec::Vec;
 
 /// Implementation of reuse algorithm with relaxed constraints.
 /// While Finkelstein checks if queries are compatible for direct extension,

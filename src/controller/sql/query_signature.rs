@@ -77,6 +77,14 @@ impl Signature for QueryGraph {
     /// Used to get a concise signature for a query graph. The `hash` member can be used to check
     /// for identical sets of relations and attributes covered (as per Finkelstein algorithm),
     /// while `relations` and `attributes` as `HashSet`s that allow for efficient subset checks.
+    ///
+    /// *N.B.:* Equal query signatures do *NOT* imply that queries are identical! Instead, it
+    /// merely means that the queries:
+    ///  1) refer to the same relations
+    ///  2) mention the same columns as attributes
+    /// Importantly, this does *NOT* say anything about the operators used in comparisons, literal
+    /// values compared against, or even which columns are compared. It is the responsibilty of the
+    /// caller to do a deeper comparison of the queries.
     fn signature(&self) -> QuerySignature {
         use std::collections::hash_map::DefaultHasher;
 
@@ -120,6 +128,17 @@ impl Signature for QueryGraph {
             }
         }
 
+        // Global predicates are part of the attributes too
+        for p in &self.global_predicates {
+            match *p {
+                ComparisonOp(ref ct) | LogicalOp(ref ct) => for c in &ct.contained_columns() {
+                    attrs_vec.push(c);
+                    attrs.insert(c);
+                },
+                _ => unreachable!(),
+            }
+        }
+
         // Compute attributes part of hash
         attrs_vec.sort();
         for a in &attrs_vec {
@@ -128,7 +147,7 @@ impl Signature for QueryGraph {
 
         let proj_columns: Vec<&OutputColumn> = self.columns.iter().collect();
         // Compute projected columns part of hash. In the strict definition of the Finkelstein
-        // query graph equivalence problem, we should sort the columns here, since their order
+        // query graph equivalence problem, we should not sort the columns here, since their order
         // doesn't matter in the query graph. However, we would like to avoid spurious ExactMatch
         // reuse cases and reproject incorrectly ordered columns, so we actually reflect the
         // column order in the query signature.
@@ -217,7 +236,6 @@ mod tests {
     }
 
     #[test]
-    #[ignore]
     fn it_compares_signatures() {
         use controller::sql::query_graph::to_query_graph;
         use nom_sql::parser::{parse_query, SqlQuery};
@@ -251,11 +269,11 @@ mod tests {
 
         // identical queries = identical signatures
         assert_eq!(qsa, qsa);
-        // but not if operators differ
-        assert_ne!(qsa, qsb);
+        // even if operators differ
+        assert_eq!(qsa, qsb);
         // ... or if literals differ
-        assert_ne!(qsc, qsd);
-        // ... or if additional predicates exist
+        assert_eq!(qsc, qsd);
+        // ... but not if additional predicates exist
         assert_ne!(qsa, qsc);
     }
 }

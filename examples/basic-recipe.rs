@@ -25,6 +25,7 @@ fn main() {
         512,
         Duration::from_millis(1),
         Some(String::from("example")),
+        1,
     );
 
     // set up Soup via recipe
@@ -33,6 +34,10 @@ fn main() {
     builder.set_worker_threads(2);
     builder.disable_partial();
     builder.set_persistence(persistence_params);
+
+    // TODO: This should be removed when the `it_works_with_reads_before_writes`
+    // test passes again.
+    builder.disable_partial();
 
     let mut blender = builder.build_local();
     blender.install_recipe(sql.to_owned()).unwrap();
@@ -46,7 +51,7 @@ fn main() {
     println!("Creating article...");
     let aid = 1;
     // Make sure the article exists:
-    if awvc.lookup(&aid.into(), true).unwrap().is_empty() {
+    if awvc.lookup(&[aid.into()], true).unwrap().is_empty() {
         println!("Creating new article...");
         let title = "test title";
         let url = "http://pdos.csail.mit.edu";
@@ -67,6 +72,5 @@ fn main() {
     thread::sleep(Duration::from_millis(1000));
 
     println!("Reading...");
-    println!("{:#?}", awvc.lookup(&1.into(), true));
-    thread::sleep(Duration::from_millis(10000));
+    println!("{:#?}", awvc.lookup(&[1.into()], true))
 }

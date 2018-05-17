@@ -1,21 +1,27 @@
+#![feature(nll)]
 #![feature(box_syntax)]
 #![feature(box_patterns)]
+#![feature(option_filter)]
 #![feature(use_extern_macros)]
 #![feature(entry_or_default)]
+#![feature(if_while_or_patterns)]
 #![feature(plugin, use_extern_macros)]
+#![feature(duration_from_micros)]
+#![feature(proc_macro_path_invoc)]
 #![plugin(tarpc_plugins)]
 #![deny(unused_extern_crates)]
 
 #[allow(unused_extern_crates)]
 extern crate backtrace;
-extern crate buf_redux;
 extern crate channel;
-extern crate core;
+extern crate basics;
 extern crate evmap;
 extern crate fnv;
+extern crate hyper;
 extern crate itertools;
 extern crate nom_sql;
 extern crate petgraph;
+extern crate rand;
 extern crate regex;
 extern crate serde;
 #[macro_use]
@@ -28,7 +34,6 @@ extern crate tarpc;
 extern crate timekeeper;
 extern crate tokio_core;
 extern crate vec_map;
-extern crate hyper;
 
 pub mod backlog;
 pub mod checktable;
@@ -40,25 +45,23 @@ pub mod prelude;
 pub mod statistics;
 
 mod domain;
-mod persistence;
+mod group_commit;
 mod processing;
 mod transactions;
 
-use std::sync::{Arc, Mutex};
 use std::collections::HashMap;
+use std::sync::{Arc, Mutex};
 
 use checktable::TokenGenerator;
 
 pub type Readers = Arc<
-    Mutex<HashMap<(core::NodeIndex, usize), (backlog::SingleReadHandle, Option<TokenGenerator>)>>,
+    Mutex<HashMap<(basics::NodeIndex, usize), (backlog::SingleReadHandle, Option<TokenGenerator>)>>,
 >;
-pub type PersistenceParameters = persistence::Parameters;
 pub type DomainConfig = domain::Config;
 
-pub use persistence::DurabilityMode;
-pub use domain::{Domain, DomainBuilder, Executor, Index};
-pub use payload::{LocalBypass, Packet};
 pub use checktable::connect_thread_checktable;
+pub use domain::{Domain, DomainBuilder, Index};
+pub use payload::{LocalBypass, Packet};
 
 #[derive(Copy, Clone, PartialEq, Eq, Debug, Serialize, Deserialize)]
 pub enum Sharding {
@@ -85,13 +88,13 @@ impl Sharding {
 }
 
 #[inline]
-pub fn shard_by(dt: &core::DataType, shards: usize) -> usize {
+pub fn shard_by(dt: &basics::DataType, shards: usize) -> usize {
     match *dt {
-        core::DataType::Int(n) => n as usize % shards,
-        core::DataType::BigInt(n) => n as usize % shards,
-        core::DataType::Text(..) | core::DataType::TinyText(..) => {
-            use std::hash::Hasher;
+        basics::DataType::Int(n) => n as usize % shards,
+        basics::DataType::BigInt(n) => n as usize % shards,
+        basics::DataType::Text(..) | basics::DataType::TinyText(..) => {
             use std::borrow::Cow;
+            use std::hash::Hasher;
             let mut hasher = fnv::FnvHasher::default();
             let s: Cow<str> = dt.into();
             hasher.write(s.as_bytes());

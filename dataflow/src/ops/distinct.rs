@@ -52,7 +52,7 @@ impl Ingredient for Distinct {
         from: LocalNodeIndex,
         rs: Records,
         _: &mut Tracer,
-        replay_key_col: Option<usize>,
+        _: Option<&[usize]>,
         _: &DomainNodes,
         state: &StateMap,
     ) -> ProcessingResult {
@@ -119,23 +119,14 @@ impl Ingredient for Distinct {
             let positive = rec.is_positive();
             if positive {
                 match db.lookup(group_by, &KeyType::from(&group[..])) {
-                    LookupResult::Some(rs) => {
-                        if rs.is_empty(){
+                    LookupResult::Some(rr) => {
+                        //println!("record {:?}", rr);
+                        if rr.len() == 0 {
                             output.push(rec.clone());
                         }
                     },
                     LookupResult::Missing => {
                         println!("Missing");
-                        misses.push(Miss {
-                            node: *us,
-                            columns: Vec::from(group_by),
-                            replay_key: replay_key_col.map(|col| {
-                                // since topk is an identity, we don't need to map this output
-                                // column to an input column.
-                                vec![rec[col].clone()]
-                            }),
-                            key: group.clone(),
-                        });
                         ()
                     }
                 }
@@ -148,16 +139,6 @@ impl Ingredient for Distinct {
                     },
                     LookupResult::Missing => {
                         println!("Missing");
-                        misses.push(Miss {
-                            node: *us,
-                            columns: Vec::from(group_by),
-                            replay_key: replay_key_col.map(|col| {
-                                // since topk is an identity, we don't need to map this output
-                                // column to an input column.
-                                vec![rec[col].clone()]
-                            }),
-                            key: group.clone(),
-                        });
                         ()
                     }
                 }

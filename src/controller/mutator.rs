@@ -1,9 +1,14 @@
-use dataflow::prelude::*;
 use controller::domain_handle::DomainInputHandle;
+use controller::{ExclusiveConnection, SharedConnection};
 use dataflow::checktable;
+use dataflow::prelude::*;
 
-use std::net::SocketAddr;
+use nom_sql::CreateTableStatement;
 use std::cell::RefCell;
+use std::collections::HashMap;
+use std::io;
+use std::net::SocketAddr;
+use std::rc::Rc;
 use vec_map::VecMap;
 
 /// Indicates why a Mutator operation failed.
@@ -11,6 +16,8 @@ use vec_map::VecMap;
 pub enum MutatorError {
     /// Incorrect number of columns specified for operations: (expected, got).
     WrongColumnCount(usize, usize),
+    /// Incorrect number of key columns specified for operations: (expected, got).
+    WrongKeyColumnCount(usize, usize),
     /// Transaction was unable to complete due to a conflict.
     TransactionFailed,
 }
@@ -27,17 +34,44 @@ pub struct MutatorBuilder {
 
     pub(crate) table_name: String,
     pub(crate) columns: Vec<String>,
+    pub(crate) schema: Option<CreateTableStatement>,
+
+    pub(crate) local_port: Option<u16>,
 
     // skip so that serde will set value to default (which is false) when serializing
     #[serde(skip)]
     pub(crate) is_local: bool,
 }
 
+pub(crate) type MutatorRpc = Rc<RefCell<DomainInputHandle>>;
+
 impl MutatorBuilder {
+    /// Set the local port to bind to when making the shared connection.
+    pub(crate) fn with_local_port(mut self, port: u16) -> MutatorBuilder {
+        self.local_port = Some(port);
+        self
+    }
+
     /// Construct a `Mutator`.
-    pub fn build(self) -> Mutator {
+    pub fn build(
+        self,
+        rpcs: &mut HashMap<Vec<SocketAddr>, MutatorRpc>,
+    ) -> Mutator<SharedConnection> {
+        use std::collections::hash_map::Entry;
+
+        let dih = match rpcs.entry(self.txs.clone()) {
+            Entry::Occupied(e) => Rc::clone(e.get()),
+            Entry::Vacant(h) => {
+                let c = DomainInputHandle::new_on(self.local_port, h.key()).unwrap();
+                let c = Rc::new(RefCell::new(c));
+                h.insert(Rc::clone(&c));
+                c
+            }
+        };
+
         Mutator {
-            domain_input_handle: RefCell::new(DomainInputHandle::new(self.txs).unwrap()),
+            domain_input_handle: dih,
+            shard_addrs: self.txs,
             addr: self.addr,
             key: self.key,
             key_is_primary: self.key_is_primary,
@@ -46,15 +80,17 @@ impl MutatorBuilder {
             tracer: None,
             table_name: self.table_name,
             columns: self.columns,
+            schema: self.schema,
             is_local: self.is_local,
+            exclusivity: SharedConnection,
         }
     }
 }
 
 /// A `Mutator` is used to perform reads and writes to base nodes.
-pub struct Mutator {
-    // the RefCell is *just* there so we can use ::sender()
-    domain_input_handle: RefCell<DomainInputHandle>,
+pub struct Mutator<E = SharedConnection> {
+    domain_input_handle: MutatorRpc,
+    shard_addrs: Vec<SocketAddr>,
     addr: LocalNodeIndex,
     key_is_primary: bool,
     key: Vec<usize>,
@@ -63,10 +99,66 @@ pub struct Mutator {
     tracer: Tracer,
     table_name: String,
     columns: Vec<String>,
+    schema: Option<CreateTableStatement>,
     is_local: bool,
+
+    #[allow(dead_code)]
+    exclusivity: E,
 }
 
-impl Mutator {
+impl Clone for Mutator<SharedConnection> {
+    fn clone(&self) -> Self {
+        Mutator {
+            domain_input_handle: self.domain_input_handle.clone(),
+            shard_addrs: self.shard_addrs.clone(),
+            addr: self.addr,
+            key_is_primary: self.key_is_primary,
+            key: self.key.clone(),
+            transactional: self.transactional,
+            dropped: self.dropped.clone(),
+            tracer: self.tracer.clone(),
+            table_name: self.table_name.clone(),
+            columns: self.columns.clone(),
+            schema: self.schema.clone(),
+            is_local: self.is_local,
+            exclusivity: SharedConnection,
+        }
+    }
+}
+
+unsafe impl Send for Mutator<ExclusiveConnection> {}
+
+impl Mutator<SharedConnection> {
+    /// Change this mutator into one with a dedicated connection the server so it can be sent
+    /// across threads.
+    pub fn into_exclusive(self) -> Mutator<ExclusiveConnection> {
+        let c = DomainInputHandle::new(&self.shard_addrs[..]).unwrap();
+        let c = Rc::new(RefCell::new(c));
+
+        Mutator {
+            domain_input_handle: c,
+            shard_addrs: self.shard_addrs,
+            addr: self.addr,
+            key_is_primary: self.key_is_primary,
+            key: self.key.clone(),
+            transactional: self.transactional,
+            dropped: self.dropped.clone(),
+            tracer: self.tracer.clone(),
+            table_name: self.table_name.clone(),
+            columns: self.columns.clone(),
+            schema: self.schema.clone(),
+            is_local: self.is_local,
+            exclusivity: ExclusiveConnection,
+        }
+    }
+}
+
+impl<E> Mutator<E> {
+    /// Get the local address this mutator is bound to.
+    pub fn local_addr(&self) -> io::Result<SocketAddr> {
+        self.domain_input_handle.borrow().local_addr()
+    }
+
     fn inject_dropped_cols(&self, rs: &mut Records) {
         let ndropped = self.dropped.len();
         if ndropped != 0 {
@@ -147,6 +239,7 @@ impl Mutator {
                 data: rs,
                 state: TransactionState::WillCommit,
                 tracer: self.tracer.clone(),
+                senders: vec![],
             }
         } else {
             box Packet::Message {
@@ -154,6 +247,7 @@ impl Mutator {
                 src: None,
                 data: rs,
                 tracer: self.tracer.clone(),
+                senders: vec![],
             }
         }
     }
@@ -176,6 +270,7 @@ impl Mutator {
             data: rs,
             state: TransactionState::Pending(t),
             tracer: self.tracer.clone(),
+            senders: vec![],
         };
 
         self.domain_input_handle
@@ -268,7 +363,11 @@ impl Mutator {
     where
         I: Into<Vec<DataType>>,
     {
-        Ok(self.send(vec![Record::DeleteRequest(key.into())].into()))
+        Ok(self.send(
+            vec![
+                Record::BaseOperation(BaseOperation::Delete { key: key.into() }),
+            ].into(),
+        ))
     }
 
     /// Perform a transactional delete from the base node this Mutator was generated for.
@@ -280,56 +379,76 @@ impl Mutator {
     where
         I: Into<Vec<DataType>>,
     {
-        self.tx_send(vec![Record::DeleteRequest(key.into())].into(), t)
-            .map_err(|()| MutatorError::TransactionFailed)
+        self.tx_send(
+            vec![
+                Record::BaseOperation(BaseOperation::Delete { key: key.into() }),
+            ].into(),
+            t,
+        ).map_err(|()| MutatorError::TransactionFailed)
     }
 
-    /// Perform a non-transactional update (delete followed by put) to the base node this Mutator
-    /// was generated for.
-    pub fn update<V>(&mut self, u: V) -> Result<(), MutatorError>
+    /// Perform a non-transactional update to the base node this Mutator was generated for.
+    pub fn update<V>(&mut self, key: Vec<DataType>, u: V) -> Result<(), MutatorError>
     where
-        V: Into<Vec<DataType>>,
+        V: IntoIterator<Item = (usize, Modification)>,
     {
         assert!(
             !self.key.is_empty() && self.key_is_primary,
             "update operations can only be applied to base nodes with key columns"
         );
 
-        let u = u.into();
-        if u.len() != self.columns.len() {
-            return Err(MutatorError::WrongColumnCount(self.columns.len(), u.len()));
+        if key.len() != self.key.len() {
+            return Err(MutatorError::WrongKeyColumnCount(self.key.len(), key.len()));
         }
 
-        let pkey = self.key.iter().map(|&col| &u[col]).cloned().collect();
-        Ok(self.send(vec![Record::DeleteRequest(pkey), u.into()].into()))
+        let mut set = vec![Modification::None; self.columns.len()];
+        for (coli, m) in u {
+            if coli >= self.columns.len() {
+                return Err(MutatorError::WrongColumnCount(self.columns.len(), coli + 1));
+            }
+            set[coli] = m;
+        }
+        Ok(self.send(vec![Record::BaseOperation(BaseOperation::Update { key, set })].into()))
     }
 
-    /// Perform a transactional update (delete followed by put) to the base node this Mutator was
-    /// generated for.
-    pub fn transactional_update<V>(
+    /// Perform a non-transactional insert-or-update to the base node this Mutator was generated
+    /// for. If a record already exists for the key of the given record, the existing record will
+    /// instead be updated with the modifications in `u`.
+    pub fn insert_or_update<V>(
         &mut self,
-        u: V,
-        t: checktable::Token,
-    ) -> Result<i64, MutatorError>
+        insert: Vec<DataType>,
+        update: V,
+    ) -> Result<(), MutatorError>
     where
-        V: Into<Vec<DataType>>,
+        V: IntoIterator<Item = (usize, Modification)>,
     {
         assert!(
             !self.key.is_empty() && self.key_is_primary,
             "update operations can only be applied to base nodes with key columns"
         );
 
-        let u: Vec<_> = u.into();
-        if u.len() != self.columns.len() {
-            return Err(MutatorError::WrongColumnCount(self.columns.len(), u.len()));
+        if insert.len() != self.columns.len() {
+            return Err(MutatorError::WrongColumnCount(
+                self.columns.len(),
+                insert.len(),
+            ));
         }
 
-        let m = vec![
-            Record::DeleteRequest(self.key.iter().map(|&col| &u[col]).cloned().collect()),
-            u.into(),
-        ].into();
-        self.tx_send(m, t)
-            .map_err(|()| MutatorError::TransactionFailed)
+        let mut set = vec![Modification::None; self.columns.len()];
+        for (coli, m) in update {
+            if coli >= self.columns.len() {
+                return Err(MutatorError::WrongColumnCount(self.columns.len(), coli + 1));
+            }
+            set[coli] = m;
+        }
+        Ok(self.send(
+            vec![
+                Record::BaseOperation(BaseOperation::InsertOrUpdate {
+                    row: insert,
+                    update: set,
+                }),
+            ].into(),
+        ))
     }
 
     /// Trace subsequent packets by sending events on the global debug channel until `stop_tracing`
@@ -351,5 +470,10 @@ impl Mutator {
     /// Get the name of the columns in the base table this mutator is for.
     pub fn columns(&self) -> &[String] {
         &self.columns
+    }
+
+    /// Get the base table schema.
+    pub fn schema(&self) -> &CreateTableStatement {
+        self.schema.as_ref().unwrap()
     }
 }

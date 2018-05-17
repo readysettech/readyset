@@ -1,30 +1,32 @@
 use channel::tcp::TcpSender;
 use consensus::{Authority, Epoch, STATE_KEY};
-use dataflow::{checktable, node, payload, DomainConfig, PersistenceParameters};
+use basics::PersistenceParameters;
 use dataflow::payload::{EgressForBase, IngressFromBase};
 use dataflow::prelude::*;
 use dataflow::statistics::GraphStats;
+use dataflow::{checktable, node, payload, DomainConfig};
 
 use std::collections::{BTreeMap, HashMap};
 use std::error::Error;
 use std::fmt::{self, Display};
 use std::net::{IpAddr, SocketAddr};
-use std::time::{Duration, Instant};
 use std::sync::{Arc, Mutex};
+use std::time::{Duration, Instant};
 use std::{io, time};
 
-use coordination::{CoordinationMessage, CoordinationPayload};
-use controller::{ControllerState, DomainHandle, Migration, Recipe, RemoteGetterBuilder,
-                 WorkerIdentifier, WorkerStatus};
 use controller::migrate::materialization::Materializations;
 use controller::mutator::MutatorBuilder;
 use controller::recipe::ActivationResult;
+use controller::{ControllerState, DomainHandle, Migration, Recipe, RemoteGetterBuilder,
+                 WorkerIdentifier, WorkerStatus};
+use coordination::{CoordinationMessage, CoordinationPayload};
 
 use hyper::{Method, StatusCode};
 use mio::net::TcpListener;
 use petgraph;
 use petgraph::visit::Bfs;
 use slog;
+use std::mem;
 use tarpc::sync::client::{self, ClientExt};
 
 /// `Controller` is the core component of the alternate Soup implementation.
@@ -34,7 +36,7 @@ use tarpc::sync::client::{self, ClientExt};
 /// `Migration`, which can be performed using `ControllerInner::migrate`. Only one `Migration` can
 /// occur at any given point in time.
 pub struct ControllerInner {
-    pub(super) ingredients: petgraph::Graph<node::Node, Edge>,
+    pub(super) ingredients: Graph,
     pub(super) source: NodeIndex,
     pub(super) ndomains: usize,
     pub(super) checktable: checktable::CheckTableClient,
@@ -73,8 +75,45 @@ pub struct ControllerInner {
     healthcheck_every: Duration,
     last_checked_workers: Instant,
 
-    pub(super) fixed_domains: bool,
     log: slog::Logger,
+}
+
+pub(crate) fn graphviz(graph: &Graph, materializations: &Materializations) -> String {
+    let mut s = String::new();
+
+    let indentln = |s: &mut String| s.push_str("    ");
+
+    // header.
+    s.push_str("digraph {{\n");
+
+    // global formatting.
+    indentln(&mut s);
+    s.push_str("node [shape=record, fontsize=10]\n");
+
+    // node descriptions.
+    for index in graph.node_indices() {
+        let node = &graph[index];
+        let materialization_status = materializations.get_status(&index, node);
+        indentln(&mut s);
+        s.push_str(&format!("{}", index.index()));
+        s.push_str(&node.describe(index, materialization_status));
+    }
+
+    // edges.
+    for (_, edge) in graph.raw_edges().iter().enumerate() {
+        indentln(&mut s);
+        s.push_str(&format!(
+            "{} -> {}",
+            edge.source().index(),
+            edge.target().index()
+        ));
+        s.push_str("\n");
+    }
+
+    // footer.
+    s.push_str("}}");
+
+    s
 }
 
 /// Serializable error type for RPC that can fail.
@@ -126,13 +165,13 @@ impl ControllerInner {
         body: Vec<u8>,
         authority: &Arc<A>,
     ) -> Result<String, StatusCode> {
-        use serde_json as json;
         use hyper::Method::*;
+        use serde_json as json;
 
         match (&method, path.as_ref()) {
             (&Get, "/graph") => return Ok(self.graphviz()),
             (&Post, "/graphviz") => return Ok(json::to_string(&self.graphviz()).unwrap()),
-            (&Post, "/get_statistics") => {
+            (&Get, "/get_statistics") => {
                 return Ok(json::to_string(&self.get_statistics()).unwrap())
             }
             _ => {}
@@ -143,8 +182,10 @@ impl ControllerInner {
         }
 
         Ok(match (method, path.as_ref()) {
+            (Get, "/flush_partial") => return Ok(json::to_string(&self.flush_partial()).unwrap()),
             (Post, "/inputs") => json::to_string(&self.inputs()).unwrap(),
             (Post, "/outputs") => json::to_string(&self.outputs()).unwrap(),
+            (Get, "/instances") => return Ok(json::to_string(&self.get_instances()).unwrap()),
             (Post, "/mutator_builder") => {
                 json::to_string(&self.mutator_builder(json::from_slice(&body).unwrap())).unwrap()
             }
@@ -159,11 +200,14 @@ impl ControllerInner {
                 json::to_string(&self.install_recipe(authority, json::from_slice(&body).unwrap()))
                     .unwrap()
             }
-            (Post, "/set_security_config") => {
-                json::to_string(&self.set_security_config(json::from_slice(&body).unwrap())).unwrap()
-            }
+            (Post, "/set_security_config") => json::to_string(&self.set_security_config(
+                json::from_slice(&body).unwrap(),
+            )).unwrap(),
             (Post, "/create_universe") => {
                 json::to_string(&self.create_universe(json::from_slice(&body).unwrap())).unwrap()
+            }
+            (Post, "/remove_node") => {
+                json::to_string(&self.remove_node(json::from_slice(&body).unwrap())).unwrap()
             }
             _ => return Err(StatusCode::NotFound),
         })
@@ -200,15 +244,6 @@ impl ControllerInner {
                     self.apply_recipe(self.recipe.clone().extend(&r).unwrap())
                         .unwrap();
                 }
-
-                info!(self.log, "Recovering from log");
-                for (_name, index) in self.inputs().iter() {
-                    let node = &self.ingredients[*index];
-                    let domain = self.domains.get_mut(&node.domain()).unwrap();
-                    domain.send(box payload::Packet::StartRecovery).unwrap();
-                    domain.wait_for_ack().unwrap();
-                }
-                info!(self.log, "Recovery complete");
             }
         }
 
@@ -278,15 +313,10 @@ impl ControllerInner {
         let mut recipe = Recipe::blank(Some(log.clone()));
         recipe.enable_reuse(state.config.reuse);
 
-        let (fixed_domains, ndomains) = match state.config.fixed_domains {
-            Some(n) => (true, n),
-            None => (false, 0),
-        };
-
         ControllerInner {
             ingredients: g,
             source: source,
-            ndomains: ndomains,
+            ndomains: 0,
             checktable,
             checktable_addr,
             listen_addr,
@@ -314,8 +344,6 @@ impl ControllerInner {
 
             pending_recovery,
             last_checked_workers: Instant::now(),
-
-            fixed_domains: fixed_domains,
         }
     }
 
@@ -442,11 +470,13 @@ impl ControllerInner {
             .externals(petgraph::EdgeDirection::Outgoing)
             .filter_map(|n| {
                 let name = self.ingredients[n].name().to_owned();
-                self.ingredients[n].with_reader(|r| {
-                    // we want to give the the node address that is being materialized not that of
-                    // the reader node itself.
-                    (name, r.is_for())
-                })
+                self.ingredients[n]
+                    .with_reader(|r| {
+                        // we want to give the the node address that is being materialized not that of
+                        // the reader node itself.
+                        (name, r.is_for())
+                    })
+                    .ok()
             })
             .collect()
     }
@@ -501,6 +531,7 @@ impl ControllerInner {
                 .collect();
 
             RemoteGetterBuilder {
+                local_ports: vec![],
                 node: r,
                 columns,
                 shards,
@@ -553,8 +584,10 @@ impl ControllerInner {
             columns.len(),
             node.fields().len() - base_operator.get_dropped().len()
         );
+        let schema = self.recipe.get_base_schema(base);
 
         Some(MutatorBuilder {
+            local_port: None,
             txs,
             addr: (*node.local_addr()).into(),
             key: key,
@@ -563,6 +596,7 @@ impl ControllerInner {
             dropped: base_operator.get_dropped(),
             table_name: node.name().to_owned(),
             columns,
+            schema,
             is_local: true,
         })
     }
@@ -592,6 +626,59 @@ impl ControllerInner {
         GraphStats { domains: domains }
     }
 
+    pub fn get_instances(&self) -> Vec<(WorkerIdentifier, bool, Duration)> {
+        self.workers
+            .iter()
+            .map(|(&id, ref status)| (id, status.healthy, status.last_heartbeat.elapsed()))
+            .collect()
+    }
+
+    pub fn flush_partial(&mut self) -> u64 {
+        // get statistics for current domain sizes
+        // and evict all state from partial nodes
+        let to_evict: Vec<_> = self.domains
+            .iter_mut()
+            .map(|(di, s)| {
+                s.send(box payload::Packet::GetStatistics).unwrap();
+                let to_evict: Vec<(NodeIndex, u64)> = s.wait_for_statistics()
+                    .unwrap()
+                    .into_iter()
+                    .flat_map(move |(_, node_stats)| {
+                        node_stats
+                            .into_iter()
+                            .filter_map(|(ni, ns)| match ns.materialized {
+                                MaterializationStatus::Partial => Some((ni, ns.mem_size)),
+                                _ => None,
+                            })
+                    })
+                    .collect();
+                (*di, to_evict)
+            })
+            .collect();
+
+        let mut total_evicted = 0;
+        for (di, nodes) in to_evict {
+            for (ni, bytes) in nodes {
+                let na = self.ingredients[ni].local_addr();
+                self.domains
+                    .get_mut(&di)
+                    .unwrap()
+                    .send(box payload::Packet::Evict {
+                        node: Some(*na),
+                        num_bytes: bytes as usize,
+                    })
+                    .expect("failed to send domain flush message");
+                total_evicted += bytes;
+            }
+        }
+
+        warn!(
+            self.log,
+            "flushed {} bytes of partial domain state", total_evicted
+        );
+
+        total_evicted
+    }
 
     pub fn create_universe(&mut self, context: HashMap<String, DataType>) {
         let log = self.log.clone();
@@ -600,12 +687,21 @@ impl ControllerInner {
 
         let mut universe_groups = HashMap::new();
 
-        let uid = context.get("id").expect("Universe context must have id").clone();
+        let uid = context
+            .get("id")
+            .expect("Universe context must have id")
+            .clone();
+        let uid = &[uid];
         if context.get("group").is_none() {
             for g in groups {
                 let rgb: Option<RemoteGetterBuilder> = self.getter_builder(&g);
-                let mut getter = rgb.map(|rgb| rgb.build()).unwrap();
-                let my_groups: Vec<DataType> = getter.lookup(&uid, true).unwrap().iter().map(|v| v[1].clone()).collect();
+                let mut getter = rgb.map(|rgb| rgb.build_exclusive()).unwrap();
+                let my_groups: Vec<DataType> = getter
+                    .lookup(uid, true)
+                    .unwrap()
+                    .iter()
+                    .map(|v| v[1].clone())
+                    .collect();
                 universe_groups.insert(g, my_groups);
             }
         }
@@ -623,7 +719,6 @@ impl ControllerInner {
                     Err(RpcError::Other("failed to create universe".to_owned()))
                 }
             }.unwrap();
-
         });
 
         self.recipe = r;
@@ -637,20 +732,30 @@ impl ControllerInner {
 
     fn apply_recipe(&mut self, mut new: Recipe) -> Result<ActivationResult, RpcError> {
         let mut err = Err(RpcError::Other("".to_owned())); // <3 type inference
-        self.migrate(|mig| match new.activate(mig, false) {
-            Ok(ra) => {
-                err = Ok(ra);
-            }
-            Err(e) => {
-                err = Err(RpcError::Other(format!("failed to activate recipe: {}", e)));
-            }
+        self.migrate(|mig| {
+            err = new.activate(mig, false)
+                .map_err(|e| RpcError::Other(format!("failed to activate recipe: {}", e)))
         });
 
         match err {
-            Ok(_) => {
+            Ok(ref ra) => {
+                for leaf in &ra.removed_leaves {
+                    // There should be exactly one reader attached to each "leaf" node. Find it and
+                    // remove it along with any now unneeded ancestors.
+                    let readers: Vec<_> = self.ingredients
+                        .neighbors_directed(*leaf, petgraph::EdgeDirection::Outgoing)
+                        .collect();
+                    assert_eq!(readers.len(), 1);
+                    self.remove_node(readers[0]);
+                }
                 self.recipe = new;
             }
-            Err(ref e) => crit!(self.log, "{}", e.description()),
+            Err(ref e) => {
+                crit!(self.log, "{}", e.description());
+                // TODO(malte): a little yucky, since we don't really need the blank recipe
+                let recipe = mem::replace(&mut self.recipe, Recipe::blank(None));
+                self.recipe = recipe.revert();
+            }
         }
 
         err
@@ -661,7 +766,8 @@ impl ControllerInner {
         authority: &Arc<A>,
         add_txt: String,
     ) -> Result<ActivationResult, RpcError> {
-        let new = self.recipe.clone();
+        // needed because self.apply_recipe needs to mutate self.recipe, so can't have it borrowed
+        let new = mem::replace(&mut self.recipe, Recipe::blank(None));
         match new.extend(&add_txt) {
             Ok(new) => {
                 let activation_result = self.apply_recipe(new);
@@ -684,8 +790,10 @@ impl ControllerInner {
 
                 activation_result
             }
-            Err(e) => {
+            Err((old, e)) => {
+                // need to restore the old recipe
                 crit!(self.log, "failed to extend recipe: {:?}", e);
+                self.recipe = old;
                 Err(RpcError::Other("failed to extend recipe".to_owned()))
             }
         }
@@ -698,7 +806,7 @@ impl ControllerInner {
     ) -> Result<ActivationResult, RpcError> {
         match Recipe::from_str(&r_txt, Some(self.log.clone())) {
             Ok(r) => {
-                let old = self.recipe.clone();
+                let old = mem::replace(&mut self.recipe, Recipe::blank(None));
                 let mut new = old.replace(r).unwrap();
                 let activation_result = self.apply_recipe(new);
                 if authority
@@ -727,41 +835,52 @@ impl ControllerInner {
     }
 
     pub fn graphviz(&self) -> String {
-        let mut s = String::new();
+        graphviz(&self.ingredients, &self.materializations)
+    }
 
-        let indentln = |s: &mut String| s.push_str("    ");
+    pub fn remove_node(&mut self, node: NodeIndex) {
+        // Node must not have any children.
+        assert_eq!(
+            self.ingredients
+                .neighbors_directed(node, petgraph::EdgeDirection::Outgoing)
+                .count(),
+            0
+        );
+        assert!(!self.ingredients[node].is_source());
 
-        // header.
-        s.push_str("digraph {{\n");
+        let mut removals = HashMap::new();
+        let mut nodes = vec![node];
+        while let Some(node) = nodes.pop() {
+            let mut parents = self.ingredients
+                .neighbors_directed(node, petgraph::EdgeDirection::Incoming)
+                .detach();
+            while let Some(parent) = parents.next_node(&self.ingredients) {
+                let edge = self.ingredients.find_edge(parent, node).unwrap();
+                self.ingredients.remove_edge(edge);
 
-        // global formatting.
-        indentln(&mut s);
-        s.push_str("node [shape=record, fontsize=10]\n");
+                if !self.ingredients[parent].is_source() && !self.ingredients[parent].is_base()
+                    && self.ingredients
+                        .neighbors_directed(parent, petgraph::EdgeDirection::Outgoing)
+                        .count() == 1
+                {
+                    nodes.push(parent);
+                }
+            }
 
-        // node descriptions.
-        for index in self.ingredients.node_indices() {
-            let node = &self.ingredients[index];
-            let materialization_status = self.materializations.get_status(&index, node);
-            indentln(&mut s);
-            s.push_str(&format!("{}", index.index()));
-            s.push_str(&node.describe(index, materialization_status));
+            removals
+                .entry(self.ingredients[node].domain())
+                .or_insert(Vec::new())
+                .push(*self.ingredients[node].local_addr());
+            self.ingredients[node].remove();
         }
 
-        // edges.
-        for (_, edge) in self.ingredients.raw_edges().iter().enumerate() {
-            indentln(&mut s);
-            s.push_str(&format!(
-                "{} -> {}",
-                edge.source().index(),
-                edge.target().index()
-            ));
-            s.push_str("\n");
+        for (domain, nodes) in removals {
+            self.domains
+                .get_mut(&domain)
+                .unwrap()
+                .send(box payload::Packet::RemoveNodes { nodes })
+                .unwrap();
         }
-
-        // footer.
-        s.push_str("}}");
-
-        s
     }
 }
 

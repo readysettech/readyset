@@ -2,16 +2,16 @@ use nom_sql::{ArithmeticBase, ArithmeticExpression, Column, ColumnConstraint, Co
               OrderType};
 use std::collections::HashMap;
 
-use core::{DataType, NodeIndex};
-use mir::{FlowNode, MirNodeRef};
-use mir::node::{GroupedNodeType, MirNode, MirNodeType};
-use mir::query::{MirQuery, QueryFlowParts};
+use controller::Migration;
+use basics::{DataType, NodeIndex};
+use dataflow::ops;
+use dataflow::ops::filter::FilterCondition;
 use dataflow::ops::join::{Join, JoinType};
 use dataflow::ops::latest::Latest;
 use dataflow::ops::project::{Project, ProjectExpression, ProjectExpressionBase};
-use dataflow::ops::filter::FilterCondition;
-use dataflow::ops;
-use controller::Migration;
+use mir::node::{GroupedNodeType, MirNode, MirNodeType};
+use mir::query::{MirQuery, QueryFlowParts};
+use mir::{FlowNode, MirNodeRef};
 
 pub fn mir_query_to_flow_parts(mir_query: &mut MirQuery, mig: &mut Migration) -> QueryFlowParts {
     use std::collections::VecDeque;
@@ -626,7 +626,7 @@ pub(crate) fn make_join_node(
     // at this point in the codebase, so the `r2.a = r1.b` will join on the wrong `a` column.
     let left_join_col_id = projected_cols_left
         .iter()
-        .position(|lc| lc.name == on_left.first().unwrap().name)
+        .position(|lc| lc == on_left.first().unwrap())
         .expect(&format!(
             "missing left-side join column {:?} in {:?}",
             on_left.first().unwrap(),
@@ -634,7 +634,7 @@ pub(crate) fn make_join_node(
         ));
     let right_join_col_id = projected_cols_right
         .iter()
-        .position(|rc| rc.name == on_right.first().unwrap().name)
+        .position(|rc| rc == on_right.first().unwrap())
         .expect(&format!(
             "missing right-side join column {:?} in {:?}",
             on_left.first().unwrap(),
@@ -686,10 +686,12 @@ pub(crate) fn make_latest_node(
         .map(|c| parent.borrow().column_id_for_column(c))
         .collect::<Vec<_>>();
 
+    // latest doesn't support compound group by
+    assert_eq!(group_col_indx.len(), 1);
     let na = mig.add_ingredient(
         String::from(name),
         column_names.as_slice(),
-        Latest::new(parent_na, group_col_indx),
+        Latest::new(parent_na, group_col_indx[0]),
     );
     FlowNode::New(na)
 }
@@ -792,15 +794,15 @@ pub(crate) fn make_topk_node(
     let parent_na = parent.borrow().flow_node_addr().unwrap();
     let column_names = column_names(columns);
 
-    let group_by_indx = if group_by.is_empty() {
-        // no query parameters, so we index on the first column
-        vec![0 as usize]
-    } else {
-        group_by
-            .iter()
-            .map(|c| parent.borrow().column_id_for_column(c))
-            .collect::<Vec<_>>()
-    };
+    assert!(
+        !group_by.is_empty(),
+        "need bogokey for TopK without group columns"
+    );
+
+    let group_by_indx = group_by
+        .iter()
+        .map(|c| parent.borrow().column_id_for_column(c))
+        .collect::<Vec<_>>();
 
     let cmp_rows = match *order {
         Some(ref o) => {
@@ -848,15 +850,13 @@ pub(crate) fn materialize_leaf_node(
     // TODO(malte): consider the case when the projected columns need reordering
 
     if !key_cols.is_empty() {
-        // TODO(malte): this does not yet cover the case when there are multiple query
-        // parameters, which requires compound key support on Reader nodes.
-        assert_eq!(key_cols.len(), 1);
-        let first_key_col_id = parent
-            .borrow()
-            .column_id_for_column(key_cols.iter().next().unwrap());
-        mig.maintain(name, na, first_key_col_id);
+        let key_cols: Vec<_> = key_cols
+            .iter()
+            .map(|c| parent.borrow().column_id_for_column(c))
+            .collect();
+        mig.maintain(name, na, &key_cols[..]);
     } else {
         // if no key specified, default to the first column
-        mig.maintain(name, na, 0);
+        mig.maintain(name, na, &[0]);
     }
 }

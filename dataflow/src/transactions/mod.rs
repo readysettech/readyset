@@ -5,9 +5,9 @@ use std::cmp::Ordering;
 
 use std::mem;
 
-use prelude::*;
-use payload::{EgressForBase, IngressFromBase, ReplayTransactionState, TransactionState};
 use domain;
+use payload::{EgressForBase, IngressFromBase, ReplayTransactionState, TransactionState};
+use prelude::*;
 
 use checktable;
 

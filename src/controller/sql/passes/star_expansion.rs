@@ -1,4 +1,4 @@
-use nom_sql::{Column, FieldExpression, SqlQuery};
+use nom_sql::{Column, FieldDefinitionExpression, SqlQuery};
 
 use std::collections::HashMap;
 use std::mem;
@@ -16,7 +16,9 @@ impl StarExpansion for SqlQuery {
                 .clone()
                 .into_iter()
                 .map(move |f| {
-                    FieldExpression::Col(Column::from(format!("{}.{}", table_name, f).as_ref()))
+                    FieldDefinitionExpression::Col(Column::from(
+                        format!("{}.{}", table_name, f).as_ref(),
+                    ))
                 })
         };
 
@@ -25,7 +27,7 @@ impl StarExpansion for SqlQuery {
             sq.fields = old_fields
                 .into_iter()
                 .flat_map(|field| match field {
-                    FieldExpression::All => {
+                    FieldDefinitionExpression::All => {
                         let v: Vec<_> = sq.tables
                             .iter()
                             .map(|t| t.name.clone())
@@ -33,15 +35,14 @@ impl StarExpansion for SqlQuery {
                             .collect();
                         v.into_iter()
                     }
-                    FieldExpression::AllInTable(t) => {
+                    FieldDefinitionExpression::AllInTable(t) => {
                         let v: Vec<_> = expand_table(t).collect();
                         v.into_iter()
                     }
-                    FieldExpression::Arithmetic(a) => {
-                        vec![FieldExpression::Arithmetic(a)].into_iter()
+                    e @ FieldDefinitionExpression::Value(_) => vec![e].into_iter(),
+                    FieldDefinitionExpression::Col(c) => {
+                        vec![FieldDefinitionExpression::Col(c)].into_iter()
                     }
-                    FieldExpression::Literal(l) => vec![FieldExpression::Literal(l)].into_iter(),
-                    FieldExpression::Col(c) => vec![FieldExpression::Col(c)].into_iter(),
                 })
                 .collect();
         }
@@ -51,10 +52,10 @@ impl StarExpansion for SqlQuery {
 
 #[cfg(test)]
 mod tests {
-    use nom_sql::SelectStatement;
-    use nom_sql::{Column, FieldExpression, SqlQuery, Table};
-    use std::collections::HashMap;
     use super::StarExpansion;
+    use nom_sql::SelectStatement;
+    use nom_sql::{Column, FieldDefinitionExpression, SqlQuery, Table};
+    use std::collections::HashMap;
 
     #[test]
     fn it_expands_stars() {
@@ -68,7 +69,7 @@ mod tests {
                     alias: None,
                 },
             ],
-            fields: vec![FieldExpression::All],
+            fields: vec![FieldDefinitionExpression::All],
             ..Default::default()
         };
         let mut schema = HashMap::new();
@@ -81,8 +82,8 @@ mod tests {
                 assert_eq!(
                     tq.fields,
                     vec![
-                        FieldExpression::Col(Column::from("PaperTag.paper_id")),
-                        FieldExpression::Col(Column::from("PaperTag.tag_id")),
+                        FieldDefinitionExpression::Col(Column::from("PaperTag.paper_id")),
+                        FieldDefinitionExpression::Col(Column::from("PaperTag.tag_id")),
                     ]
                 );
             }
@@ -98,7 +99,7 @@ mod tests {
         // SELECT paper_id, tag_id, uid, name FROM PaperTag, Users [...]
         let q = SelectStatement {
             tables: vec![Table::from("PaperTag"), Table::from("Users")],
-            fields: vec![FieldExpression::All],
+            fields: vec![FieldDefinitionExpression::All],
             ..Default::default()
         };
         let mut schema = HashMap::new();
@@ -112,10 +113,10 @@ mod tests {
                 assert_eq!(
                     tq.fields,
                     vec![
-                        FieldExpression::Col(Column::from("PaperTag.paper_id")),
-                        FieldExpression::Col(Column::from("PaperTag.tag_id")),
-                        FieldExpression::Col(Column::from("Users.uid")),
-                        FieldExpression::Col(Column::from("Users.name")),
+                        FieldDefinitionExpression::Col(Column::from("PaperTag.paper_id")),
+                        FieldDefinitionExpression::Col(Column::from("PaperTag.tag_id")),
+                        FieldDefinitionExpression::Col(Column::from("Users.uid")),
+                        FieldDefinitionExpression::Col(Column::from("Users.name")),
                     ]
                 );
             }
@@ -132,8 +133,8 @@ mod tests {
         let q = SelectStatement {
             tables: vec![Table::from("PaperTag"), Table::from("Users")],
             fields: vec![
-                FieldExpression::AllInTable("Users".into()),
-                FieldExpression::All,
+                FieldDefinitionExpression::AllInTable("Users".into()),
+                FieldDefinitionExpression::All,
             ],
             ..Default::default()
         };
@@ -148,12 +149,12 @@ mod tests {
                 assert_eq!(
                     tq.fields,
                     vec![
-                        FieldExpression::Col(Column::from("Users.uid")),
-                        FieldExpression::Col(Column::from("Users.name")),
-                        FieldExpression::Col(Column::from("PaperTag.paper_id")),
-                        FieldExpression::Col(Column::from("PaperTag.tag_id")),
-                        FieldExpression::Col(Column::from("Users.uid")),
-                        FieldExpression::Col(Column::from("Users.name")),
+                        FieldDefinitionExpression::Col(Column::from("Users.uid")),
+                        FieldDefinitionExpression::Col(Column::from("Users.name")),
+                        FieldDefinitionExpression::Col(Column::from("PaperTag.paper_id")),
+                        FieldDefinitionExpression::Col(Column::from("PaperTag.tag_id")),
+                        FieldDefinitionExpression::Col(Column::from("Users.uid")),
+                        FieldDefinitionExpression::Col(Column::from("Users.name")),
                     ]
                 );
             }

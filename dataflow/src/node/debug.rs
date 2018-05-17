@@ -1,6 +1,6 @@
-use std::fmt;
 use node::{Node, NodeType};
 use prelude::*;
+use std::fmt;
 
 impl fmt::Debug for Node {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
@@ -43,7 +43,7 @@ impl Node {
 
         let materialized = match materialization_status {
             MaterializationStatus::Not => "",
-            MaterializationStatus::Partial => "| ▓",
+            MaterializationStatus::Partial => "| ░",
             MaterializationStatus::Full => "| █",
         };
 
@@ -68,7 +68,7 @@ impl Node {
             NodeType::Reader(ref r) => {
                 let key = match r.key() {
                     None => String::from("none"),
-                    Some(k) => format!("{}", k),
+                    Some(k) => format!("{:?}", k),
                 };
                 s.push_str(&format!(
                     "{{ {{ {} / {} {} }} | (reader / ⚷: {}) }}",

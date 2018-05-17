@@ -10,17 +10,17 @@ use std::collections::HashMap;
 use std::fmt;
 use std::fmt::Debug;
 
+use basics::local::Tag as ReplayPath;
 use domain;
-use prelude::*;
 use payload::{EgressForBase, IngressFromBase};
-use core::local::Tag as ReplayPath;
+use prelude::*;
 
 pub mod service;
 pub use self::service::SyncClient as CheckTableClient;
 pub use self::service::TransactionId;
 
-use std::net::SocketAddr;
 use std::cell::RefCell;
+use std::net::SocketAddr;
 thread_local!(static CHECKTABLE: RefCell<Option<CheckTableClient>> = RefCell::new(None));
 pub fn connect_thread_checktable(addr: SocketAddr) {
     CHECKTABLE.with(|ct| {
@@ -42,8 +42,8 @@ enum Conflict {
     /// given time.
     BaseTable(NodeIndex),
     /// This conflict should trigger an abort if the given base table has seen a write to the
-    /// specified column that had a given value after the time indicated.
-    BaseColumn(NodeIndex, usize),
+    /// specified columns that had a given value set after the time indicated.
+    BaseColumn(NodeIndex, Vec<usize>),
 }
 
 /// Tokens are used to perform transactions. Any transactional write will include a token indicating
@@ -51,7 +51,7 @@ enum Conflict {
 /// invalid (and will therefore cause it to abort) if any of the contained conflicts are triggered.
 #[derive(Clone, Serialize, Deserialize)]
 pub struct Token {
-    conflicts: Vec<(i64, DataType, Vec<Conflict>)>,
+    conflicts: Vec<(i64, Vec<DataType>, Vec<Conflict>)>,
 }
 
 impl Token {
@@ -112,7 +112,7 @@ pub struct TokenGenerator {
 impl TokenGenerator {
     pub fn new(
         base_table_conflicts: Vec<NodeIndex>,
-        base_column_conflicts: Vec<(NodeIndex, usize)>,
+        base_column_conflicts: Vec<(NodeIndex, Vec<usize>)>,
     ) -> Self {
         TokenGenerator {
             conflicts: base_table_conflicts
@@ -121,16 +121,16 @@ impl TokenGenerator {
                 .chain(
                     base_column_conflicts
                         .into_iter()
-                        .map(|(n, c)| Conflict::BaseColumn(n, c)),
+                        .map(|(n, cs)| Conflict::BaseColumn(n, cs)),
                 )
                 .collect(),
         }
     }
 
     // Generate a token that conflicts with any write that could modify a row with the given key.
-    pub fn generate(&self, ts: i64, key: DataType) -> Token {
+    pub fn generate(&self, ts: i64, key: &[DataType]) -> Token {
         Token {
-            conflicts: vec![(ts, key, self.conflicts.clone())],
+            conflicts: vec![(ts, Vec::from(key), self.conflicts.clone())],
         }
     }
 }
@@ -163,7 +163,8 @@ pub struct CheckTable {
     // For each base node, holds a hash map from column number to a tuple. First element is a map
     // from value to the last time that a row of that value was written. Second element is the time
     // the column started being tracked.
-    granular: HashMap<NodeIndex, HashMap<usize, (HashMap<DataType, i64>, i64)>>,
+    // FIXME: Vec<DataType> as key is pretty sad
+    granular: HashMap<NodeIndex, HashMap<Vec<usize>, (HashMap<Vec<DataType>, i64>, i64)>>,
 
     // For each domain, stores the set of base nodes that it receives updates from.
     domain_dependencies: HashMap<domain::Index, Vec<NodeIndex>>,
@@ -191,17 +192,17 @@ impl CheckTable {
     }
 
     // Return whether the conflict should trigger, causing the associated transaction to abort.
-    fn check_conflict(&self, ts: i64, key: &DataType, conflict: &Conflict) -> bool {
+    fn check_conflict(&self, ts: i64, key: &[DataType], conflict: &Conflict) -> bool {
         match *conflict {
             Conflict::BaseTable(node) => ts < *self.toplevel.get(&node).unwrap_or(&-1),
-            Conflict::BaseColumn(node, column) => {
+            Conflict::BaseColumn(node, ref columns) => {
                 let t = self.granular.get(&node);
                 if t.is_none() {
                     // If the base node has never seen a write, then don't trigger.
                     return false;
                 }
 
-                if let Some(&(ref t, ref start_time)) = (*t.unwrap()).get(&column) {
+                if let Some(&(ref t, ref start_time)) = (*t.unwrap()).get(&columns[..]) {
                     // Column is being tracked.
                     match t.get(key) {
                         None => ts < *start_time,
@@ -219,7 +220,9 @@ impl CheckTable {
     /// Return whether a transaction with this Token should commit.
     pub fn validate_token(&self, token: &Token) -> bool {
         !token.conflicts.iter().any(|&(ts, ref key, ref conflicts)| {
-            conflicts.iter().any(|c| self.check_conflict(ts, key, c))
+            conflicts
+                .iter()
+                .any(|c| self.check_conflict(ts, &key[..], c))
         })
     }
 
@@ -284,44 +287,22 @@ impl CheckTable {
 
     fn update_granular_checktables(&mut self, base: NodeIndex, ts: i64, rs: &Records) {
         let t = &mut self.granular.entry(base).or_default();
-        for record in rs.iter() {
-            for (i, value) in record.iter().enumerate() {
-                let mut delete = false;
-                if let Some(&mut (ref mut m, _)) = t.get_mut(&i) {
-                    if m.len() > 10000000 {
-                        delete = true;
-                    } else {
-                        *m.entry(value.clone()).or_default() = ts;
-                    }
-                }
-                if delete {
-                    t.remove(&i);
-                }
+        let mut kill = Vec::new();
+        for (key, &mut (ref mut m, _)) in t.iter_mut() {
+            if m.len() > 10000000 {
+                kill.push(key.clone());
+                continue;
+            }
+
+            for record in rs.iter() {
+                let key: Vec<_> = key.iter().map(|&c| record[c].clone()).collect();
+                *m.entry(key).or_default() = ts;
             }
         }
-    }
 
-    // Reserve a timestamp for the given base node, and update each column to said timestamp.
-    // This should be called for each batch of recovery updates.
-    pub fn recover(&mut self, base: NodeIndex) -> (i64, Option<Box<HashMap<domain::Index, i64>>>) {
-        // Take timestamp
-        let ts = self.next_timestamp;
-        self.next_timestamp += 1;
-
-        // Compute the previous timestamp that each domain will see before getting this one
-        let prev_times = self.compute_previous_timestamps(Some(base));
-
-        // Update checktables
-        self.last_base = Some(base);
-        self.toplevel.insert(base, ts);
-
-        let t = &mut self.granular.entry(base).or_default();
-        for (_column, g) in t.iter_mut() {
-            assert!(g.0.is_empty(), "checktable should be empty before recovery");
-            g.1 = ts;
+        for key in kill {
+            t.remove(&key);
         }
-
-        (ts, prev_times)
     }
 
     pub fn apply_unconditional(
@@ -402,9 +383,9 @@ impl CheckTable {
         for conflict in &gen.conflicts {
             match *conflict {
                 Conflict::BaseTable(..) => {}
-                Conflict::BaseColumn(base, col) => {
+                Conflict::BaseColumn(base, ref cols) => {
                     let t = &mut self.granular.entry(base).or_default();
-                    t.entry(col)
+                    t.entry(cols.clone())
                         .or_insert((HashMap::new(), self.next_timestamp - 1));
                 }
             }

@@ -1,17 +1,13 @@
-use std::collections::{HashMap, HashSet};
+use controller::domain_handle::DomainHandle;
+use controller::{inner::graphviz, keys};
 use dataflow::payload::TriggerEndpoint;
 use dataflow::prelude::*;
-use controller::keys;
-use controller::domain_handle::DomainHandle;
-use petgraph;
-
-const FILTER_SPECIFICITY: usize = 10;
+use std::collections::{HashMap, HashSet};
 
 pub(crate) struct Plan<'a> {
     m: &'a mut super::Materializations,
     graph: &'a Graph,
     node: NodeIndex,
-    empty: &'a HashSet<NodeIndex>,
     domains: &'a mut HashMap<DomainIndex, DomainHandle>,
     partial: bool,
 
@@ -33,7 +29,6 @@ impl<'a> Plan<'a> {
         m: &'a mut super::Materializations,
         graph: &'a Graph,
         node: NodeIndex,
-        empty: &'a HashSet<NodeIndex>,
         domains: &'a mut HashMap<DomainIndex, DomainHandle>,
     ) -> Plan<'a> {
         let partial = m.partial.contains(&node);
@@ -41,7 +36,6 @@ impl<'a> Plan<'a> {
             m,
             graph,
             node,
-            empty,
             domains,
 
             partial,
@@ -52,17 +46,10 @@ impl<'a> Plan<'a> {
         }
     }
 
-    fn paths(&mut self, columns: &[usize]) -> Vec<Vec<(NodeIndex, Option<usize>)>> {
+    fn paths(&mut self, columns: &[usize]) -> Vec<Vec<(NodeIndex, Vec<Option<usize>>)>> {
         let graph = self.graph;
         let ni = self.node;
-        let paths = if self.partial {
-            // FIXME: compound key
-            let mut on_join = Plan::partial_on_join(graph);
-            keys::provenance_of(graph, ni, columns[0], &mut *on_join)
-        } else {
-            let mut on_join = self.full_on_join();
-            keys::provenance_of(graph, ni, columns[0], &mut *on_join)
-        };
+        let paths = keys::provenance_of(graph, ni, &columns[..], Self::on_join(&self.graph));
 
         // cut paths so they only reach to the the closest materialized node
         let mut paths: Vec<_> = paths
@@ -104,7 +91,7 @@ impl<'a> Plan<'a> {
         paths.dedup();
 
         // all columns better resolve if we're doing partial
-        assert!(!self.partial || paths.iter().all(|p| p[0].1.is_some()));
+        assert!(!self.partial || paths.iter().all(|p| p[0].1.iter().all(|c| c.is_some())));
 
         paths
     }
@@ -131,8 +118,10 @@ impl<'a> Plan<'a> {
             // what key are we using for partial materialization (if any)?
             let mut partial = None;
             if self.partial {
-                if let Some(&(_, Some(ref key))) = path.first() {
-                    partial = Some(key.clone());
+                if let Some(&(_, ref cols)) = path.first() {
+                    assert!(cols.iter().all(|c| c.is_some()));
+                    let key: Vec<_> = cols.iter().map(|c| c.unwrap()).collect();
+                    partial = Some(key);
                 } else {
                     unreachable!();
                 }
@@ -141,7 +130,7 @@ impl<'a> Plan<'a> {
             // first, find out which domains we are crossing
             let mut segments = Vec::new();
             let mut last_domain = None;
-            for (node, key) in path {
+            for (node, cols) in path {
                 let domain = self.graph[node].domain();
                 if last_domain.is_none() || domain != last_domain.unwrap() {
                     segments.push((domain, Vec::new()));
@@ -156,6 +145,12 @@ impl<'a> Plan<'a> {
                     }
                 }
 
+                let key = if self.partial {
+                    Some(cols.into_iter().map(|c| c.unwrap()).collect::<Vec<_>>())
+                } else {
+                    None
+                };
+
                 segments.last_mut().unwrap().1.push((node, key));
             }
 
@@ -168,10 +163,11 @@ impl<'a> Plan<'a> {
                 // TODO:
                 //  a domain may appear multiple times in this list if a path crosses into the same
                 //  domain more than once. currently, that will cause a deadlock.
-                assert!(
-                    !seen.contains(&domain),
-                    "a-b-a domain replays are not yet supported"
-                );
+                if seen.contains(&domain) {
+                    println!("{}", graphviz(&self.graph, &self.m));
+                    crit!(self.m.log, "detected a-b-a domain replay path");
+                    unimplemented!();
+                }
                 seen.insert(domain);
 
                 // we're not replaying through the starter node
@@ -184,9 +180,9 @@ impl<'a> Plan<'a> {
                 let locals: Vec<_> = nodes
                     .iter()
                     .skip(skip_first)
-                    .map(|&(ni, key)| ReplayPathSegment {
+                    .map(|&(ni, ref key)| ReplayPathSegment {
                         node: *self.graph[ni].local_addr(),
-                        partial_key: key,
+                        partial_key: key.clone(),
                     })
                     .collect();
 
@@ -221,10 +217,10 @@ impl<'a> Plan<'a> {
                     {
                         if segments.len() == 1 {
                             // replay is entirely contained within one domain
-                            *trigger = TriggerEndpoint::Local(vec![*key]);
+                            *trigger = TriggerEndpoint::Local(key.clone());
                         } else if i == 0 {
                             // first domain needs to be told about partial replay trigger
-                            *trigger = TriggerEndpoint::Start(vec![*key]);
+                            *trigger = TriggerEndpoint::Start(key.clone());
                         } else if i == segments.len() - 1 {
                             // otherwise, should know how to trigger partial replay
                             // this means knowing how many sources there are (in the case of
@@ -235,11 +231,26 @@ impl<'a> Plan<'a> {
                             let shards = sharding.shards();
                             let shuffled = match sharding {
                                 Sharding::Random(..) => true,
-                                Sharding::ByColumn(c, _) => c != *key,
+                                Sharding::ByColumn(c, _) => {
+                                    assert_eq!(key.len(), 1);
+                                    c != key[0]
+                                }
                                 _ => false,
                             };
 
                             if shuffled {
+                                if !segments
+                                    .iter()
+                                    .flat_map(|s| s.1.iter())
+                                    .any(|&(n, _)| self.graph[n].is_sharder())
+                                {
+                                    // we have a shuffled partial key replay path, but no shuffle.
+                                    // that won't work, since it means the target won't have a way
+                                    // to wait for all the replays from upstream shards (which it
+                                    // needs to) when triggering a replay.
+                                    crit!(self.m.log, "unshuffled path shuffles partial key"; "tag" => tag.id());
+                                    unimplemented!();
+                                }
                                 warn!(self.m.log, "path shuffles partial key"; "tag" => tag.id());
                             }
 
@@ -331,17 +342,18 @@ impl<'a> Plan<'a> {
                     InitialState::PartialGlobal {
                         gid: self.node,
                         cols: self.graph[self.node].fields().len(),
-                        key: r.key().unwrap(),
+                        key: Vec::from(r.key().unwrap()),
                         trigger_domain: (last_domain, num_shards),
                     }
                 } else {
                     InitialState::Global {
                         cols: self.graph[self.node].fields().len(),
-                        key: r.key().unwrap(),
+                        key: Vec::from(r.key().unwrap()),
                         gid: self.node,
                     }
                 }
             })
+            .ok()
             .unwrap_or_else(|| {
                 // not a reader
                 if self.partial {
@@ -389,62 +401,15 @@ impl<'a> Plan<'a> {
         self.pending
     }
 
-    pub(crate) fn partial_on_join<'b>(
+    pub(crate) fn on_join<'b>(
         graph: &'b Graph,
-    ) -> Box<FnMut(NodeIndex, Option<usize>, &[NodeIndex]) -> Option<NodeIndex> + 'b> {
-        Box::new(move |node, col, parents| {
-            // we hit a join and need to choose a branch to follow.
-            //
-            // it turns out that this is slightlyc complicated:
-            //  - if `col` is the join key, we must pick among must_replay_among
-            //  - if it isn't, we must pick the table that sources those columns
-            //  - XXX: if we have multiple columns that resolve to different sources, we
-            //    can't do partial.
-            //
-            // NOTE: it is *not* okay for us to return None here
-            if col.is_none() {
-                // we've already failed to resolve, and so won't do partial anyway
-                // can pick any ancestor
-                return Some(parents[0]);
-            }
-            let col = col.unwrap();
-
-            let r = graph[node].parent_columns(col);
-            if r.len() == parents.len() {
-                // we could be cleverer here when we have a choice
-                match graph[node].must_replay_among() {
-                    Some(anc) => {
-                        // it is *extremely* important that this choice is deterministic.
-                        // if it is not, the code that decides what indices to create could choose
-                        // a *different* parent than the code that sets up the replay paths, which
-                        // would be *bad*.
-                        let mut parents = parents
-                            .iter()
-                            .filter(|p| anc.contains(p))
-                            .map(|&p| p)
-                            .collect::<Vec<_>>();
-                        assert!(!parents.is_empty());
-                        parents.sort_by_key(|p| p.index());
-                        Some(parents[0])
-                    }
-                    None => Some(parents[0]),
-                }
-            } else {
-                assert_eq!(r.len(), 1);
-                Some(r[0].0)
-            }
-        })
-    }
-
-    fn full_on_join<'b>(
-        &'b mut self,
-    ) -> Box<FnMut(NodeIndex, Option<usize>, &[NodeIndex]) -> Option<NodeIndex> + 'b> {
-        Box::new(move |node, col, parents| {
+    ) -> impl FnMut(NodeIndex, &[Option<usize>], &[NodeIndex]) -> Option<NodeIndex> + 'b {
+        move |node, cols, parents| {
             // this function should only be called when there's a choice
             assert!(parents.len() > 1);
 
             // and only internal nodes have multiple parents
-            let n = &self.graph[node];
+            let n = &graph[node];
             assert!(n.is_internal());
 
             // keep track of remaining parents
@@ -456,147 +421,59 @@ impl<'a> Plan<'a> {
             parents.retain(|&parent| options.contains(&parent));
             assert!(!parents.is_empty());
 
-            // we want to prefer source paths where we can translate the key
-            if let Some(c) = col {
-                let srcs = n.parent_columns(c);
-                let has = |p: &NodeIndex| {
-                    for &(ref src, ref col) in &srcs {
-                        if src == p && col.is_some() {
-                            return true;
-                        }
-                    }
-                    false
-                };
+            // we want to prefer source paths where we can translate all keys for the purposes of
+            // partial -- but this only matters if we haven't already lost some keys.
+            if cols.iter().all(|c| c.is_some()) {
+                let first = cols[0].unwrap();
 
-                // we only want to prune non-resolving parents if there's at least one resolving.
-                // otherwise, we might end up pruning all the parents!
-                if parents.iter().any(&has) {
-                    parents.retain(&has);
+                let mut universal_src = Vec::new();
+                for (src, col) in n.parent_columns(first) {
+                    if src == node || col.is_none() {
+                        continue;
+                    }
+                    if !options.contains(&src) {
+                        // we can't choose to use this parent anyway
+                        continue;
+                    }
+
+                    // if all other columns resolve into this src, then only keep those srcs
+                    // XXX: this is pretty inefficient, but meh...
+                    let also_to_src = cols.iter().skip(1).map(|c| c.unwrap()).all(|c| {
+                        n.parent_columns(c)
+                            .into_iter()
+                            .find(|&(this_src, _)| this_src == src)
+                            .and_then(|(_, c)| c)
+                            .is_some()
+                    });
+
+                    if also_to_src {
+                        universal_src.push(src);
+                    }
                 }
+
+                if !universal_src.is_empty() {
+                    parents = universal_src;
+                }
+            } else {
+                // no ancestor has all the index columns, so any will do (and we won't be partial).
             }
 
-            // if there is only one left, we don't have a choice
+            // if there is only one left, we don't really have a choice
             if parents.len() == 1 {
                 // no need to pick
                 return parents.pop();
             }
 
-            // if *all* the options are empty, we can safely pick any of them
-            if parents.iter().all(|p| self.empty.contains(p)) {
-                return parents.pop();
-            }
+            // ensure that our choice of multiple possible parents is deterministic
+            parents.sort_by_key(|p| p.index());
 
+            // TODO:
             // if any required parent is empty, and we know we're building a full materialization,
             // the join must be empty (since outer join targets aren't required), and therefore
             // we can just pick that parent and get a free full materialization.
-            if let Some(&parent) = parents.iter().find(|&p| self.empty.contains(p)) {
-                return Some(parent);
-            }
 
-            // we want to pick the ancestor that causes us to do the least amount of work.
-            // this is really a balancing act between
-            //
-            //   a) how many records we are going to join; and
-            //   b) how much state we need to replay
-            //
-            // consider the case where we are replaying a node downstream of a join, and the
-            // join has two ancestors: a base node (A) and a filter (F) over a base node (B).
-            // when should we choose to replay one or the other?
-            //
-            //  - the cost of replaying A is
-            //        |A| joins
-            //      + |A| lookups in B through F
-            //  - the cost of replaying B through F is
-            //        |B| filter operations
-            //      + |F(B)| join operations
-            //      + |F(B)| lookups in A
-            //
-            // which of these is more costly? even assuming we know |A| and |B|, it is not
-            // clear, because we don't know F's specificity. let's assume some things:
-            //
-            //  - filters are cheaper than joins (~10x)
-            //  - replaying is cheaper than filtering (~10x)
-            //  - a filter emits one record for every FILTER_SPECIFICITY input records
-            //
-            // given those rough estimates, what's the best choice? well, we should pick a node
-            // N with filters F1..Fn to replay which minimizes
-            //
-            //    1   * |N|                                 # replay cost
-            let replay_cost = 1;
-            //  + 10  * ( ∑i |N| / FILTER_SPECIFICITY ^ i ) # filter cost
-            let filter_cost = 10;
-            //  + 100 * |N| / FILTER_SPECIFICITY ^ n        # join cost
-            let join_cost = 100;
-            //
-            // it is worth pointing out that this heuristic does *not* capture the fact that
-            // replaying A above will encounter more expensive lookups on the join path (since
-            // the lookups are in F(B), as opposed to directly in A).
-            //
-            // to compute this, we need to find |N| and n for each candidate node.
-            // let's do that now
-            parents
-                .into_iter()
-                .map(|p| {
-                    let mut intermediates = vec![];
-                    let mut stateful = p;
-
-                    // find the nearest materialized ancestor, and keep track of filters we pass
-                    while !self.m
-                        .have
-                        .get(&stateful)
-                        .map(|m| !m.is_empty())
-                        .unwrap_or(false)
-                    {
-                        let n = &self.graph[stateful];
-                        // joins require their inputs to be materialized. therefore, we know that
-                        // any non-materialized ancestors *must* be query_through.
-                        assert!(n.is_internal());
-                        assert!(n.can_query_through());
-                        // if this node is selective (e.g., a filter), increase the filter factor.
-                        // we need to keep track of non-selective project/permute nodes too though,
-                        // as they increase the cost
-                        intermediates.push(n.is_selective());
-                        // now walk to the parent.
-                        let mut ps = self.graph
-                            .neighbors_directed(stateful, petgraph::EdgeDirection::Incoming);
-                        // of which there must be at least one
-                        stateful = ps.next().expect("recursed all the way to source");
-                        // there shouldn't ever be multiple, because neither join nor union
-                        // are query_through.
-                        assert_eq!(ps.count(), 0);
-                    }
-
-                    // find the size of the state we would end up replaying
-                    let stateful = &self.graph[stateful];
-                    let domain = self.domains.get_mut(&stateful.domain()).unwrap();
-                    domain
-                        .send(box Packet::StateSizeProbe {
-                            node: *stateful.local_addr(),
-                        })
-                        .unwrap();
-                    let mut size = domain.wait_for_state_size().unwrap();
-
-                    // compute the total cost
-                    // replay cost
-                    let mut cost = replay_cost * size;
-                    // filter cost
-                    for does_filter in intermediates {
-                        cost += filter_cost * size;
-                        if does_filter {
-                            size /= FILTER_SPECIFICITY;
-                        }
-                    }
-                    // join cost
-                    cost += join_cost * size;
-
-                    debug!(self.m.log, "cost of replaying from {:?}: {}", p, cost);
-                    (p, cost)
-                })
-                .min_by_key(|&(_, cost)| cost)
-                .map(|(node, cost)| {
-                    debug!(self.m.log, "picked replay source {:?}", node; "cost" => cost);
-                    node
-                })
-        })
+            // any choice is fine
+            Some(parents[0])
+        }
     }
 }

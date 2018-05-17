@@ -1,7 +1,7 @@
 dist: trusty
 language: rust
 rust:
-  - nightly-2018-02-14
+  - nightly-2018-04-19
 cache: cargo
 env:
   - SETTLE_TIME=2000
@@ -11,4 +11,4 @@ script:
 addons:
   apt:
     packages:
-    - libhwloc-dev
+    - liblz4-dev

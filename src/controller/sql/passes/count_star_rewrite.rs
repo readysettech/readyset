@@ -1,5 +1,5 @@
-use nom_sql::{Column, ConditionBase, ConditionExpression, ConditionTree, FieldExpression,
-              SqlQuery, Table};
+use nom_sql::{Column, ConditionBase, ConditionExpression, ConditionTree,
+              FieldDefinitionExpression, SqlQuery, Table};
 
 use std::collections::HashMap;
 
@@ -13,12 +13,10 @@ fn extract_condition_columns(ce: &ConditionExpression) -> Vec<Column> {
             box ref left,
             box ref right,
             ..
-        }) => {
-            return extract_condition_columns(left)
-                .into_iter()
-                .chain(extract_condition_columns(right).into_iter())
-                .collect();
-        }
+        }) => extract_condition_columns(left)
+            .into_iter()
+            .chain(extract_condition_columns(right).into_iter())
+            .collect(),
         ConditionExpression::ComparisonOp(ConditionTree {
             box ref left,
             box ref right,
@@ -34,11 +32,10 @@ fn extract_condition_columns(ce: &ConditionExpression) -> Vec<Column> {
                 _ => (),
             }
 
-            return cols;
+            cols
         }
-        ConditionExpression::NegationOp(ref inner) => {
-            return extract_condition_columns(inner);
-        }
+        ConditionExpression::NegationOp(ref inner) => extract_condition_columns(inner),
+        ConditionExpression::Bracketed(ref inner) => extract_condition_columns(inner),
         ConditionExpression::Base(_) => unreachable!(),
     }
 }
@@ -91,11 +88,10 @@ impl CountStarRewrite for SqlQuery {
                 }
                 for field in sq.fields.iter_mut() {
                     match field {
-                        &mut FieldExpression::All => panic!(err),
-                        &mut FieldExpression::AllInTable(_) => panic!(err),
-                        &mut FieldExpression::Literal(_) => (),
-                        &mut FieldExpression::Arithmetic(_) => (),
-                        &mut FieldExpression::Col(ref mut c) => {
+                        &mut FieldDefinitionExpression::All => panic!(err),
+                        &mut FieldDefinitionExpression::AllInTable(_) => panic!(err),
+                        &mut FieldDefinitionExpression::Value(_) => (),
+                        &mut FieldDefinitionExpression::Col(ref mut c) => {
                             rewrite_count_star(c, &tables, &avoid_cols)
                         }
                     }
@@ -111,9 +107,9 @@ impl CountStarRewrite for SqlQuery {
 
 #[cfg(test)]
 mod tests {
-    use nom_sql::{Column, FieldExpression, SqlQuery};
-    use std::collections::HashMap;
     use super::CountStarRewrite;
+    use nom_sql::{Column, FieldDefinitionExpression, SqlQuery};
+    use std::collections::HashMap;
 
     #[test]
     fn it_expands_count_star() {
@@ -136,8 +132,8 @@ mod tests {
                 assert_eq!(
                     tq.fields,
                     vec![
-                        FieldExpression::Col(Column {
-                            name: String::from("count(all)"),
+                        FieldDefinitionExpression::Col(Column {
+                            name: String::from("count(*)"),
                             alias: None,
                             table: None,
                             function: Some(Box::new(FunctionExpression::Count(
@@ -174,8 +170,8 @@ mod tests {
                 assert_eq!(
                     tq.fields,
                     vec![
-                        FieldExpression::Col(Column {
-                            name: String::from("count(all)"),
+                        FieldDefinitionExpression::Col(Column {
+                            name: String::from("count(*)"),
                             alias: None,
                             table: None,
                             function: Some(Box::new(FunctionExpression::Count(

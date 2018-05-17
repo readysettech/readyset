@@ -3,12 +3,14 @@ use dataflow::checktable;
 use dataflow::prelude::*;
 use dataflow::statistics::GraphStats;
 
-use std::collections::{HashMap, BTreeMap};
+use std::collections::{BTreeMap, HashMap};
+use std::net::SocketAddr;
 use std::sync::Arc;
 use std::sync::mpsc::Sender;
 use std::thread::{self, JoinHandle};
 use std::time::Duration;
 
+use assert_infrequent;
 use futures::Stream;
 use hyper::{self, Client};
 use serde::Serialize;
@@ -17,34 +19,75 @@ use serde_json;
 use tarpc::sync::client::{self, ClientExt};
 use tokio_core::reactor::Core;
 
-use controller::{ControlEvent, ControllerDescriptor, WorkerEvent};
+use controller::getter::{GetterRpc, RemoteGetter, RemoteGetterBuilder};
 use controller::inner::RpcError;
-use controller::getter::{RemoteGetter, RemoteGetterBuilder};
-use controller::mutator::{Mutator, MutatorBuilder};
+use controller::mutator::{Mutator, MutatorBuilder, MutatorRpc};
 use controller::recipe::ActivationResult;
+use controller::{ControlEvent, ControllerDescriptor, WorkerEvent};
 
 /// `ControllerHandle` is a handle to a Controller.
 pub struct ControllerHandle<A: Authority> {
-    pub(super) url: Option<String>,
-    pub(super) authority: Arc<A>,
+    url: Option<String>,
+    local_port: Option<u16>,
+    authority: Arc<A>,
     pub(super) local_controller: Option<(Sender<ControlEvent>, JoinHandle<()>)>,
     pub(super) local_worker: Option<(Sender<WorkerEvent>, JoinHandle<()>)>,
+    getters: HashMap<(SocketAddr, usize), GetterRpc>,
+    domains: HashMap<Vec<SocketAddr>, MutatorRpc>,
+    reactor: Core,
+    client: Client<hyper::client::HttpConnector>,
 }
+
+/// A pointer that lets you construct a new `ControllerHandle` from an existing one.
+#[derive(Clone)]
+pub struct ControllerPointer<A: Authority>(Arc<A>);
+
+impl<A: Authority> ControllerPointer<A> {
+    /// Construct another `ControllerHandle` to the controller this recipe
+    pub fn connect(&self) -> ControllerHandle<A> {
+        ControllerHandle::make(self.0.clone())
+    }
+}
+
 impl<A: Authority> ControllerHandle<A> {
-    /// Creates a `ControllerHandle` that bootstraps a connection to Soup via the configuration
-    /// stored in the `Authority` passed as an argument.
-    pub fn new(authority: A) -> Self {
+    /// Create a pointer to the controller pointed to by this handle.
+    ///
+    /// This method is safe to call from other threads than the one that made the
+    /// `ControllerHandle`. Note however that if `A = LocalAuthority` then dropping the original
+    /// `ControllerHandle` will still cause the controller threads to shut down, and thus any other
+    /// `ControllerHandle` instances will stop working.
+    pub fn pointer(&self) -> ControllerPointer<A> {
+        ControllerPointer(self.authority.clone())
+    }
+
+    pub(super) fn make(authority: Arc<A>) -> Self {
+        let core = Core::new().unwrap();
+        let client = Client::configure()
+            .connector(hyper::client::HttpConnector::new_with_executor(
+                core.handle(),
+                &core.handle(),
+            ))
+            .build(&core.handle());
         ControllerHandle {
             url: None,
-            authority: Arc::new(authority),
+            local_port: None,
+            authority: authority,
             local_controller: None,
             local_worker: None,
+            getters: Default::default(),
+            domains: Default::default(),
+            reactor: core,
+            client: client,
         }
     }
 
+    /// Creates a `ControllerHandle` that bootstraps a connection to Soup via the configuration
+    /// stored in the `Authority` passed as an argument.
+    pub fn new(authority: A) -> Self {
+        Self::make(Arc::new(authority))
+    }
+
     fn rpc<Q: Serialize, R: DeserializeOwned>(&mut self, path: &str, request: &Q) -> R {
-        let mut core = Core::new().unwrap();
-        let client = Client::new(&core.handle());
         loop {
             if self.url.is_none() {
                 let descriptor: ControllerDescriptor =
@@ -55,7 +98,7 @@ impl<A: Authority> ControllerHandle<A> {
 
             let mut r = hyper::Request::new(hyper::Method::Post, url.parse().unwrap());
             r.set_body(serde_json::to_vec(request).unwrap());
-            let res = core.run(client.request(r)).unwrap();
+            let res = self.reactor.run(self.client.request(r)).unwrap();
             if res.status() == hyper::StatusCode::ServiceUnavailable {
                 thread::sleep(Duration::from_millis(100));
                 continue;
@@ -65,7 +108,7 @@ impl<A: Authority> ControllerHandle<A> {
                 continue;
             }
 
-            let body = core.run(res.body().concat2()).unwrap();
+            let body = self.reactor.run(res.body().concat2()).unwrap();
             return serde_json::from_slice(&body).unwrap();
         }
     }
@@ -88,7 +131,12 @@ impl<A: Authority> ControllerHandle<A> {
 
     /// Obtain a `RemoteGetterBuilder` that can be sent to a client and then used to query a given
     /// (already maintained) reader node.
-    pub fn get_getter_builder(&mut self, name: &str) -> Option<RemoteGetterBuilder> {
+    fn get_getter_builder(&mut self, name: &str) -> Option<RemoteGetterBuilder> {
+        // This call attempts to detect if `get_getter_builder` is being called in a loop. If this
+        // is getting false positives, then it is safe to increase the allowed hit count.
+        #[cfg(debug_assertions)]
+        assert_infrequent::at_most(200);
+
         let rgb: Option<RemoteGetterBuilder> = self.rpc("getter_builder", &name);
         rgb.map(|mut rgb| {
             for &mut (_, ref mut is_local) in &mut rgb.shards {
@@ -100,23 +148,57 @@ impl<A: Authority> ControllerHandle<A> {
 
     /// Obtain a `RemoteGetter`.
     pub fn get_getter(&mut self, name: &str) -> Option<RemoteGetter> {
-        self.get_getter_builder(name).map(|g| g.build())
+        self.get_getter_builder(name).map(|mut g| {
+            if let Some(port) = self.local_port {
+                g = g.with_local_port(port);
+            }
+
+            let g = g.build(&mut self.getters);
+
+            if self.local_port.is_none() {
+                self.local_port = Some(g.local_addr().unwrap().port());
+            }
+
+            g
+        })
     }
 
     /// Obtain a MutatorBuild that can be used to construct a Mutator to perform writes and deletes
     /// from the given base node.
-    pub fn get_mutator_builder(&mut self, base: &str) -> Option<MutatorBuilder> {
+    fn get_mutator_builder(&mut self, base: &str) -> Option<MutatorBuilder> {
+        // This call attempts to detect if `get_mutator_builder` is being called in a loop. If this
+        // is getting false positives, then it is safe to increase the allowed hit count.
+        #[cfg(debug_assertions)]
+        assert_infrequent::at_most(200);
+
         self.rpc("mutator_builder", &base)
     }
 
     /// Obtain a Mutator
     pub fn get_mutator(&mut self, base: &str) -> Option<Mutator> {
-        self.get_mutator_builder(base).map(|m| m.build())
+        self.get_mutator_builder(base).map(|mut m| {
+            if let Some(port) = self.local_port {
+                m = m.with_local_port(port);
+            }
+
+            let m = m.build(&mut self.domains);
+
+            if self.local_port.is_none() {
+                self.local_port = Some(m.local_addr().unwrap().port());
+            }
+
+            m
+        })
     }
 
     /// Get statistics about the time spent processing different parts of the graph.
     pub fn get_statistics(&mut self) -> GraphStats {
         self.rpc("get_statistics", &())
+    }
+
+    /// Flush all partial state, evicting all rows present.
+    pub fn flush_partial(&mut self) -> Result<(), RpcError> {
+        self.rpc("flush_partial", &())
     }
 
     /// Extend the existing recipe on the controller by adding a new query.
@@ -132,6 +214,11 @@ impl<A: Authority> ControllerHandle<A> {
     /// graphviz description of the dataflow graph
     pub fn graphviz(&mut self) -> String {
         self.rpc("graphviz", &())
+    }
+
+    /// Remove a specific node from the graph.
+    pub fn remove_node(&mut self, node: NodeIndex) {
+        self.rpc("remove_node", &node)
     }
 
     /// Wait for associated local instance to exit (presumably forever).
@@ -198,18 +285,24 @@ impl ControllerHandle<LocalAuthority> {
 
     /// Install a new set of policies on the controller.
     pub fn create_universe(&mut self, context: HashMap<String, DataType>) {
-        let uid = context.get("id").expect("Universe context must have id").clone();
+        let uid = context
+            .get("id")
+            .expect("Universe context must have id")
+            .clone();
         self.rpc::<_, ()>("create_universe", &context);
 
         // Write to Context table
         let bname = match context.get("group") {
             None => format!("UserContext_{}", uid.to_string()),
-            Some(g) => format!("GroupContext_{}_{}", g.to_string(), uid.to_string())
+            Some(g) => format!("GroupContext_{}_{}", g.to_string(), uid.to_string()),
         };
 
         let mut fields: Vec<_> = context.keys().collect();
         fields.sort();
-        let record: Vec<DataType> = fields.iter().map(|&f| context.get(f).unwrap().clone()).collect();
+        let record: Vec<DataType> = fields
+            .iter()
+            .map(|&f| context.get(f).unwrap().clone())
+            .collect();
         let mut mutator = self.get_mutator(&bname).unwrap();
 
         mutator.put(record).unwrap();
@@ -217,6 +310,8 @@ impl ControllerHandle<LocalAuthority> {
 }
 impl<A: Authority> Drop for ControllerHandle<A> {
     fn drop(&mut self) {
+        self.getters.clear();
+        self.domains.clear();
         if let Some((sender, join_handle)) = self.local_controller.take() {
             let _ = sender.send(ControlEvent::Shutdown);
             let _ = join_handle.join();
@@ -224,6 +319,23 @@ impl<A: Authority> Drop for ControllerHandle<A> {
         if let Some((sender, join_handle)) = self.local_worker.take() {
             let _ = sender.send(WorkerEvent::Shutdown);
             let _ = join_handle.join();
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    #[test]
+    #[should_panic]
+    fn limit_mutator_creation() {
+        use controller::ControllerBuilder;
+        let r_txt = "CREATE TABLE a (x int, y int, z int);\n
+                     CREATE TABLE b (r int, s int);\n";
+
+        let mut c = ControllerBuilder::default().build_local();
+        assert!(c.install_recipe(r_txt.to_owned()).is_ok());
+        for _ in 0..250 {
+            let _ = c.get_mutator_builder("a").unwrap();
         }
     }
 }

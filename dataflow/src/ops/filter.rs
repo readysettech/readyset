@@ -1,4 +1,6 @@
+use std::borrow::Cow;
 use std::collections::HashMap;
+use std::fmt::{self, Display};
 use std::sync;
 
 pub use nom_sql::Operator;
@@ -12,8 +14,29 @@ pub struct Filter {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub enum Value {
+    Constant(DataType),
+    Column(usize),
+}
+
+impl From<DataType> for Value {
+    fn from(dt: DataType) -> Self {
+        Value::Constant(dt)
+    }
+}
+
+impl Display for Value {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        match *self {
+            Value::Constant(ref c) => write!(f, "{}", c),
+            Value::Column(ref ci) => write!(f, "col: {}", ci),
+        }
+    }
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub enum FilterCondition {
-    Equality(Operator, DataType),
+    Comparison(Operator, Value),
     In(Vec<DataType>),
 }
 
@@ -54,7 +77,7 @@ impl Ingredient for Filter {
         _: LocalNodeIndex,
         mut rs: Records,
         _: &mut Tracer,
-        _: Option<usize>,
+        _: Option<&[usize]>,
         _: &DomainNodes,
         _: &StateMap,
     ) -> ProcessingResult {
@@ -64,16 +87,22 @@ impl Ingredient for Filter {
                 let d = &r[i];
                 if let Some(ref cond) = *fi {
                     match *cond {
-                        FilterCondition::Equality(ref op, ref f) => match *op {
-                            Operator::Equal => d == f,
-                            Operator::NotEqual => d != f,
-                            Operator::Greater => d > f,
-                            Operator::GreaterOrEqual => d >= f,
-                            Operator::Less => d < f,
-                            Operator::LessOrEqual => d <= f,
-                            Operator::In => unreachable!(),
-                            _ => unimplemented!(),
-                        },
+                        FilterCondition::Comparison(ref op, ref f) => {
+                            let v = match *f {
+                                Value::Constant(ref dt) => dt,
+                                Value::Column(c) => &r[c],
+                            };
+                            match *op {
+                                Operator::Equal => d == v,
+                                Operator::NotEqual => d != v,
+                                Operator::Greater => d > v,
+                                Operator::GreaterOrEqual => d >= v,
+                                Operator::Less => d < v,
+                                Operator::LessOrEqual => d <= v,
+                                Operator::In => unreachable!(),
+                                _ => unimplemented!(),
+                            }
+                        }
                         FilterCondition::In(ref fs) => fs.contains(d),
                     }
                 } else {
@@ -113,7 +142,7 @@ impl Ingredient for Filter {
                 .enumerate()
                 .filter_map(|(i, ref e)| match e.as_ref() {
                     Some(cond) => match *cond {
-                        FilterCondition::Equality(ref op, ref x) => {
+                        FilterCondition::Comparison(ref op, ref x) => {
                             Some(format!("f{} {} {}", i, escape(&format!("{}", op)), x))
                         }
                         FilterCondition::In(ref xs) => Some(format!(
@@ -140,44 +169,50 @@ impl Ingredient for Filter {
     fn query_through<'a>(
         &self,
         columns: &[usize],
-        key: &KeyType<DataType>,
+        key: &KeyType,
+        nodes: &DomainNodes,
         states: &'a StateMap,
-    ) -> Option<Option<Box<Iterator<Item = &'a [DataType]> + 'a>>> {
-        states.get(&*self.src).and_then(|state| {
-            let f = self.filter.clone();
-            match state.lookup(columns, key) {
-                LookupResult::Some(rs) => {
-                    let r = Box::new(
-                        rs.iter()
-                            .filter(move |r| {
-                                r.iter().enumerate().all(|(i, d)| {
-                                    // check if this filter matches
-                                    if let Some(ref cond) = f[i] {
-                                        match *cond {
-                                            FilterCondition::Equality(ref op, ref f) => match *op {
-                                                Operator::Equal => d == f,
-                                                Operator::NotEqual => d != f,
-                                                Operator::Greater => d > f,
-                                                Operator::GreaterOrEqual => d >= f,
-                                                Operator::Less => d < f,
-                                                Operator::LessOrEqual => d <= f,
-                                                _ => unimplemented!(),
-                                            },
-                                            FilterCondition::In(ref fs) => fs.contains(d),
-                                        }
-                                    } else {
-                                        // everything matches no condition
-                                        true
+    ) -> Option<Option<Box<Iterator<Item = Cow<'a, [DataType]>> + 'a>>> {
+        self.lookup(*self.src, columns, key, nodes, states)
+            .and_then(|result| {
+                let f = self.filter.clone();
+                let filter = move |r: &[DataType]| {
+                    r.iter().enumerate().all(|(i, d)| {
+                        // check if this filter matches
+                        if let Some(ref cond) = f[i] {
+                            match *cond {
+                                FilterCondition::Comparison(ref op, ref f) => {
+                                    let v = match *f {
+                                        Value::Constant(ref dt) => dt,
+                                        Value::Column(c) => &r[c],
+                                    };
+                                    match *op {
+                                        Operator::Equal => d == v,
+                                        Operator::NotEqual => d != v,
+                                        Operator::Greater => d > v,
+                                        Operator::GreaterOrEqual => d >= v,
+                                        Operator::Less => d < v,
+                                        Operator::LessOrEqual => d <= v,
+                                        _ => unimplemented!(),
                                     }
-                                })
-                            })
-                            .map(|r| &r[..]),
-                    ) as Box<_>;
-                    Some(Some(r))
+                                }
+                                FilterCondition::In(ref fs) => fs.contains(d),
+                            }
+                        } else {
+                            // everything matches no condition
+                            true
+                        }
+                    })
+                };
+
+                match result {
+                    Some(rs) => {
+                        let r = Box::new(rs.into_iter().filter(move |r| filter(r))) as Box<_>;
+                        Some(Some(r))
+                    }
+                    None => Some(None),
                 }
-                LookupResult::Missing => Some(None),
-            }
-        })
+            })
     }
 
     fn parent_columns(&self, column: usize) -> Vec<(NodeIndex, Option<usize>)> {
@@ -208,7 +243,10 @@ mod tests {
                 s.as_global(),
                 filters.unwrap_or(&[
                     None,
-                    Some(FilterCondition::Equality(Operator::Equal, "a".into())),
+                    Some(FilterCondition::Comparison(
+                        Operator::Equal,
+                        Value::Constant("a".into()),
+                    )),
                 ]),
             ),
             materialized,
@@ -253,8 +291,14 @@ mod tests {
         let mut g = setup(
             false,
             Some(&[
-                Some(FilterCondition::Equality(Operator::Equal, 1.into())),
-                Some(FilterCondition::Equality(Operator::Equal, "a".into())),
+                Some(FilterCondition::Comparison(
+                    Operator::Equal,
+                    Value::Constant(1.into()),
+                )),
+                Some(FilterCondition::Comparison(
+                    Operator::Equal,
+                    Value::Constant("a".into()),
+                )),
             ]),
         );
 
@@ -312,8 +356,14 @@ mod tests {
         let mut g = setup(
             false,
             Some(&[
-                Some(FilterCondition::Equality(Operator::LessOrEqual, 2.into())),
-                Some(FilterCondition::Equality(Operator::NotEqual, "a".into())),
+                Some(FilterCondition::Comparison(
+                    Operator::LessOrEqual,
+                    Value::Constant(2.into()),
+                )),
+                Some(FilterCondition::Comparison(
+                    Operator::NotEqual,
+                    Value::Constant("a".into()),
+                )),
             ]),
         );
 
@@ -334,6 +384,26 @@ mod tests {
         // both conditions match (1 <= 2, "b" != "a")
         left = vec![1.into(), "b".into()];
         assert_eq!(g.narrow_one_row(left.clone(), false), vec![left].into());
+    }
+
+    #[test]
+    fn it_works_with_columns() {
+        let mut g = setup(
+            false,
+            Some(&[
+                Some(FilterCondition::Comparison(
+                    Operator::Equal,
+                    Value::Column(1),
+                )),
+                None,
+            ]),
+        );
+
+        let mut left: Vec<DataType>;
+        left = vec![2.into(), 2.into()];
+        assert_eq!(g.narrow_one_row(left.clone(), false), vec![left].into());
+        left = vec![2.into(), "b".into()];
+        assert_eq!(g.narrow_one_row(left.clone(), false), Records::default());
     }
 
     #[test]

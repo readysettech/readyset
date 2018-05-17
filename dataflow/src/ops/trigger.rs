@@ -3,37 +3,39 @@ use std::collections::HashMap;
 use prelude::*;
 
 use hyper::Client;
-use tokio_core::reactor::Core;
 use serde::Serialize;
 use serde_json;
 use std::thread;
+use tokio_core::reactor::Core;
 
 /// A Trigger data-flow operator.
 ///
-/// This node triggers an event in the dataflow graph whenever a 
+/// This node triggers an event in the dataflow graph whenever a
 /// new `key` arrives.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Trigger {
     us: Option<IndexPair>,
     src: IndexPair,
     trigger: TriggerEvent,
-    key: Vec<usize>,
+    key: usize,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub enum TriggerEvent {
     /// Triggers the creation of a new group universe.
-    GroupCreation{ controller_url: String, group: String },
+    GroupCreation {
+        controller_url: String,
+        group: String,
+    },
 }
 
 impl Trigger {
     /// Construct a new Trigger operator.
     ///
     /// `src` is the parent node from which this node receives records.
-    /// Whenever this node receives a record with a new value for `key`, 
+    /// Whenever this node receives a record with a new value for `key`,
     /// it triggers the event specified by `trigger`
-    pub fn new(src: NodeIndex, trigger: TriggerEvent, key: Vec<usize>) -> Trigger {
-        assert_eq!(key.len(), 1);
+    pub fn new(src: NodeIndex, trigger: TriggerEvent, key: usize) -> Trigger {
         Trigger {
             us: None,
             src: src.into(),
@@ -42,45 +44,51 @@ impl Trigger {
         }
     }
 
-    fn rpc<Q: Serialize>(
-        &self,
-        path: &str,
-        requests: Vec<Q>,
-        url: &String,
-    ) where Q: Send {
+    fn rpc<Q: Serialize>(&self, path: &str, requests: Vec<Q>, url: &String)
+    where
+        Q: Send,
+    {
         use hyper;
         let url = format!("{}/{}", url, path);
-        let requests: Vec<hyper::Request> = requests.iter().map(|req| {
-            let mut r = hyper::Request::new(hyper::Method::Post, url.clone().parse().unwrap());
-            r.set_body(serde_json::to_string(&req).unwrap());
-            r
-        }).collect();
+        let requests: Vec<hyper::Request> = requests
+            .iter()
+            .map(|req| {
+                let mut r = hyper::Request::new(hyper::Method::Post, url.clone().parse().unwrap());
+                r.set_body(serde_json::to_string(&req).unwrap());
+                r
+            })
+            .collect();
 
         // TODO: instead of spawing a thred for each request, we could have a
         // long running thread that we just send requests to.
         thread::spawn(move || {
-            let mut core = Core::new().unwrap();
-            let client = Client::new(&core.handle());
+            let mut basics = Core::new().unwrap();
+            let client = Client::new(&basics.handle());
             for r in requests {
                 let work = client.request(r);
-                core.run(work).unwrap();
+                basics.run(work).unwrap();
             }
         });
     }
 
     fn trigger(&self, ids: Vec<DataType>) {
         if ids.is_empty() {
-            return
+            return;
         }
 
         match self.trigger {
-            TriggerEvent::GroupCreation{ ref controller_url, ref group } => {
-                let contexts = ids.iter().map(|gid| {
-                    let mut group_context: HashMap<String, DataType> = HashMap::new();
-                    group_context.insert(String::from("id"), gid.clone());
-                    group_context.insert(String::from("group"), group.clone().into());
-                    group_context
-                }).collect();
+            TriggerEvent::GroupCreation {
+                ref controller_url,
+                ref group,
+            } => {
+                let contexts = ids.iter()
+                    .map(|gid| {
+                        let mut group_context: HashMap<String, DataType> = HashMap::new();
+                        group_context.insert(String::from("id"), gid.clone());
+                        group_context.insert(String::from("group"), group.clone().into());
+                        group_context
+                    })
+                    .collect();
 
                 self.rpc("create_universe", contexts, controller_url);
             }
@@ -109,7 +117,7 @@ impl Ingredient for Trigger {
         from: LocalNodeIndex,
         rs: Records,
         _: &mut Tracer,
-        _: Option<usize>,
+        _: Option<&[usize]>,
         _: &DomainNodes,
         state: &StateMap,
     ) -> ProcessingResult {
@@ -120,17 +128,15 @@ impl Ingredient for Trigger {
             .get(&*us)
             .expect("trigger must have its own state materialized");
 
-        let mut trigger_keys: Vec<DataType> = rs
-            .iter()
-            .map(|r| r[self.key[0]].clone())
-            .collect();
+        let mut trigger_keys: Vec<DataType> = rs.iter().map(|r| r[self.key].clone()).collect();
 
         // sort and dedup to trigger just once for each key
         trigger_keys.sort();
         trigger_keys.dedup();
 
-        let keys = trigger_keys.iter().filter_map(|k| {
-            match db.lookup(&[self.key[0]], &KeyType::Single(&k)) {
+        let keys = trigger_keys
+            .iter()
+            .filter_map(|k| match db.lookup(&[self.key], &KeyType::Single(&k)) {
                 LookupResult::Some(rs) => {
                     if rs.len() == 0 {
                         Some(k)
@@ -139,8 +145,9 @@ impl Ingredient for Trigger {
                     }
                 }
                 LookupResult::Missing => unimplemented!(),
-            }
-        }).cloned().collect();
+            })
+            .cloned()
+            .collect();
 
         self.trigger(keys);
 
@@ -152,7 +159,7 @@ impl Ingredient for Trigger {
 
     fn suggest_indexes(&self, this: NodeIndex) -> HashMap<NodeIndex, (Vec<usize>, bool)> {
         // index all key columns
-        Some((this, (self.key.clone(), true))).into_iter().collect()
+        Some((this, (vec![self.key], true))).into_iter().collect()
     }
 
     fn resolve(&self, col: usize) -> Option<Vec<(NodeIndex, usize)>> {
@@ -169,7 +176,7 @@ impl Ingredient for Trigger {
 
     // Trigger nodes require full materialization because we want group universes
     // to be long lived and to exist even if no user makes use of it.
-    // We do this for two reasons: 1) to make user universe creation faster and 
+    // We do this for two reasons: 1) to make user universe creation faster and
     // 2) so we don't have to order group and user universe migrations.
     fn requires_full_materialization(&self) -> bool {
         true
@@ -192,8 +199,7 @@ mod tests {
         g.set_op(
             "trigger",
             &["x", "y", "z"],
-
-            Trigger::new(s.as_global(), trigger_type, vec![0]),
+            Trigger::new(s.as_global(), trigger_type, 0),
             materialized,
         );
         g

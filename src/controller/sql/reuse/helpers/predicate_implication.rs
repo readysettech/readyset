@@ -1,5 +1,5 @@
-use nom_sql::{ConditionBase, ConditionExpression, ConditionTree, Literal, Operator};
 use nom_sql::ConditionExpression::*;
+use nom_sql::{ConditionBase, ConditionExpression, ConditionTree, Literal, Operator};
 
 fn direct_elimination(op1: &Operator, op2: &Operator) -> Option<Operator> {
     match *op1 {
@@ -161,6 +161,11 @@ fn predicate_implies(np: &ConditionTree, ep: &ConditionTree) -> bool {
                 _ => panic!("right-hand side of predicate must currently be literal"),
             }
         }
+        ConditionExpression::Base(ConditionBase::Literal(Literal::Null)) => match *ep.right {
+            ConditionExpression::Base(ConditionBase::Literal(Literal::Null)) => true,
+            ConditionExpression::Base(ConditionBase::Literal(_)) => false,
+            _ => panic!("right-hand side of predicate must currently be literal"),
+        },
         _ => panic!("right-hand side of predicate must currently be literal"),
     }
 }
@@ -172,8 +177,8 @@ mod tests {
 
     #[test]
     fn predicate_implication() {
-        use nom_sql::ConditionExpression::*;
         use nom_sql::ConditionBase::*;
+        use nom_sql::ConditionExpression::*;
         use nom_sql::Literal;
 
         let pa = ConditionTree {
@@ -200,8 +205,8 @@ mod tests {
 
     #[test]
     fn complex_predicate_implication_or() {
-        use nom_sql::ConditionExpression::*;
         use nom_sql::ConditionBase::*;
+        use nom_sql::ConditionExpression::*;
         use nom_sql::Literal;
 
         let pa = ComparisonOp(ConditionTree {
@@ -254,8 +259,8 @@ mod tests {
 
     #[test]
     fn complex_predicate_implication_and() {
-        use nom_sql::ConditionExpression::*;
         use nom_sql::ConditionBase::*;
+        use nom_sql::ConditionExpression::*;
         use nom_sql::Literal;
         let pa = ComparisonOp(ConditionTree {
             operator: Operator::Greater,
@@ -307,8 +312,8 @@ mod tests {
 
     #[test]
     fn complex_predicate_implication_superset_or() {
-        use nom_sql::ConditionExpression::*;
         use nom_sql::ConditionBase::*;
+        use nom_sql::ConditionExpression::*;
         use nom_sql::Literal;
         let pa = ComparisonOp(ConditionTree {
             operator: Operator::Less,
@@ -336,8 +341,8 @@ mod tests {
 
     #[test]
     fn complex_predicate_implication_subset_and() {
-        use nom_sql::ConditionExpression::*;
         use nom_sql::ConditionBase::*;
+        use nom_sql::ConditionExpression::*;
         use nom_sql::Literal;
         let pa = ComparisonOp(ConditionTree {
             operator: Operator::Greater,

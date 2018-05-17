@@ -1,9 +1,9 @@
+use domain;
+use ops;
+use petgraph;
+use prelude::*;
 use std::collections::HashMap;
 use std::ops::{Deref, DerefMut};
-use domain;
-use prelude::*;
-use petgraph;
-use ops;
 
 mod process;
 pub use self::process::materialize;
@@ -16,7 +16,7 @@ pub use self::ntype::NodeType;
 
 mod debug;
 
-#[derive(Debug)]
+#[derive(Debug, Serialize, Deserialize)]
 pub enum MaterializationStatus {
     Not,
     Full,
@@ -157,24 +157,25 @@ impl Node {
         }
     }
 
-    pub fn with_reader_mut<F>(&mut self, f: F)
+    pub fn with_reader_mut<'a, F, R>(&'a mut self, f: F) -> Result<R, ()>
     where
-        F: FnOnce(&mut special::Reader),
+        F: FnOnce(&'a mut special::Reader) -> R,
+        R: 'a,
     {
         match self.inner {
-            NodeType::Reader(ref mut r) => f(r),
-            _ => unreachable!(),
+            NodeType::Reader(ref mut r) => Ok(f(r)),
+            _ => Err(()),
         }
     }
 
-    pub fn with_reader<'a, F, R>(&'a self, f: F) -> Option<R>
+    pub fn with_reader<'a, F, R>(&'a self, f: F) -> Result<R, ()>
     where
         F: FnOnce(&'a special::Reader) -> R,
         R: 'a,
     {
         match self.inner {
-            NodeType::Reader(ref r) => Some(f(r)),
-            _ => None,
+            NodeType::Reader(ref r) => Ok(f(r)),
+            _ => Err(()),
         }
     }
 
@@ -235,6 +236,16 @@ impl Node {
 
     pub fn add_child(&mut self, child: LocalNodeIndex) {
         self.children.push(child);
+    }
+
+    pub fn try_remove_child(&mut self, child: LocalNodeIndex) -> bool {
+        for i in 0..self.children.len() {
+            if self.children[i] == child {
+                self.children.swap_remove(i);
+                return true;
+            }
+        }
+        false
     }
 
     pub fn add_column(&mut self, field: &str) -> usize {

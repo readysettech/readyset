@@ -1,5 +1,6 @@
 use std::collections::HashMap;
 use std::collections::HashSet;
+use std::mem;
 
 use prelude::*;
 
@@ -229,7 +230,7 @@ impl Ingredient for Join {
         from: LocalNodeIndex,
         rs: Records,
         _: &mut Tracer,
-        replay_key_col: Option<usize>,
+        replay_key_cols: Option<&[usize]>,
         nodes: &DomainNodes,
         state: &StateMap,
     ) -> ProcessingResult {
@@ -248,25 +249,29 @@ impl Ingredient for Join {
             (*self.left, self.on.1, self.on.0)
         };
 
-        let replay_key_col = replay_key_col.map(|col| {
-            match self.emit[col] {
-                (true, l) if from == *self.left => l,
-                (false, r) if from == *self.right => r,
-                (true, l) if l == self.on.0 => {
-                    // since we didn't hit the case above, we know that the message
-                    // *isn't* from left.
-                    self.on.1
-                }
-                (false, r) if r == self.on.1 => {
-                    // same
-                    self.on.0
-                }
-                _ => {
-                    // we're getting a partial replay, but the replay key doesn't exist
-                    // in the parent we're getting the replay from?!
-                    unreachable!()
-                }
-            }
+        let replay_key_cols = replay_key_cols.map(|cols| {
+            cols.into_iter()
+                .map(|&col| {
+                    match self.emit[col] {
+                        (true, l) if from == *self.left => l,
+                        (false, r) if from == *self.right => r,
+                        (true, l) if l == self.on.0 => {
+                            // since we didn't hit the case above, we know that the message
+                            // *isn't* from left.
+                            self.on.1
+                        }
+                        (false, r) if r == self.on.1 => {
+                            // same
+                            self.on.0
+                        }
+                        _ => {
+                            // we're getting a partial replay, but the replay key doesn't exist
+                            // in the parent we're getting the replay from?!
+                            unreachable!()
+                        }
+                    }
+                })
+                .collect()
         });
 
         // First, we want to be smart about multiple added/removed rows with the same join key
@@ -327,18 +332,21 @@ impl Ingredient for Join {
             ).unwrap();
 
             if other_rows.is_none() {
-                let replay_key = replay_key_col.map(|col| vec![rs[at][col].clone()]);
+                // we missed in the other side!
+                let from = at;
                 at = rs[at..]
                     .iter()
                     .position(|r| r[from_key] != prev_join_key)
                     .map(|p| at + p)
                     .unwrap_or(rs.len());
-                misses.push(Miss {
-                    node: other,
-                    columns: vec![other_key],
-                    replay_key,
-                    key: vec![prev_join_key],
-                });
+                misses.extend((from..at).map(|i| Miss {
+                    on: other,
+                    lookup_idx: vec![other_key],
+                    lookup_cols: vec![from_key],
+                    replay_cols: replay_key_cols.clone(),
+                    // NOTE: we're stealing data here!
+                    record: mem::replace(&mut *rs[i], Vec::new()),
+                }));
                 continue;
             }
 
@@ -369,12 +377,20 @@ impl Ingredient for Join {
                     }
                 } else {
                     // we got a right, but missed in right; clearly, a replay is needed
-                    misses.push(Miss {
-                        node: from,
-                        columns: vec![self.on.1],
-                        replay_key: replay_key_col.map(|col| vec![rs[at][col].clone()]),
-                        key: vec![rs[at][self.on.1].clone()],
-                    });
+                    let start = at;
+                    at = rs[at..]
+                        .iter()
+                        .position(|r| r[from_key] != prev_join_key)
+                        .map(|p| at + p)
+                        .unwrap_or(rs.len());
+                    misses.extend((start..at).map(|i| Miss {
+                        on: from,
+                        lookup_idx: vec![self.on.1],
+                        lookup_cols: vec![from_key],
+                        replay_cols: replay_key_cols.clone(),
+                        // NOTE: we're stealing data here!
+                        record: mem::replace(&mut *rs[i], Vec::new()),
+                    }));
                     continue;
                 }
             }
@@ -393,7 +409,7 @@ impl Ingredient for Join {
                 use std::mem;
 
                 // put something bogus in rs (which will be discarded anyway) so we can take r.
-                let r = mem::replace(&mut rs[ri], Record::DeleteRequest(Vec::new()));
+                let r = mem::replace(&mut rs[ri], Record::Positive(Vec::new()));
                 let (row, positive) = r.extract();
 
                 if let Some(other_rows) = other_rows.take() {
@@ -415,26 +431,26 @@ impl Ingredient for Join {
                     while other_rows.peek().is_some() {
                         if let Some(false) = make_null {
                             // we need to generate a -NULL for all these lefts
-                            ret.push((self.generate_null(other), false).into());
+                            ret.push((self.generate_null(&other), false).into());
                         }
                         if from == *self.left {
                             ret.push(
                                 (
-                                    self.generate_row(&row, other, Preprocessed::Neither),
+                                    self.generate_row(&row, &other, Preprocessed::Neither),
                                     positive,
                                 ).into(),
                             );
                         } else {
                             ret.push(
                                 (
-                                    self.generate_row(other, &row, Preprocessed::Neither),
+                                    self.generate_row(&other, &row, Preprocessed::Neither),
                                     positive,
                                 ).into(),
                             );
                         }
                         if let Some(true) = make_null {
                             // we need to generate a +NULL for all these lefts
-                            ret.push((self.generate_null(other), true).into());
+                            ret.push((self.generate_null(&other), true).into());
                         }
                         other = other_rows.next().unwrap();
                         other_rows_count += 1;
@@ -442,17 +458,17 @@ impl Ingredient for Join {
 
                     if let Some(false) = make_null {
                         // we need to generate a -NULL for the last left too
-                        ret.push((self.generate_null(other), false).into());
+                        ret.push((self.generate_null(&other), false).into());
                     }
                     ret.push(
                         (
-                            self.regenerate_row(row, other, from == *self.left, false),
+                            self.regenerate_row(row, &other, from == *self.left, false),
                             positive,
                         ).into(),
                     );
                     if let Some(true) = make_null {
                         // we need to generate a +NULL for the last left too
-                        ret.push((self.generate_null(other), true).into());
+                        ret.push((self.generate_null(&other), true).into());
                     }
                 } else if other_rows_count == 0 {
                     if self.kind == JoinType::Left && from == *self.left {

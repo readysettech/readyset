@@ -1,10 +1,10 @@
-use dataflow::prelude::*;
 use dataflow::node;
-use petgraph::graph::NodeIndex;
-use std::collections::{HashMap, HashSet};
-use slog::Logger;
-use petgraph;
 use dataflow::ops;
+use dataflow::prelude::*;
+use petgraph;
+use petgraph::graph::NodeIndex;
+use slog::Logger;
+use std::collections::{HashMap, HashSet};
 
 pub fn shard(
     log: &Logger,
@@ -51,13 +51,21 @@ pub fn shard(
             let s = graph[node]
                 .with_reader(|r| r.key())
                 .unwrap()
-                .map(|c| Sharding::ByColumn(c, sharding_factor))
+                .and_then(|c| {
+                    if c.len() == 1 {
+                        Some(Sharding::ByColumn(c[0], sharding_factor))
+                    } else {
+                        None
+                    }
+                })
                 .unwrap_or(Sharding::ForcedNone);
             if s.is_none() {
                 info!(log, "de-sharding prior to stream-only reader"; "node" => ?node);
             } else {
                 info!(log, "sharding reader"; "node" => ?node);
-                graph[node].with_reader_mut(|r| r.shard(sharding_factor));
+                graph[node]
+                    .with_reader_mut(|r| r.shard(sharding_factor))
+                    .unwrap();
             }
 
             if s != input_shardings[&ni] {
@@ -343,7 +351,10 @@ pub fn shard(
     let mut gone = HashSet::new();
     while !new_sharders.is_empty() {
         'sharders: for n in new_sharders.split_off(0) {
+            trace!(log, "can we eliminate sharder {:?}?", n);
+
             if gone.contains(&n) {
+                trace!(log, "no, parent is weird (already eliminated)");
                 continue;
             }
 
@@ -364,19 +375,24 @@ pub fn shard(
 
             // we can only push sharding above newly created nodes that are not already sharded.
             if !new.contains(&p) || graph[p].sharded_by() != Sharding::None {
+                trace!(log, "no, parent is weird (not new or already sharded)");
                 continue;
             }
 
             // if the parent is a base, the only option we have is to shard the base.
             if graph[p].get_base().is_some() {
+                trace!(log, "well, its parent is a base");
+
                 // sharded transactional bases are hard
                 if graph[p].is_transactional() {
+                    trace!(log, "no, parent is weird (transactional)");
                     continue;
                 }
 
                 // we can't shard compound bases (yet)
                 if let Some(k) = graph[p].get_base().unwrap().key() {
                     if k.len() != 1 {
+                        trace!(log, "no, parent is weird (has compound key)");
                         continue;
                     }
                 }
@@ -388,6 +404,7 @@ pub fn shard(
                 {
                     // TODO: technically we could still do this if the other children were
                     // sharded by the same column.
+                    trace!(log, "no, parent is weird (has other children)");
                     continue;
                 }
 

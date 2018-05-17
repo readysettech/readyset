@@ -3,22 +3,22 @@ mod passes;
 mod query_graph;
 mod query_signature;
 mod query_utils;
-pub mod security;
 pub mod reuse;
+pub mod security;
 
-use core::NodeIndex;
-use dataflow::prelude::DataType;
-use controller::Migration;
-use controller::mir_to_flow::mir_query_to_flow_parts;
-use nom_sql::parser as sql_parser;
-use nom_sql::{ArithmeticBase, Column, SqlQuery};
-use nom_sql::{CompoundSelectOperator, CompoundSelectStatement, SelectStatement};
 use self::mir::{MirNodeRef, SqlToMirConverter};
-use self::reuse::{ReuseConfig, ReuseConfigType};
 use self::query_graph::{to_query_graph, QueryGraph};
 use self::query_signature::Signature;
+use self::reuse::{ReuseConfig, ReuseConfigType};
+use controller::mir_to_flow::mir_query_to_flow_parts;
+use controller::Migration;
+use basics::NodeIndex;
+use dataflow::prelude::DataType;
 use mir::query::{MirQuery, QueryFlowParts};
 use mir::reuse as mir_reuse;
+use nom_sql::parser as sql_parser;
+use nom_sql::{ArithmeticBase, Column, CreateTableStatement, SqlQuery};
+use nom_sql::{CompoundSelectOperator, CompoundSelectStatement, SelectStatement};
 
 use slog;
 use std::collections::HashMap;
@@ -44,12 +44,18 @@ pub struct SqlIncorporator {
     log: slog::Logger,
     mir_converter: SqlToMirConverter,
     leaf_addresses: HashMap<String, NodeIndex>,
-    num_queries: usize,
+
+    named_queries: HashMap<String, u64>,
     query_graphs: HashMap<u64, QueryGraph>,
     mir_queries: HashMap<(u64, UniverseId), MirQuery>,
-    schema_version: usize,
+    num_queries: usize,
+
+    base_schemas: HashMap<String, CreateTableStatement>,
     view_schemas: HashMap<String, Vec<String>>,
+
+    schema_version: usize,
     transactional: bool,
+
     reuse_type: ReuseConfigType,
 
     /// Active universes mapped to the group they belong to.
@@ -63,12 +69,18 @@ impl Default for SqlIncorporator {
             log: slog::Logger::root(slog::Discard, o!()),
             mir_converter: SqlToMirConverter::default(),
             leaf_addresses: HashMap::default(),
-            num_queries: 0,
+
+            named_queries: HashMap::default(),
             query_graphs: HashMap::default(),
             mir_queries: HashMap::default(),
-            schema_version: 0,
+            num_queries: 0,
+
+            base_schemas: HashMap::default(),
             view_schemas: HashMap::default(),
+
+            schema_version: 0,
             transactional: false,
+
             reuse_type: ReuseConfigType::Finkelstein,
             universes: HashMap::default(),
         }
@@ -141,6 +153,10 @@ impl SqlIncorporator {
         }
     }
 
+    pub fn get_base_schema(&self, name: &str) -> Option<CreateTableStatement> {
+        self.base_schemas.get(name).cloned()
+    }
+
     #[cfg(test)]
     fn get_flow_node_address(&self, name: &str, v: usize) -> Option<NodeIndex> {
         self.mir_converter.get_flow_node_address(name, v)
@@ -149,7 +165,10 @@ impl SqlIncorporator {
     /// Retrieves the flow node associated with a given query's leaf view.
     #[allow(unused)]
     pub fn get_query_address(&self, name: &str) -> Option<NodeIndex> {
-        self.mir_converter.get_leaf(name)
+        match self.leaf_addresses.get(name) {
+            None => self.mir_converter.get_leaf(name),
+            Some(na) => Some(na.clone()),
+        }
     }
 
     fn consider_query_graph(
@@ -186,30 +205,54 @@ impl SqlIncorporator {
                 // different order means that we cannot simply reuse the existing reader.
                 if existing_qg.signature() == qg.signature()
                     && existing_qg.parameters() == qg.parameters()
+                    && existing_qg.exact_hash() == qg.exact_hash()
                 {
                     // we already have this exact query, down to the exact same reader key columns
                     // in exactly the same order
                     info!(
                         self.log,
-                        "An exact match for query \"{}\" already exists in universe \"{:?}\", reusing it",
+                        "An exact match for query \"{}\" already exists in universe \"{}\", reusing it",
                         query_name,
-                        universe,
+                        universe.0.to_string(),
                     );
 
-                    trace!(self.log,
+                    trace!(
+                        self.log,
                         "Reusing MirQuery {} with QueryGraph {:#?}",
                         mir_query.name,
                         existing_qg,
                     );
 
                     return (qg, QueryGraphReuse::ExactMatch(mir_query.leaf.clone()));
-                } else if existing_qg.signature() == qg.signature() {
+                } else if existing_qg.signature() == qg.signature()
+                    && existing_qg.parameters() != qg.parameters()
+                {
                     use self::query_graph::OutputColumn;
+
+                    // the signatures match, but this comparison has only given us an inexact result:
+                    // we know that both queries mention the same columns, but not that they
+                    // actually do the same comparisons or have the same literals. Hence, we need
+                    // to scan the predicates here and ensure that for each predicate in the
+                    // incoming QG, we have a matching predicate in the existing one.
+                    // Since `qg.relations.predicates` only contains comparisons between columns
+                    // and literals (col/col is a join predicate and associated with the join edge,
+                    // col/param is stored in qg.params), we will not be inhibited by the fact that
+                    // the queries have different parameters.
+                    let mut predicates_match = true;
+                    for (r, n) in qg.relations.iter() {
+                        for p in n.predicates.iter() {
+                            if !existing_qg.relations.contains_key(r)
+                                || !existing_qg.relations[r].predicates.contains(p)
+                            {
+                                predicates_match = false;
+                            }
+                        }
+                    }
 
                     // if any of our columns are grouped expressions, we can't reuse here, since
                     // the difference in parameters means that there is a difference in the implied
                     // GROUP BY clause
-                    if qg.columns.iter().all(|c| match *c {
+                    let no_grouped_columns = qg.columns.iter().all(|c| match *c {
                         OutputColumn::Literal(_) => true,
                         OutputColumn::Arithmetic(ref ac) => {
                             let mut is_function = false;
@@ -224,7 +267,9 @@ impl SqlIncorporator {
                             !is_function
                         }
                         OutputColumn::Data(ref dc) => dc.function.is_none(),
-                    }) {
+                    });
+
+                    if predicates_match && no_grouped_columns {
                         // QGs are identical, except for parameters (or their order)
                         info!(
                             self.log,
@@ -374,6 +419,16 @@ impl SqlIncorporator {
         // push it into the flow graph using the migration in `mig`, and obtain `QueryFlowParts`
         let qfp = mir_query_to_flow_parts(&mut mir, &mut mig);
 
+        // remember the schema in case we need it later
+        // on base table schema change, we will overwrite the existing schema here.
+        // TODO(malte): this means that requests for this will always return the *latest* schema
+        // for a base.
+        if let SqlQuery::CreateTable(ref ctq) = query {
+            self.base_schemas.insert(query_name.to_owned(), ctq.clone());
+        } else {
+            unimplemented!();
+        }
+
         self.register_query(query_name, None, &mir, mig.universe());
 
         qfp
@@ -427,7 +482,7 @@ impl SqlIncorporator {
             QueryGraphReuse::ExactMatch(mn) => {
                 let flow_node = mn.borrow().flow_node.as_ref().unwrap().address();
                 let qfp = QueryFlowParts {
-                    name: String::from(mn.borrow().name()),
+                    name: String::from(query_name),
                     new_nodes: vec![],
                     reused_nodes: vec![flow_node],
                     query_leaf: flow_node,
@@ -462,8 +517,13 @@ impl SqlIncorporator {
         let universe = mig.universe();
         // no QG-level reuse possible, so we'll build a new query.
         // first, compute the MIR representation of the SQL query
-        let mut mir = self.mir_converter
-            .named_query_to_mir(query_name, query, &qg, is_leaf, universe.clone());
+        let mut mir = self.mir_converter.named_query_to_mir(
+            query_name,
+            query,
+            &qg,
+            is_leaf,
+            universe.clone(),
+        );
 
         trace!(self.log, "Unoptimized MIR:\n{}", mir.to_graphviz().unwrap());
 
@@ -481,7 +541,60 @@ impl SqlIncorporator {
         (qfp, mir)
     }
 
-    fn register_query(&mut self, query_name: &str, qg: Option<QueryGraph>, mir: &MirQuery, universe: UniverseId) {
+    pub fn remove_query(&mut self, query_name: &str, mig: &Migration) -> Option<NodeIndex> {
+        let nodeid = self.leaf_addresses
+            .remove(query_name)
+            .expect("tried to remove unknown query");
+
+        let qg_hash = self.named_queries
+            .remove(query_name)
+            .expect("missing query hash for named query");
+        let mir = self.mir_queries.get(&(qg_hash, mig.universe())).unwrap();
+
+        // traverse self.leaf__addresses
+        if self.leaf_addresses
+            .values()
+            .find(|&id| *id == nodeid)
+            .is_none()
+        {
+            // ok to remove
+
+            // remove local state for query
+
+            // traverse and remove MIR nodes
+            // TODO(malte): implement this
+            self.mir_converter.remove_query(query_name, mir);
+
+            // clean up local state
+            self.mir_queries.remove(&(qg_hash, mig.universe())).unwrap();
+            self.query_graphs.remove(&qg_hash).unwrap();
+            self.view_schemas.remove(query_name).unwrap();
+
+            // trigger reader node removal
+            Some(nodeid)
+        } else {
+            // more than one query uses this leaf
+            // don't remove node yet!
+
+            // TODO(malte): implement this
+            self.mir_converter.remove_query(query_name, mir);
+
+            // clean up state for this query
+            self.mir_queries.remove(&(qg_hash, mig.universe())).unwrap();
+            self.query_graphs.remove(&qg_hash).unwrap();
+            self.view_schemas.remove(query_name).unwrap();
+
+            None
+        }
+    }
+
+    fn register_query(
+        &mut self,
+        query_name: &str,
+        qg: Option<QueryGraph>,
+        mir: &MirQuery,
+        universe: UniverseId,
+    ) {
         // TODO(malte): we currently need to remember these for local state, but should figure out
         // a better plan (see below)
         let fields = mir.leaf
@@ -501,11 +614,10 @@ impl SqlIncorporator {
         match qg {
             Some(qg) => {
                 let qg_hash = qg.signature().hash;
-                self.query_graphs
-                    .insert(qg_hash, qg);
-                self.mir_queries
-                    .insert((qg_hash, universe), mir.clone());
-            },
+                self.query_graphs.insert(qg_hash, qg);
+                self.mir_queries.insert((qg_hash, universe), mir.clone());
+                self.named_queries.insert(query_name.to_owned(), qg_hash);
+            }
             None => (),
         }
     }
@@ -525,8 +637,13 @@ impl SqlIncorporator {
 
         // no QG-level reuse possible, so we'll build a new query.
         // first, compute the MIR representation of the SQL query
-        let new_query_mir = self.mir_converter
-            .named_query_to_mir(query_name, query, &qg, is_leaf, universe.clone());
+        let new_query_mir = self.mir_converter.named_query_to_mir(
+            query_name,
+            query,
+            &qg,
+            is_leaf,
+            universe.clone(),
+        );
 
         // TODO(malte): should we run the MIR-level optimizations here?
         let new_opt_mir = new_query_mir.optimize();
@@ -592,8 +709,9 @@ impl SqlIncorporator {
         use controller::sql::passes::alias_removal::AliasRemoval;
         use controller::sql::passes::count_star_rewrite::CountStarRewrite;
         use controller::sql::passes::implied_tables::ImpliedTableExpansion;
-        use controller::sql::passes::star_expansion::StarExpansion;
+        use controller::sql::passes::key_def_coalescing::KeyDefinitionCoalescing;
         use controller::sql::passes::negation_removal::NegationRemoval;
+        use controller::sql::passes::star_expansion::StarExpansion;
         use controller::sql::passes::subqueries::SubQueries;
         use controller::sql::query_utils::ReferredTables;
 
@@ -607,7 +725,7 @@ impl SqlIncorporator {
         let mut fq = q.clone();
         for sq in fq.extract_subqueries() {
             use self::passes::subqueries::{field_with_table_name, query_from_condition_base,
-                                          Subquery};
+                                           Subquery};
             use nom_sql::{JoinRightSide, Table};
             match sq {
                 Subquery::InComparison(cond_base) => {
@@ -644,12 +762,14 @@ impl SqlIncorporator {
             // if we're just about to create the table, we don't need to check if it exists. If it
             // does, we will amend or reuse it; if it does not, we create it.
             SqlQuery::CreateTable(_) => (),
+            | SqlQuery::CreateView(_) => (),
             // other kinds of queries *do* require their referred tables to exist!
-            ref q @ SqlQuery::CompoundSelect(_)
+            | ref q @ SqlQuery::CompoundSelect(_)
             | ref q @ SqlQuery::Select(_)
             | ref q @ SqlQuery::Set(_)
             | ref q @ SqlQuery::Update(_)
             | ref q @ SqlQuery::Delete(_)
+            | ref q @ SqlQuery::DropTable(_)
             | ref q @ SqlQuery::Insert(_) => for t in &q.referred_tables() {
                 if !self.view_schemas.contains_key(&t.name) {
                     panic!("query refers to unknown table \"{}\"", t.name);
@@ -661,6 +781,7 @@ impl SqlIncorporator {
         // as we no longer have to consider complications like aliases.
         fq.expand_table_aliases(mig.context())
             .remove_negation()
+            .coalesce_key_definitions()
             .expand_stars(&self.view_schemas)
             .expand_implied_tables(&self.view_schemas)
             .rewrite_count_star(&self.view_schemas)
@@ -755,10 +876,11 @@ impl<'a> ToFlowParts for &'a str {
 
 #[cfg(test)]
 mod tests {
-    use nom_sql::Column;
-    use dataflow::prelude::*;
-    use controller::{ControllerBuilder, Migration};
     use super::{SqlIncorporator, ToFlowParts};
+    use controller::Migration;
+    use dataflow::prelude::*;
+    use integration;
+    use nom_sql::Column;
     use nom_sql::FunctionExpression;
 
     /// Helper to grab a reference to a named view.
@@ -773,8 +895,8 @@ mod tests {
     /// ordered by `Ord`.
     fn query_id_hash(relations: &[&str], attrs: &[&Column], columns: &[&Column]) -> u64 {
         use controller::sql::query_graph::OutputColumn;
-        use std::hash::{Hash, Hasher};
         use std::collections::hash_map::DefaultHasher;
+        use std::hash::{Hash, Hasher};
 
         let mut hasher = DefaultHasher::new();
         for r in relations.iter() {
@@ -792,7 +914,7 @@ mod tests {
     #[test]
     fn it_parses() {
         // set up graph
-        let mut g = ControllerBuilder::default().build_local();
+        let mut g = integration::build_local("it_parses");
         g.migrate(|mig| {
             let mut inc = SqlIncorporator::default();
             // Must have a base node for type inference to work, so make one manually
@@ -830,7 +952,7 @@ mod tests {
     #[test]
     fn it_incorporates_simple_join() {
         // set up graph
-        let mut g = ControllerBuilder::default().build_local();
+        let mut g = integration::build_local("it_incorporates_simple_join");
         g.migrate(|mig| {
             let mut inc = SqlIncorporator::default();
             // Establish a base write type for "users"
@@ -886,7 +1008,7 @@ mod tests {
     #[test]
     fn it_incorporates_simple_selection() {
         // set up graph
-        let mut g = ControllerBuilder::default().build_local();
+        let mut g = integration::build_local("it_incorporates_simple_selection");
         g.migrate(|mig| {
             let mut inc = SqlIncorporator::default();
             // Establish a base write type
@@ -927,7 +1049,7 @@ mod tests {
     #[test]
     fn it_incorporates_aggregation() {
         // set up graph
-        let mut g = ControllerBuilder::default().build_local();
+        let mut g = integration::build_local("it_incorporates_aggregation");
         g.migrate(|mig| {
             let mut inc = SqlIncorporator::default();
             // Establish a base write types
@@ -959,14 +1081,12 @@ mod tests {
             let qid = query_id_hash(
                 &["computed_columns", "votes"],
                 &[&Column::from("votes.aid")],
-                &[
-                    &Column {
-                        name: String::from("votes"),
-                        alias: Some(String::from("votes")),
-                        table: None,
-                        function: Some(f),
-                    },
-                ],
+                &[&Column {
+                    name: String::from("votes"),
+                    alias: Some(String::from("votes")),
+                    table: None,
+                    function: Some(f),
+                }],
             );
             let agg_view = get_node(&inc, mig, &format!("q_{:x}_n0", qid));
             assert_eq!(agg_view.fields(), &["aid", "votes"]);
@@ -981,7 +1101,7 @@ mod tests {
     #[test]
     fn it_does_not_reuse_if_disabled() {
         // set up graph
-        let mut g = ControllerBuilder::default().build_local();
+        let mut g = integration::build_local("it_does_not_reuse_if_disabled");
         g.migrate(|mig| {
             let mut inc = SqlIncorporator::default();
             inc.disable_reuse();
@@ -1010,7 +1130,7 @@ mod tests {
     #[test]
     fn it_reuses_identical_query() {
         // set up graph
-        let mut g = ControllerBuilder::default().build_local();
+        let mut g = integration::build_local("it_reuses_identical_query");
         g.migrate(|mig| {
             let mut inc = SqlIncorporator::default();
             // Establish a base write type
@@ -1055,7 +1175,7 @@ mod tests {
     #[test]
     fn it_reuses_with_different_parameter() {
         // set up graph
-        let mut g = ControllerBuilder::default().build_local();
+        let mut g = integration::build_local("it_reuses_with_different_parameter");
         g.migrate(|mig| {
             let mut inc = SqlIncorporator::default();
             // Establish a base write type
@@ -1121,7 +1241,7 @@ mod tests {
     #[test]
     fn it_incorporates_aggregation_no_group_by() {
         // set up graph
-        let mut g = ControllerBuilder::default().build_local();
+        let mut g = integration::build_local("it_incorporates_aggregation_no_group_by");
         g.migrate(|mig| {
             let mut inc = SqlIncorporator::default();
             // Establish a base write type
@@ -1147,14 +1267,12 @@ mod tests {
             let qid = query_id_hash(
                 &["computed_columns", "votes"],
                 &[],
-                &[
-                    &Column {
-                        name: String::from("count"),
-                        alias: Some(String::from("count")),
-                        table: None,
-                        function: Some(f),
-                    },
-                ],
+                &[&Column {
+                    name: String::from("count"),
+                    alias: Some(String::from("count")),
+                    table: None,
+                    function: Some(f),
+                }],
             );
             let proj_helper_view = get_node(&inc, mig, &format!("q_{:x}_n0_prj_hlpr", qid));
             assert_eq!(proj_helper_view.fields(), &["userid", "grp"]);
@@ -1175,7 +1293,7 @@ mod tests {
     #[test]
     fn it_incorporates_aggregation_count_star() {
         // set up graph
-        let mut g = ControllerBuilder::default().build_local();
+        let mut g = integration::build_local("it_incorporates_aggregation_count_star");
         g.migrate(|mig| {
             let mut inc = SqlIncorporator::default();
             // Establish a base write type
@@ -1202,14 +1320,12 @@ mod tests {
             let qid = query_id_hash(
                 &["computed_columns", "votes"],
                 &[&Column::from("votes.userid")],
-                &[
-                    &Column {
-                        name: String::from("count"),
-                        alias: Some(String::from("count")),
-                        table: None,
-                        function: Some(f),
-                    },
-                ],
+                &[&Column {
+                    name: String::from("count"),
+                    alias: Some(String::from("count")),
+                    table: None,
+                    function: Some(f),
+                }],
             );
             let agg_view = get_node(&inc, mig, &format!("q_{:x}_n0", qid));
             assert_eq!(agg_view.fields(), &["userid", "count"]);
@@ -1226,7 +1342,7 @@ mod tests {
     #[test]
     fn it_incorporates_explicit_multi_join() {
         // set up graph
-        let mut g = ControllerBuilder::default().build_local();
+        let mut g = integration::build_local("it_incorporates_explicit_multi_join");
         g.migrate(|mig| {
             let mut inc = SqlIncorporator::default();
             // Establish base write types for "users" and "articles" and "votes"
@@ -1277,7 +1393,7 @@ mod tests {
     #[test]
     fn it_incorporates_implicit_multi_join() {
         // set up graph
-        let mut g = ControllerBuilder::default().build_local();
+        let mut g = integration::build_local("it_incorporates_implicit_multi_join");
         g.migrate(|mig| {
             let mut inc = SqlIncorporator::default();
             // Establish base write types for "users" and "articles" and "votes"
@@ -1340,7 +1456,7 @@ mod tests {
     #[test]
     fn it_incorporates_literal_projection() {
         // set up graph
-        let mut g = ControllerBuilder::default().build_local();
+        let mut g = integration::build_local("it_incorporates_literal_projection");
         g.migrate(|mig| {
             let mut inc = SqlIncorporator::default();
             assert!(
@@ -1361,7 +1477,7 @@ mod tests {
     #[test]
     fn it_incorporates_arithmetic_projection() {
         // set up graph
-        let mut g = ControllerBuilder::default().build_local();
+        let mut g = integration::build_local("it_incorporates_arithmetic_projection");
         g.migrate(|mig| {
             let mut inc = SqlIncorporator::default();
             assert!(
@@ -1378,7 +1494,7 @@ mod tests {
 
             // leaf view node
             let edge = get_node(&inc, mig, &res.unwrap().name);
-            assert_eq!(edge.fields(), &["bogokey", "2 * users.age", "twenty"]);
+            assert_eq!(edge.fields(), &["2 * users.age", "twenty", "bogokey"]);
             assert_eq!(
                 edge.description(),
                 format!("π[(lit: 2) * 1, (lit: 2) * (lit: 10), lit: 0]")
@@ -1388,7 +1504,7 @@ mod tests {
 
     #[test]
     fn it_incorporates_join_with_nested_query() {
-        let mut g = ControllerBuilder::default().build_local();
+        let mut g = integration::build_local("it_incorporates_join_with_nested_query");
         g.migrate(|mig| {
             let mut inc = SqlIncorporator::default();
             assert!(
@@ -1422,19 +1538,19 @@ mod tests {
             let new_join_view = get_node(&inc, mig, &format!("q_{:x}_n0", qid));
             assert_eq!(
                 new_join_view.fields(),
-                &["id", "name", "id", "author", "title"]
+                &["id", "author", "title", "id", "name"]
             );
             // leaf node
             let new_leaf_view = get_node(&inc, mig, &q.unwrap().name);
             assert_eq!(new_leaf_view.fields(), &["name", "title", "bogokey"]);
-            assert_eq!(new_leaf_view.description(), format!("π[1, 4, lit: 0]"));
+            assert_eq!(new_leaf_view.description(), format!("π[4, 2, lit: 0]"));
         });
     }
 
     #[test]
     fn it_incorporates_compound_selection() {
         // set up graph
-        let mut g = ControllerBuilder::default().build_local();
+        let mut g = integration::build_local("it_incorporates_compound_selection");
         g.migrate(|mig| {
             let mut inc = SqlIncorporator::default();
             assert!(
@@ -1461,10 +1577,9 @@ mod tests {
     }
 
     #[test]
-    #[ignore]
     fn it_distinguishes_predicates() {
         // set up graph
-        let mut g = ControllerBuilder::default().build_local();
+        let mut g = integration::build_local("it_distinguishes_predicates");
         g.migrate(|mig| {
             let mut inc = SqlIncorporator::default();
             // Establish a base write type

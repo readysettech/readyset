@@ -1,11 +1,11 @@
-use controller::sql::query_graph::{QueryGraph, QueryGraphEdge};
 use controller::sql::mir::SqlToMirConverter;
-use nom_sql::{Column, ConditionExpression};
-use std::collections::HashMap;
+use controller::sql::query_graph::{QueryGraph, QueryGraphEdge};
 use mir::MirNodeRef;
-use std::ops::Deref;
 use nom_sql::FunctionExpression;
 use nom_sql::FunctionExpression::*;
+use nom_sql::{Column, ConditionExpression};
+use std::collections::HashMap;
+use std::ops::Deref;
 
 fn target_columns_from_computed_column(computed_col: &Column) -> &Column {
     use nom_sql::FunctionExpression::*;
@@ -195,7 +195,7 @@ pub fn make_grouped(
                         func_nodes.push(proj.clone());
                         node_count += 1;
 
-                        let bogo_group_col = Column::from(format!("{}.grp", proj_name).as_str());
+                        let bogo_group_col = Column::from("grp");
                         (vec![bogo_group_col], proj)
                     } else {
                         (proj_cols_from_target_table.clone(), parent_node)

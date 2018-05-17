@@ -1,21 +1,22 @@
-use std::{self, cell, io};
 use std::collections::HashMap;
 use std::net::{IpAddr, SocketAddr};
 use std::sync::Arc;
+use std::{self, cell, io};
 
 use mio;
 use slog::Logger;
 
-use channel::{tcp, TcpReceiver, TcpSender};
 use channel::poll::{KeepPolling, PollEvent, PollingLoop, StopPolling};
+use channel::{tcp, DomainConnectionBuilder, TcpReceiver, TcpSender};
 use consensus::Epoch;
-use dataflow::{self, DomainBuilder, DomainConfig, PersistenceParameters};
+use basics::PersistenceParameters;
 use dataflow::payload::ControlReplyPacket;
 use dataflow::prelude::*;
 use dataflow::statistics::{DomainStats, NodeStats};
+use dataflow::{self, DomainBuilder, DomainConfig};
 
-use coordination::{CoordinationMessage, CoordinationPayload};
 use controller::{WorkerEndpoint, WorkerIdentifier};
+use coordination::{CoordinationMessage, CoordinationPayload};
 
 #[derive(Debug)]
 pub enum WaitError {
@@ -65,7 +66,11 @@ impl<'a> BatchSendHandle<'a> {
                 let shard = {
                     let key = match r {
                         Record::Positive(ref r) | Record::Negative(ref r) => &r[key_col],
-                        Record::DeleteRequest(ref k) => &k[0],
+                        Record::BaseOperation(BaseOperation::Delete { ref key }) => &key[0],
+                        Record::BaseOperation(BaseOperation::Update { ref key, .. }) => &key[0],
+                        Record::BaseOperation(BaseOperation::InsertOrUpdate {
+                            ref row, ..
+                        }) => &row[key_col],
                     };
                     dataflow::shard_by(key, self.dih.txs.len())
                 };
@@ -73,15 +78,17 @@ impl<'a> BatchSendHandle<'a> {
             }
 
             for (s, rs) in shard_writes.drain(..).enumerate() {
-                let mut p = Box::new(p.clone_data()); // ok here, as data previously emptied
-                p.swap_data(rs.into());
+                if !rs.is_empty() {
+                    let mut p = Box::new(p.clone_data()); // ok here, as data previously emptied
+                    p.swap_data(rs.into());
 
-                if local {
-                    p = p.make_local();
+                    if local {
+                        p = p.make_local();
+                    }
+
+                    self.dih.txs[s].send(p)?;
+                    self.sent[s] += 1;
                 }
-
-                self.dih.txs[s].send(p)?;
-                self.sent[s] += 1;
             }
         }
 
@@ -105,10 +112,28 @@ impl<'a> BatchSendHandle<'a> {
 }
 
 impl DomainInputHandle {
-    pub(crate) fn new(txs: Vec<SocketAddr>) -> Result<Self, io::Error> {
-        let txs: Result<Vec<_>, _> = txs.iter().map(|addr| TcpSender::connect(addr)).collect();
+    pub(crate) fn new_on(mut local_port: Option<u16>, txs: &[SocketAddr]) -> io::Result<Self> {
+        let txs: io::Result<Vec<_>> = txs.into_iter()
+            .map(|addr| {
+                let c = DomainConnectionBuilder::for_mutator(*addr)
+                    .maybe_on_port(local_port)
+                    .build()?;
+                if local_port.is_none() {
+                    local_port = Some(c.local_addr()?.port());
+                }
+                Ok(c)
+            })
+            .collect();
 
         Ok(Self { txs: txs? })
+    }
+
+    pub(crate) fn new(txs: &[SocketAddr]) -> Result<Self, io::Error> {
+        Self::new_on(None, txs)
+    }
+
+    pub(crate) fn local_addr(&self) -> io::Result<SocketAddr> {
+        self.txs[0].local_addr()
     }
 
     pub(crate) fn sender(&mut self) -> BatchSendHandle {
@@ -218,7 +243,17 @@ impl DomainHandle {
             PollEvent::ResumePolling(_) => KeepPolling,
             PollEvent::Process(ControlReplyPacket::Booted(shard, addr)) => {
                 channel_coordinator.insert_addr((idx, shard), addr.clone(), false);
-                txs.push(channel_coordinator.get_tx(&(idx, shard)).unwrap());
+                txs.push(
+                    channel_coordinator
+                        .get_dest(&(idx, shard))
+                        .map(|(addr, is_local)| {
+                            (
+                                DomainConnectionBuilder::for_domain(addr).build().unwrap(),
+                                is_local,
+                            )
+                        })
+                        .unwrap(),
+                );
 
                 // TODO(malte): this is a hack, and not an especially neat one. In response to a
                 // domain boot message, we broadcast information about this new domain to all
@@ -319,17 +354,6 @@ impl DomainHandle {
             }
         }
         Ok(())
-    }
-
-    pub fn wait_for_state_size(&mut self) -> Result<usize, WaitError> {
-        let mut size = 0;
-        for _ in 0..self.shards() {
-            match self.wait_for_next_reply() {
-                ControlReplyPacket::StateSize(s) => size += s,
-                r => return Err(WaitError::WrongReply(r)),
-            }
-        }
-        Ok(size)
     }
 
     pub fn wait_for_statistics(

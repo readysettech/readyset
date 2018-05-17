@@ -1,9 +1,9 @@
 use consensus::{Authority, LocalAuthority};
-use dataflow::PersistenceParameters;
+use basics::PersistenceParameters;
 
-use std::time;
 use std::net::IpAddr;
 use std::sync::Arc;
+use std::time;
 
 use slog;
 
@@ -16,6 +16,8 @@ pub struct ControllerBuilder {
     config: ControllerConfig,
     nworker_threads: usize,
     nread_threads: usize,
+    memory_limit: Option<usize>,
+    memory_check_frequency: Option<time::Duration>,
     listen_addr: IpAddr,
     log: slog::Logger,
 }
@@ -27,6 +29,8 @@ impl Default for ControllerBuilder {
             log: slog::Logger::root(slog::Discard, o!()),
             nworker_threads: 2,
             nread_threads: 1,
+            memory_limit: None,
+            memory_check_frequency: None,
         }
     }
 }
@@ -79,6 +83,14 @@ impl ControllerBuilder {
         self.nread_threads = threads;
     }
 
+    /// Set the memory limit (target) and how often we check it (in millis).
+    pub fn set_memory_limit(&mut self, limit: usize, check_freq: time::Duration) {
+        assert_ne!(limit, 0);
+        assert_ne!(check_freq, time::Duration::from_millis(0));
+        self.memory_limit = Some(limit);
+        self.memory_check_frequency = Some(check_freq);
+    }
+
     /// Set the IP address that the controller should use for listening.
     pub fn set_listen_addr(&mut self, listen_addr: IpAddr) {
         self.listen_addr = listen_addr;
@@ -94,14 +106,6 @@ impl ControllerBuilder {
         self.config.reuse = reuse_type;
     }
 
-    /// Set the number of fixed domains for all subsequent migration.
-    /// `None` disables fixed domains, and allows migrations to change
-    /// the number of domains as they see fit.
-    fn set_fixed_domains(&mut self, ndomains: Option<usize>) {
-        self.config.fixed_domains = ndomains;
-    }
-
-
     /// Build a controller and return a handle to it.
     pub fn build<A: Authority + 'static>(self, authority: Arc<A>) -> ControllerHandle<A> {
         controller::start_instance(
@@ -110,6 +114,8 @@ impl ControllerBuilder {
             self.config,
             self.nworker_threads,
             self.nread_threads,
+            self.memory_limit,
+            self.memory_check_frequency,
             self.log,
         )
     }

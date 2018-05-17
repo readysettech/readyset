@@ -20,9 +20,9 @@
 //!
 //! Beware, Here be dragons™
 
-use dataflow::{checktable, node, payload};
 use dataflow::ops::base::Base;
 use dataflow::prelude::*;
+use dataflow::{checktable, node, payload};
 
 use std::collections::{HashMap, HashSet};
 use std::time::Instant;
@@ -32,19 +32,19 @@ use controller::{keys, ControllerInner, DomainHandle, WorkerEndpoint, WorkerIden
 use petgraph;
 use slog;
 
-pub mod routing;
-pub mod transactions;
-pub mod materialization;
-pub mod augmentation;
 pub mod assignment;
+pub mod augmentation;
+pub mod materialization;
+pub mod routing;
 pub mod sharding;
+pub mod transactions;
 
 const NANOS_PER_SEC: u64 = 1_000_000_000;
 macro_rules! dur_to_ns {
     ($d:expr) => {{
         let d = $d;
         d.as_secs() * NANOS_PER_SEC + d.subsec_nanos() as u64
-    }}
+    }};
 }
 
 #[derive(Clone)]
@@ -128,7 +128,6 @@ impl<'a> Migration<'a> {
     /// Returns the universe in which this migration is operating in.
     /// If not specified, assumes `global` universe.
     pub fn universe(&self) -> (DataType, Option<DataType>) {
-
         let id = match self.context.get("id") {
             Some(id) => id.clone(),
             None => "global".into(),
@@ -140,7 +139,6 @@ impl<'a> Migration<'a> {
         };
 
         (id, group)
-
     }
 
     /// Add a transactional base node to the graph
@@ -251,7 +249,7 @@ impl<'a> Migration<'a> {
         }
     }
 
-    fn ensure_token_generator(&mut self, n: NodeIndex, key: usize) {
+    fn ensure_token_generator(&mut self, n: NodeIndex, key: &[usize]) {
         let ri = self.readers[&n];
         if self.mainline.ingredients[ri]
             .with_reader(|r| r.token_generator().is_some())
@@ -263,8 +261,8 @@ impl<'a> Migration<'a> {
         // A map from base node to the column in that base node whose value must match the value of
         // this node's column to cause a conflict. Is None for a given base node if any write to
         // that base node might cause a conflict.
-        let base_columns: Vec<(_, Option<_>)> =
-            keys::provenance_of(&self.mainline.ingredients, n, key, |_, _, _| None)
+        let base_columns: Vec<_> =
+            keys::provenance_of(&self.mainline.ingredients, n, &key[..], |_, _, _| None)
                 .into_iter()
                 .map(|path| {
                     // we want the base node corresponding to each path
@@ -274,14 +272,20 @@ impl<'a> Migration<'a> {
 
         let coarse_parents = base_columns
             .iter()
-            .filter_map(|&(ni, o)| if o.is_none() { Some(ni) } else { None })
+            .filter_map(|&(ni, ref o)| {
+                if o.iter().any(|c| c.is_none()) {
+                    Some(ni)
+                } else {
+                    None
+                }
+            })
             .collect();
 
         let granular_parents = base_columns
             .into_iter()
-            .filter_map(|(ni, o)| {
-                if o.is_some() {
-                    Some((ni, o.unwrap()))
+            .filter_map(|(ni, ref o)| {
+                if o.iter().all(|c| c.is_some()) {
+                    Some((ni, o.iter().map(|c| c.unwrap()).collect()))
                 } else {
                     None
                 }
@@ -294,9 +298,11 @@ impl<'a> Migration<'a> {
             .track(token_generator.clone())
             .unwrap();
 
-        self.mainline.ingredients[ri].with_reader_mut(|r| {
-            r.set_token_generator(token_generator);
-        });
+        self.mainline.ingredients[ri]
+            .with_reader_mut(|r| {
+                r.set_token_generator(token_generator);
+            })
+            .unwrap();
     }
 
     /// Set up the given node such that its output can be efficiently queried.
@@ -304,7 +310,7 @@ impl<'a> Migration<'a> {
     /// To query into the maintained state, use `ControllerInner::get_getter` or
     /// `ControllerInner::get_transactional_getter`
     #[cfg(test)]
-    pub fn maintain_anonymous(&mut self, n: NodeIndex, key: usize) {
+    pub fn maintain_anonymous(&mut self, n: NodeIndex, key: &[usize]) -> NodeIndex {
         self.ensure_reader_for(n, None);
         if self.mainline.ingredients[n].is_transactional() {
             self.ensure_token_generator(n, key);
@@ -312,14 +318,18 @@ impl<'a> Migration<'a> {
 
         let ri = self.readers[&n];
 
-        self.mainline.ingredients[ri].with_reader_mut(|r| r.set_key(key));
+        self.mainline.ingredients[ri]
+            .with_reader_mut(|r| r.set_key(key))
+            .unwrap();
+
+        ri
     }
 
     /// Set up the given node such that its output can be efficiently queried.
     ///
     /// To query into the maintained state, use `ControllerInner::get_getter` or
     /// `ControllerInner::get_transactional_getter`
-    pub fn maintain(&mut self, name: String, n: NodeIndex, key: usize) {
+    pub fn maintain(&mut self, name: String, n: NodeIndex, key: &[usize]) {
         self.ensure_reader_for(n, Some(name));
         if self.mainline.ingredients[n].is_transactional() {
             self.ensure_token_generator(n, key);
@@ -327,7 +337,9 @@ impl<'a> Migration<'a> {
 
         let ri = self.readers[&n];
 
-        self.mainline.ingredients[ri].with_reader_mut(|r| r.set_key(key));
+        self.mainline.ingredients[ri]
+            .with_reader_mut(|r| r.set_key(key))
+            .unwrap();
     }
 
     /// Commit the changes introduced by this `Migration` to the master `Soup`.
@@ -368,7 +380,6 @@ impl<'a> Migration<'a> {
             mainline.source,
             &new,
             &mut mainline.ndomains,
-            mainline.fixed_domains,
         );
 
         // Set up ingress and egress nodes

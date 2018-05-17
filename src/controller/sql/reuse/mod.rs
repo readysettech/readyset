@@ -1,25 +1,26 @@
-use nom_sql::Table;
 use controller::sql::query_graph::QueryGraph;
+use nom_sql::Table;
 
-use std::vec::Vec;
 use std::collections::HashMap;
+use std::vec::Vec;
 
-use controller::sql::reuse::join_order::reorder_joins;
 use controller::sql::UniverseId;
+use controller::sql::reuse::join_order::reorder_joins;
 
 use dataflow::prelude::DataType;
 
 mod finkelstein;
-mod relaxed;
 mod full;
 mod helpers;
 mod join_order;
+mod relaxed;
 
 #[derive(Clone, Debug)]
 pub enum ReuseType {
     DirectExtension,
     PrefixReuse,
-    #[allow(dead_code)] BackjoinRequired(Vec<Table>),
+    #[allow(dead_code)]
+    BackjoinRequired(Vec<Table>),
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
@@ -63,7 +64,11 @@ impl ReuseConfig {
     }
 
     // Return which universes are available for reuse opportunities
-    pub fn reuse_universes(&self, universe: UniverseId, universes: &HashMap<Option<DataType>, Vec<UniverseId>>) -> Vec<UniverseId> {
+    pub fn reuse_universes(
+        &self,
+        universe: UniverseId,
+        universes: &HashMap<Option<DataType>, Vec<UniverseId>>,
+    ) -> Vec<UniverseId> {
         let global = ("global".into(), None);
         let mut reuse_universes = vec![global, universe.clone()];
         let (_, group) = universe;
@@ -74,7 +79,7 @@ impl ReuseConfig {
                 let grouped = uids.first().unwrap().clone();
                 reuse_universes.push(grouped);
             }
-            None => ()
+            None => (),
         }
 
         reuse_universes

@@ -1,5 +1,6 @@
-use nom_sql::{ArithmeticBase, Column, ConditionExpression, ConditionTree, FieldExpression,
-              JoinRightSide, SelectStatement, SqlQuery, Table};
+use nom_sql::{ArithmeticBase, Column, ConditionExpression, ConditionTree,
+              FieldDefinitionExpression, FieldValueExpression, JoinRightSide, SelectStatement,
+              SqlQuery, Table};
 
 use std::collections::HashMap;
 
@@ -15,8 +16,8 @@ fn rewrite_conditional<F>(
 where
     F: Fn(Column, &Vec<Table>) -> Column,
 {
-    use nom_sql::ConditionExpression::*;
     use nom_sql::ConditionBase::*;
+    use nom_sql::ConditionExpression::*;
 
     let translate_ct_arm = |bce: Box<ConditionExpression>| -> Box<ConditionExpression> {
         let new_ce = match *bce {
@@ -142,12 +143,13 @@ fn rewrite_selection(
                             | &mut Sum(ref mut fe, _)
                             | &mut Min(ref mut fe)
                             | &mut Max(ref mut fe)
-                            | &mut GroupConcat(ref mut fe, _) => {
+                            | &mut GroupConcat(ref mut fe, _) if fe.table.is_none() =>
+                            {
                                 fe.table = find_table(fe, tables_in_query);
-                                None
                             }
-                            &mut CountStar => None,
+                            _ => {}
                         }
+                        None
                     }
                     None => find_table(&f, tables_in_query),
                 }
@@ -169,10 +171,10 @@ fn rewrite_selection(
     // Expand within field list
     for field in sq.fields.iter_mut() {
         match field {
-            &mut FieldExpression::All => panic!(err),
-            &mut FieldExpression::AllInTable(_) => panic!(err),
-            &mut FieldExpression::Literal(_) => (),
-            &mut FieldExpression::Arithmetic(ref mut e) => {
+            &mut FieldDefinitionExpression::All => panic!(err),
+            &mut FieldDefinitionExpression::AllInTable(_) => panic!(err),
+            &mut FieldDefinitionExpression::Value(FieldValueExpression::Literal(_)) => (),
+            &mut FieldDefinitionExpression::Value(FieldValueExpression::Arithmetic(ref mut e)) => {
                 if let ArithmeticBase::Column(ref mut c) = e.left {
                     *c = expand_columns(c.clone(), &tables);
                 }
@@ -181,7 +183,7 @@ fn rewrite_selection(
                     *c = expand_columns(c.clone(), &tables);
                 }
             }
-            &mut FieldExpression::Col(ref mut f) => {
+            &mut FieldDefinitionExpression::Col(ref mut f) => {
                 *f = expand_columns(f.clone(), &tables);
             }
         }
@@ -221,9 +223,8 @@ fn rewrite_selection(
 
 impl ImpliedTableExpansion for SqlQuery {
     fn expand_implied_tables(self, write_schemas: &HashMap<String, Vec<String>>) -> SqlQuery {
-        use nom_sql::TableKey::*;
-
         match self {
+            SqlQuery::CreateTable(..) => self,
             SqlQuery::CompoundSelect(mut csq) => {
                 csq.selects = csq.selects
                     .into_iter()
@@ -232,40 +233,6 @@ impl ImpliedTableExpansion for SqlQuery {
                 SqlQuery::CompoundSelect(csq)
             }
             SqlQuery::Select(sq) => SqlQuery::Select(rewrite_selection(sq, write_schemas)),
-            SqlQuery::CreateTable(mut ctq) => {
-                let table = ctq.table.clone();
-                let transform_key = |key_cols: Vec<Column>| {
-                    key_cols.into_iter().map(|k| set_table(k, &table)).collect()
-                };
-                // Expand within field list
-                ctq.fields = ctq.fields
-                    .into_iter()
-                    .map(|mut tfs| {
-                        tfs.column = set_table(tfs.column, &table);
-                        tfs
-                    })
-                    .collect();
-                // Expand tables for key specification
-                if ctq.keys.is_some() {
-                    ctq.keys = Some(
-                        ctq.keys
-                            .unwrap()
-                            .into_iter()
-                            .map(|k| match k {
-                                PrimaryKey(key_cols) => PrimaryKey(transform_key(key_cols)),
-                                UniqueKey(name, key_cols) => {
-                                    UniqueKey(name, transform_key(key_cols))
-                                }
-                                FulltextKey(name, key_cols) => {
-                                    FulltextKey(name, transform_key(key_cols))
-                                }
-                                Key(name, key_cols) => Key(name, transform_key(key_cols)),
-                            })
-                            .collect(),
-                    );
-                }
-                SqlQuery::CreateTable(ctq)
-            }
             SqlQuery::Insert(mut iq) => {
                 let table = iq.table.clone();
                 // Expand within field list
@@ -282,42 +249,9 @@ impl ImpliedTableExpansion for SqlQuery {
 
 #[cfg(test)]
 mod tests {
-    use nom_sql::{Column, ColumnSpecification, FieldExpression, SqlQuery, SqlType, Table};
-    use std::collections::HashMap;
     use super::ImpliedTableExpansion;
-
-    #[test]
-    fn it_expands_implied_tables_for_create_table() {
-        use nom_sql::CreateTableStatement;
-
-        // CREATE TABLE address (addr_id, addr_street1);
-        // -->
-        // CREATE TABLE address (address.addr_id, address.addr_street1);
-        let q = CreateTableStatement {
-            table: Table::from("address"),
-            fields: vec![
-                ColumnSpecification::new(Column::from("addr_id"), SqlType::Text),
-                ColumnSpecification::new(Column::from("addr_street1"), SqlType::Text),
-            ],
-            ..Default::default()
-        };
-
-        // empty write schema for CREATE
-        let schema = HashMap::new();
-        let res = SqlQuery::CreateTable(q).expand_implied_tables(&schema);
-        match res {
-            SqlQuery::CreateTable(tq) => {
-                let cs1 = ColumnSpecification::new(Column::from("address.addr_id"), SqlType::Text);
-                let cs2 =
-                    ColumnSpecification::new(Column::from("address.addr_street1"), SqlType::Text);
-                assert_eq!(tq.fields, vec![cs1, cs2]);
-                assert_eq!(tq.table, Table::from("address"));
-            }
-            // if we get anything other than a table creation query back,
-            // something really weird is up
-            _ => panic!(),
-        }
-    }
+    use nom_sql::{Column, FieldDefinitionExpression, SqlQuery, Table};
+    use std::collections::HashMap;
 
     #[test]
     fn it_expands_implied_tables_for_select() {
@@ -331,8 +265,8 @@ mod tests {
         let q = SelectStatement {
             tables: vec![Table::from("users"), Table::from("articles")],
             fields: vec![
-                FieldExpression::Col(Column::from("name")),
-                FieldExpression::Col(Column::from("title")),
+                FieldDefinitionExpression::Col(Column::from("name")),
+                FieldDefinitionExpression::Col(Column::from("title")),
             ],
             where_clause: Some(ConditionExpression::ComparisonOp(ConditionTree {
                 operator: Operator::Equal,
@@ -357,8 +291,8 @@ mod tests {
                 assert_eq!(
                     tq.fields,
                     vec![
-                        FieldExpression::Col(Column::from("users.name")),
-                        FieldExpression::Col(Column::from("articles.title")),
+                        FieldDefinitionExpression::Col(Column::from("users.name")),
+                        FieldDefinitionExpression::Col(Column::from("articles.title")),
                     ]
                 );
                 assert_eq!(

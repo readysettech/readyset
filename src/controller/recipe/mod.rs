@@ -1,15 +1,17 @@
-use nom_sql::parser as sql_parser;
-use nom_sql::SqlQuery;
-use controller::Migration;
 use controller::sql::reuse::ReuseConfigType;
 use controller::sql::SqlIncorporator;
-use dataflow::prelude::DataType;
+use controller::Migration;
+use basics::NodeIndex;
 use dataflow::ops::trigger::Trigger;
 use dataflow::ops::trigger::TriggerEvent;
-use core::NodeIndex;
+use dataflow::prelude::DataType;
+use nom_sql::parser as sql_parser;
+use nom_sql::SqlQuery;
 
 use controller::security::SecurityConfig;
 
+use nom::{self, is_alphanumeric, multispace};
+use nom_sql::CreateTableStatement;
 use slog;
 use std::collections::HashMap;
 use std::str;
@@ -22,6 +24,8 @@ type QueryID = u64;
 pub struct ActivationResult {
     /// Map of query names to `NodeIndex` handles for reads/writes.
     pub new_nodes: HashMap<String, NodeIndex>,
+    /// List of leaf nodes that were removed.
+    pub removed_leaves: Vec<NodeIndex>,
     /// Number of expressions the recipe added compared to the prior recipe.
     pub expressions_added: usize,
     /// Number of expressions the recipe removed compared to the prior recipe.
@@ -69,13 +73,37 @@ fn hash_query(q: &SqlQuery) -> QueryID {
     h.finish()
 }
 
+#[inline]
+fn is_ident(chr: u8) -> bool {
+    is_alphanumeric(chr) || chr == '_' as u8
+}
+
+named!(query_expr<&[u8], (bool, Option<String>, SqlQuery)>,
+    do_parse!(
+        prefix: opt!(do_parse!(
+            public: opt!(alt_complete!(tag_no_case!("query") | tag_no_case!("view"))) >>
+            opt!(complete!(multispace)) >>
+            name: opt!(terminated!(map_res!(take_while1!(is_ident), str::from_utf8),
+                                   opt!(complete!(multispace)))) >>
+            tag!(":") >>
+            opt!(complete!(multispace)) >>
+            (public, name)
+        )) >>
+        expr: apply!(sql_parser::sql_query,) >>
+        (match prefix {
+            None => (false, None, expr),
+            Some(p) => (p.0.is_some(), p.1.map(|s| s.to_owned()), expr)
+        })
+    )
+);
+
 #[allow(unused)]
 impl Recipe {
     /// Return security groups in the recipe
     pub fn security_groups(&self) -> Vec<String> {
         match self.security_config {
             Some(ref config) => config.groups.keys().cloned().collect(),
-            None => vec![]
+            None => vec![],
         }
     }
 
@@ -127,6 +155,11 @@ impl Recipe {
     /// Enable reuse
     pub fn enable_reuse(&mut self, reuse_type: ReuseConfigType) {
         self.inc.as_mut().unwrap().enable_reuse(reuse_type)
+    }
+
+    /// Base table schema
+    pub fn get_base_schema(&self, name: &str) -> Option<CreateTableStatement> {
+        self.inc.as_ref().unwrap().get_base_schema(name)
     }
 
     /// Obtains the `NodeIndex` for the node corresponding to a named query or a write type.
@@ -233,20 +266,26 @@ impl Recipe {
     }
 
     /// Creates a new security universe
-    pub fn create_universe(&mut self, mig: &mut Migration, universe_groups: HashMap<String, Vec<DataType>>) -> Result<ActivationResult, String> {
+    pub fn create_universe(
+        &mut self,
+        mig: &mut Migration,
+        universe_groups: HashMap<String, Vec<DataType>>,
+    ) -> Result<ActivationResult, String> {
         use controller::sql::security::Multiverse;
 
         let mut result = ActivationResult {
             new_nodes: HashMap::default(),
+            removed_leaves: Vec::default(),
             expressions_added: 0,
             expressions_removed: 0,
         };
 
         if self.security_config.is_some() {
-            let qfps = self.inc
-                .as_mut()
-                .unwrap()
-                .prepare_universe(&self.security_config.clone().unwrap(), universe_groups, mig);
+            let qfps = self.inc.as_mut().unwrap().prepare_universe(
+                &self.security_config.clone().unwrap(),
+                universe_groups,
+                mig,
+            );
 
             for qfp in qfps {
                 result.new_nodes.insert(qfp.name.clone(), qfp.query_leaf);
@@ -261,18 +300,19 @@ impl Recipe {
             let (id, group) = mig.universe();
             let new_name = if n.is_some() {
                 match group {
-                    Some(ref g) => Some(format!("{}_{}{}", n.clone().unwrap(), g.to_string(), id.to_string())),
+                    Some(ref g) => Some(format!(
+                        "{}_{}{}",
+                        n.clone().unwrap(),
+                        g.to_string(),
+                        id.to_string()
+                    )),
                     None => Some(format!("{}_u{}", n.clone().unwrap(), id.to_string())),
                 }
             } else {
                 None
             };
 
-            let is_leaf = if group.is_some() {
-                false
-            } else {
-                is_leaf
-            };
+            let is_leaf = if group.is_some() { false } else { is_leaf };
 
             let qfp = self.inc
                 .as_mut()
@@ -314,6 +354,7 @@ impl Recipe {
 
         let mut result = ActivationResult {
             new_nodes: HashMap::default(),
+            removed_leaves: Vec::default(),
             expressions_added: added.len(),
             expressions_removed: removed.len(),
         };
@@ -332,19 +373,35 @@ impl Recipe {
 
         // create nodes to enforce security configuration
         if self.security_config.is_some() {
-            info!(self.log, "Found a security configuration, bootstrapping groups...");
+            info!(
+                self.log,
+                "Found a security configuration, bootstrapping groups..."
+            );
             let config = self.security_config.take().unwrap();
             for group in config.groups.values() {
-                info!(self.log, "Creating membership view for group {}", group.name());
-                let qfp = self.inc
-                    .as_mut()
-                    .unwrap()
-                    .add_parsed_query(group.membership(), Some(group.name()), true, mig)?;
+                info!(
+                    self.log,
+                    "Creating membership view for group {}",
+                    group.name()
+                );
+                let qfp = self.inc.as_mut().unwrap().add_parsed_query(
+                    group.membership(),
+                    Some(group.name()),
+                    true,
+                    mig,
+                )?;
 
                 /// Add trigger node below group membership views
-                let group_creation = TriggerEvent::GroupCreation { controller_url: config.url.clone(), group: group.name() };
-                let trigger = Trigger::new(qfp.query_leaf,  group_creation, vec![1]);
-                mig.add_ingredient(&format!("{}-trigger", group.name()), &["uid", "gid"], trigger);
+                let group_creation = TriggerEvent::GroupCreation {
+                    controller_url: config.url.clone(),
+                    group: group.name(),
+                };
+                let trigger = Trigger::new(qfp.query_leaf, group_creation, 1);
+                mig.add_ingredient(
+                    &format!("{}-trigger", group.name()),
+                    &["uid", "gid"],
+                    trigger,
+                );
 
                 result.new_nodes.insert(group.name(), qfp.query_leaf);
             }
@@ -364,12 +421,6 @@ impl Recipe {
                 .unwrap()
                 .add_parsed_query(q, n.clone(), is_leaf, mig)?;
 
-            // we currently use a domain per query
-            // let d = mig.add_domain();
-            // for na in qfp.new_nodes.iter() {
-            //     mig.assign_domain(na.clone(), d);
-            // }
-
             // If the user provided us with a query name, use that.
             // If not, use the name internally used by the QFP.
             let query_name = match n {
@@ -380,11 +431,16 @@ impl Recipe {
             result.new_nodes.insert(query_name, qfp.query_leaf);
         }
 
-        // TODO(malte): deal with removal.
-        for qid in removed {
-            error!(self.log, "Unhandled query removal of {:?}", qid; "version" => self.version);
-            //unimplemented!()
-        }
+        result.removed_leaves = removed
+            .iter()
+            .filter_map(|qid| {
+                let (ref n, _, _) = self.prior.as_ref().unwrap().expressions[qid];
+                self.inc
+                    .as_mut()
+                    .unwrap()
+                    .remove_query(n.as_ref().unwrap(), mig)
+            })
+            .collect();
 
         Ok(result)
     }
@@ -422,9 +478,12 @@ impl Recipe {
     /// `additions`, and if successful, will extend the recipe. No expressions are removed from the
     /// recipe; use `replace` if removal of unused expressions is desired.
     /// Consumes `self` and returns a replacement recipe.
-    pub fn extend(mut self, additions: &str) -> Result<Recipe, String> {
+    pub fn extend(mut self, additions: &str) -> Result<Recipe, (Recipe, String)> {
         // parse and compute differences to current recipe
-        let add_rp = Recipe::from_str(additions, None)?;
+        let add_rp = match Recipe::from_str(additions, None) {
+            Ok(rp) => rp,
+            Err(e) => return Err((self, e)),
+        };
         let (added, _) = add_rp.compute_delta(&self);
 
         // move the incorporator state from the old recipe to the new one
@@ -484,30 +543,17 @@ impl Recipe {
 
         let parsed_queries = query_strings
             .iter()
-            .map(|ref q| {
-                let r: Vec<&str> = q.splitn(2, ":").map(|s| s.trim()).collect();
-                if r.len() == 2 {
-                    // named query
-                    let q = r[1];
-                    let (is_leaf, name) = if r[0].to_lowercase().starts_with("query ") {
-                        (true, Some(String::from(&r[0][6..])))
-                    } else {
-                        (false, Some(String::from(r[0])))
-                    };
-                    (name, q.clone(), sql_parser::parse_query(q), is_leaf)
-                } else {
-                    // unnamed query
-                    let q = r[0];
-                    (None, q.clone(), sql_parser::parse_query(q), false)
-                }
-            })
+            .map(|ref q| (q.clone(), query_expr(q.as_bytes())))
             .collect::<Vec<_>>();
 
-        if !parsed_queries.iter().all(|pq| pq.2.is_ok()) {
+        if !parsed_queries.iter().all(|pq| pq.1.is_done()) {
             for pq in parsed_queries {
-                match pq.2 {
-                    Err(e) => return Err(format!("Query \"{}\", parse error: {}", pq.1, e)),
-                    Ok(_) => (),
+                match pq.1 {
+                    nom::IResult::Error(e) => {
+                        return Err(format!("Query \"{}\", parse error: {}", pq.0, e))
+                    }
+                    nom::IResult::Done(_, _) => (),
+                    nom::IResult::Incomplete(_) => unreachable!(),
                 }
             }
             return Err(format!("Failed to parse recipe!"));
@@ -515,7 +561,10 @@ impl Recipe {
 
         Ok(parsed_queries
             .into_iter()
-            .map(|t| (t.0, t.2.unwrap(), t.3))
+            .map(|(_, t)| {
+                let pr = t.unwrap().1;
+                (pr.1, pr.2, pr.0)
+            })
             .collect::<Vec<_>>())
     }
 
@@ -553,6 +602,15 @@ impl Recipe {
     /// Returns the version number of this recipe.
     pub fn version(&self) -> usize {
         self.version
+    }
+
+    /// Reverts to prior version of recipe
+    pub fn revert(self) -> Recipe {
+        if let Some(prior) = self.prior {
+            *prior
+        } else {
+            Recipe::blank(Some(self.log))
+        }
     }
 }
 
