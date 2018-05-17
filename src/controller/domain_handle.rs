@@ -24,7 +24,7 @@ pub enum WaitError {
 }
 
 pub struct DomainInputHandle {
-    txs: Vec<TcpSender<Box<Packet>>>,
+    txs: Vec<TcpSender<Input>>,
 }
 
 pub(crate) struct BatchSendHandle<'a> {
@@ -38,17 +38,9 @@ impl<'a> BatchSendHandle<'a> {
         Self { dih, sent }
     }
 
-    pub(crate) fn enqueue(
-        &mut self,
-        mut p: Box<Packet>,
-        key: &[usize],
-        local: bool,
-    ) -> Result<(), tcp::SendError> {
+    pub(crate) fn enqueue(&mut self, mut i: Input, key: &[usize]) -> Result<(), tcp::SendError> {
         if self.dih.txs.len() == 1 {
-            if local {
-                p = p.make_local();
-            }
-            self.dih.txs[0].send(p)?;
+            self.dih.txs[0].send(i)?;
             self.sent[0] += 1;
         } else {
             if key.is_empty() {
@@ -61,16 +53,13 @@ impl<'a> BatchSendHandle<'a> {
             let key_col = key[0];
 
             let mut shard_writes = vec![Vec::new(); self.dih.txs.len()];
-            let mut data = p.take_data();
-            for r in data.drain(..) {
+            for r in i.data.drain(..) {
                 let shard = {
                     let key = match r {
-                        Record::Positive(ref r) | Record::Negative(ref r) => &r[key_col],
-                        Record::BaseOperation(BaseOperation::Delete { ref key }) => &key[0],
-                        Record::BaseOperation(BaseOperation::Update { ref key, .. }) => &key[0],
-                        Record::BaseOperation(BaseOperation::InsertOrUpdate {
-                            ref row, ..
-                        }) => &row[key_col],
+                        BaseOperation::Insert(ref r) => &r[key_col],
+                        BaseOperation::Delete { ref key } => &key[0],
+                        BaseOperation::Update { ref key, .. } => &key[0],
+                        BaseOperation::InsertOrUpdate { ref row, .. } => &row[key_col],
                     };
                     dataflow::shard_by(key, self.dih.txs.len())
                 };
@@ -79,14 +68,10 @@ impl<'a> BatchSendHandle<'a> {
 
             for (s, rs) in shard_writes.drain(..).enumerate() {
                 if !rs.is_empty() {
-                    let mut p = Box::new(p.clone_data()); // ok here, as data previously emptied
-                    p.swap_data(rs.into());
-
-                    if local {
-                        p = p.make_local();
-                    }
-
-                    self.dih.txs[s].send(p)?;
+                    self.dih.txs[s].send(Input {
+                        link: i.link,
+                        data: rs,
+                    })?;
                     self.sent[s] += 1;
                 }
             }
@@ -140,14 +125,9 @@ impl DomainInputHandle {
         BatchSendHandle::new(self)
     }
 
-    pub(crate) fn base_send(
-        &mut self,
-        p: Box<Packet>,
-        key: &[usize],
-        local: bool,
-    ) -> Result<i64, tcp::SendError> {
+    pub(crate) fn base_send(&mut self, i: Input, key: &[usize]) -> Result<i64, tcp::SendError> {
         let mut s = BatchSendHandle::new(self);
-        s.enqueue(p, key, local)?;
+        s.enqueue(i, key)?;
         s.wait().map_err(|_| {
             tcp::SendError::IoError(io::Error::new(io::ErrorKind::Other, "write failed"))
         })

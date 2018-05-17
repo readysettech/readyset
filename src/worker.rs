@@ -14,9 +14,12 @@ use slog::Logger;
 use timer_heap::{TimerHeap, TimerType};
 use vec_map::VecMap;
 
+use basics::Input;
 use channel::poll::{PollEvent, ProcessResult};
 use channel::tcp::{SendError, TryRecvError};
-use channel::{self, DomainConnectionBuilder, TcpReceiver, TcpSender, CONNECTION_FROM_MUTATOR};
+use channel::{
+    self, DomainConnectionBuilder, DualTcpReceiver, TcpReceiver, TcpSender, CONNECTION_FROM_MUTATOR,
+};
 use dataflow::payload::SourceChannelIdentifier;
 use dataflow::{self, Domain, Packet};
 
@@ -39,7 +42,8 @@ type EnqueuedSend = (ReplicaIndex, Box<Packet>);
 type ChannelCoordinator = channel::ChannelCoordinator<ReplicaIndex>;
 type ReplicaToken = usize;
 
-type ReplicaReceiversInner = VecMap<RefCell<(TcpReceiver<Box<Packet>>, Option<ReplicaIndex>)>>;
+type ReplicaReceiversInner =
+    VecMap<RefCell<(DualTcpReceiver<Box<Packet>, Input>, Option<ReplicaIndex>)>>;
 
 #[derive(Default)]
 struct ReplicaReceivers(ReplicaReceiversInner);
@@ -430,9 +434,17 @@ impl Worker {
                     self.all.register(&stream, Token(token)).unwrap();
 
                     let tcp = if is_mutator {
-                        TcpReceiver::new(stream)
+                        DualTcpReceiver::upgrade(stream, move |input| {
+                            Box::new(Packet::Input {
+                                inner: input,
+                                src: Some(SourceChannelIdentifier { token: token }),
+                                senders: Vec::new(),
+                                tracer: None,
+                                txn: None,
+                            })
+                        })
                     } else {
-                        TcpReceiver::with_capacity(2 * 1024 * 1024, stream)
+                        TcpReceiver::with_capacity(2 * 1024 * 1024, stream).into()
                     };
                     replica.receivers.insert(token, RefCell::new((tcp, None)));
                     break;
@@ -612,13 +624,7 @@ impl Worker {
                     // context.receivers here is *not* okay. However, *we* know that reading
                     // context.receivers here is fine, since we hold the &mut context.receivers,
                     // and we are not concurrently modifying it.
-                    if !self.process(
-                        &mut context.replica,
-                        &context.receivers,
-                        m,
-                        Some(token),
-                        &mut sends,
-                    ) {
+                    if !self.process(&mut context.replica, &context.receivers, m, &mut sends) {
                         // told to exit?
                         if rearm {
                             ready(fd).unwrap();
@@ -761,7 +767,6 @@ impl Worker {
                                 &mut context.replica,
                                 &context.receivers,
                                 m,
-                                None,
                                 &mut sends,
                             ) {
                                 // told to exit?
@@ -837,22 +842,10 @@ impl Worker {
         replica: &mut Replica,
         receivers: &ReplicaReceivers,
         mut packet: Box<Packet>,
-        token: Option<usize>,
         sends: &mut Vec<EnqueuedSend>,
     ) -> bool {
         if let Some(local) = packet.extract_local() {
             packet = local;
-        }
-
-        if let Some(token) = token {
-            // XXX: inject token into packet somewhere
-            // (maybe only if it's a base?)
-            match *packet {
-                Packet::Transaction { ref mut src, .. } | Packet::Message { ref mut src, .. } => {
-                    *src = Some(SourceChannelIdentifier { token: token });
-                }
-                _ => {}
-            }
         }
 
         match replica.on_event(receivers, PollEvent::Process(packet), sends) {

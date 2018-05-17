@@ -874,6 +874,7 @@ fn it_recovers_persisted_bases_w_multiple_nodes() {
 }
 
 #[test]
+#[ignore]
 fn it_recovers_persisted_bases_w_transactions() {
     let log_name = LogName::new("it_recovers_persisted_bases_w_transactions");
     let persistence_params = PersistenceParameters::new(
@@ -1143,6 +1144,7 @@ fn votes() {
 }
 
 #[test]
+#[ignore]
 fn transactional_vote() {
     // set up graph
     let mut g = ControllerBuilder::default();
@@ -1749,6 +1751,7 @@ fn full_aggregation_with_bogokey() {
 }
 
 #[test]
+#[ignore]
 fn transactional_migration() {
     // set up graph
     let mut g = build_local("transactional_migration");

@@ -148,7 +148,6 @@ impl State for PersistentState {
                 Record::Negative(ref r) => {
                     self.remove(&mut batch, r);
                 }
-                Record::BaseOperation(..) => unreachable!(),
             }
         }
 

@@ -28,22 +28,13 @@ impl GroupCommitQueueSet {
         }
     }
 
-    /// Returns None for packet types not relevant to persistence, and the node the packet was
-    /// directed to otherwise.
-    fn packet_destination(p: &Box<Packet>) -> Option<LocalNodeIndex> {
-        match **p {
-            Packet::Message { ref link, .. } | Packet::Transaction { ref link, .. } => {
-                Some(link.dst)
-            }
-            _ => None,
-        }
-    }
-
     /// Returns whether the given packet should be persisted.
     pub fn should_append(&self, p: &Box<Packet>, nodes: &DomainNodes) -> bool {
-        match Self::packet_destination(p) {
-            Some(n) => nodes[&n].borrow().is_base(),
-            None => false,
+        if let Packet::Input { .. } = **p {
+            assert!(nodes[&p.link().dst].borrow().is_base());
+            true
+        } else {
+            false
         }
     }
 
@@ -83,7 +74,7 @@ impl GroupCommitQueueSet {
         nodes: &DomainNodes,
         ex: &Executor,
     ) -> Option<Box<Packet>> {
-        let node = Self::packet_destination(&p).unwrap();
+        let node = p.link().dst;
         if !self.pending_packets.contains_key(&node) {
             self.pending_packets
                 .insert(node.clone(), Vec::with_capacity(self.params.queue_capacity));
@@ -119,40 +110,30 @@ impl GroupCommitQueueSet {
         I: Iterator<Item = Box<Packet>>,
     {
         let mut packets = packets.peekable();
-        let merged_link = match **packets.peek().as_mut().unwrap() {
-            box Packet::Message { ref link, .. } | box Packet::Transaction { ref link, .. } => {
-                link.clone()
-            }
-            _ => unreachable!(),
-        };
+        let merged_link = packets.peek().as_mut().unwrap().link().clone();
         let mut merged_tracer: Tracer = None;
 
-        let mut senders = vec![];
-        let merged_data = packets.fold(Records::default(), |mut acc, p| {
-            match (p,) {
-                (box Packet::Message {
-                    ref link,
+        let mut all_senders = vec![];
+        let merged_data = packets.fold(Vec::new(), |mut acc, p| {
+            match *p {
+                Packet::Input {
+                    inner: Input { link, data },
                     src,
-                    ref mut data,
-                    ref mut tracer,
-                    ..
-                },)
-                | (box Packet::Transaction {
-                    ref link,
-                    src,
-                    ref mut data,
-                    ref mut tracer,
-                    ..
-                },) => {
-                    assert_eq!(merged_link, *link);
-                    acc.append(data);
+                    tracer,
+                    senders,
+                    txn,
+                } => {
+                    assert_eq!(senders.len(), 0);
+                    assert_eq!(merged_link, link);
+                    assert!(txn.is_none() || txn.unwrap().is_committed());
+                    acc.extend(data);
 
                     if let Some(src) = src {
-                        senders.push(src);
+                        all_senders.push(src);
                     }
 
                     match (&merged_tracer, tracer) {
-                        (&Some((mtag, _)), &mut Some((tag, Some(ref sender)))) => {
+                        (&Some((mtag, _)), Some((tag, Some(sender)))) => {
                             sender
                                 .send(DebugEvent {
                                     instant: time::Instant::now(),
@@ -163,7 +144,7 @@ impl GroupCommitQueueSet {
                                 })
                                 .unwrap();
                         }
-                        (_, tracer @ &mut Some(_)) => {
+                        (_, mut tracer @ Some(_)) => {
                             merged_tracer = tracer.take();
                         }
                         _ => {}
@@ -174,23 +155,16 @@ impl GroupCommitQueueSet {
             acc
         });
 
-        match transaction_state {
-            Some(merged_state) => Some(Box::new(Packet::Transaction {
+        Some(Box::new(Packet::Input {
+            inner: Input {
                 link: merged_link,
-                src: None,
                 data: merged_data,
-                tracer: merged_tracer,
-                state: merged_state,
-                senders,
-            })),
-            None => Some(Box::new(Packet::Message {
-                link: merged_link,
-                src: None,
-                data: merged_data,
-                tracer: merged_tracer,
-                senders,
-            })),
-        }
+            },
+            src: None,
+            tracer: merged_tracer,
+            senders: all_senders,
+            txn: transaction_state,
+        }))
     }
 
     /// Merge the contents of packets into a single packet, emptying packets in the process. Panics
@@ -301,9 +275,13 @@ impl GroupCommitQueueSet {
             return None;
         }
 
-        match packets[0] {
-            box Packet::Message { .. } => Self::merge_committed_packets(packets.drain(..), None),
-            box Packet::Transaction { .. } => Self::merge_transactional_packets(packets, nodes, ex),
+        match *packets[0] {
+            Packet::Input { txn: None, .. } => {
+                Self::merge_committed_packets(packets.drain(..), None)
+            }
+            Packet::Input { txn: Some(..), .. } => {
+                Self::merge_transactional_packets(packets, nodes, ex)
+            }
             _ => unreachable!(),
         }
     }

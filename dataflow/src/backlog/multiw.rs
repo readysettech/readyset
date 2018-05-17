@@ -124,7 +124,6 @@ impl Handle {
                             memory_delta -= r.deep_size_of() as isize;
                             h.remove(r[key[0]].clone(), r);
                         }
-                        Record::BaseOperation(..) => unreachable!(),
                     }
                 }
             }
@@ -141,7 +140,6 @@ impl Handle {
                             memory_delta -= r.deep_size_of() as isize;
                             h.remove((r[key[0]].clone(), r[key[1]].clone()), r);
                         }
-                        Record::BaseOperation(..) => unreachable!(),
                     }
                 }
             }
@@ -157,7 +155,6 @@ impl Handle {
                         memory_delta -= r.deep_size_of() as isize;
                         h.remove(key, r);
                     }
-                    Record::BaseOperation(..) => unreachable!(),
                 }
             },
         }

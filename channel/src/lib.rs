@@ -30,7 +30,7 @@ pub mod poll;
 pub mod rpc;
 pub mod tcp;
 
-pub use tcp::{channel, TcpReceiver, TcpSender};
+pub use tcp::{channel, DualTcpReceiver, TcpReceiver, TcpSender};
 
 pub const CONNECTION_FROM_MUTATOR: u8 = 1;
 pub const CONNECTION_FROM_DOMAIN: u8 = 0;

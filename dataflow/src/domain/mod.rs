@@ -868,7 +868,7 @@ impl Domain {
         m.trace(PacketEvent::Handle);
 
         match *m {
-            Packet::Message { .. } => {
+            Packet::Message { .. } | Packet::Input { .. } => {
                 self.dispatch(m, true, sends, executor);
             }
             Packet::Transaction { .. }
@@ -1257,7 +1257,7 @@ impl Domain {
                                 let n = self.nodes[&from].borrow();
                                 let mut default = None;
                                 if let Some(b) = n.get_base() {
-                                    let mut row = (Vec::new(), true).into();
+                                    let mut row = Vec::new();
                                     b.fix(&mut row);
                                     default = Some(row);
                                 }
@@ -1548,9 +1548,9 @@ impl Domain {
 
         let n = self.nodes[&source].borrow();
         if let Some(b) = n.get_base() {
-            let mut row = row.into_owned().into();
+            let mut row = row.into_owned();
             b.fix(&mut row);
-            return row;
+            return Record::Positive(row);
         }
 
         return row.into_owned().into();
@@ -2688,7 +2688,6 @@ impl Domain {
                 // TODO: Initialize tracer here, and when flushing group commit
                 // queue.
                 if self.group_commit_queues.should_append(&packet, &self.nodes) {
-                    debug_assert!(packet.is_regular());
                     packet.trace(PacketEvent::ExitInputChannel);
                     let merged_packet =
                         self.group_commit_queues

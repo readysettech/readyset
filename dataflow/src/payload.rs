@@ -16,24 +16,6 @@ use std::fmt;
 use std::net::SocketAddr;
 use std::time;
 
-#[derive(Clone, PartialEq, Serialize, Deserialize)]
-pub struct Link {
-    pub src: LocalNodeIndex,
-    pub dst: LocalNodeIndex,
-}
-
-impl Link {
-    pub fn new(src: LocalNodeIndex, dst: LocalNodeIndex) -> Self {
-        Link { src: src, dst: dst }
-    }
-}
-
-impl fmt::Debug for Link {
-    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        write!(f, "{:?} -> {:?}", self.src, self.dst)
-    }
-}
-
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct ReplayPathSegment {
     pub node: LocalNodeIndex,
@@ -92,6 +74,16 @@ pub enum TransactionState {
     WillCommit,
 }
 
+impl TransactionState {
+    pub fn is_committed(&self) -> bool {
+        if let TransactionState::Committed(..) = *self {
+            true
+        } else {
+            false
+        }
+    }
+}
+
 #[derive(Clone, Serialize, Deserialize)]
 pub struct ReplayTransactionState {
     pub ts: i64,
@@ -121,6 +113,13 @@ pub type EgressForBase = HashMap<petgraph::graph::NodeIndex, Vec<LocalNodeIndex>
 pub enum Packet {
     // Data messages
     //
+    Input {
+        inner: Input,
+        tracer: Tracer,
+        src: Option<SourceChannelIdentifier>,
+        senders: Vec<SourceChannelIdentifier>,
+        txn: Option<TransactionState>,
+    },
     /// Regular data-flow update.
     Message {
         link: Link,
@@ -135,9 +134,9 @@ pub enum Packet {
         link: Link,
         src: Option<SourceChannelIdentifier>,
         data: Records,
-        state: TransactionState,
         tracer: Tracer,
         senders: Vec<SourceChannelIdentifier>,
+        state: TransactionState,
     },
 
     /// Update that is part of a tagged data-flow replay path.
@@ -312,6 +311,10 @@ pub enum Packet {
 impl Packet {
     pub fn link(&self) -> &Link {
         match *self {
+            Packet::Input {
+                inner: Input { ref link, .. },
+                ..
+            } => link,
             Packet::Message { ref link, .. } => link,
             Packet::Transaction { ref link, .. } => link,
             Packet::ReplayPiece { ref link, .. } => link,

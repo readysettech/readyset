@@ -17,7 +17,6 @@ impl From<Record> for StreamUpdate {
         match other {
             Record::Positive(u) => StreamUpdate::AddRow(u),
             Record::Negative(u) => StreamUpdate::DeleteRow(u),
-            Record::BaseOperation(..) => unreachable!(),
         }
     }
 }

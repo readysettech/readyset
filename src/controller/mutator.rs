@@ -159,18 +159,19 @@ impl<E> Mutator<E> {
         self.domain_input_handle.borrow().local_addr()
     }
 
-    fn inject_dropped_cols(&self, rs: &mut Records) {
+    fn inject_dropped_cols(&self, rs: &mut [BaseOperation]) {
         let ndropped = self.dropped.len();
         if ndropped != 0 {
             // inject defaults for dropped columns
             let dropped = self.dropped.iter().rev();
-            for r in rs.iter_mut() {
+            for r in rs {
                 use std::mem;
 
                 // get a handle to the underlying data vector
                 let r = match *r {
-                    Record::Positive(ref mut r) | Record::Negative(ref mut r) => r,
-                    _ => continue,
+                    BaseOperation::Insert(ref mut row)
+                    | BaseOperation::InsertOrUpdate { ref mut row, .. } => row,
+                    _ => unimplemented!("we need to shift the update/delete cols!"),
                 };
 
                 // we want to iterate over all the dropped columns
@@ -230,52 +231,42 @@ impl<E> Mutator<E> {
         }
     }
 
-    fn prep_records(&self, mut rs: Records) -> Box<Packet> {
-        self.inject_dropped_cols(&mut rs);
-        if self.transactional {
-            box Packet::Transaction {
-                link: Link::new(self.addr, self.addr),
-                src: None,
-                data: rs,
-                state: TransactionState::WillCommit,
-                tracer: self.tracer.clone(),
-                senders: vec![],
-            }
-        } else {
-            box Packet::Message {
-                link: Link::new(self.addr, self.addr),
-                src: None,
-                data: rs,
-                tracer: self.tracer.clone(),
-                senders: vec![],
-            }
+    fn prep_records(&self, mut ops: Vec<BaseOperation>) -> Input {
+        self.inject_dropped_cols(&mut ops);
+        Input {
+            link: Link::new(self.addr, self.addr),
+            data: ops,
+            //txn: TransactionState::WillCommit,
+            //tracer: self.tracer.clone(),
         }
     }
 
-    fn send(&mut self, rs: Records) {
-        let m = self.prep_records(rs);
+    fn send(&mut self, ops: Vec<BaseOperation>) {
+        let m = self.prep_records(ops);
         self.domain_input_handle
             .borrow_mut()
-            .base_send(m, &self.key[..], self.is_local)
+            .base_send(m, &self.key[..])
             .unwrap();
     }
 
-    fn tx_send(&mut self, mut rs: Records, t: checktable::Token) -> Result<i64, ()> {
+    #[allow(unused_variables)]
+    #[allow(unreachable_code)]
+    fn tx_send(&mut self, mut ops: Vec<BaseOperation>, t: checktable::Token) -> Result<i64, ()> {
         assert!(self.transactional);
 
-        self.inject_dropped_cols(&mut rs);
-        let m = box Packet::Transaction {
+        self.inject_dropped_cols(&mut ops);
+        let m = Input {
             link: Link::new(self.addr, self.addr),
-            src: None,
-            data: rs,
-            state: TransactionState::Pending(t),
-            tracer: self.tracer.clone(),
-            senders: vec![],
+            data: ops,
+            //txn: TransactionState::Pending(t),
+            //tracer: self.tracer.clone(),
         };
+
+        unimplemented!();
 
         self.domain_input_handle
             .borrow_mut()
-            .base_send(m, &self.key[..], self.is_local)
+            .base_send(m, &self.key[..])
             .map_err(|_| ())
     }
 
@@ -283,24 +274,25 @@ impl<E> Mutator<E> {
     pub fn batch_put<I, V>(&mut self, i: I) -> Result<(), MutatorError>
     where
         I: IntoIterator<Item = V>,
-        V: Into<Vec<DataType>>,
+        V: Into<BaseOperation>,
     {
         let mut dih = self.domain_input_handle.borrow_mut();
         let mut batch_putter = dih.sender();
 
         for row in i {
             let data = vec![row.into()];
-            if data[0].len() != self.columns.len() {
-                return Err(MutatorError::WrongColumnCount(
-                    self.columns.len(),
-                    data[0].len(),
-                ));
+
+            if let Some(cols) = data[0].row() {
+                if cols.len() != self.columns.len() {
+                    return Err(MutatorError::WrongColumnCount(
+                        self.columns.len(),
+                        cols.len(),
+                    ));
+                }
             }
 
-            let m = self.prep_records(data.into());
-            batch_putter
-                .enqueue(m, &self.key[..], self.is_local)
-                .unwrap();
+            let m = self.prep_records(data);
+            batch_putter.enqueue(m, &self.key[..]).unwrap();
         }
 
         batch_putter
@@ -314,31 +306,36 @@ impl<E> Mutator<E> {
     where
         V: Into<Vec<DataType>>,
     {
-        let data = vec![u.into()];
-        if data[0].len() != self.columns.len() {
+        let data = vec![BaseOperation::Insert(u.into())];
+        if data[0].row().unwrap().len() != self.columns.len() {
             return Err(MutatorError::WrongColumnCount(
                 self.columns.len(),
-                data[0].len(),
+                data[0].row().unwrap().len(),
             ));
         }
 
-        Ok(self.send(data.into()))
+        Ok(self.send(data))
     }
 
     /// Perform some non-transactional writes to the base node this Mutator was generated for.
-    pub fn multi_put<V>(&mut self, u: V) -> Result<(), MutatorError>
+    pub fn multi_put<I, V>(&mut self, i: I) -> Result<(), MutatorError>
     where
-        V: Into<Vec<Vec<DataType>>>,
+        I: IntoIterator<Item = V>,
+        V: Into<Vec<DataType>>,
     {
-        let data = u.into();
-        if data[0].len() != self.columns.len() {
-            return Err(MutatorError::WrongColumnCount(
-                self.columns.len(),
-                data[0].len(),
-            ));
-        }
-
-        Ok(self.send(data.into()))
+        i.into_iter()
+            .map(|r| {
+                let row = r.into();
+                if row.len() != self.columns.len() {
+                    return Err(MutatorError::WrongColumnCount(
+                        self.columns.len(),
+                        row.len(),
+                    ));
+                }
+                Ok(BaseOperation::Insert(row))
+            })
+            .collect::<Result<Vec<_>, _>>()
+            .map(|data| self.send(data))
     }
 
     /// Perform a transactional write to the base node this Mutator was generated for.
@@ -346,15 +343,15 @@ impl<E> Mutator<E> {
     where
         V: Into<Vec<DataType>>,
     {
-        let data = vec![u.into()];
-        if data[0].len() != self.columns.len() {
+        let data = vec![BaseOperation::Insert(u.into())];
+        if data[0].row().unwrap().len() != self.columns.len() {
             return Err(MutatorError::WrongColumnCount(
                 self.columns.len(),
-                data[0].len(),
+                data[0].row().unwrap().len(),
             ));
         }
 
-        self.tx_send(data.into(), t)
+        self.tx_send(data, t)
             .map_err(|()| MutatorError::TransactionFailed)
     }
 
@@ -363,11 +360,7 @@ impl<E> Mutator<E> {
     where
         I: Into<Vec<DataType>>,
     {
-        Ok(self.send(
-            vec![
-                Record::BaseOperation(BaseOperation::Delete { key: key.into() }),
-            ].into(),
-        ))
+        Ok(self.send(vec![BaseOperation::Delete { key: key.into() }].into()))
     }
 
     /// Perform a transactional delete from the base node this Mutator was generated for.
@@ -379,12 +372,8 @@ impl<E> Mutator<E> {
     where
         I: Into<Vec<DataType>>,
     {
-        self.tx_send(
-            vec![
-                Record::BaseOperation(BaseOperation::Delete { key: key.into() }),
-            ].into(),
-            t,
-        ).map_err(|()| MutatorError::TransactionFailed)
+        self.tx_send(vec![BaseOperation::Delete { key: key.into() }].into(), t)
+            .map_err(|()| MutatorError::TransactionFailed)
     }
 
     /// Perform a non-transactional update to the base node this Mutator was generated for.
@@ -408,7 +397,7 @@ impl<E> Mutator<E> {
             }
             set[coli] = m;
         }
-        Ok(self.send(vec![Record::BaseOperation(BaseOperation::Update { key, set })].into()))
+        Ok(self.send(vec![BaseOperation::Update { key, set }].into()))
     }
 
     /// Perform a non-transactional insert-or-update to the base node this Mutator was generated
@@ -442,12 +431,10 @@ impl<E> Mutator<E> {
             set[coli] = m;
         }
         Ok(self.send(
-            vec![
-                Record::BaseOperation(BaseOperation::InsertOrUpdate {
-                    row: insert,
-                    update: set,
-                }),
-            ].into(),
+            vec![BaseOperation::InsertOrUpdate {
+                row: insert,
+                update: set,
+            }].into(),
         ))
     }
 
