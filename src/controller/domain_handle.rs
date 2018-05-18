@@ -15,7 +15,7 @@ use dataflow::prelude::*;
 use dataflow::statistics::{DomainStats, NodeStats};
 use dataflow::{self, DomainBuilder, DomainConfig};
 
-use controller::{WorkerEndpoint, WorkerIdentifier};
+use controller::{WorkerEndpoint, WorkerIdentifier, WorkerStatus};
 use coordination::{CoordinationMessage, CoordinationPayload};
 
 #[derive(Debug)]
@@ -330,6 +330,11 @@ impl DomainHandle {
         &self.nodes
     }
 
+    pub fn remove_node(&mut self, node: NodeIndex) {
+        self.nodes
+            .swap_remove(self.nodes.iter().position(|n| *n == node).unwrap());
+    }
+
     fn build_descriptors(graph: &mut Graph, nodes: Vec<(NodeIndex, bool)>) -> DomainNodes {
         nodes
             .into_iter()
@@ -347,6 +352,22 @@ impl DomainHandle {
                 // TODO: avoid clone on last iteration.
                 shard.tx.send(p.clone().make_local())?;
             } else {
+                shard.tx.send_ref(&p)?;
+            }
+        }
+        Ok(())
+    }
+
+    pub(super) fn send_to_healthy(
+        &mut self,
+        p: Box<Packet>,
+        workers: &HashMap<WorkerIdentifier, WorkerStatus>,
+    ) -> Result<(), tcp::SendError> {
+        for shard in self.shards.iter_mut() {
+            if shard.is_local {
+                // TODO: avoid clone on last iteration.
+                shard.tx.send(p.clone().make_local())?;
+            } else if workers[&shard.worker].healthy {
                 shard.tx.send_ref(&p)?;
             }
         }
