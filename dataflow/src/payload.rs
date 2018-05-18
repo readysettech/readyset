@@ -1,5 +1,5 @@
 use petgraph;
-use serde::{Deserialize, Deserializer, Serialize, Serializer};
+use serde::{Deserialize, Serialize};
 
 #[cfg(debug_assertions)]
 use backtrace::Backtrace;
@@ -531,9 +531,8 @@ impl fmt::Debug for Packet {
             ),
             Packet::Local(ref lp) => {
                 use std::mem;
-                let lp = unsafe { Box::from_raw(lp.0) };
+                let lp = unsafe { lp.deref() };
                 let s = write!(f, "local {:?}", lp)?;
-                mem::forget(lp);
                 Ok(s)
             }
             ref p => {
@@ -571,37 +570,4 @@ impl ControlReplyPacket {
     }
 }
 
-pub struct LocalBypass<T>(*mut T);
-
-impl<T> LocalBypass<T> {
-    pub fn make(t: Box<T>) -> Self {
-        LocalBypass(Box::into_raw(t))
-    }
-
-    pub unsafe fn take(self) -> Box<T> {
-        Box::from_raw(self.0)
-    }
-}
-
-unsafe impl<T> Send for LocalBypass<T> {}
-impl<T> Serialize for LocalBypass<T> {
-    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
-    where
-        S: Serializer,
-    {
-        (self.0 as usize).serialize(serializer)
-    }
-}
-impl<'de, T> Deserialize<'de> for LocalBypass<T> {
-    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
-    where
-        D: Deserializer<'de>,
-    {
-        usize::deserialize(deserializer).map(|p| LocalBypass(p as *mut T))
-    }
-}
-impl<T> Clone for LocalBypass<T> {
-    fn clone(&self) -> LocalBypass<T> {
-        panic!("LocalPacket cannot be cloned");
-    }
-}
+pub use api::LocalBypass;

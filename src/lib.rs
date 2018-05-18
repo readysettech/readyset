@@ -316,6 +316,7 @@
 #![deny(unused_extern_crates)]
 #![feature(fnbox)]
 
+extern crate api;
 extern crate assert_infrequent;
 extern crate basics;
 extern crate bincode;
@@ -364,12 +365,10 @@ pub use dataflow::checktable::{Token, TransactionResult};
 pub use dataflow::debug::{DebugEvent, DebugEventType};
 pub use dataflow::prelude::DomainIndex;
 
-pub use controller::sql::reuse::ReuseConfigType;
-pub use controller::{Controller, ControllerBuilder, ControllerHandle, ExclusiveConnection,
-                     Mutator, MutatorBuilder, MutatorError, ReadQuery, ReadReply, RemoteGetter,
-                     RemoteGetterBuilder, RpcError, SharedConnection};
+pub use api::*;
 
-pub use controller::recipe::ActivationResult;
+pub use controller::sql::reuse::ReuseConfigType;
+pub use controller::{Controller, ControllerBuilder, LocalControllerHandle};
 
 /// Just give me a damn terminal logger
 pub fn logger_pls() -> slog::Logger {

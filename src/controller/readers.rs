@@ -6,7 +6,7 @@ use dataflow::Readers;
 use std::cell::RefCell;
 use std::collections::HashMap;
 
-use controller::{LocalOrNot, ReadQuery, ReadReply};
+use api::{LocalOrNot, ReadQuery, ReadReply};
 
 pub(crate) type Rpc = RpcServiceEndpoint<LocalOrNot<ReadQuery>, LocalOrNot<ReadReply>>;
 
@@ -97,6 +97,7 @@ pub(crate) fn handle_message(m: LocalOrNot<ReadQuery>, conn: &mut Rpc, s: &mut R
 
                 Ok(ret)
             })),
+            /*
             ReadQuery::WithToken { target, keys } => ReadReply::WithToken(
                 keys.into_iter()
                     .map(|key| {
@@ -124,6 +125,7 @@ pub(crate) fn handle_message(m: LocalOrNot<ReadQuery>, conn: &mut Rpc, s: &mut R
                     })
                     .collect(),
             ),
+            */
             ReadQuery::Size { target } => {
                 let size = READERS.with(|readers_cache| {
                     let mut readers_cache = readers_cache.borrow_mut();

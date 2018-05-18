@@ -31,6 +31,7 @@ extern crate serde_json;
 extern crate slog;
 #[macro_use]
 extern crate tarpc;
+extern crate api;
 extern crate timekeeper;
 extern crate tokio_core;
 extern crate vec_map;
@@ -87,22 +88,4 @@ impl Sharding {
     }
 }
 
-#[inline]
-pub fn shard_by(dt: &basics::DataType, shards: usize) -> usize {
-    match *dt {
-        basics::DataType::Int(n) => n as usize % shards,
-        basics::DataType::BigInt(n) => n as usize % shards,
-        basics::DataType::Text(..) | basics::DataType::TinyText(..) => {
-            use std::borrow::Cow;
-            use std::hash::Hasher;
-            let mut hasher = fnv::FnvHasher::default();
-            let s: Cow<str> = dt.into();
-            hasher.write(s.as_bytes());
-            hasher.finish() as usize % shards
-        }
-        ref x => {
-            println!("asked to shard on value {:?}", x);
-            unimplemented!();
-        }
-    }
-}
+pub use basics::shard_by;

@@ -4,7 +4,7 @@ use basics::{DataType, DurabilityMode, PersistenceParameters};
 use consensus::LocalAuthority;
 use controller::recipe::Recipe;
 use controller::sql::SqlIncorporator;
-use controller::{ControllerBuilder, ControllerHandle};
+use controller::{LocalControllerHandle, ControllerBuilder, ControllerHandle};
 use dataflow::checktable::Token;
 use dataflow::node::special::Base;
 use dataflow::ops::grouped::aggregate::Aggregation;
@@ -66,7 +66,7 @@ fn get_persistence_params(prefix: &str) -> PersistenceParameters {
 
 // Builds a local controller with the given log prefix
 // (suffixed with a timestamp, see `get_log_name`).
-pub fn build_local(prefix: &str) -> ControllerHandle<LocalAuthority> {
+pub fn build_local(prefix: &str) -> LocalControllerHandle<LocalAuthority> {
     let mut builder = ControllerBuilder::default();
     builder.set_persistence(get_persistence_params(prefix));
     builder.build_local()
@@ -873,8 +873,8 @@ fn it_recovers_persisted_bases_w_multiple_nodes() {
     }
 }
 
+/*
 #[test]
-#[ignore]
 fn it_recovers_persisted_bases_w_transactions() {
     let log_name = LogName::new("it_recovers_persisted_bases_w_transactions");
     let persistence_params = PersistenceParameters::new(
@@ -927,6 +927,7 @@ fn it_recovers_persisted_bases_w_transactions() {
         assert_eq!(result[0][1], b.into());
     }
 }
+*/
 
 #[test]
 fn it_works_with_simple_arithmetic() {
@@ -1143,8 +1144,8 @@ fn votes() {
     assert!(res.len() <= 1) // could be 1 if we had zero-rows
 }
 
+/*
 #[test]
-#[ignore]
 fn transactional_vote() {
     // set up graph
     let mut g = ControllerBuilder::default();
@@ -1292,6 +1293,7 @@ fn transactional_vote() {
     let res = endq.transactional_lookup(&[a2.clone()]).unwrap().0;
     assert!(res.len() <= 1); // could be 1 if we had zero-rows
 }
+*/
 
 #[test]
 fn empty_migration() {
@@ -1750,8 +1752,8 @@ fn full_aggregation_with_bogokey() {
     );
 }
 
+/*
 #[test]
-#[ignore]
 fn transactional_migration() {
     // set up graph
     let mut g = build_local("transactional_migration");
@@ -1839,6 +1841,7 @@ fn transactional_migration() {
 
     assert!(res.contains(&vec![3.into(), 6.into()]));
 }
+*/
 
 #[test]
 fn crossing_migration() {

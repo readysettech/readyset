@@ -1,3 +1,4 @@
+use api::ControllerHandle;
 use basics::PersistenceParameters;
 use consensus::{Authority, LocalAuthority};
 
@@ -7,9 +8,8 @@ use std::time;
 
 use slog;
 
-use controller::handle::ControllerHandle;
 use controller::sql::reuse::ReuseConfigType;
-use controller::{self, ControllerConfig};
+use controller::{self, ControllerConfig, LocalControllerHandle};
 
 /// Used to construct a controller.
 pub struct ControllerBuilder {
@@ -107,7 +107,7 @@ impl ControllerBuilder {
     }
 
     /// Build a controller and return a handle to it.
-    pub fn build<A: Authority + 'static>(self, authority: Arc<A>) -> ControllerHandle<A> {
+    pub fn build<A: Authority + 'static>(self, authority: Arc<A>) -> LocalControllerHandle<A> {
         controller::start_instance(
             authority,
             self.listen_addr,
@@ -121,7 +121,7 @@ impl ControllerBuilder {
     }
 
     /// Build a local controller, and return a ControllerHandle to provide access to it.
-    pub fn build_local(self) -> ControllerHandle<LocalAuthority> {
+    pub fn build_local(self) -> LocalControllerHandle<LocalAuthority> {
         self.build(Arc::new(LocalAuthority::new()))
     }
 }

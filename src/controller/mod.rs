@@ -1,6 +1,7 @@
 use channel::poll::{PollEvent, PollingLoop, ProcessResult};
 use channel::tcp::TcpSender;
 
+use api::{ControllerDescriptor, LocalOrNot};
 use basics::PersistenceParameters;
 use consensus::{Authority, Epoch, STATE_KEY};
 use dataflow::checktable::service::CheckTableServer;
@@ -48,21 +49,13 @@ mod mutator;
 mod readers;
 mod worker_inner;
 
+pub use api::builders::*;
+pub use api::prelude::*;
 pub use controller::builder::ControllerBuilder;
-pub(crate) use controller::getter::LocalOrNot;
-pub use controller::getter::{Getter, ReadQuery, ReadReply, RemoteGetter, RemoteGetterBuilder};
-pub use controller::handle::ControllerHandle;
-pub use controller::inner::RpcError;
+pub use controller::getter::Getter;
 pub use controller::migrate::Migration;
-pub use controller::mutator::{Mutator, MutatorBuilder, MutatorError};
+pub use controller::handle::LocalControllerHandle;
 use controller::worker_inner::WorkerInner;
-
-/// Marker for a handle that has an exclusive connection to the backend(s).
-pub struct ExclusiveConnection;
-
-/// Marker for a handle that shares its underlying connection with other handles owned by the same
-/// thread.
-pub struct SharedConnection;
 
 type WorkerIdentifier = SocketAddr;
 type WorkerEndpoint = Arc<Mutex<TcpSender<CoordinationMessage>>>;
@@ -113,16 +106,6 @@ impl ServingThread {
         drop(self.stop);
         self.join_handle.join().unwrap();
     }
-}
-
-/// Describes a running controller instance. A serialized version of this struct is stored in
-/// ZooKeeper so that clients can reach the currently active controller.
-#[derive(Clone, Serialize, Deserialize)]
-pub(crate) struct ControllerDescriptor {
-    pub external_addr: SocketAddr,
-    pub internal_addr: SocketAddr,
-    pub checktable_addr: SocketAddr,
-    pub nonce: u64,
 }
 
 #[derive(Clone, Serialize, Deserialize, PartialEq)]
@@ -197,7 +180,7 @@ fn start_instance<A: Authority + 'static>(
     memory_limit: Option<usize>,
     memory_check_frequency: Option<Duration>,
     log: slog::Logger,
-) -> ControllerHandle<A> {
+) -> LocalControllerHandle<A> {
     let (controller_event_tx, controller_event_rx) = mpsc::channel();
     let (worker_event_tx, worker_event_rx) = mpsc::channel();
 
@@ -270,10 +253,11 @@ fn start_instance<A: Authority + 'static>(
         })
         .unwrap();
 
-    let mut ch = ControllerHandle::make(authority2);
-    ch.local_controller = Some((controller_event_tx2, controller_join_handle));
-    ch.local_worker = Some((worker_event_tx3, worker_join_handle));
-    ch
+    LocalControllerHandle::new(
+        authority2,
+        Some((controller_event_tx2, controller_join_handle)),
+        Some((worker_event_tx3, worker_join_handle)),
+    )
 }
 fn instance_campaign<A: Authority + 'static>(
     controller_event_tx: Sender<ControlEvent>,

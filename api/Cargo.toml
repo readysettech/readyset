@@ -1,17 +1,7 @@
 [package]
-name = "distributary"
+name = "api"
 version = "0.1.0"
 authors = ["Jon Gjengset <jon@thesquareplanet.com>"]
-
-[workspace]
-members = ["benchmarks", "consensus", "channel", "basics", "mir", "api"]
-
-[features]
-default = ["carry_local"]
-profiling = ["timekeeper/default"]
-binaries = ["default"]
-generate_mysql_tests = ["default"]
-carry_local = []
 
 [dependencies]
 clap = "2.25.0"
@@ -47,12 +37,9 @@ memcached-rs = { git = "https://github.com/jonhoo/memcached-rs.git", branch = "e
 nom-sql = { git = "https://github.com/ms705/nom-sql.git", rev = "3e7ae4c4d32b77342051d5c217549ab8fcb68e85" }
 
 # local deps
-channel = { path = "channel" }
-consensus = { path = "consensus" }
-basics = { path = "basics" }
-dataflow = { path = "dataflow" }
-mir = { path = "mir" }
-api = { path = "api" }
+channel = { path = "../channel" }
+consensus = { path = "../consensus" }
+basics = { path = "../basics" }
 
 # Not needed directly, but we want to force the version used by our
 # dependencies to have default features. If this isn't here, then the features
@@ -69,17 +56,3 @@ backtrace = { version = "0.3.2", features = ["serialize-serde"] }
 toml = "0.4.1"
 diff = "0.1.10"
 glob = "0.2.11"
-
-[profile.release]
-debug=true
-
-[lib]
-name = "distributary"
-path = "src/lib.rs"
-
-[[example]]
-name = "basic-recipe"
-
-[[bin]]
-name = "souplet"
-path = "src/bin/souplet.rs"

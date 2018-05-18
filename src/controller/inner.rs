@@ -14,11 +14,12 @@ use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 use std::{io, time};
 
+use api::builders::*;
+use api::{ActivationResult, RpcError};
 use controller::migrate::materialization::Materializations;
-use controller::mutator::MutatorBuilder;
-use controller::recipe::ActivationResult;
-use controller::{ControllerState, DomainHandle, Migration, Recipe, RemoteGetterBuilder,
-                 WorkerIdentifier, WorkerStatus};
+use controller::{
+    ControllerState, DomainHandle, Migration, Recipe, WorkerIdentifier, WorkerStatus,
+};
 use coordination::{CoordinationMessage, CoordinationPayload};
 
 use hyper::{Method, StatusCode};
@@ -114,27 +115,6 @@ pub(crate) fn graphviz(graph: &Graph, materializations: &Materializations) -> St
     s.push_str("}}");
 
     s
-}
-
-/// Serializable error type for RPC that can fail.
-#[derive(Debug, Deserialize, Serialize)]
-pub enum RpcError {
-    /// Generic error message vessel.
-    Other(String),
-}
-
-impl Error for RpcError {
-    fn description(&self) -> &str {
-        match *self {
-            RpcError::Other(ref s) => s,
-        }
-    }
-}
-
-impl Display for RpcError {
-    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        write!(f, "{}", self.description())
-    }
 }
 
 impl ControllerInner {

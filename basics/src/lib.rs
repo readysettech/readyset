@@ -37,6 +37,25 @@ pub use local::{
 pub use map::Map;
 pub use petgraph::graph::NodeIndex;
 
+#[inline]
+pub fn shard_by(dt: &DataType, shards: usize) -> usize {
+    match *dt {
+        DataType::Int(n) => n as usize % shards,
+        DataType::BigInt(n) => n as usize % shards,
+        DataType::Text(..) | DataType::TinyText(..) => {
+            use std::borrow::Cow;
+            use std::hash::Hasher;
+            let mut hasher = fnv::FnvHasher::default();
+            let s: Cow<str> = dt.into();
+            hasher.write(s.as_bytes());
+            hasher.finish() as usize % shards
+        }
+        ref x => {
+            unimplemented!("asked to shard on value {:?}", x);
+        }
+    }
+}
+
 pub type StateMap = map::Map<Box<State>>;
 
 /// Indicates to what degree updates should be persisted.

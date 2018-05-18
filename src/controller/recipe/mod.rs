@@ -1,3 +1,4 @@
+use api::ActivationResult;
 use basics::NodeIndex;
 use controller::security::SecurityConfig;
 use controller::sql::reuse::ReuseConfigType;
@@ -17,19 +18,6 @@ use std::str;
 use std::vec::Vec;
 
 type QueryID = u64;
-
-/// Represents the result of a recipe activation.
-#[derive(Clone, Debug, Deserialize, Serialize)]
-pub struct ActivationResult {
-    /// Map of query names to `NodeIndex` handles for reads/writes.
-    pub new_nodes: HashMap<String, NodeIndex>,
-    /// List of leaf nodes that were removed.
-    pub removed_leaves: Vec<NodeIndex>,
-    /// Number of expressions the recipe added compared to the prior recipe.
-    pub expressions_added: usize,
-    /// Number of expressions the recipe removed compared to the prior recipe.
-    pub expressions_removed: usize,
-}
 
 /// Represents a Soup recipe.
 #[derive(Clone, Debug)]
