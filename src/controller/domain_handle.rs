@@ -51,7 +51,6 @@ impl DomainHandle {
         placer: &'a mut Box<Iterator<Item = (WorkerIdentifier, WorkerEndpoint)>>,
         workers: &'a mut Vec<WorkerEndpoint>,
         epoch: Epoch,
-        ts: i64,
     ) -> Self {
         // NOTE: warning to future self...
         // the code currently relies on the fact that the domains that are sharded by the same key
@@ -79,7 +78,6 @@ impl DomainHandle {
                 config: config.clone(),
                 nodes,
                 persistence_parameters: persistence_params.clone(),
-                ts,
                 control_addr: control_listener.local_addr().unwrap(),
                 debug_addr: debug_addr.clone(),
             };

@@ -53,14 +53,6 @@ impl Handle {
         }
     }
 
-    pub fn set_meta(&mut self, meta: i64) -> i64 {
-        match *self {
-            Handle::Single(ref mut h) => h.set_meta(meta),
-            Handle::Double(ref mut h) => h.set_meta(meta),
-            Handle::Many(ref mut h) => h.set_meta(meta),
-        }
-    }
-
     pub fn meta_get_and<F, T>(&self, key: Key, then: F) -> Option<(Option<T>, i64)>
     where
         F: FnOnce(&[Vec<DataType>]) -> T,

@@ -15,12 +15,11 @@ use channel::poll::{PollEvent, ProcessResult};
 use channel::{DomainConnectionBuilder, TcpSender};
 use debug;
 use group_commit::GroupCommitQueueSet;
-use payload::{ControlReplyPacket, ReplayPieceContext, ReplayTransactionState, TransactionState};
+use payload::{ControlReplyPacket, ReplayPieceContext};
 use prelude::*;
 use slog::Logger;
 use statistics;
 use timekeeper::{RealTime, SimpleTracker, ThreadTime, Timer, TimerSet};
-use transactions;
 use Readers;
 
 type EnqueuedSends = Vec<(ReplicaAddr, Box<Packet>)>;
@@ -138,8 +137,6 @@ pub struct DomainBuilder {
     pub nodes: DomainNodes,
     /// The domain's persistence setting.
     pub persistence_parameters: PersistenceParameters,
-    /// The starting timestamp.
-    pub ts: i64,
     /// The socket address at which this domain receives control messages.
     pub control_addr: SocketAddr,
     /// The socket address for debug interactions with this domain.
@@ -179,7 +176,6 @@ impl DomainBuilder {
             .map(|addr| TcpSender::connect(addr).unwrap());
         let control_reply_tx = TcpSender::connect(&self.control_addr).unwrap();
 
-        let transaction_state = transactions::DomainState::new(self.index, self.ts);
         let group_commit_queues = GroupCommitQueueSet::new(&self.persistence_parameters);
 
         Domain {
@@ -188,7 +184,6 @@ impl DomainBuilder {
             _nshards: self.nshards,
             domain_addr: addr,
 
-            transaction_state,
             persistence_parameters: self.persistence_parameters,
             nodes: self.nodes,
             state: StateMap::default(),
@@ -241,7 +236,6 @@ pub struct Domain {
 
     ingress_inject: Map<(usize, Vec<DataType>)>,
 
-    transaction_state: transactions::DomainState,
     persistence_parameters: PersistenceParameters,
 
     mode: DomainMode,
@@ -687,10 +681,6 @@ impl Domain {
                 return output_messages;
             }
             &box Packet::Message { .. } => {}
-            &box Packet::Transaction { .. } => {
-                // Any message with a timestamp (ie part of a transaction) must flow through the
-                // entire graph, even if there are no updates associated with it.
-            }
             &box Packet::ReplayPiece { .. } => {
                 unreachable!("replay should never go through dispatch");
             }
@@ -746,118 +736,6 @@ impl Domain {
         output_messages
     }
 
-    pub fn transactional_dispatch(
-        &mut self,
-        messages: Vec<Box<Packet>>,
-        sends: &mut EnqueuedSends,
-        executor: Option<&Executor>,
-    ) {
-        assert!(!messages.is_empty());
-
-        let mut egress_messages = HashMap::new();
-        let (ts, tracer) = if let Packet::Transaction {
-            state: ref ts @ TransactionState::Committed(..),
-            ref tracer,
-            ..
-        } = *messages[0]
-        {
-            (ts.clone(), tracer.clone())
-        } else {
-            unreachable!();
-        };
-
-        for m in messages {
-            let new_messages = self.dispatch(m, false, sends, executor);
-
-            for (key, mut value) in new_messages {
-                egress_messages
-                    .entry(key)
-                    .or_insert_with(Vec::new)
-                    .append(&mut value);
-            }
-        }
-
-        let base = if let TransactionState::Committed(_, base, _) = ts {
-            base
-        } else {
-            unreachable!()
-        };
-
-        for n in self.transaction_state.egress_for(base) {
-            let n = &self.nodes[n];
-            let data = match egress_messages.entry(*n.borrow().local_addr()) {
-                Entry::Occupied(entry) => entry.remove().into(),
-                _ => Records::default(),
-            };
-
-            let addr = *n.borrow().local_addr();
-            // TODO: message should be from actual parent, not self.
-            // FIXME: source address here needs to be shard index for sharded egress
-            let m = if n.borrow().is_transactional() {
-                box Packet::Transaction {
-                    link: Link::new(addr, addr),
-                    src: None,
-                    data: data,
-                    state: ts.clone(),
-                    tracer: tracer.clone(),
-                    senders: vec![],
-                }
-            } else {
-                // The packet is about to hit a non-transactional output node (which could be an
-                // egress node), so it must be converted to a normal normal message.
-                box Packet::Message {
-                    link: Link::new(addr, addr),
-                    src: None,
-                    data: data,
-                    tracer: tracer.clone(),
-                    senders: vec![],
-                }
-            };
-
-            if !self.not_ready.is_empty() && self.not_ready.contains(&addr) {
-                continue;
-            }
-
-            self.process_times.start(addr);
-            self.process_ptimes.start(addr);
-            let mut m = Some(m);
-            self.nodes[&addr].borrow_mut().process(
-                &mut m,
-                None,
-                &mut self.state,
-                &self.nodes,
-                self.shard,
-                true,
-                sends,
-                None,
-            );
-            self.process_ptimes.stop();
-            self.process_times.stop();
-            assert_eq!(n.borrow().nchildren(), 0);
-        }
-    }
-
-    fn process_transactions(&mut self, sends: &mut EnqueuedSends, executor: Option<&Executor>) {
-        loop {
-            match self.transaction_state.get_next_event() {
-                transactions::Event::Transaction(m) => {
-                    self.transactional_dispatch(m, sends, executor)
-                }
-                transactions::Event::StartMigration => {
-                    self.control_reply_tx
-                        .send(ControlReplyPacket::ack())
-                        .unwrap();
-                }
-                transactions::Event::CompleteMigration => {}
-                transactions::Event::SeedReplay(tag, key, rts) => {
-                    self.seed_replay(tag, &key[..], Some(rts), sends)
-                }
-                transactions::Event::Replay(m) => self.handle_replay(m, sends),
-                transactions::Event::None => break,
-            }
-        }
-    }
-
     fn handle(
         &mut self,
         m: Box<Packet>,
@@ -870,16 +748,6 @@ impl Domain {
         match *m {
             Packet::Message { .. } | Packet::Input { .. } => {
                 self.dispatch(m, true, sends, executor);
-            }
-            Packet::Transaction { .. }
-            | Packet::StartMigration { .. }
-            | Packet::CompleteMigration { .. }
-            | Packet::ReplayPiece {
-                transaction_state: Some(_),
-                ..
-            } => {
-                self.transaction_state.handle(m);
-                self.process_transactions(sends, executor);
             }
             Packet::ReplayPiece { .. } => {
                 self.handle_replay(m, sends);
@@ -1064,14 +932,13 @@ impl Domain {
 
                                 let mut n = self.nodes[&node].borrow_mut();
                                 n.with_reader_mut(|r| {
-                                    let token_generator = r.token_generator().cloned();
                                     assert!(
                                         self.readers
                                             .lock()
                                             .unwrap()
                                             .insert(
                                                 (gid, *self.shard.as_ref().unwrap_or(&0)),
-                                                (r_part, token_generator)
+                                                r_part
                                             )
                                             .is_none()
                                     );
@@ -1086,14 +953,13 @@ impl Domain {
 
                                 let mut n = self.nodes[&node].borrow_mut();
                                 n.with_reader_mut(|r| {
-                                    let token_generator = r.token_generator().cloned();
                                     assert!(
                                         self.readers
                                             .lock()
                                             .unwrap()
                                             .insert(
                                                 (gid, *self.shard.as_ref().unwrap_or(&0)),
-                                                (r_part, token_generator)
+                                                r_part
                                             )
                                             .is_none()
                                     );
@@ -1201,7 +1067,7 @@ impl Domain {
                            "tag" => tag.id(),
                            "key" => format!("{:?}", key)
                         );
-                        self.seed_replay(tag, &key[..], None, sends);
+                        self.seed_replay(tag, &key[..], sends);
                     }
                     Packet::StartReplay { tag, from } => {
                         use std::thread;
@@ -1245,7 +1111,6 @@ impl Domain {
                                 last: state.is_empty(),
                             },
                             data: Vec::<Record>::new().into(),
-                            transaction_state: None,
                         };
 
                         if !state.is_empty() {
@@ -1312,7 +1177,6 @@ impl Domain {
                                             link: link.clone(), // to is overwritten by receiver
                                             context: ReplayPieceContext::Regular { last },
                                             data: chunk,
-                                            transaction_state: None,
                                         };
 
                                         trace!(log, "sending batch"; "#" => i, "[]" => len);
@@ -1589,7 +1453,6 @@ impl Domain {
                             ignore: false,
                         },
                         data: rs.into(),
-                        transaction_state: None,
                     })
                 } else {
                     None
@@ -1638,49 +1501,34 @@ impl Domain {
         }
     }
 
-    fn seed_replay(
-        &mut self,
-        tag: Tag,
-        key: &[DataType],
-        transaction_state: Option<ReplayTransactionState>,
-        sends: &mut EnqueuedSends,
-    ) {
-        if transaction_state.is_none() {
-            if let ReplayPath {
-                source: Some(source),
-                trigger: TriggerEndpoint::Start(..),
-                ..
-            } = self.replay_paths[&tag]
-            {
-                if self.nodes[&source].borrow().is_transactional() {
-                    self.transaction_state.schedule_replay(tag, key.into());
-                    self.process_transactions(sends, None);
-                    return;
-                }
-
-                // maybe delay this seed request so that we can batch respond later?
-                // TODO
-                use std::collections::hash_map::Entry;
-                let key = Vec::from(key);
-                match self.buffered_replay_requests.entry(tag) {
-                    Entry::Occupied(mut o) => {
-                        if o.get().1.is_empty() {
-                            o.get_mut().0 = time::Instant::now();
-                        }
-                        o.into_mut().1.insert(key);
-                        self.has_buffered_replay_requests = true;
+    fn seed_replay(&mut self, tag: Tag, key: &[DataType], sends: &mut EnqueuedSends) {
+        if let ReplayPath {
+            trigger: TriggerEndpoint::Start(..),
+            ..
+        } = self.replay_paths[&tag]
+        {
+            // maybe delay this seed request so that we can batch respond later?
+            // TODO
+            use std::collections::hash_map::Entry;
+            let key = Vec::from(key);
+            match self.buffered_replay_requests.entry(tag) {
+                Entry::Occupied(mut o) => {
+                    if o.get().1.is_empty() {
+                        o.get_mut().0 = time::Instant::now();
                     }
-                    Entry::Vacant(v) => {
-                        let mut ks = HashSet::new();
-                        ks.insert(key);
-                        v.insert((time::Instant::now(), ks));
-                        self.has_buffered_replay_requests = true;
-                    }
+                    o.into_mut().1.insert(key);
+                    self.has_buffered_replay_requests = true;
                 }
-
-                // TODO: if timer has expired, call seed_all(tag, _, sends) immediately
-                return;
+                Entry::Vacant(v) => {
+                    let mut ks = HashSet::new();
+                    ks.insert(key);
+                    v.insert((time::Instant::now(), ks));
+                    self.has_buffered_replay_requests = true;
+                }
             }
+
+            // TODO: if timer has expired, call seed_all(tag, _, sends) immediately
+            return;
         }
 
         let (m, source, is_miss) = match self.replay_paths[&tag] {
@@ -1716,22 +1564,8 @@ impl Domain {
                             ignore: false,
                         },
                         data,
-                        transaction_state: transaction_state,
                     });
                     (m, source, None)
-                } else if transaction_state.is_some() {
-                    // we need to forward a ReplayPiece for the timestamp we claimed
-                    let m = Some(box Packet::ReplayPiece {
-                        link: Link::new(source, path[0].node),
-                        tag: tag,
-                        context: ReplayPieceContext::Partial {
-                            for_keys: k,
-                            ignore: true,
-                        },
-                        data: Records::default(),
-                        transaction_state: transaction_state,
-                    });
-                    (m, source, Some(cols.clone()))
                 } else {
                     (None, source, Some(cols.clone()))
                 }
@@ -1806,31 +1640,6 @@ impl Domain {
                 }
             }
 
-            if let box Packet::ReplayPiece {
-                context: ReplayPieceContext::Partial { ignore: true, .. },
-                ..
-            } = m
-            {
-                let mut n = self.nodes[&path.last().unwrap().node].borrow_mut();
-                if n.is_egress() && n.is_transactional() {
-                    // We need to propagate this replay even though it contains no data, so that
-                    // downstream domains don't wait for its timestamp.  There is no need to set
-                    // link src/dst since the egress node will not use them.
-                    let mut m = Some(m);
-                    n.process(
-                        &mut m,
-                        None,
-                        &mut self.state,
-                        &self.nodes,
-                        self.shard,
-                        false,
-                        sends,
-                        None,
-                    );
-                }
-                break;
-            }
-
             // will look somewhat nicer with https://github.com/rust-lang/rust/issues/15287
             let m = *m; // workaround for #16223
             match m {
@@ -1839,7 +1648,6 @@ impl Domain {
                     link,
                     data,
                     mut context,
-                    transaction_state,
                 } => {
                     if let ReplayPieceContext::Partial { ref for_keys, .. } = context {
                         trace!(
@@ -1853,15 +1661,12 @@ impl Domain {
                         debug!(self.log, "replaying batch"; "#" => data.len());
                     }
 
-                    let mut is_transactional = transaction_state.is_some();
-
                     // forward the current message through all local nodes.
                     let m = box Packet::ReplayPiece {
                         link: link.clone(),
                         tag,
                         data,
                         context: context.clone(),
-                        transaction_state: transaction_state.clone(),
                     };
                     let mut m = Some(m);
 
@@ -1889,23 +1694,6 @@ impl Domain {
                         } else {
                             None
                         };
-
-                        if !n.is_transactional() {
-                            if let Some(box Packet::ReplayPiece {
-                                ref mut transaction_state,
-                                ..
-                            }) = m
-                            {
-                                // Transactional replays that cross into non-transactional subgraphs
-                                // should stop being transactional. This is necessary to ensure that
-                                // they don't end up being buffered, and thus re-ordered relative to
-                                // subsequent writes to the same key.
-                                transaction_state.take();
-                                is_transactional = false;
-                            } else {
-                                unreachable!();
-                            }
-                        }
 
                         // figure out if we're the target of a partial replay.
                         // this is the case either if the current node is waiting for a replay,
@@ -2034,41 +1822,6 @@ impl Domain {
                         if m.is_none() {
                             // eaten full replay
                             assert_eq!(misses.len(), 0);
-                            if backfill_keys.is_some() && is_transactional {
-                                let last_ni = path.last().unwrap().node;
-                                if last_ni != segment.node {
-                                    let mut n = self.nodes[&last_ni].borrow_mut();
-                                    if n.is_egress() && n.is_transactional() {
-                                        // The partial replay was captured, but we still need to
-                                        // propagate an (ignored) ReplayPiece so that downstream
-                                        // domains don't end up waiting forever for the timestamp we
-                                        // claimed.
-                                        let m = box Packet::ReplayPiece {
-                                            link: link, // TODO: use dummy link instead
-                                            tag,
-                                            data: Vec::<Record>::new().into(),
-                                            context: ReplayPieceContext::Partial {
-                                                for_keys: backfill_keys.unwrap().clone(),
-                                                ignore: true,
-                                            },
-                                            transaction_state,
-                                        };
-                                        // No need to set link src/dst since the egress node will
-                                        // not use them.
-                                        let mut m = Some(m);
-                                        n.process(
-                                            &mut m,
-                                            None,
-                                            &mut self.state,
-                                            &self.nodes,
-                                            self.shard,
-                                            false,
-                                            sends,
-                                            None,
-                                        );
-                                    }
-                                }
-                            }
 
                             // it's been captured, so we need to *not* consider the replay finished
                             // (which the logic below matching on context would do)
@@ -2371,7 +2124,6 @@ impl Domain {
                     self.mode = DomainMode::Forwarding;
                     self.dispatch(m, true, sends, None);
                 } else {
-                    // no transactions allowed here since we're still in a migration
                     unreachable!();
                 }
 
@@ -2689,9 +2441,7 @@ impl Domain {
                 // queue.
                 if self.group_commit_queues.should_append(&packet, &self.nodes) {
                     packet.trace(PacketEvent::ExitInputChannel);
-                    let merged_packet =
-                        self.group_commit_queues
-                            .append(packet, &self.nodes, executor);
+                    let merged_packet = self.group_commit_queues.append(packet);
                     if let Some(packet) = merged_packet {
                         self.handle(packet, sends, Some(executor), true);
                     }
@@ -2702,10 +2452,7 @@ impl Domain {
                 ProcessResult::KeepPolling
             }
             PollEvent::Timeout => {
-                if let Some(m) = self
-                    .group_commit_queues
-                    .flush_if_necessary(&self.nodes, executor)
-                {
+                if let Some(m) = self.group_commit_queues.flush_if_necessary() {
                     self.handle(m, sends, Some(executor), true);
                 } else if self.has_buffered_replay_requests {
                     self.handle(box Packet::Spin, sends, Some(executor), true);

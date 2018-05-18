@@ -28,7 +28,6 @@ pub struct Node {
     name: String,
     index: Option<IndexPair>,
     domain: Option<domain::Index>,
-    transactional: bool,
 
     fields: Vec<String>,
     children: Vec<LocalNodeIndex>,
@@ -40,7 +39,7 @@ pub struct Node {
 
 // constructors
 impl Node {
-    pub fn new<S1, FS, S2, NT>(name: S1, fields: FS, inner: NT, transactional: bool) -> Node
+    pub fn new<S1, FS, S2, NT>(name: S1, fields: FS, inner: NT) -> Node
     where
         S1: ToString,
         S2: ToString,
@@ -51,7 +50,6 @@ impl Node {
             name: name.to_string(),
             index: None,
             domain: None,
-            transactional: transactional,
 
             fields: fields.into_iter().map(|s| s.to_string()).collect(),
             children: Vec::new(),
@@ -63,11 +61,11 @@ impl Node {
     }
 
     pub fn mirror<NT: Into<NodeType>>(&self, n: NT) -> Node {
-        Self::new(&*self.name, &self.fields, n, self.transactional)
+        Self::new(&*self.name, &self.fields, n)
     }
 
     pub fn named_mirror<NT: Into<NodeType>>(&self, n: NT, name: String) -> Node {
-        Self::new(name, &self.fields, n, self.transactional)
+        Self::new(name, &self.fields, n)
     }
 }
 
@@ -419,9 +417,5 @@ impl Node {
             NodeType::Egress { .. } | NodeType::Reader(..) | NodeType::Sharder(..) => true,
             _ => false,
         }
-    }
-
-    pub fn is_transactional(&self) -> bool {
-        self.transactional
     }
 }

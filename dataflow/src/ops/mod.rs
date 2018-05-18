@@ -235,7 +235,6 @@ pub mod test {
                 "source",
                 &["because-type-inference"],
                 node::NodeType::Source,
-                true,
             ));
             MockGraph {
                 graph: graph,
@@ -259,7 +258,7 @@ pub mod test {
         ) -> IndexPair {
             use node::special::Base;
             let i = Base::new(defaults);
-            let global = self.graph.add_node(Node::new(name, fields, i, false));
+            let global = self.graph.add_node(Node::new(name, fields, i));
             self.graph.add_edge(self.source, global, ());
             let mut remap = HashMap::new();
             let local = unsafe { LocalNodeIndex::make(self.remap.len() as u32) };
@@ -340,7 +339,7 @@ pub mod test {
             assert!(!parents.is_empty(), "node under test should have ancestors");
 
             let i: NodeOperator = i.into();
-            let global = self.graph.add_node(Node::new(name, fields, i, false));
+            let global = self.graph.add_node(Node::new(name, fields, i));
             let local = unsafe { LocalNodeIndex::make(self.remap.len() as u32) };
             if materialized {
                 self.states.insert(local, box MemoryState::default());

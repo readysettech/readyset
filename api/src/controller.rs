@@ -26,7 +26,6 @@ use {ActivationResult, RpcError};
 pub struct ControllerDescriptor {
     pub external_addr: SocketAddr,
     pub internal_addr: SocketAddr,
-    pub checktable_addr: SocketAddr,
     pub nonce: u64,
 }
 
@@ -221,19 +220,6 @@ impl<A: Authority> ControllerHandle<A> {
     pub fn remove_node(&mut self, node: NodeIndex) {
         self.rpc("remove_node", &node)
     }
-
-    /*
-    /// Get a function that can validate tokens.
-    pub fn get_validator(&self) -> Box<Fn(&::dataflow::checktable::Token) -> bool> {
-        let descriptor: ControllerDescriptor =
-            serde_json::from_slice(&self.authority.get_leader().unwrap().1).unwrap();
-        let checktable = checktable::CheckTableClient::connect(
-            descriptor.checktable_addr,
-            client::Options::default(),
-        ).unwrap();
-        Box::new(move |t: &checktable::Token| checktable.validate_token(t.clone()).unwrap())
-    }
-    */
 
     /// Close all connections opened by this handle.
     ///

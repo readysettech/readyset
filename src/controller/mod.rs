@@ -4,7 +4,6 @@ use channel::tcp::TcpSender;
 use api::ControllerDescriptor;
 use basics::PersistenceParameters;
 use consensus::{Authority, Epoch, STATE_KEY};
-use dataflow::checktable::service::CheckTableServer;
 use dataflow::DomainConfig;
 
 use controller::domain_handle::DomainHandle;
@@ -198,7 +197,6 @@ fn start_instance<A: Authority + 'static>(
                 controller_event_tx.clone(),
                 SocketAddr::new(listen_addr, 0),
             );
-            let checktable = CheckTableServer::start(SocketAddr::new(listen_addr, 0));
             let external = Controller::listen_external(
                 controller_event_tx.clone(),
                 SocketAddr::new(listen_addr, 9000),
@@ -207,7 +205,6 @@ fn start_instance<A: Authority + 'static>(
             let descriptor = ControllerDescriptor {
                 external_addr: external.addr,
                 internal_addr: internal.addr,
-                checktable_addr: checktable,
                 nonce: rand::random(),
             };
             let campaign = Some(instance_campaign(
@@ -225,7 +222,6 @@ fn start_instance<A: Authority + 'static>(
                 log,
                 internal,
                 external,
-                checktable,
                 campaign,
                 listen_addr,
             };
@@ -365,7 +361,6 @@ pub struct Controller<A> {
     listen_addr: IpAddr,
     internal: ServingThread,
     external: ServingThread,
-    checktable: SocketAddr,
     campaign: Option<JoinHandle<()>>,
 
     log: slog::Logger,
@@ -405,7 +400,6 @@ impl<A: Authority + 'static> Controller<A> {
                     self.campaign.take().unwrap().join().unwrap();
                     self.inner = Some(ControllerInner::new(
                         self.listen_addr,
-                        self.checktable,
                         self.log.clone(),
                         state.clone(),
                     ));
@@ -600,7 +594,6 @@ impl Worker {
                     self.inner.take().map(|w| w.shutdown());
                     if let Ok(worker) = WorkerInner::new(
                         self.listen_addr,
-                        descriptor.checktable_addr,
                         descriptor.internal_addr,
                         self.internal.addr,
                         &state,

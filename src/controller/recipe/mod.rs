@@ -326,11 +326,7 @@ impl Recipe {
     /// Activate the recipe by migrating the Soup data-flow graph wrapped in `mig` to the recipe.
     /// This causes all necessary changes to said graph to be applied; however, it is the caller's
     /// responsibility to call `mig.commit()` afterwards.
-    pub fn activate(
-        &mut self,
-        mig: &mut Migration,
-        transactional_base_nodes: bool,
-    ) -> Result<ActivationResult, String> {
+    pub fn activate(&mut self, mig: &mut Migration) -> Result<ActivationResult, String> {
         debug!(self.log, "{} queries, {} of which are named",
                                  self.expressions.len(),
                                  self.aliases.len(); "version" => self.version);
@@ -356,11 +352,6 @@ impl Recipe {
         if self.version > 0 {
             self.inc.as_mut().unwrap().upgrade_schema(self.version);
         }
-
-        self.inc
-            .as_mut()
-            .unwrap()
-            .set_transactional(transactional_base_nodes);
 
         // create nodes to enforce security configuration
         if self.security_config.is_some() {

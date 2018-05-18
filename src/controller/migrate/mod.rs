@@ -21,12 +21,12 @@
 //! Beware, Here be dragons™
 
 use dataflow::prelude::*;
-use dataflow::{checktable, node, payload};
+use dataflow::{node, payload};
 
 use std::collections::{HashMap, HashSet};
 use std::time::Instant;
 
-use controller::{keys, ControllerInner, DomainHandle, WorkerEndpoint, WorkerIdentifier};
+use controller::{ControllerInner, DomainHandle, WorkerEndpoint, WorkerIdentifier};
 
 use petgraph;
 use slog;
@@ -36,7 +36,6 @@ pub mod augmentation;
 pub mod materialization;
 pub mod routing;
 pub mod sharding;
-pub mod transactions;
 
 const NANOS_PER_SEC: u64 = 1_000_000_000;
 macro_rules! dur_to_ns {
@@ -86,18 +85,11 @@ impl<'a> Migration<'a> {
         let parents = i.ancestors();
         assert!(!parents.is_empty());
 
-        let transactional = !parents.is_empty()
-            && parents
-                .iter()
-                .all(|&p| self.mainline.ingredients[p].is_transactional());
-
         // add to the graph
-        let ni = self.mainline.ingredients.add_node(node::Node::new(
-            name.to_string(),
-            fields,
-            i.into(),
-            transactional,
-        ));
+        let ni =
+            self.mainline
+                .ingredients
+                .add_node(node::Node::new(name.to_string(), fields, i.into()));
         info!(self.log,
               "adding new node";
               "node" => ni.index(),
@@ -122,7 +114,6 @@ impl<'a> Migration<'a> {
         name: S1,
         fields: FS,
         b: node::special::Base,
-        transactional: bool,
     ) -> NodeIndex
     where
         S1: ToString,
@@ -130,16 +121,13 @@ impl<'a> Migration<'a> {
         FS: IntoIterator<Item = S2>,
     {
         // add to the graph
-        let ni = self.mainline.ingredients.add_node(node::Node::new(
-            name.to_string(),
-            fields,
-            b,
-            transactional,
-        ));
+        let ni = self
+            .mainline
+            .ingredients
+            .add_node(node::Node::new(name.to_string(), fields, b));
         info!(self.log,
               "adding new base";
               "node" => ni.index(),
-              "transactional" => ?transactional,
         );
 
         // keep track of the fact that it's new
@@ -242,73 +230,12 @@ impl<'a> Migration<'a> {
         }
     }
 
-    fn ensure_token_generator(&mut self, n: NodeIndex, key: &[usize]) {
-        let ri = self.readers[&n];
-        if self.mainline.ingredients[ri]
-            .with_reader(|r| r.token_generator().is_some())
-            .expect("tried to add token generator to non-reader node")
-        {
-            return;
-        }
-
-        // A map from base node to the column in that base node whose value must match the value of
-        // this node's column to cause a conflict. Is None for a given base node if any write to
-        // that base node might cause a conflict.
-        let base_columns: Vec<_> =
-            keys::provenance_of(&self.mainline.ingredients, n, &key[..], |_, _, _| None)
-                .into_iter()
-                .map(|path| {
-                    // we want the base node corresponding to each path
-                    path.into_iter().last().unwrap()
-                })
-                .collect();
-
-        let coarse_parents = base_columns
-            .iter()
-            .filter_map(|&(ni, ref o)| {
-                if o.iter().any(|c| c.is_none()) {
-                    Some(ni)
-                } else {
-                    None
-                }
-            })
-            .collect();
-
-        let granular_parents = base_columns
-            .into_iter()
-            .filter_map(|(ni, ref o)| {
-                if o.iter().all(|c| c.is_some()) {
-                    Some((ni, o.iter().map(|c| c.unwrap()).collect()))
-                } else {
-                    None
-                }
-            })
-            .collect();
-
-        let token_generator = checktable::TokenGenerator::new(coarse_parents, granular_parents);
-        self.mainline
-            .checktable
-            .track(token_generator.clone())
-            .unwrap();
-
-        self.mainline.ingredients[ri]
-            .with_reader_mut(|r| {
-                r.set_token_generator(token_generator);
-            })
-            .unwrap();
-    }
-
     /// Set up the given node such that its output can be efficiently queried.
     ///
-    /// To query into the maintained state, use `ControllerInner::get_getter` or
-    /// `ControllerInner::get_transactional_getter`
+    /// To query into the maintained state, use `ControllerInner::get_getter`.
     #[cfg(test)]
     pub fn maintain_anonymous(&mut self, n: NodeIndex, key: &[usize]) -> NodeIndex {
         self.ensure_reader_for(n, None);
-        if self.mainline.ingredients[n].is_transactional() {
-            self.ensure_token_generator(n, key);
-        }
-
         let ri = self.readers[&n];
 
         self.mainline.ingredients[ri]
@@ -320,13 +247,9 @@ impl<'a> Migration<'a> {
 
     /// Set up the given node such that its output can be efficiently queried.
     ///
-    /// To query into the maintained state, use `ControllerInner::get_getter` or
-    /// `ControllerInner::get_transactional_getter`
+    /// To query into the maintained state, use `ControllerInner::get_getter`.
     pub fn maintain(&mut self, name: String, n: NodeIndex, key: &[usize]) {
         self.ensure_reader_for(n, Some(name));
-        if self.mainline.ingredients[n].is_transactional() {
-            self.ensure_token_generator(n, key);
-        }
 
         let ri = self.readers[&n];
 
@@ -523,11 +446,6 @@ impl<'a> Migration<'a> {
         // etc.
         // println!("{}", mainline);
 
-        let new_deps =
-            transactions::analyze_changes(&mainline.ingredients, mainline.source, domain_new_nodes);
-
-        transactions::merge_deps(&mainline.ingredients, &mut mainline.deps, new_deps);
-
         let mut uninformed_domain_nodes = mainline
             .ingredients
             .node_indices()
@@ -538,13 +456,6 @@ impl<'a> Migration<'a> {
                 dns.entry(d).or_insert_with(Vec::new).push((ni, new));
                 dns
             });
-
-        let (start_ts, end_ts, prevs) = mainline
-            .checktable
-            .perform_migration(mainline.deps.clone())
-            .unwrap();
-
-        info!(log, "migration claimed timestamp range"; "start" => start_ts, "end" => end_ts);
 
         let mut workers: Vec<_> = mainline
             .workers
@@ -582,20 +493,13 @@ impl<'a> Migration<'a> {
                 &mut placer,
                 &mut workers,
                 mainline.epoch,
-                start_ts,
             );
             mainline.domains.insert(domain, d);
         }
 
         // Add any new nodes to existing domains (they'll also ignore all updates for now)
         debug!(log, "mutating existing domains");
-        augmentation::inform(
-            &log,
-            &mut mainline,
-            uninformed_domain_nodes,
-            start_ts,
-            prevs.unwrap(),
-        );
+        augmentation::inform(&log, &mut mainline, uninformed_domain_nodes);
 
         // Tell all base nodes and base ingress children about newly added columns
         for (ni, change) in self.columns {
@@ -651,18 +555,6 @@ impl<'a> Migration<'a> {
         mainline
             .materializations
             .commit(&mainline.ingredients, &new, &mut mainline.domains);
-
-        info!(log, "finalizing migration");
-
-        // Ideally this should happen as part of checktable::perform_migration(), but we don't know
-        // the replay paths then. It is harmless to do now since we know the new replay paths won't
-        // request timestamps until after the migration in finished.
-        mainline
-            .checktable
-            .add_replay_paths(mainline.materializations.domains_on_path.clone())
-            .unwrap();
-
-        transactions::finalize(mainline.deps.clone(), &log, &mut mainline.domains, end_ts);
 
         warn!(log, "migration completed"; "ms" => dur_to_ns!(start.elapsed()) / 1_000_000);
     }

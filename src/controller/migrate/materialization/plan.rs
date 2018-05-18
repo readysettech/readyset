@@ -136,14 +136,6 @@ impl<'a> Plan<'a> {
                 if last_domain.is_none() || domain != last_domain.unwrap() {
                     segments.push((domain, Vec::new()));
                     last_domain = Some(domain);
-
-                    if self.partial && self.graph[node].is_transactional() {
-                        self.m
-                            .domains_on_path
-                            .entry(tag.clone())
-                            .or_default()
-                            .push(domain);
-                    }
                 }
 
                 let key = if self.partial {

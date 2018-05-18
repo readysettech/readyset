@@ -1,10 +1,9 @@
 use basics::PersistenceParameters;
 use channel::tcp::TcpSender;
 use consensus::{Authority, Epoch, STATE_KEY};
-use dataflow::payload::{EgressForBase, IngressFromBase};
 use dataflow::prelude::*;
 use dataflow::statistics::GraphStats;
-use dataflow::{checktable, node, payload, DomainConfig};
+use dataflow::{node, payload, DomainConfig};
 
 use std::collections::{BTreeMap, HashMap};
 use std::error::Error;
@@ -27,7 +26,6 @@ use petgraph;
 use petgraph::visit::Bfs;
 use slog;
 use std::mem;
-use tarpc::sync::client::{self, ClientExt};
 
 /// `Controller` is the core component of the alternate Soup implementation.
 ///
@@ -39,8 +37,6 @@ pub struct ControllerInner {
     pub(super) ingredients: Graph,
     pub(super) source: NodeIndex,
     pub(super) ndomains: usize,
-    pub(super) checktable: checktable::CheckTableClient,
-    checktable_addr: SocketAddr,
     pub(super) sharding: Option<usize>,
 
     pub(super) domain_config: DomainConfig,
@@ -63,7 +59,6 @@ pub struct ControllerInner {
     pub(super) workers: HashMap<WorkerIdentifier, WorkerStatus>,
 
     /// State between migrations
-    pub(super) deps: HashMap<DomainIndex, (IngressFromBase, EgressForBase)>,
     pub(super) remap: HashMap<DomainIndex, HashMap<NodeIndex, IndexPair>>,
 
     pub(super) epoch: Epoch,
@@ -255,23 +250,13 @@ impl ControllerInner {
     }
 
     /// Construct `ControllerInner` with a specified listening interface
-    pub(super) fn new(
-        listen_addr: IpAddr,
-        checktable_addr: SocketAddr,
-        log: slog::Logger,
-        state: ControllerState,
-    ) -> Self {
+    pub(super) fn new(listen_addr: IpAddr, log: slog::Logger, state: ControllerState) -> Self {
         let mut g = petgraph::Graph::new();
         let source = g.add_node(node::Node::new(
             "source",
             &["because-type-inference"],
             node::special::Source,
-            true,
         ));
-
-        let checktable =
-            checktable::CheckTableClient::connect(checktable_addr, client::Options::default())
-                .unwrap();
 
         let mut materializations = Materializations::new(&log);
         if !state.config.partial_enabled {
@@ -294,8 +279,6 @@ impl ControllerInner {
             ingredients: g,
             source: source,
             ndomains: 0,
-            checktable,
-            checktable_addr,
             listen_addr,
 
             materializations,
@@ -313,7 +296,6 @@ impl ControllerInner {
             debug_channel: None,
             epoch: state.epoch,
 
-            deps: HashMap::default(),
             remap: HashMap::default(),
 
             read_addrs: HashMap::default(),
@@ -406,15 +388,6 @@ impl ControllerInner {
         let r = f(&mut m);
         m.commit();
         r
-    }
-
-    /// Get a boxed function which can be used to validate tokens.
-    #[allow(unused)]
-    pub fn get_validator(&self) -> Box<Fn(&checktable::Token) -> bool> {
-        let checktable =
-            checktable::CheckTableClient::connect(self.checktable_addr, client::Options::default())
-                .unwrap();
-        Box::new(move |t: &checktable::Token| checktable.validate_token(t.clone()).unwrap())
     }
 
     #[cfg(test)]
@@ -563,7 +536,6 @@ impl ControllerInner {
             addr: (*node.local_addr()).into(),
             key: key,
             key_is_primary: is_primary,
-            transactional: self.ingredients[ni].is_transactional(),
             dropped: base_operator.get_dropped(),
             table_name: node.name().to_owned(),
             columns,
@@ -707,7 +679,7 @@ impl ControllerInner {
         let mut err = Err(RpcError::Other("".to_owned())); // <3 type inference
         self.migrate(|mig| {
             err = new
-                .activate(mig, false)
+                .activate(mig)
                 .map_err(|e| RpcError::Other(format!("failed to activate recipe: {}", e)))
         });
 

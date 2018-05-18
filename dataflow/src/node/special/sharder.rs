@@ -100,10 +100,6 @@ impl Sharder {
             // eventual shard merged! pretty unfortunate. TODO
             force_all = true;
         }
-        if let Packet::Transaction { .. } = *m {
-            // transactions (currently) need to reach all shards so they know they can progress
-            force_all = true;
-        }
         if force_all {
             for shard in 0..self.txs.len() {
                 self.sharded

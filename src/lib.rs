@@ -311,8 +311,7 @@
 #![feature(nll)]
 #![feature(entry_or_default)]
 #![deny(missing_docs)]
-#![feature(plugin, use_extern_macros)]
-#![plugin(tarpc_plugins)]
+#![feature(use_extern_macros)]
 #![deny(unused_extern_crates)]
 #![feature(fnbox)]
 
@@ -341,7 +340,6 @@ extern crate slab;
 #[macro_use]
 extern crate slog;
 extern crate slog_term;
-extern crate tarpc;
 extern crate timer_heap;
 extern crate vec_map;
 
@@ -358,7 +356,6 @@ pub use basics::{
     DataType, Datas, DurabilityMode, Modification, NodeIndex, Operation, PersistenceParameters,
 };
 
-pub use dataflow::checktable::{Token, TransactionResult};
 pub use dataflow::debug::{DebugEvent, DebugEventType};
 pub use dataflow::prelude::DomainIndex;
 

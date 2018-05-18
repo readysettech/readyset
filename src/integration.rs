@@ -99,8 +99,8 @@ fn it_works_basic() {
     ));
     let mut g = b.build_local();
     let _ = g.migrate(|mig| {
-        let a = mig.add_base("a", &["a", "b"], Base::new(vec![]).with_key(vec![0]), false);
-        let b = mig.add_base("b", &["a", "b"], Base::new(vec![]).with_key(vec![0]), false);
+        let a = mig.add_base("a", &["a", "b"], Base::new(vec![]).with_key(vec![0]));
+        let b = mig.add_base("b", &["a", "b"], Base::new(vec![]).with_key(vec![0]));
 
         let mut emits = HashMap::new();
         emits.insert(a, vec![0, 1]);
@@ -172,7 +172,7 @@ fn base_mutation() {
 
     let mut g = build_local("base_mutation");
     g.migrate(|mig| {
-        let a = mig.add_base("a", &["a", "b"], Base::new(vec![]).with_key(vec![0]), false);
+        let a = mig.add_base("a", &["a", "b"], Base::new(vec![]).with_key(vec![0]));
         mig.maintain_anonymous(a, &[0]);
     });
 
@@ -247,7 +247,7 @@ fn shared_interdomain_ancestor() {
     // set up graph
     let mut g = build_local("shared_interdomain_ancestor");
     let _ = g.migrate(|mig| {
-        let a = mig.add_base("a", &["a", "b"], Base::default(), false);
+        let a = mig.add_base("a", &["a", "b"], Base::default());
 
         let mut emits = HashMap::new();
         emits.insert(a, vec![0, 1]);
@@ -298,8 +298,8 @@ fn it_works_w_mat() {
     // set up graph
     let mut g = build_local("it_works_w_mat");
     let _ = g.migrate(|mig| {
-        let a = mig.add_base("a", &["a", "b"], Base::default(), false);
-        let b = mig.add_base("b", &["a", "b"], Base::default(), false);
+        let a = mig.add_base("a", &["a", "b"], Base::default());
+        let b = mig.add_base("b", &["a", "b"], Base::default());
 
         let mut emits = HashMap::new();
         emits.insert(a, vec![0, 1]);
@@ -355,8 +355,8 @@ fn it_works_w_partial_mat() {
     // set up graph
     let mut g = build_local("it_works_w_partial_mat");
     let (a, b) = g.migrate(|mig| {
-        let a = mig.add_base("a", &["a", "b"], Base::default(), false);
-        let b = mig.add_base("b", &["a", "b"], Base::default(), false);
+        let a = mig.add_base("a", &["a", "b"], Base::default());
+        let b = mig.add_base("b", &["a", "b"], Base::default());
         (a, b)
     });
 
@@ -406,8 +406,8 @@ fn it_works_w_partial_mat_below_empty() {
     // for now.
     let mut g = build_local("it_works_w_partial_mat_below_empty");
     let _ = g.migrate(|mig| {
-        let a = mig.add_base("a", &["a", "b"], Base::default(), false);
-        let b = mig.add_base("b", &["a", "b"], Base::default(), false);
+        let a = mig.add_base("a", &["a", "b"], Base::default());
+        let b = mig.add_base("b", &["a", "b"], Base::default());
         let mut emits = HashMap::new();
         emits.insert(a, vec![0, 1]);
         emits.insert(b, vec![0, 1]);
@@ -450,13 +450,8 @@ fn it_works_deletion() {
     // set up graph
     let mut g = build_local("it_works_deletion");
     let _ = g.migrate(|mig| {
-        let a = mig.add_base("a", &["x", "y"], Base::new(vec![]).with_key(vec![1]), false);
-        let b = mig.add_base(
-            "b",
-            &["_", "x", "y"],
-            Base::new(vec![]).with_key(vec![2]),
-            false,
-        );
+        let a = mig.add_base("a", &["x", "y"], Base::new(vec![]).with_key(vec![1]));
+        let b = mig.add_base("b", &["_", "x", "y"], Base::new(vec![]).with_key(vec![2]));
 
         let mut emits = HashMap::new();
         emits.insert(a, vec![0, 1]);
@@ -783,7 +778,7 @@ fn mutator_churn() {
         // migrate
 
         // add vote base table
-        let vote = mig.add_base("vote", &["user", "id"], Base::default(), false);
+        let vote = mig.add_base("vote", &["user", "id"], Base::default());
 
         // add vote count
         let vc = mig.add_ingredient(
@@ -872,62 +867,6 @@ fn it_recovers_persisted_bases_w_multiple_nodes() {
     }
 }
 
-/*
-#[test]
-fn it_recovers_persisted_bases_w_transactions() {
-    let log_name = LogName::new("it_recovers_persisted_bases_w_transactions");
-    let persistence_params = PersistenceParameters::new(
-        DurabilityMode::Permanent,
-        128,
-        Duration::from_millis(1),
-        Some(log_name.name.clone()),
-        1,
-    );
-
-    {
-        let mut builder = ControllerBuilder::default();
-        builder.set_persistence(persistence_params.clone());
-        let mut g = builder.build_local();
-
-        // TODO: Convert this to use SQL interface (because only migrations specified that way get
-        // persisted...)
-        g.migrate(|mig| {
-            let a = mig.add_base("a", &["a", "b"], Base::default(), true);
-            mig.maintain_anonymous(a, &[0]);
-        });
-
-        let mut mutator = g.get_mutator("a").unwrap();
-
-        for i in 1..10 {
-            let b = i * 10;
-            mutator
-                .transactional_put(vec![i.into(), b.into()], Token::empty())
-                .unwrap();
-        }
-
-        // Let writes propagate:
-        sleep();
-    }
-
-    let mut builder = ControllerBuilder::default();
-    builder.set_persistence(persistence_params.clone());
-    let mut g = builder.build_local();
-    g.migrate(|mig| {
-        let a = mig.add_base("a", &["a", "b"], Base::default(), true);
-        mig.maintain_anonymous(a, &[0]);
-    });
-
-    let mut getter = g.get_getter("a").unwrap();
-    for i in 1..10 {
-        let b = i * 10;
-        let (result, _token) = getter.transactional_lookup(&[i.into()]).unwrap();
-        assert_eq!(result.len(), 1);
-        assert_eq!(result[0][0], i.into());
-        assert_eq!(result[0][1], b.into());
-    }
-}
-*/
-
 #[test]
 fn it_works_with_simple_arithmetic() {
     let mut g = build_local("it_works_with_simple_arithmetic");
@@ -936,7 +875,7 @@ fn it_works_with_simple_arithmetic() {
         let sql = "CREATE TABLE Car (id int, price int, PRIMARY KEY(id));
                    QUERY CarPrice: SELECT 2 * price FROM Car WHERE id = ?;";
         let mut recipe = Recipe::from_str(&sql, None).unwrap();
-        recipe.activate(mig, false).unwrap();
+        recipe.activate(mig).unwrap();
     });
 
     let mut mutator = g.get_mutator("Car").unwrap();
@@ -1047,8 +986,8 @@ fn votes() {
     let mut g = build_local("votes");
     let _ = g.migrate(|mig| {
         // add article base nodes (we use two so we can exercise unions too)
-        let article1 = mig.add_base("article1", &["id", "title"], Base::default(), false);
-        let article2 = mig.add_base("article2", &["id", "title"], Base::default(), false);
+        let article1 = mig.add_base("article1", &["id", "title"], Base::default());
+        let article2 = mig.add_base("article2", &["id", "title"], Base::default());
 
         // add a (stupid) union of article1 + article2
         let mut emits = HashMap::new();
@@ -1059,7 +998,7 @@ fn votes() {
         mig.maintain_anonymous(article, &[0]);
 
         // add vote base table
-        let vote = mig.add_base("vote", &["user", "id"], Base::default(), false);
+        let vote = mig.add_base("vote", &["user", "id"], Base::default());
 
         // add vote count
         let vc = mig.add_ingredient(
@@ -1143,157 +1082,6 @@ fn votes() {
     assert!(res.len() <= 1) // could be 1 if we had zero-rows
 }
 
-/*
-#[test]
-fn transactional_vote() {
-    // set up graph
-    let mut g = ControllerBuilder::default();
-    g.set_persistence(get_persistence_params("transactional_vote"));
-    g.disable_partial(); // because end_votes forces full below partial
-    let mut g = g.build_local();
-    let validate = g.get_validator();
-
-    let _ = g.migrate(|mig| {
-        // add article base nodes (we use two so we can exercise unions too)
-        let article1 = mig.add_base("article1", &["id", "title"], Base::default(), true);
-        let article2 = mig.add_base("article2", &["id", "title"], Base::default(), true);
-
-        // add a (stupid) union of article1 + article2
-        let mut emits = HashMap::new();
-        emits.insert(article1, vec![0, 1]);
-        emits.insert(article2, vec![0, 1]);
-        let u = Union::new(emits);
-        let article = mig.add_ingredient("article", &["id", "title"], u);
-        mig.maintain_anonymous(article, &[0]);
-
-        // add vote base table
-        let vote = mig.add_base("vote", &["user", "id"], Base::default(), true);
-
-        // add vote count
-        let vc = mig.add_ingredient(
-            "vc",
-            &["id", "votes"],
-            Aggregation::COUNT.over(vote, 0, &[1]),
-        );
-        mig.maintain_anonymous(vc, &[0]);
-
-        // add final join using first field from article and first from vc
-        let j = Join::new(article, vc, JoinType::Inner, vec![B(0, 0), L(1), R(1)]);
-        let end = mig.add_ingredient("end", &["id", "title", "votes"], j);
-        let end_title =
-            mig.add_ingredient("end_title", &["id", "title", "votes"], Identity::new(end));
-        let end_votes =
-            mig.add_ingredient("end_votes", &["id", "title", "votes"], Identity::new(end));
-
-        mig.maintain_anonymous(end, &[0]);
-        mig.maintain_anonymous(end_title, &[1]);
-        mig.maintain_anonymous(end_votes, &[2]);
-
-        (
-            article1, article2, vote, article, vc, end, end_title, end_votes,
-        )
-    });
-
-    let mut articleq = g.get_getter("article").unwrap();
-    let mut vcq = g.get_getter("vc").unwrap();
-    let mut endq = g.get_getter("end").unwrap();
-    let mut endq_title = g.get_getter("end_title").unwrap();
-    let mut endq_votes = g.get_getter("end_votes").unwrap();
-
-    let mut mut1 = g.get_mutator("article1").unwrap();
-    let mut mut2 = g.get_mutator("article2").unwrap();
-    let mut mutv = g.get_mutator("vote").unwrap();
-
-    let a1: DataType = 1.into();
-    let a2: DataType = 2.into();
-
-    let token = articleq.transactional_lookup(&[a1.clone()]).unwrap().1;
-
-    let endq_token = endq.transactional_lookup(&[a2.clone()]).unwrap().1;
-    let endq_title_token = endq_title.transactional_lookup(&[4.into()]).unwrap().1;
-    let endq_votes_token = endq_votes.transactional_lookup(&[0.into()]).unwrap().1;
-
-    // make one article
-    assert!(
-        mut1.transactional_put(vec![a1.clone(), 2.into()], token)
-            .is_ok()
-    );
-
-    // give it some time to propagate
-    sleep();
-
-    // query articles to see that it was absorbed
-    let (res, token) = articleq.transactional_lookup(&[a1.clone()]).unwrap();
-    assert_eq!(res, vec![vec![a1.clone(), 2.into()]]);
-
-    // check endq tokens are as expected
-    assert!(validate(&endq_token));
-    assert!(validate(&endq_title_token));
-    assert!(!validate(&endq_votes_token));
-
-    // make another article
-    assert!(
-        mut2.transactional_put(vec![a2.clone(), 4.into()], token)
-            .is_ok()
-    );
-
-    // give it some time to propagate
-    sleep();
-
-    // query articles again to see that the new article was absorbed
-    // and that the old one is still present
-    let (res, mut token) = articleq.transactional_lookup(&[a1.clone()]).unwrap();
-    assert_eq!(res, vec![vec![a1.clone(), 2.into()]]);
-    let (res, token2) = articleq.transactional_lookup(&[a2.clone()]).unwrap();
-    assert_eq!(res, vec![vec![a2.clone(), 4.into()]]);
-    // check endq tokens are as expected
-    assert!(!validate(&endq_token));
-    assert!(!validate(&endq_title_token));
-    assert!(!validate(&endq_votes_token));
-
-    // Check that the two reads happened transactionally.
-    token.merge(token2);
-    assert!(validate(&token));
-
-    let endq_token = endq.transactional_lookup(&[a1.clone()]).unwrap().1;
-    let endq_title_token = endq_title.transactional_lookup(&[4.into()]).unwrap().1;
-    let endq_votes_token = endq_votes.transactional_lookup(&[0.into()]).unwrap().1;
-
-    // create a vote (user 1 votes for article 1)
-    assert!(
-        mutv.transactional_put(vec![1.into(), a1.clone()], token)
-            .is_ok()
-    );
-
-    // give it some time to propagate
-    sleep();
-
-    // check endq tokens
-    assert!(!validate(&endq_token));
-    assert!(!validate(&endq_title_token));
-    assert!(!validate(&endq_votes_token));
-
-    // query vote count to see that the count was updated
-    let res = vcq.lookup(&[a1.clone()], true).unwrap();
-    assert!(res.iter().all(|r| r[0] == a1.clone() && r[1] == 1.into()));
-    assert_eq!(res.len(), 1);
-
-    // check that article 1 appears in the join view with a vote count of one
-    let res = endq.transactional_lookup(&[a1.clone()]).unwrap().0;
-    assert_eq!(res.len(), 1);
-    assert!(
-        res.iter()
-            .any(|r| r[0] == a1.clone() && r[1] == 2.into() && r[2] == 1.into()),
-        "no entry for [1,2,1|2] in {:?}",
-        res
-    );
-
-    // check that article 2 doesn't have any votes
-    let res = endq.transactional_lookup(&[a2.clone()]).unwrap().0;
-    assert!(res.len() <= 1); // could be 1 if we had zero-rows
-}
-*/
-
 #[test]
 fn empty_migration() {
     // set up graph
@@ -1301,8 +1089,8 @@ fn empty_migration() {
     g.migrate(|_| {});
 
     let _ = g.migrate(|mig| {
-        let a = mig.add_base("a", &["a", "b"], Base::default(), false);
-        let b = mig.add_base("b", &["a", "b"], Base::default(), false);
+        let a = mig.add_base("a", &["a", "b"], Base::default());
+        let b = mig.add_base("b", &["a", "b"], Base::default());
 
         let mut emits = HashMap::new();
         emits.insert(a, vec![0, 1]);
@@ -1349,7 +1137,7 @@ fn simple_migration() {
     // set up graph
     let mut g = build_local("simple_migration");
     let _ = g.migrate(|mig| {
-        let a = mig.add_base("a", &["a", "b"], Base::default(), false);
+        let a = mig.add_base("a", &["a", "b"], Base::default());
         mig.maintain_anonymous(a, &[0]);
         a
     });
@@ -1371,7 +1159,7 @@ fn simple_migration() {
 
     // add unrelated node b in a migration
     let _ = g.migrate(|mig| {
-        let b = mig.add_base("b", &["a", "b"], Base::default(), false);
+        let b = mig.add_base("b", &["a", "b"], Base::default());
         mig.maintain_anonymous(b, &[0]);
         b
     });
@@ -1399,7 +1187,7 @@ fn add_columns() {
     // set up graph
     let mut g = build_local("add_columns");
     let a = g.migrate(|mig| {
-        let a = mig.add_base("a", &["a", "b"], Base::new(vec![1.into(), 2.into()]), false);
+        let a = mig.add_base("a", &["a", "b"], Base::new(vec![1.into(), 2.into()]));
         mig.maintain_anonymous(a, &[0]);
         a
     });
@@ -1452,7 +1240,7 @@ fn migrate_added_columns() {
     // set up graph
     let mut g = build_local("migrate_added_columns");
     let a = g.migrate(|mig| {
-        let a = mig.add_base("a", &["a", "b"], Base::new(vec![1.into(), 2.into()]), false);
+        let a = mig.add_base("a", &["a", "b"], Base::new(vec![1.into(), 2.into()]));
         a
     });
     let mut muta = g.get_mutator("a").unwrap();
@@ -1500,12 +1288,7 @@ fn migrate_drop_columns() {
     // set up graph
     let mut g = build_local("migrate_drop_columns");
     let a = g.migrate(|mig| {
-        let a = mig.add_base(
-            "a",
-            &["a", "b"],
-            Base::new(vec!["a".into(), "b".into()]),
-            false,
-        );
+        let a = mig.add_base("a", &["a", "b"], Base::new(vec!["a".into(), "b".into()]));
         mig.maintain_anonymous(a, &[0]);
         a
     });
@@ -1571,7 +1354,7 @@ fn key_on_added() {
     // set up graph
     let mut g = build_local("key_on_added");
     let a = g.migrate(|mig| {
-        let a = mig.add_base("a", &["a", "b"], Base::new(vec![1.into(), 2.into()]), false);
+        let a = mig.add_base("a", &["a", "b"], Base::new(vec![1.into(), 2.into()]));
         a
     });
 
@@ -1605,14 +1388,9 @@ fn replay_during_replay() {
         //  - a will be the left side of the left join
         //  - u1 and u2 will be joined together with a regular one-to-one join to produce a partial
         //    view (remember, we need to miss in the source of the replay, so it must be partial).
-        let a = mig.add_base("a", &["a"], Base::new(vec![1.into()]), false);
-        let u1 = mig.add_base("u1", &["u"], Base::new(vec![1.into()]), false);
-        let u2 = mig.add_base(
-            "u2",
-            &["u", "a"],
-            Base::new(vec![1.into(), 2.into()]),
-            false,
-        );
+        let a = mig.add_base("a", &["a"], Base::new(vec![1.into()]));
+        let u1 = mig.add_base("u1", &["u"], Base::new(vec![1.into()]));
+        let u2 = mig.add_base("u2", &["u", "a"], Base::new(vec![1.into(), 2.into()]));
         (a, u1, u2)
     });
 
@@ -1702,7 +1480,7 @@ fn replay_during_replay() {
 fn full_aggregation_with_bogokey() {
     // set up graph
     let mut g = build_local("full_aggregation_with_bogokey");
-    let base = g.migrate(|mig| mig.add_base("base", &["x"], Base::new(vec![1.into()]), false));
+    let base = g.migrate(|mig| mig.add_base("base", &["x"], Base::new(vec![1.into()])));
 
     // add an aggregation over the base with a bogo key.
     // in other words, the aggregation is across all rows.
@@ -1751,104 +1529,13 @@ fn full_aggregation_with_bogokey() {
     );
 }
 
-/*
-#[test]
-fn transactional_migration() {
-    // set up graph
-    let mut g = build_local("transactional_migration");
-    let a = g.migrate(|mig| {
-        let a = mig.add_base("a", &["a", "b"], Base::default(), true);
-        mig.maintain_anonymous(a, &[0]);
-        a
-    });
-
-    let mut aq = g.get_getter("a").unwrap();
-    let mut muta = g.get_mutator("a").unwrap();
-
-    // send a value on a
-    muta.transactional_put(vec![1.into(), 2.into()], Token::empty())
-        .unwrap();
-
-    // give it some time to propagate
-    sleep();
-
-    // check that a got it
-    assert_eq!(
-        aq.transactional_lookup(&[1.into()]).unwrap().0,
-        vec![vec![1.into(), 2.into()]]
-    );
-
-    // add unrelated node b in a migration
-    let b = g.migrate(|mig| {
-        let b = mig.add_base("b", &["a", "b"], Base::default(), true);
-        mig.maintain_anonymous(b, &[0]);
-        b
-    });
-
-    let mut bq = g.get_getter("b").unwrap();
-    let mut mutb = g.get_mutator("b").unwrap();
-
-    // send a value on b
-    mutb.transactional_put(vec![2.into(), 4.into()], Token::empty())
-        .unwrap();
-
-    // give it some time to propagate
-    sleep();
-
-    // check that b got it
-    assert_eq!(
-        bq.transactional_lookup(&[2.into()]).unwrap().0,
-        vec![vec![2.into(), 4.into()]]
-    );
-
-    let _ = g.migrate(move |mig| {
-        let mut emits = HashMap::new();
-        emits.insert(a, vec![0, 1]);
-        emits.insert(b, vec![0, 1]);
-        let u = Union::new(emits);
-        let c = mig.add_ingredient("c", &["a", "b"], u);
-        mig.maintain_anonymous(c, &[0]);
-        c
-    });
-
-    let mut cq = g.get_getter("c").unwrap();
-
-    // check that c has both previous entries
-    assert_eq!(
-        aq.transactional_lookup(&[1.into()]).unwrap().0,
-        vec![vec![1.into(), 2.into()]]
-    );
-    assert_eq!(
-        bq.transactional_lookup(&[2.into()]).unwrap().0,
-        vec![vec![2.into(), 4.into()]]
-    );
-
-    // send a value on a and b
-    muta.transactional_put(vec![3.into(), 5.into()], Token::empty())
-        .unwrap();
-    mutb.transactional_put(vec![3.into(), 6.into()], Token::empty())
-        .unwrap();
-
-    // give them some time to propagate
-    sleep();
-
-    // check that c got them
-    let res = cq.transactional_lookup(&[3.into()]).unwrap().0;
-
-    assert_eq!(res.len(), 2);
-    assert!(res.contains(&vec![3.into(), 5.into()]));
-
-    assert!(res.contains(&vec![3.into(), 6.into()]));
-}
-*/
-
 #[test]
 fn crossing_migration() {
     // set up graph
     let mut g = build_local("crossing_migration");
     let (a, b) = g.migrate(|mig| {
-        let a = mig.add_base("a", &["a", "b"], Base::default(), false);
-        let b = mig.add_base("b", &["a", "b"], Base::default(), false);
+        let a = mig.add_base("a", &["a", "b"], Base::default());
+        let b = mig.add_base("b", &["a", "b"], Base::default());
         (a, b)
     });
     let mut muta = g.get_mutator("a").unwrap();
@@ -1894,7 +1581,7 @@ fn independent_domain_migration() {
     // set up graph
     let mut g = build_local("independent_domain_migration");
     let _ = g.migrate(|mig| {
-        let a = mig.add_base("a", &["a", "b"], Base::default(), false);
+        let a = mig.add_base("a", &["a", "b"], Base::default());
         mig.maintain_anonymous(a, &[0]);
         a
     });
@@ -1916,7 +1603,7 @@ fn independent_domain_migration() {
 
     // add unrelated node b in a migration
     let _ = g.migrate(|mig| {
-        let b = mig.add_base("b", &["a", "b"], Base::default(), false);
+        let b = mig.add_base("b", &["a", "b"], Base::default());
         mig.maintain_anonymous(b, &[0]);
         b
     });
@@ -1942,8 +1629,8 @@ fn domain_amend_migration() {
     // set up graph
     let mut g = build_local("domain_amend_migration");
     let (a, b) = g.migrate(|mig| {
-        let a = mig.add_base("a", &["a", "b"], Base::default(), false);
-        let b = mig.add_base("b", &["a", "b"], Base::default(), false);
+        let a = mig.add_base("a", &["a", "b"], Base::default());
+        let b = mig.add_base("b", &["a", "b"], Base::default());
         (a, b)
     });
     let mut muta = g.get_mutator("a").unwrap();
@@ -1993,7 +1680,7 @@ fn migration_depends_on_unchanged_domain() {
     let mut g = build_local("migration_depends_on_unchanged_domain");
     let left = g.migrate(|mig| {
         // base node, so will be materialized
-        let left = mig.add_base("foo", &["a", "b"], Base::default(), false);
+        let left = mig.add_base("foo", &["a", "b"], Base::default());
 
         // node in different domain that depends on foo causes egress to be added
         mig.add_ingredient("bar", &["a", "b"], Identity::new(left));
@@ -2003,7 +1690,7 @@ fn migration_depends_on_unchanged_domain() {
     g.migrate(move |mig| {
         // joins require their inputs to be materialized
         // we need a new base as well so we can actually make a join
-        let tmp = mig.add_base("tmp", &["a", "b"], Base::default(), false);
+        let tmp = mig.add_base("tmp", &["a", "b"], Base::default());
         let j = Join::new(
             left,
             tmp,
@@ -2021,7 +1708,7 @@ fn do_full_vote_migration(old_puts_after: bool) {
         // migrate
 
         // add article base node
-        let article = mig.add_base("article", &["id", "title"], Base::default(), false);
+        let article = mig.add_base("article", &["id", "title"], Base::default());
 
         // add vote base table
         // NOTE: the double-column key here means that we can't shard vote
@@ -2029,7 +1716,6 @@ fn do_full_vote_migration(old_puts_after: bool) {
             "vote",
             &["user", "id"],
             Base::default().with_key(vec![0, 1]),
-            false,
         );
 
         // add vote count
@@ -2079,7 +1765,7 @@ fn do_full_vote_migration(old_puts_after: bool) {
     // migrate
     let _ = g.migrate(move |mig| {
         // add new "ratings" base table
-        let rating = mig.add_base("rating", &["user", "id", "stars"], Base::default(), false);
+        let rating = mig.add_base("rating", &["user", "id", "stars"], Base::default());
 
         // add sum of ratings
         let rs = mig.add_ingredient(
@@ -2151,7 +1837,7 @@ fn live_writes() {
         // migrate
 
         // add vote base table
-        let vote = mig.add_base("vote", &["user", "id"], Base::default(), false);
+        let vote = mig.add_base("vote", &["user", "id"], Base::default());
 
         // add vote count
         let vc = mig.add_ingredient(
@@ -2223,8 +1909,8 @@ fn state_replay_migration_query() {
 
     let mut g = build_local("state_replay_migration_query");
     let (a, b) = g.migrate(|mig| {
-        let a = mig.add_base("a", &["x", "y"], Base::default(), false);
-        let b = mig.add_base("b", &["x", "z"], Base::default(), false);
+        let a = mig.add_base("a", &["x", "y"], Base::default());
+        let b = mig.add_base("b", &["x", "z"], Base::default());
 
         (a, b)
     });
@@ -2282,7 +1968,7 @@ fn recipe_activates() {
         assert_eq!(r.version(), 0);
         assert_eq!(r.expressions().len(), 1);
         assert_eq!(r.prior(), None);
-        assert!(r.activate(mig, false).is_ok());
+        assert!(r.activate(mig).is_ok());
     });
     // one base node
     assert_eq!(g.inputs().len(), 1);
@@ -2391,7 +2077,7 @@ fn tpc_w() {
             let or = r.clone();
             r = match r.extend(q) {
                 Ok(mut nr) => {
-                    assert!(nr.activate(mig, false).is_ok());
+                    assert!(nr.activate(mig).is_ok());
                     nr
                 }
                 Err(e) => {
@@ -2416,8 +2102,8 @@ fn node_removal() {
     ));
     let mut g = b.build_local();
     let cid = g.migrate(|mig| {
-        let a = mig.add_base("a", &["a", "b"], Base::new(vec![]).with_key(vec![0]), false);
-        let b = mig.add_base("b", &["a", "b"], Base::new(vec![]).with_key(vec![0]), false);
+        let a = mig.add_base("a", &["a", "b"], Base::new(vec![]).with_key(vec![0]));
+        let b = mig.add_base("b", &["a", "b"], Base::new(vec![]).with_key(vec![0]));
 
         let mut emits = HashMap::new();
         emits.insert(a, vec![0, 1]);

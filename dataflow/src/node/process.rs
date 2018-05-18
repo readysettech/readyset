@@ -36,7 +36,6 @@ impl Node {
                         src,
                         tracer,
                         mut senders,
-                        txn,
                     }) => {
                         let mut rs = b.process(addr, data, &*state);
 
@@ -54,13 +53,7 @@ impl Node {
                         // Send write-ACKs to all the clients with updates that made
                         // it into this merged packet:
                         if let Some(ex) = executor {
-                            match txn {
-                                None => senders.drain(..).for_each(|src| ex.send_back(src, Ok(0))),
-                                Some(TransactionState::Committed(ts, ..)) => {
-                                    senders.drain(..).for_each(|src| ex.send_back(src, Ok(ts)))
-                                }
-                                _ => unreachable!(),
-                            }
+                            senders.drain(..).for_each(|src| ex.send_back(src, Ok(0)));
                         }
 
                         *m = Some(Box::new(Packet::Message {

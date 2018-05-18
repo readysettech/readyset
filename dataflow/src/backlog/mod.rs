@@ -257,10 +257,6 @@ impl WriteHandle {
         }
     }
 
-    pub(crate) fn update_ts(&mut self, ts: i64) {
-        self.handle.set_meta(ts);
-    }
-
     pub(crate) fn is_partial(&self) -> bool {
         self.partial
     }

@@ -1,6 +1,5 @@
 use std::cell::RefCell;
 use std::io;
-use std::net::{SocketAddr, ToSocketAddrs};
 use std::ops::AddAssign;
 use std::os::unix::io::{AsRawFd, RawFd};
 use std::sync::{mpsc, Arc, Mutex, TryLockError};
@@ -133,14 +132,11 @@ pub struct WorkerPool {
 }
 
 impl WorkerPool {
-    pub fn new<A: ToSocketAddrs>(
+    pub fn new(
         n: usize,
         log: &Logger,
-        checktable_addr: A,
         channel_coordinator: Arc<ChannelCoordinator>,
     ) -> io::Result<Self> {
-        let checktable_addr = checktable_addr.to_socket_addrs().unwrap().next().unwrap();
-
         let poll = Arc::new(Poll::new()?);
         let (notify_tx, notify_rx): (_, Vec<_>) = (0..n).map(|_| mpsc::channel()).unzip();
         let truth = Arc::new(Mutex::new(Slab::new()));
@@ -155,10 +151,9 @@ impl WorkerPool {
                     channel_coordinator: channel_coordinator.clone(),
                     notify,
                 };
-                let checktable_addr = checktable_addr.clone();
                 thread::Builder::new()
                     .name(format!("worker{}", i + 1))
-                    .spawn(move || w.run(checktable_addr))
+                    .spawn(move || w.run())
                     .unwrap()
             })
             .collect();
@@ -234,7 +229,7 @@ pub struct Worker {
 }
 
 impl Worker {
-    pub fn run(mut self, checktable_addr: SocketAddr) {
+    pub fn run(mut self) {
         // we want to only process a single domain, otherwise we might hold on to work that another
         // worker could be doing. and that'd be silly.
         let mut events = Events::with_capacity(1);
@@ -243,8 +238,6 @@ impl Worker {
         let mut durtmp = None;
         let mut force_refresh_truth = false;
         let mut sends = Vec::new();
-
-        dataflow::connect_thread_checktable(checktable_addr);
 
         let cc = &self.channel_coordinator;
         let send = |me: &ReplicaIndex,
@@ -440,7 +433,6 @@ impl Worker {
                                 src: Some(SourceChannelIdentifier { token: token }),
                                 senders: Vec::new(),
                                 tracer: None,
-                                txn: None,
                             })
                         })
                     } else {

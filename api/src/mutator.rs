@@ -18,8 +18,6 @@ pub enum MutatorError {
     WrongColumnCount(usize, usize),
     /// Incorrect number of key columns specified for operations: (expected, got).
     WrongKeyColumnCount(usize, usize),
-    /// Transaction was unable to complete due to a conflict.
-    TransactionFailed,
 }
 
 /// Serializable struct that Mutators can be constructed from.
@@ -30,7 +28,6 @@ pub struct MutatorBuilder {
     pub addr: LocalNodeIndex,
     pub key_is_primary: bool,
     pub key: Vec<usize>,
-    pub transactional: bool,
     pub dropped: VecMap<DataType>,
 
     pub table_name: String,
@@ -72,7 +69,6 @@ impl MutatorBuilder {
             addr: self.addr,
             key: self.key,
             key_is_primary: self.key_is_primary,
-            transactional: self.transactional,
             dropped: self.dropped,
             //tracer: None,
             table_name: self.table_name,
@@ -90,7 +86,6 @@ pub struct Mutator<E = SharedConnection> {
     addr: LocalNodeIndex,
     key_is_primary: bool,
     key: Vec<usize>,
-    transactional: bool,
     dropped: VecMap<DataType>,
     //tracer: Tracer,
     table_name: String,
@@ -109,7 +104,6 @@ impl Clone for Mutator<SharedConnection> {
             addr: self.addr,
             key_is_primary: self.key_is_primary,
             key: self.key.clone(),
-            transactional: self.transactional,
             dropped: self.dropped.clone(),
             //tracer: self.tracer.clone(),
             table_name: self.table_name.clone(),
@@ -135,7 +129,6 @@ impl Mutator<SharedConnection> {
             addr: self.addr,
             key_is_primary: self.key_is_primary,
             key: self.key.clone(),
-            transactional: self.transactional,
             dropped: self.dropped.clone(),
             //tracer: self.tracer.clone(),
             table_name: self.table_name.clone(),
@@ -229,7 +222,6 @@ impl<E> Mutator<E> {
         Input {
             link: Link::new(self.addr, self.addr),
             data: ops,
-            //txn: TransactionState::WillCommit,
             //tracer: self.tracer.clone(),
         }
     }
@@ -242,28 +234,7 @@ impl<E> Mutator<E> {
             .unwrap();
     }
 
-    /*
-    fn tx_send(&mut self, mut ops: Vec<BaseOperation>, t: checktable::Token) -> Result<i64, ()> {
-        assert!(self.transactional);
-
-        self.inject_dropped_cols(&mut ops);
-        let m = Input {
-            link: Link::new(self.addr, self.addr),
-            data: ops,
-            //txn: TransactionState::Pending(t),
-            //tracer: self.tracer.clone(),
-        };
-
-        unimplemented!();
-
-        self.domain_input_handle
-            .borrow_mut()
-            .base_send(m, &self.key[..])
-            .map_err(|_| ())
-    }
-    */
-
-    /// Perform a non-transactional write to the base node this Mutator was generated for.
+    /// Perform a write to the base node this Mutator was generated for.
     pub fn batch_put<I, V>(&mut self, i: I) -> Result<(), MutatorError>
     where
         I: IntoIterator<Item = V>,
@@ -288,13 +259,10 @@ impl<E> Mutator<E> {
             batch_putter.enqueue(m, &self.key[..]).unwrap();
         }
 
-        batch_putter
-            .wait()
-            .map(|_| ())
-            .map_err(|_| MutatorError::TransactionFailed)
+        batch_putter.wait().map(|_| ()).map_err(|_| unreachable!())
     }
 
-    /// Perform a non-transactional write to the base node this Mutator was generated for.
+    /// Perform a write to the base node this Mutator was generated for.
     pub fn put<V>(&mut self, u: V) -> Result<(), MutatorError>
     where
         V: Into<Vec<DataType>>,
@@ -310,7 +278,7 @@ impl<E> Mutator<E> {
         Ok(self.send(data))
     }
 
-    /// Perform some non-transactional writes to the base node this Mutator was generated for.
+    /// Perform some writes to the base node this Mutator was generated for.
     pub fn multi_put<I, V>(&mut self, i: I) -> Result<(), MutatorError>
     where
         I: IntoIterator<Item = V>,
@@ -331,26 +299,7 @@ impl<E> Mutator<E> {
             .map(|data| self.send(data))
     }
 
-    /*
-    /// Perform a transactional write to the base node this Mutator was generated for.
-    pub fn transactional_put<V>(&mut self, u: V, t: checktable::Token) -> Result<i64, MutatorError>
-    where
-        V: Into<Vec<DataType>>,
-    {
-        let data = vec![BaseOperation::Insert(u.into())];
-        if data[0].row().unwrap().len() != self.columns.len() {
-            return Err(MutatorError::WrongColumnCount(
-                self.columns.len(),
-                data[0].row().unwrap().len(),
-            ));
-        }
-
-        self.tx_send(data, t)
-            .map_err(|()| MutatorError::TransactionFailed)
-    }
-    */
-
-    /// Perform a non-transactional delete from the base node this Mutator was generated for.
+    /// Perform a delete from the base node this Mutator was generated for.
     pub fn delete<I>(&mut self, key: I) -> Result<(), MutatorError>
     where
         I: Into<Vec<DataType>>,
@@ -358,22 +307,7 @@ impl<E> Mutator<E> {
         Ok(self.send(vec![BaseOperation::Delete { key: key.into() }].into()))
     }
 
-    /*
-    /// Perform a transactional delete from the base node this Mutator was generated for.
-    pub fn transactional_delete<I>(
-        &mut self,
-        key: I,
-        t: checktable::Token,
-    ) -> Result<i64, MutatorError>
-    where
-        I: Into<Vec<DataType>>,
-    {
-        self.tx_send(vec![BaseOperation::Delete { key: key.into() }].into(), t)
-            .map_err(|()| MutatorError::TransactionFailed)
-    }
-    */
-
-    /// Perform a non-transactional update to the base node this Mutator was generated for.
+    /// Perform a update to the base node this Mutator was generated for.
     pub fn update<V>(&mut self, key: Vec<DataType>, u: V) -> Result<(), MutatorError>
     where
         V: IntoIterator<Item = (usize, Modification)>,
@@ -397,7 +331,7 @@ impl<E> Mutator<E> {
         Ok(self.send(vec![BaseOperation::Update { key, set }].into()))
     }
 
-    /// Perform a non-transactional insert-or-update to the base node this Mutator was generated
+    /// Perform a insert-or-update to the base node this Mutator was generated
     /// for. If a record already exists for the key of the given record, the existing record will
     /// instead be updated with the modifications in `u`.
     pub fn insert_or_update<V>(

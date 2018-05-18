@@ -13,9 +13,7 @@ pub type Edge = ();
 pub type Graph = petgraph::Graph<Node, Edge>;
 
 // dataflow types
-pub use payload::{
-    Packet, PacketEvent, ReplayPathSegment, SourceChannelIdentifier, Tracer, TransactionState,
-};
+pub use payload::{Packet, PacketEvent, ReplayPathSegment, SourceChannelIdentifier, Tracer};
 pub use Sharding;
 
 // domain local state

@@ -23,15 +23,6 @@ pub enum ReadQuery {
         /// Whether to block if a partial replay is triggered
         block: bool,
     },
-    /*
-    /// Read and also get a checktable token
-    WithToken {
-        /// Where to read from
-        target: (NodeIndex, usize),
-        /// Keys to read with
-        keys: Vec<Vec<DataType>>,
-    },
-    */
     /// Read the size of a leaf view
     Size {
         /// Where to read from
@@ -45,11 +36,6 @@ pub enum ReadReply {
     /// Read normally.
     /// Errors if view isn't ready yet.
     Normal(Result<Vec<Datas>, ()>),
-    /*
-    /// Read and got checktable tokens.
-    /// Errors if view isn't ready yet.
-    WithToken(Result<Vec<(Datas, checktable::Token)>, ()>),
-    */
     /// Read size of view
     Size(usize),
 }
@@ -294,80 +280,10 @@ impl<E> RemoteGetter<E> {
         }
     }
 
-    /*
-    /// Query for the results for the given keys, optionally blocking if it is not yet available.
-    pub fn transactional_multi_lookup(
-        &mut self,
-        keys: Vec<Vec<DataType>>,
-    ) -> Result<Vec<(Datas, checktable::Token)>, ()> {
-        if self.shards.len() == 1 {
-            let mut shard = self.shards[0].borrow_mut();
-            let reply = shard
-                .send(&ReadQuery::WithToken {
-                    target: (self.node, 0),
-                    keys,
-                })
-                .unwrap();
-            match reply {
-                ReadReply::WithToken(rows) => rows,
-                _ => unreachable!(),
-            }
-        } else {
-            assert!(keys.iter().all(|k| k.len() == 1));
-            let mut shard_queries = vec![Vec::new(); self.shards.len()];
-            for key in keys {
-                let shard = shard_by(&key[0], self.shards.len());
-                shard_queries[shard].push(key);
-            }
-
-            let mut err = false;
-            let rows = shard_queries
-                .into_iter()
-                .enumerate()
-                .flat_map(|(shardi, keys)| {
-                    let mut shard = self.shards[shardi].borrow_mut();
-                    let reply = shard
-                        .send(&ReadQuery::WithToken {
-                            target: (self.node, shardi),
-                            keys,
-                        })
-                        .unwrap();
-
-                    match reply {
-                        ReadReply::WithToken(Ok(rows)) => rows,
-                        ReadReply::WithToken(Err(())) => {
-                            err = true;
-                            Vec::new()
-                        }
-                        _ => unreachable!(),
-                    }
-                })
-                .collect();
-            if err {
-                Err(())
-            } else {
-                Ok(rows)
-            }
-        }
-    }
-    */
-
     /// Lookup a single key.
     pub fn lookup(&mut self, key: &[DataType], block: bool) -> Result<Datas, ()> {
         // TODO: Optimized version of this function?
         self.multi_lookup(vec![Vec::from(key)], block)
             .map(|rs| rs.into_iter().next().unwrap())
     }
-
-    /*
-    /// Do a transactional lookup for a single key.
-    pub fn transactional_lookup(
-        &mut self,
-        key: &[DataType],
-    ) -> Result<(Datas, checktable::Token), ()> {
-        // TODO: Optimized version of this function?
-        self.transactional_multi_lookup(vec![Vec::from(key)])
-            .map(|rs| rs.into_iter().next().unwrap())
-    }
-    */
 }

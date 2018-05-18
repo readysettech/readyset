@@ -1,6 +1,5 @@
 use std::time;
 
-use checktable;
 use debug::DebugEventType;
 use prelude::*;
 
@@ -39,11 +38,7 @@ impl GroupCommitQueueSet {
     }
 
     /// Find the first queue that has timed out waiting for more packets, and flush it to disk.
-    pub fn flush_if_necessary(
-        &mut self,
-        nodes: &DomainNodes,
-        ex: &Executor,
-    ) -> Option<Box<Packet>> {
+    pub fn flush_if_necessary(&mut self) -> Option<Box<Packet>> {
         let mut needs_flush = None;
         for (node, wait_start) in self.wait_start.iter() {
             if wait_start.elapsed() >= self.params.flush_timeout {
@@ -52,28 +47,18 @@ impl GroupCommitQueueSet {
             }
         }
 
-        needs_flush.and_then(|node| self.flush_internal(&node, nodes, ex))
+        needs_flush.and_then(|node| self.flush_internal(&node))
     }
 
     /// Merge any pending packets.
-    fn flush_internal(
-        &mut self,
-        node: &LocalNodeIndex,
-        nodes: &DomainNodes,
-        ex: &Executor,
-    ) -> Option<Box<Packet>> {
+    fn flush_internal(&mut self, node: &LocalNodeIndex) -> Option<Box<Packet>> {
         self.wait_start.remove(node);
-        Self::merge_packets(&mut self.pending_packets[node], nodes, ex)
+        Self::merge_packets(&mut self.pending_packets[node])
     }
 
     /// Add a new packet to be persisted, and if this triggered a flush return an iterator over the
     /// packets that were written.
-    pub fn append<'a>(
-        &mut self,
-        p: Box<Packet>,
-        nodes: &DomainNodes,
-        ex: &Executor,
-    ) -> Option<Box<Packet>> {
+    pub fn append<'a>(&mut self, p: Box<Packet>) -> Option<Box<Packet>> {
         let node = p.link().dst;
         if !self.pending_packets.contains_key(&node) {
             self.pending_packets
@@ -82,7 +67,7 @@ impl GroupCommitQueueSet {
 
         self.pending_packets[&node].push(p);
         if self.pending_packets[&node].len() >= self.params.queue_capacity {
-            return self.flush_internal(&node, nodes, ex);
+            return self.flush_internal(&node);
         } else if !self.wait_start.contains_key(&node) {
             self.wait_start.insert(node, time::Instant::now());
         }
@@ -102,10 +87,7 @@ impl GroupCommitQueueSet {
             .min()
     }
 
-    fn merge_committed_packets<I>(
-        packets: I,
-        transaction_state: Option<TransactionState>,
-    ) -> Option<Box<Packet>>
+    fn merge_committed_packets<I>(packets: I) -> Option<Box<Packet>>
     where
         I: Iterator<Item = Box<Packet>>,
     {
@@ -121,11 +103,9 @@ impl GroupCommitQueueSet {
                     src,
                     tracer,
                     senders,
-                    txn,
                 } => {
                     assert_eq!(senders.len(), 0);
                     assert_eq!(merged_link, link);
-                    assert!(txn.is_none() || txn.unwrap().is_committed());
                     acc.extend(data);
 
                     if let Some(src) = src {
@@ -163,126 +143,15 @@ impl GroupCommitQueueSet {
             src: None,
             tracer: merged_tracer,
             senders: all_senders,
-            txn: transaction_state,
         }))
     }
 
-    /// Merge the contents of packets into a single packet, emptying packets in the process. Panics
-    /// if every packet in packets is not a `Packet::Transaction`, or if packets is empty.
-    fn merge_transactional_packets(
-        packets: &mut Vec<Box<Packet>>,
-        nodes: &DomainNodes,
-        ex: &Executor,
-    ) -> Option<Box<Packet>> {
-        let send_reply = |p: &Packet, reply| {
-            let src = match *p {
-                Packet::Transaction { src: Some(src), .. } => src,
-                _ => unreachable!(),
-            };
-            ex.send_back(src, reply);
-        };
-
-        let base = if let box Packet::Transaction { ref link, .. } = packets[0] {
-            nodes[&link.dst].borrow().global_addr()
-        } else {
-            unreachable!()
-        };
-
-        let reply = {
-            let transactions = packets
-                .iter()
-                .enumerate()
-                .map(|(i, p)| {
-                    let id = checktable::TransactionId(i as u64);
-                    if let box Packet::Transaction {
-                        ref data,
-                        ref state,
-                        ..
-                    } = *p
-                    {
-                        match *state {
-                            TransactionState::Pending(ref token, ..) => {
-                                // NOTE: this data.clone() seems sad?
-                                (id, data.clone(), Some(token.clone()))
-                            }
-                            TransactionState::WillCommit => (id, data.clone(), None),
-                            TransactionState::Committed(..) => unreachable!(),
-                        }
-                    } else {
-                        unreachable!();
-                    }
-                })
-                .collect();
-
-            let request = checktable::service::TimestampRequest { transactions, base };
-            match checktable::with_checktable(|ct| ct.apply_batch(request).unwrap()) {
-                None => {
-                    for packet in packets.drain(..) {
-                        if let Packet::Transaction {
-                            state: TransactionState::Pending(..),
-                            ..
-                        } = *packet
-                        {
-                            send_reply(&packet, Err(()));
-                        } else {
-                            unreachable!();
-                        }
-                    }
-                    return None;
-                }
-                Some(mut reply) => {
-                    reply.committed_transactions.sort();
-                    reply
-                }
-            }
-        };
-
-        let prevs = reply.prevs;
-        let committed_transactions = reply.committed_transactions;
-
-        // TODO: persist list of committed transacions.
-
-        let committed_packets = packets.drain(..).enumerate().filter_map(|(i, packet)| {
-            if let box Packet::Transaction {
-                state: TransactionState::Pending(..),
-                ..
-            } = packet
-            {
-                if committed_transactions
-                    .binary_search(&checktable::TransactionId(i as u64))
-                    .is_err()
-                {
-                    send_reply(&packet, Err(()));
-                    return None;
-                }
-            }
-            Some(packet)
-        });
-
-        Self::merge_committed_packets(
-            committed_packets,
-            Some(TransactionState::Committed(reply.timestamp, base, prevs)),
-        )
-    }
-
     /// Merge the contents of packets into a single packet, emptying packets in the process.
-    fn merge_packets(
-        packets: &mut Vec<Box<Packet>>,
-        nodes: &DomainNodes,
-        ex: &Executor,
-    ) -> Option<Box<Packet>> {
+    fn merge_packets(packets: &mut Vec<Box<Packet>>) -> Option<Box<Packet>> {
         if packets.is_empty() {
             return None;
         }
 
-        match *packets[0] {
-            Packet::Input { txn: None, .. } => {
-                Self::merge_committed_packets(packets.drain(..), None)
-            }
-            Packet::Input { txn: Some(..), .. } => {
-                Self::merge_transactional_packets(packets, nodes, ex)
-            }
-            _ => unreachable!(),
-        }
+        Self::merge_committed_packets(packets.drain(..))
     }
 }
