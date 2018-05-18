@@ -317,7 +317,6 @@
 #![feature(fnbox)]
 
 extern crate api;
-extern crate assert_infrequent;
 extern crate basics;
 extern crate bincode;
 extern crate channel;
@@ -335,7 +334,6 @@ extern crate nom;
 extern crate nom_sql;
 extern crate petgraph;
 extern crate rand;
-extern crate serde;
 #[macro_use]
 extern crate serde_derive;
 extern crate serde_json;
@@ -345,7 +343,6 @@ extern crate slog;
 extern crate slog_term;
 extern crate tarpc;
 extern crate timer_heap;
-extern crate tokio_core;
 extern crate vec_map;
 
 mod controller;

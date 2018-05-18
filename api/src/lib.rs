@@ -11,7 +11,6 @@ extern crate futures;
 extern crate hyper;
 extern crate mio;
 extern crate mio_pool;
-#[macro_use]
 extern crate nom;
 extern crate nom_sql;
 extern crate petgraph;
@@ -21,7 +20,6 @@ extern crate serde;
 extern crate serde_derive;
 extern crate serde_json;
 extern crate slab;
-#[macro_use]
 extern crate slog;
 extern crate slog_term;
 extern crate tarpc;

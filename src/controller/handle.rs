@@ -1,28 +1,13 @@
-use consensus::{Authority, LocalAuthority};
-use dataflow::checktable;
+use consensus::{Authority};
 use dataflow::prelude::*;
-use dataflow::statistics::GraphStats;
 
-use std::collections::{BTreeMap, HashMap};
-use std::net::SocketAddr;
+use std::collections::{HashMap};
 use std::ops::{Deref, DerefMut};
 use std::sync::mpsc::Sender;
 use std::sync::Arc;
-use std::thread::{self, JoinHandle};
-use std::time::Duration;
+use std::thread::{JoinHandle};
 
-use assert_infrequent;
-use futures::Stream;
-use hyper::{self, Client};
-use serde::de::DeserializeOwned;
-use serde::Serialize;
-use serde_json;
-use tarpc::sync::client::{self, ClientExt};
-use tokio_core::reactor::Core;
-
-use api::builders::*;
 use api::prelude::*;
-use api::ControllerDescriptor;
 use controller::{ControlEvent, WorkerEvent};
 
 /// A handle to a controller that is running in the same process as this one.

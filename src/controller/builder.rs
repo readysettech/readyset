@@ -1,4 +1,3 @@
-use api::ControllerHandle;
 use basics::PersistenceParameters;
 use consensus::{Authority, LocalAuthority};
 

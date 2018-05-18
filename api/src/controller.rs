@@ -13,7 +13,6 @@ use hyper::{self, Client};
 use serde::de::DeserializeOwned;
 use serde::Serialize;
 use serde_json;
-use tarpc::sync::client::{self, ClientExt};
 use tokio_core::reactor::Core;
 
 use consensus::Authority;

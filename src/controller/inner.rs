@@ -8,7 +8,6 @@ use dataflow::{checktable, node, payload, DomainConfig};
 
 use std::collections::{BTreeMap, HashMap};
 use std::error::Error;
-use std::fmt::{self, Display};
 use std::net::{IpAddr, SocketAddr};
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};

@@ -1,15 +1,9 @@
 use std::collections::HashMap;
-use std::net::{IpAddr, SocketAddr};
-use std::sync::Arc;
-use std::{self, cell, io};
-
-use mio;
-use slog::Logger;
+use std::net::{SocketAddr};
+use std::{io};
 
 use basics::*;
-use channel::poll::{KeepPolling, PollEvent, PollingLoop, StopPolling};
-use channel::{tcp, DomainConnectionBuilder, TcpReceiver, TcpSender};
-use consensus::Epoch;
+use channel::{tcp, DomainConnectionBuilder, TcpSender};
 use {ExclusiveConnection, SharedConnection};
 
 use nom_sql::CreateTableStatement;

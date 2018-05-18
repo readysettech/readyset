@@ -1,7 +1,7 @@
 use std::collections::HashMap;
 use std::net::{IpAddr, SocketAddr};
 use std::sync::Arc;
-use std::{self, cell, io};
+use std::{self, cell};
 
 use mio;
 use slog::Logger;
@@ -13,7 +13,7 @@ use consensus::Epoch;
 use dataflow::payload::ControlReplyPacket;
 use dataflow::prelude::*;
 use dataflow::statistics::{DomainStats, NodeStats};
-use dataflow::{self, DomainBuilder, DomainConfig};
+use dataflow::{DomainBuilder, DomainConfig};
 
 use controller::{WorkerEndpoint, WorkerIdentifier};
 use coordination::{CoordinationMessage, CoordinationPayload};

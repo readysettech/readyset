@@ -1,15 +1,6 @@
-use api::{ExclusiveConnection, SharedConnection};
-use channel::rpc::RpcClient;
-
 use dataflow::backlog::{self, ReadHandle};
 use dataflow::prelude::*;
-use dataflow::{self, checktable, LocalBypass, Readers};
-
-use std::cell::RefCell;
-use std::collections::HashMap;
-use std::io;
-use std::net::SocketAddr;
-use std::rc::Rc;
+use dataflow::{checktable, Readers};
 
 /// A handle for looking up results in a materialized view.
 pub struct Getter {
