@@ -154,14 +154,17 @@ impl DomainInputHandle {
     }
 }
 
+struct DomainShardHandle {
+    worker: WorkerIdentifier,
+    tx: TcpSender<Box<Packet>>,
+    is_local: bool,
+}
+
 pub struct DomainHandle {
     _idx: DomainIndex,
 
     cr_poll: PollingLoop<ControlReplyPacket>,
-    txs: Vec<(TcpSender<Box<Packet>>, bool)>,
-
-    // Which worker each shard is assigned to, if any.
-    assignments: Vec<WorkerIdentifier>,
+    shards: Vec<DomainShardHandle>,
 }
 
 impl DomainHandle {
@@ -186,7 +189,7 @@ impl DomainHandle {
         // *also* have the same number of shards. if this no longer holds, we actually need to do a
         // shuffle, otherwise writes will end up on the wrong shard. keep that in mind.
 
-        let mut txs = Vec::new();
+        let mut txs = HashMap::new();
         let mut cr_rxs = Vec::new();
         let mut assignments = Vec::new();
         let mut nodes = Some(Self::build_descriptors(graph, nodes));
@@ -243,7 +246,8 @@ impl DomainHandle {
             PollEvent::ResumePolling(_) => KeepPolling,
             PollEvent::Process(ControlReplyPacket::Booted(shard, addr)) => {
                 channel_coordinator.insert_addr((idx, shard), addr.clone(), false);
-                txs.push(
+                txs.insert(
+                    shard,
                     channel_coordinator
                         .get_dest(&(idx, shard))
                         .map(|(addr, is_local)| {
@@ -287,20 +291,32 @@ impl DomainHandle {
             PollEvent::Timeout => unreachable!(),
         });
 
+        let shards = assignments
+            .into_iter()
+            .enumerate()
+            .map(|(i, worker)| {
+                let (tx, is_local) = txs.remove(&i).unwrap();
+                DomainShardHandle {
+                    is_local,
+                    worker,
+                    tx,
+                }
+            })
+            .collect();
+
         DomainHandle {
             _idx: idx,
             cr_poll,
-            txs,
-            assignments,
+            shards,
         }
     }
 
     pub fn shards(&self) -> usize {
-        self.txs.len()
+        self.shards.len()
     }
 
     pub fn assignment(&self, shard: usize) -> WorkerIdentifier {
-        self.assignments[shard].clone()
+        self.shards[shard].worker.clone()
     }
 
     fn build_descriptors(graph: &mut Graph, nodes: Vec<(NodeIndex, bool)>) -> DomainNodes {
@@ -315,22 +331,22 @@ impl DomainHandle {
     }
 
     pub fn send(&mut self, p: Box<Packet>) -> Result<(), tcp::SendError> {
-        for &mut (ref mut tx, is_local) in self.txs.iter_mut() {
-            if is_local {
+        for shard in self.shards.iter_mut() {
+            if shard.is_local {
                 // TODO: avoid clone on last iteration.
-                tx.send(p.clone().make_local())?;
+                shard.tx.send(p.clone().make_local())?;
             } else {
-                tx.send_ref(&p)?;
+                shard.tx.send_ref(&p)?;
             }
         }
         Ok(())
     }
 
     pub fn send_to_shard(&mut self, i: usize, mut p: Box<Packet>) -> Result<(), tcp::SendError> {
-        if self.txs[i].1 {
+        if self.shards[i].is_local {
             p = p.make_local();
         }
-        self.txs[i].0.send(p)
+        self.shards[i].tx.send(p)
     }
 
     fn wait_for_next_reply(&mut self) -> ControlReplyPacket {
