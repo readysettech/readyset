@@ -488,7 +488,6 @@ impl fmt::Debug for Packet {
                 data.len()
             ),
             Packet::Local(ref lp) => {
-                use std::mem;
                 let lp = unsafe { lp.deref() };
                 let s = write!(f, "local {:?}", lp)?;
                 Ok(s)

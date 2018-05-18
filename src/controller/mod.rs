@@ -52,8 +52,8 @@ pub use api::builders::*;
 pub use api::prelude::*;
 pub use controller::builder::ControllerBuilder;
 pub use controller::getter::Getter;
-pub use controller::migrate::Migration;
 pub use controller::handle::LocalControllerHandle;
+pub use controller::migrate::Migration;
 use controller::worker_inner::WorkerInner;
 
 type WorkerIdentifier = SocketAddr;

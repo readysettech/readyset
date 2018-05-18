@@ -1,11 +1,11 @@
-use consensus::{Authority};
+use consensus::Authority;
 use dataflow::prelude::*;
 
-use std::collections::{HashMap};
+use std::collections::HashMap;
 use std::ops::{Deref, DerefMut};
 use std::sync::mpsc::Sender;
 use std::sync::Arc;
-use std::thread::{JoinHandle};
+use std::thread::JoinHandle;
 
 use api::prelude::*;
 use controller::{ControlEvent, WorkerEvent};

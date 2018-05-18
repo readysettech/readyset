@@ -138,7 +138,8 @@ impl Base {
         state: &StateMap,
     ) -> Records {
         if self.primary_key.is_none() || ops.is_empty() {
-            return ops.into_iter()
+            return ops
+                .into_iter()
                 .map(|r| {
                     if let BaseOperation::Insert(mut r) = r {
                         self.fix(&mut r);

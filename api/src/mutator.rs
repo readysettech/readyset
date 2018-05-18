@@ -1,6 +1,6 @@
 use std::collections::HashMap;
-use std::net::{SocketAddr};
-use std::{io};
+use std::io;
+use std::net::SocketAddr;
 
 use basics::*;
 use channel::{tcp, DomainConnectionBuilder, TcpSender};

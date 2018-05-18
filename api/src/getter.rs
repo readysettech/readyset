@@ -57,9 +57,7 @@ impl RemoteGetterBuilder {
         let conns = self
             .shards
             .iter()
-            .map(move |addr| {
-                Rc::new(RefCell::new(RpcClient::connect(addr, false).unwrap()))
-            })
+            .map(move |addr| Rc::new(RefCell::new(RpcClient::connect(addr, false).unwrap())))
             .collect();
 
         RemoteGetter {
@@ -177,8 +175,8 @@ impl<E> RemoteGetter<E> {
             let mut shard = self.shards[0].borrow_mut();
             let reply = shard
                 .send(&ReadQuery::Size {
-                        target: (self.node, 0),
-                    })
+                    target: (self.node, 0),
+                })
                 .unwrap();
             match reply {
                 ReadReply::Size(rows) => Ok(rows),
@@ -191,9 +189,8 @@ impl<E> RemoteGetter<E> {
                 let mut shard = self.shards[shardi].borrow_mut();
                 let reply = shard
                     .send(&ReadQuery::Size {
-                            target: (self.node, shardi),
-                        }
-                    )
+                        target: (self.node, shardi),
+                    })
                     .unwrap();
 
                 match reply {
@@ -215,10 +212,10 @@ impl<E> RemoteGetter<E> {
             let mut shard = self.shards[0].borrow_mut();
             let reply = shard
                 .send(&ReadQuery::Normal {
-                        target: (self.node, 0),
-                        keys,
-                        block,
-                    })
+                    target: (self.node, 0),
+                    keys,
+                    block,
+                })
                 .unwrap();
             match reply {
                 ReadReply::Normal(rows) => rows,
@@ -247,10 +244,10 @@ impl<E> RemoteGetter<E> {
                     Some(
                         shard
                             .send_async(&ReadQuery::Normal {
-                                    target: (self.node, shardi),
-                                    keys: mem::replace(&mut shard_queries[shardi], Vec::new()),
-                                    block,
-                                })
+                                target: (self.node, shardi),
+                                keys: mem::replace(&mut shard_queries[shardi], Vec::new()),
+                                block,
+                            })
                             .unwrap(),
                     )
                 })

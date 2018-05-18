@@ -4,7 +4,7 @@ use basics::{DataType, DurabilityMode, PersistenceParameters};
 use consensus::LocalAuthority;
 use controller::recipe::Recipe;
 use controller::sql::SqlIncorporator;
-use controller::{LocalControllerHandle, ControllerBuilder};
+use controller::{ControllerBuilder, LocalControllerHandle};
 use dataflow::node::special::Base;
 use dataflow::ops::grouped::aggregate::Aggregation;
 use dataflow::ops::identity::Identity;
