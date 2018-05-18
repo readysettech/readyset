@@ -31,7 +31,6 @@ extern crate serde_json;
 extern crate slog;
 #[macro_use]
 extern crate tarpc;
-extern crate api;
 extern crate timekeeper;
 extern crate tokio_core;
 extern crate vec_map;

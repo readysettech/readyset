@@ -498,13 +498,6 @@ impl ControllerInner {
             let columns = self.ingredients[r].fields().to_vec();
             let shards = (0..self.domains[&domain].shards())
                 .map(|i| self.read_addrs[&self.domains[&domain].assignment(i)].clone())
-                .map(|a| {
-                    // NOTE: this is where we decide whether assignments are local or not (and
-                    // hence whether we should use LocalBypass). currently, we assume that either
-                    // *all* assignments are local, or *none* are. this is likely to change, at
-                    // which point this has to change too.
-                    (a, false)
-                })
                 .collect();
 
             RemoteGetterBuilder {
@@ -576,7 +569,6 @@ impl ControllerInner {
             table_name: node.name().to_owned(),
             columns,
             schema,
-            is_local: true,
         })
     }
 

@@ -6,9 +6,9 @@ use dataflow::Readers;
 use std::cell::RefCell;
 use std::collections::HashMap;
 
-use api::{LocalOrNot, ReadQuery, ReadReply};
+use api::{ReadQuery, ReadReply};
 
-pub(crate) type Rpc = RpcServiceEndpoint<LocalOrNot<ReadQuery>, LocalOrNot<ReadReply>>;
+pub(crate) type Rpc = RpcServiceEndpoint<ReadQuery, ReadReply>;
 
 thread_local! {
     static READERS: RefCell<HashMap<
@@ -17,10 +17,9 @@ thread_local! {
     >> = Default::default();
 }
 
-pub(crate) fn handle_message(m: LocalOrNot<ReadQuery>, conn: &mut Rpc, s: &mut Readers) {
-    let is_local = m.is_local();
-    let mut res = conn.send(&LocalOrNot::make(
-        match unsafe { m.take() } {
+pub(crate) fn handle_message(m: ReadQuery, conn: &mut Rpc, s: &mut Readers) {
+    let mut res = conn.send(&
+        match m {
             ReadQuery::Normal {
                 target,
                 mut keys,
@@ -140,9 +139,7 @@ pub(crate) fn handle_message(m: LocalOrNot<ReadQuery>, conn: &mut Rpc, s: &mut R
 
                 ReadReply::Size(size)
             }
-        },
-        is_local,
-    ));
+        });
 
     while let Err(RpcSendError::StillNeedsFlush) = res {
         res = conn.flush();

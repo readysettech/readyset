@@ -1,5 +1,5 @@
 use petgraph;
-use serde::{Deserialize, Serialize};
+use serde::{Deserialize, Deserializer, Serialize, Serializer};
 
 #[cfg(debug_assertions)]
 use backtrace::Backtrace;
@@ -15,6 +15,76 @@ use std::collections::{HashMap, HashSet};
 use std::fmt;
 use std::net::SocketAddr;
 use std::time;
+
+pub struct LocalBypass<T>(*mut T);
+
+impl<T> LocalBypass<T> {
+    pub fn make(t: Box<T>) -> Self {
+        LocalBypass(Box::into_raw(t))
+    }
+
+    pub unsafe fn deref(&self) -> &T {
+        &*self.0
+    }
+
+    pub unsafe fn take(self) -> Box<T> {
+        Box::from_raw(self.0)
+    }
+}
+
+unsafe impl<T> Send for LocalBypass<T> {}
+impl<T> Serialize for LocalBypass<T> {
+    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: Serializer,
+    {
+        (self.0 as usize).serialize(serializer)
+    }
+}
+impl<'de, T> Deserialize<'de> for LocalBypass<T> {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: Deserializer<'de>,
+    {
+        usize::deserialize(deserializer).map(|p| LocalBypass(p as *mut T))
+    }
+}
+impl<T> Clone for LocalBypass<T> {
+    fn clone(&self) -> LocalBypass<T> {
+        panic!("LocalBypass types cannot be cloned");
+    }
+}
+
+#[derive(Serialize, Deserialize)]
+pub enum LocalOrNot<T> {
+    Local(LocalBypass<T>),
+    Not(T),
+}
+
+impl<T> LocalOrNot<T> {
+    pub fn is_local(&self) -> bool {
+        if let LocalOrNot::Local(..) = *self {
+            true
+        } else {
+            false
+        }
+    }
+
+    pub fn make(t: T, local: bool) -> Self {
+        if local {
+            LocalOrNot::Local(LocalBypass::make(Box::new(t)))
+        } else {
+            LocalOrNot::Not(t)
+        }
+    }
+
+    pub unsafe fn take(self) -> T {
+        match self {
+            LocalOrNot::Local(l) => *l.take(),
+            LocalOrNot::Not(t) => t,
+        }
+    }
+}
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct ReplayPathSegment {
@@ -569,5 +639,3 @@ impl ControlReplyPacket {
         ControlReplyPacket::Ack(())
     }
 }
-
-pub use api::LocalBypass;

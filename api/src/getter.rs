@@ -1,5 +1,5 @@
 use channel::rpc::RpcClient;
-use {ExclusiveConnection, LocalBypass, LocalOrNot, SharedConnection};
+use {ExclusiveConnection, SharedConnection};
 
 use basics::*;
 
@@ -9,7 +9,7 @@ use std::io;
 use std::net::SocketAddr;
 use std::rc::Rc;
 
-pub(crate) type GetterRpc = Rc<RefCell<RpcClient<LocalOrNot<ReadQuery>, LocalOrNot<ReadReply>>>>;
+pub(crate) type GetterRpc = Rc<RefCell<RpcClient<ReadQuery, ReadReply>>>;
 
 /// A request to read a specific key.
 #[derive(Serialize, Deserialize, Debug)]
@@ -60,7 +60,7 @@ pub enum ReadReply {
 pub struct RemoteGetterBuilder {
     pub node: NodeIndex,
     pub columns: Vec<String>,
-    pub shards: Vec<(SocketAddr, bool)>,
+    pub shards: Vec<SocketAddr>,
     // one per shard
     pub local_ports: Vec<u16>,
 }
@@ -71,8 +71,8 @@ impl RemoteGetterBuilder {
         let conns = self
             .shards
             .iter()
-            .map(move |&(ref addr, is_local)| {
-                Rc::new(RefCell::new(RpcClient::connect(addr, is_local).unwrap()))
+            .map(move |addr| {
+                Rc::new(RefCell::new(RpcClient::connect(addr, false).unwrap()))
             })
             .collect();
 
@@ -102,7 +102,7 @@ impl RemoteGetterBuilder {
             .shards
             .iter()
             .enumerate()
-            .map(move |(shardi, &(ref addr, is_local))| {
+            .map(move |(shardi, addr)| {
                 use std::collections::hash_map::Entry;
 
                 // one entry per shard so that we can send sharded requests in parallel even if
@@ -111,7 +111,7 @@ impl RemoteGetterBuilder {
                     Entry::Occupied(e) => Rc::clone(e.get()),
                     Entry::Vacant(h) => {
                         let c =
-                            RpcClient::connect_from(sports.get(shardi).map(|&p| p), addr, is_local)
+                            RpcClient::connect_from(sports.get(shardi).map(|&p| p), addr, false)
                                 .unwrap();
                         if shardi >= sports.len() {
                             assert!(shardi == sports.len());
@@ -141,7 +141,7 @@ pub struct RemoteGetter<E = SharedConnection> {
     node: NodeIndex,
     columns: Vec<String>,
     shards: Vec<GetterRpc>,
-    shard_addrs: Vec<(SocketAddr, bool)>,
+    shard_addrs: Vec<SocketAddr>,
 
     #[allow(dead_code)]
     exclusivity: E,
@@ -189,16 +189,12 @@ impl<E> RemoteGetter<E> {
     pub fn len(&mut self) -> Result<usize, ()> {
         if self.shards.len() == 1 {
             let mut shard = self.shards[0].borrow_mut();
-            let is_local = shard.is_local();
             let reply = shard
-                .send(&LocalOrNot::make(
-                    ReadQuery::Size {
+                .send(&ReadQuery::Size {
                         target: (self.node, 0),
-                    },
-                    is_local,
-                ))
+                    })
                 .unwrap();
-            match unsafe { reply.take() } {
+            match reply {
                 ReadReply::Size(rows) => Ok(rows),
                 _ => unreachable!(),
             }
@@ -207,17 +203,14 @@ impl<E> RemoteGetter<E> {
 
             let len = shard_queries.into_iter().fold(0, |acc, shardi| {
                 let mut shard = self.shards[shardi].borrow_mut();
-                let is_local = shard.is_local();
                 let reply = shard
-                    .send(&LocalOrNot::make(
-                        ReadQuery::Size {
+                    .send(&ReadQuery::Size {
                             target: (self.node, shardi),
-                        },
-                        is_local,
-                    ))
+                        }
+                    )
                     .unwrap();
 
-                match unsafe { reply.take() } {
+                match reply {
                     ReadReply::Size(rows) => acc + rows,
                     _ => unreachable!(),
                 }
@@ -234,18 +227,14 @@ impl<E> RemoteGetter<E> {
     ) -> Result<Vec<Datas>, ()> {
         if self.shards.len() == 1 {
             let mut shard = self.shards[0].borrow_mut();
-            let is_local = shard.is_local();
             let reply = shard
-                .send(&LocalOrNot::make(
-                    ReadQuery::Normal {
+                .send(&ReadQuery::Normal {
                         target: (self.node, 0),
                         keys,
                         block,
-                    },
-                    is_local,
-                ))
+                    })
                 .unwrap();
-            match unsafe { reply.take() } {
+            match reply {
                 ReadReply::Normal(rows) => rows,
                 _ => unreachable!(),
             }
@@ -269,17 +258,13 @@ impl<E> RemoteGetter<E> {
                         return None;
                     }
 
-                    let is_local = shard.is_local();
                     Some(
                         shard
-                            .send_async(&LocalOrNot::make(
-                                ReadQuery::Normal {
+                            .send_async(&ReadQuery::Normal {
                                     target: (self.node, shardi),
                                     keys: mem::replace(&mut shard_queries[shardi], Vec::new()),
                                     block,
-                                },
-                                is_local,
-                            ))
+                                })
                             .unwrap(),
                     )
                 })
@@ -290,7 +275,7 @@ impl<E> RemoteGetter<E> {
                 .into_iter()
                 .flat_map(|res| {
                     let reply = res.wait().unwrap();
-                    match unsafe { reply.take() } {
+                    match reply {
                         ReadReply::Normal(Ok(rows)) => rows,
                         ReadReply::Normal(Err(())) => {
                             err = true;
@@ -317,17 +302,13 @@ impl<E> RemoteGetter<E> {
     ) -> Result<Vec<(Datas, checktable::Token)>, ()> {
         if self.shards.len() == 1 {
             let mut shard = self.shards[0].borrow_mut();
-            let is_local = shard.is_local();
             let reply = shard
-                .send(&LocalOrNot::make(
-                    ReadQuery::WithToken {
-                        target: (self.node, 0),
-                        keys,
-                    },
-                    is_local,
-                ))
+                .send(&ReadQuery::WithToken {
+                    target: (self.node, 0),
+                    keys,
+                })
                 .unwrap();
-            match unsafe { reply.take() } {
+            match reply {
                 ReadReply::WithToken(rows) => rows,
                 _ => unreachable!(),
             }
@@ -345,18 +326,14 @@ impl<E> RemoteGetter<E> {
                 .enumerate()
                 .flat_map(|(shardi, keys)| {
                     let mut shard = self.shards[shardi].borrow_mut();
-                    let is_local = shard.is_local();
                     let reply = shard
-                        .send(&LocalOrNot::make(
-                            ReadQuery::WithToken {
-                                target: (self.node, shardi),
-                                keys,
-                            },
-                            is_local,
-                        ))
+                        .send(&ReadQuery::WithToken {
+                            target: (self.node, shardi),
+                            keys,
+                        })
                         .unwrap();
 
-                    match unsafe { reply.take() } {
+                    match reply {
                         ReadReply::WithToken(Ok(rows)) => rows,
                         ReadReply::WithToken(Err(())) => {
                             err = true;

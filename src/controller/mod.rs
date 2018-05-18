@@ -1,7 +1,7 @@
 use channel::poll::{PollEvent, PollingLoop, ProcessResult};
 use channel::tcp::TcpSender;
 
-use api::{ControllerDescriptor, LocalOrNot};
+use api::ControllerDescriptor;
 use basics::PersistenceParameters;
 use consensus::{Authority, Epoch, STATE_KEY};
 use dataflow::checktable::service::CheckTableServer;

@@ -44,10 +44,6 @@ pub struct MutatorBuilder {
     pub schema: Option<CreateTableStatement>,
 
     pub local_port: Option<u16>,
-
-    // skip so that serde will set value to default (which is false) when serializing
-    #[serde(skip)]
-    pub is_local: bool,
 }
 
 pub(crate) type MutatorRpc = Rc<RefCell<DomainInputHandle>>;
@@ -88,7 +84,6 @@ impl MutatorBuilder {
             table_name: self.table_name,
             columns: self.columns,
             schema: self.schema,
-            is_local: self.is_local,
             exclusivity: SharedConnection,
         }
     }
@@ -107,7 +102,6 @@ pub struct Mutator<E = SharedConnection> {
     table_name: String,
     columns: Vec<String>,
     schema: Option<CreateTableStatement>,
-    is_local: bool,
 
     #[allow(dead_code)]
     exclusivity: E,
@@ -127,7 +121,6 @@ impl Clone for Mutator<SharedConnection> {
             table_name: self.table_name.clone(),
             columns: self.columns.clone(),
             schema: self.schema.clone(),
-            is_local: self.is_local,
             exclusivity: SharedConnection,
         }
     }
@@ -154,7 +147,6 @@ impl Mutator<SharedConnection> {
             table_name: self.table_name.clone(),
             columns: self.columns.clone(),
             schema: self.schema.clone(),
-            is_local: self.is_local,
             exclusivity: ExclusiveConnection,
         }
     }
