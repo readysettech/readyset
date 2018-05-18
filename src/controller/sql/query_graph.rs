@@ -1,7 +1,9 @@
 use nom_sql::SelectStatement;
-use nom_sql::{ArithmeticBase, ArithmeticExpression, Column, ConditionBase, ConditionExpression,
-              ConditionTree, FieldDefinitionExpression, FieldValueExpression, JoinConstraint,
-              JoinOperator, JoinRightSide, Literal, Operator, Table};
+use nom_sql::{
+    ArithmeticBase, ArithmeticExpression, Column, ConditionBase, ConditionExpression,
+    ConditionTree, FieldDefinitionExpression, FieldValueExpression, JoinConstraint, JoinOperator,
+    JoinRightSide, Literal, Operator, Table,
+};
 
 use std::cmp::Ordering;
 use std::collections::HashMap;
@@ -460,7 +462,8 @@ pub fn to_query_graph(st: &SelectStatement) -> Result<QueryGraph, String> {
         QueryGraphNode {
             rel_name: rel.clone(),
             predicates: preds,
-            columns: st.fields
+            columns: st
+                .fields
                 .iter()
                 .filter_map(|field| match *field {
                     // unreachable because SQL rewrite passes will have expanded these already
@@ -604,7 +607,8 @@ pub fn to_query_graph(st: &SelectStatement) -> Result<QueryGraph, String> {
                 };
 
                 // add edge for join
-                let mut _e = qg.edges
+                let mut _e = qg
+                    .edges
                     .entry((left_table.clone(), right_table.clone()))
                     .or_insert_with(|| match jc.operator {
                         JoinOperator::LeftJoin => QueryGraphEdge::LeftJoin(vec![join_pred]),
@@ -670,7 +674,8 @@ pub fn to_query_graph(st: &SelectStatement) -> Result<QueryGraph, String> {
                         );
                     }
 
-                    let e = qg.edges
+                    let e = qg
+                        .edges
                         .entry((l.table.clone().unwrap(), r.table.clone().unwrap()))
                         .or_insert_with(|| QueryGraphEdge::Join(vec![]));
                     match *e {
@@ -766,7 +771,8 @@ pub fn to_query_graph(st: &SelectStatement) -> Result<QueryGraph, String> {
         Some(ref clause) => {
             for column in &clause.columns {
                 // add an edge for each relation whose columns appear in the GROUP BY clause
-                let e = qg.edges
+                let e = qg
+                    .edges
                     .entry((
                         String::from("computed_columns"),
                         column.table.as_ref().unwrap().clone(),

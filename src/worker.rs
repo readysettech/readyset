@@ -346,7 +346,8 @@ impl Worker {
             };
 
             if force_refresh_truth
-                || self.shared
+                || self
+                    .shared
                     .sockets
                     .get(token)
                     .and_then(|sc| self.shared.replicas.get(sc.rit))
@@ -380,7 +381,8 @@ impl Worker {
                     continue;
                 }
             };
-            let replica = self.shared
+            let replica = self
+                .shared
                 .replicas
                 .get(sc.rit)
                 .expect("token resolves to unknown replica");
@@ -643,7 +645,8 @@ impl Worker {
                                 continue;
                             }
 
-                            if next.as_ref()
+                            if next
+                                .as_ref()
                                 .map(|&(ref nri, _)| nri == &ri)
                                 .unwrap_or(false)
                             {
@@ -691,7 +694,8 @@ impl Worker {
             while let Some((ri, m)) = next.take() {
                 assert!(sends.is_empty());
                 let rit = self.shared.revmap[&ri];
-                let rc = self.shared
+                let rc = self
+                    .shared
                     .replicas
                     .get(rit)
                     .expect("packet is for unknown replica");
@@ -776,7 +780,8 @@ impl Worker {
                                 continue;
                             }
 
-                            if next.as_ref()
+                            if next
+                                .as_ref()
                                 .map(|&(ref nri, _)| nri == &ri)
                                 .unwrap_or(false)
                             {

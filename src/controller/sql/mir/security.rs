@@ -1,8 +1,8 @@
-use controller::sql::UniverseId;
-use controller::sql::mir::SqlToMirConverter;
 use controller::sql::mir::rewrite::make_rewrite_nodes;
+use controller::sql::mir::SqlToMirConverter;
 use controller::sql::query_graph::QueryGraph;
 use controller::sql::query_signature::Signature;
+use controller::sql::UniverseId;
 use mir::MirNodeRef;
 use std::collections::HashMap;
 
@@ -172,7 +172,8 @@ fn make_security_nodes(
 
         // handles predicate nodes
         for rel in &sorted_rels {
-            let qgn = qg.relations
+            let qgn = qg
+                .relations
                 .get(*rel)
                 .expect("relation should have a query graph node.");
             assert!(*rel != "computed_collumns");

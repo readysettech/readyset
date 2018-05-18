@@ -1,8 +1,8 @@
 use channel::poll::{PollEvent, PollingLoop, ProcessResult};
 use channel::tcp::TcpSender;
 
-use consensus::{Authority, Epoch, STATE_KEY};
 use basics::PersistenceParameters;
+use consensus::{Authority, Epoch, STATE_KEY};
 use dataflow::checktable::service::CheckTableServer;
 use dataflow::DomainConfig;
 
@@ -497,12 +497,8 @@ impl<A: Authority + 'static> Controller<A> {
                         Box::new(req.body().concat2().and_then(move |body| {
                             let body: Vec<u8> = body.iter().cloned().collect();
                             let (tx, rx) = futures::sync::oneshot::channel();
-                            let _ = event_tx.send(ControlEvent::ExternalRequest(
-                                method,
-                                path,
-                                body,
-                                tx,
-                            ));
+                            let _ = event_tx
+                                .send(ControlEvent::ExternalRequest(method, path, body, tx));
                             rx.and_then(|reply| {
                                 let mut res = Response::new();
                                 res.headers_mut()

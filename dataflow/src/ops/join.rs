@@ -60,7 +60,8 @@ impl Join {
     /// means right parent).
     pub fn new(left: NodeIndex, right: NodeIndex, kind: JoinType, emit: Vec<JoinSource>) -> Self {
         let mut join_columns = Vec::new();
-        let emit: Vec<_> = emit.into_iter()
+        let emit: Vec<_> = emit
+            .into_iter()
             .map(|join_source| match join_source {
                 JoinSource::L(c) => (true, c),
                 JoinSource::R(c) => (false, c),
@@ -76,7 +77,8 @@ impl Join {
 
         let (in_place_left_emit, in_place_right_emit) = {
             let compute_in_place_emit = |left| {
-                let num_columns = emit.iter()
+                let num_columns = emit
+                    .iter()
                     .filter(|&&(from_left, _)| from_left == left)
                     .map(|&(_, c)| c + 1)
                     .max()
@@ -291,13 +293,14 @@ impl Ingredient for Join {
             let prev_join_key = rs[at][from_key].clone();
 
             if from == *self.right && self.kind == JoinType::Left {
-                let rc = self.lookup(
-                    *self.right,
-                    &[self.on.1],
-                    &KeyType::Single(&prev_join_key),
-                    nodes,
-                    state,
-                ).unwrap();
+                let rc =
+                    self.lookup(
+                        *self.right,
+                        &[self.on.1],
+                        &KeyType::Single(&prev_join_key),
+                        nodes,
+                        state,
+                    ).unwrap();
 
                 if rc.is_none() {
                     // we got something from right, but that row's key is not in right??
@@ -323,13 +326,14 @@ impl Ingredient for Join {
             }
 
             // get rows from the other side
-            let mut other_rows = self.lookup(
-                other,
-                &[other_key],
-                &KeyType::Single(&prev_join_key),
-                nodes,
-                state,
-            ).unwrap();
+            let mut other_rows =
+                self.lookup(
+                    other,
+                    &[other_key],
+                    &KeyType::Single(&prev_join_key),
+                    nodes,
+                    state,
+                ).unwrap();
 
             if other_rows.is_none() {
                 // we missed in the other side!
@@ -529,7 +533,8 @@ impl Ingredient for Join {
     }
 
     fn description(&self) -> String {
-        let emit = self.emit
+        let emit = self
+            .emit
             .iter()
             .map(|&(from_left, col)| {
                 let src = if from_left {
@@ -567,16 +572,10 @@ impl Ingredient for Join {
                 (self.right.as_global(), Some(self.on.1)),
             ]
         } else {
-            vec![
-                (
-                    if pcol.0 {
-                        &self.left
-                    } else {
-                        &self.right
-                    }.as_global(),
-                    Some(pcol.1),
-                ),
-            ]
+            vec![(
+                if pcol.0 { &self.left } else { &self.right }.as_global(),
+                Some(pcol.1),
+            )]
         }
     }
 }

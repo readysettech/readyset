@@ -197,7 +197,8 @@ impl GraphViz for MirNodeType {
                 write!(out, "⋈  | on: {}", jc)?;
             }
             MirNodeType::Leaf { ref keys, .. } => {
-                let key_cols = keys.iter()
+                let key_cols = keys
+                    .iter()
                     .map(|k| k.name.clone())
                     .collect::<Vec<_>>()
                     .join(", ");
@@ -271,7 +272,8 @@ impl GraphViz for MirNodeType {
                 write!(out, "TopK | k: {}, {:?}", k, order)?;
             }
             MirNodeType::Union { ref emit } => {
-                let cols = emit.iter()
+                let cols = emit
+                    .iter()
                     .map(|c| {
                         c.iter()
                             .map(|e| e.name.clone())

@@ -1,6 +1,7 @@
-use nom_sql::{ArithmeticBase, Column, ConditionExpression, ConditionTree,
-              FieldDefinitionExpression, FieldValueExpression, JoinRightSide, SelectStatement,
-              SqlQuery, Table};
+use nom_sql::{
+    ArithmeticBase, Column, ConditionExpression, ConditionTree, FieldDefinitionExpression,
+    FieldValueExpression, JoinRightSide, SelectStatement, SqlQuery, Table,
+};
 
 use std::collections::HashMap;
 
@@ -197,7 +198,8 @@ fn rewrite_selection(
     sq.group_by = match sq.group_by {
         None => None,
         Some(gbc) => Some(GroupByClause {
-            columns: gbc.columns
+            columns: gbc
+                .columns
                 .into_iter()
                 .map(|f| expand_columns(f, &tables))
                 .collect(),
@@ -211,7 +213,8 @@ fn rewrite_selection(
     sq.order = match sq.order {
         None => None,
         Some(oc) => Some(OrderClause {
-            columns: oc.columns
+            columns: oc
+                .columns
                 .into_iter()
                 .map(|(f, o)| (expand_columns(f, &tables), o))
                 .collect(),
@@ -226,7 +229,8 @@ impl ImpliedTableExpansion for SqlQuery {
         match self {
             SqlQuery::CreateTable(..) => self,
             SqlQuery::CompoundSelect(mut csq) => {
-                csq.selects = csq.selects
+                csq.selects = csq
+                    .selects
                     .into_iter()
                     .map(|(op, sq)| (op, rewrite_selection(sq, write_schemas)))
                     .collect();
@@ -236,7 +240,8 @@ impl ImpliedTableExpansion for SqlQuery {
             SqlQuery::Insert(mut iq) => {
                 let table = iq.table.clone();
                 // Expand within field list
-                iq.fields = iq.fields
+                iq.fields = iq
+                    .fields
                     .into_iter()
                     .map(|c| set_table(c, &table))
                     .collect();
@@ -255,7 +260,9 @@ mod tests {
 
     #[test]
     fn it_expands_implied_tables_for_select() {
-        use nom_sql::{ConditionBase, ConditionExpression, ConditionTree, Operator, SelectStatement};
+        use nom_sql::{
+            ConditionBase, ConditionExpression, ConditionTree, Operator, SelectStatement,
+        };
 
         let wrap = |cb| Box::new(ConditionExpression::Base(cb));
 

@@ -2,8 +2,8 @@ use std::collections::BTreeMap;
 use std::sync::{Condvar, Mutex};
 
 use failure::Error;
-use serde::Serialize;
 use serde::de::DeserializeOwned;
+use serde::Serialize;
 use serde_json;
 
 use Authority;
@@ -78,7 +78,11 @@ impl Authority for LocalAuthority {
             inner = self.cv.wait(inner).unwrap();
         }
 
-        Ok(inner.keys.get(CONTROLLER_KEY).cloned().map(|k| (inner.epoch, k)))
+        Ok(inner
+            .keys
+            .get(CONTROLLER_KEY)
+            .cloned()
+            .map(|k| (inner.epoch, k)))
     }
 
     fn try_read(&self, path: &str) -> Result<Option<Vec<u8>>, Error> {
@@ -108,9 +112,9 @@ impl Authority for LocalAuthority {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::time::Duration;
     use std::sync::Arc;
     use std::thread;
+    use std::time::Duration;
 
     #[test]
     fn it_works() {

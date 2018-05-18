@@ -1,10 +1,10 @@
 use std::process;
-use std::time::Duration;
 use std::thread::{self, Thread};
+use std::time::Duration;
 
 use failure::Error;
-use serde::Serialize;
 use serde::de::DeserializeOwned;
+use serde::Serialize;
 use serde_json;
 use slog;
 use zookeeper::{Acl, CreateMode, KeeperState, Stat, WatchedEvent, Watcher, ZkError, ZooKeeper};
@@ -201,8 +201,8 @@ impl Authority for ZookeeperAuthority {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::time::Duration;
     use std::sync::Arc;
+    use std::time::Duration;
 
     #[test]
     #[allow_fail]

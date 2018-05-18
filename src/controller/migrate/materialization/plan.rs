@@ -56,7 +56,8 @@ impl<'a> Plan<'a> {
             .into_iter()
             .map(|path| -> Vec<_> {
                 let mut found = false;
-                let mut path: Vec<_> = path.into_iter()
+                let mut path: Vec<_> = path
+                    .into_iter()
                     .enumerate()
                     .take_while(|&(i, (node, _))| {
                         // remember, the paths are "backwards", so the first node is target node
@@ -357,7 +358,8 @@ impl<'a> Plan<'a> {
             .unwrap_or_else(|| {
                 // not a reader
                 if self.partial {
-                    let indices = self.tags
+                    let indices = self
+                        .tags
                         .drain()
                         .map(|(k, paths)| (k, paths.into_iter().map(|(tag, _)| tag).collect()))
                         .collect();
@@ -416,7 +418,8 @@ impl<'a> Plan<'a> {
             let mut parents = Vec::from(parents);
 
             // the node dictates that we *must* replay the state of some ancestor(s)
-            let options = n.must_replay_among()
+            let options = n
+                .must_replay_among()
                 .expect("join did not have must replay preference");
             parents.retain(|&parent| options.contains(&parent));
             assert!(!parents.is_empty());

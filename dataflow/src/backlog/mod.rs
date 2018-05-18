@@ -1,5 +1,5 @@
-use basics::{DataType, Record};
 use basics::data::SizeOf;
+use basics::{DataType, Record};
 use fnv::FnvBuildHasher;
 use std::borrow::Cow;
 
@@ -132,7 +132,8 @@ pub(crate) struct WriteHandleEntry<'a> {
 
 impl<'a> MutWriteHandleEntry<'a> {
     pub fn mark_filled(self) {
-        if let Some((None, _)) = self.handle
+        if let Some((None, _)) = self
+            .handle
             .handle
             .meta_get_and(Cow::Borrowed(&*self.key), |rs| rs.is_empty())
         {
@@ -143,7 +144,8 @@ impl<'a> MutWriteHandleEntry<'a> {
     }
 
     pub fn mark_hole(self) {
-        let size = self.handle
+        let size = self
+            .handle
             .handle
             .meta_get_and(Cow::Borrowed(&*self.key), |rs| {
                 rs.iter().map(|r| r.deep_size_of()).sum()
@@ -248,7 +250,8 @@ impl WriteHandle {
         if mem_delta > 0 {
             self.mem_size += mem_delta as usize;
         } else if mem_delta < 0 {
-            self.mem_size = self.mem_size
+            self.mem_size = self
+                .mem_size
                 .checked_sub(mem_delta.checked_abs().unwrap() as usize)
                 .unwrap();
         }
@@ -278,7 +281,8 @@ impl WriteHandle {
                     bytes_to_be_freed += size;
                 }
             }
-            self.mem_size = self.mem_size
+            self.mem_size = self
+                .mem_size
                 .checked_sub(bytes_to_be_freed as usize)
                 .unwrap();
         }

@@ -11,14 +11,14 @@ extern crate toml;
 use mysql::OptsBuilder;
 use mysql::Params;
 
-use std::path::Path;
-use std::io::{BufRead, BufReader, Read, Write};
-use std::fs::{self, File};
 use std::collections::BTreeMap;
+use std::fmt::Write as FmtWrite;
+use std::fs::{self, File};
+use std::io::{BufRead, BufReader, Read, Write};
+use std::path::Path;
 use std::slice::SliceConcatExt;
 use std::str::FromStr;
 use std::sync::{Arc, Mutex};
-use std::fmt::Write as FmtWrite;
 
 use std::io;
 use std::panic;
@@ -183,8 +183,7 @@ fn generate_target_results(schemas: &BTreeMap<String, Schema>) {
                 if let Err(msg) = insert.execute(row.clone()) {
                     println!(
                         "MySQL insert query failed for table: {}, values: {:?}",
-                        table_name,
-                        row
+                        table_name, row
                     );
                     println!("{:?}", msg);
                     panic!();
@@ -207,7 +206,8 @@ fn generate_target_results(schemas: &BTreeMap<String, Schema>) {
 
                 let values = Params::Positional(values.iter().map(|v| v.into()).collect());
                 for row in pool.prep_exec(&query.select_query, values).unwrap() {
-                    let row = row.unwrap()
+                    let row = row
+                        .unwrap()
                         .unwrap()
                         .into_iter()
                         .map(|v| {
@@ -284,7 +284,8 @@ fn check_query(
         let mut mutator = g.get_mutator(table_name).unwrap();
         for row in table.data.as_ref().unwrap().iter() {
             assert_eq!(row.len(), table.types.len());
-            let row: Vec<DataType> = row.iter()
+            let row: Vec<DataType> = row
+                .iter()
                 .enumerate()
                 .map(|(i, v)| table.types[i].make_datatype(v))
                 .collect();
@@ -321,8 +322,7 @@ fn check_query(
             Some(diff) => {
                 return Err(format!(
                     "MySQL and Soup results do not match for ? = {:?}\n{}",
-                    query_parameter,
-                    diff
+                    query_parameter, diff
                 ))
             }
             None => {}

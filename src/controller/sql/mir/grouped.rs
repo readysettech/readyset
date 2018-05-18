@@ -83,7 +83,8 @@ pub fn make_grouped(
     match qg.relations.get("computed_columns") {
         None => (),
         Some(computed_cols_cgn) => {
-            let gb_edges: Vec<_> = qg.edges
+            let gb_edges: Vec<_> = qg
+                .edges
                 .values()
                 .filter(|e| match **e {
                     QueryGraphEdge::Join(_) | QueryGraphEdge::LeftJoin(_) => false,

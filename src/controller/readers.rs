@@ -44,7 +44,8 @@ pub(crate) fn handle_message(m: LocalOrNot<ReadQuery>, conn: &mut Rpc, s: &mut R
                 let dup = &dup;
 
                 // first do non-blocking reads for all keys to trigger any replays
-                let found = keys.iter_mut()
+                let found = keys
+                    .iter_mut()
                     .map(|key| {
                         let rs = reader.find_and(key, dup, false).map(|r| r.0);
                         (key, rs)

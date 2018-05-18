@@ -1,8 +1,8 @@
-use std::collections::HashMap;
 use serde::{Deserialize, Deserializer, Serialize, Serializer};
+use std::collections::HashMap;
 
-use node::MaterializationStatus;
 use domain;
+use node::MaterializationStatus;
 use prelude::*;
 
 type DomainMap = HashMap<(domain::Index, usize), (DomainStats, HashMap<NodeIndex, NodeStats>)>;

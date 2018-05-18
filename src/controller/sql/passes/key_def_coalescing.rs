@@ -9,7 +9,8 @@ impl KeyDefinitionCoalescing for SqlQuery {
         match self {
             SqlQuery::CreateTable(mut ctq) => {
                 // TODO(malte): only handles primary keys so far!
-                let pkeys: Vec<&ColumnSpecification> = ctq.fields
+                let pkeys: Vec<&ColumnSpecification> = ctq
+                    .fields
                     .iter()
                     .filter(|cs| cs.constraints.contains(&ColumnConstraint::PrimaryKey))
                     .collect();
@@ -39,8 +40,9 @@ impl KeyDefinitionCoalescing for SqlQuery {
 #[cfg(test)]
 mod tests {
     use super::KeyDefinitionCoalescing;
-    use nom_sql::{Column, ColumnConstraint, ColumnSpecification, SqlQuery, SqlType, Table,
-                  TableKey};
+    use nom_sql::{
+        Column, ColumnConstraint, ColumnSpecification, SqlQuery, SqlType, Table, TableKey,
+    };
 
     #[test]
     fn it_coalesces_pkeys() {

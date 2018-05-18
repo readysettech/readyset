@@ -1,7 +1,7 @@
-use MirNodeRef;
+use dataflow::ops::filter::FilterCondition;
 use node::{MirNode, MirNodeType};
 use query::MirQuery;
-use dataflow::ops::filter::FilterCondition;
+use MirNodeRef;
 
 use std::collections::HashMap;
 

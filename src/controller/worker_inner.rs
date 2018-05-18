@@ -10,8 +10,8 @@ use controller::{readers, ControllerState};
 use coordination::{CoordinationMessage, CoordinationPayload};
 use worker;
 
-use std::collections::HashMap;
 use std::cmp;
+use std::collections::HashMap;
 use std::fs;
 use std::io;
 use std::net::{IpAddr, SocketAddr};
@@ -278,7 +278,8 @@ impl WorkerInner {
         }
         // 2. add current state sizes (could be out of date, as packet sent below is not
         //    necessarily received immediately)
-        let sizes: Vec<(&(DomainIndex, usize), usize)> = self.state_sizes
+        let sizes: Vec<(&(DomainIndex, usize), usize)> = self
+            .state_sizes
             .iter()
             .map(|(ds, sa)| {
                 let size = sa.load(Ordering::Relaxed);
@@ -326,7 +327,8 @@ impl WorkerInner {
         let listener = TcpListener::bind(&addr).unwrap();
         let addr = listener.local_addr().unwrap();
         let pool = PoolBuilder::from(listener).unwrap();
-        let h = pool.with_state(readers.clone())
+        let h = pool
+            .with_state(readers.clone())
             .set_thread_name_prefix("reader-")
             .with_adapter(RpcServiceEndpoint::new)
             .run(

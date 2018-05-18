@@ -203,7 +203,8 @@ impl GroupedOperation for GroupConcat {
     }
 
     fn description(&self) -> String {
-        let fields = self.components
+        let fields = self
+            .components
             .iter()
             .map(|c| match *c {
                 TextComponent::Literal(ref s) => format!("\"{}\"", s),
