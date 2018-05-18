@@ -159,7 +159,8 @@ impl DomainBuilder {
         state_size: Arc<AtomicUsize>,
     ) -> Domain {
         // initially, all nodes are not ready
-        let not_ready = self.nodes
+        let not_ready = self
+            .nodes
             .values()
             .map(|n| *n.borrow().local_addr())
             .collect();
@@ -172,7 +173,8 @@ impl DomainBuilder {
 
         let log = log.new(o!("domain" => self.index.0, "shard" => self.shard));
 
-        let debug_tx = self.debug_addr
+        let debug_tx = self
+            .debug_addr
             .as_ref()
             .map(|addr| TcpSender::connect(addr).unwrap());
         let control_reply_tx = TcpSender::connect(&self.control_addr).unwrap();
@@ -615,7 +617,8 @@ impl Domain {
                 // but, for now, here we go:
                 // first, what partial replay paths go through this node?
                 let from = self.nodes[&src].borrow().global_addr();
-                let deps: Vec<_> = self.replay_paths
+                let deps: Vec<_> = self
+                    .replay_paths
                     .iter()
                     .filter_map(|(&tag, rp)| {
                         rp.path
@@ -974,7 +977,8 @@ impl Domain {
                     Packet::StateSizeProbe { node } => {
                         let row_count =
                             self.state.get(&node).map(|state| state.rows()).unwrap_or(0);
-                        let mem_size = self.state
+                        let mem_size = self
+                            .state
                             .get(&node)
                             .map(|state| state.deep_size_of())
                             .unwrap_or(0);
@@ -1166,7 +1170,8 @@ impl Domain {
                         let still_miss = self.nodes[&node]
                             .borrow_mut()
                             .with_reader_mut(|r| {
-                                let w = r.writer_mut()
+                                let w = r
+                                    .writer_mut()
                                     .expect("reader replay requested for non-materialized reader");
                                 // ensure that all writes have been applied
                                 w.swap();
@@ -1180,7 +1185,8 @@ impl Domain {
 
                         // ensure that we haven't already requested a replay of this key
                         if still_miss
-                            && self.reader_triggered
+                            && self
+                                .reader_triggered
                                 .entry(node)
                                 .or_default()
                                 .insert(key.clone())
@@ -1212,7 +1218,8 @@ impl Domain {
                         // we clone the entire state so that we can continue to occasionally
                         // process incoming updates to the domain without disturbing the state that
                         // is being replayed.
-                        let state = self.state
+                        let state = self
+                            .state
                             .get(&from)
                             .expect("migration replay path started with non-materialized node")
                             .cloned_records();
@@ -1389,7 +1396,8 @@ impl Domain {
                             wait_time: self.wait_time.num_nanoseconds(),
                         };
 
-                        let node_stats = self.nodes
+                        let node_stats = self
+                            .nodes
                             .values()
                             .filter_map(|nd| {
                                 let ref n = *nd.borrow();
@@ -1453,7 +1461,8 @@ impl Domain {
                             .unwrap();
                     }
                     Packet::UpdateStateSize => {
-                        let total: u64 = self.nodes
+                        let total: u64 = self
+                            .nodes
                             .values()
                             .map(|nd| {
                                 let ref n = *nd.borrow();
@@ -1555,7 +1564,8 @@ impl Domain {
                 ref path,
                 ..
             } => {
-                let state = self.state
+                let state = self
+                    .state
                     .get(&source)
                     .expect("migration replay path started with non-materialized node");
 
@@ -1686,7 +1696,8 @@ impl Domain {
                 ref path,
                 ..
             } => {
-                let rs = self.state
+                let rs = self
+                    .state
                     .get(&source)
                     .expect("migration replay path started with non-materialized node")
                     .lookup(&cols[..], &KeyType::from(&key[..]));
@@ -1900,7 +1911,8 @@ impl Domain {
                         // this is the case either if the current node is waiting for a replay,
                         // *or* if the target is a reader. the last case is special in that when a
                         // client requests a replay, the Reader isn't marked as "waiting".
-                        let target = backfill_keys.is_some() && i == path.len() - 1
+                        let target = backfill_keys.is_some()
+                            && i == path.len() - 1
                             && (is_reader || self.waiting.contains_key(&segment.node));
 
                         // targets better be last
@@ -2077,7 +2089,8 @@ impl Domain {
                         //     replay count! note that it's *not* sufficient to check if the
                         //     *current* node is a target/reader, because we could miss during a
                         //     join along the path.
-                        if backfill_keys.is_some() && finished_partial == 0
+                        if backfill_keys.is_some()
+                            && finished_partial == 0
                             && (dst_is_reader || dst_is_target)
                         {
                             finished_partial = backfill_keys.as_ref().unwrap().len();
@@ -2583,7 +2596,8 @@ impl Domain {
                     return;
                 };
 
-                let i = path.iter()
+                let i = path
+                    .iter()
                     .position(|ps| ps.node == dst)
                     .expect("got eviction for non-local node");
                 walk_path(
@@ -2689,7 +2703,8 @@ impl Domain {
                 ProcessResult::KeepPolling
             }
             PollEvent::Timeout => {
-                if let Some(m) = self.group_commit_queues
+                if let Some(m) = self
+                    .group_commit_queues
                     .flush_if_necessary(&self.nodes, executor)
                 {
                     self.handle(m, sends, Some(executor), true);

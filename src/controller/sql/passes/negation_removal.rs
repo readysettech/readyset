@@ -1,5 +1,6 @@
-use nom_sql::{ConditionBase, ConditionExpression, ConditionTree, JoinConstraint, Literal,
-              Operator, SqlQuery};
+use nom_sql::{
+    ConditionBase, ConditionExpression, ConditionTree, JoinConstraint, Literal, Operator, SqlQuery,
+};
 
 use std::mem;
 

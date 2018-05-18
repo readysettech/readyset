@@ -1,10 +1,10 @@
-use controller::Migration;
 use controller::security::SecurityConfig;
 use controller::sql::query_graph::{to_query_graph, QueryGraph};
 use controller::sql::{QueryFlowParts, SqlIncorporator};
+use controller::Migration;
 use dataflow::prelude::DataType;
-use nom_sql::SqlQuery;
 use nom_sql::parser as sql_parser;
+use nom_sql::SqlQuery;
 use std::collections::HashMap;
 
 #[derive(Clone, Debug)]
@@ -106,7 +106,8 @@ impl Multiverse for SqlIncorporator {
         let mut row_policies_qg: HashMap<String, Vec<QueryGraph>> = HashMap::new();
         for policy in universe_policies {
             if !policy.is_row_policy() {
-                let qfp = self.add_parsed_query(policy.predicate(), None, false, mig)
+                let qfp = self
+                    .add_parsed_query(policy.predicate(), None, false, mig)
                     .unwrap();
                 let rewrite_view = qfp.name.clone();
                 let rw_pol = RewritePolicy {

@@ -7,16 +7,16 @@ extern crate regex;
 #[macro_use]
 extern crate slog;
 
-use std::rc::Rc;
 use std::cell::RefCell;
+use std::rc::Rc;
 
 use basics::*;
 
-pub mod reuse;
 pub mod node;
-pub mod query;
-mod rewrite;
 mod optimize;
+pub mod query;
+pub mod reuse;
+mod rewrite;
 pub mod visualize;
 
 pub type MirNodeRef = Rc<RefCell<node::MirNode>>;

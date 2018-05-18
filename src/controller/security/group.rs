@@ -1,6 +1,6 @@
 use controller::security::policy::Policy;
-use nom_sql::SqlQuery;
 use nom_sql::parser as sql_parser;
+use nom_sql::SqlQuery;
 use serde_json;
 use serde_json::Value;
 

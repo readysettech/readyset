@@ -131,7 +131,8 @@ impl State for MemoryState {
 
     fn lookup<'a>(&'a self, columns: &[usize], key: &KeyType) -> LookupResult<'a> {
         debug_assert!(!self.state.is_empty(), "lookup on uninitialized index");
-        let index = self.state_for(columns)
+        let index = self
+            .state_for(columns)
             .expect("lookup on non-indexed column set");
         self.state[index].lookup(key)
     }

@@ -1,5 +1,7 @@
-use nom_sql::{Column, ConditionBase, ConditionExpression, ConditionTree,
-              FieldDefinitionExpression, JoinConstraint, JoinRightSide, SqlQuery};
+use nom_sql::{
+    Column, ConditionBase, ConditionExpression, ConditionTree, FieldDefinitionExpression,
+    JoinConstraint, JoinRightSide, SqlQuery,
+};
 
 use std::collections::HashMap;
 
@@ -122,7 +124,8 @@ impl AliasRemoval for SqlQuery {
                     }
                 }
                 // Remove them from fields
-                sq.fields = sq.fields
+                sq.fields = sq
+                    .fields
                     .into_iter()
                     .map(|field| match field {
                         // WTF rustfmt?
@@ -149,7 +152,8 @@ impl AliasRemoval for SqlQuery {
                     })
                     .collect();
                 // Remove them from join clauses
-                sq.join = sq.join
+                sq.join = sq
+                    .join
                     .into_iter()
                     .map(|mut jc| {
                         jc.constraint = match jc.constraint {
@@ -187,12 +191,10 @@ mod tests {
 
         let wrap = |cb| Box::new(ConditionExpression::Base(cb));
         let q = SelectStatement {
-            tables: vec![
-                Table {
-                    name: String::from("PaperTag"),
-                    alias: Some(String::from("t")),
-                },
-            ],
+            tables: vec![Table {
+                name: String::from("PaperTag"),
+                alias: Some(String::from("t")),
+            }],
             fields: vec![FieldDefinitionExpression::Col(Column::from("t.id"))],
             where_clause: Some(ConditionExpression::ComparisonOp(ConditionTree {
                 operator: Operator::Equal,

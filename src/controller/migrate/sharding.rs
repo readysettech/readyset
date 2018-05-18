@@ -254,7 +254,8 @@ pub fn shard(
             } else {
                 graph[node].parent_columns(col)
             };
-            let srcs: Vec<_> = srcs.into_iter()
+            let srcs: Vec<_> = srcs
+                .into_iter()
                 .filter_map(|(ni, src)| src.map(|src| (ni, src)))
                 .collect();
 
@@ -349,7 +350,8 @@ pub fn shard(
 
     // the code above can do some stupid things, such as adding a sharder after a new, unsharded
     // node. we want to "flatten" such cases so that we shard as early as we can.
-    let mut new_sharders: Vec<_> = new.iter()
+    let mut new_sharders: Vec<_> = new
+        .iter()
         .filter(|&&n| graph[n].is_sharder())
         .cloned()
         .collect();
@@ -553,7 +555,8 @@ pub fn shard(
     // will ensure that replays from the first sharding are turned into a single update before
     // arriving at the second sharding, and the merged sharder will ensure that nshards is set
     // correctly.
-    let sharded_sharders: Vec<_> = new.iter()
+    let sharded_sharders: Vec<_> = new
+        .iter()
         .filter(|&&n| graph[n].is_sharder() && !graph[n].sharded_by().is_none())
         .cloned()
         .collect();

@@ -1,7 +1,7 @@
 use basics::{DataType, NodeIndex};
-pub use mir::MirNodeRef;
 use mir::node::{GroupedNodeType, MirNode, MirNodeType};
 use mir::query::MirQuery;
+pub use mir::MirNodeRef;
 // TODO(malte): remove if possible
 use dataflow::ops::filter::FilterCondition;
 use dataflow::ops::join::JoinType;
@@ -9,9 +9,10 @@ pub use mir::FlowNode;
 
 use controller::sql::query_graph::{OutputColumn, QueryGraph};
 use controller::sql::query_signature::Signature;
-use nom_sql::{ArithmeticExpression, Column, ColumnSpecification, CompoundSelectOperator,
-              ConditionBase, ConditionExpression, ConditionTree, Literal, Operator, SqlQuery,
-              TableKey};
+use nom_sql::{
+    ArithmeticExpression, Column, ColumnSpecification, CompoundSelectOperator, ConditionBase,
+    ConditionExpression, ConditionTree, Literal, Operator, SqlQuery, TableKey,
+};
 use nom_sql::{LimitClause, OrderClause, SelectStatement};
 
 use slog;
@@ -20,8 +21,8 @@ use std::collections::{HashMap, HashSet};
 use std::ops::Deref;
 use std::vec::Vec;
 
-use controller::sql::UniverseId;
 use controller::sql::security::Universe;
+use controller::sql::UniverseId;
 
 mod grouped;
 mod join;
@@ -434,7 +435,8 @@ impl SqlToMirConverter {
     pub fn remove_query(&mut self, name: &str, mq: &MirQuery) {
         use std::collections::VecDeque;
 
-        let v = self.current
+        let v = self
+            .current
             .remove(name)
             .expect(&format!("no query named \"{}\"?", name));
 
@@ -636,7 +638,8 @@ impl SqlToMirConverter {
         // the TableKey structure passed in via `keys`.
         let primary_keys = match keys {
             None => vec![],
-            Some(keys) => keys.iter()
+            Some(keys) => keys
+                .iter()
                 .filter_map(|k| match *k {
                     ref k @ TableKey::PrimaryKey(..) => Some(k),
                     _ => None,
@@ -1387,7 +1390,8 @@ impl SqlToMirConverter {
             let mut ancestors = self.universe.member_of.iter().fold(
                 vec![],
                 |mut acc, (gname, gids)| {
-                    let group_views: Vec<MirNodeRef> = gids.iter()
+                    let group_views: Vec<MirNodeRef> = gids
+                        .iter()
                         .filter_map(|gid| {
                             // This is a little annoying, but because of the way we name universe queries,
                             // we need to strip the view name of the _u{uid} suffix
@@ -1557,14 +1561,12 @@ impl SqlToMirConverter {
                         nodes_added.push(bogo_project.clone());
                         final_node = bogo_project;
 
-                        vec![
-                            Column {
-                                name: "bogokey".to_owned(),
-                                table: None,
-                                alias: None,
-                                function: None,
-                            },
-                        ]
+                        vec![Column {
+                            name: "bogokey".to_owned(),
+                            table: None,
+                            alias: None,
+                            function: None,
+                        }]
                     } else {
                         qg.parameters().into_iter().cloned().collect()
                     };
@@ -1640,7 +1642,8 @@ impl SqlToMirConverter {
                 value_columns_needed_for_predicates(&qg.columns, &qg.global_predicates)
                     .into_iter()
                     .unzip();
-            let projected_arithmetic: Vec<(String, ArithmeticExpression)> = qg.columns
+            let projected_arithmetic: Vec<(String, ArithmeticExpression)> = qg
+                .columns
                 .iter()
                 .filter_map(|oc| match *oc {
                     OutputColumn::Arithmetic(ref ac) => {
@@ -1660,7 +1663,8 @@ impl SqlToMirConverter {
                     OutputColumn::Literal(_) => None,
                 })
                 .collect();
-            let mut projected_literals: Vec<(String, DataType)> = qg.columns
+            let mut projected_literals: Vec<(String, DataType)> = qg
+                .columns
                 .iter()
                 .filter_map(|oc| match *oc {
                     OutputColumn::Arithmetic(_) => None,
@@ -1721,14 +1725,12 @@ impl SqlToMirConverter {
                     .collect();
 
                 let query_params = if has_bogokey {
-                    vec![
-                        Column {
-                            name: String::from("bogokey"),
-                            alias: None,
-                            table: None,
-                            function: None,
-                        },
-                    ]
+                    vec![Column {
+                        name: String::from("bogokey"),
+                        alias: None,
+                        table: None,
+                        function: None,
+                    }]
                 } else {
                     qg.parameters().into_iter().cloned().collect()
                 };

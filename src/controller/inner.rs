@@ -194,17 +194,15 @@ impl ControllerInner {
             (Post, "/getter_builder") => {
                 json::to_string(&self.getter_builder(json::from_slice(&body).unwrap())).unwrap()
             }
-            (Post, "/extend_recipe") => {
-                json::to_string(&self.extend_recipe(authority, json::from_slice(&body).unwrap()))
-                    .unwrap()
-            }
-            (Post, "/install_recipe") => {
-                json::to_string(&self.install_recipe(authority, json::from_slice(&body).unwrap()))
-                    .unwrap()
-            }
-            (Post, "/set_security_config") => json::to_string(&self.set_security_config(
-                json::from_slice(&body).unwrap(),
-            )).unwrap(),
+            (Post, "/extend_recipe") => json::to_string(
+                &self.extend_recipe(authority, json::from_slice(&body).unwrap())
+            ).unwrap(),
+            (Post, "/install_recipe") => json::to_string(
+                &self.install_recipe(authority, json::from_slice(&body).unwrap())
+            ).unwrap(),
+            (Post, "/set_security_config") => json::to_string(
+                &self.set_security_config(json::from_slice(&body).unwrap())
+            ).unwrap(),
             (Post, "/create_universe") => {
                 json::to_string(&self.create_universe(json::from_slice(&body).unwrap())).unwrap()
             }
@@ -573,9 +571,11 @@ impl ControllerInner {
             })
             .collect();
 
-        let base_operator = node.get_base()
+        let base_operator = node
+            .get_base()
             .expect("asked to get mutator for non-base node");
-        let columns: Vec<String> = node.fields()
+        let columns: Vec<String> = node
+            .fields()
             .iter()
             .enumerate()
             .filter(|&(n, _)| !base_operator.get_dropped().contains_key(n))
@@ -605,7 +605,8 @@ impl ControllerInner {
     /// Get statistics about the time spent processing different parts of the graph.
     pub fn get_statistics(&mut self) -> GraphStats {
         // TODO: request stats from domains in parallel.
-        let domains = self.domains
+        let domains = self
+            .domains
             .iter_mut()
             .flat_map(|(di, s)| {
                 s.send(box payload::Packet::GetStatistics).unwrap();
@@ -637,11 +638,13 @@ impl ControllerInner {
     pub fn flush_partial(&mut self) -> u64 {
         // get statistics for current domain sizes
         // and evict all state from partial nodes
-        let to_evict: Vec<_> = self.domains
+        let to_evict: Vec<_> = self
+            .domains
             .iter_mut()
             .map(|(di, s)| {
                 s.send(box payload::Packet::GetStatistics).unwrap();
-                let to_evict: Vec<(NodeIndex, u64)> = s.wait_for_statistics()
+                let to_evict: Vec<(NodeIndex, u64)> = s
+                    .wait_for_statistics()
                     .unwrap()
                     .into_iter()
                     .flat_map(move |(_, node_stats)| {
@@ -734,7 +737,8 @@ impl ControllerInner {
     fn apply_recipe(&mut self, mut new: Recipe) -> Result<ActivationResult, RpcError> {
         let mut err = Err(RpcError::Other("".to_owned())); // <3 type inference
         self.migrate(|mig| {
-            err = new.activate(mig, false)
+            err = new
+                .activate(mig, false)
                 .map_err(|e| RpcError::Other(format!("failed to activate recipe: {}", e)))
         });
 
@@ -743,7 +747,8 @@ impl ControllerInner {
                 for leaf in &ra.removed_leaves {
                     // There should be exactly one reader attached to each "leaf" node. Find it and
                     // remove it along with any now unneeded ancestors.
-                    let readers: Vec<_> = self.ingredients
+                    let readers: Vec<_> = self
+                        .ingredients
                         .neighbors_directed(*leaf, petgraph::EdgeDirection::Outgoing)
                         .collect();
                     assert_eq!(readers.len(), 1);
@@ -852,7 +857,8 @@ impl ControllerInner {
         let mut removals = HashMap::new();
         let mut nodes = vec![node];
         while let Some(node) = nodes.pop() {
-            let mut parents = self.ingredients
+            let mut parents = self
+                .ingredients
                 .neighbors_directed(node, petgraph::EdgeDirection::Incoming)
                 .detach();
             while let Some(parent) = parents.next_node(&self.ingredients) {
@@ -860,7 +866,8 @@ impl ControllerInner {
                 self.ingredients.remove_edge(edge);
 
                 if !self.ingredients[parent].is_source() && !self.ingredients[parent].is_base()
-                    && self.ingredients
+                    && self
+                        .ingredients
                         .neighbors_directed(parent, petgraph::EdgeDirection::Outgoing)
                         .count() == 1
                 {

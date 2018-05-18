@@ -1,5 +1,7 @@
-use nom_sql::{Column, ConditionBase, ConditionExpression, ConditionTree,
-              FieldDefinitionExpression, SqlQuery, Table};
+use nom_sql::{
+    Column, ConditionBase, ConditionExpression, ConditionTree, FieldDefinitionExpression, SqlQuery,
+    Table,
+};
 
 use std::collections::HashMap;
 
@@ -113,8 +115,8 @@ mod tests {
 
     #[test]
     fn it_expands_count_star() {
-        use nom_sql::FunctionExpression;
         use nom_sql::parser::parse_query;
+        use nom_sql::FunctionExpression;
 
         // SELECT COUNT(*) FROM users;
         // -->
@@ -131,17 +133,15 @@ mod tests {
             SqlQuery::Select(tq) => {
                 assert_eq!(
                     tq.fields,
-                    vec![
-                        FieldDefinitionExpression::Col(Column {
-                            name: String::from("count(*)"),
-                            alias: None,
-                            table: None,
-                            function: Some(Box::new(FunctionExpression::Count(
-                                Column::from("users.id"),
-                                false,
-                            ))),
-                        }),
-                    ]
+                    vec![FieldDefinitionExpression::Col(Column {
+                        name: String::from("count(*)"),
+                        alias: None,
+                        table: None,
+                        function: Some(Box::new(FunctionExpression::Count(
+                            Column::from("users.id"),
+                            false,
+                        ))),
+                    })]
                 );
             }
             // if we get anything other than a selection query back, something really weird is up
@@ -151,8 +151,8 @@ mod tests {
 
     #[test]
     fn it_expands_count_star_with_group_by() {
-        use nom_sql::FunctionExpression;
         use nom_sql::parser::parse_query;
+        use nom_sql::FunctionExpression;
 
         // SELECT COUNT(*) FROM users GROUP BY id;
         // -->
@@ -169,17 +169,15 @@ mod tests {
             SqlQuery::Select(tq) => {
                 assert_eq!(
                     tq.fields,
-                    vec![
-                        FieldDefinitionExpression::Col(Column {
-                            name: String::from("count(*)"),
-                            alias: None,
-                            table: None,
-                            function: Some(Box::new(FunctionExpression::Count(
-                                Column::from("users.name"),
-                                false,
-                            ))),
-                        }),
-                    ]
+                    vec![FieldDefinitionExpression::Col(Column {
+                        name: String::from("count(*)"),
+                        alias: None,
+                        table: None,
+                        function: Some(Box::new(FunctionExpression::Count(
+                            Column::from("users.name"),
+                            false,
+                        ))),
+                    })]
                 );
             }
             // if we get anything other than a selection query back, something really weird is up

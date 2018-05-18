@@ -5,16 +5,16 @@ use dataflow::statistics::GraphStats;
 
 use std::collections::{BTreeMap, HashMap};
 use std::net::SocketAddr;
-use std::sync::Arc;
 use std::sync::mpsc::Sender;
+use std::sync::Arc;
 use std::thread::{self, JoinHandle};
 use std::time::Duration;
 
 use assert_infrequent;
 use futures::Stream;
 use hyper::{self, Client};
-use serde::Serialize;
 use serde::de::DeserializeOwned;
+use serde::Serialize;
 use serde_json;
 use tarpc::sync::client::{self, ClientExt};
 use tokio_core::reactor::Core;

@@ -238,7 +238,8 @@ impl CheckTable {
             self.domain_dependencies
                 .iter()
                 .map(|(d, v)| {
-                    let earliest: i64 = v.iter()
+                    let earliest: i64 = v
+                        .iter()
                         .filter_map(|b| self.toplevel.get(b))
                         .chain(self.last_migration.iter())
                         .chain(self.last_replay.get(d).iter().map(|t| *t))
@@ -356,7 +357,8 @@ impl CheckTable {
         self.last_base = None;
         self.next_timestamp += 2;
         self.last_migration = Some(ts + 1);
-        self.domain_dependencies = deps.iter()
+        self.domain_dependencies = deps
+            .iter()
             .map(|(domain, &(ref ingress_from_base, _))| {
                 (
                     *domain,

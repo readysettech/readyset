@@ -154,7 +154,8 @@ impl MirNode {
     }
 
     pub fn remove_ancestor(&mut self, a: MirNodeRef) {
-        match self.ancestors
+        match self
+            .ancestors
             .iter()
             .position(|x| x.borrow().versioned_name() == a.borrow().versioned_name())
         {
@@ -170,7 +171,8 @@ impl MirNode {
     }
 
     pub fn remove_child(&mut self, a: MirNodeRef) {
-        match self.children
+        match self
+            .children
             .iter()
             .position(|x| x.borrow().versioned_name() == a.borrow().versioned_name())
         {
@@ -226,7 +228,8 @@ impl MirNode {
             },
             MirNodeType::Reuse { ref node } => node.borrow().column_id_for_column(c),
             // otherwise, just look up in the column set
-            _ => match self.columns
+            _ => match self
+                .columns
                 .iter()
                 .position(|cc| cc.name == c.name && cc.table == c.table)
             {
@@ -600,7 +603,9 @@ impl MirNodeType {
                     k,
                     offset,
                 } => {
-                    order == our_order && group_by == our_group_by && k == our_k
+                    order == our_order
+                        && group_by == our_group_by
+                        && k == our_k
                         && offset == our_offset
                 }
                 _ => false,
@@ -778,7 +783,8 @@ impl Debug for MirNodeType {
                 )
             }
             MirNodeType::Leaf { ref keys, .. } => {
-                let key_cols = keys.iter()
+                let key_cols = keys
+                    .iter()
                     .map(|k| k.name.clone())
                     .collect::<Vec<_>>()
                     .join(", ");
@@ -860,7 +866,8 @@ impl Debug for MirNodeType {
                 ref order, ref k, ..
             } => write!(f, "TopK [k: {}, {:?}]", k, order),
             MirNodeType::Union { ref emit } => {
-                let cols = emit.iter()
+                let cols = emit
+                    .iter()
                     .map(|c| {
                         c.iter()
                             .map(|e| e.name.clone())

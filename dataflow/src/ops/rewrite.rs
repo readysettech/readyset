@@ -97,7 +97,8 @@ impl Ingredient for Rewrite {
             if from == *self.src {
                 let key = r[self.signal_key].clone();
                 // ask signal if column should be rewritten
-                let rc = self.lookup(*self.signal, &[0], &KeyType::Single(&key), nodes, state)
+                let rc = self
+                    .lookup(*self.signal, &[0], &KeyType::Single(&key), nodes, state)
                     .unwrap();
 
                 if rc.is_none() {
@@ -121,13 +122,14 @@ impl Ingredient for Rewrite {
                 }
             } else if from == *self.signal {
                 let key = r[0].clone();
-                let other_rows = self.lookup(
-                    *self.src,
-                    &[self.signal_key],
-                    &KeyType::Single(&key),
-                    nodes,
-                    state,
-                ).unwrap();
+                let other_rows =
+                    self.lookup(
+                        *self.src,
+                        &[self.signal_key],
+                        &KeyType::Single(&key),
+                        nodes,
+                        state,
+                    ).unwrap();
 
                 if other_rows.is_none() {
                     // replays always happen from the `src` side,

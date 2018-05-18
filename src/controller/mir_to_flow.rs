@@ -1,9 +1,10 @@
-use nom_sql::{ArithmeticBase, ArithmeticExpression, Column, ColumnConstraint, ColumnSpecification,
-              OrderType};
+use nom_sql::{
+    ArithmeticBase, ArithmeticExpression, Column, ColumnConstraint, ColumnSpecification, OrderType,
+};
 use std::collections::HashMap;
 
-use controller::Migration;
 use basics::{DataType, NodeIndex};
+use controller::Migration;
 use dataflow::ops::filter::FilterCondition;
 use dataflow::ops::join::{Join, JoinType};
 use dataflow::ops::latest::Latest;
@@ -315,7 +316,8 @@ pub(crate) fn adapt_base_node(
     };
 
     for a in add.iter() {
-        let default_value = match a.constraints
+        let default_value = match a
+            .constraints
             .iter()
             .filter_map(|c| match *c {
                 ColumnConstraint::DefaultValue(ref dv) => Some(dv.into()),
@@ -576,7 +578,8 @@ pub(crate) fn make_join_node(
 
     let column_names = column_names(columns);
 
-    let projected_cols_left: Vec<Column> = left.borrow()
+    let projected_cols_left: Vec<Column> = left
+        .borrow()
         .columns
         .iter()
         .filter(|c| proj_cols.contains(c))
@@ -705,7 +708,8 @@ pub(crate) fn make_project_node(
     let parent_na = parent.borrow().flow_node_addr().unwrap();
     let column_names = column_names(columns);
 
-    let projected_column_ids = emit.iter()
+    let projected_column_ids = emit
+        .iter()
         .map(|c| parent.borrow().column_id_for_column(c))
         .collect::<Vec<_>>();
 
@@ -762,7 +766,8 @@ pub(crate) fn make_topk_node(
         Some(ref o) => {
             assert_eq!(offset, 0); // Non-zero offset not supported
 
-            let columns: Vec<_> = o.iter()
+            let columns: Vec<_> = o
+                .iter()
                 .map(|&(ref c, ref order_type)| {
                     // SQL and Soup disagree on what ascending and descending order means, so do the
                     // conversion here.

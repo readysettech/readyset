@@ -13,8 +13,8 @@
 
 #[allow(unused_extern_crates)]
 extern crate backtrace;
-extern crate channel;
 extern crate basics;
+extern crate channel;
 extern crate evmap;
 extern crate fnv;
 extern crate hyper;
