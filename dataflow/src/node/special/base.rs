@@ -327,7 +327,7 @@ mod tests {
             true,
         ));
 
-        let mut b = Base::new(vec![]).with_key(vec![0, 2]);
+        let b = Base::new(vec![]).with_key(vec![0, 2]);
         let global = graph.add_node(Node::new("b", &["x", "y", "z"], b, false));
         graph.add_edge(source, global, ());
         let local = unsafe { LocalNodeIndex::make(0 as u32) };
@@ -352,7 +352,6 @@ mod tests {
         let n = graph[global].take();
         let mut n = n.finalize(&graph);
 
-        let nodes = DomainNodes::new();
         let mut one = move |u: Vec<Record>| {
             let mut m = n.get_base_mut().unwrap().process(local, u.into(), &states);
             node::materialize(&mut m, None, states.get_mut(&local));

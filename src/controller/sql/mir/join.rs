@@ -86,7 +86,7 @@ fn pick_join_chains(
 ) -> (JoinChain, JoinChain) {
     let left_chain = match join_chains
         .iter()
-        .position(|ref chain| chain.has_table(src))
+        .position(|chain| chain.has_table(src))
     {
         Some(idx) => join_chains.swap_remove(idx),
         None => JoinChain {
@@ -97,7 +97,7 @@ fn pick_join_chains(
 
     let right_chain = match join_chains
         .iter()
-        .position(|ref chain| chain.has_table(dst))
+        .position(|chain| chain.has_table(dst))
     {
         Some(idx) => join_chains.swap_remove(idx),
         None => JoinChain {

@@ -258,7 +258,7 @@ pub mod test {
             defaults: Vec<DataType>,
         ) -> IndexPair {
             use node::special::Base;
-            let mut i = Base::new(defaults);
+            let i = Base::new(defaults);
             let global = self.graph.add_node(Node::new(name, fields, i, false));
             self.graph.add_edge(self.source, global, ());
             let mut remap = HashMap::new();

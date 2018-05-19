@@ -252,7 +252,7 @@ impl WorkerInner {
 
         // 1. tell domains to update state size
         for &(di, shard) in self.state_sizes.keys() {
-            let mut tx = match self.domain_senders.get_mut(&(di, shard)) {
+            let tx = match self.domain_senders.get_mut(&(di, shard)) {
                 None => {
                     // we're lax about failures here since missing an UpdateStateSize message has
                     // no correctness implications
@@ -269,7 +269,7 @@ impl WorkerInner {
                         }
                     }
                 }
-                Some(mut tx) => tx,
+                Some(tx) => tx,
             };
             match tx.send(box payload::Packet::UpdateStateSize) {
                 Ok(_) => (),

@@ -545,7 +545,7 @@ impl Worker {
                     // even with nll we need to *first* try_recv, and *then* match. otherwise the
                     // borrow_mut() handle will be kept until the end of the match, which would
                     // prevent us from doing context.receivers.remove().
-                    let mut m = match m {
+                    let m = match m {
                         Ok(p) => p,
                         Err(TryRecvError::Empty) => break,
                         Err(TryRecvError::Disconnected) => {

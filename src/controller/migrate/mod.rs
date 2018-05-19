@@ -121,7 +121,7 @@ impl<'a> Migration<'a> {
         &mut self,
         name: S1,
         fields: FS,
-        mut b: node::special::Base,
+        b: node::special::Base,
         transactional: bool,
     ) -> NodeIndex
     where

@@ -167,7 +167,7 @@ pub fn make_grouped(
                     // column set
                     let param_cols: Vec<_> = qg.relations.values().fold(vec![], |acc, rel| {
                         acc.into_iter()
-                            .chain(rel.parameters.iter().filter(|ref c| !gb_cols.contains(c)))
+                            .chain(rel.parameters.iter().filter(|c| !gb_cols.contains(c)))
                             .collect()
                     });
                     // combine

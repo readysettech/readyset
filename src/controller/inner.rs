@@ -811,7 +811,7 @@ impl ControllerInner {
         match Recipe::from_str(&r_txt, Some(self.log.clone())) {
             Ok(r) => {
                 let old = mem::replace(&mut self.recipe, Recipe::blank(None));
-                let mut new = old.replace(r).unwrap();
+                let new = old.replace(r).unwrap();
                 let activation_result = self.apply_recipe(new);
                 if authority
                     .read_modify_write(STATE_KEY, |state: Option<ControllerState>| match state {

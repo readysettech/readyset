@@ -178,7 +178,7 @@ impl QueryGraph {
     pub fn parameters<'a>(&'a self) -> Vec<&'a Column> {
         self.relations
             .values()
-            .fold(Vec::new(), |mut acc: Vec<&'a Column>, ref qgn| {
+            .fold(Vec::new(), |mut acc: Vec<&'a Column>, qgn| {
                 acc.extend(qgn.parameters.iter());
                 acc
             })

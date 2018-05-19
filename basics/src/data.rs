@@ -743,7 +743,7 @@ mod tests {
     fn add_invalid_types() {
         let a: DataType = "hi".into();
         let b: DataType = 5.into();
-        &a + &b;
+        let _ = &a + &b;
     }
 
     #[test]

@@ -2273,7 +2273,7 @@ impl Domain {
                 // we got a partial replay result that we were waiting for. it's time we let any
                 // downstream nodes that missed in us on that key know that they can (probably)
                 // continue with their replays.
-                for mut key in for_keys.unwrap() {
+                for key in for_keys.unwrap() {
                     let hole = (key_cols.clone(), key);
                     let replay = waiting
                         .redos
