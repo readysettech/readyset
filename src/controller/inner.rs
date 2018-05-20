@@ -253,14 +253,46 @@ impl ControllerInner {
     }
 
     fn check_worker_liveness(&mut self) {
+        let mut any_failed = false;
+
+        // check if there are any newly failed workers
         if self.last_checked_workers.elapsed() > self.healthcheck_every {
+            for (addr, ws) in self.workers.iter() {
+                if ws.healthy && ws.last_heartbeat.elapsed() > self.heartbeat_every * 4 {
+                    any_failed = true;
+                }
+            }
+            self.last_checked_workers = Instant::now();
+        }
+
+        // if we have newly failed workers, iterate again to find all workers that have missed >= 3
+        // heartbeats. This is necessary so that we correctly handle correlated failures of
+        // workers.
+        if any_failed {
+            let mut failed = Vec::new();
             for (addr, ws) in self.workers.iter_mut() {
                 if ws.healthy && ws.last_heartbeat.elapsed() > self.heartbeat_every * 3 {
                     warn!(self.log, "worker at {:?} has failed!", addr);
                     ws.healthy = false;
+                    failed.push(addr.clone());
                 }
             }
-            self.last_checked_workers = Instant::now();
+            self.handle_failed_workers(failed);
+        }
+    }
+
+    fn handle_failed_workers(&mut self, failed: Vec<WorkerIdentifier>) {
+        // first, translate from the affected workers to affected data-flow nodes
+        let mut affected_nodes = Vec::new();
+        for wi in failed {
+            info!(self.log, "handling failure of {:?}", wi);
+            affected_nodes.extend(self.get_failed_nodes(&wi));
+        }
+
+        // then, figure out which queries are affected (and thus must be removed and added again in
+        // a migration)
+        for n in affected_nodes {
+            debug!(self.log, "data-flow node {:?} affected by failure", n);
         }
     }
 
