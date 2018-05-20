@@ -616,6 +616,18 @@ impl Recipe {
             Recipe::blank(Some(self.log))
         }
     }
+
+    pub(crate) fn queries_for_nodes(&self, nodes: Vec<NodeIndex>) -> Vec<String> {
+        nodes
+            .iter()
+            .flat_map(|ni| {
+                self.inc
+                    .as_ref()
+                    .expect("need SQL incorporator")
+                    .get_queries_for_node(*ni)
+            })
+            .collect()
+    }
 }
 
 #[cfg(test)]

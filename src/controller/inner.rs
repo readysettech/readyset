@@ -285,14 +285,15 @@ impl ControllerInner {
         // first, translate from the affected workers to affected data-flow nodes
         let mut affected_nodes = Vec::new();
         for wi in failed {
-            info!(self.log, "handling failure of {:?}", wi);
+            info!(self.log, "handling failure of worker {:?}", wi);
             affected_nodes.extend(self.get_failed_nodes(&wi));
         }
 
         // then, figure out which queries are affected (and thus must be removed and added again in
         // a migration)
-        for n in affected_nodes {
-            debug!(self.log, "data-flow node {:?} affected by failure", n);
+        let affected_queries = self.recipe.queries_for_nodes(affected_nodes);
+        for q in affected_queries {
+            debug!(self.log, "query {} affected by failure", q);
         }
     }
 
