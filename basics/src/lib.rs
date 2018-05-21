@@ -1,7 +1,3 @@
-#![feature(allow_fail)]
-#![feature(box_syntax)]
-#![feature(entry_or_default)]
-#![feature(non_modrs_mods)]
 #![feature(try_from)]
 #![deny(unused_extern_crates)]
 

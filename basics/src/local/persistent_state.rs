@@ -375,7 +375,7 @@ impl PersistentState {
         }
 
         // Create prefixes with PrefixTransform on all new inserted keys:
-        let transform = SliceTransform::create("key", box PrefixTransform);
+        let transform = SliceTransform::create("key", Box::new(PrefixTransform));
         opts.set_prefix_extractor(transform);
 
         // Assigns the number of threads for compactions and flushes in RocksDB.
