@@ -851,7 +851,7 @@ impl Worker {
 }
 
 impl dataflow::prelude::Executor for ReplicaReceivers {
-    fn send_back(&self, channel: SourceChannelIdentifier, reply: Result<i64, ()>) {
+    fn send_back(&self, channel: SourceChannelIdentifier, reply: ()) {
         if let Some(ch) = self.get(channel.token) {
             use bincode;
             use std::io::{self, Write};

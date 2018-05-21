@@ -40,7 +40,7 @@ fn main() {
 
     let mut blender = builder.build_local();
     blender.install_recipe(sql).unwrap();
-    println!("{}", blender.graphviz());
+    println!("{}", blender.graphviz().unwrap());
 
     // Get mutators and getter.
     let mut article = blender.table("Article").unwrap();

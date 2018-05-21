@@ -154,7 +154,7 @@ enum ControlEvent {
         Method,
         String,
         Vec<u8>,
-        futures::sync::oneshot::Sender<Result<String, StatusCode>>,
+        futures::sync::oneshot::Sender<Result<Result<String, String>, StatusCode>>,
     ),
     WonLeaderElection(ControllerState),
     Shutdown,
@@ -482,7 +482,11 @@ impl<A: Authority + 'static> Controller<A> {
                                 res.headers_mut()
                                     .set_raw("Access-Control-Allow-Origin", "*");
                                 match reply {
-                                    Ok(reply) => res.set_body(reply),
+                                    Ok(Ok(reply)) => res.set_body(reply),
+                                    Ok(Err(reply)) => {
+                                        res.set_status(StatusCode::InternalServerError);
+                                        res.set_body(reply)
+                                    }
                                     Err(status_code) => {
                                         res.set_status(status_code);
                                     }
@@ -649,7 +653,7 @@ mod tests {
     #[allow_fail]
     fn it_works_default() {
         // Controller gets dropped. It doesn't have Domains, so we don't see any dropped.
-        let authority = ZookeeperAuthority::new("127.0.0.1:2181/it_works_default");
+        let authority = ZookeeperAuthority::new("127.0.0.1:2181/it_works_default").unwrap();
         {
             let _c = ControllerBuilder::default().build(Arc::new(authority));
             thread::sleep(Duration::from_millis(100));
@@ -664,7 +668,8 @@ mod tests {
         let r_txt = "CREATE TABLE a (x int, y int, z int);\n
                      CREATE TABLE b (r int, s int);\n";
 
-        let authority = ZookeeperAuthority::new("127.0.0.1:2181/it_works_blender_with_migration");
+        let authority =
+            ZookeeperAuthority::new("127.0.0.1:2181/it_works_blender_with_migration").unwrap();
         let mut c = ControllerBuilder::default().build(Arc::new(authority));
         assert!(c.install_recipe(r_txt).is_ok());
     }

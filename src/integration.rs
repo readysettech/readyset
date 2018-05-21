@@ -127,8 +127,8 @@ fn it_works_basic() {
 
     // send a query to c
     assert_eq!(
-        cq.lookup(&[id.clone()], true),
-        Ok(vec![vec![1.into(), 2.into()]])
+        cq.lookup(&[id.clone()], true).unwrap(),
+        vec![vec![1.into(), 2.into()]]
     );
 
     // update value again
@@ -150,8 +150,8 @@ fn it_works_basic() {
 
     // send a query to c
     assert_eq!(
-        cq.lookup(&[id.clone()], true),
-        Ok(vec![vec![1.into(), 4.into()]])
+        cq.lookup(&[id.clone()], true).unwrap(),
+        vec![vec![1.into(), 4.into()]]
     );
 
     // Update second record
@@ -183,8 +183,8 @@ fn base_mutation() {
     write.insert(vec![1.into(), 2.into()]).unwrap();
     sleep();
     assert_eq!(
-        read.lookup(&[1.into()], true),
-        Ok(vec![vec![1.into(), 2.into()]])
+        read.lookup(&[1.into()], true).unwrap(),
+        vec![vec![1.into(), 2.into()]]
     );
 
     // update that record in place (set)
@@ -193,8 +193,8 @@ fn base_mutation() {
         .unwrap();
     sleep();
     assert_eq!(
-        read.lookup(&[1.into()], true),
-        Ok(vec![vec![1.into(), 3.into()]])
+        read.lookup(&[1.into()], true).unwrap(),
+        vec![vec![1.into(), 3.into()]]
     );
 
     // update that record in place (add)
@@ -206,8 +206,8 @@ fn base_mutation() {
         .unwrap();
     sleep();
     assert_eq!(
-        read.lookup(&[1.into()], true),
-        Ok(vec![vec![1.into(), 4.into()]])
+        read.lookup(&[1.into()], true).unwrap(),
+        vec![vec![1.into(), 4.into()]]
     );
 
     // insert or update should update
@@ -219,14 +219,14 @@ fn base_mutation() {
         .unwrap();
     sleep();
     assert_eq!(
-        read.lookup(&[1.into()], true),
-        Ok(vec![vec![1.into(), 5.into()]])
+        read.lookup(&[1.into()], true).unwrap(),
+        vec![vec![1.into(), 5.into()]]
     );
 
     // delete should, well, delete
     write.delete(vec![1.into()]).unwrap();
     sleep();
-    assert_eq!(read.lookup(&[1.into()], true), Ok(vec![]));
+    assert!(read.lookup(&[1.into()], true).unwrap().is_empty());
 
     // insert or update should insert
     write
@@ -237,8 +237,8 @@ fn base_mutation() {
         .unwrap();
     sleep();
     assert_eq!(
-        read.lookup(&[1.into()], true),
-        Ok(vec![vec![1.into(), 2.into()]])
+        read.lookup(&[1.into()], true).unwrap(),
+        vec![vec![1.into(), 2.into()]]
     );
 }
 
@@ -271,12 +271,12 @@ fn shared_interdomain_ancestor() {
     muta.insert(vec![id.clone(), 2.into()]).unwrap();
     sleep();
     assert_eq!(
-        bq.lookup(&[id.clone()], true),
-        Ok(vec![vec![id.clone(), 2.into()].into()])
+        bq.lookup(&[id.clone()], true).unwrap(),
+        vec![vec![id.clone(), 2.into()]]
     );
     assert_eq!(
-        cq.lookup(&[id.clone()], true),
-        Ok(vec![vec![id.clone(), 2.into()].into()])
+        cq.lookup(&[id.clone()], true).unwrap(),
+        vec![vec![id.clone(), 2.into()]]
     );
 
     // update value again
@@ -284,12 +284,12 @@ fn shared_interdomain_ancestor() {
     muta.insert(vec![id.clone(), 4.into()]).unwrap();
     sleep();
     assert_eq!(
-        bq.lookup(&[id.clone()], true),
-        Ok(vec![vec![id.clone(), 4.into()].into()])
+        bq.lookup(&[id.clone()], true).unwrap(),
+        vec![vec![id.clone(), 4.into()]]
     );
     assert_eq!(
-        cq.lookup(&[id.clone()], true),
-        Ok(vec![vec![id.clone(), 4.into()].into()])
+        cq.lookup(&[id.clone()], true).unwrap(),
+        vec![vec![id.clone(), 4.into()]]
     );
 }
 
@@ -470,8 +470,8 @@ fn it_works_deletion() {
     muta.insert(vec![1.into(), 2.into()]).unwrap();
     sleep();
     assert_eq!(
-        cq.lookup(&[1.into()], true),
-        Ok(vec![vec![1.into(), 2.into()].into()])
+        cq.lookup(&[1.into()], true).unwrap(),
+        vec![vec![1.into(), 2.into()]]
     );
 
     // send a value on b
@@ -487,8 +487,8 @@ fn it_works_deletion() {
     muta.delete(vec![2.into()]).unwrap();
     sleep();
     assert_eq!(
-        cq.lookup(&[1.into()], true),
-        Ok(vec![vec![1.into(), 4.into()]])
+        cq.lookup(&[1.into()], true).unwrap(),
+        vec![vec![1.into(), 4.into()]]
     );
 }
 
@@ -819,8 +819,8 @@ fn mutator_churn() {
     // check that all writes happened the right number of times
     for i in 0..ids {
         assert_eq!(
-            vc_state.lookup(&[i.into()], true),
-            Ok(vec![vec![i.into(), votes.into()]])
+            vc_state.lookup(&[i.into()], true).unwrap(),
+            vec![vec![i.into(), votes.into()]]
         );
     }
 }
@@ -1041,8 +1041,8 @@ fn votes() {
 
     // query articles to see that it was updated
     assert_eq!(
-        articleq.lookup(&[a1.clone()], true),
-        Ok(vec![vec![a1.clone(), 2.into()]])
+        articleq.lookup(&[a1.clone()], true).unwrap(),
+        vec![vec![a1.clone(), 2.into()]]
     );
 
     // make another article
@@ -1054,12 +1054,12 @@ fn votes() {
     // query articles again to see that the new article was absorbed
     // and that the old one is still present
     assert_eq!(
-        articleq.lookup(&[a1.clone()], true),
-        Ok(vec![vec![a1.clone(), 2.into()]])
+        articleq.lookup(&[a1.clone()], true).unwrap(),
+        vec![vec![a1.clone(), 2.into()]]
     );
     assert_eq!(
-        articleq.lookup(&[a2.clone()], true),
-        Ok(vec![vec![a2.clone(), 4.into()]])
+        articleq.lookup(&[a2.clone()], true).unwrap(),
+        vec![vec![a2.clone(), 4.into()]]
     );
 
     // create a vote (user 1 votes for article 1)
@@ -1120,8 +1120,8 @@ fn empty_migration() {
 
     // send a query to c
     assert_eq!(
-        cq.lookup(&[id.clone()], true),
-        Ok(vec![vec![1.into(), 2.into()]])
+        cq.lookup(&[id.clone()], true).unwrap(),
+        vec![vec![1.into(), 2.into()]]
     );
 
     // update value again
@@ -1159,8 +1159,8 @@ fn simple_migration() {
 
     // check that a got it
     assert_eq!(
-        aq.lookup(&[id.clone()], true),
-        Ok(vec![vec![1.into(), 2.into()]])
+        aq.lookup(&[id.clone()], true).unwrap(),
+        vec![vec![1.into(), 2.into()]]
     );
 
     // add unrelated node b in a migration
@@ -1181,8 +1181,8 @@ fn simple_migration() {
 
     // check that b got it
     assert_eq!(
-        bq.lookup(&[id.clone()], true),
-        Ok(vec![vec![1.into(), 4.into()]])
+        bq.lookup(&[id.clone()], true).unwrap(),
+        vec![vec![1.into(), 4.into()]]
     );
 }
 
@@ -1206,8 +1206,8 @@ fn add_columns() {
 
     // check that a got it
     assert_eq!(
-        aq.lookup(&[id.clone()], true),
-        Ok(vec![vec![id.clone(), "y".into()].into()])
+        aq.lookup(&[id.clone()], true).unwrap(),
+        vec![vec![id.clone(), "y".into()]]
     );
 
     // add a third column to a
@@ -1443,8 +1443,8 @@ fn replay_during_replay() {
     let mut r = g.view("end").unwrap();
 
     assert_eq!(
-        r.lookup(&[1.into()], true),
-        Ok(vec![vec![1.into(), "a".into()]])
+        r.lookup(&[1.into()], true).unwrap(),
+        vec![vec![1.into(), "a".into()]]
     );
 
     // we now know that u has key a=1 in its index
@@ -1458,8 +1458,8 @@ fn replay_during_replay() {
     // second is partial and empty, so any read should trigger a replay.
     // though that shouldn't interact with target in any way.
     assert_eq!(
-        second.lookup(&["a".into()], true),
-        Ok(vec![vec!["a".into(), 1.into()]])
+        second.lookup(&["a".into()], true).unwrap(),
+        vec![vec!["a".into(), 1.into()]]
     );
 
     // now we get to the funky part.
@@ -1468,8 +1468,8 @@ fn replay_during_replay() {
     // "a" value for which u has a hole. that record is then going to be forwarded to *both*
     // children, and it'll be interesting to see what the join then does.
     assert_eq!(
-        second.lookup(&["b".into()], true),
-        Ok(vec![vec!["b".into(), 2.into()]])
+        second.lookup(&["b".into()], true).unwrap(),
+        vec![vec!["b".into(), 2.into()]]
     );
 
     // u has a hole for a=2, but not for u=b, and so should forward this to both children
@@ -1479,8 +1479,8 @@ fn replay_during_replay() {
 
     // what happens if we now query for 2?
     assert_eq!(
-        r.lookup(&[2.into()], true),
-        Ok(vec![vec![2.into(), "b".into()], vec![2.into(), "b".into()]])
+        r.lookup(&[2.into()], true).unwrap(),
+        vec![vec![2.into(), "b".into()], vec![2.into(), "b".into()]]
     );
 }
 
@@ -1520,8 +1520,8 @@ fn full_aggregation_with_bogokey() {
 
     // send a query to aggregation materialization
     assert_eq!(
-        aggq.lookup(&[0.into()], true),
-        Ok(vec![vec![0.into(), 3.into()]])
+        aggq.lookup(&[0.into()], true).unwrap(),
+        vec![vec![0.into(), 3.into()]]
     );
 
     // update value again
@@ -1532,8 +1532,8 @@ fn full_aggregation_with_bogokey() {
 
     // check that value was updated again
     assert_eq!(
-        aggq.lookup(&[0.into()], true),
-        Ok(vec![vec![0.into(), 4.into()]])
+        aggq.lookup(&[0.into()], true).unwrap(),
+        vec![vec![0.into(), 4.into()]]
     );
 }
 
@@ -1568,8 +1568,8 @@ fn crossing_migration() {
     sleep();
 
     assert_eq!(
-        cq.lookup(&[id.clone()], true),
-        Ok(vec![vec![id.clone(), 2.into()].into()])
+        cq.lookup(&[id.clone()], true).unwrap(),
+        vec![vec![id.clone(), 2.into()]]
     );
 
     // update value again
@@ -1605,8 +1605,8 @@ fn independent_domain_migration() {
 
     // check that a got it
     assert_eq!(
-        aq.lookup(&[id.clone()], true),
-        Ok(vec![vec![1.into(), 2.into()]])
+        aq.lookup(&[id.clone()], true).unwrap(),
+        vec![vec![1.into(), 2.into()]]
     );
 
     // add unrelated node b in a migration
@@ -1627,8 +1627,8 @@ fn independent_domain_migration() {
 
     // check that a got it
     assert_eq!(
-        bq.lookup(&[id.clone()], true),
-        Ok(vec![vec![1.into(), 4.into()]])
+        bq.lookup(&[id.clone()], true).unwrap(),
+        vec![vec![1.into(), 4.into()]]
     );
 }
 
@@ -1662,8 +1662,8 @@ fn domain_amend_migration() {
     sleep();
 
     assert_eq!(
-        cq.lookup(&[id.clone()], true),
-        Ok(vec![vec![id.clone(), 2.into()].into()])
+        cq.lookup(&[id.clone()], true).unwrap(),
+        vec![vec![id.clone(), 2.into()]]
     );
 
     // update value again
@@ -1860,7 +1860,7 @@ fn live_writes() {
     });
 
     let mut vc_state = g.view("votecount").unwrap();
-    let mut add = g.table("vote").unwrap().into_exclusive();
+    let mut add = g.table("vote").unwrap().into_exclusive().unwrap();
 
     let ids = 1000;
     let votes = 7;
@@ -1900,12 +1900,12 @@ fn live_writes() {
     // check that all writes happened the right number of times
     for i in 0..ids {
         assert_eq!(
-            vc_state.lookup(&[i.into()], true),
-            Ok(vec![vec![i.into(), votes.into()]])
+            vc_state.lookup(&[i.into()], true).unwrap(),
+            vec![vec![i.into(), votes.into()]]
         );
         assert_eq!(
-            vc2_state.lookup(&[i.into()], true),
-            Ok(vec![vec![i.into(), votes.into()]])
+            vc2_state.lookup(&[i.into()], true).unwrap(),
+            vec![vec![i.into(), votes.into()]]
         );
     }
 }
@@ -1960,8 +1960,8 @@ fn state_replay_migration_query() {
 
     // there are (/should be) one record in a with x == 2
     assert_eq!(
-        out.lookup(&[2.into()], true),
-        Ok(vec![vec![2.into(), "c".into(), "o".into()]])
+        out.lookup(&[2.into()], true).unwrap(),
+        vec![vec![2.into(), "c".into(), "o".into()]]
     );
 
     // there are (/should be) no records with x == 3
@@ -1980,7 +1980,7 @@ fn recipe_activates() {
         assert!(r.activate(mig).is_ok());
     });
     // one base node
-    assert_eq!(g.inputs().len(), 1);
+    assert_eq!(g.inputs().unwrap().len(), 1);
 }
 
 #[test]
@@ -1992,13 +1992,13 @@ fn recipe_activates_and_migrates() {
     let mut g = build_local("recipe_activates_and_migrates");
     g.install_recipe(r_txt).unwrap();
     // one base node
-    assert_eq!(g.inputs().len(), 1);
+    assert_eq!(g.inputs().unwrap().len(), 1);
 
     g.extend_recipe(r1_txt).unwrap();
     // still one base node
-    assert_eq!(g.inputs().len(), 1);
+    assert_eq!(g.inputs().unwrap().len(), 1);
     // two leaf nodes
-    assert_eq!(g.outputs().len(), 2);
+    assert_eq!(g.outputs().unwrap().len(), 2);
 }
 
 #[test]
@@ -2011,14 +2011,14 @@ fn recipe_activates_and_migrates_with_join() {
     g.install_recipe(r_txt).unwrap();
 
     // two base nodes
-    assert_eq!(g.inputs().len(), 2);
+    assert_eq!(g.inputs().unwrap().len(), 2);
 
     g.extend_recipe(r1_txt).unwrap();
 
     // still two base nodes
-    assert_eq!(g.inputs().len(), 2);
+    assert_eq!(g.inputs().unwrap().len(), 2);
     // one leaf node
-    assert_eq!(g.outputs().len(), 1);
+    assert_eq!(g.outputs().unwrap().len(), 1);
 }
 
 #[test]
@@ -2138,11 +2138,11 @@ fn node_removal() {
 
     // send a query to c
     assert_eq!(
-        cq.lookup(&[id.clone()], true),
-        Ok(vec![vec![1.into(), 2.into()]])
+        cq.lookup(&[id.clone()], true).unwrap(),
+        vec![vec![1.into(), 2.into()]]
     );
 
-    g.remove_node(cid);
+    g.remove_node(cid).unwrap();
 
     // update value again
     mutb.insert(vec![id.clone(), 4.into()]).unwrap();
@@ -2179,8 +2179,8 @@ fn remove_query() {
 
     let mut g = ControllerBuilder::default().build_local();
     g.install_recipe(r_txt).unwrap();
-    assert_eq!(g.inputs().len(), 1);
-    assert_eq!(g.outputs().len(), 2);
+    assert_eq!(g.inputs().unwrap().len(), 1);
+    assert_eq!(g.outputs().unwrap().len(), 2);
 
     let mut mutb = g.table("b").unwrap();
     let mut qa = g.view("qa").unwrap();
@@ -2196,9 +2196,9 @@ fn remove_query() {
 
     // Remove qb and check that the graph still functions as expected.
     g.install_recipe(r2_txt).unwrap();
-    assert_eq!(g.inputs().len(), 1);
-    assert_eq!(g.outputs().len(), 1);
-    assert!(g.view("qb").is_none());
+    assert_eq!(g.inputs().unwrap().len(), 1);
+    assert_eq!(g.outputs().unwrap().len(), 1);
+    assert!(g.view("qb").is_err());
 
     mutb.insert(vec![42.into(), "6".into(), "7".into()])
         .unwrap();

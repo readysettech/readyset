@@ -14,10 +14,13 @@ use throttled_reader::ThrottledReader;
 
 use super::{DeserializeReceiver, NonBlockingWriter, ReceiveError};
 
-#[derive(Debug)]
+#[derive(Debug, Fail)]
 pub enum SendError {
-    BincodeError(bincode::Error),
-    IoError(io::Error),
+    #[fail(display = "{}", _0)]
+    BincodeError(#[cause] bincode::Error),
+    #[fail(display = "{}", _0)]
+    IoError(#[cause] io::Error),
+    #[fail(display = "channel has previously encountered an error")]
     Poisoned,
 }
 

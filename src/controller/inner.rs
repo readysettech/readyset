@@ -6,14 +6,13 @@ use dataflow::prelude::*;
 use dataflow::{node, payload, DomainConfig};
 
 use std::collections::{BTreeMap, HashMap};
-use std::error::Error;
 use std::net::{IpAddr, SocketAddr};
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 use std::{io, time};
 
 use api::builders::*;
-use api::{ActivationResult, RpcError};
+use api::ActivationResult;
 use controller::migrate::materialization::Materializations;
 use controller::{
     ControllerState, DomainHandle, Migration, Recipe, WorkerIdentifier, WorkerStatus,
@@ -138,15 +137,15 @@ impl ControllerInner {
         path: String,
         body: Vec<u8>,
         authority: &Arc<A>,
-    ) -> Result<String, StatusCode> {
+    ) -> Result<Result<String, String>, StatusCode> {
         use hyper::Method::*;
         use serde_json as json;
 
         match (&method, path.as_ref()) {
-            (&Get, "/graph") => return Ok(self.graphviz()),
-            (&Post, "/graphviz") => return Ok(json::to_string(&self.graphviz()).unwrap()),
+            (&Get, "/graph") => return Ok(Ok(self.graphviz())),
+            (&Post, "/graphviz") => return Ok(Ok(json::to_string(&self.graphviz()).unwrap())),
             (&Get, "/get_statistics") => {
-                return Ok(json::to_string(&self.get_statistics()).unwrap())
+                return Ok(Ok(json::to_string(&self.get_statistics()).unwrap()))
             }
             _ => {}
         }
@@ -155,34 +154,46 @@ impl ControllerInner {
             return Err(StatusCode::ServiceUnavailable);
         }
 
-        Ok(match (method, path.as_ref()) {
-            (Get, "/flush_partial") => return Ok(json::to_string(&self.flush_partial()).unwrap()),
-            (Post, "/inputs") => json::to_string(&self.inputs()).unwrap(),
-            (Post, "/outputs") => json::to_string(&self.outputs()).unwrap(),
-            (Get, "/instances") => return Ok(json::to_string(&self.get_instances()).unwrap()),
-            (Post, "/table_builder") => {
-                json::to_string(&self.table_builder(json::from_slice(&body).unwrap())).unwrap()
-            }
-            (Post, "/view_builder") => {
-                json::to_string(&self.view_builder(json::from_slice(&body).unwrap())).unwrap()
-            }
-            (Post, "/extend_recipe") => json::to_string(
-                &self.extend_recipe(authority, json::from_slice(&body).unwrap())
-            ).unwrap(),
-            (Post, "/install_recipe") => json::to_string(
-                &self.install_recipe(authority, json::from_slice(&body).unwrap())
-            ).unwrap(),
-            (Post, "/set_security_config") => json::to_string(
-                &self.set_security_config(json::from_slice(&body).unwrap())
-            ).unwrap(),
-            (Post, "/create_universe") => {
-                json::to_string(&self.create_universe(json::from_slice(&body).unwrap())).unwrap()
-            }
-            (Post, "/remove_node") => {
-                json::to_string(&self.remove_node(json::from_slice(&body).unwrap())).unwrap()
-            }
+        match (method, path.as_ref()) {
+            (Get, "/flush_partial") => Ok(Ok(json::to_string(&self.flush_partial()).unwrap())),
+            (Post, "/inputs") => Ok(Ok(json::to_string(&self.inputs()).unwrap())),
+            (Post, "/outputs") => Ok(Ok(json::to_string(&self.outputs()).unwrap())),
+            (Get, "/instances") => Ok(Ok(json::to_string(&self.get_instances()).unwrap())),
+            (Post, "/table_builder") => json::from_slice(&body)
+                .map_err(|_| StatusCode::BadRequest)
+                .map(|args| Ok(json::to_string(&self.table_builder(args)).unwrap())),
+            (Post, "/view_builder") => json::from_slice(&body)
+                .map_err(|_| StatusCode::BadRequest)
+                .map(|args| Ok(json::to_string(&self.view_builder(args)).unwrap())),
+            (Post, "/extend_recipe") => json::from_slice(&body)
+                .map_err(|_| StatusCode::BadRequest)
+                .map(|args| {
+                    self.extend_recipe(authority, args)
+                        .map(|r| json::to_string(&r).unwrap())
+                }),
+            (Post, "/install_recipe") => json::from_slice(&body)
+                .map_err(|_| StatusCode::BadRequest)
+                .map(|args| {
+                    self.install_recipe(authority, args)
+                        .map(|r| json::to_string(&r).unwrap())
+                }),
+            (Post, "/set_security_config") => json::from_slice(&body)
+                .map_err(|_| StatusCode::BadRequest)
+                .map(|args| {
+                    self.set_security_config(args)
+                        .map(|r| json::to_string(&r).unwrap())
+                }),
+            (Post, "/create_universe") => json::from_slice(&body)
+                .map_err(|_| StatusCode::BadRequest)
+                .map(|args| {
+                    self.create_universe(args)
+                        .map(|r| json::to_string(&r).unwrap())
+                }),
+            (Post, "/remove_node") => json::from_slice(&body)
+                .map_err(|_| StatusCode::BadRequest)
+                .map(|args| self.remove_node(args).map(|r| json::to_string(&r).unwrap())),
             _ => return Err(StatusCode::NotFound),
-        })
+        }
     }
 
     fn handle_register(
@@ -628,7 +639,7 @@ impl ControllerInner {
         total_evicted
     }
 
-    pub fn create_universe(&mut self, context: HashMap<String, DataType>) {
+    pub fn create_universe(&mut self, context: HashMap<String, DataType>) -> Result<(), String> {
         let log = self.log.clone();
         let mut r = self.recipe.clone();
         let groups = self.recipe.security_groups();
@@ -643,7 +654,7 @@ impl ControllerInner {
         if context.get("group").is_none() {
             for g in groups {
                 let rgb: Option<ViewBuilder> = self.view_builder(&g);
-                let mut view = rgb.map(|rgb| rgb.build_exclusive()).unwrap();
+                let mut view = rgb.map(|rgb| rgb.build_exclusive().unwrap()).unwrap();
                 let my_groups: Vec<DataType> = view
                     .lookup(uid, true)
                     .unwrap()
@@ -664,29 +675,29 @@ impl ControllerInner {
                 }
                 Err(e) => {
                     crit!(log, "failed to create universe: {:?}", e);
-                    Err(RpcError::Other("failed to create universe".to_owned()))
+                    Err("failed to create universe".to_owned())
                 }
             }.unwrap();
         });
 
         self.recipe = r;
+        Ok(())
     }
 
-    pub fn set_security_config(&mut self, config: (String, String)) {
+    pub fn set_security_config(&mut self, config: (String, String)) -> Result<(), String> {
         let p = config.0;
         let url = config.1;
         self.recipe.set_security_config(&p, url);
+        Ok(())
     }
 
-    fn apply_recipe(&mut self, mut new: Recipe) -> Result<ActivationResult, RpcError> {
-        let mut err = Err(RpcError::Other("".to_owned())); // <3 type inference
-        self.migrate(|mig| {
-            err = new
-                .activate(mig)
-                .map_err(|e| RpcError::Other(format!("failed to activate recipe: {}", e)))
+    fn apply_recipe(&mut self, mut new: Recipe) -> Result<ActivationResult, String> {
+        let r = self.migrate(|mig| {
+            new.activate(mig)
+                .map_err(|e| format!("failed to activate recipe: {}", e))
         });
 
-        match err {
+        match r {
             Ok(ref ra) => {
                 for leaf in &ra.removed_leaves {
                     // There should be exactly one reader attached to each "leaf" node. Find it and
@@ -696,26 +707,26 @@ impl ControllerInner {
                         .neighbors_directed(*leaf, petgraph::EdgeDirection::Outgoing)
                         .collect();
                     assert_eq!(readers.len(), 1);
-                    self.remove_node(readers[0]);
+                    self.remove_node(readers[0]).unwrap();
                 }
                 self.recipe = new;
             }
             Err(ref e) => {
-                crit!(self.log, "{}", e.description());
+                crit!(self.log, "{}", e);
                 // TODO(malte): a little yucky, since we don't really need the blank recipe
                 let recipe = mem::replace(&mut self.recipe, Recipe::blank(None));
                 self.recipe = recipe.revert();
             }
         }
 
-        err
+        r
     }
 
     pub fn extend_recipe<A: Authority + 'static>(
         &mut self,
         authority: &Arc<A>,
         add_txt: String,
-    ) -> Result<ActivationResult, RpcError> {
+    ) -> Result<ActivationResult, String> {
         // needed because self.apply_recipe needs to mutate self.recipe, so can't have it borrowed
         let new = mem::replace(&mut self.recipe, Recipe::blank(None));
         match new.extend(&add_txt) {
@@ -733,9 +744,7 @@ impl ControllerInner {
                     })
                     .is_err()
                 {
-                    return Err(RpcError::Other(
-                        "Failed to persist recipe extension".to_owned(),
-                    ));
+                    return Err("Failed to persist recipe extension".to_owned());
                 }
 
                 activation_result
@@ -744,7 +753,7 @@ impl ControllerInner {
                 // need to restore the old recipe
                 crit!(self.log, "failed to extend recipe: {:?}", e);
                 self.recipe = old;
-                Err(RpcError::Other("failed to extend recipe".to_owned()))
+                Err("failed to extend recipe".to_owned())
             }
         }
     }
@@ -753,7 +762,7 @@ impl ControllerInner {
         &mut self,
         authority: &Arc<A>,
         r_txt: String,
-    ) -> Result<ActivationResult, RpcError> {
+    ) -> Result<ActivationResult, String> {
         match Recipe::from_str(&r_txt, Some(self.log.clone())) {
             Ok(r) => {
                 let old = mem::replace(&mut self.recipe, Recipe::blank(None));
@@ -771,15 +780,13 @@ impl ControllerInner {
                     })
                     .is_err()
                 {
-                    return Err(RpcError::Other(
-                        "Failed to persist recipe installation".to_owned(),
-                    ));
+                    return Err("Failed to persist recipe installation".to_owned());
                 }
                 activation_result
             }
             Err(e) => {
                 crit!(self.log, "failed to parse recipe: {:?}", e);
-                Err(RpcError::Other("failed to parse recipe".to_owned()))
+                Err("failed to parse recipe".to_owned())
             }
         }
     }
@@ -788,7 +795,7 @@ impl ControllerInner {
         graphviz(&self.ingredients, &self.materializations)
     }
 
-    pub fn remove_node(&mut self, node: NodeIndex) {
+    pub fn remove_node(&mut self, node: NodeIndex) -> Result<(), String> {
         // Node must not have any children.
         assert_eq!(
             self.ingredients
@@ -833,6 +840,8 @@ impl ControllerInner {
                 .send(box payload::Packet::RemoveNodes { nodes })
                 .unwrap();
         }
+
+        Ok(())
     }
 }
 

@@ -7,6 +7,8 @@
 extern crate bincode;
 extern crate bufstream;
 extern crate byteorder;
+#[macro_use]
+extern crate failure;
 extern crate mio;
 extern crate net2;
 extern crate serde;

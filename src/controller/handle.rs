@@ -51,7 +51,7 @@ impl<A: Authority> LocalControllerHandle<A> {
         worker: Option<(Sender<WorkerEvent>, JoinHandle<()>)>,
     ) -> Self {
         LocalControllerHandle {
-            c: ControllerHandle::make(authority),
+            c: ControllerHandle::make(authority).unwrap(),
             controller,
             worker,
         }
@@ -98,7 +98,7 @@ impl<A: Authority> LocalControllerHandle<A> {
             None => panic!("url not defined"),
         };
 
-        self.rpc("set_security_config", &(p, url))
+        self.rpc("set_security_config", &(p, url)).unwrap()
     }
 
     /// Install a new set of policies on the controller.
@@ -107,7 +107,7 @@ impl<A: Authority> LocalControllerHandle<A> {
             .get("id")
             .expect("Universe context must have id")
             .clone();
-        self.rpc::<_, ()>("create_universe", &context);
+        self.rpc::<_, ()>("create_universe", &context).unwrap();
 
         // Write to Context table
         let bname = match context.get("group") {

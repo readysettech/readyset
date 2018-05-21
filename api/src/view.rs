@@ -5,9 +5,26 @@ use std::collections::HashMap;
 use std::io;
 use std::net::SocketAddr;
 use std::rc::Rc;
-use {ExclusiveConnection, SharedConnection};
+use {ExclusiveConnection, SharedConnection, TransportError};
 
 pub(crate) type ViewRpc = Rc<RefCell<RpcClient<ReadQuery, ReadReply>>>;
+
+/// A failed View operation.
+#[derive(Debug, Fail)]
+pub enum ViewError {
+    /// The given view is not yet available.
+    #[fail(display = "the view is not yet available")]
+    NotYetAvailable,
+    /// A lower-level error occurred while communicating with Soup.
+    #[fail(display = "{}", _0)]
+    TransportError(#[cause] TransportError),
+}
+
+impl From<TransportError> for ViewError {
+    fn from(e: TransportError) -> Self {
+        ViewError::TransportError(e)
+    }
+}
 
 #[doc(hidden)]
 #[derive(Serialize, Deserialize, Debug)]
@@ -49,20 +66,20 @@ pub struct ViewBuilder {
 
 impl ViewBuilder {
     #[doc(hidden)]
-    pub fn build_exclusive(self) -> View<ExclusiveConnection> {
+    pub fn build_exclusive(self) -> io::Result<View<ExclusiveConnection>> {
         let conns = self
             .shards
             .iter()
-            .map(move |addr| Rc::new(RefCell::new(RpcClient::connect(addr, false).unwrap())))
-            .collect();
+            .map(move |addr| RpcClient::connect(addr, false).map(|rpc| Rc::new(RefCell::new(rpc))))
+            .collect::<io::Result<Vec<_>>>()?;
 
-        View {
+        Ok(View {
             node: self.node,
             columns: self.columns,
             shard_addrs: self.shards,
             shards: conns,
             exclusivity: ExclusiveConnection,
-        }
+        })
     }
 
     /// Set the local port to bind to when making the shared connection.
@@ -76,7 +93,7 @@ impl ViewBuilder {
     pub(crate) fn build(
         mut self,
         rpcs: &mut HashMap<(SocketAddr, usize), ViewRpc>,
-    ) -> View<SharedConnection> {
+    ) -> io::Result<View<SharedConnection>> {
         let sports = &mut self.local_ports;
         let conns = self
             .shards
@@ -88,31 +105,30 @@ impl ViewBuilder {
                 // one entry per shard so that we can send sharded requests in parallel even if
                 // they happen to be targeting the same machine.
                 match rpcs.entry((*addr, shardi)) {
-                    Entry::Occupied(e) => Rc::clone(e.get()),
+                    Entry::Occupied(e) => Ok(Rc::clone(e.get())),
                     Entry::Vacant(h) => {
                         let c =
-                            RpcClient::connect_from(sports.get(shardi).map(|&p| p), addr, false)
-                                .unwrap();
+                            RpcClient::connect_from(sports.get(shardi).map(|&p| p), addr, false)?;
                         if shardi >= sports.len() {
                             assert!(shardi == sports.len());
-                            sports.push(c.local_addr().unwrap().port());
+                            sports.push(c.local_addr()?.port());
                         }
 
                         let c = Rc::new(RefCell::new(c));
                         h.insert(Rc::clone(&c));
-                        c
+                        Ok(c)
                     }
                 }
             })
-            .collect();
+            .collect::<io::Result<Vec<_>>>()?;
 
-        View {
+        Ok(View {
             node: self.node,
             columns: self.columns,
             shard_addrs: self.shards,
             shards: conns,
             exclusivity: SharedConnection,
-        }
+        })
     }
 }
 
@@ -149,7 +165,7 @@ unsafe impl Send for View<ExclusiveConnection> {}
 impl View<SharedConnection> {
     /// Produce a `View` with dedicated Soup connections so it can be safely sent across
     /// threads.
-    pub fn into_exclusive(self) -> View<ExclusiveConnection> {
+    pub fn into_exclusive(self) -> io::Result<View<ExclusiveConnection>> {
         ViewBuilder {
             node: self.node,
             local_ports: vec![],
@@ -171,14 +187,14 @@ impl<E> View<E> {
     }
 
     /// Get the current size of this view.
-    pub fn len(&mut self) -> Result<usize, ()> {
+    pub fn len(&mut self) -> Result<usize, ViewError> {
         if self.shards.len() == 1 {
             let mut shard = self.shards[0].borrow_mut();
             let reply = shard
                 .send(&ReadQuery::Size {
                     target: (self.node, 0),
                 })
-                .unwrap();
+                .map_err(TransportError::from)?;
             match reply {
                 ReadReply::Size(rows) => Ok(rows),
                 _ => unreachable!(),
@@ -186,20 +202,21 @@ impl<E> View<E> {
         } else {
             let shard_queries = 0..self.shards.len();
 
-            let len = shard_queries.into_iter().fold(0, |acc, shardi| {
-                let mut shard = self.shards[shardi].borrow_mut();
-                let reply = shard
-                    .send(&ReadQuery::Size {
-                        target: (self.node, shardi),
-                    })
-                    .unwrap();
+            shard_queries.into_iter().fold(Ok(0), |acc, shardi| {
+                acc.and_then(|acc| {
+                    let mut shard = self.shards[shardi].borrow_mut();
+                    let reply = shard
+                        .send(&ReadQuery::Size {
+                            target: (self.node, shardi),
+                        })
+                        .map_err(TransportError::from)?;
 
-                match reply {
-                    ReadReply::Size(rows) => acc + rows,
-                    _ => unreachable!(),
-                }
-            });
-            Ok(len)
+                    match reply {
+                        ReadReply::Size(rows) => Ok(acc + rows),
+                        _ => unreachable!(),
+                    }
+                })
+            })
         }
     }
 
@@ -210,7 +227,7 @@ impl<E> View<E> {
         &mut self,
         keys: Vec<Vec<DataType>>,
         block: bool,
-    ) -> Result<Vec<Datas>, ()> {
+    ) -> Result<Vec<Datas>, ViewError> {
         if self.shards.len() == 1 {
             let mut shard = self.shards[0].borrow_mut();
             let reply = shard
@@ -219,9 +236,10 @@ impl<E> View<E> {
                     keys,
                     block,
                 })
-                .unwrap();
+                .map_err(TransportError::from)?;
             match reply {
-                ReadReply::Normal(rows) => rows,
+                ReadReply::Normal(Ok(rows)) => Ok(rows),
+                ReadReply::Normal(Err(())) => Err(ViewError::NotYetAvailable),
                 _ => unreachable!(),
             }
         } else {
@@ -234,56 +252,42 @@ impl<E> View<E> {
 
             let mut borrow_all: Vec<_> = self.shards.iter().map(|s| s.borrow_mut()).collect();
 
-            let qs: Vec<_> = borrow_all
+            let qs = borrow_all
                 .iter_mut()
                 .enumerate()
-                .filter_map(|(shardi, shard)| {
+                .zip(shard_queries.iter_mut())
+                .filter(|&(_, ref sq)| !sq.is_empty())
+                .map(|((shardi, shard), shard_queries)| {
                     use std::mem;
-
-                    if shard_queries[shardi].is_empty() {
-                        return None;
-                    }
-
-                    Some(
-                        shard
-                            .send_async(&ReadQuery::Normal {
-                                target: (self.node, shardi),
-                                keys: mem::replace(&mut shard_queries[shardi], Vec::new()),
-                                block,
-                            })
-                            .unwrap(),
-                    )
+                    Ok(shard
+                        .send_async(&ReadQuery::Normal {
+                            target: (self.node, shardi),
+                            keys: mem::replace(shard_queries, Vec::new()),
+                            block,
+                        })
+                        .map_err(TransportError::from)?)
                 })
-                .collect();
+                .collect::<Result<Vec<_>, ViewError>>()?;
 
-            let mut err = false;
-            let rows = qs
-                .into_iter()
-                .flat_map(|res| {
-                    let reply = res.wait().unwrap();
-                    match reply {
-                        ReadReply::Normal(Ok(rows)) => rows,
-                        ReadReply::Normal(Err(())) => {
-                            err = true;
-                            Vec::new()
-                        }
-                        _ => unreachable!(),
+            let mut results = Vec::new();
+            for res in qs {
+                let reply = res.wait().map_err(TransportError::from)?;
+                match reply {
+                    ReadReply::Normal(Ok(rows)) => {
+                        results.extend(rows);
                     }
-                })
-                .collect();
-
-            if err {
-                Err(())
-            } else {
-                Ok(rows)
+                    ReadReply::Normal(Err(())) => return Err(ViewError::NotYetAvailable),
+                    _ => unreachable!(),
+                }
             }
+            Ok(results)
         }
     }
 
     /// Retrieve the query results for the given parameter value.
     ///
     /// The method will block if the results are not yet available only when `block` is `true`.
-    pub fn lookup(&mut self, key: &[DataType], block: bool) -> Result<Datas, ()> {
+    pub fn lookup(&mut self, key: &[DataType], block: bool) -> Result<Datas, ViewError> {
         // TODO: Optimized version of this function?
         self.multi_lookup(vec![Vec::from(key)], block)
             .map(|rs| rs.into_iter().next().unwrap())

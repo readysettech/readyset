@@ -27,5 +27,5 @@ use channel;
 /// Channel coordinator type specialized for domains
 pub type ChannelCoordinator = channel::ChannelCoordinator<(DomainIndex, usize)>;
 pub trait Executor {
-    fn send_back(&self, SourceChannelIdentifier, Result<i64, ()>);
+    fn send_back(&self, SourceChannelIdentifier, ());
 }

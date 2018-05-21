@@ -89,8 +89,7 @@
 //! MySQL binary protocol directly to Soup operations. While it works decently well, and can be
 //! useful to provide backwards-compatibility, we recommend using the client bindings directly
 //! where possible.
-// TODO: switch to failure crate fo errors
-
+#![feature(transpose_result)]
 #![deny(missing_docs)]
 #![deny(unused_extern_crates)]
 
@@ -99,6 +98,8 @@ extern crate basics;
 extern crate bincode;
 extern crate channel;
 extern crate consensus;
+#[macro_use]
+extern crate failure;
 extern crate futures;
 extern crate hyper;
 extern crate nom_sql;
@@ -111,8 +112,6 @@ extern crate vec_map;
 
 use basics::*;
 use std::collections::HashMap;
-use std::error::Error;
-use std::fmt;
 
 mod controller;
 mod table;
@@ -128,7 +127,7 @@ pub mod prelude {
 
 pub use controller::{ControllerDescriptor, ControllerHandle, ControllerPointer};
 pub use table::{Input, Table, TableError};
-pub use view::{ReadQuery, ReadReply, View};
+pub use view::{ReadQuery, ReadReply, View, ViewError};
 
 #[doc(hidden)]
 pub mod builders {
@@ -163,23 +162,25 @@ pub struct ActivationResult {
     pub expressions_removed: usize,
 }
 
-/// Serializable error type for RPC that can fail.
-#[derive(Debug, Deserialize, Serialize)]
-pub enum RpcError {
-    /// Generic error message vessel.
-    Other(String),
+/// An error occured during transport (i.e., while sending or receiving).
+#[derive(Debug, Fail)]
+pub enum TransportError {
+    /// A network-level error occurred.
+    #[fail(display = "{}", _0)]
+    Channel(#[cause] channel::tcp::SendError),
+    /// A protocol-level error occurred.
+    #[fail(display = "{}", _0)]
+    Serialization(#[cause] bincode::Error),
 }
 
-impl Error for RpcError {
-    fn description(&self) -> &str {
-        match *self {
-            RpcError::Other(ref s) => s,
-        }
+impl From<channel::tcp::SendError> for TransportError {
+    fn from(e: channel::tcp::SendError) -> Self {
+        TransportError::Channel(e)
     }
 }
 
-impl fmt::Display for RpcError {
-    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        write!(f, "{}", self.description())
+impl From<bincode::Error> for TransportError {
+    fn from(e: bincode::Error) -> Self {
+        TransportError::Serialization(e)
     }
 }

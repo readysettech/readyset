@@ -8,7 +8,7 @@ use std::io;
 use std::net::SocketAddr;
 use std::rc::Rc;
 use vec_map::VecMap;
-use {ExclusiveConnection, SharedConnection};
+use {ExclusiveConnection, SharedConnection, TransportError};
 
 #[doc(hidden)]
 #[derive(Clone, Serialize, Deserialize)]
@@ -19,12 +19,23 @@ pub struct Input {
 }
 
 /// A failed Table operation.
-#[derive(Debug)]
+#[derive(Debug, Fail)]
 pub enum TableError {
-    /// Incorrect number of columns specified for operations: (expected, got).
+    /// The wrong number of columns was given when inserting a row.
+    #[fail(display = "wrong number of columns specified: expected {}, got {}", _0, _1)]
     WrongColumnCount(usize, usize),
-    /// Incorrect number of key columns specified for operations: (expected, got).
+    /// The wrong number of key columns was given when modifying a row.
+    #[fail(display = "wrong number of key columns used: expected {}, got {}", _0, _1)]
     WrongKeyColumnCount(usize, usize),
+    /// The underlying connection to Soup produced an error.
+    #[fail(display = "{}", _0)]
+    TransportError(#[cause] TransportError),
+}
+
+impl From<TransportError> for TableError {
+    fn from(e: TransportError) -> Self {
+        TableError::TransportError(e)
+    }
 }
 
 #[doc(hidden)]
@@ -53,20 +64,20 @@ impl TableBuilder {
     pub(crate) fn build(
         self,
         rpcs: &mut HashMap<Vec<SocketAddr>, TableRpc>,
-    ) -> Table<SharedConnection> {
+    ) -> io::Result<Table<SharedConnection>> {
         use std::collections::hash_map::Entry;
 
         let dih = match rpcs.entry(self.txs.clone()) {
             Entry::Occupied(e) => Rc::clone(e.get()),
             Entry::Vacant(h) => {
-                let c = DomainInputHandle::new_on(self.local_port, h.key()).unwrap();
+                let c = DomainInputHandle::new_on(self.local_port, h.key())?;
                 let c = Rc::new(RefCell::new(c));
                 h.insert(Rc::clone(&c));
                 c
             }
         };
 
-        Table {
+        Ok(Table {
             domain_input_handle: dih,
             shard_addrs: self.txs,
             addr: self.addr,
@@ -78,7 +89,7 @@ impl TableBuilder {
             columns: self.columns,
             schema: self.schema,
             exclusivity: SharedConnection,
-        }
+        })
     }
 }
 
@@ -126,11 +137,11 @@ unsafe impl Send for Table<ExclusiveConnection> {}
 
 impl Table<SharedConnection> {
     /// Produce a `Table` with dedicated Soup connections so it can be safely sent across threads.
-    pub fn into_exclusive(self) -> Table<ExclusiveConnection> {
-        let c = DomainInputHandle::new(&self.shard_addrs[..]).unwrap();
+    pub fn into_exclusive(self) -> io::Result<Table<ExclusiveConnection>> {
+        let c = DomainInputHandle::new(&self.shard_addrs[..])?;
         let c = Rc::new(RefCell::new(c));
 
-        Table {
+        Ok(Table {
             domain_input_handle: c,
             shard_addrs: self.shard_addrs,
             addr: self.addr,
@@ -142,7 +153,7 @@ impl Table<SharedConnection> {
             columns: self.columns.clone(),
             schema: self.schema.clone(),
             exclusivity: ExclusiveConnection,
-        }
+        })
     }
 }
 
@@ -164,8 +175,8 @@ impl<E> Table<E> {
     ///
     /// Note that this will *not* be updated if the underlying recipe changes and adds or removes
     /// columns!
-    pub fn schema(&self) -> &CreateTableStatement {
-        self.schema.as_ref().unwrap()
+    pub fn schema(&self) -> Option<&CreateTableStatement> {
+        self.schema.as_ref()
     }
 
     /// Get the local address this `Table` is bound to.
@@ -254,13 +265,12 @@ impl<E> Table<E> {
         }
     }
 
-    fn send(&mut self, ops: Vec<TableOperation>) {
+    fn send(&mut self, ops: Vec<TableOperation>) -> Result<(), TransportError> {
         let tracer = self.tracer.take();
         let m = self.prep_records(tracer, ops);
         self.domain_input_handle
             .borrow_mut()
             .base_send(m, &self.key[..])
-            .unwrap();
     }
 
     /// Perform multiple operations on this base table in one batch.
@@ -283,11 +293,11 @@ impl<E> Table<E> {
 
             let tracer = self.tracer.clone();
             let m = self.prep_records(tracer, data);
-            batch_putter.enqueue(m, &self.key[..]).unwrap();
+            batch_putter.enqueue(m, &self.key[..])?;
         }
 
         self.tracer.take();
-        batch_putter.wait().map(|_| ()).map_err(|_| unreachable!())
+        Ok(batch_putter.wait()?)
     }
 
     /// Insert a single row of data into this base table.
@@ -303,7 +313,7 @@ impl<E> Table<E> {
             ));
         }
 
-        Ok(self.send(data))
+        Ok(self.send(data)?)
     }
 
     /// Insert multiple rows of data into this base table.
@@ -321,7 +331,8 @@ impl<E> Table<E> {
                 Ok(TableOperation::Insert(row))
             })
             .collect::<Result<Vec<_>, _>>()
-            .map(|data| self.send(data))
+            .and_then(|data| Ok(self.send(data)?))
+            .map(|_| ())
     }
 
     /// Delete the row with the given key from this base table.
@@ -329,7 +340,7 @@ impl<E> Table<E> {
     where
         I: Into<Vec<DataType>>,
     {
-        Ok(self.send(vec![TableOperation::Delete { key: key.into() }].into()))
+        Ok(self.send(vec![TableOperation::Delete { key: key.into() }].into())?)
     }
 
     /// Update the row with the given key in this base table.
@@ -356,7 +367,7 @@ impl<E> Table<E> {
             }
             set[coli] = m;
         }
-        Ok(self.send(vec![TableOperation::Update { key, set }].into()))
+        Ok(self.send(vec![TableOperation::Update { key, set }].into())?)
     }
 
     /// Perform a insert-or-update on this base table.
@@ -390,12 +401,13 @@ impl<E> Table<E> {
             }
             set[coli] = m;
         }
+
         Ok(self.send(
             vec![TableOperation::InsertOrUpdate {
                 row: insert,
                 update: set,
             }].into(),
-        ))
+        )?)
     }
 
     /// Trace the next modification to this base table.
@@ -447,11 +459,11 @@ impl DomainInputHandle {
         BatchSendHandle::new(self)
     }
 
-    pub(crate) fn base_send(&mut self, i: Input, key: &[usize]) -> Result<i64, tcp::SendError> {
+    pub(crate) fn base_send(&mut self, i: Input, key: &[usize]) -> Result<(), TransportError> {
         let mut s = BatchSendHandle::new(self);
         s.enqueue(i, key)?;
         s.wait().map_err(|_| {
-            tcp::SendError::IoError(io::Error::new(io::ErrorKind::Other, "write failed"))
+            tcp::SendError::IoError(io::Error::new(io::ErrorKind::Other, "write failed")).into()
         })
     }
 }
@@ -467,7 +479,7 @@ impl<'a> BatchSendHandle<'a> {
         Self { dih, sent }
     }
 
-    pub(crate) fn enqueue(&mut self, mut i: Input, key: &[usize]) -> Result<(), tcp::SendError> {
+    pub(crate) fn enqueue(&mut self, mut i: Input, key: &[usize]) -> Result<(), TransportError> {
         if self.dih.txs.len() == 1 {
             self.dih.txs[0].send(i)?;
             self.sent[0] += 1;
@@ -510,18 +522,14 @@ impl<'a> BatchSendHandle<'a> {
         Ok(())
     }
 
-    pub(crate) fn wait(self) -> Result<i64, ()> {
-        let mut id = Ok(0);
+    pub(crate) fn wait(self) -> Result<(), TransportError> {
         for (shard, n) in self.sent.into_iter().enumerate() {
             for _ in 0..n {
                 use bincode;
-                let res: Result<Result<i64, ()>, _>;
-                res = bincode::deserialize_from(&mut (&mut self.dih.txs[shard]).reader());
-                id = res.unwrap();
+                bincode::deserialize_from(&mut (&mut self.dih.txs[shard]).reader())?;
             }
         }
 
-        // XXX: this just returns the last id :/
-        id
+        Ok(())
     }
 }

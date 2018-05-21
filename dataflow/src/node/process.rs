@@ -52,7 +52,7 @@ impl Node {
                         // Send write-ACKs to all the clients with updates that made
                         // it into this merged packet:
                         if let Some(ex) = executor {
-                            senders.drain(..).for_each(|src| ex.send_back(src, Ok(0)));
+                            senders.drain(..).for_each(|src| ex.send_back(src, ()));
                         }
 
                         *m = Some(Box::new(Packet::Message {
