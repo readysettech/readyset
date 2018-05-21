@@ -43,8 +43,8 @@ fn main() {
     println!("{}", blender.graphviz());
 
     // Get mutators and getter.
-    let mut article = blender.base("Article").unwrap();
-    let mut vote = blender.base("Vote").unwrap();
+    let mut article = blender.table("Article").unwrap();
+    let mut vote = blender.table("Vote").unwrap();
     let mut awvc = blender.view("ArticleWithVoteCount").unwrap();
 
     println!("Creating article...");
@@ -55,7 +55,7 @@ fn main() {
         let title = "test title";
         let url = "http://pdos.csail.mit.edu";
         article
-            .put(vec![aid.into(), title.into(), url.into()])
+            .insert(vec![aid.into(), title.into(), url.into()])
             .unwrap();
     }
 
@@ -65,7 +65,7 @@ fn main() {
         .duration_since(UNIX_EPOCH)
         .unwrap()
         .as_secs() as i64;
-    vote.put(vec![aid.into(), uid.into()]).unwrap();
+    vote.insert(vec![aid.into(), uid.into()]).unwrap();
 
     println!("Finished writing! Let's wait for things to propagate...");
     thread::sleep(Duration::from_millis(1000));

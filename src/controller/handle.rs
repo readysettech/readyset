@@ -121,9 +121,9 @@ impl<A: Authority> LocalControllerHandle<A> {
             .iter()
             .map(|&f| context.get(f).unwrap().clone())
             .collect();
-        let mut mutator = self.base(&bname).unwrap();
+        let mut table = self.table(&bname).unwrap();
 
-        mutator.put(record).unwrap();
+        table.insert(record).unwrap();
     }
 
     /// Wait for associated local instance to exit (presumably forever).
@@ -145,7 +145,7 @@ mod tests {
         let mut c = ControllerBuilder::default().build_local();
         assert!(c.install_recipe(r_txt).is_ok());
         for _ in 0..250 {
-            let _ = c.base("a").unwrap();
+            let _ = c.table("a").unwrap();
         }
     }
 }

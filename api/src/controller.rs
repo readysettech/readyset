@@ -4,9 +4,7 @@ use assert_infrequent;
 use basics::*;
 use consensus::{self, Authority};
 use futures::Stream;
-use getter::{GetterRpc, RemoteGetter, RemoteGetterBuilder};
 use hyper::{self, Client};
-use mutator::{Mutator, MutatorBuilder, MutatorRpc};
 use serde::de::DeserializeOwned;
 use serde::Serialize;
 use serde_json;
@@ -15,7 +13,9 @@ use std::net::SocketAddr;
 use std::sync::Arc;
 use std::thread;
 use std::time::Duration;
+use table::{Table, TableBuilder, TableRpc};
 use tokio_core::reactor::Core;
+use view::{View, ViewBuilder, ViewRpc};
 use {ActivationResult, RpcError};
 
 /// Describes a running controller instance.
@@ -39,16 +39,16 @@ pub struct ControllerDescriptor {
 /// To establish a new connection to Soup, use `ControllerHandle::new`, and pass in the appropraite
 /// `Authority`. In the likely case that you are using Zookeeper, use `ControllerHandle::from_zk`.
 ///
-/// `RemoteGetter` and `Mutator` handles that are spawned from one `ControllerHandle` may share
+/// `View` and `Table` handles that are spawned from one `ControllerHandle` may share
 /// underlying connections to Soup. This means that a `ControllerHandle` is *not* `Send` or `Sync`.
 /// To establish more connections to Soup for use by other threads, use
-/// `ControllerHandle::connect()` or call the `into_exclusive` method on a given getter or mutator.
+/// `ControllerHandle::connect()` or call the `into_exclusive` method on a given view or table.
 pub struct ControllerHandle<A: Authority> {
     url: Option<String>,
     local_port: Option<u16>,
     authority: Arc<A>,
-    getters: HashMap<(SocketAddr, usize), GetterRpc>,
-    domains: HashMap<Vec<SocketAddr>, MutatorRpc>,
+    views: HashMap<(SocketAddr, usize), ViewRpc>,
+    domains: HashMap<Vec<SocketAddr>, TableRpc>,
     reactor: Core,
     client: Client<hyper::client::HttpConnector>,
 }
@@ -95,7 +95,7 @@ impl<A: Authority> ControllerHandle<A> {
             url: None,
             local_port: None,
             authority: authority,
-            getters: Default::default(),
+            views: Default::default(),
             domains: Default::default(),
             reactor: core,
             client: client,
@@ -157,57 +157,51 @@ impl<A: Authority> ControllerHandle<A> {
         self.rpc("outputs", &())
     }
 
-    fn get_getter_builder(&mut self, name: &str) -> Option<RemoteGetterBuilder> {
-        // This call attempts to detect if `get_getter_builder` is being called in a loop. If this
+    /// Obtain a `View` that allows you to query the given external view.
+    pub fn view(&mut self, name: &str) -> Option<View> {
+        // This call attempts to detect if this function is being called in a loop. If this
         // is getting false positives, then it is safe to increase the allowed hit count.
         #[cfg(debug_assertions)]
         assert_infrequent::at_most(200);
 
-        self.rpc("getter_builder", &name)
+        self.rpc::<_, Option<ViewBuilder>>("view_builder", name)
+            .map(|mut g| {
+                if let Some(port) = self.local_port {
+                    g = g.with_local_port(port);
+                }
+
+                let g = g.build(&mut self.views);
+
+                if self.local_port.is_none() {
+                    self.local_port = Some(g.local_addr().unwrap().port());
+                }
+
+                g
+            })
     }
 
-    /// Obtain a `RemoteGetter` that allows you to query the given external view.
-    pub fn view(&mut self, name: &str) -> Option<RemoteGetter> {
-        self.get_getter_builder(name).map(|mut g| {
-            if let Some(port) = self.local_port {
-                g = g.with_local_port(port);
-            }
-
-            let g = g.build(&mut self.getters);
-
-            if self.local_port.is_none() {
-                self.local_port = Some(g.local_addr().unwrap().port());
-            }
-
-            g
-        })
-    }
-
-    fn get_mutator_builder(&mut self, base: &str) -> Option<MutatorBuilder> {
-        // This call attempts to detect if `get_mutator_builder` is being called in a loop. If this
-        // is getting false positives, then it is safe to increase the allowed hit count.
-        #[cfg(debug_assertions)]
-        assert_infrequent::at_most(200);
-
-        self.rpc("mutator_builder", &base)
-    }
-
-    /// Obtain a `Mutator` that allows you to perform writes, deletes, and other operations on the
+    /// Obtain a `Table` that allows you to perform writes, deletes, and other operations on the
     /// given base table.
-    pub fn base(&mut self, name: &str) -> Option<Mutator> {
-        self.get_mutator_builder(name).map(|mut m| {
-            if let Some(port) = self.local_port {
-                m = m.with_local_port(port);
-            }
+    pub fn table(&mut self, name: &str) -> Option<Table> {
+        // This call attempts to detect if this function is being called in a loop. If this
+        // is getting false positives, then it is safe to increase the allowed hit count.
+        #[cfg(debug_assertions)]
+        assert_infrequent::at_most(200);
 
-            let m = m.build(&mut self.domains);
+        self.rpc::<_, Option<TableBuilder>>("table_builder", name)
+            .map(|mut m| {
+                if let Some(port) = self.local_port {
+                    m = m.with_local_port(port);
+                }
 
-            if self.local_port.is_none() {
-                self.local_port = Some(m.local_addr().unwrap().port());
-            }
+                let m = m.build(&mut self.domains);
 
-            m
-        })
+                if self.local_port.is_none() {
+                    self.local_port = Some(m.local_addr().unwrap().port());
+                }
+
+                m
+            })
     }
 
     ///// Get statistics about the time spent processing different parts of the graph.
@@ -243,12 +237,12 @@ impl<A: Authority> ControllerHandle<A> {
 
     /// Close all connections opened by this handle.
     ///
-    /// Any connections that are in use by `Mutator` or `RemoteGetter` handles that have not yet
+    /// Any connections that are in use by `Table` or `View` handles that have not yet
     /// been dropped will be dropped only when those handles are dropped.
     ///
     /// Note that this method gets called automatically when the `ControllerHandle` is dropped.
     pub fn shutdown(&mut self) {
-        self.getters.clear();
+        self.views.clear();
         self.domains.clear();
     }
 }

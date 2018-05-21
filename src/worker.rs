@@ -17,7 +17,7 @@ use basics::Input;
 use channel::poll::{PollEvent, ProcessResult};
 use channel::tcp::{SendError, TryRecvError};
 use channel::{
-    self, DomainConnectionBuilder, DualTcpReceiver, TcpReceiver, TcpSender, CONNECTION_FROM_MUTATOR,
+    self, DomainConnectionBuilder, DualTcpReceiver, TcpReceiver, TcpSender, CONNECTION_FROM_BASE,
 };
 use dataflow::payload::SourceChannelIdentifier;
 use dataflow::{self, Domain, Packet};
@@ -396,7 +396,7 @@ impl Worker {
                 // NOTE: only really a while loop to let us break early
                 while let Ok((mut stream, _src)) = replica.listener.as_mut().unwrap().accept() {
                     // we know that any new connection to a domain will first send a one-byte
-                    // token to indicate whether the connection is from a mutator or not.
+                    // token to indicate whether the connection is from a base or not.
                     set_nonblocking(&stream, false);
                     let mut tag = [0];
                     use std::io::Read;
@@ -405,7 +405,7 @@ impl Worker {
                         info!(self.log, "worker discarded new connection: {:?}", e);
                         break;
                     }
-                    let is_mutator = tag[0] == CONNECTION_FROM_MUTATOR;
+                    let is_base = tag[0] == CONNECTION_FROM_BASE;
                     set_nonblocking(&stream, true);
 
                     // NOTE: we're taking two locks at the same time here! we need to be sure that
@@ -426,7 +426,7 @@ impl Worker {
 
                     self.all.register(&stream, Token(token)).unwrap();
 
-                    let tcp = if is_mutator {
+                    let tcp = if is_base {
                         DualTcpReceiver::upgrade(stream, move |input| {
                             Box::new(Packet::Input {
                                 inner: input,
@@ -554,7 +554,7 @@ impl Worker {
                         Err(TryRecvError::Empty) => break,
                         Err(TryRecvError::Disconnected) => {
                             // how can this even happen?
-                            // mutator that goes away maybe?
+                            // base that goes away maybe?
                             // in any case, we can unregister the socket.
                             debug!(self.log, "worker dropped lost connection"; "token" => token);
                             let rx = context.receivers.remove(token).unwrap();

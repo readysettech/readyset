@@ -9,9 +9,9 @@ use std::rc::Rc;
 use vec_map::VecMap;
 use {ExclusiveConnection, SharedConnection};
 
-/// A failed Mutator operation.
+/// A failed Table operation.
 #[derive(Debug)]
-pub enum MutatorError {
+pub enum TableError {
     /// Incorrect number of columns specified for operations: (expected, got).
     WrongColumnCount(usize, usize),
     /// Incorrect number of key columns specified for operations: (expected, got).
@@ -20,7 +20,7 @@ pub enum MutatorError {
 
 #[doc(hidden)]
 #[derive(Clone, Serialize, Deserialize)]
-pub struct MutatorBuilder {
+pub struct TableBuilder {
     pub txs: Vec<SocketAddr>,
     pub addr: LocalNodeIndex,
     pub key_is_primary: bool,
@@ -34,17 +34,17 @@ pub struct MutatorBuilder {
     pub local_port: Option<u16>,
 }
 
-impl MutatorBuilder {
+impl TableBuilder {
     /// Set the local port to bind to when making the shared connection.
-    pub(crate) fn with_local_port(mut self, port: u16) -> MutatorBuilder {
+    pub(crate) fn with_local_port(mut self, port: u16) -> TableBuilder {
         self.local_port = Some(port);
         self
     }
 
     pub(crate) fn build(
         self,
-        rpcs: &mut HashMap<Vec<SocketAddr>, MutatorRpc>,
-    ) -> Mutator<SharedConnection> {
+        rpcs: &mut HashMap<Vec<SocketAddr>, TableRpc>,
+    ) -> Table<SharedConnection> {
         use std::collections::hash_map::Entry;
 
         let dih = match rpcs.entry(self.txs.clone()) {
@@ -57,7 +57,7 @@ impl MutatorBuilder {
             }
         };
 
-        Mutator {
+        Table {
             domain_input_handle: dih,
             shard_addrs: self.txs,
             addr: self.addr,
@@ -73,14 +73,14 @@ impl MutatorBuilder {
     }
 }
 
-/// A `Mutator` is used to perform writes, deletes, and other operations to data in base tables.
+/// A `Table` is used to perform writes, deletes, and other operations to data in base tables.
 ///
-/// If you create multiple `Mutator` handles from a single `ControllerHandle`, they may share
-/// connections to the Soup workers. For this reason, `Mutator` is *not* `Send` or `Sync`. To get a
+/// If you create multiple `Table` handles from a single `ControllerHandle`, they may share
+/// connections to the Soup workers. For this reason, `Table` is *not* `Send` or `Sync`. To get a
 /// handle that can be sent to a different thread (i.e., one with its own dedicated connections),
-/// call `Mutator::into_exclusive`.
-pub struct Mutator<E = SharedConnection> {
-    domain_input_handle: MutatorRpc,
+/// call `Table::into_exclusive`.
+pub struct Table<E = SharedConnection> {
+    domain_input_handle: TableRpc,
     shard_addrs: Vec<SocketAddr>,
     addr: LocalNodeIndex,
     key_is_primary: bool,
@@ -95,9 +95,9 @@ pub struct Mutator<E = SharedConnection> {
     exclusivity: E,
 }
 
-impl Clone for Mutator<SharedConnection> {
+impl Clone for Table<SharedConnection> {
     fn clone(&self) -> Self {
-        Mutator {
+        Table {
             domain_input_handle: self.domain_input_handle.clone(),
             shard_addrs: self.shard_addrs.clone(),
             addr: self.addr,
@@ -113,15 +113,15 @@ impl Clone for Mutator<SharedConnection> {
     }
 }
 
-unsafe impl Send for Mutator<ExclusiveConnection> {}
+unsafe impl Send for Table<ExclusiveConnection> {}
 
-impl Mutator<SharedConnection> {
-    /// Produce a `Mutator` with dedicated Soup connections so it can be safely sent across threads.
-    pub fn into_exclusive(self) -> Mutator<ExclusiveConnection> {
+impl Table<SharedConnection> {
+    /// Produce a `Table` with dedicated Soup connections so it can be safely sent across threads.
+    pub fn into_exclusive(self) -> Table<ExclusiveConnection> {
         let c = DomainInputHandle::new(&self.shard_addrs[..]).unwrap();
         let c = Rc::new(RefCell::new(c));
 
-        Mutator {
+        Table {
             domain_input_handle: c,
             shard_addrs: self.shard_addrs,
             addr: self.addr,
@@ -137,7 +137,7 @@ impl Mutator<SharedConnection> {
     }
 }
 
-impl<E> Mutator<E> {
+impl<E> Table<E> {
     /// Get the name of this base table.
     pub fn table_name(&self) -> &str {
         &self.table_name
@@ -159,12 +159,12 @@ impl<E> Mutator<E> {
         self.schema.as_ref().unwrap()
     }
 
-    /// Get the local address this `Mutator` is bound to.
+    /// Get the local address this `Table` is bound to.
     pub fn local_addr(&self) -> io::Result<SocketAddr> {
         self.domain_input_handle.borrow().local_addr()
     }
 
-    fn inject_dropped_cols(&self, rs: &mut [BaseOperation]) {
+    fn inject_dropped_cols(&self, rs: &mut [TableOperation]) {
         let ndropped = self.dropped.len();
         if ndropped != 0 {
             // inject defaults for dropped columns
@@ -174,8 +174,8 @@ impl<E> Mutator<E> {
 
                 // get a handle to the underlying data vector
                 let r = match *r {
-                    BaseOperation::Insert(ref mut row)
-                    | BaseOperation::InsertOrUpdate { ref mut row, .. } => row,
+                    TableOperation::Insert(ref mut row)
+                    | TableOperation::InsertOrUpdate { ref mut row, .. } => row,
                     _ => unimplemented!("we need to shift the update/delete cols!"),
                 };
 
@@ -236,7 +236,7 @@ impl<E> Mutator<E> {
         }
     }
 
-    fn prep_records(&self, mut ops: Vec<BaseOperation>) -> Input {
+    fn prep_records(&self, mut ops: Vec<TableOperation>) -> Input {
         self.inject_dropped_cols(&mut ops);
         Input {
             link: Link::new(self.addr, self.addr),
@@ -245,7 +245,7 @@ impl<E> Mutator<E> {
         }
     }
 
-    fn send(&mut self, ops: Vec<BaseOperation>) {
+    fn send(&mut self, ops: Vec<TableOperation>) {
         let m = self.prep_records(ops);
         self.domain_input_handle
             .borrow_mut()
@@ -254,10 +254,10 @@ impl<E> Mutator<E> {
     }
 
     /// Perform multiple operations on this base table in one batch.
-    pub fn batch_put<I, V>(&mut self, i: I) -> Result<(), MutatorError>
+    pub fn batch_insert<I, V>(&mut self, i: I) -> Result<(), TableError>
     where
         I: IntoIterator<Item = V>,
-        V: Into<BaseOperation>,
+        V: Into<TableOperation>,
     {
         let mut dih = self.domain_input_handle.borrow_mut();
         let mut batch_putter = dih.sender();
@@ -267,10 +267,7 @@ impl<E> Mutator<E> {
 
             if let Some(cols) = data[0].row() {
                 if cols.len() != self.columns.len() {
-                    return Err(MutatorError::WrongColumnCount(
-                        self.columns.len(),
-                        cols.len(),
-                    ));
+                    return Err(TableError::WrongColumnCount(self.columns.len(), cols.len()));
                 }
             }
 
@@ -282,13 +279,13 @@ impl<E> Mutator<E> {
     }
 
     /// Insert a single row of data into this base table.
-    pub fn put<V>(&mut self, u: V) -> Result<(), MutatorError>
+    pub fn insert<V>(&mut self, u: V) -> Result<(), TableError>
     where
         V: Into<Vec<DataType>>,
     {
-        let data = vec![BaseOperation::Insert(u.into())];
+        let data = vec![TableOperation::Insert(u.into())];
         if data[0].row().unwrap().len() != self.columns.len() {
-            return Err(MutatorError::WrongColumnCount(
+            return Err(TableError::WrongColumnCount(
                 self.columns.len(),
                 data[0].row().unwrap().len(),
             ));
@@ -298,7 +295,7 @@ impl<E> Mutator<E> {
     }
 
     /// Insert multiple rows of data into this base table.
-    pub fn multi_put<I, V>(&mut self, i: I) -> Result<(), MutatorError>
+    pub fn insert_all<I, V>(&mut self, i: I) -> Result<(), TableError>
     where
         I: IntoIterator<Item = V>,
         V: Into<Vec<DataType>>,
@@ -307,30 +304,27 @@ impl<E> Mutator<E> {
             .map(|r| {
                 let row = r.into();
                 if row.len() != self.columns.len() {
-                    return Err(MutatorError::WrongColumnCount(
-                        self.columns.len(),
-                        row.len(),
-                    ));
+                    return Err(TableError::WrongColumnCount(self.columns.len(), row.len()));
                 }
-                Ok(BaseOperation::Insert(row))
+                Ok(TableOperation::Insert(row))
             })
             .collect::<Result<Vec<_>, _>>()
             .map(|data| self.send(data))
     }
 
     /// Delete the row with the given key from this base table.
-    pub fn delete<I>(&mut self, key: I) -> Result<(), MutatorError>
+    pub fn delete<I>(&mut self, key: I) -> Result<(), TableError>
     where
         I: Into<Vec<DataType>>,
     {
-        Ok(self.send(vec![BaseOperation::Delete { key: key.into() }].into()))
+        Ok(self.send(vec![TableOperation::Delete { key: key.into() }].into()))
     }
 
     /// Update the row with the given key in this base table.
     ///
     /// `u` is a set of column-modification pairs, where for each pair `(i, m)`, the modification
     /// `m` will be applied to column `i` of the record with key `key`.
-    pub fn update<V>(&mut self, key: Vec<DataType>, u: V) -> Result<(), MutatorError>
+    pub fn update<V>(&mut self, key: Vec<DataType>, u: V) -> Result<(), TableError>
     where
         V: IntoIterator<Item = (usize, Modification)>,
     {
@@ -340,28 +334,28 @@ impl<E> Mutator<E> {
         );
 
         if key.len() != self.key.len() {
-            return Err(MutatorError::WrongKeyColumnCount(self.key.len(), key.len()));
+            return Err(TableError::WrongKeyColumnCount(self.key.len(), key.len()));
         }
 
         let mut set = vec![Modification::None; self.columns.len()];
         for (coli, m) in u {
             if coli >= self.columns.len() {
-                return Err(MutatorError::WrongColumnCount(self.columns.len(), coli + 1));
+                return Err(TableError::WrongColumnCount(self.columns.len(), coli + 1));
             }
             set[coli] = m;
         }
-        Ok(self.send(vec![BaseOperation::Update { key, set }].into()))
+        Ok(self.send(vec![TableOperation::Update { key, set }].into()))
     }
 
     /// Perform a insert-or-update on this base table.
     ///
     /// If a row already exists for the key in `insert`, the existing row will instead be updated
-    /// with the modifications in `u` (as documented in `Mutator::update`).
+    /// with the modifications in `u` (as documented in `Table::update`).
     pub fn insert_or_update<V>(
         &mut self,
         insert: Vec<DataType>,
         update: V,
-    ) -> Result<(), MutatorError>
+    ) -> Result<(), TableError>
     where
         V: IntoIterator<Item = (usize, Modification)>,
     {
@@ -371,7 +365,7 @@ impl<E> Mutator<E> {
         );
 
         if insert.len() != self.columns.len() {
-            return Err(MutatorError::WrongColumnCount(
+            return Err(TableError::WrongColumnCount(
                 self.columns.len(),
                 insert.len(),
             ));
@@ -380,12 +374,12 @@ impl<E> Mutator<E> {
         let mut set = vec![Modification::None; self.columns.len()];
         for (coli, m) in update {
             if coli >= self.columns.len() {
-                return Err(MutatorError::WrongColumnCount(self.columns.len(), coli + 1));
+                return Err(TableError::WrongColumnCount(self.columns.len(), coli + 1));
             }
             set[coli] = m;
         }
         Ok(self.send(
-            vec![BaseOperation::InsertOrUpdate {
+            vec![TableOperation::InsertOrUpdate {
                 row: insert,
                 update: set,
             }].into(),
@@ -410,14 +404,14 @@ pub(crate) struct DomainInputHandle {
     txs: Vec<TcpSender<Input>>,
 }
 
-pub(crate) type MutatorRpc = Rc<RefCell<DomainInputHandle>>;
+pub(crate) type TableRpc = Rc<RefCell<DomainInputHandle>>;
 
 impl DomainInputHandle {
     pub(crate) fn new_on(mut local_port: Option<u16>, txs: &[SocketAddr]) -> io::Result<Self> {
         let txs: io::Result<Vec<_>> = txs
             .into_iter()
             .map(|addr| {
-                let c = DomainConnectionBuilder::for_mutator(*addr)
+                let c = DomainConnectionBuilder::for_base(*addr)
                     .maybe_on_port(local_port)
                     .build()?;
                 if local_port.is_none() {
@@ -480,10 +474,10 @@ impl<'a> BatchSendHandle<'a> {
             for r in i.data.drain(..) {
                 let shard = {
                     let key = match r {
-                        BaseOperation::Insert(ref r) => &r[key_col],
-                        BaseOperation::Delete { ref key } => &key[0],
-                        BaseOperation::Update { ref key, .. } => &key[0],
-                        BaseOperation::InsertOrUpdate { ref row, .. } => &row[key_col],
+                        TableOperation::Insert(ref r) => &r[key_col],
+                        TableOperation::Delete { ref key } => &key[0],
+                        TableOperation::Update { ref key, .. } => &key[0],
+                        TableOperation::InsertOrUpdate { ref row, .. } => &row[key_col],
                     };
                     shard_by(key, self.dih.txs.len())
                 };

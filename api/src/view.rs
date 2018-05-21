@@ -7,7 +7,7 @@ use std::net::SocketAddr;
 use std::rc::Rc;
 use {ExclusiveConnection, SharedConnection};
 
-pub(crate) type GetterRpc = Rc<RefCell<RpcClient<ReadQuery, ReadReply>>>;
+pub(crate) type ViewRpc = Rc<RefCell<RpcClient<ReadQuery, ReadReply>>>;
 
 #[doc(hidden)]
 #[derive(Serialize, Deserialize, Debug)]
@@ -39,7 +39,7 @@ pub enum ReadReply {
 
 #[doc(hidden)]
 #[derive(Clone, Debug, Serialize, Deserialize)]
-pub struct RemoteGetterBuilder {
+pub struct ViewBuilder {
     pub node: NodeIndex,
     pub columns: Vec<String>,
     pub shards: Vec<SocketAddr>,
@@ -47,16 +47,16 @@ pub struct RemoteGetterBuilder {
     pub local_ports: Vec<u16>,
 }
 
-impl RemoteGetterBuilder {
+impl ViewBuilder {
     #[doc(hidden)]
-    pub fn build_exclusive(self) -> RemoteGetter<ExclusiveConnection> {
+    pub fn build_exclusive(self) -> View<ExclusiveConnection> {
         let conns = self
             .shards
             .iter()
             .map(move |addr| Rc::new(RefCell::new(RpcClient::connect(addr, false).unwrap())))
             .collect();
 
-        RemoteGetter {
+        View {
             node: self.node,
             columns: self.columns,
             shard_addrs: self.shards,
@@ -66,17 +66,17 @@ impl RemoteGetterBuilder {
     }
 
     /// Set the local port to bind to when making the shared connection.
-    pub(crate) fn with_local_port(mut self, port: u16) -> RemoteGetterBuilder {
+    pub(crate) fn with_local_port(mut self, port: u16) -> ViewBuilder {
         assert!(self.local_ports.is_empty());
         self.local_ports = vec![port];
         self
     }
 
-    /// Build a `RemoteGetter` out of a `RemoteGetterBuilder`
+    /// Build a `View` out of a `ViewBuilder`
     pub(crate) fn build(
         mut self,
-        rpcs: &mut HashMap<(SocketAddr, usize), GetterRpc>,
-    ) -> RemoteGetter<SharedConnection> {
+        rpcs: &mut HashMap<(SocketAddr, usize), ViewRpc>,
+    ) -> View<SharedConnection> {
         let sports = &mut self.local_ports;
         let conns = self
             .shards
@@ -106,7 +106,7 @@ impl RemoteGetterBuilder {
             })
             .collect();
 
-        RemoteGetter {
+        View {
             node: self.node,
             columns: self.columns,
             shard_addrs: self.shards,
@@ -116,25 +116,25 @@ impl RemoteGetterBuilder {
     }
 }
 
-/// A `RemoteGetter` is used to query previously defined external views.
+/// A `View` is used to query previously defined external views.
 ///
-/// If you create multiple `RemoteGetter` handles from a single `ControllerHandle`, they may share
-/// connections to the Soup workers. For this reason, `RemoteGetter` is *not* `Send` or `Sync`. To
+/// If you create multiple `View` handles from a single `ControllerHandle`, they may share
+/// connections to the Soup workers. For this reason, `View` is *not* `Send` or `Sync`. To
 /// get a handle that can be sent to a different thread (i.e., one with its own dedicated
-/// connections), call `RemoteGetter::into_exclusive`.
-pub struct RemoteGetter<E = SharedConnection> {
+/// connections), call `View::into_exclusive`.
+pub struct View<E = SharedConnection> {
     node: NodeIndex,
     columns: Vec<String>,
-    shards: Vec<GetterRpc>,
+    shards: Vec<ViewRpc>,
     shard_addrs: Vec<SocketAddr>,
 
     #[allow(dead_code)]
     exclusivity: E,
 }
 
-impl Clone for RemoteGetter<SharedConnection> {
+impl Clone for View<SharedConnection> {
     fn clone(&self) -> Self {
-        RemoteGetter {
+        View {
             node: self.node,
             columns: self.columns.clone(),
             shards: self.shards.clone(),
@@ -144,13 +144,13 @@ impl Clone for RemoteGetter<SharedConnection> {
     }
 }
 
-unsafe impl Send for RemoteGetter<ExclusiveConnection> {}
+unsafe impl Send for View<ExclusiveConnection> {}
 
-impl RemoteGetter<SharedConnection> {
-    /// Produce a `RemoteGetter` with dedicated Soup connections so it can be safely sent across
+impl View<SharedConnection> {
+    /// Produce a `View` with dedicated Soup connections so it can be safely sent across
     /// threads.
-    pub fn into_exclusive(self) -> RemoteGetter<ExclusiveConnection> {
-        RemoteGetterBuilder {
+    pub fn into_exclusive(self) -> View<ExclusiveConnection> {
+        ViewBuilder {
             node: self.node,
             local_ports: vec![],
             columns: self.columns,
@@ -159,13 +159,13 @@ impl RemoteGetter<SharedConnection> {
     }
 }
 
-impl<E> RemoteGetter<E> {
+impl<E> View<E> {
     /// Get the list of columns in this view.
     pub fn columns(&self) -> &[String] {
         self.columns.as_slice()
     }
 
-    /// Get the local address this `RemoteGetter` is bound to.
+    /// Get the local address this `View` is bound to.
     pub fn local_addr(&self) -> io::Result<SocketAddr> {
         self.shards[0].borrow().local_addr()
     }

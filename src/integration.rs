@@ -112,15 +112,15 @@ fn it_works_basic() {
     });
 
     let mut cq = g.view("c").unwrap();
-    let mut muta = g.base("a").unwrap();
-    let mut mutb = g.base("b").unwrap();
+    let mut muta = g.table("a").unwrap();
+    let mut mutb = g.table("b").unwrap();
     let id: DataType = 1.into();
 
     assert_eq!(muta.table_name(), "a");
     assert_eq!(muta.columns(), &["a", "b"]);
 
     // send a value on a
-    muta.put(vec![id.clone(), 2.into()]).unwrap();
+    muta.insert(vec![id.clone(), 2.into()]).unwrap();
 
     // give it some time to propagate
     sleep();
@@ -132,7 +132,7 @@ fn it_works_basic() {
     );
 
     // update value again
-    mutb.put(vec![id.clone(), 4.into()]).unwrap();
+    mutb.insert(vec![id.clone(), 4.into()]).unwrap();
 
     // give it some time to propagate
     sleep();
@@ -177,10 +177,10 @@ fn base_mutation() {
     });
 
     let mut read = g.view("a").unwrap();
-    let mut write = g.base("a").unwrap();
+    let mut write = g.table("a").unwrap();
 
     // insert a new record
-    write.put(vec![1.into(), 2.into()]).unwrap();
+    write.insert(vec![1.into(), 2.into()]).unwrap();
     sleep();
     assert_eq!(
         read.lookup(&[1.into()], true),
@@ -264,11 +264,11 @@ fn shared_interdomain_ancestor() {
 
     let mut bq = g.view("b").unwrap();
     let mut cq = g.view("c").unwrap();
-    let mut muta = g.base("a").unwrap();
+    let mut muta = g.table("a").unwrap();
     let id: DataType = 1.into();
 
     // send a value on a
-    muta.put(vec![id.clone(), 2.into()]).unwrap();
+    muta.insert(vec![id.clone(), 2.into()]).unwrap();
     sleep();
     assert_eq!(
         bq.lookup(&[id.clone()], true),
@@ -281,7 +281,7 @@ fn shared_interdomain_ancestor() {
 
     // update value again
     let id: DataType = 2.into();
-    muta.put(vec![id.clone(), 4.into()]).unwrap();
+    muta.insert(vec![id.clone(), 4.into()]).unwrap();
     sleep();
     assert_eq!(
         bq.lookup(&[id.clone()], true),
@@ -311,14 +311,14 @@ fn it_works_w_mat() {
     });
 
     let mut cq = g.view("c").unwrap();
-    let mut muta = g.base("a").unwrap();
-    let mut mutb = g.base("b").unwrap();
+    let mut muta = g.table("a").unwrap();
+    let mut mutb = g.table("b").unwrap();
     let id: DataType = 1.into();
 
     // send a few values on a
-    muta.put(vec![id.clone(), 1.into()]).unwrap();
-    muta.put(vec![id.clone(), 2.into()]).unwrap();
-    muta.put(vec![id.clone(), 3.into()]).unwrap();
+    muta.insert(vec![id.clone(), 1.into()]).unwrap();
+    muta.insert(vec![id.clone(), 2.into()]).unwrap();
+    muta.insert(vec![id.clone(), 3.into()]).unwrap();
 
     // give them some time to propagate
     sleep();
@@ -332,9 +332,9 @@ fn it_works_w_mat() {
     assert!(res.iter().any(|r| r == &vec![id.clone(), 3.into()]));
 
     // update value again (and again send some secondary updates)
-    mutb.put(vec![id.clone(), 4.into()]).unwrap();
-    mutb.put(vec![id.clone(), 5.into()]).unwrap();
-    mutb.put(vec![id.clone(), 6.into()]).unwrap();
+    mutb.insert(vec![id.clone(), 4.into()]).unwrap();
+    mutb.insert(vec![id.clone(), 5.into()]).unwrap();
+    mutb.insert(vec![id.clone(), 6.into()]).unwrap();
 
     // give it some time to propagate
     sleep();
@@ -360,13 +360,13 @@ fn it_works_w_partial_mat() {
         (a, b)
     });
 
-    let mut muta = g.base("a").unwrap();
+    let mut muta = g.table("a").unwrap();
     let id: DataType = 1.into();
 
     // send a few values on a
-    muta.put(vec![id.clone(), 1.into()]).unwrap();
-    muta.put(vec![id.clone(), 2.into()]).unwrap();
-    muta.put(vec![id.clone(), 3.into()]).unwrap();
+    muta.insert(vec![id.clone(), 1.into()]).unwrap();
+    muta.insert(vec![id.clone(), 2.into()]).unwrap();
+    muta.insert(vec![id.clone(), 3.into()]).unwrap();
 
     // give it some time to propagate
     sleep();
@@ -417,13 +417,13 @@ fn it_works_w_partial_mat_below_empty() {
         (a, b, c)
     });
 
-    let mut muta = g.base("a").unwrap();
+    let mut muta = g.table("a").unwrap();
     let id: DataType = 1.into();
 
     // send a few values on a
-    muta.put(vec![id.clone(), 1.into()]).unwrap();
-    muta.put(vec![id.clone(), 2.into()]).unwrap();
-    muta.put(vec![id.clone(), 3.into()]).unwrap();
+    muta.insert(vec![id.clone(), 1.into()]).unwrap();
+    muta.insert(vec![id.clone(), 2.into()]).unwrap();
+    muta.insert(vec![id.clone(), 3.into()]).unwrap();
 
     // give it some time to propagate
     sleep();
@@ -463,11 +463,11 @@ fn it_works_deletion() {
     });
 
     let mut cq = g.view("c").unwrap();
-    let mut muta = g.base("a").unwrap();
-    let mut mutb = g.base("b").unwrap();
+    let mut muta = g.table("a").unwrap();
+    let mut mutb = g.table("b").unwrap();
 
     // send a value on a
-    muta.put(vec![1.into(), 2.into()]).unwrap();
+    muta.insert(vec![1.into(), 2.into()]).unwrap();
     sleep();
     assert_eq!(
         cq.lookup(&[1.into()], true),
@@ -475,7 +475,7 @@ fn it_works_deletion() {
     );
 
     // send a value on b
-    mutb.put(vec![0.into(), 1.into(), 4.into()]).unwrap();
+    mutb.insert(vec![0.into(), 1.into(), 4.into()]).unwrap();
     sleep();
 
     let res = cq.lookup(&[1.into()], true).unwrap();
@@ -501,7 +501,7 @@ fn it_works_with_sql_recipe() {
     ";
     g.install_recipe(sql).unwrap();
 
-    let mut mutator = g.base("Car").unwrap();
+    let mut mutator = g.table("Car").unwrap();
     let mut getter = g.view("CountCars").unwrap();
 
     assert_eq!(mutator.table_name(), "Car");
@@ -509,7 +509,7 @@ fn it_works_with_sql_recipe() {
 
     let brands = vec!["Volvo", "Volvo", "Volkswagen"];
     for (i, &brand) in brands.iter().enumerate() {
-        mutator.put(vec![i.into(), brand.into()]).unwrap();
+        mutator.insert(vec![i.into(), brand.into()]).unwrap();
     }
 
     // Let writes propagate:
@@ -538,13 +538,13 @@ fn it_works_with_vote() {
     ";
 
     g.install_recipe(sql).unwrap();
-    let mut article = g.base("Article").unwrap();
-    let mut vote = g.base("Vote").unwrap();
+    let mut article = g.table("Article").unwrap();
+    let mut vote = g.table("Vote").unwrap();
     let mut awvc = g.view("ArticleWithVoteCount").unwrap();
 
-    article.put(vec![0i64.into(), "Article".into()]).unwrap();
-    article.put(vec![1i64.into(), "Article".into()]).unwrap();
-    vote.put(vec![0i64.into(), 0.into()]).unwrap();
+    article.insert(vec![0i64.into(), "Article".into()]).unwrap();
+    article.insert(vec![1i64.into(), "Article".into()]).unwrap();
+    vote.insert(vec![0i64.into(), 0.into()]).unwrap();
 
     sleep();
 
@@ -584,13 +584,13 @@ fn it_works_with_double_query_through() {
     ";
 
     g.install_recipe(sql).unwrap();
-    let mut a = g.base("A").unwrap();
-    let mut b = g.base("B").unwrap();
+    let mut a = g.table("A").unwrap();
+    let mut b = g.table("B").unwrap();
     let mut getter = g.view("ReadJoin").unwrap();
 
-    a.put(vec![1i64.into(), 5.into()]).unwrap();
-    a.put(vec![2i64.into(), 10.into()]).unwrap();
-    b.put(vec![1i64.into()]).unwrap();
+    a.insert(vec![1i64.into(), 5.into()]).unwrap();
+    a.insert(vec![2i64.into(), 10.into()]).unwrap();
+    b.insert(vec![1i64.into()]).unwrap();
 
     sleep();
 
@@ -614,18 +614,18 @@ fn it_works_with_reads_before_writes() {
     ";
 
     g.install_recipe(sql).unwrap();
-    let mut article = g.base("Article").unwrap();
-    let mut vote = g.base("Vote").unwrap();
+    let mut article = g.table("Article").unwrap();
+    let mut vote = g.table("Vote").unwrap();
     let mut awvc = g.view("ArticleVote").unwrap();
 
     let aid = 1;
     let uid = 10;
 
     assert!(awvc.lookup(&[aid.into()], true).unwrap().is_empty());
-    article.put(vec![aid.into()]).unwrap();
+    article.insert(vec![aid.into()]).unwrap();
     sleep();
 
-    vote.put(vec![aid.into(), uid.into()]).unwrap();
+    vote.insert(vec![aid.into(), uid.into()]).unwrap();
     sleep();
 
     let result = awvc.lookup(&[aid.into()], true).unwrap();
@@ -648,15 +648,17 @@ fn forced_shuffle_despite_same_shard() {
     ";
     g.install_recipe(sql).unwrap();
 
-    let mut car_mutator = g.base("Car").unwrap();
-    let mut price_mutator = g.base("Price").unwrap();
+    let mut car_mutator = g.table("Car").unwrap();
+    let mut price_mutator = g.table("Price").unwrap();
     let mut getter = g.view("CarPrice").unwrap();
     let cid = 1;
     let pid = 1;
     let price = 100;
 
-    price_mutator.put(vec![pid.into(), price.into()]).unwrap();
-    car_mutator.put(vec![cid.into(), pid.into()]).unwrap();
+    price_mutator
+        .insert(vec![pid.into(), price.into()])
+        .unwrap();
+    car_mutator.insert(vec![cid.into(), pid.into()]).unwrap();
 
     // Let writes propagate:
     sleep();
@@ -679,15 +681,17 @@ fn double_shuffle() {
     ";
     g.install_recipe(sql).unwrap();
 
-    let mut car_mutator = g.base("Car").unwrap();
-    let mut price_mutator = g.base("Price").unwrap();
+    let mut car_mutator = g.table("Car").unwrap();
+    let mut price_mutator = g.table("Price").unwrap();
     let mut getter = g.view("CarPrice").unwrap();
     let cid = 1;
     let pid = 1;
     let price = 100;
 
-    price_mutator.put(vec![pid.into(), price.into()]).unwrap();
-    car_mutator.put(vec![cid.into(), pid.into()]).unwrap();
+    price_mutator
+        .insert(vec![pid.into(), price.into()])
+        .unwrap();
+    car_mutator.insert(vec![cid.into(), pid.into()]).unwrap();
 
     // Let writes propagate:
     sleep();
@@ -708,11 +712,13 @@ fn it_works_with_arithmetic_aliases() {
     ";
     g.install_recipe(sql).unwrap();
 
-    let mut price_mutator = g.base("Price").unwrap();
+    let mut price_mutator = g.table("Price").unwrap();
     let mut getter = g.view("AltPrice").unwrap();
     let pid = 1;
     let price = 10000;
-    price_mutator.put(vec![pid.into(), price.into()]).unwrap();
+    price_mutator
+        .insert(vec![pid.into(), price.into()])
+        .unwrap();
 
     // Let writes propagate:
     sleep();
@@ -746,11 +752,11 @@ fn it_recovers_persisted_bases() {
         ";
         g.install_recipe(sql).unwrap();
 
-        let mut mutator = g.base("Car").unwrap();
+        let mut mutator = g.table("Car").unwrap();
 
         for i in 1..10 {
             let price = i * 10;
-            mutator.put(vec![i.into(), price.into()]).unwrap();
+            mutator.insert(vec![i.into(), price.into()]).unwrap();
         }
 
         // Let writes propagate:
@@ -800,9 +806,9 @@ fn mutator_churn() {
     let user: DataType = 0.into();
     for _ in 0..votes {
         for i in 0..ids {
-            g.base("vote")
+            g.table("vote")
                 .unwrap()
-                .put(vec![user.clone(), i.into()])
+                .insert(vec![user.clone(), i.into()])
                 .unwrap();
         }
     }
@@ -848,8 +854,8 @@ fn it_recovers_persisted_bases_w_multiple_nodes() {
         ";
         g.install_recipe(sql).unwrap();
         for (i, table) in tables.iter().enumerate() {
-            let mut mutator = g.base(table).unwrap();
-            mutator.put(vec![i.into()]).unwrap();
+            let mut mutator = g.table(table).unwrap();
+            mutator.insert(vec![i.into()]).unwrap();
         }
         sleep();
     }
@@ -878,11 +884,11 @@ fn it_works_with_simple_arithmetic() {
         recipe.activate(mig).unwrap();
     });
 
-    let mut mutator = g.base("Car").unwrap();
+    let mut mutator = g.table("Car").unwrap();
     let mut getter = g.view("CarPrice").unwrap();
     let id: DataType = 1.into();
     let price: DataType = 123.into();
-    mutator.put(vec![id.clone(), price]).unwrap();
+    mutator.insert(vec![id.clone(), price]).unwrap();
 
     // Let writes propagate:
     sleep();
@@ -901,11 +907,11 @@ fn it_works_with_multiple_arithmetic_expressions() {
                ";
     g.install_recipe(sql).unwrap();
 
-    let mut mutator = g.base("Car").unwrap();
+    let mut mutator = g.table("Car").unwrap();
     let mut getter = g.view("CarPrice").unwrap();
     let id: DataType = 1.into();
     let price: DataType = 123.into();
-    mutator.put(vec![id.clone(), price]).unwrap();
+    mutator.insert(vec![id.clone(), price]).unwrap();
 
     // Let writes propagate:
     sleep();
@@ -933,17 +939,17 @@ fn it_works_with_join_arithmetic() {
     ";
     g.install_recipe(sql).unwrap();
 
-    let mut car_mutator = g.base("Car").unwrap();
-    let mut price_mutator = g.base("Price").unwrap();
-    let mut sales_mutator = g.base("Sales").unwrap();
+    let mut car_mutator = g.table("Car").unwrap();
+    let mut price_mutator = g.table("Price").unwrap();
+    let mut sales_mutator = g.table("Sales").unwrap();
     let mut getter = g.view("CarPrice").unwrap();
     let id = 1;
     let price = 123;
     let fraction = 0.7;
-    car_mutator.put(vec![id.into(), id.into()]).unwrap();
-    price_mutator.put(vec![id.into(), price.into()]).unwrap();
+    car_mutator.insert(vec![id.into(), id.into()]).unwrap();
+    price_mutator.insert(vec![id.into(), price.into()]).unwrap();
     sales_mutator
-        .put(vec![id.into(), id.into(), fraction.into()])
+        .insert(vec![id.into(), id.into(), fraction.into()])
         .unwrap();
 
     // Let writes propagate:
@@ -964,12 +970,12 @@ fn it_works_with_function_arithmetic() {
     ";
     g.install_recipe(sql).unwrap();
 
-    let mut mutator = g.base("Bread").unwrap();
+    let mut mutator = g.table("Bread").unwrap();
     let mut getter = g.view("Price").unwrap();
     let max_price = 20;
     for (i, price) in (10..max_price + 1).enumerate() {
         let id = i + 1;
-        mutator.put(vec![id.into(), price.into()]).unwrap();
+        mutator.insert(vec![id.into(), price.into()]).unwrap();
     }
 
     // Let writes propagate:
@@ -1020,15 +1026,15 @@ fn votes() {
     let mut vcq = g.view("vc").unwrap();
     let mut endq = g.view("end").unwrap();
 
-    let mut mut1 = g.base("article1").unwrap();
-    let mut mut2 = g.base("article2").unwrap();
-    let mut mutv = g.base("vote").unwrap();
+    let mut mut1 = g.table("article1").unwrap();
+    let mut mut2 = g.table("article2").unwrap();
+    let mut mutv = g.table("vote").unwrap();
 
     let a1: DataType = 1.into();
     let a2: DataType = 2.into();
 
     // make one article
-    mut1.put(vec![a1.clone(), 2.into()]).unwrap();
+    mut1.insert(vec![a1.clone(), 2.into()]).unwrap();
 
     // give it some time to propagate
     sleep();
@@ -1040,7 +1046,7 @@ fn votes() {
     );
 
     // make another article
-    mut2.put(vec![a2.clone(), 4.into()]).unwrap();
+    mut2.insert(vec![a2.clone(), 4.into()]).unwrap();
 
     // give it some time to propagate
     sleep();
@@ -1057,7 +1063,7 @@ fn votes() {
     );
 
     // create a vote (user 1 votes for article 1)
-    mutv.put(vec![1.into(), a1.clone()]).unwrap();
+    mutv.insert(vec![1.into(), a1.clone()]).unwrap();
 
     // give it some time to propagate
     sleep();
@@ -1102,12 +1108,12 @@ fn empty_migration() {
     });
 
     let mut cq = g.view("c").unwrap();
-    let mut muta = g.base("a").unwrap();
-    let mut mutb = g.base("b").unwrap();
+    let mut muta = g.table("a").unwrap();
+    let mut mutb = g.table("b").unwrap();
     let id: DataType = 1.into();
 
     // send a value on a
-    muta.put(vec![id.clone(), 2.into()]).unwrap();
+    muta.insert(vec![id.clone(), 2.into()]).unwrap();
 
     // give it some time to propagate
     sleep();
@@ -1119,7 +1125,7 @@ fn empty_migration() {
     );
 
     // update value again
-    mutb.put(vec![id.clone(), 4.into()]).unwrap();
+    mutb.insert(vec![id.clone(), 4.into()]).unwrap();
 
     // give it some time to propagate
     sleep();
@@ -1143,10 +1149,10 @@ fn simple_migration() {
     });
 
     let mut aq = g.view("a").unwrap();
-    let mut muta = g.base("a").unwrap();
+    let mut muta = g.table("a").unwrap();
 
     // send a value on a
-    muta.put(vec![id.clone(), 2.into()]).unwrap();
+    muta.insert(vec![id.clone(), 2.into()]).unwrap();
 
     // give it some time to propagate
     sleep();
@@ -1165,10 +1171,10 @@ fn simple_migration() {
     });
 
     let mut bq = g.view("b").unwrap();
-    let mut mutb = g.base("b").unwrap();
+    let mut mutb = g.table("b").unwrap();
 
     // send a value on b
-    mutb.put(vec![id.clone(), 4.into()]).unwrap();
+    mutb.insert(vec![id.clone(), 4.into()]).unwrap();
 
     // give it some time to propagate
     sleep();
@@ -1192,10 +1198,10 @@ fn add_columns() {
         a
     });
     let mut aq = g.view("a").unwrap();
-    let mut muta = g.base("a").unwrap();
+    let mut muta = g.table("a").unwrap();
 
     // send a value on a
-    muta.put(vec![id.clone(), "y".into()]).unwrap();
+    muta.insert(vec![id.clone(), "y".into()]).unwrap();
     sleep();
 
     // check that a got it
@@ -1211,7 +1217,7 @@ fn add_columns() {
     sleep();
 
     // send another (old) value on a
-    muta.put(vec![id.clone(), "z".into()]).unwrap();
+    muta.insert(vec![id.clone(), "z".into()]).unwrap();
     sleep();
 
     // check that a got it, and added the new, third column's default
@@ -1221,8 +1227,9 @@ fn add_columns() {
     assert!(res.contains(&vec![id.clone(), "z".into(), 3.into()]));
 
     // get a new muta and send a new value on it
-    let mut muta = g.base("a").unwrap();
-    muta.put(vec![id.clone(), "a".into(), 10.into()]).unwrap();
+    let mut muta = g.table("a").unwrap();
+    muta.insert(vec![id.clone(), "a".into(), 10.into()])
+        .unwrap();
     sleep();
 
     // check that a got it, and included the third column
@@ -1243,10 +1250,10 @@ fn migrate_added_columns() {
         let a = mig.add_base("a", &["a", "b"], Base::new(vec![1.into(), 2.into()]));
         a
     });
-    let mut muta = g.base("a").unwrap();
+    let mut muta = g.table("a").unwrap();
 
     // send a value on a
-    muta.put(vec![id.clone(), "y".into()]).unwrap();
+    muta.insert(vec![id.clone(), "y".into()]).unwrap();
     sleep();
 
     // add a third column to a, and a view that uses it
@@ -1260,10 +1267,11 @@ fn migrate_added_columns() {
     let mut bq = g.view("x").unwrap();
 
     // send another (old) value on a
-    muta.put(vec![id.clone(), "z".into()]).unwrap();
+    muta.insert(vec![id.clone(), "z".into()]).unwrap();
     // and an entirely new value
-    let mut muta = g.base("a").unwrap();
-    muta.put(vec![id.clone(), "a".into(), 10.into()]).unwrap();
+    let mut muta = g.table("a").unwrap();
+    muta.insert(vec![id.clone(), "a".into(), 10.into()])
+        .unwrap();
 
     // give it some time to propagate
     sleep();
@@ -1293,10 +1301,10 @@ fn migrate_drop_columns() {
         a
     });
     let mut aq = g.view("a").unwrap();
-    let mut muta1 = g.base("a").unwrap();
+    let mut muta1 = g.table("a").unwrap();
 
     // send a value on a
-    muta1.put(vec![id.clone(), "bx".into()]).unwrap();
+    muta1.insert(vec![id.clone(), "bx".into()]).unwrap();
 
     // check that it's there
     sleep();
@@ -1312,8 +1320,8 @@ fn migrate_drop_columns() {
 
     // new mutator should only require one column
     // and should inject default for a.b
-    let mut muta2 = g.base("a").unwrap();
-    muta2.put(vec![id.clone()]).unwrap();
+    let mut muta2 = g.table("a").unwrap();
+    muta2.insert(vec![id.clone()]).unwrap();
 
     // so two rows now!
     sleep();
@@ -1328,14 +1336,14 @@ fn migrate_drop_columns() {
     });
 
     // new mutator allows putting two values, and injects default for a.b
-    let mut muta3 = g.base("a").unwrap();
-    muta3.put(vec![id.clone(), "cy".into()]).unwrap();
+    let mut muta3 = g.table("a").unwrap();
+    muta3.insert(vec![id.clone(), "cy".into()]).unwrap();
 
     // using an old putter now should add default for c
-    muta1.put(vec![id.clone(), "bz".into()]).unwrap();
+    muta1.insert(vec![id.clone(), "bz".into()]).unwrap();
 
     // using putter that knows of neither b nor c should result in defaults for both
-    muta2.put(vec![id.clone()]).unwrap();
+    muta2.insert(vec![id.clone()]).unwrap();
     sleep();
 
     let res = aq.lookup(&[id.clone()], true).unwrap();
@@ -1409,24 +1417,24 @@ fn replay_during_replay() {
     // must already be present in the one index that `u` has. let's do some writes and check that
     // nothing crashes.
 
-    let mut muta = g.base("a").unwrap();
-    let mut mutu1 = g.base("u1").unwrap();
-    let mut mutu2 = g.base("u2").unwrap();
+    let mut muta = g.table("a").unwrap();
+    let mut mutu1 = g.table("u1").unwrap();
+    let mut mutu2 = g.table("u2").unwrap();
 
     // as are numbers
-    muta.put(vec![1.into()]).unwrap();
-    muta.put(vec![2.into()]).unwrap();
-    muta.put(vec![3.into()]).unwrap();
+    muta.insert(vec![1.into()]).unwrap();
+    muta.insert(vec![2.into()]).unwrap();
+    muta.insert(vec![3.into()]).unwrap();
 
     // us are strings
-    mutu1.put(vec!["a".into()]).unwrap();
-    mutu1.put(vec!["b".into()]).unwrap();
-    mutu1.put(vec!["c".into()]).unwrap();
+    mutu1.insert(vec!["a".into()]).unwrap();
+    mutu1.insert(vec!["b".into()]).unwrap();
+    mutu1.insert(vec!["c".into()]).unwrap();
 
     // we want there to be data for all keys
-    mutu2.put(vec!["a".into(), 1.into()]).unwrap();
-    mutu2.put(vec!["b".into(), 2.into()]).unwrap();
-    mutu2.put(vec!["c".into(), 3.into()]).unwrap();
+    mutu2.insert(vec!["a".into(), 1.into()]).unwrap();
+    mutu2.insert(vec!["b".into(), 2.into()]).unwrap();
+    mutu2.insert(vec!["c".into(), 3.into()]).unwrap();
 
     sleep();
 
@@ -1465,7 +1473,7 @@ fn replay_during_replay() {
     );
 
     // u has a hole for a=2, but not for u=b, and so should forward this to both children
-    mutu2.put(vec!["b".into(), 2.into()]).unwrap();
+    mutu2.insert(vec!["b".into(), 2.into()]).unwrap();
 
     sleep();
 
@@ -1500,12 +1508,12 @@ fn full_aggregation_with_bogokey() {
     });
 
     let mut aggq = g.view("agg").unwrap();
-    let mut base = g.base("base").unwrap();
+    let mut base = g.table("base").unwrap();
 
     // insert some values
-    base.put(vec![1.into()]).unwrap();
-    base.put(vec![2.into()]).unwrap();
-    base.put(vec![3.into()]).unwrap();
+    base.insert(vec![1.into()]).unwrap();
+    base.insert(vec![2.into()]).unwrap();
+    base.insert(vec![3.into()]).unwrap();
 
     // give it some time to propagate
     sleep();
@@ -1517,7 +1525,7 @@ fn full_aggregation_with_bogokey() {
     );
 
     // update value again
-    base.put(vec![4.into()]).unwrap();
+    base.insert(vec![4.into()]).unwrap();
 
     // give it some time to propagate
     sleep();
@@ -1538,8 +1546,8 @@ fn crossing_migration() {
         let b = mig.add_base("b", &["a", "b"], Base::default());
         (a, b)
     });
-    let mut muta = g.base("a").unwrap();
-    let mut mutb = g.base("b").unwrap();
+    let mut muta = g.table("a").unwrap();
+    let mut mutb = g.table("b").unwrap();
 
     let _ = g.migrate(move |mig| {
         let mut emits = HashMap::new();
@@ -1556,7 +1564,7 @@ fn crossing_migration() {
     let id: DataType = 1.into();
 
     // send a value on a
-    muta.put(vec![id.clone(), 2.into()]).unwrap();
+    muta.insert(vec![id.clone(), 2.into()]).unwrap();
     sleep();
 
     assert_eq!(
@@ -1565,7 +1573,7 @@ fn crossing_migration() {
     );
 
     // update value again
-    mutb.put(vec![id.clone(), 4.into()]).unwrap();
+    mutb.insert(vec![id.clone(), 4.into()]).unwrap();
     sleep();
 
     let res = cq.lookup(&[id.clone()], true).unwrap();
@@ -1587,10 +1595,10 @@ fn independent_domain_migration() {
     });
 
     let mut aq = g.view("a").unwrap();
-    let mut muta = g.base("a").unwrap();
+    let mut muta = g.table("a").unwrap();
 
     // send a value on a
-    muta.put(vec![id.clone(), 2.into()]).unwrap();
+    muta.insert(vec![id.clone(), 2.into()]).unwrap();
 
     // give it some time to propagate
     sleep();
@@ -1609,10 +1617,10 @@ fn independent_domain_migration() {
     });
 
     let mut bq = g.view("b").unwrap();
-    let mut mutb = g.base("b").unwrap();
+    let mut mutb = g.table("b").unwrap();
 
     // send a value on b
-    mutb.put(vec![id.clone(), 4.into()]).unwrap();
+    mutb.insert(vec![id.clone(), 4.into()]).unwrap();
 
     // give it some time to propagate
     sleep();
@@ -1633,8 +1641,8 @@ fn domain_amend_migration() {
         let b = mig.add_base("b", &["a", "b"], Base::default());
         (a, b)
     });
-    let mut muta = g.base("a").unwrap();
-    let mut mutb = g.base("b").unwrap();
+    let mut muta = g.table("a").unwrap();
+    let mut mutb = g.table("b").unwrap();
 
     let _ = g.migrate(move |mig| {
         let mut emits = HashMap::new();
@@ -1650,7 +1658,7 @@ fn domain_amend_migration() {
     let id: DataType = 1.into();
 
     // send a value on a
-    muta.put(vec![id.clone(), 2.into()]).unwrap();
+    muta.insert(vec![id.clone(), 2.into()]).unwrap();
     sleep();
 
     assert_eq!(
@@ -1659,7 +1667,7 @@ fn domain_amend_migration() {
     );
 
     // update value again
-    mutb.put(vec![id.clone(), 4.into()]).unwrap();
+    mutb.insert(vec![id.clone(), 4.into()]).unwrap();
     sleep();
 
     let res = cq.lookup(&[id.clone()], true).unwrap();
@@ -1732,18 +1740,18 @@ fn do_full_vote_migration(old_puts_after: bool) {
         mig.maintain_anonymous(end, &[0]);
         (article, vote, vc, end)
     });
-    let mut muta = g.base("article").unwrap();
-    let mut mutv = g.base("vote").unwrap();
+    let mut muta = g.table("article").unwrap();
+    let mut mutv = g.table("vote").unwrap();
 
     let n = 250i64;
     let title: DataType = "foo".into();
     let raten: DataType = 5.into();
 
     for i in 0..n {
-        muta.put(vec![i.into(), title.clone()]).unwrap();
+        muta.insert(vec![i.into(), title.clone()]).unwrap();
     }
     for i in 0..n {
-        mutv.put(vec![1.into(), i.into()]).unwrap();
+        mutv.insert(vec![1.into(), i.into()]).unwrap();
     }
 
     let mut last = g.view("awvc").unwrap();
@@ -1791,12 +1799,13 @@ fn do_full_vote_migration(old_puts_after: bool) {
     });
 
     let mut last = g.view("awr").unwrap();
-    let mut mutr = g.base("rating").unwrap();
+    let mut mutr = g.table("rating").unwrap();
     for i in 0..n {
         if old_puts_after {
-            mutv.put(vec![2.into(), i.into()]).unwrap();
+            mutv.insert(vec![2.into(), i.into()]).unwrap();
         }
-        mutr.put(vec![2.into(), i.into(), raten.clone()]).unwrap();
+        mutr.insert(vec![2.into(), i.into(), raten.clone()])
+            .unwrap();
     }
 
     thread::sleep(get_settle_time().checked_mul(3).unwrap());
@@ -1851,7 +1860,7 @@ fn live_writes() {
     });
 
     let mut vc_state = g.view("votecount").unwrap();
-    let mut add = g.base("vote").unwrap().into_exclusive();
+    let mut add = g.table("vote").unwrap().into_exclusive();
 
     let ids = 1000;
     let votes = 7;
@@ -1860,7 +1869,7 @@ fn live_writes() {
     let jh = thread::spawn(move || {
         let user: DataType = 0.into();
         // we need to use a batch putter because otherwise we'd wait for 7000 batch intervals
-        add.batch_put((0..votes).flat_map(|_| (0..ids).map(|i| vec![user.clone(), i.into()])))
+        add.batch_insert((0..votes).flat_map(|_| (0..ids).map(|i| vec![user.clone(), i.into()])))
             .unwrap()
     });
 
@@ -1914,15 +1923,15 @@ fn state_replay_migration_query() {
 
         (a, b)
     });
-    let mut muta = g.base("a").unwrap();
-    let mut mutb = g.base("b").unwrap();
+    let mut muta = g.table("a").unwrap();
+    let mut mutb = g.table("b").unwrap();
 
     // make a couple of records
-    muta.put(vec![1.into(), "a".into()]).unwrap();
-    muta.put(vec![1.into(), "b".into()]).unwrap();
-    muta.put(vec![2.into(), "c".into()]).unwrap();
-    mutb.put(vec![1.into(), "n".into()]).unwrap();
-    mutb.put(vec![2.into(), "o".into()]).unwrap();
+    muta.insert(vec![1.into(), "a".into()]).unwrap();
+    muta.insert(vec![1.into(), "b".into()]).unwrap();
+    muta.insert(vec![2.into(), "c".into()]).unwrap();
+    mutb.insert(vec![1.into(), "n".into()]).unwrap();
+    mutb.insert(vec![2.into(), "o".into()]).unwrap();
 
     let _ = g.migrate(move |mig| {
         // add join and a reader node
@@ -2114,15 +2123,15 @@ fn node_removal() {
     });
 
     let mut cq = g.view("c").unwrap();
-    let mut muta = g.base("a").unwrap();
-    let mut mutb = g.base("b").unwrap();
+    let mut muta = g.table("a").unwrap();
+    let mut mutb = g.table("b").unwrap();
     let id: DataType = 1.into();
 
     assert_eq!(muta.table_name(), "a");
     assert_eq!(muta.columns(), &["a", "b"]);
 
     // send a value on a
-    muta.put(vec![id.clone(), 2.into()]).unwrap();
+    muta.insert(vec![id.clone(), 2.into()]).unwrap();
 
     // give it some time to propagate
     sleep();
@@ -2136,7 +2145,7 @@ fn node_removal() {
     g.remove_node(cid);
 
     // update value again
-    mutb.put(vec![id.clone(), 4.into()]).unwrap();
+    mutb.insert(vec![id.clone(), 4.into()]).unwrap();
 
     // give it some time to propagate
     sleep();
@@ -2173,12 +2182,13 @@ fn remove_query() {
     assert_eq!(g.inputs().len(), 1);
     assert_eq!(g.outputs().len(), 2);
 
-    let mut mutb = g.base("b").unwrap();
+    let mut mutb = g.table("b").unwrap();
     let mut qa = g.view("qa").unwrap();
     let mut qb = g.view("qb").unwrap();
 
-    mutb.put(vec![42.into(), "2".into(), "3".into()]).unwrap();
-    mutb.put(vec![1.into(), "4".into(), "5".into()]).unwrap();
+    mutb.insert(vec![42.into(), "2".into(), "3".into()])
+        .unwrap();
+    mutb.insert(vec![1.into(), "4".into(), "5".into()]).unwrap();
     sleep();
 
     assert_eq!(qa.lookup(&[0.into()], true).unwrap().len(), 2);
@@ -2190,7 +2200,8 @@ fn remove_query() {
     assert_eq!(g.outputs().len(), 1);
     assert!(g.view("qb").is_none());
 
-    mutb.put(vec![42.into(), "6".into(), "7".into()]).unwrap();
+    mutb.insert(vec![42.into(), "6".into(), "7".into()])
+        .unwrap();
     sleep();
 
     assert_eq!(qa.lookup(&[0.into()], true).unwrap().len(), 3);

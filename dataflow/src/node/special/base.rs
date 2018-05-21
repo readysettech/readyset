@@ -110,16 +110,16 @@ impl Default for Base {
     }
 }
 
-fn key_val(i: usize, col: usize, r: &BaseOperation) -> &DataType {
+fn key_val(i: usize, col: usize, r: &TableOperation) -> &DataType {
     match *r {
-        BaseOperation::Insert(ref row) => &row[col],
-        BaseOperation::Delete { ref key } => &key[i],
-        BaseOperation::Update { ref key, .. } => &key[i],
-        BaseOperation::InsertOrUpdate { ref row, .. } => &row[col],
+        TableOperation::Insert(ref row) => &row[col],
+        TableOperation::Delete { ref key } => &key[i],
+        TableOperation::Update { ref key, .. } => &key[i],
+        TableOperation::InsertOrUpdate { ref row, .. } => &row[col],
     }
 }
 
-fn key_of<'a>(key_cols: &'a [usize], r: &'a BaseOperation) -> impl Iterator<Item = &'a DataType> {
+fn key_of<'a>(key_cols: &'a [usize], r: &'a TableOperation) -> impl Iterator<Item = &'a DataType> {
     key_cols
         .iter()
         .enumerate()
@@ -134,14 +134,14 @@ impl Base {
     pub(crate) fn process(
         &mut self,
         us: LocalNodeIndex,
-        mut ops: Vec<BaseOperation>,
+        mut ops: Vec<TableOperation>,
         state: &StateMap,
     ) -> Records {
         if self.primary_key.is_none() || ops.is_empty() {
             return ops
                 .into_iter()
                 .map(|r| {
-                    if let BaseOperation::Insert(mut r) = r {
+                    if let TableOperation::Insert(mut r) = r {
                         self.fix(&mut r);
                         Record::Positive(r)
                     } else {
@@ -199,7 +199,7 @@ impl Base {
             }
 
             let update = match op {
-                BaseOperation::Insert(row) => {
+                TableOperation::Insert(row) => {
                     if let Some(ref was) = was {
                         eprintln!("base ignoring {:?} since it already has {:?}", row, was);
                     } else {
@@ -208,7 +208,7 @@ impl Base {
                     }
                     continue;
                 }
-                BaseOperation::Delete { .. } => {
+                TableOperation::Delete { .. } => {
                     if current.is_some() {
                         current = None;
                     } else {
@@ -217,8 +217,8 @@ impl Base {
                     }
                     continue;
                 }
-                BaseOperation::Update { set, .. } => set,
-                BaseOperation::InsertOrUpdate { row, update } => {
+                TableOperation::Update { set, .. } => set,
+                TableOperation::InsertOrUpdate { row, update } => {
                     if current.is_none() {
                         current = Some(Cow::Owned(row));
                         continue;
@@ -344,7 +344,7 @@ mod tests {
         let n = graph[global].take();
         let mut n = n.finalize(&graph);
 
-        let mut one = move |u: Vec<BaseOperation>| {
+        let mut one = move |u: Vec<TableOperation>| {
             let mut m = n.get_base_mut().unwrap().process(local, u, &states);
             node::materialize(&mut m, None, states.get_mut(&local));
             m
@@ -352,13 +352,13 @@ mod tests {
 
         assert_eq!(
             one(vec![
-                BaseOperation::Insert(vec![1.into(), "a".into(), 1.into()]),
-                BaseOperation::Insert(vec![2.into(), "2a".into(), 1.into()]),
-                BaseOperation::Delete {
+                TableOperation::Insert(vec![1.into(), "a".into(), 1.into()]),
+                TableOperation::Insert(vec![2.into(), "2a".into(), 1.into()]),
+                TableOperation::Delete {
                     key: vec![1.into(), 1.into()],
                 },
-                BaseOperation::Insert(vec![1.into(), "b".into(), 1.into()]),
-                BaseOperation::InsertOrUpdate {
+                TableOperation::Insert(vec![1.into(), "b".into(), 1.into()]),
+                TableOperation::InsertOrUpdate {
                     row: vec![1.into(), "c".into(), 1.into()],
                     update: vec![
                         Modification::None,
@@ -366,7 +366,7 @@ mod tests {
                         Modification::None,
                     ],
                 },
-                BaseOperation::InsertOrUpdate {
+                TableOperation::InsertOrUpdate {
                     row: vec![1.into(), "also never".into(), 1.into()],
                     update: vec![
                         Modification::None,
@@ -374,7 +374,7 @@ mod tests {
                         Modification::None,
                     ],
                 },
-                BaseOperation::Update {
+                TableOperation::Update {
                     key: vec![1.into(), 1.into()],
                     set: vec![
                         Modification::None,
@@ -382,7 +382,7 @@ mod tests {
                         Modification::None,
                     ],
                 },
-                BaseOperation::Update {
+                TableOperation::Update {
                     key: vec![2.into(), 1.into()],
                     set: vec![
                         Modification::None,
@@ -390,10 +390,10 @@ mod tests {
                         Modification::None,
                     ],
                 },
-                BaseOperation::Delete {
+                TableOperation::Delete {
                     key: vec![1.into(), 1.into()],
                 },
-                BaseOperation::Delete {
+                TableOperation::Delete {
                     key: vec![2.into(), 1.into()],
                 },
             ]),

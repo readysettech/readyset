@@ -84,10 +84,7 @@ fn pick_join_chains(
     join_chains: &mut Vec<JoinChain>,
     node_for_rel: &HashMap<&str, MirNodeRef>,
 ) -> (JoinChain, JoinChain) {
-    let left_chain = match join_chains
-        .iter()
-        .position(|chain| chain.has_table(src))
-    {
+    let left_chain = match join_chains.iter().position(|chain| chain.has_table(src)) {
         Some(idx) => join_chains.swap_remove(idx),
         None => JoinChain {
             tables: vec![src.clone()].into_iter().collect(),
@@ -95,10 +92,7 @@ fn pick_join_chains(
         },
     };
 
-    let right_chain = match join_chains
-        .iter()
-        .position(|chain| chain.has_table(dst))
-    {
+    let right_chain = match join_chains.iter().position(|chain| chain.has_table(dst)) {
         Some(idx) => join_chains.swap_remove(idx),
         None => JoinChain {
             tables: vec![dst.clone()].into_iter().collect(),

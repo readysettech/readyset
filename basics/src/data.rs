@@ -468,7 +468,7 @@ pub enum Modification {
 }
 
 #[derive(Clone, PartialEq, Eq, Debug, Serialize, Deserialize)]
-pub enum BaseOperation {
+pub enum TableOperation {
     Insert(Vec<DataType>),
     Delete {
         key: Vec<DataType>,
@@ -483,19 +483,19 @@ pub enum BaseOperation {
     },
 }
 
-impl BaseOperation {
+impl TableOperation {
     pub fn row(&self) -> Option<&[DataType]> {
         match *self {
-            BaseOperation::Insert(ref r) => Some(r),
-            BaseOperation::InsertOrUpdate { ref row, .. } => Some(row),
+            TableOperation::Insert(ref r) => Some(r),
+            TableOperation::InsertOrUpdate { ref row, .. } => Some(row),
             _ => None,
         }
     }
 }
 
-impl From<Vec<DataType>> for BaseOperation {
+impl From<Vec<DataType>> for TableOperation {
     fn from(other: Vec<DataType>) -> Self {
-        BaseOperation::Insert(other)
+        TableOperation::Insert(other)
     }
 }
 

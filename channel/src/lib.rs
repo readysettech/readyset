@@ -32,21 +32,21 @@ pub mod tcp;
 
 pub use tcp::{channel, DualTcpReceiver, TcpReceiver, TcpSender};
 
-pub const CONNECTION_FROM_MUTATOR: u8 = 1;
+pub const CONNECTION_FROM_BASE: u8 = 1;
 pub const CONNECTION_FROM_DOMAIN: u8 = 0;
 
 pub struct DomainConnectionBuilder {
     sport: Option<u16>,
     addr: SocketAddr,
-    is_for_mutator: bool,
+    is_for_base: bool,
 }
 
 impl DomainConnectionBuilder {
-    pub fn for_mutator(addr: SocketAddr) -> Self {
+    pub fn for_base(addr: SocketAddr) -> Self {
         DomainConnectionBuilder {
             sport: None,
             addr,
-            is_for_mutator: true,
+            is_for_base: true,
         }
     }
 
@@ -54,7 +54,7 @@ impl DomainConnectionBuilder {
         DomainConnectionBuilder {
             sport: None,
             addr,
-            is_for_mutator: false,
+            is_for_base: false,
         }
     }
 
@@ -72,8 +72,8 @@ impl DomainConnectionBuilder {
         let mut s = TcpSender::connect_from(self.sport, &self.addr)?;
         {
             let s = s.get_mut();
-            s.write_all(&[if self.is_for_mutator {
-                CONNECTION_FROM_MUTATOR
+            s.write_all(&[if self.is_for_base {
+                CONNECTION_FROM_BASE
             } else {
                 CONNECTION_FROM_DOMAIN
             }])?;

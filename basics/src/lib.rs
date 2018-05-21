@@ -30,7 +30,7 @@ use std::time;
 
 pub use addressing::{IndexPair, LocalNodeIndex};
 pub use api::{Input, Link};
-pub use data::{BaseOperation, DataType, Datas, Modification, Operation, Record, Records};
+pub use data::{DataType, Datas, Modification, Operation, Record, Records, TableOperation};
 pub use local::{
     KeyType, LookupResult, MemoryState, PersistentState, RecordResult, Row, State, Tag,
 };

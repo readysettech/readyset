@@ -29,16 +29,16 @@
 //! particular, a query, or _view_, must be _registered_ before it can be executed, much like SQL
 //! prepared statements. To register new views, use [`ControllerHandle::extend_recipe`]. Once a
 //! view has been registered, a handle for executing it is made by passing the view's name to
-//! [`ControllerHandle::view`]. The returned [`RemoteGetter`] can be used to query the view with
+//! [`ControllerHandle::view`]. The returned [`View`] can be used to query the view with
 //! different values for it's declared parameters (i.e., values in place of `?` in the query)
-//! through [`RemoteGetter::lookup`] and [`RemoteGetter::multi_lookup`].
+//! through [`View::lookup`] and [`View::multi_lookup`].
 //!
 //! Writes, in contrast, are quite similar to those in relational databases. To add a new table,
 //! you extend the recipe (using [`ControllerHandle::extend_recipe`]) with a `CREATE TABLE`
-//! statement, and then use [`ControllerHandle::base`] to get a handle to the new _base_ table.
-//! Base tables support similar operations and SQL tables, such as [`Mutator::put`],
-//! [`Mutator::update`], [`Mutator::delete`], and also more esoteric operations like
-//! [`Mutator::insert_or_update`].
+//! statement, and then use [`ControllerHandle::table`] to get a handle to the new base table.
+//! Table tables support similar operations and SQL tables, such as [`Table::insert`],
+//! [`Table::update`], [`Table::delete`], and also more esoteric operations like
+//! [`Table::insert_or_update`].
 //!
 //! More concretely, a first interaction with Soup might look like this:
 //!
@@ -53,19 +53,19 @@
 //!     CREATE TABLE Vote (aid int, uid int);");
 //!
 //! // we can then get handles that let us insert into the new tables
-//! let mut article = soup.base("Article").unwrap();
-//! let mut vote = soup.base("Vote").unwrap();
+//! let mut article = soup.table("Article").unwrap();
+//! let mut vote = soup.table("Vote").unwrap();
 //!
 //! // so let us make a new article
 //! let aid = 1;
 //! let title = "test title";
 //! let url = "https://pdos.csail.mit.edu";
 //! article
-//!     .put(vec![aid.into(), title.into(), url.into()])
+//!     .insert(vec![aid.into(), title.into(), url.into()])
 //!     .unwrap();
 //!
 //! // and also a vote
-//! vote.put(vec![aid.into(), 42.into()]).unwrap();
+//! vote.insert(vec![aid.into(), 42.into()]).unwrap();
 //!
 //! // we can also declare views that the application will want to query
 //! soup.extend_recipe("
@@ -90,7 +90,6 @@
 //! useful to provide backwards-compatibility, we recommend using the client bindings directly
 //! where possible.
 // TODO: bring back GetStats
-// TODO: rename Mutator and RemoteGetter (maybe Base and View?)
 // TODO: switch to failure crate fo errors
 
 #![deny(missing_docs)]
@@ -117,25 +116,25 @@ use std::error::Error;
 use std::fmt;
 
 mod controller;
-mod getter;
-mod mutator;
+mod table;
+mod view;
 
 /// The prelude contains most of the types needed in everyday operation.
 pub mod prelude {
     pub use super::ActivationResult;
     pub use super::ControllerHandle;
-    pub use super::Mutator;
-    pub use super::RemoteGetter;
+    pub use super::Table;
+    pub use super::View;
 }
 
 pub use controller::{ControllerDescriptor, ControllerHandle, ControllerPointer};
-pub use getter::{ReadQuery, ReadReply, RemoteGetter};
-pub use mutator::{Mutator, MutatorError};
+pub use table::{Table, TableError};
+pub use view::{ReadQuery, ReadReply, View};
 
 #[doc(hidden)]
 pub mod builders {
-    pub use super::getter::RemoteGetterBuilder;
-    pub use super::mutator::MutatorBuilder;
+    pub use super::table::TableBuilder;
+    pub use super::view::ViewBuilder;
 }
 
 /// Marker for a handle that has its own connection to Soup.

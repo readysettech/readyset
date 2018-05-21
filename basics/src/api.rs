@@ -1,5 +1,5 @@
 use std::fmt;
-use {BaseOperation, LocalNodeIndex};
+use {LocalNodeIndex, TableOperation};
 
 #[derive(Clone, Copy, PartialEq, Serialize, Deserialize)]
 pub struct Link {
@@ -22,7 +22,7 @@ impl fmt::Debug for Link {
 #[derive(Clone, Serialize, Deserialize)]
 pub struct Input {
     pub link: Link,
-    pub data: Vec<BaseOperation>,
+    pub data: Vec<TableOperation>,
     // NOTE: would have to pull out TransactionState
     //pub txn: Option<TransactionState>,
 }

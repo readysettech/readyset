@@ -281,7 +281,7 @@ fn check_query(
     g.install_recipe(&queries.join("\n")).unwrap();
 
     for (table_name, table) in tables.iter() {
-        let mut mutator = g.base(table_name).unwrap();
+        let mut mutator = g.table(table_name).unwrap();
         for row in table.data.as_ref().unwrap().iter() {
             assert_eq!(row.len(), table.types.len());
             let row: Vec<DataType> = row
@@ -289,7 +289,7 @@ fn check_query(
                 .enumerate()
                 .map(|(i, v)| table.types[i].make_datatype(v))
                 .collect();
-            mutator.put(row).unwrap();
+            mutator.insert(row).unwrap();
         }
     }
 

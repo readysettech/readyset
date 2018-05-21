@@ -160,11 +160,11 @@ impl ControllerInner {
             (Post, "/inputs") => json::to_string(&self.inputs()).unwrap(),
             (Post, "/outputs") => json::to_string(&self.outputs()).unwrap(),
             (Get, "/instances") => return Ok(json::to_string(&self.get_instances()).unwrap()),
-            (Post, "/mutator_builder") => {
-                json::to_string(&self.mutator_builder(json::from_slice(&body).unwrap())).unwrap()
+            (Post, "/table_builder") => {
+                json::to_string(&self.table_builder(json::from_slice(&body).unwrap())).unwrap()
             }
-            (Post, "/getter_builder") => {
-                json::to_string(&self.getter_builder(json::from_slice(&body).unwrap())).unwrap()
+            (Post, "/view_builder") => {
+                json::to_string(&self.view_builder(json::from_slice(&body).unwrap())).unwrap()
             }
             (Post, "/extend_recipe") => json::to_string(
                 &self.extend_recipe(authority, json::from_slice(&body).unwrap())
@@ -397,7 +397,7 @@ impl ControllerInner {
 
     /// Get a Vec of all known input nodes.
     ///
-    /// Input nodes are here all nodes of type `Base`. The addresses returned by this function will
+    /// Input nodes are here all nodes of type `Table`. The addresses returned by this function will
     /// all have been returned as a key in the map from `commit` at some point in the past.
     pub fn inputs(&self) -> BTreeMap<String, NodeIndex> {
         self.ingredients
@@ -430,7 +430,7 @@ impl ControllerInner {
             .collect()
     }
 
-    fn find_getter_for(&self, node: NodeIndex) -> Option<NodeIndex> {
+    fn find_view_for(&self, node: NodeIndex) -> Option<NodeIndex> {
         // reader should be a child of the given node. however, due to sharding, it may not be an
         // *immediate* child. furthermore, once we go beyond depth 1, we may accidentally hit an
         // *unrelated* reader node. to account for this, readers keep track of what node they are
@@ -451,9 +451,9 @@ impl ControllerInner {
         reader
     }
 
-    /// Obtain a `RemoteGetterBuilder` that can be sent to a client and then used to query a given
+    /// Obtain a `ViewBuilder` that can be sent to a client and then used to query a given
     /// (already maintained) reader node called `name`.
-    pub fn getter_builder(&self, name: &str) -> Option<RemoteGetterBuilder> {
+    pub fn view_builder(&self, name: &str) -> Option<ViewBuilder> {
         // first try to resolve the node via the recipe, which handles aliasing between identical
         // queries.
         let node = match self.recipe.node_addr_for(name) {
@@ -465,14 +465,14 @@ impl ControllerInner {
             }
         };
 
-        self.find_getter_for(node).map(|r| {
+        self.find_view_for(node).map(|r| {
             let domain = self.ingredients[r].domain();
             let columns = self.ingredients[r].fields().to_vec();
             let shards = (0..self.domains[&domain].shards())
                 .map(|i| self.read_addrs[&self.domains[&domain].assignment(i)].clone())
                 .collect();
 
-            RemoteGetterBuilder {
+            ViewBuilder {
                 local_ports: vec![],
                 node: r,
                 columns,
@@ -481,16 +481,16 @@ impl ControllerInner {
         })
     }
 
-    /// Obtain a MutatorBuild that can be used to construct a Mutator to perform writes and deletes
+    /// Obtain a TableBuild that can be used to construct a Table to perform writes and deletes
     /// from the given named base node.
-    pub fn mutator_builder(&self, base: &str) -> Option<MutatorBuilder> {
+    pub fn table_builder(&self, base: &str) -> Option<TableBuilder> {
         let ni = match self.recipe.node_addr_for(base) {
             Ok(ni) => ni,
             Err(_) => *self.inputs().get(base)?,
         };
         let node = &self.ingredients[ni];
 
-        trace!(self.log, "creating mutator"; "for" => base);
+        trace!(self.log, "creating table"; "for" => base);
 
         let mut key = self.ingredients[ni]
             .suggest_indexes(ni)
@@ -516,7 +516,7 @@ impl ControllerInner {
 
         let base_operator = node
             .get_base()
-            .expect("asked to get mutator for non-base node");
+            .expect("asked to get table for non-base node");
         let columns: Vec<String> = node
             .fields()
             .iter()
@@ -530,7 +530,7 @@ impl ControllerInner {
         );
         let schema = self.recipe.get_base_schema(base);
 
-        Some(MutatorBuilder {
+        Some(TableBuilder {
             local_port: None,
             txs,
             addr: (*node.local_addr()).into(),
@@ -639,9 +639,9 @@ impl ControllerInner {
         let uid = &[uid];
         if context.get("group").is_none() {
             for g in groups {
-                let rgb: Option<RemoteGetterBuilder> = self.getter_builder(&g);
-                let mut getter = rgb.map(|rgb| rgb.build_exclusive()).unwrap();
-                let my_groups: Vec<DataType> = getter
+                let rgb: Option<ViewBuilder> = self.view_builder(&g);
+                let mut view = rgb.map(|rgb| rgb.build_exclusive()).unwrap();
+                let my_groups: Vec<DataType> = view
                     .lookup(uid, true)
                     .unwrap()
                     .iter()
