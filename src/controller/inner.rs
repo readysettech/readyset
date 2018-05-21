@@ -306,10 +306,13 @@ impl ControllerInner {
         }
     }
 
-    /// Use a debug channel. This function may only be called once because the receiving end it
-    /// returned.
+    /// Create a global channel for receiving tracer events.
+    ///
+    /// Only domains created after this method is called will be able to send trace events.
+    ///
+    /// This function may only be called once because the receiving end it returned.
     #[allow(unused)]
-    pub fn create_debug_channel(&mut self) -> TcpListener {
+    pub fn create_tracer_channel(&mut self) -> TcpListener {
         assert!(self.debug_channel.is_none());
         let addr: SocketAddr = "127.0.0.1:0".parse().unwrap();
         let listener = TcpListener::bind(&addr).unwrap();

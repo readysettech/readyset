@@ -113,7 +113,7 @@ impl Clone for Table<SharedConnection> {
             key_is_primary: self.key_is_primary,
             key: self.key.clone(),
             dropped: self.dropped.clone(),
-            tracer: self.tracer.clone(),
+            tracer: None,
             table_name: self.table_name.clone(),
             columns: self.columns.clone(),
             schema: self.schema.clone(),
@@ -137,7 +137,7 @@ impl Table<SharedConnection> {
             key_is_primary: self.key_is_primary,
             key: self.key.clone(),
             dropped: self.dropped.clone(),
-            tracer: self.tracer.clone(),
+            tracer: None,
             table_name: self.table_name.clone(),
             columns: self.columns.clone(),
             schema: self.schema.clone(),
@@ -245,17 +245,18 @@ impl<E> Table<E> {
         }
     }
 
-    fn prep_records(&self, mut ops: Vec<TableOperation>) -> Input {
+    fn prep_records(&self, tracer: Tracer, mut ops: Vec<TableOperation>) -> Input {
         self.inject_dropped_cols(&mut ops);
         Input {
             link: Link::new(self.addr, self.addr),
             data: ops,
-            tracer: self.tracer.clone(),
+            tracer: tracer,
         }
     }
 
     fn send(&mut self, ops: Vec<TableOperation>) {
-        let m = self.prep_records(ops);
+        let tracer = self.tracer.take();
+        let m = self.prep_records(tracer, ops);
         self.domain_input_handle
             .borrow_mut()
             .base_send(m, &self.key[..])
@@ -280,10 +281,12 @@ impl<E> Table<E> {
                 }
             }
 
-            let m = self.prep_records(data);
+            let tracer = self.tracer.clone();
+            let m = self.prep_records(tracer, data);
             batch_putter.enqueue(m, &self.key[..]).unwrap();
         }
 
+        self.tracer.take();
         batch_putter.wait().map(|_| ()).map_err(|_| unreachable!())
     }
 
@@ -395,15 +398,16 @@ impl<E> Table<E> {
         ))
     }
 
-    /// Trace subsequent packets by sending events on the global debug channel until `stop_tracing`
-    /// is called. Any such events will be tagged with `tag`.
-    pub fn start_tracing(&mut self, tag: u64) {
+    /// Trace the next modification to this base table.
+    ///
+    /// When an input is traced, events are triggered as it flows through the dataflow, and are
+    /// communicated back to the controller. Currently, you can only receive trace events if you
+    /// build a local controller, specifically by calling `create_debug_channel` before adding any
+    /// operators to the dataflow.
+    ///
+    /// Traced events are sent on the debug channel, and are tagged with the given `tag`.
+    pub fn trace_next(&mut self, tag: u64) {
         self.tracer = Some((tag, None));
-    }
-
-    /// Stop attaching the tracer to packets sent.
-    pub fn stop_tracing(&mut self) {
-        self.tracer = None;
     }
 }
 
