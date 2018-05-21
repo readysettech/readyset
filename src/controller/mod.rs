@@ -666,7 +666,7 @@ mod tests {
 
         let authority = ZookeeperAuthority::new("127.0.0.1:2181/it_works_blender_with_migration");
         let mut c = ControllerBuilder::default().build(Arc::new(authority));
-        assert!(c.install_recipe(r_txt.to_owned()).is_ok());
+        assert!(c.install_recipe(r_txt).is_ok());
     }
 
     // Controller without any domains gets dropped once it leaves the scope.
@@ -688,6 +688,6 @@ mod tests {
                      CREATE TABLE b (r int, s int);\n";
 
         let mut c = ControllerBuilder::default().build_local();
-        assert!(c.install_recipe(r_txt.to_owned()).is_ok());
+        assert!(c.install_recipe(r_txt).is_ok());
     }
 }

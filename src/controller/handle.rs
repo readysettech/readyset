@@ -121,7 +121,7 @@ impl<A: Authority> LocalControllerHandle<A> {
             .iter()
             .map(|&f| context.get(f).unwrap().clone())
             .collect();
-        let mut mutator = self.get_mutator(&bname).unwrap();
+        let mut mutator = self.base(&bname).unwrap();
 
         mutator.put(record).unwrap();
     }
@@ -143,9 +143,9 @@ mod tests {
                      CREATE TABLE b (r int, s int);\n";
 
         let mut c = ControllerBuilder::default().build_local();
-        assert!(c.install_recipe(r_txt.to_owned()).is_ok());
+        assert!(c.install_recipe(r_txt).is_ok());
         for _ in 0..250 {
-            let _ = c.get_mutator("a").unwrap();
+            let _ = c.base("a").unwrap();
         }
     }
 }

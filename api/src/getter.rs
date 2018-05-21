@@ -1,20 +1,18 @@
-use channel::rpc::RpcClient;
-use {ExclusiveConnection, SharedConnection};
-
 use basics::*;
-
+use channel::rpc::RpcClient;
 use std::cell::RefCell;
 use std::collections::HashMap;
 use std::io;
 use std::net::SocketAddr;
 use std::rc::Rc;
+use {ExclusiveConnection, SharedConnection};
 
 pub(crate) type GetterRpc = Rc<RefCell<RpcClient<ReadQuery, ReadReply>>>;
 
-/// A request to read a specific key.
+#[doc(hidden)]
 #[derive(Serialize, Deserialize, Debug)]
 pub enum ReadQuery {
-    /// Read normally
+    /// Read from a leaf view
     Normal {
         /// Where to read from
         target: (NodeIndex, usize),
@@ -30,19 +28,17 @@ pub enum ReadQuery {
     },
 }
 
-/// The contents of a specific key
+#[doc(hidden)]
 #[derive(Serialize, Deserialize, Debug)]
 pub enum ReadReply {
-    /// Read normally.
     /// Errors if view isn't ready yet.
     Normal(Result<Vec<Datas>, ()>),
     /// Read size of view
     Size(usize),
 }
 
-/// Serializeable version of a `RemoteGetter`.
-#[derive(Clone, Debug, Serialize, Deserialize)]
 #[doc(hidden)]
+#[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct RemoteGetterBuilder {
     pub node: NodeIndex,
     pub columns: Vec<String>,
@@ -52,7 +48,7 @@ pub struct RemoteGetterBuilder {
 }
 
 impl RemoteGetterBuilder {
-    /// Build a `RemoteGetter` out of a `RemoteGetterBuilder`
+    #[doc(hidden)]
     pub fn build_exclusive(self) -> RemoteGetter<ExclusiveConnection> {
         let conns = self
             .shards
@@ -120,7 +116,12 @@ impl RemoteGetterBuilder {
     }
 }
 
-/// Struct to query the contents of a materialized view.
+/// A `RemoteGetter` is used to query previously defined external views.
+///
+/// If you create multiple `RemoteGetter` handles from a single `ControllerHandle`, they may share
+/// connections to the Soup workers. For this reason, `RemoteGetter` is *not* `Send` or `Sync`. To
+/// get a handle that can be sent to a different thread (i.e., one with its own dedicated
+/// connections), call `RemoteGetter::into_exclusive`.
 pub struct RemoteGetter<E = SharedConnection> {
     node: NodeIndex,
     columns: Vec<String>,
@@ -146,7 +147,7 @@ impl Clone for RemoteGetter<SharedConnection> {
 unsafe impl Send for RemoteGetter<ExclusiveConnection> {}
 
 impl RemoteGetter<SharedConnection> {
-    /// Change this getter into one with a dedicated connection the server so it can be sent across
+    /// Produce a `RemoteGetter` with dedicated Soup connections so it can be safely sent across
     /// threads.
     pub fn into_exclusive(self) -> RemoteGetter<ExclusiveConnection> {
         RemoteGetterBuilder {
@@ -159,17 +160,17 @@ impl RemoteGetter<SharedConnection> {
 }
 
 impl<E> RemoteGetter<E> {
-    /// Get the local address this getter is bound to.
-    pub fn local_addr(&self) -> io::Result<SocketAddr> {
-        self.shards[0].borrow().local_addr()
-    }
-
-    /// Return the column schema of the view this getter is associated with.
+    /// Get the list of columns in this view.
     pub fn columns(&self) -> &[String] {
         self.columns.as_slice()
     }
 
-    /// Query for the size of a specific view.
+    /// Get the local address this `RemoteGetter` is bound to.
+    pub fn local_addr(&self) -> io::Result<SocketAddr> {
+        self.shards[0].borrow().local_addr()
+    }
+
+    /// Get the current size of this view.
     pub fn len(&mut self) -> Result<usize, ()> {
         if self.shards.len() == 1 {
             let mut shard = self.shards[0].borrow_mut();
@@ -202,7 +203,9 @@ impl<E> RemoteGetter<E> {
         }
     }
 
-    /// Query for the results for the given keys, optionally blocking if it is not yet available.
+    /// Retrieve the query results for the given parameter values.
+    ///
+    /// The method will block if the results are not yet available only when `block` is `true`.
     pub fn multi_lookup(
         &mut self,
         keys: Vec<Vec<DataType>>,
@@ -277,7 +280,9 @@ impl<E> RemoteGetter<E> {
         }
     }
 
-    /// Lookup a single key.
+    /// Retrieve the query results for the given parameter value.
+    ///
+    /// The method will block if the results are not yet available only when `block` is `true`.
     pub fn lookup(&mut self, key: &[DataType], block: bool) -> Result<Datas, ()> {
         // TODO: Optimized version of this function?
         self.multi_lookup(vec![Vec::from(key)], block)

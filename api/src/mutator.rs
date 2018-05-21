@@ -1,18 +1,16 @@
+use basics::*;
+use channel::{tcp, DomainConnectionBuilder, TcpSender};
+use nom_sql::CreateTableStatement;
+use std::cell::RefCell;
 use std::collections::HashMap;
 use std::io;
 use std::net::SocketAddr;
-
-use basics::*;
-use channel::{tcp, DomainConnectionBuilder, TcpSender};
-use {ExclusiveConnection, SharedConnection};
-
-use nom_sql::CreateTableStatement;
-use std::cell::RefCell;
 use std::rc::Rc;
 use vec_map::VecMap;
+use {ExclusiveConnection, SharedConnection};
 
-/// Indicates why a Mutator operation failed.
-#[derive(Serialize, Deserialize, Debug)]
+/// A failed Mutator operation.
+#[derive(Debug)]
 pub enum MutatorError {
     /// Incorrect number of columns specified for operations: (expected, got).
     WrongColumnCount(usize, usize),
@@ -20,9 +18,8 @@ pub enum MutatorError {
     WrongKeyColumnCount(usize, usize),
 }
 
-/// Serializable struct that Mutators can be constructed from.
-#[derive(Clone, Serialize, Deserialize)]
 #[doc(hidden)]
+#[derive(Clone, Serialize, Deserialize)]
 pub struct MutatorBuilder {
     pub txs: Vec<SocketAddr>,
     pub addr: LocalNodeIndex,
@@ -37,8 +34,6 @@ pub struct MutatorBuilder {
     pub local_port: Option<u16>,
 }
 
-pub(crate) type MutatorRpc = Rc<RefCell<DomainInputHandle>>;
-
 impl MutatorBuilder {
     /// Set the local port to bind to when making the shared connection.
     pub(crate) fn with_local_port(mut self, port: u16) -> MutatorBuilder {
@@ -46,8 +41,7 @@ impl MutatorBuilder {
         self
     }
 
-    /// Construct a `Mutator`.
-    pub fn build(
+    pub(crate) fn build(
         self,
         rpcs: &mut HashMap<Vec<SocketAddr>, MutatorRpc>,
     ) -> Mutator<SharedConnection> {
@@ -79,7 +73,12 @@ impl MutatorBuilder {
     }
 }
 
-/// A `Mutator` is used to perform reads and writes to base nodes.
+/// A `Mutator` is used to perform writes, deletes, and other operations to data in base tables.
+///
+/// If you create multiple `Mutator` handles from a single `ControllerHandle`, they may share
+/// connections to the Soup workers. For this reason, `Mutator` is *not* `Send` or `Sync`. To get a
+/// handle that can be sent to a different thread (i.e., one with its own dedicated connections),
+/// call `Mutator::into_exclusive`.
 pub struct Mutator<E = SharedConnection> {
     domain_input_handle: MutatorRpc,
     shard_addrs: Vec<SocketAddr>,
@@ -117,8 +116,7 @@ impl Clone for Mutator<SharedConnection> {
 unsafe impl Send for Mutator<ExclusiveConnection> {}
 
 impl Mutator<SharedConnection> {
-    /// Change this mutator into one with a dedicated connection the server so it can be sent
-    /// across threads.
+    /// Produce a `Mutator` with dedicated Soup connections so it can be safely sent across threads.
     pub fn into_exclusive(self) -> Mutator<ExclusiveConnection> {
         let c = DomainInputHandle::new(&self.shard_addrs[..]).unwrap();
         let c = Rc::new(RefCell::new(c));
@@ -140,7 +138,28 @@ impl Mutator<SharedConnection> {
 }
 
 impl<E> Mutator<E> {
-    /// Get the local address this mutator is bound to.
+    /// Get the name of this base table.
+    pub fn table_name(&self) -> &str {
+        &self.table_name
+    }
+
+    /// Get the list of columns in this base table.
+    ///
+    /// Note that this will *not* be updated if the underlying recipe changes and adds or removes
+    /// columns!
+    pub fn columns(&self) -> &[String] {
+        &self.columns
+    }
+
+    /// Get the schema that was used to create this base table.
+    ///
+    /// Note that this will *not* be updated if the underlying recipe changes and adds or removes
+    /// columns!
+    pub fn schema(&self) -> &CreateTableStatement {
+        self.schema.as_ref().unwrap()
+    }
+
+    /// Get the local address this `Mutator` is bound to.
     pub fn local_addr(&self) -> io::Result<SocketAddr> {
         self.domain_input_handle.borrow().local_addr()
     }
@@ -234,7 +253,7 @@ impl<E> Mutator<E> {
             .unwrap();
     }
 
-    /// Perform a write to the base node this Mutator was generated for.
+    /// Perform multiple operations on this base table in one batch.
     pub fn batch_put<I, V>(&mut self, i: I) -> Result<(), MutatorError>
     where
         I: IntoIterator<Item = V>,
@@ -262,7 +281,7 @@ impl<E> Mutator<E> {
         batch_putter.wait().map(|_| ()).map_err(|_| unreachable!())
     }
 
-    /// Perform a write to the base node this Mutator was generated for.
+    /// Insert a single row of data into this base table.
     pub fn put<V>(&mut self, u: V) -> Result<(), MutatorError>
     where
         V: Into<Vec<DataType>>,
@@ -278,7 +297,7 @@ impl<E> Mutator<E> {
         Ok(self.send(data))
     }
 
-    /// Perform some writes to the base node this Mutator was generated for.
+    /// Insert multiple rows of data into this base table.
     pub fn multi_put<I, V>(&mut self, i: I) -> Result<(), MutatorError>
     where
         I: IntoIterator<Item = V>,
@@ -299,7 +318,7 @@ impl<E> Mutator<E> {
             .map(|data| self.send(data))
     }
 
-    /// Perform a delete from the base node this Mutator was generated for.
+    /// Delete the row with the given key from this base table.
     pub fn delete<I>(&mut self, key: I) -> Result<(), MutatorError>
     where
         I: Into<Vec<DataType>>,
@@ -307,7 +326,10 @@ impl<E> Mutator<E> {
         Ok(self.send(vec![BaseOperation::Delete { key: key.into() }].into()))
     }
 
-    /// Perform a update to the base node this Mutator was generated for.
+    /// Update the row with the given key in this base table.
+    ///
+    /// `u` is a set of column-modification pairs, where for each pair `(i, m)`, the modification
+    /// `m` will be applied to column `i` of the record with key `key`.
     pub fn update<V>(&mut self, key: Vec<DataType>, u: V) -> Result<(), MutatorError>
     where
         V: IntoIterator<Item = (usize, Modification)>,
@@ -331,9 +353,10 @@ impl<E> Mutator<E> {
         Ok(self.send(vec![BaseOperation::Update { key, set }].into()))
     }
 
-    /// Perform a insert-or-update to the base node this Mutator was generated
-    /// for. If a record already exists for the key of the given record, the existing record will
-    /// instead be updated with the modifications in `u`.
+    /// Perform a insert-or-update on this base table.
+    ///
+    /// If a row already exists for the key in `insert`, the existing row will instead be updated
+    /// with the modifications in `u` (as documented in `Mutator::update`).
     pub fn insert_or_update<V>(
         &mut self,
         insert: Vec<DataType>,
@@ -381,24 +404,51 @@ impl<E> Mutator<E> {
         self.tracer = None;
     }
     */
-
-    /// Get the name of the base table that this mutator writes to.
-    pub fn table_name(&self) -> &str {
-        &self.table_name
-    }
-
-    /// Get the name of the columns in the base table this mutator is for.
-    pub fn columns(&self) -> &[String] {
-        &self.columns
-    }
-
-    /// Get the base table schema.
-    pub fn schema(&self) -> &CreateTableStatement {
-        self.schema.as_ref().unwrap()
-    }
 }
-pub struct DomainInputHandle {
+
+pub(crate) struct DomainInputHandle {
     txs: Vec<TcpSender<Input>>,
+}
+
+pub(crate) type MutatorRpc = Rc<RefCell<DomainInputHandle>>;
+
+impl DomainInputHandle {
+    pub(crate) fn new_on(mut local_port: Option<u16>, txs: &[SocketAddr]) -> io::Result<Self> {
+        let txs: io::Result<Vec<_>> = txs
+            .into_iter()
+            .map(|addr| {
+                let c = DomainConnectionBuilder::for_mutator(*addr)
+                    .maybe_on_port(local_port)
+                    .build()?;
+                if local_port.is_none() {
+                    local_port = Some(c.local_addr()?.port());
+                }
+                Ok(c)
+            })
+            .collect();
+
+        Ok(Self { txs: txs? })
+    }
+
+    pub(crate) fn new(txs: &[SocketAddr]) -> Result<Self, io::Error> {
+        Self::new_on(None, txs)
+    }
+
+    pub(crate) fn local_addr(&self) -> io::Result<SocketAddr> {
+        self.txs[0].local_addr()
+    }
+
+    pub(crate) fn sender(&mut self) -> BatchSendHandle {
+        BatchSendHandle::new(self)
+    }
+
+    pub(crate) fn base_send(&mut self, i: Input, key: &[usize]) -> Result<i64, tcp::SendError> {
+        let mut s = BatchSendHandle::new(self);
+        s.enqueue(i, key)?;
+        s.wait().map_err(|_| {
+            tcp::SendError::IoError(io::Error::new(io::ErrorKind::Other, "write failed"))
+        })
+    }
 }
 
 pub(crate) struct BatchSendHandle<'a> {
@@ -467,44 +517,5 @@ impl<'a> BatchSendHandle<'a> {
 
         // XXX: this just returns the last id :/
         id
-    }
-}
-
-impl DomainInputHandle {
-    pub(crate) fn new_on(mut local_port: Option<u16>, txs: &[SocketAddr]) -> io::Result<Self> {
-        let txs: io::Result<Vec<_>> = txs
-            .into_iter()
-            .map(|addr| {
-                let c = DomainConnectionBuilder::for_mutator(*addr)
-                    .maybe_on_port(local_port)
-                    .build()?;
-                if local_port.is_none() {
-                    local_port = Some(c.local_addr()?.port());
-                }
-                Ok(c)
-            })
-            .collect();
-
-        Ok(Self { txs: txs? })
-    }
-
-    pub(crate) fn new(txs: &[SocketAddr]) -> Result<Self, io::Error> {
-        Self::new_on(None, txs)
-    }
-
-    pub(crate) fn local_addr(&self) -> io::Result<SocketAddr> {
-        self.txs[0].local_addr()
-    }
-
-    pub(crate) fn sender(&mut self) -> BatchSendHandle {
-        BatchSendHandle::new(self)
-    }
-
-    pub(crate) fn base_send(&mut self, i: Input, key: &[usize]) -> Result<i64, tcp::SendError> {
-        let mut s = BatchSendHandle::new(self);
-        s.enqueue(i, key)?;
-        s.wait().map_err(|_| {
-            tcp::SendError::IoError(io::Error::new(io::ErrorKind::Other, "write failed"))
-        })
     }
 }

@@ -4,36 +4,17 @@ version = "0.1.0"
 authors = ["Jon Gjengset <jon@thesquareplanet.com>"]
 
 [dependencies]
-clap = "2.25.0"
-failure = "0.1.1"
-fnv = "1.0.5"
 futures = "0.1.16"
-hostname = "0.1.3"
 hyper = "0.11.6"
-mio = "0.6.9"
-mio-pool = "0.5.5"
-nom = "^3.2.1"
-mysql = "12.2.0"
-rand = "0.4.0"
+serde = { version = "1.0.8", features = ["rc"] }
 serde_derive = "1.0.8"
 serde_json = "1.0.2"
-slog = "2.2.2"
-#slog = { version = "2.2.2", features = ["max_level_trace", "release_max_level_trace"] }
-slog-term = "2.4.0"
-tarpc = "0.11.0"
-tarpc-plugins = "0.3.0"
 tokio-core = "0.1.8"
-slab = "0.4"
 bincode = "1.0.0"
-
 vec_map = { version = "0.8.0", features = ["eders"] }
-timer_heap = "0.3.0"
-serde = { version = "1.0.8", features = ["rc"] }
 
 # git deps
 assert_infrequent = { git = "https://github.com/fintelia/assert_infrequent.git", rev = "720e140bc8516d65dad7008abdc1d38796700c09" }
-petgraph = { version = "0.4.11", features = ["serde-1"] }
-memcached-rs = { git = "https://github.com/jonhoo/memcached-rs.git", branch = "expose-multi" }
 nom-sql = { git = "https://github.com/ms705/nom-sql.git", rev = "3e7ae4c4d32b77342051d5c217549ab8fcb68e85" }
 
 # local deps
@@ -41,18 +22,5 @@ channel = { path = "../channel" }
 consensus = { path = "../consensus" }
 basics = { path = "../basics" }
 
-# Not needed directly, but we want to force the version used by our
-# dependencies to have default features. If this isn't here, then the features
-# used for `num` will vary between subcrates, triggering unnecessary
-# recompiles.
-num = "0.1"
-
-[dependencies.timekeeper]
-version = "0.3.0"
-default-features = false
-
 [dev-dependencies]
 backtrace = { version = "0.3.2", features = ["serialize-serde"] }
-toml = "0.4.1"
-diff = "0.1.10"
-glob = "0.2.11"
