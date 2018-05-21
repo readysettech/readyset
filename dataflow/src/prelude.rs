@@ -13,7 +13,9 @@ pub type Edge = ();
 pub type Graph = petgraph::Graph<Node, Edge>;
 
 // dataflow types
-pub use payload::{Packet, PacketEvent, ReplayPathSegment, SourceChannelIdentifier, Tracer};
+pub use api::debug::trace::{Event, PacketEvent, Tracer};
+pub use api::Input;
+pub use payload::{Packet, ReplayPathSegment, SourceChannelIdentifier};
 pub use Sharding;
 
 // domain local state
@@ -27,6 +29,3 @@ pub type ChannelCoordinator = channel::ChannelCoordinator<(DomainIndex, usize)>;
 pub trait Executor {
     fn send_back(&self, SourceChannelIdentifier, Result<i64, ()>);
 }
-
-// debug types
-pub use debug::DebugEvent;

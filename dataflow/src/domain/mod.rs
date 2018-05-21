@@ -15,7 +15,6 @@ use api;
 pub use basics::DomainIndex as Index;
 use channel::poll::{PollEvent, ProcessResult};
 use channel::{DomainConnectionBuilder, TcpSender};
-use debug;
 use group_commit::GroupCommitQueueSet;
 use payload::{ControlReplyPacket, ReplayPieceContext};
 use prelude::*;
@@ -226,7 +225,7 @@ pub struct Domain {
     replay_request_queue: VecDeque<(Tag, Vec<DataType>)>,
 
     readers: Readers,
-    _debug_tx: Option<TcpSender<debug::DebugEvent>>,
+    _debug_tx: Option<TcpSender<api::debug::trace::Event>>,
     control_reply_tx: TcpSender<ControlReplyPacket>,
     channel_coordinator: Arc<ChannelCoordinator>,
 

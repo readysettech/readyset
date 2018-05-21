@@ -127,7 +127,7 @@ pub mod prelude {
 }
 
 pub use controller::{ControllerDescriptor, ControllerHandle, ControllerPointer};
-pub use table::{Table, TableError};
+pub use table::{Input, Table, TableError};
 pub use view::{ReadQuery, ReadReply, View};
 
 #[doc(hidden)]

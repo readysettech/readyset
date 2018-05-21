@@ -1,5 +1,6 @@
 use basics::*;
 use channel::{tcp, DomainConnectionBuilder, TcpSender};
+use debug::trace::Tracer;
 use nom_sql::CreateTableStatement;
 use std::cell::RefCell;
 use std::collections::HashMap;
@@ -8,6 +9,14 @@ use std::net::SocketAddr;
 use std::rc::Rc;
 use vec_map::VecMap;
 use {ExclusiveConnection, SharedConnection};
+
+#[doc(hidden)]
+#[derive(Clone, Serialize, Deserialize)]
+pub struct Input {
+    pub link: Link,
+    pub data: Vec<TableOperation>,
+    pub tracer: Tracer,
+}
 
 /// A failed Table operation.
 #[derive(Debug)]
@@ -64,7 +73,7 @@ impl TableBuilder {
             key: self.key,
             key_is_primary: self.key_is_primary,
             dropped: self.dropped,
-            //tracer: None,
+            tracer: None,
             table_name: self.table_name,
             columns: self.columns,
             schema: self.schema,
@@ -86,7 +95,7 @@ pub struct Table<E = SharedConnection> {
     key_is_primary: bool,
     key: Vec<usize>,
     dropped: VecMap<DataType>,
-    //tracer: Tracer,
+    tracer: Tracer,
     table_name: String,
     columns: Vec<String>,
     schema: Option<CreateTableStatement>,
@@ -104,7 +113,7 @@ impl Clone for Table<SharedConnection> {
             key_is_primary: self.key_is_primary,
             key: self.key.clone(),
             dropped: self.dropped.clone(),
-            //tracer: self.tracer.clone(),
+            tracer: self.tracer.clone(),
             table_name: self.table_name.clone(),
             columns: self.columns.clone(),
             schema: self.schema.clone(),
@@ -128,7 +137,7 @@ impl Table<SharedConnection> {
             key_is_primary: self.key_is_primary,
             key: self.key.clone(),
             dropped: self.dropped.clone(),
-            //tracer: self.tracer.clone(),
+            tracer: self.tracer.clone(),
             table_name: self.table_name.clone(),
             columns: self.columns.clone(),
             schema: self.schema.clone(),
@@ -241,7 +250,7 @@ impl<E> Table<E> {
         Input {
             link: Link::new(self.addr, self.addr),
             data: ops,
-            //tracer: self.tracer.clone(),
+            tracer: self.tracer.clone(),
         }
     }
 
@@ -386,7 +395,6 @@ impl<E> Table<E> {
         ))
     }
 
-    /*
     /// Trace subsequent packets by sending events on the global debug channel until `stop_tracing`
     /// is called. Any such events will be tagged with `tag`.
     pub fn start_tracing(&mut self, tag: u64) {
@@ -397,7 +405,6 @@ impl<E> Table<E> {
     pub fn stop_tracing(&mut self) {
         self.tracer = None;
     }
-    */
 }
 
 pub(crate) struct DomainInputHandle {
@@ -488,6 +495,7 @@ impl<'a> BatchSendHandle<'a> {
                 if !rs.is_empty() {
                     self.dih.txs[s].send(Input {
                         link: i.link,
+                        tracer: i.tracer.clone(),
                         data: rs,
                     })?;
                     self.sent[s] += 1;

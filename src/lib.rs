@@ -356,9 +356,6 @@ pub use basics::{
     DataType, Datas, DurabilityMode, Modification, NodeIndex, Operation, PersistenceParameters,
 };
 
-pub use dataflow::debug::{DebugEvent, DebugEventType};
-pub use dataflow::prelude::DomainIndex;
-
 pub use api::*;
 
 pub use controller::sql::reuse::ReuseConfigType;

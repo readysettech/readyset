@@ -5,7 +5,6 @@ use api;
 #[cfg(debug_assertions)]
 use backtrace::Backtrace;
 use channel;
-use debug::{DebugEvent, DebugEventType};
 use domain;
 use node;
 use prelude::*;
@@ -132,30 +131,12 @@ pub struct SourceChannelIdentifier {
     pub token: usize,
 }
 
-/// Different events that can occur as a packet is being processed.
-#[derive(Copy, Clone, Debug, Serialize, Deserialize)]
-pub enum PacketEvent {
-    /// The packet has been pulled off the input channel.
-    ExitInputChannel,
-    /// The packet has been received by some domain, and is being handled.
-    Handle,
-    /// The packet is being processed at some node.
-    Process,
-    /// The packet has reached some reader node.
-    ReachedReader,
-    /// The packet has been merged with another, and will no longer trigger events.
-    Merged(u64),
-}
-
-pub type Tracer = Option<(u64, Option<channel::TraceSender<DebugEvent>>)>;
-
 #[derive(Clone, Serialize, Deserialize)]
 pub enum Packet {
     // Data messages
     //
     Input {
         inner: Input,
-        tracer: Tracer,
         src: Option<SourceChannelIdentifier>,
         senders: Vec<SourceChannelIdentifier>,
     },
@@ -434,10 +415,11 @@ impl Packet {
                 tracer: Some((tag, Some(ref sender))),
                 ..
             } => {
+                use api::debug::trace::{Event, EventType};
                 sender
-                    .send(DebugEvent {
+                    .send(Event {
                         instant: time::Instant::now(),
-                        event: DebugEventType::PacketEvent(event, tag),
+                        event: EventType::PacketEvent(event, tag),
                     })
                     .unwrap();
             }

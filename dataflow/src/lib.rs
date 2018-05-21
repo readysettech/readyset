@@ -33,7 +33,6 @@ extern crate tokio_core;
 extern crate vec_map;
 
 pub mod backlog;
-pub mod debug;
 pub mod node;
 pub mod ops;
 pub mod payload;

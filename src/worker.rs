@@ -13,7 +13,7 @@ use slog::Logger;
 use timer_heap::{TimerHeap, TimerType};
 use vec_map::VecMap;
 
-use basics::Input;
+use api;
 use channel::poll::{PollEvent, ProcessResult};
 use channel::tcp::{SendError, TryRecvError};
 use channel::{
@@ -41,8 +41,12 @@ type EnqueuedSend = (ReplicaIndex, Box<Packet>);
 type ChannelCoordinator = channel::ChannelCoordinator<ReplicaIndex>;
 type ReplicaToken = usize;
 
-type ReplicaReceiversInner =
-    VecMap<RefCell<(DualTcpReceiver<Box<Packet>, Input>, Option<ReplicaIndex>)>>;
+type ReplicaReceiversInner = VecMap<
+    RefCell<(
+        DualTcpReceiver<Box<Packet>, api::Input>,
+        Option<ReplicaIndex>,
+    )>,
+>;
 
 #[derive(Default)]
 struct ReplicaReceivers(ReplicaReceiversInner);
@@ -432,7 +436,6 @@ impl Worker {
                                 inner: input,
                                 src: Some(SourceChannelIdentifier { token: token }),
                                 senders: Vec::new(),
-                                tracer: None,
                             })
                         })
                     } else {

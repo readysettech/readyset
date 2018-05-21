@@ -1,7 +1,5 @@
-use std::time;
-
-use debug::DebugEventType;
 use prelude::*;
+use std::time;
 
 pub struct GroupCommitQueueSet {
     /// Packets that are queued to be persisted.
@@ -99,9 +97,8 @@ impl GroupCommitQueueSet {
         let merged_data = packets.fold(Vec::new(), |mut acc, p| {
             match *p {
                 Packet::Input {
-                    inner: Input { link, data },
+                    inner: Input { link, data, tracer },
                     src,
-                    tracer,
                     senders,
                 } => {
                     assert_eq!(senders.len(), 0);
@@ -114,13 +111,11 @@ impl GroupCommitQueueSet {
 
                     match (&merged_tracer, tracer) {
                         (&Some((mtag, _)), Some((tag, Some(sender)))) => {
+                            use api::debug::trace::*;
                             sender
-                                .send(DebugEvent {
+                                .send(Event {
                                     instant: time::Instant::now(),
-                                    event: DebugEventType::PacketEvent(
-                                        PacketEvent::Merged(mtag),
-                                        tag,
-                                    ),
+                                    event: EventType::PacketEvent(PacketEvent::Merged(mtag), tag),
                                 })
                                 .unwrap();
                         }
@@ -139,9 +134,9 @@ impl GroupCommitQueueSet {
             inner: Input {
                 link: merged_link,
                 data: merged_data,
+                tracer: merged_tracer,
             },
             src: None,
-            tracer: merged_tracer,
             senders: all_senders,
         }))
     }

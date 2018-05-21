@@ -32,9 +32,8 @@ impl Node {
                 // NOTE: bases only accept BaseOperations
                 match m.take() {
                     Some(box Packet::Input {
-                        inner: Input { link, data },
+                        inner: Input { link, data, tracer },
                         src,
-                        tracer,
                         mut senders,
                     }) => {
                         let mut rs = b.process(addr, data, &*state);
