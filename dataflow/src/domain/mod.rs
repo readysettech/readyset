@@ -11,6 +11,8 @@ use std::time;
 
 use std::net::SocketAddr;
 
+use api;
+pub use basics::DomainIndex as Index;
 use channel::poll::{PollEvent, ProcessResult};
 use channel::{DomainConnectionBuilder, TcpSender};
 use debug;
@@ -18,7 +20,6 @@ use group_commit::GroupCommitQueueSet;
 use payload::{ControlReplyPacket, ReplayPieceContext};
 use prelude::*;
 use slog::Logger;
-use statistics;
 use timekeeper::{RealTime, SimpleTracker, ThreadTime, Timer, TimerSet};
 use Readers;
 
@@ -38,29 +39,6 @@ macro_rules! dur_to_ns {
         let d = $d;
         d.as_secs() * NANOS_PER_SEC + d.subsec_nanos() as u64
     }};
-}
-
-#[allow(missing_docs)]
-#[derive(Eq, PartialEq, Ord, PartialOrd, Hash, Clone, Copy, Debug, Serialize, Deserialize)]
-pub struct Index(usize);
-
-impl From<usize> for Index {
-    fn from(i: usize) -> Self {
-        Index(i)
-    }
-}
-
-impl Into<usize> for Index {
-    fn into(self) -> usize {
-        self.0
-    }
-}
-
-#[allow(missing_docs)]
-impl Index {
-    pub fn index(&self) -> usize {
-        self.0
-    }
 }
 
 #[derive(Debug)]
@@ -168,7 +146,7 @@ impl DomainBuilder {
             Some(self.shard)
         };
 
-        let log = log.new(o!("domain" => self.index.0, "shard" => self.shard));
+        let log = log.new(o!("domain" => self.index.index(), "shard" => self.shard));
 
         let debug_tx = self
             .debug_addr
@@ -743,6 +721,7 @@ impl Domain {
         executor: Option<&Executor>,
         top: bool,
     ) {
+        self.wait_time.stop();
         m.trace(PacketEvent::Handle);
 
         match *m {
@@ -1254,7 +1233,7 @@ impl Domain {
                             .unwrap();
                     }
                     Packet::GetStatistics => {
-                        let domain_stats = statistics::DomainStats {
+                        let domain_stats = api::debug::stats::DomainStats {
                             total_time: self.total_time.num_nanoseconds(),
                             total_ptime: self.total_ptime.num_nanoseconds(),
                             wait_time: self.wait_time.num_nanoseconds(),
@@ -1286,19 +1265,19 @@ impl Domain {
                                     match self.state.get(&local_index) {
                                         Some(ref s) => {
                                             if s.is_partial() {
-                                                MaterializationStatus::Partial
+                                                api::MaterializationStatus::Partial
                                             } else {
-                                                MaterializationStatus::Full
+                                                api::MaterializationStatus::Full
                                             }
                                         }
-                                        None => MaterializationStatus::Not,
+                                        None => api::MaterializationStatus::Not,
                                     }
                                 } else {
                                     n.with_reader(|r| {
                                         if r.is_partial() {
-                                            MaterializationStatus::Partial
+                                            api::MaterializationStatus::Partial
                                         } else {
-                                            MaterializationStatus::Full
+                                            api::MaterializationStatus::Full
                                         }
                                     }).unwrap()
                                 };
@@ -1306,7 +1285,7 @@ impl Domain {
                                 if time.is_some() && ptime.is_some() {
                                     Some((
                                         node_index,
-                                        statistics::NodeStats {
+                                        api::debug::stats::NodeStats {
                                             desc: format!("{:?}", n),
                                             process_time: time.unwrap(),
                                             process_ptime: ptime.unwrap(),
@@ -1400,6 +1379,7 @@ impl Domain {
                 self.handle(m, sends, executor, false);
             }
         }
+        self.wait_time.start();
     }
 
     fn seed_row<'a>(&self, source: LocalNodeIndex, row: Cow<'a, [DataType]>) -> Record {
@@ -2406,6 +2386,7 @@ impl Domain {
         self.control_reply_tx
             .send(ControlReplyPacket::Booted(self.shard.unwrap_or(0), addr))
             .unwrap();
+        self.wait_time.start();
     }
 
     pub fn on_event(
@@ -2414,9 +2395,10 @@ impl Domain {
         event: PollEvent<Box<Packet>>,
         sends: &mut EnqueuedSends,
     ) -> ProcessResult {
+        self.wait_time.stop();
         //self.total_time.start();
         //self.total_ptime.start();
-        match event {
+        let res = match event {
             PollEvent::ResumePolling(timeout) => {
                 *timeout = self.group_commit_queues.duration_until_flush().or_else(|| {
                     let now = time::Instant::now();
@@ -2459,6 +2441,8 @@ impl Domain {
                 }
                 ProcessResult::KeepPolling
             }
-        }
+        };
+        self.wait_time.start();
+        res
     }
 }

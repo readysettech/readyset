@@ -89,7 +89,6 @@
 //! MySQL binary protocol directly to Soup operations. While it works decently well, and can be
 //! useful to provide backwards-compatibility, we recommend using the client bindings directly
 //! where possible.
-// TODO: bring back GetStats
 // TODO: switch to failure crate fo errors
 
 #![deny(missing_docs)]
@@ -137,6 +136,9 @@ pub mod builders {
     pub use super::view::ViewBuilder;
 }
 
+/// Types used when debugging Soup.
+pub mod debug;
+
 /// Marker for a handle that has its own connection to Soup.
 ///
 /// Such a handle can freely be sent between threads.
@@ -147,6 +149,17 @@ pub struct ExclusiveConnection;
 ///
 /// This kind of handle can only be used on a single thread.
 pub struct SharedConnection;
+
+/// Describe the materialization state of an operator.
+#[derive(Debug, Serialize, Deserialize)]
+pub enum MaterializationStatus {
+    /// Operator's state is not materialized.
+    Not,
+    /// Operator's state is fully materialized.
+    Full,
+    /// Operator's state is partially materialized.
+    Partial,
+}
 
 /// Represents the result of a recipe activation.
 #[derive(Clone, Debug, Deserialize, Serialize)]

@@ -1,8 +1,8 @@
+use api::debug::stats::GraphStats;
 use basics::PersistenceParameters;
 use channel::tcp::TcpSender;
 use consensus::{Authority, Epoch, STATE_KEY};
 use dataflow::prelude::*;
-use dataflow::statistics::GraphStats;
 use dataflow::{node, payload, DomainConfig};
 
 use std::collections::{BTreeMap, HashMap};
@@ -13,7 +13,7 @@ use std::time::{Duration, Instant};
 use std::{io, time};
 
 use api::builders::*;
-use api::{ActivationResult, RpcError};
+use api::{self, ActivationResult, RpcError};
 use controller::migrate::materialization::Materializations;
 use controller::{
     ControllerState, DomainHandle, Migration, Recipe, WorkerIdentifier, WorkerStatus,
@@ -592,7 +592,7 @@ impl ControllerInner {
                         node_stats
                             .into_iter()
                             .filter_map(|(ni, ns)| match ns.materialized {
-                                MaterializationStatus::Partial => Some((ni, ns.mem_size)),
+                                api::MaterializationStatus::Partial => Some((ni, ns.mem_size)),
                                 _ => None,
                             })
                     })

@@ -1,8 +1,7 @@
-// TODO: use dataflow::statistics::GraphStats;
-
 use assert_infrequent;
 use basics::*;
 use consensus::{self, Authority};
+use debug::stats;
 use futures::Stream;
 use hyper::{self, Client};
 use serde::de::DeserializeOwned;
@@ -204,10 +203,10 @@ impl<A: Authority> ControllerHandle<A> {
             })
     }
 
-    ///// Get statistics about the time spent processing different parts of the graph.
-    //pub fn get_statistics(&mut self) -> GraphStats {
-    //    self.rpc("get_statistics", &())
-    //}
+    /// Get statistics about the time spent processing different parts of the graph.
+    pub fn statistics(&mut self) -> stats::GraphStats {
+        self.rpc("get_statistics", &())
+    }
 
     /// Flush all partial state, evicting all rows present.
     pub fn flush_partial(&mut self) -> Result<(), RpcError> {

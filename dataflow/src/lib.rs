@@ -10,7 +10,7 @@
 #![feature(proc_macro_path_invoc)]
 #![deny(unused_extern_crates)]
 
-#[allow(unused_extern_crates)]
+extern crate api;
 extern crate backtrace;
 extern crate basics;
 extern crate channel;
@@ -38,7 +38,6 @@ pub mod node;
 pub mod ops;
 pub mod payload;
 pub mod prelude;
-pub mod statistics;
 
 mod domain;
 mod group_commit;

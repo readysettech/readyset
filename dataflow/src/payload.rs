@@ -1,6 +1,7 @@
 use petgraph;
 use serde::{Deserialize, Deserializer, Serialize, Serializer};
 
+use api;
 #[cfg(debug_assertions)]
 use backtrace::Backtrace;
 use channel;
@@ -8,7 +9,6 @@ use debug::{DebugEvent, DebugEventType};
 use domain;
 use node;
 use prelude::*;
-use statistics;
 
 use std::collections::{HashMap, HashSet};
 use std::fmt;
@@ -509,8 +509,8 @@ pub enum ControlReplyPacket {
     /// (number of rows, size in bytes)
     StateSize(usize, u64),
     Statistics(
-        statistics::DomainStats,
-        HashMap<petgraph::graph::NodeIndex, statistics::NodeStats>,
+        api::debug::stats::DomainStats,
+        HashMap<petgraph::graph::NodeIndex, api::debug::stats::NodeStats>,
     ),
     Booted(usize, SocketAddr),
 }

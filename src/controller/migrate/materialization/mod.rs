@@ -5,6 +5,7 @@
 //! domains, but does not perform that copying itself (that is the role of the `augmentation`
 //! module).
 
+use api;
 use controller::domain_handle::DomainHandle;
 use controller::{inner::graphviz, keys};
 use dataflow::prelude::*;
@@ -423,16 +424,16 @@ impl Materializations {
 
     /// Retrieves the materialization status of a given node, or None
     /// if the node isn't materialized.
-    pub fn get_status(&self, index: &NodeIndex, node: &Node) -> MaterializationStatus {
+    pub fn get_status(&self, index: &NodeIndex, node: &Node) -> api::MaterializationStatus {
         let is_materialized = self.have.contains_key(index)
             || node.with_reader(|r| r.is_materialized()).unwrap_or(false);
 
         if !is_materialized {
-            MaterializationStatus::Not
+            api::MaterializationStatus::Not
         } else if self.partial.contains(index) {
-            MaterializationStatus::Partial
+            api::MaterializationStatus::Partial
         } else {
-            MaterializationStatus::Full
+            api::MaterializationStatus::Full
         }
     }
 

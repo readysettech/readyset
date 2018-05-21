@@ -48,6 +48,27 @@ pub trait State: SizeOf + Send {
     fn evict_keys(&mut self, tag: &Tag, keys: &[Vec<DataType>]) -> Option<(&[usize], u64)>;
 }
 
+#[derive(Eq, PartialEq, Ord, PartialOrd, Hash, Clone, Copy, Debug, Serialize, Deserialize)]
+pub struct DomainIndex(usize);
+
+impl From<usize> for DomainIndex {
+    fn from(i: usize) -> Self {
+        DomainIndex(i)
+    }
+}
+
+impl Into<usize> for DomainIndex {
+    fn into(self) -> usize {
+        self.0
+    }
+}
+
+impl DomainIndex {
+    pub fn index(&self) -> usize {
+        self.0
+    }
+}
+
 #[derive(Clone, Copy, Eq, PartialEq, Ord, PartialOrd, Hash, Debug, Serialize, Deserialize)]
 pub struct Tag(pub u32);
 impl Tag {

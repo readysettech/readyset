@@ -1,36 +1,55 @@
+use basics::*;
 use serde::{Deserialize, Deserializer, Serialize, Serializer};
 use std::collections::HashMap;
+use MaterializationStatus;
 
-use domain;
-use node::MaterializationStatus;
-use prelude::*;
+type DomainMap = HashMap<(DomainIndex, usize), (DomainStats, HashMap<NodeIndex, NodeStats>)>;
 
-type DomainMap = HashMap<(domain::Index, usize), (DomainStats, HashMap<NodeIndex, NodeStats>)>;
-
-/// Struct holding statistics about a domain. All times are in nanoseconds.
+/// Statistics about a domain.
+///
+/// All times are in nanoseconds.
 #[derive(Debug, Serialize, Deserialize)]
 pub struct DomainStats {
+    /// Total wall-clock time elapsed while processing in this domain.
     pub total_time: u64,
+    /// Total thread time elapsed while processing in this domain.
     pub total_ptime: u64,
+    /// Total wall-clock time spent waiting for work in this domain.
     pub wait_time: u64,
 }
 
-/// Struct holding statistics about a node. All times are in nanoseconds.
+/// Statistics about a node.
+///
+/// All times are in nanoseconds.
 #[derive(Debug, Serialize, Deserialize)]
 pub struct NodeStats {
+    /// A textual description of this node.
     pub desc: String,
+    /// Total wall-clock time elapsed while processing in this node.
     pub process_time: u64,
+    /// Total thread time elapsed while processing in this node.
     pub process_ptime: u64,
+    /// Total memory size of this node's state.
     pub mem_size: u64,
+    /// The materialization type of this node's state.
     pub materialized: MaterializationStatus,
 }
 
-/// Struct holding statistics about an entire graph.
+/// Statistics about the Soup data-flow.
 #[derive(Debug, Serialize, Deserialize)]
 pub struct GraphStats {
     #[serde(serialize_with = "serialize_domainmap")]
     #[serde(deserialize_with = "deserialize_domainmap")]
+    #[doc(hidden)]
     pub domains: DomainMap,
+}
+
+use std::ops::Deref;
+impl Deref for GraphStats {
+    type Target = DomainMap;
+    fn deref(&self) -> &Self::Target {
+        &self.domains
+    }
 }
 
 fn serialize_domainmap<S: Serializer>(map: &DomainMap, s: S) -> Result<S::Ok, S::Error> {

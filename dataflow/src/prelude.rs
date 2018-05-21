@@ -8,7 +8,7 @@ pub use processing::Ingredient;
 pub(crate) use processing::{Miss, ProcessingResult, RawProcessingResult, ReplayContext};
 
 // graph types
-pub use node::{MaterializationStatus, Node};
+pub use node::Node;
 pub type Edge = ();
 pub type Graph = petgraph::Graph<Node, Edge>;
 
@@ -18,12 +18,10 @@ pub use Sharding;
 
 // domain local state
 pub type DomainNodes = Map<cell::RefCell<Node>>;
-pub type DomainIndex = domain::Index;
-pub type ReplicaAddr = (domain::Index, usize);
+pub type ReplicaAddr = (DomainIndex, usize);
 
 // channel related types
 use channel;
-use domain;
 /// Channel coordinator type specialized for domains
 pub type ChannelCoordinator = channel::ChannelCoordinator<(DomainIndex, usize)>;
 pub trait Executor {

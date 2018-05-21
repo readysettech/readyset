@@ -26,6 +26,7 @@ timekeeper = {version = "0.3.0", default-features = false }
 nom-sql = { git = "https://github.com/ms705/nom-sql.git", rev = "3e7ae4c4d32b77342051d5c217549ab8fcb68e85" }
 
 # local deps
+api = { path = "../api" }
 channel = { path = "../channel" }
 basics = { path = "../basics" }
 

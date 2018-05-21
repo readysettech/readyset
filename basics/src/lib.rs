@@ -20,8 +20,8 @@ extern crate serde;
 extern crate serde_derive;
 
 pub mod addressing;
-pub mod api;
 pub mod data;
+pub mod external;
 pub mod local;
 pub mod map;
 
@@ -29,10 +29,10 @@ use std::path::PathBuf;
 use std::time;
 
 pub use addressing::{IndexPair, LocalNodeIndex};
-pub use api::{Input, Link};
 pub use data::{DataType, Datas, Modification, Operation, Record, Records, TableOperation};
+pub use external::{Input, Link};
 pub use local::{
-    KeyType, LookupResult, MemoryState, PersistentState, RecordResult, Row, State, Tag,
+    DomainIndex, KeyType, LookupResult, MemoryState, PersistentState, RecordResult, Row, State, Tag,
 };
 pub use map::Map;
 pub use petgraph::graph::NodeIndex;
