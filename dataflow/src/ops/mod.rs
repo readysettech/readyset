@@ -292,20 +292,18 @@ pub mod test {
 
             // node descriptions.
             for index in self.graph.node_indices() {
-                use api;
-
                 let node = &self.graph[index];
                 let materialization_status = if node.is_localized() {
                     match self.states.get(&node.local_addr()) {
                         Some(ref s) => if s.is_partial() {
-                            api::MaterializationStatus::Partial
+                            MaterializationStatus::Partial
                         } else {
-                            api::MaterializationStatus::Full
+                            MaterializationStatus::Full
                         },
-                        None => api::MaterializationStatus::Not,
+                        None => MaterializationStatus::Not,
                     }
                 } else {
-                    api::MaterializationStatus::Not
+                    MaterializationStatus::Not
                 };
                 indentln(&mut s);
                 s.push_str(&format!("{}", index.index()));

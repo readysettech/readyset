@@ -150,17 +150,6 @@ pub struct ExclusiveConnection;
 /// This kind of handle can only be used on a single thread.
 pub struct SharedConnection;
 
-/// Describe the materialization state of an operator.
-#[derive(Debug, Serialize, Deserialize)]
-pub enum MaterializationStatus {
-    /// Operator's state is not materialized.
-    Not,
-    /// Operator's state is fully materialized.
-    Full,
-    /// Operator's state is partially materialized.
-    Partial,
-}
-
 /// Represents the result of a recipe activation.
 #[derive(Clone, Debug, Deserialize, Serialize)]
 pub struct ActivationResult {

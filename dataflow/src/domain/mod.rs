@@ -1264,19 +1264,19 @@ impl Domain {
                                     match self.state.get(&local_index) {
                                         Some(ref s) => {
                                             if s.is_partial() {
-                                                api::MaterializationStatus::Partial
+                                                MaterializationStatus::Partial
                                             } else {
-                                                api::MaterializationStatus::Full
+                                                MaterializationStatus::Full
                                             }
                                         }
-                                        None => api::MaterializationStatus::Not,
+                                        None => MaterializationStatus::Not,
                                     }
                                 } else {
                                     n.with_reader(|r| {
                                         if r.is_partial() {
-                                            api::MaterializationStatus::Partial
+                                            MaterializationStatus::Partial
                                         } else {
-                                            api::MaterializationStatus::Full
+                                            MaterializationStatus::Full
                                         }
                                     }).unwrap()
                                 };

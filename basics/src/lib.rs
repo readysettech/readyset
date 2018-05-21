@@ -26,7 +26,7 @@ use std::time;
 
 pub use addressing::{IndexPair, LocalNodeIndex};
 pub use data::{DataType, Datas, Modification, Operation, Record, Records, TableOperation};
-pub use external::Link;
+pub use external::{Link, MaterializationStatus};
 pub use local::{
     DomainIndex, KeyType, LookupResult, MemoryState, PersistentState, RecordResult, Row, State, Tag,
 };

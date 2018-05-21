@@ -4,6 +4,7 @@ version = "0.1.0"
 authors = ["Jon Gjengset <jon@thesquareplanet.com>"]
 
 [dependencies]
+failure = "0.1"
 futures = "0.1.16"
 hyper = "0.11.6"
 serde = { version = "1.0.8", features = ["rc"] }

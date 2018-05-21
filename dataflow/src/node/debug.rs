@@ -1,4 +1,3 @@
-use api;
 use node::{Node, NodeType};
 use prelude::*;
 use std::fmt;
@@ -22,7 +21,7 @@ impl Node {
     pub fn describe(
         &self,
         idx: NodeIndex,
-        materialization_status: api::MaterializationStatus,
+        materialization_status: MaterializationStatus,
     ) -> String {
         let mut s = String::new();
         let border = match self.sharded_by {
@@ -44,9 +43,9 @@ impl Node {
         ));
 
         let materialized = match materialization_status {
-            api::MaterializationStatus::Not => "",
-            api::MaterializationStatus::Partial => "| ░",
-            api::MaterializationStatus::Full => "| █",
+            MaterializationStatus::Not => "",
+            MaterializationStatus::Partial => "| ░",
+            MaterializationStatus::Full => "| █",
         };
 
         let addr = match self.index {

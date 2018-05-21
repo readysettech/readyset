@@ -13,7 +13,7 @@ use std::time::{Duration, Instant};
 use std::{io, time};
 
 use api::builders::*;
-use api::{self, ActivationResult, RpcError};
+use api::{ActivationResult, RpcError};
 use controller::migrate::materialization::Materializations;
 use controller::{
     ControllerState, DomainHandle, Migration, Recipe, WorkerIdentifier, WorkerStatus,
@@ -595,7 +595,7 @@ impl ControllerInner {
                         node_stats
                             .into_iter()
                             .filter_map(|(ni, ns)| match ns.materialized {
-                                api::MaterializationStatus::Partial => Some((ni, ns.mem_size)),
+                                MaterializationStatus::Partial => Some((ni, ns.mem_size)),
                                 _ => None,
                             })
                     })
