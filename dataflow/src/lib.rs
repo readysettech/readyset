@@ -11,6 +11,7 @@
 #![deny(unused_extern_crates)]
 
 extern crate api;
+#[cfg(debug_assertions)]
 extern crate backtrace;
 extern crate basics;
 extern crate channel;
