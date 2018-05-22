@@ -92,7 +92,6 @@ impl State for MemoryState {
                 match *r {
                     Record::Positive(ref r) => self.insert(r.clone(), partial_tag),
                     Record::Negative(ref r) => self.remove(r),
-                    Record::BaseOperation(..) => unreachable!(),
                 }
             });
         } else {
@@ -106,7 +105,6 @@ impl State for MemoryState {
                         let hit = self.remove(r);
                         debug_assert!(hit);
                     }
-                    Record::BaseOperation(..) => unreachable!(),
                 }
             }
         }

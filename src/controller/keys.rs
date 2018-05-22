@@ -191,14 +191,12 @@ mod tests {
             "source",
             &["because-type-inference"],
             node::special::Source,
-            true,
         ));
 
         let a = g.add_node(node::Node::new(
             "a",
             &["a1", "a2"],
             node::NodeType::from(node::special::Base::default()),
-            true,
         ));
         g.add_edge(src, a, ());
 
@@ -206,7 +204,6 @@ mod tests {
             "b",
             &["b1", "b2"],
             node::NodeType::from(node::special::Base::default()),
-            true,
         ));
         g.add_edge(src, b, ());
 
@@ -240,12 +237,7 @@ mod tests {
     fn internal_passthrough() {
         let (mut g, a, _) = bases();
 
-        let x = g.add_node(node::Node::new(
-            "x",
-            &["x1", "x2"],
-            node::special::Ingress,
-            true,
-        ));
+        let x = g.add_node(node::Node::new("x", &["x1", "x2"], node::special::Ingress));
         g.add_edge(a, x, ());
 
         assert_eq!(
@@ -274,7 +266,6 @@ mod tests {
                 None,
                 None,
             ))),
-            true,
         ));
         g.add_edge(a, x, ());
 
@@ -304,7 +295,6 @@ mod tests {
                 Some(vec![3.14.into()]),
                 None,
             ))),
-            true,
         ));
         g.add_edge(a, x, ());
 
@@ -332,7 +322,6 @@ mod tests {
             node::NodeType::from(ops::NodeOperator::Union(ops::union::Union::new(
                 vec![(a, vec![0, 1]), (b, vec![0, 1])].into_iter().collect(),
             ))),
-            true,
         ));
         g.add_edge(a, x, ());
         g.add_edge(b, x, ());
@@ -374,7 +363,6 @@ mod tests {
                     ops::join::JoinSource::R(1),
                 ],
             ))),
-            true,
         ));
         g.add_edge(a, x, ());
         g.add_edge(b, x, ());

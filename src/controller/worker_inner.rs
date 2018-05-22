@@ -50,7 +50,6 @@ pub(super) struct WorkerInner {
 impl WorkerInner {
     pub(super) fn new(
         listen_addr: IpAddr,
-        checktable_addr: SocketAddr,
         controller_addr: SocketAddr,
         souplet_addr: SocketAddr,
         state: &ControllerState,
@@ -108,7 +107,6 @@ impl WorkerInner {
             worker_pool: worker::WorkerPool::new(
                 nworker_threads,
                 &log,
-                checktable_addr,
                 channel_coordinator.clone(),
             ).unwrap(),
             channel_coordinator,

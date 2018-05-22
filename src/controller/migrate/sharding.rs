@@ -138,11 +138,6 @@ pub fn shard(
             continue;
         }
 
-        if graph[node].is_base() && graph[node].is_transactional() {
-            error!(log, "not sharding transactional base node"; "node" => ?node);
-            continue;
-        }
-
         // if a node does a lookup into itself by a given key, it must be sharded by that key (or
         // not at all). this *also* means that its inputs must be sharded by the column(s) that the
         // output column resolves to.
@@ -389,12 +384,6 @@ pub fn shard(
             // if the parent is a base, the only option we have is to shard the base.
             if graph[p].is_base() {
                 trace!(log, "well, its parent is a base");
-
-                // sharded transactional bases are hard
-                if graph[p].is_transactional() {
-                    trace!(log, "no, parent is weird (transactional)");
-                    continue;
-                }
 
                 // we can't shard compound bases (yet)
                 if let Some(k) = graph[p].get_base().unwrap().key() {

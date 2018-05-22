@@ -151,7 +151,8 @@ fn main() {
     let verbose = matches.is_present("verbose");
     let deployment_name = matches.value_of("deployment").unwrap();
 
-    let mut authority = ZookeeperAuthority::new(&format!("{}/{}", zookeeper_addr, deployment_name));
+    let mut authority =
+        ZookeeperAuthority::new(&format!("{}/{}", zookeeper_addr, deployment_name)).unwrap();
     let mut builder = ControllerBuilder::default();
     builder.set_listen_addr(listen_addr);
     builder.set_worker_threads(workers);

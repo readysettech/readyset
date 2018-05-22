@@ -4,7 +4,7 @@ version = "0.1.0"
 authors = ["Jon Gjengset <jon@thesquareplanet.com>"]
 
 [workspace]
-members = ["benchmarks", "consensus", "channel", "basics", "mir"]
+members = ["benchmarks", "consensus", "channel", "basics", "mir", "api"]
 
 [features]
 default = ["carry_local"]
@@ -32,7 +32,6 @@ slog = "2.2.2"
 slog-term = "2.4.0"
 tarpc = "0.11.0"
 tarpc-plugins = "0.3.0"
-tokio-core = "0.1.8"
 slab = "0.4"
 bincode = "1.0.0"
 
@@ -41,7 +40,6 @@ timer_heap = "0.3.0"
 serde = { version = "1.0.8", features = ["rc"] }
 
 # git deps
-assert_infrequent = { git = "https://github.com/fintelia/assert_infrequent.git", rev = "720e140bc8516d65dad7008abdc1d38796700c09" }
 petgraph = { version = "0.4.11", features = ["serde-1"] }
 memcached-rs = { git = "https://github.com/jonhoo/memcached-rs.git", branch = "expose-multi" }
 nom-sql = { git = "https://github.com/ms705/nom-sql.git", rev = "3e7ae4c4d32b77342051d5c217549ab8fcb68e85" }
@@ -52,6 +50,7 @@ consensus = { path = "consensus" }
 basics = { path = "basics" }
 dataflow = { path = "dataflow" }
 mir = { path = "mir" }
+api = { path = "api" }
 
 # Not needed directly, but we want to force the version used by our
 # dependencies to have default features. If this isn't here, then the features

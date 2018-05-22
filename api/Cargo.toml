@@ -1,0 +1,27 @@
+[package]
+name = "api"
+version = "0.1.0"
+authors = ["Jon Gjengset <jon@thesquareplanet.com>"]
+
+[dependencies]
+failure = "0.1"
+futures = "0.1.16"
+hyper = "0.11.6"
+serde = { version = "1.0.8", features = ["rc"] }
+serde_derive = "1.0.8"
+serde_json = "1.0.2"
+tokio-core = "0.1.8"
+bincode = "1.0.0"
+vec_map = { version = "0.8.0", features = ["eders"] }
+
+# git deps
+assert_infrequent = { git = "https://github.com/fintelia/assert_infrequent.git", rev = "720e140bc8516d65dad7008abdc1d38796700c09" }
+nom-sql = { git = "https://github.com/ms705/nom-sql.git", rev = "3e7ae4c4d32b77342051d5c217549ab8fcb68e85" }
+
+# local deps
+channel = { path = "../channel" }
+consensus = { path = "../consensus" }
+basics = { path = "../basics" }
+
+[dev-dependencies]
+backtrace = { version = "0.3.2", features = ["serialize-serde"] }

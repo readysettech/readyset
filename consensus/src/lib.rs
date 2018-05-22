@@ -23,8 +23,8 @@ mod zk;
 pub use local::LocalAuthority;
 pub use zk::ZookeeperAuthority;
 
-pub const CONTROLLER_KEY: &'static str = "/controller";
-pub const STATE_KEY: &'static str = "/state";
+pub const CONTROLLER_KEY: &str = "/controller";
+pub const STATE_KEY: &str = "/state";
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
 pub struct Epoch(i64);

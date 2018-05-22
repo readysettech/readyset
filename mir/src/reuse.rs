@@ -240,7 +240,6 @@ mod tests {
             MirNodeType::Base {
                 column_specs: vec![cspec("aa"), cspec("ab")],
                 keys: vec![Column::from("aa")],
-                transactional: false,
                 adapted_over: None,
             },
             vec![],
@@ -253,7 +252,6 @@ mod tests {
             MirNodeType::Base {
                 column_specs: vec![cspec("ba"), cspec("bb")],
                 keys: vec![Column::from("ba")],
-                transactional: false,
                 adapted_over: None,
             },
             vec![],

@@ -67,7 +67,6 @@ impl MirNode {
             MirNodeType::Base {
                 ref column_specs,
                 ref keys,
-                transactional,
                 ..
             } => {
                 let new_column_specs: Vec<(ColumnSpecification, Option<usize>)> = column_specs
@@ -94,7 +93,6 @@ impl MirNode {
                 let new_inner = MirNodeType::Base {
                     column_specs: new_column_specs,
                     keys: keys.clone(),
-                    transactional: transactional,
                     adapted_over: Some(BaseNodeAdaptation {
                         over: node.clone(),
                         columns_added: added_cols.into_iter().cloned().collect(),
@@ -349,7 +347,6 @@ pub enum MirNodeType {
     Base {
         column_specs: Vec<(ColumnSpecification, Option<usize>)>,
         keys: Vec<Column>,
-        transactional: bool,
         adapted_over: Option<BaseNodeAdaptation>,
     },
     /// over column, group_by columns
@@ -502,17 +499,14 @@ impl MirNodeType {
             MirNodeType::Base {
                 column_specs: ref our_column_specs,
                 keys: ref our_keys,
-                transactional: our_transactional,
                 adapted_over: ref our_adapted_over,
             } => {
                 match *other {
                     MirNodeType::Base {
                         ref column_specs,
                         ref keys,
-                        transactional,
                         ..
                     } => {
-                        assert_eq!(our_transactional, transactional);
                         // if we are instructed to adapt an earlier base node, we cannot reuse
                         // anything directly; we'll have to keep a new MIR node here.
                         if our_adapted_over.is_some() {
@@ -687,12 +681,10 @@ impl Debug for MirNodeType {
             MirNodeType::Base {
                 ref column_specs,
                 ref keys,
-                transactional,
                 ..
             } => write!(
                 f,
-                "B{} [{}; ⚷: {}]",
-                if transactional { "*" } else { "" },
+                "B [{}; ⚷: {}]",
                 column_specs
                     .into_iter()
                     .map(|&(ref cs, _)| cs.column.name.as_str())

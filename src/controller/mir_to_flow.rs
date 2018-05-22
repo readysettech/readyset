@@ -94,12 +94,9 @@ pub fn mir_node_to_flow_parts(mir_node: &mut MirNode, mig: &mut Migration) -> Fl
                 MirNodeType::Base {
                     ref mut column_specs,
                     ref keys,
-                    transactional,
                     ref adapted_over,
                 } => match *adapted_over {
-                    None => {
-                        make_base_node(&name, column_specs.as_mut_slice(), keys, mig, transactional)
-                    }
+                    None => make_base_node(&name, column_specs.as_mut_slice(), keys, mig),
                     Some(ref bna) => adapt_base_node(
                         bna.over.clone(),
                         mig,
@@ -363,7 +360,6 @@ pub(crate) fn make_base_node(
     column_specs: &mut [(ColumnSpecification, Option<usize>)],
     pkey_columns: &Vec<Column>,
     mig: &mut Migration,
-    transactional: bool,
 ) -> FlowNode {
     // remember the absolute base column ID for potential later removal
     for (i, cs) in column_specs.iter_mut().enumerate() {
@@ -408,7 +404,7 @@ pub(crate) fn make_base_node(
         node::special::Base::new(default_values)
     };
 
-    FlowNode::New(mig.add_base(name, column_names.as_slice(), base, transactional))
+    FlowNode::New(mig.add_base(name, column_names.as_slice(), base))
 }
 
 pub(crate) fn make_union_node(

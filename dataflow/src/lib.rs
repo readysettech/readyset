@@ -5,13 +5,13 @@
 #![feature(use_extern_macros)]
 #![feature(entry_or_default)]
 #![feature(if_while_or_patterns)]
-#![feature(plugin, use_extern_macros)]
+#![feature(use_extern_macros)]
 #![feature(duration_from_micros)]
 #![feature(proc_macro_path_invoc)]
-#![plugin(tarpc_plugins)]
 #![deny(unused_extern_crates)]
 
-#[allow(unused_extern_crates)]
+extern crate api;
+#[cfg(debug_assertions)]
 extern crate backtrace;
 extern crate basics;
 extern crate channel;
@@ -29,37 +29,26 @@ extern crate serde_derive;
 extern crate serde_json;
 #[macro_use]
 extern crate slog;
-#[macro_use]
-extern crate tarpc;
 extern crate timekeeper;
 extern crate tokio_core;
 extern crate vec_map;
 
 pub mod backlog;
-pub mod checktable;
-pub mod debug;
 pub mod node;
 pub mod ops;
 pub mod payload;
 pub mod prelude;
-pub mod statistics;
 
 mod domain;
 mod group_commit;
 mod processing;
-mod transactions;
 
 use std::collections::HashMap;
 use std::sync::{Arc, Mutex};
 
-use checktable::TokenGenerator;
-
-pub type Readers = Arc<
-    Mutex<HashMap<(basics::NodeIndex, usize), (backlog::SingleReadHandle, Option<TokenGenerator>)>>,
->;
+pub type Readers = Arc<Mutex<HashMap<(basics::NodeIndex, usize), backlog::SingleReadHandle>>>;
 pub type DomainConfig = domain::Config;
 
-pub use checktable::connect_thread_checktable;
 pub use domain::{Domain, DomainBuilder, Index};
 pub use payload::{LocalBypass, Packet};
 
@@ -87,22 +76,4 @@ impl Sharding {
     }
 }
 
-#[inline]
-pub fn shard_by(dt: &basics::DataType, shards: usize) -> usize {
-    match *dt {
-        basics::DataType::Int(n) => n as usize % shards,
-        basics::DataType::BigInt(n) => n as usize % shards,
-        basics::DataType::Text(..) | basics::DataType::TinyText(..) => {
-            use std::borrow::Cow;
-            use std::hash::Hasher;
-            let mut hasher = fnv::FnvHasher::default();
-            let s: Cow<str> = dt.into();
-            hasher.write(s.as_bytes());
-            hasher.finish() as usize % shards
-        }
-        ref x => {
-            println!("asked to shard on value {:?}", x);
-            unimplemented!();
-        }
-    }
-}
+pub use basics::shard_by;
