@@ -58,7 +58,7 @@ impl ZookeeperAuthority {
             CreateMode::Persistent,
         );
         Ok(Self {
-            zk: zk,
+            zk,
             log: slog::Logger::root(slog::Discard, o!()),
         })
     }
@@ -92,7 +92,8 @@ impl Authority for ZookeeperAuthority {
     }
 
     fn surrender_leadership(&self) -> Result<(), Error> {
-        Ok(self.zk.delete(CONTROLLER_KEY, None)?)
+        self.zk.delete(CONTROLLER_KEY, None)?;
+        Ok(())
     }
 
     fn get_leader(&self) -> Result<(Epoch, Vec<u8>), Error> {

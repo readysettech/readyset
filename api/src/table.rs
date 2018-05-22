@@ -223,7 +223,7 @@ impl<E> Table<E> {
                 // doesn't panic. what's the worst that could happen, right?
 
                 // keep trying to insert the next dropped column
-                'next: for (next_insert, default) in dropped {
+                for (next_insert, default) in dropped {
                     // think of this being at the bottom of the loop
                     // we just hoist it here to avoid underflow if we ever insert at 0
                     free -= 1;
@@ -243,7 +243,7 @@ impl<E> Table<E> {
                     }
 
                     // we're at the right index -- insert the dropped value
-                    let current = r.get_mut(next_insert).unwrap();
+                    let current = &mut r[next_insert];
                     let old = mem::replace(current, default.clone());
                     // the old value is uninitialized memory!
                     // (remember how we called set_len above?)
@@ -261,7 +261,7 @@ impl<E> Table<E> {
         Input {
             link: Link::new(self.addr, self.addr),
             data: ops,
-            tracer: tracer,
+            tracer,
         }
     }
 
@@ -297,7 +297,8 @@ impl<E> Table<E> {
         }
 
         self.tracer.take();
-        Ok(batch_putter.wait()?)
+        batch_putter.wait()?;
+        Ok(())
     }
 
     /// Insert a single row of data into this base table.
@@ -313,7 +314,8 @@ impl<E> Table<E> {
             ));
         }
 
-        Ok(self.send(data)?)
+        self.send(data)?;
+        Ok(())
     }
 
     /// Insert multiple rows of data into this base table.
@@ -331,7 +333,10 @@ impl<E> Table<E> {
                 Ok(TableOperation::Insert(row))
             })
             .collect::<Result<Vec<_>, _>>()
-            .and_then(|data| Ok(self.send(data)?))
+            .and_then(|data| {
+                self.send(data)?;
+                Ok(())
+            })
             .map(|_| ())
     }
 
@@ -340,7 +345,8 @@ impl<E> Table<E> {
     where
         I: Into<Vec<DataType>>,
     {
-        Ok(self.send(vec![TableOperation::Delete { key: key.into() }].into())?)
+        self.send(vec![TableOperation::Delete { key: key.into() }])?;
+        Ok(())
     }
 
     /// Update the row with the given key in this base table.
@@ -367,7 +373,8 @@ impl<E> Table<E> {
             }
             set[coli] = m;
         }
-        Ok(self.send(vec![TableOperation::Update { key, set }].into())?)
+        self.send(vec![TableOperation::Update { key, set }])?;
+        Ok(())
     }
 
     /// Perform a insert-or-update on this base table.
@@ -402,12 +409,11 @@ impl<E> Table<E> {
             set[coli] = m;
         }
 
-        Ok(self.send(
-            vec![TableOperation::InsertOrUpdate {
-                row: insert,
-                update: set,
-            }].into(),
-        )?)
+        self.send(vec![TableOperation::InsertOrUpdate {
+            row: insert,
+            update: set,
+        }])?;
+        Ok(())
     }
 
     /// Trace the next modification to this base table.

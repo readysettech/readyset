@@ -84,21 +84,21 @@ impl<A: Authority> ControllerHandle<A> {
 
     #[doc(hidden)]
     pub fn make(authority: Arc<A>) -> Result<Self, failure::Error> {
-        let core = Core::new()?;
+        let reactor = Core::new()?;
         let client = Client::configure()
             .connector(hyper::client::HttpConnector::new_with_executor(
-                core.handle(),
-                &core.handle(),
+                reactor.handle(),
+                &reactor.handle(),
             ))
-            .build(&core.handle());
+            .build(&reactor.handle());
         Ok(ControllerHandle {
             url: None,
             local_port: None,
-            authority: authority,
+            authority,
+            reactor,
+            client,
             views: Default::default(),
             domains: Default::default(),
-            reactor: core,
-            client: client,
         })
     }
 
@@ -182,7 +182,7 @@ impl<A: Authority> ControllerHandle<A> {
 
         self.rpc::<_, Option<ViewBuilder>>("view_builder", name)
             .context(format!("building View for {}", name))?
-            .ok_or(format_err!("view {} does not exist", name))
+            .ok_or_else(|| format_err!("view {} does not exist", name))
             .and_then(|mut g| {
                 if let Some(port) = self.local_port {
                     g = g.with_local_port(port);
@@ -208,7 +208,7 @@ impl<A: Authority> ControllerHandle<A> {
 
         self.rpc::<_, Option<TableBuilder>>("table_builder", name)
             .context(format!("building Table for {}", name))?
-            .ok_or(format_err!("view {} does not exist", name))
+            .ok_or_else(|| format_err!("view {} does not exist", name))
             .and_then(|mut m| {
                 if let Some(port) = self.local_port {
                     m = m.with_local_port(port);
@@ -231,9 +231,9 @@ impl<A: Authority> ControllerHandle<A> {
 
     /// Flush all partial state, evicting all rows present.
     pub fn flush_partial(&mut self) -> Result<(), failure::Error> {
-        Ok(self
-            .rpc("flush_partial", &())
-            .context("flushing partial state")?)
+        self.rpc("flush_partial", &())
+            .context("flushing partial state")?;
+        Ok(())
     }
 
     /// Extend the existing recipe with the given set of queries.
@@ -263,9 +263,9 @@ impl<A: Authority> ControllerHandle<A> {
     /// Remove the given external view from the graph.
     pub fn remove_node(&mut self, view: NodeIndex) -> Result<(), failure::Error> {
         // TODO: this should likely take a view name, and we should verify that it's a Reader.
-        Ok(self
-            .rpc("remove_node", &view)
-            .context(format!("attempting to remove node {:?}", view))?)
+        self.rpc("remove_node", &view)
+            .context(format!("attempting to remove node {:?}", view))?;
+        Ok(())
     }
 
     /// Close all connections opened by this handle.

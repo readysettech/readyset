@@ -107,8 +107,7 @@ impl ViewBuilder {
                 match rpcs.entry((*addr, shardi)) {
                     Entry::Occupied(e) => Ok(Rc::clone(e.get())),
                     Entry::Vacant(h) => {
-                        let c =
-                            RpcClient::connect_from(sports.get(shardi).map(|&p| p), addr, false)?;
+                        let c = RpcClient::connect_from(sports.get(shardi).cloned(), addr, false)?;
                         if shardi >= sports.len() {
                             assert!(shardi == sports.len());
                             sports.push(c.local_addr()?.port());
@@ -175,6 +174,7 @@ impl View<SharedConnection> {
     }
 }
 
+#[cfg_attr(feature = "cargo-clippy", allow(len_without_is_empty))]
 impl<E> View<E> {
     /// Get the list of columns in this view.
     pub fn columns(&self) -> &[String] {
