@@ -892,6 +892,9 @@ impl ControllerInner {
                 let edge = self.ingredients.find_edge(parent, node).unwrap();
                 self.ingredients.remove_edge(edge);
 
+                // XXX(malte): this is currently overzealous at removing things; it will remove
+                // internal views above a reader that have no other dependent views.
+                // Should not remove "internal leaf" nodes.
                 if !self.ingredients[parent].is_source() && !self.ingredients[parent].is_base()
                     && self.ingredients
                         .neighbors_directed(parent, petgraph::EdgeDirection::Outgoing)
