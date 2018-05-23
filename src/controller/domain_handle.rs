@@ -222,7 +222,7 @@ impl DomainHandle {
 
             // send domain to worker
             let mut w = endpoint.lock().unwrap();
-            debug!(
+            info!(
                 log,
                 "sending domain {}.{} to worker {:?}",
                 domain.index.index(),
