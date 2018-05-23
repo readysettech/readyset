@@ -23,6 +23,7 @@
 use dataflow::prelude::*;
 use dataflow::{node, payload};
 
+use rand::{thread_rng, Rng};
 use std::collections::{HashMap, HashSet};
 use std::time::Instant;
 
@@ -462,11 +463,15 @@ impl<'a> Migration<'a> {
             .values()
             .map(|w| w.sender.clone())
             .collect();
-        let placer_workers: Vec<_> = mainline
+        let mut placer_workers: Vec<_> = mainline
             .workers
             .iter()
+            .filter(|(_, status)| status.healthy)
             .map(|(id, status)| (id.clone(), status.sender.clone()))
             .collect();
+        // Randomize worker iteration order, so that we avoid putting the domains on machines in
+        // the same sequence on each migration.
+        thread_rng().shuffle(&mut placer_workers);
         let mut placer: Box<Iterator<Item = (WorkerIdentifier, WorkerEndpoint)>> =
             Box::new(placer_workers.into_iter().cycle());
 

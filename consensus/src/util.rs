@@ -62,7 +62,7 @@ fn main() {
     let deployment = matches.value_of("deployment").unwrap();
     let zookeeper_addr = format!("{}/{}", matches.value_of("zookeeper").unwrap(), deployment);
     let clean = matches.is_present("clean");
-    let dump = matches.is_present("dump");
+    let dump = matches.is_present("show");
 
     let zk = ZooKeeper::connect(&zookeeper_addr, Duration::from_secs(1), EventWatcher).unwrap();
 
