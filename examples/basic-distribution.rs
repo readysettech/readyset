@@ -8,14 +8,14 @@ use std::time::{Duration, SystemTime, UNIX_EPOCH};
 fn main() {
     // inline recipe definition
     let sql1 = "CREATE TABLE Article (aid int, title varchar(255), \
-                                      url text, PRIMARY KEY(aid));";
+                url text, PRIMARY KEY(aid));";
     let sql2 = "CREATE TABLE Vote (aid int, uid int);";
     let sql3 = "VoteCount: SELECT Vote.aid, COUNT(uid) AS votes \
-                            FROM Vote GROUP BY Vote.aid;";
+                FROM Vote GROUP BY Vote.aid;";
     let sql4 = "QUERY ArticleWithVoteCount: \
-                           SELECT Article.aid, title, url, VoteCount.votes AS votes \
-                           FROM Article, VoteCount \
-                           WHERE Article.aid = VoteCount.aid AND Article.aid = ?;";
+                SELECT Article.aid, title, url, VoteCount.votes AS votes \
+                FROM Article, VoteCount \
+                WHERE Article.aid = VoteCount.aid AND Article.aid = ?;";
 
     let persistence_params = distributary::PersistenceParameters::new(
         distributary::DurabilityMode::Permanent,
@@ -40,12 +40,11 @@ fn main() {
 
     // Get mutators and getter.
     let mut article = blender.get_mutator("Article").unwrap();
-    let mut vote = blender.get_mutator("Vote").unwrap();
-    let mut awvc = blender.get_getter("ArticleWithVoteCount").unwrap();
 
     println!("Creating article...");
     let aid = 1;
     // Make sure the article exists:
+    let mut awvc = blender.get_getter("ArticleWithVoteCount").unwrap();
     if awvc.lookup(&[aid.into()], true).unwrap().is_empty() {
         println!("Creating new article...");
         let title = "test title";
@@ -55,17 +54,27 @@ fn main() {
             .unwrap();
     }
 
-    // Then create a new vote:
-    println!("Casting vote...");
-    let uid = SystemTime::now()
-        .duration_since(UNIX_EPOCH)
-        .unwrap()
-        .as_secs() as i64;
-    vote.put(vec![aid.into(), uid.into()]).unwrap();
+    loop {
+        let mut vote = blender.get_mutator("Vote").unwrap();
+        loop {
+            // Then create a new vote:
+            print!("Casting vote...");
+            let uid = SystemTime::now()
+                .duration_since(UNIX_EPOCH)
+                .unwrap()
+                .as_secs() as i64;
+            if let Err(_) = vote.put(vec![aid.into(), uid.into()]) {
+                println!(" Failed!");
+                break;
+            }
 
-    println!("Finished writing! Let's wait for things to propagate...");
-    thread::sleep(Duration::from_millis(1000));
+            thread::sleep(Duration::from_millis(1000));
 
-    println!("Reading...");
-    println!("{:#?}", awvc.lookup(&[1.into()], true))
+            if let Err(_) = awvc.lookup(&[1.into()], false) {
+                break;
+            }
+            println!(" Done");
+        }
+        awvc = blender.get_getter("ArticleWithVoteCount").unwrap();
+    }
 }
