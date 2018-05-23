@@ -21,6 +21,12 @@
       <ul class="navbar-nav px-3">
         <li class="nav-item text-nowrap">
           <div class="nav-link" id="controller-addr"></div>
+          <div class="input-group input-group-sm mb-3 d-none" id="controller-addr-edit">
+            <input type="text" placeholder="Controller IP:PORT" class="form-control" id="controller-addr-input" aria-describedby="controller-addr-label">
+            <div class="input-group-append">
+              <button class="btn btn-outline-secondary" type="button" id="controller-addr-connect">Connect</button>
+            </div>
+          </div>
         </li>
       </ul>
     </nav>
@@ -119,26 +125,47 @@
     <script src="https://cdnjs.cloudflare.com/ajax/libs/bootstrap-table/1.10.1/bootstrap-table.min.js"></script>
 
     <script>
-      var controller_addr = "localhost:9000";
+      var controller_addr = "";
 
       function durationFormatter(value) {
         return value.secs + value.nanos / 1000000000.0;
       }
 
-      $("#controller-addr").html("Connected to Noria controller at: <b>" + controller_addr + "</b>");
+      /* Controller connection handling */
+      $("#controller-addr").html("<b>Click to connect to controller</b>");
 
-      $.ajax({
-        url: "http://" + controller_addr + "/instances",
-        dataType: "json",
-        success: function(data) {
-          $("#instance-table").bootstrapTable({
-            data: data
-          });
-        },
-        error: function(e) {
-          $("#error-msg").html("AJAX request to controller API failed: " + e.statusText).addClass("show");
+      $("#controller-addr").click(function() {
+        $("#controller-addr").addClass("d-none");
+        if (controller_addr != "") {
+          $("#controller-addr-input").val(controller_addr);
         }
+        $("#controller-addr-edit").removeClass("d-none");
       });
+      $("#controller-addr-connect").click(function() {
+        controller_addr = $("#controller-addr-input").val();
+        $("#controller-addr-edit").addClass("d-none");
+        $("#controller-addr").removeClass("d-none");
+        $("#controller-addr").html("Connected to Noria controller at: <b>" + controller_addr + "</b>");
+      });
+
+      function update() {
+        $.ajax({
+          url: "http://" + controller_addr + "/instances",
+          dataType: "json",
+          success: function(data) {
+            $("#error-msg").removeClass("show");
+            $("#instance-table").bootstrapTable({
+              data: data
+            });
+          },
+          error: function(e) {
+            $("#error-msg").html("AJAX request to controller API failed: " + e.statusText).addClass("show");
+          }
+        });
+      }
+
+      setInterval(update, 1000);
+      update();
     </script>
   </body>
 </html>
