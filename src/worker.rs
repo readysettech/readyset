@@ -2,8 +2,10 @@ use std::cell::RefCell;
 use std::io;
 use std::ops::AddAssign;
 use std::os::unix::io::{AsRawFd, RawFd};
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{mpsc, Arc, Mutex, TryLockError};
 use std::thread;
+use std::time::Duration;
 
 use fnv::FnvHashMap;
 use mio::net::TcpListener;
@@ -104,15 +106,19 @@ struct SharedWorkerState {
     ///
     /// This is lazily pulled in by workers when they miss in `sockets`.
     truth: Arc<Mutex<Slab<SocketContext>>>,
+
+    /// Whether workers should exit.
+    exit: Arc<AtomicBool>,
 }
 
 impl SharedWorkerState {
-    fn new(truth: Arc<Mutex<Slab<SocketContext>>>) -> Self {
+    fn new(truth: Arc<Mutex<Slab<SocketContext>>>, exit: Arc<AtomicBool>) -> Self {
         SharedWorkerState {
             sockets: Slab::new(),
             replicas: Slab::new(),
             revmap: Default::default(),
             truth,
+            exit,
         }
     }
 }
@@ -144,12 +150,13 @@ impl WorkerPool {
         let poll = Arc::new(Poll::new()?);
         let (notify_tx, notify_rx): (_, Vec<_>) = (0..n).map(|_| mpsc::channel()).unzip();
         let truth = Arc::new(Mutex::new(Slab::new()));
+        let exit = Arc::new(AtomicBool::new(false));
         let workers = notify_rx
             .into_iter()
             .enumerate()
             .map(|(i, notify)| {
                 let w = Worker {
-                    shared: SharedWorkerState::new(truth.clone()),
+                    shared: SharedWorkerState::new(truth.clone(), exit.clone()),
                     log: log.new(o!("worker" => i)),
                     all: poll.clone(),
                     channel_coordinator: channel_coordinator.clone(),
@@ -166,7 +173,7 @@ impl WorkerPool {
             workers,
             poll,
             notify: notify_tx,
-            wstate: SharedWorkerState::new(truth),
+            wstate: SharedWorkerState::new(truth, exit.clone()),
             log: log.new(o!()),
         })
     }
@@ -218,6 +225,8 @@ impl WorkerPool {
 
     pub fn wait(&mut self) {
         self.notify.clear();
+        self.wstate.exit.store(true, Ordering::SeqCst);
+
         for jh in self.workers.drain(..) {
             jh.join().unwrap();
         }
@@ -268,6 +277,10 @@ impl Worker {
         };
 
         loop {
+            if self.shared.exit.load(Ordering::SeqCst) {
+                break;
+            }
+
             // have any timers expired?
             expired.extend(timers.expired());
             for rit in expired.drain(..) {
@@ -318,7 +331,7 @@ impl Worker {
                 }
             }
 
-            let next = timers.time_remaining();
+            let next = timers.time_remaining().or(Some(Duration::from_millis(100)));
             if let Err(e) = self.all.poll(&mut events, next) {
                 if e.kind() == io::ErrorKind::Interrupted {
                     // spurious wakeup

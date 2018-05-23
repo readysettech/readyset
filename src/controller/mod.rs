@@ -595,7 +595,9 @@ impl Worker {
                     worker.coordination_message(msg)
                 },
                 WorkerEvent::LeaderChange(state, descriptor) => {
+                    info!(self.log, "Detected leader change");
                     self.inner.take().map(|w| w.shutdown());
+                    info!(self.log, "Attempting to connect");
                     if let Ok(worker) = WorkerInner::new(
                         self.listen_addr,
                         descriptor.internal_addr,
@@ -608,6 +610,9 @@ impl Worker {
                         self.log.clone(),
                     ) {
                         self.inner = Some(worker);
+                        warn!(self.log, "Connected to new leader");
+                    } else {
+                        warn!(self.log, "Failed to connect to new leader");
                     }
                 }
                 WorkerEvent::Shutdown => break,
