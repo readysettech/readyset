@@ -79,6 +79,9 @@ path = "src/lib.rs"
 [[example]]
 name = "basic-recipe"
 
+[[example]]
+name = "basic-distribution"
+
 [[bin]]
 name = "souplet"
 path = "src/bin/souplet.rs"
