@@ -218,7 +218,7 @@ fn start_instance<A: Authority + 'static>(
             let checktable = CheckTableServer::start(SocketAddr::new(listen_addr, 0));
             let external = Controller::listen_external(
                 controller_event_tx.clone(),
-                SocketAddr::new(listen_addr, 9000),
+                SocketAddr::new(listen_addr, 0),
                 authority.clone(),
             );
             let descriptor = ControllerDescriptor {
