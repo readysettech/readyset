@@ -272,7 +272,7 @@ impl ControllerInner {
             let mut failed = Vec::new();
             for (addr, ws) in self.workers.iter_mut() {
                 if ws.healthy && ws.last_heartbeat.elapsed() > self.heartbeat_every * 3 {
-                    warn!(self.log, "worker at {:?} has failed!", addr);
+                    error!(self.log, "worker at {:?} has failed!", addr);
                     ws.healthy = false;
                     failed.push(addr.clone());
                 }
