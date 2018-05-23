@@ -127,14 +127,14 @@ impl<A: Authority> ControllerHandle<A> {
         loop {
             if self.url.is_none() {
                 let descriptor: ControllerDescriptor =
-                    serde_json::from_slice(&self.authority.get_leader().unwrap().1).unwrap();
+                    serde_json::from_slice(&self.authority.get_leader()?.1)?;
                 self.url = Some(format!("http://{}", descriptor.external_addr));
             }
             let url = format!("{}/{}", self.url.as_ref().unwrap(), path);
 
-            let mut r = hyper::Request::new(hyper::Method::Post, url.parse().unwrap());
-            r.set_body(serde_json::to_vec(&request).unwrap());
-            let res = self.reactor.run(self.client.request(r)).unwrap();
+            let mut r = hyper::Request::new(hyper::Method::Post, url.parse()?);
+            r.set_body(serde_json::to_vec(&request)?);
+            let res = self.reactor.run(self.client.request(r))?;
             match res.status() {
                 hyper::StatusCode::ServiceUnavailable => {
                     thread::sleep(Duration::from_millis(100));
@@ -142,7 +142,7 @@ impl<A: Authority> ControllerHandle<A> {
                 }
                 status @ hyper::StatusCode::InternalServerError
                 | status @ hyper::StatusCode::Ok => {
-                    let body = self.reactor.run(res.body().concat2()).unwrap();
+                    let body = self.reactor.run(res.body().concat2())?;
                     if let hyper::StatusCode::Ok = status {
                         return Ok(serde_json::from_slice::<R>(&body)
                             .context(format!("while decoding rpc reply from {}", path))?);
@@ -177,9 +177,6 @@ impl<A: Authority> ControllerHandle<A> {
     pub fn view(&mut self, name: &str) -> Result<View, failure::Error> {
         // This call attempts to detect if this function is being called in a loop. If this
         // is getting false positives, then it is safe to increase the allowed hit count.
-        #[cfg(debug_assertions)]
-        assert_infrequent::at_most(200);
-
         self.rpc::<_, Option<ViewBuilder>>("view_builder", name)
             .context(format!("building View for {}", name))?
             .ok_or_else(|| format_err!("view {} does not exist", name))
@@ -203,9 +200,6 @@ impl<A: Authority> ControllerHandle<A> {
     pub fn table(&mut self, name: &str) -> Result<Table, failure::Error> {
         // This call attempts to detect if this function is being called in a loop. If this
         // is getting false positives, then it is safe to increase the allowed hit count.
-        #[cfg(debug_assertions)]
-        assert_infrequent::at_most(200);
-
         self.rpc::<_, Option<TableBuilder>>("table_builder", name)
             .context(format!("building Table for {}", name))?
             .ok_or_else(|| format_err!("view {} does not exist", name))

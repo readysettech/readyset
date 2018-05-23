@@ -2,6 +2,7 @@ extern crate distributary;
 
 use distributary::{ControllerHandle, ZookeeperAuthority};
 
+use std::io::Write;
 use std::thread;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
@@ -28,53 +29,89 @@ fn main() {
     let log = distributary::logger_pls();
 
     // set up Soup via recipe
-    let mut auth = ZookeeperAuthority::new("127.0.0.1:2181/basicdist");
+    let mut auth = ZookeeperAuthority::new("127.0.0.1:2181/basicdist").unwrap();
     auth.log_with(log.clone());
 
-    let mut blender = ControllerHandle::new(auth);
-    blender.install_recipe(sql1.to_owned()).unwrap();
-    blender.extend_recipe(sql2.to_owned()).unwrap();
-    blender.extend_recipe(sql3.to_owned()).unwrap();
-    blender.extend_recipe(sql4.to_owned()).unwrap();
-    println!("{}", blender.graphviz());
+    let mut blender = ControllerHandle::new(auth).unwrap();
+    blender.install_recipe(sql1).unwrap();
+    blender.extend_recipe(sql2).unwrap();
+    blender.extend_recipe(sql3).unwrap();
+    blender.extend_recipe(sql4).unwrap();
+    println!("{}", blender.graphviz().unwrap());
+
+    let get_view = |b: &mut ControllerHandle<ZookeeperAuthority>, n| loop {
+        match b.view(n) {
+            Ok(v) => return v,
+            Err(e) => {
+                print!("x");
+                ::std::io::stdout()
+                    .flush()
+                    .ok()
+                    .expect("Could not flush stdout");
+                thread::sleep(Duration::from_millis(500));
+                let mut auth = ZookeeperAuthority::new("127.0.0.1:2181/basicdist").unwrap();
+                auth.log_with(log.clone());
+                *b = ControllerHandle::new(auth).unwrap();
+            }
+        }
+    };
+
+    let get_table = |b: &mut ControllerHandle<ZookeeperAuthority>, n| loop {
+        match b.table(n) {
+            Ok(v) => return v,
+            Err(e) => {
+                print!("x");
+                ::std::io::stdout()
+                    .flush()
+                    .ok()
+                    .expect("Could not flush stdout");
+                thread::sleep(Duration::from_millis(500));
+                let mut auth = ZookeeperAuthority::new("127.0.0.1:2181/basicdist").unwrap();
+                auth.log_with(log.clone());
+                *b = ControllerHandle::new(auth).unwrap();
+            }
+        }
+    };
 
     // Get mutators and getter.
-    let mut article = blender.get_mutator("Article").unwrap();
+    let mut vote = get_table(&mut blender, "Vote");
+    let mut article = get_table(&mut blender, "Article");
+    let mut awvc = get_view(&mut blender, "ArticleWithVoteCount");
 
     println!("Creating article...");
     let aid = 1;
     // Make sure the article exists:
-    let mut awvc = blender.get_getter("ArticleWithVoteCount").unwrap();
     if awvc.lookup(&[aid.into()], true).unwrap().is_empty() {
         println!("Creating new article...");
         let title = "test title";
         let url = "http://pdos.csail.mit.edu";
         article
-            .put(vec![aid.into(), title.into(), url.into()])
+            .insert(vec![aid.into(), title.into(), url.into()])
             .unwrap();
     }
 
     loop {
-        let mut vote = blender.get_mutator("Vote").unwrap();
         loop {
             // Then create a new vote:
             print!("Casting vote...");
+            ::std::io::stdout()
+                .flush()
+                .ok()
+                .expect("Could not flush stdout");
             let uid = SystemTime::now()
                 .duration_since(UNIX_EPOCH)
                 .unwrap()
                 .as_secs() as i64;
-            if let Err(_) = vote.put(vec![aid.into(), uid.into()]) {
-                println!(" Failed!");
-                break;
+            while let Err(_) = vote.insert(vec![aid.into(), uid.into()]) {
+                vote = get_table(&mut blender, "Vote");
             }
 
             thread::sleep(Duration::from_millis(1000));
 
-            if let Err(_) = awvc.lookup(&[1.into()], false) {
-                break;
+            while let Err(_) = awvc.lookup(&[1.into()], false) {
+                awvc = get_view(&mut blender, "ArticleWithVoteCount");
             }
             println!(" Done");
         }
-        awvc = blender.get_getter("ArticleWithVoteCount").unwrap();
     }
 }
