@@ -1,6 +1,5 @@
 use backlog;
 use channel;
-use checktable;
 use prelude::*;
 
 /// A StreamUpdate reflects the addition or deletion of a row from a reader node.
@@ -17,7 +16,6 @@ impl From<Record> for StreamUpdate {
         match other {
             Record::Positive(u) => StreamUpdate::AddRow(u),
             Record::Negative(u) => StreamUpdate::DeleteRow(u),
-            Record::BaseOperation(..) => unreachable!(),
         }
     }
 }
@@ -36,8 +34,6 @@ pub struct Reader {
     #[serde(skip)]
     streamers: Vec<channel::StreamSender<Vec<StreamUpdate>>>,
 
-    token_generator: Option<checktable::TokenGenerator>,
-
     for_node: NodeIndex,
     state: Option<Vec<usize>>,
 }
@@ -49,7 +45,6 @@ impl Clone for Reader {
             writer: None,
             streamers: self.streamers.clone(),
             state: self.state.clone(),
-            token_generator: self.token_generator.clone(),
             for_node: self.for_node,
         }
     }
@@ -61,7 +56,6 @@ impl Reader {
             writer: None,
             streamers: Vec::new(),
             state: None,
-            token_generator: None,
             for_node,
         }
     }
@@ -87,7 +81,6 @@ impl Reader {
             writer: self.writer.take(),
             streamers: mem::replace(&mut self.streamers, Vec::new()),
             state: self.state.clone(),
-            token_generator: self.token_generator.clone(),
             for_node: self.for_node,
         }
     }
@@ -131,15 +124,6 @@ impl Reader {
     pub fn state_size(&self) -> Option<u64> {
         use basics::data::SizeOf;
         self.writer.as_ref().map(|w| w.deep_size_of())
-    }
-
-    pub fn token_generator(&self) -> Option<&checktable::TokenGenerator> {
-        self.token_generator.as_ref()
-    }
-
-    pub fn set_token_generator(&mut self, gen: checktable::TokenGenerator) {
-        assert!(self.token_generator.is_none());
-        self.token_generator = Some(gen);
     }
 
     /// Evict a randomly selected key, returning the number of bytes evicted.
@@ -222,13 +206,6 @@ impl Reader {
                 state.add(m.take_data());
             } else {
                 state.add(m.data().iter().cloned());
-            }
-            if let Packet::Transaction {
-                state: TransactionState::Committed(ts, ..),
-                ..
-            } = **m
-            {
-                state.update_ts(ts);
             }
 
             if swap {

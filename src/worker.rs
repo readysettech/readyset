@@ -1,6 +1,5 @@
 use std::cell::RefCell;
 use std::io;
-use std::net::{SocketAddr, ToSocketAddrs};
 use std::ops::AddAssign;
 use std::os::unix::io::{AsRawFd, RawFd};
 use std::sync::{mpsc, Arc, Mutex, TryLockError};
@@ -14,9 +13,12 @@ use slog::Logger;
 use timer_heap::{TimerHeap, TimerType};
 use vec_map::VecMap;
 
+use api;
 use channel::poll::{PollEvent, ProcessResult};
 use channel::tcp::{SendError, TryRecvError};
-use channel::{self, DomainConnectionBuilder, TcpReceiver, TcpSender, CONNECTION_FROM_MUTATOR};
+use channel::{
+    self, DomainConnectionBuilder, DualTcpReceiver, TcpReceiver, TcpSender, CONNECTION_FROM_BASE,
+};
 use dataflow::payload::SourceChannelIdentifier;
 use dataflow::{self, Domain, Packet};
 
@@ -39,7 +41,12 @@ type EnqueuedSend = (ReplicaIndex, Box<Packet>);
 type ChannelCoordinator = channel::ChannelCoordinator<ReplicaIndex>;
 type ReplicaToken = usize;
 
-type ReplicaReceiversInner = VecMap<RefCell<(TcpReceiver<Box<Packet>>, Option<ReplicaIndex>)>>;
+type ReplicaReceiversInner = VecMap<
+    RefCell<(
+        DualTcpReceiver<Box<Packet>, api::Input>,
+        Option<ReplicaIndex>,
+    )>,
+>;
 
 #[derive(Default)]
 struct ReplicaReceivers(ReplicaReceiversInner);
@@ -129,14 +136,11 @@ pub struct WorkerPool {
 }
 
 impl WorkerPool {
-    pub fn new<A: ToSocketAddrs>(
+    pub fn new(
         n: usize,
         log: &Logger,
-        checktable_addr: A,
         channel_coordinator: Arc<ChannelCoordinator>,
     ) -> io::Result<Self> {
-        let checktable_addr = checktable_addr.to_socket_addrs().unwrap().next().unwrap();
-
         let poll = Arc::new(Poll::new()?);
         let (notify_tx, notify_rx): (_, Vec<_>) = (0..n).map(|_| mpsc::channel()).unzip();
         let truth = Arc::new(Mutex::new(Slab::new()));
@@ -151,10 +155,9 @@ impl WorkerPool {
                     channel_coordinator: channel_coordinator.clone(),
                     notify,
                 };
-                let checktable_addr = checktable_addr.clone();
                 thread::Builder::new()
                     .name(format!("worker{}", i + 1))
-                    .spawn(move || w.run(checktable_addr))
+                    .spawn(move || w.run())
                     .unwrap()
             })
             .collect();
@@ -230,7 +233,7 @@ pub struct Worker {
 }
 
 impl Worker {
-    pub fn run(mut self, checktable_addr: SocketAddr) {
+    pub fn run(mut self) {
         // we want to only process a single domain, otherwise we might hold on to work that another
         // worker could be doing. and that'd be silly.
         let mut events = Events::with_capacity(1);
@@ -239,8 +242,6 @@ impl Worker {
         let mut durtmp = None;
         let mut force_refresh_truth = false;
         let mut sends = Vec::new();
-
-        dataflow::connect_thread_checktable(checktable_addr);
 
         let cc = &self.channel_coordinator;
         let send = |me: &ReplicaIndex,
@@ -399,7 +400,7 @@ impl Worker {
                 // NOTE: only really a while loop to let us break early
                 while let Ok((mut stream, _src)) = replica.listener.as_mut().unwrap().accept() {
                     // we know that any new connection to a domain will first send a one-byte
-                    // token to indicate whether the connection is from a mutator or not.
+                    // token to indicate whether the connection is from a base or not.
                     set_nonblocking(&stream, false);
                     let mut tag = [0];
                     use std::io::Read;
@@ -408,7 +409,7 @@ impl Worker {
                         info!(self.log, "worker discarded new connection: {:?}", e);
                         break;
                     }
-                    let is_mutator = tag[0] == CONNECTION_FROM_MUTATOR;
+                    let is_base = tag[0] == CONNECTION_FROM_BASE;
                     set_nonblocking(&stream, true);
 
                     // NOTE: we're taking two locks at the same time here! we need to be sure that
@@ -429,10 +430,16 @@ impl Worker {
 
                     self.all.register(&stream, Token(token)).unwrap();
 
-                    let tcp = if is_mutator {
-                        TcpReceiver::new(stream)
+                    let tcp = if is_base {
+                        DualTcpReceiver::upgrade(stream, move |input| {
+                            Box::new(Packet::Input {
+                                inner: input,
+                                src: Some(SourceChannelIdentifier { token: token }),
+                                senders: Vec::new(),
+                            })
+                        })
                     } else {
-                        TcpReceiver::with_capacity(2 * 1024 * 1024, stream)
+                        TcpReceiver::with_capacity(2 * 1024 * 1024, stream).into()
                     };
                     replica.receivers.insert(token, RefCell::new((tcp, None)));
                     break;
@@ -545,12 +552,12 @@ impl Worker {
                     // even with nll we need to *first* try_recv, and *then* match. otherwise the
                     // borrow_mut() handle will be kept until the end of the match, which would
                     // prevent us from doing context.receivers.remove().
-                    let mut m = match m {
+                    let m = match m {
                         Ok(p) => p,
                         Err(TryRecvError::Empty) => break,
                         Err(TryRecvError::Disconnected) => {
                             // how can this even happen?
-                            // mutator that goes away maybe?
+                            // base that goes away maybe?
                             // in any case, we can unregister the socket.
                             debug!(self.log, "worker dropped lost connection"; "token" => token);
                             let rx = context.receivers.remove(token).unwrap();
@@ -612,13 +619,7 @@ impl Worker {
                     // context.receivers here is *not* okay. However, *we* know that reading
                     // context.receivers here is fine, since we hold the &mut context.receivers,
                     // and we are not concurrently modifying it.
-                    if !self.process(
-                        &mut context.replica,
-                        &context.receivers,
-                        m,
-                        Some(token),
-                        &mut sends,
-                    ) {
+                    if !self.process(&mut context.replica, &context.receivers, m, &mut sends) {
                         // told to exit?
                         if rearm {
                             ready(fd).unwrap();
@@ -761,7 +762,6 @@ impl Worker {
                                 &mut context.replica,
                                 &context.receivers,
                                 m,
-                                None,
                                 &mut sends,
                             ) {
                                 // told to exit?
@@ -837,22 +837,10 @@ impl Worker {
         replica: &mut Replica,
         receivers: &ReplicaReceivers,
         mut packet: Box<Packet>,
-        token: Option<usize>,
         sends: &mut Vec<EnqueuedSend>,
     ) -> bool {
         if let Some(local) = packet.extract_local() {
             packet = local;
-        }
-
-        if let Some(token) = token {
-            // XXX: inject token into packet somewhere
-            // (maybe only if it's a base?)
-            match *packet {
-                Packet::Transaction { ref mut src, .. } | Packet::Message { ref mut src, .. } => {
-                    *src = Some(SourceChannelIdentifier { token: token });
-                }
-                _ => {}
-            }
         }
 
         match replica.on_event(receivers, PollEvent::Process(packet), sends) {
@@ -863,7 +851,7 @@ impl Worker {
 }
 
 impl dataflow::prelude::Executor for ReplicaReceivers {
-    fn send_back(&self, channel: SourceChannelIdentifier, reply: Result<i64, ()>) {
+    fn send_back(&self, channel: SourceChannelIdentifier, reply: ()) {
         if let Some(ch) = self.get(channel.token) {
             use bincode;
             use std::io::{self, Write};

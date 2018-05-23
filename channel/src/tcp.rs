@@ -14,10 +14,13 @@ use throttled_reader::ThrottledReader;
 
 use super::{DeserializeReceiver, NonBlockingWriter, ReceiveError};
 
-#[derive(Debug)]
+#[derive(Debug, Fail)]
 pub enum SendError {
-    BincodeError(bincode::Error),
-    IoError(io::Error),
+    #[fail(display = "{}", _0)]
+    BincodeError(#[cause] bincode::Error),
+    #[fail(display = "{}", _0)]
+    IoError(#[cause] io::Error),
+    #[fail(display = "channel has previously encountered an error")]
     Poisoned,
 }
 
@@ -120,6 +123,85 @@ pub enum TryRecvError {
 pub enum RecvError {
     Disconnected,
     DeserializationError(bincode::Error),
+}
+
+pub enum DualTcpReceiver<T, T2> {
+    Passthrough(TcpReceiver<T>),
+    Upgrade(TcpReceiver<T2>, Box<FnMut(T2) -> T + Send + Sync>),
+}
+
+impl<T, T2> From<TcpReceiver<T>> for DualTcpReceiver<T, T2> {
+    fn from(r: TcpReceiver<T>) -> Self {
+        DualTcpReceiver::Passthrough(r)
+    }
+}
+
+impl<T, T2> DualTcpReceiver<T, T2>
+where
+    for<'de> T: Deserialize<'de>,
+    for<'de> T2: Deserialize<'de>,
+{
+    pub fn upgrade<F: 'static + FnMut(T2) -> T + Send + Sync>(
+        stream: mio::net::TcpStream,
+        f: F,
+    ) -> Self {
+        let r: TcpReceiver<T2> = TcpReceiver::new(stream);
+        DualTcpReceiver::Upgrade(r, Box::new(f))
+    }
+
+    pub fn get_ref(&self) -> &mio::net::TcpStream {
+        match *self {
+            DualTcpReceiver::Passthrough(ref s) => s.get_ref(),
+            DualTcpReceiver::Upgrade(ref s, _) => s.get_ref(),
+        }
+    }
+
+    pub fn local_addr(&self) -> Result<SocketAddr, io::Error> {
+        self.get_ref().local_addr()
+    }
+
+    pub fn is_empty(&self) -> bool {
+        match *self {
+            DualTcpReceiver::Passthrough(ref s) => s.stream.buffer().is_empty(),
+            DualTcpReceiver::Upgrade(ref s, _) => s.stream.buffer().is_empty(),
+        }
+    }
+
+    pub fn syscall_limit(&mut self, limit: Option<usize>) {
+        if let Some(l) = limit {
+            match *self {
+                DualTcpReceiver::Passthrough(ref mut s) => s.stream.get_mut().set_limit(l),
+                DualTcpReceiver::Upgrade(ref mut s, _) => s.stream.get_mut().set_limit(l),
+            }
+        } else {
+            match *self {
+                DualTcpReceiver::Passthrough(ref mut s) => s.stream.get_mut().unthrottle(),
+                DualTcpReceiver::Upgrade(ref mut s, _) => s.stream.get_mut().unthrottle(),
+            }
+        }
+    }
+
+    pub fn try_recv(&mut self) -> Result<T, TryRecvError> {
+        match *self {
+            DualTcpReceiver::Passthrough(ref mut s) => s.try_recv(),
+            DualTcpReceiver::Upgrade(ref mut s, ref mut upgrade) => {
+                s.try_recv().map(move |t2| upgrade(t2))
+            }
+        }
+    }
+
+    pub fn recv(&mut self) -> Result<T, RecvError> {
+        loop {
+            return match self.try_recv() {
+                Err(TryRecvError::Empty) => continue,
+                Err(TryRecvError::Disconnected) => Err(RecvError::Disconnected),
+                Err(TryRecvError::DeserializationError(e)) => {
+                    Err(RecvError::DeserializationError(e))
+                }
+                Ok(t) => Ok(t),
+            };
+        }
+    }
 }
 
 pub struct TcpReceiver<T> {

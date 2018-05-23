@@ -12,8 +12,6 @@ regex = "0.2.2"
 serde_derive = "1.0.8"
 serde_json = "1.0.2"
 slog = "2.2.2"
-tarpc = "0.11.0"
-tarpc-plugins = "0.3.0"
 tokio-core = "0.1.8"
 vec_map = { version = "0.8.0", features = ["eders"] }
 hyper = "0.11.6"
@@ -28,6 +26,7 @@ timekeeper = {version = "0.3.0", default-features = false }
 nom-sql = { git = "https://github.com/ms705/nom-sql.git", rev = "3e7ae4c4d32b77342051d5c217549ab8fcb68e85" }
 
 # local deps
+api = { path = "../api" }
 channel = { path = "../channel" }
 basics = { path = "../basics" }
 

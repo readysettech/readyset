@@ -54,7 +54,6 @@ pub struct SqlIncorporator {
     view_schemas: HashMap<String, Vec<String>>,
 
     schema_version: usize,
-    transactional: bool,
 
     reuse_type: ReuseConfigType,
 
@@ -79,7 +78,6 @@ impl Default for SqlIncorporator {
             view_schemas: HashMap::default(),
 
             schema_version: 0,
-            transactional: false,
 
             reuse_type: ReuseConfigType::Finkelstein,
             universes: HashMap::default(),
@@ -96,11 +94,6 @@ impl SqlIncorporator {
             mir_converter: SqlToMirConverter::with_logger(lc),
             ..Default::default()
         }
-    }
-
-    /// Make any future base nodes added be transactional.
-    pub fn set_transactional(&mut self, transactional: bool) {
-        self.transactional = transactional;
     }
 
     /// Disable node reuse for future migrations.
@@ -417,9 +410,7 @@ impl SqlIncorporator {
         mut mig: &mut Migration,
     ) -> QueryFlowParts {
         // first, compute the MIR representation of the SQL query
-        let mut mir = self
-            .mir_converter
-            .named_base_to_mir(query_name, query, self.transactional);
+        let mut mir = self.mir_converter.named_base_to_mir(query_name, query);
 
         trace!(self.log, "Base node MIR: {:#?}", mir);
 

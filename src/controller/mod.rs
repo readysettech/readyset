@@ -1,9 +1,9 @@
 use channel::poll::{PollEvent, PollingLoop, ProcessResult};
 use channel::tcp::TcpSender;
 
+use api::ControllerDescriptor;
 use basics::PersistenceParameters;
 use consensus::{Authority, Epoch, STATE_KEY};
-use dataflow::checktable::service::CheckTableServer;
 use dataflow::DomainConfig;
 
 use controller::domain_handle::DomainHandle;
@@ -48,21 +48,13 @@ mod mutator;
 mod readers;
 mod worker_inner;
 
+pub use api::builders::*;
+pub use api::prelude::*;
 pub use controller::builder::ControllerBuilder;
-pub(crate) use controller::getter::LocalOrNot;
-pub use controller::getter::{Getter, ReadQuery, ReadReply, RemoteGetter, RemoteGetterBuilder};
-pub use controller::handle::ControllerHandle;
-pub use controller::inner::RpcError;
+pub use controller::getter::Getter;
+pub use controller::handle::LocalControllerHandle;
 pub use controller::migrate::Migration;
-pub use controller::mutator::{Mutator, MutatorBuilder, MutatorError};
 use controller::worker_inner::WorkerInner;
-
-/// Marker for a handle that has an exclusive connection to the backend(s).
-pub struct ExclusiveConnection;
-
-/// Marker for a handle that shares its underlying connection with other handles owned by the same
-/// thread.
-pub struct SharedConnection;
 
 type WorkerIdentifier = SocketAddr;
 type WorkerEndpoint = Arc<Mutex<TcpSender<CoordinationMessage>>>;
@@ -115,16 +107,6 @@ impl ServingThread {
     }
 }
 
-/// Describes a running controller instance. A serialized version of this struct is stored in
-/// ZooKeeper so that clients can reach the currently active controller.
-#[derive(Clone, Serialize, Deserialize)]
-pub(crate) struct ControllerDescriptor {
-    pub external_addr: SocketAddr,
-    pub internal_addr: SocketAddr,
-    pub checktable_addr: SocketAddr,
-    pub nonce: u64,
-}
-
 #[derive(Clone, Serialize, Deserialize, PartialEq)]
 pub(crate) struct ControllerConfig {
     pub sharding: Option<usize>,
@@ -172,7 +154,7 @@ enum ControlEvent {
         Method,
         String,
         Vec<u8>,
-        futures::sync::oneshot::Sender<Result<String, StatusCode>>,
+        futures::sync::oneshot::Sender<Result<Result<String, String>, StatusCode>>,
     ),
     WonLeaderElection(ControllerState),
     Shutdown,
@@ -197,7 +179,7 @@ fn start_instance<A: Authority + 'static>(
     memory_limit: Option<usize>,
     memory_check_frequency: Option<Duration>,
     log: slog::Logger,
-) -> ControllerHandle<A> {
+) -> LocalControllerHandle<A> {
     let (controller_event_tx, controller_event_rx) = mpsc::channel();
     let (worker_event_tx, worker_event_rx) = mpsc::channel();
 
@@ -215,7 +197,6 @@ fn start_instance<A: Authority + 'static>(
                 controller_event_tx.clone(),
                 SocketAddr::new(listen_addr, 0),
             );
-            let checktable = CheckTableServer::start(SocketAddr::new(listen_addr, 0));
             let external = Controller::listen_external(
                 controller_event_tx.clone(),
                 SocketAddr::new(listen_addr, 0),
@@ -224,7 +205,6 @@ fn start_instance<A: Authority + 'static>(
             let descriptor = ControllerDescriptor {
                 external_addr: external.addr,
                 internal_addr: internal.addr,
-                checktable_addr: checktable,
                 nonce: rand::random(),
             };
             let campaign = Some(instance_campaign(
@@ -242,7 +222,6 @@ fn start_instance<A: Authority + 'static>(
                 log,
                 internal,
                 external,
-                checktable,
                 campaign,
                 listen_addr,
             };
@@ -270,10 +249,11 @@ fn start_instance<A: Authority + 'static>(
         })
         .unwrap();
 
-    let mut ch = ControllerHandle::make(authority2);
-    ch.local_controller = Some((controller_event_tx2, controller_join_handle));
-    ch.local_worker = Some((worker_event_tx3, worker_join_handle));
-    ch
+    LocalControllerHandle::new(
+        authority2,
+        Some((controller_event_tx2, controller_join_handle)),
+        Some((worker_event_tx3, worker_join_handle)),
+    )
 }
 fn instance_campaign<A: Authority + 'static>(
     controller_event_tx: Sender<ControlEvent>,
@@ -381,7 +361,6 @@ pub struct Controller<A> {
     listen_addr: IpAddr,
     internal: ServingThread,
     external: ServingThread,
-    checktable: SocketAddr,
     campaign: Option<JoinHandle<()>>,
 
     log: slog::Logger,
@@ -421,7 +400,6 @@ impl<A: Authority + 'static> Controller<A> {
                     self.campaign.take().unwrap().join().unwrap();
                     self.inner = Some(ControllerInner::new(
                         self.listen_addr,
-                        self.checktable,
                         self.log.clone(),
                         state.clone(),
                     ));
@@ -504,7 +482,11 @@ impl<A: Authority + 'static> Controller<A> {
                                 res.headers_mut()
                                     .set_raw("Access-Control-Allow-Origin", "*");
                                 match reply {
-                                    Ok(reply) => res.set_body(reply),
+                                    Ok(Ok(reply)) => res.set_body(reply),
+                                    Ok(Err(reply)) => {
+                                        res.set_status(StatusCode::InternalServerError);
+                                        res.set_body(reply)
+                                    }
                                     Err(status_code) => {
                                         res.set_status(status_code);
                                     }
@@ -616,7 +598,6 @@ impl Worker {
                     self.inner.take().map(|w| w.shutdown());
                     if let Ok(worker) = WorkerInner::new(
                         self.listen_addr,
-                        descriptor.checktable_addr,
                         descriptor.internal_addr,
                         self.internal.addr,
                         &state,
@@ -672,7 +653,7 @@ mod tests {
     #[allow_fail]
     fn it_works_default() {
         // Controller gets dropped. It doesn't have Domains, so we don't see any dropped.
-        let authority = ZookeeperAuthority::new("127.0.0.1:2181/it_works_default");
+        let authority = ZookeeperAuthority::new("127.0.0.1:2181/it_works_default").unwrap();
         {
             let _c = ControllerBuilder::default().build(Arc::new(authority));
             thread::sleep(Duration::from_millis(100));
@@ -687,9 +668,10 @@ mod tests {
         let r_txt = "CREATE TABLE a (x int, y int, z int);\n
                      CREATE TABLE b (r int, s int);\n";
 
-        let authority = ZookeeperAuthority::new("127.0.0.1:2181/it_works_blender_with_migration");
+        let authority =
+            ZookeeperAuthority::new("127.0.0.1:2181/it_works_blender_with_migration").unwrap();
         let mut c = ControllerBuilder::default().build(Arc::new(authority));
-        assert!(c.install_recipe(r_txt.to_owned()).is_ok());
+        assert!(c.install_recipe(r_txt).is_ok());
     }
 
     // Controller without any domains gets dropped once it leaves the scope.
@@ -711,6 +693,6 @@ mod tests {
                      CREATE TABLE b (r int, s int);\n";
 
         let mut c = ControllerBuilder::default().build_local();
-        assert!(c.install_recipe(r_txt.to_owned()).is_ok());
+        assert!(c.install_recipe(r_txt).is_ok());
     }
 }

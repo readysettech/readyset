@@ -2,7 +2,7 @@ use std::process;
 use std::thread::{self, Thread};
 use std::time::Duration;
 
-use failure::Error;
+use failure::{Error, ResultExt};
 use serde::de::DeserializeOwned;
 use serde::Serialize;
 use serde_json;
@@ -43,24 +43,24 @@ pub struct ZookeeperAuthority {
 
 impl ZookeeperAuthority {
     /// Create a new instance.
-    pub fn new(connect_string: &str) -> Self {
-        let zk = ZooKeeper::connect(connect_string, Duration::from_secs(1), EventWatcher).expect(
-            &format!(
+    pub fn new(connect_string: &str) -> Result<Self, Error> {
+        let zk = ZooKeeper::connect(connect_string, Duration::from_secs(1), EventWatcher).context(
+            format!(
                 "Failed to connect to ZooKeeper at {}. Do you have \"maxClientCnxns\" set \
                  correctly in /etc/zookeeper/conf/zoo.conf?",
                 connect_string
             ),
-        );
+        )?;
         let _ = zk.create(
             "/",
             vec![],
             Acl::open_unsafe().clone(),
             CreateMode::Persistent,
         );
-        Self {
-            zk: zk,
+        Ok(Self {
+            zk,
             log: slog::Logger::root(slog::Discard, o!()),
-        }
+        })
     }
 
     /// Enable logging
@@ -92,7 +92,8 @@ impl Authority for ZookeeperAuthority {
     }
 
     fn surrender_leadership(&self) -> Result<(), Error> {
-        Ok(self.zk.delete(CONTROLLER_KEY, None)?)
+        self.zk.delete(CONTROLLER_KEY, None)?;
+        Ok(())
     }
 
     fn get_leader(&self) -> Result<(Epoch, Vec<u8>), Error> {
@@ -207,7 +208,8 @@ mod tests {
     #[test]
     #[allow_fail]
     fn it_works() {
-        let authority = Arc::new(ZookeeperAuthority::new("127.0.0.1:2181/concensus_it_works"));
+        let authority =
+            Arc::new(ZookeeperAuthority::new("127.0.0.1:2181/concensus_it_works").unwrap());
         assert!(authority.try_read(CONTROLLER_KEY).unwrap().is_none());
         assert_eq!(
             authority

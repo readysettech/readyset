@@ -1,25 +1,21 @@
+use api::debug::stats::GraphStats;
 use basics::PersistenceParameters;
 use channel::tcp::TcpSender;
 use consensus::{Authority, Epoch, STATE_KEY};
-use dataflow::payload::{EgressForBase, IngressFromBase};
 use dataflow::prelude::*;
-use dataflow::statistics::GraphStats;
-use dataflow::{checktable, node, payload, DomainConfig};
+use dataflow::{node, payload, DomainConfig};
 
 use std::collections::{BTreeMap, HashMap};
-use std::error::Error;
-use std::fmt::{self, Display};
 use std::net::{IpAddr, SocketAddr};
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 use std::{io, time};
 
+use api::builders::*;
+use api::ActivationResult;
 use controller::migrate::materialization::Materializations;
-use controller::mutator::MutatorBuilder;
-use controller::recipe::ActivationResult;
 use controller::{
-    ControllerState, DomainHandle, Migration, Recipe, RemoteGetterBuilder, WorkerIdentifier,
-    WorkerStatus,
+    ControllerState, DomainHandle, Migration, Recipe, WorkerIdentifier, WorkerStatus,
 };
 use coordination::{CoordinationMessage, CoordinationPayload};
 
@@ -29,7 +25,6 @@ use petgraph;
 use petgraph::visit::Bfs;
 use slog;
 use std::mem;
-use tarpc::sync::client::{self, ClientExt};
 
 /// `Controller` is the core component of the alternate Soup implementation.
 ///
@@ -41,8 +36,6 @@ pub struct ControllerInner {
     pub(super) ingredients: Graph,
     pub(super) source: NodeIndex,
     pub(super) ndomains: usize,
-    pub(super) checktable: checktable::CheckTableClient,
-    checktable_addr: SocketAddr,
     pub(super) sharding: Option<usize>,
 
     pub(super) domain_config: DomainConfig,
@@ -65,7 +58,6 @@ pub struct ControllerInner {
     pub(super) workers: HashMap<WorkerIdentifier, WorkerStatus>,
 
     /// State between migrations
-    pub(super) deps: HashMap<DomainIndex, (IngressFromBase, EgressForBase)>,
     pub(super) remap: HashMap<DomainIndex, HashMap<NodeIndex, IndexPair>>,
 
     pub(super) epoch: Epoch,
@@ -118,27 +110,6 @@ pub(crate) fn graphviz(graph: &Graph, materializations: &Materializations) -> St
     s
 }
 
-/// Serializable error type for RPC that can fail.
-#[derive(Debug, Deserialize, Serialize)]
-pub enum RpcError {
-    /// Generic error message vessel.
-    Other(String),
-}
-
-impl Error for RpcError {
-    fn description(&self) -> &str {
-        match *self {
-            RpcError::Other(ref s) => s,
-        }
-    }
-}
-
-impl Display for RpcError {
-    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        write!(f, "{}", self.description())
-    }
-}
-
 impl ControllerInner {
     pub fn coordination_message(&mut self, msg: CoordinationMessage) {
         trace!(self.log, "Received {:?}", msg);
@@ -166,15 +137,15 @@ impl ControllerInner {
         path: String,
         body: Vec<u8>,
         authority: &Arc<A>,
-    ) -> Result<String, StatusCode> {
+    ) -> Result<Result<String, String>, StatusCode> {
         use hyper::Method::*;
         use serde_json as json;
 
         match (&method, path.as_ref()) {
-            (&Get, "/graph") => return Ok(self.graphviz()),
-            (&Post, "/graphviz") => return Ok(json::to_string(&self.graphviz()).unwrap()),
+            (&Get, "/graph") => return Ok(Ok(self.graphviz())),
+            (&Post, "/graphviz") => return Ok(Ok(json::to_string(&self.graphviz()).unwrap())),
             (&Get, "/get_statistics") => {
-                return Ok(json::to_string(&self.get_statistics()).unwrap())
+                return Ok(Ok(json::to_string(&self.get_statistics()).unwrap()))
             }
             _ => {}
         }
@@ -183,36 +154,46 @@ impl ControllerInner {
             return Err(StatusCode::ServiceUnavailable);
         }
 
-        Ok(match (method, path.as_ref()) {
-            (Get, "/flush_partial") => return Ok(json::to_string(&self.flush_partial()).unwrap()),
-            (Post, "/inputs") => json::to_string(&self.inputs()).unwrap(),
-            (Post, "/outputs") => json::to_string(&self.outputs()).unwrap(),
-            (Get, "/instances") => return Ok(json::to_string(&self.get_instances()).unwrap()),
-            (Post, "/mutator_builder") => {
-                json::to_string(&self.mutator_builder(json::from_slice(&body).unwrap())).unwrap()
-            }
-            (Post, "/getter_builder") => {
-                json::to_string(&self.getter_builder(json::from_slice(&body).unwrap())).unwrap()
-            }
-            (Post, "/extend_recipe") => {
-                json::to_string(&self.extend_recipe(authority, json::from_slice(&body).unwrap()))
-                    .unwrap()
-            }
-            (Post, "/install_recipe") => {
-                json::to_string(&self.install_recipe(authority, json::from_slice(&body).unwrap()))
-                    .unwrap()
-            }
-            (Post, "/set_security_config") => json::to_string(&self.set_security_config(
-                json::from_slice(&body).unwrap(),
-            )).unwrap(),
-            (Post, "/create_universe") => {
-                json::to_string(&self.create_universe(json::from_slice(&body).unwrap())).unwrap()
-            }
-            (Post, "/remove_node") => {
-                json::to_string(&self.remove_node(json::from_slice(&body).unwrap())).unwrap()
-            }
+        match (method, path.as_ref()) {
+            (Get, "/flush_partial") => Ok(Ok(json::to_string(&self.flush_partial()).unwrap())),
+            (Post, "/inputs") => Ok(Ok(json::to_string(&self.inputs()).unwrap())),
+            (Post, "/outputs") => Ok(Ok(json::to_string(&self.outputs()).unwrap())),
+            (Get, "/instances") => Ok(Ok(json::to_string(&self.get_instances()).unwrap())),
+            (Post, "/table_builder") => json::from_slice(&body)
+                .map_err(|_| StatusCode::BadRequest)
+                .map(|args| Ok(json::to_string(&self.table_builder(args)).unwrap())),
+            (Post, "/view_builder") => json::from_slice(&body)
+                .map_err(|_| StatusCode::BadRequest)
+                .map(|args| Ok(json::to_string(&self.view_builder(args)).unwrap())),
+            (Post, "/extend_recipe") => json::from_slice(&body)
+                .map_err(|_| StatusCode::BadRequest)
+                .map(|args| {
+                    self.extend_recipe(authority, args)
+                        .map(|r| json::to_string(&r).unwrap())
+                }),
+            (Post, "/install_recipe") => json::from_slice(&body)
+                .map_err(|_| StatusCode::BadRequest)
+                .map(|args| {
+                    self.install_recipe(authority, args)
+                        .map(|r| json::to_string(&r).unwrap())
+                }),
+            (Post, "/set_security_config") => json::from_slice(&body)
+                .map_err(|_| StatusCode::BadRequest)
+                .map(|args| {
+                    self.set_security_config(args)
+                        .map(|r| json::to_string(&r).unwrap())
+                }),
+            (Post, "/create_universe") => json::from_slice(&body)
+                .map_err(|_| StatusCode::BadRequest)
+                .map(|args| {
+                    self.create_universe(args)
+                        .map(|r| json::to_string(&r).unwrap())
+                }),
+            (Post, "/remove_node") => json::from_slice(&body)
+                .map_err(|_| StatusCode::BadRequest)
+                .map(|args| self.remove_node(args).map(|r| json::to_string(&r).unwrap())),
             _ => return Err(StatusCode::NotFound),
-        })
+        }
     }
 
     fn handle_register(
@@ -313,23 +294,13 @@ impl ControllerInner {
     }
 
     /// Construct `ControllerInner` with a specified listening interface
-    pub(super) fn new(
-        listen_addr: IpAddr,
-        checktable_addr: SocketAddr,
-        log: slog::Logger,
-        state: ControllerState,
-    ) -> Self {
+    pub(super) fn new(listen_addr: IpAddr, log: slog::Logger, state: ControllerState) -> Self {
         let mut g = petgraph::Graph::new();
         let source = g.add_node(node::Node::new(
             "source",
             &["because-type-inference"],
             node::special::Source,
-            true,
         ));
-
-        let checktable =
-            checktable::CheckTableClient::connect(checktable_addr, client::Options::default())
-                .unwrap();
 
         let mut materializations = Materializations::new(&log);
         if !state.config.partial_enabled {
@@ -352,8 +323,6 @@ impl ControllerInner {
             ingredients: g,
             source: source,
             ndomains: 0,
-            checktable,
-            checktable_addr,
             listen_addr,
 
             materializations,
@@ -371,7 +340,6 @@ impl ControllerInner {
             debug_channel: None,
             epoch: state.epoch,
 
-            deps: HashMap::default(),
             remap: HashMap::default(),
 
             read_addrs: HashMap::default(),
@@ -382,10 +350,13 @@ impl ControllerInner {
         }
     }
 
-    /// Use a debug channel. This function may only be called once because the receiving end it
-    /// returned.
+    /// Create a global channel for receiving tracer events.
+    ///
+    /// Only domains created after this method is called will be able to send trace events.
+    ///
+    /// This function may only be called once because the receiving end it returned.
     #[allow(unused)]
-    pub fn create_debug_channel(&mut self) -> TcpListener {
+    pub fn create_tracer_channel(&mut self) -> TcpListener {
         assert!(self.debug_channel.is_none());
         let addr: SocketAddr = "127.0.0.1:0".parse().unwrap();
         let listener = TcpListener::bind(&addr).unwrap();
@@ -466,15 +437,6 @@ impl ControllerInner {
         r
     }
 
-    /// Get a boxed function which can be used to validate tokens.
-    #[allow(unused)]
-    pub fn get_validator(&self) -> Box<Fn(&checktable::Token) -> bool> {
-        let checktable =
-            checktable::CheckTableClient::connect(self.checktable_addr, client::Options::default())
-                .unwrap();
-        Box::new(move |t: &checktable::Token| checktable.validate_token(t.clone()).unwrap())
-    }
-
     #[cfg(test)]
     pub fn graph(&self) -> &Graph {
         &self.ingredients
@@ -482,7 +444,7 @@ impl ControllerInner {
 
     /// Get a Vec of all known input nodes.
     ///
-    /// Input nodes are here all nodes of type `Base`. The addresses returned by this function will
+    /// Input nodes are here all nodes of type `Table`. The addresses returned by this function will
     /// all have been returned as a key in the map from `commit` at some point in the past.
     pub fn inputs(&self) -> BTreeMap<String, NodeIndex> {
         self.ingredients
@@ -515,7 +477,7 @@ impl ControllerInner {
             .collect()
     }
 
-    fn find_getter_for(&self, node: NodeIndex) -> Option<NodeIndex> {
+    fn find_view_for(&self, node: NodeIndex) -> Option<NodeIndex> {
         // reader should be a child of the given node. however, due to sharding, it may not be an
         // *immediate* child. furthermore, once we go beyond depth 1, we may accidentally hit an
         // *unrelated* reader node. to account for this, readers keep track of what node they are
@@ -536,9 +498,9 @@ impl ControllerInner {
         reader
     }
 
-    /// Obtain a `RemoteGetterBuilder` that can be sent to a client and then used to query a given
+    /// Obtain a `ViewBuilder` that can be sent to a client and then used to query a given
     /// (already maintained) reader node called `name`.
-    pub fn getter_builder(&self, name: &str) -> Option<RemoteGetterBuilder> {
+    pub fn view_builder(&self, name: &str) -> Option<ViewBuilder> {
         // first try to resolve the node via the recipe, which handles aliasing between identical
         // queries.
         let node = match self.recipe.node_addr_for(name) {
@@ -550,21 +512,14 @@ impl ControllerInner {
             }
         };
 
-        self.find_getter_for(node).map(|r| {
+        self.find_view_for(node).map(|r| {
             let domain = self.ingredients[r].domain();
             let columns = self.ingredients[r].fields().to_vec();
             let shards = (0..self.domains[&domain].shards())
                 .map(|i| self.read_addrs[&self.domains[&domain].assignment(i)].clone())
-                .map(|a| {
-                    // NOTE: this is where we decide whether assignments are local or not (and
-                    // hence whether we should use LocalBypass). currently, we assume that either
-                    // *all* assignments are local, or *none* are. this is likely to change, at
-                    // which point this has to change too.
-                    (a, false)
-                })
                 .collect();
 
-            RemoteGetterBuilder {
+            ViewBuilder {
                 local_ports: vec![],
                 node: r,
                 columns,
@@ -573,16 +528,16 @@ impl ControllerInner {
         })
     }
 
-    /// Obtain a MutatorBuild that can be used to construct a Mutator to perform writes and deletes
+    /// Obtain a TableBuild that can be used to construct a Table to perform writes and deletes
     /// from the given named base node.
-    pub fn mutator_builder(&self, base: &str) -> Option<MutatorBuilder> {
+    pub fn table_builder(&self, base: &str) -> Option<TableBuilder> {
         let ni = match self.recipe.node_addr_for(base) {
             Ok(ni) => ni,
             Err(_) => *self.inputs().get(base)?,
         };
         let node = &self.ingredients[ni];
 
-        trace!(self.log, "creating mutator"; "for" => base);
+        trace!(self.log, "creating table"; "for" => base);
 
         let mut key = self.ingredients[ni]
             .suggest_indexes(ni)
@@ -606,9 +561,11 @@ impl ControllerInner {
             })
             .collect();
 
-        let base_operator = node.get_base()
-            .expect("asked to get mutator for non-base node");
-        let columns: Vec<String> = node.fields()
+        let base_operator = node
+            .get_base()
+            .expect("asked to get table for non-base node");
+        let columns: Vec<String> = node
+            .fields()
             .iter()
             .enumerate()
             .filter(|&(n, _)| !base_operator.get_dropped().contains_key(n))
@@ -620,18 +577,16 @@ impl ControllerInner {
         );
         let schema = self.recipe.get_base_schema(base);
 
-        Some(MutatorBuilder {
+        Some(TableBuilder {
             local_port: None,
             txs,
             addr: (*node.local_addr()).into(),
             key: key,
             key_is_primary: is_primary,
-            transactional: self.ingredients[ni].is_transactional(),
             dropped: base_operator.get_dropped(),
             table_name: node.name().to_owned(),
             columns,
             schema,
-            is_local: true,
         })
     }
 
@@ -714,7 +669,7 @@ impl ControllerInner {
         total_evicted
     }
 
-    pub fn create_universe(&mut self, context: HashMap<String, DataType>) {
+    pub fn create_universe(&mut self, context: HashMap<String, DataType>) -> Result<(), String> {
         let log = self.log.clone();
         let mut r = self.recipe.clone();
         let groups = self.recipe.security_groups();
@@ -728,9 +683,9 @@ impl ControllerInner {
         let uid = &[uid];
         if context.get("group").is_none() {
             for g in groups {
-                let rgb: Option<RemoteGetterBuilder> = self.getter_builder(&g);
-                let mut getter = rgb.map(|rgb| rgb.build_exclusive()).unwrap();
-                let my_groups: Vec<DataType> = getter
+                let rgb: Option<ViewBuilder> = self.view_builder(&g);
+                let mut view = rgb.map(|rgb| rgb.build_exclusive().unwrap()).unwrap();
+                let my_groups: Vec<DataType> = view
                     .lookup(uid, true)
                     .unwrap()
                     .iter()
@@ -750,28 +705,29 @@ impl ControllerInner {
                 }
                 Err(e) => {
                     crit!(log, "failed to create universe: {:?}", e);
-                    Err(RpcError::Other("failed to create universe".to_owned()))
+                    Err("failed to create universe".to_owned())
                 }
             }.unwrap();
         });
 
         self.recipe = r;
+        Ok(())
     }
 
-    pub fn set_security_config(&mut self, config: (String, String)) {
+    pub fn set_security_config(&mut self, config: (String, String)) -> Result<(), String> {
         let p = config.0;
         let url = config.1;
         self.recipe.set_security_config(&p, url);
+        Ok(())
     }
 
-    fn apply_recipe(&mut self, mut new: Recipe) -> Result<ActivationResult, RpcError> {
-        let mut err = Err(RpcError::Other("".to_owned())); // <3 type inference
-        self.migrate(|mig| {
-            err = new.activate(mig, false)
-                .map_err(|e| RpcError::Other(format!("failed to activate recipe: {}", e)))
+    fn apply_recipe(&mut self, mut new: Recipe) -> Result<ActivationResult, String> {
+        let r = self.migrate(|mig| {
+            new.activate(mig)
+                .map_err(|e| format!("failed to activate recipe: {}", e))
         });
 
-        match err {
+        match r {
             Ok(ref ra) => {
                 for leaf in &ra.removed_leaves {
                     // There should be exactly one reader attached to each "leaf" node. Find it and
@@ -780,26 +736,26 @@ impl ControllerInner {
                         .neighbors_directed(*leaf, petgraph::EdgeDirection::Outgoing)
                         .collect();
                     assert_eq!(readers.len(), 1);
-                    self.remove_node(readers[0]);
+                    self.remove_node(readers[0]).unwrap();
                 }
                 self.recipe = new;
             }
             Err(ref e) => {
-                crit!(self.log, "{}", e.description());
+                crit!(self.log, "{}", e);
                 // TODO(malte): a little yucky, since we don't really need the blank recipe
                 let recipe = mem::replace(&mut self.recipe, Recipe::blank(None));
                 self.recipe = recipe.revert();
             }
         }
 
-        err
+        r
     }
 
     pub fn extend_recipe<A: Authority + 'static>(
         &mut self,
         authority: &Arc<A>,
         add_txt: String,
-    ) -> Result<ActivationResult, RpcError> {
+    ) -> Result<ActivationResult, String> {
         // needed because self.apply_recipe needs to mutate self.recipe, so can't have it borrowed
         let new = mem::replace(&mut self.recipe, Recipe::blank(None));
         match new.extend(&add_txt) {
@@ -817,9 +773,7 @@ impl ControllerInner {
                     })
                     .is_err()
                 {
-                    return Err(RpcError::Other(
-                        "Failed to persist recipe extension".to_owned(),
-                    ));
+                    return Err("Failed to persist recipe extension".to_owned());
                 }
 
                 activation_result
@@ -828,7 +782,7 @@ impl ControllerInner {
                 // need to restore the old recipe
                 crit!(self.log, "failed to extend recipe: {:?}", e);
                 self.recipe = old;
-                Err(RpcError::Other("failed to extend recipe".to_owned()))
+                Err("failed to extend recipe".to_owned())
             }
         }
     }
@@ -837,11 +791,11 @@ impl ControllerInner {
         &mut self,
         authority: &Arc<A>,
         r_txt: String,
-    ) -> Result<ActivationResult, RpcError> {
+    ) -> Result<ActivationResult, String> {
         match Recipe::from_str(&r_txt, Some(self.log.clone())) {
             Ok(r) => {
                 let old = mem::replace(&mut self.recipe, Recipe::blank(None));
-                let mut new = old.replace(r).unwrap();
+                let new = old.replace(r).unwrap();
                 let activation_result = self.apply_recipe(new);
                 if authority
                     .read_modify_write(STATE_KEY, |state: Option<ControllerState>| match state {
@@ -855,15 +809,13 @@ impl ControllerInner {
                     })
                     .is_err()
                 {
-                    return Err(RpcError::Other(
-                        "Failed to persist recipe installation".to_owned(),
-                    ));
+                    return Err("Failed to persist recipe installation".to_owned());
                 }
                 activation_result
             }
             Err(e) => {
                 crit!(self.log, "failed to parse recipe: {:?}", e);
-                Err(RpcError::Other("failed to parse recipe".to_owned()))
+                Err("failed to parse recipe".to_owned())
             }
         }
     }
@@ -872,7 +824,7 @@ impl ControllerInner {
         graphviz(&self.ingredients, &self.materializations)
     }
 
-    pub fn remove_node(&mut self, node: NodeIndex) {
+    pub fn remove_node(&mut self, node: NodeIndex) -> Result<(), String> {
         // Node must not have any children.
         assert_eq!(
             self.ingredients
@@ -922,6 +874,8 @@ impl ControllerInner {
                 .send_to_healthy(box payload::Packet::RemoveNodes { nodes }, &self.workers)
                 .unwrap();
         }
+
+        Ok(())
     }
 
     fn get_failed_nodes(&self, lost_worker: &WorkerIdentifier) -> Vec<NodeIndex> {

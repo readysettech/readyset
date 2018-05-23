@@ -104,13 +104,11 @@ impl GraphViz for MirNodeType {
             MirNodeType::Base {
                 ref column_specs,
                 ref keys,
-                transactional,
                 ..
             } => {
                 write!(
                     out,
-                    "B{} | {} | ⚷: {}",
-                    if transactional { "*" } else { "" },
+                    "B | {} | ⚷: {}",
                     column_specs
                         .into_iter()
                         .map(|&(ref cs, _)| cs.column.name.as_str())

@@ -278,10 +278,10 @@ fn check_query(
         .collect();
 
     let mut g = ControllerBuilder::default().build_local();
-    g.install_recipe(queries.join("\n")).unwrap();
+    g.install_recipe(&queries.join("\n")).unwrap();
 
     for (table_name, table) in tables.iter() {
-        let mut mutator = g.get_mutator(table_name).unwrap();
+        let mut mutator = g.table(table_name).unwrap();
         for row in table.data.as_ref().unwrap().iter() {
             assert_eq!(row.len(), table.types.len());
             let row: Vec<DataType> = row
@@ -289,13 +289,13 @@ fn check_query(
                 .enumerate()
                 .map(|(i, v)| table.types[i].make_datatype(v))
                 .collect();
-            mutator.put(row).unwrap();
+            mutator.insert(row).unwrap();
         }
     }
 
     thread::sleep(time::Duration::from_millis(300));
 
-    let mut getter = g.get_getter(query_name).unwrap();
+    let mut getter = g.view(query_name).unwrap();
 
     for (i, query_parameter) in query.values.iter().enumerate() {
         let query_param = query.types[0].make_datatype(&query_parameter[0]);

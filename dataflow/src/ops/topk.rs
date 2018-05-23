@@ -263,7 +263,6 @@ impl Ingredient for TopK {
                             }
                         }
                     }
-                    x => unreachable!("topk got base op {:?}", x),
                 }
             }
         }

@@ -1,36 +1,86 @@
 use petgraph;
 use serde::{Deserialize, Deserializer, Serialize, Serializer};
 
+use api;
 #[cfg(debug_assertions)]
 use backtrace::Backtrace;
 use channel;
-use checktable;
-use debug::{DebugEvent, DebugEventType};
 use domain;
 use node;
 use prelude::*;
-use statistics;
 
 use std::collections::{HashMap, HashSet};
 use std::fmt;
 use std::net::SocketAddr;
 use std::time;
 
-#[derive(Clone, PartialEq, Serialize, Deserialize)]
-pub struct Link {
-    pub src: LocalNodeIndex,
-    pub dst: LocalNodeIndex,
-}
+pub struct LocalBypass<T>(*mut T);
 
-impl Link {
-    pub fn new(src: LocalNodeIndex, dst: LocalNodeIndex) -> Self {
-        Link { src: src, dst: dst }
+impl<T> LocalBypass<T> {
+    pub fn make(t: Box<T>) -> Self {
+        LocalBypass(Box::into_raw(t))
+    }
+
+    pub unsafe fn deref(&self) -> &T {
+        &*self.0
+    }
+
+    pub unsafe fn take(self) -> Box<T> {
+        Box::from_raw(self.0)
     }
 }
 
-impl fmt::Debug for Link {
-    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        write!(f, "{:?} -> {:?}", self.src, self.dst)
+unsafe impl<T> Send for LocalBypass<T> {}
+impl<T> Serialize for LocalBypass<T> {
+    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: Serializer,
+    {
+        (self.0 as usize).serialize(serializer)
+    }
+}
+impl<'de, T> Deserialize<'de> for LocalBypass<T> {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: Deserializer<'de>,
+    {
+        usize::deserialize(deserializer).map(|p| LocalBypass(p as *mut T))
+    }
+}
+impl<T> Clone for LocalBypass<T> {
+    fn clone(&self) -> LocalBypass<T> {
+        panic!("LocalBypass types cannot be cloned");
+    }
+}
+
+#[derive(Serialize, Deserialize)]
+pub enum LocalOrNot<T> {
+    Local(LocalBypass<T>),
+    Not(T),
+}
+
+impl<T> LocalOrNot<T> {
+    pub fn is_local(&self) -> bool {
+        if let LocalOrNot::Local(..) = *self {
+            true
+        } else {
+            false
+        }
+    }
+
+    pub fn make(t: T, local: bool) -> Self {
+        if local {
+            LocalOrNot::Local(LocalBypass::make(Box::new(t)))
+        } else {
+            LocalOrNot::Not(t)
+        }
+    }
+
+    pub unsafe fn take(self) -> T {
+        match self {
+            LocalOrNot::Local(l) => *l.take(),
+            LocalOrNot::Not(t) => t,
+        }
     }
 }
 
@@ -82,60 +132,19 @@ pub struct SourceChannelIdentifier {
 }
 
 #[derive(Clone, Serialize, Deserialize)]
-pub enum TransactionState {
-    Committed(
-        i64,
-        petgraph::graph::NodeIndex,
-        Option<Box<HashMap<domain::Index, i64>>>,
-    ),
-    Pending(checktable::Token),
-    WillCommit,
-}
-
-#[derive(Clone, Serialize, Deserialize)]
-pub struct ReplayTransactionState {
-    pub ts: i64,
-    pub prevs: Option<Box<HashMap<domain::Index, i64>>>,
-}
-
-/// Different events that can occur as a packet is being processed.
-#[derive(Copy, Clone, Debug, Serialize, Deserialize)]
-pub enum PacketEvent {
-    /// The packet has been pulled off the input channel.
-    ExitInputChannel,
-    /// The packet has been received by some domain, and is being handled.
-    Handle,
-    /// The packet is being processed at some node.
-    Process,
-    /// The packet has reached some reader node.
-    ReachedReader,
-    /// The packet has been merged with another, and will no longer trigger events.
-    Merged(u64),
-}
-
-pub type Tracer = Option<(u64, Option<channel::TraceSender<DebugEvent>>)>;
-pub type IngressFromBase = HashMap<petgraph::graph::NodeIndex, usize>;
-pub type EgressForBase = HashMap<petgraph::graph::NodeIndex, Vec<LocalNodeIndex>>;
-
-#[derive(Clone, Serialize, Deserialize)]
 pub enum Packet {
     // Data messages
     //
+    Input {
+        inner: Input,
+        src: Option<SourceChannelIdentifier>,
+        senders: Vec<SourceChannelIdentifier>,
+    },
     /// Regular data-flow update.
     Message {
         link: Link,
         src: Option<SourceChannelIdentifier>,
         data: Records,
-        tracer: Tracer,
-        senders: Vec<SourceChannelIdentifier>,
-    },
-
-    /// Transactional data-flow update.
-    Transaction {
-        link: Link,
-        src: Option<SourceChannelIdentifier>,
-        data: Records,
-        state: TransactionState,
         tracer: Tracer,
         senders: Vec<SourceChannelIdentifier>,
     },
@@ -146,7 +155,6 @@ pub enum Packet {
         tag: Tag,
         data: Records,
         context: ReplayPieceContext,
-        transaction_state: Option<ReplayTransactionState>,
     },
 
     /// Trigger an eviction from the target node.
@@ -269,31 +277,6 @@ pub enum Packet {
     /// A packet used solely to drive the event loop forward.
     Spin,
 
-    // Transaction time messages
-    //
-    /// Instruct domain to flush pending transactions and notify upon completion. `prev_ts` is the
-    /// timestamp of the last transaction sent to the domain prior to at.
-    ///
-    /// This allows a migration to ensure all transactions happen strictly *before* or *after* a
-    /// migration in timestamp order.
-    StartMigration {
-        at: i64,
-        prev_ts: i64,
-    },
-
-    /// Notify a domain about a completion timestamp for an ongoing migration.
-    ///
-    /// Once this message is received, the domain may continue processing transactions with
-    /// timestamps following the given one.
-    ///
-    /// The update also includes the new ingress_from_base counts and egress_from_base map the
-    /// domain should use going forward.
-    CompleteMigration {
-        at: i64,
-        ingress_from_base: IngressFromBase,
-        egress_for_base: EgressForBase,
-    },
-
     /// Request that a domain send usage statistics on the control reply channel.
     /// Argument specifies if we wish to get the full state size or just the partial nodes.
     GetStatistics,
@@ -312,8 +295,11 @@ pub enum Packet {
 impl Packet {
     pub fn link(&self) -> &Link {
         match *self {
+            Packet::Input {
+                inner: Input { ref link, .. },
+                ..
+            } => link,
             Packet::Message { ref link, .. } => link,
-            Packet::Transaction { ref link, .. } => link,
             Packet::ReplayPiece { ref link, .. } => link,
             _ => unreachable!(),
         }
@@ -322,7 +308,6 @@ impl Packet {
     pub fn link_mut(&mut self) -> &mut Link {
         match *self {
             Packet::Message { ref mut link, .. } => link,
-            Packet::Transaction { ref mut link, .. } => link,
             Packet::ReplayPiece { ref mut link, .. } => link,
             Packet::EvictKeys { ref mut link, .. } => link,
             _ => unreachable!(),
@@ -332,7 +317,6 @@ impl Packet {
     pub fn is_empty(&self) -> bool {
         match *self {
             Packet::Message { ref data, .. } => data.is_empty(),
-            Packet::Transaction { ref data, .. } => data.is_empty(),
             Packet::ReplayPiece { ref data, .. } => data.is_empty(),
             _ => unreachable!(),
         }
@@ -343,9 +327,7 @@ impl Packet {
         F: FnOnce(&mut Records),
     {
         match *self {
-            Packet::Message { ref mut data, .. }
-            | Packet::Transaction { ref mut data, .. }
-            | Packet::ReplayPiece { ref mut data, .. } => {
+            Packet::Message { ref mut data, .. } | Packet::ReplayPiece { ref mut data, .. } => {
                 map(data);
             }
             _ => {
@@ -357,7 +339,6 @@ impl Packet {
     pub fn is_regular(&self) -> bool {
         match *self {
             Packet::Message { .. } => true,
-            Packet::Transaction { .. } => true,
             _ => false,
         }
     }
@@ -373,7 +354,6 @@ impl Packet {
     pub fn data(&self) -> &Records {
         match *self {
             Packet::Message { ref data, .. } => data,
-            Packet::Transaction { ref data, .. } => data,
             Packet::ReplayPiece { ref data, .. } => data,
             _ => unreachable!(),
         }
@@ -383,7 +363,6 @@ impl Packet {
         use std::mem;
         let inner = match *self {
             Packet::Message { ref mut data, .. } => data,
-            Packet::Transaction { ref mut data, .. } => data,
             Packet::ReplayPiece { ref mut data, .. } => data,
             _ => unreachable!(),
         };
@@ -394,7 +373,6 @@ impl Packet {
         use std::mem;
         let inner = match *self {
             Packet::Message { ref mut data, .. } => data,
-            Packet::Transaction { ref mut data, .. } => data,
             Packet::ReplayPiece { ref mut data, .. } => data,
             _ => unreachable!(),
         };
@@ -416,33 +394,16 @@ impl Packet {
                 tracer: tracer.clone(),
                 senders: senders.clone(),
             },
-            Packet::Transaction {
-                ref link,
-                src: _,
-                ref data,
-                ref state,
-                ref tracer,
-                ref senders,
-            } => Packet::Transaction {
-                link: link.clone(),
-                src: None,
-                data: data.clone(),
-                state: state.clone(),
-                tracer: tracer.clone(),
-                senders: senders.clone(),
-            },
             Packet::ReplayPiece {
                 ref link,
                 ref tag,
                 ref data,
                 ref context,
-                ref transaction_state,
             } => Packet::ReplayPiece {
                 link: link.clone(),
                 tag: tag.clone(),
                 data: data.clone(),
                 context: context.clone(),
-                transaction_state: transaction_state.clone(),
             },
             _ => unreachable!(),
         }
@@ -453,15 +414,12 @@ impl Packet {
             Packet::Message {
                 tracer: Some((tag, Some(ref sender))),
                 ..
-            }
-            | Packet::Transaction {
-                tracer: Some((tag, Some(ref sender))),
-                ..
             } => {
+                use api::debug::trace::{Event, EventType};
                 sender
-                    .send(DebugEvent {
+                    .send(Event {
                         instant: time::Instant::now(),
-                        event: DebugEventType::PacketEvent(event, tag),
+                        event: EventType::PacketEvent(event, tag),
                     })
                     .unwrap();
             }
@@ -471,9 +429,7 @@ impl Packet {
 
     pub fn tracer(&mut self) -> Option<&mut Tracer> {
         match *self {
-            Packet::Message { ref mut tracer, .. } | Packet::Transaction { ref mut tracer, .. } => {
-                Some(tracer)
-            }
+            Packet::Message { ref mut tracer, .. } => Some(tracer),
             _ => None,
         }
     }
@@ -501,19 +457,6 @@ impl fmt::Debug for Packet {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         match *self {
             Packet::Message { ref link, .. } => write!(f, "Packet::Message({:?})", link),
-            Packet::Transaction {
-                ref link,
-                ref state,
-                ..
-            } => match *state {
-                TransactionState::Committed(ts, ..) => {
-                    write!(f, "Packet::Transaction({:?}, {})", link, ts)
-                }
-                TransactionState::Pending(..) => {
-                    write!(f, "Packet::Transaction({:?}, pending)", link)
-                }
-                TransactionState::WillCommit => write!(f, "Packet::Transaction({:?}, ?)", link),
-            },
             Packet::ReplayPiece {
                 ref link,
                 ref tag,
@@ -527,10 +470,8 @@ impl fmt::Debug for Packet {
                 data.len()
             ),
             Packet::Local(ref lp) => {
-                use std::mem;
-                let lp = unsafe { Box::from_raw(lp.0) };
+                let lp = unsafe { lp.deref() };
                 let s = write!(f, "local {:?}", lp)?;
-                mem::forget(lp);
                 Ok(s)
             }
             ref p => {
@@ -550,8 +491,8 @@ pub enum ControlReplyPacket {
     /// (number of rows, size in bytes)
     StateSize(usize, u64),
     Statistics(
-        statistics::DomainStats,
-        HashMap<petgraph::graph::NodeIndex, statistics::NodeStats>,
+        api::debug::stats::DomainStats,
+        HashMap<petgraph::graph::NodeIndex, api::debug::stats::NodeStats>,
     ),
     Booted(usize, SocketAddr),
 }
@@ -565,40 +506,5 @@ impl ControlReplyPacket {
     #[cfg(not(debug_assertions))]
     pub fn ack() -> ControlReplyPacket {
         ControlReplyPacket::Ack(())
-    }
-}
-
-pub struct LocalBypass<T>(*mut T);
-
-impl<T> LocalBypass<T> {
-    pub fn make(t: Box<T>) -> Self {
-        LocalBypass(Box::into_raw(t))
-    }
-
-    pub unsafe fn take(self) -> Box<T> {
-        Box::from_raw(self.0)
-    }
-}
-
-unsafe impl<T> Send for LocalBypass<T> {}
-impl<T> Serialize for LocalBypass<T> {
-    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
-    where
-        S: Serializer,
-    {
-        (self.0 as usize).serialize(serializer)
-    }
-}
-impl<'de, T> Deserialize<'de> for LocalBypass<T> {
-    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
-    where
-        D: Deserializer<'de>,
-    {
-        usize::deserialize(deserializer).map(|p| LocalBypass(p as *mut T))
-    }
-}
-impl<T> Clone for LocalBypass<T> {
-    fn clone(&self) -> LocalBypass<T> {
-        panic!("LocalPacket cannot be cloned");
     }
 }

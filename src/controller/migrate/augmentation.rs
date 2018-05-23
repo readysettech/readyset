@@ -20,20 +20,12 @@ pub fn inform(
     log: &Logger,
     controller: &mut controller::ControllerInner,
     nodes: HashMap<DomainIndex, Vec<(NodeIndex, bool)>>,
-    ts: i64,
-    prevs: Box<HashMap<DomainIndex, i64>>,
 ) {
     let source = controller.source;
     for (domain, nodes) in nodes {
         let log = log.new(o!("domain" => domain.index()));
         let ctx = controller.domains.get_mut(&domain).unwrap();
 
-        trace!(log, "informing domain of migration start");
-        let _ = ctx.send(box Packet::StartMigration {
-            at: ts,
-            prev_ts: prevs[&domain],
-        });
-        let _ = ctx.wait_for_ack();
         trace!(log, "domain ready for migration");
 
         let old_nodes: HashSet<_> = nodes

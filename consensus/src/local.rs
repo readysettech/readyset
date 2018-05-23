@@ -20,6 +20,12 @@ pub struct LocalAuthority {
     cv: Condvar,
 }
 
+impl Default for LocalAuthority {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl LocalAuthority {
     pub fn new() -> Self {
         Self {
