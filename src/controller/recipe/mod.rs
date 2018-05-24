@@ -22,7 +22,7 @@ type QueryID = u64;
 /// Represents a Soup recipe.
 #[derive(Clone, Debug)]
 pub struct Recipe {
-    /// SQL queries represented in the recipe. Value tuple is (name, query).
+    /// SQL queries represented in the recipe. Value tuple is (name, query, public).
     expressions: HashMap<QueryID, (Option<String>, SqlQuery, bool)>,
     /// Addition order for the recipe expressions
     expression_order: Vec<QueryID>,
