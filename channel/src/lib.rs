@@ -14,7 +14,9 @@ extern crate net2;
 extern crate serde;
 #[macro_use]
 extern crate serde_derive;
+extern crate async_bincode;
 extern crate throttled_reader;
+extern crate tokio;
 
 use std::collections::HashMap;
 use std::hash::Hash;

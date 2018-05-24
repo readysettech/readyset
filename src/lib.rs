@@ -322,12 +322,11 @@ extern crate bincode;
 extern crate channel;
 extern crate consensus;
 extern crate dataflow;
+#[macro_use]
 extern crate failure;
-extern crate fnv;
 extern crate futures;
 extern crate hyper;
 extern crate mio;
-extern crate mio_pool;
 extern crate mir;
 #[macro_use]
 extern crate nom;
@@ -337,17 +336,15 @@ extern crate rand;
 #[macro_use]
 extern crate serde_derive;
 extern crate serde_json;
-extern crate slab;
 #[macro_use]
 extern crate slog;
+extern crate async_bincode;
 extern crate slog_term;
-extern crate timer_heap;
 extern crate tokio;
-extern crate vec_map;
+extern crate tokio_threadpool;
 
 mod controller;
 mod coordination;
-mod worker;
 
 #[cfg(test)]
 mod integration;
@@ -361,7 +358,7 @@ pub use dataflow::{DurabilityMode, PersistenceParameters};
 pub use api::*;
 
 pub use controller::sql::reuse::ReuseConfigType;
-pub use controller::{Controller, ControllerBuilder, LocalControllerHandle};
+pub use controller::{ControllerBuilder, LocalControllerHandle};
 
 /// Just give me a damn terminal logger
 pub fn logger_pls() -> slog::Logger {

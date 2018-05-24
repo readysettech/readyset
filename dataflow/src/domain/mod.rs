@@ -122,6 +122,8 @@ pub struct DomainBuilder {
     pub config: Config,
 }
 
+unsafe impl Send for DomainBuilder {}
+
 impl DomainBuilder {
     /// Starts up the domain represented by this `DomainBuilder`.
     pub fn build(
@@ -1303,35 +1305,7 @@ impl Domain {
                             .unwrap();
                     }
                     Packet::UpdateStateSize => {
-                        let total: u64 = self
-                            .nodes
-                            .values()
-                            .map(|nd| {
-                                let ref n = *nd.borrow();
-                                let local_index: LocalNodeIndex = *n.local_addr();
-
-                                if n.is_reader() {
-                                    // We are a reader, which has its own kind of state
-                                    let mut size = 0;
-                                    n.with_reader(|r| {
-                                        if r.is_partial() {
-                                            size = r.state_size().unwrap_or(0)
-                                        }
-                                    }).unwrap();
-                                    size
-                                } else {
-                                    // Not a reader, state is with domain
-                                    self.state
-                                        .get(&local_index)
-                                        .filter(|state| state.is_partial())
-                                        .map(|state| state.deep_size_of())
-                                        .unwrap_or(0)
-                                }
-                            })
-                            .sum();
-
-                        self.state_size.store(total as usize, Ordering::Relaxed);
-                        // no response sent, as worker will read the atomic
+                        self.update_state_sizes();
                     }
                     Packet::Quit => unreachable!("Quit messages are handled by event loop"),
                     Packet::Spin => {
@@ -2388,6 +2362,38 @@ impl Domain {
             .send(ControlReplyPacket::Booted(self.shard.unwrap_or(0), addr))
             .unwrap();
         self.wait_time.start();
+    }
+
+    pub fn update_state_sizes(&mut self) {
+        let total: u64 = self
+            .nodes
+            .values()
+            .map(|nd| {
+                let ref n = *nd.borrow();
+                let local_index: LocalNodeIndex = *n.local_addr();
+
+                if n.is_reader() {
+                    // We are a reader, which has its own kind of state
+                    let mut size = 0;
+                    n.with_reader(|r| {
+                        if r.is_partial() {
+                            size = r.state_size().unwrap_or(0)
+                        }
+                    }).unwrap();
+                    size
+                } else {
+                    // Not a reader, state is with domain
+                    self.state
+                        .get(&local_index)
+                        .filter(|state| state.is_partial())
+                        .map(|state| state.deep_size_of())
+                        .unwrap_or(0)
+                }
+            })
+            .sum();
+
+        self.state_size.store(total as usize, Ordering::Relaxed);
+        // no response sent, as worker will read the atomic
     }
 
     pub fn on_event(

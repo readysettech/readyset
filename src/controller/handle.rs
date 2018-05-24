@@ -3,18 +3,18 @@ use dataflow::prelude::*;
 
 use std::collections::HashMap;
 use std::ops::{Deref, DerefMut};
-use std::sync::mpsc::Sender;
 use std::sync::Arc;
-use std::thread::JoinHandle;
 
 use api::prelude::*;
-use controller::{ControlEvent, WorkerEvent};
+use controller::Event;
+use futures::{self, Future, Sink};
+use tokio;
 
 /// A handle to a controller that is running in the same process as this one.
 pub struct LocalControllerHandle<A: Authority> {
     c: ControllerHandle<A>,
-    controller: Option<(Sender<ControlEvent>, JoinHandle<()>)>,
-    worker: Option<(Sender<WorkerEvent>, JoinHandle<()>)>,
+    event_tx: futures::sync::mpsc::UnboundedSender<Event>,
+    runtime: tokio::runtime::Runtime,
 }
 
 impl<A: Authority> Deref for LocalControllerHandle<A> {
@@ -33,27 +33,21 @@ impl<A: Authority> DerefMut for LocalControllerHandle<A> {
 impl<A: Authority> Drop for LocalControllerHandle<A> {
     fn drop(&mut self) {
         self.c.shutdown();
-        if let Some((sender, join_handle)) = self.controller.take() {
-            let _ = sender.send(ControlEvent::Shutdown);
-            let _ = join_handle.join();
-        }
-        if let Some((sender, join_handle)) = self.worker.take() {
-            let _ = sender.send(WorkerEvent::Shutdown);
-            let _ = join_handle.join();
-        }
+        self.event_tx.send(Event::Shutdown);
+        self.wait();
     }
 }
 
 impl<A: Authority> LocalControllerHandle<A> {
     pub(super) fn new(
         authority: Arc<A>,
-        controller: Option<(Sender<ControlEvent>, JoinHandle<()>)>,
-        worker: Option<(Sender<WorkerEvent>, JoinHandle<()>)>,
+        event_tx: futures::sync::mpsc::UnboundedSender<Event>,
+        rt: tokio::runtime::Runtime,
     ) -> Self {
         LocalControllerHandle {
             c: ControllerHandle::make(authority).unwrap(),
-            controller,
-            worker,
+            event_tx,
+            runtime: rt,
         }
     }
 
@@ -77,13 +71,7 @@ impl<A: Authority> LocalControllerHandle<A> {
             })
                 as Box<for<'a, 's> FnBox(&'a mut Migration<'s>) + Send + 'static>;
 
-            self.controller
-                .as_mut()
-                .unwrap()
-                .0
-                .send(ControlEvent::ManualMigration(b))
-                .unwrap();
-
+            self.event_tx.send(Event::ManualMigration(b)).unwrap();
             match rx.recv() {
                 Ok(ret) => return ret,
                 Err(_) => ::std::thread::sleep(::std::time::Duration::from_millis(100)),
@@ -128,8 +116,7 @@ impl<A: Authority> LocalControllerHandle<A> {
 
     /// Wait for associated local instance to exit (presumably forever).
     pub fn wait(mut self) {
-        self.controller.take().unwrap().1.join().unwrap();
-        self.worker.take().unwrap().1.join().unwrap();
+        self.runtime.shutdown_on_idle().wait().unwrap();
     }
 }
 

@@ -5,6 +5,7 @@ use std::net::IpAddr;
 use std::sync::Arc;
 use std::time;
 
+use failure;
 use slog;
 
 use controller::sql::reuse::ReuseConfigType;
@@ -106,7 +107,10 @@ impl ControllerBuilder {
     }
 
     /// Build a controller and return a handle to it.
-    pub fn build<A: Authority + 'static>(self, authority: Arc<A>) -> LocalControllerHandle<A> {
+    pub fn build<A: Authority + 'static>(
+        self,
+        authority: Arc<A>,
+    ) -> Result<LocalControllerHandle<A>, failure::Error> {
         controller::start_instance(
             authority,
             self.listen_addr,
@@ -120,7 +124,7 @@ impl ControllerBuilder {
     }
 
     /// Build a local controller, and return a ControllerHandle to provide access to it.
-    pub fn build_local(self) -> LocalControllerHandle<LocalAuthority> {
+    pub fn build_local(self) -> Result<LocalControllerHandle<LocalAuthority>, failure::Error> {
         self.build(Arc::new(LocalAuthority::new()))
     }
 }
