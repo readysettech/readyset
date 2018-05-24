@@ -308,7 +308,7 @@ impl PersistentState {
         };
 
         let mut db = DB::open_cf_descriptors(&opts, &full_name, make_cfs());
-        for _ in 0..10 {
+        for _ in 0..100 {
             if db.is_ok() {
                 break;
             }
