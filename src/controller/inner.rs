@@ -275,6 +275,26 @@ impl ControllerInner {
         let affected_queries = self.recipe.queries_for_nodes(affected_nodes);
         for q in affected_queries {
             debug!(self.log, "query {} affected by failure", q);
+            let mut original = self.recipe.clone();
+            let mut recovery = self.recipe.clone();
+
+            // activate recipe
+            let r = self.migrate(|mig| {
+                // remove from recipe
+                assert!(recovery.remove_query(&q, mig));
+
+                recovery
+                    .activate(mig)
+                    .map_err(|e| format!("failed to activate recovery recipe: {}", e))
+            });
+
+            // back to original recipe, which should add the query again
+            let r = self.migrate(|mig| {
+                original
+                    .activate(mig)
+                    .map_err(|e| format!("failed to activate original recipe: {}", e))
+            });
+
         }
     }
 

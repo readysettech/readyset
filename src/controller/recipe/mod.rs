@@ -556,6 +556,12 @@ impl Recipe {
         self.prior.as_ref()
     }
 
+    pub(crate) fn remove_query(&mut self, qname: &str, mig: &Migration) -> bool {
+        let qid = self.aliases.get(qname).expect("query to remove must be named");
+        self.inc.as_mut().unwrap().remove_query(qname, mig);
+        self.expressions.remove(qid).is_some()
+    }
+
     /// Replace this recipe with a new one, retaining queries that exist in both. Any queries only
     /// contained in `new` (but not in `self`) will be added; any contained in `self`, but not in
     /// `new` will be removed.
