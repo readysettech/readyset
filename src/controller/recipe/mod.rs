@@ -632,7 +632,7 @@ impl Recipe {
 
         // remove from recipe
         for q in affected_queries {
-            debug!(self.log, "query {} affected by failure", q);
+            warn!(self.log, "query {} affected by failure", q);
             if !recovery.remove_query(&q) {
                 warn!(self.log, "Call to Recipe::remove_query() failed for {}", q);
             }
