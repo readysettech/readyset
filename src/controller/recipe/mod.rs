@@ -11,7 +11,7 @@ use nom_sql::parser as sql_parser;
 use nom_sql::SqlQuery;
 
 use nom::{self, is_alphanumeric, multispace};
-use nom_sql::{CreateTableStatement, Table};
+use nom_sql::CreateTableStatement;
 use slog;
 use std::collections::HashMap;
 use std::str;

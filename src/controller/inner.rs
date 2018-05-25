@@ -238,7 +238,7 @@ impl ControllerInner {
 
         // check if there are any newly failed workers
         if self.last_checked_workers.elapsed() > self.healthcheck_every {
-            for (addr, ws) in self.workers.iter() {
+            for (_addr, ws) in self.workers.iter() {
                 if ws.healthy && ws.last_heartbeat.elapsed() > self.heartbeat_every * 4 {
                     any_failed = true;
                 }
@@ -276,7 +276,7 @@ impl ControllerInner {
         let (mut recovery, mut original) = self.recipe.make_recovery(affected_queries);
 
         // activate recipe
-        let r = self.migrate(|mig| {
+        let _r = self.migrate(|mig| {
             recovery
                 .activate(mig)
                 .map_err(|e| format!("failed to activate recovery recipe: {}", e))
@@ -286,7 +286,7 @@ impl ControllerInner {
         original.inc = recovery.inc.clone();
 
         // back to original recipe, which should add the query again
-        let r = self.migrate(|mig| {
+        let _r = self.migrate(|mig| {
             original
                 .activate(mig)
                 .map_err(|e| format!("failed to activate original recipe: {}", e))
