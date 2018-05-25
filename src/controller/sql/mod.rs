@@ -47,6 +47,7 @@ pub struct SqlIncorporator {
 
     named_queries: HashMap<String, u64>,
     query_graphs: HashMap<u64, QueryGraph>,
+    base_mir_queries: HashMap<String, MirQuery>,
     mir_queries: HashMap<(u64, UniverseId), MirQuery>,
     num_queries: usize,
 
@@ -71,6 +72,7 @@ impl Default for SqlIncorporator {
 
             named_queries: HashMap::default(),
             query_graphs: HashMap::default(),
+            base_mir_queries: HashMap::default(),
             mir_queries: HashMap::default(),
             num_queries: 0,
 
@@ -596,7 +598,10 @@ impl SqlIncorporator {
                 "Attempted to remove non-existant base node {} from SqlIncorporator", name
             );
         }
-        self.mir_converter.remove_base(name)
+
+        let mir = self.base_mir_queries.get(name)
+                                       .expect(&format!("tried to remove unknown base {}", name));
+        self.mir_converter.remove_base(name, mir)
     }
 
     fn register_query(
@@ -629,7 +634,9 @@ impl SqlIncorporator {
                 self.mir_queries.insert((qg_hash, universe), mir.clone());
                 self.named_queries.insert(query_name.to_owned(), qg_hash);
             }
-            None => (),
+            None => {
+                self.base_mir_queries.insert(query_name.to_owned(), mir.clone());
+            },
         }
     }
 
