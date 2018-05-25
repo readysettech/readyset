@@ -66,7 +66,7 @@ default-features = false
 backtrace = { version = "0.3.2", features = ["serialize-serde"] }
 toml = "0.4.1"
 diff = "0.1.10"
-glob = "0.2.11"
+tempfile = "3.0.2"
 
 [profile.release]
 debug=true

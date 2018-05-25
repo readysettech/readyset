@@ -1,4 +1,4 @@
-extern crate glob;
+extern crate tempfile;
 
 use basics::{DataType, DurabilityMode, PersistenceParameters};
 use consensus::LocalAuthority;
@@ -15,43 +15,10 @@ use dataflow::ops::union::Union;
 
 use std::collections::HashMap;
 use std::sync::Arc;
-use std::time::{Duration, SystemTime, UNIX_EPOCH};
-use std::{env, fs, thread};
+use std::time::Duration;
+use std::{env, thread};
 
 const DEFAULT_SETTLE_TIME_MS: u64 = 200;
-
-// Suffixes the given log prefix with a timestamp, ensuring that
-// subsequent test runs do not reuse log files in the case of failures.
-fn get_log_name(prefix: &str) -> String {
-    let current_time = SystemTime::now().duration_since(UNIX_EPOCH).unwrap();
-    format!(
-        "/tmp/{}.{}.{}",
-        prefix,
-        current_time.as_secs(),
-        current_time.subsec_nanos()
-    )
-}
-
-// Ensures correct handling of log file names, by deleting used log files in Drop.
-struct LogName {
-    name: String,
-}
-
-impl LogName {
-    fn new(prefix: &str) -> LogName {
-        let name = get_log_name(prefix);
-        LogName { name }
-    }
-}
-
-// Removes persistent files created by Soup during test runs.
-impl Drop for LogName {
-    fn drop(&mut self) {
-        for db_path in glob::glob(&format!("./{}-*.db", self.name)).unwrap() {
-            fs::remove_dir_all(db_path.unwrap()).unwrap();
-        }
-    }
-}
 
 // PersistenceParameters with a log_name on the form of `prefix` + timestamp,
 // avoiding collisions between separate test runs (in case an earlier panic causes clean-up to
@@ -59,12 +26,11 @@ impl Drop for LogName {
 fn get_persistence_params(prefix: &str) -> PersistenceParameters {
     let mut params = PersistenceParameters::default();
     params.mode = DurabilityMode::DeleteOnExit;
-    params.log_prefix = get_log_name(prefix);
+    params.log_prefix = String::from(prefix);
     params
 }
 
-// Builds a local controller with the given log prefix
-// (suffixed with a timestamp, see `get_log_name`).
+// Builds a local controller with the given log prefix.
 pub fn build_local(prefix: &str) -> LocalControllerHandle<LocalAuthority> {
     let mut builder = ControllerBuilder::default();
     builder.set_persistence(get_persistence_params(prefix));
@@ -94,7 +60,7 @@ fn it_works_basic() {
         DurabilityMode::DeleteOnExit,
         128,
         Duration::from_millis(1),
-        Some(get_log_name("it_works_basic")),
+        Some(String::from("it_works_basic")),
         1,
     ));
     let mut g = b.build_local();
@@ -732,12 +698,13 @@ fn it_works_with_arithmetic_aliases() {
 #[test]
 fn it_recovers_persisted_bases() {
     let authority = Arc::new(LocalAuthority::new());
-    let log_name = LogName::new("it_recovers_persisted_bases");
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("it_recovers_persisted_bases");
     let persistence_params = PersistenceParameters::new(
         DurabilityMode::Permanent,
         128,
         Duration::from_millis(1),
-        Some(log_name.name.clone()),
+        Some(path.to_string_lossy().into()),
         1,
     );
 
@@ -828,13 +795,16 @@ fn mutator_churn() {
 #[test]
 fn it_recovers_persisted_bases_w_multiple_nodes() {
     let authority = Arc::new(LocalAuthority::new());
-    let log_name = LogName::new("it_recovers_persisted_bases_w_multiple_nodes");
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir
+        .path()
+        .join("it_recovers_persisted_bases_w_multiple_nodes");
     let tables = vec!["A", "B", "C"];
     let persistence_parameters = PersistenceParameters::new(
         DurabilityMode::Permanent,
         128,
         Duration::from_millis(1),
-        Some(log_name.name.clone()),
+        Some(path.to_string_lossy().into()),
         1,
     );
 
@@ -2106,7 +2076,7 @@ fn node_removal() {
         DurabilityMode::DeleteOnExit,
         128,
         Duration::from_millis(1),
-        Some(get_log_name("domain_removal")),
+        Some(String::from("domain_removal")),
         1,
     ));
     let mut g = b.build_local();

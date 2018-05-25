@@ -14,6 +14,7 @@ extern crate rocksdb;
 extern crate serde;
 #[macro_use]
 extern crate serde_derive;
+extern crate tempfile;
 
 pub mod addressing;
 pub mod data;

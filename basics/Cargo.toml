@@ -11,6 +11,7 @@ itertools = "0.7.2"
 serde_derive = "1.0.8"
 rahashmap = "0.2.7"
 rand = "0.4.2"
+tempfile = "3.0.2"
 
 # need features
 chrono = { version = "0.4.0", features = ["serde"] }
