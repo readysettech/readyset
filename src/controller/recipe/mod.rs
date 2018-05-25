@@ -557,9 +557,15 @@ impl Recipe {
     }
 
     pub(crate) fn remove_query(&mut self, qname: &str, mig: &Migration) -> bool {
-        let qid = self.aliases.get(qname).expect("query to remove must be named");
+        println!("expressions: {:?}", self.expressions);
+        let qid = if self.aliases.contains_key(qname) {
+            *self.aliases.get(qname).unwrap()
+        } else {
+            println!("looking for expression {}", qname);
+            *self.expressions.iter().find(|(k, (n, _, _))| n.is_some() && n.as_ref().unwrap() == qname).unwrap().0
+        };
         self.inc.as_mut().unwrap().remove_query(qname, mig);
-        self.expressions.remove(qid).is_some() && self.expression_order.remove_item(qid).is_some()
+        self.expressions.remove(&qid).is_some() && self.expression_order.remove_item(&qid).is_some()
     }
 
     /// Replace this recipe with a new one, retaining queries that exist in both. Any queries only
