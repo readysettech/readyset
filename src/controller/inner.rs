@@ -276,7 +276,9 @@ impl ControllerInner {
         for q in affected_queries {
             debug!(self.log, "query {} affected by failure", q);
             let mut original = self.recipe.clone();
-            let mut recovery = self.recipe.clone();
+            original.next();
+            let mut recovery = original.clone();
+            recovery.next();
 
             // activate recipe
             let r = self.migrate(|mig| {
@@ -294,7 +296,6 @@ impl ControllerInner {
                     .activate(mig)
                     .map_err(|e| format!("failed to activate original recipe: {}", e))
             });
-
         }
     }
 
@@ -581,11 +582,9 @@ impl ControllerInner {
             })
             .collect();
 
-        let base_operator = node
-            .get_base()
+        let base_operator = node.get_base()
             .expect("asked to get table for non-base node");
-        let columns: Vec<String> = node
-            .fields()
+        let columns: Vec<String> = node.fields()
             .iter()
             .enumerate()
             .filter(|&(n, _)| !base_operator.get_dropped().contains_key(n))
@@ -705,8 +704,7 @@ impl ControllerInner {
             for g in groups {
                 let rgb: Option<ViewBuilder> = self.view_builder(&g);
                 let mut view = rgb.map(|rgb| rgb.build_exclusive().unwrap()).unwrap();
-                let my_groups: Vec<DataType> = view
-                    .lookup(uid, true)
+                let my_groups: Vec<DataType> = view.lookup(uid, true)
                     .unwrap()
                     .iter()
                     .map(|v| v[1].clone())

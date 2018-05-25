@@ -2,9 +2,17 @@ extern crate distributary;
 
 use distributary::{ControllerHandle, ZookeeperAuthority};
 
-use std::io::Write;
+use std::collections::BTreeMap;
 use std::thread;
-use std::time::{Duration, SystemTime, UNIX_EPOCH};
+use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
+
+const NANOS_PER_SEC: u64 = 1_000_000_000;
+macro_rules! dur_to_ns {
+    ($d:expr) => {{
+        let d = $d;
+        d.as_secs() * NANOS_PER_SEC + d.subsec_nanos() as u64
+    }};
+}
 
 fn main() {
     // inline recipe definition
@@ -18,13 +26,13 @@ fn main() {
                 FROM Article, VoteCount \
                 WHERE Article.aid = VoteCount.aid AND Article.aid = ?;";
 
-    let persistence_params = distributary::PersistenceParameters::new(
-        distributary::DurabilityMode::Permanent,
-        512,
-        Duration::from_millis(1),
-        Some(String::from("example")),
-        1,
-    );
+    // let persistence_params = distributary::PersistenceParameters::new(
+    //     distributary::DurabilityMode::Permanent,
+    //     512,
+    //     Duration::from_millis(1),
+    //     Some(String::from("example")),
+    //     1,
+    // );
 
     let log = distributary::logger_pls();
 
@@ -33,7 +41,7 @@ fn main() {
     auth.log_with(log.clone());
 
     let mut blender = ControllerHandle::new(auth).unwrap();
-    blender.install_recipe(sql1).unwrap();
+    blender.extend_recipe(sql1).unwrap();
     blender.extend_recipe(sql2).unwrap();
     blender.extend_recipe(sql3).unwrap();
     blender.extend_recipe(sql4).unwrap();
@@ -42,13 +50,8 @@ fn main() {
     let get_view = |b: &mut ControllerHandle<ZookeeperAuthority>, n| loop {
         match b.view(n) {
             Ok(v) => return v,
-            Err(e) => {
-                print!("x");
-                ::std::io::stdout()
-                    .flush()
-                    .ok()
-                    .expect("Could not flush stdout");
-                thread::sleep(Duration::from_millis(500));
+            Err(_) => {
+                thread::sleep(Duration::from_millis(50));
                 let mut auth = ZookeeperAuthority::new("127.0.0.1:2181/basicdist").unwrap();
                 auth.log_with(log.clone());
                 *b = ControllerHandle::new(auth).unwrap();
@@ -59,13 +62,8 @@ fn main() {
     let get_table = |b: &mut ControllerHandle<ZookeeperAuthority>, n| loop {
         match b.table(n) {
             Ok(v) => return v,
-            Err(e) => {
-                print!("x");
-                ::std::io::stdout()
-                    .flush()
-                    .ok()
-                    .expect("Could not flush stdout");
-                thread::sleep(Duration::from_millis(500));
+            Err(_) => {
+                thread::sleep(Duration::from_millis(50));
                 let mut auth = ZookeeperAuthority::new("127.0.0.1:2181/basicdist").unwrap();
                 auth.log_with(log.clone());
                 *b = ControllerHandle::new(auth).unwrap();
@@ -90,28 +88,42 @@ fn main() {
             .unwrap();
     }
 
+    let start = Instant::now();
+
+    let mut last_print = Instant::now();
+
+    let mut times = Vec::new();
+
     loop {
-        loop {
-            // Then create a new vote:
-            print!("Casting vote...");
-            ::std::io::stdout()
-                .flush()
-                .ok()
-                .expect("Could not flush stdout");
-            let uid = SystemTime::now()
-                .duration_since(UNIX_EPOCH)
-                .unwrap()
-                .as_secs() as i64;
-            while let Err(_) = vote.insert(vec![aid.into(), uid.into()]) {
-                vote = get_table(&mut blender, "Vote");
+        let elapsed = last_print.elapsed();
+        if elapsed >= Duration::from_secs(5) {
+            last_print += elapsed;
+
+            let mut counts = BTreeMap::new();
+            for t in &times {
+                *counts.entry(t).or_insert(0) += 1;
             }
 
-            thread::sleep(Duration::from_millis(1000));
-
-            while let Err(_) = awvc.lookup(&[1.into()], false) {
-                awvc = get_view(&mut blender, "ArticleWithVoteCount");
+            for (k, c) in counts {
+                println!("{}: {}", k, c);
             }
-            println!(" Done");
+            println!("---------")
         }
+
+        let uid = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap()
+            .as_secs() as i64;
+        while let Err(_) = vote.insert(vec![aid.into(), uid.into()]) {
+            vote = get_table(&mut blender, "Vote");
+        }
+
+        times.push(start.elapsed().as_secs());
+        // thread::sleep(Duration::from_millis(1000));
+
+        // while let Err(_) = awvc.lookup(&[1.into()], false) {
+        //     awvc = get_view(&mut blender, "ArticleWithVoteCount");
+        // }
+        // println!(" Done");
     }
 }
