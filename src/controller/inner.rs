@@ -280,10 +280,13 @@ impl ControllerInner {
             recovery
                 .activate(mig)
                 .map_err(|e| format!("failed to activate recovery recipe: {}", e))
-        });
+        }).unwrap();
+
 
         original.prior = Some(Box::new(recovery.clone()));
         original.inc = recovery.inc.clone();
+
+        self.recipe = recovery;
 
         // back to original recipe, which should add the query again
         let _r = self.migrate(|mig| {
@@ -291,6 +294,8 @@ impl ControllerInner {
                 .activate(mig)
                 .map_err(|e| format!("failed to activate original recipe: {}", e))
         });
+
+        self.recipe = original;
     }
 
     fn handle_heartbeat(&mut self, msg: &CoordinationMessage) -> Result<(), io::Error> {
