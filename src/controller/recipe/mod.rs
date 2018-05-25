@@ -11,7 +11,7 @@ use nom_sql::parser as sql_parser;
 use nom_sql::SqlQuery;
 
 use nom::{self, is_alphanumeric, multispace};
-use nom_sql::CreateTableStatement;
+use nom_sql::{CreateTableStatement, Table};
 use slog;
 use std::collections::HashMap;
 use std::str;
@@ -45,10 +45,8 @@ pub struct Recipe {
 impl PartialEq for Recipe {
     /// Equality for recipes is defined in terms of all members apart from `inc`.
     fn eq(&self, other: &Recipe) -> bool {
-        self.expressions == other.expressions
-            && self.expression_order == other.expression_order
-            && self.aliases == other.aliases
-            && self.version == other.version
+        self.expressions == other.expressions && self.expression_order == other.expression_order
+            && self.aliases == other.aliases && self.version == other.version
             && self.prior == other.prior
     }
 }
@@ -212,8 +210,7 @@ impl Recipe {
         let mut aliases = HashMap::default();
         let mut expression_order = Vec::new();
         let mut duplicates = 0;
-        let expressions = qs
-            .into_iter()
+        let expressions = qs.into_iter()
             .map(|(n, q, is_leaf)| {
                 let qid = hash_query(&q);
                 if !expression_order.contains(&qid) {
@@ -304,8 +301,7 @@ impl Recipe {
 
             let is_leaf = if group.is_some() { false } else { is_leaf };
 
-            let qfp = self
-                .inc
+            let qfp = self.inc
                 .as_mut()
                 .unwrap()
                 .add_parsed_query(q, new_name, is_leaf, mig)?;
@@ -398,8 +394,7 @@ impl Recipe {
             let (n, q, is_leaf) = self.expressions[&qid].clone();
 
             // add the query
-            let qfp = self
-                .inc
+            let qfp = self.inc
                 .as_mut()
                 .unwrap()
                 .add_parsed_query(q, n.clone(), is_leaf, mig)?;
@@ -557,12 +552,30 @@ impl Recipe {
     }
 
     pub(crate) fn remove_query(&mut self, qname: &str, mig: &Migration) -> bool {
-        println!("expressions: {:?}", self.expressions);
-        let qid = if self.aliases.contains_key(qname) {
-            *self.aliases.get(qname).unwrap()
+        let qid = self.aliases.get(qname).cloned();
+        let qid = if qid.is_some() {
+            qid.unwrap()
         } else {
-            println!("looking for expression {}", qname);
-            *self.expressions.iter().find(|(k, (n, _, _))| n.is_some() && n.as_ref().unwrap() == qname).unwrap().0
+            let qid = self.expressions
+                .iter()
+                .find(|(k, (_, q, _))| {
+                    if let SqlQuery::CreateTable(CreateTableStatement {
+                        table: Table { name, .. },
+                        ..
+                    }) = q
+                    {
+                        return name == qname;
+                    } else {
+                        return false;
+                    }
+                })
+                .map(|(k, _)| *k);
+
+            if qid.is_none() {
+                warn!(self.log, "Query {} not found in expressions", qname);
+                return true;
+            }
+            qid.unwrap()
         };
         self.inc.as_mut().unwrap().remove_query(qname, mig);
         self.expressions.remove(&qid).is_some() && self.expression_order.remove_item(&qid).is_some()

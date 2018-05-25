@@ -273,9 +273,6 @@ impl ControllerInner {
         // then, figure out which queries are affected (and thus must be removed and added again in
         // a migration)
         let affected_queries = self.recipe.queries_for_nodes(affected_nodes);
-        for q in &affected_queries {
-            debug!(self.log, "query {} affected by failure", q);
-        }
 
         let mut original = self.recipe.clone();
         original.next();
@@ -286,7 +283,10 @@ impl ControllerInner {
         let r = self.migrate(|mig| {
             // remove from recipe
             for q in affected_queries {
-                assert!(recovery.remove_query(&q, mig));
+                debug!(mig.log, "query {} affected by failure", q);
+                if !recovery.remove_query(&q, mig) {
+                    warn!(mig.log, "Call to Recipe::remove_query() failed for {}", q);
+                }
             }
             recovery
                 .activate(mig)
