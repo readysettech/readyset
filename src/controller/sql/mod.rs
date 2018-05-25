@@ -550,7 +550,7 @@ impl SqlIncorporator {
         let qg_hash = self
             .named_queries
             .remove(query_name)
-            .expect("missing query hash for named query");
+            .expect(&format!("missing query hash for named query \"{}\"", query_name));
         let mir = self.mir_queries.get(&(qg_hash, mig.universe())).unwrap();
 
         // traverse self.leaf__addresses

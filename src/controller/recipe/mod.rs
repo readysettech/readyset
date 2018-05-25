@@ -412,11 +412,19 @@ impl Recipe {
         result.removed_leaves = removed
             .iter()
             .filter_map(|qid| {
-                let (ref n, _, _) = self.prior.as_ref().unwrap().expressions[qid];
-                self.inc
-                    .as_mut()
-                    .unwrap()
-                    .remove_query(n.as_ref().unwrap(), mig)
+                let (ref n, ref q, _) = self.prior.as_ref().unwrap().expressions[qid];
+                match q {
+                    SqlQuery::CreateTable(ref ctq) => {
+                        match self.prior.as_ref().unwrap().node_addr_for(&ctq.table.name) {
+                            Ok(ni) => Some(ni),
+                            Err(e) => {
+                                println!("{:?}", e);
+                                unimplemented!()
+                            },
+                        }
+                    },
+                    _ => self.inc.as_mut().unwrap().remove_query(n.as_ref().unwrap(), mig),
+                }
             })
             .collect();
 
@@ -551,33 +559,14 @@ impl Recipe {
         self.prior.as_ref()
     }
 
-    pub(crate) fn remove_query(&mut self, qname: &str, mig: &Migration) -> bool {
+    pub(crate) fn remove_query(&mut self, qname: &str) -> bool {
         let qid = self.aliases.get(qname).cloned();
-        let qid = if qid.is_some() {
-            qid.unwrap()
-        } else {
-            let qid = self.expressions
-                .iter()
-                .find(|(k, (_, q, _))| {
-                    if let SqlQuery::CreateTable(CreateTableStatement {
-                        table: Table { name, .. },
-                        ..
-                    }) = q
-                    {
-                        return name == qname;
-                    } else {
-                        return false;
-                    }
-                })
-                .map(|(k, _)| *k);
+        if qid.is_none() {
+            warn!(self.log, "Query {} not found in expressions", qname);
+            return false;
+        }
+        let qid = qid.unwrap();
 
-            if qid.is_none() {
-                warn!(self.log, "Query {} not found in expressions", qname);
-                return true;
-            }
-            qid.unwrap()
-        };
-        self.inc.as_mut().unwrap().remove_query(qname, mig);
         self.expressions.remove(&qid).is_some() && self.expression_order.remove_item(&qid).is_some()
     }
 
@@ -631,6 +620,30 @@ impl Recipe {
                     .get_queries_for_node(*ni)
             })
             .collect()
+    }
+
+    pub(crate) fn make_recovery(&self, mut affected_queries: Vec<String>) -> (Recipe, Recipe) {
+        affected_queries.sort();
+        affected_queries.dedup();
+
+        let mut recovery = self.clone();
+        recovery.prior = Some(Box::new(self.clone()));
+        recovery.next();
+
+        // remove from recipe
+        for q in affected_queries {
+            debug!(self.log, "query {} affected by failure", q);
+            if !recovery.remove_query(&q) {
+                warn!(self.log, "Call to Recipe::remove_query() failed for {}", q);
+            }
+        }
+
+        let mut original = self.clone();
+        original.prior = Some(Box::new(recovery.clone()));
+        original.next();
+        original.next();
+
+        (recovery, original)
     }
 }
 

@@ -273,21 +273,10 @@ impl ControllerInner {
         // then, figure out which queries are affected (and thus must be removed and added again in
         // a migration)
         let affected_queries = self.recipe.queries_for_nodes(affected_nodes);
-
-        let mut original = self.recipe.clone();
-        original.next();
-        let mut recovery = original.clone();
-        recovery.next();
+        let (mut recovery, mut original) = self.recipe.make_recovery(affected_queries);
 
         // activate recipe
         let r = self.migrate(|mig| {
-            // remove from recipe
-            for q in affected_queries {
-                debug!(mig.log, "query {} affected by failure", q);
-                if !recovery.remove_query(&q, mig) {
-                    warn!(mig.log, "Call to Recipe::remove_query() failed for {}", q);
-                }
-            }
             recovery
                 .activate(mig)
                 .map_err(|e| format!("failed to activate recovery recipe: {}", e))
@@ -755,8 +744,10 @@ impl ControllerInner {
                     let readers: Vec<_> = self.ingredients
                         .neighbors_directed(*leaf, petgraph::EdgeDirection::Outgoing)
                         .collect();
-                    assert_eq!(readers.len(), 1);
-                    self.remove_node(readers[0]).unwrap();
+                    assert!(readers.len() <= 1);
+                    if !readers.is_empty() {
+                        self.remove_node(readers[0]).unwrap();
+                    }
                 }
                 self.recipe = new;
             }
