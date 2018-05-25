@@ -16,9 +16,9 @@ macro_rules! dur_to_ns {
 
 fn main() {
     // inline recipe definition
-    let sql1 = "CREATE TABLE Article (aid int, title varchar(255), \
+    let sql1 = "Article: CREATE TABLE Article (aid int, title varchar(255), \
                 url text, PRIMARY KEY(aid));";
-    let sql2 = "CREATE TABLE Vote (aid int, uid int);";
+    let sql2 = "Vote: CREATE TABLE Vote (aid int, uid int);";
     let sql3 = "VoteCount: SELECT Vote.aid, COUNT(uid) AS votes \
                 FROM Vote GROUP BY Vote.aid;";
     let sql4 = "QUERY ArticleWithVoteCount: \
