@@ -415,6 +415,7 @@ impl Recipe {
                 let (ref n, ref q, _) = self.prior.as_ref().unwrap().expressions[qid];
                 match q {
                     SqlQuery::CreateTable(ref ctq) => {
+                        self.inc.as_mut().unwrap().remove_base(&ctq.table.name);
                         match self.prior.as_ref().unwrap().node_addr_for(&ctq.table.name) {
                             Ok(ni) => Some(ni),
                             Err(e) => {

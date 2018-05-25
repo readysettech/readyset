@@ -198,8 +198,7 @@ impl SqlIncorporator {
         match self.mir_queries.get(&(qg_hash, universe.clone())) {
             None => (),
             Some(ref mir_query) => {
-                let existing_qg = self
-                    .query_graphs
+                let existing_qg = self.query_graphs
                     .get(&qg_hash)
                     .expect("query graph should be present");
                 // note that this also checks the *order* in which parameters are specified; a
@@ -542,20 +541,18 @@ impl SqlIncorporator {
     }
 
     pub fn remove_query(&mut self, query_name: &str, mig: &Migration) -> Option<NodeIndex> {
-        let nodeid = self
-            .leaf_addresses
+        let nodeid = self.leaf_addresses
             .remove(query_name)
             .expect("tried to remove unknown query");
 
-        let qg_hash = self
-            .named_queries
-            .remove(query_name)
-            .expect(&format!("missing query hash for named query \"{}\"", query_name));
+        let qg_hash = self.named_queries.remove(query_name).expect(&format!(
+            "missing query hash for named query \"{}\"",
+            query_name
+        ));
         let mir = self.mir_queries.get(&(qg_hash, mig.universe())).unwrap();
 
         // traverse self.leaf__addresses
-        if self
-            .leaf_addresses
+        if self.leaf_addresses
             .values()
             .find(|&id| *id == nodeid)
             .is_none()
@@ -591,6 +588,17 @@ impl SqlIncorporator {
         }
     }
 
+    pub fn remove_base(&mut self, name: &str) {
+        info!(self.log, "Removing base {} from SqlIncorporator", name);
+        if self.base_schemas.remove(name).is_none() {
+            warn!(
+                self.log,
+                "Attempted to remove non-existant base node {} from SqlIncorporator", name
+            );
+        }
+        self.mir_converter.remove_base(name)
+    }
+
     fn register_query(
         &mut self,
         query_name: &str,
@@ -600,8 +608,7 @@ impl SqlIncorporator {
     ) {
         // TODO(malte): we currently need to remember these for local state, but should figure out
         // a better plan (see below)
-        let fields = mir
-            .leaf
+        let fields = mir.leaf
             .borrow()
             .columns()
             .into_iter()
@@ -736,21 +743,19 @@ impl SqlIncorporator {
                 Subquery::InComparison(cond_base) => {
                     let (sq, column) = query_from_condition_base(&cond_base);
 
-                    let qfp = self
-                        .add_parsed_query(sq, None, false, mig)
+                    let qfp = self.add_parsed_query(sq, None, false, mig)
                         .expect("failed to add subquery");
                     *cond_base = field_with_table_name(qfp.name.clone(), column);
                 }
                 Subquery::InJoin(join_right_side) => {
                     *join_right_side = match *join_right_side {
                         JoinRightSide::NestedSelect(box ref ns, ref alias) => {
-                            let qfp =
-                                self.add_parsed_query(
-                                    SqlQuery::Select(ns.clone()),
-                                    alias.clone(),
-                                    false,
-                                    mig,
-                                ).expect("failed to add subquery in join");
+                            let qfp = self.add_parsed_query(
+                                SqlQuery::Select(ns.clone()),
+                                alias.clone(),
+                                false,
+                                mig,
+                            ).expect("failed to add subquery in join");
                             JoinRightSide::Table(Table {
                                 name: qfp.name.clone(),
                                 alias: None,
@@ -892,8 +897,7 @@ mod tests {
 
     /// Helper to grab a reference to a named view.
     fn get_node<'a>(inc: &SqlIncorporator, mig: &'a Migration, name: &str) -> &'a Node {
-        let na = inc
-            .get_flow_node_address(name, 0)
+        let na = inc.get_flow_node_address(name, 0)
             .expect(&format!("No node named \"{}\" exists", name));
         mig.graph().node_weight(na).unwrap()
     }
@@ -975,13 +979,11 @@ mod tests {
             assert!(get_node(&inc, mig, "users").is_base());
 
             // Establish a base write type for "articles"
-            assert!(
-                inc.add_query(
-                    "CREATE TABLE articles (id int, author int, title varchar(255));",
-                    None,
-                    mig
-                ).is_ok()
-            );
+            assert!(inc.add_query(
+                "CREATE TABLE articles (id int, author int, title varchar(255));",
+                None,
+                mig
+            ).is_ok());
             // Should have source and "users" base table node
             assert_eq!(mig.graph().node_count(), 3);
             assert_eq!(get_node(&inc, mig, "articles").name(), "articles");
@@ -1189,13 +1191,11 @@ mod tests {
         g.migrate(|mig| {
             let mut inc = SqlIncorporator::default();
             // Establish a base write type
-            assert!(
-                inc.add_query(
-                    "CREATE TABLE users (id int, name varchar(40), address varchar(40));",
-                    None,
-                    mig
-                ).is_ok()
-            );
+            assert!(inc.add_query(
+                "CREATE TABLE users (id int, name varchar(40), address varchar(40));",
+                None,
+                mig
+            ).is_ok());
             // Should have source and "users" base table node
             assert_eq!(mig.graph().node_count(), 2);
             assert_eq!(get_node(&inc, mig, "users").name(), "users");
@@ -1366,13 +1366,11 @@ mod tests {
                 inc.add_query("CREATE TABLE votes (aid int, uid int);", None, mig)
                     .is_ok()
             );
-            assert!(
-                inc.add_query(
-                    "CREATE TABLE articles (aid int, title varchar(255), author int);",
-                    None,
-                    mig
-                ).is_ok()
-            );
+            assert!(inc.add_query(
+                "CREATE TABLE articles (aid int, title varchar(255), author int);",
+                None,
+                mig
+            ).is_ok());
 
             // Try an explicit multi-way-join
             let q = "SELECT users.name, articles.title, votes.uid \
@@ -1419,13 +1417,11 @@ mod tests {
                 inc.add_query("CREATE TABLE votes (aid int, uid int);", None, mig)
                     .is_ok()
             );
-            assert!(
-                inc.add_query(
-                    "CREATE TABLE articles (aid int, title varchar(255), author int);",
-                    None,
-                    mig
-                ).is_ok()
-            );
+            assert!(inc.add_query(
+                "CREATE TABLE articles (aid int, title varchar(255), author int);",
+                None,
+                mig
+            ).is_ok());
 
             // Try an implicit multi-way-join
             let q = "SELECT users.name, articles.title, votes.uid \
@@ -1527,13 +1523,11 @@ mod tests {
                 inc.add_query("CREATE TABLE users (id int, name varchar(40));", None, mig)
                     .is_ok()
             );
-            assert!(
-                inc.add_query(
-                    "CREATE TABLE articles (id int, author int, title varchar(255));",
-                    None,
-                    mig
-                ).is_ok()
-            );
+            assert!(inc.add_query(
+                "CREATE TABLE articles (id int, author int, title varchar(255));",
+                None,
+                mig
+            ).is_ok());
 
             let q = "SELECT nested_users.name, articles.title \
                      FROM articles \
