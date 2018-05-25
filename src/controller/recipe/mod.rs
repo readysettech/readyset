@@ -640,6 +640,7 @@ impl Recipe {
 
         let mut original = self.clone();
         original.prior = Some(Box::new(recovery.clone()));
+        original.inc = recovery.inc.clone();
         original.next();
         original.next();
 
