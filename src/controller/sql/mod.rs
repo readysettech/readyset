@@ -544,8 +544,8 @@ impl SqlIncorporator {
     pub fn remove_query(&mut self, query_name: &str, mig: &Migration) -> Option<NodeIndex> {
         let nodeid = self
             .leaf_addresses
-            .remove(query_name)?;
-//            .expect("tried to remove unknown query");
+            .remove(query_name)
+            .expect("tried to remove unknown query");
 
         let qg_hash = self
             .named_queries
