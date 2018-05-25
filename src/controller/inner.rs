@@ -750,6 +750,8 @@ impl ControllerInner {
                     assert!(readers.len() <= 1);
                     if !readers.is_empty() {
                         self.remove_node(readers[0]).unwrap();
+                    } else {
+                        self.remove_node(*leaf).unwrap();
                     }
                 }
                 self.recipe = new;
