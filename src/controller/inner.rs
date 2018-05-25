@@ -282,6 +282,9 @@ impl ControllerInner {
                 .map_err(|e| format!("failed to activate recovery recipe: {}", e))
         });
 
+        original.prior = Some(Box::new(recovery.clone()));
+        original.inc = recovery.inc.clone();
+
         // back to original recipe, which should add the query again
         let r = self.migrate(|mig| {
             original

@@ -34,10 +34,10 @@ pub struct Recipe {
     /// Recipe revision.
     version: usize,
     /// Preceding recipe.
-    prior: Option<Box<Recipe>>,
+    pub(crate) prior: Option<Box<Recipe>>,
 
     /// Maintains lower-level state, but not the graph itself. Lazily initialized.
-    inc: Option<SqlIncorporator>,
+    pub(crate) inc: Option<SqlIncorporator>,
 
     log: slog::Logger,
 }
@@ -640,8 +640,6 @@ impl Recipe {
         }
 
         let mut original = self.clone();
-        original.prior = Some(Box::new(recovery.clone()));
-        original.inc = recovery.inc.clone();
         original.next();
         original.next();
 
