@@ -160,6 +160,19 @@ impl ControllerInner {
             (Post, "/inputs") => Ok(Ok(json::to_string(&self.inputs()).unwrap())),
             (Post, "/outputs") => Ok(Ok(json::to_string(&self.outputs()).unwrap())),
             (Get, "/instances") => Ok(Ok(json::to_string(&self.get_instances()).unwrap())),
+            (Get, "/nodes") => {
+                // TODO(malte): this is a pretty yucky hack, but hyper doesn't provide easy access
+                // to individual query variables unfortunately. We'll probably want to factor this
+                // out into a helper method.
+                if let Some(query) = query {
+                    let vars: Vec<_> = query.split("&").map(String::from).collect();
+                    if let Some(n) = &vars.into_iter().find(|v| v.starts_with("w=")) {
+                        return Ok(Ok(json::to_string(&self.nodes_on_worker(Some(&n[2..].parse().unwrap()))).unwrap()));
+                    }
+                }
+                // all data-flow nodes
+                Ok(Ok(json::to_string(&self.nodes_on_worker(None)).unwrap()))
+            },
             (Post, "/table_builder") => json::from_slice(&body)
                 .map_err(|_| StatusCode::BadRequest)
                 .map(|args| Ok(json::to_string(&self.table_builder(args)).unwrap())),
@@ -902,12 +915,7 @@ impl ControllerInner {
 
     fn get_failed_nodes(&self, lost_worker: &WorkerIdentifier) -> Vec<NodeIndex> {
         // Find nodes directly impacted by worker failure.
-        let mut nodes: Vec<NodeIndex> = self.domains
-            .values()
-            .filter(|dh| dh.assigned_to_worker(lost_worker))
-            .flat_map(|dh| dh.nodes().iter())
-            .cloned()
-            .collect();
+        let mut nodes: Vec<NodeIndex> = self.nodes_on_worker(Some(lost_worker));
 
         // Add any other downstream nodes.
         let mut failed_nodes = Vec::new();
@@ -922,6 +930,24 @@ impl ControllerInner {
             }
         }
         failed_nodes
+    }
+
+    /// List data-flow nodes, on a specific worker if `worker` specified.
+    fn nodes_on_worker(&self, worker: Option<&WorkerIdentifier>) -> Vec<NodeIndex> {
+        if worker.is_some() {
+            self.domains
+                .values()
+                .filter(|dh| dh.assigned_to_worker(worker.unwrap()))
+                .flat_map(|dh| dh.nodes().iter())
+                .cloned()
+                .collect()
+        } else {
+            self.domains
+                .values()
+                .flat_map(|dh| dh.nodes().iter())
+                .cloned()
+                .collect()
+        }
     }
 }
 
