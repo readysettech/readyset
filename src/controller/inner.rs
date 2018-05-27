@@ -135,6 +135,7 @@ impl ControllerInner {
         &mut self,
         method: Method,
         path: String,
+        query: Option<String>,
         body: Vec<u8>,
         authority: &Arc<A>,
     ) -> Result<Result<String, String>, StatusCode> {

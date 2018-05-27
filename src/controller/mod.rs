@@ -153,6 +153,7 @@ enum ControlEvent {
     ExternalRequest(
         Method,
         String,
+        Option<String>,
         Vec<u8>,
         futures::sync::oneshot::Sender<Result<Result<String, String>, StatusCode>>,
     ),
@@ -387,10 +388,10 @@ impl<A: Authority + 'static> Controller<A> {
                 ControlEvent::InternalMessage(msg) => if let Some(ref mut inner) = self.inner {
                     inner.coordination_message(msg)
                 },
-                ControlEvent::ExternalRequest(method, path, body, reply_tx) => {
+                ControlEvent::ExternalRequest(method, path, query, body, reply_tx) => {
                     if let Some(ref mut inner) = self.inner {
                         reply_tx
-                            .send(inner.external_request(method, path, body, &self.authority))
+                            .send(inner.external_request(method, path, query, body, &self.authority))
                             .unwrap()
                     } else {
                         reply_tx.send(Err(StatusCode::NotFound)).unwrap();
@@ -471,12 +472,13 @@ impl<A: Authority + 'static> Controller<A> {
                     }
                     (method, path) => {
                         let path = path.to_owned();
+                        let query = req.query().map(|s| s.to_owned());
                         let event_tx = self.0.clone();
                         Box::new(req.body().concat2().and_then(move |body| {
                             let body: Vec<u8> = body.iter().cloned().collect();
                             let (tx, rx) = futures::sync::oneshot::channel();
                             let _ = event_tx
-                                .send(ControlEvent::ExternalRequest(method, path, body, tx));
+                                .send(ControlEvent::ExternalRequest(method, path, query, body, tx));
                             rx.and_then(|reply| {
                                 let mut res = Response::new();
                                 res.headers_mut()
