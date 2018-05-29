@@ -321,7 +321,7 @@ fn start_instance<A: Authority + 'static>(
                         panic!(e);
                     }
                     Event::Shutdown => {
-                        /* TODO
+                        /* FIXME
                          * maybe use Receiver::close()?
                         self.external.stop();
                         self.internal.stop();
@@ -444,7 +444,7 @@ fn listen_df(
             ctrl_rx
                 .for_each(move |cm| {
                     // TODO: deal with the case when the controller moves
-                    // TODO: make these sends async
+                    // FIXME: make these sends async
                     block_on(|| {
                         sender.send(CoordinationMessage {
                             source: sender_addr,
@@ -489,6 +489,7 @@ fn listen_df(
         if let Some(evict_every) = evict_every {
             let log = log.clone();
             let mut domain_senders = HashMap::new();
+            let state_sizes = state_sizes.clone();
             tokio::spawn(
                 tokio::timer::Interval::new(time::Instant::now() + evict_every, evict_every)
                     .for_each(move |_| {
@@ -519,9 +520,8 @@ fn listen_df(
 
                     // need to register the domain with the local channel coordinator
                     coord.insert_addr((idx, shard), addr, false);
-                    // TODO: self.state_sizes.insert((idx, shard), state_size);
+                    block_on(|| state_sizes.lock().unwrap().insert((idx, shard), state_size));
 
-                    // TODO: call update_state_sizes every evict_every
                     tokio::spawn(Replica::new(d, on, log.clone(), coord.clone()));
 
                     trace!(
@@ -882,7 +882,7 @@ impl Replica {
         }
     }
 
-    // TODO: make this async
+    // FIXME: make this async
     fn try_ack(&mut self) {
         let mut bytes = Vec::new();
         'streams: for (streami, n) in self.sendback.back.drain() {
@@ -963,7 +963,7 @@ impl Replica {
                 let (addr, is_local) = dest.unwrap();
                 let mut tx = DomainConnectionBuilder::for_domain(addr).build().unwrap();
                 if is_local {
-                    tx.send_ref(&Packet::Hey(me.0, me.1)).unwrap();
+                    block_on(|| tx.send_ref(&Packet::Hey(me.0, me.1)).unwrap());
                 }
                 (tx, is_local)
             });
@@ -971,7 +971,7 @@ impl Replica {
                 m = m.make_local();
             }
 
-            tx.send_ref(&m)?;
+            block_on(|| tx.send_ref(&m))?;
         }
         Ok(())
     }
@@ -991,11 +991,12 @@ impl Replica {
                 set_nonblocking(&stream, true);
 
                 debug!(self.log, "accepted new connection"; "base" => ?is_base);
+                let token = self.inputs.len();
                 let tcp = if is_base {
                     DualTcpReceiver::upgrade(BufReader::new(stream), move |input| {
                         Box::new(Packet::Input {
                             inner: input,
-                            src: None, /* TODO: send_back */
+                            src: Some(SourceChannelIdentifier { token }),
                             senders: Vec::new(),
                         })
                     })
@@ -1042,6 +1043,8 @@ impl Future for Replica {
     type Error = ();
     fn poll(&mut self) -> Result<Async<Self::Item>, Self::Error> {
         let r: Result<Async<Self::Item>, failure::Error> = do catch {
+            // FIXME: check if we should call update_state_sizes (every evict_every)
+
             // first, try sending packets to downstream domains if they blocked before
             // TODO: send fail == exiting?
             self.try_flush().context("downstream flush (before)")?;
@@ -1056,7 +1059,7 @@ impl Future for Replica {
             self.try_timeout().context("check timeout")?;
 
             // and now, finally, we see if there's new input for us
-            // TODO: replace with https://github.com/jonhoo/streamunordered
+            // FIXME: replace with https://github.com/jonhoo/streamunordered
             for input in &mut self.inputs {
                 loop {
                     match input.poll() {
@@ -1075,13 +1078,13 @@ impl Future for Replica {
                         }
                         Ok(Async::Ready(None)) => {
                             trace!(self.log, "connection closed");
-                            // TODO: reclaim i? make sure we don't poll it again.
+                            // FIXME: reclaim i? make sure we don't poll it again.
                             continue;
                         }
                         Ok(Async::NotReady) => break,
                         Err(e) => {
                             debug!(self.log, "connection dropped: {:?}", e);
-                            // TODO: reclaim i? make sure we don't poll it again.
+                            // FIXME: reclaim i? make sure we don't poll it again.
                             continue;
                         }
                     }
