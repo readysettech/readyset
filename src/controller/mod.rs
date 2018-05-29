@@ -35,7 +35,7 @@ use std::sync::{
 use std::thread::{self, JoinHandle};
 use std::time::{self, Duration};
 use tokio;
-use tokio::prelude::future::Either;
+use tokio::prelude::future::{poll_fn, Either};
 use tokio::prelude::*;
 use tokio_threadpool::blocking;
 
@@ -70,6 +70,16 @@ type WorkerEndpoint = Arc<Mutex<TcpSender<CoordinationMessage>>>;
 
 type ReplicaIndex = (DomainIndex, usize);
 type ChannelCoordinator = channel::ChannelCoordinator<ReplicaIndex>;
+
+fn block_on<F, T>(f: F) -> T
+where
+    F: FnOnce() -> T,
+{
+    let mut wrap = Some(f);
+    poll_fn(|| blocking(|| wrap.take().unwrap()()))
+        .wait()
+        .unwrap()
+}
 
 #[derive(Clone, Serialize, Deserialize, PartialEq)]
 pub(crate) struct ControllerConfig {
@@ -193,69 +203,67 @@ fn start_instance<A: Authority + 'static>(
         rx.map_err(|_| unreachable!())
             .for_each(move |e| {
                 match e {
-                    Event::InternalMessage(msg) => {
-                        match msg.payload {
-                            CoordinationPayload::Deregister => {
-                                unimplemented!();
-                            }
-                            CoordinationPayload::RemoveDomain => {
-                                unimplemented!();
-                            }
-                            CoordinationPayload::AssignDomain(d) => {
-                                if let InstanceState::Active {
-                                    epoch,
-                                    ref mut add_domain,
-                                } = instance.state
-                                {
-                                    if epoch == msg.epoch {
-                                        return Either::A(Box::new(
-                                            add_domain.clone().send(d).map(|_| ()).map_err(|d| {
-                                                format_err!("could not add new domain {:?}", d)
-                                            }),
-                                        ));
-                                    }
-                                } else {
-                                    unreachable!();
+                    Event::InternalMessage(msg) => match msg.payload {
+                        CoordinationPayload::Deregister => {
+                            unimplemented!();
+                        }
+                        CoordinationPayload::RemoveDomain => {
+                            unimplemented!();
+                        }
+                        CoordinationPayload::AssignDomain(d) => {
+                            if let InstanceState::Active {
+                                epoch,
+                                ref mut add_domain,
+                            } = instance.state
+                            {
+                                if epoch == msg.epoch {
+                                    return Either::A(Box::new(
+                                        add_domain.clone().send(d).map(|_| ()).map_err(|d| {
+                                            format_err!("could not add new domain {:?}", d)
+                                        }),
+                                    ));
                                 }
+                            } else {
+                                unreachable!();
                             }
-                            CoordinationPayload::DomainBooted((domain, shard), addr) => {
-                                if let InstanceState::Active { epoch, .. } = instance.state {
-                                    if epoch == msg.epoch {
-                                        trace!(
-                                            log,
-                                            "found that domain {}.{} is at {:?}",
-                                            domain.index(),
-                                            shard,
-                                            addr
-                                        );
-                                        coord.insert_addr((domain, shard), addr, false);
-                                    }
-                                }
-                            }
-                            CoordinationPayload::Register {
-                                ref addr,
-                                ref read_listen_addr,
-                                ..
-                            } => {
-                                if let Some(ref mut ctrl) = instance.controller {
-                                    // TODO: blocking
-                                    ctrl.handle_register(&msg, addr, read_listen_addr.clone())
-                                        .unwrap();
-                                }
-                            }
-                            CoordinationPayload::Heartbeat => {
-                                if let Some(ref mut ctrl) = instance.controller {
-                                    // TODO: blocking
-                                    ctrl.handle_heartbeat(&msg).unwrap();
+                        }
+                        CoordinationPayload::DomainBooted((domain, shard), addr) => {
+                            if let InstanceState::Active { epoch, .. } = instance.state {
+                                if epoch == msg.epoch {
+                                    trace!(
+                                        log,
+                                        "found that domain {}.{} is at {:?}",
+                                        domain.index(),
+                                        shard,
+                                        addr
+                                    );
+                                    coord.insert_addr((domain, shard), addr, false);
                                 }
                             }
                         }
-                    }
+                        CoordinationPayload::Register {
+                            ref addr,
+                            ref read_listen_addr,
+                            ..
+                        } => {
+                            if let Some(ref mut ctrl) = instance.controller {
+                                block_on(|| {
+                                    ctrl.handle_register(&msg, addr, read_listen_addr.clone())
+                                        .unwrap()
+                                });
+                            }
+                        }
+                        CoordinationPayload::Heartbeat => {
+                            if let Some(ref mut ctrl) = instance.controller {
+                                block_on(|| ctrl.handle_heartbeat(&msg).unwrap());
+                            }
+                        }
+                    },
                     Event::ExternalRequest(method, path, body, reply_tx) => {
                         if let Some(ref mut ctrl) = instance.controller {
-                            // TODO: blocking
+                            let authority = &instance.authority;
                             let reply =
-                                ctrl.external_request(method, path, body, &instance.authority);
+                                block_on(|| ctrl.external_request(method, path, body, authority));
 
                             if let Err(_) = reply_tx.send(reply) {
                                 warn!(log, "client hung up");
@@ -270,8 +278,7 @@ fn start_instance<A: Authority + 'static>(
                     Event::ManualMigration(f) => {
                         if let Some(ref mut ctrl) = instance.controller {
                             if !ctrl.workers.is_empty() {
-                                // TODO: blocking
-                                ctrl.migrate(move |m| f.call_box((m,)));
+                                block_on(|| ctrl.migrate(move |m| f.call_box((m,))));
                             }
                         }
                     }
@@ -302,8 +309,8 @@ fn start_instance<A: Authority + 'static>(
                         );
                     }
                     Event::WonLeaderElection(state) => {
-                        // TODO: blocking
-                        instance.campaign.take().unwrap().join().unwrap();
+                        let c = instance.campaign.take().unwrap();
+                        block_on(move || c.join().unwrap());
                         instance.controller = Some(ControllerInner::new(
                             instance.listen_addr,
                             instance.log.clone(),
@@ -438,14 +445,13 @@ fn listen_df(
                 .for_each(move |cm| {
                     // TODO: deal with the case when the controller moves
                     // TODO: make these sends async
-                    // TODO: blocking
-                    sender
-                        .send(CoordinationMessage {
+                    block_on(|| {
+                        sender.send(CoordinationMessage {
                             source: sender_addr,
                             payload: cm,
                             epoch,
                         })
-                        .unwrap();
+                    }).unwrap();
                     Ok(())
                 })
                 .map_err(|e| panic!(e)),
@@ -787,13 +793,11 @@ fn do_eviction(
     domain_senders: &mut HashMap<(DomainIndex, usize), TcpSender<Box<Packet>>>,
     state_sizes: &Arc<Mutex<HashMap<(DomainIndex, usize), Arc<AtomicUsize>>>>,
 ) -> impl Future<Item = (), Error = ()> {
-    // TODO: blocking blocking blocking
-
     use std::cmp;
 
     // 2. add current state sizes (could be out of date, as packet sent below is not
     //    necessarily received immediately)
-    let sizes: Vec<((DomainIndex, usize), usize)> = {
+    let sizes: Vec<((DomainIndex, usize), usize)> = block_on(|| {
         let state_sizes = state_sizes.lock().unwrap();
         state_sizes
             .iter()
@@ -809,7 +813,7 @@ fn do_eviction(
                 (ds.clone(), size)
             })
             .collect()
-    };
+    });
 
     // 3. are we above the limit?
     let total: usize = sizes.iter().map(|&(_, s)| s).sum();
@@ -828,10 +832,12 @@ fn do_eviction(
                     );
 
                 let tx = domain_senders.get_mut(&largest.0).unwrap();
-                tx.send(box Packet::Evict {
-                    node: None,
-                    num_bytes: cmp::min(largest.1, total - limit),
-                }).unwrap();
+                block_on(|| {
+                    tx.send(box Packet::Evict {
+                        node: None,
+                        num_bytes: cmp::min(largest.1, total - limit),
+                    }).unwrap()
+                });
             }
         }
     }
@@ -1006,9 +1012,10 @@ impl Replica {
     fn try_timeout(&mut self) -> Result<(), tokio::timer::Error> {
         if let Some(mut to) = self.timeout.take() {
             if let Async::Ready(()) = to.poll()? {
-                // TODO: blocking blocking blocking
-                self.domain
-                    .on_event(&mut self.sendback, PollEvent::Timeout, &mut self.outbox);
+                block_on(|| {
+                    self.domain
+                        .on_event(&mut self.sendback, PollEvent::Timeout, &mut self.outbox)
+                });
             } else {
                 self.timeout = Some(to);
             }
@@ -1049,17 +1056,19 @@ impl Future for Replica {
             self.try_timeout().context("check timeout")?;
 
             // and now, finally, we see if there's new input for us
+            // TODO: replace with https://github.com/jonhoo/streamunordered
             for input in &mut self.inputs {
                 loop {
                     match input.poll() {
                         Ok(Async::Ready(Some(packet))) => {
-                            // TODO: blocking blocking blocking
+                            let d = &mut self.domain;
+                            let sb = &mut self.sendback;
+                            let ob = &mut self.outbox;
+
                             // TODO: carry_local
-                            if let ProcessResult::StopPolling = self.domain.on_event(
-                                &mut self.sendback,
-                                PollEvent::Process(packet),
-                                &mut self.outbox,
-                            ) {
+                            if let ProcessResult::StopPolling =
+                                block_on(|| d.on_event(sb, PollEvent::Process(packet), ob))
+                            {
                                 // TODO: quit
                                 unimplemented!();
                             }
