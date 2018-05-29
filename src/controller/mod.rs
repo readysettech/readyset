@@ -69,7 +69,6 @@ type WorkerIdentifier = SocketAddr;
 type WorkerEndpoint = Arc<Mutex<TcpSender<CoordinationMessage>>>;
 
 type ReplicaIndex = (DomainIndex, usize);
-type EnqueuedSend = (ReplicaIndex, Box<Packet>);
 type ChannelCoordinator = channel::ChannelCoordinator<ReplicaIndex>;
 
 #[derive(Clone, Serialize, Deserialize, PartialEq)]
@@ -240,12 +239,14 @@ fn start_instance<A: Authority + 'static>(
                             } => {
                                 if let Some(ref mut ctrl) = instance.controller {
                                     // TODO: blocking
-                                    ctrl.handle_register(&msg, addr, read_listen_addr.clone());
+                                    ctrl.handle_register(&msg, addr, read_listen_addr.clone())
+                                        .unwrap();
                                 }
                             }
                             CoordinationPayload::Heartbeat => {
                                 if let Some(ref mut ctrl) = instance.controller {
-                                    ctrl.handle_heartbeat(&msg);
+                                    // TODO: blocking
+                                    ctrl.handle_heartbeat(&msg).unwrap();
                                 }
                             }
                         }
@@ -438,11 +439,13 @@ fn listen_df(
                     // TODO: deal with the case when the controller moves
                     // TODO: make these sends async
                     // TODO: blocking
-                    sender.send(CoordinationMessage {
-                        source: sender_addr,
-                        payload: cm,
-                        epoch,
-                    });
+                    sender
+                        .send(CoordinationMessage {
+                            source: sender_addr,
+                            payload: cm,
+                            epoch,
+                        })
+                        .unwrap();
                     Ok(())
                 })
                 .map_err(|e| panic!(e)),
@@ -476,7 +479,7 @@ fn listen_df(
                 }),
         );
 
-        let mut state_sizes = Arc::new(Mutex::new(HashMap::new()));
+        let state_sizes = Arc::new(Mutex::new(HashMap::new()));
         if let Some(evict_every) = evict_every {
             let log = log.clone();
             let mut domain_senders = HashMap::new();
@@ -1139,7 +1142,9 @@ mod tests {
 
         let authority =
             ZookeeperAuthority::new("127.0.0.1:2181/it_works_blender_with_migration").unwrap();
-        let mut c = ControllerBuilder::default().build(Arc::new(authority));
+        let mut c = ControllerBuilder::default()
+            .build(Arc::new(authority))
+            .unwrap();
         assert!(c.install_recipe(r_txt).is_ok());
     }
 
@@ -1149,7 +1154,7 @@ mod tests {
     fn it_works_default_local() {
         // Controller gets dropped. It doesn't have Domains, so we don't see any dropped.
         {
-            let _c = ControllerBuilder::default().build_local();
+            let _c = ControllerBuilder::default().build_local().unwrap();
             thread::sleep(Duration::from_millis(100));
         }
         thread::sleep(Duration::from_millis(100));
@@ -1161,7 +1166,7 @@ mod tests {
         let r_txt = "CREATE TABLE a (x int, y int, z int);\n
                      CREATE TABLE b (r int, s int);\n";
 
-        let mut c = ControllerBuilder::default().build_local();
+        let mut c = ControllerBuilder::default().build_local().unwrap();
         assert!(c.install_recipe(r_txt).is_ok());
     }
 }

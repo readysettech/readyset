@@ -63,7 +63,13 @@ impl<A: Authority> LocalControllerHandle<A> {
             })
                 as Box<for<'a, 's> FnBox(&'a mut Migration<'s>) + Send + 'static>;
 
-            self.event_tx.send(Event::ManualMigration(b)).unwrap();
+            self.runtime.spawn(
+                self.event_tx
+                    .clone()
+                    .send(Event::ManualMigration(b))
+                    .map(|_| ())
+                    .map_err(|e| panic!(e)),
+            );
             match rx.recv() {
                 Ok(ret) => return ret,
                 Err(_) => ::std::thread::sleep(::std::time::Duration::from_millis(100)),
@@ -128,7 +134,7 @@ mod tests {
         let r_txt = "CREATE TABLE a (x int, y int, z int);\n
                      CREATE TABLE b (r int, s int);\n";
 
-        let mut c = ControllerBuilder::default().build_local();
+        let mut c = ControllerBuilder::default().build_local().unwrap();
         assert!(c.install_recipe(r_txt).is_ok());
         for _ in 0..250 {
             let _ = c.table("a").unwrap();
