@@ -30,14 +30,6 @@ impl<A: Authority> DerefMut for LocalControllerHandle<A> {
     }
 }
 
-impl<A: Authority> Drop for LocalControllerHandle<A> {
-    fn drop(&mut self) {
-        self.c.shutdown();
-        self.event_tx.send(Event::Shutdown);
-        self.wait();
-    }
-}
-
 impl<A: Authority> LocalControllerHandle<A> {
     pub(super) fn new(
         authority: Arc<A>,
@@ -114,8 +106,15 @@ impl<A: Authority> LocalControllerHandle<A> {
         table.insert(record).unwrap();
     }
 
-    /// Wait for associated local instance to exit (presumably forever).
-    pub fn wait(mut self) {
+    /// Inform the local instance that it should exit, and wait for that to happen
+    pub fn shutdown_and_wait(mut self) {
+        self.c.shutdown();
+        self.event_tx.send(Event::Shutdown).wait().unwrap();
+        self.runtime.shutdown_on_idle().wait().unwrap();
+    }
+
+    /// Wait for associated local instance to exit (presumably with an error).
+    pub fn wait(self) {
         self.runtime.shutdown_on_idle().wait().unwrap();
     }
 }

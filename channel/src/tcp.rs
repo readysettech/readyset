@@ -143,6 +143,13 @@ impl<R, T, T2> DualTcpReceiver<R, T, T2> {
         let r: AsyncBincodeReader<R, T2> = AsyncBincodeReader::from(reader);
         DualTcpReceiver::Upgrade(r, Box::new(f))
     }
+
+    pub fn get_ref(&self) -> &R {
+        match *self {
+            DualTcpReceiver::Passthrough(ref abr) => abr.get_ref(),
+            DualTcpReceiver::Upgrade(ref abr, _) => abr.get_ref(),
+        }
+    }
 }
 
 impl<R, T, T2> Stream for DualTcpReceiver<R, T, T2>

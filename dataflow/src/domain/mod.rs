@@ -500,7 +500,7 @@ impl Domain {
         m: Box<Packet>,
         enable_output: bool,
         sends: &mut EnqueuedSends,
-        executor: Option<&Executor>,
+        executor: Option<&mut Executor>,
     ) -> HashMap<LocalNodeIndex, Vec<Record>> {
         let src = m.link().src;
         let me = m.link().dst;
@@ -719,7 +719,7 @@ impl Domain {
         &mut self,
         m: Box<Packet>,
         sends: &mut EnqueuedSends,
-        executor: Option<&Executor>,
+        executor: &mut Executor,
         top: bool,
     ) {
         self.wait_time.stop();
@@ -727,7 +727,8 @@ impl Domain {
 
         match *m {
             Packet::Message { .. } | Packet::Input { .. } => {
-                self.dispatch(m, true, sends, executor);
+                // WO for https://github.com/rust-lang/rfcs/issues/1403
+                self.dispatch(m, true, sends, Some(executor));
             }
             Packet::ReplayPiece { .. } => {
                 self.handle_replay(m, sends);
@@ -1349,6 +1350,8 @@ impl Domain {
                 // we really want this to just use tail recursion.
                 // but alas, the compiler doesn't seem to want to do that.
                 // instead, we ensure that only the topmost call to handle() walks delayed_for_self
+
+                // WO for https://github.com/rust-lang/rfcs/issues/1403
                 self.handle(m, sends, executor, false);
             }
         }
@@ -2398,7 +2401,7 @@ impl Domain {
 
     pub fn on_event(
         &mut self,
-        executor: &Executor,
+        executor: &mut Executor,
         event: PollEvent<Box<Packet>>,
         sends: &mut EnqueuedSends,
     ) -> ProcessResult {
@@ -2432,19 +2435,19 @@ impl Domain {
                     packet.trace(PacketEvent::ExitInputChannel);
                     let merged_packet = self.group_commit_queues.append(packet);
                     if let Some(packet) = merged_packet {
-                        self.handle(packet, sends, Some(executor), true);
+                        self.handle(packet, sends, executor, true);
                     }
                 } else {
-                    self.handle(packet, sends, Some(executor), true);
+                    self.handle(packet, sends, executor, true);
                 }
 
                 ProcessResult::KeepPolling
             }
             PollEvent::Timeout => {
                 if let Some(m) = self.group_commit_queues.flush_if_necessary() {
-                    self.handle(m, sends, Some(executor), true);
+                    self.handle(m, sends, executor, true);
                 } else if self.has_buffered_replay_requests {
-                    self.handle(box Packet::Spin, sends, Some(executor), true);
+                    self.handle(box Packet::Spin, sends, executor, true);
                 }
                 ProcessResult::KeepPolling
             }

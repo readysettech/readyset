@@ -14,7 +14,7 @@ impl Node {
         on_shard: Option<usize>,
         swap: bool,
         output: &mut Vec<(ReplicaAddr, Box<Packet>)>,
-        executor: Option<&Executor>,
+        executor: Option<&mut Executor>,
     ) -> (Vec<Miss>, HashSet<Vec<DataType>>) {
         m.as_mut().unwrap().trace(PacketEvent::Process);
 

@@ -2,11 +2,13 @@ use bincode;
 use dataflow::backlog::SingleReadHandle;
 use dataflow::prelude::*;
 use dataflow::Readers;
-use futures::future::{self, poll_fn, Either};
+use futures::{
+    self, future::{self, Either},
+};
 use std::cell::RefCell;
 use std::collections::HashMap;
+use std::mem;
 use tokio::prelude::*;
-use tokio_threadpool::blocking;
 
 use api::{ReadQuery, ReadReply};
 
@@ -33,7 +35,7 @@ pub(crate) fn handle_message(
             mut keys,
             block,
         } => {
-            let immediate = READERS.with(move |readers_cache| {
+            let immediate = READERS.with(|readers_cache| {
                 let mut readers_cache = readers_cache.borrow_mut();
                 let reader = readers_cache.entry(target.clone()).or_insert_with(|| {
                     let readers = s.lock().unwrap();
@@ -85,33 +87,12 @@ pub(crate) fn handle_message(
                     if !block {
                         Either::A(Either::A(future::ok(ReadReply::Normal(Ok(ret)))))
                     } else {
-                        // TODO: don't actually block here. instead, be a future.
-                        Either::A(Either::B(poll_fn(move || {
-                            blocking(move || {
-                                READERS.with(move |readers_cache| {
-                                    // block on all remaining keys
-                                    let readers_cache = readers_cache.borrow();
-                                    let reader = readers_cache.get(&target).unwrap();
-                                    for (i, key) in keys.iter().enumerate() {
-                                        if key.is_empty() {
-                                            // already have this value
-                                        } else {
-                                            // note that this *does* mean we'll trigger replay twice for things that
-                                            // miss and aren't replayed in time, which is a little sad. but at the same
-                                            // time, that replay trigger will just be ignored by the target domain.
-                                            ret[i] = reader
-                                                .find_and(key, dup, true)
-                                                .map(|r| r.0.unwrap_or_default())
-                                                .expect(
-                                                    "evmap *was* ready, then *stopped* being ready",
-                                                )
-                                        }
-                                    }
-
-                                    ReadReply::Normal(Ok(ret))
-                                })
-                            }).map_err(|e| panic!(e))
-                        })))
+                        Either::A(Either::B(BlockingRead {
+                            target,
+                            keys,
+                            read: ret,
+                            truth: s.clone(),
+                        }))
                     }
                 }
             }
@@ -129,5 +110,63 @@ pub(crate) fn handle_message(
 
             Either::B(future::ok(ReadReply::Size(size)))
         }
+    }
+}
+
+struct BlockingRead {
+    read: Vec<Vec<Vec<DataType>>>,
+    target: (NodeIndex, usize),
+    keys: Vec<Vec<DataType>>,
+    truth: Readers,
+}
+
+impl Future for BlockingRead {
+    type Item = ReadReply;
+    type Error = bincode::Error;
+    fn poll(&mut self) -> Result<Async<Self::Item>, Self::Error> {
+        READERS.with(move |readers_cache| {
+            let mut readers_cache = readers_cache.borrow_mut();
+            let s = &self.truth;
+            let target = &self.target;
+            let reader = readers_cache.entry(self.target.clone()).or_insert_with(|| {
+                let readers = s.lock().unwrap();
+                readers.get(target).unwrap().clone()
+            });
+
+            let mut missing = false;
+            for (i, key) in self.keys.iter_mut().enumerate() {
+                if key.is_empty() {
+                    // already have this value
+                } else {
+                    // note that this *does* mean we'll trigger replay multiple times for things
+                    // that miss and aren't replayed in time, which is a little sad. but at the
+                    // same time, that replay trigger will just be ignored by the target domain.
+                    // TODO: maybe introduce a tokio::timer::Delay here?
+                    match reader.find_and(key, dup, false).map(|r| r.0) {
+                        Ok(Some(rs)) => {
+                            self.read[i] = rs;
+                            key.clear();
+                        }
+                        Err(()) => {
+                            unreachable!("map became not ready?");
+                        }
+                        Ok(None) => {
+                            // triggered partial replay
+                            missing = true;
+                        }
+                    }
+                }
+            }
+
+            if missing {
+                futures::task::current().notify();
+                Ok(Async::NotReady)
+            } else {
+                Ok(Async::Ready(ReadReply::Normal(Ok(mem::replace(
+                    &mut self.read,
+                    Vec::new(),
+                )))))
+            }
+        })
     }
 }

@@ -1,15 +1,22 @@
-use api::ControllerDescriptor;
+use api::{ControllerDescriptor, Input};
 use async_bincode::{AsyncBincodeReader, AsyncBincodeWriter};
 use basics::DomainIndex;
-use channel::{self, DualTcpReceiver, TcpSender, CONNECTION_FROM_BASE};
+use channel::{
+    self, poll::{PollEvent, ProcessResult}, DomainConnectionBuilder, DualTcpReceiver, TcpSender,
+    CONNECTION_FROM_BASE,
+};
 use consensus::{Authority, Epoch, STATE_KEY};
 use controller::domain_handle::DomainHandle;
 use controller::inner::ControllerInner;
 use controller::recipe::Recipe;
 use controller::sql::reuse::ReuseConfigType;
 use coordination::{CoordinationMessage, CoordinationPayload};
-use dataflow::{DomainBuilder, DomainConfig, Packet, PersistenceParameters, Readers};
-use failure;
+use dataflow::{
+    payload::SourceChannelIdentifier, prelude::Executor, Domain, DomainBuilder, DomainConfig,
+    Packet, PersistenceParameters, Readers,
+};
+use failure::{self, ResultExt};
+use fnv::FnvHashMap;
 use futures::sync::mpsc::UnboundedSender;
 use futures::{self, Future, Sink, Stream};
 use hyper::header::CONTENT_TYPE;
@@ -28,7 +35,8 @@ use std::sync::{
 use std::thread::{self, JoinHandle};
 use std::time::{self, Duration};
 use tokio;
-use tokio::prelude::future::{poll_fn, Either};
+use tokio::prelude::future::Either;
+use tokio::prelude::*;
 use tokio_threadpool::blocking;
 
 #[cfg(test)]
@@ -127,13 +135,11 @@ fn start_instance<A: Authority + 'static>(
     authority: Arc<A>,
     listen_addr: IpAddr,
     config: ControllerConfig,
-    nworker_threads: usize,
-    nread_threads: usize,
     memory_limit: Option<usize>,
     memory_check_frequency: Option<Duration>,
     log: slog::Logger,
 ) -> Result<LocalControllerHandle<A>, failure::Error> {
-    let rt = tokio::runtime::Runtime::new().unwrap();
+    let mut rt = tokio::runtime::Runtime::new().unwrap();
     let (tx, rx) = futures::sync::mpsc::unbounded();
 
     // we'll be listening for a couple of different types of events:
@@ -177,11 +183,11 @@ fn start_instance<A: Authority + 'static>(
 
     let mut instance = Instance {
         state: InstanceState::Pining,
-        authority,
+        authority: authority.clone(),
         controller: None,
         listen_addr,
         campaign,
-        log,
+        log: log.clone(),
     };
 
     rt.spawn(
@@ -281,7 +287,7 @@ fn start_instance<A: Authority + 'static>(
 
                         // now we can start accepting dataflow messages
                         // TODO: memory stuff should probably also be in config?
-                        rt.spawn(
+                        tokio::spawn(
                             listen_df(
                                 log.clone(),
                                 (memory_limit, memory_check_frequency),
@@ -362,7 +368,7 @@ fn listen_reads(
 ) -> impl Future<Item = (), Error = ()> {
     on.incoming()
         .map(Some)
-        .or_else(|e| {
+        .or_else(|_| {
             // io error from client: just ignore it
             Ok(None)
         })
@@ -372,8 +378,8 @@ fn listen_reads(
 
             let mut readers = readers.clone();
             let (r, w) = stream.split();
-            let mut w = AsyncBincodeWriter::from(w).for_sync();
-            let mut r = AsyncBincodeReader::from(r);
+            let w = AsyncBincodeWriter::from(w).for_sync();
+            let r = AsyncBincodeReader::from(r);
             tokio::spawn(
                 r.and_then(move |req| readers::handle_message(req, &mut readers))
                     .map_err(|_| -> () {
@@ -413,7 +419,7 @@ fn listen_df(
     let epoch = state.epoch;
     let heartbeat_every = state.config.heartbeat_every;
 
-    let mut sender = TcpSender::connect(&desc.internal_addr)?;
+    let sender = TcpSender::connect(&desc.internal_addr)?;
     let sender_addr = sender.local_addr()?;
     let (ctrl_tx, ctrl_rx) = futures::sync::mpsc::unbounded();
 
@@ -425,9 +431,10 @@ fn listen_df(
     // now async so we can use tokio::spawn
     Ok(futures::future::lazy(move || {
         // start controller message handler
+        let mut sender = sender;
         tokio::spawn(
             ctrl_rx
-                .for_each(|cm| {
+                .for_each(move |cm| {
                     // TODO: deal with the case when the controller moves
                     // TODO: make these sends async
                     // TODO: blocking
@@ -445,45 +452,53 @@ fn listen_df(
         tokio::spawn(listen_reads(rport, readers.clone()));
 
         // and tell the controller about us
-        ctrl_tx.send(CoordinationPayload::Register {
-            addr: waddr,
-            read_listen_addr: raddr,
-            log_files,
-        });
+        tokio::spawn(
+            ctrl_tx
+                .clone()
+                .send(CoordinationPayload::Register {
+                    addr: waddr,
+                    read_listen_addr: raddr,
+                    log_files,
+                })
+                .and_then(move |ctrl_tx| {
+                    // and start sending heartbeats
+                    tokio::timer::Interval::new(
+                        time::Instant::now() + heartbeat_every,
+                        heartbeat_every,
+                    ).map(|_| CoordinationPayload::Heartbeat)
+                        .map_err(|e| -> futures::sync::mpsc::SendError<_> { panic!(e) })
+                        .forward(ctrl_tx.clone())
+                        .map(|_| ())
+                })
+                .map_err(|_| {
+                    // we're probably just shutting down
+                    ()
+                }),
+        );
 
         let mut state_sizes = Arc::new(Mutex::new(HashMap::new()));
         if let Some(evict_every) = evict_every {
             let log = log.clone();
-            let coord = coord.clone();
             let mut domain_senders = HashMap::new();
             tokio::spawn(
                 tokio::timer::Interval::new(time::Instant::now() + evict_every, evict_every)
                     .for_each(move |_| {
-                        poll_fn(|| {
-                            blocking(|| {
-                                do_eviction(
-                                    &log,
-                                    memory_limit,
-                                    &coord,
-                                    &mut domain_senders,
-                                    &state_sizes,
-                                );
-                            })
-                        }).map_err(|e| panic!(e))
+                        do_eviction(&log, memory_limit, &mut domain_senders, &state_sizes)
+                            .map_err(|e| panic!(e))
                     })
                     .map_err(|e| panic!(e)),
             );
         }
 
         replicas
-            .map_err(|e| panic!(e))
-            .for_each(move |d| {
-                let ok = do catch {
+            .map_err(|e| -> io::Error { panic!(e) })
+            .fold(ctrl_tx, move |ctrl_tx, d| {
+                let idx = d.index;
+                let shard = d.shard;
+                let addr: io::Result<_> = do catch {
                     let on = tokio::net::TcpListener::bind(&SocketAddr::new(on, 0))?;
                     let addr = on.local_addr()?;
 
-                    let idx = d.index;
-                    let shard = d.shard;
                     let state_size = Arc::new(AtomicUsize::new(0));
                     let d = d.build(
                         log.clone(),
@@ -497,37 +512,9 @@ fn listen_df(
                     coord.insert_addr((idx, shard), addr, false);
                     // TODO: self.state_sizes.insert((idx, shard), state_size);
 
-                    let d = Arc::new(Mutex::new(d));
-                    let ctrl = ctrl_tx.clone();
-                    tokio::spawn(
-                        tokio::timer::Interval::new(
-                            time::Instant::now() + heartbeat_every,
-                            heartbeat_every,
-                        ).map(|_| CoordinationPayload::Heartbeat)
-                            .map_err(|_| ())
-                            .forward(ctrl.sink_map_err(|_| ()))
-                            .map_err(|_| {
-                                // we're probably just shutting down
-                                ()
-                            })
-                            .map(|_| ()),
-                    );
+                    // TODO: call update_state_sizes every evict_every
+                    tokio::spawn(Replica::new(d, on, log.clone(), coord.clone()));
 
-                    if let Some(evict_every) = evict_every {
-                        let d = d.clone();
-                        tokio::spawn(
-                            tokio::timer::Interval::new(
-                                time::Instant::now() + evict_every,
-                                evict_every,
-                            ).map_err(|e| panic!(e))
-                                .for_each(move |_| {
-                                    poll_fn(|| blocking(|| d.lock().unwrap().update_state_sizes()))
-                                        .map_err(|e| panic!(e))
-                                }),
-                        );
-                    }
-
-                    ctrl_tx.send(CoordinationPayload::DomainBooted((idx, shard), addr));
                     trace!(
                         log,
                         "informed controller that domain {}.{} is at {:?}",
@@ -536,56 +523,24 @@ fn listen_df(
                         addr
                     );
 
-                    let log = log.clone();
-                    on.incoming().for_each(move |stream| {
-                        // we know that any new connection to a domain will first send a one-byte
-                        // token to indicate whether the connection is from a base or not.
-                        set_nonblocking(&stream, false);
-                        let mut tag = [0];
-                        use std::io::Read;
-                        if let Err(e) = stream.read_exact(&mut tag[..]) {
-                            // well.. that failed quickly..
-                            info!(log, "worker discarded new connection: {:?}", e);
-                            return Err(e);
-                        }
-                        let is_base = tag[0] == CONNECTION_FROM_BASE;
-                        set_nonblocking(&stream, true);
-
-                        debug!(log, "accepted new connection"; "base" => ?is_base);
-                        let tcp = if is_base {
-                            DualTcpReceiver::upgrade(BufReader::new(stream), move |input| {
-                                Box::new(Packet::Input {
-                                    inner: input,
-                                    src: None, /* TODO: send_back */
-                                    senders: Vec::new(),
-                                })
-                            })
-                        } else {
-                            BufReader::with_capacity(2 * 1024 * 1024, stream).into()
-                        };
-
-                        let d = Arc::clone(&d);
-
-                        tokio::spawn(tcp.map_err(|e| panic!(e)).for_each(
-                            move |dfm| -> Result<(), ()> {
-                                // TODO: blocking
-                                // TODO: worker::process
-                                // TODO: carry_local
-                                // TODO: capture any timeouts
-                                // TODO: send_back
-                                unimplemented!()
-                            },
-                        ));
-                        Ok(())
-                    })
+                    addr
                 };
 
-                match ok {
-                    Ok(fut) => Either::A(fut),
-                    Err(e) => Either::B(futures::future::err(e)),
+                match addr {
+                    Ok(addr) => Either::A(
+                        ctrl_tx
+                            .clone()
+                            .send(CoordinationPayload::DomainBooted((idx, shard), addr))
+                            .map_err(|_| {
+                                // controller went away -- exit?
+                                io::Error::new(io::ErrorKind::Other, "controller went away")
+                            }),
+                    ),
+                    Err(e) => Either::B(future::err(e)),
                 }
             })
             .map_err(|e| panic!(e))
+            .map(|_| ())
     }))
 }
 
@@ -613,7 +568,7 @@ fn listen_internal(
 }
 
 struct ExternalServer<A: Authority>(UnboundedSender<Event>, Arc<A>);
-fn listen_external<A: Authority>(
+fn listen_external<A: Authority + 'static>(
     event_tx: UnboundedSender<Event>,
     on: tokio::net::Incoming,
     authority: Arc<A>,
@@ -637,66 +592,71 @@ fn listen_external<A: Authority>(
             let mut res = Response::builder();
             // disable CORS to allow use as API server
             res.header(hyper::header::ACCESS_CONTROL_ALLOW_ORIGIN, "*");
-            Box::new(match (req.method().clone(), req.uri().path()) {
-                (Method::GET, "/graph.html") => {
-                    res.header(CONTENT_TYPE, "text/html");
-                    let res = res.body(hyper::Body::from(include_str!("graph.html")));
-                    Either::A(futures::future::ok(res.unwrap()))
-                }
-                (Method::GET, "/js/layout-worker.js") => {
-                    let res = res.body(hyper::Body::from(
-                        "importScripts('https://cdn.rawgit.com/mstefaniuk/graph-viz-d3-js/\
-                         cf2160ee3ca39b843b081d5231d5d51f1a901617/dist/layout-worker.js');",
-                    ));
-                    Either::A(futures::future::ok(res.unwrap()))
-                }
-                (Method::GET, path) if path.starts_with("/zookeeper/") => {
-                    let res = match self.1.try_read(&format!("/{}", &path[11..])) {
-                        Ok(Some(data)) => {
-                            res.header(CONTENT_TYPE, "application/json");
-                            res.body(hyper::Body::from(data))
-                        }
-                        _ => {
-                            res.status(StatusCode::NOT_FOUND);
-                            res.body(hyper::Body::empty())
-                        }
-                    };
-                    Either::A(futures::future::ok(res.unwrap()))
-                }
-                (method, path) => {
-                    let path = path.to_owned();
-                    let event_tx = self.0.clone();
-                    Either::B(req.body().concat2().and_then(move |body| {
-                        let body: Vec<u8> = body.iter().cloned().collect();
-                        let (tx, rx) = futures::sync::oneshot::channel();
-                        event_tx
-                            .clone()
-                            .send(Event::ExternalRequest(method, path, body, tx))
-                            .map_err(|_| futures::Canceled)
-                            .then(move |_| rx)
-                            .and_then(|reply| {
-                                res.header(hyper::header::ACCESS_CONTROL_ALLOW_ORIGIN, "*");
-                                let res = match reply {
-                                    Ok(Ok(reply)) => res.body(hyper::Body::from(reply)),
-                                    Ok(Err(reply)) => {
-                                        res.status(StatusCode::INTERNAL_SERVER_ERROR);
-                                        res.body(hyper::Body::from(reply))
-                                    }
-                                    Err(status_code) => {
-                                        res.status(status_code);
-                                        res.body(hyper::Body::empty())
-                                    }
-                                };
-                                futures::future::ok(res.unwrap())
-                            })
-                            .or_else(|_| {
-                                res.header(hyper::header::ACCESS_CONTROL_ALLOW_ORIGIN, "*");
+            if let &Method::GET = req.method() {
+                match req.uri().path() {
+                    "/graph.html" => {
+                        res.header(CONTENT_TYPE, "text/html");
+                        let res = res.body(hyper::Body::from(include_str!("graph.html")));
+                        return Box::new(futures::future::ok(res.unwrap()));
+                    }
+                    "/js/layout-worker.js" => {
+                        let res = res.body(hyper::Body::from(
+                            "importScripts('https://cdn.rawgit.com/mstefaniuk/graph-viz-d3-js/\
+                             cf2160ee3ca39b843b081d5231d5d51f1a901617/dist/layout-worker.js');",
+                        ));
+                        return Box::new(futures::future::ok(res.unwrap()));
+                    }
+                    path if path.starts_with("/zookeeper/") => {
+                        let res = match self.1.try_read(&format!("/{}", &path[11..])) {
+                            Ok(Some(data)) => {
+                                res.header(CONTENT_TYPE, "application/json");
+                                res.body(hyper::Body::from(data))
+                            }
+                            _ => {
                                 res.status(StatusCode::NOT_FOUND);
-                                futures::future::ok(res.body(hyper::Body::empty()).unwrap())
-                            })
-                    }))
+                                res.body(hyper::Body::empty())
+                            }
+                        };
+                        return Box::new(futures::future::ok(res.unwrap()));
+                    }
+                    _ => {}
                 }
-            })
+            }
+
+            let method = req.method().clone();
+            let path = req.uri().path().to_string();
+            let event_tx = self.0.clone();
+            Box::new(req.into_body().concat2().and_then(move |body| {
+                let body: Vec<u8> = body.iter().cloned().collect();
+                let (tx, rx) = futures::sync::oneshot::channel();
+                event_tx
+                    .clone()
+                    .send(Event::ExternalRequest(method, path, body, tx))
+                    .map_err(|_| futures::Canceled)
+                    .then(move |_| rx)
+                    .then(move |reply| match reply {
+                        Ok(reply) => {
+                            res.header(hyper::header::ACCESS_CONTROL_ALLOW_ORIGIN, "*");
+                            let res = match reply {
+                                Ok(Ok(reply)) => res.body(hyper::Body::from(reply)),
+                                Ok(Err(reply)) => {
+                                    res.status(StatusCode::INTERNAL_SERVER_ERROR);
+                                    res.body(hyper::Body::from(reply))
+                                }
+                                Err(status_code) => {
+                                    res.status(status_code);
+                                    res.body(hyper::Body::empty())
+                                }
+                            };
+                            Ok(res.unwrap())
+                        }
+                        Err(_) => {
+                            res.header(hyper::header::ACCESS_CONTROL_ALLOW_ORIGIN, "*");
+                            res.status(StatusCode::NOT_FOUND);
+                            Ok(res.body(hyper::Body::empty()).unwrap())
+                        }
+                    })
+            }))
         }
     }
     impl<A: Authority> NewService for ExternalServer<A> {
@@ -732,16 +692,12 @@ fn instance_campaign<A: Authority + 'static>(
     config: ControllerConfig,
 ) -> JoinHandle<()> {
     let descriptor_bytes = serde_json::to_vec(&descriptor).unwrap();
-    let campaign_inner = move |event_tx: UnboundedSender<Event>| -> Result<(), failure::Error> {
-        let lost_election = |payload: Vec<u8>| -> Result<(), failure::Error> {
+    let campaign_inner = move |mut event_tx: UnboundedSender<Event>| -> Result<(), failure::Error> {
+        let payload_to_event = |payload: Vec<u8>| -> Result<Event, failure::Error> {
             let descriptor: ControllerDescriptor = serde_json::from_slice(&payload[..])?;
             let state: ControllerState =
-                serde_json::from_slice(&authority.try_read(STATE_KEY).unwrap().unwrap()).unwrap();
-            event_tx
-                .send(Event::LeaderChange(state, descriptor))
-                .wait()
-                .map(|_| ())
-                .map_err(|_| format_err!("send failed"))
+                serde_json::from_slice(&authority.try_read(STATE_KEY).unwrap().unwrap())?;
+            Ok(Event::LeaderChange(state, descriptor))
         };
 
         loop {
@@ -752,10 +708,16 @@ fn instance_campaign<A: Authority + 'static>(
             let mut epoch;
             if let Some(leader) = authority.try_get_leader()? {
                 epoch = leader.0;
-                lost_election(leader.1)?;
+                event_tx = event_tx
+                    .send(payload_to_event(leader.1)?)
+                    .wait()
+                    .map_err(|_| format_err!("send failed"))?;
                 while let Some(leader) = authority.await_new_epoch(epoch)? {
                     epoch = leader.0;
-                    lost_election(leader.1)?;
+                    event_tx = event_tx
+                        .send(payload_to_event(leader.1)?)
+                        .wait()
+                        .map_err(|_| format_err!("send failed"))?;
                 }
             }
 
@@ -819,31 +781,35 @@ fn instance_campaign<A: Authority + 'static>(
 fn do_eviction(
     log: &slog::Logger,
     memory_limit: Option<usize>,
-    coord: &Arc<ChannelCoordinator>,
     domain_senders: &mut HashMap<(DomainIndex, usize), TcpSender<Box<Packet>>>,
     state_sizes: &Arc<Mutex<HashMap<(DomainIndex, usize), Arc<AtomicUsize>>>>,
-) {
+) -> impl Future<Item = (), Error = ()> {
+    // TODO: blocking blocking blocking
+
     use std::cmp;
+
     // 2. add current state sizes (could be out of date, as packet sent below is not
     //    necessarily received immediately)
-    let sizes: Vec<(&(DomainIndex, usize), usize)> = state_sizes
-        .lock()
-        .unwrap()
-        .iter()
-        .map(|(ds, sa)| {
-            let size = sa.load(Ordering::Relaxed);
-            trace!(
-                log,
-                "domain {}.{} state size is {} bytes",
-                ds.0.index(),
-                ds.1,
-                size
-            );
-            (ds, size)
-        })
-        .collect();
-    let total: usize = sizes.iter().map(|&(_, s)| s).sum();
+    let sizes: Vec<((DomainIndex, usize), usize)> = {
+        let state_sizes = state_sizes.lock().unwrap();
+        state_sizes
+            .iter()
+            .map(|(ds, sa)| {
+                let size = sa.load(Ordering::Relaxed);
+                trace!(
+                    log,
+                    "domain {}.{} state size is {} bytes",
+                    ds.0.index(),
+                    ds.1,
+                    size
+                );
+                (ds.clone(), size)
+            })
+            .collect()
+    };
+
     // 3. are we above the limit?
+    let total: usize = sizes.iter().map(|&(_, s)| s).sum();
     match memory_limit {
         None => (),
         Some(limit) => {
@@ -858,11 +824,288 @@ fn do_eviction(
                         (largest.0).0.index(),
                     );
 
-                let tx = domain_senders.get_mut(largest.0).unwrap();
+                let tx = domain_senders.get_mut(&largest.0).unwrap();
                 tx.send(box Packet::Evict {
                     node: None,
                     num_bytes: cmp::min(largest.1, total - limit),
                 }).unwrap();
+            }
+        }
+    }
+
+    Result::Ok::<_, ()>(()).into_future()
+}
+
+struct Replica {
+    domain: Domain,
+    ri: ReplicaIndex,
+    log: slog::Logger,
+
+    coord: Arc<ChannelCoordinator>,
+
+    incoming: tokio::net::Incoming,
+    inputs: Vec<DualTcpReceiver<BufReader<tokio::net::TcpStream>, Box<Packet>, Input>>,
+    outputs: FnvHashMap<ReplicaIndex, (TcpSender<Packet>, bool)>,
+
+    outbox: Vec<(ReplicaIndex, Box<Packet>)>,
+    timeout: Option<tokio::timer::Delay>,
+    sendback: Sendback,
+}
+
+impl Replica {
+    pub fn new(
+        domain: Domain,
+        on: tokio::net::TcpListener,
+        log: slog::Logger,
+        cc: Arc<ChannelCoordinator>,
+    ) -> Self {
+        Replica {
+            coord: cc,
+            ri: domain.id(),
+            domain,
+            incoming: on.incoming(),
+            log,
+            inputs: Default::default(),
+            outputs: Default::default(),
+            outbox: Default::default(),
+            sendback: Default::default(),
+            timeout: None,
+        }
+    }
+
+    // TODO: make this async
+    fn try_ack(&mut self) {
+        let mut bytes = Vec::new();
+        'streams: for (streami, n) in self.sendback.back.drain() {
+            use bincode;
+            use std::io::{self, Write};
+
+            let stream = &mut self.inputs[streami];
+            let mut stream = stream.get_ref().get_ref();
+
+            let mut at = 0;
+            bytes.clear();
+            for _ in 0..n {
+                bincode::serialize_into(&mut bytes[at..], &()).unwrap();
+                at = bytes.len();
+            }
+            let mut bytes = &bytes[..];
+
+            let mut undo_blocking = false;
+            while !bytes.is_empty() {
+                // NOTE: we unfortunately can't just serialize_into the stream
+                // https://github.com/TyOverby/bincode/issues/229
+                match stream.write(bytes) {
+                    Ok(n) => {
+                        bytes = &bytes[n..];
+                    }
+                    Err(e) => match e.kind() {
+                        io::ErrorKind::WouldBlock => {
+                            // transient -- retry (and start blocking)
+                            set_nonblocking(stream, false);
+                            undo_blocking = true;
+                        }
+                        io::ErrorKind::Interrupted | io::ErrorKind::TimedOut => {
+                            // transient -- retry
+                        }
+                        _ => {
+                            // permanent, client disconnected, ignore and swallow
+                            // TODO: drop connection?
+                            continue 'streams;
+                        }
+                    },
+                }
+            }
+
+            while let Err(e) = stream.flush() {
+                match e.kind() {
+                    io::ErrorKind::WouldBlock => {
+                        // transient -- retry (and start blocking)
+                        set_nonblocking(stream, false);
+                        undo_blocking = true;
+                    }
+                    io::ErrorKind::Interrupted | io::ErrorKind::TimedOut => {
+                        // transient -- retry
+                    }
+                    _ => {
+                        // client connection lost, ignore and swallow
+                        // TODO: drop connection?
+                        continue 'streams;
+                    }
+                }
+            }
+
+            if undo_blocking {
+                set_nonblocking(stream, true);
+            }
+        }
+    }
+
+    // TODO: make this async
+    fn try_flush(&mut self) -> Result<(), channel::tcp::SendError> {
+        let me = &self.ri;
+        let cc = &self.coord;
+        for (ri, mut m) in self.outbox.drain(..) {
+            let &mut (ref mut tx, is_local) = self.outputs.entry(ri).or_insert_with(|| {
+                let mut dest = None;
+                while dest.is_none() {
+                    dest = cc.get_dest(&ri);
+                }
+                let (addr, is_local) = dest.unwrap();
+                let mut tx = DomainConnectionBuilder::for_domain(addr).build().unwrap();
+                if is_local {
+                    tx.send_ref(&Packet::Hey(me.0, me.1)).unwrap();
+                }
+                (tx, is_local)
+            });
+            if is_local {
+                m = m.make_local();
+            }
+
+            tx.send_ref(&m)?;
+        }
+        Ok(())
+    }
+
+    fn try_new(&mut self) -> io::Result<()> {
+        while let Async::Ready(Some(mut stream)) = self.incoming.poll()? {
+            // we know that any new connection to a domain will first send a one-byte
+            // token to indicate whether the connection is from a base or not.
+            set_nonblocking(&stream, false);
+            let mut tag = [0];
+            use std::io::Read;
+            if let Err(e) = stream.read_exact(&mut tag[..]) {
+                // well.. that failed quickly..
+                info!(self.log, "worker discarded new connection: {:?}", e);
+            } else {
+                let is_base = tag[0] == CONNECTION_FROM_BASE;
+                set_nonblocking(&stream, true);
+
+                debug!(self.log, "accepted new connection"; "base" => ?is_base);
+                let tcp = if is_base {
+                    DualTcpReceiver::upgrade(BufReader::new(stream), move |input| {
+                        Box::new(Packet::Input {
+                            inner: input,
+                            src: None, /* TODO: send_back */
+                            senders: Vec::new(),
+                        })
+                    })
+                } else {
+                    BufReader::with_capacity(2 * 1024 * 1024, stream).into()
+                };
+
+                self.inputs.push(tcp);
+            }
+        }
+        Ok(())
+    }
+
+    fn try_timeout(&mut self) -> Result<(), tokio::timer::Error> {
+        if let Some(mut to) = self.timeout.take() {
+            if let Async::Ready(()) = to.poll()? {
+                // TODO: blocking blocking blocking
+                self.domain
+                    .on_event(&mut self.sendback, PollEvent::Timeout, &mut self.outbox);
+            } else {
+                self.timeout = Some(to);
+            }
+        }
+        Ok(())
+    }
+}
+
+#[derive(Default)]
+struct Sendback {
+    // map from inputi to number of (empty) ACKs
+    back: FnvHashMap<usize, usize>,
+}
+
+impl Executor for Sendback {
+    fn send_back(&mut self, id: SourceChannelIdentifier, _: ()) {
+        use std::ops::AddAssign;
+        self.back.entry(id.token).or_insert(0).add_assign(1);
+    }
+}
+
+impl Future for Replica {
+    type Item = ();
+    type Error = ();
+    fn poll(&mut self) -> Result<Async<Self::Item>, Self::Error> {
+        let r: Result<Async<Self::Item>, failure::Error> = do catch {
+            // first, try sending packets to downstream domains if they blocked before
+            // TODO: send fail == exiting?
+            self.try_flush().context("downstream flush (before)")?;
+
+            // then, try to send any acks we haven't sent yet
+            self.try_ack();
+
+            // then, see if there are any new connections
+            self.try_new().context("check for new connections")?;
+
+            // then, see if our timer has expired
+            self.try_timeout().context("check timeout")?;
+
+            // and now, finally, we see if there's new input for us
+            for input in &mut self.inputs {
+                loop {
+                    match input.poll() {
+                        Ok(Async::Ready(Some(packet))) => {
+                            // TODO: blocking blocking blocking
+                            // TODO: carry_local
+                            if let ProcessResult::StopPolling = self.domain.on_event(
+                                &mut self.sendback,
+                                PollEvent::Process(packet),
+                                &mut self.outbox,
+                            ) {
+                                // TODO: quit
+                                unimplemented!();
+                            }
+                        }
+                        Ok(Async::Ready(None)) => {
+                            trace!(self.log, "connection closed");
+                            // TODO: reclaim i? make sure we don't poll it again.
+                            continue;
+                        }
+                        Ok(Async::NotReady) => break,
+                        Err(e) => {
+                            debug!(self.log, "connection dropped: {:?}", e);
+                            // TODO: reclaim i? make sure we don't poll it again.
+                            continue;
+                        }
+                    }
+                }
+            }
+
+            // check if we now need to set a timeout
+            let mut timeout = None;
+            self.domain.on_event(
+                &mut self.sendback,
+                PollEvent::ResumePolling(&mut timeout),
+                &mut self.outbox,
+            );
+
+            if let Some(timeout) = timeout {
+                self.timeout = Some(tokio::timer::Delay::new(time::Instant::now() + timeout));
+
+                // we need to poll the delay to ensure we'll get woken up
+                self.try_timeout().context("check timeout after setting")?;
+            }
+
+            // send to downstream
+            // TODO: send fail == exiting?
+            self.try_flush().context("downstream flush (after)")?;
+
+            // and also acks
+            self.try_ack();
+
+            Async::NotReady
+        };
+
+        match r {
+            Ok(k) => Ok(k),
+            Err(e) => {
+                crit!(self.log, "replica failure: {:?}", e);
+                Err(())
             }
         }
     }

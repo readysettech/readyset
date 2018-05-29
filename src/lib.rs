@@ -324,6 +324,7 @@ extern crate consensus;
 extern crate dataflow;
 #[macro_use]
 extern crate failure;
+extern crate fnv;
 extern crate futures;
 extern crate hyper;
 extern crate mio;
