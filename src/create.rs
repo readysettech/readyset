@@ -3,9 +3,9 @@ use std::str;
 use std::str::FromStr;
 use std::fmt;
 
-use common::{column_identifier_no_alias, integer_literal, opt_multispace, sql_identifier,
-             statement_terminator, table_reference, type_identifier, Literal, Real, SqlType,
-             TableKey};
+use common::{column_identifier_no_alias, integer_literal, opt_multispace, parse_comment,
+             sql_identifier, statement_terminator, table_reference, type_identifier, Literal, Real,
+             SqlType, TableKey};
 use column::{Column, ColumnConstraint, ColumnSpecification};
 use compound_select::{compound_selection, CompoundSelectStatement};
 use keywords::escape_if_keyword;
@@ -216,6 +216,7 @@ named!(pub field_specification_list<&[u8], Vec<ColumnSpecification> >,
                                ))
                ) >>
                constraints: many0!(column_constraint) >>
+               comment: opt!(parse_comment) >>
                opt!(
                    complete!(do_parse!(
                        opt_multispace >>
@@ -233,6 +234,7 @@ named!(pub field_specification_list<&[u8], Vec<ColumnSpecification> >,
                        column: identifier,
                        sql_type: t,
                        constraints: constraints.into_iter().filter_map(|m|m).collect(),
+                       comment: comment,
                    }
                })
            ))
