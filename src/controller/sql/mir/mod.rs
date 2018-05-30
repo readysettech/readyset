@@ -430,7 +430,8 @@ impl SqlToMirConverter {
     pub fn remove_query(&mut self, name: &str, mq: &MirQuery) {
         use std::collections::VecDeque;
 
-        let v = self.current
+        let v = self
+            .current
             .remove(name)
             .expect(&format!("no query named \"{}\"?", name));
 
@@ -642,7 +643,8 @@ impl SqlToMirConverter {
         // the TableKey structure passed in via `keys`.
         let primary_keys = match keys {
             None => vec![],
-            Some(keys) => keys.iter()
+            Some(keys) => keys
+                .iter()
                 .filter_map(|k| match *k {
                     ref k @ TableKey::PrimaryKey(..) => Some(k),
                     _ => None,
@@ -1391,7 +1393,8 @@ impl SqlToMirConverter {
             let mut ancestors = self.universe.member_of.iter().fold(
                 vec![],
                 |mut acc, (gname, gids)| {
-                    let group_views: Vec<MirNodeRef> = gids.iter()
+                    let group_views: Vec<MirNodeRef> = gids
+                        .iter()
                         .filter_map(|gid| {
                             // This is a little annoying, but because of the way we name universe queries,
                             // we need to strip the view name of the _u{uid} suffix
@@ -1642,7 +1645,8 @@ impl SqlToMirConverter {
                 value_columns_needed_for_predicates(&qg.columns, &qg.global_predicates)
                     .into_iter()
                     .unzip();
-            let projected_arithmetic: Vec<(String, ArithmeticExpression)> = qg.columns
+            let projected_arithmetic: Vec<(String, ArithmeticExpression)> = qg
+                .columns
                 .iter()
                 .filter_map(|oc| match *oc {
                     OutputColumn::Arithmetic(ref ac) => {
@@ -1662,7 +1666,8 @@ impl SqlToMirConverter {
                     OutputColumn::Literal(_) => None,
                 })
                 .collect();
-            let mut projected_literals: Vec<(String, DataType)> = qg.columns
+            let mut projected_literals: Vec<(String, DataType)> = qg
+                .columns
                 .iter()
                 .filter_map(|oc| match *oc {
                     OutputColumn::Arithmetic(_) => None,

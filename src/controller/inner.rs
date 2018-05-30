@@ -595,9 +595,11 @@ impl ControllerInner {
             })
             .collect();
 
-        let base_operator = node.get_base()
+        let base_operator = node
+            .get_base()
             .expect("asked to get table for non-base node");
-        let columns: Vec<String> = node.fields()
+        let columns: Vec<String> = node
+            .fields()
             .iter()
             .enumerate()
             .filter(|&(n, _)| !base_operator.get_dropped().contains_key(n))
@@ -625,7 +627,8 @@ impl ControllerInner {
     /// Get statistics about the time spent processing different parts of the graph.
     pub fn get_statistics(&mut self) -> GraphStats {
         // TODO: request stats from domains in parallel.
-        let domains = self.domains
+        let domains = self
+            .domains
             .iter_mut()
             .flat_map(|(di, s)| {
                 s.send(box payload::Packet::GetStatistics).unwrap();
@@ -657,11 +660,13 @@ impl ControllerInner {
     pub fn flush_partial(&mut self) -> u64 {
         // get statistics for current domain sizes
         // and evict all state from partial nodes
-        let to_evict: Vec<_> = self.domains
+        let to_evict: Vec<_> = self
+            .domains
             .iter_mut()
             .map(|(di, s)| {
                 s.send(box payload::Packet::GetStatistics).unwrap();
-                let to_evict: Vec<(NodeIndex, u64)> = s.wait_for_statistics()
+                let to_evict: Vec<(NodeIndex, u64)> = s
+                    .wait_for_statistics()
                     .unwrap()
                     .into_iter()
                     .flat_map(move |(_, node_stats)| {
@@ -717,7 +722,8 @@ impl ControllerInner {
             for g in groups {
                 let rgb: Option<ViewBuilder> = self.view_builder(&g);
                 let mut view = rgb.map(|rgb| rgb.build_exclusive().unwrap()).unwrap();
-                let my_groups: Vec<DataType> = view.lookup(uid, true)
+                let my_groups: Vec<DataType> = view
+                    .lookup(uid, true)
                     .unwrap()
                     .iter()
                     .map(|v| v[1].clone())
@@ -763,7 +769,8 @@ impl ControllerInner {
                 for leaf in &ra.removed_leaves {
                     // There should be exactly one reader attached to each "leaf" node. Find it and
                     // remove it along with any now unneeded ancestors.
-                    let readers: Vec<_> = self.ingredients
+                    let readers: Vec<_> = self
+                        .ingredients
                         .neighbors_directed(*leaf, petgraph::EdgeDirection::Outgoing)
                         .collect();
                     assert!(readers.len() <= 1);
@@ -872,7 +879,8 @@ impl ControllerInner {
         let mut removals = HashMap::new();
         let mut nodes = vec![node];
         while let Some(node) = nodes.pop() {
-            let mut parents = self.ingredients
+            let mut parents = self
+                .ingredients
                 .neighbors_directed(node, petgraph::EdgeDirection::Incoming)
                 .detach();
             while let Some(parent) = parents.next_node(&self.ingredients) {
@@ -883,7 +891,8 @@ impl ControllerInner {
                 // internal views above a reader that have no other dependent views.
                 // Should not remove "internal leaf" nodes.
                 if !self.ingredients[parent].is_source() && !self.ingredients[parent].is_base()
-                    && self.ingredients
+                    && self
+                        .ingredients
                         .neighbors_directed(parent, petgraph::EdgeDirection::Outgoing)
                         .count() == 1
                 {
