@@ -389,7 +389,7 @@ fn listen_reads(
 
             let mut readers = readers.clone();
             let (r, w) = stream.split();
-            let w = AsyncBincodeWriter::from(w).for_sync();
+            let w = AsyncBincodeWriter::from(w);
             let r = AsyncBincodeReader::from(r);
             tokio::spawn(
                 r.and_then(move |req| readers::handle_message(req, &mut readers))
