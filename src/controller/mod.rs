@@ -1,8 +1,10 @@
 use api::{ControllerDescriptor, Input};
-use async_bincode::{AsyncBincodeReader, AsyncBincodeWriter};
+use async_bincode::{AsyncBincodeReader, AsyncBincodeWriter, AsyncDestination, SyncDestination};
 use basics::DomainIndex;
+use bincode;
+use bufstream::BufStream;
 use channel::{
-    self, poll::{PollEvent, ProcessResult}, DomainConnectionBuilder, DualTcpReceiver, TcpSender,
+    self, poll::{PollEvent, ProcessResult}, DomainConnectionBuilder, DualTcpStream, TcpSender,
     CONNECTION_FROM_BASE,
 };
 use consensus::{Authority, Epoch, STATE_KEY};
@@ -16,7 +18,7 @@ use dataflow::{
     Packet, PersistenceParameters, Readers,
 };
 use failure::{self, ResultExt};
-use fnv::FnvHashMap;
+use fnv::{FnvHashMap, FnvHashSet};
 use futures::sync::mpsc::UnboundedSender;
 use futures::{self, Future, Sink, Stream};
 use hyper::header::CONTENT_TYPE;
@@ -25,15 +27,16 @@ use hyper::{self, Method, StatusCode};
 use rand;
 use serde_json;
 use slog;
-use std::collections::HashMap;
+use std::collections::{HashMap, VecDeque};
 use std::fs;
-use std::io::{self, BufReader, ErrorKind};
+use std::io::{self, BufWriter, ErrorKind};
 use std::net::{IpAddr, SocketAddr};
 use std::sync::{
     atomic::{AtomicUsize, Ordering}, Arc, Mutex,
 };
 use std::thread::{self, JoinHandle};
 use std::time::{self, Duration};
+use streamunordered::StreamUnordered;
 use tokio;
 use tokio::prelude::future::{poll_fn, Either};
 use tokio::prelude::*;
@@ -847,16 +850,24 @@ fn do_eviction(
 
 struct Replica {
     domain: Domain,
-    ri: ReplicaIndex,
     log: slog::Logger,
 
     coord: Arc<ChannelCoordinator>,
 
     incoming: tokio::net::Incoming,
-    inputs: Vec<DualTcpReceiver<BufReader<tokio::net::TcpStream>, Box<Packet>, Input>>,
-    outputs: FnvHashMap<ReplicaIndex, (TcpSender<Packet>, bool)>,
+    inputs: StreamUnordered<
+        DualTcpStream<BufStream<tokio::net::TcpStream>, Box<Packet>, Input, SyncDestination>,
+    >,
+    outputs: FnvHashMap<
+        ReplicaIndex,
+        (
+            AsyncBincodeWriter<BufWriter<tokio::net::TcpStream>, Box<Packet>, AsyncDestination>,
+            bool,
+            bool,
+        ),
+    >,
 
-    outbox: Vec<(ReplicaIndex, Box<Packet>)>,
+    outbox: FnvHashMap<ReplicaIndex, VecDeque<Box<Packet>>>,
     timeout: Option<tokio::timer::Delay>,
     sendback: Sendback,
 }
@@ -870,7 +881,6 @@ impl Replica {
     ) -> Self {
         Replica {
             coord: cc,
-            ri: domain.id(),
             domain,
             incoming: on.incoming(),
             log,
@@ -882,97 +892,151 @@ impl Replica {
         }
     }
 
-    // FIXME: make this async
-    fn try_ack(&mut self) {
-        let mut bytes = Vec::new();
-        'streams: for (streami, n) in self.sendback.back.drain() {
-            use bincode;
-            use std::io::{self, Write};
+    fn try_ack(&mut self) -> Result<(), failure::Error> {
+        let inputs = &mut self.inputs;
+        let pending = &mut self.sendback.pending;
 
-            let stream = &mut self.inputs[streami];
-            let mut stream = stream.get_ref().get_ref();
+        // first, queue up any additional writes we have to do
+        let mut err = Vec::new();
+        self.sendback.back.retain(|&streami, n| {
+            use std::ops::SubAssign;
 
-            let mut at = 0;
-            bytes.clear();
-            for _ in 0..n {
-                bincode::serialize_into(&mut bytes[at..], &()).unwrap();
-                at = bytes.len();
-            }
-            let mut bytes = &bytes[..];
+            let stream = &mut inputs[streami];
 
-            let mut undo_blocking = false;
-            while !bytes.is_empty() {
-                // NOTE: we unfortunately can't just serialize_into the stream
-                // https://github.com/TyOverby/bincode/issues/229
-                match stream.write(bytes) {
-                    Ok(n) => {
-                        bytes = &bytes[n..];
-                    }
-                    Err(e) => match e.kind() {
-                        io::ErrorKind::WouldBlock => {
-                            // transient -- retry (and start blocking)
-                            set_nonblocking(stream, false);
-                            undo_blocking = true;
+            let end = *n;
+            for i in 0..end {
+                match stream.start_send(()) {
+                    Ok(AsyncSink::Ready) => {
+                        if i == 0 {
+                            pending.insert(streami);
                         }
-                        io::ErrorKind::Interrupted | io::ErrorKind::TimedOut => {
-                            // transient -- retry
+                        n.sub_assign(1);
+                    }
+                    Ok(AsyncSink::NotReady(())) => {
+                        break;
+                    }
+                    Err(e) => {
+                        // start_send shouldn't generally error
+                        err.push(e.into());
+                    }
+                }
+            }
+
+            *n > 0
+        });
+
+        if !err.is_empty() {
+            return Err(err.swap_remove(0));
+        }
+
+        // then, try to send on any streams we may be able to
+        pending.retain(|&streami| {
+            let stream = &mut inputs[streami];
+            match stream.poll_complete() {
+                Ok(Async::Ready(())) => false,
+                Ok(Async::NotReady) => true,
+                Err(box bincode::ErrorKind::Io(e)) => {
+                    match e.kind() {
+                        io::ErrorKind::BrokenPipe
+                        | io::ErrorKind::NotConnected
+                        | io::ErrorKind::UnexpectedEof
+                        | io::ErrorKind::ConnectionAborted
+                        | io::ErrorKind::ConnectionReset => {
+                            // connection went away, no need to try more
+                            false
                         }
                         _ => {
-                            // permanent, client disconnected, ignore and swallow
-                            // TODO: drop connection?
-                            continue 'streams;
+                            err.push(e.into());
+                            true
                         }
-                    },
-                }
-            }
-
-            while let Err(e) = stream.flush() {
-                match e.kind() {
-                    io::ErrorKind::WouldBlock => {
-                        // transient -- retry (and start blocking)
-                        set_nonblocking(stream, false);
-                        undo_blocking = true;
-                    }
-                    io::ErrorKind::Interrupted | io::ErrorKind::TimedOut => {
-                        // transient -- retry
-                    }
-                    _ => {
-                        // client connection lost, ignore and swallow
-                        // TODO: drop connection?
-                        continue 'streams;
                     }
                 }
+                Err(e) => {
+                    err.push(e.into());
+                    true
+                }
             }
+        });
 
-            if undo_blocking {
-                set_nonblocking(stream, true);
-            }
+        if !err.is_empty() {
+            return Err(err.swap_remove(0));
         }
+
+        Ok(())
     }
 
-    // TODO: make this async
-    fn try_flush(&mut self) -> Result<(), channel::tcp::SendError> {
-        let me = &self.ri;
+    fn try_flush(&mut self) -> Result<(), failure::Error> {
         let cc = &self.coord;
-        for (ri, mut m) in self.outbox.drain(..) {
-            let &mut (ref mut tx, is_local) = self.outputs.entry(ri).or_insert_with(|| {
-                let mut dest = None;
-                while dest.is_none() {
-                    dest = cc.get_dest(&ri);
-                }
-                let (addr, is_local) = dest.unwrap();
-                let mut tx = DomainConnectionBuilder::for_domain(addr).build().unwrap();
-                if is_local {
-                    block_on(|| tx.send_ref(&Packet::Hey(me.0, me.1)).unwrap());
-                }
-                (tx, is_local)
-            });
-            if is_local {
-                m = m.make_local();
+        let outputs = &mut self.outputs;
+
+        // just like in try_ack:
+        // first, queue up any additional writes we have to do
+        let mut err = Vec::new();
+        for (&ri, ms) in &mut self.outbox {
+            if ms.is_empty() {
+                continue;
             }
 
-            block_on(|| tx.send_ref(&m))?;
+            let &mut (ref mut tx, ref mut pending, is_local) =
+                outputs.entry(ri).or_insert_with(|| {
+                    let mut dest = None;
+                    while dest.is_none() {
+                        dest = cc.get_dest(&ri);
+                    }
+                    let (addr, is_local) = dest.unwrap();
+                    let tx = DomainConnectionBuilder::for_domain(addr)
+                        .build_async()
+                        .unwrap();
+                    (tx, true, is_local)
+                });
+
+            while let Some(mut m) = ms.pop_front() {
+                if is_local && !m.is_local() {
+                    m = m.make_local();
+                }
+
+                match tx.start_send(m) {
+                    Ok(AsyncSink::Ready) => {
+                        // we queued something, so we'll need to send!
+                        *pending = true;
+                    }
+                    Ok(AsyncSink::NotReady(m)) => {
+                        // put back the m we tried to send
+                        ms.push_front(m);
+                        // there's also no use in trying to enqueue more packets
+                        break;
+                    }
+                    Err(e) => {
+                        err.push(e);
+                        break;
+                    }
+                }
+            }
         }
+
+        if !err.is_empty() {
+            return Err(err.swap_remove(0).into());
+        }
+
+        // then, try to do any sends that are still pending
+        for &mut (ref mut tx, ref mut pending, _) in outputs.values_mut() {
+            if !*pending {
+                continue;
+            }
+
+            match tx.poll_complete() {
+                Ok(Async::Ready(())) => {
+                    *pending = false;
+                }
+                Ok(Async::NotReady) => {}
+                Err(e) => err.push(e),
+            }
+        }
+
+        if !err.is_empty() {
+            return Err(err.swap_remove(0).into());
+        }
+
         Ok(())
     }
 
@@ -991,9 +1055,10 @@ impl Replica {
                 set_nonblocking(&stream, true);
 
                 debug!(self.log, "accepted new connection"; "base" => ?is_base);
-                let token = self.inputs.len();
+                let slot = self.inputs.stream_slot();
+                let token = slot.token();
                 let tcp = if is_base {
-                    DualTcpReceiver::upgrade(BufReader::new(stream), move |input| {
+                    DualTcpStream::upgrade(BufStream::new(stream), move |input| {
                         Box::new(Packet::Input {
                             inner: input,
                             src: Some(SourceChannelIdentifier { token }),
@@ -1001,10 +1066,9 @@ impl Replica {
                         })
                     })
                 } else {
-                    BufReader::with_capacity(2 * 1024 * 1024, stream).into()
+                    BufStream::with_capacities(2 * 1024 * 1024, 4 * 1024, stream).into()
                 };
-
-                self.inputs.push(tcp);
+                slot.insert(tcp);
             }
         }
         Ok(())
@@ -1029,6 +1093,7 @@ impl Replica {
 struct Sendback {
     // map from inputi to number of (empty) ACKs
     back: FnvHashMap<usize, usize>,
+    pending: FnvHashSet<usize>,
 }
 
 impl Executor for Sendback {
@@ -1050,7 +1115,7 @@ impl Future for Replica {
             self.try_flush().context("downstream flush (before)")?;
 
             // then, try to send any acks we haven't sent yet
-            self.try_ack();
+            self.try_ack()?;
 
             // then, see if there are any new connections
             self.try_new().context("check for new connections")?;
@@ -1060,33 +1125,31 @@ impl Future for Replica {
 
             // and now, finally, we see if there's new input for us
             // FIXME: replace with https://github.com/jonhoo/streamunordered
-            for input in &mut self.inputs {
-                loop {
-                    match input.poll() {
-                        Ok(Async::Ready(Some(packet))) => {
-                            let d = &mut self.domain;
-                            let sb = &mut self.sendback;
-                            let ob = &mut self.outbox;
 
-                            // TODO: carry_local
-                            if let ProcessResult::StopPolling =
-                                block_on(|| d.on_event(sb, PollEvent::Process(packet), ob))
-                            {
-                                // TODO: quit
-                                unimplemented!();
-                            }
+            loop {
+                match self.inputs.poll() {
+                    Ok(Async::Ready(Some((packet, _)))) => {
+                        let d = &mut self.domain;
+                        let sb = &mut self.sendback;
+                        let ob = &mut self.outbox;
+
+                        // TODO: carry_local
+                        if let ProcessResult::StopPolling =
+                            block_on(|| d.on_event(sb, PollEvent::Process(packet), ob))
+                        {
+                            // TODO: quit
+                            unimplemented!();
                         }
-                        Ok(Async::Ready(None)) => {
-                            trace!(self.log, "connection closed");
-                            // FIXME: reclaim i? make sure we don't poll it again.
-                            continue;
-                        }
-                        Ok(Async::NotReady) => break,
-                        Err(e) => {
-                            debug!(self.log, "connection dropped: {:?}", e);
-                            // FIXME: reclaim i? make sure we don't poll it again.
-                            continue;
-                        }
+                    }
+                    Ok(Async::Ready(None)) => {
+                        warn!(self.log, "all streams terminated");
+                        // XXX: time to exit?
+                        break;
+                    }
+                    Ok(Async::NotReady) => break,
+                    Err(e) => {
+                        error!(self.log, "input stream failed: {:?}", e);
+                        break;
                     }
                 }
             }
@@ -1111,7 +1174,7 @@ impl Future for Replica {
             self.try_flush().context("downstream flush (after)")?;
 
             // and also acks
-            self.try_ack();
+            self.try_ack()?;
 
             Async::NotReady
         };

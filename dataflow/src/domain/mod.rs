@@ -1,3 +1,4 @@
+use fnv::FnvHashMap;
 use petgraph::graph::NodeIndex;
 use std::borrow::Cow;
 use std::cell;
@@ -5,11 +6,10 @@ use std::cmp;
 use std::collections::hash_map::Entry;
 use std::collections::{HashMap, HashSet, VecDeque};
 use std::mem;
+use std::net::SocketAddr;
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time;
-
-use std::net::SocketAddr;
 
 use api;
 pub use basics::DomainIndex as Index;
@@ -22,7 +22,7 @@ use slog::Logger;
 use timekeeper::{RealTime, SimpleTracker, ThreadTime, Timer, TimerSet};
 use Readers;
 
-type EnqueuedSends = Vec<(ReplicaAddr, Box<Packet>)>;
+type EnqueuedSends = FnvHashMap<ReplicaAddr, VecDeque<Box<Packet>>>;
 
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
 pub struct Config {

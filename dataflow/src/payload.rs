@@ -287,9 +287,6 @@ pub enum Packet {
     /// The packet is being sent locally, so a pointer is sent to avoid
     /// serialization/deserialization costs.
     Local(LocalBypass<Packet>),
-
-    /// Notify downstream replica what our index is
-    Hey(domain::Index, usize),
 }
 
 impl Packet {
@@ -445,6 +442,14 @@ impl Packet {
             }
         } else {
             None
+        }
+    }
+
+    pub fn is_local(&self) -> bool {
+        if let Packet::Local(..) = *self {
+            true
+        } else {
+            false
         }
     }
 
