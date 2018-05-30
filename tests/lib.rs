@@ -161,3 +161,38 @@ fn mediawiki_schema() {
     assert_eq!(ok, 17);
     assert_eq!(fail, 0);
 }
+
+#[test]
+fn parse_comments() {
+    let mut f = File::open(Path::new("tests/comments.txt")).unwrap();
+    let mut s = String::new();
+
+    // Load queries
+    f.read_to_string(&mut s).unwrap();
+    let lines: Vec<&str> = s.lines()
+        .map(str::trim)
+        .filter(|l| {
+            !l.is_empty() && !l.starts_with("#") && !l.starts_with("--") && !l.starts_with("DROP") && !l.starts_with("/*")
+        })
+        .collect();
+    let mut q = String::new();
+    let mut queries = Vec::new();
+    for l in lines {
+        if !l.ends_with(";") {
+            q.push_str(l);
+        } else {
+            // end of query
+            q.push_str(l);
+            queries.push(q.clone());
+            q = String::new();
+        }
+    }
+    println!("Loaded {} table definitions", queries.len());
+
+    // Try parsing them all
+    let (ok, fail) = parse_queryset(queries);
+
+    // There are 2 CREATE TABLE queries in the schema
+    assert_eq!(ok, 2);
+    assert_eq!(fail, 0);
+}
