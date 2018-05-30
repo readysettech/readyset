@@ -34,10 +34,10 @@ pub struct Recipe {
     /// Recipe revision.
     version: usize,
     /// Preceding recipe.
-    pub(crate) prior: Option<Box<Recipe>>,
+    prior: Option<Box<Recipe>>,
 
     /// Maintains lower-level state, but not the graph itself. Lazily initialized.
-    pub(crate) inc: Option<SqlIncorporator>,
+    inc: Option<SqlIncorporator>,
 
     log: slog::Logger,
 }
@@ -505,6 +505,22 @@ impl Recipe {
 
         // return new recipe as replacement for self
         Ok(new)
+    }
+
+    /// Helper method to reparent a recipe. This is needed for the recovery logic to build
+    /// recovery and original recipe (see `make_recovery`).
+    pub(crate) fn set_prior(&mut self, new_prior: Recipe) {
+        self.prior = Some(Box::new(new_prior));
+    }
+
+    /// Helper method to reparent a recipe. This is needed for some of t
+    pub(crate) fn sql_inc(&self) -> &SqlIncorporator {
+        self.inc.as_ref().unwrap()
+    }
+
+    /// Helper method to reparent a recipe. This is needed for some of t
+    pub(crate) fn set_sql_inc(&mut self, new_inc: SqlIncorporator) {
+        self.inc = Some(new_inc);
     }
 
     fn parse(recipe_text: &str) -> Result<Vec<(Option<String>, SqlQuery, bool)>, String> {

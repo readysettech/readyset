@@ -296,9 +296,11 @@ impl ControllerInner {
                 .map_err(|e| format!("failed to activate recovery recipe: {}", e))
         }).unwrap();
 
-
-        original.prior = Some(Box::new(recovery.clone()));
-        original.inc = recovery.inc.clone();
+        // we must do this *after* the migration, since the migration itself modifies the recipe in
+        // `recovery`, and we currently need to clone it here.
+        original.set_prior(recovery.clone());
+        // somewhat awkward, but we must replace the stale `SqlIncorporator` state in `original`
+        original.set_sql_inc(recovery.sql_inc().clone());
 
         self.recipe = recovery;
 
