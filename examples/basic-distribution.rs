@@ -6,14 +6,6 @@ use std::collections::BTreeMap;
 use std::thread;
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
-const NANOS_PER_SEC: u64 = 1_000_000_000;
-macro_rules! dur_to_ns {
-    ($d:expr) => {{
-        let d = $d;
-        d.as_secs() * NANOS_PER_SEC + d.subsec_nanos() as u64
-    }};
-}
-
 fn main() {
     // inline recipe definition
     let sql1 = "Article: CREATE TABLE Article (aid int, title varchar(255), \
