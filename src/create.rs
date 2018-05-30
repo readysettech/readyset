@@ -4,8 +4,8 @@ use std::str::FromStr;
 use std::fmt;
 
 use common::{column_identifier_no_alias, integer_literal, opt_multispace, parse_comment,
-             sql_identifier, statement_terminator, table_reference, type_identifier, Literal, Real,
-             SqlType, TableKey};
+             sql_identifier, statement_terminator, string_literal, table_reference, type_identifier, Literal,
+             Real, SqlType, TableKey};
 use column::{Column, ColumnConstraint, ColumnSpecification};
 use compound_select::{compound_selection, CompoundSelectStatement};
 use keywords::escape_if_keyword;
@@ -382,6 +382,18 @@ named!(pub creation<&[u8], CreateTableStatement>,
             )
         ) >>
         opt_multispace >>
+        opt!(
+            complete!(
+                do_parse!(
+                    tag_no_case!("comment") >>
+                    opt_multispace >>
+                    tag!("=") >>
+                    opt_multispace >>
+                    string_literal >>
+                    ()
+                )
+            )
+        ) >>
         opt!(
             complete!(
                 do_parse!(
