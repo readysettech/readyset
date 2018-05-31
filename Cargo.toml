@@ -1,3 +1,5 @@
+cargo-features = ["rename-dependency"]
+
 [package]
 name = "distributary-mysql"
 version = "0.1.0"
@@ -6,9 +8,11 @@ authors = ["Malte Schwarzkopf <malte@csail.mit.edu>"]
 [dependencies]
 arccstr = "1.1.0"
 clap = "2.24.0"
+failure = "0.1.1"
 msql-srv = "0.6"
-#distributary = { path = "../distributary" }
-distributary = { git = "https://github.com/mit-pdos/distributary.git", rev = "9877e51a78d23a28958cb732f2f08b8d9954d6e6" }
+# local override for development
+#distributary = { path = "../distributary/api", package = "api" }
+distributary = { git = "https://github.com/mit-pdos/distributary.git", rev = "16b4b721809e863078e1166d980332867a4b2619", path = "api", package = "api" }
 lazy_static = "1.0.0"
 nom-sql = { git = "https://github.com/ms705/nom-sql.git", rev = "3e7ae4c4d32b77342051d5c217549ab8fcb68e85" }
 slog = "2.2.2"
