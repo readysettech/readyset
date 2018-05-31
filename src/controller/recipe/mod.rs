@@ -42,6 +42,8 @@ pub struct Recipe {
     log: slog::Logger,
 }
 
+unsafe impl Send for Recipe {}
+
 impl PartialEq for Recipe {
     /// Equality for recipes is defined in terms of all members apart from `inc`.
     fn eq(&self, other: &Recipe) -> bool {
