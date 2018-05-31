@@ -488,7 +488,7 @@ fn listen_df(
 
     // now async so we can use tokio::spawn
     Ok(tokio::net::TcpStream::connect(&desc.internal_addr)
-        .map_err(|e| panic!(e))
+        .map_err(|e| panic!("{:?}", e))
         .and_then(move |sender| {
             let sender_addr = sender.local_addr().unwrap();
             let sender = AsyncBincodeWriter::from(sender).for_async();
@@ -502,8 +502,8 @@ fn listen_df(
                         payload: cm,
                         epoch,
                     })
-                    .map_err(|e| panic!(e))
-                    .forward(sender.sink_map_err(|e| panic!(e)))
+                    .map_err(|e| panic!("{:?}", e))
+                    .forward(sender.sink_map_err(|e| panic!("{:?}", e)))
                     .map(|_| ()),
             );
 
@@ -525,7 +525,7 @@ fn listen_df(
                             time::Instant::now() + heartbeat_every,
                             heartbeat_every,
                         ).map(|_| CoordinationPayload::Heartbeat)
-                            .map_err(|e| -> futures::sync::mpsc::SendError<_> { panic!(e) })
+                            .map_err(|e| -> futures::sync::mpsc::SendError<_> { panic!("{:?}", e) })
                             .forward(ctrl_tx.clone())
                             .map(|_| ())
                     })
@@ -544,14 +544,14 @@ fn listen_df(
                     tokio::timer::Interval::new(time::Instant::now() + evict_every, evict_every)
                         .for_each(move |_| {
                             do_eviction(&log, memory_limit, &mut domain_senders, &state_sizes)
-                                .map_err(|e| panic!(e))
+                                .map_err(|e| panic!("{:?}", e))
                         })
-                        .map_err(|e| panic!(e)),
+                        .map_err(|e| panic!("{:?}", e)),
                 );
             }
 
             replicas
-                .map_err(|e| -> io::Error { panic!(e) })
+                .map_err(|e| -> io::Error { panic!("{:?}", e) })
                 .fold(ctrl_tx, move |ctrl_tx, d| {
                     let idx = d.index;
                     let shard = d.shard;
@@ -598,7 +598,7 @@ fn listen_df(
                         Err(e) => Either::B(future::err(e)),
                     }
                 })
-                .map_err(|e| panic!(e))
+                .map_err(|e| panic!("{:?}", e))
                 .map(|_| ())
         }))
 }
