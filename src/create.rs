@@ -372,6 +372,19 @@ named!(pub creation<&[u8], CreateTableStatement>,
         opt!(
             complete!(
                 do_parse!(
+                    tag_no_case!("auto_increment") >>
+                    opt_multispace >>
+                    tag!("=") >>
+                    opt_multispace >>
+                    integer_literal >>
+                    ()
+                )
+            )
+        ) >>
+        opt_multispace >>
+        opt!(
+            complete!(
+                do_parse!(
                     tag_no_case!("default charset") >>
                     opt_multispace >>
                     tag!("=") >>
