@@ -141,6 +141,22 @@ enum Event {
     ManualMigration(Box<for<'a, 's> FnBox(&'a mut ::controller::migrate::Migration<'s>) + Send>),
 }
 
+use std::fmt;
+impl fmt::Debug for Event {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        match *self {
+            Event::InternalMessage(ref cm) => write!(f, "Internal({:?})", cm),
+            Event::ExternalRequest(ref m, ref path, ..) => write!(f, "Request({} {})", m, path),
+            Event::LeaderChange(..) => write!(f, "LeaderChange(..)"),
+            Event::WonLeaderElection(..) => write!(f, "Won(..)"),
+            Event::CampaignError(ref e) => write!(f, "CampaignError({:?})", e),
+            Event::Shutdown => write!(f, "Shutdown"),
+            #[cfg(test)]
+            Event::ManualMigration(..) => write!(f, "ManualMigration(..)"),
+        }
+    }
+}
+
 /// Start up a new instance and return a handle to it. Dropping the handle will stop the
 /// controller.
 fn start_instance<A: Authority + 'static>(
