@@ -941,16 +941,19 @@ struct Replica {
 
 impl Replica {
     pub fn new(
-        domain: Domain,
+        mut domain: Domain,
         on: tokio::net::TcpListener,
         log: slog::Logger,
         cc: Arc<ChannelCoordinator>,
     ) -> Self {
+        let id = domain.id();
+        let id = format!("{}.{}", id.0.index(), id.1);
+        domain.booted(on.local_addr().unwrap());
         Replica {
             coord: cc,
             domain,
             incoming: on.incoming(),
-            log,
+            log: log.new(o!{"id" => id}),
             inputs: Default::default(),
             outputs: Default::default(),
             outbox: Default::default(),
