@@ -27,6 +27,8 @@ where
     P: FnMut(&str) -> u32,
     E: FnMut(u32, Vec<msql_srv::ParamValue>, QueryResultWriter<net::TcpStream>) -> io::Result<()>,
 {
+    type Error = io::Error;
+
     fn on_prepare(
         &mut self,
         query: &str,

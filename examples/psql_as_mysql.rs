@@ -108,7 +108,9 @@ impl Postgres {
 }
 
 impl<W: io::Write> MysqlShim<W> for Postgres {
-    fn on_prepare(&mut self, query: &str, info: StatementMetaWriter<W>) -> io::Result<()> {
+    type Error = postgres::Error;
+
+    fn on_prepare(&mut self, query: &str, info: StatementMetaWriter<W>) -> Result<(), Self::Error> {
         match self.connection.prepare(query) {
             Ok(stmt) => {
                 // the PostgreSQL server will tell us about the parameter types and output columns
@@ -156,19 +158,16 @@ impl<W: io::Write> MysqlShim<W> for Postgres {
 
                 let id = self.prepared.insert(stmt);
                 let stmt = &self.prepared[id];
-                info.reply(id as u32, &stmt.params, &columns)
+                info.reply(id as u32, &stmt.params, &columns)?;
+                Ok(())
             }
             Err(e) => {
-                if let Some(io) = e.as_io() {
-                    return Err(io::Error::new(io.kind(), format!("{:?}", io)));
-                }
                 if let Some(db) = e.as_db() {
-                    return info.error(ErrorKind::ER_NO, db.message.as_bytes());
+                    info.error(ErrorKind::ER_NO, db.message.as_bytes())?;
+                    return Ok(());
                 }
-                unimplemented!(
-                    "don't know how to translate PostgreSQL error {:?} to a MySQL error",
-                    e
-                );
+
+                Err(e)
             }
         }
     }
@@ -178,9 +177,9 @@ impl<W: io::Write> MysqlShim<W> for Postgres {
         id: u32,
         ps: ParamParser,
         results: QueryResultWriter<W>,
-    ) -> io::Result<()> {
+    ) -> Result<(), Self::Error> {
         match self.prepared.get_mut(id as usize) {
-            None => results.error(ErrorKind::ER_NO, b"no such prepared statement"),
+            None => Ok(results.error(ErrorKind::ER_NO, b"no such prepared statement")?),
             Some(&mut Prepared { ref mut stmt, .. }) => {
                 // this is a little nasty because we have to take MySQL-encoded arguments and
                 // massage them into &ToSql things, which is what postgres::Statement::query takes.
@@ -228,7 +227,7 @@ impl<W: io::Write> MysqlShim<W> for Postgres {
         self.prepared.remove(id as usize);
     }
 
-    fn on_query(&mut self, query: &str, results: QueryResultWriter<W>) -> io::Result<()> {
+    fn on_query(&mut self, query: &str, results: QueryResultWriter<W>) -> Result<(), Self::Error> {
         answer_rows(results, self.connection.query(query, &[]))
     }
 }
@@ -245,7 +244,7 @@ impl Drop for Postgres {
 fn answer_rows<W: io::Write>(
     results: QueryResultWriter<W>,
     rows: postgres::Result<postgres::rows::Rows>,
-) -> io::Result<()> {
+) -> Result<(), postgres::Error> {
     match rows {
         Ok(rows) => {
             let cols: Vec<_> = rows
@@ -281,10 +280,13 @@ fn answer_rows<W: io::Write>(
                     }
                 }
             }
-            writer.finish()
+            writer.finish()?;
         }
-        Err(e) => results.error(ErrorKind::ER_BAD_SLAVE, format!("{:?}", e).as_bytes()),
+        Err(e) => {
+            results.error(ErrorKind::ER_BAD_SLAVE, format!("{:?}", e).as_bytes())?;
+        }
     }
+    Ok(())
 }
 
 /// Convert a PostgreSQL data type and translate it into the corresponding MySQL type
