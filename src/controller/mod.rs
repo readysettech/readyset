@@ -1216,8 +1216,7 @@ impl Future for Replica {
                         }
                     }
                     Ok(Async::Ready(None)) => {
-                        warn!(self.log, "all streams terminated");
-                        // XXX: time to exit?
+                        // we probably haven't booted yet
                         break;
                     }
                     Ok(Async::NotReady) => break,
