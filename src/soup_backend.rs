@@ -1,4 +1,4 @@
-use distributary::{ControllerHandle, DataType, Mutator, RemoteGetter, ZookeeperAuthority};
+use distributary::{ControllerHandle, DataType, Table, View, ZookeeperAuthority};
 
 use msql_srv::{self, *};
 use nom_sql::{self, ColumnConstraint, InsertStatement, Literal, SelectSpecification,
@@ -43,27 +43,29 @@ impl fmt::Debug for PreparedStatement {
 
 struct SoupBackendInner {
     soup: ControllerHandle<ZookeeperAuthority>,
-    inputs: BTreeMap<String, Mutator>,
-    outputs: BTreeMap<String, RemoteGetter>,
+    inputs: BTreeMap<String, Table>,
+    outputs: BTreeMap<String, View>,
 }
 
 impl SoupBackendInner {
     fn new(zk_addr: &str, deployment: &str, log: &slog::Logger) -> Self {
-        let mut zk_auth = ZookeeperAuthority::new(&format!("{}/{}", zk_addr, deployment));
+        let mut zk_auth = ZookeeperAuthority::new(&format!("{}/{}", zk_addr, deployment)).unwrap();
         zk_auth.log_with(log.clone());
 
         debug!(log, "Connecting to Soup...",);
-        let mut ch = ControllerHandle::new(zk_auth);
+        let mut ch = ControllerHandle::new(zk_auth).unwrap();
 
         let soup = SoupBackendInner {
             inputs: ch.inputs()
+                .expect("couldn't get inputs from Soup")
                 .into_iter()
-                .map(|(n, _)| (n.clone(), ch.get_mutator(&n).unwrap()))
-                .collect::<BTreeMap<String, Mutator>>(),
+                .map(|(n, _)| (n.clone(), ch.table(&n).unwrap()))
+                .collect::<BTreeMap<String, Table>>(),
             outputs: ch.outputs()
+                .expect("couldn't get outputs from Soup")
                 .into_iter()
-                .map(|(n, _)| (n.clone(), ch.get_getter(&n).unwrap()))
-                .collect::<BTreeMap<String, RemoteGetter>>(),
+                .map(|(n, _)| (n.clone(), ch.view(&n).unwrap()))
+                .collect::<BTreeMap<String, View>>(),
             soup: ch,
         };
 
@@ -72,18 +74,18 @@ impl SoupBackendInner {
         soup
     }
 
-    fn get_or_make_mutator<'a, 'b>(&'a mut self, table: &'b str) -> &'a mut Mutator {
+    fn get_or_make_mutator<'a, 'b>(&'a mut self, table: &'b str) -> &'a mut Table {
         let soup = &mut self.soup;
         self.inputs.entry(table.to_owned()).or_insert_with(|| {
-            soup.get_mutator(table)
+            soup.table(table)
                 .expect(&format!("no table named {}", table))
         })
     }
 
-    fn get_or_make_getter<'a, 'b>(&'a mut self, view: &'b str) -> &'a mut RemoteGetter {
+    fn get_or_make_getter<'a, 'b>(&'a mut self, view: &'b str) -> &'a mut View {
         let soup = &mut self.soup;
         self.outputs.entry(view.to_owned()).or_insert_with(|| {
-            soup.get_getter(view)
+            soup.view(view)
                 .expect(&format!("no view named '{}'", view))
         })
     }
@@ -156,7 +158,7 @@ impl SoupBackend {
     ) -> io::Result<()> {
         // TODO(malte): we should perhaps check our usual caches here, rather than just blindly
         // doing a migration on Soup ever time. On the other hand, CREATE TABLE is rare...
-        match self.inner.soup.extend_recipe(format!("{};", q)) {
+        match self.inner.soup.extend_recipe(&format!("{};", q)) {
             Ok(_) => {
                 let mut ts_lock = self.table_schemas.write().unwrap();
                 ts_lock.insert(q.table.name.clone(), Schema::Table(q));
@@ -164,7 +166,7 @@ impl SoupBackend {
                 // TODO(malte): potentially eagerly cache the mutator for this table
                 results.completed(0, 0)
             }
-            Err(e) => Err(io::Error::new(io::ErrorKind::Other, e)),
+            Err(e) => Err(io::Error::new(io::ErrorKind::Other, e.compat())),
         }
     }
 
@@ -197,7 +199,7 @@ impl SoupBackend {
         );
         match self.inner
             .soup
-            .extend_recipe(format!("{}: {};", q.name, q.definition))
+            .extend_recipe(&format!("{}: {};", q.name, q.definition))
         {
             Ok(_) => {
                 let mut ts_lock = self.table_schemas.write().unwrap();
@@ -205,7 +207,7 @@ impl SoupBackend {
                 // no rows to return
                 results.completed(0, 0)
             }
-            Err(e) => Err(io::Error::new(io::ErrorKind::Other, e)),
+            Err(e) => Err(io::Error::new(io::ErrorKind::Other, e.compat())),
         }
     }
 
@@ -389,9 +391,9 @@ impl SoupBackend {
                             }
                             if let Err(e) = self.inner
                                 .soup
-                                .extend_recipe(format!("QUERY {}: {};", qname, q))
+                                .extend_recipe(&format!("QUERY {}: {};", qname, q))
                             {
-                                return Err(io::Error::new(io::ErrorKind::Other, e));
+                                return Err(io::Error::new(io::ErrorKind::Other, e.compat()));
                             }
 
                             gc.insert(q.clone(), qname.clone());
@@ -636,7 +638,7 @@ impl SoupBackend {
             putter.insert_or_update(buf[0].clone(), updates)
         } else {
             trace!(self.log, "inserting {:?}", buf);
-            putter.multi_put(buf)
+            putter.batch_insert(buf)
         };
 
         match result {

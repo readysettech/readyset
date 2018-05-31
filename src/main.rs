@@ -14,6 +14,7 @@ extern crate nom_sql;
 extern crate lazy_static;
 #[macro_use]
 extern crate slog;
+extern crate slog_term;
 
 extern crate regex;
 
@@ -34,6 +35,16 @@ use std::thread;
 
 use soup_backend::SoupBackend;
 use schema::Schema;
+
+// Just give me a damn terminal logger
+// Duplicated from distributary, as the API subcrate doesn't export it.
+pub fn logger_pls() -> slog::Logger {
+    use slog::Drain;
+    use slog::Logger;
+    use slog_term::term_full;
+    use std::sync::Mutex;
+    Logger::root(Mutex::new(term_full()).fuse(), o!())
+}
 
 fn main() {
     use clap::{App, Arg};
@@ -92,7 +103,7 @@ fn main() {
 
     let listener = net::TcpListener::bind(format!("127.0.0.1:{}", port)).unwrap();
 
-    let log = distributary::logger_pls();
+    let log = logger_pls();
 
     info!(log, "listening on port {}", port);
 
