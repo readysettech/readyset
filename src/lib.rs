@@ -22,6 +22,8 @@
 //!
 //! struct Backend;
 //! impl<W: io::Write> MysqlShim<W> for Backend {
+//!     type Error = io::Error;
+//!
 //!     fn on_prepare(&mut self, _: &str, info: StatementMetaWriter<W>) -> io::Result<()> {
 //!         info.reply(42, &[], &[])
 //!     }
@@ -136,12 +138,17 @@ pub use value::{ToMysqlValue, Value, ValueInner};
 
 /// Implementors of this trait can be used to drive a MySQL-compatible database backend.
 pub trait MysqlShim<W: Write> {
+    /// The error type produced by operations on this shim.
+    ///
+    /// Must implement `From<io::Error>` so that transport-level errors can be lifted.
+    type Error: From<io::Error>;
+
     /// Called when the client issues a request to prepare `query` for later execution.
     ///
     /// The provided [`StatementMetaWriter`](struct.StatementMetaWriter.html) should be used to
     /// notify the client of the statement id assigned to the prepared statement, as well as to
     /// give metadata about the types of parameters and returned columns.
-    fn on_prepare(&mut self, query: &str, info: StatementMetaWriter<W>) -> io::Result<()>;
+    fn on_prepare(&mut self, query: &str, info: StatementMetaWriter<W>) -> Result<(), Self::Error>;
 
     /// Called when the client executes a previously prepared statement.
     ///
@@ -153,7 +160,7 @@ pub trait MysqlShim<W: Write> {
         id: u32,
         params: ParamParser,
         results: QueryResultWriter<W>,
-    ) -> io::Result<()>;
+    ) -> Result<(), Self::Error>;
 
     /// Called when the client wishes to deallocate resources associated with a previously prepared
     /// statement.
@@ -163,7 +170,7 @@ pub trait MysqlShim<W: Write> {
     ///
     /// Results should be returned using the given
     /// [`QueryResultWriter`](struct.QueryResultWriter.html).
-    fn on_query(&mut self, query: &str, results: QueryResultWriter<W>) -> io::Result<()>;
+    fn on_query(&mut self, query: &str, results: QueryResultWriter<W>) -> Result<(), Self::Error>;
 }
 
 /// A server that speaks the MySQL/MariaDB protocol, and can delegate client commands to a backend
@@ -178,7 +185,7 @@ impl<B: MysqlShim<net::TcpStream>> MysqlIntermediary<B, net::TcpStream, net::Tcp
     /// Create a new server over a TCP stream and process client commands until the client
     /// disconnects or an error occurs. See also
     /// [`MysqlIntermediary::run_on`](struct.MysqlIntermediary.html#method.run_on).
-    pub fn run_on_tcp(shim: B, stream: net::TcpStream) -> io::Result<()> {
+    pub fn run_on_tcp(shim: B, stream: net::TcpStream) -> Result<(), B::Error> {
         let w = stream.try_clone()?;
         MysqlIntermediary::run_on(shim, stream, w)
     }
@@ -188,7 +195,7 @@ impl<B: MysqlShim<S>, S: Read + Write + Clone> MysqlIntermediary<B, S, S> {
     /// Create a new server over a two-way stream and process client commands until the client
     /// disconnects or an error occurs. See also
     /// [`MysqlIntermediary::run_on`](struct.MysqlIntermediary.html#method.run_on).
-    pub fn run_on_stream(shim: B, stream: S) -> io::Result<()> {
+    pub fn run_on_stream(shim: B, stream: S) -> Result<(), B::Error> {
         MysqlIntermediary::run_on(shim, stream.clone(), stream)
     }
 }
@@ -203,7 +210,7 @@ struct StatementData {
 impl<B: MysqlShim<W>, R: Read, W: Write> MysqlIntermediary<B, R, W> {
     /// Create a new server over two one-way channels and process client commands until the client
     /// disconnects or an error occurs.
-    pub fn run_on(shim: B, reader: R, writer: W) -> io::Result<()> {
+    pub fn run_on(shim: B, reader: R, writer: W) -> Result<(), B::Error> {
         let r = packet::PacketReader::new(reader);
         let w = packet::PacketWriter::new(writer);
         let mut mi = MysqlIntermediary {
@@ -215,7 +222,7 @@ impl<B: MysqlShim<W>, R: Read, W: Write> MysqlIntermediary<B, R, W> {
         mi.run()
     }
 
-    fn init(&mut self) -> io::Result<()> {
+    fn init(&mut self) -> Result<(), B::Error> {
         self.writer.write_all(&[10])?; // protocol 10
 
         // 5.1.10 because that's what Ruby's ActiveRecord requires
@@ -240,10 +247,12 @@ impl<B: MysqlShim<W>, R: Read, W: Write> MysqlIntermediary<B, R, W> {
         }
 
         writers::write_ok_packet(&mut self.writer, 0, 0, StatusFlags::empty())?;
-        self.writer.flush()
+        self.writer.flush()?;
+
+        Ok(())
     }
 
-    fn run(mut self) -> io::Result<()> {
+    fn run(mut self) -> Result<(), B::Error> {
         use commands::Command;
 
         let mut stmts: HashMap<u32, _> = HashMap::new();
