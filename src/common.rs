@@ -926,6 +926,18 @@ named!(pub table_reference<&[u8], Table>,
     )
 );
 
+/// Parse rule for a comment part.
+named!(pub parse_comment<&[u8], String>,
+    do_parse!(
+        opt_multispace >>
+        tag_no_case!("comment") >>
+        multispace >>
+        comment: map_res!(delimited!(tag!("'"), take_until!("'"), tag!("'")), str::from_utf8) >>
+        (String::from(comment))
+    )
+);
+
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -979,6 +991,12 @@ mod tests {
             table: None,
             function: Some(Box::new(FunctionExpression::Max(Column::from("addr_id")))),
         };
-        assert_eq!(res.unwrap().1, expected);
+    assert_eq!(res.unwrap().1, expected);
+    }
+
+    #[test]
+    fn comment_data() {
+        let res = parse_comment(b" COMMENT 'test'");
+        assert_eq!(res.unwrap().1, "test");
     }
 }

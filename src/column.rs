@@ -142,6 +142,7 @@ pub struct ColumnSpecification {
     pub column: Column,
     pub sql_type: SqlType,
     pub constraints: Vec<ColumnConstraint>,
+    pub comment: Option<String>,
 }
 
 impl fmt::Display for ColumnSpecification {
@@ -155,6 +156,9 @@ impl fmt::Display for ColumnSpecification {
         for constraint in self.constraints.iter() {
             write!(f, " {}", constraint)?;
         }
+        if let Some(ref comment) = self.comment {
+            write!(f, " COMMENT '{}'", comment)?;
+        }
         Ok(())
     }
 }
@@ -165,6 +169,7 @@ impl ColumnSpecification {
             column: c,
             sql_type: t,
             constraints: vec![],
+            comment: None,
         }
     }
 
@@ -177,6 +182,7 @@ impl ColumnSpecification {
             column: c,
             sql_type: t,
             constraints: ccs,
+            comment: None,
         }
     }
 }
