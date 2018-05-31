@@ -14,7 +14,9 @@ use tokio;
 pub struct LocalControllerHandle<A: Authority> {
     c: ControllerHandle<A>,
     event_tx: futures::sync::mpsc::UnboundedSender<Event>,
+    #[allow(dead_code)]
     runtime: tokio::runtime::Runtime,
+    shutdown_rx: futures::sync::oneshot::Receiver<()>,
 }
 
 impl<A: Authority> Deref for LocalControllerHandle<A> {
@@ -35,11 +37,13 @@ impl<A: Authority> LocalControllerHandle<A> {
         authority: Arc<A>,
         event_tx: futures::sync::mpsc::UnboundedSender<Event>,
         rt: tokio::runtime::Runtime,
+        shutdown_rx: futures::sync::oneshot::Receiver<()>,
     ) -> Self {
         LocalControllerHandle {
             c: ControllerHandle::make(authority).unwrap(),
             event_tx,
             runtime: rt,
+            shutdown_rx,
         }
     }
 
@@ -116,12 +120,14 @@ impl<A: Authority> LocalControllerHandle<A> {
     pub fn shutdown_and_wait(mut self) {
         self.c.shutdown();
         self.event_tx.send(Event::Shutdown).wait().unwrap();
-        self.runtime.shutdown_on_idle().wait().unwrap();
+        self.shutdown_rx.wait().unwrap();
+        //self.runtime.shutdown_on_idle().wait().unwrap();
     }
 
     /// Wait for associated local instance to exit (presumably with an error).
     pub fn wait(self) {
-        self.runtime.shutdown_on_idle().wait().unwrap();
+        self.shutdown_rx.wait().unwrap();
+        //self.runtime.shutdown_on_idle().wait().unwrap();
     }
 }
 

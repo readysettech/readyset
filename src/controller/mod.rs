@@ -168,6 +168,7 @@ fn start_instance<A: Authority + 'static>(
     log: slog::Logger,
 ) -> Result<LocalControllerHandle<A>, failure::Error> {
     let mut rt = tokio::runtime::Runtime::new().unwrap();
+    let (shutdown_tx, shutdown_rx) = futures::sync::oneshot::channel();
     let (tx, rx) = futures::sync::mpsc::unbounded();
 
     // we'll be listening for a couple of different types of events:
@@ -216,6 +217,7 @@ fn start_instance<A: Authority + 'static>(
     let (worker_tx, worker_rx) = futures::sync::mpsc::unbounded();
 
     // first, a loop that just forwards to the appropriate place
+    let mut shutdown_tx = Some(shutdown_tx);
     rt.spawn(
         rx.map_err(|_| unreachable!())
             .fold((ctrl_tx, worker_tx), move |(ctx, wtx), e| {
@@ -243,6 +245,8 @@ fn start_instance<A: Authority + 'static>(
                     Event::WonLeaderElection(..) => fw(e, true),
                     Event::CampaignError(..) => fw(e, true),
                     Event::Shutdown => {
+                        shutdown_tx.take().unwrap().send(()).unwrap();
+                        unimplemented!();
                         // FIXME
                         // maybe use Receiver::close()?
                         // self.external.stop();
@@ -251,7 +255,6 @@ fn start_instance<A: Authority + 'static>(
                         //     self.authority.surrender_leadership().unwrap();
                         // }
                         // rt.shutdown_now()
-                        unimplemented!();
                     }
                 }.map_err(|e| panic!("{:?}", e))
             })
@@ -420,7 +423,7 @@ fn start_instance<A: Authority + 'static>(
         );
     }
 
-    Ok(LocalControllerHandle::new(authority, tx, rt))
+    Ok(LocalControllerHandle::new(authority, tx, rt, shutdown_rx))
 }
 
 /*
