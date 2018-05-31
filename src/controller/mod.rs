@@ -627,15 +627,19 @@ fn listen_internal(
     on.incoming()
         .map_err(failure::Error::from)
         .for_each(move |sock| {
-            AsyncBincodeReader::from(sock)
-                .map(Event::InternalMessage)
-                .map_err(failure::Error::from)
-                .forward(
-                    event_tx
-                        .clone()
-                        .sink_map_err(|_| format_err!("main event loop went away")),
-                )
-                .map(|_| ())
+            tokio::spawn(
+                AsyncBincodeReader::from(sock)
+                    .map(Event::InternalMessage)
+                    .map_err(failure::Error::from)
+                    .forward(
+                        event_tx
+                            .clone()
+                            .sink_map_err(|_| format_err!("main event loop went away")),
+                    )
+                    .map(|_| ())
+                    .map_err(|e| panic!("{:?}", e)),
+            );
+            Ok(())
         })
         .map_err(move |e| {
             warn!(log, "internal connection failed: {:?}", e);
