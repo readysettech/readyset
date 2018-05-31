@@ -1111,35 +1111,41 @@ impl Replica {
     }
 
     fn try_new(&mut self) -> io::Result<()> {
-        while let Async::Ready(Some(mut stream)) = self.incoming.poll()? {
+        'more: while let Async::Ready(Some(mut stream)) = self.incoming.poll()? {
             // we know that any new connection to a domain will first send a one-byte
             // token to indicate whether the connection is from a base or not.
             set_nonblocking(&stream, false);
             let mut tag = [0];
             use std::io::Read;
-            if let Err(e) = stream.read_exact(&mut tag[..]) {
+            while let Err(e) = stream.read_exact(&mut tag[..]) {
+                if e.kind() == ErrorKind::WouldBlock {
+                    // TODO: async
+                    continue;
+                }
+
                 // well.. that failed quickly..
                 info!(self.log, "worker discarded new connection: {:?}", e);
-            } else {
-                let is_base = tag[0] == CONNECTION_FROM_BASE;
-                set_nonblocking(&stream, true);
-
-                debug!(self.log, "accepted new connection"; "base" => ?is_base);
-                let slot = self.inputs.stream_slot();
-                let token = slot.token();
-                let tcp = if is_base {
-                    DualTcpStream::upgrade(BufStream::new(stream), move |input| {
-                        Box::new(Packet::Input {
-                            inner: input,
-                            src: Some(SourceChannelIdentifier { token }),
-                            senders: Vec::new(),
-                        })
-                    })
-                } else {
-                    BufStream::with_capacities(2 * 1024 * 1024, 4 * 1024, stream).into()
-                };
-                slot.insert(tcp);
+                continue 'more;
             }
+
+            let is_base = tag[0] == CONNECTION_FROM_BASE;
+            set_nonblocking(&stream, true);
+
+            debug!(self.log, "accepted new connection"; "base" => ?is_base);
+            let slot = self.inputs.stream_slot();
+            let token = slot.token();
+            let tcp = if is_base {
+                DualTcpStream::upgrade(BufStream::new(stream), move |input| {
+                    Box::new(Packet::Input {
+                        inner: input,
+                        src: Some(SourceChannelIdentifier { token }),
+                        senders: Vec::new(),
+                    })
+                })
+            } else {
+                BufStream::with_capacities(2 * 1024 * 1024, 4 * 1024, stream).into()
+            };
+            slot.insert(tcp);
         }
         Ok(())
     }
