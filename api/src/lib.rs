@@ -117,6 +117,10 @@ mod controller;
 mod table;
 mod view;
 
+pub use basics::{DataType, Modification, Operation};
+
+pub use consensus::{LocalAuthority, ZookeeperAuthority};
+
 /// The prelude contains most of the types needed in everyday operation.
 pub mod prelude {
     pub use super::ActivationResult;
