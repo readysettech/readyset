@@ -32,7 +32,8 @@ fn main() {
     let mut db = mysql::Conn::new(&format!("mysql://127.0.0.1:{}", port)).unwrap();
     assert_eq!(db.ping(), true);
     {
-        let mut results = db.query("SELECT INT4(1) AS foo, INT8(1) AS bar, 'BAZ' AS baz")
+        let mut results = db
+            .query("SELECT INT4(1) AS foo, INT8(1) AS bar, 'BAZ' AS baz")
             .unwrap();
         {
             let cols = results.columns_ref();
@@ -56,7 +57,8 @@ fn main() {
         assert_eq!(results.count(), 0);
     }
     {
-        let mut results = db.prep_exec("SELECT INT4(1) AS foo, INT8(1) AS bar, 'BAZ' AS baz", ())
+        let mut results = db
+            .prep_exec("SELECT INT4(1) AS foo, INT8(1) AS bar, 'BAZ' AS baz", ())
             .unwrap();
         {
             let cols = results.columns_ref();
@@ -113,7 +115,8 @@ impl<W: io::Write> MysqlShim<W> for Postgres {
                 // of the query we just prepared. we now need to communicate this back to our MySQL
                 // client, which requires translating between psql and mysql types.
                 use std::mem;
-                let params: Vec<_> = stmt.param_types()
+                let params: Vec<_> = stmt
+                    .param_types()
                     .into_iter()
                     .map(|t| {
                         let ct = p2mt(t);
@@ -125,7 +128,8 @@ impl<W: io::Write> MysqlShim<W> for Postgres {
                         }
                     })
                     .collect();
-                let columns: Vec<_> = stmt.columns()
+                let columns: Vec<_> = stmt
+                    .columns()
                     .into_iter()
                     .map(|c| {
                         let t = c.type_();
@@ -183,7 +187,8 @@ impl<W: io::Write> MysqlShim<W> for Postgres {
                 // we can only do that by first boxing all the values (so they can be kept in a
                 // single vec), and then collecting a *second* vec with references to those, and
                 // *then* take a slice of that vec.
-                let args: Vec<Box<postgres::types::ToSql>> = ps.into_iter()
+                let args: Vec<Box<postgres::types::ToSql>> = ps
+                    .into_iter()
                     .map(|p| match p.coltype {
                         ColumnType::MYSQL_TYPE_SHORT => {
                             Box::new(Into::<i16>::into(p.value)) as Box<_>
@@ -243,7 +248,8 @@ fn answer_rows<W: io::Write>(
 ) -> io::Result<()> {
     match rows {
         Ok(rows) => {
-            let cols: Vec<_> = rows.columns()
+            let cols: Vec<_> = rows
+                .columns()
                 .into_iter()
                 .map(|c| {
                     let t = c.type_();

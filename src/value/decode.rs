@@ -113,24 +113,24 @@ impl<'a> ValueInner<'a> {
             }
             ColumnType::MYSQL_TYPE_SHORT | ColumnType::MYSQL_TYPE_YEAR => {
                 if unsigned {
-                    Ok(ValueInner::UInt(
-                        u64::from(input.read_u16::<LittleEndian>()?),
-                    ))
+                    Ok(ValueInner::UInt(u64::from(
+                        input.read_u16::<LittleEndian>()?,
+                    )))
                 } else {
-                    Ok(ValueInner::Int(
-                        i64::from(input.read_i16::<LittleEndian>()?),
-                    ))
+                    Ok(ValueInner::Int(i64::from(
+                        input.read_i16::<LittleEndian>()?,
+                    )))
                 }
             }
             ColumnType::MYSQL_TYPE_LONG | ColumnType::MYSQL_TYPE_INT24 => {
                 if unsigned {
-                    Ok(ValueInner::UInt(
-                        u64::from(input.read_u32::<LittleEndian>()?),
-                    ))
+                    Ok(ValueInner::UInt(u64::from(
+                        input.read_u32::<LittleEndian>()?,
+                    )))
                 } else {
-                    Ok(ValueInner::Int(
-                        i64::from(input.read_i32::<LittleEndian>()?),
-                    ))
+                    Ok(ValueInner::Int(i64::from(
+                        input.read_i32::<LittleEndian>()?,
+                    )))
                 }
             }
             ColumnType::MYSQL_TYPE_LONGLONG => {

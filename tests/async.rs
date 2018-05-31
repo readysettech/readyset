@@ -13,8 +13,10 @@ use std::net;
 use std::thread;
 use tokio_core::reactor::Core;
 
-use msql_srv::{Column, ErrorKind, MysqlIntermediary, MysqlShim, ParamParser, QueryResultWriter,
-               StatementMetaWriter};
+use msql_srv::{
+    Column, ErrorKind, MysqlIntermediary, MysqlShim, ParamParser, QueryResultWriter,
+    StatementMetaWriter,
+};
 
 struct TestingShim<Q, P, E> {
     columns: Vec<Column>,
@@ -101,10 +103,11 @@ where
 
         let mut core = Core::new().unwrap();
         let handle = core.handle();
-        let db = core.run(mysql_async::Conn::new(
-            &format!("mysql://127.0.0.1:{}", port),
-            &handle,
-        )).unwrap();
+        let db =
+            core.run(mysql_async::Conn::new(
+                &format!("mysql://127.0.0.1:{}", port),
+                &handle,
+            )).unwrap();
         core.run(c(db).into_future()).unwrap();
         jh.join().unwrap().unwrap();
     }
@@ -146,14 +149,12 @@ fn empty_response() {
 
 #[test]
 fn no_rows() {
-    let cols = [
-        Column {
-            table: String::new(),
-            column: "a".to_owned(),
-            coltype: myc::constants::ColumnType::MYSQL_TYPE_SHORT,
-            colflags: myc::constants::ColumnFlags::empty(),
-        },
-    ];
+    let cols = [Column {
+        table: String::new(),
+        column: "a".to_owned(),
+        coltype: myc::constants::ColumnType::MYSQL_TYPE_SHORT,
+        colflags: myc::constants::ColumnFlags::empty(),
+    }];
     TestingShim::new(
         move |_, w| w.start(&cols[..])?.finish(),
         |_| unreachable!(),
@@ -234,14 +235,12 @@ fn error_response() {
 
 #[test]
 fn empty_on_drop() {
-    let cols = [
-        Column {
-            table: String::new(),
-            column: "a".to_owned(),
-            coltype: myc::constants::ColumnType::MYSQL_TYPE_SHORT,
-            colflags: myc::constants::ColumnFlags::empty(),
-        },
-    ];
+    let cols = [Column {
+        table: String::new(),
+        column: "a".to_owned(),
+        coltype: myc::constants::ColumnType::MYSQL_TYPE_SHORT,
+        colflags: myc::constants::ColumnFlags::empty(),
+    }];
     TestingShim::new(
         move |_, w| w.start(&cols[..]).map(|_| ()),
         |_| unreachable!(),
@@ -260,14 +259,12 @@ fn empty_on_drop() {
 fn it_queries_nulls() {
     TestingShim::new(
         |_, w| {
-            let cols = &[
-                Column {
-                    table: String::new(),
-                    column: "a".to_owned(),
-                    coltype: myc::constants::ColumnType::MYSQL_TYPE_SHORT,
-                    colflags: myc::constants::ColumnFlags::empty(),
-                },
-            ];
+            let cols = &[Column {
+                table: String::new(),
+                column: "a".to_owned(),
+                coltype: myc::constants::ColumnType::MYSQL_TYPE_SHORT,
+                colflags: myc::constants::ColumnFlags::empty(),
+            }];
             let mut w = w.start(cols)?;
             w.write_col(None::<i16>)?;
             w.finish()
@@ -290,14 +287,12 @@ fn it_queries_nulls() {
 fn it_queries() {
     TestingShim::new(
         |_, w| {
-            let cols = &[
-                Column {
-                    table: String::new(),
-                    column: "a".to_owned(),
-                    coltype: myc::constants::ColumnType::MYSQL_TYPE_SHORT,
-                    colflags: myc::constants::ColumnFlags::empty(),
-                },
-            ];
+            let cols = &[Column {
+                table: String::new(),
+                column: "a".to_owned(),
+                coltype: myc::constants::ColumnType::MYSQL_TYPE_SHORT,
+                colflags: myc::constants::ColumnFlags::empty(),
+            }];
             let mut w = w.start(cols)?;
             w.write_col(1024i16)?;
             w.finish()
@@ -361,23 +356,19 @@ fn it_queries_many_rows() {
 
 #[test]
 fn it_prepares() {
-    let cols = vec![
-        Column {
-            table: String::new(),
-            column: "a".to_owned(),
-            coltype: myc::constants::ColumnType::MYSQL_TYPE_SHORT,
-            colflags: myc::constants::ColumnFlags::empty(),
-        },
-    ];
+    let cols = vec![Column {
+        table: String::new(),
+        column: "a".to_owned(),
+        coltype: myc::constants::ColumnType::MYSQL_TYPE_SHORT,
+        colflags: myc::constants::ColumnFlags::empty(),
+    }];
     let cols2 = cols.clone();
-    let params = vec![
-        Column {
-            table: String::new(),
-            column: "c".to_owned(),
-            coltype: myc::constants::ColumnType::MYSQL_TYPE_SHORT,
-            colflags: myc::constants::ColumnFlags::empty(),
-        },
-    ];
+    let params = vec![Column {
+        table: String::new(),
+        column: "c".to_owned(),
+        coltype: myc::constants::ColumnType::MYSQL_TYPE_SHORT,
+        colflags: myc::constants::ColumnFlags::empty(),
+    }];
 
     TestingShim::new(
         |_, _| unreachable!(),
@@ -535,23 +526,19 @@ fn insert_exec() {
 
 #[test]
 fn send_long() {
-    let cols = vec![
-        Column {
-            table: String::new(),
-            column: "a".to_owned(),
-            coltype: myc::constants::ColumnType::MYSQL_TYPE_SHORT,
-            colflags: myc::constants::ColumnFlags::empty(),
-        },
-    ];
+    let cols = vec![Column {
+        table: String::new(),
+        column: "a".to_owned(),
+        coltype: myc::constants::ColumnType::MYSQL_TYPE_SHORT,
+        colflags: myc::constants::ColumnFlags::empty(),
+    }];
     let cols2 = cols.clone();
-    let params = vec![
-        Column {
-            table: String::new(),
-            column: "c".to_owned(),
-            coltype: myc::constants::ColumnType::MYSQL_TYPE_BLOB,
-            colflags: myc::constants::ColumnFlags::empty(),
-        },
-    ];
+    let params = vec![Column {
+        table: String::new(),
+        column: "c".to_owned(),
+        coltype: myc::constants::ColumnType::MYSQL_TYPE_BLOB,
+        colflags: myc::constants::ColumnFlags::empty(),
+    }];
 
     TestingShim::new(
         |_, _| unreachable!(),
@@ -642,23 +629,19 @@ fn it_prepares_many() {
 
 #[test]
 fn prepared_empty() {
-    let cols = vec![
-        Column {
-            table: String::new(),
-            column: "a".to_owned(),
-            coltype: myc::constants::ColumnType::MYSQL_TYPE_SHORT,
-            colflags: myc::constants::ColumnFlags::empty(),
-        },
-    ];
+    let cols = vec![Column {
+        table: String::new(),
+        column: "a".to_owned(),
+        coltype: myc::constants::ColumnType::MYSQL_TYPE_SHORT,
+        colflags: myc::constants::ColumnFlags::empty(),
+    }];
     let cols2 = cols.clone();
-    let params = vec![
-        Column {
-            table: String::new(),
-            column: "c".to_owned(),
-            coltype: myc::constants::ColumnType::MYSQL_TYPE_SHORT,
-            colflags: myc::constants::ColumnFlags::empty(),
-        },
-    ];
+    let params = vec![Column {
+        table: String::new(),
+        column: "c".to_owned(),
+        coltype: myc::constants::ColumnType::MYSQL_TYPE_SHORT,
+        colflags: myc::constants::ColumnFlags::empty(),
+    }];
 
     TestingShim::new(
         |_, _| unreachable!(),
@@ -681,14 +664,12 @@ fn prepared_empty() {
 
 #[test]
 fn prepared_no_params() {
-    let cols = vec![
-        Column {
-            table: String::new(),
-            column: "a".to_owned(),
-            coltype: myc::constants::ColumnType::MYSQL_TYPE_SHORT,
-            colflags: myc::constants::ColumnFlags::empty(),
-        },
-    ];
+    let cols = vec![Column {
+        table: String::new(),
+        column: "a".to_owned(),
+        coltype: myc::constants::ColumnType::MYSQL_TYPE_SHORT,
+        colflags: myc::constants::ColumnFlags::empty(),
+    }];
     let cols2 = cols.clone();
     let params = vec![];
 
@@ -788,14 +769,12 @@ fn prepared_nulls() {
 
 #[test]
 fn prepared_no_rows() {
-    let cols = vec![
-        Column {
-            table: String::new(),
-            column: "a".to_owned(),
-            coltype: myc::constants::ColumnType::MYSQL_TYPE_SHORT,
-            colflags: myc::constants::ColumnFlags::empty(),
-        },
-    ];
+    let cols = vec![Column {
+        table: String::new(),
+        column: "a".to_owned(),
+        coltype: myc::constants::ColumnType::MYSQL_TYPE_SHORT,
+        colflags: myc::constants::ColumnFlags::empty(),
+    }];
     let cols2 = cols.clone();
     TestingShim::new(
         |_, _| unreachable!(),

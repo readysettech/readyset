@@ -1,9 +1,9 @@
-use Column;
 use byteorder::{LittleEndian, WriteBytesExt};
 use myc;
 use myc::constants::{ColumnFlags, ColumnType};
 use myc::io::WriteMysqlExt;
 use std::io::{self, Write};
+use Column;
 
 /// Implementors of this trait can be sent as a single resultset value to a MySQL/MariaDB client.
 pub trait ToMysqlValue {
@@ -561,7 +561,8 @@ impl ToMysqlValue for myc::value::Value {
                         "negative times not yet supported",
                     ));
                 }
-                (chrono::Duration::days(d as i64) + chrono::Duration::hours(h as i64)
+                (chrono::Duration::days(d as i64)
+                    + chrono::Duration::hours(h as i64)
                     + chrono::Duration::minutes(m as i64)
                     + chrono::Duration::seconds(s as i64)
                     + chrono::Duration::microseconds(us as i64))
@@ -624,7 +625,8 @@ impl ToMysqlValue for myc::value::Value {
                         "negative times not yet supported",
                     ));
                 }
-                (chrono::Duration::days(d as i64) + chrono::Duration::hours(h as i64)
+                (chrono::Duration::days(d as i64)
+                    + chrono::Duration::hours(h as i64)
                     + chrono::Duration::minutes(m as i64)
                     + chrono::Duration::seconds(s as i64)
                     + chrono::Duration::microseconds(us as i64))
