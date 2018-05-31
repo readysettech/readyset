@@ -56,6 +56,36 @@ fn test_queries_from_file(f: &Path, name: &str) -> Result<i32, i32> {
     Ok(ok)
 }
 
+fn parse_file(path: &str) -> (i32, i32) {
+    let mut f = File::open(Path::new(path)).unwrap();
+    let mut s = String::new();
+
+    // Load queries
+    f.read_to_string(&mut s).unwrap();
+    let lines: Vec<&str> = s.lines()
+        .map(str::trim)
+        .filter(|l| {
+            !l.is_empty() && !l.starts_with("#") && !l.starts_with("--") && !l.starts_with("DROP") && !l.starts_with("/*")
+        })
+        .collect();
+    let mut q = String::new();
+    let mut queries = Vec::new();
+    for l in lines {
+        if !l.ends_with(";") {
+            q.push_str(l);
+        } else {
+            // end of query
+            q.push_str(l);
+            queries.push(q.clone());
+            q = String::new();
+        }
+    }
+    println!("Loaded {} table definitions", queries.len());
+
+    // Try parsing them all
+    parse_queryset(queries)
+}
+
 #[test]
 fn hotcrp_queries() {
     assert!(test_queries_from_file(Path::new("tests/hotcrp-queries.txt"), "HotCRP").is_ok());
@@ -129,33 +159,7 @@ fn hotcrp_schema() {
 
 #[test]
 fn mediawiki_schema() {
-    let mut f = File::open(Path::new("tests/mediawiki-schema.txt")).unwrap();
-    let mut s = String::new();
-
-    // Load queries
-    f.read_to_string(&mut s).unwrap();
-    let lines: Vec<&str> = s.lines()
-        .map(str::trim)
-        .filter(|l| {
-            !l.is_empty() && !l.starts_with("#") && !l.starts_with("--") && !l.starts_with("DROP")
-        })
-        .collect();
-    let mut q = String::new();
-    let mut queries = Vec::new();
-    for l in lines {
-        if !l.ends_with(";") {
-            q.push_str(l);
-        } else {
-            // end of query
-            q.push_str(l);
-            queries.push(q.clone());
-            q = String::new();
-        }
-    }
-    println!("Loaded {} table definitions", queries.len());
-
-    // Try parsing them all
-    let (ok, fail) = parse_queryset(queries);
+    let (ok, fail) = parse_file("tests/mediawiki-schema.txt");
 
     // There are 17 CREATE TABLE queries in the schema
     assert_eq!(ok, 17);
@@ -164,33 +168,7 @@ fn mediawiki_schema() {
 
 #[test]
 fn parse_comments() {
-    let mut f = File::open(Path::new("tests/comments.txt")).unwrap();
-    let mut s = String::new();
-
-    // Load queries
-    f.read_to_string(&mut s).unwrap();
-    let lines: Vec<&str> = s.lines()
-        .map(str::trim)
-        .filter(|l| {
-            !l.is_empty() && !l.starts_with("#") && !l.starts_with("--") && !l.starts_with("DROP") && !l.starts_with("/*")
-        })
-        .collect();
-    let mut q = String::new();
-    let mut queries = Vec::new();
-    for l in lines {
-        if !l.ends_with(";") {
-            q.push_str(l);
-        } else {
-            // end of query
-            q.push_str(l);
-            queries.push(q.clone());
-            q = String::new();
-        }
-    }
-    println!("Loaded {} table definitions", queries.len());
-
-    // Try parsing them all
-    let (ok, fail) = parse_queryset(queries);
+    let (ok, fail) = parse_file("tests/comments.txt");
 
     // There are 2 CREATE TABLE queries in the schema
     assert_eq!(ok, 2);
