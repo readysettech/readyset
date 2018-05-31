@@ -257,14 +257,12 @@ impl<B: MysqlShim<W>, R: Read, W: Write> MysqlIntermediary<B, R, W> {
                         let var = &q[b"SELECT @@".len()..];
                         match var {
                             b"max_allowed_packet" => {
-                                let cols = &[
-                                    Column {
-                                        table: String::new(),
-                                        column: "@@max_allowed_packet".to_owned(),
-                                        coltype: myc::constants::ColumnType::MYSQL_TYPE_SHORT,
-                                        colflags: myc::constants::ColumnFlags::UNSIGNED_FLAG,
-                                    },
-                                ];
+                                let cols = &[Column {
+                                    table: String::new(),
+                                    column: "@@max_allowed_packet".to_owned(),
+                                    coltype: myc::constants::ColumnType::MYSQL_TYPE_SHORT,
+                                    colflags: myc::constants::ColumnFlags::UNSIGNED_FLAG,
+                                }];
                                 let mut w = w.start(cols)?;
                                 w.write_row(iter::once(1024u16))?;
                                 w.finish()?;

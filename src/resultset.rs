@@ -243,7 +243,8 @@ where
                 self.data.resize(self.bitmap_len, 0);
             }
 
-            let c = self.columns
+            let c = self
+                .columns
                 .get(self.col)
                 .ok_or_else(|| {
                     io::Error::new(

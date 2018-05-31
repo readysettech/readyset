@@ -117,12 +117,16 @@ mod tests {
                 .capabilities
                 .contains(CapabilityFlags::CLIENT_MULTI_RESULTS)
         );
-        assert!(!handshake
-            .capabilities
-            .contains(CapabilityFlags::CLIENT_CONNECT_WITH_DB));
-        assert!(!handshake
-            .capabilities
-            .contains(CapabilityFlags::CLIENT_DEPRECATE_EOF));
+        assert!(
+            !handshake
+                .capabilities
+                .contains(CapabilityFlags::CLIENT_CONNECT_WITH_DB)
+        );
+        assert!(
+            !handshake
+                .capabilities
+                .contains(CapabilityFlags::CLIENT_DEPRECATE_EOF)
+        );
         assert_eq!(handshake.collation, UTF8_GENERAL_CI);
         assert_eq!(handshake.username, &b"jon"[..]);
         assert_eq!(handshake.maxps, 16777216);
