@@ -138,7 +138,12 @@ enum Event {
     CampaignError(failure::Error),
     Shutdown,
     #[cfg(test)]
-    ManualMigration(Box<for<'a, 's> FnBox(&'a mut ::controller::migrate::Migration<'s>) + Send>),
+    IsReady(futures::sync::oneshot::Sender<bool>),
+    #[cfg(test)]
+    ManualMigration {
+        f: Box<FnBox(&mut Migration) + Send + 'static>,
+        done: futures::sync::oneshot::Sender<()>,
+    },
 }
 
 use std::fmt;
@@ -150,9 +155,11 @@ impl fmt::Debug for Event {
             Event::LeaderChange(..) => write!(f, "LeaderChange(..)"),
             Event::WonLeaderElection(..) => write!(f, "Won(..)"),
             Event::CampaignError(ref e) => write!(f, "CampaignError({:?})", e),
+            #[cfg(test)]
+            Event::IsReady(..) => write!(f, "IsReady"),
             Event::Shutdown => write!(f, "Shutdown"),
             #[cfg(test)]
-            Event::ManualMigration(..) => write!(f, "ManualMigration(..)"),
+            Event::ManualMigration { .. } => write!(f, "ManualMigration{{..}}"),
         }
     }
 }
@@ -240,10 +247,12 @@ fn start_instance<A: Authority + 'static>(
                     },
                     Event::ExternalRequest(..) => fw(e, true),
                     #[cfg(test)]
-                    Event::ManualMigration(..) => fw(e, true),
+                    Event::ManualMigration { .. } => fw(e, true),
                     Event::LeaderChange(..) => fw(e, false),
                     Event::WonLeaderElection(..) => fw(e, true),
                     Event::CampaignError(..) => fw(e, true),
+                    #[cfg(test)]
+                    Event::IsReady(..) => fw(e, true),
                     Event::Shutdown => {
                         shutdown_tx.take().unwrap().send(()).unwrap();
                         unimplemented!();
@@ -393,12 +402,28 @@ fn start_instance<A: Authority + 'static>(
                             }
                         }
                         #[cfg(test)]
-                        Event::ManualMigration(f) => {
+                        Event::ManualMigration { f, done } => {
                             if let Some(ref mut ctrl) = controller {
                                 if !ctrl.workers.is_empty() {
-                                    block_on(|| ctrl.migrate(move |m| f.call_box((m,))));
+                                    block_on(|| {
+                                        ctrl.migrate(move |m| f.call_box((m,)));
+                                        done.send(()).unwrap();
+                                    });
                                 }
+                            } else {
+                                unreachable!("got migration closure before becoming leader");
                             }
+                        }
+                        #[cfg(test)]
+                        Event::IsReady(reply) => {
+                            reply
+                                .send(
+                                    controller
+                                        .as_ref()
+                                        .map(|ctrl| !ctrl.workers.is_empty())
+                                        .unwrap_or(false),
+                                )
+                                .unwrap();
                         }
                         Event::WonLeaderElection(state) => {
                             let c = campaign.take().unwrap();

@@ -107,6 +107,10 @@ impl ControllerBuilder {
 
     /// Build a local controller, and return a ControllerHandle to provide access to it.
     pub fn build_local(self) -> Result<LocalControllerHandle<LocalAuthority>, failure::Error> {
-        self.build(Arc::new(LocalAuthority::new()))
+        #[allow(unused_mut)]
+        let mut lch = self.build(Arc::new(LocalAuthority::new()))?;
+        #[cfg(test)]
+        lch.wait_until_ready();
+        Ok(lch)
     }
 }

@@ -1,4 +1,6 @@
 use consensus::Authority;
+#[cfg(test)]
+use controller::migrate::Migration;
 use dataflow::prelude::*;
 
 use std::collections::HashMap;
@@ -48,36 +50,49 @@ impl<A: Authority> LocalControllerHandle<A> {
     }
 
     #[cfg(test)]
+    pub(crate) fn wait_until_ready(&mut self) {
+        let mut snd = self.event_tx.clone();
+        loop {
+            let (tx, rx) = futures::sync::oneshot::channel();
+            snd = snd.send(Event::IsReady(tx)).wait().unwrap();
+            match rx.wait() {
+                Ok(true) => break,
+                Ok(false) => {
+                    use std::{thread, time};
+                    thread::sleep(time::Duration::from_millis(50));
+                    continue;
+                }
+                Err(e) => unreachable!("{:?}", e),
+            }
+        }
+    }
+
+    #[cfg(test)]
     pub fn migrate<F, T>(&mut self, f: F) -> T
     where
-        F: for<'a> FnMut(&'a mut ::controller::migrate::Migration) -> T + Send + 'static,
+        F: FnOnce(&mut Migration) -> T + Send + 'static,
         T: Send + 'static,
     {
-        use controller::migrate::Migration;
-        use std::boxed::FnBox;
-        use std::sync::Mutex;
-
-        let f = Arc::new(Mutex::new(Some(f)));
-        loop {
-            let (tx, rx) = ::std::sync::mpsc::channel();
-            let f = f.clone();
-            let b = Box::new(move |m: &mut Migration| {
-                let mut f = f.lock().unwrap().take().unwrap();
-                tx.send(f(m)).unwrap();
-            })
-                as Box<for<'a, 's> FnBox(&'a mut Migration<'s>) + Send + 'static>;
-
-            self.runtime.spawn(
-                self.event_tx
-                    .clone()
-                    .send(Event::ManualMigration(b))
-                    .map(|_| ())
-                    .map_err(|e| panic!(e)),
-            );
-            match rx.recv() {
-                Ok(ret) => return ret,
-                Err(_) => ::std::thread::sleep(::std::time::Duration::from_millis(100)),
+        let (ret_tx, ret_rx) = futures::sync::oneshot::channel();
+        let (fin_tx, fin_rx) = futures::sync::oneshot::channel();
+        let b = Box::new(move |m: &mut Migration| -> () {
+            if ret_tx.send(f(m)).is_err() {
+                unreachable!("could not return migration result");
             }
+        });
+
+        self.event_tx
+            .clone()
+            .send(Event::ManualMigration { f: b, done: fin_tx })
+            .map(|_| ())
+            .wait()
+            .unwrap();
+
+        match fin_rx.wait() {
+            Ok(()) => {
+                ret_rx.wait().unwrap()
+            }
+            Err(e) => unreachable!("{:?}", e),
         }
     }
 
