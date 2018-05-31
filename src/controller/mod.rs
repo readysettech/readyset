@@ -193,153 +193,216 @@ fn start_instance<A: Authority + 'static>(
         config,
     ));
 
-    let mut instance = Instance {
-        state: InstanceState::Pining,
-        authority: authority.clone(),
-        controller: None,
-        listen_addr,
-        campaign,
-        log: log.clone(),
-    };
+    // set up different loops for the controller "part" and the worker "part" of us. this is
+    // necessary because sometimes the two need to communicate (e.g., for migrations), and if they
+    // were in a single loop, that could deadlock.
+    let (ctrl_tx, ctrl_rx) = futures::sync::mpsc::unbounded();
+    let (worker_tx, worker_rx) = futures::sync::mpsc::unbounded();
 
+    // first, a loop that just forwards to the appropriate place
     rt.spawn(
         rx.map_err(|_| unreachable!())
-            .for_each(move |e| {
+            .fold((ctrl_tx, worker_tx), move |(ctx, wtx), e| {
+                let fw = move |e, to_ctrl| {
+                    if to_ctrl {
+                        Either::A(ctx.send(e).map(move |ctx| (ctx, wtx)))
+                    } else {
+                        Either::B(wtx.send(e).map(move |wtx| (ctx, wtx)))
+                    }
+                };
+
                 match e {
-                    Event::InternalMessage(msg) => match msg.payload {
-                        CoordinationPayload::Deregister => {
-                            unimplemented!();
-                        }
-                        CoordinationPayload::RemoveDomain => {
-                            unimplemented!();
-                        }
-                        CoordinationPayload::AssignDomain(d) => {
-                            if let InstanceState::Active {
-                                epoch,
-                                ref mut add_domain,
-                            } = instance.state
-                            {
-                                if epoch == msg.epoch {
-                                    return Either::A(Box::new(
-                                        add_domain.clone().send(d).map(|_| ()).map_err(|d| {
-                                            format_err!("could not add new domain {:?}", d)
-                                        }),
-                                    ));
-                                }
-                            } else {
-                                unreachable!();
-                            }
-                        }
-                        CoordinationPayload::DomainBooted((domain, shard), addr) => {
-                            if let InstanceState::Active { epoch, .. } = instance.state {
-                                if epoch == msg.epoch {
-                                    trace!(
-                                        log,
-                                        "found that domain {}.{} is at {:?}",
-                                        domain.index(),
-                                        shard,
-                                        addr
-                                    );
-                                    coord.insert_addr((domain, shard), addr, false);
-                                }
-                            }
-                        }
-                        CoordinationPayload::Register {
-                            ref addr,
-                            ref read_listen_addr,
-                            ..
-                        } => {
-                            if let Some(ref mut ctrl) = instance.controller {
-                                block_on(|| {
-                                    ctrl.handle_register(&msg, addr, read_listen_addr.clone())
-                                        .unwrap()
-                                });
-                            }
-                        }
-                        CoordinationPayload::Heartbeat => {
-                            if let Some(ref mut ctrl) = instance.controller {
-                                block_on(|| ctrl.handle_heartbeat(&msg).unwrap());
-                            }
-                        }
+                    Event::InternalMessage(ref msg) => match msg.payload {
+                        CoordinationPayload::Deregister => fw(e, true),
+                        CoordinationPayload::RemoveDomain => fw(e, false),
+                        CoordinationPayload::AssignDomain(..) => fw(e, false),
+                        CoordinationPayload::DomainBooted(..) => fw(e, false),
+                        CoordinationPayload::Register { .. } => fw(e, true),
+                        CoordinationPayload::Heartbeat => fw(e, true),
                     },
-                    Event::ExternalRequest(method, path, body, reply_tx) => {
-                        if let Some(ref mut ctrl) = instance.controller {
-                            let authority = &instance.authority;
-                            let reply =
-                                block_on(|| ctrl.external_request(method, path, body, authority));
-
-                            if let Err(_) = reply_tx.send(reply) {
-                                warn!(log, "client hung up");
-                            }
-                        } else {
-                            if let Err(_) = reply_tx.send(Err(StatusCode::NOT_FOUND)) {
-                                warn!(log, "client hung up for 404");
-                            }
-                        }
-                    }
+                    Event::ExternalRequest(..) => fw(e, true),
                     #[cfg(test)]
-                    Event::ManualMigration(f) => {
-                        if let Some(ref mut ctrl) = instance.controller {
-                            if !ctrl.workers.is_empty() {
-                                block_on(|| ctrl.migrate(move |m| f.call_box((m,))));
-                            }
-                        }
-                    }
-                    Event::LeaderChange(state, descriptor) => {
-                        if let InstanceState::Active { .. } = instance.state {
-                            unimplemented!("leader change happened while running");
-                        }
-
-                        let (rep_tx, rep_rx) = futures::sync::mpsc::unbounded();
-                        instance.state = InstanceState::Active {
-                            epoch: state.epoch,
-                            add_domain: rep_tx,
-                        };
-
-                        // now we can start accepting dataflow messages
-                        // TODO: memory stuff should probably also be in config?
-                        tokio::spawn(
-                            listen_df(
-                                log.clone(),
-                                (memory_limit, memory_check_frequency),
-                                &state,
-                                &descriptor,
-                                waddr,
-                                coord.clone(),
-                                listen_addr,
-                                rep_rx,
-                            ).unwrap(),
-                        );
-                    }
-                    Event::WonLeaderElection(state) => {
-                        let c = instance.campaign.take().unwrap();
-                        block_on(move || c.join().unwrap());
-                        instance.controller = Some(ControllerInner::new(
-                            instance.listen_addr,
-                            instance.log.clone(),
-                            state.clone(),
-                        ));
-                    }
-                    Event::CampaignError(e) => {
-                        panic!(e);
-                    }
+                    Event::ManualMigration(..) => fw(e, true),
+                    Event::LeaderChange(..) => fw(e, false),
+                    Event::WonLeaderElection(..) => fw(e, true),
+                    Event::CampaignError(..) => fw(e, true),
                     Event::Shutdown => {
-                        /* FIXME
-                         * maybe use Receiver::close()?
-                        self.external.stop();
-                        self.internal.stop();
-                        if self.controller.is_some() {
-                            self.authority.surrender_leadership().unwrap();
-                        }
-                        rt.shutdown_now()
-                        */
+                        // FIXME
+                        // maybe use Receiver::close()?
+                        // self.external.stop();
+                        // self.internal.stop();
+                        // if self.controller.is_some() {
+                        //     self.authority.surrender_leadership().unwrap();
+                        // }
+                        // rt.shutdown_now()
                         unimplemented!();
                     }
-                }
-                Either::B(futures::future::ok(()))
+                }.map_err(|e| panic!("{:?}", e))
             })
-            .map_err(|e| panic!(e)),
+            .map(|_| ()),
     );
+
+    {
+        let mut worker_state = InstanceState::Pining;
+        let log = log.clone();
+        rt.spawn(
+            worker_rx
+                .map_err(|_| unreachable!())
+                .for_each(move |e| {
+                    match e {
+                        Event::InternalMessage(msg) => match msg.payload {
+                            CoordinationPayload::RemoveDomain => {
+                                unimplemented!();
+                            }
+                            CoordinationPayload::AssignDomain(d) => {
+                                if let InstanceState::Active {
+                                    epoch,
+                                    ref mut add_domain,
+                                } = worker_state
+                                {
+                                    if epoch == msg.epoch {
+                                        return Either::A(Box::new(
+                                            add_domain.clone().send(d).map(|_| ()).map_err(|d| {
+                                                format_err!("could not add new domain {:?}", d)
+                                            }),
+                                        ));
+                                    }
+                                } else {
+                                    unreachable!();
+                                }
+                            }
+                            CoordinationPayload::DomainBooted((domain, shard), addr) => {
+                                if let InstanceState::Active { epoch, .. } = worker_state {
+                                    if epoch == msg.epoch {
+                                        trace!(
+                                            log,
+                                            "found that domain {}.{} is at {:?}",
+                                            domain.index(),
+                                            shard,
+                                            addr
+                                        );
+                                        coord.insert_addr((domain, shard), addr, false);
+                                    }
+                                }
+                            }
+                            _ => unreachable!(),
+                        },
+                        Event::LeaderChange(state, descriptor) => {
+                            if let InstanceState::Active { .. } = worker_state {
+                                unimplemented!("leader change happened while running");
+                            }
+
+                            let (rep_tx, rep_rx) = futures::sync::mpsc::unbounded();
+                            worker_state = InstanceState::Active {
+                                epoch: state.epoch,
+                                add_domain: rep_tx,
+                            };
+
+                            // now we can start accepting dataflow messages
+                            // TODO: memory stuff should probably also be in config?
+                            tokio::spawn(
+                                listen_df(
+                                    log.clone(),
+                                    (memory_limit, memory_check_frequency),
+                                    &state,
+                                    &descriptor,
+                                    waddr,
+                                    coord.clone(),
+                                    listen_addr,
+                                    rep_rx,
+                                ).unwrap(),
+                            );
+                        }
+                        Event::Shutdown => {
+                            unimplemented!();
+                        }
+                        e => unreachable!("{:?} is not a worker event", e),
+                    }
+                    Either::B(futures::future::ok(()))
+                })
+                .map_err(|e| panic!("{:?}", e)),
+        );
+    }
+
+    {
+        let log = log;
+        let authority = authority.clone();
+        let mut campaign = campaign;
+        let mut controller: Option<ControllerInner> = None;
+        rt.spawn(
+            ctrl_rx
+                .map_err(|_| unreachable!())
+                .for_each(move |e| {
+                    match e {
+                        Event::InternalMessage(msg) => match msg.payload {
+                            CoordinationPayload::Deregister => {
+                                unimplemented!();
+                            }
+                            CoordinationPayload::Register {
+                                ref addr,
+                                ref read_listen_addr,
+                                ..
+                            } => {
+                                if let Some(ref mut ctrl) = controller {
+                                    block_on(|| {
+                                        ctrl.handle_register(&msg, addr, read_listen_addr.clone())
+                                            .unwrap()
+                                    });
+                                }
+                            }
+                            CoordinationPayload::Heartbeat => {
+                                if let Some(ref mut ctrl) = controller {
+                                    block_on(|| ctrl.handle_heartbeat(&msg).unwrap());
+                                }
+                            }
+                            _ => unreachable!(),
+                        },
+                        Event::ExternalRequest(method, path, body, reply_tx) => {
+                            if let Some(ref mut ctrl) = controller {
+                                let authority = &authority;
+                                let reply = block_on(|| {
+                                    ctrl.external_request(method, path, body, authority)
+                                });
+
+                                if let Err(_) = reply_tx.send(reply) {
+                                    warn!(log, "client hung up");
+                                }
+                            } else {
+                                if let Err(_) = reply_tx.send(Err(StatusCode::NOT_FOUND)) {
+                                    warn!(log, "client hung up for 404");
+                                }
+                            }
+                        }
+                        #[cfg(test)]
+                        Event::ManualMigration(f) => {
+                            if let Some(ref mut ctrl) = controller {
+                                if !ctrl.workers.is_empty() {
+                                    block_on(|| ctrl.migrate(move |m| f.call_box((m,))));
+                                }
+                            }
+                        }
+                        Event::WonLeaderElection(state) => {
+                            let c = campaign.take().unwrap();
+                            block_on(move || c.join().unwrap());
+                            controller = Some(ControllerInner::new(
+                                listen_addr,
+                                log.clone(),
+                                state.clone(),
+                            ));
+                        }
+                        Event::CampaignError(e) => {
+                            panic!("{:?}", e);
+                        }
+                        Event::Shutdown => {
+                            unimplemented!();
+                        }
+                        e => unreachable!("{:?} is not a controller event", e),
+                    }
+                    Ok(())
+                })
+                .map_err(|e| panic!("{:?}", e)),
+        );
+    }
 
     Ok(LocalControllerHandle::new(authority, tx, rt))
 }
@@ -358,20 +421,6 @@ enum InstanceState {
         add_domain: UnboundedSender<DomainBuilder>,
     },
 }
-
-pub struct Instance<A> {
-    state: InstanceState,
-    authority: Arc<A>,
-    controller: Option<ControllerInner>,
-
-    listen_addr: IpAddr,
-    campaign: Option<JoinHandle<()>>,
-
-    log: slog::Logger,
-}
-
-// I'm 95% sure this'll come back to bite me.
-unsafe impl<A> Send for Instance<A> {}
 
 fn listen_reads(
     on: tokio::net::TcpListener,
