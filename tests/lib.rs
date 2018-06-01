@@ -174,3 +174,12 @@ fn parse_comments() {
     assert_eq!(ok, 2);
     assert_eq!(fail, 0);
 }
+
+#[test]
+fn parse_autoincrement() {
+    let (ok, fail) = parse_file("tests/autoincrement.txt");
+
+    // There is 1 CREATE TABLE queries in the schema
+    assert_eq!(ok, 1);
+    assert_eq!(fail, 0);
+}
