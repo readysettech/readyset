@@ -36,7 +36,7 @@ use std::sync::{
 };
 use std::thread::{self, JoinHandle};
 use std::time::{self, Duration};
-use streamunordered::StreamUnordered;
+use streamunordered::{StreamUnordered, StreamYield};
 use tokio;
 use tokio::prelude::future::{poll_fn, Either};
 use tokio::prelude::*;
@@ -1230,7 +1230,7 @@ impl Future for Replica {
             // and now, finally, we see if there's new input for us
             loop {
                 match self.inputs.poll() {
-                    Ok(Async::Ready(Some((packet, _)))) => {
+                    Ok(Async::Ready(Some((StreamYield::Item(packet), _)))) => {
                         let d = &mut self.domain;
                         let sb = &mut self.sendback;
                         let ob = &mut self.outbox;
@@ -1242,6 +1242,11 @@ impl Future for Replica {
                             // TODO: quit
                             unimplemented!();
                         }
+                    }
+                    Ok(Async::Ready(Some((StreamYield::Finished(_stream), streami)))) => {
+                        self.sendback.back.remove(&streami);
+                        self.sendback.pending.remove(&streami);
+                        // FIXME: what about pending acks?
                     }
                     Ok(Async::Ready(None)) => {
                         // we probably haven't booted yet
