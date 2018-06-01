@@ -35,6 +35,8 @@ pub struct DomainHandle {
     cr_poll: PollingLoop<ControlReplyPacket>,
     shards: Vec<DomainShardHandle>,
     nodes: Vec<NodeIndex>,
+
+    log: Logger,
 }
 
 impl DomainHandle {
@@ -178,6 +180,7 @@ impl DomainHandle {
             cr_poll,
             shards,
             nodes: node_ids,
+            log: log.clone(),
         }
     }
 
@@ -236,6 +239,9 @@ impl DomainHandle {
                 shard.tx.send(p.clone().make_local())?;
             } else if workers[&shard.worker].healthy {
                 shard.tx.send_ref(&p)?;
+            } else {
+                error!(self.log, "Tried to send packet to failed worker {:?}; ignoring!",
+                       shard.worker);
             }
         }
         Ok(())
