@@ -216,6 +216,7 @@ impl DomainHandle {
             .collect()
     }
 
+    #[warn(deprecated)]
     pub fn send(&mut self, p: Box<Packet>) -> Result<(), tcp::SendError> {
         for shard in self.shards.iter_mut() {
             if shard.is_local {
