@@ -7,7 +7,6 @@ use mio;
 use slog::Logger;
 
 use api::debug::stats::{DomainStats, NodeStats};
-use basics::PersistenceParameters;
 use channel::poll::{KeepPolling, PollEvent, PollingLoop, StopPolling};
 use channel::{tcp, DomainConnectionBuilder, TcpReceiver, TcpSender};
 use consensus::Epoch;
