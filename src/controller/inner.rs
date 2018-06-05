@@ -18,7 +18,7 @@ use controller::{
 };
 use coordination::{CoordinationMessage, CoordinationPayload};
 
-use hyper::{Method, StatusCode};
+use hyper::{self, StatusCode};
 use mio::net::TcpListener;
 use petgraph;
 use petgraph::visit::Bfs;
@@ -132,66 +132,71 @@ impl ControllerInner {
 
     pub fn external_request<A: Authority + 'static>(
         &mut self,
-        method: Method,
+        method: hyper::Method,
         path: String,
         body: Vec<u8>,
         authority: &Arc<A>,
     ) -> Result<Result<String, String>, StatusCode> {
-        use hyper::Method::*;
         use serde_json as json;
 
         match (&method, path.as_ref()) {
-            (&Get, "/graph") => return Ok(Ok(self.graphviz())),
-            (&Post, "/graphviz") => return Ok(Ok(json::to_string(&self.graphviz()).unwrap())),
-            (&Get, "/get_statistics") => {
+            (&hyper::Method::GET, "/graph") => return Ok(Ok(self.graphviz())),
+            (&hyper::Method::POST, "/graphviz") => {
+                return Ok(Ok(json::to_string(&self.graphviz()).unwrap()))
+            }
+            (&hyper::Method::GET, "/get_statistics") => {
                 return Ok(Ok(json::to_string(&self.get_statistics()).unwrap()))
             }
             _ => {}
         }
 
         if self.pending_recovery.is_some() || self.workers.len() < self.quorum {
-            return Err(StatusCode::ServiceUnavailable);
+            return Err(StatusCode::SERVICE_UNAVAILABLE);
         }
 
         match (method, path.as_ref()) {
-            (Get, "/flush_partial") => Ok(Ok(json::to_string(&self.flush_partial()).unwrap())),
-            (Post, "/inputs") => Ok(Ok(json::to_string(&self.inputs()).unwrap())),
-            (Post, "/outputs") => Ok(Ok(json::to_string(&self.outputs()).unwrap())),
-            (Get, "/instances") => Ok(Ok(json::to_string(&self.get_instances()).unwrap())),
-            (Post, "/table_builder") => json::from_slice(&body)
-                .map_err(|_| StatusCode::BadRequest)
+            (hyper::Method::GET, "/flush_partial") => {
+                Ok(Ok(json::to_string(&self.flush_partial()).unwrap()))
+            }
+            (hyper::Method::POST, "/inputs") => Ok(Ok(json::to_string(&self.inputs()).unwrap())),
+            (hyper::Method::POST, "/outputs") => Ok(Ok(json::to_string(&self.outputs()).unwrap())),
+            (hyper::Method::GET, "/instances") => {
+                Ok(Ok(json::to_string(&self.get_instances()).unwrap()))
+            }
+            (hyper::Method::POST, "/table_builder") => json::from_slice(&body)
+                .map_err(|_| StatusCode::BAD_REQUEST)
                 .map(|args| Ok(json::to_string(&self.table_builder(args)).unwrap())),
-            (Post, "/view_builder") => json::from_slice(&body)
-                .map_err(|_| StatusCode::BadRequest)
+            (hyper::Method::POST, "/view_builder") => json::from_slice(&body)
+                .map_err(|_| StatusCode::BAD_REQUEST)
                 .map(|args| Ok(json::to_string(&self.view_builder(args)).unwrap())),
-            (Post, "/extend_recipe") => json::from_slice(&body)
-                .map_err(|_| StatusCode::BadRequest)
+            (hyper::Method::POST, "/extend_recipe") => json::from_slice(&body)
+                .map_err(|_| StatusCode::BAD_REQUEST)
                 .map(|args| {
                     self.extend_recipe(authority, args)
                         .map(|r| json::to_string(&r).unwrap())
                 }),
-            (Post, "/install_recipe") => json::from_slice(&body)
-                .map_err(|_| StatusCode::BadRequest)
+            (hyper::Method::POST, "/install_recipe") => json::from_slice(&body)
+                .map_err(|_| StatusCode::BAD_REQUEST)
                 .map(|args| {
                     self.install_recipe(authority, args)
                         .map(|r| json::to_string(&r).unwrap())
                 }),
-            (Post, "/set_security_config") => json::from_slice(&body)
-                .map_err(|_| StatusCode::BadRequest)
+            (hyper::Method::POST, "/set_security_config") => json::from_slice(&body)
+                .map_err(|_| StatusCode::BAD_REQUEST)
                 .map(|args| {
                     self.set_security_config(args)
                         .map(|r| json::to_string(&r).unwrap())
                 }),
-            (Post, "/create_universe") => json::from_slice(&body)
-                .map_err(|_| StatusCode::BadRequest)
+            (hyper::Method::POST, "/create_universe") => json::from_slice(&body)
+                .map_err(|_| StatusCode::BAD_REQUEST)
                 .map(|args| {
                     self.create_universe(args)
                         .map(|r| json::to_string(&r).unwrap())
                 }),
-            (Post, "/remove_node") => json::from_slice(&body)
-                .map_err(|_| StatusCode::BadRequest)
+            (hyper::Method::POST, "/remove_node") => json::from_slice(&body)
+                .map_err(|_| StatusCode::BAD_REQUEST)
                 .map(|args| self.remove_node(args).map(|r| json::to_string(&r).unwrap())),
-            _ => return Err(StatusCode::NotFound),
+            _ => return Err(StatusCode::NOT_FOUND),
         }
     }
 

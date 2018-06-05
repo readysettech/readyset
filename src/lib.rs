@@ -314,6 +314,7 @@
 #![feature(use_extern_macros)]
 #![deny(unused_extern_crates)]
 #![feature(fnbox)]
+#![feature(catch_expr)]
 
 extern crate api;
 extern crate basics;
@@ -341,6 +342,7 @@ extern crate slab;
 extern crate slog;
 extern crate slog_term;
 extern crate timer_heap;
+extern crate tokio;
 extern crate vec_map;
 
 mod controller;
