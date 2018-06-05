@@ -12,7 +12,7 @@ failure = "0.1.1"
 msql-srv = "0.6"
 # local override for development
 #distributary = { path = "../distributary/api", package = "api" }
-distributary = { git = "https://github.com/mit-pdos/distributary.git", package = "api", branch = "dataflow_state" }
+distributary = { git = "https://github.com/mit-pdos/distributary.git", package = "api" }
 lazy_static = "1.0.0"
 nom-sql = { git = "https://github.com/ms705/nom-sql.git", rev = "3e7ae4c4d32b77342051d5c217549ab8fcb68e85" }
 slog = "2.2.2"
