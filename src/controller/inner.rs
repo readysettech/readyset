@@ -631,12 +631,14 @@ impl ControllerInner {
 
     /// Get statistics about the time spent processing different parts of the graph.
     pub fn get_statistics(&mut self) -> GraphStats {
+        let workers = &self.workers;
         // TODO: request stats from domains in parallel.
         let domains = self
             .domains
             .iter_mut()
             .flat_map(|(di, s)| {
-                s.send(box payload::Packet::GetStatistics).unwrap();
+                s.send_to_healthy(box payload::Packet::GetStatistics, workers)
+                    .unwrap();
                 s.wait_for_statistics()
                     .unwrap()
                     .into_iter()
@@ -665,11 +667,13 @@ impl ControllerInner {
     pub fn flush_partial(&mut self) -> u64 {
         // get statistics for current domain sizes
         // and evict all state from partial nodes
+        let workers = &self.workers;
         let to_evict: Vec<_> = self
             .domains
             .iter_mut()
             .map(|(di, s)| {
-                s.send(box payload::Packet::GetStatistics).unwrap();
+                s.send_to_healthy(box payload::Packet::GetStatistics, workers)
+                    .unwrap();
                 let to_evict: Vec<(NodeIndex, u64)> = s
                     .wait_for_statistics()
                     .unwrap()
@@ -694,10 +698,13 @@ impl ControllerInner {
                 self.domains
                     .get_mut(&di)
                     .unwrap()
-                    .send(box payload::Packet::Evict {
-                        node: Some(*na),
-                        num_bytes: bytes as usize,
-                    })
+                    .send_to_healthy(
+                        box payload::Packet::Evict {
+                            node: Some(*na),
+                            num_bytes: bytes as usize,
+                        },
+                        workers,
+                    )
                     .expect("failed to send domain flush message");
                 total_evicted += bytes;
             }

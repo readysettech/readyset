@@ -545,7 +545,7 @@ impl<'a> Migration<'a> {
 
                 let domain = mainline.domains.get_mut(&n.domain()).unwrap();
 
-                domain.send(m).unwrap();
+                domain.send_to_healthy(m, &mainline.workers).unwrap();
                 domain.wait_for_ack().unwrap();
             }
         }
