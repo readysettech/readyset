@@ -918,7 +918,6 @@ impl ControllerInner {
                 .push(*self.ingredients[node].local_addr());
 
             // Remove node from controller local state
-            self.domains.get_mut(&domain).unwrap().remove_node(node);
             self.ingredients[node].remove();
         }
 
@@ -955,19 +954,32 @@ impl ControllerInner {
 
     /// List data-flow nodes, on a specific worker if `worker` specified.
     fn nodes_on_worker(&self, worker: Option<&WorkerIdentifier>) -> Vec<NodeIndex> {
+        // NOTE(malte): this traverses all graph vertices in order to find those assigned to a
+        // domain. We do this to avoid keeping separate state that may get out of sync, but it
+        // could become a performance bottleneck in the future (e.g., when recovergin large
+        // graphs).
+        let domain_nodes = |i: DomainIndex| -> Vec<NodeIndex> {
+            self.ingredients
+                .node_indices()
+                .filter(|&ni| ni != self.source)
+                .filter(|&ni| !self.ingredients[ni].is_dropped())
+                .filter(|&ni| self.ingredients[ni].domain() == i)
+                .collect()
+        };
+
         if worker.is_some() {
             self.domains
                 .values()
                 .filter(|dh| dh.assigned_to_worker(worker.unwrap()))
-                .flat_map(|dh| dh.nodes().iter())
-                .cloned()
-                .collect()
+                .fold(Vec::new(), |mut acc, dh| {
+                    acc.extend(domain_nodes(dh.index()));
+                    acc
+                })
         } else {
-            self.domains
-                .values()
-                .flat_map(|dh| dh.nodes().iter())
-                .cloned()
-                .collect()
+            self.domains.values().fold(Vec::new(), |mut acc, dh| {
+                acc.extend(domain_nodes(dh.index()));
+                acc
+            })
         }
     }
 }

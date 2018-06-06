@@ -29,11 +29,10 @@ struct DomainShardHandle {
 }
 
 pub struct DomainHandle {
-    _idx: DomainIndex,
+    idx: DomainIndex,
 
     cr_poll: PollingLoop<ControlReplyPacket>,
     shards: Vec<DomainShardHandle>,
-    nodes: Vec<NodeIndex>,
 
     log: Logger,
 }
@@ -62,7 +61,6 @@ impl DomainHandle {
         let mut txs = HashMap::new();
         let mut cr_rxs = Vec::new();
         let mut assignments = Vec::new();
-        let node_ids = nodes.iter().map(|(ni, _)| ni.clone()).collect();
         let mut nodes = Some(Self::build_descriptors(graph, nodes));
 
         for i in 0..num_shards {
@@ -175,12 +173,15 @@ impl DomainHandle {
             .collect();
 
         DomainHandle {
-            _idx: idx,
+            idx: idx,
             cr_poll,
             shards,
-            nodes: node_ids,
             log: log.clone(),
         }
+    }
+
+    pub fn index(&self) -> DomainIndex {
+        self.idx
     }
 
     pub fn shards(&self) -> usize {
@@ -193,15 +194,6 @@ impl DomainHandle {
 
     pub fn assigned_to_worker(&self, worker: &WorkerIdentifier) -> bool {
         self.shards.iter().any(|s| s.worker == *worker)
-    }
-
-    pub fn nodes(&self) -> &Vec<NodeIndex> {
-        &self.nodes
-    }
-
-    pub fn remove_node(&mut self, node: NodeIndex) {
-        self.nodes
-            .swap_remove(self.nodes.iter().position(|n| *n == node).unwrap());
     }
 
     fn build_descriptors(graph: &mut Graph, nodes: Vec<(NodeIndex, bool)>) -> DomainNodes {
