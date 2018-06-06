@@ -167,12 +167,14 @@ impl ControllerInner {
                 if let Some(query) = query {
                     let vars: Vec<_> = query.split("&").map(String::from).collect();
                     if let Some(n) = &vars.into_iter().find(|v| v.starts_with("w=")) {
-                        return Ok(Ok(json::to_string(&self.nodes_on_worker(Some(&n[2..].parse().unwrap()))).unwrap()));
+                        return Ok(Ok(json::to_string(
+                            &self.nodes_on_worker(Some(&n[2..].parse().unwrap())),
+                        ).unwrap()));
                     }
                 }
                 // all data-flow nodes
                 Ok(Ok(json::to_string(&self.nodes_on_worker(None)).unwrap()))
-            },
+            }
             (Post, "/table_builder") => json::from_slice(&body)
                 .map_err(|_| StatusCode::BadRequest)
                 .map(|args| Ok(json::to_string(&self.table_builder(args)).unwrap())),
@@ -290,11 +292,12 @@ impl ControllerInner {
         let (mut recovery, mut original) = self.recipe.make_recovery(affected_queries);
 
         // activate recipe
-        let _r = self.migrate(|mig| {
-            recovery
-                .activate(mig)
-                .map_err(|e| format!("failed to activate recovery recipe: {}", e))
-        }).unwrap();
+        let _r =
+            self.migrate(|mig| {
+                recovery
+                    .activate(mig)
+                    .map_err(|e| format!("failed to activate recovery recipe: {}", e))
+            }).unwrap();
 
         // we must do this *after* the migration, since the migration itself modifies the recipe in
         // `recovery`, and we currently need to clone it here.
@@ -932,7 +935,8 @@ impl ControllerInner {
         let mut failed_nodes = Vec::new();
         while let Some(node) = nodes.pop() {
             failed_nodes.push(node);
-            for child in self.ingredients
+            for child in self
+                .ingredients
                 .neighbors_directed(node, petgraph::EdgeDirection::Outgoing)
             {
                 if !nodes.contains(&child) {
