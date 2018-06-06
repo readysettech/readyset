@@ -250,14 +250,6 @@ impl DomainHandle {
         Ok(())
     }
 
-    #[deprecated]
-    pub fn send_to_shard(&mut self, i: usize, mut p: Box<Packet>) -> Result<(), tcp::SendError> {
-        if self.shards[i].is_local {
-            p = p.make_local();
-        }
-        self.shards[i].tx.send(p)
-    }
-
     pub(super) fn send_to_healthy_shard(
         &mut self,
         i: usize,
