@@ -602,8 +602,10 @@ impl SqlIncorporator {
             );
         }
 
-        let mir = self.base_mir_queries.get(name)
-                                       .expect(&format!("tried to remove unknown base {}", name));
+        let mir = self
+            .base_mir_queries
+            .get(name)
+            .expect(&format!("tried to remove unknown base {}", name));
         self.mir_converter.remove_base(name, mir)
     }
 
@@ -639,8 +641,9 @@ impl SqlIncorporator {
                 self.named_queries.insert(query_name.to_owned(), qg_hash);
             }
             None => {
-                self.base_mir_queries.insert(query_name.to_owned(), mir.clone());
-            },
+                self.base_mir_queries
+                    .insert(query_name.to_owned(), mir.clone());
+            }
         }
     }
 
