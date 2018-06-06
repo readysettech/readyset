@@ -288,32 +288,22 @@ impl ControllerInner {
         // then, figure out which queries are affected (and thus must be removed and added again in
         // a migration)
         let affected_queries = self.recipe.queries_for_nodes(affected_nodes);
-        let (mut recovery, mut original) = self.recipe.make_recovery(affected_queries);
+        let (recovery, mut original) = self.recipe.make_recovery(affected_queries);
 
         // activate recipe
-        let _r =
-            self.migrate(|mig| {
-                recovery
-                    .activate(mig)
-                    .map_err(|e| format!("failed to activate recovery recipe: {}", e))
-            }).unwrap();
+        self.apply_recipe(recovery.clone())
+            .expect("failed to apply recovery recipe");
 
         // we must do this *after* the migration, since the migration itself modifies the recipe in
         // `recovery`, and we currently need to clone it here.
-        original.set_prior(recovery.clone());
+        let tmp = self.recipe.clone();
+        original.set_prior(tmp.clone());
         // somewhat awkward, but we must replace the stale `SqlIncorporator` state in `original`
-        original.set_sql_inc(recovery.sql_inc().clone());
-
-        self.recipe = recovery;
+        original.set_sql_inc(tmp.sql_inc().clone());
 
         // back to original recipe, which should add the query again
-        let _r = self.migrate(|mig| {
-            original
-                .activate(mig)
-                .map_err(|e| format!("failed to activate original recipe: {}", e))
-        });
-
-        self.recipe = original;
+        self.apply_recipe(original)
+            .expect("failed to activate original recipe");
     }
 
     fn handle_heartbeat(&mut self, msg: &CoordinationMessage) -> Result<(), io::Error> {
