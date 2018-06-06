@@ -593,6 +593,7 @@ impl Recipe {
         }
         let qid = qid.unwrap();
 
+        self.aliases.remove(qname);
         self.expressions.remove(&qid).is_some() && self.expression_order.remove_item(&qid).is_some()
     }
 
