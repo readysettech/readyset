@@ -215,19 +215,6 @@ impl DomainHandle {
             .collect()
     }
 
-    #[deprecated]
-    pub fn send(&mut self, p: Box<Packet>) -> Result<(), tcp::SendError> {
-        for shard in self.shards.iter_mut() {
-            if shard.is_local {
-                // TODO: avoid clone on last iteration.
-                shard.tx.send(p.clone().make_local())?;
-            } else {
-                shard.tx.send_ref(&p)?;
-            }
-        }
-        Ok(())
-    }
-
     pub(super) fn send_to_healthy(
         &mut self,
         p: Box<Packet>,
