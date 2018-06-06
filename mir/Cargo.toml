@@ -4,7 +4,7 @@ version = "0.1.0"
 authors = ["The Distributary Developers"]
 
 [dependencies]
-regex = "0.2.2"
+regex = "1.0.0"
 slog = "2.2.2"
 
 # git deps

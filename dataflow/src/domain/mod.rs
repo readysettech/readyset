@@ -1870,10 +1870,12 @@ impl Domain {
                                     // bunch here? what if two key columns are reordered?
                                     // XXX: this clone and collect here is *really* sad
                                     let r = r.rec();
-                                    !missed_on.contains(&partial_col
-                                        .iter()
-                                        .map(|&c| r[c].clone())
-                                        .collect::<Vec<_>>())
+                                    !missed_on.contains(
+                                        &partial_col
+                                            .iter()
+                                            .map(|&c| r[c].clone())
+                                            .collect::<Vec<_>>(),
+                                    )
                                 })
                             });
                         }

@@ -6,7 +6,7 @@ use hyper::Client;
 use serde::Serialize;
 use serde_json;
 use std::thread;
-use tokio_core::reactor::Core;
+use tokio;
 
 /// A Trigger data-flow operator.
 ///
@@ -50,23 +50,22 @@ impl Trigger {
     {
         use hyper;
         let url = format!("{}/{}", url, path);
-        let requests: Vec<hyper::Request> = requests
+        let requests: Vec<_> = requests
             .iter()
             .map(|req| {
-                let mut r = hyper::Request::new(hyper::Method::Post, url.clone().parse().unwrap());
-                r.set_body(serde_json::to_string(&req).unwrap());
-                r
+                hyper::Request::post(&url)
+                    .body(hyper::Body::from(serde_json::to_string(&req).unwrap()))
+                    .unwrap()
             })
             .collect();
 
         // TODO: instead of spawing a thred for each request, we could have a
         // long running thread that we just send requests to.
         thread::spawn(move || {
-            let mut basics = Core::new().unwrap();
-            let client = Client::new(&basics.handle());
+            let client = Client::new();
+            let mut rt = tokio::runtime::current_thread::Runtime::new().unwrap();
             for r in requests {
-                let work = client.request(r);
-                basics.run(work).unwrap();
+                rt.block_on(client.request(r)).unwrap();
             }
         });
     }

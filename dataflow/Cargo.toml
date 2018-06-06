@@ -4,17 +4,21 @@ version = "0.1.0"
 authors = ["The Distributary Developers"]
 
 [dependencies]
+bincode = "1.0.0"
 evmap = { git = "https://github.com/ms705/rust-evmap" }
 fnv = "1.0.5"
 itertools = "0.7.2"
+# upgrade to 0.2.8 once compiler bug fixed (#51348)
+rahashmap = "=0.2.7"
 rand = "0.4.2"
 regex = "0.2.2"
 serde_derive = "1.0.8"
 serde_json = "1.0.2"
 slog = "2.2.2"
-tokio-core = "0.1.8"
+tokio = "0.1"
 vec_map = { version = "0.8.0", features = ["eders"] }
-hyper = "0.11.6"
+hyper = "0.12.0"
+tempfile = "3.0.2"
 
 # need features
 backtrace = { version = "0.3.2", features = ["serialize-serde"] }
@@ -30,3 +34,7 @@ api = { path = "../api" }
 channel = { path = "../channel" }
 basics = { path = "../basics" }
 
+[dependencies.rocksdb]
+git = "https://github.com/ekmartin/rust-rocksdb.git"
+features = ["lz4"]
+branch = "custom"
