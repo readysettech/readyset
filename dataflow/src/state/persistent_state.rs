@@ -1,10 +1,12 @@
 use bincode;
 use itertools::Itertools;
 use rocksdb::{self, ColumnFamily, SliceTransform, SliceTransformFns, WriteBatch};
+use serde;
 use tempfile::{tempdir, TempDir};
 
-use data::SizeOf;
-use *;
+use prelude::*;
+use basics::data::SizeOf;
+use state::{RecordResult, State};
 
 // Incremented on each PersistentState initialization so that IndexSeq
 // can be used to create unique identifiers for rows.
@@ -600,8 +602,8 @@ impl PersistentState {
 #[cfg(test)]
 mod tests {
     use super::*;
-
     use bincode;
+    use std::path::PathBuf;
 
     fn insert<S: State>(state: &mut S, row: Vec<DataType>) {
         let record: Record = row.into();
@@ -1144,7 +1146,7 @@ mod tests {
         assert!(k.starts_with(&prefix));
 
         // 2) Compare(prefix(key), key) <= 0.
-        assert!(prefix <= &k);
+        assert!(prefix <= &k[..]);
 
         // 3) If Compare(k1, k2) <= 0, then Compare(prefix(k1), prefix(k2)) <= 0
         let other_k = PersistentState::serialize_prefix(&r);

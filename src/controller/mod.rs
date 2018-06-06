@@ -2,9 +2,8 @@ use channel::poll::{PollEvent, PollingLoop, ProcessResult};
 use channel::tcp::TcpSender;
 
 use api::ControllerDescriptor;
-use basics::PersistenceParameters;
 use consensus::{Authority, Epoch, STATE_KEY};
-use dataflow::DomainConfig;
+use dataflow::{DomainConfig, PersistenceParameters};
 
 use controller::domain_handle::DomainHandle;
 use controller::inner::ControllerInner;

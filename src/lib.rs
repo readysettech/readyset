@@ -353,9 +353,9 @@ mod integration;
 
 pub use consensus::{LocalAuthority, ZookeeperAuthority};
 
-pub use basics::{
-    DataType, Datas, DurabilityMode, Modification, NodeIndex, Operation, PersistenceParameters,
-};
+pub use basics::{DataType, Datas, Modification, NodeIndex, Operation};
+
+pub use dataflow::{DurabilityMode, PersistenceParameters};
 
 pub use api::*;
 

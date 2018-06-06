@@ -19,8 +19,14 @@ pub use payload::{Packet, ReplayPathSegment, SourceChannelIdentifier};
 pub use Sharding;
 
 // domain local state
+pub use state::{LookupResult, MemoryState, PersistentState, RecordResult, Row, State};
+pub type StateMap = map::Map<Box<State>>;
 pub type DomainNodes = Map<cell::RefCell<Node>>;
 pub type ReplicaAddr = (DomainIndex, usize);
+
+// persistence configuration
+pub use DurabilityMode;
+pub use PersistenceParameters;
 
 // channel related types
 use channel;

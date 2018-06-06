@@ -4,14 +4,9 @@ version = "0.1.0"
 authors = ["The Distributary Developers"]
 
 [dependencies]
-bincode = "1.0.0"
 arccstr = "1.1.0"
 fnv = "1.0.5"
-itertools = "0.7.2"
 serde_derive = "1.0.8"
-rahashmap = "0.2.7"
-rand = "0.4.2"
-tempfile = "3.0.2"
 
 # need features
 chrono = { version = "0.4.0", features = ["serde"] }
@@ -20,8 +15,3 @@ serde = { version = "1.0.8", features = ["rc"] }
 
 # git deps
 nom-sql = { git = "https://github.com/ms705/nom-sql.git", rev = "3e7ae4c4d32b77342051d5c217549ab8fcb68e85" }
-
-[dependencies.rocksdb]
-git = "https://github.com/ekmartin/rust-rocksdb.git"
-features = ["lz4"]
-branch = "custom"

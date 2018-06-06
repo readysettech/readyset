@@ -1,5 +1,4 @@
 use api::debug::stats::GraphStats;
-use basics::PersistenceParameters;
 use channel::tcp::TcpSender;
 use consensus::{Authority, Epoch, STATE_KEY};
 use dataflow::prelude::*;
