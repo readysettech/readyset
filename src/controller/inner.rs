@@ -978,7 +978,7 @@ impl Drop for ControllerInner {
             // XXX: this is a terrible ugly hack to ensure that all workers exit
             for _ in 0..100 {
                 // don't unwrap, because given domain may already have terminated
-                drop(d.send(box payload::Packet::Quit));
+                drop(d.send_to_healthy(box payload::Packet::Quit, &self.workers));
             }
         }
     }
