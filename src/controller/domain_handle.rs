@@ -1,7 +1,7 @@
 use std::collections::HashMap;
 use std::net::{IpAddr, SocketAddr};
 use std::sync::Arc;
-use std::{self, cell};
+use std::{self, cell, io};
 
 use mio;
 use slog::Logger;
@@ -241,18 +241,43 @@ impl DomainHandle {
             } else if workers[&shard.worker].healthy {
                 shard.tx.send_ref(&p)?;
             } else {
-                error!(self.log, "Tried to send packet to failed worker {:?}; ignoring!",
-                       shard.worker);
+                error!(
+                    self.log,
+                    "Tried to send packet to failed worker {:?}; ignoring!", shard.worker
+                );
+                return Err(io::Error::new(io::ErrorKind::BrokenPipe, "worker failed").into());
             }
         }
         Ok(())
     }
 
+    #[deprecated]
     pub fn send_to_shard(&mut self, i: usize, mut p: Box<Packet>) -> Result<(), tcp::SendError> {
         if self.shards[i].is_local {
             p = p.make_local();
         }
         self.shards[i].tx.send(p)
+    }
+
+    pub(super) fn send_to_healthy_shard(
+        &mut self,
+        i: usize,
+        mut p: Box<Packet>,
+        workers: &HashMap<WorkerIdentifier, WorkerStatus>,
+    ) -> Result<(), tcp::SendError> {
+        if self.shards[i].is_local {
+            p = p.make_local();
+        }
+        if workers[&self.shards[i].worker].healthy {
+            self.shards[i].tx.send_ref(&p)?;
+        } else {
+            error!(
+                self.log,
+                "Tried to send packet to failed worker {:?}; ignoring!", &self.shards[i].worker
+            );
+            return Err(io::Error::new(io::ErrorKind::BrokenPipe, "worker failed").into());
+        }
+        Ok(())
     }
 
     fn wait_for_next_reply(&mut self) -> ControlReplyPacket {
