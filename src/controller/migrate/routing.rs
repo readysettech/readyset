@@ -7,6 +7,7 @@
 //!  - Egress nodes that gain new children must gain channels to facilitate forwarding
 
 use controller::domain_handle::DomainHandle;
+use controller::{WorkerIdentifier, WorkerStatus};
 use dataflow::node;
 use dataflow::prelude::*;
 use petgraph;
@@ -242,10 +243,11 @@ pub fn add(
     swaps
 }
 
-pub fn connect(
+pub(super) fn connect(
     log: &Logger,
     graph: &mut Graph,
     domains: &mut HashMap<DomainIndex, DomainHandle>,
+    workers: &HashMap<WorkerIdentifier, WorkerStatus>,
     new: &HashSet<NodeIndex>,
 ) {
     // ensure all egress nodes contain the tx channel of the domains of their child ingress nodes
@@ -278,13 +280,14 @@ pub fn connect(
                     // that the sharding must be the same.
                     for i in 0..shards {
                         domain
-                            .send_to_shard(
+                            .send_to_healthy_shard(
                                 i,
                                 box Packet::UpdateEgress {
                                     node: *sender_node.local_addr(),
                                     new_tx: Some((node.into(), *n.local_addr(), (n.domain(), i))),
                                     new_tag: None,
                                 },
+                                workers,
                             )
                             .unwrap();
                     }
@@ -295,11 +298,14 @@ pub fn connect(
                     // *must* be a Sharder.
                     assert_eq!(shards, 1);
                     domain
-                        .send(box Packet::UpdateEgress {
-                            node: *sender_node.local_addr(),
-                            new_tx: Some((node.into(), *n.local_addr(), (n.domain(), 0))),
-                            new_tag: None,
-                        })
+                        .send_to_healthy(
+                            box Packet::UpdateEgress {
+                                node: *sender_node.local_addr(),
+                                new_tx: Some((node.into(), *n.local_addr(), (n.domain(), 0))),
+                                new_tag: None,
+                            },
+                            workers,
+                        )
                         .unwrap();
                 }
             } else if sender_node.is_sharder() {
@@ -314,10 +320,13 @@ pub fn connect(
                 domains
                     .get_mut(&sender_node.domain())
                     .unwrap()
-                    .send(box Packet::UpdateSharder {
-                        node: *sender_node.local_addr(),
-                        new_txs: (*n.local_addr(), txs),
-                    })
+                    .send_to_healthy(
+                        box Packet::UpdateSharder {
+                            node: *sender_node.local_addr(),
+                            new_txs: (*n.local_addr(), txs),
+                        },
+                        workers,
+                    )
                     .unwrap();
             } else if sender_node.is_source() {
             } else {
