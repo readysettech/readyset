@@ -4,7 +4,7 @@ version = "0.1.0"
 authors = ["Jon Gjengset <jon@thesquareplanet.com>"]
 
 [workspace]
-members = ["consensus", "channel", "basics", "mir", "api"]
+members = ["benchmarks", "consensus", "channel", "basics", "mir", "api"]
 
 [features]
 default = ["carry_local"]
