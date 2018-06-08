@@ -58,7 +58,6 @@ mod getter;
 mod handle;
 mod inner;
 mod mir_to_flow;
-mod mutator;
 mod readers;
 
 pub use api::builders::*;
