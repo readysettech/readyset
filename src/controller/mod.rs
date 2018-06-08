@@ -1002,14 +1002,14 @@ impl Replica {
 
             let end = *n;
             for i in 0..end {
-                match stream.start_send(()) {
+                match stream.start_send(true) {
                     Ok(AsyncSink::Ready) => {
                         if i == 0 {
                             pending.insert(streami);
                         }
                         n.sub_assign(1);
                     }
-                    Ok(AsyncSink::NotReady(())) => {
+                    Ok(AsyncSink::NotReady(_)) => {
                         break;
                     }
                     Err(e) => {
@@ -1245,7 +1245,7 @@ impl Future for Replica {
                     Ok(Async::Ready(Some((StreamYield::Finished(_stream), streami)))) => {
                         self.sendback.back.remove(&streami);
                         self.sendback.pending.remove(&streami);
-                        // FIXME: what about pending acks?
+                        // FIXME: what about if a later flush flushes to this stream?
                     }
                     Ok(Async::Ready(None)) => {
                         // we probably haven't booted yet

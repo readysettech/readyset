@@ -132,9 +132,9 @@ pub enum RecvError {
 }
 
 pub enum DualTcpStream<S, T, T2, D> {
-    Passthrough(AsyncBincodeStream<S, T, (), D>),
+    Passthrough(AsyncBincodeStream<S, T, bool, D>),
     Upgrade(
-        AsyncBincodeStream<S, T2, (), D>,
+        AsyncBincodeStream<S, T2, bool, D>,
         Box<FnMut(T2) -> T + Send + Sync>,
     ),
 }
@@ -147,7 +147,7 @@ impl<S, T, T2> From<S> for DualTcpStream<S, T, T2, SyncDestination> {
 
 impl<S, T, T2> DualTcpStream<S, T, T2, SyncDestination> {
     pub fn upgrade<F: 'static + FnMut(T2) -> T + Send + Sync>(stream: S, f: F) -> Self {
-        let s: AsyncBincodeStream<S, T2, (), SyncDestination> = AsyncBincodeStream::from(stream);
+        let s: AsyncBincodeStream<S, T2, bool, SyncDestination> = AsyncBincodeStream::from(stream);
         DualTcpStream::Upgrade(s, Box::new(f))
     }
 
@@ -162,9 +162,9 @@ impl<S, T, T2> DualTcpStream<S, T, T2, SyncDestination> {
 impl<S, T, T2, D> Sink for DualTcpStream<S, T, T2, D>
 where
     S: AsyncWrite,
-    AsyncBincodeWriter<S, (), D>: Sink<SinkItem = (), SinkError = bincode::Error>,
+    AsyncBincodeWriter<S, bool, D>: Sink<SinkItem = bool, SinkError = bincode::Error>,
 {
-    type SinkItem = ();
+    type SinkItem = bool;
     type SinkError = bincode::Error;
     fn start_send(
         &mut self,
