@@ -15,10 +15,10 @@ use tokio;
 /// A handle to a controller that is running in the same process as this one.
 pub struct LocalControllerHandle<A: Authority> {
     c: ControllerHandle<A>,
-    event_tx: futures::sync::mpsc::UnboundedSender<Event>,
+    event_tx: Option<futures::sync::mpsc::UnboundedSender<Event>>,
     #[allow(dead_code)]
     runtime: tokio::runtime::Runtime,
-    shutdown_rx: futures::sync::oneshot::Receiver<()>,
+    shutdown_rx: Option<futures::sync::oneshot::Receiver<()>>,
 }
 
 impl<A: Authority> Deref for LocalControllerHandle<A> {
@@ -43,15 +43,15 @@ impl<A: Authority> LocalControllerHandle<A> {
     ) -> Self {
         LocalControllerHandle {
             c: ControllerHandle::make(authority).unwrap(),
-            event_tx,
+            event_tx: Some(event_tx),
             runtime: rt,
-            shutdown_rx,
+            shutdown_rx: Some(shutdown_rx),
         }
     }
 
     #[cfg(test)]
     pub(crate) fn wait_until_ready(&mut self) {
-        let mut snd = self.event_tx.clone();
+        let mut snd = self.event_tx.clone().unwrap();
         loop {
             let (tx, rx) = futures::sync::oneshot::channel();
             snd = snd.send(Event::IsReady(tx)).wait().unwrap();
@@ -83,15 +83,14 @@ impl<A: Authority> LocalControllerHandle<A> {
 
         self.event_tx
             .clone()
+            .unwrap()
             .send(Event::ManualMigration { f: b, done: fin_tx })
             .map(|_| ())
             .wait()
             .unwrap();
 
         match fin_rx.wait() {
-            Ok(()) => {
-                ret_rx.wait().unwrap()
-            }
+            Ok(()) => ret_rx.wait().unwrap(),
             Err(e) => unreachable!("{:?}", e),
         }
     }
@@ -132,17 +131,28 @@ impl<A: Authority> LocalControllerHandle<A> {
     }
 
     /// Inform the local instance that it should exit, and wait for that to happen
-    pub fn shutdown_and_wait(mut self) {
-        self.c.shutdown();
-        self.event_tx.send(Event::Shutdown).wait().unwrap();
-        self.shutdown_rx.wait().unwrap();
-        //self.runtime.shutdown_on_idle().wait().unwrap();
+    pub fn shutdown_and_wait(&mut self) {
+        if let Some(event_tx) = self.event_tx.take() {
+            self.c.shutdown();
+            event_tx.send(Event::Shutdown).wait().unwrap();
+            if let Some(shutdown_rx) = self.shutdown_rx.take() {
+                // if the user has already called .wait()
+                shutdown_rx.wait().unwrap();
+            }
+            //self.runtime.shutdown_now().wait().unwrap();
+        }
     }
 
     /// Wait for associated local instance to exit (presumably with an error).
-    pub fn wait(self) {
-        self.shutdown_rx.wait().unwrap();
+    pub fn wait(mut self) {
+        self.shutdown_rx.take().unwrap().wait().unwrap();
         //self.runtime.shutdown_on_idle().wait().unwrap();
+    }
+}
+
+impl<A: Authority> Drop for LocalControllerHandle<A> {
+    fn drop(&mut self) {
+        self.shutdown_and_wait();
     }
 }
 

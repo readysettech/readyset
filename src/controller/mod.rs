@@ -227,6 +227,23 @@ fn start_instance<A: Authority + 'static>(
     rt.spawn(
         rx.map_err(|_| unreachable!())
             .fold((ctrl_tx, worker_tx), move |(ctx, wtx), e| {
+                if let Event::Shutdown = e {
+                    let shutdown_tx = shutdown_tx.take().unwrap();
+                    return Either::B(
+                        wtx.send(Event::Shutdown)
+                            .and_then(move |wtx| {
+                                ctx.send(Event::Shutdown).map(move |ctx| (ctx, wtx))
+                            })
+                            .and_then(move |(ctx, wtx)| {
+                                shutdown_tx
+                                    .send(())
+                                    .map(move |_| (ctx, wtx))
+                                    .map_err(|_| unreachable!())
+                            })
+                            .map_err(|e| panic!("{:?}", e)),
+                    );
+                }
+
                 let fw = move |e, to_ctrl| {
                     if to_ctrl {
                         Either::A(ctx.send(e).map(move |ctx| (ctx, wtx)))
@@ -235,36 +252,27 @@ fn start_instance<A: Authority + 'static>(
                     }
                 };
 
-                match e {
-                    Event::InternalMessage(ref msg) => match msg.payload {
-                        CoordinationPayload::Deregister => fw(e, true),
-                        CoordinationPayload::RemoveDomain => fw(e, false),
-                        CoordinationPayload::AssignDomain(..) => fw(e, false),
-                        CoordinationPayload::DomainBooted(..) => fw(e, false),
-                        CoordinationPayload::Register { .. } => fw(e, true),
-                        CoordinationPayload::Heartbeat => fw(e, true),
-                    },
-                    Event::ExternalRequest(..) => fw(e, true),
-                    #[cfg(test)]
-                    Event::ManualMigration { .. } => fw(e, true),
-                    Event::LeaderChange(..) => fw(e, false),
-                    Event::WonLeaderElection(..) => fw(e, true),
-                    Event::CampaignError(..) => fw(e, true),
-                    #[cfg(test)]
-                    Event::IsReady(..) => fw(e, true),
-                    Event::Shutdown => {
-                        shutdown_tx.take().unwrap().send(()).unwrap();
-                        unimplemented!();
-                        // FIXME
-                        // maybe use Receiver::close()?
-                        // self.external.stop();
-                        // self.internal.stop();
-                        // if self.controller.is_some() {
-                        //     self.authority.surrender_leadership().unwrap();
-                        // }
-                        // rt.shutdown_now()
-                    }
-                }.map_err(|e| panic!("{:?}", e))
+                Either::A(
+                    match e {
+                        Event::InternalMessage(ref msg) => match msg.payload {
+                            CoordinationPayload::Deregister => fw(e, true),
+                            CoordinationPayload::RemoveDomain => fw(e, false),
+                            CoordinationPayload::AssignDomain(..) => fw(e, false),
+                            CoordinationPayload::DomainBooted(..) => fw(e, false),
+                            CoordinationPayload::Register { .. } => fw(e, true),
+                            CoordinationPayload::Heartbeat => fw(e, true),
+                        },
+                        Event::ExternalRequest(..) => fw(e, true),
+                        #[cfg(test)]
+                        Event::ManualMigration { .. } => fw(e, true),
+                        Event::LeaderChange(..) => fw(e, false),
+                        Event::WonLeaderElection(..) => fw(e, true),
+                        Event::CampaignError(..) => fw(e, true),
+                        #[cfg(test)]
+                        Event::IsReady(..) => fw(e, true),
+                        Event::Shutdown => unreachable!(),
+                    }.map_err(|e| panic!("{:?}", e)),
+                )
             })
             .map(|_| ()),
     );
@@ -319,29 +327,32 @@ fn start_instance<A: Authority + 'static>(
                                 unimplemented!("leader change happened while running");
                             }
 
-                            let (rep_tx, rep_rx) = futures::sync::mpsc::unbounded();
-                            worker_state = InstanceState::Active {
-                                epoch: state.epoch,
-                                add_domain: rep_tx,
-                            };
-
-                            // now we can start accepting dataflow messages
                             // TODO: memory stuff should probably also be in config?
-                            tokio::spawn(
-                                listen_df(
-                                    log.clone(),
-                                    (memory_limit, memory_check_frequency),
-                                    &state,
-                                    &descriptor,
-                                    waddr,
-                                    coord.clone(),
-                                    listen_addr,
-                                    rep_rx,
-                                ).unwrap(),
+                            let (rep_tx, rep_rx) = futures::sync::mpsc::unbounded();
+                            let ctrl = listen_df(
+                                log.clone(),
+                                (memory_limit, memory_check_frequency),
+                                &state,
+                                &descriptor,
+                                waddr,
+                                coord.clone(),
+                                listen_addr,
+                                rep_rx,
                             );
+
+                            if let Err(e) = ctrl {
+                                error!(log, "failed to connect to controller");
+                                eprintln!("{:?}", e);
+                            } else {
+                                // now we can start accepting dataflow messages
+                                worker_state = InstanceState::Active {
+                                    epoch: state.epoch,
+                                    add_domain: rep_tx,
+                                };
+                            }
                         }
                         Event::Shutdown => {
-                            unimplemented!();
+                            // TODO: maybe flush things or something?
                         }
                         e => unreachable!("{:?} is not a worker event", e),
                     }
@@ -437,7 +448,12 @@ fn start_instance<A: Authority + 'static>(
                             panic!("{:?}", e);
                         }
                         Event::Shutdown => {
-                            unimplemented!();
+                            if controller.is_some() {
+                                if let Err(e) = authority.surrender_leadership() {
+                                    error!(log, "failed to surrender leadership");
+                                    eprintln!("{:?}", e);
+                                }
+                            }
                         }
                         e => unreachable!("{:?} is not a controller event", e),
                     }
@@ -507,7 +523,12 @@ fn listen_df(
     coord: Arc<ChannelCoordinator>,
     on: IpAddr,
     replicas: futures::sync::mpsc::UnboundedReceiver<DomainBuilder>,
-) -> Result<impl Future<Item = (), Error = ()>, failure::Error> {
+) -> Result<(), failure::Error> {
+    // first, try to connect to controller
+    let ctrl = ::std::net::TcpStream::connect(&desc.internal_addr)?;
+    let ctrl = tokio::net::TcpStream::from_std(ctrl, &Default::default())?;
+    let ctrl_addr = ctrl.local_addr()?;
+
     let log_prefix = state.config.persistence.log_prefix.clone();
     let prefix = format!("{}-log-", log_prefix);
     let log_files: Vec<String> = fs::read_dir(".")
@@ -529,121 +550,116 @@ fn listen_df(
     let rport = tokio::net::TcpListener::bind(&SocketAddr::new(on, 0))?;
     let raddr = rport.local_addr()?;
 
-    // now async so we can use tokio::spawn
-    Ok(tokio::net::TcpStream::connect(&desc.internal_addr)
-        .map_err(|e| panic!("{:?}", e))
-        .and_then(move |sender| {
-            let sender_addr = sender.local_addr().unwrap();
-            let sender = AsyncBincodeWriter::from(sender).for_async();
+    // start controller message handler
+    // TODO: deal with the case when the controller moves
+    let ctrl = AsyncBincodeWriter::from(ctrl).for_async();
+    tokio::spawn(
+        ctrl_rx
+            .map(move |cm| CoordinationMessage {
+                source: ctrl_addr,
+                payload: cm,
+                epoch,
+            })
+            .map_err(|e| panic!("{:?}", e))
+            .forward(ctrl.sink_map_err(|e| panic!("{:?}", e)))
+            .map(|_| ()),
+    );
 
-            // start controller message handler
-            // TODO: deal with the case when the controller moves
-            tokio::spawn(
-                ctrl_rx
-                    .map(move |cm| CoordinationMessage {
-                        source: sender_addr,
-                        payload: cm,
-                        epoch,
-                    })
-                    .map_err(|e| panic!("{:?}", e))
-                    .forward(sender.sink_map_err(|e| panic!("{:?}", e)))
-                    .map(|_| ()),
-            );
+    // also start readers
+    tokio::spawn(listen_reads(rport, readers.clone()));
 
-            // also start readers
-            tokio::spawn(listen_reads(rport, readers.clone()));
+    // and tell the controller about us
+    tokio::spawn(
+        ctrl_tx
+            .clone()
+            .send(CoordinationPayload::Register {
+                addr: waddr,
+                read_listen_addr: raddr,
+                log_files,
+            })
+            .and_then(move |ctrl_tx| {
+                // and start sending heartbeats
+                tokio::timer::Interval::new(time::Instant::now() + heartbeat_every, heartbeat_every)
+                    .map(|_| CoordinationPayload::Heartbeat)
+                    .map_err(|e| -> futures::sync::mpsc::SendError<_> { panic!("{:?}", e) })
+                    .forward(ctrl_tx.clone())
+                    .map(|_| ())
+            })
+            .map_err(|_| {
+                // we're probably just shutting down
+                ()
+            }),
+    );
 
-            // and tell the controller about us
-            tokio::spawn(
-                ctrl_tx
-                    .clone()
-                    .send(CoordinationPayload::Register {
-                        addr: waddr,
-                        read_listen_addr: raddr,
-                        log_files,
-                    })
-                    .and_then(move |ctrl_tx| {
-                        // and start sending heartbeats
-                        tokio::timer::Interval::new(
-                            time::Instant::now() + heartbeat_every,
-                            heartbeat_every,
-                        ).map(|_| CoordinationPayload::Heartbeat)
-                            .map_err(|e| -> futures::sync::mpsc::SendError<_> { panic!("{:?}", e) })
-                            .forward(ctrl_tx.clone())
-                            .map(|_| ())
-                    })
-                    .map_err(|_| {
-                        // we're probably just shutting down
-                        ()
-                    }),
-            );
-
-            let state_sizes = Arc::new(Mutex::new(HashMap::new()));
-            if let Some(evict_every) = evict_every {
-                let log = log.clone();
-                let mut domain_senders = HashMap::new();
-                let state_sizes = state_sizes.clone();
-                tokio::spawn(
-                    tokio::timer::Interval::new(time::Instant::now() + evict_every, evict_every)
-                        .for_each(move |_| {
-                            do_eviction(&log, memory_limit, &mut domain_senders, &state_sizes)
-                                .map_err(|e| panic!("{:?}", e))
-                        })
-                        .map_err(|e| panic!("{:?}", e)),
-                );
-            }
-
-            replicas
-                .map_err(|e| -> io::Error { panic!("{:?}", e) })
-                .fold(ctrl_tx, move |ctrl_tx, d| {
-                    let idx = d.index;
-                    let shard = d.shard;
-                    let addr: io::Result<_> = do catch {
-                        let on = tokio::net::TcpListener::bind(&SocketAddr::new(on, 0))?;
-                        let addr = on.local_addr()?;
-
-                        let state_size = Arc::new(AtomicUsize::new(0));
-                        let d = d.build(
-                            log.clone(),
-                            readers.clone(),
-                            coord.clone(),
-                            addr,
-                            state_size.clone(),
-                        );
-
-                        // need to register the domain with the local channel coordinator
-                        coord.insert_addr((idx, shard), addr, false);
-                        block_on(|| state_sizes.lock().unwrap().insert((idx, shard), state_size));
-
-                        tokio::spawn(Replica::new(d, on, log.clone(), coord.clone()));
-
-                        trace!(
-                            log,
-                            "informed controller that domain {}.{} is at {:?}",
-                            idx.index(),
-                            shard,
-                            addr
-                        );
-
-                        addr
-                    };
-
-                    match addr {
-                        Ok(addr) => Either::A(
-                            ctrl_tx
-                                .clone()
-                                .send(CoordinationPayload::DomainBooted((idx, shard), addr))
-                                .map_err(|_| {
-                                    // controller went away -- exit?
-                                    io::Error::new(io::ErrorKind::Other, "controller went away")
-                                }),
-                        ),
-                        Err(e) => Either::B(future::err(e)),
-                    }
+    let state_sizes = Arc::new(Mutex::new(HashMap::new()));
+    if let Some(evict_every) = evict_every {
+        let log = log.clone();
+        let mut domain_senders = HashMap::new();
+        let state_sizes = state_sizes.clone();
+        tokio::spawn(
+            tokio::timer::Interval::new(time::Instant::now() + evict_every, evict_every)
+                .for_each(move |_| {
+                    do_eviction(&log, memory_limit, &mut domain_senders, &state_sizes)
+                        .map_err(|e| panic!("{:?}", e))
                 })
-                .map_err(|e| panic!("{:?}", e))
-                .map(|_| ())
-        }))
+                .map_err(|e| panic!("{:?}", e)),
+        );
+    }
+
+    tokio::spawn(
+        replicas
+            .map_err(|e| -> io::Error { panic!("{:?}", e) })
+            .fold(ctrl_tx, move |ctrl_tx, d| {
+                let idx = d.index;
+                let shard = d.shard;
+                let addr: io::Result<_> = do catch {
+                    let on = tokio::net::TcpListener::bind(&SocketAddr::new(on, 0))?;
+                    let addr = on.local_addr()?;
+
+                    let state_size = Arc::new(AtomicUsize::new(0));
+                    let d = d.build(
+                        log.clone(),
+                        readers.clone(),
+                        coord.clone(),
+                        addr,
+                        state_size.clone(),
+                    );
+
+                    // need to register the domain with the local channel coordinator
+                    coord.insert_addr((idx, shard), addr, false);
+                    block_on(|| state_sizes.lock().unwrap().insert((idx, shard), state_size));
+
+                    tokio::spawn(Replica::new(d, on, log.clone(), coord.clone()));
+
+                    trace!(
+                        log,
+                        "informed controller that domain {}.{} is at {:?}",
+                        idx.index(),
+                        shard,
+                        addr
+                    );
+
+                    addr
+                };
+
+                match addr {
+                    Ok(addr) => Either::A(
+                        ctrl_tx
+                            .clone()
+                            .send(CoordinationPayload::DomainBooted((idx, shard), addr))
+                            .map_err(|_| {
+                                // controller went away -- exit?
+                                io::Error::new(io::ErrorKind::Other, "controller went away")
+                            }),
+                    ),
+                    Err(e) => Either::B(future::err(e)),
+                }
+            })
+            .map_err(|e| panic!("{:?}", e))
+            .map(|_| ()),
+    );
+
+    Ok(())
 }
 
 fn listen_internal(
