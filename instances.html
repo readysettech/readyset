@@ -146,12 +146,6 @@
         $("#controller-addr-edit").removeClass("d-none");
         $("#controller-addr-input").focus();
       });
-      $("#controller-addr-edit").focusout(function() {
-        window.setTimeout(function () {
-          $("#controller-addr-edit").addClass("d-none");
-          $("#controller-addr").removeClass("d-none");
-        }, 100)
-      });
       $("#controller-addr-connect").click(function() {
         controller_addr = $("#controller-addr-input").val();
         localStorage.setItem("noria_controller_addr", controller_addr);
