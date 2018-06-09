@@ -154,15 +154,15 @@
         $("#controller-addr").html("Connected to Noria controller at: <b>" + controller_addr + "</b>");
       });
 
+      $("#instance-table").bootstrapTable();
+
       function update() {
         $.ajax({
           url: "http://" + controller_addr + "/instances",
           dataType: "json",
           success: function(data) {
             $("#error-msg").removeClass("show");
-            $("#instance-table").bootstrapTable({
-              data: data
-            });
+            $("#instance-table").bootstrapTable('load', data);
           },
           error: function(e) {
             $("#error-msg").html("AJAX request to controller API failed: " + e.statusText).addClass("show");
@@ -170,8 +170,8 @@
         });
       }
 
-      setInterval(update, 1000);
       update();
+      setInterval(update, 1000);
     </script>
   </body>
 </html>
