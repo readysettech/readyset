@@ -945,7 +945,7 @@ impl ControllerInner {
                     && self
                         .ingredients
                         .neighbors_directed(parent, petgraph::EdgeDirection::Outgoing)
-                        .count() == 1
+                        .count() == 0
                 {
                     nodes.push(parent);
                 }
