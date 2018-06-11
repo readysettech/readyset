@@ -767,24 +767,41 @@ impl ControllerInner {
 
         match r {
             Ok(ref ra) => {
-                for leaf in &ra.removed_leaves {
+                let (removed_bases, removed_other): (Vec<_>, Vec<_>) = ra
+                    .removed_leaves
+                    .iter()
+                    .cloned()
+                    .partition(|ni| self.ingredients[*ni].is_base());
+
+                // first remove query nodes
+                for leaf in removed_other {
                     // There should be exactly one reader attached to each "leaf" node. Find it and
                     // remove it along with any now unneeded ancestors.
                     let readers: Vec<_> = self
                         .ingredients
-                        .neighbors_directed(*leaf, petgraph::EdgeDirection::Outgoing)
+                        .neighbors_directed(leaf, petgraph::EdgeDirection::Outgoing)
                         .collect();
                     assert!(readers.len() <= 1);
                     if !readers.is_empty() {
                         self.remove_node(readers[0]).unwrap();
                     } else {
-                        self.remove_node(*leaf).unwrap();
+                        self.remove_node(leaf).unwrap();
                     }
                 }
+
+                // now remove bases
+                for base in removed_bases {
+                    // get any remaining readers below the base
+                    // TODO
+                    let readers: Vec<NodeIndex> = vec![];
+                    // now drop the (orphaned) base
+                    self.remove_node(base).unwrap();
+                }
+
                 self.recipe = new;
             }
             Err(ref e) => {
-                crit!(self.log, "{}", e);
+                crit!(self.log, "failed to apply recipe: {}", e);
                 // TODO(malte): a little yucky, since we don't really need the blank recipe
                 let recipe = mem::replace(&mut self.recipe, Recipe::blank(None));
                 self.recipe = recipe.revert();
