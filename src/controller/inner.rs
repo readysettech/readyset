@@ -1,5 +1,5 @@
 use api::debug::stats::GraphStats;
-use channel::tcp::TcpSender;
+use channel::tcp::{SendError, TcpSender};
 use consensus::{Authority, Epoch, STATE_KEY};
 use dataflow::prelude::*;
 use dataflow::{node, payload, DomainConfig};
@@ -777,10 +777,26 @@ impl ControllerInner {
                 for leaf in removed_other {
                     // There should be exactly one reader attached to each "leaf" node. Find it and
                     // remove it along with any now unneeded ancestors.
+                    let mut has_non_reader_children = false;
                     let readers: Vec<_> = self
                         .ingredients
                         .neighbors_directed(leaf, petgraph::EdgeDirection::Outgoing)
+                        .filter(|ni| {
+                            if self.ingredients[*ni].is_reader() {
+                                true
+                            } else {
+                                has_non_reader_children = true;
+                                false
+                            }
+                        })
                         .collect();
+                    if has_non_reader_children {
+                        warn!(
+                            self.log,
+                            "not removing {:?}, which still has non-reader children", leaf
+                        );
+                        continue;
+                    }
                     assert!(readers.len() <= 1);
                     if !readers.is_empty() {
                         self.remove_node(readers[0]).unwrap();
@@ -929,11 +945,28 @@ impl ControllerInner {
         }
 
         for (domain, nodes) in removals {
-            self.domains
+            match self
+                .domains
                 .get_mut(&domain)
                 .unwrap()
                 .send_to_healthy(box payload::Packet::RemoveNodes { nodes }, &self.workers)
-                .unwrap();
+            {
+                Ok(_) => (),
+                Err(e) => match e {
+                    SendError::IoError(ref ioe) => {
+                        if ioe.kind() == io::ErrorKind::BrokenPipe
+                            && ioe.get_ref().unwrap().description() == "worker failed"
+                        {
+                            // message would have gone to a failed worker, so ignore error
+                        } else {
+                            panic!("failed to remove nodes: {:?}", e);
+                        }
+                    }
+                    _ => {
+                        panic!("failed to remove nodes: {:?}", e);
+                    }
+                },
+            }
         }
 
         Ok(())
