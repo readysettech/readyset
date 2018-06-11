@@ -793,11 +793,17 @@ impl ControllerInner {
                     if has_non_reader_children {
                         warn!(
                             self.log,
-                            "not removing {:?}, which still has non-reader children", leaf
+                            "not removing node {} yet, as it still has non-reader children",
+                            leaf.index()
                         );
                         continue;
                     }
                     assert!(readers.len() <= 1);
+                    debug!(
+                        self.log,
+                        "Removing query leaf \"{}\"", self.ingredients[leaf].name();
+                        "node" => leaf.index(),
+                    );
                     if !readers.is_empty() {
                         self.remove_node(readers[0]).unwrap();
                     } else {
@@ -807,9 +813,20 @@ impl ControllerInner {
 
                 // now remove bases
                 for base in removed_bases {
-                    // get any remaining readers below the base
-                    // TODO
-                    let readers: Vec<NodeIndex> = vec![];
+                    // TODO(malte): support removing bases that still have children?
+                    let children: Vec<NodeIndex> = self
+                        .ingredients
+                        .neighbors_directed(base, petgraph::EdgeDirection::Outgoing)
+                        .collect();
+                    // TODO(malte): what about domain crossings? can ingress/egress nodes be left
+                    // behind?
+                    assert_eq!(children.len(), 0);
+                    debug!(
+                        self.log,
+                        "Removing base \"{}\"",
+                        self.ingredients[base].name();
+                        "node" => base.index(),
+                    );
                     // now drop the (orphaned) base
                     self.remove_node(base).unwrap();
                 }
