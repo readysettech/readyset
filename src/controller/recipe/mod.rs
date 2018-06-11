@@ -420,11 +420,19 @@ impl Recipe {
                 let (ref n, ref q, _) = self.prior.as_ref().unwrap().expressions[qid];
                 match q {
                     SqlQuery::CreateTable(ref ctq) => {
+                        // a base may have many dependent queries, including ones that also lost
+                        // nodes; the code handling `removed_leaves` therefore needs to take care
+                        // not to remove bases while they still have children, or to try removing
+                        // them twice.
                         self.inc.as_mut().unwrap().remove_base(&ctq.table.name);
                         match self.prior.as_ref().unwrap().node_addr_for(&ctq.table.name) {
                             Ok(ni) => Some(ni),
                             Err(e) => {
-                                println!("{:?}", e);
+                                crit!(
+                                    self.log,
+                                    "failed to remove base {} whose  address could not be resolved",
+                                    ctq.table.name
+                                );
                                 unimplemented!()
                             }
                         }
