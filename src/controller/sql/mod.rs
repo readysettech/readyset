@@ -166,6 +166,10 @@ impl SqlIncorporator {
         }
     }
 
+    pub fn is_leaf_address(&self, ni: NodeIndex) -> bool {
+        self.leaf_addresses.values().any(|nn| *nn == ni)
+    }
+
     pub fn get_queries_for_node(&self, ni: NodeIndex) -> Vec<String> {
         self.leaf_addresses
             .iter()

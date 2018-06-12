@@ -206,7 +206,10 @@ impl ControllerInner {
                 }),
             (Post, "/remove_node") => json::from_slice(&body)
                 .map_err(|_| StatusCode::BadRequest)
-                .map(|args| self.remove_node(args).map(|r| json::to_string(&r).unwrap())),
+                .map(|args| {
+                    self.remove_nodes(vec![args])
+                        .map(|r| json::to_string(&r).unwrap())
+                }),
             _ => return Err(StatusCode::NotFound),
         }
     }
@@ -775,40 +778,7 @@ impl ControllerInner {
 
                 // first remove query nodes
                 for leaf in removed_other {
-                    // There should be exactly one reader attached to each "leaf" node. Find it and
-                    // remove it along with any now unneeded ancestors.
-                    let mut has_non_reader_children = false;
-                    let readers: Vec<_> = self
-                        .ingredients
-                        .neighbors_directed(leaf, petgraph::EdgeDirection::Outgoing)
-                        .filter(|ni| {
-                            if self.ingredients[*ni].is_reader() {
-                                true
-                            } else {
-                                has_non_reader_children = true;
-                                false
-                            }
-                        })
-                        .collect();
-                    if has_non_reader_children {
-                        warn!(
-                            self.log,
-                            "not removing node {} yet, as it still has non-reader children",
-                            leaf.index()
-                        );
-                        continue;
-                    }
-                    assert!(readers.len() <= 1);
-                    debug!(
-                        self.log,
-                        "Removing query leaf \"{}\"", self.ingredients[leaf].name();
-                        "node" => leaf.index(),
-                    );
-                    if !readers.is_empty() {
-                        self.remove_node(readers[0]).unwrap();
-                    } else {
-                        self.remove_node(leaf).unwrap();
-                    }
+                    self.remove_leaf(leaf)?;
                 }
 
                 // now remove bases
@@ -828,7 +798,7 @@ impl ControllerInner {
                         "node" => base.index(),
                     );
                     // now drop the (orphaned) base
-                    self.remove_node(base).unwrap();
+                    self.remove_nodes(vec![base]).unwrap();
                 }
 
                 self.recipe = new;
@@ -917,18 +887,71 @@ impl ControllerInner {
         graphviz(&self.ingredients, &self.materializations)
     }
 
-    pub fn remove_node(&mut self, node: NodeIndex) -> Result<(), String> {
-        // Node must not have any children.
+    fn remove_leaf(&mut self, mut leaf: NodeIndex) -> Result<(), String> {
+        let mut removals = vec![];
+        let start = leaf;
+        assert!(!self.ingredients[leaf].is_source());
+
+        info!(
+            self.log,
+            "Computing removals for removing node {}",
+            leaf.index()
+        );
+
+        if self
+            .ingredients
+            .neighbors_directed(leaf, petgraph::EdgeDirection::Outgoing)
+            .count() > 0
+        {
+            // This query leaf node has children -- typically, these are readers, but they can also
+            // include egress nodes or other, dependent queries.
+            let mut has_non_reader_children = false;
+            let readers: Vec<_> = self
+                .ingredients
+                .neighbors_directed(leaf, petgraph::EdgeDirection::Outgoing)
+                .filter(|ni| {
+                    if self.ingredients[*ni].is_reader() {
+                        true
+                    } else {
+                        has_non_reader_children = true;
+                        false
+                    }
+                })
+                .collect();
+            if has_non_reader_children {
+                warn!(
+                    self.log,
+                    "not removing node {} yet, as it still has non-reader children",
+                    leaf.index()
+                );
+                // assume that we will remove the node later (e.g., when removing a dependent
+                // query)
+                return Ok(());
+            }
+            // nodes can have only one reader attached
+            assert!(readers.len() <= 1);
+            debug!(
+                        self.log,
+                        "Removing query leaf \"{}\"", self.ingredients[leaf].name();
+                        "node" => leaf.index(),
+                    );
+            if !readers.is_empty() {
+                removals.push(readers[0]);
+                leaf = readers[0];
+            } else {
+                unreachable!();
+            }
+        }
+
+        // `node` now does not have any children any more
         assert_eq!(
             self.ingredients
-                .neighbors_directed(node, petgraph::EdgeDirection::Outgoing)
+                .neighbors_directed(leaf, petgraph::EdgeDirection::Outgoing)
                 .count(),
             0
         );
-        assert!(!self.ingredients[node].is_source());
 
-        let mut removals = HashMap::new();
-        let mut nodes = vec![node];
+        let mut nodes = vec![leaf];
         while let Some(node) = nodes.pop() {
             let mut parents = self
                 .ingredients
@@ -938,10 +961,10 @@ impl ControllerInner {
                 let edge = self.ingredients.find_edge(parent, node).unwrap();
                 self.ingredients.remove_edge(edge);
 
-                // XXX(malte): this is currently overzealous at removing things; it will remove
-                // internal views above a reader that have no other dependent views.
-                // Should not remove "internal leaf" nodes.
-                if !self.ingredients[parent].is_source() && !self.ingredients[parent].is_base()
+                if !self.ingredients[parent].is_source()
+                    && !self.ingredients[parent].is_base()
+                    // ok to remove original start leaf
+                    && (parent == start || !self.recipe.sql_inc().is_leaf_address(parent))
                     && self
                         .ingredients
                         .neighbors_directed(parent, petgraph::EdgeDirection::Outgoing)
@@ -951,17 +974,32 @@ impl ControllerInner {
                 }
             }
 
-            let domain = self.ingredients[node].domain();
-            removals
-                .entry(domain)
-                .or_insert(Vec::new())
-                .push(*self.ingredients[node].local_addr());
-
-            // Remove node from controller local state
-            self.ingredients[node].remove();
+            removals.push(node);
         }
 
-        for (domain, nodes) in removals {
+        self.remove_nodes(removals)
+    }
+
+    fn remove_nodes(&mut self, removals: Vec<NodeIndex>) -> Result<(), String> {
+        // Remove node from controller local state
+        let mut domain_removals: HashMap<DomainIndex, Vec<LocalNodeIndex>> = HashMap::default();
+        for ni in &removals {
+            self.ingredients[*ni].remove();
+            debug!(self.log, "removed node {}", ni.index());
+            domain_removals
+                .entry(self.ingredients[*ni].domain())
+                .or_insert(Vec::new())
+                .push(*self.ingredients[*ni].local_addr())
+        }
+
+        // Send messages to domains
+        for (domain, nodes) in domain_removals {
+            debug!(
+                self.log,
+                "Notifying domain {} of node removals",
+                domain.index(),
+            );
+
             match self
                 .domains
                 .get_mut(&domain)
