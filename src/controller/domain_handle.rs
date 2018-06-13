@@ -84,7 +84,9 @@ impl DomainHandle {
             };
 
             // TODO(malte): simple round-robin placement for the moment
-            let (identifier, endpoint) = placer.next().unwrap();
+            let (identifier, endpoint) = placer
+                .next()
+                .expect("no workers available to place domain on!");
 
             // send domain to worker
             let mut w = endpoint.lock().unwrap();
