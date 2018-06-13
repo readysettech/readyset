@@ -1095,7 +1095,7 @@ impl Drop for ControllerInner {
 mod tests {
     use super::*;
     use channel::poll::{PollEvent, PollingLoop, ProcessResult};
-    use consensus::{Epoch, LocalAuthority};
+    use consensus::LocalAuthority;
     use controller::{ControllerConfig, ControllerState, ServingThread, WorkerEvent};
     use dataflow::Domain;
     use std::sync::mpsc::{self, Receiver, Sender};
@@ -1126,7 +1126,10 @@ mod tests {
                             let mut sender = TcpSender::<ControlReplyPacket>::connect(
                                 &bld.control_addr,
                             ).unwrap();
-                            sender.send(ControlReplyPacket::Booted(bld.shard, self.listen_addr));
+                            sender.send(ControlReplyPacket::Booted(
+                                bld.shard,
+                                self.domain_listen_addr,
+                            ));
                         }
                         _ => (),
                     },
@@ -1168,10 +1171,11 @@ mod tests {
 
         let auth = LocalAuthority::new();
         auth.become_leader(vec![15]).unwrap();
+        let epoch = auth.get_leader().unwrap().0;
 
         let state = ControllerState {
             config: ControllerConfig::default(),
-            epoch: Epoch::new(1),
+            epoch: epoch,
             recipe_version: 0,
             recipes: vec![],
         };
@@ -1186,7 +1190,7 @@ mod tests {
                 let worker = MockWorker {
                     receiver: w_rx,
                     domains: Vec::new(),
-                    listen_addr: w_addr.clone(),
+                    domain_listen_addr: w_addr.clone(), // XXX: wrong
                     internal,
                     log: log,
                 };
@@ -1199,7 +1203,7 @@ mod tests {
         let mut register = |worker_addr: SocketAddr| {
             let msg = CoordinationMessage {
                 source: worker_addr,
-                epoch: Epoch::new(1),
+                epoch: epoch,
                 payload: CoordinationPayload::Register {
                     addr: worker_addr,
                     read_listen_addr: worker_addr, // fake
