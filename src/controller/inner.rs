@@ -1090,3 +1090,138 @@ impl Drop for ControllerInner {
         }
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use channel::poll::{PollEvent, PollingLoop, ProcessResult};
+    use consensus::{Epoch, LocalAuthority};
+    use controller::{ControllerConfig, ControllerState, ServingThread, WorkerEvent};
+    use dataflow::Domain;
+    use std::sync::mpsc::{self, Receiver, Sender};
+    use std::thread;
+
+    pub struct MockWorker {
+        receiver: Receiver<WorkerEvent>,
+
+        domains: Vec<Domain>,
+        // fake domain listener
+        domain_listen_addr: SocketAddr,
+
+        internal: ServingThread,
+
+        log: slog::Logger,
+    }
+
+    /// A pretend-worker that handles coordination messages, but doesn't actually run any domains.
+    impl MockWorker {
+        fn main_loop(self) {
+            use dataflow::payload::ControlReplyPacket;
+
+            while let Ok(msg) = self.receiver.recv() {
+                match msg {
+                    WorkerEvent::InternalMessage(msg) => match msg.payload {
+                        CoordinationPayload::AssignDomain(bld) => {
+                            //self.domains.push(bld.build(self.log.clone()))
+                            let mut sender = TcpSender::<ControlReplyPacket>::connect(
+                                &bld.control_addr,
+                            ).unwrap();
+                            sender.send(ControlReplyPacket::Booted(bld.shard, self.listen_addr));
+                        }
+                        _ => (),
+                    },
+                    WorkerEvent::Shutdown => break,
+                    _ => unimplemented!(),
+                }
+            }
+            self.internal.join_handle.join().unwrap();
+        }
+
+        fn listen_internal(event_tx: Sender<WorkerEvent>, addr: SocketAddr) -> ServingThread {
+            ServingThread::new(addr, move |listener, mut done| {
+                let mut pl = PollingLoop::from_listener(listener);
+                pl.run_polling_loop(move |e| {
+                    if Arc::get_mut(&mut done).is_some() {
+                        return ProcessResult::StopPolling;
+                    }
+
+                    match e {
+                        PollEvent::ResumePolling(timeout) => {
+                            *timeout = Some(Duration::from_millis(100));
+                        }
+                        PollEvent::Process(msg) => {
+                            if event_tx.send(WorkerEvent::InternalMessage(msg)).is_err() {
+                                return ProcessResult::StopPolling;
+                            }
+                        }
+                        PollEvent::Timeout => {}
+                    }
+                    ProcessResult::KeepPolling
+                });
+            })
+        }
+    }
+
+    fn setup() -> (LocalAuthority, ControllerInner, SocketAddr) {
+        use logger_pls;
+        let log = logger_pls(); //slog::Logger::root(slog::Discard, o!());
+
+        let auth = LocalAuthority::new();
+        auth.become_leader(vec![15]).unwrap();
+
+        let state = ControllerState {
+            config: ControllerConfig::default(),
+            epoch: Epoch::new(1),
+            recipe_version: 0,
+            recipes: vec![],
+        };
+        let mut ci = ControllerInner::new("127.0.0.1".parse().unwrap(), log.clone(), state);
+
+        let make_worker = move || -> SocketAddr {
+            let (w_tx, w_rx) = mpsc::channel();
+            let internal =
+                MockWorker::listen_internal(w_tx, SocketAddr::new("127.0.0.1".parse().unwrap(), 0));
+            let w_addr = internal.addr.clone();
+            let _wh = thread::spawn(move || {
+                let worker = MockWorker {
+                    receiver: w_rx,
+                    domains: Vec::new(),
+                    listen_addr: w_addr.clone(),
+                    internal,
+                    log: log,
+                };
+                worker.main_loop()
+            });
+
+            w_addr
+        };
+
+        let mut register = |worker_addr: SocketAddr| {
+            let msg = CoordinationMessage {
+                source: worker_addr,
+                epoch: Epoch::new(1),
+                payload: CoordinationPayload::Register {
+                    addr: worker_addr,
+                    read_listen_addr: worker_addr, // fake
+                    log_files: vec![],
+                },
+            };
+
+            ci.coordination_message(msg);
+        };
+
+        let worker_addr = make_worker();
+        register(worker_addr.clone());
+
+        (auth, ci, worker_addr)
+    }
+
+    #[test]
+    fn it_works() {
+        let (a, mut c, wa) = setup();
+        let auth = Arc::new(a);
+
+        c.install_recipe(&auth, "CREATE TABLE t (a int, b int);".to_owned())
+            .unwrap();
+    }
+}

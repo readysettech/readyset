@@ -29,6 +29,12 @@ pub const STATE_KEY: &str = "/state";
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
 pub struct Epoch(i64);
 
+impl Epoch {
+    pub fn new(i: i64) -> Self {
+        Epoch(i)
+    }
+}
+
 pub enum ElectionResult {
     Won(Epoch),
     Lost { epoch: Epoch, payload: Vec<u8> },
