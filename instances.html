@@ -124,20 +124,9 @@
     <script src="https://maxcdn.bootstrapcdn.com/bootstrap/4.0.0/js/bootstrap.min.js" integrity="sha384-JZR6Spejh4U02d8jOt6vLEHfe/JQGiRRSQQxSfFWpi1MquVdAyjUar5+76PVCmYl" crossorigin="anonymous"></script>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/bootstrap-table/1.10.1/bootstrap-table.min.js"></script>
 
+    <script src="js/formatters.js"></script>
     <script>
       var controller_addr = localStorage.getItem("noria_controller_addr");
-
-      function durationFormatter(value) {
-        return value.secs + value.nanos / 1000000000.0;
-      }
-
-      function booleanFormatter(value) {
-        if (value) {
-          return "<span data-feather=\"check\"></span>";
-        } else {
-          return "<span data-feather=\"x\"></span>";
-        }
-      }
 
       /* Controller connection handling */
       if (controller_addr != "") {
