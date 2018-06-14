@@ -207,7 +207,7 @@ impl ControllerInner {
             (Post, "/remove_node") => json::from_slice(&body)
                 .map_err(|_| StatusCode::BadRequest)
                 .map(|args| {
-                    self.remove_nodes(vec![args])
+                    self.remove_nodes(vec![args].as_slice())
                         .map(|r| json::to_string(&r).unwrap())
                 }),
             _ => return Err(StatusCode::NotFound),
@@ -776,8 +776,17 @@ impl ControllerInner {
                     .cloned()
                     .partition(|ni| self.ingredients[*ni].is_base());
 
-                // first remove query nodes
-                for leaf in removed_other {
+                // first remove query nodes in reverse topological order
+                let mut topo_removals = Vec::with_capacity(removed_other.len());
+                let mut topo = petgraph::visit::Topo::new(&self.ingredients);
+                while let Some(node) = topo.next(&self.ingredients) {
+                    if removed_other.contains(&node) {
+                        topo_removals.push(node);
+                    }
+                }
+                topo_removals.reverse();
+
+                for leaf in topo_removals {
                     self.remove_leaf(leaf)?;
                 }
 
@@ -798,7 +807,7 @@ impl ControllerInner {
                         "node" => base.index(),
                     );
                     // now drop the (orphaned) base
-                    self.remove_nodes(vec![base]).unwrap();
+                    self.remove_nodes(vec![base].as_slice()).unwrap();
                 }
 
                 self.recipe = new;
@@ -977,13 +986,13 @@ impl ControllerInner {
             removals.push(node);
         }
 
-        self.remove_nodes(removals)
+        self.remove_nodes(removals.as_slice())
     }
 
-    fn remove_nodes(&mut self, removals: Vec<NodeIndex>) -> Result<(), String> {
+    fn remove_nodes(&mut self, removals: &[NodeIndex]) -> Result<(), String> {
         // Remove node from controller local state
         let mut domain_removals: HashMap<DomainIndex, Vec<LocalNodeIndex>> = HashMap::default();
-        for ni in &removals {
+        for ni in removals {
             self.ingredients[*ni].remove();
             debug!(self.log, "removed node {}", ni.index());
             domain_removals
