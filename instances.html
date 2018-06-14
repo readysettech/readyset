@@ -101,7 +101,7 @@
             <thead>
               <tr>
                 <th data-field="0">Instance address</th>
-                <th data-field="1">Healthy</th>
+                <th data-field="1" data-formatter="booleanFormatter">Healthy</th>
                 <th data-field="2" data-formatter="durationFormatter">Time since heartbeat [sec]</th>
               </tr>
             </thead>
@@ -129,6 +129,14 @@
 
       function durationFormatter(value) {
         return value.secs + value.nanos / 1000000000.0;
+      }
+
+      function booleanFormatter(value) {
+        if (value) {
+          return "<span data-feather=\"check\"></span>";
+        } else {
+          return "<span data-feather=\"x\"></span>";
+        }
       }
 
       /* Controller connection handling */
@@ -163,6 +171,7 @@
           success: function(data) {
             $("#error-msg").removeClass("show");
             $("#instance-table").bootstrapTable('load', data);
+            feather.replace()
           },
           error: function(e) {
             $("#error-msg").html("AJAX request to controller API failed: " + e.statusText).addClass("show");
