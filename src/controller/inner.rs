@@ -928,14 +928,13 @@ impl ControllerInner {
                 })
                 .collect();
             if has_non_reader_children {
-                warn!(
+                // should never happen, since we remove nodes in reverse topological order
+                crit!(
                     self.log,
                     "not removing node {} yet, as it still has non-reader children",
                     leaf.index()
                 );
-                // assume that we will remove the node later (e.g., when removing a dependent
-                // query)
-                return Ok(());
+                unreachable!();
             }
             // nodes can have only one reader attached
             assert!(readers.len() <= 1);
