@@ -13,7 +13,7 @@ use coordination::CoordinationMessage;
 
 #[cfg(test)]
 use std::boxed::FnBox;
-use std::io::{self, ErrorKind};
+use std::io;
 use std::net::{IpAddr, SocketAddr};
 use std::sync::mpsc::{self, Receiver, RecvTimeoutError, Sender};
 use std::sync::{Arc, Mutex};
