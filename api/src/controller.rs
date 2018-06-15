@@ -120,7 +120,7 @@ impl<A: Authority> ControllerHandle<A> {
         loop {
             if self.url.is_none() {
                 let descriptor: ControllerDescriptor =
-                    serde_json::from_slice(&self.authority.get_leader().unwrap().1).unwrap();
+                    serde_json::from_slice(&self.authority.get_leader()?.1)?;
                 self.url = Some(format!("http://{}", descriptor.external_addr));
             }
             let url = format!("{}/{}", self.url.as_ref().unwrap(), path);

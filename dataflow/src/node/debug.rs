@@ -59,7 +59,7 @@ impl Node {
 
         match self.inner {
             NodeType::Source => s.push_str("(source)"),
-            NodeType::Dropped => s.push_str("✗"),
+            NodeType::Dropped => s.push_str(&format!("{{ {} | dropped }}", addr)),
             NodeType::Base(..) => {
                 s.push_str(&format!(
                     "{{ {{ {} / {} | {} {} }} | {} }}",

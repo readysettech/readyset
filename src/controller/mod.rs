@@ -153,6 +153,7 @@ enum ControlEvent {
     ExternalRequest(
         Method,
         String,
+        Option<String>,
         Vec<u8>,
         futures::sync::oneshot::Sender<Result<Result<String, String>, StatusCode>>,
     ),
@@ -199,7 +200,7 @@ fn start_instance<A: Authority + 'static>(
             );
             let external = Controller::listen_external(
                 controller_event_tx.clone(),
-                SocketAddr::new(listen_addr, 9000),
+                SocketAddr::new(listen_addr, 0),
                 authority.clone(),
             );
             let descriptor = ControllerDescriptor {
@@ -387,10 +388,10 @@ impl<A: Authority + 'static> Controller<A> {
                 ControlEvent::InternalMessage(msg) => if let Some(ref mut inner) = self.inner {
                     inner.coordination_message(msg)
                 },
-                ControlEvent::ExternalRequest(method, path, body, reply_tx) => {
+                ControlEvent::ExternalRequest(method, path, query, body, reply_tx) => {
                     if let Some(ref mut inner) = self.inner {
                         reply_tx
-                            .send(inner.external_request(method, path, body, &self.authority))
+                            .send(inner.external_request(method, path, query, body, &self.authority))
                             .unwrap()
                     } else {
                         reply_tx.send(Err(StatusCode::NOT_FOUND)).unwrap();
@@ -481,13 +482,14 @@ impl<A: Authority + 'static> Controller<A> {
 
                 let method = req.method().clone();
                 let path = req.uri().path().to_string();
+                let query = req.uri().query().map(|s| s.to_owned());
                 let event_tx = self.0.clone();
                 Box::new(req.into_body().concat2().and_then(move |body| {
                     let body: Vec<u8> = body.iter().cloned().collect();
                     let (tx, rx) = futures::sync::oneshot::channel();
                     event_tx
                         .clone()
-                        .send(ControlEvent::ExternalRequest(method, path, body, tx))
+                        .send(ControlEvent::ExternalRequest(method, path, query, body, tx))
                         .map_err(|_| futures::Canceled)
                         .into_future()
                         .then(move |_| rx)
@@ -619,7 +621,9 @@ impl Worker {
                     worker.coordination_message(msg)
                 },
                 WorkerEvent::LeaderChange(state, descriptor) => {
+                    info!(self.log, "Detected leader change");
                     self.inner.take().map(|w| w.shutdown());
+                    info!(self.log, "Attempting to connect");
                     if let Ok(worker) = WorkerInner::new(
                         self.listen_addr,
                         descriptor.internal_addr,
@@ -632,6 +636,9 @@ impl Worker {
                         self.log.clone(),
                     ) {
                         self.inner = Some(worker);
+                        warn!(self.log, "Connected to new leader");
+                    } else {
+                        warn!(self.log, "Failed to connect to new leader");
                     }
                 }
                 WorkerEvent::Shutdown => break,

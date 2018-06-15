@@ -1,5 +1,5 @@
 use controller::domain_handle::DomainHandle;
-use controller::{inner::graphviz, keys};
+use controller::{inner::graphviz, keys, WorkerIdentifier, WorkerStatus};
 use dataflow::payload::TriggerEndpoint;
 use dataflow::prelude::*;
 use std::collections::{HashMap, HashSet};
@@ -9,6 +9,7 @@ pub(crate) struct Plan<'a> {
     graph: &'a Graph,
     node: NodeIndex,
     domains: &'a mut HashMap<DomainIndex, DomainHandle>,
+    workers: &'a HashMap<WorkerIdentifier, WorkerStatus>,
     partial: bool,
 
     tags: HashMap<Vec<usize>, Vec<(Tag, DomainIndex)>>,
@@ -25,11 +26,12 @@ pub(crate) struct PendingReplay {
 }
 
 impl<'a> Plan<'a> {
-    pub fn new(
+    pub(super) fn new(
         m: &'a mut super::Materializations,
         graph: &'a Graph,
         node: NodeIndex,
         domains: &'a mut HashMap<DomainIndex, DomainHandle>,
+        workers: &'a HashMap<WorkerIdentifier, WorkerStatus>,
     ) -> Plan<'a> {
         let partial = m.partial.contains(&node);
         Plan {
@@ -37,6 +39,7 @@ impl<'a> Plan<'a> {
             graph,
             node,
             domains,
+            workers,
 
             partial,
 
@@ -279,15 +282,19 @@ impl<'a> Plan<'a> {
                     // to tell it about this replay path so that it knows
                     // what path to forward replay packets on.
                     let n = &self.graph[nodes.last().unwrap().0];
+                    let workers = &self.workers;
                     if n.is_egress() {
                         self.domains
                             .get_mut(&domain)
                             .unwrap()
-                            .send(box Packet::UpdateEgress {
-                                node: *n.local_addr(),
-                                new_tx: None,
-                                new_tag: Some((tag, segments[i + 1].1[0].0.into())),
-                            })
+                            .send_to_healthy(
+                                box Packet::UpdateEgress {
+                                    node: *n.local_addr(),
+                                    new_tx: None,
+                                    new_tag: Some((tag, segments[i + 1].1[0].0.into())),
+                                },
+                                workers,
+                            )
                             .unwrap();
                     } else {
                         assert!(n.is_sharder());
@@ -296,7 +303,7 @@ impl<'a> Plan<'a> {
 
                 trace!(self.m.log, "telling domain about replay path"; "domain" => domain.index());
                 let ctx = self.domains.get_mut(&domain).unwrap();
-                ctx.send(setup).unwrap();
+                ctx.send_to_healthy(setup, self.workers).unwrap();
                 ctx.wait_for_ack().unwrap();
             }
 
@@ -365,10 +372,13 @@ impl<'a> Plan<'a> {
         self.domains
             .get_mut(&self.graph[self.node].domain())
             .unwrap()
-            .send(box Packet::PrepareState {
-                node: *self.graph[self.node].local_addr(),
-                state: s,
-            })
+            .send_to_healthy(
+                box Packet::PrepareState {
+                    node: *self.graph[self.node].local_addr(),
+                    state: s,
+                },
+                self.workers,
+            )
             .unwrap();
 
         if !self.partial {

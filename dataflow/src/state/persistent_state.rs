@@ -311,12 +311,24 @@ impl PersistentState {
             Err(_err) => vec![DEFAULT_CF.to_string()],
         };
 
-        let cfs: Vec<_> = column_family_names
-            .iter()
-            .map(|cf| ColumnFamilyDescriptor::new(cf.clone(), Self::build_options(&name, &params)))
-            .collect();
+        let make_cfs = || {
+            column_family_names
+                .iter()
+                .map(|cf| {
+                    ColumnFamilyDescriptor::new(cf.clone(), Self::build_options(&name, &params))
+                })
+                .collect()
+        };
 
-        let mut db = DB::open_cf_descriptors(&opts, &full_name, cfs).unwrap();
+        let mut db = DB::open_cf_descriptors(&opts, &full_name, make_cfs());
+        for _ in 0..100 {
+            if db.is_ok() {
+                break;
+            }
+            ::std::thread::sleep(::std::time::Duration::from_millis(50));
+            db = DB::open_cf_descriptors(&opts, &full_name, make_cfs());
+        }
+        let mut db = db.unwrap();
         let meta = Self::retrieve_and_update_meta(&db);
         let indices: Vec<PersistentIndex> = meta
             .indices
