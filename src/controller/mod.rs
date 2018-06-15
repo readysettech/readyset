@@ -21,14 +21,15 @@ use std::thread::{self, JoinHandle};
 use std::time::{self, Duration, Instant};
 
 use failure::{self, Error};
-use futures::{self, Future, Stream};
-use hyper::header::ContentType;
-use hyper::server::{Http, NewService, Request, Response, Service};
-use hyper::{self, Method, StatusCode};
+use futures::{self, future::FutureResult, Future, IntoFuture, Stream};
+use hyper::server::Server;
+use hyper::service::{NewService, Service};
+use hyper::{self, Method, Request, Response, StatusCode};
 use mio::net::TcpListener;
 use rand;
 use serde_json;
 use slog;
+use tokio;
 
 pub mod domain_handle;
 pub mod keys;
@@ -393,7 +394,7 @@ impl<A: Authority + 'static> Controller<A> {
                             .send(inner.external_request(method, path, query, body, &self.authority))
                             .unwrap()
                     } else {
-                        reply_tx.send(Err(StatusCode::NotFound)).unwrap();
+                        reply_tx.send(Err(StatusCode::NOT_FOUND)).unwrap();
                     }
                 }
                 ControlEvent::WonLeaderElection(state) => {
@@ -427,7 +428,10 @@ impl<A: Authority + 'static> Controller<A> {
         event_tx: Sender<ControlEvent>,
         addr: SocketAddr,
         authority: Arc<A>,
-    ) -> ServingThread {
+    ) -> ServingThread
+    where
+        A: 'static,
+    {
         struct ExternalServer<A: Authority>(Sender<ControlEvent>, Arc<A>);
         impl<A: Authority> Clone for ExternalServer<A> {
             // Needed due to #26925
@@ -436,112 +440,133 @@ impl<A: Authority + 'static> Controller<A> {
             }
         }
         impl<A: Authority> Service for ExternalServer<A> {
-            type Request = Request;
-            type Response = Response;
+            type ReqBody = hyper::Body;
+            type ResBody = hyper::Body;
             type Error = hyper::Error;
-            type Future = Box<Future<Item = Self::Response, Error = Self::Error>>;
+            type Future = Box<Future<Item = Response<Self::ResBody>, Error = Self::Error> + Send>;
 
-            fn call(&self, req: Request) -> Self::Future {
-                let mut res = Response::new();
+            fn call(&mut self, req: Request<Self::ReqBody>) -> Self::Future {
+                let mut res = Response::builder();
                 // disable CORS to allow use as API server
-                res.headers_mut()
-                    .set_raw("Access-Control-Allow-Origin", "*");
-                match (req.method().clone(), req.path().to_owned().as_ref()) {
-                    (Method::Get, "/graph.html") => {
-                        res.headers_mut().set(ContentType::html());
-                        res.set_body(include_str!("graph.html"));
-                        Box::new(futures::future::ok(res))
-                    }
-                    (Method::Get, "/js/layout-worker.js") => {
-                        res.set_body(
-                            "importScripts('https://cdn.rawgit.com/mstefaniuk/graph-viz-d3-js/\
-                             cf2160ee3ca39b843b081d5231d5d51f1a901617/dist/layout-worker.js');",
-                        );
-                        Box::new(futures::future::ok(res))
-                    }
-                    (Method::Get, path) if path.starts_with("/zookeeper/") => {
-                        match self.1.try_read(&format!("/{}", &path[11..])) {
-                            Ok(Some(data)) => {
-                                res.headers_mut().set(ContentType::json());
-                                res.set_body(data);
-                            }
-                            _ => res.set_status(StatusCode::NotFound),
+                res.header(hyper::header::ACCESS_CONTROL_ALLOW_ORIGIN, "*");
+                if let &Method::GET = req.method() {
+                    match req.uri().path() {
+                        "/graph.html" => {
+                            res.header(hyper::header::CONTENT_TYPE, "text/html");
+                            let res = res.body(hyper::Body::from(include_str!("graph.html")));
+                            return Box::new(futures::future::ok(res.unwrap()));
                         }
-                        Box::new(futures::future::ok(res))
-                    }
-                    (method, path) => {
-                        let path = path.to_owned();
-                        let query = req.query().map(|s| s.to_owned());
-                        let event_tx = self.0.clone();
-                        Box::new(req.body().concat2().and_then(move |body| {
-                            let body: Vec<u8> = body.iter().cloned().collect();
-                            let (tx, rx) = futures::sync::oneshot::channel();
-                            let _ = event_tx
-                                .send(ControlEvent::ExternalRequest(method, path, query, body, tx));
-                            rx.and_then(|reply| {
-                                let mut res = Response::new();
-                                res.headers_mut()
-                                    .set_raw("Access-Control-Allow-Origin", "*");
-                                match reply {
-                                    Ok(Ok(reply)) => res.set_body(reply),
-                                    Ok(Err(reply)) => {
-                                        res.set_status(StatusCode::InternalServerError);
-                                        res.set_body(reply)
-                                    }
-                                    Err(status_code) => {
-                                        res.set_status(status_code);
-                                    }
+                        "/js/layout-worker.js" => {
+                            let res = res.body(hyper::Body::from(
+                                "importScripts('https://cdn.rawgit.com/mstefaniuk/graph-viz-d3-js/\
+                                 cf2160ee3ca39b843b081d5231d5d51f1a901617/dist/layout-worker.js');",
+                            ));
+                            return Box::new(futures::future::ok(res.unwrap()));
+                        }
+                        path if path.starts_with("/zookeeper/") => {
+                            let res = match self.1.try_read(&format!("/{}", &path[11..])) {
+                                Ok(Some(data)) => {
+                                    res.header(hyper::header::CONTENT_TYPE, "application/json");
+                                    res.body(hyper::Body::from(data))
                                 }
-                                Box::new(futures::future::ok(res))
-                            }).or_else(|futures::Canceled| {
-                                let mut res = Response::new();
-                                res.headers_mut()
-                                    .set_raw("Access-Control-Allow-Origin", "*");
-                                res.set_status(StatusCode::NotFound);
-                                Box::new(futures::future::ok(res))
-                            })
-                        }))
+                                _ => {
+                                    res.status(StatusCode::NOT_FOUND);
+                                    res.body(hyper::Body::empty())
+                                }
+                            };
+                            return Box::new(futures::future::ok(res.unwrap()));
+                        }
+                        _ => {}
                     }
                 }
+
+                let method = req.method().clone();
+                let path = req.uri().path().to_string();
+                let query = req.uri().query().map(|s| s.to_owned());
+                let event_tx = self.0.clone();
+                Box::new(req.into_body().concat2().and_then(move |body| {
+                    let body: Vec<u8> = body.iter().cloned().collect();
+                    let (tx, rx) = futures::sync::oneshot::channel();
+                    event_tx
+                        .clone()
+                        .send(ControlEvent::ExternalRequest(method, path, query, body, tx))
+                        .map_err(|_| futures::Canceled)
+                        .into_future()
+                        .then(move |_| rx)
+                        .then(move |reply| match reply {
+                            Ok(reply) => {
+                                res.header(hyper::header::ACCESS_CONTROL_ALLOW_ORIGIN, "*");
+                                let res = match reply {
+                                    Ok(Ok(reply)) => res.body(hyper::Body::from(reply)),
+                                    Ok(Err(reply)) => {
+                                        res.status(StatusCode::INTERNAL_SERVER_ERROR);
+                                        res.body(hyper::Body::from(reply))
+                                    }
+                                    Err(status_code) => {
+                                        res.status(status_code);
+                                        res.body(hyper::Body::empty())
+                                    }
+                                };
+                                Ok(res.unwrap())
+                            }
+                            Err(_) => {
+                                res.header(hyper::header::ACCESS_CONTROL_ALLOW_ORIGIN, "*");
+                                res.status(StatusCode::NOT_FOUND);
+                                Ok(res.body(hyper::Body::empty()).unwrap())
+                            }
+                        })
+                }))
             }
         }
         impl<A: Authority> NewService for ExternalServer<A> {
-            type Request = Request;
-            type Response = Response;
+            type Service = Self;
+            type ReqBody = hyper::Body;
+            type ResBody = hyper::Body;
             type Error = hyper::Error;
-            type Instance = Self;
-            fn new_service(&self) -> Result<Self::Instance, io::Error> {
-                Ok(self.clone())
+            type InitError = io::Error;
+            type Future = FutureResult<Self, Self::InitError>;
+            fn new_service(&self) -> FutureResult<Self, Self::InitError> {
+                Ok(self.clone()).into()
             }
         }
 
-        let (tx, rx) = mpsc::channel();
-        let (done_tx, done_rx) = futures::sync::oneshot::channel();
-        let builder = thread::Builder::new().name("srv-ext".to_owned());
-        let join_handle = builder
-            .spawn(move || {
-                let service = ExternalServer(event_tx, authority);
-                let server = Http::new().bind(&addr, service.clone());
-                let server = match server {
-                    Ok(s) => s,
-                    Err(hyper::Error::Io(ref e))
-                        if e.kind() == ErrorKind::AddrInUse && addr.port() != 0 =>
-                    {
-                        Http::new()
-                            .bind(&SocketAddr::new(addr.ip(), 0), service)
-                            .unwrap()
-                    }
-                    Err(e) => panic!("{}", e),
+        let server = match Server::try_bind(&addr) {
+            Ok(s) => s,
+            Err(e) => {
+                let s: Option<_> = do catch {
+                    // https://github.com/hyperium/hyper/issues/1542
+                    //let e = e.cause()?;
+                    //let e = e.downcast_ref::<io::Error>()?;
+                    //if e.kind() == ErrorKind::AddrInUse && addr.port() != 0 {
+                    Some(Server::bind(&SocketAddr::new(addr.ip(), 0)))?
+                    //} else {
+                    //    None
+                    //}?
                 };
 
-                let addr = server.local_addr().unwrap();
-                tx.send(addr).unwrap();
-                server.run_until(done_rx.map_err(|_| ())).unwrap();
+                if let Some(s) = s {
+                    s
+                } else {
+                    panic!("{}", e);
+                }
+            }
+        };
+
+        let server = server.serve(ExternalServer(event_tx, authority));
+        let addr = server.local_addr();
+
+        let builder = thread::Builder::new().name("srv-ext".to_owned());
+        let (done_tx, done_rx) = futures::sync::oneshot::channel::<()>();
+        let join_handle = builder
+            .spawn(move || {
+                let mut rt = tokio::runtime::current_thread::Runtime::new().unwrap();
+                rt.spawn(server.map_err(|e| panic!("{}", e)));
+                rt.block_on(done_rx.map_err(|_| ())).is_ok();
             })
             .unwrap();
 
         ServingThread {
-            addr: rx.recv().unwrap(),
+            addr,
             join_handle,
             stop: Box::new(done_tx),
         }

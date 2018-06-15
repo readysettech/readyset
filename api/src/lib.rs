@@ -107,7 +107,7 @@ extern crate serde;
 #[macro_use]
 extern crate serde_derive;
 extern crate serde_json;
-extern crate tokio_core;
+extern crate tokio;
 extern crate vec_map;
 
 use basics::*;

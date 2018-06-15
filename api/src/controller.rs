@@ -14,7 +14,7 @@ use std::sync::Arc;
 use std::thread;
 use std::time::Duration;
 use table::{Table, TableBuilder, TableRpc};
-use tokio_core::reactor::Core;
+use tokio;
 use view::{View, ViewBuilder, ViewRpc};
 use ActivationResult;
 
@@ -49,8 +49,8 @@ pub struct ControllerHandle<A: Authority> {
     authority: Arc<A>,
     views: HashMap<(SocketAddr, usize), ViewRpc>,
     domains: HashMap<Vec<SocketAddr>, TableRpc>,
-    reactor: Core,
     client: Client<hyper::client::HttpConnector>,
+    rt: tokio::runtime::current_thread::Runtime,
 }
 
 /// A pointer that lets you construct a new `ControllerHandle` from an existing one.
@@ -84,21 +84,14 @@ impl<A: Authority> ControllerHandle<A> {
 
     #[doc(hidden)]
     pub fn make(authority: Arc<A>) -> Result<Self, failure::Error> {
-        let reactor = Core::new()?;
-        let client = Client::configure()
-            .connector(hyper::client::HttpConnector::new_with_executor(
-                reactor.handle(),
-                &reactor.handle(),
-            ))
-            .build(&reactor.handle());
         Ok(ControllerHandle {
             url: None,
             local_port: None,
             authority,
-            reactor,
-            client,
+            client: Client::new(),
             views: Default::default(),
             domains: Default::default(),
+            rt: tokio::runtime::current_thread::Runtime::new()?,
         })
     }
 
@@ -132,23 +125,26 @@ impl<A: Authority> ControllerHandle<A> {
             }
             let url = format!("{}/{}", self.url.as_ref().unwrap(), path);
 
-            let mut r = hyper::Request::new(hyper::Method::Post, url.parse()?);
-            r.set_body(serde_json::to_vec(&request)?);
-            let res = self.reactor.run(self.client.request(r))?;
+            let r = hyper::Request::post(url)
+                .body(serde_json::to_vec(&request)?.into())
+                .unwrap();
+            let res = self.rt.block_on(self.client.request(r))?;
             match res.status() {
-                hyper::StatusCode::ServiceUnavailable => {
+                hyper::StatusCode::SERVICE_UNAVAILABLE => {
                     thread::sleep(Duration::from_millis(100));
                     continue;
                 }
-                status @ hyper::StatusCode::InternalServerError
-                | status @ hyper::StatusCode::Ok => {
-                    let body = self.reactor.run(res.body().concat2())?;
-                    if let hyper::StatusCode::Ok = status {
+                status @ hyper::StatusCode::INTERNAL_SERVER_ERROR
+                | status @ hyper::StatusCode::OK => {
+                    let body = self.rt.block_on(res.into_body().concat2())?;
+                    if let hyper::StatusCode::OK = status {
                         return Ok(serde_json::from_slice::<R>(&body)
                             .context(format!("while decoding rpc reply from {}", path))?);
                     } else {
-                        bail!(serde_json::from_slice::<String>(&body)
-                            .context(format!("while decoding rpc error reply from {}", path))?);
+                        bail!(
+                            serde_json::from_slice::<String>(&body)
+                                .context(format!("while decoding rpc error reply from {}", path))?
+                        );
                     }
                 }
                 _ => {

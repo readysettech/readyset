@@ -4,8 +4,8 @@ use rocksdb::{self, ColumnFamily, SliceTransform, SliceTransformFns, WriteBatch}
 use serde;
 use tempfile::{tempdir, TempDir};
 
-use prelude::*;
 use basics::data::SizeOf;
+use prelude::*;
 use state::{RecordResult, State};
 
 // Incremented on each PersistentState initialization so that IndexSeq

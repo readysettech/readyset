@@ -34,7 +34,7 @@ extern crate serde_json;
 extern crate slog;
 extern crate tempfile;
 extern crate timekeeper;
-extern crate tokio_core;
+extern crate tokio;
 extern crate vec_map;
 
 pub mod backlog;
