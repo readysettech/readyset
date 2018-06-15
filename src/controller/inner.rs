@@ -994,7 +994,7 @@ impl ControllerInner {
         let mut domain_removals: HashMap<DomainIndex, Vec<LocalNodeIndex>> = HashMap::default();
         for ni in removals {
             self.ingredients[*ni].remove();
-            debug!(self.log, "removed node {}", ni.index());
+            debug!(self.log, "Removed node {}", ni.index());
             domain_removals
                 .entry(self.ingredients[*ni].domain())
                 .or_insert(Vec::new())
@@ -1003,7 +1003,7 @@ impl ControllerInner {
 
         // Send messages to domains
         for (domain, nodes) in domain_removals {
-            debug!(
+            trace!(
                 self.log,
                 "Notifying domain {} of node removals",
                 domain.index(),
