@@ -287,7 +287,7 @@ pub(crate) fn get_parameter_columns(query: &SqlQuery) -> Vec<&Column> {
                 .collect()
         }
         SqlQuery::Update(ref query) => {
-            let mut field_params = query.fields.iter().filter_map(|f| {
+            let field_params = query.fields.iter().filter_map(|f| {
                 if let FieldValueExpression::Literal(LiteralExpression {
                     value: Literal::Placeholder,
                     alias: None,
