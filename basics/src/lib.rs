@@ -36,6 +36,8 @@ pub fn shard_by(dt: &DataType, shards: usize) -> usize {
             hasher.write(s.as_bytes());
             hasher.finish() as usize % shards
         }
+        // a bit hacky: send all NULL values to the first shard
+        DataType::None => 0,
         ref x => {
             unimplemented!("asked to shard on value {:?}", x);
         }
