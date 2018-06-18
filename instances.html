@@ -76,6 +76,7 @@
           </div>
         </nav>
 
+
         <main role="main" class="col-md-9 ml-sm-auto col-lg-10 pt-3 px-4">
           <div class="d-flex justify-content-between flex-wrap flex-md-nowrap align-items-center pb-2 mb-3 border-bottom">
             <h1 class="h2">Cluster overview</h1>
@@ -108,6 +109,7 @@
           </table>
           <!--<canvas class="my-4" id="myChart" width="900" height="380"></canvas>-->
         </main>
+
       </div>
     </div>
 
@@ -124,33 +126,9 @@
     <script src="https://maxcdn.bootstrapcdn.com/bootstrap/4.0.0/js/bootstrap.min.js" integrity="sha384-JZR6Spejh4U02d8jOt6vLEHfe/JQGiRRSQQxSfFWpi1MquVdAyjUar5+76PVCmYl" crossorigin="anonymous"></script>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/bootstrap-table/1.10.1/bootstrap-table.min.js"></script>
 
+    <script src="js/connect.js"></script>
     <script src="js/formatters.js"></script>
     <script>
-      var controller_addr = localStorage.getItem("noria_controller_addr");
-
-      /* Controller connection handling */
-      if (controller_addr != "") {
-        $("#controller-addr").html("Connected to Noria controller at: <b>" + controller_addr + "</b>");
-      } else {
-        $("#controller-addr").html("<b>Click to connect to controller</b>");
-      }
-
-      $("#controller-addr").click(function() {
-        $("#controller-addr").addClass("d-none");
-        if (controller_addr != "") {
-          $("#controller-addr-input").val(controller_addr);
-        }
-        $("#controller-addr-edit").removeClass("d-none");
-        $("#controller-addr-input").focus();
-      });
-      $("#controller-addr-connect").click(function() {
-        controller_addr = $("#controller-addr-input").val();
-        localStorage.setItem("noria_controller_addr", controller_addr);
-        $("#controller-addr-edit").addClass("d-none");
-        $("#controller-addr").removeClass("d-none");
-        $("#controller-addr").html("Connected to Noria controller at: <b>" + controller_addr + "</b>");
-      });
-
       $("#instance-table").bootstrapTable();
 
       function update() {
@@ -170,6 +148,8 @@
 
       update();
       setInterval(update, 1000);
+
     </script>
   </body>
 </html>
+
