@@ -9,6 +9,7 @@ use nom_sql::{
     Literal, LiteralExpression, Operator, SqlQuery, TableKey, UpdateStatement,
 };
 use regex::Regex;
+use std::borrow::Cow;
 use std::collections::HashMap;
 
 lazy_static! {
@@ -45,12 +46,20 @@ lazy_static! {
             vec![("lockstatus", "1")],
         ),
     ];
+    pub(crate) static ref COMMENTS: Vec<(Regex, &'static str)> = vec![
+        (Regex::new(r"(?s)/\*.*\*/").unwrap(), ""),
+        (Regex::new(r"--.*\n").unwrap(), "\n"),
+    ];
+    pub(crate) static ref COLLAPSE_SPACES: (Regex, &'static str) =
+        (Regex::new(r" +").unwrap(), " ");
 }
 
 pub(crate) fn sanitize_query(query: &str) -> String {
-    let query = Regex::new(r"(?s)/\*.*\*/").unwrap().replace_all(query, "");
-    let query = Regex::new(r"--.*\n").unwrap().replace_all(&query, "\n");
-    let query = Regex::new(r" +").unwrap().replace_all(&query, " ");
+    let query = Cow::from(query);
+    for &(ref pattern, replacement) in &*COMMENTS {
+        pattern.replace_all(&query, replacement);
+    }
+    let query = COLLAPSE_SPACES.0.replace_all(&query, COLLAPSE_SPACES.1);
     let query = query.replace('"', "'");
     let query = query.trim();
     query.to_owned()
