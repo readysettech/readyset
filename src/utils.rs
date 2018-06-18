@@ -3,10 +3,11 @@ use std::collections::HashSet;
 use convert::ToDataType;
 use distributary::{DataType, Modification, Operation};
 use msql_srv::ParamParser;
-use nom_sql::{ArithmeticBase, ArithmeticExpression, ArithmeticOperator, Column, ColumnConstraint,
-              ConditionBase, ConditionExpression, ConditionTree, CreateTableStatement,
-              FieldValueExpression, Literal, LiteralExpression, Operator, SqlQuery, TableKey,
-              UpdateStatement};
+use nom_sql::{
+    ArithmeticBase, ArithmeticExpression, ArithmeticOperator, Column, ColumnConstraint,
+    ConditionBase, ConditionExpression, ConditionTree, CreateTableStatement, FieldValueExpression,
+    Literal, LiteralExpression, Operator, SqlQuery, TableKey, UpdateStatement,
+};
 use regex::Regex;
 use std::collections::HashMap;
 
@@ -354,7 +355,8 @@ pub(crate) fn extract_update_params_and_fields(
 ) -> Vec<(usize, Modification)> {
     let mut updates = Vec::new();
     for (i, field) in schema.fields.iter().enumerate() {
-        if let Some(sets) = q.fields
+        if let Some(sets) = q
+            .fields
             .iter()
             .position(|&(ref f, _)| f.name == field.column.name)
         {
@@ -416,12 +418,14 @@ pub(crate) fn extract_update(
     let updates = extract_update_params_and_fields(&mut q, &mut params, schema);
 
     let pkey = get_primary_key(schema);
-    let where_clause = q.where_clause
+    let where_clause = q
+        .where_clause
         .expect("UPDATE without WHERE is not supported");
     let mut col_to_val: HashMap<_, _> = HashMap::new();
     walk_update_where(&mut col_to_val, &mut params, where_clause);
 
-    let key: Vec<_> = pkey.iter()
+    let key: Vec<_> = pkey
+        .iter()
         .map(|&(_, c)| col_to_val.remove(&c.name).unwrap())
         .collect();
 
@@ -443,7 +447,8 @@ mod tests {
             _ => unreachable!(),
         };
 
-        let pkey: Vec<Column> = key.into_iter()
+        let pkey: Vec<Column> = key
+            .into_iter()
             .map(|k| Column {
                 name: String::from(k),
                 table: Some(String::from("T")),
