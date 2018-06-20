@@ -545,7 +545,7 @@ impl<'a> Migration<'a> {
 
                 let domain = mainline.domains.get_mut(&n.domain()).unwrap();
 
-                domain.send(m).unwrap();
+                domain.send_to_healthy(m, &mainline.workers).unwrap();
                 domain.wait_for_ack().unwrap();
             }
         }
@@ -553,13 +553,22 @@ impl<'a> Migration<'a> {
         // Set up inter-domain connections
         // NOTE: once we do this, we are making existing domains block on new domains!
         info!(log, "bringing up inter-domain connections");
-        routing::connect(&log, &mut mainline.ingredients, &mut mainline.domains, &new);
+        routing::connect(
+            &log,
+            &mut mainline.ingredients,
+            &mut mainline.domains,
+            &mainline.workers,
+            &new,
+        );
 
         // And now, the last piece of the puzzle -- set up materializations
         info!(log, "initializing new materializations");
-        mainline
-            .materializations
-            .commit(&mainline.ingredients, &new, &mut mainline.domains);
+        mainline.materializations.commit(
+            &mainline.ingredients,
+            &new,
+            &mut mainline.domains,
+            &mainline.workers,
+        );
 
         warn!(log, "migration completed"; "ms" => dur_to_ns!(start.elapsed()) / 1_000_000);
     }

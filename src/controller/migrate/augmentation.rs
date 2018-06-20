@@ -58,10 +58,13 @@ pub fn inform(
                 .collect();
 
             trace!(log, "request addition of node"; "node" => ni.index());
-            ctx.send(box Packet::AddNode {
-                node: node,
-                parents: old_parents,
-            }).unwrap();
+            ctx.send_to_healthy(
+                box Packet::AddNode {
+                    node: node,
+                    parents: old_parents,
+                },
+                &controller.workers,
+            ).unwrap();
         }
     }
 }

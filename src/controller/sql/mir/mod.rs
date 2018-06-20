@@ -458,6 +458,17 @@ impl SqlToMirConverter {
         }
     }
 
+    pub fn remove_base(&mut self, name: &str, mq: &MirQuery) {
+        info!(self.log, "Removing base {} from SqlTomirconverter", name);
+        self.remove_query(name, mq);
+        if self.base_schemas.remove(name).is_none() {
+            warn!(
+                self.log,
+                "Attempted to remove non-existant base node {} from SqlToMirconverter", name
+            );
+        }
+    }
+
     pub fn named_query_to_mir(
         &mut self,
         name: &str,

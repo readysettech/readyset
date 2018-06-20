@@ -314,6 +314,7 @@
 #![feature(use_extern_macros)]
 #![deny(unused_extern_crates)]
 #![feature(fnbox)]
+#![feature(vec_remove_item)]
 #![feature(catch_expr)]
 
 extern crate api;

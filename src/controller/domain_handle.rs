@@ -1,7 +1,7 @@
 use std::collections::HashMap;
 use std::net::{IpAddr, SocketAddr};
 use std::sync::Arc;
-use std::{self, cell};
+use std::{self, cell, io};
 
 use mio;
 use slog::Logger;
@@ -14,7 +14,7 @@ use dataflow::payload::ControlReplyPacket;
 use dataflow::prelude::*;
 use dataflow::{DomainBuilder, DomainConfig};
 
-use controller::{WorkerEndpoint, WorkerIdentifier};
+use controller::{WorkerEndpoint, WorkerIdentifier, WorkerStatus};
 use coordination::{CoordinationMessage, CoordinationPayload};
 
 #[derive(Debug)]
@@ -29,10 +29,12 @@ struct DomainShardHandle {
 }
 
 pub struct DomainHandle {
-    _idx: DomainIndex,
+    idx: DomainIndex,
 
     cr_poll: PollingLoop<ControlReplyPacket>,
     shards: Vec<DomainShardHandle>,
+
+    log: Logger,
 }
 
 impl DomainHandle {
@@ -82,11 +84,13 @@ impl DomainHandle {
             };
 
             // TODO(malte): simple round-robin placement for the moment
-            let (identifier, endpoint) = placer.next().unwrap();
+            let (identifier, endpoint) = placer
+                .next()
+                .expect("no workers available to place domain on!");
 
             // send domain to worker
             let mut w = endpoint.lock().unwrap();
-            debug!(
+            info!(
                 log,
                 "sending domain {}.{} to worker {:?}",
                 domain.index.index(),
@@ -171,10 +175,15 @@ impl DomainHandle {
             .collect();
 
         DomainHandle {
-            _idx: idx,
+            idx: idx,
             cr_poll,
             shards,
+            log: log.clone(),
         }
+    }
+
+    pub fn index(&self) -> DomainIndex {
+        self.idx
     }
 
     pub fn shards(&self) -> usize {
@@ -183,6 +192,10 @@ impl DomainHandle {
 
     pub fn assignment(&self, shard: usize) -> WorkerIdentifier {
         self.shards[shard].worker.clone()
+    }
+
+    pub fn assigned_to_worker(&self, worker: &WorkerIdentifier) -> bool {
+        self.shards.iter().any(|s| s.worker == *worker)
     }
 
     fn build_descriptors(graph: &mut Graph, nodes: Vec<(NodeIndex, bool)>) -> DomainNodes {
@@ -196,23 +209,47 @@ impl DomainHandle {
             .collect()
     }
 
-    pub fn send(&mut self, p: Box<Packet>) -> Result<(), tcp::SendError> {
+    pub(super) fn send_to_healthy(
+        &mut self,
+        p: Box<Packet>,
+        workers: &HashMap<WorkerIdentifier, WorkerStatus>,
+    ) -> Result<(), tcp::SendError> {
         for shard in self.shards.iter_mut() {
             if shard.is_local {
                 // TODO: avoid clone on last iteration.
                 shard.tx.send(p.clone().make_local())?;
-            } else {
+            } else if workers[&shard.worker].healthy {
                 shard.tx.send_ref(&p)?;
+            } else {
+                error!(
+                    self.log,
+                    "Tried to send packet to failed worker {:?}; ignoring!", shard.worker
+                );
+                return Err(io::Error::new(io::ErrorKind::BrokenPipe, "worker failed").into());
             }
         }
         Ok(())
     }
 
-    pub fn send_to_shard(&mut self, i: usize, mut p: Box<Packet>) -> Result<(), tcp::SendError> {
+    pub(super) fn send_to_healthy_shard(
+        &mut self,
+        i: usize,
+        mut p: Box<Packet>,
+        workers: &HashMap<WorkerIdentifier, WorkerStatus>,
+    ) -> Result<(), tcp::SendError> {
         if self.shards[i].is_local {
             p = p.make_local();
         }
-        self.shards[i].tx.send(p)
+        if workers[&self.shards[i].worker].healthy {
+            self.shards[i].tx.send_ref(&p)?;
+        } else {
+            error!(
+                self.log,
+                "Tried to send packet to failed worker {:?}; ignoring!", &self.shards[i].worker
+            );
+            return Err(io::Error::new(io::ErrorKind::BrokenPipe, "worker failed").into());
+        }
+        Ok(())
     }
 
     fn wait_for_next_reply(&mut self) -> ControlReplyPacket {

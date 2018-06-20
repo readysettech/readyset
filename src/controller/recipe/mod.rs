@@ -22,7 +22,7 @@ type QueryID = u64;
 /// Represents a Soup recipe.
 #[derive(Clone, Debug)]
 pub struct Recipe {
-    /// SQL queries represented in the recipe. Value tuple is (name, query).
+    /// SQL queries represented in the recipe. Value tuple is (name, query, public).
     expressions: HashMap<QueryID, (Option<String>, SqlQuery, bool)>,
     /// Addition order for the recipe expressions
     expression_order: Vec<QueryID>,
@@ -419,11 +419,32 @@ impl Recipe {
         result.removed_leaves = removed
             .iter()
             .filter_map(|qid| {
-                let (ref n, _, _) = self.prior.as_ref().unwrap().expressions[qid];
-                self.inc
-                    .as_mut()
-                    .unwrap()
-                    .remove_query(n.as_ref().unwrap(), mig)
+                let (ref n, ref q, _) = self.prior.as_ref().unwrap().expressions[qid];
+                match q {
+                    SqlQuery::CreateTable(ref ctq) => {
+                        // a base may have many dependent queries, including ones that also lost
+                        // nodes; the code handling `removed_leaves` therefore needs to take care
+                        // not to remove bases while they still have children, or to try removing
+                        // them twice.
+                        self.inc.as_mut().unwrap().remove_base(&ctq.table.name);
+                        match self.prior.as_ref().unwrap().node_addr_for(&ctq.table.name) {
+                            Ok(ni) => Some(ni),
+                            Err(e) => {
+                                crit!(
+                                    self.log,
+                                    "failed to remove base {} whose  address could not be resolved",
+                                    ctq.table.name
+                                );
+                                unimplemented!()
+                            }
+                        }
+                    }
+                    _ => self
+                        .inc
+                        .as_mut()
+                        .unwrap()
+                        .remove_query(n.as_ref().unwrap(), mig),
+                }
             })
             .collect();
 
@@ -500,6 +521,22 @@ impl Recipe {
         Ok(new)
     }
 
+    /// Helper method to reparent a recipe. This is needed for the recovery logic to build
+    /// recovery and original recipe (see `make_recovery`).
+    pub(crate) fn set_prior(&mut self, new_prior: Recipe) {
+        self.prior = Some(Box::new(new_prior));
+    }
+
+    /// Helper method to reparent a recipe. This is needed for some of t
+    pub(crate) fn sql_inc(&self) -> &SqlIncorporator {
+        self.inc.as_ref().unwrap()
+    }
+
+    /// Helper method to reparent a recipe. This is needed for some of t
+    pub(crate) fn set_sql_inc(&mut self, new_inc: SqlIncorporator) {
+        self.inc = Some(new_inc);
+    }
+
     fn parse(recipe_text: &str) -> Result<Vec<(Option<String>, SqlQuery, bool)>, String> {
         let lines: Vec<&str> = recipe_text
             .lines()
@@ -558,6 +595,18 @@ impl Recipe {
         self.prior.as_ref()
     }
 
+    pub(crate) fn remove_query(&mut self, qname: &str) -> bool {
+        let qid = self.aliases.get(qname).cloned();
+        if qid.is_none() {
+            warn!(self.log, "Query {} not found in expressions", qname);
+            return false;
+        }
+        let qid = qid.unwrap();
+
+        self.aliases.remove(qname);
+        self.expressions.remove(&qid).is_some() && self.expression_order.remove_item(&qid).is_some()
+    }
+
     /// Replace this recipe with a new one, retaining queries that exist in both. Any queries only
     /// contained in `new` (but not in `self`) will be added; any contained in `self`, but not in
     /// `new` will be removed.
@@ -596,6 +645,41 @@ impl Recipe {
         } else {
             Recipe::blank(Some(self.log))
         }
+    }
+
+    pub(crate) fn queries_for_nodes(&self, nodes: Vec<NodeIndex>) -> Vec<String> {
+        nodes
+            .iter()
+            .flat_map(|ni| {
+                self.inc
+                    .as_ref()
+                    .expect("need SQL incorporator")
+                    .get_queries_for_node(*ni)
+            })
+            .collect()
+    }
+
+    pub(crate) fn make_recovery(&self, mut affected_queries: Vec<String>) -> (Recipe, Recipe) {
+        affected_queries.sort();
+        affected_queries.dedup();
+
+        let mut recovery = self.clone();
+        recovery.prior = Some(Box::new(self.clone()));
+        recovery.next();
+
+        // remove from recipe
+        for q in affected_queries {
+            warn!(self.log, "query {} affected by failure", q);
+            if !recovery.remove_query(&q) {
+                warn!(self.log, "Call to Recipe::remove_query() failed for {}", q);
+            }
+        }
+
+        let mut original = self.clone();
+        original.next();
+        original.next();
+
+        (recovery, original)
     }
 }
 

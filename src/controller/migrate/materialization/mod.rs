@@ -6,7 +6,7 @@
 //! module).
 
 use controller::domain_handle::DomainHandle;
-use controller::{inner::graphviz, keys};
+use controller::{inner::graphviz, keys, WorkerIdentifier, WorkerStatus};
 use dataflow::prelude::*;
 use petgraph;
 use petgraph::graph::NodeIndex;
@@ -440,11 +440,12 @@ impl Materializations {
     ///
     /// This includes setting up replay paths, adding new indices to existing materializations, and
     /// populating new materializations.
-    pub fn commit(
+    pub(super) fn commit(
         &mut self,
         graph: &Graph,
         new: &HashSet<NodeIndex>,
         domains: &mut HashMap<DomainIndex, DomainHandle>,
+        workers: &HashMap<WorkerIdentifier, WorkerStatus>,
     ) {
         self.extend(graph, new);
 
@@ -611,7 +612,7 @@ impl Materializations {
                 info!(self.log, "adding partial index to existing {:?}", n);
                 let log = self.log.new(o!("node" => node.index()));
                 let log = mem::replace(&mut self.log, log);
-                self.setup(node, &mut index_on, graph, domains);
+                self.setup(node, &mut index_on, graph, domains, workers);
                 mem::replace(&mut self.log, log);
                 index_on.clear();
             } else if !n.sharded_by().is_none() {
@@ -626,10 +627,13 @@ impl Materializations {
                 domains
                     .get_mut(&n.domain())
                     .unwrap()
-                    .send(box Packet::PrepareState {
-                        node: *n.local_addr(),
-                        state: InitialState::IndexedLocal(index_on),
-                    })
+                    .send_to_healthy(
+                        box Packet::PrepareState {
+                            node: *n.local_addr(),
+                            state: InitialState::IndexedLocal(index_on),
+                        },
+                        workers,
+                    )
                     .unwrap();
             }
         }
@@ -647,7 +651,7 @@ impl Materializations {
                 .unwrap_or_else(HashSet::new);
 
             let start = ::std::time::Instant::now();
-            self.ready_one(ni, &mut index_on, graph, domains);
+            self.ready_one(ni, &mut index_on, graph, domains, workers);
             let reconstructed = index_on.is_empty();
 
             // communicate to the domain in charge of a particular node that it should start
@@ -658,10 +662,13 @@ impl Materializations {
             trace!(self.log, "readying node"; "node" => ni.index());
             let domain = domains.get_mut(&n.domain()).unwrap();
             domain
-                .send(box Packet::Ready {
-                    node: *n.local_addr(),
-                    index: index_on,
-                })
+                .send_to_healthy(
+                    box Packet::Ready {
+                        node: *n.local_addr(),
+                        index: index_on,
+                    },
+                    workers,
+                )
                 .unwrap();
             domain.wait_for_ack().unwrap();
             trace!(self.log, "node ready"; "node" => ni.index());
@@ -685,6 +692,7 @@ impl Materializations {
         index_on: &mut HashSet<Vec<usize>>,
         graph: &Graph,
         domains: &mut HashMap<DomainIndex, DomainHandle>,
+        workers: &HashMap<WorkerIdentifier, WorkerStatus>,
     ) {
         let n = &graph[ni];
         let mut has_state = !index_on.is_empty();
@@ -723,7 +731,7 @@ impl Materializations {
         info!(self.log, "beginning reconstruction of {:?}", n);
         let log = self.log.new(o!("node" => ni.index()));
         let log = mem::replace(&mut self.log, log);
-        self.setup(ni, index_on, graph, domains);
+        self.setup(ni, index_on, graph, domains, workers);
         mem::replace(&mut self.log, log);
 
         // NOTE: the state has already been marked ready by the replay completing, but we want to
@@ -740,6 +748,7 @@ impl Materializations {
         index_on: &mut HashSet<Vec<usize>>,
         graph: &Graph,
         domains: &mut HashMap<DomainIndex, DomainHandle>,
+        workers: &HashMap<WorkerIdentifier, WorkerStatus>,
     ) {
         if index_on.is_empty() {
             // we must be reconstructing a Reader.
@@ -756,7 +765,7 @@ impl Materializations {
 
         // construct and disseminate a plan for each index
         let pending = {
-            let mut plan = plan::Plan::new(self, graph, ni, domains);
+            let mut plan = plan::Plan::new(self, graph, ni, domains, workers);
             for index in index_on.drain() {
                 plan.add(index);
             }
@@ -775,10 +784,13 @@ impl Materializations {
                 domains
                     .get_mut(&pending.source_domain)
                     .unwrap()
-                    .send(box Packet::StartReplay {
-                        tag: pending.tag,
-                        from: pending.source,
-                    })
+                    .send_to_healthy(
+                        box Packet::StartReplay {
+                            tag: pending.tag,
+                            from: pending.source,
+                        },
+                        workers,
+                    )
                     .unwrap();
             }
 

@@ -9,7 +9,7 @@ use channel::{
 };
 use consensus::{Authority, Epoch, STATE_KEY};
 use controller::domain_handle::DomainHandle;
-use controller::inner::ControllerInner;
+use controller::inner::{ControllerInner, WorkerStatus};
 use controller::recipe::Recipe;
 use controller::sql::reuse::ReuseConfigType;
 use coordination::{CoordinationMessage, CoordinationPayload};
@@ -129,6 +129,7 @@ enum Event {
     ExternalRequest(
         Method,
         String,
+        Option<String>,
         Vec<u8>,
         futures::sync::oneshot::Sender<Result<Result<String, String>, StatusCode>>,
     ),
@@ -184,13 +185,7 @@ fn start_instance<A: Authority + 'static>(
     rt.spawn(listen_internal(log.clone(), tx.clone(), wport));
 
     // and second, messages from the "real world"
-    let xport = match tokio::net::TcpListener::bind(&SocketAddr::new(listen_addr, 9000)) {
-        Ok(s) => Ok(s),
-        Err(ref e) if e.kind() == ErrorKind::AddrInUse => {
-            tokio::net::TcpListener::bind(&SocketAddr::new(listen_addr, 0))
-        }
-        Err(e) => Err(e),
-    }?;
+    let xport = tokio::net::TcpListener::bind(&SocketAddr::new(listen_addr, 0))?;
     let xaddr = xport.local_addr()?;
     let ext_log = log.clone();
     rt.spawn(
@@ -323,9 +318,11 @@ fn start_instance<A: Authority + 'static>(
                             _ => unreachable!(),
                         },
                         Event::LeaderChange(state, descriptor) => {
+                            info!(log, "Detected leader change");
                             if let InstanceState::Active { .. } = worker_state {
                                 unimplemented!("leader change happened while running");
                             }
+                            info!(log, "Attempting to connect");
 
                             // TODO: memory stuff should probably also be in config?
                             let (rep_tx, rep_rx) = futures::sync::mpsc::unbounded();
@@ -349,6 +346,7 @@ fn start_instance<A: Authority + 'static>(
                                     epoch: state.epoch,
                                     add_domain: rep_tx,
                                 };
+                                warn!(log, "Connected to new leader");
                             }
                         }
                         Event::Shutdown => {
@@ -395,11 +393,11 @@ fn start_instance<A: Authority + 'static>(
                             }
                             _ => unreachable!(),
                         },
-                        Event::ExternalRequest(method, path, body, reply_tx) => {
+                        Event::ExternalRequest(method, path, query, body, reply_tx) => {
                             if let Some(ref mut ctrl) = controller {
                                 let authority = &authority;
                                 let reply = block_on(|| {
-                                    ctrl.external_request(method, path, body, authority)
+                                    ctrl.external_request(method, path, query, body, authority)
                                 });
 
                                 if let Err(_) = reply_tx.send(reply) {
@@ -747,13 +745,14 @@ fn listen_external<A: Authority + 'static>(
 
             let method = req.method().clone();
             let path = req.uri().path().to_string();
+            let query = req.uri().query().map(|s| s.to_owned());
             let event_tx = self.0.clone();
             Box::new(req.into_body().concat2().and_then(move |body| {
                 let body: Vec<u8> = body.iter().cloned().collect();
                 let (tx, rx) = futures::sync::oneshot::channel();
                 event_tx
                     .clone()
-                    .send(Event::ExternalRequest(method, path, body, tx))
+                    .send(Event::ExternalRequest(method, path, query, body, tx))
                     .map_err(|_| futures::Canceled)
                     .then(move |_| rx)
                     .then(move |reply| match reply {
