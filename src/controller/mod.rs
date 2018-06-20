@@ -174,7 +174,16 @@ fn start_instance<A: Authority + 'static>(
     memory_check_frequency: Option<Duration>,
     log: slog::Logger,
 ) -> Result<LocalControllerHandle<A>, failure::Error> {
-    let mut rt = tokio::runtime::Runtime::new().unwrap();
+    let mut rt = if cfg!(debug_assertions) {
+        let mut pool = tokio::executor::thread_pool::Builder::new();
+        pool.pool_size(2);
+
+        let mut rt = tokio::runtime::Builder::new();
+        rt.threadpool_builder(pool);
+        rt.build().unwrap()
+    } else {
+        tokio::runtime::Runtime::new().unwrap()
+    };
     let (shutdown_tx, shutdown_rx) = futures::sync::oneshot::channel();
     let (tx, rx) = futures::sync::mpsc::unbounded();
 
