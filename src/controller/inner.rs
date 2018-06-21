@@ -168,16 +168,30 @@ impl ControllerInner {
                 // TODO(malte): this is a pretty yucky hack, but hyper doesn't provide easy access
                 // to individual query variables unfortunately. We'll probably want to factor this
                 // out into a helper method.
-                if let Some(query) = query {
+                let nodes = if let Some(query) = query {
                     let vars: Vec<_> = query.split("&").map(String::from).collect();
                     if let Some(n) = &vars.into_iter().find(|v| v.starts_with("w=")) {
-                        return Ok(Ok(json::to_string(
-                            &self.nodes_on_worker(Some(&n[2..].parse().unwrap())),
-                        ).unwrap()));
+                        self.nodes_on_worker(Some(&n[2..].parse().unwrap()))
+                    } else {
+                        self.nodes_on_worker(None)
                     }
-                }
-                // all data-flow nodes
-                Ok(Ok(json::to_string(&self.nodes_on_worker(None)).unwrap()))
+                } else {
+                    // all data-flow nodes
+                    self.nodes_on_worker(None)
+                };
+                Ok(Ok(json::to_string(
+                    &nodes
+                        .into_iter()
+                        .filter_map(|ni| {
+                            let n = &self.ingredients[ni];
+                            if n.is_internal() {
+                                Some((ni, n.name(), n.description()))
+                            } else {
+                                None
+                            }
+                        })
+                        .collect::<Vec<_>>(),
+                ).unwrap()))
             }
             (hyper::Method::POST, "/table_builder") => json::from_slice(&body)
                 .map_err(|_| StatusCode::BAD_REQUEST)
