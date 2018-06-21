@@ -495,7 +495,6 @@ impl<A: Authority + 'static> Controller<A> {
                         .then(move |_| rx)
                         .then(move |reply| match reply {
                             Ok(reply) => {
-                                res.header(hyper::header::ACCESS_CONTROL_ALLOW_ORIGIN, "*");
                                 let res = match reply {
                                     Ok(Ok(reply)) => res.body(hyper::Body::from(reply)),
                                     Ok(Err(reply)) => {
@@ -510,7 +509,6 @@ impl<A: Authority + 'static> Controller<A> {
                                 Ok(res.unwrap())
                             }
                             Err(_) => {
-                                res.header(hyper::header::ACCESS_CONTROL_ALLOW_ORIGIN, "*");
                                 res.status(StatusCode::NOT_FOUND);
                                 Ok(res.body(hyper::Body::empty()).unwrap())
                             }
