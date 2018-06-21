@@ -1,4 +1,4 @@
-all: instances.html graph.html
+all: instances.html graph.html nodes.html
 
 %.html: %.tmpl %.js.tmpl
 	python gen.py $* > $*.html
