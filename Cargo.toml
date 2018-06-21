@@ -33,11 +33,9 @@ tarpc = "0.11.0"
 tarpc-plugins = "0.3.0"
 slab = "0.4"
 bincode = "1.0.0"
-#tokio = "0.1"
-tokio = { git = "https://github.com/tokio-rs/tokio.git" }
+tokio = "0.1"
 async-bincode = "0.4.3"
-#tokio-threadpool = "0.1"
-tokio-threadpool = { git = "https://github.com/tokio-rs/tokio.git" }
+tokio-threadpool = "0.1"
 streamunordered = "0.4.0"
 bufstream = { version = "0.1.3", features = [ "tokio" ] }
 
@@ -73,14 +71,6 @@ backtrace = { version = "0.3.2", features = ["serialize-serde"] }
 toml = "0.4.1"
 diff = "0.1.10"
 tempfile = "3.0.2"
-
-[replace]
-"tokio:0.1.7" = { git = "https://github.com/tokio-rs/tokio.git" }
-"tokio-timer:0.2.4" = { git = "https://github.com/tokio-rs/tokio.git" }
-"tokio-executor:0.1.2" = { git = "https://github.com/tokio-rs/tokio.git" }
-"tokio-reactor:0.1.2" = { git = "https://github.com/tokio-rs/tokio.git" }
-"tokio-tcp:0.1.0" = { git = "https://github.com/tokio-rs/tokio.git" }
-"tokio-io:0.1.7" = { git = "https://github.com/tokio-rs/tokio.git" }
 
 [profile.release]
 debug=true
