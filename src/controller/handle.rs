@@ -9,7 +9,7 @@ use std::sync::Arc;
 
 use api::prelude::*;
 use controller::Event;
-use futures::{self, Future, Sink};
+use futures::{self, Future, Sink, Stream};
 use tokio;
 
 /// A handle to a controller that is running in the same process as this one.
@@ -18,7 +18,6 @@ pub struct LocalControllerHandle<A: Authority> {
     event_tx: Option<futures::sync::mpsc::UnboundedSender<Event>>,
     #[allow(dead_code)]
     runtime: tokio::runtime::Runtime,
-    shutdown_rx: Option<futures::sync::oneshot::Receiver<()>>,
 }
 
 impl<A: Authority> Deref for LocalControllerHandle<A> {
@@ -39,13 +38,11 @@ impl<A: Authority> LocalControllerHandle<A> {
         authority: Arc<A>,
         event_tx: futures::sync::mpsc::UnboundedSender<Event>,
         rt: tokio::runtime::Runtime,
-        shutdown_rx: futures::sync::oneshot::Receiver<()>,
     ) -> Self {
         LocalControllerHandle {
             c: ControllerHandle::make(authority).unwrap(),
             event_tx: Some(event_tx),
             runtime: rt,
-            shutdown_rx: Some(shutdown_rx),
         }
     }
 
@@ -132,20 +129,24 @@ impl<A: Authority> LocalControllerHandle<A> {
 
     /// Inform the local instance that it should exit, and wait for that to happen
     pub fn shutdown_and_wait(&mut self) {
+        let (shutdown_tx, shutdown_rx) = futures::sync::mpsc::channel(0);
         if let Some(event_tx) = self.event_tx.take() {
             self.c.shutdown();
-            event_tx.send(Event::Shutdown).wait().unwrap();
-            if let Some(shutdown_rx) = self.shutdown_rx.take() {
-                // if the user has already called .wait()
-                shutdown_rx.wait().unwrap();
+            event_tx.send(Event::Shutdown(shutdown_tx)).wait().unwrap();
+            if let None = shutdown_rx.wait().next() {
+            } else {
+                unreachable!();
             }
             //self.runtime.shutdown_now().wait().unwrap();
         }
     }
 
     /// Wait for associated local instance to exit (presumably with an error).
-    pub fn wait(mut self) {
-        self.shutdown_rx.take().unwrap().wait().unwrap();
+    pub fn wait(self) {
+        // TODO:
+        loop {
+            ::std::thread::yield_now();
+        }
         //self.runtime.shutdown_on_idle().wait().unwrap();
     }
 }

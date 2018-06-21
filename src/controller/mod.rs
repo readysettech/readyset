@@ -136,7 +136,7 @@ enum Event {
     LeaderChange(ControllerState, ControllerDescriptor),
     WonLeaderElection(ControllerState),
     CampaignError(failure::Error),
-    Shutdown,
+    Shutdown(futures::sync::mpsc::Sender<()>),
     #[cfg(test)]
     IsReady(futures::sync::oneshot::Sender<bool>),
     #[cfg(test)]
@@ -157,7 +157,7 @@ impl fmt::Debug for Event {
             Event::CampaignError(ref e) => write!(f, "CampaignError({:?})", e),
             #[cfg(test)]
             Event::IsReady(..) => write!(f, "IsReady"),
-            Event::Shutdown => write!(f, "Shutdown"),
+            Event::Shutdown(..) => write!(f, "Shutdown"),
             #[cfg(test)]
             Event::ManualMigration { .. } => write!(f, "ManualMigration{{..}}"),
         }
@@ -184,7 +184,6 @@ fn start_instance<A: Authority + 'static>(
     } else {
         tokio::runtime::Runtime::new().unwrap()
     };
-    let (shutdown_tx, shutdown_rx) = futures::sync::oneshot::channel();
     let (tx, rx) = futures::sync::mpsc::unbounded();
 
     // we'll be listening for a couple of different types of events:
@@ -227,22 +226,20 @@ fn start_instance<A: Authority + 'static>(
     let (worker_tx, worker_rx) = futures::sync::mpsc::unbounded();
 
     // first, a loop that just forwards to the appropriate place
-    let mut shutdown_tx = Some(shutdown_tx);
     rt.spawn(
         rx.map_err(|_| unreachable!())
             .fold((ctrl_tx, worker_tx), move |(ctx, wtx), e| {
-                if let Event::Shutdown = e {
-                    let shutdown_tx = shutdown_tx.take().unwrap();
+                if let Event::Shutdown(shutdown_tx) = e {
+                    let wshutdown = shutdown_tx.clone();
+                    let cshutdown = shutdown_tx.clone();
                     return Either::B(
-                        wtx.send(Event::Shutdown)
+                        wtx.send(Event::Shutdown(wshutdown))
                             .and_then(move |wtx| {
-                                ctx.send(Event::Shutdown).map(move |ctx| (ctx, wtx))
+                                ctx.send(Event::Shutdown(cshutdown))
+                                    .map(move |ctx| (ctx, wtx))
                             })
-                            .and_then(move |(ctx, wtx)| {
-                                shutdown_tx
-                                    .send(())
-                                    .map(move |_| (ctx, wtx))
-                                    .map_err(|_| unreachable!())
+                            .inspect(move |_| {
+                                drop(shutdown_tx);
                             })
                             .map_err(|e| panic!("{:?}", e)),
                     );
@@ -274,7 +271,7 @@ fn start_instance<A: Authority + 'static>(
                         Event::CampaignError(..) => fw(e, true),
                         #[cfg(test)]
                         Event::IsReady(..) => fw(e, true),
-                        Event::Shutdown => unreachable!(),
+                        Event::Shutdown(..) => unreachable!(),
                     }.map_err(|e| panic!("{:?}", e)),
                 )
             })
@@ -358,7 +355,7 @@ fn start_instance<A: Authority + 'static>(
                                 warn!(log, "Connected to new leader");
                             }
                         }
-                        Event::Shutdown => {
+                        Event::Shutdown(_) => {
                             // TODO: maybe flush things or something?
                         }
                         e => unreachable!("{:?} is not a worker event", e),
@@ -454,7 +451,7 @@ fn start_instance<A: Authority + 'static>(
                         Event::CampaignError(e) => {
                             panic!("{:?}", e);
                         }
-                        Event::Shutdown => {
+                        Event::Shutdown(_) => {
                             if controller.is_some() {
                                 if let Err(e) = authority.surrender_leadership() {
                                     error!(log, "failed to surrender leadership");
@@ -470,7 +467,7 @@ fn start_instance<A: Authority + 'static>(
         );
     }
 
-    Ok(LocalControllerHandle::new(authority, tx, rt, shutdown_rx))
+    Ok(LocalControllerHandle::new(authority, tx, rt))
 }
 
 /*
