@@ -103,17 +103,6 @@ impl Node {
 
                 // Output node outputs. Second row.
                 s.push_str(&format!(" | {}", self.fields().join(", \\n")));
-
-                // Maybe output node's HAVING conditions. Optional third row.
-                // TODO
-                // if let Some(conds) = n.node().unwrap().having_conditions() {
-                //     let conds = conds.iter()
-                //         .map(|c| format!("{}", c))
-                //         .collect::<Vec<_>>()
-                //         .join(" ∧ ");
-                //     write!(f, " | σ({})", escape(&conds))?;
-                // }
-
                 s.push_str(" }}")
             }
         };
