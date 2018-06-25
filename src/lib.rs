@@ -343,6 +343,7 @@ extern crate slog;
 extern crate async_bincode;
 extern crate bufstream;
 extern crate slog_term;
+extern crate stream_cancel;
 extern crate streamunordered;
 extern crate tokio;
 extern crate tokio_threadpool;

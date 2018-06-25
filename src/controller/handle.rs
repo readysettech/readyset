@@ -9,27 +9,29 @@ use std::sync::Arc;
 
 use api::prelude::*;
 use controller::Event;
-use futures::{self, Future, Sink, Stream};
+use futures::{self, Future};
+use stream_cancel::Trigger;
 use tokio;
 
 /// A handle to a controller that is running in the same process as this one.
 pub struct LocalControllerHandle<A: Authority> {
-    c: ControllerHandle<A>,
-    event_tx: Option<futures::sync::mpsc::UnboundedSender<Event>>,
+    c: Option<ControllerHandle<A>>,
     #[allow(dead_code)]
-    runtime: tokio::runtime::Runtime,
+    event_tx: Option<futures::sync::mpsc::UnboundedSender<Event>>,
+    kill: Option<Trigger>,
+    runtime: Option<tokio::runtime::Runtime>,
 }
 
 impl<A: Authority> Deref for LocalControllerHandle<A> {
     type Target = ControllerHandle<A>;
     fn deref(&self) -> &Self::Target {
-        &self.c
+        self.c.as_ref().unwrap()
     }
 }
 
 impl<A: Authority> DerefMut for LocalControllerHandle<A> {
     fn deref_mut(&mut self) -> &mut Self::Target {
-        &mut self.c
+        self.c.as_mut().unwrap()
     }
 }
 
@@ -37,21 +39,23 @@ impl<A: Authority> LocalControllerHandle<A> {
     pub(super) fn new(
         authority: Arc<A>,
         event_tx: futures::sync::mpsc::UnboundedSender<Event>,
+        kill: Trigger,
         rt: tokio::runtime::Runtime,
     ) -> Self {
         LocalControllerHandle {
-            c: ControllerHandle::make(authority).unwrap(),
+            c: Some(ControllerHandle::make(authority).unwrap()),
             event_tx: Some(event_tx),
-            runtime: rt,
+            kill: Some(kill),
+            runtime: Some(rt),
         }
     }
 
     #[cfg(test)]
     pub(crate) fn wait_until_ready(&mut self) {
-        let mut snd = self.event_tx.clone().unwrap();
+        let snd = self.event_tx.clone().unwrap();
         loop {
             let (tx, rx) = futures::sync::oneshot::channel();
-            snd = snd.send(Event::IsReady(tx)).wait().unwrap();
+            snd.unbounded_send(Event::IsReady(tx)).unwrap();
             match rx.wait() {
                 Ok(true) => break,
                 Ok(false) => {
@@ -81,9 +85,7 @@ impl<A: Authority> LocalControllerHandle<A> {
         self.event_tx
             .clone()
             .unwrap()
-            .send(Event::ManualMigration { f: b, done: fin_tx })
-            .map(|_| ())
-            .wait()
+            .unbounded_send(Event::ManualMigration { f: b, done: fin_tx })
             .unwrap();
 
         match fin_rx.wait() {
@@ -94,7 +96,7 @@ impl<A: Authority> LocalControllerHandle<A> {
 
     /// Install a new set of policies on the controller.
     pub fn set_security_config(&mut self, p: String) {
-        let url = match self.c.url() {
+        let url = match (&**self).url() {
             Some(ref url) => String::from(*url),
             None => panic!("url not defined"),
         };
@@ -129,25 +131,20 @@ impl<A: Authority> LocalControllerHandle<A> {
 
     /// Inform the local instance that it should exit, and wait for that to happen
     pub fn shutdown_and_wait(&mut self) {
-        let (shutdown_tx, shutdown_rx) = futures::sync::mpsc::channel(0);
-        if let Some(event_tx) = self.event_tx.take() {
-            self.c.shutdown();
-            event_tx.send(Event::Shutdown(shutdown_tx)).wait().unwrap();
-            if let None = shutdown_rx.wait().next() {
-            } else {
-                unreachable!();
-            }
-            //self.runtime.shutdown_now().wait().unwrap();
+        if let Some(rt) = self.runtime.take() {
+            drop(self.c.take());
+            drop(self.event_tx.take());
+            drop(self.kill.take());
+            rt.shutdown_on_idle().wait().unwrap();
         }
     }
 
     /// Wait for associated local instance to exit (presumably with an error).
-    pub fn wait(self) {
-        // TODO:
-        loop {
-            ::std::thread::yield_now();
+    pub fn wait(mut self) {
+        drop(self.event_tx.take());
+        if let Some(rt) = self.runtime.take() {
+            rt.shutdown_on_idle().wait().unwrap();
         }
-        //self.runtime.shutdown_on_idle().wait().unwrap();
     }
 }
 

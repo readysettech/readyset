@@ -263,21 +263,4 @@ impl<A: Authority> ControllerHandle<A> {
             .context(format!("attempting to remove node {:?}", view))?;
         Ok(())
     }
-
-    /// Close all connections opened by this handle.
-    ///
-    /// Any connections that are in use by `Table` or `View` handles that have not yet
-    /// been dropped will be dropped only when those handles are dropped.
-    ///
-    /// Note that this method gets called automatically when the `ControllerHandle` is dropped.
-    pub fn shutdown(&mut self) {
-        self.views.clear();
-        self.domains.clear();
-    }
-}
-
-impl<A: Authority> Drop for ControllerHandle<A> {
-    fn drop(&mut self) {
-        self.shutdown();
-    }
 }

@@ -36,6 +36,7 @@ use std::sync::{
 };
 use std::thread::{self, JoinHandle};
 use std::time::{self, Duration};
+use stream_cancel::{Valve, Valved};
 use streamunordered::{StreamUnordered, StreamYield};
 use tokio;
 use tokio::prelude::future::{poll_fn, Either};
@@ -136,7 +137,6 @@ enum Event {
     LeaderChange(ControllerState, ControllerDescriptor),
     WonLeaderElection(ControllerState),
     CampaignError(failure::Error),
-    Shutdown(futures::sync::mpsc::Sender<()>),
     #[cfg(test)]
     IsReady(futures::sync::oneshot::Sender<bool>),
     #[cfg(test)]
@@ -157,7 +157,6 @@ impl fmt::Debug for Event {
             Event::CampaignError(ref e) => write!(f, "CampaignError({:?})", e),
             #[cfg(test)]
             Event::IsReady(..) => write!(f, "IsReady"),
-            Event::Shutdown(..) => write!(f, "Shutdown"),
             #[cfg(test)]
             Event::ManualMigration { .. } => write!(f, "ManualMigration{{..}}"),
         }
@@ -184,22 +183,26 @@ fn start_instance<A: Authority + 'static>(
     } else {
         tokio::runtime::Runtime::new().unwrap()
     };
+
+    let (trigger, valve) = Valve::new();
     let (tx, rx) = futures::sync::mpsc::unbounded();
 
     // we'll be listening for a couple of different types of events:
     // first, events from workers
     let wport = tokio::net::TcpListener::bind(&SocketAddr::new(listen_addr, 0))?;
     let waddr = wport.local_addr()?;
-    rt.spawn(listen_internal(log.clone(), tx.clone(), wport));
+    rt.spawn(listen_internal(&valve, log.clone(), tx.clone(), wport));
 
     // and second, messages from the "real world"
     let xport = tokio::net::TcpListener::bind(&SocketAddr::new(listen_addr, 0))?;
     let xaddr = xport.local_addr()?;
     let ext_log = log.clone();
     rt.spawn(
-        listen_external(tx.clone(), xport.incoming(), authority.clone()).map_err(move |e| {
-            warn!(ext_log, "external request failed: {:?}", e);
-        }),
+        listen_external(tx.clone(), valve.wrap(xport.incoming()), authority.clone()).map_err(
+            move |e| {
+                warn!(ext_log, "external request failed: {:?}", e);
+            },
+        ),
     );
 
     // shared df state
@@ -229,22 +232,6 @@ fn start_instance<A: Authority + 'static>(
     rt.spawn(
         rx.map_err(|_| unreachable!())
             .fold((ctrl_tx, worker_tx), move |(ctx, wtx), e| {
-                if let Event::Shutdown(shutdown_tx) = e {
-                    let wshutdown = shutdown_tx.clone();
-                    let cshutdown = shutdown_tx.clone();
-                    return Either::B(
-                        wtx.send(Event::Shutdown(wshutdown))
-                            .and_then(move |wtx| {
-                                ctx.send(Event::Shutdown(cshutdown))
-                                    .map(move |ctx| (ctx, wtx))
-                            })
-                            .inspect(move |_| {
-                                drop(shutdown_tx);
-                            })
-                            .map_err(|e| panic!("{:?}", e)),
-                    );
-                }
-
                 let fw = move |e, to_ctrl| {
                     if to_ctrl {
                         Either::A(ctx.send(e).map(move |ctx| (ctx, wtx)))
@@ -253,27 +240,24 @@ fn start_instance<A: Authority + 'static>(
                     }
                 };
 
-                Either::A(
-                    match e {
-                        Event::InternalMessage(ref msg) => match msg.payload {
-                            CoordinationPayload::Deregister => fw(e, true),
-                            CoordinationPayload::RemoveDomain => fw(e, false),
-                            CoordinationPayload::AssignDomain(..) => fw(e, false),
-                            CoordinationPayload::DomainBooted(..) => fw(e, false),
-                            CoordinationPayload::Register { .. } => fw(e, true),
-                            CoordinationPayload::Heartbeat => fw(e, true),
-                        },
-                        Event::ExternalRequest(..) => fw(e, true),
-                        #[cfg(test)]
-                        Event::ManualMigration { .. } => fw(e, true),
-                        Event::LeaderChange(..) => fw(e, false),
-                        Event::WonLeaderElection(..) => fw(e, true),
-                        Event::CampaignError(..) => fw(e, true),
-                        #[cfg(test)]
-                        Event::IsReady(..) => fw(e, true),
-                        Event::Shutdown(..) => unreachable!(),
-                    }.map_err(|e| panic!("{:?}", e)),
-                )
+                match e {
+                    Event::InternalMessage(ref msg) => match msg.payload {
+                        CoordinationPayload::Deregister => fw(e, true),
+                        CoordinationPayload::RemoveDomain => fw(e, false),
+                        CoordinationPayload::AssignDomain(..) => fw(e, false),
+                        CoordinationPayload::DomainBooted(..) => fw(e, false),
+                        CoordinationPayload::Register { .. } => fw(e, true),
+                        CoordinationPayload::Heartbeat => fw(e, true),
+                    },
+                    Event::ExternalRequest(..) => fw(e, true),
+                    #[cfg(test)]
+                    Event::ManualMigration { .. } => fw(e, true),
+                    Event::LeaderChange(..) => fw(e, false),
+                    Event::WonLeaderElection(..) => fw(e, true),
+                    Event::CampaignError(..) => fw(e, true),
+                    #[cfg(test)]
+                    Event::IsReady(..) => fw(e, true),
+                }.map_err(|e| panic!("{:?}", e))
             })
             .map(|_| ()),
     );
@@ -333,6 +317,7 @@ fn start_instance<A: Authority + 'static>(
                             // TODO: memory stuff should probably also be in config?
                             let (rep_tx, rep_rx) = futures::sync::mpsc::unbounded();
                             let ctrl = listen_df(
+                                &valve,
                                 log.clone(),
                                 (memory_limit, memory_check_frequency),
                                 &state,
@@ -355,12 +340,14 @@ fn start_instance<A: Authority + 'static>(
                                 warn!(log, "Connected to new leader");
                             }
                         }
-                        Event::Shutdown(_) => {
-                            // TODO: maybe flush things or something?
-                        }
                         e => unreachable!("{:?} is not a worker event", e),
                     }
                     Either::B(futures::future::ok(()))
+                })
+                .and_then(|v| {
+                    // shutting down...
+                    // TODO: maybe flush things or something?
+                    Ok(v)
                 })
                 .map_err(|e| panic!("{:?}", e)),
         );
@@ -369,12 +356,15 @@ fn start_instance<A: Authority + 'static>(
     {
         let log = log;
         let authority = authority.clone();
+
+        let log2 = log.clone();
+        let authority2 = authority.clone();
+
         let mut campaign = campaign;
-        let mut controller: Option<ControllerInner> = None;
         rt.spawn(
             ctrl_rx
                 .map_err(|_| unreachable!())
-                .for_each(move |e| {
+                .fold(None, move |mut controller: Option<ControllerInner>, e| {
                     match e {
                         Event::InternalMessage(msg) => match msg.payload {
                             CoordinationPayload::Deregister => {
@@ -403,7 +393,7 @@ fn start_instance<A: Authority + 'static>(
                             if let Some(ref mut ctrl) = controller {
                                 let authority = &authority;
                                 let reply = block_on(|| {
-                                    ctrl.external_request(method, path, query, body, authority)
+                                    ctrl.external_request(method, path, query, body, &authority)
                                 });
 
                                 if let Err(_) = reply_tx.send(reply) {
@@ -451,15 +441,17 @@ fn start_instance<A: Authority + 'static>(
                         Event::CampaignError(e) => {
                             panic!("{:?}", e);
                         }
-                        Event::Shutdown(_) => {
-                            if controller.is_some() {
-                                if let Err(e) = authority.surrender_leadership() {
-                                    error!(log, "failed to surrender leadership");
-                                    eprintln!("{:?}", e);
-                                }
-                            }
-                        }
                         e => unreachable!("{:?} is not a controller event", e),
+                    }
+                    Ok(controller)
+                })
+                .and_then(move |controller| {
+                    // shutting down
+                    if controller.is_some() {
+                        if let Err(e) = authority2.surrender_leadership() {
+                            error!(log2, "failed to surrender leadership");
+                            eprintln!("{:?}", e);
+                        }
                     }
                     Ok(())
                 })
@@ -467,7 +459,7 @@ fn start_instance<A: Authority + 'static>(
         );
     }
 
-    Ok(LocalControllerHandle::new(authority, tx, rt))
+    Ok(LocalControllerHandle::new(authority, tx, trigger, rt))
 }
 
 /*
@@ -486,10 +478,12 @@ enum InstanceState {
 }
 
 fn listen_reads(
+    valve: &Valve,
     on: tokio::net::TcpListener,
     readers: Readers,
 ) -> impl Future<Item = (), Error = ()> {
-    on.incoming()
+    valve
+        .wrap(on.incoming())
         .map(Some)
         .or_else(|_| {
             // io error from client: just ignore it
@@ -519,6 +513,7 @@ fn listen_reads(
 }
 
 fn listen_df(
+    valve: &Valve,
     log: slog::Logger,
     (memory_limit, evict_every): (Option<usize>, Option<Duration>),
     state: &ControllerState,
@@ -570,9 +565,13 @@ fn listen_df(
     );
 
     // also start readers
-    tokio::spawn(listen_reads(rport, readers.clone()));
+    tokio::spawn(listen_reads(valve, rport, readers.clone()));
 
     // and tell the controller about us
+    let timer = valve.wrap(tokio::timer::Interval::new(
+        time::Instant::now() + heartbeat_every,
+        heartbeat_every,
+    ));
     tokio::spawn(
         ctrl_tx
             .clone()
@@ -583,7 +582,7 @@ fn listen_df(
             })
             .and_then(move |ctrl_tx| {
                 // and start sending heartbeats
-                tokio::timer::Interval::new(time::Instant::now() + heartbeat_every, heartbeat_every)
+                timer
                     .map(|_| CoordinationPayload::Heartbeat)
                     .map_err(|e| -> futures::sync::mpsc::SendError<_> { panic!("{:?}", e) })
                     .forward(ctrl_tx.clone())
@@ -600,8 +599,12 @@ fn listen_df(
         let log = log.clone();
         let mut domain_senders = HashMap::new();
         let state_sizes = state_sizes.clone();
+        let timer = valve.wrap(tokio::timer::Interval::new(
+            time::Instant::now() + evict_every,
+            evict_every,
+        ));
         tokio::spawn(
-            tokio::timer::Interval::new(time::Instant::now() + evict_every, evict_every)
+            timer
                 .for_each(move |_| {
                     do_eviction(&log, memory_limit, &mut domain_senders, &state_sizes)
                         .map_err(|e| panic!("{:?}", e))
@@ -610,6 +613,7 @@ fn listen_df(
         );
     }
 
+    let valve = valve.clone();
     tokio::spawn(
         replicas
             .map_err(|e| -> io::Error { panic!("{:?}", e) })
@@ -633,7 +637,7 @@ fn listen_df(
                     coord.insert_addr((idx, shard), addr, false);
                     block_on(|| state_sizes.lock().unwrap().insert((idx, shard), state_size));
 
-                    tokio::spawn(Replica::new(d, on, log.clone(), coord.clone()));
+                    tokio::spawn(Replica::new(&valve, d, on, log.clone(), coord.clone()));
 
                     trace!(
                         log,
@@ -667,15 +671,19 @@ fn listen_df(
 }
 
 fn listen_internal(
+    valve: &Valve,
     log: slog::Logger,
     event_tx: UnboundedSender<Event>,
     on: tokio::net::TcpListener,
 ) -> impl Future<Item = (), Error = ()> {
-    on.incoming()
+    let valve = valve.clone();
+    valve
+        .wrap(on.incoming())
         .map_err(failure::Error::from)
         .for_each(move |sock| {
             tokio::spawn(
-                AsyncBincodeReader::from(sock)
+                valve
+                    .wrap(AsyncBincodeReader::from(sock))
                     .map(Event::InternalMessage)
                     .map_err(failure::Error::from)
                     .forward(
@@ -696,7 +704,7 @@ fn listen_internal(
 struct ExternalServer<A: Authority>(UnboundedSender<Event>, Arc<A>);
 fn listen_external<A: Authority + 'static>(
     event_tx: UnboundedSender<Event>,
-    on: tokio::net::Incoming,
+    on: Valved<tokio::net::Incoming>,
     authority: Arc<A>,
 ) -> impl Future<Item = (), Error = hyper::Error> + Send {
     use hyper::{
@@ -969,7 +977,7 @@ struct Replica {
 
     coord: Arc<ChannelCoordinator>,
 
-    incoming: tokio::net::Incoming,
+    incoming: Valved<tokio::net::Incoming>,
     inputs: StreamUnordered<
         DualTcpStream<BufStream<tokio::net::TcpStream>, Box<Packet>, Input, SyncDestination>,
     >,
@@ -989,6 +997,7 @@ struct Replica {
 
 impl Replica {
     pub fn new(
+        valve: &Valve,
         mut domain: Domain,
         on: tokio::net::TcpListener,
         log: slog::Logger,
@@ -1000,7 +1009,7 @@ impl Replica {
         Replica {
             coord: cc,
             domain,
-            incoming: on.incoming(),
+            incoming: valve.wrap(on.incoming()),
             log: log.new(o!{"id" => id}),
             inputs: Default::default(),
             outputs: Default::default(),
@@ -1158,44 +1167,51 @@ impl Replica {
         Ok(())
     }
 
-    fn try_new(&mut self) -> io::Result<()> {
-        'more: while let Async::Ready(Some(mut stream)) = self.incoming.poll()? {
-            // we know that any new connection to a domain will first send a one-byte
-            // token to indicate whether the connection is from a base or not.
-            set_nonblocking(&stream, false);
-            let mut tag = [0];
-            use std::io::Read;
-            while let Err(e) = stream.read_exact(&mut tag[..]) {
-                if e.kind() == ErrorKind::WouldBlock {
-                    // TODO: async
-                    continue;
+    fn try_new(&mut self) -> io::Result<bool> {
+        'more: while let Async::Ready(stream) = self.incoming.poll()? {
+            match stream {
+                Some(mut stream) => {
+                    // we know that any new connection to a domain will first send a one-byte
+                    // token to indicate whether the connection is from a base or not.
+                    set_nonblocking(&stream, false);
+                    let mut tag = [0];
+                    use std::io::Read;
+                    while let Err(e) = stream.read_exact(&mut tag[..]) {
+                        if e.kind() == ErrorKind::WouldBlock {
+                            // TODO: async
+                            continue;
+                        }
+
+                        // well.. that failed quickly..
+                        info!(self.log, "worker discarded new connection: {:?}", e);
+                        continue 'more;
+                    }
+
+                    let is_base = tag[0] == CONNECTION_FROM_BASE;
+                    set_nonblocking(&stream, true);
+
+                    debug!(self.log, "accepted new connection"; "base" => ?is_base);
+                    let slot = self.inputs.stream_slot();
+                    let token = slot.token();
+                    let tcp = if is_base {
+                        DualTcpStream::upgrade(BufStream::new(stream), move |input| {
+                            Box::new(Packet::Input {
+                                inner: input,
+                                src: Some(SourceChannelIdentifier { token }),
+                                senders: Vec::new(),
+                            })
+                        })
+                    } else {
+                        BufStream::with_capacities(2 * 1024 * 1024, 4 * 1024, stream).into()
+                    };
+                    slot.insert(tcp);
                 }
-
-                // well.. that failed quickly..
-                info!(self.log, "worker discarded new connection: {:?}", e);
-                continue 'more;
+                None => {
+                    return Ok(false);
+                }
             }
-
-            let is_base = tag[0] == CONNECTION_FROM_BASE;
-            set_nonblocking(&stream, true);
-
-            debug!(self.log, "accepted new connection"; "base" => ?is_base);
-            let slot = self.inputs.stream_slot();
-            let token = slot.token();
-            let tcp = if is_base {
-                DualTcpStream::upgrade(BufStream::new(stream), move |input| {
-                    Box::new(Packet::Input {
-                        inner: input,
-                        src: Some(SourceChannelIdentifier { token }),
-                        senders: Vec::new(),
-                    })
-                })
-            } else {
-                BufStream::with_capacities(2 * 1024 * 1024, 4 * 1024, stream).into()
-            };
-            slot.insert(tcp);
         }
-        Ok(())
+        Ok(true)
     }
 
     fn try_timeout(&mut self) -> Result<(), tokio::timer::Error> {
@@ -1242,7 +1258,10 @@ impl Future for Replica {
             self.try_ack()?;
 
             // then, see if there are any new connections
-            self.try_new().context("check for new connections")?;
+            if !self.try_new().context("check for new connections")? {
+                // incoming socket closed -- no more clients will arrive
+                return Ok(Async::Ready(()));
+            }
 
             // then, see if our timer has expired
             self.try_timeout().context("check timeout")?;
@@ -1259,8 +1278,8 @@ impl Future for Replica {
                         if let ProcessResult::StopPolling =
                             block_on(|| d.on_event(sb, PollEvent::Process(packet), ob))
                         {
-                            // TODO: quit
-                            unimplemented!();
+                            // domain got a message to quit
+                            return Ok(Async::Ready(()));
                         }
                     }
                     Ok(Async::Ready(Some((StreamYield::Finished(_stream), streami)))) => {
