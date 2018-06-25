@@ -3,7 +3,9 @@ use basics::*;
 use consensus::{self, Authority};
 use debug::stats;
 use failure::{self, ResultExt};
-use futures::Stream;
+use futures::{
+    sync::{mpsc, oneshot}, Future, Stream,
+};
 use hyper::{self, Client};
 use serde::de::DeserializeOwned;
 use serde::Serialize;
@@ -49,8 +51,13 @@ pub struct ControllerHandle<A: Authority> {
     authority: Arc<A>,
     views: HashMap<(SocketAddr, usize), ViewRpc>,
     domains: HashMap<Vec<SocketAddr>, TableRpc>,
-    client: Client<hyper::client::HttpConnector>,
-    rt: tokio::runtime::current_thread::Runtime,
+    req: Option<
+        mpsc::UnboundedSender<(
+            hyper::Request<hyper::Body>,
+            oneshot::Sender<(hyper::StatusCode, hyper::Chunk)>,
+        )>,
+    >,
+    rt: Option<thread::JoinHandle<()>>,
 }
 
 /// A pointer that lets you construct a new `ControllerHandle` from an existing one.
@@ -84,14 +91,39 @@ impl<A: Authority> ControllerHandle<A> {
 
     #[doc(hidden)]
     pub fn make(authority: Arc<A>) -> Result<Self, failure::Error> {
+        let (tx, rx) = mpsc::unbounded();
+        let rt = thread::Builder::new().name(format!("api")).spawn(move || {
+            let client = Client::new();
+            let mut rt = tokio::runtime::current_thread::Runtime::new().unwrap();
+            rt.spawn(
+                rx.map_err(|_| unreachable!())
+                    .for_each(
+                        move |(req, tx): (
+                            hyper::Request<hyper::Body>,
+                            oneshot::Sender<(hyper::StatusCode, hyper::Chunk)>,
+                        )| {
+                            client
+                                .request(req)
+                                .and_then(|res| {
+                                    let status = res.status();
+                                    res.into_body().concat2().map(move |body| (status, body))
+                                })
+                                .and_then(move |r| tx.send(r).map_err(|_| unreachable!()))
+                        },
+                    )
+                    .map_err(|_| unreachable!()),
+            );
+            rt.run().unwrap()
+        })?;
+
         Ok(ControllerHandle {
             url: None,
             local_port: None,
             authority,
-            client: Client::new(),
             views: Default::default(),
             domains: Default::default(),
-            rt: tokio::runtime::current_thread::Runtime::new()?,
+            req: Some(tx),
+            rt: Some(rt),
         })
     }
 
@@ -128,15 +160,16 @@ impl<A: Authority> ControllerHandle<A> {
             let r = hyper::Request::post(url)
                 .body(serde_json::to_vec(&request)?.into())
                 .unwrap();
-            let res = self.rt.block_on(self.client.request(r))?;
-            match res.status() {
+            let (tx, rx) = oneshot::channel();
+            self.req.as_mut().unwrap().unbounded_send((r, tx)).unwrap();
+            let (status, body) = rx.wait()?;
+            match status {
                 hyper::StatusCode::SERVICE_UNAVAILABLE => {
                     thread::sleep(Duration::from_millis(100));
                     continue;
                 }
                 status @ hyper::StatusCode::INTERNAL_SERVER_ERROR
                 | status @ hyper::StatusCode::OK => {
-                    let body = self.rt.block_on(res.into_body().concat2())?;
                     if let hyper::StatusCode::OK = status {
                         return Ok(serde_json::from_slice::<R>(&body)
                             .context(format!("while decoding rpc reply from {}", path))?);
@@ -262,5 +295,12 @@ impl<A: Authority> ControllerHandle<A> {
         self.rpc("remove_node", &view)
             .context(format!("attempting to remove node {:?}", view))?;
         Ok(())
+    }
+}
+
+impl<A: Authority> Drop for ControllerHandle<A> {
+    fn drop(&mut self) {
+        drop(self.req.take());
+        self.rt.take().unwrap().join().unwrap();
     }
 }
