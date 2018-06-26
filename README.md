@@ -65,9 +65,9 @@ $ cargo run --release --bin souplet -- --zookeeper 127.0.0.1:2181 --deployment m
 The elected leader `souplet` runs a REST API bound to a random port. You
 can read the port from Zookeeper via this command:
 ```console
-echo "CONTROLLER API ON: $(cargo run --manifest-path=consensus/Cargo.toml \
-   --bin zk-util -- --show --deployment testing | grep external | \
-   cut -d' ' -f 4)"
+$ echo "CONTROLLER API ON: $(cargo run --manifest-path=consensus/Cargo.toml \
+    --bin zk-util -- --show --deployment testing | grep external | \
+    cut -d' ' -f 4)"
 ```
 A basic graphical UI runs at `http://IP:PORT/graph.html`. The UI show
 the running data-flow graph and updates as it changes.
