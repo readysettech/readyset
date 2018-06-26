@@ -85,7 +85,6 @@ macro_rules! impl_ingredient_fn_mut {
             NodeOperator::Trigger(ref mut i) => i.$fn($($arg),*),
             NodeOperator::Rewrite(ref mut i) => i.$fn($($arg),*),
             NodeOperator::Distinct(ref mut i) => i.$fn($($arg),*),
-
         }
     }
 }

@@ -764,7 +764,7 @@ pub(crate) fn make_distinct_node(
 
     let group_by_indx = if group_by.is_empty() {
         // no query parameters, so we index on the first column
-        vec![0 as usize]
+        columns.clone()
     } else {
         group_by
             .iter()

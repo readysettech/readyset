@@ -893,7 +893,7 @@ impl Debug for MirNodeType {
                     .join(" ⋃ ");
 
                 write!(f, "{}", cols)
-            },
+            }
             MirNodeType::Rewrite { ref column, .. } => write!(f, "Rw [{}]", column),
         }
     }
