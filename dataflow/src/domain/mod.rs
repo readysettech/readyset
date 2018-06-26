@@ -2009,10 +2009,10 @@ impl Domain {
                 // continue with their replays.
                 for key in for_keys.unwrap() {
                     let hole = (key_cols.clone(), key);
-                    let replay = waiting
-                        .redos
-                        .remove(&hole)
-                        .expect("got backfill for unnecessary key");
+                    let replay = waiting.redos.remove(&hole).expect(&format!(
+                        "node {:?} got backfill for unnecessary key {:?} via tag {:?}",
+                        ni, hole.1, tag
+                    ));
 
                     // we may need more holes to fill before some replays should be re-attempted
                     let replay: Vec<_> = replay
