@@ -48,6 +48,13 @@ impl Node {
             MaterializationStatus::Full => "| █",
         };
 
+        let sharding = match self.sharded_by {
+            Sharding::ByColumn(k, w) => format!("shard ⚷: {} / {}-way", k, w),
+            Sharding::Random(_) => format!("shard randomly"),
+            Sharding::None => "unsharded".to_owned(),
+            Sharding::ForcedNone => "desharded to avoid SS".to_owned(),
+        };
+
         let addr = match self.index {
             Some(ref idx) => if idx.has_local() {
                 format!("{} / {}", idx.as_global().index(), **idx)
@@ -62,31 +69,37 @@ impl Node {
             NodeType::Dropped => s.push_str(&format!("{{ {} | dropped }}", addr)),
             NodeType::Base(..) => {
                 s.push_str(&format!(
-                    "{{ {{ {} / {} | {} {} }} | {} }}",
+                    "{{ {{ {} / {} | {} {} }} | {} | {} }}",
                     addr,
                     Self::escape(self.name()),
                     "B",
                     materialized,
-                    self.fields().join(", \\n")
+                    self.fields().join(", \\n"),
+                    sharding
                 ));
             }
             NodeType::Ingress => s.push_str(&format!(
-                "{{ {{ {} {} }} | (ingress) }}",
-                addr, materialized
+                "{{ {{ {} {} }} | (ingress) | {} }}",
+                addr, materialized, sharding
             )),
-            NodeType::Egress { .. } => s.push_str(&format!("{{ {} | (egress) }}", addr)),
-            NodeType::Sharder { .. } => s.push_str(&format!("{{ {} | (sharder) }}", addr)),
+            NodeType::Egress { .. } => {
+                s.push_str(&format!("{{ {} | (egress) | {} }}", addr, sharding))
+            }
+            NodeType::Sharder { .. } => {
+                s.push_str(&format!("{{ {} | (sharder) | {} }}", addr, sharding))
+            }
             NodeType::Reader(ref r) => {
                 let key = match r.key() {
                     None => String::from("none"),
                     Some(k) => format!("{:?}", k),
                 };
                 s.push_str(&format!(
-                    "{{ {{ {} / {} {} }} | (reader / ⚷: {}) }}",
+                    "{{ {{ {} / {} {} }} | (reader / ⚷: {}) | {} }}",
                     addr,
                     Self::escape(self.name()),
                     materialized,
                     key,
+                    sharding,
                 ))
             }
             NodeType::Internal(ref i) => {
@@ -103,18 +116,7 @@ impl Node {
 
                 // Output node outputs. Second row.
                 s.push_str(&format!(" | {}", self.fields().join(", \\n")));
-
-                // Maybe output node's HAVING conditions. Optional third row.
-                // TODO
-                // if let Some(conds) = n.node().unwrap().having_conditions() {
-                //     let conds = conds.iter()
-                //         .map(|c| format!("{}", c))
-                //         .collect::<Vec<_>>()
-                //         .join(" ∧ ");
-                //     write!(f, " | σ({})", escape(&conds))?;
-                // }
-
-                s.push_str(" }}")
+                s.push_str(&format!(" | {} }}", sharding))
             }
         };
 

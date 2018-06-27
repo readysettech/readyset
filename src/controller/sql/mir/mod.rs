@@ -495,7 +495,6 @@ impl SqlToMirConverter {
             }
             if mn.borrow().children().len() == 0 {
                 // leaf
-                debug!(self.log, "node {:?} is a leaf", mn);
                 leaves.push(mn);
             }
         }
