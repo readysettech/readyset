@@ -9,7 +9,7 @@ impl fmt::Debug for Node {
             NodeType::Source => write!(f, "source node"),
             NodeType::Ingress => write!(f, "ingress node"),
             NodeType::Egress { .. } => write!(f, "egress node"),
-            NodeType::Sharder(ref s) => write!(f, "sharder({})", self.fields[s.sharded_by()]),
+            NodeType::Sharder(ref s) => write!(f, "sharder [{}] node", s.sharded_by()),
             NodeType::Reader(..) => write!(f, "reader node"),
             NodeType::Base(..) => write!(f, "B"),
             NodeType::Internal(ref i) => write!(f, "internal {} node", i.description()),
