@@ -569,7 +569,7 @@ pub fn shard(
 }
 
 /// Modify the graph such that the path between `src` and `dst` shuffles the input such that the
-/// records received by `dst` are sharded by column `col`.
+/// records received by `dst` are sharded by sharding `to`.
 fn reshard(
     log: &Logger,
     new: &mut HashSet<NodeIndex>,
