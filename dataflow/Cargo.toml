@@ -8,8 +8,7 @@ bincode = "1.0.0"
 evmap = { git = "https://github.com/ms705/rust-evmap" }
 fnv = "1.0.5"
 itertools = "0.7.2"
-# upgrade to 0.2.8 once compiler bug fixed (#51348)
-rahashmap = "=0.2.7"
+rahashmap = "0.2"
 rand = "0.4.2"
 regex = "0.2.2"
 serde_derive = "1.0.8"
