@@ -391,7 +391,13 @@ impl<A: Authority + 'static> Controller<A> {
                 ControlEvent::ExternalRequest(method, path, query, body, reply_tx) => {
                     if let Some(ref mut inner) = self.inner {
                         reply_tx
-                            .send(inner.external_request(method, path, query, body, &self.authority))
+                            .send(inner.external_request(
+                                method,
+                                path,
+                                query,
+                                body,
+                                &self.authority,
+                            ))
                             .unwrap()
                     } else {
                         reply_tx.send(Err(StatusCode::NOT_FOUND)).unwrap();
