@@ -183,3 +183,10 @@ fn parse_autoincrement() {
     assert_eq!(ok, 1);
     assert_eq!(fail, 0);
 }
+
+#[test]
+fn parse_select() {
+    let (ok, fail) = parse_file("tests/select.txt");
+    assert_eq!(fail, 0);
+    assert_eq!(ok, 24);
+}
