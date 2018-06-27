@@ -322,6 +322,8 @@ pub fn shard(
             for &(ni, src) in &srcs {
                 let need_sharding = Sharding::ByColumn(src, sharding_factor);
                 if input_shardings[&ni] != need_sharding {
+                    debug!(log, "resharding input with sharding {:?} to match desired sharding {:?}",
+                           input_shardings[&ni], need_sharding; "node" => ?node, "input" => ?ni);
                     reshard(log, new, &mut swaps, graph, ni, node, need_sharding);
                     input_shardings.insert(ni, need_sharding);
                 }
