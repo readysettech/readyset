@@ -96,6 +96,9 @@ pub fn add(
                             if graph[i].domain() == domain {
                                 // it does! we can just reuse that ingress :D
                                 ingress = Some(i);
+                                // FIXME(malte): this is buggy! it will re-use ingress nodes even if
+                                // they have a different sharding to the one we're about to add
+                                // (whose sharding is only determined below).
                                 trace!(log,
                                        "re-using cross-domain ingress";
                                        "to" => node.index(),
