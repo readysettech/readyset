@@ -427,6 +427,10 @@ impl<'a> Migration<'a> {
             }
         }
 
+        if let Some(shards) = mainline.sharding {
+            sharding::validate(&log, &mainline.ingredients, mainline.source, &new, shards)
+        };
+
         // at this point, we've hooked up the graph such that, for any given domain, the graph
         // looks like this:
         //
