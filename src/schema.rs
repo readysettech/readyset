@@ -1,7 +1,9 @@
 use msql_srv;
-use nom_sql::{self, ColumnConstraint, CreateTableStatement, CreateViewStatement,
-              FieldDefinitionExpression, FieldValueExpression, InsertStatement, Literal,
-              SelectSpecification, SelectStatement, SqlQuery, SqlType};
+use nom_sql::{
+    self, ColumnConstraint, CreateTableStatement, CreateViewStatement, FieldDefinitionExpression,
+    FieldValueExpression, InsertStatement, Literal, SelectSpecification, SelectStatement, SqlQuery,
+    SqlType,
+};
 
 use std::collections::HashMap;
 

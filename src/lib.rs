@@ -20,5 +20,5 @@ mod schema;
 mod soup_backend;
 mod utils;
 
-pub use soup_backend::SoupBackend;
 pub use schema::Schema;
+pub use soup_backend::SoupBackend;
