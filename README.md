@@ -6,11 +6,11 @@ Python and a recent version of Pystache.
 
 On Ubuntu:
 ```
-# apt-get install python-pystache
+$ apt-get install python-pystache
 ```
 Other platforms with `pip`:
 ```
-pip install pystache
+$ pip install pystache
 ```
 
 ## Serving the UI
