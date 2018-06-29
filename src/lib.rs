@@ -2,9 +2,9 @@
 #![feature(nll)]
 #![feature(try_from)]
 
+extern crate api as distributary;
 extern crate arccstr;
 extern crate chrono;
-extern crate distributary;
 extern crate msql_srv;
 extern crate nom_sql;
 extern crate regex;

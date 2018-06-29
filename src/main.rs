@@ -6,7 +6,7 @@ extern crate arccstr;
 extern crate chrono;
 #[macro_use]
 extern crate clap;
-extern crate distributary;
+extern crate api as distributary;
 extern crate msql_srv;
 extern crate nom_sql;
 

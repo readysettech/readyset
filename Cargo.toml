@@ -1,4 +1,4 @@
-cargo-features = ["rename-dependency"]
+#cargo-features = ["rename-dependency"]
 
 [package]
 name = "distributary-mysql"
@@ -11,8 +11,11 @@ clap = "2.24.0"
 failure = "0.1.1"
 msql-srv = "0.6"
 # local override for development
+#
+# can't rename dep because of https://github.com/rust-lang/rust/issues/51796
 #distributary = { path = "../distributary/api", package = "api" }
-distributary = { git = "https://github.com/mit-pdos/distributary.git", package = "api" }
+#distributary = { git = "https://github.com/mit-pdos/distributary.git", package = "api" }
+api = { git = "https://github.com/mit-pdos/distributary.git" }
 lazy_static = "1.0.0"
 nom-sql = { git = "https://github.com/ms705/nom-sql.git", rev = "3e7ae4c4d32b77342051d5c217549ab8fcb68e85" }
 slog = "2.2.2"
@@ -24,6 +27,7 @@ chrono = "0.4"
 [dev-dependencies]
 mysql = "12.0.4"
 zookeeper = { git = "https://github.com/bonifaido/rust-zookeeper", rev = "1167cfce5f5088112bd53983614145e5787b4c8f" }
+distributary = { git = "https://github.com/mit-pdos/distributary.git" }
 
 [profile.release]
 debug=true
