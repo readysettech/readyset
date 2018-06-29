@@ -765,6 +765,9 @@ pub(crate) fn make_distinct_node(
     let group_by_indx = if group_by.is_empty() {
         // no query parameters, so we index on the first column
         columns.clone()
+            .iter()
+            .map(|c| parent.borrow().column_id_for_column(c))
+            .collect::<Vec<_>>()
     } else {
         group_by
             .iter()
