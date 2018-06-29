@@ -3,7 +3,8 @@ use dataflow::backlog::SingleReadHandle;
 use dataflow::prelude::*;
 use dataflow::Readers;
 use futures::{
-    self, future::{self, Either},
+    self,
+    future::{self, Either},
 };
 use std::cell::RefCell;
 use std::collections::HashMap;

@@ -4,8 +4,9 @@ use basics::DomainIndex;
 use bincode;
 use bufstream::BufStream;
 use channel::{
-    self, poll::{PollEvent, ProcessResult}, DomainConnectionBuilder, DualTcpStream, TcpSender,
-    CONNECTION_FROM_BASE,
+    self,
+    poll::{PollEvent, ProcessResult},
+    DomainConnectionBuilder, DualTcpStream, TcpSender, CONNECTION_FROM_BASE,
 };
 use consensus::{Authority, Epoch, STATE_KEY};
 use controller::domain_handle::DomainHandle;
@@ -32,7 +33,8 @@ use std::fs;
 use std::io::{self, BufWriter, ErrorKind};
 use std::net::{IpAddr, SocketAddr};
 use std::sync::{
-    atomic::{AtomicUsize, Ordering}, Arc, Mutex,
+    atomic::{AtomicUsize, Ordering},
+    Arc, Mutex,
 };
 use std::thread::{self, JoinHandle};
 use std::time::{self, Duration};
@@ -708,7 +710,8 @@ fn listen_external<A: Authority + 'static>(
     authority: Arc<A>,
 ) -> impl Future<Item = (), Error = hyper::Error> + Send {
     use hyper::{
-        service::{NewService, Service}, Request, Response,
+        service::{NewService, Service},
+        Request, Response,
     };
     impl<A: Authority> Clone for ExternalServer<A> {
         // Needed due to #26925

@@ -4,7 +4,8 @@ use consensus::{self, Authority};
 use debug::stats;
 use failure::{self, ResultExt};
 use futures::{
-    sync::{mpsc, oneshot}, Future, Stream,
+    sync::{mpsc, oneshot},
+    Future, Stream,
 };
 use hyper::{self, Client};
 use serde::de::DeserializeOwned;
