@@ -1,6 +1,8 @@
-use nom_sql::{Column, ConditionBase, ConditionExpression, ConditionTree, CreateTableStatement,
-              CreateViewStatement, FieldDefinitionExpression, FieldValueExpression, Literal,
-              Operator, SelectSpecification, SelectStatement, SqlQuery};
+use nom_sql::{
+    Column, ConditionBase, ConditionExpression, ConditionTree, CreateTableStatement,
+    CreateViewStatement, FieldDefinitionExpression, FieldValueExpression, Literal, Operator,
+    SelectSpecification, SelectStatement, SqlQuery,
+};
 
 use std::collections::HashMap;
 use std::mem;
@@ -67,7 +69,8 @@ pub(crate) fn expand_stars(sq: &mut SelectStatement, table_schemas: &HashMap<Str
         .into_iter()
         .flat_map(|field| match field {
             FieldDefinitionExpression::All => {
-                let v: Vec<_> = sq.tables
+                let v: Vec<_> = sq
+                    .tables
                     .iter()
                     .map(|t| t.name.clone())
                     .flat_map(&expand_table)

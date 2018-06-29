@@ -1,8 +1,10 @@
 use distributary::{ControllerHandle, DataType, Table, View, ZookeeperAuthority};
 
 use msql_srv::{self, *};
-use nom_sql::{self, ColumnConstraint, InsertStatement, Literal, SelectSpecification,
-              SelectStatement, SqlQuery, UpdateStatement};
+use nom_sql::{
+    self, ColumnConstraint, InsertStatement, Literal, SelectSpecification, SelectStatement,
+    SqlQuery, UpdateStatement,
+};
 
 use slog;
 use std::borrow::Cow;
@@ -56,12 +58,14 @@ impl SoupBackendInner {
         let mut ch = ControllerHandle::new(zk_auth).unwrap();
 
         let soup = SoupBackendInner {
-            inputs: ch.inputs()
+            inputs: ch
+                .inputs()
                 .expect("couldn't get inputs from Soup")
                 .into_iter()
                 .map(|(n, _)| (n.clone(), ch.table(&n).unwrap()))
                 .collect::<BTreeMap<String, Table>>(),
-            outputs: ch.outputs()
+            outputs: ch
+                .outputs()
                 .expect("couldn't get outputs from Soup")
                 .into_iter()
                 .map(|(n, _)| (n.clone(), ch.view(&n).unwrap()))
@@ -84,10 +88,9 @@ impl SoupBackendInner {
 
     fn get_or_make_getter<'a, 'b>(&'a mut self, view: &'b str) -> &'a mut View {
         let soup = &mut self.soup;
-        self.outputs.entry(view.to_owned()).or_insert_with(|| {
-            soup.view(view)
-                .expect(&format!("no view named '{}'", view))
-        })
+        self.outputs
+            .entry(view.to_owned())
+            .or_insert_with(|| soup.view(view).expect(&format!("no view named '{}'", view)))
     }
 }
 
@@ -197,7 +200,8 @@ impl SoupBackend {
             self.log,
             "Adding view \"{}\" to Soup as {}", q.definition, q.name
         );
-        match self.inner
+        match self
+            .inner
             .soup
             .extend_recipe(&format!("{}: {};", q.name, q.definition))
         {
@@ -216,7 +220,8 @@ impl SoupBackend {
         q: nom_sql::DeleteStatement,
         results: QueryResultWriter<W>,
     ) -> io::Result<()> {
-        let cond = q.where_clause
+        let cond = q
+            .where_clause
             .expect("only supports DELETEs with WHERE-clauses");
 
         let ts = self.table_schemas.read().unwrap();
@@ -263,7 +268,8 @@ impl SoupBackend {
         q: nom_sql::InsertStatement,
         results: QueryResultWriter<W>,
     ) -> io::Result<()> {
-        let data: Vec<Vec<DataType>> = q.data
+        let data: Vec<Vec<DataType>> = q
+            .data
             .iter()
             .map(|row| row.iter().map(|v| DataType::from(v)).collect())
             .collect();
@@ -373,7 +379,8 @@ impl SoupBackend {
                         if let Some(qname) = gc.get(q) {
                             qname.clone()
                         } else {
-                            let qc = self.query_count
+                            let qc = self
+                                .query_count
                                 .fetch_add(1, sync::atomic::Ordering::SeqCst);
                             let qname = format!("q_{}", qc);
 
@@ -389,7 +396,8 @@ impl SoupBackend {
                                     "Adding ad-hoc query \"{}\" to Soup as {}", q, qname
                                 );
                             }
-                            if let Err(e) = self.inner
+                            if let Err(e) = self
+                                .inner
                                 .soup
                                 .extend_recipe(&format!("QUERY {}: {};", qname, q))
                             {
@@ -909,13 +917,15 @@ impl<W: io::Write> MysqlShim<W> for SoupBackend {
 
         let query_lc = query.to_lowercase();
 
-        if query_lc.starts_with("begin") || query_lc.starts_with("start transaction")
+        if query_lc.starts_with("begin")
+            || query_lc.starts_with("start transaction")
             || query_lc.starts_with("commit")
         {
             return results.completed(0, 0);
         }
 
-        if query_lc.starts_with("show databases") || query_lc.starts_with("rollback")
+        if query_lc.starts_with("show databases")
+            || query_lc.starts_with("rollback")
             || query_lc.starts_with("alter table")
             || query_lc.starts_with("create index")
             || query_lc.starts_with("create unique index")
@@ -929,14 +939,12 @@ impl<W: io::Write> MysqlShim<W> for SoupBackend {
         }
 
         if query_lc.starts_with("show tables") {
-            let cols = [
-                Column {
-                    table: String::from(""),
-                    column: String::from("Tables"),
-                    coltype: ColumnType::MYSQL_TYPE_STRING,
-                    colflags: ColumnFlags::empty(),
-                },
-            ];
+            let cols = [Column {
+                table: String::from(""),
+                column: String::from("Tables"),
+                coltype: ColumnType::MYSQL_TYPE_STRING,
+                colflags: ColumnFlags::empty(),
+            }];
             // TODO(malte): we actually know what tables exist via self.table_schemas, so
             //              return them here
             let writer = results.start(&cols)?;

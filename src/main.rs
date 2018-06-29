@@ -33,8 +33,8 @@ use std::sync::atomic::AtomicUsize;
 use std::sync::{Arc, RwLock};
 use std::thread;
 
-use soup_backend::SoupBackend;
 use schema::Schema;
+use soup_backend::SoupBackend;
 
 // Just give me a damn terminal logger
 // Duplicated from distributary, as the API subcrate doesn't export it.
