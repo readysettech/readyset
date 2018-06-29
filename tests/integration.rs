@@ -82,7 +82,7 @@ fn setup(deployment: &Deployment) -> mysql::Opts {
     let l = logger.clone();
     let n = deployment.name.clone();
     thread::spawn(move || {
-        let mut authority = ZookeeperAuthority::new(&format!("{}/{}", zk_addr, n));
+        let mut authority = ZookeeperAuthority::new(&format!("{}/{}", zk_addr, n)).unwrap();
         let mut builder = ControllerBuilder::default();
         authority.log_with(l.clone());
         builder.log_with(l);
@@ -134,7 +134,8 @@ fn delete_basic() {
     conn.query("INSERT INTO Cats (id) VALUES (1)").unwrap();
     sleep();
 
-    let row = conn.query("SELECT Cats.id FROM Cats WHERE Cats.id = 1")
+    let row = conn
+        .query("SELECT Cats.id FROM Cats WHERE Cats.id = 1")
         .unwrap()
         .next();
     assert!(row.is_some());
@@ -145,7 +146,8 @@ fn delete_basic() {
         sleep();
     }
 
-    let row = conn.query("SELECT Cats.id FROM Cats WHERE Cats.id = 1")
+    let row = conn
+        .query("SELECT Cats.id FROM Cats WHERE Cats.id = 1")
         .unwrap()
         .next();
     assert!(row.is_none());
@@ -171,7 +173,8 @@ fn delete_only_constraint() {
         sleep();
     }
 
-    let row = conn.query("SELECT Cats.id FROM Cats WHERE Cats.id = 1")
+    let row = conn
+        .query("SELECT Cats.id FROM Cats WHERE Cats.id = 1")
         .unwrap()
         .next();
     assert!(row.is_none());
@@ -193,7 +196,8 @@ fn delete_multiple() {
     }
 
     {
-        let deleted = conn.query("DELETE FROM Cats WHERE Cats.id = 1 OR Cats.id = 2")
+        let deleted = conn
+            .query("DELETE FROM Cats WHERE Cats.id = 1 OR Cats.id = 2")
             .unwrap();
         assert_eq!(deleted.affected_rows(), 2);
         sleep();
@@ -205,7 +209,8 @@ fn delete_multiple() {
         assert!(row.is_none());
     }
 
-    let row = conn.query("SELECT Cats.id FROM Cats WHERE Cats.id = 3")
+    let row = conn
+        .query("SELECT Cats.id FROM Cats WHERE Cats.id = 3")
         .unwrap()
         .next();
     assert!(row.is_some());
@@ -221,7 +226,8 @@ fn delete_bogus() {
     sleep();
 
     // `id` can't be both 1 and 2!
-    let deleted = conn.query("DELETE FROM Cats WHERE Cats.id = 1 AND Cats.id = 2")
+    let deleted = conn
+        .query("DELETE FROM Cats WHERE Cats.id = 1 AND Cats.id = 2")
         .unwrap();
     assert_eq!(deleted.affected_rows(), 0);
 }
@@ -238,20 +244,23 @@ fn delete_bogus_valid_and() {
     conn.query("INSERT INTO Cats (id) VALUES (1)").unwrap();
     sleep();
 
-    let row = conn.query("SELECT Cats.id FROM Cats WHERE Cats.id = 1")
+    let row = conn
+        .query("SELECT Cats.id FROM Cats WHERE Cats.id = 1")
         .unwrap()
         .next();
     assert!(row.is_some());
 
     {
         // Not that it makes much sense, but we should support this regardless...
-        let deleted = conn.query("DELETE FROM Cats WHERE Cats.id = 1 AND Cats.id = 1")
+        let deleted = conn
+            .query("DELETE FROM Cats WHERE Cats.id = 1 AND Cats.id = 1")
             .unwrap();
         assert_eq!(deleted.affected_rows(), 1);
         sleep();
     }
 
-    let row = conn.query("SELECT Cats.id FROM Cats WHERE Cats.id = 1")
+    let row = conn
+        .query("SELECT Cats.id FROM Cats WHERE Cats.id = 1")
         .unwrap()
         .next();
     assert!(row.is_none());
@@ -269,20 +278,23 @@ fn delete_bogus_valid_or() {
     conn.query("INSERT INTO Cats (id) VALUES (1)").unwrap();
     sleep();
 
-    let row = conn.query("SELECT Cats.id FROM Cats WHERE Cats.id = 1")
+    let row = conn
+        .query("SELECT Cats.id FROM Cats WHERE Cats.id = 1")
         .unwrap()
         .next();
     assert!(row.is_some());
 
     {
         // Not that it makes much sense, but we should support this regardless...
-        let deleted = conn.query("DELETE FROM Cats WHERE Cats.id = 1 OR Cats.id = 1")
+        let deleted = conn
+            .query("DELETE FROM Cats WHERE Cats.id = 1 OR Cats.id = 1")
             .unwrap();
         assert_eq!(deleted.affected_rows(), 1);
         sleep();
     }
 
-    let row = conn.query("SELECT Cats.id FROM Cats WHERE Cats.id = 1")
+    let row = conn
+        .query("SELECT Cats.id FROM Cats WHERE Cats.id = 1")
         .unwrap()
         .next();
     assert!(row.is_none());
@@ -387,13 +399,15 @@ fn update_basic() {
     sleep();
 
     {
-        let updated = conn.query("UPDATE Cats SET Cats.name = \"Rusty\" WHERE Cats.id = 1")
+        let updated = conn
+            .query("UPDATE Cats SET Cats.name = \"Rusty\" WHERE Cats.id = 1")
             .unwrap();
         assert_eq!(updated.affected_rows(), 1);
         sleep();
     }
 
-    let name: String = conn.first("SELECT Cats.name FROM Cats WHERE Cats.id = 1")
+    let name: String = conn
+        .first("SELECT Cats.name FROM Cats WHERE Cats.id = 1")
         .unwrap()
         .unwrap();
     assert_eq!(name, String::from("Rusty"));
@@ -413,29 +427,33 @@ fn update_basic_prepared() {
     sleep();
 
     {
-        let updated = conn.prep_exec(
-            "UPDATE Cats SET Cats.name = \"Rusty\" WHERE Cats.id = ?",
-            (1,),
-        ).unwrap();
+        let updated =
+            conn.prep_exec(
+                "UPDATE Cats SET Cats.name = \"Rusty\" WHERE Cats.id = ?",
+                (1,),
+            ).unwrap();
         assert_eq!(updated.affected_rows(), 1);
         sleep();
     }
 
-    let name: String = conn.first("SELECT Cats.name FROM Cats WHERE Cats.id = 1")
+    let name: String = conn
+        .first("SELECT Cats.name FROM Cats WHERE Cats.id = 1")
         .unwrap()
         .unwrap();
     assert_eq!(name, String::from("Rusty"));
 
     {
-        let updated = conn.prep_exec(
-            "UPDATE Cats SET Cats.name = ? WHERE Cats.id = ?",
-            ("Bob", 1),
-        ).unwrap();
+        let updated =
+            conn.prep_exec(
+                "UPDATE Cats SET Cats.name = ? WHERE Cats.id = ?",
+                ("Bob", 1),
+            ).unwrap();
         assert_eq!(updated.affected_rows(), 1);
         sleep();
     }
 
-    let name: String = conn.first("SELECT Cats.name FROM Cats WHERE Cats.id = 1")
+    let name: String = conn
+        .first("SELECT Cats.name FROM Cats WHERE Cats.id = 1")
         .unwrap()
         .unwrap();
     assert_eq!(name, String::from("Bob"));
@@ -487,13 +505,15 @@ fn update_only_constraint() {
     sleep();
 
     {
-        let updated = conn.query("UPDATE Cats SET Cats.name = \"Rusty\" WHERE Cats.id = 1")
+        let updated = conn
+            .query("UPDATE Cats SET Cats.name = \"Rusty\" WHERE Cats.id = 1")
             .unwrap();
         assert_eq!(updated.affected_rows(), 1);
         sleep();
     }
 
-    let name: String = conn.first("SELECT Cats.name FROM Cats WHERE Cats.id = 1")
+    let name: String = conn
+        .first("SELECT Cats.name FROM Cats WHERE Cats.id = 1")
         .unwrap()
         .unwrap();
     assert_eq!(name, String::from("Rusty"));
@@ -519,11 +539,13 @@ fn update_pkey() {
         sleep();
     }
 
-    let name: String = conn.first("SELECT Cats.name FROM Cats WHERE Cats.id = 10")
+    let name: String = conn
+        .first("SELECT Cats.name FROM Cats WHERE Cats.id = 10")
         .unwrap()
         .unwrap();
     assert_eq!(name, String::from("Rusty"));
-    let old_row = conn.query("SELECT Cats.name FROM Cats WHERE Cats.id = 1")
+    let old_row = conn
+        .query("SELECT Cats.name FROM Cats WHERE Cats.id = 1")
         .unwrap()
         .next();
     assert!(old_row.is_none());
@@ -543,20 +565,23 @@ fn update_separate() {
     sleep();
 
     {
-        let updated = conn.query("UPDATE Cats SET Cats.name = \"Rusty\" WHERE Cats.id = 1")
+        let updated = conn
+            .query("UPDATE Cats SET Cats.name = \"Rusty\" WHERE Cats.id = 1")
             .unwrap();
         assert_eq!(updated.affected_rows(), 1);
         sleep();
     }
 
     {
-        let updated = conn.query("UPDATE Cats SET Cats.name = \"Rusty II\" WHERE Cats.id = 1")
+        let updated = conn
+            .query("UPDATE Cats SET Cats.name = \"Rusty II\" WHERE Cats.id = 1")
             .unwrap();
         assert_eq!(updated.affected_rows(), 1);
         sleep();
     }
 
-    let name: String = conn.first("SELECT Cats.name FROM Cats WHERE Cats.id = 1")
+    let name: String = conn
+        .first("SELECT Cats.name FROM Cats WHERE Cats.id = 1")
         .unwrap()
         .unwrap();
     assert_eq!(name, String::from("Rusty II"));
@@ -604,7 +629,8 @@ fn update_no_changes() {
         .unwrap();
     sleep();
 
-    let updated = conn.query("UPDATE Cats SET Cats.name = \"Bob\" WHERE Cats.id = 1")
+    let updated = conn
+        .query("UPDATE Cats SET Cats.name = \"Bob\" WHERE Cats.id = 1")
         .unwrap();
     assert_eq!(updated.affected_rows(), 0);
 }
@@ -641,7 +667,27 @@ fn select_collapse_where_in() {
         .unwrap();
     sleep();
 
-    let names: Vec<String> = conn.query("SELECT Cats.name FROM Cats WHERE Cats.id IN (1, 2)")
+    let names: Vec<String> = conn
+        .query("SELECT Cats.name FROM Cats WHERE Cats.id IN (1, 2)")
+        .unwrap()
+        .map(|row| row.unwrap().take::<String, _>(0).unwrap())
+        .collect();
+    assert_eq!(names.len(), 2);
+    assert!(names.iter().any(|s| s == "Bob"));
+    assert!(names.iter().any(|s| s == "Jane"));
+
+    let names: Vec<String> = conn
+        .prep_exec("SELECT Cats.name FROM Cats WHERE Cats.id IN (?, ?)", (1, 2))
+        .unwrap()
+        .map(|row| row.unwrap().take::<String, _>(0).unwrap())
+        .collect();
+    assert_eq!(names.len(), 2);
+    assert!(names.iter().any(|s| s == "Bob"));
+    assert!(names.iter().any(|s| s == "Jane"));
+
+    // some lookups give empty results
+    let names: Vec<String> = conn
+        .query("SELECT Cats.name FROM Cats WHERE Cats.id IN (1, 2, 3)")
         .unwrap()
         .map(|row| row.unwrap().take::<String, _>(0).unwrap())
         .collect();
@@ -650,48 +696,32 @@ fn select_collapse_where_in() {
     assert!(names.iter().any(|s| s == "Jane"));
 
     let names: Vec<String> =
-        conn.prep_exec("SELECT Cats.name FROM Cats WHERE Cats.id IN (?, ?)", (1, 2))
-            .unwrap()
+        conn.prep_exec(
+            "SELECT Cats.name FROM Cats WHERE Cats.id IN (?, ?, ?)",
+            (1, 2, 3),
+        ).unwrap()
             .map(|row| row.unwrap().take::<String, _>(0).unwrap())
             .collect();
     assert_eq!(names.len(), 2);
     assert!(names.iter().any(|s| s == "Bob"));
     assert!(names.iter().any(|s| s == "Jane"));
 
-    // some lookups give empty results
-    let names: Vec<String> = conn.query("SELECT Cats.name FROM Cats WHERE Cats.id IN (1, 2, 3)")
-        .unwrap()
-        .map(|row| row.unwrap().take::<String, _>(0).unwrap())
-        .collect();
-    assert_eq!(names.len(), 2);
-    assert!(names.iter().any(|s| s == "Bob"));
-    assert!(names.iter().any(|s| s == "Jane"));
-
-    let names: Vec<String> = conn.prep_exec(
-        "SELECT Cats.name FROM Cats WHERE Cats.id IN (?, ?, ?)",
-        (1, 2, 3),
-    ).unwrap()
-        .map(|row| row.unwrap().take::<String, _>(0).unwrap())
-        .collect();
-    assert_eq!(names.len(), 2);
-    assert!(names.iter().any(|s| s == "Bob"));
-    assert!(names.iter().any(|s| s == "Jane"));
-
     // also track another parameter
-    let names: Vec<String> = conn.query(
-        "SELECT Cats.name FROM Cats WHERE Cats.name = 'Bob' AND Cats.id IN (1, 2)",
-    ).unwrap()
+    let names: Vec<String> = conn
+        .query("SELECT Cats.name FROM Cats WHERE Cats.name = 'Bob' AND Cats.id IN (1, 2)")
+        .unwrap()
         .map(|row| row.unwrap().take::<String, _>(0).unwrap())
         .collect();
     assert_eq!(names.len(), 1);
     assert!(names.iter().any(|s| s == "Bob"));
 
-    let names: Vec<String> = conn.prep_exec(
-        "SELECT Cats.name FROM Cats WHERE Cats.name = ? AND Cats.id IN (?, ?)",
-        ("Bob", 1, 2),
-    ).unwrap()
-        .map(|row| row.unwrap().take::<String, _>(0).unwrap())
-        .collect();
+    let names: Vec<String> =
+        conn.prep_exec(
+            "SELECT Cats.name FROM Cats WHERE Cats.name = ? AND Cats.id IN (?, ?)",
+            ("Bob", 1, 2),
+        ).unwrap()
+            .map(|row| row.unwrap().take::<String, _>(0).unwrap())
+            .collect();
     assert_eq!(names.len(), 1);
     assert!(names.iter().any(|s| s == "Bob"));
 }
