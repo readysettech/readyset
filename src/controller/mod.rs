@@ -502,7 +502,7 @@ fn listen_reads(
             tokio::spawn(
                 r.and_then(move |req| readers::handle_message(req, &mut readers))
                     .map_err(|_| -> () {
-                        unreachable!();
+                        eprintln!("!!! reader client protocol error");
                     })
                     .forward(w.sink_map_err(|_| ()))
                     .then(|_| {
