@@ -9,7 +9,7 @@ impl fmt::Debug for Node {
             NodeType::Source => write!(f, "source node"),
             NodeType::Ingress => write!(f, "ingress node"),
             NodeType::Egress { .. } => write!(f, "egress node"),
-            NodeType::Sharder { .. } => write!(f, "sharder"),
+            NodeType::Sharder(ref s) => write!(f, "sharder [{}] node", s.sharded_by()),
             NodeType::Reader(..) => write!(f, "reader node"),
             NodeType::Base(..) => write!(f, "B"),
             NodeType::Internal(ref i) => write!(f, "internal {} node", i.description()),
@@ -49,7 +49,7 @@ impl Node {
         };
 
         let sharding = match self.sharded_by {
-            Sharding::ByColumn(k, w) => format!("shard ⚷: {} / {}-way", k, w),
+            Sharding::ByColumn(k, w) => format!("shard ⚷: {} / {}-way", self.fields[k], w),
             Sharding::Random(_) => format!("shard randomly"),
             Sharding::None => "unsharded".to_owned(),
             Sharding::ForcedNone => "desharded to avoid SS".to_owned(),
@@ -85,9 +85,12 @@ impl Node {
             NodeType::Egress { .. } => {
                 s.push_str(&format!("{{ {} | (egress) | {} }}", addr, sharding))
             }
-            NodeType::Sharder { .. } => {
-                s.push_str(&format!("{{ {} | (sharder) | {} }}", addr, sharding))
-            }
+            NodeType::Sharder(ref sharder) => s.push_str(&format!(
+                "{{ {} | shard by {} | {} }}",
+                addr,
+                self.fields[sharder.sharded_by()],
+                sharding
+            )),
             NodeType::Reader(ref r) => {
                 let key = match r.key() {
                     None => String::from("none"),
