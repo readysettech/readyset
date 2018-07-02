@@ -1457,10 +1457,7 @@ fn replay_during_replay() {
 
 #[test]
 fn cascading_replays_with_sharding() {
-    use logger_pls;
-
     let mut g = ControllerBuilder::default();
-    g.log_with(logger_pls());
     g.set_sharding(Some(2));
     g.set_persistence(get_persistence_params("cascading_replays_with_sharding"));
     let mut g = g.build_local();
@@ -1496,8 +1493,6 @@ fn cascading_replays_with_sharding() {
     mutv.insert(vec!["u1".into(), 1.into()]).unwrap();
     mutv.insert(vec!["u2".into(), 1.into()]).unwrap();
     mutv.insert(vec!["u3".into(), 1.into()]).unwrap();
-
-    println!("{}", g.graphviz().unwrap());
 
     sleep();
 
