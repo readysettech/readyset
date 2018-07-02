@@ -344,8 +344,6 @@ impl Domain {
                 // we haven't already requested backfill of this key
                 let mut redos = HashSet::new();
                 // remember to notify this Redo when backfill completes
-                trace!(self.log, "adding redo wait for miss of replay key {:?} on {:?}",
-                       replay_key, miss_in; "tag" => ?needed_for);
                 redos.insert(redo.clone());
                 e.insert(redos);
                 // this Redo should wait for this backfill to complete before redoing
@@ -724,13 +722,6 @@ impl Domain {
     ) {
         self.wait_time.stop();
         m.trace(PacketEvent::Handle);
-        trace!(
-            self.log,
-            "domain {}.{} handling incoming packet: {:#?}",
-            self.index.index(),
-            self.shard.unwrap_or(0),
-            m
-        );
 
         match *m {
             Packet::Message { .. } | Packet::Input { .. } => {
@@ -2065,8 +2056,6 @@ impl Domain {
                         "got backfill for unnecessary key {:?} via tag {:?}",
                         hole.1, tag
                     ));
-                    trace!(self.log, "removed redo for replay key {:?} at {:?}", hole.1, ni;
-                           "tag" => ?tag);
 
                     // we may need more holes to fill before some replays should be re-attempted
                     let replay: Vec<_> = replay

@@ -587,7 +587,7 @@ fn reshard(
     assert!(!graph[src].is_source());
 
     if graph[src].sharded_by().is_none() && to.is_none() {
-        trace!(log, "no need to shuffle";
+        debug!(log, "no need to shuffle";
                "src" => ?src,
                "dst" => ?dst,
                "sharding" => ?to);
