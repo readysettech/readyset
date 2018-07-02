@@ -115,7 +115,7 @@ pub enum InitialState {
     },
 }
 
-#[derive(Clone, Serialize, Deserialize)]
+#[derive(Clone, Debug, Serialize, Deserialize)]
 pub enum ReplayPieceContext {
     Partial {
         for_keys: HashSet<Vec<DataType>>,
@@ -461,13 +461,15 @@ impl fmt::Debug for Packet {
                 ref link,
                 ref tag,
                 ref data,
+                ref context,
                 ..
             } => write!(
                 f,
-                "Packet::ReplayPiece({:?}, {}, {} records)",
+                "Packet::ReplayPiece({:?}, {}, {} records, {:?})",
                 link,
                 tag.id(),
-                data.len()
+                data.len(),
+                context,
             ),
             Packet::Local(ref lp) => {
                 let lp = unsafe { lp.deref() };

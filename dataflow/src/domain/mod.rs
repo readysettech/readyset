@@ -344,6 +344,8 @@ impl Domain {
                 // we haven't already requested backfill of this key
                 let mut redos = HashSet::new();
                 // remember to notify this Redo when backfill completes
+                trace!(self.log, "adding redo wait for miss of replay key {:?} on {:?}",
+                       replay_key, miss_in; "tag" => ?needed_for);
                 redos.insert(redo.clone());
                 e.insert(redos);
                 // this Redo should wait for this backfill to complete before redoing
@@ -722,6 +724,13 @@ impl Domain {
     ) {
         self.wait_time.stop();
         m.trace(PacketEvent::Handle);
+        trace!(
+            self.log,
+            "domain {}.{} handling incoming packet: {:#?}",
+            self.index.index(),
+            self.shard.unwrap_or(0),
+            m
+        );
 
         match *m {
             Packet::Message { .. } | Packet::Input { .. } => {
@@ -1993,7 +2002,9 @@ impl Domain {
             if let Some(mut waiting) = self.waiting.remove(&ni) {
                 trace!(
                     self.log,
-                    "partial replay finished to node with waiting backfills"
+                    "partial replay finished to node with waiting backfills";
+                    "keys" => ?for_keys,
+                    "waiting" => ?waiting,
                 );
 
                 let key_cols = self.replay_paths[&tag]
@@ -2010,9 +2021,11 @@ impl Domain {
                 for key in for_keys.unwrap() {
                     let hole = (key_cols.clone(), key);
                     let replay = waiting.redos.remove(&hole).expect(&format!(
-                        "node {:?} got backfill for unnecessary key {:?} via tag {:?}",
-                        ni, hole.1, tag
+                        "got backfill for unnecessary key {:?} via tag {:?}",
+                        hole.1, tag
                     ));
+                    trace!(self.log, "removed redo for replay key {:?} at {:?}", hole.1, ni;
+                           "tag" => ?tag);
 
                     // we may need more holes to fill before some replays should be re-attempted
                     let replay: Vec<_> = replay
