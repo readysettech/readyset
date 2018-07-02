@@ -90,11 +90,25 @@ pub struct ReplayPathSegment {
     pub partial_key: Option<Vec<usize>>,
 }
 
+#[derive(Clone, Copy, PartialEq, Eq, Debug, Serialize, Deserialize)]
+pub enum SourceSelection {
+    /// Query only the shard of the source that matches the key.
+    ///
+    /// Value is the number of shards.
+    KeyShard(usize),
+    /// Query the same shard of the source as the destination.
+    SameShard,
+    /// Query all shards of the source.
+    ///
+    /// Value is the number of shards.
+    AllShards(usize),
+}
+
 #[derive(Clone, Serialize, Deserialize)]
 pub enum TriggerEndpoint {
     None,
     Start(Vec<usize>),
-    End(bool, domain::Index, usize),
+    End(SourceSelection, domain::Index),
     Local(Vec<usize>),
 }
 

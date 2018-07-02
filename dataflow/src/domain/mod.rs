@@ -62,7 +62,10 @@ impl PartialEq for DomainMode {
 enum TriggerEndpoint {
     None,
     Start(Vec<usize>),
-    End(bool, Vec<TcpSender<Box<Packet>>>),
+    End {
+        ask_all: bool,
+        options: Vec<TcpSender<Box<Packet>>>,
+    },
     Local(Vec<usize>),
 }
 
@@ -361,10 +364,12 @@ impl Domain {
 
     fn send_partial_replay_request(&mut self, tag: Tag, key: Vec<DataType>) {
         debug_assert!(self.concurrent_replays < self.max_concurrent_replays);
-        if let TriggerEndpoint::End(shuffled, ref mut triggers) =
-            self.replay_paths.get_mut(&tag).unwrap().trigger
+        if let TriggerEndpoint::End {
+            ask_all,
+            ref mut options,
+        } = self.replay_paths.get_mut(&tag).unwrap().trigger
         {
-            if triggers.len() != 1 && shuffled {
+            if ask_all && options.len() != 1 {
                 // source is sharded by a different key than we are doing lookups for,
                 // so we need to trigger on all the shards.
                 self.concurrent_replays += 1;
@@ -375,7 +380,7 @@ impl Domain {
                        "concurrent" => self.concurrent_replays,
                        );
 
-                for trigger in triggers {
+                for trigger in options {
                     if trigger
                         .send(box Packet::RequestPartialReplay {
                             tag,
@@ -389,18 +394,11 @@ impl Domain {
                 return;
             }
 
-            // TODO: if we're sharded by a different key than the source, then we could cause
-            // replay responses to be sent to *other* shards too in response to our request :/
-
-            // find right shard. it's important that we only request a replay from the right
-            // shard, because otherwise all the other shard domains will miss, and then request
-            // replays themselves for the miss key. however, the response to that request will
-            // never be routed to them, leading to infinite loops and whatnot.
-            let shard = if triggers.len() == 1 {
+            let shard = if options.len() == 1 {
                 0
             } else {
                 assert_eq!(key.len(), 1);
-                ::shard_by(&key[0], triggers.len())
+                ::shard_by(&key[0], options.len())
             };
             self.concurrent_replays += 1;
             trace!(self.log, "sending replay request";
@@ -409,7 +407,7 @@ impl Domain {
                    "buffered" => self.replay_request_queue.len(),
                    "concurrent" => self.concurrent_replays,
                    );
-            if triggers[shard]
+            if options[shard]
                 .send(box Packet::RequestPartialReplay { tag, key })
                 .is_err()
             {
@@ -436,7 +434,7 @@ impl Domain {
 
     fn finished_partial_replay(&mut self, tag: &Tag, num: usize) {
         match self.replay_paths[tag].trigger {
-            TriggerEndpoint::End(..) => {
+            TriggerEndpoint::End { .. } => {
                 // A backfill request we made to another domain was just satisfied!
                 // We can now issue another request from the concurrent replay queue.
                 // However, since unions require multiple backfill requests, but produce only one
@@ -449,7 +447,7 @@ impl Domain {
                     self.replay_paths
                         .iter()
                         .filter(|&(_, p)| {
-                            if let TriggerEndpoint::End(..) = p.trigger {
+                            if let TriggerEndpoint::End { .. } = p.trigger {
                                 let p = p.path.last().unwrap();
                                 p.node == last.node && p.partial_key == last.partial_key
                             } else {
@@ -977,23 +975,35 @@ impl Domain {
                             payload::TriggerEndpoint::None => TriggerEndpoint::None,
                             payload::TriggerEndpoint::Start(v) => TriggerEndpoint::Start(v),
                             payload::TriggerEndpoint::Local(v) => TriggerEndpoint::Local(v),
-                            payload::TriggerEndpoint::End(shuffled, domain, shards) => {
-                                TriggerEndpoint::End(
-                                    shuffled,
-                                    (0..shards)
-                                        .map(|shard| {
-                                            // TODO: take advantage of local channels for replay paths.
-                                            self.channel_coordinator
-                                                .get_addr(&(domain, shard))
-                                                .map(|addr| {
-                                                    DomainConnectionBuilder::for_domain(addr)
-                                                        .build()
-                                                        .unwrap()
-                                                })
+                            payload::TriggerEndpoint::End(selection, domain) => {
+                                let shard = |shardi| {
+                                    // TODO: take advantage of local channels for replay paths.
+                                    self.channel_coordinator
+                                        .get_addr(&(domain, shardi))
+                                        .map(|addr| {
+                                            DomainConnectionBuilder::for_domain(addr)
+                                                .build()
                                                 .unwrap()
                                         })
-                                        .collect(),
-                                )
+                                        .unwrap()
+                                };
+
+                                let (ask_all, options) = match selection {
+                                    payload::SourceSelection::AllShards(nshards) => {
+                                        (true, (0..nshards).map(shard).collect())
+                                    }
+                                    payload::SourceSelection::SameShard => (
+                                        true,
+                                        vec![shard(self.shard.expect(
+                                            "told to replay from same shard, but not sharded",
+                                        ))],
+                                    ),
+                                    payload::SourceSelection::KeyShard(nshards) => {
+                                        (false, (0..nshards).map(shard).collect())
+                                    }
+                                };
+
+                                TriggerEndpoint::End { ask_all, options }
                             }
                         };
 
@@ -2387,7 +2397,7 @@ impl Domain {
                 );
 
                 match trigger {
-                    TriggerEndpoint::End(..) | TriggerEndpoint::Local(..) => {
+                    TriggerEndpoint::End { .. } | TriggerEndpoint::Local(..) => {
                         // This path terminates inside the domain. Find the target node, evict
                         // from it, and then propagate the eviction further downstream.
                         let target = path.last().unwrap().node;
