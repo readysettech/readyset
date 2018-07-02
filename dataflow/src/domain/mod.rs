@@ -1634,7 +1634,7 @@ impl Domain {
                 Packet::ReplayPiece {
                     tag,
                     link,
-                    data,
+                    mut data,
                     mut context,
                 } => {
                     if let ReplayPieceContext::Partial { ref for_keys, .. } = context {
@@ -1649,6 +1649,55 @@ impl Domain {
                         debug!(self.log, "replaying batch"; "#" => data.len());
                     }
 
+                    // let's collect some information about the destination of this replay
+                    let dst = path.last().unwrap().node;
+                    let dst_is_reader = self.nodes[&dst]
+                        .borrow()
+                        .with_reader(|r| r.is_materialized())
+                        .unwrap_or(false);
+                    let dst_is_target = !self.nodes[&dst].borrow().is_sender();
+
+                    if dst_is_target {
+                        // prune keys and data for keys we're not waiting for
+                        if let ReplayPieceContext::Partial {
+                            ref mut for_keys, ..
+                        } = context
+                        {
+                            let had = for_keys.len();
+                            let partial_keys = path.last().unwrap().partial_key.as_ref().unwrap();
+                            if let Some(w) = self.waiting.get(&dst) {
+                                // discard all the keys that we aren't waiting for
+                                for_keys.retain(|k| {
+                                    w.redos.contains_key(&(partial_keys.clone(), k.clone()))
+                                });
+                            } else if let Some(ref prev) = self.reader_triggered.get(&dst) {
+                                // discard all the keys that we aren't waiting for
+                                for_keys.retain(|k| prev.contains(k));
+                            } else {
+                                // this packet contained no keys that we're waiting for, so it's
+                                // useless to us.
+                                return;
+                            }
+
+                            if for_keys.is_empty() {
+                                return;
+                            } else if for_keys.len() != had {
+                                // discard records in data associated with the keys we weren't
+                                // waiting for
+                                // note that we need to use the partial_keys column IDs from the
+                                // *start* of the path here, as the records haven't been processed
+                                // yet
+                                let partial_keys =
+                                    path.first().unwrap().partial_key.as_ref().unwrap();
+                                data.retain(|r| {
+                                    for_keys.iter().any(|k| {
+                                        partial_keys.iter().enumerate().all(|(i, c)| r[*c] == k[i])
+                                    })
+                                });
+                            }
+                        }
+                    }
+
                     // forward the current message through all local nodes.
                     let m = box Packet::ReplayPiece {
                         link: link.clone(),
@@ -1657,14 +1706,6 @@ impl Domain {
                         context: context.clone(),
                     };
                     let mut m = Some(m);
-
-                    // let's collect some information about the destination of this replay
-                    let dst = path.last().unwrap().node;
-                    let dst_is_reader = self.nodes[&dst]
-                        .borrow()
-                        .with_reader(|r| r.is_materialized())
-                        .unwrap_or(false);
-                    let dst_is_target = self.waiting.contains_key(&dst);
 
                     for (i, segment) in path.iter().enumerate() {
                         let mut n = self.nodes[&segment.node].borrow_mut();
@@ -1689,7 +1730,7 @@ impl Domain {
                         // client requests a replay, the Reader isn't marked as "waiting".
                         let target = backfill_keys.is_some()
                             && i == path.len() - 1
-                            && (is_reader || self.waiting.contains_key(&segment.node));
+                            && (is_reader || !n.is_sender());
 
                         // targets better be last
                         assert!(!target || i == path.len() - 1);
@@ -1961,14 +2002,14 @@ impl Domain {
                         }
                         ReplayPieceContext::Partial { for_keys, ignore } => {
                             assert!(!ignore);
-                            if dst_is_target {
+                            if dst_is_reader {
+                                assert_ne!(finished_partial, 0);
+                            } else if dst_is_target {
                                 trace!(self.log, "partial replay completed"; "local" => dst.id());
                                 if finished_partial == 0 {
                                     assert!(for_keys.is_empty());
                                 }
                                 finished = Some((tag, dst, Some(for_keys)));
-                            } else if dst_is_reader {
-                                assert_ne!(finished_partial, 0);
                             } else {
                                 // we're just on the replay path
                             }
@@ -2073,15 +2114,16 @@ impl Domain {
                     assert!(waiting.redos.is_empty());
                 }
                 return;
+            } else if for_keys.is_some() {
+                unreachable!("got unexpected replay of {:?} for {:?}", for_keys, ni)
+            } else {
+                // must be a full replay
+                // NOTE: node is now ready, in the sense that it shouldn't ignore all updates since
+                // replaying_to is still set, "normal" dispatch calls will continue to be buffered, but
+                // this allows finish_replay to dispatch into the node by overriding replaying_to.
+                self.not_ready.remove(&ni);
+                self.delayed_for_self.push_back(box Packet::Finish(tag, ni));
             }
-
-            assert!(for_keys.is_none());
-
-            // NOTE: node is now ready, in the sense that it shouldn't ignore all updates since
-            // replaying_to is still set, "normal" dispatch calls will continue to be buffered, but
-            // this allows finish_replay to dispatch into the node by overriding replaying_to.
-            self.not_ready.remove(&ni);
-            self.delayed_for_self.push_back(box Packet::Finish(tag, ni));
         }
     }
 
