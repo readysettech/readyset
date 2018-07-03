@@ -62,7 +62,10 @@ impl PartialEq for DomainMode {
 enum TriggerEndpoint {
     None,
     Start(Vec<usize>),
-    End(bool, Vec<TcpSender<Box<Packet>>>),
+    End {
+        ask_all: bool,
+        options: Vec<TcpSender<Box<Packet>>>,
+    },
     Local(Vec<usize>),
 }
 
@@ -363,10 +366,12 @@ impl Domain {
 
     fn send_partial_replay_request(&mut self, tag: Tag, key: Vec<DataType>) {
         debug_assert!(self.concurrent_replays < self.max_concurrent_replays);
-        if let TriggerEndpoint::End(shuffled, ref mut triggers) =
-            self.replay_paths.get_mut(&tag).unwrap().trigger
+        if let TriggerEndpoint::End {
+            ask_all,
+            ref mut options,
+        } = self.replay_paths.get_mut(&tag).unwrap().trigger
         {
-            if triggers.len() != 1 && shuffled {
+            if ask_all && options.len() != 1 {
                 // source is sharded by a different key than we are doing lookups for,
                 // so we need to trigger on all the shards.
                 self.concurrent_replays += 1;
@@ -377,7 +382,7 @@ impl Domain {
                        "concurrent" => self.concurrent_replays,
                        );
 
-                for trigger in triggers {
+                for trigger in options {
                     if trigger
                         .send(box Packet::RequestPartialReplay {
                             tag,
@@ -391,18 +396,11 @@ impl Domain {
                 return;
             }
 
-            // TODO: if we're sharded by a different key than the source, then we could cause
-            // replay responses to be sent to *other* shards too in response to our request :/
-
-            // find right shard. it's important that we only request a replay from the right
-            // shard, because otherwise all the other shard domains will miss, and then request
-            // replays themselves for the miss key. however, the response to that request will
-            // never be routed to them, leading to infinite loops and whatnot.
-            let shard = if triggers.len() == 1 {
+            let shard = if options.len() == 1 {
                 0
             } else {
                 assert_eq!(key.len(), 1);
-                ::shard_by(&key[0], triggers.len())
+                ::shard_by(&key[0], options.len())
             };
             self.concurrent_replays += 1;
             trace!(self.log, "sending replay request";
@@ -411,7 +409,7 @@ impl Domain {
                    "buffered" => self.replay_request_queue.len(),
                    "concurrent" => self.concurrent_replays,
                    );
-            if triggers[shard]
+            if options[shard]
                 .send(box Packet::RequestPartialReplay { tag, key })
                 .is_err()
             {
@@ -438,7 +436,7 @@ impl Domain {
 
     fn finished_partial_replay(&mut self, tag: &Tag, num: usize) {
         match self.replay_paths[tag].trigger {
-            TriggerEndpoint::End(..) => {
+            TriggerEndpoint::End { .. } => {
                 // A backfill request we made to another domain was just satisfied!
                 // We can now issue another request from the concurrent replay queue.
                 // However, since unions require multiple backfill requests, but produce only one
@@ -451,7 +449,7 @@ impl Domain {
                     self.replay_paths
                         .iter()
                         .filter(|&(_, p)| {
-                            if let TriggerEndpoint::End(..) = p.trigger {
+                            if let TriggerEndpoint::End { .. } = p.trigger {
                                 let p = p.path.last().unwrap();
                                 p.node == last.node && p.partial_key == last.partial_key
                             } else {
@@ -980,23 +978,35 @@ impl Domain {
                             payload::TriggerEndpoint::None => TriggerEndpoint::None,
                             payload::TriggerEndpoint::Start(v) => TriggerEndpoint::Start(v),
                             payload::TriggerEndpoint::Local(v) => TriggerEndpoint::Local(v),
-                            payload::TriggerEndpoint::End(shuffled, domain, shards) => {
-                                TriggerEndpoint::End(
-                                    shuffled,
-                                    (0..shards)
-                                        .map(|shard| {
-                                            // TODO: take advantage of local channels for replay paths.
-                                            self.channel_coordinator
-                                                .get_addr(&(domain, shard))
-                                                .map(|addr| {
-                                                    DomainConnectionBuilder::for_domain(addr)
-                                                        .build()
-                                                        .unwrap()
-                                                })
+                            payload::TriggerEndpoint::End(selection, domain) => {
+                                let shard = |shardi| {
+                                    // TODO: take advantage of local channels for replay paths.
+                                    self.channel_coordinator
+                                        .get_addr(&(domain, shardi))
+                                        .map(|addr| {
+                                            DomainConnectionBuilder::for_domain(addr)
+                                                .build()
                                                 .unwrap()
                                         })
-                                        .collect(),
-                                )
+                                        .unwrap()
+                                };
+
+                                let (ask_all, options) = match selection {
+                                    payload::SourceSelection::AllShards(nshards) => {
+                                        (true, (0..nshards).map(shard).collect())
+                                    }
+                                    payload::SourceSelection::SameShard => (
+                                        true,
+                                        vec![shard(self.shard.expect(
+                                            "told to replay from same shard, but not sharded",
+                                        ))],
+                                    ),
+                                    payload::SourceSelection::KeyShard(nshards) => {
+                                        (false, (0..nshards).map(shard).collect())
+                                    }
+                                };
+
+                                TriggerEndpoint::End { ask_all, options }
                             }
                         };
 
@@ -1602,7 +1612,7 @@ impl Domain {
                 Packet::ReplayPiece {
                     tag,
                     link,
-                    data,
+                    mut data,
                     mut context,
                 } => {
                     if let ReplayPieceContext::Partial { ref for_keys, .. } = context {
@@ -1617,6 +1627,55 @@ impl Domain {
                         debug!(self.log, "replaying batch"; "#" => data.len());
                     }
 
+                    // let's collect some information about the destination of this replay
+                    let dst = path.last().unwrap().node;
+                    let dst_is_reader = self.nodes[&dst]
+                        .borrow()
+                        .with_reader(|r| r.is_materialized())
+                        .unwrap_or(false);
+                    let dst_is_target = !self.nodes[&dst].borrow().is_sender();
+
+                    if dst_is_target {
+                        // prune keys and data for keys we're not waiting for
+                        if let ReplayPieceContext::Partial {
+                            ref mut for_keys, ..
+                        } = context
+                        {
+                            let had = for_keys.len();
+                            let partial_keys = path.last().unwrap().partial_key.as_ref().unwrap();
+                            if let Some(w) = self.waiting.get(&dst) {
+                                // discard all the keys that we aren't waiting for
+                                for_keys.retain(|k| {
+                                    w.redos.contains_key(&(partial_keys.clone(), k.clone()))
+                                });
+                            } else if let Some(ref prev) = self.reader_triggered.get(&dst) {
+                                // discard all the keys that we aren't waiting for
+                                for_keys.retain(|k| prev.contains(k));
+                            } else {
+                                // this packet contained no keys that we're waiting for, so it's
+                                // useless to us.
+                                return;
+                            }
+
+                            if for_keys.is_empty() {
+                                return;
+                            } else if for_keys.len() != had {
+                                // discard records in data associated with the keys we weren't
+                                // waiting for
+                                // note that we need to use the partial_keys column IDs from the
+                                // *start* of the path here, as the records haven't been processed
+                                // yet
+                                let partial_keys =
+                                    path.first().unwrap().partial_key.as_ref().unwrap();
+                                data.retain(|r| {
+                                    for_keys.iter().any(|k| {
+                                        partial_keys.iter().enumerate().all(|(i, c)| r[*c] == k[i])
+                                    })
+                                });
+                            }
+                        }
+                    }
+
                     // forward the current message through all local nodes.
                     let m = box Packet::ReplayPiece {
                         link: link.clone(),
@@ -1625,14 +1684,6 @@ impl Domain {
                         context: context.clone(),
                     };
                     let mut m = Some(m);
-
-                    // let's collect some information about the destination of this replay
-                    let dst = path.last().unwrap().node;
-                    let dst_is_reader = self.nodes[&dst]
-                        .borrow()
-                        .with_reader(|r| r.is_materialized())
-                        .unwrap_or(false);
-                    let dst_is_target = self.waiting.contains_key(&dst);
 
                     for (i, segment) in path.iter().enumerate() {
                         let mut n = self.nodes[&segment.node].borrow_mut();
@@ -1657,7 +1708,7 @@ impl Domain {
                         // client requests a replay, the Reader isn't marked as "waiting".
                         let target = backfill_keys.is_some()
                             && i == path.len() - 1
-                            && (is_reader || self.waiting.contains_key(&segment.node));
+                            && (is_reader || !n.is_sender());
 
                         // targets better be last
                         assert!(!target || i == path.len() - 1);
@@ -1929,14 +1980,14 @@ impl Domain {
                         }
                         ReplayPieceContext::Partial { for_keys, ignore } => {
                             assert!(!ignore);
-                            if dst_is_target {
+                            if dst_is_reader {
+                                assert_ne!(finished_partial, 0);
+                            } else if dst_is_target {
                                 trace!(self.log, "partial replay completed"; "local" => dst.id());
                                 if finished_partial == 0 {
                                     assert!(for_keys.is_empty());
                                 }
                                 finished = Some((tag, dst, Some(for_keys)));
-                            } else if dst_is_reader {
-                                assert_ne!(finished_partial, 0);
                             } else {
                                 // we're just on the replay path
                             }
@@ -1970,7 +2021,9 @@ impl Domain {
             if let Some(mut waiting) = self.waiting.remove(&ni) {
                 trace!(
                     self.log,
-                    "partial replay finished to node with waiting backfills"
+                    "partial replay finished to node with waiting backfills";
+                    "keys" => ?for_keys,
+                    "waiting" => ?waiting,
                 );
 
                 let key_cols = self.replay_paths[&tag]
@@ -1987,8 +2040,8 @@ impl Domain {
                 for key in for_keys.unwrap() {
                     let hole = (key_cols.clone(), key);
                     let replay = waiting.redos.remove(&hole).expect(&format!(
-                        "node {:?} got backfill for unnecessary key {:?} via tag {:?}",
-                        ni, hole.1, tag
+                        "got backfill for unnecessary key {:?} via tag {:?}",
+                        hole.1, tag
                     ));
 
                     // we may need more holes to fill before some replays should be re-attempted
@@ -2037,15 +2090,16 @@ impl Domain {
                     assert!(waiting.redos.is_empty());
                 }
                 return;
+            } else if for_keys.is_some() {
+                unreachable!("got unexpected replay of {:?} for {:?}", for_keys, ni)
+            } else {
+                // must be a full replay
+                // NOTE: node is now ready, in the sense that it shouldn't ignore all updates since
+                // replaying_to is still set, "normal" dispatch calls will continue to be buffered, but
+                // this allows finish_replay to dispatch into the node by overriding replaying_to.
+                self.not_ready.remove(&ni);
+                self.delayed_for_self.push_back(box Packet::Finish(tag, ni));
             }
-
-            assert!(for_keys.is_none());
-
-            // NOTE: node is now ready, in the sense that it shouldn't ignore all updates since
-            // replaying_to is still set, "normal" dispatch calls will continue to be buffered, but
-            // this allows finish_replay to dispatch into the node by overriding replaying_to.
-            self.not_ready.remove(&ni);
-            self.delayed_for_self.push_back(box Packet::Finish(tag, ni));
         }
     }
 
@@ -2320,7 +2374,7 @@ impl Domain {
                 );
 
                 match trigger {
-                    TriggerEndpoint::End(..) | TriggerEndpoint::Local(..) => {
+                    TriggerEndpoint::End { .. } | TriggerEndpoint::Local(..) => {
                         // This path terminates inside the domain. Find the target node, evict
                         // from it, and then propagate the eviction further downstream.
                         let target = path.last().unwrap().node;

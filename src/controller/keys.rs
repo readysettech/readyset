@@ -4,6 +4,7 @@ use petgraph;
 
 use std::collections::HashMap;
 
+// TODO: rewrite as iterator
 pub fn provenance_of<F>(
     graph: &Graph,
     node: NodeIndex,

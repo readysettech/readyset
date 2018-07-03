@@ -1,6 +1,6 @@
 use controller::domain_handle::DomainHandle;
 use controller::{inner::graphviz, keys, WorkerIdentifier, WorkerStatus};
-use dataflow::payload::TriggerEndpoint;
+use dataflow::payload::{SourceSelection, TriggerEndpoint};
 use dataflow::prelude::*;
 use std::collections::{HashMap, HashSet};
 
@@ -218,40 +218,69 @@ impl<'a> Plan<'a> {
                             // first domain needs to be told about partial replay trigger
                             *trigger = TriggerEndpoint::Start(key.clone());
                         } else if i == segments.len() - 1 {
-                            // otherwise, should know how to trigger partial replay
-                            // this means knowing how many sources there are (in the case of
-                            // sharding), as well as whether the partial key matches the sharding
-                            // key of the source. if it does, *all* shards need to be consulted
-                            // when doing a replay.
-                            let sharding = self.graph[segments[0].1[0].0].sharded_by();
-                            let shards = sharding.shards();
-                            let shuffled = match sharding {
-                                Sharding::Random(..) => true,
+                            // if the source is sharded, we need to know whether we should ask all
+                            // the shards, or just one. if the replay key is the same as the
+                            // sharding key, we just ask one, and all is good. if the replay key
+                            // and the sharding key differs, we generally have to query *all* the
+                            // shards.
+                            //
+                            // there is, however, an exception to this: if we have two domains that
+                            // have the same sharding, but a replay path between them on some other
+                            // key than the sharding key, the right thing to do is to *only* query
+                            // the same shard as ourselves. this is because any answers from other
+                            // shards would necessarily just be with records that do not match our
+                            // sharding key anyway, and that we should thus never see.
+                            let src_sharding = self.graph[segments[0].1[0].0].sharded_by();
+                            let shards = src_sharding.shards();
+                            let lookup_on_shard_key = match src_sharding {
+                                Sharding::Random(..) => false,
                                 Sharding::ByColumn(c, _) => {
                                     assert_eq!(key.len(), 1);
-                                    c != key[0]
+                                    c == key[0]
                                 }
-                                _ => false,
+                                _ => true,
                             };
 
-                            if shuffled {
-                                if !segments
+                            let selection = if lookup_on_shard_key {
+                                // if we are not sharded, all is okay.
+                                //
+                                // if we are sharded:
+                                //
+                                //  - if there is a shuffle above us, a shard merger + sharder
+                                //    above us will ensure that we hear the replay response.
+                                //
+                                //  - if there is not, we are sharded by the same column as the
+                                //    source. this also means that the replay key in the
+                                //    destination is the sharding key of the destination. to see
+                                //    why, consider the case where the destination is sharded by x.
+                                //    the source must also be sharded by x for us to be in this
+                                //    case. we also know that the replay lookup key on the source
+                                //    must be x since lookup_on_shard_key == true. since no shuffle
+                                //    was introduced, src.x must resolve to dst.x assuming x is not
+                                //    aliased in dst. because of this, it should be the case that
+                                //    KeyShard == SameShard; if that were not the case, the value
+                                //    in dst.x should never have reached dst in the first place.
+                                SourceSelection::KeyShard(shards)
+                            } else {
+                                // replay key != sharding key
+                                // normally, we'd have to query all shards, but if we are sharded
+                                // the same as the source (i.e., there are no shuffles between the
+                                // source and us), then we should *only* query the same shard of
+                                // the source (since it necessarily holds all records we could
+                                // possibly see).
+                                if segments
                                     .iter()
                                     .flat_map(|s| s.1.iter())
-                                    .any(|&(n, _)| self.graph[n].is_sharder())
+                                    .any(|&(n, _)| self.graph[n].is_shard_merger())
                                 {
-                                    // we have a shuffled partial key replay path, but no shuffle.
-                                    // that won't work, since it means the target won't have a way
-                                    // to wait for all the replays from upstream shards (which it
-                                    // needs to) when triggering a replay.
-                                    crit!(self.m.log, "unshuffled path shuffles partial key"; "tag" => tag.id());
-                                    unimplemented!();
+                                    SourceSelection::AllShards(shards)
+                                } else {
+                                    SourceSelection::SameShard
                                 }
-                                warn!(self.m.log, "path shuffles partial key"; "tag" => tag.id());
-                            }
+                            };
 
-                            *trigger =
-                                TriggerEndpoint::End(shuffled, segments[0].0.clone(), shards);
+                            debug!(self.m.log, "picked source selection policy"; "policy" => ?selection, "tag" => tag.id());
+                            *trigger = TriggerEndpoint::End(selection, segments[0].0.clone());
                         }
                     } else {
                         unreachable!();

@@ -1456,6 +1456,65 @@ fn replay_during_replay() {
 }
 
 #[test]
+fn cascading_replays_with_sharding() {
+    let mut g = ControllerBuilder::default();
+    g.set_sharding(Some(2));
+    g.set_persistence(get_persistence_params("cascading_replays_with_sharding"));
+    let mut g = g.build_local();
+
+    // add each two bases. these are initially unsharded, but f will end up being sharded by u1,
+    // while v will be sharded by u
+
+    // force v to be in a different domain by adding it in a separate migration
+    let v = g.migrate(|mig| mig.add_base("v", &["u", "s"], Base::new(vec!["".into(), 1.into()])));
+    // now add the rest
+    let _ = g.migrate(move |mig| {
+        let f = mig.add_base("f", &["f1", "f2"], Base::new(vec!["".into(), "".into()]));
+        // add a join
+        let jb = Join::new(f, v, JoinType::Inner, vec![B(0, 0), R(1), L(1)]);
+        let j = mig.add_ingredient("j", &["u", "s", "f2"], jb);
+        // aggregate over the join. this will force a shard merger to be inserted because the
+        // group-by column ("f2") isn't the same as the join's output sharding column ("f1"/"u")
+        let a = Aggregation::COUNT.over(j, 0, &[2]);
+        let end = mig.add_ingredient("end", &["u", "c"], a);
+        mig.maintain_anonymous(end, &[0]);
+        (j, end)
+    });
+
+    let mut mutf = g.table("f").unwrap();
+    let mut mutv = g.table("v").unwrap();
+
+    //                f1           f2
+    mutf.insert(vec!["u1".into(), "u3".into()]).unwrap();
+    mutf.insert(vec!["u2".into(), "u3".into()]).unwrap();
+    mutf.insert(vec!["u3".into(), "u1".into()]).unwrap();
+
+    //                u
+    mutv.insert(vec!["u1".into(), 1.into()]).unwrap();
+    mutv.insert(vec!["u2".into(), 1.into()]).unwrap();
+    mutv.insert(vec!["u3".into(), 1.into()]).unwrap();
+
+    sleep();
+
+    let mut e = g.view("end").unwrap();
+
+    assert_eq!(
+        e.lookup(&["u1".into()], true).unwrap(),
+        vec![vec!["u1".into(), 1.into()]]
+    );
+    assert_eq!(
+        e.lookup(&["u2".into()], true).unwrap(),
+        Vec::<Vec<DataType>>::new()
+    );
+    assert_eq!(
+        e.lookup(&["u3".into()], true).unwrap(),
+        vec![vec!["u3".into(), 2.into()]]
+    );
+
+    sleep();
+}
+
+#[test]
 fn full_aggregation_with_bogokey() {
     // set up graph
     let mut g = build_local("full_aggregation_with_bogokey");
