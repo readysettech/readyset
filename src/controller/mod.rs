@@ -1361,8 +1361,15 @@ mod tests {
         let r_txt = "CREATE TABLE a (x int, y int, z int);\n
                      CREATE TABLE b (r int, s int);\n";
 
-        let authority =
-            ZookeeperAuthority::new("127.0.0.1:2181/it_works_blender_with_migration").unwrap();
+        use rand::Rng;
+        let zk = format!(
+            "127.0.0.1:2181/it_works_blender_with_migration_{}",
+            rand::thread_rng()
+                .sample_iter(&rand::distributions::Alphanumeric)
+                .take(8)
+                .collect::<String>()
+        );
+        let authority = ZookeeperAuthority::new(&zk).unwrap();
         let mut c = ControllerBuilder::default()
             .build(Arc::new(authority))
             .unwrap();
