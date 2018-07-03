@@ -1460,7 +1460,7 @@ fn cascading_replays_with_sharding() {
     let mut g = ControllerBuilder::default();
     g.set_sharding(Some(2));
     g.set_persistence(get_persistence_params("cascading_replays_with_sharding"));
-    let mut g = g.build_local();
+    let mut g = g.build_local().unwrap();
 
     // add each two bases. these are initially unsharded, but f will end up being sharded by u1,
     // while v will be sharded by u
