@@ -32,14 +32,6 @@ pub struct Config {
 
 const BATCH_SIZE: usize = 256;
 
-const NANOS_PER_SEC: u64 = 1_000_000_000;
-macro_rules! dur_to_ns {
-    ($d:expr) => {{
-        let d = $d;
-        d.as_secs() * NANOS_PER_SEC + d.subsec_nanos() as u64
-    }};
-}
-
 #[derive(Debug)]
 enum DomainMode {
     Forwarding,
@@ -1080,7 +1072,7 @@ impl Domain {
 
                         debug!(self.log,
                                "current state cloned for replay";
-                               "μs" => dur_to_ns!(start.elapsed()) / 1000
+                               "μs" => start.elapsed().as_micros() as u64
                         );
 
                         let link = Link::new(from, self.replay_paths[&tag].path[0].node);
@@ -1177,7 +1169,7 @@ impl Domain {
                                     debug!(log,
                                    "state chunker finished";
                                    "node" => %link.dst,
-                                   "μs" => dur_to_ns!(start.elapsed()) / 1000
+                                   "μs" => start.elapsed().as_micros() as u64
                                 );
                                 })
                                 .unwrap();

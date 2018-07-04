@@ -308,6 +308,7 @@
 #![feature(try_from)]
 #![feature(box_patterns)]
 #![feature(box_syntax)]
+#![feature(duration_as_u128)]
 #![feature(nll)]
 #![feature(entry_or_default)]
 #![deny(missing_docs)]

@@ -1,6 +1,7 @@
 #![feature(nll)]
 #![feature(box_syntax)]
 #![feature(box_patterns)]
+#![feature(duration_as_u128)]
 #![feature(option_filter)]
 #![feature(use_extern_macros)]
 #![feature(entry_or_default)]

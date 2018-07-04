@@ -17,14 +17,6 @@ use std::sync::atomic::{AtomicUsize, Ordering};
 
 mod plan;
 
-const NANOS_PER_SEC: u64 = 1_000_000_000;
-macro_rules! dur_to_ns {
-    ($d:expr) => {{
-        let d = $d;
-        d.as_secs() * NANOS_PER_SEC + d.subsec_nanos() as u64
-    }};
-}
-
 type Indices = HashSet<Vec<usize>>;
 
 pub struct Materializations {
@@ -738,7 +730,7 @@ impl Materializations {
 
             if reconstructed {
                 info!(self.log, "reconstruction completed";
-                      "ms" => dur_to_ns!(start.elapsed()) / 1_000_000,
+                      "ms" => start.elapsed().as_millis() as u64,
                       "node" => ni.index(),
                       );
             }
