@@ -1276,6 +1276,57 @@ mod tests {
     }
 
     #[test]
+    fn it_reuses_by_extending_existing_query() {
+        use super::sql_parser;
+        // set up graph
+        let mut g = integration::build_local("it_reuses_by_extending_existing_query");
+        g.migrate(|mig| {
+            let mut inc = SqlIncorporator::default();
+            // Add base tables
+            assert!(
+                inc.add_query(
+                    "CREATE TABLE articles (id int, title varchar(40));",
+                    None,
+                    mig
+                ).is_ok()
+            );
+            assert!(
+                inc.add_query("CREATE TABLE votes (aid int, uid int);", None, mig)
+                    .is_ok()
+            );
+            // Should have source, "articles" and "votes" base tables
+            assert_eq!(mig.graph().node_count(), 3);
+
+            // Add a new query
+            let res = inc.add_parsed_query(
+                sql_parser::parse_query("SELECT COUNT(uid) AS vc FROM votes GROUP BY aid;")
+                    .unwrap(),
+                Some("votecount".into()),
+                false,
+                mig,
+            );
+            assert!(res.is_ok());
+
+            // Add a query that can reuse votecount by extending it.
+            let ncount = mig.graph().node_count();
+            let res = inc.add_parsed_query(
+                sql_parser::parse_query(
+                    "SELECT COUNT(uid) AS vc FROM votes WHERE vc > 5 GROUP BY aid;",
+                ).unwrap(),
+                Some("highvotes".into()),
+                true,
+                mig,
+            );
+            assert!(res.is_ok());
+            // should have added three more nodes: a join, a projection, and a reader
+            let qfp = res.unwrap();
+            assert_eq!(mig.graph().node_count(), ncount + 3);
+            // only the join and projection nodes are returned in the vector of new nodes
+            assert_eq!(qfp.new_nodes.len(), 2);
+        });
+    }
+
+    #[test]
     fn it_incorporates_aggregation_no_group_by() {
         // set up graph
         let mut g = integration::build_local("it_incorporates_aggregation_no_group_by");
