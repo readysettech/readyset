@@ -10,6 +10,17 @@ pub struct Column {
     pub aliases: Vec<Column>,
 }
 
+impl Column {
+    pub fn new(table: Option<&str>, name: &str) -> Self {
+        Column {
+            table: table.map(|t| t.to_owned()),
+            name: name.to_owned(),
+            function: None,
+            aliases: vec![],
+        }
+    }
+}
+
 impl From<nom_sql::Column> for Column {
     fn from(c: nom_sql::Column) -> Column {
         Column {
@@ -150,7 +161,7 @@ mod tests {
 
     #[test]
     fn column_equality() {
-        let c = Column::from(nom_sql::Column::from("t.col"));
+        let c = Column::new(Some("t"), "col");
         let ac = Column {
             table: Some("t".into()),
             name: "al".into(),
