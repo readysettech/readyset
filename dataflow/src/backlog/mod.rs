@@ -423,31 +423,27 @@ mod tests {
         let (r, mut w) = new(2, &[0]);
 
         // initially, store is uninitialized
-        assert_eq!(r.find_and(&a[0..1], |rs| rs.len(), true), Err(()));
+        assert_eq!(r.try_find_and(&a[0..1], |rs| rs.len()), Err(()));
 
         w.swap();
 
         // after first swap, it is empty, but ready
-        assert_eq!(r.find_and(&a[0..1], |rs| rs.len(), true), Ok((None, -1)));
+        assert_eq!(r.try_find_and(&a[0..1], |rs| rs.len()), Ok((Some(0), -1)));
 
         w.add(vec![Record::Positive(a.clone())]);
 
         // it is empty even after an add (we haven't swapped yet)
-        assert_eq!(r.find_and(&a[0..1], |rs| rs.len(), true), Ok((None, -1)));
+        assert_eq!(r.try_find_and(&a[0..1], |rs| rs.len()), Ok((Some(0), -1)));
 
         w.swap();
 
         // but after the swap, the record is there!
-        assert_eq!(
-            r.find_and(&a[0..1], |rs| rs.len(), true).unwrap().0,
-            Some(1)
-        );
+        assert_eq!(r.try_find_and(&a[0..1], |rs| rs.len()).unwrap().0, Some(1));
         assert!(
-            r.find_and(
-                &a[0..1],
-                |rs| rs.iter().any(|r| r[0] == a[0] && r[1] == a[1]),
-                true
-            ).unwrap()
+            r.try_find_and(&a[0..1], |rs| rs
+                .iter()
+                .any(|r| r[0] == a[0] && r[1] == a[1]))
+                .unwrap()
                 .0
                 .unwrap()
         );
@@ -469,7 +465,7 @@ mod tests {
         for i in 0..n {
             let i = &[i.into()];
             loop {
-                match r.find_and(i, |rs| rs.len(), true) {
+                match r.try_find_and(i, |rs| rs.len()) {
                     Ok((None, _)) => continue,
                     Ok((Some(1), _)) => break,
                     Ok((Some(i), _)) => assert_ne!(i, 1),
@@ -489,16 +485,12 @@ mod tests {
         w.swap();
         w.add(vec![Record::Positive(b.clone())]);
 
-        assert_eq!(
-            r.find_and(&a[0..1], |rs| rs.len(), true).unwrap().0,
-            Some(1)
-        );
+        assert_eq!(r.try_find_and(&a[0..1], |rs| rs.len()).unwrap().0, Some(1));
         assert!(
-            r.find_and(
-                &a[0..1],
-                |rs| rs.iter().any(|r| r[0] == a[0] && r[1] == a[1]),
-                true
-            ).unwrap()
+            r.try_find_and(&a[0..1], |rs| rs
+                .iter()
+                .any(|r| r[0] == a[0] && r[1] == a[1]))
+                .unwrap()
                 .0
                 .unwrap()
         );
@@ -516,25 +508,20 @@ mod tests {
         w.swap();
         w.add(vec![Record::Positive(c.clone())]);
 
-        assert_eq!(
-            r.find_and(&a[0..1], |rs| rs.len(), true).unwrap().0,
-            Some(2)
-        );
+        assert_eq!(r.try_find_and(&a[0..1], |rs| rs.len()).unwrap().0, Some(2));
         assert!(
-            r.find_and(
-                &a[0..1],
-                |rs| rs.iter().any(|r| r[0] == a[0] && r[1] == a[1]),
-                true
-            ).unwrap()
+            r.try_find_and(&a[0..1], |rs| rs
+                .iter()
+                .any(|r| r[0] == a[0] && r[1] == a[1]))
+                .unwrap()
                 .0
                 .unwrap()
         );
         assert!(
-            r.find_and(
-                &a[0..1],
-                |rs| rs.iter().any(|r| r[0] == b[0] && r[1] == b[1]),
-                true
-            ).unwrap()
+            r.try_find_and(&a[0..1], |rs| rs
+                .iter()
+                .any(|r| r[0] == b[0] && r[1] == b[1]))
+                .unwrap()
                 .0
                 .unwrap()
         );
@@ -551,16 +538,12 @@ mod tests {
         w.add(vec![Record::Negative(a.clone())]);
         w.swap();
 
-        assert_eq!(
-            r.find_and(&a[0..1], |rs| rs.len(), true).unwrap().0,
-            Some(1)
-        );
+        assert_eq!(r.try_find_and(&a[0..1], |rs| rs.len()).unwrap().0, Some(1));
         assert!(
-            r.find_and(
-                &a[0..1],
-                |rs| rs.iter().any(|r| r[0] == b[0] && r[1] == b[1]),
-                true
-            ).unwrap()
+            r.try_find_and(&a[0..1], |rs| rs
+                .iter()
+                .any(|r| r[0] == b[0] && r[1] == b[1]))
+                .unwrap()
                 .0
                 .unwrap()
         );
@@ -578,16 +561,12 @@ mod tests {
         w.add(vec![Record::Negative(a.clone())]);
         w.swap();
 
-        assert_eq!(
-            r.find_and(&a[0..1], |rs| rs.len(), true).unwrap().0,
-            Some(1)
-        );
+        assert_eq!(r.try_find_and(&a[0..1], |rs| rs.len()).unwrap().0, Some(1));
         assert!(
-            r.find_and(
-                &a[0..1],
-                |rs| rs.iter().any(|r| r[0] == b[0] && r[1] == b[1]),
-                true
-            ).unwrap()
+            r.try_find_and(&a[0..1], |rs| rs
+                .iter()
+                .any(|r| r[0] == b[0] && r[1] == b[1]))
+                .unwrap()
                 .0
                 .unwrap()
         );
@@ -606,25 +585,20 @@ mod tests {
         ]);
         w.swap();
 
-        assert_eq!(
-            r.find_and(&a[0..1], |rs| rs.len(), true).unwrap().0,
-            Some(2)
-        );
+        assert_eq!(r.try_find_and(&a[0..1], |rs| rs.len()).unwrap().0, Some(2));
         assert!(
-            r.find_and(
-                &a[0..1],
-                |rs| rs.iter().any(|r| r[0] == a[0] && r[1] == a[1]),
-                true
-            ).unwrap()
+            r.try_find_and(&a[0..1], |rs| rs
+                .iter()
+                .any(|r| r[0] == a[0] && r[1] == a[1]))
+                .unwrap()
                 .0
                 .unwrap()
         );
         assert!(
-            r.find_and(
-                &a[0..1],
-                |rs| rs.iter().any(|r| r[0] == b[0] && r[1] == b[1]),
-                true
-            ).unwrap()
+            r.try_find_and(&a[0..1], |rs| rs
+                .iter()
+                .any(|r| r[0] == b[0] && r[1] == b[1]))
+                .unwrap()
                 .0
                 .unwrap()
         );
@@ -636,16 +610,12 @@ mod tests {
         ]);
         w.swap();
 
-        assert_eq!(
-            r.find_and(&a[0..1], |rs| rs.len(), true).unwrap().0,
-            Some(1)
-        );
+        assert_eq!(r.try_find_and(&a[0..1], |rs| rs.len()).unwrap().0, Some(1));
         assert!(
-            r.find_and(
-                &a[0..1],
-                |rs| rs.iter().any(|r| r[0] == b[0] && r[1] == b[1]),
-                true
-            ).unwrap()
+            r.try_find_and(&a[0..1], |rs| rs
+                .iter()
+                .any(|r| r[0] == b[0] && r[1] == b[1]))
+                .unwrap()
                 .0
                 .unwrap()
         );
