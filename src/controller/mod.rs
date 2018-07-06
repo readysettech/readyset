@@ -57,7 +57,6 @@ pub(crate) mod security;
 pub(crate) mod sql;
 
 mod builder;
-mod getter;
 mod handle;
 mod inner;
 mod mir_to_flow;
@@ -66,7 +65,6 @@ mod readers;
 pub use api::builders::*;
 pub use api::prelude::*;
 pub use controller::builder::ControllerBuilder;
-pub use controller::getter::Getter;
 pub use controller::handle::LocalControllerHandle;
 pub use controller::migrate::Migration;
 
@@ -632,6 +630,7 @@ fn listen_df(
                         readers.clone(),
                         coord.clone(),
                         addr,
+                        &valve,
                         state_size.clone(),
                     );
 

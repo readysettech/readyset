@@ -2,16 +2,19 @@ use bincode;
 use dataflow::backlog::SingleReadHandle;
 use dataflow::prelude::*;
 use dataflow::Readers;
-use futures::{
-    self,
-    future::{self, Either},
-};
+use futures::future::{self, Either};
 use std::cell::RefCell;
 use std::collections::HashMap;
-use std::mem;
+use std::{mem, time};
+use tokio;
 use tokio::prelude::*;
 
 use api::{ReadQuery, ReadReply};
+
+/// If a blocking reader finds itself waiting this long for a backfill to complete, it will
+/// re-issue the replay request. To avoid the system falling over if replays are slow for a little
+/// while, waiting readers will use exponential backoff on this delay if they continue to miss.
+const RETRY_TIMEOUT_US: u64 = 1_000;
 
 thread_local! {
     static READERS: RefCell<HashMap<
@@ -46,11 +49,11 @@ pub(crate) fn handle_message(
                 let mut ret = Vec::with_capacity(keys.len());
                 ret.resize(keys.len(), Vec::new());
 
-                // first do non-blocking reads for all keys to trigger any replays
+                // first do non-blocking reads for all keys to see if we can return immediately
                 let found = keys
                     .iter_mut()
                     .map(|key| {
-                        let rs = reader.find_and(key, dup, false).map(|r| r.0);
+                        let rs = reader.try_find_and(key, dup).map(|r| r.0);
                         (key, rs)
                     })
                     .enumerate();
@@ -88,11 +91,18 @@ pub(crate) fn handle_message(
                     if !block {
                         Either::A(Either::A(future::ok(ReadReply::Normal(Ok(ret)))))
                     } else {
+                        let trigger = time::Duration::from_micros(RETRY_TIMEOUT_US);
+                        let retry = time::Duration::from_micros(10);
+                        let now = time::Instant::now();
+                        let next = now + retry;
                         Either::A(Either::B(BlockingRead {
                             target,
                             keys,
                             read: ret,
                             truth: s.clone(),
+                            retry: tokio::timer::Interval::new(now + retry, retry),
+                            trigger_timeout: trigger,
+                            next_trigger: next,
                         }))
                     }
                 }
@@ -119,6 +129,9 @@ struct BlockingRead {
     target: (NodeIndex, usize),
     keys: Vec<Vec<DataType>>,
     truth: Readers,
+    retry: tokio::timer::Interval,
+    trigger_timeout: time::Duration,
+    next_trigger: time::Instant,
 }
 
 impl Future for BlockingRead {
@@ -135,6 +148,7 @@ impl Future for BlockingRead {
             });
 
             let mut missing = false;
+            let now = time::Instant::now();
             for (i, key) in self.keys.iter_mut().enumerate() {
                 if key.is_empty() {
                     // already have this value
@@ -142,8 +156,7 @@ impl Future for BlockingRead {
                     // note that this *does* mean we'll trigger replay multiple times for things
                     // that miss and aren't replayed in time, which is a little sad. but at the
                     // same time, that replay trigger will just be ignored by the target domain.
-                    // TODO: maybe introduce a tokio::timer::Delay here?
-                    match reader.find_and(key, dup, false).map(|r| r.0) {
+                    match reader.try_find_and(key, dup).map(|r| r.0) {
                         Ok(Some(rs)) => {
                             self.read[i] = rs;
                             key.clear();
@@ -152,7 +165,12 @@ impl Future for BlockingRead {
                             unreachable!("map became not ready?");
                         }
                         Ok(None) => {
-                            // triggered partial replay
+                            if now > self.next_trigger {
+                                // maybe the key was filled but then evicted, and we missed it?
+                                reader.trigger(key);
+                                self.trigger_timeout *= 2;
+                                self.next_trigger = now + self.trigger_timeout;
+                            }
                             missing = true;
                         }
                     }
@@ -160,8 +178,14 @@ impl Future for BlockingRead {
             }
 
             if missing {
-                futures::task::current().notify();
-                Ok(Async::NotReady)
+                loop {
+                    match self.retry.poll() {
+                        Ok(Async::Ready(Some(_))) => {}
+                        Ok(Async::Ready(None)) => unreachable!("interval stopped yielding"),
+                        Ok(Async::NotReady) => return Ok(Async::NotReady),
+                        Err(e) => unreachable!("{:?}", e),
+                    }
+                }
             } else {
                 Ok(Async::Ready(ReadReply::Normal(Ok(mem::replace(
                     &mut self.read,

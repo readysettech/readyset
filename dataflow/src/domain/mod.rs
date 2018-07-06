@@ -8,18 +8,22 @@ use std::collections::{HashMap, HashSet, VecDeque};
 use std::mem;
 use std::net::SocketAddr;
 use std::sync::atomic::{AtomicUsize, Ordering};
-use std::sync::{Arc, Mutex};
+use std::sync::Arc;
 use std::time;
 
 use api;
 pub use basics::DomainIndex as Index;
 use channel::poll::{PollEvent, ProcessResult};
 use channel::{DomainConnectionBuilder, TcpSender};
+use futures;
 use group_commit::GroupCommitQueueSet;
 use payload::{ControlReplyPacket, ReplayPieceContext};
 use prelude::*;
 use slog::Logger;
+use stream_cancel::Valve;
+
 use timekeeper::{RealTime, SimpleTracker, ThreadTime, Timer, TimerSet};
+use tokio::{self, prelude::*};
 use Readers;
 
 type EnqueuedSends = FnvHashMap<ReplicaAddr, VecDeque<Box<Packet>>>;
@@ -135,6 +139,7 @@ impl DomainBuilder {
         readers: Readers,
         channel_coordinator: Arc<ChannelCoordinator>,
         addr: SocketAddr,
+        shutdown_valve: &Valve,
         state_size: Arc<AtomicUsize>,
     ) -> Domain {
         // initially, all nodes are not ready
@@ -178,6 +183,7 @@ impl DomainBuilder {
 
             ingress_inject: Default::default(),
 
+            shutdown_valve: shutdown_valve.clone(),
             readers,
             _debug_tx: debug_tx,
             control_reply_tx,
@@ -229,6 +235,7 @@ pub struct Domain {
     max_concurrent_replays: usize,
     replay_request_queue: VecDeque<(Tag, Vec<DataType>)>,
 
+    shutdown_valve: Valve,
     readers: Readers,
     _debug_tx: Option<TcpSender<api::debug::trace::Event>>,
     control_reply_tx: TcpSender<ControlReplyPacket>,
@@ -866,47 +873,64 @@ impl Domain {
                                 trigger_domain: (trigger_domain, shards),
                             } => {
                                 use backlog;
-                                let txs = Mutex::new(
-                                    (0..shards)
-                                        .map(|shard| {
-                                            self.channel_coordinator
-                                                .get_dest(&(trigger_domain, shard))
-                                                .map(|(addr, local)| {
-                                                    (
-                                                        DomainConnectionBuilder::for_domain(addr)
-                                                            .build()
-                                                            .unwrap(),
-                                                        local,
-                                                    )
-                                                })
-                                                .unwrap()
-                                        })
-                                        .collect::<Vec<_>>(),
-                                );
                                 let k = key.clone(); // ugh
+                                let txs = (0..shards)
+                                    .map(|shard| {
+                                        let key = key.clone();
+                                        let (tx, rx) = futures::sync::mpsc::unbounded();
+                                        let (sender, is_local) = self
+                                            .channel_coordinator
+                                            .get_dest(&(trigger_domain, shard))
+                                            .map(|(addr, local)| {
+                                                (
+                                                    DomainConnectionBuilder::for_domain(addr)
+                                                        .build_async()
+                                                        .unwrap(),
+                                                    local,
+                                                )
+                                            })
+                                            .unwrap();
+
+                                        tokio::spawn(
+                                            self.shutdown_valve
+                                                .wrap(rx)
+                                                .map(move |miss| {
+                                                    let mut m = box Packet::RequestReaderReplay {
+                                                        key: miss,
+                                                        cols: key.clone(),
+                                                        node: node,
+                                                    };
+
+                                                    if is_local {
+                                                        m = m.make_local();
+                                                    }
+                                                    m
+                                                })
+                                                .fold(sender, move |sender, m| {
+                                                    sender.send(m).map_err(|e| {
+                                                        // domain went away?
+                                                        eprintln!(
+                                                            "replay source went away: {:?}",
+                                                            e
+                                                        );
+                                                    })
+                                                })
+                                                .map(|_| ()),
+                                        );
+                                        tx
+                                    })
+                                    .collect::<Vec<_>>();
                                 let (r_part, w_part) =
                                     backlog::new_partial(cols, &k[..], move |miss| {
-                                        let mut txs = txs.lock().unwrap();
-                                        let tx = if txs.len() == 1 {
-                                            &mut txs[0]
+                                        let n = txs.len();
+                                        let tx = if n == 1 {
+                                            &txs[0]
                                         } else {
                                             // TODO: compound reader
                                             assert_eq!(miss.len(), 1);
-
-                                            let n = txs.len();
-                                            &mut txs[::shard_by(&miss[0], n)]
+                                            &txs[::shard_by(&miss[0], n)]
                                         };
-
-                                        let mut m = box Packet::RequestReaderReplay {
-                                            key: Vec::from(miss),
-                                            cols: key.clone(),
-                                            node: node,
-                                        };
-
-                                        if tx.1 {
-                                            m = m.make_local();
-                                        }
-                                        tx.0.send(m).unwrap();
+                                        tx.unbounded_send(Vec::from(miss)).unwrap();
                                     });
 
                                 let mut n = self.nodes[&node].borrow_mut();
