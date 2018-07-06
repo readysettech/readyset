@@ -94,7 +94,6 @@ pub(crate) fn handle_message(
                         let trigger = time::Duration::from_micros(RETRY_TIMEOUT_US);
                         let retry = time::Duration::from_micros(10);
                         let now = time::Instant::now();
-                        let next = now + retry;
                         Either::A(Either::B(BlockingRead {
                             target,
                             keys,
@@ -102,7 +101,7 @@ pub(crate) fn handle_message(
                             truth: s.clone(),
                             retry: tokio::timer::Interval::new(now + retry, retry),
                             trigger_timeout: trigger,
-                            next_trigger: next,
+                            next_trigger: now,
                         }))
                     }
                 }
@@ -147,6 +146,7 @@ impl Future for BlockingRead {
                 readers.get(target).unwrap().clone()
             });
 
+            let mut triggered = false;
             let mut missing = false;
             let now = time::Instant::now();
             for (i, key) in self.keys.iter_mut().enumerate() {
@@ -168,13 +168,17 @@ impl Future for BlockingRead {
                             if now > self.next_trigger {
                                 // maybe the key was filled but then evicted, and we missed it?
                                 reader.trigger(key);
-                                self.trigger_timeout *= 2;
-                                self.next_trigger = now + self.trigger_timeout;
+                                triggered = true;
                             }
                             missing = true;
                         }
                     }
                 }
+            }
+
+            if triggered {
+                self.trigger_timeout *= 2;
+                self.next_trigger = now + self.trigger_timeout;
             }
 
             if missing {
