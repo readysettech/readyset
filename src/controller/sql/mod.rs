@@ -16,8 +16,9 @@ use controller::Migration;
 use dataflow::prelude::DataType;
 use mir::query::{MirQuery, QueryFlowParts};
 use mir::reuse as mir_reuse;
+use mir::Column;
 use nom_sql::parser as sql_parser;
-use nom_sql::{ArithmeticBase, Column, CreateTableStatement, SqlQuery};
+use nom_sql::{ArithmeticBase, CreateTableStatement, SqlQuery};
 use nom_sql::{CompoundSelectOperator, CompoundSelectStatement, SelectStatement};
 
 use slog;
@@ -293,7 +294,11 @@ impl SqlIncorporator {
                         // present in the query graph (because a later migration added the column to
                         // a base schema after the query was added to the graph). In this case, we
                         // move on to other reuse options.
-                        let params = qg.parameters().into_iter().cloned().collect();
+                        let params = qg
+                            .parameters()
+                            .into_iter()
+                            .map(|c| Column::from(c))
+                            .collect();
                         match mir_reuse::rewind_until_columns_found(mir_query.leaf.clone(), &params)
                         {
                             Some(mn) => {

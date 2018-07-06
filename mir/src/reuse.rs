@@ -1,5 +1,5 @@
+use column::Column;
 use node::{MirNode, MirNodeType};
-use nom_sql::Column;
 use query::MirQuery;
 use slog;
 use MirNodeRef;
@@ -223,13 +223,13 @@ pub fn merge_mir_for_queries(
 mod tests {
     use super::*;
     use node::{MirNode, MirNodeType};
-    use nom_sql::{Column, ColumnSpecification, SqlType};
+    use nom_sql::{self, ColumnSpecification, SqlType};
     use MirNodeRef;
 
     fn make_nodes() -> (MirNodeRef, MirNodeRef, MirNodeRef, MirNodeRef) {
         let cspec = |n: &str| -> (ColumnSpecification, Option<usize>) {
             (
-                ColumnSpecification::new(Column::from(n), SqlType::Text),
+                ColumnSpecification::new(nom_sql::Column::from(n), SqlType::Text),
                 None,
             )
         };

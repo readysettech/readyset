@@ -1,9 +1,10 @@
-use nom_sql::{ArithmeticExpression, Column, ColumnSpecification, OrderType};
+use nom_sql::{ArithmeticExpression, ColumnSpecification, OrderType};
 use std::cell::RefCell;
 use std::fmt::{Debug, Display, Error, Formatter};
 use std::rc::Rc;
 
 use basics::{DataType, NodeIndex};
+use column::Column;
 use dataflow::ops;
 use dataflow::ops::filter::FilterCondition;
 use dataflow::ops::grouped::aggregate::Aggregation as AggregationKind;
@@ -82,7 +83,7 @@ impl MirNode {
                     .collect();
                 let new_columns: Vec<Column> = new_column_specs
                     .iter()
-                    .map(|&(ref cs, _)| cs.column.clone())
+                    .map(|&(ref cs, _)| Column::from(&cs.column))
                     .collect();
 
                 assert_eq!(
@@ -215,7 +216,10 @@ impl MirNode {
             // and assume that only one column of the same name ever exists at the same time.
             MirNodeType::Base {
                 ref column_specs, ..
-            } => match column_specs.iter().rposition(|cs| cs.0.column == *c) {
+            } => match column_specs
+                .iter()
+                .rposition(|cs| Column::from(&cs.0.column) == *c)
+            {
                 None => panic!(
                     "tried to look up non-existent column {:?} in {}",
                     c, self.name
@@ -274,14 +278,8 @@ impl MirNode {
     }
 
     pub fn referenced_columns(&self) -> Vec<Column> {
-        // all projected columns, minus those with aliases, which we add with their original names
-        // below. This is important because we'll otherwise end up searching (and fail to find)
-        // aliased columns further up in the MIR graph.
-        let mut columns: Vec<Column> = self.columns
-            .iter()
-            .filter(|c| c.alias.is_none() || c.function.is_some()) // alias ok if computed column
-            .cloned()
-            .collect();
+        // all projected columns
+        let mut columns: Vec<Column> = self.columns.iter().cloned().collect();
 
         // + any parent columns referenced internally by the operator
         match self.inner {

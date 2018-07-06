@@ -1,13 +1,12 @@
 use controller::sql::mir::SqlToMirConverter;
 use controller::sql::query_graph::{QueryGraph, QueryGraphEdge};
-use mir::MirNodeRef;
-use nom_sql::FunctionExpression;
+use mir::{Column, MirNodeRef};
 use nom_sql::FunctionExpression::*;
-use nom_sql::{Column, ConditionExpression};
+use nom_sql::{self, ConditionExpression, FunctionExpression};
 use std::collections::HashMap;
 use std::ops::Deref;
 
-fn target_columns_from_computed_column(computed_col: &Column) -> &Column {
+fn target_columns_from_computed_column(computed_col: &nom_sql::Column) -> Column {
     use nom_sql::FunctionExpression::*;
 
     match *computed_col.function.as_ref().unwrap().deref() {
@@ -16,7 +15,7 @@ fn target_columns_from_computed_column(computed_col: &Column) -> &Column {
         | GroupConcat(ref col, _)
         | Max(ref col)
         | Min(ref col)
-        | Sum(ref col, _) => col,
+        | Sum(ref col, _) => Column::from(col),
         CountStar => {
             // see comment re COUNT(*) rewriting in make_aggregation_node
             panic!("COUNT(*) should have been rewritten earlier!")
@@ -40,29 +39,31 @@ pub fn make_predicates_above_grouped<'a>(
 
     match qg.relations.get("computed_columns") {
         None => (),
-        Some(computed_cols_cgn) => for ccol in &computed_cols_cgn.columns {
-            let over_col = target_columns_from_computed_column(ccol);
-            let over_table = over_col.table.as_ref().unwrap().as_str();
+        Some(computed_cols_cgn) => {
+            for ccol in &computed_cols_cgn.columns {
+                let over_col = target_columns_from_computed_column(ccol);
+                let over_table = over_col.table.as_ref().unwrap().as_str();
 
-            if column_to_predicates.contains_key(&over_col) {
-                let parent = match *prev_node {
-                    Some(ref p) => p.clone(),
-                    None => node_for_rel[over_table].clone(),
-                };
+                if column_to_predicates.contains_key(&over_col) {
+                    let parent = match *prev_node {
+                        Some(ref p) => p.clone(),
+                        None => node_for_rel[over_table].clone(),
+                    };
 
-                let new_mpns = mir_converter.predicates_above_group_by(
-                    &format!("{}_n{}", name, node_count),
-                    &column_to_predicates,
-                    over_col.clone(),
-                    parent,
-                    &mut created_predicates,
-                );
+                    let new_mpns = mir_converter.predicates_above_group_by(
+                        &format!("{}_n{}", name, node_count),
+                        &column_to_predicates,
+                        over_col,
+                        parent,
+                        &mut created_predicates,
+                    );
 
-                node_count += predicates_above_group_by_nodes.len();
-                *prev_node = Some(new_mpns.last().unwrap().clone());
-                predicates_above_group_by_nodes.extend(new_mpns);
+                    node_count += predicates_above_group_by_nodes.len();
+                    *prev_node = Some(new_mpns.last().unwrap().clone());
+                    predicates_above_group_by_nodes.extend(new_mpns);
+                }
             }
-        },
+        }
     }
 
     (created_predicates, predicates_above_group_by_nodes)
@@ -96,30 +97,30 @@ pub fn make_grouped(
                 let computed_col = if is_reconcile {
                     let func = computed_col.function.as_ref().unwrap();
                     let new_func = match *func.deref() {
-                        Sum(ref col, b) => FunctionExpression::Sum(
-                            Column::from(
-                                format!("{}.sum({})", col.clone().table.unwrap(), col.name)
-                                    .as_ref(),
-                            ),
-                            b,
-                        ),
-                        Count(ref col, b) => FunctionExpression::Sum(
-                            Column::from(
-                                format!("{}.count({})", col.clone().table.unwrap(), col.name)
-                                    .as_ref(),
-                            ),
-                            b,
-                        ),
-                        Max(ref col) => FunctionExpression::Max(Column::from(
-                            format!("{}.max({})", col.clone().table.unwrap(), col.name).as_ref(),
-                        )),
-                        Min(ref col) => FunctionExpression::Min(Column::from(
-                            format!("{}.min({})", col.clone().table.unwrap(), col.name).as_ref(),
-                        )),
+                        Sum(ref col, b) => {
+                            let colname =
+                                format!("{}.sum({})", col.table.as_ref().unwrap(), col.name);
+                            FunctionExpression::Sum(nom_sql::Column::from(colname.as_ref()), b)
+                        }
+                        Count(ref col, b) => {
+                            let colname =
+                                format!("{}.count({})", col.clone().table.unwrap(), col.name);
+                            FunctionExpression::Sum(nom_sql::Column::from(colname.as_ref()), b)
+                        }
+                        Max(ref col) => {
+                            let colname =
+                                format!("{}.max({})", col.clone().table.unwrap(), col.name);
+                            FunctionExpression::Max(nom_sql::Column::from(colname.as_ref()))
+                        }
+                        Min(ref col) => {
+                            let colname =
+                                format!("{}.min({})", col.clone().table.unwrap(), col.name);
+                            FunctionExpression::Min(nom_sql::Column::from(colname.as_ref()))
+                        }
                         _ => unimplemented!(),
                     };
 
-                    let new_fn_col = Column {
+                    let new_fn_col = nom_sql::Column {
                         function: Some(Box::new(new_func)),
                         name: computed_col.name.clone(),
                         alias: computed_col.alias.clone(),
@@ -148,12 +149,12 @@ pub fn make_grouped(
 
                 let (parent_node, group_cols) = if !gb_edges.is_empty() {
                     // Function columns with GROUP BY clause
-                    let mut gb_cols: Vec<&Column> = Vec::new();
+                    let mut gb_cols: Vec<&nom_sql::Column> = Vec::new();
 
                     for e in &gb_edges {
                         match **e {
                             QueryGraphEdge::GroupBy(ref gbc) => {
-                                let table = gbc.into_iter().next().unwrap().table.as_ref().unwrap();
+                                let table = gbc.first().unwrap().table.as_ref().unwrap();
                                 assert!(
                                     gbc.into_iter().all(|c| c.table.as_ref().unwrap() == table)
                                 );
@@ -174,7 +175,7 @@ pub fn make_grouped(
                     let gb_and_param_cols: Vec<Column> = gb_cols
                         .into_iter()
                         .chain(param_cols.into_iter())
-                        .cloned()
+                        .map(|c| Column::from(c))
                         .collect();
 
                     (parent_node, gb_and_param_cols)
@@ -191,15 +192,21 @@ pub fn make_grouped(
                         let fn_col = target_columns_from_computed_column(&computed_col);
 
                         let proj =
-                            mir_converter.make_projection_helper(&proj_name, parent_node, fn_col);
+                            mir_converter.make_projection_helper(&proj_name, parent_node, &fn_col);
 
                         func_nodes.push(proj.clone());
                         node_count += 1;
 
-                        let bogo_group_col = Column::from("grp");
+                        let bogo_group_col = Column::new(None, "grp");
                         (vec![bogo_group_col], proj)
                     } else {
-                        (proj_cols_from_target_table.clone(), parent_node)
+                        (
+                            proj_cols_from_target_table
+                                .into_iter()
+                                .map(|c| Column::from(c))
+                                .collect(),
+                            parent_node,
+                        )
                     };
 
                     (parent_node, group_cols)
@@ -207,7 +214,7 @@ pub fn make_grouped(
 
                 let n = mir_converter.make_function_node(
                     name,
-                    &computed_col,
+                    &Column::from(computed_col),
                     group_cols.iter().collect(),
                     parent_node,
                 );

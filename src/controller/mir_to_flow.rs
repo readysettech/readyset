@@ -1,5 +1,5 @@
 use nom_sql::{
-    ArithmeticBase, ArithmeticExpression, Column, ColumnConstraint, ColumnSpecification, OrderType,
+    ArithmeticBase, ArithmeticExpression, ColumnConstraint, ColumnSpecification, OrderType,
 };
 use std::collections::HashMap;
 
@@ -12,7 +12,7 @@ use dataflow::ops::project::{Project, ProjectExpression, ProjectExpressionBase};
 use dataflow::{node, ops};
 use mir::node::{GroupedNodeType, MirNode, MirNodeType};
 use mir::query::{MirQuery, QueryFlowParts};
-use mir::{FlowNode, MirNodeRef};
+use mir::{Column, FlowNode, MirNodeRef};
 
 pub fn mir_query_to_flow_parts(mir_query: &mut MirQuery, mig: &mut Migration) -> QueryFlowParts {
     use std::collections::VecDeque;
@@ -368,8 +368,7 @@ pub(crate) fn make_base_node(
 
     let columns: Vec<_> = column_specs
         .iter()
-        .map(|&(ref cs, _)| &cs.column)
-        .cloned()
+        .map(|&(ref cs, _)| Column::from(&cs.column))
         .collect();
     let column_names = column_names(columns.as_slice());
 
@@ -395,7 +394,7 @@ pub(crate) fn make_base_node(
                 //assert_eq!(pkc.table.as_ref().unwrap(), name);
                 column_specs
                     .iter()
-                    .position(|&(ref cs, _)| cs.column == *pkc)
+                    .position(|&(ref cs, _)| Column::from(&cs.column) == *pkc)
                     .unwrap()
             })
             .collect();
@@ -682,7 +681,7 @@ pub(crate) fn make_latest_node(
 fn generate_projection_base(parent: &MirNodeRef, base: &ArithmeticBase) -> ProjectExpressionBase {
     match *base {
         ArithmeticBase::Column(ref column) => {
-            let column_id = parent.borrow().column_id_for_column(column);
+            let column_id = parent.borrow().column_id_for_column(&Column::from(column));
             ProjectExpressionBase::Column(column_id)
         }
         ArithmeticBase::Scalar(ref literal) => {

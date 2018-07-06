@@ -1,7 +1,7 @@
 use basics::{DataType, NodeIndex};
 use mir::node::{GroupedNodeType, MirNode, MirNodeType};
 use mir::query::MirQuery;
-pub use mir::MirNodeRef;
+pub use mir::{Column, MirNodeRef};
 // TODO(malte): remove if possible
 use dataflow::ops::filter::FilterCondition;
 use dataflow::ops::join::JoinType;
@@ -10,7 +10,7 @@ pub use mir::FlowNode;
 use controller::sql::query_graph::{OutputColumn, QueryGraph};
 use controller::sql::query_signature::Signature;
 use nom_sql::{
-    ArithmeticExpression, Column, ColumnSpecification, CompoundSelectOperator, ConditionBase,
+    ArithmeticExpression, ColumnSpecification, CompoundSelectOperator, ConditionBase,
     ConditionExpression, ConditionTree, Literal, Operator, SqlQuery, TableKey,
 };
 use nom_sql::{LimitClause, OrderClause, SelectStatement};
@@ -29,13 +29,12 @@ mod join;
 mod rewrite;
 mod security;
 
-fn sanitize_leaf_column(mut c: Column, view_name: &str) -> Column {
+fn sanitize_leaf_column(c: &mut Column, view_name: &str) {
+    if c.table.as_ref().map(|s| s.as_str()) != Some(view_name) && !c.aliases.contains(c) {
+        c.aliases.push(c.clone());
+    }
     c.table = Some(view_name.to_string());
     c.function = None;
-    if c.alias.is_some() && *c.alias.as_ref().unwrap() == c.name {
-        c.alias = None;
-    }
-    c
 }
 
 /// Returns all collumns used in a predicate
@@ -49,7 +48,7 @@ fn predicate_columns(ce: &ConditionExpression) -> HashSet<Column> {
             cols.extend(predicate_columns(&ct.right));
         }
         Base(ConditionBase::Field(ref c)) => {
-            cols.insert(c.clone());
+            cols.insert(Column::from(c));
         }
         Bracketed(ref ce) => {
             cols.extend(predicate_columns(&ce));
@@ -77,8 +76,8 @@ fn value_columns_needed_for_predicates(
                 Column {
                     name: ac.name.clone(),
                     table: ac.table.clone(),
-                    alias: None,
                     function: None,
+                    aliases: vec![],
                 },
                 oc.clone(),
             )),
@@ -86,8 +85,8 @@ fn value_columns_needed_for_predicates(
                 Column {
                     name: lc.name.clone(),
                     table: lc.table.clone(),
-                    alias: None,
                     function: None,
+                    aliases: vec![],
                 },
                 oc.clone(),
             )),
@@ -222,7 +221,7 @@ impl SqlToMirConverter {
             None => {
                 // Might occur if the column doesn't exist in the parent; e.g., for aggregations.
                 // We assume that the column is appended at the end.
-                columns.push(l);
+                columns.push(Column::from(l));
                 filters.push(f);
             }
             Some(pos) => {
@@ -283,7 +282,10 @@ impl SqlToMirConverter {
             columns
                 .clone()
                 .into_iter()
-                .map(|c| sanitize_leaf_column(c, name))
+                .map(|mut c| {
+                    sanitize_leaf_column(&mut c, name);
+                    c
+                })
                 .collect(),
             MirNodeType::Leaf {
                 node: parent.clone(),
@@ -337,7 +339,10 @@ impl SqlToMirConverter {
         let sanitized_columns: Vec<Column> = columns
             .clone()
             .into_iter()
-            .map(|c| sanitize_leaf_column(c, name))
+            .map(|mut c| {
+                sanitize_leaf_column(&mut c, name);
+                c
+            })
             .collect();
 
         if limit.is_some() {
@@ -673,10 +678,10 @@ impl SqlToMirConverter {
                     MirNode::new(
                         name,
                         self.schema_version,
-                        cols.iter().map(|cs| cs.column.clone()).collect(),
+                        cols.iter().map(|cs| Column::from(&cs.column)).collect(),
                         MirNodeType::Base {
                             column_specs: cols.iter().map(|cs| (cs.clone(), None)).collect(),
-                            keys: key_cols.clone(),
+                            keys: key_cols.iter().map(|kc| Column::from(kc)).collect(),
                             adapted_over: None,
                         },
                         vec![],
@@ -689,7 +694,7 @@ impl SqlToMirConverter {
             MirNode::new(
                 name,
                 self.schema_version,
-                cols.iter().map(|cs| cs.column.clone()).collect(),
+                cols.iter().map(|cs| Column::from(&cs.column)).collect(),
                 MirNodeType::Base {
                     column_specs: cols.iter().map(|cs| (cs.clone(), None)).collect(),
                     keys: vec![],
@@ -815,14 +820,20 @@ impl SqlToMirConverter {
         use dataflow::ops::grouped::extremum::Extremum;
         use nom_sql::FunctionExpression::*;
 
-        let mknode = |over: &Column, t: GroupedNodeType| {
+        let mknode = |over: Column, t: GroupedNodeType| {
             self.make_grouped_node(name, &func_col, (parent, &over), group_cols, t)
         };
 
         let func = func_col.function.as_ref().unwrap();
         match *func.deref() {
-            Sum(ref col, _) => mknode(col, GroupedNodeType::Aggregation(Aggregation::SUM)),
-            Count(ref col, _) => mknode(col, GroupedNodeType::Aggregation(Aggregation::COUNT)),
+            Sum(ref col, _) => mknode(
+                Column::from(col),
+                GroupedNodeType::Aggregation(Aggregation::SUM),
+            ),
+            Count(ref col, _) => mknode(
+                Column::from(col),
+                GroupedNodeType::Aggregation(Aggregation::COUNT),
+            ),
             CountStar => {
                 // XXX(malte): there is no "over" column, but our aggregation operators' API
                 // requires one to be specified, so we earlier rewrote it to use the last parent
@@ -832,11 +843,12 @@ impl SqlToMirConverter {
                 // (but we also don't have a NULL value, so maybe we're okay).
                 panic!("COUNT(*) should have been rewritten earlier!")
             }
-            Max(ref col) => mknode(col, GroupedNodeType::Extremum(Extremum::MAX)),
-            Min(ref col) => mknode(col, GroupedNodeType::Extremum(Extremum::MIN)),
-            GroupConcat(ref col, ref separator) => {
-                mknode(col, GroupedNodeType::GroupConcat(separator.clone()))
-            }
+            Max(ref col) => mknode(Column::from(col), GroupedNodeType::Extremum(Extremum::MAX)),
+            Min(ref col) => mknode(Column::from(col), GroupedNodeType::Extremum(Extremum::MIN)),
+            GroupConcat(ref col, ref separator) => mknode(
+                Column::from(col),
+                GroupedNodeType::GroupConcat(separator.clone()),
+            ),
             _ => unimplemented!(),
         }
     }
@@ -853,23 +865,6 @@ impl SqlToMirConverter {
 
         // Resolve column IDs in parent
         let over_col = over.1;
-
-        // move alias to name in computed column (which needs not to
-        // match against a parent node column, and is often aliased)
-        let computed_col = match computed_col.alias {
-            None => Column {
-                name: computed_col.name.clone(),
-                alias: None,
-                table: computed_col.table.clone(),
-                function: None,
-            },
-            Some(ref a) => Column {
-                name: a.clone(),
-                alias: None,
-                table: computed_col.table.clone(),
-                function: None,
-            },
-        };
 
         // The function node's set of output columns is the group columns plus the function
         // column
@@ -959,8 +954,8 @@ impl SqlToMirConverter {
             ConditionExpression::Base(ConditionBase::Field(ref f)) => f.clone(),
             _ => unimplemented!(),
         };
-        left_join_columns.push(l_col);
-        right_join_columns.push(r_col);
+        left_join_columns.push(Column::from(l_col));
+        right_join_columns.push(Column::from(r_col));
 
         assert_eq!(left_join_columns.len(), right_join_columns.len());
         let inner = match kind {
@@ -1022,55 +1017,25 @@ impl SqlToMirConverter {
         let fields = proj_cols
             .clone()
             .into_iter()
-            .map(|c| match c.alias {
-                Some(ref a) => Column {
-                    name: a.clone(),
-                    table: if is_leaf {
-                        // if this is the leaf node of a query, it represents a view, so we rewrite
-                        // the table name here.
-                        Some(String::from(name))
-                    } else {
-                        c.table.clone()
-                    },
-                    alias: None,
-                    function: if is_leaf { None } else { c.function.clone() },
-                },
-                None => {
-                    // if this is the leaf node of a query, it represents a view, so we rewrite the
-                    // table name here.
-                    if is_leaf {
-                        sanitize_leaf_column(c.clone(), name)
-                    } else {
-                        c.clone()
-                    }
+            .map(|c| {
+                let mut c = c.clone();
+                // if this is the leaf node of a query, it represents a view, so we rewrite the
+                // table name here.
+                if is_leaf {
+                    sanitize_leaf_column(&mut c, name);
                 }
+                c
             })
-            .chain(names.into_iter().map(|n| Column {
-                name: n,
-                alias: None,
-                table: if is_leaf {
-                    Some(String::from(name))
+            .chain(names.into_iter().map(|n| {
+                if is_leaf {
+                    Column::new(Some(&name), &n)
                 } else {
-                    None
-                },
-                function: None,
+                    Column::new(None, &n)
+                }
             }))
             .collect();
 
-        // remove aliases from emit columns because they are later compared to parent node columns
-        // and need to be equal. Note that `fields`, which holds the column names applied,
-        // preserves the aliases.
-        let emit_cols = proj_cols
-            .into_iter()
-            .cloned()
-            .map(|mut c| {
-                match c.alias {
-                    Some(_) => c.alias = None,
-                    None => (),
-                };
-                c
-            })
-            .collect();
+        let emit_cols = proj_cols.into_iter().cloned().collect();
 
         MirNode::new(
             name,
@@ -1097,7 +1062,12 @@ impl SqlToMirConverter {
         let combined_columns = parent.borrow().columns().iter().cloned().collect();
 
         let order = match *order {
-            Some(ref o) => Some(o.columns.clone()),
+            Some(ref o) => Some(
+                o.columns
+                    .iter()
+                    .map(|(c, o)| (Column::from(c), o.clone()))
+                    .collect(),
+            ),
             None => None,
         };
 
@@ -1563,14 +1533,12 @@ impl SqlToMirConverter {
                         nodes_added.push(bogo_project.clone());
                         final_node = bogo_project;
 
-                        vec![Column {
-                            name: "bogokey".to_owned(),
-                            table: None,
-                            alias: None,
-                            function: None,
-                        }]
+                        vec![Column::new(None, "bogokey")]
                     } else {
-                        qg.parameters().into_iter().cloned().collect()
+                        qg.parameters()
+                            .into_iter()
+                            .map(|c| Column::from(c))
+                            .collect()
                     };
 
                     let topk_node = self.make_topk_node(
@@ -1616,12 +1584,7 @@ impl SqlToMirConverter {
                     .iter()
                     .filter_map(|oc| match *oc {
                         OutputColumn::Arithmetic(_) => None,
-                        OutputColumn::Data(ref c) => Some(Column {
-                            name: c.name.clone(),
-                            alias: c.alias.clone(),
-                            table: c.table.clone(),
-                            function: None,
-                        }),
+                        OutputColumn::Data(ref c) => Some(Column::from(c)),
                         OutputColumn::Literal(_) => None,
                     })
                     .collect()
@@ -1634,8 +1597,9 @@ impl SqlToMirConverter {
             };
 
             for pc in qg.parameters() {
-                if !projected_columns.contains(pc) {
-                    projected_columns.push(pc.clone());
+                let pc = Column::from(pc);
+                if !projected_columns.contains(&pc) {
+                    projected_columns.push(pc);
                 }
             }
 
@@ -1652,12 +1616,7 @@ impl SqlToMirConverter {
                         if !already_computed.contains(oc) {
                             Some((ac.name.clone(), ac.expression.clone()))
                         } else {
-                            projected_columns.push(Column {
-                                name: ac.name.clone(),
-                                table: None,
-                                alias: None,
-                                function: None,
-                            });
+                            projected_columns.push(Column::new(None, &ac.name));
                             None
                         }
                     }
@@ -1675,12 +1634,7 @@ impl SqlToMirConverter {
                         if !already_computed.contains(oc) {
                             Some((lc.name.clone(), DataType::from(&lc.value)))
                         } else {
-                            projected_columns.push(Column {
-                                name: lc.name.clone(),
-                                table: None,
-                                alias: None,
-                                function: None,
-                            });
+                            projected_columns.push(Column::new(None, &lc.name));
                             None
                         }
                     }
@@ -1690,7 +1644,7 @@ impl SqlToMirConverter {
             // if this query does not have any parameters, we must add a bogokey
             let has_bogokey = if has_leaf && qg.parameters().is_empty() {
                 // only add the bogokey if we haven't already added it prior to a TopK above
-                if !projected_columns.contains(&Column::from("bogokey")) {
+                if !projected_columns.contains(&Column::new(None, "bogokey")) {
                     projected_literals.push(("bogokey".into(), DataType::from(0 as i32)));
                 }
                 true
@@ -1723,18 +1677,19 @@ impl SqlToMirConverter {
                     .columns()
                     .iter()
                     .cloned()
-                    .map(|c| sanitize_leaf_column(c, name))
+                    .map(|mut c| {
+                        sanitize_leaf_column(&mut c, name);
+                        c
+                    })
                     .collect();
 
                 let query_params = if has_bogokey {
-                    vec![Column {
-                        name: String::from("bogokey"),
-                        alias: None,
-                        table: None,
-                        function: None,
-                    }]
+                    vec![Column::new(None, "bogokey")]
                 } else {
-                    qg.parameters().into_iter().cloned().collect()
+                    qg.parameters()
+                        .into_iter()
+                        .map(|c| Column::from(c))
+                        .collect()
                 };
 
                 let leaf_node = MirNode::new(

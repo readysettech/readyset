@@ -1,4 +1,4 @@
-use nom_sql::Column;
+use column::Column;
 use query::MirQuery;
 use MirNodeRef;
 
