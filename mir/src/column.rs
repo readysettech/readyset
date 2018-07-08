@@ -2,7 +2,7 @@ use std::cmp::Ordering;
 
 use nom_sql::{self, FunctionExpression};
 
-#[derive(Clone, Debug, Eq, Hash)]
+#[derive(Clone, Debug, Hash)]
 pub struct Column {
     pub table: Option<String>,
     pub name: String,
@@ -96,6 +96,8 @@ impl PartialEq for Column {
     }
 }
 
+impl Eq for Column {}
+
 impl Ord for Column {
     fn cmp(&self, other: &Column) -> Ordering {
         if self.table.is_some() && other.table.is_some() {
@@ -178,5 +180,9 @@ mod tests {
 
         // column is equal to its aliases
         assert_eq!(ac, c);
+
+        // column with aliases is equal to the same column without aliases set
+        let ac_no_alias = Column::new(Some("t"), "al");
+        assert_eq!(ac, ac_no_alias);
     }
 }
