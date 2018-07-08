@@ -19,6 +19,10 @@ impl Column {
             aliases: vec![],
         }
     }
+
+    pub fn add_alias(&mut self, alias: &Column) {
+        self.aliases.push(alias.clone());
+    }
 }
 
 impl From<nom_sql::Column> for Column {
