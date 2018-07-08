@@ -619,7 +619,7 @@ pub(crate) fn make_join_node(
         .expect(&format!(
             "missing right-side join column {:?} in {:?}",
             on_left.first().unwrap(),
-            projected_cols_left
+            projected_cols_right
         ));
 
     let join_config = projected_cols_left
