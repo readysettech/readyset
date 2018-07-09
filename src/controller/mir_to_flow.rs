@@ -609,7 +609,7 @@ pub(crate) fn make_join_node(
         .iter()
         .position(|lc| lc == on_left.first().unwrap())
         .expect(&format!(
-            "missing left-side join column {:?} in {:?}",
+            "missing left-side join column {:#?} in {:#?}",
             on_left.first().unwrap(),
             projected_cols_left
         ));
@@ -617,7 +617,7 @@ pub(crate) fn make_join_node(
         .iter()
         .position(|rc| rc == on_right.first().unwrap())
         .expect(&format!(
-            "missing right-side join column {:?} in {:?}",
+            "missing right-side join column {:#?} in {:#?}",
             on_left.first().unwrap(),
             projected_cols_right
         ));
