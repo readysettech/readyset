@@ -946,16 +946,39 @@ impl SqlToMirConverter {
 
         // equi-join only
         assert!(jp.operator == Operator::Equal || jp.operator == Operator::In);
-        let l_col = match *jp.left {
-            ConditionExpression::Base(ConditionBase::Field(ref f)) => f.clone(),
+        let mut l_col = match *jp.left {
+            ConditionExpression::Base(ConditionBase::Field(ref f)) => Column::from(f),
             _ => unimplemented!(),
         };
         let r_col = match *jp.right {
-            ConditionExpression::Base(ConditionBase::Field(ref f)) => f.clone(),
+            ConditionExpression::Base(ConditionBase::Field(ref f)) => Column::from(f),
             _ => unimplemented!(),
         };
-        left_join_columns.push(Column::from(l_col));
-        right_join_columns.push(Column::from(r_col));
+
+        // don't duplicate the join column in the output, but instead add aliases to the columns
+        // that represent it going forward (viz., the left-side join column)
+        l_col.add_alias(&r_col);
+        // add the alias to all instances of `l_col` in `fields` (there might be more than one
+        // if `l_col` is explicitly projected multiple times)
+        let fields: Vec<Column> = fields
+            .into_iter()
+            .filter_map(|mut f| {
+                if f == l_col {
+                    // add alias for right-side column to any left-side column
+                    f.add_alias(&r_col);
+                    Some(f)
+                } else if f == r_col {
+                    // drop instances of right-side column
+                    None
+                } else {
+                    // keep unaffected columns
+                    Some(f)
+                }
+            })
+            .collect();
+
+        left_join_columns.push(l_col);
+        right_join_columns.push(r_col);
 
         assert_eq!(left_join_columns.len(), right_join_columns.len());
         let inner = match kind {
