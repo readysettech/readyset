@@ -922,6 +922,10 @@ impl SqlToMirConverter {
         right_node: MirNodeRef,
         kind: JoinType,
     ) -> MirNodeRef {
+        // TODO(malte): this is where we overproject join columns in order to increase reuse
+        // opportunities. Technically, we need to only project those columns here that the query
+        // actually needs; at a minimum, we could start with just the join colums, relying on the
+        // automatic column pull-down to retrieve the remaining columns required.
         let projected_cols_left = left_node
             .borrow()
             .columns()
