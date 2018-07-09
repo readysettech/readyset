@@ -963,13 +963,16 @@ impl SqlToMirConverter {
         let fields: Vec<Column> = fields
             .into_iter()
             .filter_map(|mut f| {
-                if f == l_col {
-                    // add alias for right-side column to any left-side column
-                    f.add_alias(&r_col);
-                    Some(f)
-                } else if f == r_col {
+                if f == r_col {
                     // drop instances of right-side column
                     None
+                } else if f == l_col {
+                    // add alias for right-side column to any left-side column
+                    // N.B.: since `l_col` is already aliased, need to check this *after* checking
+                    // for equivalence with `r_col` (by now, `l_col` == `r_col` via alias), so
+                    // `f == l_col` also triggers if `f` is in `l_col.aliases`.
+                    f.add_alias(&r_col);
+                    Some(f)
                 } else {
                     // keep unaffected columns
                     Some(f)

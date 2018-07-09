@@ -573,20 +573,18 @@ pub(crate) fn make_join_node(
 
     let column_names = column_names(columns);
 
-    let projected_cols_left: Vec<Column> = left
-        .borrow()
-        .columns
+    let (projected_cols_left, rest): (Vec<Column>, Vec<Column>) = proj_cols
         .iter()
-        .filter(|c| proj_cols.contains(c))
         .cloned()
-        .collect();
-    let projected_cols_right: Vec<Column> = right
-        .borrow()
-        .columns
-        .iter()
-        .filter(|c| proj_cols.contains(c))
-        .cloned()
-        .collect();
+        .partition(|c| left.borrow().columns.contains(c));
+    let (projected_cols_right, rest): (Vec<Column>, Vec<Column>) = rest
+        .into_iter()
+        .partition(|c| right.borrow().columns.contains(c));
+    assert!(
+        rest.is_empty(),
+        "could not resolve output columns projected from join: {:?}",
+        rest
+    );
 
     assert_eq!(
         projected_cols_left.len() + projected_cols_right.len(),
@@ -605,38 +603,54 @@ pub(crate) fn make_join_node(
     // the `r1.a = r2.b` join predicate will create a join node with columns: r1.a, r1.b, r2.a, r2,b
     // however, because the way we deal with aliases, we can't distinguish between `r1.a` and `r2.a`
     // at this point in the codebase, so the `r2.a = r1.b` will join on the wrong `a` column.
-    let left_join_col_id = projected_cols_left
+    let left_join_col_id = left
+        .borrow()
+        .columns
         .iter()
         .position(|lc| lc == on_left.first().unwrap())
         .expect(&format!(
             "missing left-side join column {:#?} in {:#?}",
             on_left.first().unwrap(),
-            projected_cols_left
+            left.borrow().columns
         ));
-    let right_join_col_id = projected_cols_right
+    let right_join_col_id = right
+        .borrow()
+        .columns
         .iter()
         .position(|rc| rc == on_right.first().unwrap())
         .expect(&format!(
             "missing right-side join column {:#?} in {:#?}",
             on_left.first().unwrap(),
-            projected_cols_right
+            right.borrow().columns
         ));
 
-    let join_config = projected_cols_left
+    let join_config = left
+        .borrow()
+        .columns
         .iter()
         .enumerate()
-        .map(|(i, _)| {
+        .filter_map(|(i, c)| {
             if i == left_join_col_id {
-                JoinSource::B(i, right_join_col_id)
+                Some(JoinSource::B(i, right_join_col_id))
+            } else if projected_cols_left.contains(c) {
+                Some(JoinSource::L(i))
             } else {
-                JoinSource::L(i)
+                None
             }
         })
         .chain(
-            projected_cols_right
+            right
+                .borrow()
+                .columns
                 .iter()
                 .enumerate()
-                .map(|(i, _)| JoinSource::R(i)),
+                .filter_map(|(i, c)| {
+                    if projected_cols_right.contains(c) {
+                        Some(JoinSource::R(i))
+                    } else {
+                        None
+                    }
+                }),
         )
         .collect();
 

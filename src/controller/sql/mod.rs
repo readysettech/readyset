@@ -1034,14 +1034,11 @@ mod tests {
             );
             // join node
             let new_join_view = get_node(&inc, mig, &format!("q_{:x}_n0", qid));
-            assert_eq!(
-                new_join_view.fields(),
-                &["id", "author", "title", "id", "name"]
-            );
+            assert_eq!(new_join_view.fields(), &["id", "author", "title", "name"]);
             // leaf node
             let new_leaf_view = get_node(&inc, mig, &q.unwrap().name);
             assert_eq!(new_leaf_view.fields(), &["name", "title", "bogokey"]);
-            assert_eq!(new_leaf_view.description(), format!("π[4, 2, lit: 0]"));
+            assert_eq!(new_leaf_view.description(), format!("π[3, 2, lit: 0]"));
         });
     }
 
@@ -1533,20 +1530,65 @@ mod tests {
                 ],
             );
             let join1_view = get_node(&inc, mig, &format!("q_{:x}_n0", qid));
-            // articles join votes
-            assert_eq!(
-                join1_view.fields(),
-                &["aid", "title", "author", "id", "name"]
-            );
+            // articles join users
+            assert_eq!(join1_view.fields(), &["aid", "title", "author", "name"]);
             let join2_view = get_node(&inc, mig, &format!("q_{:x}_n1", qid));
-            // join1_view join users
+            // join1_view join vptes
             assert_eq!(
                 join2_view.fields(),
-                &["aid", "title", "author", "id", "name", "aid", "uid"]
+                &["aid", "title", "author", "name", "uid"]
             );
             // leaf view
             let leaf_view = get_node(&inc, mig, "q_3");
             assert_eq!(leaf_view.fields(), &["name", "title", "uid", "bogokey"]);
+        });
+    }
+
+    #[test]
+    fn it_incorporates_join_projecting_join_columns() {
+        // set up graph
+        let mut g = integration::build_local("it_incorporates_join_projecting_join_columns");
+        g.migrate(|mig| {
+            let mut inc = SqlIncorporator::default();
+            assert!(
+                inc.add_query("CREATE TABLE users (id int, name varchar(40));", None, mig)
+                    .is_ok()
+            );
+            assert!(
+                inc.add_query(
+                    "CREATE TABLE articles (id int, author int, title varchar(255));",
+                    None,
+                    mig
+                ).is_ok()
+            );
+            let q = "SELECT users.id, users.name, articles.author, articles.title \
+                     FROM articles, users \
+                     WHERE users.id = articles.author;";
+            let q = inc.add_query(q, None, mig);
+            assert!(q.is_ok());
+            let qid = query_id_hash(
+                &["articles", "users"],
+                &[&Column::from("articles.author"), &Column::from("users.id")],
+                &[
+                    &Column::from("users.id"),
+                    &Column::from("users.name"),
+                    &Column::from("articles.author"),
+                    &Column::from("articles.title"),
+                ],
+            );
+            // join node
+            let new_join_view = get_node(&inc, mig, &format!("q_{:x}_n0", qid));
+            assert_eq!(new_join_view.fields(), &["id", "author", "title", "name"]);
+            // leaf node
+            let new_leaf_view = get_node(&inc, mig, &q.unwrap().name);
+            assert_eq!(
+                new_leaf_view.fields(),
+                &["id", "name", "author", "title", "bogokey"]
+            );
+            assert_eq!(
+                new_leaf_view.description(),
+                format!("π[1, 3, 1, 2, lit: 0]")
+            );
         });
     }
 
@@ -1635,14 +1677,11 @@ mod tests {
             );
             // join node
             let new_join_view = get_node(&inc, mig, &format!("q_{:x}_n0", qid));
-            assert_eq!(
-                new_join_view.fields(),
-                &["id", "author", "title", "id", "name"]
-            );
+            assert_eq!(new_join_view.fields(), &["id", "author", "title", "name"]);
             // leaf node
             let new_leaf_view = get_node(&inc, mig, &q.unwrap().name);
             assert_eq!(new_leaf_view.fields(), &["name", "title", "bogokey"]);
-            assert_eq!(new_leaf_view.description(), format!("π[4, 2, lit: 0]"));
+            assert_eq!(new_leaf_view.description(), format!("π[3, 2, lit: 0]"));
         });
     }
 
