@@ -67,14 +67,6 @@ fn main() {
                 .help("Zookeeper connection info."),
         )
         .arg(
-            Arg::with_name("workers")
-                .short("w")
-                .long("workers")
-                .takes_value(true)
-                .default_value("1")
-                .help("Number of worker threads to run on this souplet."),
-        )
-        .arg(
             Arg::with_name("memory")
                 .short("m")
                 .long("memory")
@@ -99,14 +91,6 @@ fn main() {
             Arg::with_name("nopartial")
                 .long("no-partial")
                 .help("Disable partial"),
-        )
-        .arg(
-            Arg::with_name("readers")
-                .short("r")
-                .long("readers")
-                .takes_value(true)
-                .default_value("1")
-                .help("Number of reader threads to run on this souplet."),
         )
         .arg(
             Arg::with_name("quorum")
@@ -137,10 +121,8 @@ fn main() {
     let durability = matches.value_of("durability").unwrap();
     let listen_addr = matches.value_of("address").unwrap().parse().unwrap();
     let zookeeper_addr = matches.value_of("zookeeper").unwrap();
-    let workers = value_t_or_exit!(matches, "workers", usize);
     let memory = value_t_or_exit!(matches, "memory", usize);
     let memory_check_freq = value_t_or_exit!(matches, "memory_check_freq", u64);
-    let readers = value_t_or_exit!(matches, "readers", usize);
     let quorum = value_t_or_exit!(matches, "quorum", usize);
     let persistence_threads = value_t_or_exit!(matches, "persistence-threads", i32);
     let flush_ns = value_t_or_exit!(matches, "flush-timeout", u32);
@@ -155,11 +137,9 @@ fn main() {
         ZookeeperAuthority::new(&format!("{}/{}", zookeeper_addr, deployment_name)).unwrap();
     let mut builder = ControllerBuilder::default();
     builder.set_listen_addr(listen_addr);
-    builder.set_worker_threads(workers);
     if memory > 0 {
         builder.set_memory_limit(memory, Duration::from_millis(memory_check_freq));
     }
-    builder.set_read_threads(readers);
     builder.set_sharding(sharding);
     builder.set_quorum(quorum);
     if matches.is_present("nopartial") {
@@ -191,5 +171,5 @@ fn main() {
         builder.log_with(log);
     }
 
-    builder.build(Arc::new(authority)).wait();
+    builder.build(Arc::new(authority)).unwrap().wait();
 }

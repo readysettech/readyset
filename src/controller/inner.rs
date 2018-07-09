@@ -13,17 +13,32 @@ use std::{io, time};
 use api::builders::*;
 use api::ActivationResult;
 use controller::migrate::materialization::Materializations;
-use controller::{
-    ControllerState, DomainHandle, Migration, Recipe, WorkerIdentifier, WorkerStatus,
-};
-use coordination::{CoordinationMessage, CoordinationPayload};
+use controller::{ControllerState, DomainHandle, Migration, Recipe, WorkerIdentifier};
+use coordination::CoordinationMessage;
 
-use hyper::{self, StatusCode};
+use hyper::{self, Method, StatusCode};
 use mio::net::TcpListener;
 use petgraph;
 use petgraph::visit::Bfs;
 use slog;
 use std::mem;
+
+#[derive(Clone)]
+pub(crate) struct WorkerStatus {
+    pub(crate) healthy: bool,
+    last_heartbeat: Instant,
+    pub(crate) sender: Arc<Mutex<TcpSender<CoordinationMessage>>>,
+}
+
+impl WorkerStatus {
+    pub fn new(sender: Arc<Mutex<TcpSender<CoordinationMessage>>>) -> Self {
+        WorkerStatus {
+            healthy: true,
+            last_heartbeat: Instant::now(),
+            sender,
+        }
+    }
+}
 
 /// `Controller` is the core component of the alternate Soup implementation.
 ///
@@ -110,26 +125,6 @@ pub(crate) fn graphviz(graph: &Graph, materializations: &Materializations) -> St
 }
 
 impl ControllerInner {
-    pub fn coordination_message(&mut self, msg: CoordinationMessage) {
-        trace!(self.log, "Received {:?}", msg);
-        let process = match msg.payload {
-            CoordinationPayload::Register {
-                ref addr,
-                ref read_listen_addr,
-                ..
-            } => self.handle_register(&msg, addr, read_listen_addr.clone()),
-            CoordinationPayload::Heartbeat => self.handle_heartbeat(&msg),
-            CoordinationPayload::DomainBooted(..) => Ok(()),
-            _ => unimplemented!(),
-        };
-        match process {
-            Ok(_) => (),
-            Err(e) => error!(self.log, "failed to handle message {:?}: {:?}", msg, e),
-        }
-
-        self.check_worker_liveness();
-    }
-
     pub fn external_request<A: Authority + 'static>(
         &mut self,
         method: hyper::Method,
@@ -141,11 +136,11 @@ impl ControllerInner {
         use serde_json as json;
 
         match (&method, path.as_ref()) {
-            (&hyper::Method::GET, "/graph") => return Ok(Ok(self.graphviz())),
-            (&hyper::Method::POST, "/graphviz") => {
+            (&Method::GET, "/graph") => return Ok(Ok(self.graphviz())),
+            (&Method::POST, "/graphviz") => {
                 return Ok(Ok(json::to_string(&self.graphviz()).unwrap()))
             }
-            (&hyper::Method::GET, "/get_statistics") => {
+            (&Method::GET, "/get_statistics") => {
                 return Ok(Ok(json::to_string(&self.get_statistics()).unwrap()))
             }
             _ => {}
@@ -156,15 +151,13 @@ impl ControllerInner {
         }
 
         match (method, path.as_ref()) {
-            (hyper::Method::GET, "/flush_partial") => {
+            (Method::GET, "/flush_partial") => {
                 Ok(Ok(json::to_string(&self.flush_partial()).unwrap()))
             }
-            (hyper::Method::POST, "/inputs") => Ok(Ok(json::to_string(&self.inputs()).unwrap())),
-            (hyper::Method::POST, "/outputs") => Ok(Ok(json::to_string(&self.outputs()).unwrap())),
-            (hyper::Method::GET, "/instances") => {
-                Ok(Ok(json::to_string(&self.get_instances()).unwrap()))
-            }
-            (hyper::Method::GET, "/nodes") => {
+            (Method::POST, "/inputs") => Ok(Ok(json::to_string(&self.inputs()).unwrap())),
+            (Method::POST, "/outputs") => Ok(Ok(json::to_string(&self.outputs()).unwrap())),
+            (Method::GET, "/instances") => Ok(Ok(json::to_string(&self.get_instances()).unwrap())),
+            (Method::GET, "/nodes") => {
                 // TODO(malte): this is a pretty yucky hack, but hyper doesn't provide easy access
                 // to individual query variables unfortunately. We'll probably want to factor this
                 // out into a helper method.
@@ -193,37 +186,37 @@ impl ControllerInner {
                         .collect::<Vec<_>>(),
                 ).unwrap()))
             }
-            (hyper::Method::POST, "/table_builder") => json::from_slice(&body)
+            (Method::POST, "/table_builder") => json::from_slice(&body)
                 .map_err(|_| StatusCode::BAD_REQUEST)
                 .map(|args| Ok(json::to_string(&self.table_builder(args)).unwrap())),
-            (hyper::Method::POST, "/view_builder") => json::from_slice(&body)
+            (Method::POST, "/view_builder") => json::from_slice(&body)
                 .map_err(|_| StatusCode::BAD_REQUEST)
                 .map(|args| Ok(json::to_string(&self.view_builder(args)).unwrap())),
-            (hyper::Method::POST, "/extend_recipe") => json::from_slice(&body)
+            (Method::POST, "/extend_recipe") => json::from_slice(&body)
                 .map_err(|_| StatusCode::BAD_REQUEST)
                 .map(|args| {
                     self.extend_recipe(authority, args)
                         .map(|r| json::to_string(&r).unwrap())
                 }),
-            (hyper::Method::POST, "/install_recipe") => json::from_slice(&body)
+            (Method::POST, "/install_recipe") => json::from_slice(&body)
                 .map_err(|_| StatusCode::BAD_REQUEST)
                 .map(|args| {
                     self.install_recipe(authority, args)
                         .map(|r| json::to_string(&r).unwrap())
                 }),
-            (hyper::Method::POST, "/set_security_config") => json::from_slice(&body)
+            (Method::POST, "/set_security_config") => json::from_slice(&body)
                 .map_err(|_| StatusCode::BAD_REQUEST)
                 .map(|args| {
                     self.set_security_config(args)
                         .map(|r| json::to_string(&r).unwrap())
                 }),
-            (hyper::Method::POST, "/create_universe") => json::from_slice(&body)
+            (Method::POST, "/create_universe") => json::from_slice(&body)
                 .map_err(|_| StatusCode::BAD_REQUEST)
                 .map(|args| {
                     self.create_universe(args)
                         .map(|r| json::to_string(&r).unwrap())
                 }),
-            (hyper::Method::POST, "/remove_node") => json::from_slice(&body)
+            (Method::POST, "/remove_node") => json::from_slice(&body)
                 .map_err(|_| StatusCode::BAD_REQUEST)
                 .map(|args| {
                     self.remove_nodes(vec![args].as_slice())
@@ -233,7 +226,7 @@ impl ControllerInner {
         }
     }
 
-    fn handle_register(
+    pub(crate) fn handle_register(
         &mut self,
         msg: &CoordinationMessage,
         remote: &SocketAddr,
@@ -328,7 +321,7 @@ impl ControllerInner {
             .expect("failed to activate original recipe");
     }
 
-    fn handle_heartbeat(&mut self, msg: &CoordinationMessage) -> Result<(), io::Error> {
+    pub(crate) fn handle_heartbeat(&mut self, msg: &CoordinationMessage) -> Result<(), io::Error> {
         match self.workers.get_mut(&msg.source) {
             None => crit!(
                 self.log,
@@ -340,6 +333,7 @@ impl ControllerInner {
             }
         }
 
+        self.check_worker_liveness();
         Ok(())
     }
 

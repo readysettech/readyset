@@ -1,5 +1,6 @@
+use fnv::FnvHashMap;
 use prelude::*;
-use std::collections::HashMap;
+use std::collections::{HashMap, VecDeque};
 
 #[derive(Serialize, Deserialize)]
 struct EgressTx {
@@ -51,7 +52,7 @@ impl Egress {
         &mut self,
         m: &mut Option<Box<Packet>>,
         shard: usize,
-        output: &mut Vec<(ReplicaAddr, Box<Packet>)>,
+        output: &mut FnvHashMap<ReplicaAddr, VecDeque<Box<Packet>>>,
     ) {
         let &mut Self {
             ref mut txs,
@@ -96,7 +97,7 @@ impl Egress {
             m.link_mut().src = unsafe { LocalNodeIndex::make(shard as u32) };
             m.link_mut().dst = tx.local;
 
-            output.push((tx.dest, m));
+            output.entry(tx.dest).or_default().push_back(m);
             if take {
                 break;
             }

@@ -5,12 +5,6 @@ use std::borrow::Cow;
 
 use rand::{Rng, ThreadRng};
 use std::sync::Arc;
-use std::time;
-
-/// If a blocking reader finds itself waiting this long for a backfill to complete, it will
-/// re-issue the replay request. To avoid the system falling over if replays are slow for a little
-/// while, waiting readers will use exponential backoff on this delay if they continue to miss.
-const RETRY_TIMEOUT_US: u64 = 1_000;
 
 /// Allocate a new end-user facing result table.
 pub(crate) fn new(cols: usize, key: &[usize]) -> (SingleReadHandle, WriteHandle) {
@@ -307,6 +301,17 @@ pub struct SingleReadHandle {
 }
 
 impl SingleReadHandle {
+    /// Trigger a replay of a missing key from a partially materialized view.
+    pub fn trigger(&self, key: &[DataType]) {
+        assert!(
+            self.trigger.is_some(),
+            "tried to trigger a replay for a fully materialized view"
+        );
+
+        // trigger a replay to populate
+        (*self.trigger.as_ref().unwrap())(key);
+    }
+
     /// Find all entries that matched the given conditions.
     ///
     /// Returned records are passed to `then` before being returned.
@@ -314,62 +319,20 @@ impl SingleReadHandle {
     /// Note that not all writes will be included with this read -- only those that have been
     /// swapped in by the writer.
     ///
-    /// If `block` is set, this call will block if it encounters a hole in partially materialized
-    /// state.
-    pub fn find_and<F, T>(
-        &self,
-        key: &[DataType],
-        mut then: F,
-        block: bool,
-    ) -> Result<(Option<T>, i64), ()>
+    /// Holes in partially materialized state are returned as `Ok((None, _))`.
+    pub fn try_find_and<F, T>(&self, key: &[DataType], mut then: F) -> Result<(Option<T>, i64), ()>
     where
         F: FnMut(&[Vec<DataType>]) -> T,
     {
-        match self.try_find_and(key, &mut then) {
-            Ok((None, ts)) if self.trigger.is_some() => {
-                if let Some(ref trigger) = self.trigger {
-                    use std::thread;
-                    let mut retry_timeout = time::Duration::from_micros(RETRY_TIMEOUT_US);
-
-                    'retry: loop {
-                        // trigger a replay to populate
-                        (*trigger)(key);
-
-                        if !block {
-                            break 'retry Ok((None, ts));
-                        }
-
-                        // wait for result to come through
-                        let now = time::Instant::now();
-                        while now.elapsed() < retry_timeout {
-                            thread::sleep(time::Duration::from_micros(10));
-                            match self.try_find_and(key, &mut then) {
-                                Ok((None, _)) => {}
-                                r => break 'retry r,
-                            }
-                        }
-
-                        // we've waited for a while
-                        // maybe the key was filled but then evicted, and we missed it?
-                        retry_timeout *= 2;
-                    }
-                } else {
-                    unreachable!()
+        self.handle
+            .meta_get_and(key, &mut then)
+            .ok_or(())
+            .map(|(mut records, meta)| {
+                if records.is_none() && self.trigger.is_none() {
+                    records = Some(then(&[]));
                 }
-            }
-            r => r,
-        }
-    }
-
-    pub(crate) fn try_find_and<F, T>(
-        &self,
-        key: &[DataType],
-        mut then: F,
-    ) -> Result<(Option<T>, i64), ()>
-    where
-        F: FnMut(&[Vec<DataType>]) -> T,
-    {
-        self.handle.meta_get_and(key, &mut then).ok_or(())
+                (records, meta)
+            })
     }
 
     #[allow(dead_code)]
@@ -401,30 +364,7 @@ impl ReadHandle {
     /// Note that not all writes will be included with this read -- only those that have been
     /// swapped in by the writer.
     ///
-    /// If `block` is set, this call will block if it encounters a hole in partially materialized
-    /// state.
-    pub fn find_and<F, T>(
-        &self,
-        key: &[DataType],
-        then: F,
-        block: bool,
-    ) -> Result<(Option<T>, i64), ()>
-    where
-        F: FnMut(&[Vec<DataType>]) -> T,
-    {
-        match *self {
-            ReadHandle::Sharded(ref shards) => {
-                assert_eq!(key.len(), 1);
-                shards[::shard_by(&key[0], shards.len())]
-                    .as_ref()
-                    .unwrap()
-                    .find_and(key, then, block)
-            }
-            ReadHandle::Singleton(ref srh) => srh.as_ref().unwrap().find_and(key, then, block),
-        }
-    }
-
-    #[allow(dead_code)]
+    /// A hole in partially materialized state is returned as `Ok((None, _))`.
     pub fn try_find_and<F, T>(&self, key: &[DataType], then: F) -> Result<(Option<T>, i64), ()>
     where
         F: FnMut(&[Vec<DataType>]) -> T,
@@ -483,31 +423,27 @@ mod tests {
         let (r, mut w) = new(2, &[0]);
 
         // initially, store is uninitialized
-        assert_eq!(r.find_and(&a[0..1], |rs| rs.len(), true), Err(()));
+        assert_eq!(r.try_find_and(&a[0..1], |rs| rs.len()), Err(()));
 
         w.swap();
 
         // after first swap, it is empty, but ready
-        assert_eq!(r.find_and(&a[0..1], |rs| rs.len(), true), Ok((None, -1)));
+        assert_eq!(r.try_find_and(&a[0..1], |rs| rs.len()), Ok((Some(0), -1)));
 
         w.add(vec![Record::Positive(a.clone())]);
 
         // it is empty even after an add (we haven't swapped yet)
-        assert_eq!(r.find_and(&a[0..1], |rs| rs.len(), true), Ok((None, -1)));
+        assert_eq!(r.try_find_and(&a[0..1], |rs| rs.len()), Ok((Some(0), -1)));
 
         w.swap();
 
         // but after the swap, the record is there!
-        assert_eq!(
-            r.find_and(&a[0..1], |rs| rs.len(), true).unwrap().0,
-            Some(1)
-        );
+        assert_eq!(r.try_find_and(&a[0..1], |rs| rs.len()).unwrap().0, Some(1));
         assert!(
-            r.find_and(
-                &a[0..1],
-                |rs| rs.iter().any(|r| r[0] == a[0] && r[1] == a[1]),
-                true
-            ).unwrap()
+            r.try_find_and(&a[0..1], |rs| rs
+                .iter()
+                .any(|r| r[0] == a[0] && r[1] == a[1]))
+                .unwrap()
                 .0
                 .unwrap()
         );
@@ -529,7 +465,7 @@ mod tests {
         for i in 0..n {
             let i = &[i.into()];
             loop {
-                match r.find_and(i, |rs| rs.len(), true) {
+                match r.try_find_and(i, |rs| rs.len()) {
                     Ok((None, _)) => continue,
                     Ok((Some(1), _)) => break,
                     Ok((Some(i), _)) => assert_ne!(i, 1),
@@ -549,16 +485,12 @@ mod tests {
         w.swap();
         w.add(vec![Record::Positive(b.clone())]);
 
-        assert_eq!(
-            r.find_and(&a[0..1], |rs| rs.len(), true).unwrap().0,
-            Some(1)
-        );
+        assert_eq!(r.try_find_and(&a[0..1], |rs| rs.len()).unwrap().0, Some(1));
         assert!(
-            r.find_and(
-                &a[0..1],
-                |rs| rs.iter().any(|r| r[0] == a[0] && r[1] == a[1]),
-                true
-            ).unwrap()
+            r.try_find_and(&a[0..1], |rs| rs
+                .iter()
+                .any(|r| r[0] == a[0] && r[1] == a[1]))
+                .unwrap()
                 .0
                 .unwrap()
         );
@@ -576,25 +508,20 @@ mod tests {
         w.swap();
         w.add(vec![Record::Positive(c.clone())]);
 
-        assert_eq!(
-            r.find_and(&a[0..1], |rs| rs.len(), true).unwrap().0,
-            Some(2)
-        );
+        assert_eq!(r.try_find_and(&a[0..1], |rs| rs.len()).unwrap().0, Some(2));
         assert!(
-            r.find_and(
-                &a[0..1],
-                |rs| rs.iter().any(|r| r[0] == a[0] && r[1] == a[1]),
-                true
-            ).unwrap()
+            r.try_find_and(&a[0..1], |rs| rs
+                .iter()
+                .any(|r| r[0] == a[0] && r[1] == a[1]))
+                .unwrap()
                 .0
                 .unwrap()
         );
         assert!(
-            r.find_and(
-                &a[0..1],
-                |rs| rs.iter().any(|r| r[0] == b[0] && r[1] == b[1]),
-                true
-            ).unwrap()
+            r.try_find_and(&a[0..1], |rs| rs
+                .iter()
+                .any(|r| r[0] == b[0] && r[1] == b[1]))
+                .unwrap()
                 .0
                 .unwrap()
         );
@@ -611,16 +538,12 @@ mod tests {
         w.add(vec![Record::Negative(a.clone())]);
         w.swap();
 
-        assert_eq!(
-            r.find_and(&a[0..1], |rs| rs.len(), true).unwrap().0,
-            Some(1)
-        );
+        assert_eq!(r.try_find_and(&a[0..1], |rs| rs.len()).unwrap().0, Some(1));
         assert!(
-            r.find_and(
-                &a[0..1],
-                |rs| rs.iter().any(|r| r[0] == b[0] && r[1] == b[1]),
-                true
-            ).unwrap()
+            r.try_find_and(&a[0..1], |rs| rs
+                .iter()
+                .any(|r| r[0] == b[0] && r[1] == b[1]))
+                .unwrap()
                 .0
                 .unwrap()
         );
@@ -638,16 +561,12 @@ mod tests {
         w.add(vec![Record::Negative(a.clone())]);
         w.swap();
 
-        assert_eq!(
-            r.find_and(&a[0..1], |rs| rs.len(), true).unwrap().0,
-            Some(1)
-        );
+        assert_eq!(r.try_find_and(&a[0..1], |rs| rs.len()).unwrap().0, Some(1));
         assert!(
-            r.find_and(
-                &a[0..1],
-                |rs| rs.iter().any(|r| r[0] == b[0] && r[1] == b[1]),
-                true
-            ).unwrap()
+            r.try_find_and(&a[0..1], |rs| rs
+                .iter()
+                .any(|r| r[0] == b[0] && r[1] == b[1]))
+                .unwrap()
                 .0
                 .unwrap()
         );
@@ -666,25 +585,20 @@ mod tests {
         ]);
         w.swap();
 
-        assert_eq!(
-            r.find_and(&a[0..1], |rs| rs.len(), true).unwrap().0,
-            Some(2)
-        );
+        assert_eq!(r.try_find_and(&a[0..1], |rs| rs.len()).unwrap().0, Some(2));
         assert!(
-            r.find_and(
-                &a[0..1],
-                |rs| rs.iter().any(|r| r[0] == a[0] && r[1] == a[1]),
-                true
-            ).unwrap()
+            r.try_find_and(&a[0..1], |rs| rs
+                .iter()
+                .any(|r| r[0] == a[0] && r[1] == a[1]))
+                .unwrap()
                 .0
                 .unwrap()
         );
         assert!(
-            r.find_and(
-                &a[0..1],
-                |rs| rs.iter().any(|r| r[0] == b[0] && r[1] == b[1]),
-                true
-            ).unwrap()
+            r.try_find_and(&a[0..1], |rs| rs
+                .iter()
+                .any(|r| r[0] == b[0] && r[1] == b[1]))
+                .unwrap()
                 .0
                 .unwrap()
         );
@@ -696,16 +610,12 @@ mod tests {
         ]);
         w.swap();
 
-        assert_eq!(
-            r.find_and(&a[0..1], |rs| rs.len(), true).unwrap().0,
-            Some(1)
-        );
+        assert_eq!(r.try_find_and(&a[0..1], |rs| rs.len()).unwrap().0, Some(1));
         assert!(
-            r.find_and(
-                &a[0..1],
-                |rs| rs.iter().any(|r| r[0] == b[0] && r[1] == b[1]),
-                true
-            ).unwrap()
+            r.try_find_and(&a[0..1], |rs| rs
+                .iter()
+                .any(|r| r[0] == b[0] && r[1] == b[1]))
+                .unwrap()
                 .0
                 .unwrap()
         );

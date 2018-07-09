@@ -1,3 +1,4 @@
+use fnv::FnvHashMap;
 use petgraph::graph::NodeIndex;
 use std::borrow::Cow;
 use std::cell;
@@ -5,24 +6,27 @@ use std::cmp;
 use std::collections::hash_map::Entry;
 use std::collections::{HashMap, HashSet, VecDeque};
 use std::mem;
-use std::sync::atomic::{AtomicUsize, Ordering};
-use std::sync::{Arc, Mutex};
-use std::time;
-
 use std::net::SocketAddr;
+use std::sync::atomic::{AtomicUsize, Ordering};
+use std::sync::Arc;
+use std::time;
 
 use api;
 pub use basics::DomainIndex as Index;
 use channel::poll::{PollEvent, ProcessResult};
 use channel::{DomainConnectionBuilder, TcpSender};
+use futures;
 use group_commit::GroupCommitQueueSet;
 use payload::{ControlReplyPacket, ReplayPieceContext};
 use prelude::*;
 use slog::Logger;
+use stream_cancel::Valve;
+
 use timekeeper::{RealTime, SimpleTracker, ThreadTime, Timer, TimerSet};
+use tokio::{self, prelude::*};
 use Readers;
 
-type EnqueuedSends = Vec<(ReplicaAddr, Box<Packet>)>;
+type EnqueuedSends = FnvHashMap<ReplicaAddr, VecDeque<Box<Packet>>>;
 
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
 pub struct Config {
@@ -117,6 +121,8 @@ pub struct DomainBuilder {
     pub config: Config,
 }
 
+unsafe impl Send for DomainBuilder {}
+
 impl DomainBuilder {
     /// Starts up the domain represented by this `DomainBuilder`.
     pub fn build(
@@ -125,6 +131,7 @@ impl DomainBuilder {
         readers: Readers,
         channel_coordinator: Arc<ChannelCoordinator>,
         addr: SocketAddr,
+        shutdown_valve: &Valve,
         state_size: Arc<AtomicUsize>,
     ) -> Domain {
         // initially, all nodes are not ready
@@ -168,6 +175,7 @@ impl DomainBuilder {
 
             ingress_inject: Default::default(),
 
+            shutdown_valve: shutdown_valve.clone(),
             readers,
             _debug_tx: debug_tx,
             control_reply_tx,
@@ -219,6 +227,7 @@ pub struct Domain {
     max_concurrent_replays: usize,
     replay_request_queue: VecDeque<(Tag, Vec<DataType>)>,
 
+    shutdown_valve: Valve,
     readers: Readers,
     _debug_tx: Option<TcpSender<api::debug::trace::Event>>,
     control_reply_tx: TcpSender<ControlReplyPacket>,
@@ -488,7 +497,7 @@ impl Domain {
         m: Box<Packet>,
         enable_output: bool,
         sends: &mut EnqueuedSends,
-        executor: Option<&Executor>,
+        executor: Option<&mut Executor>,
     ) -> HashMap<LocalNodeIndex, Vec<Record>> {
         let src = m.link().src;
         let me = m.link().dst;
@@ -707,7 +716,7 @@ impl Domain {
         &mut self,
         m: Box<Packet>,
         sends: &mut EnqueuedSends,
-        executor: Option<&Executor>,
+        executor: &mut Executor,
         top: bool,
     ) {
         self.wait_time.stop();
@@ -715,7 +724,8 @@ impl Domain {
 
         match *m {
             Packet::Message { .. } | Packet::Input { .. } => {
-                self.dispatch(m, true, sends, executor);
+                // WO for https://github.com/rust-lang/rfcs/issues/1403
+                self.dispatch(m, true, sends, Some(executor));
             }
             Packet::ReplayPiece { .. } => {
                 self.handle_replay(m, sends);
@@ -855,47 +865,64 @@ impl Domain {
                                 trigger_domain: (trigger_domain, shards),
                             } => {
                                 use backlog;
-                                let txs = Mutex::new(
-                                    (0..shards)
-                                        .map(|shard| {
-                                            self.channel_coordinator
-                                                .get_dest(&(trigger_domain, shard))
-                                                .map(|(addr, local)| {
-                                                    (
-                                                        DomainConnectionBuilder::for_domain(addr)
-                                                            .build()
-                                                            .unwrap(),
-                                                        local,
-                                                    )
-                                                })
-                                                .unwrap()
-                                        })
-                                        .collect::<Vec<_>>(),
-                                );
                                 let k = key.clone(); // ugh
+                                let txs = (0..shards)
+                                    .map(|shard| {
+                                        let key = key.clone();
+                                        let (tx, rx) = futures::sync::mpsc::unbounded();
+                                        let (sender, is_local) = self
+                                            .channel_coordinator
+                                            .get_dest(&(trigger_domain, shard))
+                                            .map(|(addr, local)| {
+                                                (
+                                                    DomainConnectionBuilder::for_domain(addr)
+                                                        .build_async()
+                                                        .unwrap(),
+                                                    local,
+                                                )
+                                            })
+                                            .unwrap();
+
+                                        tokio::spawn(
+                                            self.shutdown_valve
+                                                .wrap(rx)
+                                                .map(move |miss| {
+                                                    let mut m = box Packet::RequestReaderReplay {
+                                                        key: miss,
+                                                        cols: key.clone(),
+                                                        node: node,
+                                                    };
+
+                                                    if is_local {
+                                                        m = m.make_local();
+                                                    }
+                                                    m
+                                                })
+                                                .fold(sender, move |sender, m| {
+                                                    sender.send(m).map_err(|e| {
+                                                        // domain went away?
+                                                        eprintln!(
+                                                            "replay source went away: {:?}",
+                                                            e
+                                                        );
+                                                    })
+                                                })
+                                                .map(|_| ()),
+                                        );
+                                        tx
+                                    })
+                                    .collect::<Vec<_>>();
                                 let (r_part, w_part) =
                                     backlog::new_partial(cols, &k[..], move |miss| {
-                                        let mut txs = txs.lock().unwrap();
-                                        let tx = if txs.len() == 1 {
-                                            &mut txs[0]
+                                        let n = txs.len();
+                                        let tx = if n == 1 {
+                                            &txs[0]
                                         } else {
                                             // TODO: compound reader
                                             assert_eq!(miss.len(), 1);
-
-                                            let n = txs.len();
-                                            &mut txs[::shard_by(&miss[0], n)]
+                                            &txs[::shard_by(&miss[0], n)]
                                         };
-
-                                        let mut m = box Packet::RequestReaderReplay {
-                                            key: Vec::from(miss),
-                                            cols: key.clone(),
-                                            node: node,
-                                        };
-
-                                        if tx.1 {
-                                            m = m.make_local();
-                                        }
-                                        tx.0.send(m).unwrap();
+                                        tx.unbounded_send(Vec::from(miss)).unwrap();
                                     });
 
                                 let mut n = self.nodes[&node].borrow_mut();
@@ -1305,35 +1332,7 @@ impl Domain {
                             .unwrap();
                     }
                     Packet::UpdateStateSize => {
-                        let total: u64 = self
-                            .nodes
-                            .values()
-                            .map(|nd| {
-                                let ref n = *nd.borrow();
-                                let local_index: LocalNodeIndex = *n.local_addr();
-
-                                if n.is_reader() {
-                                    // We are a reader, which has its own kind of state
-                                    let mut size = 0;
-                                    n.with_reader(|r| {
-                                        if r.is_partial() {
-                                            size = r.state_size().unwrap_or(0)
-                                        }
-                                    }).unwrap();
-                                    size
-                                } else {
-                                    // Not a reader, state is with domain
-                                    self.state
-                                        .get(&local_index)
-                                        .filter(|state| state.is_partial())
-                                        .map(|state| state.deep_size_of())
-                                        .unwrap_or(0)
-                                }
-                            })
-                            .sum();
-
-                        self.state_size.store(total as usize, Ordering::Relaxed);
-                        // no response sent, as worker will read the atomic
+                        self.update_state_sizes();
                     }
                     Packet::Quit => unreachable!("Quit messages are handled by event loop"),
                     Packet::Spin => {
@@ -1377,6 +1376,8 @@ impl Domain {
                 // we really want this to just use tail recursion.
                 // but alas, the compiler doesn't seem to want to do that.
                 // instead, we ensure that only the topmost call to handle() walks delayed_for_self
+
+                // WO for https://github.com/rust-lang/rfcs/issues/1403
                 self.handle(m, sends, executor, false);
             }
         }
@@ -2436,9 +2437,41 @@ impl Domain {
         self.wait_time.start();
     }
 
+    pub fn update_state_sizes(&mut self) {
+        let total: u64 = self
+            .nodes
+            .values()
+            .map(|nd| {
+                let ref n = *nd.borrow();
+                let local_index: LocalNodeIndex = *n.local_addr();
+
+                if n.is_reader() {
+                    // We are a reader, which has its own kind of state
+                    let mut size = 0;
+                    n.with_reader(|r| {
+                        if r.is_partial() {
+                            size = r.state_size().unwrap_or(0)
+                        }
+                    }).unwrap();
+                    size
+                } else {
+                    // Not a reader, state is with domain
+                    self.state
+                        .get(&local_index)
+                        .filter(|state| state.is_partial())
+                        .map(|state| state.deep_size_of())
+                        .unwrap_or(0)
+                }
+            })
+            .sum();
+
+        self.state_size.store(total as usize, Ordering::Relaxed);
+        // no response sent, as worker will read the atomic
+    }
+
     pub fn on_event(
         &mut self,
-        executor: &Executor,
+        executor: &mut Executor,
         event: PollEvent<Box<Packet>>,
         sends: &mut EnqueuedSends,
     ) -> ProcessResult {
@@ -2472,19 +2505,19 @@ impl Domain {
                     packet.trace(PacketEvent::ExitInputChannel);
                     let merged_packet = self.group_commit_queues.append(packet);
                     if let Some(packet) = merged_packet {
-                        self.handle(packet, sends, Some(executor), true);
+                        self.handle(packet, sends, executor, true);
                     }
                 } else {
-                    self.handle(packet, sends, Some(executor), true);
+                    self.handle(packet, sends, executor, true);
                 }
 
                 ProcessResult::KeepPolling
             }
             PollEvent::Timeout => {
                 if let Some(m) = self.group_commit_queues.flush_if_necessary() {
-                    self.handle(m, sends, Some(executor), true);
+                    self.handle(m, sends, executor, true);
                 } else if self.has_buffered_replay_requests {
-                    self.handle(box Packet::Spin, sends, Some(executor), true);
+                    self.handle(box Packet::Spin, sends, executor, true);
                 }
                 ProcessResult::KeepPolling
             }

@@ -4,6 +4,7 @@ use std::io::{self, BufReader, Write};
 use std::marker::PhantomData;
 use std::net::{Ipv4Addr, SocketAddr};
 
+use async_bincode::{AsyncBincodeStream, AsyncBincodeWriter, SyncDestination};
 use bincode;
 use bufstream::BufStream;
 use byteorder::{NetworkEndian, WriteBytesExt};
@@ -11,6 +12,7 @@ use mio::{self, Evented, Poll, PollOpt, Ready, Token};
 use net2;
 use serde::{Deserialize, Serialize};
 use throttled_reader::ThrottledReader;
+use tokio::prelude::*;
 
 use super::{DeserializeReceiver, NonBlockingWriter, ReceiveError};
 
@@ -81,6 +83,10 @@ impl<T: Serialize> TcpSender<T> {
         &mut self.stream
     }
 
+    pub(crate) fn into_inner(self) -> BufStream<std::net::TcpStream> {
+        self.stream
+    }
+
     pub fn local_addr(&self) -> io::Result<SocketAddr> {
         self.stream.get_ref().local_addr()
     }
@@ -125,81 +131,74 @@ pub enum RecvError {
     DeserializationError(bincode::Error),
 }
 
-pub enum DualTcpReceiver<T, T2> {
-    Passthrough(TcpReceiver<T>),
-    Upgrade(TcpReceiver<T2>, Box<FnMut(T2) -> T + Send + Sync>),
+pub enum DualTcpStream<S, T, T2, D> {
+    Passthrough(AsyncBincodeStream<S, T, bool, D>),
+    Upgrade(
+        AsyncBincodeStream<S, T2, bool, D>,
+        Box<FnMut(T2) -> T + Send + Sync>,
+    ),
 }
 
-impl<T, T2> From<TcpReceiver<T>> for DualTcpReceiver<T, T2> {
-    fn from(r: TcpReceiver<T>) -> Self {
-        DualTcpReceiver::Passthrough(r)
+impl<S, T, T2> From<S> for DualTcpStream<S, T, T2, SyncDestination> {
+    fn from(stream: S) -> Self {
+        DualTcpStream::Passthrough(AsyncBincodeStream::from(stream))
     }
 }
 
-impl<T, T2> DualTcpReceiver<T, T2>
+impl<S, T, T2> DualTcpStream<S, T, T2, SyncDestination> {
+    pub fn upgrade<F: 'static + FnMut(T2) -> T + Send + Sync>(stream: S, f: F) -> Self {
+        let s: AsyncBincodeStream<S, T2, bool, SyncDestination> = AsyncBincodeStream::from(stream);
+        DualTcpStream::Upgrade(s, Box::new(f))
+    }
+
+    pub fn get_ref(&self) -> &S {
+        match *self {
+            DualTcpStream::Passthrough(ref abs) => abs.get_ref(),
+            DualTcpStream::Upgrade(ref abs, _) => abs.get_ref(),
+        }
+    }
+}
+
+impl<S, T, T2, D> Sink for DualTcpStream<S, T, T2, D>
 where
-    for<'de> T: Deserialize<'de>,
-    for<'de> T2: Deserialize<'de>,
+    S: AsyncWrite,
+    AsyncBincodeWriter<S, bool, D>: Sink<SinkItem = bool, SinkError = bincode::Error>,
 {
-    pub fn upgrade<F: 'static + FnMut(T2) -> T + Send + Sync>(
-        stream: mio::net::TcpStream,
-        f: F,
-    ) -> Self {
-        let r: TcpReceiver<T2> = TcpReceiver::new(stream);
-        DualTcpReceiver::Upgrade(r, Box::new(f))
-    }
-
-    pub fn get_ref(&self) -> &mio::net::TcpStream {
+    type SinkItem = bool;
+    type SinkError = bincode::Error;
+    fn start_send(
+        &mut self,
+        item: Self::SinkItem,
+    ) -> Result<AsyncSink<Self::SinkItem>, Self::SinkError> {
         match *self {
-            DualTcpReceiver::Passthrough(ref s) => s.get_ref(),
-            DualTcpReceiver::Upgrade(ref s, _) => s.get_ref(),
+            DualTcpStream::Passthrough(ref mut abs) => abs.start_send(item),
+            DualTcpStream::Upgrade(ref mut abs, _) => abs.start_send(item),
         }
     }
-
-    pub fn local_addr(&self) -> Result<SocketAddr, io::Error> {
-        self.get_ref().local_addr()
-    }
-
-    pub fn is_empty(&self) -> bool {
+    fn poll_complete(&mut self) -> Result<Async<()>, Self::SinkError> {
         match *self {
-            DualTcpReceiver::Passthrough(ref s) => s.stream.buffer().is_empty(),
-            DualTcpReceiver::Upgrade(ref s, _) => s.stream.buffer().is_empty(),
+            DualTcpStream::Passthrough(ref mut abs) => abs.poll_complete(),
+            DualTcpStream::Upgrade(ref mut abs, _) => abs.poll_complete(),
         }
     }
+}
 
-    pub fn syscall_limit(&mut self, limit: Option<usize>) {
-        if let Some(l) = limit {
-            match *self {
-                DualTcpReceiver::Passthrough(ref mut s) => s.stream.get_mut().set_limit(l),
-                DualTcpReceiver::Upgrade(ref mut s, _) => s.stream.get_mut().set_limit(l),
-            }
-        } else {
-            match *self {
-                DualTcpReceiver::Passthrough(ref mut s) => s.stream.get_mut().unthrottle(),
-                DualTcpReceiver::Upgrade(ref mut s, _) => s.stream.get_mut().unthrottle(),
-            }
-        }
-    }
-
-    pub fn try_recv(&mut self) -> Result<T, TryRecvError> {
+impl<S, T, T2, D> Stream for DualTcpStream<S, T, T2, D>
+where
+    for<'a> T: Deserialize<'a>,
+    for<'a> T2: Deserialize<'a>,
+    S: AsyncRead,
+{
+    type Item = T;
+    type Error = bincode::Error;
+    fn poll(&mut self) -> Result<Async<Option<Self::Item>>, Self::Error> {
         match *self {
-            DualTcpReceiver::Passthrough(ref mut s) => s.try_recv(),
-            DualTcpReceiver::Upgrade(ref mut s, ref mut upgrade) => {
-                s.try_recv().map(move |t2| upgrade(t2))
-            }
-        }
-    }
-
-    pub fn recv(&mut self) -> Result<T, RecvError> {
-        loop {
-            return match self.try_recv() {
-                Err(TryRecvError::Empty) => continue,
-                Err(TryRecvError::Disconnected) => Err(RecvError::Disconnected),
-                Err(TryRecvError::DeserializationError(e)) => {
-                    Err(RecvError::DeserializationError(e))
-                }
-                Ok(t) => Ok(t),
-            };
+            DualTcpStream::Passthrough(ref mut abr) => abr.poll(),
+            DualTcpStream::Upgrade(ref mut abr, ref mut upgrade) => match abr.poll() {
+                Ok(Async::Ready(x)) => Ok(Async::Ready(x.map(|x| upgrade(x)))),
+                Ok(Async::NotReady) => Ok(Async::NotReady),
+                Err(e) => Err(e),
+            },
         }
     }
 }

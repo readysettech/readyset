@@ -532,7 +532,7 @@ impl<'a> BatchSendHandle<'a> {
         for (shard, n) in self.sent.into_iter().enumerate() {
             for _ in 0..n {
                 use bincode;
-                bincode::deserialize_from(&mut (&mut self.dih.txs[shard]).reader())?;
+                let _: bool = bincode::deserialize_from(&mut (&mut self.dih.txs[shard]).reader())?;
             }
         }
 

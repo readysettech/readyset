@@ -1,7 +1,8 @@
+use fnv::FnvHashMap;
 use node::NodeType;
 use payload;
 use prelude::*;
-use std::collections::HashSet;
+use std::collections::{HashSet, VecDeque};
 use std::mem;
 
 impl Node {
@@ -13,8 +14,8 @@ impl Node {
         nodes: &DomainNodes,
         on_shard: Option<usize>,
         swap: bool,
-        output: &mut Vec<(ReplicaAddr, Box<Packet>)>,
-        executor: Option<&Executor>,
+        output: &mut FnvHashMap<ReplicaAddr, VecDeque<Box<Packet>>>,
+        executor: Option<&mut Executor>,
     ) -> (Vec<Miss>, HashSet<Vec<DataType>>) {
         m.as_mut().unwrap().trace(PacketEvent::Process);
 
@@ -236,7 +237,7 @@ impl Node {
         keys: &mut Vec<Vec<DataType>>,
         tag: Tag,
         on_shard: Option<usize>,
-        output: &mut Vec<(ReplicaAddr, Box<Packet>)>,
+        output: &mut FnvHashMap<ReplicaAddr, VecDeque<Box<Packet>>>,
     ) {
         let addr = *self.local_addr();
         match self.inner {

@@ -5,6 +5,7 @@ use std::net::IpAddr;
 use std::sync::Arc;
 use std::time;
 
+use failure;
 use slog;
 
 use controller::sql::reuse::ReuseConfigType;
@@ -13,8 +14,6 @@ use controller::{self, ControllerConfig, LocalControllerHandle};
 /// Used to construct a controller.
 pub struct ControllerBuilder {
     config: ControllerConfig,
-    nworker_threads: usize,
-    nread_threads: usize,
     memory_limit: Option<usize>,
     memory_check_frequency: Option<time::Duration>,
     listen_addr: IpAddr,
@@ -26,8 +25,6 @@ impl Default for ControllerBuilder {
             config: ControllerConfig::default(),
             listen_addr: "127.0.0.1".parse().unwrap(),
             log: slog::Logger::root(slog::Discard, o!()),
-            nworker_threads: 2,
-            nread_threads: 1,
             memory_limit: None,
             memory_check_frequency: None,
         }
@@ -70,18 +67,6 @@ impl ControllerBuilder {
         self.config.quorum = quorum;
     }
 
-    /// Set the number of worker threads used by this instance.
-    pub fn set_worker_threads(&mut self, threads: usize) {
-        assert_ne!(threads, 0);
-        self.nworker_threads = threads;
-    }
-
-    /// Set the number of read threads that should be run on this instance.
-    pub fn set_read_threads(&mut self, threads: usize) {
-        assert_ne!(threads, 0);
-        self.nread_threads = threads;
-    }
-
     /// Set the memory limit (target) and how often we check it (in millis).
     pub fn set_memory_limit(&mut self, limit: usize, check_freq: time::Duration) {
         assert_ne!(limit, 0);
@@ -106,13 +91,14 @@ impl ControllerBuilder {
     }
 
     /// Build a controller and return a handle to it.
-    pub fn build<A: Authority + 'static>(self, authority: Arc<A>) -> LocalControllerHandle<A> {
+    pub fn build<A: Authority + 'static>(
+        self,
+        authority: Arc<A>,
+    ) -> Result<LocalControllerHandle<A>, failure::Error> {
         controller::start_instance(
             authority,
             self.listen_addr,
             self.config,
-            self.nworker_threads,
-            self.nread_threads,
             self.memory_limit,
             self.memory_check_frequency,
             self.log,
@@ -120,7 +106,11 @@ impl ControllerBuilder {
     }
 
     /// Build a local controller, and return a ControllerHandle to provide access to it.
-    pub fn build_local(self) -> LocalControllerHandle<LocalAuthority> {
-        self.build(Arc::new(LocalAuthority::new()))
+    pub fn build_local(self) -> Result<LocalControllerHandle<LocalAuthority>, failure::Error> {
+        #[allow(unused_mut)]
+        let mut lch = self.build(Arc::new(LocalAuthority::new()))?;
+        #[cfg(test)]
+        lch.wait_until_ready();
+        Ok(lch)
     }
 }

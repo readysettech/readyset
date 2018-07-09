@@ -35,7 +35,7 @@ fn get_persistence_params(prefix: &str) -> PersistenceParameters {
 pub fn build_local(prefix: &str) -> LocalControllerHandle<LocalAuthority> {
     let mut builder = ControllerBuilder::default();
     builder.set_persistence(get_persistence_params(prefix));
-    builder.build_local()
+    builder.build_local().unwrap()
 }
 
 fn get_settle_time() -> Duration {
@@ -64,7 +64,7 @@ fn it_works_basic() {
         Some(String::from("it_works_basic")),
         1,
     ));
-    let mut g = b.build_local();
+    let mut g = b.build_local().unwrap();
     let _ = g.migrate(|mig| {
         let a = mig.add_base("a", &["a", "b"], Base::new(vec![]).with_key(vec![0]));
         let b = mig.add_base("b", &["a", "b"], Base::new(vec![]).with_key(vec![0]));
@@ -535,7 +535,7 @@ fn it_works_with_double_query_through() {
     // all ancestors (and bid comes first). The reader is on aid though, so the sharder should pick
     // that as well (and not bid!).
     builder.set_sharding(None);
-    let mut g = builder.build_local();
+    let mut g = builder.build_local().unwrap();
     let sql = "
         # base tables
         CREATE TABLE A (aid int, other int, PRIMARY KEY(aid));
@@ -710,7 +710,7 @@ fn it_recovers_persisted_bases() {
     {
         let mut g = ControllerBuilder::default();
         g.set_persistence(persistence_params.clone());
-        let mut g = g.build(authority.clone());
+        let mut g = g.build(authority.clone()).unwrap();
 
         let sql = "
             CREATE TABLE Car (id int, price int, PRIMARY KEY(id));
@@ -731,7 +731,7 @@ fn it_recovers_persisted_bases() {
 
     let mut g = ControllerBuilder::default();
     g.set_persistence(persistence_params);
-    let mut g = g.build(authority.clone());
+    let mut g = g.build(authority.clone()).unwrap();
     let mut getter = g.view("CarPrice").unwrap();
 
     // Make sure that the new graph contains the old writes
@@ -810,7 +810,7 @@ fn it_recovers_persisted_bases_w_multiple_nodes() {
     {
         let mut g = ControllerBuilder::default();
         g.set_persistence(persistence_parameters.clone());
-        let mut g = g.build(authority.clone());
+        let mut g = g.build(authority.clone()).unwrap();
 
         let sql = "
             CREATE TABLE A (id int, PRIMARY KEY(id));
@@ -833,7 +833,7 @@ fn it_recovers_persisted_bases_w_multiple_nodes() {
     // state that the other one had.
     let mut g = ControllerBuilder::default();
     g.set_persistence(persistence_parameters);
-    let mut g = g.build(authority.clone());
+    let mut g = g.build(authority.clone()).unwrap();
     for (i, table) in tables.iter().enumerate() {
         let mut getter = g.view(&format!("{}ID", table)).unwrap();
         let result = getter.lookup(&[i.into()], true).unwrap();
@@ -1356,7 +1356,7 @@ fn replay_during_replay() {
     let mut g = ControllerBuilder::default();
     g.disable_partial();
     g.set_persistence(get_persistence_params("replay_during_replay"));
-    let mut g = g.build_local();
+    let mut g = g.build_local().unwrap();
     let (a, u1, u2) = g.migrate(|mig| {
         // we need three bases:
         //
@@ -1456,7 +1456,7 @@ fn cascading_replays_with_sharding() {
     let mut g = ControllerBuilder::default();
     g.set_sharding(Some(2));
     g.set_persistence(get_persistence_params("cascading_replays_with_sharding"));
-    let mut g = g.build_local();
+    let mut g = g.build_local().unwrap();
 
     // add each two bases. these are initially unsharded, but f will end up being sharded by u1,
     // while v will be sharded by u
@@ -2136,7 +2136,7 @@ fn node_removal() {
         Some(String::from("domain_removal")),
         1,
     ));
-    let mut g = b.build_local();
+    let mut g = b.build_local().unwrap();
     let cid = g.migrate(|mig| {
         let a = mig.add_base("a", &["a", "b"], Base::new(vec![]).with_key(vec![0]));
         let b = mig.add_base("b", &["a", "b"], Base::new(vec![]).with_key(vec![0]));
@@ -2204,7 +2204,7 @@ fn remove_query() {
     let r2_txt = "CREATE TABLE b (a int, c text, x text);\n
                   QUERY qa: SELECT a FROM b;";
 
-    let mut g = ControllerBuilder::default().build_local();
+    let mut g = ControllerBuilder::default().build_local().unwrap();
     g.install_recipe(r_txt).unwrap();
     assert_eq!(g.inputs().unwrap().len(), 1);
     assert_eq!(g.outputs().unwrap().len(), 2);
