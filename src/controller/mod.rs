@@ -38,7 +38,7 @@ use std::sync::{
 };
 use std::thread::{self, JoinHandle};
 use std::time::{self, Duration};
-use stream_cancel::{Valve, Valved};
+use stream_cancel::{Trigger, Valve, Valved};
 use streamunordered::{StreamUnordered, StreamYield};
 use tokio;
 use tokio::prelude::future::{poll_fn, Either};
@@ -278,6 +278,7 @@ fn start_instance<A: Authority + 'static>(
                                 if let InstanceState::Active {
                                     epoch,
                                     ref mut add_domain,
+                                    ..
                                 } = worker_state
                                 {
                                     if epoch == msg.epoch {
@@ -308,16 +309,28 @@ fn start_instance<A: Authority + 'static>(
                             _ => unreachable!(),
                         },
                         Event::LeaderChange(state, descriptor) => {
-                            info!(log, "Detected leader change");
-                            if let InstanceState::Active { .. } = worker_state {
-                                unimplemented!("leader change happened while running");
+                            if let InstanceState::Active {
+                                add_domain,
+                                trigger,
+                                ..
+                            } = worker_state.take()
+                            {
+                                // XXX: should we wait for current DF to be fully shut down?
+                                info!(log, "detected leader change");
+                                drop(add_domain);
+                                trigger.cancel();
+                            } else {
+                                info!(log, "found initial leader");
                             }
-                            info!(log, "Attempting to connect");
+
+                            // we need to make a new valve that we can use to shut down *just* the
+                            // worker in the case of controller failover.
+                            let (trigger, valve) = Valve::new();
 
                             // TODO: memory stuff should probably also be in config?
                             let (rep_tx, rep_rx) = futures::sync::mpsc::unbounded();
                             let ctrl = listen_df(
-                                &valve,
+                                valve,
                                 log.clone(),
                                 (memory_limit, memory_check_frequency),
                                 &state,
@@ -336,6 +349,7 @@ fn start_instance<A: Authority + 'static>(
                                 worker_state = InstanceState::Active {
                                     epoch: state.epoch,
                                     add_domain: rep_tx,
+                                    trigger,
                                 };
                                 warn!(log, "Connected to new leader");
                             }
@@ -346,6 +360,10 @@ fn start_instance<A: Authority + 'static>(
                 })
                 .and_then(|v| {
                     // shutting down...
+                    //
+                    // NOTE: the Trigger in InstanceState::Active is dropped when the for_each
+                    // closure above is dropped, which will also shut down the worker.
+                    //
                     // TODO: maybe flush things or something?
                     Ok(v)
                 })
@@ -473,8 +491,15 @@ enum InstanceState {
     Pining,
     Active {
         epoch: Epoch,
+        trigger: Trigger,
         add_domain: UnboundedSender<DomainBuilder>,
     },
+}
+
+impl InstanceState {
+    fn take(&mut self) -> Self {
+        ::std::mem::replace(self, InstanceState::Pining)
+    }
 }
 
 fn listen_reads(
@@ -513,7 +538,7 @@ fn listen_reads(
 }
 
 fn listen_df(
-    valve: &Valve,
+    valve: Valve,
     log: slog::Logger,
     (memory_limit, evict_every): (Option<usize>, Option<Duration>),
     state: &ControllerState,
@@ -565,7 +590,7 @@ fn listen_df(
     );
 
     // also start readers
-    tokio::spawn(listen_reads(valve, rport, readers.clone()));
+    tokio::spawn(listen_reads(&valve, rport, readers.clone()));
 
     // and tell the controller about us
     let timer = valve.wrap(tokio::timer::Interval::new(
@@ -613,7 +638,6 @@ fn listen_df(
         );
     }
 
-    let valve = valve.clone();
     tokio::spawn(
         replicas
             .map_err(|e| -> io::Error { panic!("{:?}", e) })
