@@ -91,8 +91,8 @@ impl GraphViz for MirNodeType {
                 ref kind,
             } => {
                 let op_string = match *kind {
-                    AggregationKind::COUNT => format!("|*|({})", on.name.as_str()),
-                    AggregationKind::SUM => format!("𝛴({})", on.name.as_str()),
+                    AggregationKind::COUNT => format!("\\|*\\|({})", print_col(on)),
+                    AggregationKind::SUM => format!("𝛴({})", print_col(on)),
                 };
                 let group_cols = group_by
                     .iter()
