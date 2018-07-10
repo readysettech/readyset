@@ -174,24 +174,21 @@ fn start_instance<A: Authority + 'static>(
     memory_check_frequency: Option<Duration>,
     log: slog::Logger,
 ) -> Result<LocalControllerHandle<A>, failure::Error> {
-    let mut rt = if cfg!(debug_assertions) {
-        let mut pool = tokio::executor::thread_pool::Builder::new();
+    let mut pool = tokio::executor::thread_pool::Builder::new();
+    pool.name_prefix("tokio-pool-");
+    if cfg!(debug_assertions) {
         pool.pool_size(2);
+    }
+    let mut rt = tokio::runtime::Builder::new();
+    rt.threadpool_builder(pool);
+    let mut rt = rt.build().unwrap();
 
-        let mut rt = tokio::runtime::Builder::new();
-        rt.threadpool_builder(pool);
-        rt.build().unwrap()
-    } else {
-        tokio::runtime::Runtime::new().unwrap()
-    };
-
-    let iopool = if cfg!(debug_assertions) {
-        let mut pool = tokio_io_pool::Builder::default();
+    let mut pool = tokio_io_pool::Builder::default();
+    pool.name_prefix("tokio-io-pool-");
+    if cfg!(debug_assertions) {
         pool.pool_size(2);
-        pool.build().unwrap()
-    } else {
-        tokio_io_pool::Runtime::new()
-    };
+    }
+    let iopool = pool.build().unwrap();
     let ioh = iopool.handle().clone();
 
     let (trigger, valve) = Valve::new();
