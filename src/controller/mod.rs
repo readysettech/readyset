@@ -575,7 +575,6 @@ fn listen_df(
     let raddr = rport.local_addr()?;
 
     // start controller message handler
-    // TODO: deal with the case when the controller moves
     let ctrl = AsyncBincodeWriter::from(ctrl).for_async();
     tokio::spawn(
         ctrl_rx
@@ -585,7 +584,11 @@ fn listen_df(
                 epoch,
             })
             .map_err(|e| panic!("{:?}", e))
-            .forward(ctrl.sink_map_err(|e| panic!("{:?}", e)))
+            .forward(ctrl.sink_map_err(|e| {
+                // if the controller goes away, another will be elected, and the worker will be
+                // restarted, so there's no reason to do anything too drastic here.
+                eprintln!("controller went away: {:?}", e);
+            }))
             .map(|_| ()),
     );
 
