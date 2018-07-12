@@ -2153,7 +2153,6 @@ fn lobsters() {
         // Add them one by one
         for (_i, q) in lines.iter().enumerate() {
             //println!("{}: {}", i, q);
-            let or = r.clone();
             r = match r.extend(q) {
                 Ok(mut nr) => {
                     assert!(nr.activate(mig).is_ok());
@@ -2161,7 +2160,6 @@ fn lobsters() {
                 }
                 Err(e) => {
                     panic!("{:?}", e);
-                    or
                 }
             }
         }
