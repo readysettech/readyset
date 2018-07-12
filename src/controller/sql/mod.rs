@@ -1593,6 +1593,30 @@ mod tests {
     }
 
     #[test]
+    fn it_incorporates_self_join() {
+        // set up graph
+        let mut g = integration::build_local("it_incorporates_self_join");
+        g.migrate(|mig| {
+            let mut inc = SqlIncorporator::default();
+            assert!(
+                inc.add_query("CREATE TABLE friends (id int, friend int);", None, mig)
+                    .is_ok()
+            );
+
+            // Try a friends-of-friends type computation via self join
+            let q = "SELECT f1.id, f2.friend AS fof \
+                     FROM friends AS f1 \
+                     JOIN (SELECT * FROM friends) AS f2 ON (f1.friend = f2.id)
+                     WHERE f1.id = ?;";
+
+            let q = inc.add_query(q, None, mig);
+            assert!(q.is_ok());
+            let leaf_view = get_node(&inc, mig, "q_1");
+            assert_eq!(leaf_view.fields(), &["id", "fof"]);
+        });
+    }
+
+    #[test]
     fn it_incorporates_literal_projection() {
         // set up graph
         let mut g = integration::build_local("it_incorporates_literal_projection");
