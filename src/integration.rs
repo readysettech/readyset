@@ -2160,7 +2160,7 @@ fn lobsters() {
                     nr
                 }
                 Err(e) => {
-                    println!("{:?}", e);
+                    panic!("{:?}", e);
                     or
                 }
             }
