@@ -22,20 +22,19 @@ hostname = "0.1.3"
 hyper = "0.12.0"
 mio = "0.6.9"
 nom = "^3.2.1"
-mysql = "13.1.0"
+mysql = "14.0.0"
 rand = "0.5.0"
 serde_derive = "1.0.8"
 serde_json = "1.0.2"
 slog = "2.2.2"
 #slog = { version = "2.2.2", features = ["max_level_trace", "release_max_level_trace"] }
 slog-term = "2.4.0"
-tarpc = "0.11.0"
-tarpc-plugins = "0.3.0"
 slab = "0.4"
 bincode = "1.0.0"
 tokio = "0.1"
 async-bincode = "0.4.5"
 tokio-threadpool = "0.1"
+tokio-io-pool = "0.1.1"
 streamunordered = "0.4.0"
 bufstream = { version = "0.1.3", features = [ "tokio" ] }
 stream-cancel = "0.4"
@@ -48,7 +47,6 @@ serde = { version = "1.0.8", features = ["rc"] }
 petgraph = { version = "0.4.11", features = ["serde-1"] }
 memcached-rs = { git = "https://github.com/jonhoo/memcached-rs.git", branch = "expose-multi" }
 nom-sql = { git = "https://github.com/ms705/nom-sql.git", rev = "3e7ae4c4d32b77342051d5c217549ab8fcb68e85" }
-tokio-io-pool = { git = "https://github.com/jonhoo/tokio-io-pool.git" }
 
 # local deps
 channel = { path = "channel" }
@@ -57,12 +55,6 @@ basics = { path = "basics" }
 dataflow = { path = "dataflow" }
 mir = { path = "mir" }
 api = { path = "api" }
-
-# Not needed directly, but we want to force the version used by our
-# dependencies to have default features. If this isn't here, then the features
-# used for `num` will vary between subcrates, triggering unnecessary
-# recompiles.
-num = "0.1"
 
 [dependencies.timekeeper]
 version = "0.3.0"
