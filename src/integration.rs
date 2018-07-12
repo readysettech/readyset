@@ -2151,8 +2151,8 @@ fn lobsters() {
             .collect();
 
         // Add them one by one
-        for (i, q) in lines.iter().enumerate() {
-            println!("{}: {}", i, q);
+        for (_i, q) in lines.iter().enumerate() {
+            //println!("{}: {}", i, q);
             let or = r.clone();
             r = match r.extend(q) {
                 Ok(mut nr) => {
