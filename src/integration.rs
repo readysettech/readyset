@@ -2125,6 +2125,51 @@ fn tpc_w() {
 }
 
 #[test]
+fn lobsters() {
+    use std::fs::File;
+    use std::io::Read;
+    use logger_pls;
+
+    // set up graph
+    let mut g = build_local("lobsters");
+    g.migrate(|mig| {
+        let mut r = Recipe::blank(Some(logger_pls()));
+        let mut f = File::open("tests/lobsters-schema.txt").unwrap();
+        let mut s = String::new();
+
+        // Load queries
+        f.read_to_string(&mut s).unwrap();
+        let lines: Vec<String> = s
+            .lines()
+            .filter(|l| !l.is_empty() && !l.starts_with('#') && !l.starts_with("DROP TABLE"))
+            .map(|l| {
+                if !(l.ends_with('\n') || l.ends_with(';')) {
+                    String::from(l) + "\n"
+                } else {
+                    String::from(l)
+                }
+            })
+            .collect();
+
+        // Add them one by one
+        for (i, q) in lines.iter().enumerate() {
+            println!("{}: {}", i, q);
+            let or = r.clone();
+            r = match r.extend(q) {
+                Ok(mut nr) => {
+                    assert!(nr.activate(mig).is_ok());
+                    nr
+                }
+                Err(e) => {
+                    println!("{:?}", e);
+                    or
+                }
+            }
+        }
+    });
+}
+
+#[test]
 #[allow_fail]
 fn node_removal() {
     // set up graph
