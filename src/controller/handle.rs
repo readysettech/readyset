@@ -12,6 +12,7 @@ use controller::Event;
 use futures::{self, Future};
 use stream_cancel::Trigger;
 use tokio;
+use tokio_io_pool;
 
 /// A handle to a controller that is running in the same process as this one.
 pub struct LocalControllerHandle<A: Authority> {
@@ -20,6 +21,7 @@ pub struct LocalControllerHandle<A: Authority> {
     event_tx: Option<futures::sync::mpsc::UnboundedSender<Event>>,
     kill: Option<Trigger>,
     runtime: Option<tokio::runtime::Runtime>,
+    iopool: Option<tokio_io_pool::Runtime>,
 }
 
 impl<A: Authority> Deref for LocalControllerHandle<A> {
@@ -41,12 +43,14 @@ impl<A: Authority> LocalControllerHandle<A> {
         event_tx: futures::sync::mpsc::UnboundedSender<Event>,
         kill: Trigger,
         rt: tokio::runtime::Runtime,
+        io: tokio_io_pool::Runtime,
     ) -> Self {
         LocalControllerHandle {
             c: Some(ControllerHandle::make(authority).unwrap()),
             event_tx: Some(event_tx),
             kill: Some(kill),
             runtime: Some(rt),
+            iopool: Some(io),
         }
     }
 
@@ -137,6 +141,9 @@ impl<A: Authority> LocalControllerHandle<A> {
             drop(self.kill.take());
             rt.shutdown_on_idle().wait().unwrap();
         }
+        if let Some(io) = self.iopool.take() {
+            io.shutdown_on_idle();
+        }
     }
 
     /// Wait for associated local instance to exit (presumably with an error).
@@ -144,6 +151,9 @@ impl<A: Authority> LocalControllerHandle<A> {
         drop(self.event_tx.take());
         if let Some(rt) = self.runtime.take() {
             rt.shutdown_on_idle().wait().unwrap();
+        }
+        if let Some(io) = self.iopool.take() {
+            io.shutdown_on_idle();
         }
     }
 }

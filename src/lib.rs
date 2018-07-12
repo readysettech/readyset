@@ -347,6 +347,7 @@ extern crate slog_term;
 extern crate stream_cancel;
 extern crate streamunordered;
 extern crate tokio;
+extern crate tokio_io_pool;
 extern crate tokio_threadpool;
 
 mod controller;
