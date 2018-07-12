@@ -72,7 +72,7 @@ impl Union {
             let mut last = &emit[0];
             for i in emit {
                 if i < last {
-                    unimplemented!();
+                    unimplemented!("union doesn't support column reordering; got emit = {:?}", emit);
                 }
                 last = i;
             }
