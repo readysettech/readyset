@@ -590,7 +590,7 @@ impl Materializations {
                                       "alias" => c,
                                       "shard" => col,
                             );
-                            //unimplemented!();
+                            unimplemented!();
                         }
                     }
                 }
