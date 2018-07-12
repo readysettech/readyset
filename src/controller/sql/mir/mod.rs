@@ -30,9 +30,6 @@ mod rewrite;
 mod security;
 
 fn sanitize_leaf_column(c: &mut Column, view_name: &str) {
-    if c.table.as_ref().map(|s| s.as_str()) != Some(view_name) && !c.aliases.contains(c) {
-        c.aliases.push(c.clone());
-    }
     c.table = Some(view_name.to_string());
     c.function = None;
 }
