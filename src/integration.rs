@@ -2128,12 +2128,11 @@ fn tpc_w() {
 fn lobsters() {
     use std::fs::File;
     use std::io::Read;
-    use logger_pls;
 
     // set up graph
     let mut g = build_local("lobsters");
     g.migrate(|mig| {
-        let mut r = Recipe::blank(Some(logger_pls()));
+        let mut r = Recipe::blank(None);
         let mut f = File::open("tests/lobsters-schema.txt").unwrap();
         let mut s = String::new();
 
