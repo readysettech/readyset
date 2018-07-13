@@ -280,7 +280,19 @@ impl GraphViz for MirNodeType {
             MirNodeType::TopK {
                 ref order, ref k, ..
             } => {
-                write!(out, "TopK | k: {}, {:?}", k, order)?;
+                write!(
+                    out,
+                    "TopK [k: {}; {}]",
+                    k,
+                    order
+                        .as_ref()
+                        .map(|v| v
+                            .iter()
+                            .map(|(c, o)| format!("{}: {}", c.name.as_str(), o))
+                            .collect::<Vec<_>>()
+                            .join(", "))
+                        .unwrap_or("".into())
+                )?;
             }
             MirNodeType::Union { ref emit } => {
                 let cols = emit
