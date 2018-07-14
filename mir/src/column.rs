@@ -91,8 +91,9 @@ impl<'a> From<&'a str> for Column {
 
 impl PartialEq for Column {
     fn eq(&self, other: &Column) -> bool {
-        (self.name == other.name && self.table == other.table && self.function == other.function)
-            || self.aliases.contains(other) || other.aliases.contains(self)
+        (self.name == other.name && self.table == other.table)
+            || self.aliases.contains(other)
+            || other.aliases.contains(self)
     }
 }
 
