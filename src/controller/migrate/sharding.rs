@@ -736,7 +736,18 @@ pub fn validate(
             } else {
                 // ancestor is an ordinary node, so it must have the same sharding
                 let in_sharding = remap(n, in_ni, in_node.sharded_by());
-                if in_sharding != n.sharded_by() {
+                let out_sharding = n.sharded_by();
+                let equal = match in_sharding {
+                    // ForcedNone and None are different enum variants, but correspond to the same
+                    // sharding (namely, none)
+                    Sharding::ForcedNone | Sharding::None => match out_sharding {
+                        Sharding::ForcedNone | Sharding::None => true,
+                        _ => in_sharding == out_sharding,
+                    },
+                    _ => in_sharding == out_sharding,
+                };
+
+                if !equal {
                     crit!(
                         log,
                         "invalid sharding: {} sharded by {:?} != {}'s {:?}",
@@ -746,7 +757,7 @@ pub fn validate(
                         graph[node].sharded_by(),
                     );
                 }
-                assert_eq!(in_sharding, n.sharded_by());
+                assert!(equal);
             }
         }
     }
