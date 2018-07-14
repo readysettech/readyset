@@ -86,7 +86,7 @@ fn setup(deployment: &Deployment) -> mysql::Opts {
         let mut builder = ControllerBuilder::default();
         authority.log_with(l.clone());
         builder.log_with(l);
-        builder.build(Arc::new(authority)).wait();
+        builder.build(Arc::new(authority)).unwrap().wait();
     });
 
     let query_counter = Arc::new(AtomicUsize::new(0));
