@@ -662,7 +662,7 @@ fn listen_df(
             .map_err(|e| -> io::Error { panic!("{:?}", e) })
             .fold(ctrl_tx, move |ctrl_tx, d| {
                 let idx = d.index;
-                let shard = d.shard;
+                let shard = d.shard.unwrap_or(0);
                 let addr: io::Result<_> = do catch {
                     let on = tokio::net::TcpListener::bind(&SocketAddr::new(on, 0))?;
                     let addr = on.local_addr()?;

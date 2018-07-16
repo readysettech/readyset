@@ -106,7 +106,7 @@ pub struct DomainBuilder {
     /// The domain's index.
     pub index: Index,
     /// The shard ID represented by this `DomainBuilder`.
-    pub shard: usize,
+    pub shard: Option<usize>,
     /// The number of shards in the domain.
     pub nshards: usize,
     /// The nodes in the domain.
@@ -141,13 +141,7 @@ impl DomainBuilder {
             .map(|n| *n.borrow().local_addr())
             .collect();
 
-        let shard = if self.nshards == 1 {
-            None
-        } else {
-            Some(self.shard)
-        };
-
-        let log = log.new(o!("domain" => self.index.index(), "shard" => self.shard));
+        let log = log.new(o!("domain" => self.index.index(), "shard" => self.shard.unwrap_or(0)));
 
         let debug_tx = self
             .debug_addr
@@ -159,7 +153,7 @@ impl DomainBuilder {
 
         Domain {
             index: self.index,
-            shard,
+            shard: self.shard,
             _nshards: self.nshards,
             domain_addr: addr,
 

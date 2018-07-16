@@ -96,7 +96,7 @@ impl Union {
 
     /// Construct a new union operator meant to de-shard a sharded data-flow subtree.
     pub fn new_deshard(parent: NodeIndex, sharding: Sharding) -> Union {
-        let shards = sharding.shards();
+        let shards = sharding.shards().unwrap();
         Union {
             emit: Emit::AllFrom(parent.into(), sharding),
             required: shards,

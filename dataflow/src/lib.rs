@@ -78,10 +78,10 @@ impl Sharding {
         }
     }
 
-    pub fn shards(&self) -> usize {
+    pub fn shards(&self) -> Option<usize> {
         match *self {
-            Sharding::None | Sharding::ForcedNone => 1,
-            Sharding::Random(shards) | Sharding::ByColumn(_, shards) => shards,
+            Sharding::None | Sharding::ForcedNone => None,
+            Sharding::Random(shards) | Sharding::ByColumn(_, shards) => Some(shards),
         }
     }
 }

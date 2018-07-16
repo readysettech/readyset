@@ -40,7 +40,7 @@ pub struct DomainHandle {
 impl DomainHandle {
     pub fn new<'a>(
         idx: DomainIndex,
-        num_shards: usize,
+        num_shards: Option<usize>,
         log: &Logger,
         graph: &mut Graph,
         config: &DomainConfig,
@@ -63,8 +63,8 @@ impl DomainHandle {
         let mut assignments = Vec::new();
         let mut nodes = Some(Self::build_descriptors(graph, nodes));
 
-        for i in 0..num_shards {
-            let nodes = if i == num_shards - 1 {
+        for i in 0..num_shards.unwrap_or(1) {
+            let nodes = if i == num_shards.unwrap_or(1) - 1 {
                 nodes.take().unwrap()
             } else {
                 nodes.clone().unwrap()
@@ -74,8 +74,8 @@ impl DomainHandle {
                 std::net::TcpListener::bind(SocketAddr::new(listen_addr.clone(), 0)).unwrap();
             let domain = DomainBuilder {
                 index: idx,
-                shard: i,
-                nshards: num_shards,
+                shard: if num_shards.is_some() { Some(i) } else { None },
+                nshards: num_shards.unwrap_or(1),
                 config: config.clone(),
                 nodes,
                 persistence_parameters: persistence_params.clone(),
@@ -94,7 +94,7 @@ impl DomainHandle {
                 log,
                 "sending domain {}.{} to worker {:?}",
                 domain.index.index(),
-                domain.shard,
+                domain.shard.unwrap_or(0),
                 w.peer_addr()
             );
             let src = w.local_addr().unwrap();
@@ -151,7 +151,7 @@ impl DomainHandle {
                     s.send(msg).unwrap();
                 }
 
-                if txs.len() == num_shards {
+                if txs.len() == num_shards.unwrap_or(1) {
                     StopPolling
                 } else {
                     KeepPolling

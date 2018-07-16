@@ -231,7 +231,7 @@ impl<'a> Plan<'a> {
                             // shards would necessarily just be with records that do not match our
                             // sharding key anyway, and that we should thus never see.
                             let src_sharding = self.graph[segments[0].1[0].0].sharded_by();
-                            let shards = src_sharding.shards();
+                            let shards = src_sharding.shards().unwrap_or(1);
                             let lookup_on_shard_key = match src_sharding {
                                 Sharding::Random(..) => false,
                                 Sharding::ByColumn(c, _) => {
