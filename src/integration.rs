@@ -20,6 +20,7 @@ use std::time::Duration;
 use std::{env, thread};
 
 const DEFAULT_SETTLE_TIME_MS: u64 = 200;
+const DEFAULT_SHARDING: Option<usize> = Some(2);
 
 // PersistenceParameters with a log_name on the form of `prefix` + timestamp,
 // avoiding collisions between separate test runs (in case an earlier panic causes clean-up to
@@ -33,7 +34,30 @@ fn get_persistence_params(prefix: &str) -> PersistenceParameters {
 
 // Builds a local controller with the given log prefix.
 pub fn build_local(prefix: &str) -> LocalControllerHandle<LocalAuthority> {
+    build(prefix, DEFAULT_SHARDING, false)
+}
+
+#[allow(dead_code)]
+pub fn build_local_unsharded(prefix: &str) -> LocalControllerHandle<LocalAuthority> {
+    build(prefix, None, false)
+}
+
+#[allow(dead_code)]
+pub fn build_local_logging(prefix: &str) -> LocalControllerHandle<LocalAuthority> {
+    build(prefix, DEFAULT_SHARDING, true)
+}
+
+fn build(
+    prefix: &str,
+    sharding: Option<usize>,
+    log: bool,
+) -> LocalControllerHandle<LocalAuthority> {
+    use logger_pls;
     let mut builder = ControllerBuilder::default();
+    if log {
+        builder.log_with(logger_pls());
+    }
+    builder.set_sharding(sharding);
     builder.set_persistence(get_persistence_params(prefix));
     builder.build_local().unwrap()
 }
