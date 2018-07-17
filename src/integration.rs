@@ -2154,7 +2154,7 @@ fn lobsters() {
     use std::io::Read;
 
     // set up graph
-    let mut g = build_local("lobsters");
+    let mut g = build_local_unsharded("lobsters");
     g.migrate(|mig| {
         let mut r = Recipe::blank(None);
         let mut f = File::open("tests/lobsters-schema.txt").unwrap();
