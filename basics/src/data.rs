@@ -30,7 +30,7 @@ pub enum DataType {
     BigInt(i64),
     /// A fixed point real value. The first field is the integer part, while the second is the
     /// fractional and must be between -999999999 and 999999999.
-    Real(i32, i32),
+    Real(i64, i32),
     /// A reference-counted string-like value.
     Text(ArcCStr),
     /// A tiny string that fits in a pointer
@@ -203,7 +203,7 @@ impl From<f64> for DataType {
             panic!();
         }
 
-        let mut i = f.trunc() as i32;
+        let mut i = f.trunc() as i64;
         let mut frac = (f.fract() * FLOAT_PRECISION).round() as i32;
         if frac == 1000_000_000 {
             i += 1;
@@ -227,7 +227,7 @@ impl<'a> From<&'a Literal> for DataType {
                 let ts = chrono::Local::now().naive_local();
                 DataType::Timestamp(ts)
             }
-            Literal::FixedPoint(ref r) => DataType::Real(r.integral as i32, r.fractional as i32),
+            Literal::FixedPoint(ref r) => DataType::Real(r.integral as i64, r.fractional as i32),
             _ => unimplemented!(),
         }
     }
@@ -243,7 +243,7 @@ impl From<Literal> for DataType {
                 let ts = chrono::Local::now().naive_local();
                 DataType::Timestamp(ts)
             }
-            Literal::FixedPoint(r) => DataType::Real(r.integral as i32, r.fractional as i32),
+            Literal::FixedPoint(r) => DataType::Real(r.integral as i64, r.fractional as i32),
             _ => unimplemented!(),
         }
     }
