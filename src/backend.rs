@@ -224,8 +224,10 @@ impl NoriaBackend {
             .where_clause
             .expect("only supports DELETEs with WHERE-clauses");
 
-        let ts = self.table_schemas.read().unwrap();
-        let pkey = if let Some(Schema::Table(ref cts)) = ts.get(&q.table.name) {
+        // create a mutator if we don't have one for this table already
+        let mutator = self.inner.get_or_make_mutator(&q.table.name);
+
+        let pkey = if let Some(cts) = mutator.schema() {
             utils::get_primary_key(cts)
                 .into_iter()
                 .map(|(_, c)| c)
@@ -234,9 +236,6 @@ impl NoriaBackend {
             // cannot delete from view
             unimplemented!();
         };
-
-        // create a mutator if we don't have one for this table already
-        let mutator = self.inner.get_or_make_mutator(&q.table.name);
 
         match utils::flatten_conditional(&cond, &pkey) {
             None => results.completed(0, 0),
@@ -787,8 +786,7 @@ impl NoriaBackend {
 
         let q = q.into_owned();
         let (key, updates) = {
-            let ts = self.table_schemas.read().unwrap();
-            let schema = if let Some(Schema::Table(ref cts)) = ts.get(&q.table.name) {
+            let schema = if let Some(cts) = mutator.schema() {
                 cts
             } else {
                 // no update on views
