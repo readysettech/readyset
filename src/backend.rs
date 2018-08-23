@@ -179,7 +179,7 @@ impl NoriaBackend {
         results: QueryResultWriter<W>,
     ) -> io::Result<()> {
         // TODO(malte): we should perhaps check our usual caches here, rather than just blindly
-        // doing a migration on Noria ever time. On the other hand, CREATE VIEW is rare...
+        // doing a migration on Noria every time. On the other hand, CREATE VIEW is rare...
 
         // NOTE(jon): expand stars here so that we don't have to recursively walk them when given a
         // view.* at query-time.
