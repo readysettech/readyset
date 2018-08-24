@@ -759,6 +759,7 @@ impl ControllerInner {
         self.find_view_for(node).map(|r| {
             let domain = self.ingredients[r].domain();
             let columns = self.ingredients[r].fields().to_vec();
+            let schema = None; // FIXME
             let shards = (0..self.domains[&domain].shards())
                 .map(|i| self.read_addrs[&self.domains[&domain].assignment(i)].clone())
                 .collect();
@@ -767,6 +768,7 @@ impl ControllerInner {
                 local_ports: vec![],
                 node: r,
                 columns,
+                schema,
                 shards,
             }
         })
