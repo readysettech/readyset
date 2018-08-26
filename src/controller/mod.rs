@@ -330,6 +330,16 @@ fn start_instance<A: Authority + 'static>(
                                 info!(log, "found initial leader");
                             }
 
+                            info!(
+                                log,
+                                "leader listening on external address {:?}",
+                                descriptor.external_addr
+                            );
+                            debug!(
+                                log,
+                                "leader's internal listen address: {:?}", descriptor.internal_addr
+                            );
+
                             // we need to make a new valve that we can use to shut down *just* the
                             // worker in the case of controller failover.
                             let (trigger, valve) = Valve::new();
