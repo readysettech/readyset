@@ -11,7 +11,7 @@ use noria::ActivationResult;
 use petgraph::graph::NodeIndex;
 
 use nom::{self, is_alphanumeric, multispace};
-use nom_sql::CreateTableStatement;
+use nom_sql::{CreateTableStatement, CreateViewStatement};
 use slog;
 use std::collections::HashMap;
 use std::str;
@@ -53,6 +53,12 @@ impl PartialEq for Recipe {
             && self.version == other.version
             && self.prior == other.prior
     }
+}
+
+#[derive(Debug)]
+pub enum Schema {
+    Table(CreateTableStatement),
+    View(CreateViewStatement),
 }
 
 fn hash_query(q: &SqlQuery) -> QueryID {
@@ -148,11 +154,6 @@ impl Recipe {
         self.inc.as_mut().unwrap().enable_reuse(reuse_type)
     }
 
-    /// Base table schema
-    pub fn get_base_schema(&self, name: &str) -> Option<CreateTableStatement> {
-        self.inc.as_ref().unwrap().get_base_schema(name)
-    }
-
     /// Obtains the `NodeIndex` for the node corresponding to a named query or a write type.
     pub fn node_addr_for(&self, name: &str) -> Result<NodeIndex, String> {
         match self.inc {
@@ -175,6 +176,14 @@ impl Recipe {
                 }
             }
             None => Err(format!("Recipe not applied")),
+        }
+    }
+
+    /// Get schema for a base table or view in the recipe.
+    pub fn schema_for(&self, name: &str) -> Option<Schema> {
+        match self.inc.as_ref().unwrap().get_base_schema(name) {
+            None => unimplemented!(),
+            Some(s) => Some(Schema::Table(s)),
         }
     }
 
