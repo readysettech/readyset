@@ -11,7 +11,7 @@ use noria::ActivationResult;
 use petgraph::graph::NodeIndex;
 
 use nom::{self, is_alphanumeric, multispace};
-use nom_sql::{CreateTableStatement, CreateViewStatement};
+use nom_sql::CreateTableStatement;
 use slog;
 use std::collections::HashMap;
 use std::str;
@@ -58,7 +58,7 @@ impl PartialEq for Recipe {
 #[derive(Debug)]
 pub enum Schema {
     Table(CreateTableStatement),
-    View(CreateViewStatement),
+    View(Vec<String>),
 }
 
 fn hash_query(q: &SqlQuery) -> QueryID {
@@ -182,7 +182,12 @@ impl Recipe {
     /// Get schema for a base table or view in the recipe.
     pub fn schema_for(&self, name: &str) -> Option<Schema> {
         match self.inc.as_ref().unwrap().get_base_schema(name) {
-            None => unimplemented!(),
+            None => self
+                .inc
+                .as_ref()
+                .unwrap()
+                .get_view_schema(name)
+                .map(|s| Schema::View(s)),
             Some(s) => Some(Schema::Table(s)),
         }
     }

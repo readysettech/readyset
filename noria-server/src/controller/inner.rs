@@ -14,6 +14,7 @@ use noria::channel::tcp::{SendError, TcpSender};
 use noria::consensus::{Authority, Epoch, STATE_KEY};
 use noria::debug::stats::{DomainStats, GraphStats, NodeStats};
 use noria::ActivationResult;
+use nom_sql::{Column, ColumnSpecification, SqlType};
 use petgraph;
 use petgraph::visit::Bfs;
 use slog;
@@ -761,7 +762,13 @@ impl ControllerInner {
             let domain = self.ingredients[r].domain();
             let columns = self.ingredients[r].fields().to_vec();
             let schema = self.recipe.schema_for(name).map(|s| match s {
-                Schema::View(s) => s,
+                Schema::View(s) => {
+                    use std::convert::From;
+                    // XXX(malte): properly derive columns and types by looking at graph here
+                    s.into_iter()
+                        .map(|c| ColumnSpecification::new(Column::from(c.as_str()), SqlType::Text))
+                        .collect()
+                }
                 _ => panic!("no-view schema {:?} returned for view '{}'", s, name),
             });
             let shards = (0..self.domains[&domain].shards())
