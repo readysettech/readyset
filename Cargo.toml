@@ -8,7 +8,12 @@ arccstr = "1.1.0"
 clap = "2.24.0"
 failure = "0.1.1"
 msql-srv = "0.6"
-noria = { git = "https://github.com/mit-pdos/noria.git" }
+# local override for development
+#
+# can't rename dep because of https://github.com/rust-lang/rust/issues/51796
+#distributary = { path = "../distributary/api", package = "api" }
+#distributary = { git = "https://github.com/mit-pdos/distributary.git", package = "api" }
+noria = { git = "https://github.com/mit-pdos/noria.git", branch = "distributed-shim" }
 lazy_static = "1.0.0"
 nom-sql = "0.0.4"
 slog = "2.4.0"
