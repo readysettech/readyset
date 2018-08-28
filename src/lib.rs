@@ -5,6 +5,7 @@
 extern crate noria;
 extern crate arccstr;
 extern crate chrono;
+extern crate failure;
 extern crate msql_srv;
 extern crate nom_sql;
 extern crate regex;
@@ -15,6 +16,7 @@ extern crate lazy_static;
 extern crate slog;
 
 mod convert;
+mod referred_tables;
 mod rewrite;
 mod schema;
 mod backend;
