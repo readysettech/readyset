@@ -154,18 +154,21 @@ impl Recipe {
         self.inc.as_mut().unwrap().enable_reuse(reuse_type)
     }
 
+    fn resolve_alias(&self, alias: &str) -> Option<&str> {
+        self.aliases.get(alias).map(|ref qid| {
+            let (ref internal_qn, _, _) = self.expressions[qid];
+            internal_qn.as_ref().unwrap().as_str()
+        })
+    }
+
     /// Obtains the `NodeIndex` for the node corresponding to a named query or a write type.
     pub fn node_addr_for(&self, name: &str) -> Result<NodeIndex, String> {
         match self.inc {
             Some(ref inc) => {
-                // `name` might be an alias for another identical query, so resolve via QID here
-                // TODO(malte): better error handling
-                let na = match self.aliases.get(name) {
+                // `name` might be an alias for another identical query, so resolve if needed
+                let na = match self.resolve_alias(name) {
                     None => inc.get_query_address(name),
-                    Some(ref qid) => {
-                        let (ref internal_qn, _, _) = self.expressions[qid];
-                        inc.get_query_address(internal_qn.as_ref().unwrap())
-                    }
+                    Some(ref internal_qn) => inc.get_query_address(internal_qn),
                 };
                 match na {
                     None => Err(format!(
@@ -181,13 +184,15 @@ impl Recipe {
 
     /// Get schema for a base table or view in the recipe.
     pub fn schema_for(&self, name: &str) -> Option<Schema> {
-        match self.inc.as_ref().unwrap().get_base_schema(name) {
-            None => self
-                .inc
-                .as_ref()
-                .unwrap()
-                .get_view_schema(name)
-                .map(|s| Schema::View(s)),
+        let inc = self.inc.as_ref().expect("Recipe not applied");
+        match inc.get_base_schema(name) {
+            None => {
+                let s = match self.resolve_alias(name) {
+                    None => inc.get_view_schema(name),
+                    Some(ref internal_qn) => inc.get_view_schema(internal_qn),
+                };
+                s.map(|s| Schema::View(s))
+            }
             Some(s) => Some(Schema::Table(s)),
         }
     }
