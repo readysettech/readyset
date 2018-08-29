@@ -867,6 +867,10 @@ impl<W: io::Write> MysqlShim<W> for NoriaBackend {
         let sql_q = match self.parsed.get(&query) {
             None => match nom_sql::parse_query(&query) {
                 Ok(mut sql_q) => {
+                    // ensure that we have schemas and endpoints for the query
+                    let endpoints_needed = sql_q.referred_tables();
+                    self.fetch_endpoints(endpoints_needed);
+
                     if let SqlQuery::Select(ref mut q) = sql_q {
                         let ts_lock = self.table_schemas.read().unwrap();
                         let table_schemas = &(*ts_lock);
