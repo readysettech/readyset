@@ -1,7 +1,6 @@
 use nom_sql::{
     Column, ConditionBase, ConditionExpression, ConditionTree, CreateTableStatement,
-    CreateViewStatement, FieldDefinitionExpression, FieldValueExpression, Literal, Operator,
-    SelectSpecification, SelectStatement, SqlQuery,
+    FieldDefinitionExpression, Literal, Operator, SelectStatement, SqlQuery,
 };
 
 use std::collections::HashMap;
@@ -10,30 +9,6 @@ use std::mem;
 use schema::Schema;
 
 pub(crate) fn expand_stars(sq: &mut SelectStatement, table_schemas: &HashMap<String, Schema>) {
-    let do_expand_select = |sq: &SelectStatement, table_name: &str| {
-        sq.fields
-            .iter()
-            .map(|ref f| match *f {
-                FieldDefinitionExpression::Col(ref c) => FieldDefinitionExpression::Col(Column {
-                    table: Some(table_name.to_owned()),
-                    name: c.alias.as_ref().unwrap_or(&c.name).to_owned(),
-                    alias: None,
-                    function: None,
-                }),
-                FieldDefinitionExpression::Value(ref v) => FieldDefinitionExpression::Col(Column {
-                    table: Some(table_name.to_owned()),
-                    name: match *v {
-                        FieldValueExpression::Arithmetic(ref a) => &a.alias,
-                        FieldValueExpression::Literal(ref l) => &l.alias,
-                    }.clone()
-                    .unwrap(),
-                    alias: None,
-                    function: None,
-                }),
-                _ => unimplemented!(),
-            }).collect::<Vec<_>>()
-    };
-
     let expand_table = |table_name: String| match table_schemas
         .get(&table_name)
         .expect(&format!("table/view named `{}` does not exist", table_name))
