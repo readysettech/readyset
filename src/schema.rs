@@ -1,8 +1,7 @@
 use msql_srv;
 use nom_sql::{
-    self, ColumnConstraint, ColumnSpecification, CreateTableStatement, CreateViewStatement,
-    FieldDefinitionExpression, FieldValueExpression, InsertStatement, Literal, SelectSpecification,
-    SelectStatement, SqlQuery, SqlType,
+    self, ColumnConstraint, ColumnSpecification, CreateTableStatement, FieldValueExpression,
+    InsertStatement, Literal, SelectStatement, SqlQuery, SqlType,
 };
 
 use std::collections::HashMap;
@@ -86,42 +85,6 @@ pub(crate) fn schema_for_column(
     schemas: &HashMap<String, Schema>,
     c: &nom_sql::Column,
 ) -> msql_srv::Column {
-    let get_fields = |sq: &SelectStatement| {
-        sq.fields
-            .iter()
-            .filter_map(|f| match f {
-                FieldDefinitionExpression::Col(ref cc) => if cc.name == c.name
-                    || (cc.alias.is_some() && &c.name == cc.alias.as_ref().unwrap())
-                {
-                    let mut outc = schema_for_column(schemas, cc);
-                    // don't use the source table name
-                    outc.column = c.name.to_owned();
-                    Some(outc)
-                } else {
-                    None
-                },
-                FieldDefinitionExpression::Value(ref v) => {
-                    let alias = match *v {
-                        FieldValueExpression::Arithmetic(ref a) => &a.alias,
-                        FieldValueExpression::Literal(ref l) => &l.alias,
-                    };
-                    if let Some(a) = alias {
-                        if a == &c.name {
-                            return Some(msql_srv::Column {
-                                table: "".to_owned(),
-                                column: a.to_owned(),
-                                coltype: msql_srv::ColumnType::MYSQL_TYPE_LONG,
-                                colflags: msql_srv::ColumnFlags::empty(),
-                            });
-                        }
-                    }
-                    None
-                }
-                _ => None,
-            }).next()
-            .expect(&format!("column {} not found", c.name))
-    };
-
     let col_from_colspec = |cs: &ColumnSpecification| -> msql_srv::Column {
         msql_srv::Column {
             table: cs.column.table.clone().unwrap_or("".to_owned()),
