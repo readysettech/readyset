@@ -766,7 +766,12 @@ impl ControllerInner {
                     use std::convert::From;
                     // XXX(malte): properly derive columns and types by looking at graph here
                     s.into_iter()
-                        .map(|c| ColumnSpecification::new(Column::from(c.as_str()), SqlType::Text))
+                        .map(|c| ColumnSpecification::new(Column {
+                            name: c,
+                            table: Some(name.to_owned()),
+                            alias: None,
+                            function: None,
+                        }, SqlType::Text))
                         .collect()
                 }
                 _ => panic!("no-view schema {:?} returned for view '{}'", s, name),
