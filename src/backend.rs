@@ -1067,11 +1067,15 @@ impl<W: io::Write> MysqlShim<W> for NoriaBackend {
                         // time, fetch the schemas if we don't have them already.
                         // Note that this implicitly also creates mutators and getters for the
                         // relevant tables/views.
-                        if let SqlQuery::CreateTable(_) = q {
-                            // don't fetch endpoints, since table does not exist yet
-                        } else {
-                            let endpoints_needed = q.referred_tables();
-                            self.fetch_endpoints(endpoints_needed);
+                        match q {
+                            SqlQuery::CreateTable(_) | SqlQuery::DropTable(_) => {
+                                // don't fetch endpoints, since table or view does not exist yet
+                                // TODO(malte): properly DROP TABLE IF EXISTS
+                            },
+                            _ => {
+                                let endpoints_needed = q.referred_tables();
+                                self.fetch_endpoints(endpoints_needed);
+                            }
                         }
 
                         if let SqlQuery::Select(ref mut q) = q {
