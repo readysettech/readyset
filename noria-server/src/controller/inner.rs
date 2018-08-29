@@ -774,7 +774,7 @@ impl ControllerInner {
                         }, SqlType::Text))
                         .collect()
                 }
-                _ => panic!("no-view schema {:?} returned for view '{}'", s, name),
+                _ => panic!("non-view schema {:?} returned for view '{}'", s, name),
             });
             let shards = (0..self.domains[&domain].shards())
                 .map(|i| self.read_addrs[&self.domains[&domain].assignment(i)].clone())
