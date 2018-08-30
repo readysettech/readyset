@@ -725,3 +725,78 @@ fn select_collapse_where_in() {
     assert_eq!(names.len(), 1);
     assert!(names.iter().any(|s| s == "\"Bob\""));
 }
+
+#[test]
+fn basic_select() {
+    let d = Deployment::new("basic_select");
+    let opts = setup(&d);
+    let mut conn = mysql::Conn::new(opts).unwrap();
+    conn.query("CREATE TABLE test (x int, y int)").unwrap();
+    sleep();
+
+    conn.query("INSERT INTO test (x, y) VALUES (4, 2)").unwrap();
+    sleep();
+
+    assert_eq!(conn.query("SELECT test.* FROM test").unwrap().count(), 1);
+}
+
+#[test]
+fn create_view() {
+    let d = Deployment::new("create_view");
+    let opts = setup(&d);
+    let mut conn = mysql::Conn::new(opts).unwrap();
+    conn.query("CREATE TABLE test (x int, y int)").unwrap();
+    sleep();
+
+    conn.query("INSERT INTO test (x, y) VALUES (4, 2)").unwrap();
+    sleep();
+
+    conn.query("CREATE VIEW testview AS SELECT test.* FROM test")
+        .unwrap();
+    sleep();
+
+    let rows: Vec<_> = conn
+        .query("SELECT testview.* FROM testview")
+        .unwrap()
+        .map(|row| row.unwrap())
+        .collect();
+    assert_eq!(rows.len(), 1);
+    assert!(
+        rows.into_iter()
+            .any(|r| r.unwrap() == vec![4.into(), 2.into()])
+    );
+
+    let rows: Vec<_> = conn
+        .query("SELECT test.* FROM test")
+        .unwrap()
+        .map(|row| row.unwrap())
+        .collect();
+    assert_eq!(rows.len(), 1);
+    assert!(
+        rows.into_iter()
+            .any(|r| r.unwrap() == vec![4.into(), 2.into()])
+    );
+}
+
+#[test]
+fn create_view_rev() {
+    let d = Deployment::new("create_view_rev");
+    let opts = setup(&d);
+    let mut conn = mysql::Conn::new(opts).unwrap();
+    conn.query("CREATE TABLE test (x int, y int)").unwrap();
+    sleep();
+
+    conn.query("SELECT test.* FROM test").unwrap();
+    sleep();
+
+    conn.query("CREATE VIEW testview AS SELECT test.* FROM test")
+        .unwrap();
+    sleep();
+
+    assert_eq!(
+        conn.query("SELECT testview.* FROM testview")
+            .unwrap()
+            .count(),
+        1
+    );
+}
