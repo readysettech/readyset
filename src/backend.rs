@@ -3,8 +3,7 @@ use noria::{ControllerHandle, DataType, Table, View, ZookeeperAuthority};
 use failure;
 use msql_srv::{self, *};
 use nom_sql::{
-    self, ColumnConstraint, InsertStatement, Literal, SelectSpecification, SelectStatement,
-    SqlQuery, UpdateStatement,
+    self, ColumnConstraint, InsertStatement, Literal, SelectStatement, SqlQuery, UpdateStatement,
 };
 
 use slog;
@@ -19,7 +18,7 @@ use std::time;
 use convert::ToDataType;
 use referred_tables::ReferredTables;
 use rewrite;
-use schema::{schema_for_column, schema_for_insert, schema_for_select, Schema};
+use schema::{self, schema_for_column, Schema};
 use utils;
 
 #[derive(Clone)]
@@ -175,7 +174,7 @@ impl NoriaBackend {
         }
     }
 
-    fn fetch_endpoints(&mut self, need: Vec<nom_sql::Table>) {
+    fn fetch_endpoints(&mut self, need: Vec<nom_sql::Table>) -> Result<(), failure::Error> {
         let mut table_schemas = (*self.table_schemas).write().unwrap();
         for t in need {
             //  1. check inner.inputs/inner.outputs
@@ -190,18 +189,26 @@ impl NoriaBackend {
             } else {
                 //  2. If nothing, RPC for view
                 if let Ok(vh) = self.inner.get_or_make_getter(&t.name) {
-                    table_schemas.insert(t.name, Schema::View(vh.schema().unwrap().to_vec()));
+                    table_schemas.insert(
+                        t.name.clone(),
+                        Schema::View(
+                            vh.schema()
+                                .expect(&format!("no schema on view '{}'", t.name))
+                                .to_vec(),
+                        ),
+                    );
                 } else {
                     //  3. If nothing, RPC for table
                     if let Ok(th) = self.inner.get_or_make_mutator(&t.name) {
                         table_schemas.insert(t.name, Schema::Table(th.schema().unwrap().clone()));
                     } else {
                         //  4. If still nothing, panic
-                        panic!("no view or table named '{}'", t.name);
+                        bail!("no view or table named '{}'", t.name);
                     }
                 }
             }
         }
+        Ok(())
     }
 
     fn handle_create_table<W: io::Write>(
@@ -223,26 +230,11 @@ impl NoriaBackend {
 
     fn handle_create_view<W: io::Write>(
         &mut self,
-        mut q: nom_sql::CreateViewStatement,
+        q: nom_sql::CreateViewStatement,
         results: QueryResultWriter<W>,
     ) -> io::Result<()> {
         // TODO(malte): we should perhaps check our usual caches here, rather than just blindly
         // doing a migration on Noria every time. On the other hand, CREATE VIEW is rare...
-
-        // NOTE(jon): expand stars here so that we don't have to recursively walk them when given a
-        // view.* at query-time.
-        {
-            let ts_lock = self.table_schemas.read().unwrap();
-            let table_schemas = &(*ts_lock);
-            match *q.definition {
-                SelectSpecification::Simple(ref mut q) => rewrite::expand_stars(q, table_schemas),
-                SelectSpecification::Compound(ref mut qs) => {
-                    for &mut (_, ref mut q) in &mut qs.selects {
-                        rewrite::expand_stars(q, table_schemas);
-                    }
-                }
-            };
-        }
 
         info!(
             self.log,
@@ -360,10 +352,16 @@ impl NoriaBackend {
             .map(|l| vec![l.to_datatype()])
             .collect();
         // we need the schema for the result writer
-        let schema = {
-            let ts_lock = self.table_schemas.read().unwrap();
-            schema_for_select(&(*ts_lock), &q)
-        };
+        let schema = schema::convert_schema(&Schema::View(
+            self.inner
+                .ensure_getter(&qname)
+                .schema()
+                .expect(&format!("no schema for view '{}'", qname))
+                .iter()
+                .cloned()
+                .filter(|c| c.column.name != "bogokey")
+                .collect(),
+        ));
         self.do_read(&qname, keys, schema.as_slice(), results)
     }
 
@@ -389,56 +387,50 @@ impl NoriaBackend {
         mut sql_q: nom_sql::SqlQuery,
         info: StatementMetaWriter<W>,
     ) -> io::Result<()> {
-        let ts_lock = self.table_schemas.read().unwrap();
-        let table_schemas = &(*ts_lock);
+        let q = if let nom_sql::SqlQuery::Insert(ref q) = sql_q {
+            q
+        } else {
+            unreachable!()
+        };
+        let mutator = self.inner.ensure_mutator(&q.table.name);
+        let schema = schema::convert_schema(&Schema::Table(mutator.schema().unwrap().clone()));
 
         match sql_q {
             // set column names (insert schema) if not set
             nom_sql::SqlQuery::Insert(ref mut q) => if q.fields.is_none() {
-                match table_schemas[&q.table.name] {
-                    Schema::Table(ref ts) => {
-                        q.fields = Some(ts.fields.iter().map(|cs| cs.column.clone()).collect());
-                    }
-                    _ => unreachable!(),
-                }
+                q.fields = Some(mutator.schema().as_ref().unwrap().fields.iter().map(|cs| cs.column.clone()).collect());
             },
             _ => (),
         }
 
         let params: Vec<_> = {
-            let q = if let nom_sql::SqlQuery::Insert(ref q) = sql_q {
-                q
-            } else {
-                unreachable!()
-            };
-
-            // extract parameter columns
+            // extract parameter columns -- easy here, since they must all be in the same table
             let param_cols = utils::get_parameter_columns(&sql_q);
             param_cols
                 .into_iter()
                 .map(|c| {
-                    let mut cc = c.clone();
-                    cc.table = Some(q.table.name.clone());
-                    schema_for_column(table_schemas, &cc)
+                    //let mut cc = c.clone();
+                    //cc.table = Some(q.table.name.clone());
+                    //schema_for_column(table_schemas, &cc)
+                    schema
+                        .iter()
+                        .cloned()
+                        .find(|mc| c.name == mc.column)
+                        .expect(&format!("column '{}' missing in mutator schema", c))
                 }).collect()
         };
 
+        self.prepared_count += 1;
+
+        // nothing more to do for an insert
+        info.reply(self.prepared_count, params.as_slice(), schema.as_slice())?;
+
+        // register a new prepared statement
         let q = if let nom_sql::SqlQuery::Insert(q) = sql_q {
             q
         } else {
             unreachable!()
         };
-
-        // extract result schema
-        let schema = schema_for_insert(table_schemas, &q);
-
-        self.prepared_count += 1;
-
-        // nothing more to do for an insert
-        // TODO(malte): proactively get mutator?
-        info.reply(self.prepared_count, params.as_slice(), schema.as_slice())?;
-
-        // register a new prepared statement
         self.prepared
             .insert(self.prepared_count, PreparedStatement::Insert(q));
 
@@ -508,7 +500,7 @@ impl NoriaBackend {
         mut sql_q: nom_sql::SqlQuery,
         info: StatementMetaWriter<W>,
     ) -> io::Result<()> {
-        let (params, schema) = {
+        let params = {
             let ts_lock = self.table_schemas.read().unwrap();
             let table_schemas = &(*ts_lock);
 
@@ -521,15 +513,7 @@ impl NoriaBackend {
                 .map(|c| schema_for_column(table_schemas, c))
                 .collect();
 
-            let q = if let nom_sql::SqlQuery::Select(ref q) = sql_q {
-                q
-            } else {
-                unreachable!();
-            };
-
-            // extract result schema
-            let schema = schema_for_select(table_schemas, &q);
-            (params, schema)
+            params
         };
 
         let rewritten = rewrite::collapse_where_in(&mut sql_q, false);
@@ -541,6 +525,15 @@ impl NoriaBackend {
 
         // check if we already have this query prepared
         let qname = self.get_or_create_view(&q, true)?;
+
+        // extract result schema
+        let schema = schema::convert_schema(&Schema::View(
+            self.inner
+                .ensure_getter(&qname)
+                .schema()
+                .expect(&format!("no schema for view '{}'", qname))
+                .to_vec(),
+        ));
 
         self.prepared_count += 1;
 
@@ -620,21 +613,25 @@ impl NoriaBackend {
         results: QueryResultWriter<W>,
     ) -> io::Result<()> {
         let table = &q.table.name;
-        let columns_specified = &q.fields.as_ref().unwrap();
+        let columns_specified: Vec<_> = q
+            .fields
+            .as_ref()
+            .unwrap()
+            .iter()
+            .cloned()
+            .map(|mut c| {
+                c.table = Some(q.table.name.clone());
+                c
+            }).collect();
 
         // create a mutator if we don't have one for this table already
         let putter = self.inner.ensure_mutator(table);
-        let schema: Vec<String> = putter.columns().to_vec();
+        let schema = putter
+            .schema()
+            .expect(&format!("no schema for table '{}'", table));
 
         // handle auto increment
-        let ts_lock = self.table_schemas.read().unwrap();
-        let table_schema = if let Some(Schema::Table(ref cts)) = ts_lock.get(table) {
-            cts
-        } else {
-            // cannot insert into a view!
-            unimplemented!();
-        };
-        let auto_increment_columns: Vec<_> = table_schema
+        let auto_increment_columns: Vec<_> = schema
             .fields
             .iter()
             .filter(|c| c.constraints.contains(&ColumnConstraint::AutoIncrement))
@@ -657,7 +654,7 @@ impl NoriaBackend {
         let last_insert_id = &ai_lock[table];
 
         // handle default values
-        let mut default_value_columns: Vec<_> = table_schema
+        let mut default_value_columns: Vec<_> = schema
             .fields
             .iter()
             .filter_map(|ref c| {
@@ -672,14 +669,15 @@ impl NoriaBackend {
                 None
             }).collect();
 
-        let mut buf = vec![vec![DataType::None; schema.len()]; data.len()];
+        let mut buf = vec![vec![DataType::None; schema.fields.len()]; data.len()];
 
         let mut first_inserted_id = None;
         for (ri, ref row) in data.iter().enumerate() {
             if let Some(col) = auto_increment_columns.iter().next() {
                 let idx = schema
+                    .fields
                     .iter()
-                    .position(|f| *f == col.column.name)
+                    .position(|f| f == *col)
                     .expect(&format!("no column named '{}'", col.column.name));
                 // query can specify an explicit AUTO_INCREMENT value
                 if !columns_specified.contains(&col.column) {
@@ -693,8 +691,9 @@ impl NoriaBackend {
 
             for (c, v) in default_value_columns.drain(..) {
                 let idx = schema
+                    .fields
                     .iter()
-                    .position(|f| *f == c.name)
+                    .position(|f| f.column == c)
                     .expect(&format!("no column named '{}'", c.name));
                 // only use default value if query doesn't specify one
                 if !columns_specified.contains(&c) {
@@ -704,9 +703,10 @@ impl NoriaBackend {
 
             for (ci, c) in columns_specified.iter().enumerate() {
                 let idx = schema
+                    .fields
                     .iter()
-                    .position(|f| *f == c.name)
-                    .expect(&format!("no column named '{}'", c.name));
+                    .position(|f| f.column == *c)
+                    .expect(&format!("no column '{:?}' in table '{}'", c, schema.table));
                 buf[ri][idx] = row.get(ci).unwrap().clone();
             }
         }
@@ -722,7 +722,7 @@ impl NoriaBackend {
                     fields: update_fields.clone(),
                     where_clause: None,
                 };
-                utils::extract_update_params_and_fields(&mut uq, &mut None, table_schema)
+                utils::extract_update_params_and_fields(&mut uq, &mut None, schema)
             };
 
             // TODO(malte): why can't I consume buf here?
@@ -866,16 +866,10 @@ impl<W: io::Write> MysqlShim<W> for NoriaBackend {
 
         let sql_q = match self.parsed.get(&query) {
             None => match nom_sql::parse_query(&query) {
-                Ok(mut sql_q) => {
+                Ok(sql_q) => {
                     // ensure that we have schemas and endpoints for the query
                     let endpoints_needed = sql_q.referred_tables();
-                    self.fetch_endpoints(endpoints_needed);
-
-                    if let SqlQuery::Select(ref mut q) = sql_q {
-                        let ts_lock = self.table_schemas.read().unwrap();
-                        let table_schemas = &(*ts_lock);
-                        rewrite::expand_stars(q, table_schemas)
-                    }
+                    self.fetch_endpoints(endpoints_needed).unwrap();
 
                     self.parsed
                         .insert(query.to_owned(), (sql_q.clone(), vec![]));
@@ -1032,8 +1026,7 @@ impl<W: io::Write> MysqlShim<W> for NoriaBackend {
                 coltype: ColumnType::MYSQL_TYPE_STRING,
                 colflags: ColumnFlags::empty(),
             }];
-            // TODO(malte): we actually know what tables exist via self.table_schemas, so
-            //              return them here
+            // TODO(malte): we could find out which tables exist via RPC to Soup and return them
             let writer = results.start(&cols)?;
             println!(" -> Ok({} rows)", 0);
             return writer.finish();
@@ -1071,17 +1064,11 @@ impl<W: io::Write> MysqlShim<W> for NoriaBackend {
                             SqlQuery::CreateTable(_) | SqlQuery::DropTable(_) => {
                                 // don't fetch endpoints, since table or view does not exist yet
                                 // TODO(malte): properly DROP TABLE IF EXISTS
-                            },
+                            }
                             _ => {
                                 let endpoints_needed = q.referred_tables();
-                                self.fetch_endpoints(endpoints_needed);
+                                self.fetch_endpoints(endpoints_needed).unwrap();
                             }
-                        }
-
-                        if let SqlQuery::Select(ref mut q) = q {
-                            let ts_lock = self.table_schemas.read().unwrap();
-                            let table_schemas = &(*ts_lock);
-                            rewrite::expand_stars(q, table_schemas);
                         }
 
                         let mut use_params = Vec::new();

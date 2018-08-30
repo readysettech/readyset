@@ -25,6 +25,56 @@ pub(crate) fn schema_for_query(
     }
 }
 
+pub(crate) fn convert_column(cs: &ColumnSpecification) -> msql_srv::Column {
+    msql_srv::Column {
+        table: cs.column.table.clone().unwrap_or("".to_owned()),
+        column: cs.column.name.clone(),
+        coltype: match cs.sql_type {
+            SqlType::Mediumtext => msql_srv::ColumnType::MYSQL_TYPE_VAR_STRING,
+            SqlType::Longtext => msql_srv::ColumnType::MYSQL_TYPE_BLOB,
+            SqlType::Text => msql_srv::ColumnType::MYSQL_TYPE_STRING,
+            SqlType::Varchar(_) => msql_srv::ColumnType::MYSQL_TYPE_VAR_STRING,
+            SqlType::Int(_) => msql_srv::ColumnType::MYSQL_TYPE_LONG,
+            SqlType::Bigint(_) => msql_srv::ColumnType::MYSQL_TYPE_LONGLONG,
+            SqlType::Tinyint(_) => msql_srv::ColumnType::MYSQL_TYPE_TINY,
+            SqlType::Bool => msql_srv::ColumnType::MYSQL_TYPE_BIT,
+            SqlType::DateTime => msql_srv::ColumnType::MYSQL_TYPE_DATETIME,
+            SqlType::Float => msql_srv::ColumnType::MYSQL_TYPE_DOUBLE,
+            SqlType::Decimal(_, _) => msql_srv::ColumnType::MYSQL_TYPE_DECIMAL,
+            _ => unimplemented!(),
+        },
+        colflags: {
+            let mut flags = msql_srv::ColumnFlags::empty();
+            for c in &cs.constraints {
+                match *c {
+                    ColumnConstraint::AutoIncrement => {
+                        flags |= msql_srv::ColumnFlags::AUTO_INCREMENT_FLAG;
+                    }
+                    ColumnConstraint::NotNull => {
+                        flags |= msql_srv::ColumnFlags::NOT_NULL_FLAG;
+                    }
+                    ColumnConstraint::PrimaryKey => {
+                        flags |= msql_srv::ColumnFlags::PRI_KEY_FLAG;
+                    }
+                    ColumnConstraint::Unique => {
+                        flags |= msql_srv::ColumnFlags::UNIQUE_KEY_FLAG;
+                    }
+                    _ => (),
+                }
+            }
+            flags
+        },
+    }
+}
+
+pub(crate) fn convert_schema(schema: &Schema) -> Vec<msql_srv::Column> {
+    match schema {
+        Schema::Table(CreateTableStatement { ref fields, .. }) | Schema::View(ref fields) => {
+            fields.iter().map(|c| convert_column(c)).collect()
+        }
+    }
+}
+
 pub(crate) fn schema_for_insert(
     schemas: &HashMap<String, Schema>,
     q: &InsertStatement,
@@ -85,48 +135,6 @@ pub(crate) fn schema_for_column(
     schemas: &HashMap<String, Schema>,
     c: &nom_sql::Column,
 ) -> msql_srv::Column {
-    let col_from_colspec = |cs: &ColumnSpecification| -> msql_srv::Column {
-        msql_srv::Column {
-            table: cs.column.table.clone().unwrap_or("".to_owned()),
-            column: cs.column.name.clone(),
-            coltype: match cs.sql_type {
-                SqlType::Mediumtext => msql_srv::ColumnType::MYSQL_TYPE_VAR_STRING,
-                SqlType::Longtext => msql_srv::ColumnType::MYSQL_TYPE_BLOB,
-                SqlType::Text => msql_srv::ColumnType::MYSQL_TYPE_STRING,
-                SqlType::Varchar(_) => msql_srv::ColumnType::MYSQL_TYPE_VAR_STRING,
-                SqlType::Int(_) => msql_srv::ColumnType::MYSQL_TYPE_LONG,
-                SqlType::Bigint(_) => msql_srv::ColumnType::MYSQL_TYPE_LONGLONG,
-                SqlType::Tinyint(_) => msql_srv::ColumnType::MYSQL_TYPE_TINY,
-                SqlType::Bool => msql_srv::ColumnType::MYSQL_TYPE_BIT,
-                SqlType::DateTime => msql_srv::ColumnType::MYSQL_TYPE_DATETIME,
-                SqlType::Float => msql_srv::ColumnType::MYSQL_TYPE_DOUBLE,
-                SqlType::Decimal(_, _) => msql_srv::ColumnType::MYSQL_TYPE_DECIMAL,
-                _ => unimplemented!(),
-            },
-            colflags: {
-                let mut flags = msql_srv::ColumnFlags::empty();
-                for c in &cs.constraints {
-                    match *c {
-                        ColumnConstraint::AutoIncrement => {
-                            flags |= msql_srv::ColumnFlags::AUTO_INCREMENT_FLAG;
-                        }
-                        ColumnConstraint::NotNull => {
-                            flags |= msql_srv::ColumnFlags::NOT_NULL_FLAG;
-                        }
-                        ColumnConstraint::PrimaryKey => {
-                            flags |= msql_srv::ColumnFlags::PRI_KEY_FLAG;
-                        }
-                        ColumnConstraint::Unique => {
-                            flags |= msql_srv::ColumnFlags::UNIQUE_KEY_FLAG;
-                        }
-                        _ => (),
-                    }
-                }
-                flags
-            },
-        }
-    };
-
     if let Some(ref table) = c.table {
         match schemas
             .get(table)
@@ -140,9 +148,9 @@ pub(crate) fn schema_for_column(
 
                 assert_eq!(colspec.column.name, c.name);
 
-                col_from_colspec(colspec)
+                convert_column(colspec)
             }
-            Schema::View(ref fields) => col_from_colspec(
+            Schema::View(ref fields) => convert_column(
                 fields
                     .iter()
                     .find(|cs| cs.column == *c)

@@ -1,64 +1,6 @@
-use nom_sql::{
-    Column, ConditionBase, ConditionExpression, ConditionTree, CreateTableStatement,
-    FieldDefinitionExpression, Literal, Operator, SelectStatement, SqlQuery,
-};
+use nom_sql::{ConditionBase, ConditionExpression, ConditionTree, Literal, Operator, SqlQuery};
 
-use std::collections::HashMap;
 use std::mem;
-
-use schema::Schema;
-
-pub(crate) fn expand_stars(sq: &mut SelectStatement, table_schemas: &HashMap<String, Schema>) {
-    let expand_table = |table_name: String| match table_schemas
-        .get(&table_name)
-        .expect(&format!("table/view named `{}` does not exist", table_name))
-    {
-        Schema::Table(CreateTableStatement { ref fields, .. }) => fields
-            .iter()
-            .cloned()
-            .map(move |f| {
-                FieldDefinitionExpression::Col(Column {
-                    table: Some(table_name.to_owned()),
-                    name: f.column.name.clone(),
-                    alias: None,
-                    function: None,
-                })
-            }).collect::<Vec<_>>(),
-        Schema::View(ref fields) => fields
-            .iter()
-            .map(|ref f| {
-                FieldDefinitionExpression::Col(Column {
-                    table: Some(table_name.to_owned()),
-                    name: f.column.name.clone(),
-                    alias: None,
-                    function: None,
-                })
-            }).collect::<Vec<_>>(),
-    };
-
-    let old_fields = mem::replace(&mut sq.fields, vec![]);
-    sq.fields = old_fields
-        .into_iter()
-        .flat_map(|field| match field {
-            FieldDefinitionExpression::All => {
-                let v: Vec<_> = sq
-                    .tables
-                    .iter()
-                    .map(|t| t.name.clone())
-                    .flat_map(&expand_table)
-                    .collect();
-                v.into_iter()
-            }
-            FieldDefinitionExpression::AllInTable(t) => {
-                let v: Vec<_> = expand_table(t);
-                v.into_iter()
-            }
-            e @ FieldDefinitionExpression::Value(_) => vec![e].into_iter(),
-            FieldDefinitionExpression::Col(c) => {
-                vec![FieldDefinitionExpression::Col(c)].into_iter()
-            }
-        }).collect();
-}
 
 fn collapse_where_in_recursive(
     leftmost_param_index: &mut usize,
