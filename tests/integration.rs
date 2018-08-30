@@ -779,6 +779,7 @@ fn create_view() {
 }
 
 #[test]
+#[ignore]
 fn create_view_rev() {
     let d = Deployment::new("create_view_rev");
     let opts = setup(&d);
