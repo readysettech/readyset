@@ -761,9 +761,9 @@ fn create_view() {
         .map(|row| row.unwrap())
         .collect();
     assert_eq!(rows.len(), 1);
-    assert!(
-        rows.into_iter()
-            .any(|r| r.unwrap() == vec![4.into(), 2.into()])
+    assert_eq!(
+        rows.into_iter().map(|r| r.unwrap()).collect::<Vec<_>>(),
+        vec![vec!["4".into(), "2".into()]]
     );
 
     let rows: Vec<_> = conn

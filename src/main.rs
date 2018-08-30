@@ -1,12 +1,14 @@
 #![feature(box_syntax, box_patterns)]
 #![feature(nll)]
 #![feature(try_from)]
+#![feature(allow_fail)]
 
 extern crate arccstr;
 extern crate chrono;
 #[macro_use]
 extern crate clap;
 extern crate noria;
+#[macro_use]
 extern crate failure;
 extern crate msql_srv;
 extern crate nom_sql;
