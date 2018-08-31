@@ -8,28 +8,30 @@ pub use processing::Ingredient;
 pub(crate) use processing::{Miss, ProcessingResult, RawProcessingResult, ReplayContext};
 
 // graph types
-pub use node::{MaterializationStatus, Node};
+pub use node::Node;
 pub type Edge = ();
 pub type Graph = petgraph::Graph<Node, Edge>;
 
 // dataflow types
+pub use api::debug::trace::{Event, PacketEvent, Tracer};
+pub use api::Input;
+pub use payload::{Packet, ReplayPathSegment, SourceChannelIdentifier};
 pub use Sharding;
-pub use payload::{Link, Packet, PacketEvent, ReplayPathSegment, SourceChannelIdentifier, Tracer,
-                  TransactionState};
 
 // domain local state
+pub use state::{LookupResult, MemoryState, PersistentState, RecordResult, Row, State};
+pub type StateMap = map::Map<Box<State>>;
 pub type DomainNodes = Map<cell::RefCell<Node>>;
-pub type DomainIndex = domain::Index;
-pub type ReplicaAddr = (domain::Index, usize);
+pub type ReplicaAddr = (DomainIndex, usize);
+
+// persistence configuration
+pub use DurabilityMode;
+pub use PersistenceParameters;
 
 // channel related types
 use channel;
-use domain;
 /// Channel coordinator type specialized for domains
 pub type ChannelCoordinator = channel::ChannelCoordinator<(DomainIndex, usize)>;
 pub trait Executor {
-    fn send_back(&self, SourceChannelIdentifier, Result<i64, ()>);
+    fn send_back(&mut self, SourceChannelIdentifier, ());
 }
-
-// debug types
-pub use debug::DebugEvent;

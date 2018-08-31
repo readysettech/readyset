@@ -1,17 +1,18 @@
-use nom_sql::{ArithmeticBase, ArithmeticExpression, Column, ColumnConstraint, ColumnSpecification,
-              OrderType};
+use nom_sql::{
+    ArithmeticBase, ArithmeticExpression, ColumnConstraint, ColumnSpecification, OrderType,
+};
 use std::collections::HashMap;
 
-use controller::Migration;
 use basics::{DataType, NodeIndex};
-use dataflow::ops;
+use controller::Migration;
 use dataflow::ops::filter::FilterCondition;
 use dataflow::ops::join::{Join, JoinType};
 use dataflow::ops::latest::Latest;
 use dataflow::ops::project::{Project, ProjectExpression, ProjectExpressionBase};
+use dataflow::{node, ops};
 use mir::node::{GroupedNodeType, MirNode, MirNodeType};
 use mir::query::{MirQuery, QueryFlowParts};
-use mir::{FlowNode, MirNodeRef};
+use mir::{Column, FlowNode, MirNodeRef};
 
 pub fn mir_query_to_flow_parts(mir_query: &mut MirQuery, mig: &mut Migration) -> QueryFlowParts {
     use std::collections::VecDeque;
@@ -93,12 +94,9 @@ pub fn mir_node_to_flow_parts(mir_node: &mut MirNode, mig: &mut Migration) -> Fl
                 MirNodeType::Base {
                     ref mut column_specs,
                     ref keys,
-                    transactional,
                     ref adapted_over,
                 } => match *adapted_over {
-                    None => {
-                        make_base_node(&name, column_specs.as_mut_slice(), keys, mig, transactional)
-                    }
+                    None => make_base_node(&name, column_specs.as_mut_slice(), keys, mig),
                     Some(ref bna) => adapt_base_node(
                         bna.over.clone(),
                         mig,
@@ -328,7 +326,8 @@ pub(crate) fn adapt_base_node(
     };
 
     for a in add.iter() {
-        let default_value = match a.constraints
+        let default_value = match a
+            .constraints
             .iter()
             .filter_map(|c| match *c {
                 ColumnConstraint::DefaultValue(ref dv) => Some(dv.into()),
@@ -374,7 +373,6 @@ pub(crate) fn make_base_node(
     column_specs: &mut [(ColumnSpecification, Option<usize>)],
     pkey_columns: &Vec<Column>,
     mig: &mut Migration,
-    transactional: bool,
 ) -> FlowNode {
     // remember the absolute base column ID for potential later removal
     for (i, cs) in column_specs.iter_mut().enumerate() {
@@ -383,8 +381,7 @@ pub(crate) fn make_base_node(
 
     let columns: Vec<_> = column_specs
         .iter()
-        .map(|&(ref cs, _)| &cs.column)
-        .cloned()
+        .map(|&(ref cs, _)| Column::from(&cs.column))
         .collect();
     let column_names = column_names(columns.as_slice());
 
@@ -410,20 +407,16 @@ pub(crate) fn make_base_node(
                 //assert_eq!(pkc.table.as_ref().unwrap(), name);
                 column_specs
                     .iter()
-                    .position(|&(ref cs, _)| cs.column == *pkc)
+                    .position(|&(ref cs, _)| Column::from(&cs.column) == *pkc)
                     .unwrap()
             })
             .collect();
-        ops::base::Base::new(default_values).with_key(pkey_column_ids)
+        node::special::Base::new(default_values).with_key(pkey_column_ids)
     } else {
-        ops::base::Base::new(default_values)
+        node::special::Base::new(default_values)
     };
 
-    if transactional {
-        FlowNode::New(mig.add_transactional_base(name, column_names.as_slice(), base))
-    } else {
-        FlowNode::New(mig.add_ingredient(name, column_names.as_slice(), base))
-    }
+    FlowNode::New(mig.add_base(name, column_names.as_slice(), base))
 }
 
 pub(crate) fn make_union_node(
@@ -593,19 +586,18 @@ pub(crate) fn make_join_node(
 
     let column_names = column_names(columns);
 
-    let projected_cols_left: Vec<Column> = left.borrow()
-        .columns
+    let (projected_cols_left, rest): (Vec<Column>, Vec<Column>) = proj_cols
         .iter()
-        .filter(|c| proj_cols.contains(c))
         .cloned()
-        .collect();
-    let projected_cols_right: Vec<Column> = right
-        .borrow()
-        .columns
-        .iter()
-        .filter(|c| proj_cols.contains(c))
-        .cloned()
-        .collect();
+        .partition(|c| left.borrow().columns.contains(c));
+    let (projected_cols_right, rest): (Vec<Column>, Vec<Column>) = rest
+        .into_iter()
+        .partition(|c| right.borrow().columns.contains(c));
+    assert!(
+        rest.is_empty(),
+        "could not resolve output columns projected from join: {:?}",
+        rest
+    );
 
     assert_eq!(
         projected_cols_left.len() + projected_cols_right.len(),
@@ -624,38 +616,54 @@ pub(crate) fn make_join_node(
     // the `r1.a = r2.b` join predicate will create a join node with columns: r1.a, r1.b, r2.a, r2,b
     // however, because the way we deal with aliases, we can't distinguish between `r1.a` and `r2.a`
     // at this point in the codebase, so the `r2.a = r1.b` will join on the wrong `a` column.
-    let left_join_col_id = projected_cols_left
+    let left_join_col_id = left
+        .borrow()
+        .columns
         .iter()
         .position(|lc| lc == on_left.first().unwrap())
         .expect(&format!(
-            "missing left-side join column {:?} in {:?}",
+            "missing left-side join column {:#?} in {:#?}",
             on_left.first().unwrap(),
-            projected_cols_left
+            left.borrow().columns
         ));
-    let right_join_col_id = projected_cols_right
+    let right_join_col_id = right
+        .borrow()
+        .columns
         .iter()
         .position(|rc| rc == on_right.first().unwrap())
         .expect(&format!(
-            "missing right-side join column {:?} in {:?}",
+            "missing right-side join column {:#?} in {:#?}",
             on_left.first().unwrap(),
-            projected_cols_left
+            right.borrow().columns
         ));
 
-    let join_config = projected_cols_left
+    let join_config = left
+        .borrow()
+        .columns
         .iter()
         .enumerate()
-        .map(|(i, _)| {
+        .filter_map(|(i, c)| {
             if i == left_join_col_id {
-                JoinSource::B(i, right_join_col_id)
+                Some(JoinSource::B(i, right_join_col_id))
+            } else if projected_cols_left.contains(c) {
+                Some(JoinSource::L(i))
             } else {
-                JoinSource::L(i)
+                None
             }
         })
         .chain(
-            projected_cols_right
+            right
+                .borrow()
+                .columns
                 .iter()
                 .enumerate()
-                .map(|(i, _)| JoinSource::R(i)),
+                .filter_map(|(i, c)| {
+                    if projected_cols_right.contains(c) {
+                        Some(JoinSource::R(i))
+                    } else {
+                        None
+                    }
+                }),
         )
         .collect();
 
@@ -700,7 +708,7 @@ pub(crate) fn make_latest_node(
 fn generate_projection_base(parent: &MirNodeRef, base: &ArithmeticBase) -> ProjectExpressionBase {
     match *base {
         ArithmeticBase::Column(ref column) => {
-            let column_id = parent.borrow().column_id_for_column(column);
+            let column_id = parent.borrow().column_id_for_column(&Column::from(column));
             ProjectExpressionBase::Column(column_id)
         }
         ArithmeticBase::Scalar(ref literal) => {
@@ -722,7 +730,8 @@ pub(crate) fn make_project_node(
     let parent_na = parent.borrow().flow_node_addr().unwrap();
     let column_names = column_names(columns);
 
-    let projected_column_ids = emit.iter()
+    let projected_column_ids = emit
+        .iter()
         .map(|c| parent.borrow().column_id_for_column(c))
         .collect::<Vec<_>>();
 
@@ -811,7 +820,8 @@ pub(crate) fn make_topk_node(
         Some(ref o) => {
             assert_eq!(offset, 0); // Non-zero offset not supported
 
-            let columns: Vec<_> = o.iter()
+            let columns: Vec<_> = o
+                .iter()
                 .map(|&(ref c, ref order_type)| {
                     // SQL and Soup disagree on what ascending and descending order means, so do the
                     // conversion here.

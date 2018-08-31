@@ -1,9 +1,10 @@
-use nom_sql::{ArithmeticExpression, Column, ColumnSpecification, OrderType};
+use nom_sql::{ArithmeticExpression, ColumnSpecification, OrderType};
 use std::cell::RefCell;
 use std::fmt::{Debug, Display, Error, Formatter};
 use std::rc::Rc;
 
 use basics::{DataType, NodeIndex};
+use column::Column;
 use dataflow::ops;
 use dataflow::ops::filter::FilterCondition;
 use dataflow::ops::grouped::aggregate::Aggregation as AggregationKind;
@@ -67,7 +68,6 @@ impl MirNode {
             MirNodeType::Base {
                 ref column_specs,
                 ref keys,
-                transactional,
                 ..
             } => {
                 let new_column_specs: Vec<(ColumnSpecification, Option<usize>)> = column_specs
@@ -83,7 +83,7 @@ impl MirNode {
                     .collect();
                 let new_columns: Vec<Column> = new_column_specs
                     .iter()
-                    .map(|&(ref cs, _)| cs.column.clone())
+                    .map(|&(ref cs, _)| Column::from(&cs.column))
                     .collect();
 
                 assert_eq!(
@@ -94,7 +94,6 @@ impl MirNode {
                 let new_inner = MirNodeType::Base {
                     column_specs: new_column_specs,
                     keys: keys.clone(),
-                    transactional: transactional,
                     adapted_over: Some(BaseNodeAdaptation {
                         over: node.clone(),
                         columns_added: added_cols.into_iter().cloned().collect(),
@@ -154,7 +153,8 @@ impl MirNode {
     }
 
     pub fn remove_ancestor(&mut self, a: MirNodeRef) {
-        match self.ancestors
+        match self
+            .ancestors
             .iter()
             .position(|x| x.borrow().versioned_name() == a.borrow().versioned_name())
         {
@@ -170,7 +170,8 @@ impl MirNode {
     }
 
     pub fn remove_child(&mut self, a: MirNodeRef) {
-        match self.children
+        match self
+            .children
             .iter()
             .position(|x| x.borrow().versioned_name() == a.borrow().versioned_name())
         {
@@ -215,7 +216,10 @@ impl MirNode {
             // and assume that only one column of the same name ever exists at the same time.
             MirNodeType::Base {
                 ref column_specs, ..
-            } => match column_specs.iter().rposition(|cs| cs.0.column == *c) {
+            } => match column_specs
+                .iter()
+                .rposition(|cs| Column::from(&cs.0.column) == *c)
+            {
                 None => panic!(
                     "tried to look up non-existent column {:?} in {}",
                     c, self.name
@@ -226,10 +230,7 @@ impl MirNode {
             },
             MirNodeType::Reuse { ref node } => node.borrow().column_id_for_column(c),
             // otherwise, just look up in the column set
-            _ => match self.columns
-                .iter()
-                .position(|cc| cc.name == c.name && cc.table == c.table)
-            {
+            _ => match self.columns.iter().position(|cc| cc == c) {
                 None => {
                     panic!(
                         "tried to look up non-existent column {:?} on node \"{}\" (columns: {:?})",
@@ -273,14 +274,8 @@ impl MirNode {
     }
 
     pub fn referenced_columns(&self) -> Vec<Column> {
-        // all projected columns, minus those with aliases, which we add with their original names
-        // below. This is important because we'll otherwise end up searching (and fail to find)
-        // aliased columns further up in the MIR graph.
-        let mut columns: Vec<Column> = self.columns
-            .iter()
-            .filter(|c| c.alias.is_none() || c.function.is_some()) // alias ok if computed column
-            .cloned()
-            .collect();
+        // all projected columns
+        let mut columns: Vec<Column> = self.columns.iter().cloned().collect();
 
         // + any parent columns referenced internally by the operator
         match self.inner {
@@ -346,7 +341,6 @@ pub enum MirNodeType {
     Base {
         column_specs: Vec<(ColumnSpecification, Option<usize>)>,
         keys: Vec<Column>,
-        transactional: bool,
         adapted_over: Option<BaseNodeAdaptation>,
     },
     /// over column, group_by columns
@@ -508,17 +502,14 @@ impl MirNodeType {
             MirNodeType::Base {
                 column_specs: ref our_column_specs,
                 keys: ref our_keys,
-                transactional: our_transactional,
                 adapted_over: ref our_adapted_over,
             } => {
                 match *other {
                     MirNodeType::Base {
                         ref column_specs,
                         ref keys,
-                        transactional,
                         ..
                     } => {
-                        assert_eq!(our_transactional, transactional);
                         // if we are instructed to adapt an earlier base node, we cannot reuse
                         // anything directly; we'll have to keep a new MIR node here.
                         if our_adapted_over.is_some() {
@@ -619,7 +610,9 @@ impl MirNodeType {
                     k,
                     offset,
                 } => {
-                    order == our_order && group_by == our_group_by && k == our_k
+                    order == our_order
+                        && group_by == our_group_by
+                        && k == our_k
                         && offset == our_offset
                 }
                 _ => false,
@@ -701,12 +694,10 @@ impl Debug for MirNodeType {
             MirNodeType::Base {
                 ref column_specs,
                 ref keys,
-                transactional,
                 ..
             } => write!(
                 f,
-                "B{} [{}; ⚷: {}]",
-                if transactional { "*" } else { "" },
+                "B [{}; ⚷: {}]",
                 column_specs
                     .into_iter()
                     .map(|&(ref cs, _)| cs.column.name.as_str())
@@ -797,7 +788,8 @@ impl Debug for MirNodeType {
                 )
             }
             MirNodeType::Leaf { ref keys, .. } => {
-                let key_cols = keys.iter()
+                let key_cols = keys
+                    .iter()
                     .map(|k| k.name.clone())
                     .collect::<Vec<_>>()
                     .join(", ");
@@ -882,7 +874,8 @@ impl Debug for MirNodeType {
                 ref order, ref k, ..
             } => write!(f, "TopK [k: {}, {:?}]", k, order),
             MirNodeType::Union { ref emit } => {
-                let cols = emit.iter()
+                let cols = emit
+                    .iter()
                     .map(|c| {
                         c.iter()
                             .map(|e| e.name.clone())

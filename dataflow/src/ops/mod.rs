@@ -3,7 +3,6 @@ use std::collections::{HashMap, HashSet};
 
 use prelude::*;
 
-pub mod base;
 pub mod filter;
 pub mod grouped;
 pub mod identity;
@@ -18,7 +17,6 @@ pub mod union;
 
 #[derive(Clone, Serialize, Deserialize)]
 pub enum NodeOperator {
-    Base(base::Base),
     Sum(grouped::GroupedOperator<grouped::aggregate::Aggregator>),
     Extremum(grouped::GroupedOperator<grouped::extremum::ExtremumOperator>),
     Concat(grouped::GroupedOperator<grouped::concat::GroupConcat>),
@@ -44,7 +42,6 @@ macro_rules! nodeop_from_impl {
     };
 }
 
-nodeop_from_impl!(NodeOperator::Base, base::Base);
 nodeop_from_impl!(
     NodeOperator::Sum,
     grouped::GroupedOperator<grouped::aggregate::Aggregator>
@@ -71,7 +68,6 @@ nodeop_from_impl!(NodeOperator::Distinct, distinct::Distinct);
 macro_rules! impl_ingredient_fn_mut {
     ($self:ident, $fn:ident, $( $arg:ident ),* ) => {
         match *$self {
-            NodeOperator::Base(ref mut i) => i.$fn($($arg),*),
             NodeOperator::Sum(ref mut i) => i.$fn($($arg),*),
             NodeOperator::Extremum(ref mut i) => i.$fn($($arg),*),
             NodeOperator::Concat(ref mut i) => i.$fn($($arg),*),
@@ -92,7 +88,6 @@ macro_rules! impl_ingredient_fn_mut {
 macro_rules! impl_ingredient_fn_ref {
     ($self:ident, $fn:ident, $( $arg:ident ),* ) => {
         match *$self {
-            NodeOperator::Base(ref i) => i.$fn($($arg),*),
             NodeOperator::Sum(ref i) => i.$fn($($arg),*),
             NodeOperator::Extremum(ref i) => i.$fn($($arg),*),
             NodeOperator::Concat(ref i) => i.$fn($($arg),*),
@@ -125,12 +120,6 @@ impl Ingredient for NodeOperator {
     }
     fn resolve(&self, i: usize) -> Option<Vec<(NodeIndex, usize)>> {
         impl_ingredient_fn_ref!(self, resolve, i)
-    }
-    fn get_base(&self) -> Option<&base::Base> {
-        impl_ingredient_fn_ref!(self, get_base,)
-    }
-    fn get_base_mut(&mut self) -> Option<&mut base::Base> {
-        impl_ingredient_fn_mut!(self, get_base_mut,)
     }
     fn is_join(&self) -> bool {
         impl_ingredient_fn_ref!(self, is_join,)
@@ -251,7 +240,6 @@ pub mod test {
                 "source",
                 &["because-type-inference"],
                 node::NodeType::Source,
-                true,
             ));
             MockGraph {
                 graph: graph,
@@ -273,11 +261,9 @@ pub mod test {
             fields: &[&str],
             defaults: Vec<DataType>,
         ) -> IndexPair {
-            use ops::base::Base;
-            let mut i = Base::new(defaults);
-            i.on_connected(&self.graph);
-            let i: NodeOperator = i.into();
-            let global = self.graph.add_node(Node::new(name, fields, i, false));
+            use node::special::Base;
+            let i = Base::new(defaults);
+            let global = self.graph.add_node(Node::new(name, fields, i));
             self.graph.add_edge(self.source, global, ());
             let mut remap = HashMap::new();
             let local = unsafe { LocalNodeIndex::make(self.remap.len() as u32) };
@@ -358,7 +344,7 @@ pub mod test {
             assert!(!parents.is_empty(), "node under test should have ancestors");
 
             let i: NodeOperator = i.into();
-            let global = self.graph.add_node(Node::new(name, fields, i, false));
+            let global = self.graph.add_node(Node::new(name, fields, i));
             let local = unsafe { LocalNodeIndex::make(self.remap.len() as u32) };
             if materialized {
                 self.states.insert(local, box MemoryState::default());
@@ -386,7 +372,8 @@ pub mod test {
                 }
             }
             // and get rid of states we don't need
-            let unused: Vec<_> = self.remap
+            let unused: Vec<_> = self
+                .remap
                 .values()
                 .filter_map(|ni| {
                     let ni = *self.graph[ni.as_global()].local_addr();
@@ -511,7 +498,8 @@ pub mod test {
 
         pub fn narrow_base_id(&self) -> IndexPair {
             assert_eq!(self.remap.len(), 2 /* base + nut */);
-            *self.remap
+            *self
+                .remap
                 .values()
                 .skip_while(|&n| n.as_global() == self.nut.unwrap().as_global())
                 .next()

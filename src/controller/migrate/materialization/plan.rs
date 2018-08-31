@@ -1,6 +1,6 @@
 use controller::domain_handle::DomainHandle;
-use controller::{inner::graphviz, keys};
-use dataflow::payload::TriggerEndpoint;
+use controller::{inner::graphviz, keys, WorkerIdentifier, WorkerStatus};
+use dataflow::payload::{SourceSelection, TriggerEndpoint};
 use dataflow::prelude::*;
 use std::collections::{HashMap, HashSet};
 
@@ -9,6 +9,7 @@ pub(crate) struct Plan<'a> {
     graph: &'a Graph,
     node: NodeIndex,
     domains: &'a mut HashMap<DomainIndex, DomainHandle>,
+    workers: &'a HashMap<WorkerIdentifier, WorkerStatus>,
     partial: bool,
 
     tags: HashMap<Vec<usize>, Vec<(Tag, DomainIndex)>>,
@@ -25,11 +26,12 @@ pub(crate) struct PendingReplay {
 }
 
 impl<'a> Plan<'a> {
-    pub fn new(
+    pub(super) fn new(
         m: &'a mut super::Materializations,
         graph: &'a Graph,
         node: NodeIndex,
         domains: &'a mut HashMap<DomainIndex, DomainHandle>,
+        workers: &'a HashMap<WorkerIdentifier, WorkerStatus>,
     ) -> Plan<'a> {
         let partial = m.partial.contains(&node);
         Plan {
@@ -37,6 +39,7 @@ impl<'a> Plan<'a> {
             graph,
             node,
             domains,
+            workers,
 
             partial,
 
@@ -56,7 +59,8 @@ impl<'a> Plan<'a> {
             .into_iter()
             .map(|path| -> Vec<_> {
                 let mut found = false;
-                let mut path: Vec<_> = path.into_iter()
+                let mut path: Vec<_> = path
+                    .into_iter()
                     .enumerate()
                     .take_while(|&(i, (node, _))| {
                         // remember, the paths are "backwards", so the first node is target node
@@ -135,14 +139,6 @@ impl<'a> Plan<'a> {
                 if last_domain.is_none() || domain != last_domain.unwrap() {
                     segments.push((domain, Vec::new()));
                     last_domain = Some(domain);
-
-                    if self.partial && self.graph[node].is_transactional() {
-                        self.m
-                            .domains_on_path
-                            .entry(tag.clone())
-                            .or_default()
-                            .push(domain);
-                    }
                 }
 
                 let key = if self.partial {
@@ -222,40 +218,69 @@ impl<'a> Plan<'a> {
                             // first domain needs to be told about partial replay trigger
                             *trigger = TriggerEndpoint::Start(key.clone());
                         } else if i == segments.len() - 1 {
-                            // otherwise, should know how to trigger partial replay
-                            // this means knowing how many sources there are (in the case of
-                            // sharding), as well as whether the partial key matches the sharding
-                            // key of the source. if it does, *all* shards need to be consulted
-                            // when doing a replay.
-                            let sharding = self.graph[segments[0].1[0].0].sharded_by();
-                            let shards = sharding.shards();
-                            let shuffled = match sharding {
-                                Sharding::Random(..) => true,
+                            // if the source is sharded, we need to know whether we should ask all
+                            // the shards, or just one. if the replay key is the same as the
+                            // sharding key, we just ask one, and all is good. if the replay key
+                            // and the sharding key differs, we generally have to query *all* the
+                            // shards.
+                            //
+                            // there is, however, an exception to this: if we have two domains that
+                            // have the same sharding, but a replay path between them on some other
+                            // key than the sharding key, the right thing to do is to *only* query
+                            // the same shard as ourselves. this is because any answers from other
+                            // shards would necessarily just be with records that do not match our
+                            // sharding key anyway, and that we should thus never see.
+                            let src_sharding = self.graph[segments[0].1[0].0].sharded_by();
+                            let shards = src_sharding.shards().unwrap_or(1);
+                            let lookup_on_shard_key = match src_sharding {
+                                Sharding::Random(..) => false,
                                 Sharding::ByColumn(c, _) => {
                                     assert_eq!(key.len(), 1);
-                                    c != key[0]
+                                    c == key[0]
                                 }
-                                _ => false,
+                                _ => true,
                             };
 
-                            if shuffled {
-                                if !segments
+                            let selection = if lookup_on_shard_key {
+                                // if we are not sharded, all is okay.
+                                //
+                                // if we are sharded:
+                                //
+                                //  - if there is a shuffle above us, a shard merger + sharder
+                                //    above us will ensure that we hear the replay response.
+                                //
+                                //  - if there is not, we are sharded by the same column as the
+                                //    source. this also means that the replay key in the
+                                //    destination is the sharding key of the destination. to see
+                                //    why, consider the case where the destination is sharded by x.
+                                //    the source must also be sharded by x for us to be in this
+                                //    case. we also know that the replay lookup key on the source
+                                //    must be x since lookup_on_shard_key == true. since no shuffle
+                                //    was introduced, src.x must resolve to dst.x assuming x is not
+                                //    aliased in dst. because of this, it should be the case that
+                                //    KeyShard == SameShard; if that were not the case, the value
+                                //    in dst.x should never have reached dst in the first place.
+                                SourceSelection::KeyShard(shards)
+                            } else {
+                                // replay key != sharding key
+                                // normally, we'd have to query all shards, but if we are sharded
+                                // the same as the source (i.e., there are no shuffles between the
+                                // source and us), then we should *only* query the same shard of
+                                // the source (since it necessarily holds all records we could
+                                // possibly see).
+                                if segments
                                     .iter()
                                     .flat_map(|s| s.1.iter())
-                                    .any(|&(n, _)| self.graph[n].is_sharder())
+                                    .any(|&(n, _)| self.graph[n].is_shard_merger())
                                 {
-                                    // we have a shuffled partial key replay path, but no shuffle.
-                                    // that won't work, since it means the target won't have a way
-                                    // to wait for all the replays from upstream shards (which it
-                                    // needs to) when triggering a replay.
-                                    crit!(self.m.log, "unshuffled path shuffles partial key"; "tag" => tag.id());
-                                    unimplemented!();
+                                    SourceSelection::AllShards(shards)
+                                } else {
+                                    SourceSelection::SameShard
                                 }
-                                warn!(self.m.log, "path shuffles partial key"; "tag" => tag.id());
-                            }
+                            };
 
-                            *trigger =
-                                TriggerEndpoint::End(shuffled, segments[0].0.clone(), shards);
+                            debug!(self.m.log, "picked source selection policy"; "policy" => ?selection, "tag" => tag.id());
+                            *trigger = TriggerEndpoint::End(selection, segments[0].0.clone());
                         }
                     } else {
                         unreachable!();
@@ -286,15 +311,19 @@ impl<'a> Plan<'a> {
                     // to tell it about this replay path so that it knows
                     // what path to forward replay packets on.
                     let n = &self.graph[nodes.last().unwrap().0];
+                    let workers = &self.workers;
                     if n.is_egress() {
                         self.domains
                             .get_mut(&domain)
                             .unwrap()
-                            .send(box Packet::UpdateEgress {
-                                node: *n.local_addr(),
-                                new_tx: None,
-                                new_tag: Some((tag, segments[i + 1].1[0].0.into())),
-                            })
+                            .send_to_healthy(
+                                box Packet::UpdateEgress {
+                                    node: *n.local_addr(),
+                                    new_tx: None,
+                                    new_tag: Some((tag, segments[i + 1].1[0].0.into())),
+                                },
+                                workers,
+                            )
                             .unwrap();
                     } else {
                         assert!(n.is_sharder());
@@ -303,7 +332,7 @@ impl<'a> Plan<'a> {
 
                 trace!(self.m.log, "telling domain about replay path"; "domain" => domain.index());
                 let ctx = self.domains.get_mut(&domain).unwrap();
-                ctx.send(setup).unwrap();
+                ctx.send_to_healthy(setup, self.workers).unwrap();
                 ctx.wait_for_ack().unwrap();
             }
 
@@ -357,7 +386,8 @@ impl<'a> Plan<'a> {
             .unwrap_or_else(|| {
                 // not a reader
                 if self.partial {
-                    let indices = self.tags
+                    let indices = self
+                        .tags
                         .drain()
                         .map(|(k, paths)| (k, paths.into_iter().map(|(tag, _)| tag).collect()))
                         .collect();
@@ -371,10 +401,13 @@ impl<'a> Plan<'a> {
         self.domains
             .get_mut(&self.graph[self.node].domain())
             .unwrap()
-            .send(box Packet::PrepareState {
-                node: *self.graph[self.node].local_addr(),
-                state: s,
-            })
+            .send_to_healthy(
+                box Packet::PrepareState {
+                    node: *self.graph[self.node].local_addr(),
+                    state: s,
+                },
+                self.workers,
+            )
             .unwrap();
 
         if !self.partial {
@@ -416,7 +449,8 @@ impl<'a> Plan<'a> {
             let mut parents = Vec::from(parents);
 
             // the node dictates that we *must* replay the state of some ancestor(s)
-            let options = n.must_replay_among()
+            let options = n
+                .must_replay_among()
                 .expect("join did not have must replay preference");
             parents.retain(|&parent| options.contains(&parent));
             assert!(!parents.is_empty());

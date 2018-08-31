@@ -72,7 +72,7 @@ impl Union {
             let mut last = &emit[0];
             for i in emit {
                 if i < last {
-                    unimplemented!();
+                    unimplemented!("union doesn't support column reordering; got emit = {:?}", emit);
                 }
                 last = i;
             }
@@ -96,7 +96,7 @@ impl Union {
 
     /// Construct a new union operator meant to de-shard a sharded data-flow subtree.
     pub fn new_deshard(parent: NodeIndex, sharding: Sharding) -> Union {
-        let shards = sharding.shards();
+        let shards = sharding.shards().unwrap();
         Union {
             emit: Emit::AllFrom(parent.into(), sharding),
             required: shards,
@@ -148,14 +148,16 @@ impl Ingredient for Union {
                 ref mut cols_l,
             } => {
                 use std::mem;
-                let mapped_emit = emit.drain()
+                let mapped_emit = emit
+                    .drain()
                     .map(|(mut k, v)| {
                         k.remap(remap);
                         emit_l.insert(*k, v.clone());
                         (k, v)
                     })
                     .collect();
-                let mapped_cols = cols.drain()
+                let mapped_cols = cols
+                    .drain()
                     .map(|(mut k, v)| {
                         k.remap(remap);
                         cols_l.insert(*k, v.clone());
@@ -186,7 +188,8 @@ impl Ingredient for Union {
                 misses: Vec::new(),
             },
             Emit::Project { ref emit_l, .. } => {
-                let rs = rs.into_iter()
+                let rs = rs
+                    .into_iter()
                     .map(move |rec| {
                         let (r, pos) = rec.extract();
 
@@ -273,14 +276,9 @@ impl Ingredient for Union {
 
                 if self.replay_key.is_none() || self.replay_pieces.is_empty() {
                     // no replay going on, so we're done.
-                    return RawProcessingResult::Regular(self.on_input(
-                        from,
-                        rs,
-                        tracer,
-                        None,
-                        n,
-                        s,
-                    ));
+                    return RawProcessingResult::Regular(
+                        self.on_input(from, rs, tracer, None, n, s),
+                    );
                 }
 
                 // partial replays are flowing through us, and at least one piece is being waited
@@ -292,7 +290,8 @@ impl Ingredient for Union {
                 for r in &rs {
                     let k = &self.replay_key.as_ref().unwrap()[&from];
                     // XXX: the clone + collect here is really sad
-                    if let Some(ref mut pieces) = self.replay_pieces
+                    if let Some(ref mut pieces) = self
+                        .replay_pieces
                         .get_mut(&k.iter().map(|&c| r[c].clone()).collect::<Vec<_>>())
                     {
                         if let Some(ref mut rs) = pieces.buffered.get_mut(&from) {
@@ -482,7 +481,8 @@ impl Ingredient for Union {
                     }
                 }
 
-                let mut rs_by_key = rs.into_iter()
+                let mut rs_by_key = rs
+                    .into_iter()
                     .map(|r| {
                         (
                             key_cols.iter().map(|&c| r[c].clone()).collect::<Vec<_>>(),
@@ -647,7 +647,8 @@ impl Ingredient for Union {
                 emit.sort();
                 emit.iter()
                     .map(|&(src, emit)| {
-                        let cols = emit.iter()
+                        let cols = emit
+                            .iter()
                             .map(|e| e.to_string())
                             .collect::<Vec<_>>()
                             .join(", ");
@@ -661,7 +662,8 @@ impl Ingredient for Union {
     fn parent_columns(&self, col: usize) -> Vec<(NodeIndex, Option<usize>)> {
         match self.emit {
             Emit::AllFrom(p, _) => vec![(p.as_global(), Some(col))],
-            Emit::Project { ref emit, .. } => emit.iter()
+            Emit::Project { ref emit, .. } => emit
+                .iter()
                 .map(|(src, emit)| (src.as_global(), Some(emit[col])))
                 .collect(),
         }

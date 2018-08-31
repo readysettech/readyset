@@ -1,9 +1,9 @@
-use ::*;
-use std::rc::Rc;
 use rand::{Rng, ThreadRng};
-use data::SizeOf;
-use local::keyed_state::KeyedState;
-use local::Row;
+use std::rc::Rc;
+
+use basics::data::SizeOf;
+use prelude::*;
+use state::keyed_state::KeyedState;
 
 pub struct SingleState {
     key: Vec<usize>,

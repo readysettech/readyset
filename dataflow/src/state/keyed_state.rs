@@ -1,8 +1,9 @@
-use ::*;
-use data::SizeOf;
 use fnv::FnvBuildHasher;
 use rahashmap::HashMap as RaHashMap;
 use std::rc::Rc;
+
+use basics::data::SizeOf;
+use prelude::*;
 
 type FnvHashMap<K, V> = RaHashMap<K, V, FnvBuildHasher>;
 
@@ -58,13 +59,17 @@ impl KeyedState {
             KeyedState::Double(ref mut m) => {
                 m.remove_at_index(index).map(|(k, rs)| (rs, vec![k.0, k.1]))
             }
-            KeyedState::Tri(ref mut m) => m.remove_at_index(index)
+            KeyedState::Tri(ref mut m) => m
+                .remove_at_index(index)
                 .map(|(k, rs)| (rs, vec![k.0, k.1, k.2])),
-            KeyedState::Quad(ref mut m) => m.remove_at_index(index)
+            KeyedState::Quad(ref mut m) => m
+                .remove_at_index(index)
                 .map(|(k, rs)| (rs, vec![k.0, k.1, k.2, k.3])),
-            KeyedState::Quin(ref mut m) => m.remove_at_index(index)
+            KeyedState::Quin(ref mut m) => m
+                .remove_at_index(index)
                 .map(|(k, rs)| (rs, vec![k.0, k.1, k.2, k.3, k.4])),
-            KeyedState::Sex(ref mut m) => m.remove_at_index(index)
+            KeyedState::Sex(ref mut m) => m
+                .remove_at_index(index)
                 .map(|(k, rs)| (rs, vec![k.0, k.1, k.2, k.3, k.4, k.5])),
         }?;
         Some((

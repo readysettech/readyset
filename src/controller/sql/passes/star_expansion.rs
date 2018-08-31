@@ -28,7 +28,8 @@ impl StarExpansion for SqlQuery {
                 .into_iter()
                 .flat_map(|field| match field {
                     FieldDefinitionExpression::All => {
-                        let v: Vec<_> = sq.tables
+                        let v: Vec<_> = sq
+                            .tables
                             .iter()
                             .map(|t| t.name.clone())
                             .flat_map(&expand_table)
@@ -63,12 +64,10 @@ mod tests {
         // -->
         // SELECT paper_id, tag_id FROM PaperTag
         let q = SelectStatement {
-            tables: vec![
-                Table {
-                    name: String::from("PaperTag"),
-                    alias: None,
-                },
-            ],
+            tables: vec![Table {
+                name: String::from("PaperTag"),
+                alias: None,
+            }],
             fields: vec![FieldDefinitionExpression::All],
             ..Default::default()
         };

@@ -3,7 +3,7 @@ extern crate consensus;
 extern crate serde_json;
 extern crate zookeeper;
 
-use consensus::STATE_KEY;
+use consensus::{CONTROLLER_KEY, STATE_KEY};
 use serde_json::Value;
 use std::process;
 use std::time::Duration;
@@ -62,11 +62,22 @@ fn main() {
     let deployment = matches.value_of("deployment").unwrap();
     let zookeeper_addr = format!("{}/{}", matches.value_of("zookeeper").unwrap(), deployment);
     let clean = matches.is_present("clean");
-    let dump = matches.is_present("dump");
+    let dump = matches.is_present("show");
 
     let zk = ZooKeeper::connect(&zookeeper_addr, Duration::from_secs(1), EventWatcher).unwrap();
 
     if dump {
+        let (ref current_ctrl, ref _stat) = match zk.get_data(CONTROLLER_KEY, false) {
+            Ok(data) => data,
+            Err(e) => match e {
+                ZkError::NoNode => {
+                    println!("no current Soup controller in Zookeeper!");
+                    return;
+                }
+                _ => panic!("{:?}", e),
+            },
+        };
+
         let (ref current_data, ref _stat) = match zk.get_data(STATE_KEY, false) {
             Ok(data) => data,
             Err(e) => match e {
@@ -77,6 +88,12 @@ fn main() {
                 _ => panic!("{:?}", e),
             },
         };
+
+        let controller: Value = serde_json::from_slice(current_ctrl).unwrap();
+        println!(
+            "Current Soup controller in Zookeeper:\n{}\n\n",
+            serde_json::to_string_pretty(&controller).unwrap()
+        );
 
         let state: Value = serde_json::from_slice(current_data).unwrap();
         println!(

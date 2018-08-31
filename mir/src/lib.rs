@@ -7,19 +7,22 @@ extern crate regex;
 #[macro_use]
 extern crate slog;
 
-use std::rc::Rc;
 use std::cell::RefCell;
+use std::rc::Rc;
 
 use basics::*;
 
-pub mod reuse;
+mod column;
 pub mod node;
-pub mod query;
-mod rewrite;
 mod optimize;
+pub mod query;
+pub mod reuse;
+mod rewrite;
 pub mod visualize;
 
 pub type MirNodeRef = Rc<RefCell<node::MirNode>>;
+
+pub use column::Column;
 
 #[derive(Clone, Debug)]
 pub enum FlowNode {

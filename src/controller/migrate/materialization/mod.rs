@@ -6,7 +6,7 @@
 //! module).
 
 use controller::domain_handle::DomainHandle;
-use controller::{inner::graphviz, keys};
+use controller::{inner::graphviz, keys, WorkerIdentifier, WorkerStatus};
 use dataflow::prelude::*;
 use petgraph;
 use petgraph::graph::NodeIndex;
@@ -16,14 +16,6 @@ use std::mem;
 use std::sync::atomic::{AtomicUsize, Ordering};
 
 mod plan;
-
-const NANOS_PER_SEC: u64 = 1_000_000_000;
-macro_rules! dur_to_ns {
-    ($d:expr) => {{
-        let d = $d;
-        d.as_secs() * NANOS_PER_SEC + d.subsec_nanos() as u64
-    }};
-}
 
 type Indices = HashSet<Vec<usize>>;
 
@@ -132,14 +124,11 @@ impl Materializations {
                 let mut i = HashMap::new();
                 i.insert(ni, (Vec::from(key.unwrap()), false));
                 i
-            } else if !n.is_internal() {
-                // non-internal nodes cannot generate indexing obligations
-                continue;
             } else {
                 n.suggest_indexes(ni)
             };
 
-            if indices.is_empty() && n.get_base().is_some() {
+            if indices.is_empty() && n.is_base() {
                 // we must *always* materialize base nodes
                 // so, just make up some column to index on
                 indices.insert(ni, (vec![0], true));
@@ -178,6 +167,9 @@ impl Materializations {
                         .iter()
                         .map(|&col| {
                             if !n.is_internal() {
+                                if n.is_base() {
+                                    unreachable!();
+                                }
                                 return Ok(col);
                             }
 
@@ -300,7 +292,7 @@ impl Materializations {
             let mut add = HashMap::new();
 
             // bases can't be partial
-            if graph[ni].is_internal() && graph[ni].get_base().is_some() {
+            if graph[ni].is_base() {
                 able = false;
             }
 
@@ -424,9 +416,8 @@ impl Materializations {
     /// Retrieves the materialization status of a given node, or None
     /// if the node isn't materialized.
     pub fn get_status(&self, index: &NodeIndex, node: &Node) -> MaterializationStatus {
-        let is_materialized = self.have.contains_key(index) || node.with_reader(|r| {
-            r.is_materialized()
-        }).unwrap_or(false);
+        let is_materialized = self.have.contains_key(index)
+            || node.with_reader(|r| r.is_materialized()).unwrap_or(false);
 
         if !is_materialized {
             MaterializationStatus::Not
@@ -441,11 +432,12 @@ impl Materializations {
     ///
     /// This includes setting up replay paths, adding new indices to existing materializations, and
     /// populating new materializations.
-    pub fn commit(
+    pub(super) fn commit(
         &mut self,
         graph: &Graph,
         new: &HashSet<NodeIndex>,
         domains: &mut HashMap<DomainIndex, DomainHandle>,
+        workers: &HashMap<WorkerIdentifier, WorkerStatus>,
     ) {
         self.extend(graph, new);
 
@@ -542,6 +534,69 @@ impl Materializations {
             }
         }
 
+        // check that we don't have any cases where a subgraph is sharded by one column, and then
+        // has a replay path on a duplicated copy of that column. for example, a join with
+        // [B(0, 0), R(0)] where the join's subgraph is sharded by .0, but a downstream replay path
+        // looks up by .1. this causes terrible confusion where the target (correctly) queries only
+        // one shard, but the shard merger expects to have to wait for all shards (since the replay
+        // key and the sharding key do not match at the shard merger).
+        {
+            for &node in new {
+                let n = &graph[node];
+                if !n.is_shard_merger() {
+                    continue;
+                }
+
+                // we don't actually store replay paths anywhere in Materializations (perhaps we
+                // should). however, we can check a proxy for the necessary property by making sure
+                // that our parent's sharding key is never aliased. this will lead to some false
+                // positives (all replay paths may use the same alias as we shard by), but we'll
+                // deal with that.
+                let parent = graph
+                    .neighbors_directed(node, petgraph::EdgeDirection::Incoming)
+                    .next()
+                    .expect("shard mergers must have a parent");
+                let psharding = graph[parent].sharded_by();
+
+                if let Sharding::ByColumn(col, _) = psharding {
+                    // we want to resolve col all the way to its nearest materialized ancestor.
+                    // and then check whether any other cols of the parent alias that source column
+                    let columns: Vec<_> = (0..n.fields().len()).collect();
+                    for path in keys::provenance_of(graph, parent, &columns[..], |_, _, _| None) {
+                        let (mat_anc, cols) = path
+                            .into_iter()
+                            .skip_while(|&(n, _)| !self.have.contains_key(&n))
+                            .next()
+                            .expect(
+                                "since bases are materialized, \
+                                 every path must eventually have a materialized node",
+                            );
+                        let src = cols[col];
+                        if src.is_none() {
+                            continue;
+                        }
+
+                        if let Some((c, res)) = cols
+                            .iter()
+                            .enumerate()
+                            .find(|&(c, res)| c != col && res == &src)
+                        {
+                            // another column in the merger's parent resolved to the source column!
+                            //println!("{}", graphviz(graph, &self));
+                            crit!(self.log, "attempting to merge sharding by aliased column";
+                                      "parent" => mat_anc.index(),
+                                      "aliased" => res,
+                                      "sharded" => parent.index(),
+                                      "alias" => c,
+                                      "shard" => col,
+                            );
+                            unimplemented!();
+                        }
+                    }
+                }
+            }
+        }
+
         let mut reindex = Vec::with_capacity(new.len());
         let mut make = Vec::with_capacity(new.len());
         let mut topo = petgraph::visit::Topo::new(graph);
@@ -612,7 +667,7 @@ impl Materializations {
                 info!(self.log, "adding partial index to existing {:?}", n);
                 let log = self.log.new(o!("node" => node.index()));
                 let log = mem::replace(&mut self.log, log);
-                self.setup(node, &mut index_on, graph, domains);
+                self.setup(node, &mut index_on, graph, domains, workers);
                 mem::replace(&mut self.log, log);
                 index_on.clear();
             } else if !n.sharded_by().is_none() {
@@ -627,10 +682,13 @@ impl Materializations {
                 domains
                     .get_mut(&n.domain())
                     .unwrap()
-                    .send(box Packet::PrepareState {
-                        node: *n.local_addr(),
-                        state: InitialState::IndexedLocal(index_on),
-                    })
+                    .send_to_healthy(
+                        box Packet::PrepareState {
+                            node: *n.local_addr(),
+                            state: InitialState::IndexedLocal(index_on),
+                        },
+                        workers,
+                    )
                     .unwrap();
             }
         }
@@ -638,7 +696,8 @@ impl Materializations {
         // then, we start prepping new nodes
         for ni in make {
             let n = &graph[ni];
-            let mut index_on = self.added
+            let mut index_on = self
+                .added
                 .remove(&ni)
                 .map(|idxs| {
                     assert!(!idxs.is_empty());
@@ -647,7 +706,7 @@ impl Materializations {
                 .unwrap_or_else(HashSet::new);
 
             let start = ::std::time::Instant::now();
-            self.ready_one(ni, &mut index_on, graph, domains);
+            self.ready_one(ni, &mut index_on, graph, domains, workers);
             let reconstructed = index_on.is_empty();
 
             // communicate to the domain in charge of a particular node that it should start
@@ -658,17 +717,20 @@ impl Materializations {
             trace!(self.log, "readying node"; "node" => ni.index());
             let domain = domains.get_mut(&n.domain()).unwrap();
             domain
-                .send(box Packet::Ready {
-                    node: *n.local_addr(),
-                    index: index_on,
-                })
+                .send_to_healthy(
+                    box Packet::Ready {
+                        node: *n.local_addr(),
+                        index: index_on,
+                    },
+                    workers,
+                )
                 .unwrap();
             domain.wait_for_ack().unwrap();
             trace!(self.log, "node ready"; "node" => ni.index());
 
             if reconstructed {
                 info!(self.log, "reconstruction completed";
-                      "ms" => dur_to_ns!(start.elapsed()) / 1_000_000,
+                      "ms" => start.elapsed().as_millis() as u64,
                       "node" => ni.index(),
                       );
             }
@@ -685,6 +747,7 @@ impl Materializations {
         index_on: &mut HashSet<Vec<usize>>,
         graph: &Graph,
         domains: &mut HashMap<DomainIndex, DomainHandle>,
+        workers: &HashMap<WorkerIdentifier, WorkerStatus>,
     ) {
         let n = &graph[ni];
         let mut has_state = !index_on.is_empty();
@@ -723,7 +786,7 @@ impl Materializations {
         info!(self.log, "beginning reconstruction of {:?}", n);
         let log = self.log.new(o!("node" => ni.index()));
         let log = mem::replace(&mut self.log, log);
-        self.setup(ni, index_on, graph, domains);
+        self.setup(ni, index_on, graph, domains, workers);
         mem::replace(&mut self.log, log);
 
         // NOTE: the state has already been marked ready by the replay completing, but we want to
@@ -740,6 +803,7 @@ impl Materializations {
         index_on: &mut HashSet<Vec<usize>>,
         graph: &Graph,
         domains: &mut HashMap<DomainIndex, DomainHandle>,
+        workers: &HashMap<WorkerIdentifier, WorkerStatus>,
     ) {
         if index_on.is_empty() {
             // we must be reconstructing a Reader.
@@ -756,7 +820,7 @@ impl Materializations {
 
         // construct and disseminate a plan for each index
         let pending = {
-            let mut plan = plan::Plan::new(self, graph, ni, domains);
+            let mut plan = plan::Plan::new(self, graph, ni, domains, workers);
             for index in index_on.drain() {
                 plan.add(index);
             }
@@ -775,10 +839,13 @@ impl Materializations {
                 domains
                     .get_mut(&pending.source_domain)
                     .unwrap()
-                    .send(box Packet::StartReplay {
-                        tag: pending.tag,
-                        from: pending.source,
-                    })
+                    .send_to_healthy(
+                        box Packet::StartReplay {
+                            tag: pending.tag,
+                            from: pending.source,
+                        },
+                        workers,
+                    )
                     .unwrap();
             }
 

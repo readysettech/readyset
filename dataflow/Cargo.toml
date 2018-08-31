@@ -4,19 +4,22 @@ version = "0.1.0"
 authors = ["The Distributary Developers"]
 
 [dependencies]
+bincode = "1.0.0"
 evmap = { git = "https://github.com/ms705/rust-evmap" }
 fnv = "1.0.5"
+futures = "0.1"
 itertools = "0.7.2"
-rand = "0.4.2"
-regex = "0.2.2"
+rahashmap = "0.2.10"
+rand = "0.5.0"
+regex = "1.0"
 serde_derive = "1.0.8"
 serde_json = "1.0.2"
 slog = "2.2.2"
-tarpc = "0.11.0"
-tarpc-plugins = "0.3.0"
-tokio-core = "0.1.8"
+stream-cancel = "0.4"
+tokio = "0.1"
 vec_map = { version = "0.8.0", features = ["eders"] }
-hyper = "0.11.6"
+hyper = "0.12.0"
+tempfile = "3.0.2"
 
 # need features
 backtrace = { version = "0.3.2", features = ["serialize-serde"] }
@@ -28,5 +31,11 @@ timekeeper = {version = "0.3.0", default-features = false }
 nom-sql = { git = "https://github.com/ms705/nom-sql.git", rev = "3e7ae4c4d32b77342051d5c217549ab8fcb68e85" }
 
 # local deps
+api = { path = "../api" }
 channel = { path = "../channel" }
 basics = { path = "../basics" }
+
+[dependencies.rocksdb]
+git = "https://github.com/ekmartin/rust-rocksdb.git"
+features = ["lz4"]
+branch = "custom"

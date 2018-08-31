@@ -37,7 +37,7 @@ pub fn shard(
             .map(|ni| (ni, graph[ni].sharded_by()))
             .collect();
 
-        let mut need_sharding = if graph[node].is_internal() {
+        let mut need_sharding = if graph[node].is_internal() || graph[node].is_base() {
             // suggest_indexes is okay because `node` *must* be new, and therefore will return
             // global node indices.
             graph[node].suggest_indexes(node.into())
@@ -74,6 +74,8 @@ pub fn shard(
             }
             graph.node_weight_mut(node).unwrap().shard_by(s);
             continue;
+        } else if graph[node].is_source() {
+            continue;
         } else {
             // non-internal nodes are always pass-through
             HashMap::new()
@@ -92,7 +94,7 @@ pub fn shard(
                   "node" => ?node,
                   "sharding" => ?s);
 
-            if graph[node].is_internal() {
+            if graph[node].is_internal() || graph[node].is_base() {
                 if let Sharding::ByColumn(c, shards) = s {
                     // remap c according to node's semantics
                     let n = &graph[node];
@@ -124,7 +126,7 @@ pub fn shard(
             }
         }
         if complex {
-            if graph[node].get_base().is_none() {
+            if !graph[node].is_base() {
                 // not supported yet -- force no sharding
                 // TODO: if we're sharding by a two-part key and need sharding by the *first* part
                 // of that key, we can probably re-use the existing sharding?
@@ -133,11 +135,6 @@ pub fn shard(
                     reshard(log, new, &mut swaps, graph, ni, node, Sharding::ForcedNone);
                 }
             }
-            continue;
-        }
-
-        if graph[node].get_base().is_some() && graph[node].is_transactional() {
-            error!(log, "not sharding transactional base node"; "node" => ?node);
             continue;
         }
 
@@ -150,6 +147,9 @@ pub fn shard(
 
             let resolved = if graph[node].is_internal() {
                 graph[node].resolve(want_sharding)
+            } else if graph[node].is_base() {
+                // nothing resolves through a base
+                None
             } else {
                 // non-internal nodes just pass through columns
                 assert_eq!(input_shardings.len(), 1);
@@ -161,7 +161,7 @@ pub fn shard(
                 )
             };
             match resolved {
-                None if !graph[node].is_internal() || graph[node].get_base().is_none() => {
+                None if !graph[node].is_base() => {
                     // weird operator -- needs an index in its output, which it generates.
                     // we need to have *no* sharding on our inputs!
                     info!(log, "de-sharding node that partitions by output key";
@@ -244,12 +244,13 @@ pub fn shard(
         // key. we then make sure all our inputs are sharded by that key too.
         debug!(log, "testing for sharding opportunities"; "node" => ?node);
         'outer: for col in 0..graph[node].fields().len() {
-            let srcs = if graph[node].get_base().is_some() {
+            let srcs = if graph[node].is_base() {
                 vec![(node.into(), None)]
             } else {
                 graph[node].parent_columns(col)
             };
-            let srcs: Vec<_> = srcs.into_iter()
+            let srcs: Vec<_> = srcs
+                .into_iter()
                 .filter_map(|(ni, src)| src.map(|src| (ni, src)))
                 .collect();
 
@@ -321,6 +322,8 @@ pub fn shard(
             for &(ni, src) in &srcs {
                 let need_sharding = Sharding::ByColumn(src, sharding_factor);
                 if input_shardings[&ni] != need_sharding {
+                    debug!(log, "resharding input with sharding {:?} to match desired sharding {:?}",
+                           input_shardings[&ni], need_sharding; "node" => ?node, "input" => ?ni);
                     reshard(log, new, &mut swaps, graph, ni, node, need_sharding);
                     input_shardings.insert(ni, need_sharding);
                 }
@@ -344,7 +347,8 @@ pub fn shard(
 
     // the code above can do some stupid things, such as adding a sharder after a new, unsharded
     // node. we want to "flatten" such cases so that we shard as early as we can.
-    let mut new_sharders: Vec<_> = new.iter()
+    let mut new_sharders: Vec<_> = new
+        .iter()
         .filter(|&&n| graph[n].is_sharder())
         .cloned()
         .collect();
@@ -380,14 +384,8 @@ pub fn shard(
             }
 
             // if the parent is a base, the only option we have is to shard the base.
-            if graph[p].get_base().is_some() {
+            if graph[p].is_base() {
                 trace!(log, "well, its parent is a base");
-
-                // sharded transactional bases are hard
-                if graph[p].is_transactional() {
-                    trace!(log, "no, parent is weird (transactional)");
-                    continue;
-                }
 
                 // we can't shard compound bases (yet)
                 if let Some(k) = graph[p].get_base().unwrap().key() {
@@ -548,7 +546,8 @@ pub fn shard(
     // will ensure that replays from the first sharding are turned into a single update before
     // arriving at the second sharding, and the merged sharder will ensure that nshards is set
     // correctly.
-    let sharded_sharders: Vec<_> = new.iter()
+    let sharded_sharders: Vec<_> = new
+        .iter()
         .filter(|&&n| graph[n].is_sharder() && !graph[n].sharded_by().is_none())
         .cloned()
         .collect();
@@ -568,11 +567,14 @@ pub fn shard(
             .shard_by(Sharding::ForcedNone);
     }
 
+    // check that we didn't mess anything up
+    validate(log, graph, source, new, sharding_factor);
+
     swaps
 }
 
 /// Modify the graph such that the path between `src` and `dst` shuffles the input such that the
-/// records received by `dst` are sharded by column `col`.
+/// records received by `dst` are sharded by sharding `to`.
 fn reshard(
     log: &Logger,
     new: &mut HashSet<NodeIndex>,
@@ -585,7 +587,7 @@ fn reshard(
     assert!(!graph[src].is_source());
 
     if graph[src].sharded_by().is_none() && to.is_none() {
-        trace!(log, "no need to shuffle";
+        debug!(log, "no need to shuffle";
                "src" => ?src,
                "dst" => ?dst,
                "sharding" => ?to);
@@ -633,4 +635,130 @@ fn reshard(
         old, None,
         "re-sharding already sharded node introduces swap collision"
     );
+}
+
+pub fn validate(
+    log: &Logger,
+    graph: &Graph,
+    source: NodeIndex,
+    new: &HashSet<NodeIndex>,
+    sharding_factor: usize,
+) {
+    let mut topo_list = Vec::with_capacity(new.len());
+    let mut topo = petgraph::visit::Topo::new(&*graph);
+    while let Some(node) = topo.next(&*graph) {
+        if node == source {
+            continue;
+        }
+        if !new.contains(&node) {
+            continue;
+        }
+        topo_list.push(node);
+    }
+
+    // ensure that each node matches the sharding of each of its ancestors, unless the ancestor is
+    // a sharder or a shard merger
+    'nodes: for node in topo_list {
+        let n = &graph[node];
+        if n.is_internal() && n.is_shard_merger() {
+            // shard mergers legitimately have a different sharding than their ancestors
+            continue;
+        }
+
+        let inputs: Vec<_> = graph
+            .neighbors_directed(node, petgraph::EdgeDirection::Incoming)
+            .filter(|ni| !graph[*ni].is_source())
+            .collect();
+
+        let remap = |nd: &Node, pni: NodeIndex, ps: Sharding| -> Sharding {
+            if nd.is_internal() || nd.is_base() {
+                if let Sharding::ByColumn(c, shards) = ps {
+                    // remap c according to node's semantics
+                    let src = (0..nd.fields().len()).find(|&col| {
+                        for pc in nd.parent_columns(col) {
+                            if let (p, Some(src)) = pc {
+                                // found column c in parent pni
+                                if p == pni && src == c {
+                                    // extract *child* column ID that we found a match for
+                                    return true;
+                                } else if !graph[pni].is_internal() {
+                                    // need to look transitively for an indirect parent, since
+                                    // `parent_columns`'s return values does not take sharder
+                                    // and desharder nodes previously added into account (as
+                                    // the `src` in the operator is only rewritten to the
+                                    // sharder later, in `on_connected`).
+                                    // NOTE(malte): just checking connectivity here is perhaps a
+                                    // bit too lax (i.e., may miss some incorrect shardings)
+                                    if petgraph::algo::has_path_connecting(graph, p, pni, None)
+                                        && src == c
+                                    {
+                                        return true;
+                                    }
+                                }
+                            }
+                        }
+                        false
+                    });
+
+                    if let Some(src) = src {
+                        return Sharding::ByColumn(src, shards);
+                    } else {
+                        return Sharding::Random(shards);
+                    }
+                }
+            }
+            // in all other cases, the sharding matches the parent's
+            ps
+        };
+
+        for in_ni in inputs {
+            let in_node = &graph[in_ni];
+            if in_node.is_sharder() {
+                // ancestor is a sharder, so its output sharding must match ours
+                in_node.with_sharder(|s| {
+                    let in_sharding = remap(
+                        n,
+                        in_ni,
+                        Sharding::ByColumn(s.sharded_by(), sharding_factor),
+                    );
+                    if in_sharding != n.sharded_by() {
+                        crit!(
+                            log,
+                            "invalid sharding: {} shards to {:?} != {}'s {:?}",
+                            in_ni.index(),
+                            in_sharding,
+                            node.index(),
+                            n.sharded_by(),
+                        );
+                    }
+                    assert_eq!(in_sharding, n.sharded_by());
+                });
+            } else {
+                // ancestor is an ordinary node, so it must have the same sharding
+                let in_sharding = remap(n, in_ni, in_node.sharded_by());
+                let out_sharding = n.sharded_by();
+                let equal = match in_sharding {
+                    // ForcedNone and None are different enum variants, but correspond to the same
+                    // sharding (namely, none)
+                    Sharding::ForcedNone | Sharding::None => match out_sharding {
+                        Sharding::ForcedNone | Sharding::None => true,
+                        _ => in_sharding == out_sharding,
+                    },
+                    _ => in_sharding == out_sharding,
+                };
+
+                if !equal {
+                    crit!(
+                        log,
+                        "invalid sharding: {} sharded by {:?} != {}'s {:?}",
+                        in_ni.index(),
+                        in_sharding,
+                        node.index(),
+                        graph[node].sharded_by(),
+                    );
+                }
+                assert!(equal);
+            }
+        }
+    }
 }

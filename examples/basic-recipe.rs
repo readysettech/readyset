@@ -30,18 +30,18 @@ fn main() {
 
     // set up Soup via recipe
     let mut builder = ControllerBuilder::default();
-    //builder.log_with(distributary::logger_pls());
-    builder.set_worker_threads(2);
+
+    builder.log_with(distributary::logger_pls());
     builder.set_persistence(persistence_params);
 
-    let mut blender = builder.build_local();
-    blender.install_recipe(sql.to_owned()).unwrap();
-    println!("{}", blender.graphviz());
+    let mut blender = builder.build_local().unwrap();
+    blender.install_recipe(sql).unwrap();
+    println!("{}", blender.graphviz().unwrap());
 
     // Get mutators and getter.
-    let mut article = blender.get_mutator("Article").unwrap();
-    let mut vote = blender.get_mutator("Vote").unwrap();
-    let mut awvc = blender.get_getter("ArticleWithVoteCount").unwrap();
+    let mut article = blender.table("Article").unwrap();
+    let mut vote = blender.table("Vote").unwrap();
+    let mut awvc = blender.view("ArticleWithVoteCount").unwrap();
 
     println!("Creating article...");
     let aid = 1;
@@ -51,7 +51,7 @@ fn main() {
         let title = "test title";
         let url = "http://pdos.csail.mit.edu";
         article
-            .put(vec![aid.into(), title.into(), url.into()])
+            .insert(vec![aid.into(), title.into(), url.into()])
             .unwrap();
     }
 
@@ -63,8 +63,8 @@ fn main() {
         .as_secs() as i64;
 
     // There should only be one additional vote given, because of the distinct.
-    vote.put(vec![aid.into(), uid.into()]).unwrap();
-    vote.put(vec![aid.into(), uid.into()]).unwrap();
+    vote.insert(vec![aid.into(), uid.into()]).unwrap();
+    vote.insert(vec![aid.into(), uid.into()]).unwrap();
 
     println!("Finished writing! Let's wait for things to propagate...");
     thread::sleep(Duration::from_millis(1000));

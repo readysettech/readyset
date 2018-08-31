@@ -1,52 +1,59 @@
-use channel::rpc::{RpcSendError, RpcServiceEndpoint};
+use bincode;
 use dataflow::backlog::SingleReadHandle;
-use dataflow::checktable::TokenGenerator;
 use dataflow::prelude::*;
 use dataflow::Readers;
+use futures::future::{self, Either};
 use std::cell::RefCell;
 use std::collections::HashMap;
+use std::{mem, time};
+use tokio;
+use tokio::prelude::*;
 
-use controller::{LocalOrNot, ReadQuery, ReadReply};
+use api::{ReadQuery, ReadReply};
 
-pub(crate) type Rpc = RpcServiceEndpoint<LocalOrNot<ReadQuery>, LocalOrNot<ReadReply>>;
+/// If a blocking reader finds itself waiting this long for a backfill to complete, it will
+/// re-issue the replay request. To avoid the system falling over if replays are slow for a little
+/// while, waiting readers will use exponential backoff on this delay if they continue to miss.
+const RETRY_TIMEOUT_US: u64 = 1_000;
 
 thread_local! {
     static READERS: RefCell<HashMap<
         (NodeIndex, usize),
-        (SingleReadHandle, Option<TokenGenerator>),
+        SingleReadHandle,
     >> = Default::default();
 }
 
-pub(crate) fn handle_message(m: LocalOrNot<ReadQuery>, conn: &mut Rpc, s: &mut Readers) {
-    let is_local = m.is_local();
-    let mut res = conn.send(&LocalOrNot::make(
-        match unsafe { m.take() } {
-            ReadQuery::Normal {
-                target,
-                mut keys,
-                block,
-            } => ReadReply::Normal(READERS.with(move |readers_cache| {
+fn dup(rs: &[Vec<DataType>]) -> Vec<Vec<DataType>> {
+    rs.into_iter()
+        .map(|r| r.iter().map(|v| v.deep_clone()).collect())
+        .collect()
+}
+
+pub(crate) fn handle_message(
+    m: ReadQuery,
+    s: &mut Readers,
+) -> impl Future<Item = ReadReply, Error = bincode::Error> + Send {
+    match m {
+        ReadQuery::Normal {
+            target,
+            mut keys,
+            block,
+        } => {
+            let immediate = READERS.with(|readers_cache| {
                 let mut readers_cache = readers_cache.borrow_mut();
-                let &mut (ref mut reader, _) =
-                    readers_cache.entry(target.clone()).or_insert_with(|| {
-                        let readers = s.lock().unwrap();
-                        readers.get(&target).unwrap().clone()
-                    });
+                let reader = readers_cache.entry(target.clone()).or_insert_with(|| {
+                    let readers = s.lock().unwrap();
+                    readers.get(&target).unwrap().clone()
+                });
 
                 let mut ret = Vec::with_capacity(keys.len());
                 ret.resize(keys.len(), Vec::new());
 
-                let dup = |rs: &[Vec<DataType>]| {
-                    rs.into_iter()
-                        .map(|r| r.iter().map(|v| v.deep_clone()).collect())
-                        .collect()
-                };
-                let dup = &dup;
-
-                // first do non-blocking reads for all keys to trigger any replays
-                let found = keys.iter_mut()
+                // first do non-blocking reads for all keys to see if we can return immediately
+                let found = keys
+                    .iter_mut()
                     .map(|key| {
-                        let rs = reader.find_and(key, dup, false).map(|r| r.0);
+                        let rs = reader.try_find_and(key, dup).map(|r| r.0);
                         (key, rs)
                     })
                     .enumerate();
@@ -72,82 +79,123 @@ pub(crate) fn handle_message(m: LocalOrNot<ReadQuery>, conn: &mut Rpc, s: &mut R
                 }
 
                 if !ready {
-                    return Err(());
+                    return Ok(ReadReply::Normal(Err(())));
                 }
 
-                if !block {
-                    return Ok(ret);
-                }
+                Err((keys, ret))
+            });
 
-                // block on all remaining keys
-                for (i, key) in keys.iter().enumerate() {
-                    if key.is_empty() {
-                        // already have this value
+            match immediate {
+                Ok(reply) => Either::A(Either::A(future::ok(reply))),
+                Err((keys, ret)) => {
+                    if !block {
+                        Either::A(Either::A(future::ok(ReadReply::Normal(Ok(ret)))))
                     } else {
-                        // note that this *does* mean we'll trigger replay twice for things that
-                        // miss and aren't replayed in time, which is a little sad. but at the same
-                        // time, that replay trigger will just be ignored by the target domain.
-                        ret[i] = reader
-                            .find_and(key, dup, true)
-                            .map(|r| r.0.unwrap_or_default())
-                            .expect("evmap *was* ready, then *stopped* being ready")
+                        let trigger = time::Duration::from_micros(RETRY_TIMEOUT_US);
+                        let retry = time::Duration::from_micros(10);
+                        let now = time::Instant::now();
+                        Either::A(Either::B(BlockingRead {
+                            target,
+                            keys,
+                            read: ret,
+                            truth: s.clone(),
+                            retry: tokio::timer::Interval::new(now + retry, retry),
+                            trigger_timeout: trigger,
+                            next_trigger: now,
+                        }))
                     }
                 }
-
-                Ok(ret)
-            })),
-            ReadQuery::WithToken { target, keys } => ReadReply::WithToken(
-                keys.into_iter()
-                    .map(|key| {
-                        READERS.with(|readers_cache| {
-                            let mut readers_cache = readers_cache.borrow_mut();
-                            let &mut (ref mut reader, ref mut generator) =
-                                readers_cache.entry(target.clone()).or_insert_with(|| {
-                                    let readers = s.lock().unwrap();
-                                    readers.get(&target).unwrap().clone()
-                                });
-
-                            reader
-                                .find_and(
-                                    &key,
-                                    |rs| {
-                                        rs.into_iter()
-                                            .map(|r| r.iter().map(|v| v.deep_clone()).collect())
-                                            .collect()
-                                    },
-                                    true,
-                                )
-                                .map(|r| (r.0.unwrap_or_else(Vec::new), r.1))
-                                .map(|r| (r.0, generator.as_ref().unwrap().generate(r.1, &key[..])))
-                        })
-                    })
-                    .collect(),
-            ),
-            ReadQuery::Size { target } => {
-                let size = READERS.with(|readers_cache| {
-                    let mut readers_cache = readers_cache.borrow_mut();
-                    let &mut (ref mut reader, _) =
-                        readers_cache.entry(target.clone()).or_insert_with(|| {
-                            let readers = s.lock().unwrap();
-                            readers.get(&target).unwrap().clone()
-                        });
-
-                    reader.len()
+            }
+        }
+        ReadQuery::Size { target } => {
+            let size = READERS.with(|readers_cache| {
+                let mut readers_cache = readers_cache.borrow_mut();
+                let reader = readers_cache.entry(target.clone()).or_insert_with(|| {
+                    let readers = s.lock().unwrap();
+                    readers.get(&target).unwrap().clone()
                 });
 
-                ReadReply::Size(size)
-            }
-        },
-        is_local,
-    ));
+                reader.len()
+            });
 
-    while let Err(RpcSendError::StillNeedsFlush) = res {
-        res = conn.flush();
+            Either::B(future::ok(ReadReply::Size(size)))
+        }
     }
-    if let Err(RpcSendError::Disconnected) = res {
-        // something must have gone wrong on the other end...
-        // the client sent a request, and then didn't wait for the reply
-        return;
+}
+
+struct BlockingRead {
+    read: Vec<Vec<Vec<DataType>>>,
+    target: (NodeIndex, usize),
+    keys: Vec<Vec<DataType>>,
+    truth: Readers,
+    retry: tokio::timer::Interval,
+    trigger_timeout: time::Duration,
+    next_trigger: time::Instant,
+}
+
+impl Future for BlockingRead {
+    type Item = ReadReply;
+    type Error = bincode::Error;
+    fn poll(&mut self) -> Result<Async<Self::Item>, Self::Error> {
+        READERS.with(move |readers_cache| {
+            let mut readers_cache = readers_cache.borrow_mut();
+            let s = &self.truth;
+            let target = &self.target;
+            let reader = readers_cache.entry(self.target.clone()).or_insert_with(|| {
+                let readers = s.lock().unwrap();
+                readers.get(target).unwrap().clone()
+            });
+
+            let mut triggered = false;
+            let mut missing = false;
+            let now = time::Instant::now();
+            for (i, key) in self.keys.iter_mut().enumerate() {
+                if key.is_empty() {
+                    // already have this value
+                } else {
+                    // note that this *does* mean we'll trigger replay multiple times for things
+                    // that miss and aren't replayed in time, which is a little sad. but at the
+                    // same time, that replay trigger will just be ignored by the target domain.
+                    match reader.try_find_and(key, dup).map(|r| r.0) {
+                        Ok(Some(rs)) => {
+                            self.read[i] = rs;
+                            key.clear();
+                        }
+                        Err(()) => {
+                            unreachable!("map became not ready?");
+                        }
+                        Ok(None) => {
+                            if now > self.next_trigger {
+                                // maybe the key was filled but then evicted, and we missed it?
+                                reader.trigger(key);
+                                triggered = true;
+                            }
+                            missing = true;
+                        }
+                    }
+                }
+            }
+
+            if triggered {
+                self.trigger_timeout *= 2;
+                self.next_trigger = now + self.trigger_timeout;
+            }
+
+            if missing {
+                loop {
+                    match self.retry.poll() {
+                        Ok(Async::Ready(Some(_))) => {}
+                        Ok(Async::Ready(None)) => unreachable!("interval stopped yielding"),
+                        Ok(Async::NotReady) => return Ok(Async::NotReady),
+                        Err(e) => unreachable!("{:?}", e),
+                    }
+                }
+            } else {
+                Ok(Async::Ready(ReadReply::Normal(Ok(mem::replace(
+                    &mut self.read,
+                    Vec::new(),
+                )))))
+            }
+        })
     }
-    res.unwrap();
 }

@@ -16,19 +16,11 @@ pub use self::ntype::NodeType;
 
 mod debug;
 
-#[derive(Debug, Serialize, Deserialize)]
-pub enum MaterializationStatus {
-    Not,
-    Full,
-    Partial,
-}
-
 #[derive(Clone, Serialize, Deserialize)]
 pub struct Node {
     name: String,
     index: Option<IndexPair>,
     domain: Option<domain::Index>,
-    transactional: bool,
 
     fields: Vec<String>,
     children: Vec<LocalNodeIndex>,
@@ -40,7 +32,7 @@ pub struct Node {
 
 // constructors
 impl Node {
-    pub fn new<S1, FS, S2, NT>(name: S1, fields: FS, inner: NT, transactional: bool) -> Node
+    pub fn new<S1, FS, S2, NT>(name: S1, fields: FS, inner: NT) -> Node
     where
         S1: ToString,
         S2: ToString,
@@ -51,7 +43,6 @@ impl Node {
             name: name.to_string(),
             index: None,
             domain: None,
-            transactional: transactional,
 
             fields: fields.into_iter().map(|s| s.to_string()).collect(),
             children: Vec::new(),
@@ -63,11 +54,11 @@ impl Node {
     }
 
     pub fn mirror<NT: Into<NodeType>>(&self, n: NT) -> Node {
-        Self::new(&*self.name, &self.fields, n, self.transactional)
+        Self::new(&*self.name, &self.fields, n)
     }
 
     pub fn named_mirror<NT: Into<NodeType>>(&self, n: NT, name: String) -> Node {
-        Self::new(name, &self.fields, n, self.transactional)
+        Self::new(name, &self.fields, n)
     }
 }
 
@@ -93,7 +84,7 @@ impl Node {
     pub fn take(&mut self) -> DanglingDomainNode {
         assert!(!self.taken);
         assert!(
-            !self.is_internal() || self.domain.is_some(),
+            (!self.is_internal() && !self.is_base()) || self.domain.is_some(),
             "tried to take unassigned node"
         );
 
@@ -179,12 +170,11 @@ impl Node {
         }
     }
 
-    /// For mutating even though you *know* it's been taken
-    pub fn inner_mut(&mut self) -> &mut ops::NodeOperator {
-        assert!(self.taken);
+    pub fn suggest_indexes(&self, n: NodeIndex) -> HashMap<NodeIndex, (Vec<usize>, bool)> {
         match self.inner {
-            NodeType::Internal(ref mut i) => i,
-            _ => unreachable!(),
+            NodeType::Internal(ref i) => i.suggest_indexes(n),
+            NodeType::Base(ref b) => b.suggest_indexes(n),
+            _ => HashMap::new(),
         }
     }
 }
@@ -298,8 +288,28 @@ impl Node {
         self.index.as_ref().unwrap()
     }
 
+    pub fn get_base(&self) -> Option<&special::Base> {
+        if let NodeType::Base(ref b) = self.inner {
+            Some(b)
+        } else {
+            None
+        }
+    }
+
+    pub fn get_base_mut(&mut self) -> Option<&mut special::Base> {
+        if let NodeType::Base(ref mut b) = self.inner {
+            Some(b)
+        } else {
+            None
+        }
+    }
+
     pub fn is_base(&self) -> bool {
-        self.is_internal() && self.get_base().is_some()
+        if let NodeType::Base(..) = self.inner {
+            true
+        } else {
+            false
+        }
     }
 
     pub fn is_localized(&self) -> bool {
@@ -400,9 +410,5 @@ impl Node {
             NodeType::Egress { .. } | NodeType::Reader(..) | NodeType::Sharder(..) => true,
             _ => false,
         }
-    }
-
-    pub fn is_transactional(&self) -> bool {
-        self.transactional
     }
 }

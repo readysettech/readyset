@@ -4,9 +4,9 @@ use chrono::{self, NaiveDateTime};
 
 use nom_sql::Literal;
 
+use std::fmt;
 use std::hash::{Hash, Hasher};
 use std::ops::{Add, Deref, DerefMut, Div, Mul, Sub};
-use std::fmt;
 
 const FLOAT_PRECISION: f64 = 1000_000_000.0;
 const TINYTEXT_WIDTH: usize = 15;
@@ -30,7 +30,7 @@ pub enum DataType {
     BigInt(i64),
     /// A fixed point real value. The first field is the integer part, while the second is the
     /// fractional and must be between -999999999 and 999999999.
-    Real(i32, i32),
+    Real(i64, i32),
     /// A reference-counted string-like value.
     Text(ArcCStr),
     /// A tiny string that fits in a pointer
@@ -203,7 +203,7 @@ impl From<f64> for DataType {
             panic!();
         }
 
-        let mut i = f.trunc() as i32;
+        let mut i = f.trunc() as i64;
         let mut frac = (f.fract() * FLOAT_PRECISION).round() as i32;
         if frac == 1000_000_000 {
             i += 1;
@@ -227,7 +227,7 @@ impl<'a> From<&'a Literal> for DataType {
                 let ts = chrono::Local::now().naive_local();
                 DataType::Timestamp(ts)
             }
-            Literal::FixedPoint(ref r) => DataType::Real(r.integral as i32, r.fractional as i32),
+            Literal::FixedPoint(ref r) => DataType::Real(r.integral as i64, r.fractional as i32),
             _ => unimplemented!(),
         }
     }
@@ -243,7 +243,7 @@ impl From<Literal> for DataType {
                 let ts = chrono::Local::now().naive_local();
                 DataType::Timestamp(ts)
             }
-            Literal::FixedPoint(r) => DataType::Real(r.integral as i32, r.fractional as i32),
+            Literal::FixedPoint(r) => DataType::Real(r.integral as i64, r.fractional as i32),
             _ => unimplemented!(),
         }
     }
@@ -468,7 +468,8 @@ pub enum Modification {
 }
 
 #[derive(Clone, PartialEq, Eq, Debug, Serialize, Deserialize)]
-pub enum BaseOperation {
+pub enum TableOperation {
+    Insert(Vec<DataType>),
     Delete {
         key: Vec<DataType>,
     },
@@ -482,20 +483,34 @@ pub enum BaseOperation {
     },
 }
 
+impl TableOperation {
+    pub fn row(&self) -> Option<&[DataType]> {
+        match *self {
+            TableOperation::Insert(ref r) => Some(r),
+            TableOperation::InsertOrUpdate { ref row, .. } => Some(row),
+            _ => None,
+        }
+    }
+}
+
+impl From<Vec<DataType>> for TableOperation {
+    fn from(other: Vec<DataType>) -> Self {
+        TableOperation::Insert(other)
+    }
+}
+
 /// A record is a single positive or negative data record with an associated time stamp.
 #[derive(Clone, PartialEq, Eq, Debug, Serialize, Deserialize)]
 #[warn(variant_size_differences)]
 pub enum Record {
     Positive(Vec<DataType>),
     Negative(Vec<DataType>),
-    BaseOperation(BaseOperation),
 }
 
 impl Record {
     pub fn rec(&self) -> &[DataType] {
         match *self {
             Record::Positive(ref v) | Record::Negative(ref v) => &v[..],
-            Record::BaseOperation(..) => unreachable!(),
         }
     }
 
@@ -511,7 +526,6 @@ impl Record {
         match self {
             Record::Positive(v) => (v, true),
             Record::Negative(v) => (v, false),
-            Record::BaseOperation(..) => unreachable!(),
         }
     }
 }
@@ -521,7 +535,6 @@ impl Deref for Record {
     fn deref(&self) -> &Self::Target {
         match *self {
             Record::Positive(ref r) | Record::Negative(ref r) => r,
-            Record::BaseOperation(..) => unreachable!(),
         }
     }
 }
@@ -530,7 +543,6 @@ impl DerefMut for Record {
     fn deref_mut(&mut self) -> &mut Self::Target {
         match *self {
             Record::Positive(ref mut r) | Record::Negative(ref mut r) => r,
-            Record::BaseOperation(..) => unreachable!(),
         }
     }
 }
@@ -743,7 +755,7 @@ mod tests {
     fn add_invalid_types() {
         let a: DataType = "hi".into();
         let b: DataType = 5.into();
-        &a + &b;
+        let _ = &a + &b;
     }
 
     #[test]

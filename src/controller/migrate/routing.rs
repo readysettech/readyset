@@ -7,6 +7,7 @@
 //!  - Egress nodes that gain new children must gain channels to facilitate forwarding
 
 use controller::domain_handle::DomainHandle;
+use controller::{WorkerIdentifier, WorkerStatus};
 use dataflow::node;
 use dataflow::prelude::*;
 use petgraph;
@@ -95,6 +96,9 @@ pub fn add(
                             if graph[i].domain() == domain {
                                 // it does! we can just reuse that ingress :D
                                 ingress = Some(i);
+                                // FIXME(malte): this is buggy! it will re-use ingress nodes even if
+                                // they have a different sharding to the one we're about to add
+                                // (whose sharding is only determined below).
                                 trace!(log,
                                        "re-using cross-domain ingress";
                                        "to" => node.index(),
@@ -115,8 +119,24 @@ pub fn add(
                 // it belongs to this domain, not that of the parent
                 i.add_to(domain);
 
-                // the ingress is sharded the same way as its target
-                i.shard_by(graph[node].sharded_by());
+                // the ingress is sharded the same way as its target, but with remappings of parent
+                // columns applied
+                let sharding = if graph[parent].is_sharder() {
+                    let parent_out_sharding =
+                        graph[parent].with_sharder(|s| s.sharded_by()).unwrap();
+                    // TODO(malte): below is ugly, but the only way to get the sharding width at
+                    // this point; the sharder parent does not currently have the information.
+                    // Change this once we support per-subgraph sharding widths and
+                    // the sharder knows how many children it is supposed to have.
+                    if let Sharding::ByColumn(_, width) = graph[node].sharded_by() {
+                        Sharding::ByColumn(parent_out_sharding, width)
+                    } else {
+                        unreachable!()
+                    }
+                } else {
+                    graph[parent].sharded_by()
+                };
+                i.shard_by(sharding);
 
                 // insert the new ingress node
                 let ingress = graph.add_node(i);
@@ -242,10 +262,11 @@ pub fn add(
     swaps
 }
 
-pub fn connect(
+pub(super) fn connect(
     log: &Logger,
     graph: &mut Graph,
     domains: &mut HashMap<DomainIndex, DomainHandle>,
+    workers: &HashMap<WorkerIdentifier, WorkerStatus>,
     new: &HashSet<NodeIndex>,
 ) {
     // ensure all egress nodes contain the tx channel of the domains of their child ingress nodes
@@ -278,13 +299,14 @@ pub fn connect(
                     // that the sharding must be the same.
                     for i in 0..shards {
                         domain
-                            .send_to_shard(
+                            .send_to_healthy_shard(
                                 i,
                                 box Packet::UpdateEgress {
                                     node: *sender_node.local_addr(),
                                     new_tx: Some((node.into(), *n.local_addr(), (n.domain(), i))),
                                     new_tag: None,
                                 },
+                                workers,
                             )
                             .unwrap();
                     }
@@ -295,11 +317,14 @@ pub fn connect(
                     // *must* be a Sharder.
                     assert_eq!(shards, 1);
                     domain
-                        .send(box Packet::UpdateEgress {
-                            node: *sender_node.local_addr(),
-                            new_tx: Some((node.into(), *n.local_addr(), (n.domain(), 0))),
-                            new_tag: None,
-                        })
+                        .send_to_healthy(
+                            box Packet::UpdateEgress {
+                                node: *sender_node.local_addr(),
+                                new_tx: Some((node.into(), *n.local_addr(), (n.domain(), 0))),
+                                new_tag: None,
+                            },
+                            workers,
+                        )
                         .unwrap();
                 }
             } else if sender_node.is_sharder() {
@@ -314,10 +339,13 @@ pub fn connect(
                 domains
                     .get_mut(&sender_node.domain())
                     .unwrap()
-                    .send(box Packet::UpdateSharder {
-                        node: *sender_node.local_addr(),
-                        new_txs: (*n.local_addr(), txs),
-                    })
+                    .send_to_healthy(
+                        box Packet::UpdateSharder {
+                            node: *sender_node.local_addr(),
+                            new_txs: (*n.local_addr(), txs),
+                        },
+                        workers,
+                    )
                     .unwrap();
             } else if sender_node.is_source() {
             } else {

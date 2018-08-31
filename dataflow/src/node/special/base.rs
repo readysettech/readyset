@@ -12,7 +12,6 @@ use vec_map::VecMap;
 #[derive(Debug, Serialize, Deserialize)]
 pub struct Base {
     primary_key: Option<Vec<usize>>,
-    us: Option<IndexPair>,
 
     defaults: Vec<DataType>,
     dropped: Vec<usize>,
@@ -72,7 +71,7 @@ impl Base {
             .collect()
     }
 
-    pub fn fix(&self, row: &mut Record) {
+    pub fn fix(&self, row: &mut Vec<DataType>) {
         if self.unmodified {
             return;
         }
@@ -91,7 +90,6 @@ impl Clone for Base {
     fn clone(&self) -> Base {
         Base {
             primary_key: self.primary_key.clone(),
-            us: self.us,
 
             defaults: self.defaults.clone(),
             dropped: self.dropped.clone(),
@@ -104,7 +102,6 @@ impl Default for Base {
     fn default() -> Self {
         Base {
             primary_key: None,
-            us: None,
 
             defaults: Vec::new(),
             dropped: Vec::new(),
@@ -113,68 +110,56 @@ impl Default for Base {
     }
 }
 
-fn key_val(i: usize, col: usize, r: &Record) -> &DataType {
+fn key_val(i: usize, col: usize, r: &TableOperation) -> &DataType {
     match *r {
-        Record::Positive(ref r) | Record::Negative(ref r) => &r[col],
-        Record::BaseOperation(BaseOperation::Delete { ref key }) => &key[i],
-        Record::BaseOperation(BaseOperation::Update { ref key, .. }) => &key[i],
-        Record::BaseOperation(BaseOperation::InsertOrUpdate { ref row, .. }) => &row[col],
+        TableOperation::Insert(ref row) => &row[col],
+        TableOperation::Delete { ref key } => &key[i],
+        TableOperation::Update { ref key, .. } => &key[i],
+        TableOperation::InsertOrUpdate { ref row, .. } => &row[col],
     }
 }
 
-fn key_of<'a>(key_cols: &'a [usize], r: &'a Record) -> impl Iterator<Item = &'a DataType> {
+fn key_of<'a>(key_cols: &'a [usize], r: &'a TableOperation) -> impl Iterator<Item = &'a DataType> {
     key_cols
         .iter()
         .enumerate()
         .map(move |(i, col)| key_val(i, *col, r))
 }
 
-impl Ingredient for Base {
-    fn take(&mut self) -> NodeOperator {
-        Clone::clone(self).into()
+impl Base {
+    pub(crate) fn take(&mut self) -> Self {
+        Clone::clone(self)
     }
 
-    fn ancestors(&self) -> Vec<NodeIndex> {
-        vec![]
-    }
-
-    fn on_connected(&mut self, _: &Graph) {}
-
-    fn on_commit(&mut self, us: NodeIndex, remap: &HashMap<NodeIndex, IndexPair>) {
-        self.us = Some(remap[&us]);
-    }
-
-    fn on_input(
+    pub(crate) fn process(
         &mut self,
-        _: LocalNodeIndex,
-        mut rs: Records,
-        _: &mut Tracer,
-        _: Option<&[usize]>,
-        _: &DomainNodes,
+        us: LocalNodeIndex,
+        mut ops: Vec<TableOperation>,
         state: &StateMap,
-    ) -> ProcessingResult {
-        if self.primary_key.is_none() || rs.is_empty() {
-            for r in &mut *rs {
-                self.fix(r);
-            }
-
-            return ProcessingResult {
-                results: rs,
-                misses: Vec::new(),
-            };
+    ) -> Records {
+        if self.primary_key.is_none() || ops.is_empty() {
+            return ops
+                .into_iter()
+                .map(|r| {
+                    if let TableOperation::Insert(mut r) = r {
+                        self.fix(&mut r);
+                        Record::Positive(r)
+                    } else {
+                        unreachable!("unkeyed base got non-insert operation {:?}", r);
+                    }
+                })
+                .collect();
         }
 
         let key_cols = &self.primary_key.as_ref().unwrap()[..];
-
-        let mut rs: Vec<_> = rs.into();
-        rs.sort_by(|a, b| key_of(key_cols, a).cmp(key_of(key_cols, b)));
+        ops.sort_by(|a, b| key_of(key_cols, a).cmp(key_of(key_cols, b)));
 
         // starting key
-        let mut this_key: Vec<_> = key_of(key_cols, &rs[0]).cloned().collect();
+        let mut this_key: Vec<_> = key_of(key_cols, &ops[0]).cloned().collect();
 
         // starting record state
         let db = state
-            .get(&*self.us.unwrap())
+            .get(&us)
             .expect("base with primary key must be materialized");
 
         let get_current = |current_key: &'_ _| {
@@ -196,9 +181,9 @@ impl Ingredient for Base {
         let mut current = get_current(&this_key);
         let mut was = current.clone();
 
-        let mut results = Vec::with_capacity(rs.len());
-        for r in rs {
-            if this_key.iter().cmp(key_of(key_cols, &r)) != Ordering::Equal {
+        let mut results = Vec::with_capacity(ops.len());
+        for op in ops {
+            if this_key.iter().cmp(key_of(key_cols, &op)) != Ordering::Equal {
                 if current != was {
                     if let Some(was) = was {
                         results.push(Record::Negative(was.into_owned()));
@@ -208,74 +193,63 @@ impl Ingredient for Base {
                     }
                 }
 
-                this_key = key_of(key_cols, &r).cloned().collect();
+                this_key = key_of(key_cols, &op).cloned().collect();
                 current = get_current(&this_key);
                 was = current.clone();
             }
 
-            match r {
-                Record::Positive(u) => {
+            let update = match op {
+                TableOperation::Insert(row) => {
                     if let Some(ref was) = was {
-                        eprintln!("base ignoring {:?} since it already has {:?}", u, was);
+                        eprintln!("base ignoring {:?} since it already has {:?}", row, was);
                     } else {
                         //assert!(was.is_none());
-                        current = Some(Cow::Owned(u));
+                        current = Some(Cow::Owned(row));
                     }
+                    continue;
                 }
-                Record::Negative(u) => {
-                    assert_eq!(current, Some(Cow::from(&u[..])));
-                    if current == was {
-                        // save us a clone in a common case
-                        was = Some(Cow::Owned(u));
+                TableOperation::Delete { .. } => {
+                    if current.is_some() {
+                        current = None;
+                    } else {
+                        // supposed to delete a non-existing row?
+                        // TODO: warn?
                     }
-                    current = None;
+                    continue;
                 }
-                Record::BaseOperation(op) => {
-                    let update = match op {
-                        BaseOperation::Delete { .. } => {
-                            if current.is_some() {
-                                current = None;
-                            } else {
-                                // supposed to delete a non-existing row?
-                                // TODO: warn?
-                            }
-                            continue;
-                        }
-                        BaseOperation::Update { set, .. } => set,
-                        BaseOperation::InsertOrUpdate { row, update } => {
-                            if current.is_none() {
-                                current = Some(Cow::Owned(row));
-                                continue;
-                            }
-                            update
-                        }
-                    };
-
+                TableOperation::Update { set, .. } => set,
+                TableOperation::InsertOrUpdate { row, update } => {
                     if current.is_none() {
-                        // supposed to update a non-existing row?
-                        // TODO: also warn here?
+                        current = Some(Cow::Owned(row));
                         continue;
                     }
+                    update
+                }
+            };
 
-                    let mut future = current.unwrap().into_owned();
-                    for (col, op) in update.into_iter().enumerate() {
-                        // XXX: make sure user doesn't update primary key?
-                        match op {
-                            Modification::Set(v) => future[col] = v,
-                            Modification::Apply(op, v) => {
-                                let old: i64 = future[col].clone().into();
-                                let delta: i64 = v.into();
-                                future[col] = match op {
-                                    Operation::Add => (old + delta).into(),
-                                    Operation::Sub => (old - delta).into(),
-                                };
-                            }
-                            Modification::None => {}
-                        }
+            if current.is_none() {
+                // supposed to update a non-existing row?
+                // TODO: also warn here?
+                continue;
+            }
+
+            let mut future = current.unwrap().into_owned();
+            for (col, op) in update.into_iter().enumerate() {
+                // XXX: make sure user doesn't update primary key?
+                match op {
+                    Modification::Set(v) => future[col] = v,
+                    Modification::Apply(op, v) => {
+                        let old: i64 = future[col].clone().into();
+                        let delta: i64 = v.into();
+                        future[col] = match op {
+                            Operation::Add => (old + delta).into(),
+                            Operation::Sub => (old - delta).into(),
+                        };
                     }
-                    current = Some(Cow::Owned(future));
+                    Modification::None => {}
                 }
             }
+            current = Some(Cow::Owned(future));
         }
 
         // we may have changed things in the last iteration of the loop above
@@ -292,13 +266,10 @@ impl Ingredient for Base {
             self.fix(r);
         }
 
-        ProcessingResult {
-            results: results.into(),
-            misses: Vec::new(),
-        }
+        results.into()
     }
 
-    fn suggest_indexes(&self, n: NodeIndex) -> HashMap<NodeIndex, (Vec<usize>, bool)> {
+    pub(crate) fn suggest_indexes(&self, n: NodeIndex) -> HashMap<NodeIndex, (Vec<usize>, bool)> {
         if self.primary_key.is_some() {
             Some((n, (self.primary_key.as_ref().unwrap().clone(), true)))
                 .into_iter()
@@ -306,26 +277,6 @@ impl Ingredient for Base {
         } else {
             HashMap::new()
         }
-    }
-
-    fn resolve(&self, _: usize) -> Option<Vec<(NodeIndex, usize)>> {
-        None
-    }
-
-    fn get_base(&self) -> Option<&Base> {
-        Some(self)
-    }
-
-    fn get_base_mut(&mut self) -> Option<&mut Base> {
-        Some(self)
-    }
-
-    fn description(&self) -> String {
-        "B".into()
-    }
-
-    fn parent_columns(&self, _: usize) -> Vec<(NodeIndex, Option<usize>)> {
-        unreachable!();
     }
 }
 
@@ -338,7 +289,6 @@ mod tests {
         let b = Base::default();
 
         assert!(b.primary_key.is_none());
-        assert!(b.us.is_none());
 
         assert_eq!(b.defaults.len(), 0);
         assert_eq!(b.dropped.len(), 0);
@@ -350,7 +300,6 @@ mod tests {
         let b = Base::new(vec![]);
 
         assert!(b.primary_key.is_none());
-        assert!(b.us.is_none());
 
         assert_eq!(b.defaults.len(), 0);
         assert_eq!(b.dropped.len(), 0);
@@ -359,7 +308,6 @@ mod tests {
 
     fn test_lots_of_changes_in_same_batch(mut state: Box<State>) {
         use node;
-        use ops::base::Base;
         use prelude::*;
         use std::collections::HashMap;
 
@@ -369,13 +317,10 @@ mod tests {
             "source",
             &["because-type-inference"],
             node::NodeType::Source,
-            true,
         ));
 
-        let mut b = Base::new(vec![]).with_key(vec![0, 2]);
-        b.on_connected(&graph);
-        let b: NodeOperator = b.into();
-        let global = graph.add_node(Node::new("b", &["x", "y", "z"], b, false));
+        let b = Base::new(vec![]).with_key(vec![0, 2]);
+        let global = graph.add_node(Node::new("b", &["x", "y", "z"], b));
         graph.add_edge(source, global, ());
         let local = unsafe { LocalNodeIndex::make(0 as u32) };
         let mut ip: IndexPair = global.into();
@@ -399,57 +344,58 @@ mod tests {
         let n = graph[global].take();
         let mut n = n.finalize(&graph);
 
-        let nodes = DomainNodes::new();
-        let mut one = move |u: Vec<Record>| {
-            let mut m = n.on_input(local, u.into(), &mut None, None, &nodes, &states)
-                .results;
+        let mut one = move |u: Vec<TableOperation>| {
+            let mut m = n.get_base_mut().unwrap().process(local, u, &states);
             node::materialize(&mut m, None, states.get_mut(&local));
             m
         };
 
         assert_eq!(
             one(vec![
-                Record::Positive(vec![1.into(), "a".into(), 1.into()]),
-                Record::Positive(vec![2.into(), "2a".into(), 1.into()]),
-                Record::Negative(vec![1.into(), "a".into(), 1.into()]),
-                Record::Positive(vec![1.into(), "b".into(), 1.into()]),
-                Record::BaseOperation(BaseOperation::Delete {
+                TableOperation::Insert(vec![1.into(), "a".into(), 1.into()]),
+                TableOperation::Insert(vec![2.into(), "2a".into(), 1.into()]),
+                TableOperation::Delete {
                     key: vec![1.into(), 1.into()],
-                }),
-                Record::BaseOperation(BaseOperation::InsertOrUpdate {
+                },
+                TableOperation::Insert(vec![1.into(), "b".into(), 1.into()]),
+                TableOperation::InsertOrUpdate {
                     row: vec![1.into(), "c".into(), 1.into()],
                     update: vec![
                         Modification::None,
                         Modification::Set("never".into()),
                         Modification::None,
                     ],
-                }),
-                Record::BaseOperation(BaseOperation::InsertOrUpdate {
+                },
+                TableOperation::InsertOrUpdate {
                     row: vec![1.into(), "also never".into(), 1.into()],
                     update: vec![
                         Modification::None,
                         Modification::Set("d".into()),
                         Modification::None,
                     ],
-                }),
-                Record::BaseOperation(BaseOperation::Update {
+                },
+                TableOperation::Update {
                     key: vec![1.into(), 1.into()],
                     set: vec![
                         Modification::None,
                         Modification::Set("e".into()),
                         Modification::None,
                     ],
-                }),
-                Record::BaseOperation(BaseOperation::Update {
+                },
+                TableOperation::Update {
                     key: vec![2.into(), 1.into()],
                     set: vec![
                         Modification::None,
                         Modification::Set("2x".into()),
                         Modification::None,
                     ],
-                }),
-                Record::Negative(vec![1.into(), "e".into(), 1.into()]),
-                Record::Negative(vec![2.into(), "2x".into(), 1.into()]),
+                },
+                TableOperation::Delete {
+                    key: vec![1.into(), 1.into()],
+                },
+                TableOperation::Delete {
+                    key: vec![2.into(), 1.into()],
+                },
             ]),
             Records::default()
         );

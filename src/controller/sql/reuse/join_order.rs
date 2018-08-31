@@ -44,7 +44,8 @@ impl JoinChain {
 
     fn merge_chain(self, other: JoinChain) -> JoinChain {
         let tables = self.tables.union(&other.tables).cloned().collect();
-        let join_order = self.join_order
+        let join_order = self
+            .join_order
             .into_iter()
             .chain(other.join_order.into_iter())
             .collect();
@@ -62,12 +63,12 @@ impl JoinChain {
 /// The most recently modified chain will be at the end of
 /// the list.
 fn extend_chains(chains: &mut Vec<JoinChain>, jref: &JoinRef) {
-    let src_chain = match chains.iter().position(|ref c| c.has_table(&jref.src)) {
+    let src_chain = match chains.iter().position(|c| c.has_table(&jref.src)) {
         Some(idx) => chains.swap_remove(idx),
         None => JoinChain::empty(),
     };
 
-    let dst_chain = match chains.iter().position(|ref c| c.has_table(&jref.dst)) {
+    let dst_chain = match chains.iter().position(|c| c.has_table(&jref.dst)) {
         Some(idx) => chains.swap_remove(idx),
         None => JoinChain::empty(),
     };
@@ -82,8 +83,8 @@ fn greedy_merge(mc: JoinChain, existing_chains: &mut Vec<JoinChain>) {
     // the number of join predicates
     let reused_joins = existing_chains
         .iter()
-        .filter(|ref c| mc.conflicts(c))
-        .fold(0, |acc, ref c| acc + c.join_count());
+        .filter(|c| mc.conflicts(c))
+        .fold(0, |acc, c| acc + c.join_count());
 
     // if `mc` has more join predicates than the conflicting chains,
     // delete the conflicting chains and add `mc`
@@ -98,7 +99,7 @@ fn chains_to_order(chains: Vec<JoinChain>, order: &mut Vec<JoinRef>) {
     // Join chains act on disjoint tables, so it doesn't matter the
     // order in which they are added, as long as the chain's join
     // order is preserved.
-    let mut new_order = chains.iter().fold(vec![], |acc, ref c| {
+    let mut new_order = chains.iter().fold(vec![], |acc, c| {
         acc.iter().chain(c.join_order.iter()).cloned().collect()
     });
 

@@ -1,6 +1,6 @@
-use ::*;
 use std::iter::FromIterator;
 use std::ops::{Index, IndexMut};
+use *;
 
 #[derive(Serialize, Deserialize)]
 pub struct Map<T> {

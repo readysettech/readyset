@@ -5,6 +5,7 @@ use processing::Ingredient;
 #[derive(Clone, Serialize, Deserialize)]
 pub enum NodeType {
     Ingress,
+    Base(special::Base),
     Internal(ops::NodeOperator),
     Egress(Option<special::Egress>),
     Sharder(special::Sharder),
@@ -16,6 +17,7 @@ pub enum NodeType {
 impl NodeType {
     pub fn take(&mut self) -> Self {
         match *self {
+            NodeType::Base(ref mut b) => NodeType::Base(b.take()),
             NodeType::Egress(ref mut e) => NodeType::Egress(e.take()),
             NodeType::Reader(ref mut r) => NodeType::Reader(r.take()),
             NodeType::Sharder(ref mut s) => NodeType::Sharder(s.take()),
@@ -30,6 +32,12 @@ impl NodeType {
 impl From<ops::NodeOperator> for NodeType {
     fn from(op: ops::NodeOperator) -> Self {
         NodeType::Internal(op)
+    }
+}
+
+impl From<special::Base> for NodeType {
+    fn from(b: special::Base) -> Self {
+        NodeType::Base(b)
     }
 }
 

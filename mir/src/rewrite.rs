@@ -1,6 +1,6 @@
-use MirNodeRef;
+use column::Column;
 use query::MirQuery;
-use nom_sql::Column;
+use MirNodeRef;
 
 fn has_column(n: &MirNodeRef, column: &Column) -> bool {
     if n.borrow().columns().contains(column) {
@@ -25,14 +25,15 @@ pub fn pull_required_base_columns(q: &mut MirQuery) {
         // a node needs all of the columns it projects into its output
         // however, it may also need *additional* columns to perform its functionality; consider,
         // e.g., a filter that filters on a column that it doesn't project
-        let needed_columns: Vec<Column> = mn.borrow()
+        let needed_columns: Vec<Column> = mn
+            .borrow()
             .referenced_columns()
             .into_iter()
             .filter(|c| {
                 !mn.borrow()
                     .ancestors()
                     .iter()
-                    .any(|a| a.borrow().columns().iter().any(|ac|  ac.name == c.name))
+                    .any(|a| a.borrow().columns().iter().any(|ac| ac == c))
             })
             .collect();
 

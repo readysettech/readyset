@@ -2,7 +2,6 @@ use std::borrow::Cow;
 use std::collections::{HashMap, HashSet};
 
 use ops;
-use ops::base::Base;
 use prelude::*;
 
 // TODO: make a Key type that is an ArrayVec<DataType>
@@ -112,16 +111,6 @@ where
     /// Resolve where the given field originates from. If the view is materialized, or the value is
     /// otherwise created by this view, None should be returned.
     fn resolve(&self, i: usize) -> Option<Vec<(NodeIndex, usize)>>;
-
-    /// Returns a reference to the underlying Base node (if any)
-    fn get_base(&self) -> Option<&Base> {
-        None
-    }
-
-    /// Returns a mutable reference to the underlying Base node (if any)
-    fn get_base_mut(&mut self) -> Option<&mut Base> {
-        None
-    }
 
     fn is_join(&self) -> bool {
         false

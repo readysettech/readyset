@@ -3,9 +3,9 @@ use std::rc::Rc;
 
 use rand::{self, Rng};
 
-use ::*;
-use data::SizeOf;
-use local::single_state::SingleState;
+use basics::data::SizeOf;
+use prelude::*;
+use state::single_state::SingleState;
 
 #[derive(Default)]
 pub struct MemoryState {
@@ -92,7 +92,6 @@ impl State for MemoryState {
                 match *r {
                     Record::Positive(ref r) => self.insert(r.clone(), partial_tag),
                     Record::Negative(ref r) => self.remove(r),
-                    Record::BaseOperation(..) => unreachable!(),
                 }
             });
         } else {
@@ -106,7 +105,6 @@ impl State for MemoryState {
                         let hit = self.remove(r);
                         debug_assert!(hit);
                     }
-                    Record::BaseOperation(..) => unreachable!(),
                 }
             }
         }
@@ -131,7 +129,8 @@ impl State for MemoryState {
 
     fn lookup<'a>(&'a self, columns: &[usize], key: &KeyType) -> LookupResult<'a> {
         debug_assert!(!self.state.is_empty(), "lookup on uninitialized index");
-        let index = self.state_for(columns)
+        let index = self
+            .state_for(columns)
             .expect("lookup on non-indexed column set");
         self.state[index].lookup(key)
     }

@@ -1,286 +1,111 @@
-use consensus::{Authority, LocalAuthority};
-use dataflow::checktable;
+use consensus::Authority;
+#[cfg(test)]
+use controller::migrate::Migration;
 use dataflow::prelude::*;
-use dataflow::statistics::GraphStats;
 
-use std::collections::{BTreeMap, HashMap};
-use std::net::SocketAddr;
+use std::collections::HashMap;
+use std::ops::{Deref, DerefMut};
 use std::sync::Arc;
-use std::sync::mpsc::Sender;
-use std::thread::{self, JoinHandle};
-use std::time::Duration;
 
-use assert_infrequent;
-use futures::Stream;
-use hyper::{self, Client};
-use serde::Serialize;
-use serde::de::DeserializeOwned;
-use serde_json;
-use tarpc::sync::client::{self, ClientExt};
-use tokio_core::reactor::Core;
+use api::prelude::*;
+use controller::Event;
+use futures::{self, Future};
+use stream_cancel::Trigger;
+use tokio;
+use tokio_io_pool;
 
-use controller::getter::{GetterRpc, RemoteGetter, RemoteGetterBuilder};
-use controller::inner::RpcError;
-use controller::mutator::{Mutator, MutatorBuilder, MutatorRpc};
-use controller::recipe::ActivationResult;
-use controller::{ControlEvent, ControllerDescriptor, WorkerEvent};
-
-/// `ControllerHandle` is a handle to a Controller.
-pub struct ControllerHandle<A: Authority> {
-    url: Option<String>,
-    local_port: Option<u16>,
-    authority: Arc<A>,
-    pub(super) local_controller: Option<(Sender<ControlEvent>, JoinHandle<()>)>,
-    pub(super) local_worker: Option<(Sender<WorkerEvent>, JoinHandle<()>)>,
-    getters: HashMap<(SocketAddr, usize), GetterRpc>,
-    domains: HashMap<Vec<SocketAddr>, MutatorRpc>,
-    reactor: Core,
-    client: Client<hyper::client::HttpConnector>,
+/// A handle to a controller that is running in the same process as this one.
+pub struct LocalControllerHandle<A: Authority> {
+    c: Option<ControllerHandle<A>>,
+    #[allow(dead_code)]
+    event_tx: Option<futures::sync::mpsc::UnboundedSender<Event>>,
+    kill: Option<Trigger>,
+    runtime: Option<tokio::runtime::Runtime>,
+    iopool: Option<tokio_io_pool::Runtime>,
 }
 
-/// A pointer that lets you construct a new `ControllerHandle` from an existing one.
-#[derive(Clone)]
-pub struct ControllerPointer<A: Authority>(Arc<A>);
-
-impl<A: Authority> ControllerPointer<A> {
-    /// Construct another `ControllerHandle` to the controller this recipe
-    pub fn connect(&self) -> ControllerHandle<A> {
-        ControllerHandle::make(self.0.clone())
+impl<A: Authority> Deref for LocalControllerHandle<A> {
+    type Target = ControllerHandle<A>;
+    fn deref(&self) -> &Self::Target {
+        self.c.as_ref().unwrap()
     }
 }
 
-impl<A: Authority> ControllerHandle<A> {
-    /// Create a pointer to the controller pointed to by this handle.
-    ///
-    /// This method is safe to call from other threads than the one that made the
-    /// `ControllerHandle`. Note however that if `A = LocalAuthority` then dropping the original
-    /// `ControllerHandle` will still cause the controller threads to shut down, and thus any other
-    /// `ControllerHandle` instances will stop working.
-    pub fn pointer(&self) -> ControllerPointer<A> {
-        ControllerPointer(self.authority.clone())
+impl<A: Authority> DerefMut for LocalControllerHandle<A> {
+    fn deref_mut(&mut self) -> &mut Self::Target {
+        self.c.as_mut().unwrap()
     }
+}
 
-    pub(super) fn make(authority: Arc<A>) -> Self {
-        let core = Core::new().unwrap();
-        let client = Client::configure()
-            .connector(hyper::client::HttpConnector::new_with_executor(
-                core.handle(),
-                &core.handle(),
-            ))
-            .build(&core.handle());
-        ControllerHandle {
-            url: None,
-            local_port: None,
-            authority: authority,
-            local_controller: None,
-            local_worker: None,
-            getters: Default::default(),
-            domains: Default::default(),
-            reactor: core,
-            client: client,
+impl<A: Authority> LocalControllerHandle<A> {
+    pub(super) fn new(
+        authority: Arc<A>,
+        event_tx: futures::sync::mpsc::UnboundedSender<Event>,
+        kill: Trigger,
+        rt: tokio::runtime::Runtime,
+        io: tokio_io_pool::Runtime,
+    ) -> Self {
+        LocalControllerHandle {
+            c: Some(ControllerHandle::make(authority).unwrap()),
+            event_tx: Some(event_tx),
+            kill: Some(kill),
+            runtime: Some(rt),
+            iopool: Some(io),
         }
     }
 
-    /// Creates a `ControllerHandle` that bootstraps a connection to Soup via the configuration
-    /// stored in the `Authority` passed as an argument.
-    pub fn new(authority: A) -> Self {
-        Self::make(Arc::new(authority))
-    }
-
-    fn rpc<Q: Serialize, R: DeserializeOwned>(&mut self, path: &str, request: &Q) -> R {
+    #[cfg(test)]
+    pub(crate) fn wait_until_ready(&mut self) {
+        let snd = self.event_tx.clone().unwrap();
         loop {
-            if self.url.is_none() {
-                let descriptor: ControllerDescriptor =
-                    serde_json::from_slice(&self.authority.get_leader().unwrap().1).unwrap();
-                self.url = Some(format!("http://{}", descriptor.external_addr));
+            let (tx, rx) = futures::sync::oneshot::channel();
+            snd.unbounded_send(Event::IsReady(tx)).unwrap();
+            match rx.wait() {
+                Ok(true) => break,
+                Ok(false) => {
+                    use std::{thread, time};
+                    thread::sleep(time::Duration::from_millis(50));
+                    continue;
+                }
+                Err(e) => unreachable!("{:?}", e),
             }
-            let url = format!("{}/{}", self.url.as_ref().unwrap(), path);
-
-            let mut r = hyper::Request::new(hyper::Method::Post, url.parse().unwrap());
-            r.set_body(serde_json::to_vec(request).unwrap());
-            let res = self.reactor.run(self.client.request(r)).unwrap();
-            if res.status() == hyper::StatusCode::ServiceUnavailable {
-                thread::sleep(Duration::from_millis(100));
-                continue;
-            }
-            if res.status() != hyper::StatusCode::Ok {
-                self.url = None;
-                continue;
-            }
-
-            let body = self.reactor.run(res.body().concat2()).unwrap();
-            return serde_json::from_slice(&body).unwrap();
         }
     }
 
-    /// Get a Vec of all known input nodes.
-    ///
-    /// Input nodes are here all nodes of type `Base`. The addresses returned by this function will
-    /// all have been returned as a key in the map from `commit` at some point in the past.
-    pub fn inputs(&mut self) -> BTreeMap<String, NodeIndex> {
-        self.rpc("inputs", &())
-    }
-
-    /// Get a Vec of to all known output nodes.
-    ///
-    /// Output nodes here refers to nodes of type `Reader`, which is the nodes created in response
-    /// to calling `.maintain` or `.stream` for a node during a migration.
-    pub fn outputs(&mut self) -> BTreeMap<String, NodeIndex> {
-        self.rpc("outputs", &())
-    }
-
-    /// Obtain a `RemoteGetterBuilder` that can be sent to a client and then used to query a given
-    /// (already maintained) reader node.
-    fn get_getter_builder(&mut self, name: &str) -> Option<RemoteGetterBuilder> {
-        // This call attempts to detect if `get_getter_builder` is being called in a loop. If this
-        // is getting false positives, then it is safe to increase the allowed hit count.
-        #[cfg(debug_assertions)]
-        assert_infrequent::at_most(200);
-
-        let rgb: Option<RemoteGetterBuilder> = self.rpc("getter_builder", &name);
-        rgb.map(|mut rgb| {
-            for &mut (_, ref mut is_local) in &mut rgb.shards {
-                *is_local &= self.local_controller.is_some();
-            }
-            rgb
-        })
-    }
-
-    /// Obtain a `RemoteGetter`.
-    pub fn get_getter(&mut self, name: &str) -> Option<RemoteGetter> {
-        self.get_getter_builder(name).map(|mut g| {
-            if let Some(port) = self.local_port {
-                g = g.with_local_port(port);
-            }
-
-            let g = g.build(&mut self.getters);
-
-            if self.local_port.is_none() {
-                self.local_port = Some(g.local_addr().unwrap().port());
-            }
-
-            g
-        })
-    }
-
-    /// Obtain a MutatorBuild that can be used to construct a Mutator to perform writes and deletes
-    /// from the given base node.
-    fn get_mutator_builder(&mut self, base: &str) -> Option<MutatorBuilder> {
-        // This call attempts to detect if `get_mutator_builder` is being called in a loop. If this
-        // is getting false positives, then it is safe to increase the allowed hit count.
-        #[cfg(debug_assertions)]
-        assert_infrequent::at_most(200);
-
-        self.rpc("mutator_builder", &base)
-    }
-
-    /// Obtain a Mutator
-    pub fn get_mutator(&mut self, base: &str) -> Option<Mutator> {
-        self.get_mutator_builder(base).map(|mut m| {
-            if let Some(port) = self.local_port {
-                m = m.with_local_port(port);
-            }
-
-            let m = m.build(&mut self.domains);
-
-            if self.local_port.is_none() {
-                self.local_port = Some(m.local_addr().unwrap().port());
-            }
-
-            m
-        })
-    }
-
-    /// Get statistics about the time spent processing different parts of the graph.
-    pub fn get_statistics(&mut self) -> GraphStats {
-        self.rpc("get_statistics", &())
-    }
-
-    /// Flush all partial state, evicting all rows present.
-    pub fn flush_partial(&mut self) -> Result<(), RpcError> {
-        self.rpc("flush_partial", &())
-    }
-
-    /// Extend the existing recipe on the controller by adding a new query.
-    pub fn extend_recipe(&mut self, recipe_addition: String) -> Result<ActivationResult, RpcError> {
-        self.rpc("extend_recipe", &recipe_addition)
-    }
-
-    /// Install a new recipe on the controller.
-    pub fn install_recipe(&mut self, new_recipe: String) -> Result<ActivationResult, RpcError> {
-        self.rpc("install_recipe", &new_recipe)
-    }
-
-    /// graphviz description of the dataflow graph
-    pub fn graphviz(&mut self) -> String {
-        self.rpc("graphviz", &())
-    }
-
-    /// Remove a specific node from the graph.
-    pub fn remove_node(&mut self, node: NodeIndex) {
-        self.rpc("remove_node", &node)
-    }
-
-    /// Wait for associated local instance to exit (presumably forever).
-    pub fn wait(mut self) {
-        self.local_controller.take().unwrap().1.join().unwrap();
-        self.local_worker.take().unwrap().1.join().unwrap();
-    }
-
-    /// Get a function that can validate tokens.
-    pub fn get_validator(&self) -> Box<Fn(&::dataflow::checktable::Token) -> bool> {
-        let descriptor: ControllerDescriptor =
-            serde_json::from_slice(&self.authority.get_leader().unwrap().1).unwrap();
-        let checktable = checktable::CheckTableClient::connect(
-            descriptor.checktable_addr,
-            client::Options::default(),
-        ).unwrap();
-        Box::new(move |t: &checktable::Token| checktable.validate_token(t.clone()).unwrap())
-    }
-}
-impl ControllerHandle<LocalAuthority> {
     #[cfg(test)]
     pub fn migrate<F, T>(&mut self, f: F) -> T
     where
-        F: for<'a> FnMut(&'a mut ::controller::migrate::Migration) -> T + Send + 'static,
+        F: FnOnce(&mut Migration) -> T + Send + 'static,
         T: Send + 'static,
     {
-        use controller::migrate::Migration;
-        use std::boxed::FnBox;
-        use std::sync::Mutex;
-
-        let f = Arc::new(Mutex::new(Some(f)));
-        loop {
-            let (tx, rx) = ::std::sync::mpsc::channel();
-            let f = f.clone();
-            let b = Box::new(move |m: &mut Migration| {
-                let mut f = f.lock().unwrap().take().unwrap();
-                tx.send(f(m)).unwrap();
-            })
-                as Box<for<'a, 's> FnBox(&'a mut Migration<'s>) + Send + 'static>;
-
-            self.local_controller
-                .as_mut()
-                .unwrap()
-                .0
-                .send(ControlEvent::ManualMigration(b))
-                .unwrap();
-
-            match rx.recv() {
-                Ok(ret) => return ret,
-                Err(_) => ::std::thread::sleep(::std::time::Duration::from_millis(100)),
+        let (ret_tx, ret_rx) = futures::sync::oneshot::channel();
+        let (fin_tx, fin_rx) = futures::sync::oneshot::channel();
+        let b = Box::new(move |m: &mut Migration| -> () {
+            if ret_tx.send(f(m)).is_err() {
+                unreachable!("could not return migration result");
             }
+        });
+
+        self.event_tx
+            .clone()
+            .unwrap()
+            .unbounded_send(Event::ManualMigration { f: b, done: fin_tx })
+            .unwrap();
+
+        match fin_rx.wait() {
+            Ok(()) => ret_rx.wait().unwrap(),
+            Err(e) => unreachable!("{:?}", e),
         }
     }
 
     /// Install a new set of policies on the controller.
     pub fn set_security_config(&mut self, p: String) {
-        let url = match self.url {
-            Some(ref url) => url.clone(),
+        let url = match (&**self).url() {
+            Some(ref url) => String::from(*url),
             None => panic!("url not defined"),
         };
 
-        self.rpc("set_security_config", &(p, url))
+        self.rpc("set_security_config", &(p, url)).unwrap()
     }
 
     /// Install a new set of policies on the controller.
@@ -289,7 +114,7 @@ impl ControllerHandle<LocalAuthority> {
             .get("id")
             .expect("Universe context must have id")
             .clone();
-        self.rpc::<_, ()>("create_universe", &context);
+        self.rpc::<_, ()>("create_universe", &context).unwrap();
 
         // Write to Context table
         let bname = match context.get("group") {
@@ -303,23 +128,39 @@ impl ControllerHandle<LocalAuthority> {
             .iter()
             .map(|&f| context.get(f).unwrap().clone())
             .collect();
-        let mut mutator = self.get_mutator(&bname).unwrap();
+        let mut table = self.table(&bname).unwrap();
 
-        mutator.put(record).unwrap();
+        table.insert(record).unwrap();
+    }
+
+    /// Inform the local instance that it should exit, and wait for that to happen
+    pub fn shutdown_and_wait(&mut self) {
+        if let Some(rt) = self.runtime.take() {
+            drop(self.c.take());
+            drop(self.event_tx.take());
+            drop(self.kill.take());
+            rt.shutdown_on_idle().wait().unwrap();
+        }
+        if let Some(io) = self.iopool.take() {
+            io.shutdown_on_idle();
+        }
+    }
+
+    /// Wait for associated local instance to exit (presumably with an error).
+    pub fn wait(mut self) {
+        drop(self.event_tx.take());
+        if let Some(rt) = self.runtime.take() {
+            rt.shutdown_on_idle().wait().unwrap();
+        }
+        if let Some(io) = self.iopool.take() {
+            io.shutdown_on_idle();
+        }
     }
 }
-impl<A: Authority> Drop for ControllerHandle<A> {
+
+impl<A: Authority> Drop for LocalControllerHandle<A> {
     fn drop(&mut self) {
-        self.getters.clear();
-        self.domains.clear();
-        if let Some((sender, join_handle)) = self.local_controller.take() {
-            let _ = sender.send(ControlEvent::Shutdown);
-            let _ = join_handle.join();
-        }
-        if let Some((sender, join_handle)) = self.local_worker.take() {
-            let _ = sender.send(WorkerEvent::Shutdown);
-            let _ = join_handle.join();
-        }
+        self.shutdown_and_wait();
     }
 }
 
@@ -332,10 +173,10 @@ mod tests {
         let r_txt = "CREATE TABLE a (x int, y int, z int);\n
                      CREATE TABLE b (r int, s int);\n";
 
-        let mut c = ControllerBuilder::default().build_local();
-        assert!(c.install_recipe(r_txt.to_owned()).is_ok());
+        let mut c = ControllerBuilder::default().build_local().unwrap();
+        assert!(c.install_recipe(r_txt).is_ok());
         for _ in 0..250 {
-            let _ = c.get_mutator_builder("a").unwrap();
+            let _ = c.table("a").unwrap();
         }
     }
 }

@@ -4,6 +4,7 @@ use petgraph;
 
 use std::collections::HashMap;
 
+// TODO: rewrite as iterator
 pub fn provenance_of<F>(
     graph: &Graph,
     node: NodeIndex,
@@ -42,7 +43,7 @@ where
     let n = &graph[node];
 
     // have we reached a base node?
-    if n.is_internal() && n.get_base().is_some() {
+    if n.is_base() {
         return vec![path];
     }
 
@@ -191,22 +192,19 @@ mod tests {
             "source",
             &["because-type-inference"],
             node::special::Source,
-            true,
         ));
 
         let a = g.add_node(node::Node::new(
             "a",
             &["a1", "a2"],
-            node::NodeType::from(ops::NodeOperator::Base(ops::base::Base::default())),
-            true,
+            node::NodeType::from(node::special::Base::default()),
         ));
         g.add_edge(src, a, ());
 
         let b = g.add_node(node::Node::new(
             "b",
             &["b1", "b2"],
-            node::NodeType::from(ops::NodeOperator::Base(ops::base::Base::default())),
-            true,
+            node::NodeType::from(node::special::Base::default()),
         ));
         g.add_edge(src, b, ());
 
@@ -240,12 +238,7 @@ mod tests {
     fn internal_passthrough() {
         let (mut g, a, _) = bases();
 
-        let x = g.add_node(node::Node::new(
-            "x",
-            &["x1", "x2"],
-            node::special::Ingress,
-            true,
-        ));
+        let x = g.add_node(node::Node::new("x", &["x1", "x2"], node::special::Ingress));
         g.add_edge(a, x, ());
 
         assert_eq!(
@@ -254,9 +247,10 @@ mod tests {
         );
         assert_eq!(
             provenance_of(&g, x, &[0, 1], |_, _, _| None),
-            vec![
-                vec![(x, vec![Some(0), Some(1)]), (a, vec![Some(0), Some(1)])],
-            ]
+            vec![vec![
+                (x, vec![Some(0), Some(1)]),
+                (a, vec![Some(0), Some(1)]),
+            ]]
         );
     }
 
@@ -273,7 +267,6 @@ mod tests {
                 None,
                 None,
             ))),
-            true,
         ));
         g.add_edge(a, x, ());
 
@@ -283,9 +276,10 @@ mod tests {
         );
         assert_eq!(
             provenance_of(&g, x, &[0, 1], |_, _, _| None),
-            vec![
-                vec![(x, vec![Some(0), Some(1)]), (a, vec![Some(1), Some(0)])],
-            ]
+            vec![vec![
+                (x, vec![Some(0), Some(1)]),
+                (a, vec![Some(1), Some(0)]),
+            ]]
         );
     }
 
@@ -302,7 +296,6 @@ mod tests {
                 Some(vec![3.14.into()]),
                 None,
             ))),
-            true,
         ));
         g.add_edge(a, x, ());
 
@@ -330,7 +323,6 @@ mod tests {
             node::NodeType::from(ops::NodeOperator::Union(ops::union::Union::new(
                 vec![(a, vec![0, 1]), (b, vec![0, 1])].into_iter().collect(),
             ))),
-            true,
         ));
         g.add_edge(a, x, ());
         g.add_edge(b, x, ());
@@ -372,7 +364,6 @@ mod tests {
                     ops::join::JoinSource::R(1),
                 ],
             ))),
-            true,
         ));
         g.add_edge(a, x, ());
         g.add_edge(b, x, ());

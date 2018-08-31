@@ -1,6 +1,6 @@
 use controller::sql::mir::SqlToMirConverter;
-use mir::MirNodeRef;
 use mir::node::{MirNode, MirNodeType};
+use mir::MirNodeRef;
 
 pub fn make_rewrite_nodes(
     mir_converter: &mut SqlToMirConverter,

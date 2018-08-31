@@ -6,16 +6,15 @@ use std::{self, cell, io};
 use mio;
 use slog::Logger;
 
+use api::debug::stats::{DomainStats, NodeStats};
 use channel::poll::{KeepPolling, PollEvent, PollingLoop, StopPolling};
 use channel::{tcp, DomainConnectionBuilder, TcpReceiver, TcpSender};
 use consensus::Epoch;
-use basics::PersistenceParameters;
 use dataflow::payload::ControlReplyPacket;
 use dataflow::prelude::*;
-use dataflow::statistics::{DomainStats, NodeStats};
-use dataflow::{self, DomainBuilder, DomainConfig};
+use dataflow::{DomainBuilder, DomainConfig};
 
-use controller::{WorkerEndpoint, WorkerIdentifier};
+use controller::{WorkerEndpoint, WorkerIdentifier, WorkerStatus};
 use coordination::{CoordinationMessage, CoordinationPayload};
 
 #[derive(Debug)]
@@ -23,151 +22,25 @@ pub enum WaitError {
     WrongReply(ControlReplyPacket),
 }
 
-pub struct DomainInputHandle {
-    txs: Vec<TcpSender<Box<Packet>>>,
-}
-
-pub(crate) struct BatchSendHandle<'a> {
-    dih: &'a mut DomainInputHandle,
-    sent: Vec<usize>,
-}
-
-impl<'a> BatchSendHandle<'a> {
-    pub(crate) fn new(dih: &'a mut DomainInputHandle) -> Self {
-        let sent = vec![0; dih.txs.len()];
-        Self { dih, sent }
-    }
-
-    pub(crate) fn enqueue(
-        &mut self,
-        mut p: Box<Packet>,
-        key: &[usize],
-        local: bool,
-    ) -> Result<(), tcp::SendError> {
-        if self.dih.txs.len() == 1 {
-            if local {
-                p = p.make_local();
-            }
-            self.dih.txs[0].send(p)?;
-            self.sent[0] += 1;
-        } else {
-            if key.is_empty() {
-                unreachable!("sharded base without a key?");
-            }
-            if key.len() != 1 {
-                // base sharded by complex key
-                unimplemented!();
-            }
-            let key_col = key[0];
-
-            let mut shard_writes = vec![Vec::new(); self.dih.txs.len()];
-            let mut data = p.take_data();
-            for r in data.drain(..) {
-                let shard = {
-                    let key = match r {
-                        Record::Positive(ref r) | Record::Negative(ref r) => &r[key_col],
-                        Record::BaseOperation(BaseOperation::Delete { ref key }) => &key[0],
-                        Record::BaseOperation(BaseOperation::Update { ref key, .. }) => &key[0],
-                        Record::BaseOperation(BaseOperation::InsertOrUpdate {
-                            ref row, ..
-                        }) => &row[key_col],
-                    };
-                    dataflow::shard_by(key, self.dih.txs.len())
-                };
-                shard_writes[shard].push(r);
-            }
-
-            for (s, rs) in shard_writes.drain(..).enumerate() {
-                if !rs.is_empty() {
-                    let mut p = Box::new(p.clone_data()); // ok here, as data previously emptied
-                    p.swap_data(rs.into());
-
-                    if local {
-                        p = p.make_local();
-                    }
-
-                    self.dih.txs[s].send(p)?;
-                    self.sent[s] += 1;
-                }
-            }
-        }
-
-        Ok(())
-    }
-
-    pub(crate) fn wait(self) -> Result<i64, ()> {
-        let mut id = Ok(0);
-        for (shard, n) in self.sent.into_iter().enumerate() {
-            for _ in 0..n {
-                use bincode;
-                let res: Result<Result<i64, ()>, _>;
-                res = bincode::deserialize_from(&mut (&mut self.dih.txs[shard]).reader());
-                id = res.unwrap();
-            }
-        }
-
-        // XXX: this just returns the last id :/
-        id
-    }
-}
-
-impl DomainInputHandle {
-    pub(crate) fn new_on(mut local_port: Option<u16>, txs: &[SocketAddr]) -> io::Result<Self> {
-        let txs: io::Result<Vec<_>> = txs.into_iter()
-            .map(|addr| {
-                let c = DomainConnectionBuilder::for_mutator(*addr)
-                    .maybe_on_port(local_port)
-                    .build()?;
-                if local_port.is_none() {
-                    local_port = Some(c.local_addr()?.port());
-                }
-                Ok(c)
-            })
-            .collect();
-
-        Ok(Self { txs: txs? })
-    }
-
-    pub(crate) fn new(txs: &[SocketAddr]) -> Result<Self, io::Error> {
-        Self::new_on(None, txs)
-    }
-
-    pub(crate) fn local_addr(&self) -> io::Result<SocketAddr> {
-        self.txs[0].local_addr()
-    }
-
-    pub(crate) fn sender(&mut self) -> BatchSendHandle {
-        BatchSendHandle::new(self)
-    }
-
-    pub(crate) fn base_send(
-        &mut self,
-        p: Box<Packet>,
-        key: &[usize],
-        local: bool,
-    ) -> Result<i64, tcp::SendError> {
-        let mut s = BatchSendHandle::new(self);
-        s.enqueue(p, key, local)?;
-        s.wait().map_err(|_| {
-            tcp::SendError::IoError(io::Error::new(io::ErrorKind::Other, "write failed"))
-        })
-    }
+struct DomainShardHandle {
+    worker: WorkerIdentifier,
+    tx: TcpSender<Box<Packet>>,
+    is_local: bool,
 }
 
 pub struct DomainHandle {
-    _idx: DomainIndex,
+    idx: DomainIndex,
 
     cr_poll: PollingLoop<ControlReplyPacket>,
-    txs: Vec<(TcpSender<Box<Packet>>, bool)>,
+    shards: Vec<DomainShardHandle>,
 
-    // Which worker each shard is assigned to, if any.
-    assignments: Vec<WorkerIdentifier>,
+    log: Logger,
 }
 
 impl DomainHandle {
     pub fn new<'a>(
         idx: DomainIndex,
-        num_shards: usize,
+        num_shards: Option<usize>,
         log: &Logger,
         graph: &mut Graph,
         config: &DomainConfig,
@@ -179,20 +52,19 @@ impl DomainHandle {
         placer: &'a mut Box<Iterator<Item = (WorkerIdentifier, WorkerEndpoint)>>,
         workers: &'a mut Vec<WorkerEndpoint>,
         epoch: Epoch,
-        ts: i64,
     ) -> Self {
         // NOTE: warning to future self...
         // the code currently relies on the fact that the domains that are sharded by the same key
         // *also* have the same number of shards. if this no longer holds, we actually need to do a
         // shuffle, otherwise writes will end up on the wrong shard. keep that in mind.
 
-        let mut txs = Vec::new();
+        let mut txs = HashMap::new();
         let mut cr_rxs = Vec::new();
         let mut assignments = Vec::new();
         let mut nodes = Some(Self::build_descriptors(graph, nodes));
 
-        for i in 0..num_shards {
-            let nodes = if i == num_shards - 1 {
+        for i in 0..num_shards.unwrap_or(1) {
+            let nodes = if i == num_shards.unwrap_or(1) - 1 {
                 nodes.take().unwrap()
             } else {
                 nodes.clone().unwrap()
@@ -202,26 +74,27 @@ impl DomainHandle {
                 std::net::TcpListener::bind(SocketAddr::new(listen_addr.clone(), 0)).unwrap();
             let domain = DomainBuilder {
                 index: idx,
-                shard: i,
-                nshards: num_shards,
+                shard: if num_shards.is_some() { Some(i) } else { None },
+                nshards: num_shards.unwrap_or(1),
                 config: config.clone(),
                 nodes,
                 persistence_parameters: persistence_params.clone(),
-                ts,
                 control_addr: control_listener.local_addr().unwrap(),
                 debug_addr: debug_addr.clone(),
             };
 
             // TODO(malte): simple round-robin placement for the moment
-            let (identifier, endpoint) = placer.next().unwrap();
+            let (identifier, endpoint) = placer
+                .next()
+                .expect("no workers available to place domain on!");
 
             // send domain to worker
             let mut w = endpoint.lock().unwrap();
-            debug!(
+            info!(
                 log,
                 "sending domain {}.{} to worker {:?}",
                 domain.index.index(),
-                domain.shard,
+                domain.shard.unwrap_or(0),
                 w.peer_addr()
             );
             let src = w.local_addr().unwrap();
@@ -243,7 +116,8 @@ impl DomainHandle {
             PollEvent::ResumePolling(_) => KeepPolling,
             PollEvent::Process(ControlReplyPacket::Booted(shard, addr)) => {
                 channel_coordinator.insert_addr((idx, shard), addr.clone(), false);
-                txs.push(
+                txs.insert(
+                    shard,
                     channel_coordinator
                         .get_dest(&(idx, shard))
                         .map(|(addr, is_local)| {
@@ -277,7 +151,7 @@ impl DomainHandle {
                     s.send(msg).unwrap();
                 }
 
-                if txs.len() == num_shards {
+                if txs.len() == num_shards.unwrap_or(1) {
                     StopPolling
                 } else {
                     KeepPolling
@@ -287,20 +161,41 @@ impl DomainHandle {
             PollEvent::Timeout => unreachable!(),
         });
 
+        let shards = assignments
+            .into_iter()
+            .enumerate()
+            .map(|(i, worker)| {
+                let (tx, is_local) = txs.remove(&i).unwrap();
+                DomainShardHandle {
+                    is_local,
+                    worker,
+                    tx,
+                }
+            })
+            .collect();
+
         DomainHandle {
-            _idx: idx,
+            idx: idx,
             cr_poll,
-            txs,
-            assignments,
+            shards,
+            log: log.clone(),
         }
     }
 
+    pub fn index(&self) -> DomainIndex {
+        self.idx
+    }
+
     pub fn shards(&self) -> usize {
-        self.txs.len()
+        self.shards.len()
     }
 
     pub fn assignment(&self, shard: usize) -> WorkerIdentifier {
-        self.assignments[shard].clone()
+        self.shards[shard].worker.clone()
+    }
+
+    pub fn assigned_to_worker(&self, worker: &WorkerIdentifier) -> bool {
+        self.shards.iter().any(|s| s.worker == *worker)
     }
 
     fn build_descriptors(graph: &mut Graph, nodes: Vec<(NodeIndex, bool)>) -> DomainNodes {
@@ -314,23 +209,47 @@ impl DomainHandle {
             .collect()
     }
 
-    pub fn send(&mut self, p: Box<Packet>) -> Result<(), tcp::SendError> {
-        for &mut (ref mut tx, is_local) in self.txs.iter_mut() {
-            if is_local {
+    pub(super) fn send_to_healthy(
+        &mut self,
+        p: Box<Packet>,
+        workers: &HashMap<WorkerIdentifier, WorkerStatus>,
+    ) -> Result<(), tcp::SendError> {
+        for shard in self.shards.iter_mut() {
+            if shard.is_local {
                 // TODO: avoid clone on last iteration.
-                tx.send(p.clone().make_local())?;
+                shard.tx.send(p.clone().make_local())?;
+            } else if workers[&shard.worker].healthy {
+                shard.tx.send_ref(&p)?;
             } else {
-                tx.send_ref(&p)?;
+                error!(
+                    self.log,
+                    "Tried to send packet to failed worker {:?}; ignoring!", shard.worker
+                );
+                return Err(io::Error::new(io::ErrorKind::BrokenPipe, "worker failed").into());
             }
         }
         Ok(())
     }
 
-    pub fn send_to_shard(&mut self, i: usize, mut p: Box<Packet>) -> Result<(), tcp::SendError> {
-        if self.txs[i].1 {
+    pub(super) fn send_to_healthy_shard(
+        &mut self,
+        i: usize,
+        mut p: Box<Packet>,
+        workers: &HashMap<WorkerIdentifier, WorkerStatus>,
+    ) -> Result<(), tcp::SendError> {
+        if self.shards[i].is_local {
             p = p.make_local();
         }
-        self.txs[i].0.send(p)
+        if workers[&self.shards[i].worker].healthy {
+            self.shards[i].tx.send_ref(&p)?;
+        } else {
+            error!(
+                self.log,
+                "Tried to send packet to failed worker {:?}; ignoring!", &self.shards[i].worker
+            );
+            return Err(io::Error::new(io::ErrorKind::BrokenPipe, "worker failed").into());
+        }
+        Ok(())
     }
 
     fn wait_for_next_reply(&mut self) -> ControlReplyPacket {

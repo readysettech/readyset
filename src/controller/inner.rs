@@ -1,33 +1,44 @@
-use channel::tcp::TcpSender;
+use api::debug::stats::GraphStats;
+use channel::tcp::{SendError, TcpSender};
 use consensus::{Authority, Epoch, STATE_KEY};
-use basics::PersistenceParameters;
-use dataflow::payload::{EgressForBase, IngressFromBase};
 use dataflow::prelude::*;
-use dataflow::statistics::GraphStats;
-use dataflow::{checktable, node, payload, DomainConfig};
+use dataflow::{node, payload, DomainConfig};
 
 use std::collections::{BTreeMap, HashMap};
-use std::error::Error;
-use std::fmt::{self, Display};
 use std::net::{IpAddr, SocketAddr};
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 use std::{io, time};
 
+use api::builders::*;
+use api::ActivationResult;
 use controller::migrate::materialization::Materializations;
-use controller::mutator::MutatorBuilder;
-use controller::recipe::ActivationResult;
-use controller::{ControllerState, DomainHandle, Migration, Recipe, RemoteGetterBuilder,
-                 WorkerIdentifier, WorkerStatus};
-use coordination::{CoordinationMessage, CoordinationPayload};
+use controller::{ControllerState, DomainHandle, Migration, Recipe, WorkerIdentifier};
+use coordination::CoordinationMessage;
 
-use hyper::{Method, StatusCode};
+use hyper::{self, Method, StatusCode};
 use mio::net::TcpListener;
 use petgraph;
 use petgraph::visit::Bfs;
 use slog;
 use std::mem;
-use tarpc::sync::client::{self, ClientExt};
+
+#[derive(Clone)]
+pub(crate) struct WorkerStatus {
+    pub(crate) healthy: bool,
+    last_heartbeat: Instant,
+    pub(crate) sender: Arc<Mutex<TcpSender<CoordinationMessage>>>,
+}
+
+impl WorkerStatus {
+    pub fn new(sender: Arc<Mutex<TcpSender<CoordinationMessage>>>) -> Self {
+        WorkerStatus {
+            healthy: true,
+            last_heartbeat: Instant::now(),
+            sender,
+        }
+    }
+}
 
 /// `Controller` is the core component of the alternate Soup implementation.
 ///
@@ -39,8 +50,6 @@ pub struct ControllerInner {
     pub(super) ingredients: Graph,
     pub(super) source: NodeIndex,
     pub(super) ndomains: usize,
-    pub(super) checktable: checktable::CheckTableClient,
-    checktable_addr: SocketAddr,
     pub(super) sharding: Option<usize>,
 
     pub(super) domain_config: DomainConfig,
@@ -63,7 +72,6 @@ pub struct ControllerInner {
     pub(super) workers: HashMap<WorkerIdentifier, WorkerStatus>,
 
     /// State between migrations
-    pub(super) deps: HashMap<DomainIndex, (IngressFromBase, EgressForBase)>,
     pub(super) remap: HashMap<DomainIndex, HashMap<NodeIndex, IndexPair>>,
 
     pub(super) epoch: Epoch,
@@ -116,104 +124,109 @@ pub(crate) fn graphviz(graph: &Graph, materializations: &Materializations) -> St
     s
 }
 
-/// Serializable error type for RPC that can fail.
-#[derive(Debug, Deserialize, Serialize)]
-pub enum RpcError {
-    /// Generic error message vessel.
-    Other(String),
-}
-
-impl Error for RpcError {
-    fn description(&self) -> &str {
-        match *self {
-            RpcError::Other(ref s) => s,
-        }
-    }
-}
-
-impl Display for RpcError {
-    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        write!(f, "{}", self.description())
-    }
-}
-
 impl ControllerInner {
-    pub fn coordination_message(&mut self, msg: CoordinationMessage) {
-        trace!(self.log, "Received {:?}", msg);
-        let process = match msg.payload {
-            CoordinationPayload::Register {
-                ref addr,
-                ref read_listen_addr,
-                ..
-            } => self.handle_register(&msg, addr, read_listen_addr.clone()),
-            CoordinationPayload::Heartbeat => self.handle_heartbeat(&msg),
-            CoordinationPayload::DomainBooted(..) => Ok(()),
-            _ => unimplemented!(),
-        };
-        match process {
-            Ok(_) => (),
-            Err(e) => error!(self.log, "failed to handle message {:?}: {:?}", msg, e),
-        }
-
-        self.check_worker_liveness();
-    }
-
     pub fn external_request<A: Authority + 'static>(
         &mut self,
-        method: Method,
+        method: hyper::Method,
         path: String,
+        query: Option<String>,
         body: Vec<u8>,
         authority: &Arc<A>,
-    ) -> Result<String, StatusCode> {
-        use hyper::Method::*;
+    ) -> Result<Result<String, String>, StatusCode> {
         use serde_json as json;
 
         match (&method, path.as_ref()) {
-            (&Get, "/graph") => return Ok(self.graphviz()),
-            (&Post, "/graphviz") => return Ok(json::to_string(&self.graphviz()).unwrap()),
-            (&Get, "/get_statistics") => {
-                return Ok(json::to_string(&self.get_statistics()).unwrap())
+            (&Method::GET, "/graph") => return Ok(Ok(self.graphviz())),
+            (&Method::POST, "/graphviz") => {
+                return Ok(Ok(json::to_string(&self.graphviz()).unwrap()))
+            }
+            (&Method::GET, "/get_statistics") => {
+                return Ok(Ok(json::to_string(&self.get_statistics()).unwrap()))
             }
             _ => {}
         }
 
         if self.pending_recovery.is_some() || self.workers.len() < self.quorum {
-            return Err(StatusCode::ServiceUnavailable);
+            return Err(StatusCode::SERVICE_UNAVAILABLE);
         }
 
-        Ok(match (method, path.as_ref()) {
-            (Get, "/flush_partial") => return Ok(json::to_string(&self.flush_partial()).unwrap()),
-            (Post, "/inputs") => json::to_string(&self.inputs()).unwrap(),
-            (Post, "/outputs") => json::to_string(&self.outputs()).unwrap(),
-            (Get, "/instances") => return Ok(json::to_string(&self.get_instances()).unwrap()),
-            (Post, "/mutator_builder") => {
-                json::to_string(&self.mutator_builder(json::from_slice(&body).unwrap())).unwrap()
+        match (method, path.as_ref()) {
+            (Method::GET, "/flush_partial") => {
+                Ok(Ok(json::to_string(&self.flush_partial()).unwrap()))
             }
-            (Post, "/getter_builder") => {
-                json::to_string(&self.getter_builder(json::from_slice(&body).unwrap())).unwrap()
+            (Method::POST, "/inputs") => Ok(Ok(json::to_string(&self.inputs()).unwrap())),
+            (Method::POST, "/outputs") => Ok(Ok(json::to_string(&self.outputs()).unwrap())),
+            (Method::GET, "/instances") => Ok(Ok(json::to_string(&self.get_instances()).unwrap())),
+            (Method::GET, "/nodes") => {
+                // TODO(malte): this is a pretty yucky hack, but hyper doesn't provide easy access
+                // to individual query variables unfortunately. We'll probably want to factor this
+                // out into a helper method.
+                let nodes = if let Some(query) = query {
+                    let vars: Vec<_> = query.split("&").map(String::from).collect();
+                    if let Some(n) = &vars.into_iter().find(|v| v.starts_with("w=")) {
+                        self.nodes_on_worker(Some(&n[2..].parse().unwrap()))
+                    } else {
+                        self.nodes_on_worker(None)
+                    }
+                } else {
+                    // all data-flow nodes
+                    self.nodes_on_worker(None)
+                };
+                Ok(Ok(json::to_string(
+                    &nodes
+                        .into_iter()
+                        .filter_map(|ni| {
+                            let n = &self.ingredients[ni];
+                            if n.is_internal() {
+                                Some((ni, n.name(), n.description()))
+                            } else {
+                                None
+                            }
+                        })
+                        .collect::<Vec<_>>(),
+                ).unwrap()))
             }
-            (Post, "/extend_recipe") => {
-                json::to_string(&self.extend_recipe(authority, json::from_slice(&body).unwrap()))
-                    .unwrap()
-            }
-            (Post, "/install_recipe") => {
-                json::to_string(&self.install_recipe(authority, json::from_slice(&body).unwrap()))
-                    .unwrap()
-            }
-            (Post, "/set_security_config") => json::to_string(&self.set_security_config(
-                json::from_slice(&body).unwrap(),
-            )).unwrap(),
-            (Post, "/create_universe") => {
-                json::to_string(&self.create_universe(json::from_slice(&body).unwrap())).unwrap()
-            }
-            (Post, "/remove_node") => {
-                json::to_string(&self.remove_node(json::from_slice(&body).unwrap())).unwrap()
-            }
-            _ => return Err(StatusCode::NotFound),
-        })
+            (Method::POST, "/table_builder") => json::from_slice(&body)
+                .map_err(|_| StatusCode::BAD_REQUEST)
+                .map(|args| Ok(json::to_string(&self.table_builder(args)).unwrap())),
+            (Method::POST, "/view_builder") => json::from_slice(&body)
+                .map_err(|_| StatusCode::BAD_REQUEST)
+                .map(|args| Ok(json::to_string(&self.view_builder(args)).unwrap())),
+            (Method::POST, "/extend_recipe") => json::from_slice(&body)
+                .map_err(|_| StatusCode::BAD_REQUEST)
+                .map(|args| {
+                    self.extend_recipe(authority, args)
+                        .map(|r| json::to_string(&r).unwrap())
+                }),
+            (Method::POST, "/install_recipe") => json::from_slice(&body)
+                .map_err(|_| StatusCode::BAD_REQUEST)
+                .map(|args| {
+                    self.install_recipe(authority, args)
+                        .map(|r| json::to_string(&r).unwrap())
+                }),
+            (Method::POST, "/set_security_config") => json::from_slice(&body)
+                .map_err(|_| StatusCode::BAD_REQUEST)
+                .map(|args| {
+                    self.set_security_config(args)
+                        .map(|r| json::to_string(&r).unwrap())
+                }),
+            (Method::POST, "/create_universe") => json::from_slice(&body)
+                .map_err(|_| StatusCode::BAD_REQUEST)
+                .map(|args| {
+                    self.create_universe(args)
+                        .map(|r| json::to_string(&r).unwrap())
+                }),
+            (Method::POST, "/remove_node") => json::from_slice(&body)
+                .map_err(|_| StatusCode::BAD_REQUEST)
+                .map(|args| {
+                    self.remove_nodes(vec![args].as_slice())
+                        .map(|r| json::to_string(&r).unwrap())
+                }),
+            _ => return Err(StatusCode::NOT_FOUND),
+        }
     }
 
-    fn handle_register(
+    pub(crate) fn handle_register(
         &mut self,
         msg: &CoordinationMessage,
         remote: &SocketAddr,
@@ -251,18 +264,64 @@ impl ControllerInner {
     }
 
     fn check_worker_liveness(&mut self) {
+        let mut any_failed = false;
+
+        // check if there are any newly failed workers
         if self.last_checked_workers.elapsed() > self.healthcheck_every {
-            for (addr, ws) in self.workers.iter_mut() {
-                if ws.healthy && ws.last_heartbeat.elapsed() > self.heartbeat_every * 3 {
-                    warn!(self.log, "worker at {:?} has failed!", addr);
-                    ws.healthy = false;
+            for (_addr, ws) in self.workers.iter() {
+                if ws.healthy && ws.last_heartbeat.elapsed() > self.heartbeat_every * 4 {
+                    any_failed = true;
                 }
             }
             self.last_checked_workers = Instant::now();
         }
+
+        // if we have newly failed workers, iterate again to find all workers that have missed >= 3
+        // heartbeats. This is necessary so that we correctly handle correlated failures of
+        // workers.
+        if any_failed {
+            let mut failed = Vec::new();
+            for (addr, ws) in self.workers.iter_mut() {
+                if ws.healthy && ws.last_heartbeat.elapsed() > self.heartbeat_every * 3 {
+                    error!(self.log, "worker at {:?} has failed!", addr);
+                    ws.healthy = false;
+                    failed.push(addr.clone());
+                }
+            }
+            self.handle_failed_workers(failed);
+        }
     }
 
-    fn handle_heartbeat(&mut self, msg: &CoordinationMessage) -> Result<(), io::Error> {
+    fn handle_failed_workers(&mut self, failed: Vec<WorkerIdentifier>) {
+        // first, translate from the affected workers to affected data-flow nodes
+        let mut affected_nodes = Vec::new();
+        for wi in failed {
+            info!(self.log, "handling failure of worker {:?}", wi);
+            affected_nodes.extend(self.get_failed_nodes(&wi));
+        }
+
+        // then, figure out which queries are affected (and thus must be removed and added again in
+        // a migration)
+        let affected_queries = self.recipe.queries_for_nodes(affected_nodes);
+        let (recovery, mut original) = self.recipe.make_recovery(affected_queries);
+
+        // activate recipe
+        self.apply_recipe(recovery.clone())
+            .expect("failed to apply recovery recipe");
+
+        // we must do this *after* the migration, since the migration itself modifies the recipe in
+        // `recovery`, and we currently need to clone it here.
+        let tmp = self.recipe.clone();
+        original.set_prior(tmp.clone());
+        // somewhat awkward, but we must replace the stale `SqlIncorporator` state in `original`
+        original.set_sql_inc(tmp.sql_inc().clone());
+
+        // back to original recipe, which should add the query again
+        self.apply_recipe(original)
+            .expect("failed to activate original recipe");
+    }
+
+    pub(crate) fn handle_heartbeat(&mut self, msg: &CoordinationMessage) -> Result<(), io::Error> {
         match self.workers.get_mut(&msg.source) {
             None => crit!(
                 self.log,
@@ -274,27 +333,18 @@ impl ControllerInner {
             }
         }
 
+        self.check_worker_liveness();
         Ok(())
     }
 
     /// Construct `ControllerInner` with a specified listening interface
-    pub(super) fn new(
-        listen_addr: IpAddr,
-        checktable_addr: SocketAddr,
-        log: slog::Logger,
-        state: ControllerState,
-    ) -> Self {
+    pub(super) fn new(listen_addr: IpAddr, log: slog::Logger, state: ControllerState) -> Self {
         let mut g = petgraph::Graph::new();
         let source = g.add_node(node::Node::new(
             "source",
             &["because-type-inference"],
             node::special::Source,
-            true,
         ));
-
-        let checktable =
-            checktable::CheckTableClient::connect(checktable_addr, client::Options::default())
-                .unwrap();
 
         let mut materializations = Materializations::new(&log);
         if !state.config.partial_enabled {
@@ -317,8 +367,6 @@ impl ControllerInner {
             ingredients: g,
             source: source,
             ndomains: 0,
-            checktable,
-            checktable_addr,
             listen_addr,
 
             materializations,
@@ -336,7 +384,6 @@ impl ControllerInner {
             debug_channel: None,
             epoch: state.epoch,
 
-            deps: HashMap::default(),
             remap: HashMap::default(),
 
             read_addrs: HashMap::default(),
@@ -347,10 +394,13 @@ impl ControllerInner {
         }
     }
 
-    /// Use a debug channel. This function may only be called once because the receiving end it
-    /// returned.
+    /// Create a global channel for receiving tracer events.
+    ///
+    /// Only domains created after this method is called will be able to send trace events.
+    ///
+    /// This function may only be called once because the receiving end it returned.
     #[allow(unused)]
-    pub fn create_debug_channel(&mut self) -> TcpListener {
+    pub fn create_tracer_channel(&mut self) -> TcpListener {
         assert!(self.debug_channel.is_none());
         let addr: SocketAddr = "127.0.0.1:0".parse().unwrap();
         let listener = TcpListener::bind(&addr).unwrap();
@@ -431,15 +481,6 @@ impl ControllerInner {
         r
     }
 
-    /// Get a boxed function which can be used to validate tokens.
-    #[allow(unused)]
-    pub fn get_validator(&self) -> Box<Fn(&checktable::Token) -> bool> {
-        let checktable =
-            checktable::CheckTableClient::connect(self.checktable_addr, client::Options::default())
-                .unwrap();
-        Box::new(move |t: &checktable::Token| checktable.validate_token(t.clone()).unwrap())
-    }
-
     #[cfg(test)]
     pub fn graph(&self) -> &Graph {
         &self.ingredients
@@ -447,15 +488,14 @@ impl ControllerInner {
 
     /// Get a Vec of all known input nodes.
     ///
-    /// Input nodes are here all nodes of type `Base`. The addresses returned by this function will
+    /// Input nodes are here all nodes of type `Table`. The addresses returned by this function will
     /// all have been returned as a key in the map from `commit` at some point in the past.
     pub fn inputs(&self) -> BTreeMap<String, NodeIndex> {
         self.ingredients
             .neighbors_directed(self.source, petgraph::EdgeDirection::Outgoing)
             .map(|n| {
                 let base = &self.ingredients[n];
-                assert!(base.is_internal());
-                assert!(base.get_base().is_some());
+                assert!(base.is_base());
                 (base.name().to_owned(), n.into())
             })
             .collect()
@@ -481,7 +521,7 @@ impl ControllerInner {
             .collect()
     }
 
-    fn find_getter_for(&self, node: NodeIndex) -> Option<NodeIndex> {
+    fn find_view_for(&self, node: NodeIndex) -> Option<NodeIndex> {
         // reader should be a child of the given node. however, due to sharding, it may not be an
         // *immediate* child. furthermore, once we go beyond depth 1, we may accidentally hit an
         // *unrelated* reader node. to account for this, readers keep track of what node they are
@@ -502,9 +542,9 @@ impl ControllerInner {
         reader
     }
 
-    /// Obtain a `RemoteGetterBuilder` that can be sent to a client and then used to query a given
+    /// Obtain a `ViewBuilder` that can be sent to a client and then used to query a given
     /// (already maintained) reader node called `name`.
-    pub fn getter_builder(&self, name: &str) -> Option<RemoteGetterBuilder> {
+    pub fn view_builder(&self, name: &str) -> Option<ViewBuilder> {
         // first try to resolve the node via the recipe, which handles aliasing between identical
         // queries.
         let node = match self.recipe.node_addr_for(name) {
@@ -516,21 +556,14 @@ impl ControllerInner {
             }
         };
 
-        self.find_getter_for(node).map(|r| {
+        self.find_view_for(node).map(|r| {
             let domain = self.ingredients[r].domain();
             let columns = self.ingredients[r].fields().to_vec();
             let shards = (0..self.domains[&domain].shards())
                 .map(|i| self.read_addrs[&self.domains[&domain].assignment(i)].clone())
-                .map(|a| {
-                    // NOTE: this is where we decide whether assignments are local or not (and
-                    // hence whether we should use LocalBypass). currently, we assume that either
-                    // *all* assignments are local, or *none* are. this is likely to change, at
-                    // which point this has to change too.
-                    (a, false)
-                })
                 .collect();
 
-            RemoteGetterBuilder {
+            ViewBuilder {
                 local_ports: vec![],
                 node: r,
                 columns,
@@ -539,16 +572,16 @@ impl ControllerInner {
         })
     }
 
-    /// Obtain a MutatorBuild that can be used to construct a Mutator to perform writes and deletes
+    /// Obtain a TableBuild that can be used to construct a Table to perform writes and deletes
     /// from the given named base node.
-    pub fn mutator_builder(&self, base: &str) -> Option<MutatorBuilder> {
+    pub fn table_builder(&self, base: &str) -> Option<TableBuilder> {
         let ni = match self.recipe.node_addr_for(base) {
             Ok(ni) => ni,
             Err(_) => *self.inputs().get(base)?,
         };
         let node = &self.ingredients[ni];
 
-        trace!(self.log, "creating mutator"; "for" => base);
+        trace!(self.log, "creating table"; "for" => base);
 
         let mut key = self.ingredients[ni]
             .suggest_indexes(ni)
@@ -572,9 +605,11 @@ impl ControllerInner {
             })
             .collect();
 
-        let base_operator = node.get_base()
-            .expect("asked to get mutator for non-base node");
-        let columns: Vec<String> = node.fields()
+        let base_operator = node
+            .get_base()
+            .expect("asked to get table for non-base node");
+        let columns: Vec<String> = node
+            .fields()
             .iter()
             .enumerate()
             .filter(|&(n, _)| !base_operator.get_dropped().contains_key(n))
@@ -586,28 +621,29 @@ impl ControllerInner {
         );
         let schema = self.recipe.get_base_schema(base);
 
-        Some(MutatorBuilder {
+        Some(TableBuilder {
             local_port: None,
             txs,
             addr: (*node.local_addr()).into(),
             key: key,
             key_is_primary: is_primary,
-            transactional: self.ingredients[ni].is_transactional(),
             dropped: base_operator.get_dropped(),
             table_name: node.name().to_owned(),
             columns,
             schema,
-            is_local: true,
         })
     }
 
     /// Get statistics about the time spent processing different parts of the graph.
     pub fn get_statistics(&mut self) -> GraphStats {
+        let workers = &self.workers;
         // TODO: request stats from domains in parallel.
-        let domains = self.domains
+        let domains = self
+            .domains
             .iter_mut()
             .flat_map(|(di, s)| {
-                s.send(box payload::Packet::GetStatistics).unwrap();
+                s.send_to_healthy(box payload::Packet::GetStatistics, workers)
+                    .unwrap();
                 s.wait_for_statistics()
                     .unwrap()
                     .into_iter()
@@ -636,11 +672,15 @@ impl ControllerInner {
     pub fn flush_partial(&mut self) -> u64 {
         // get statistics for current domain sizes
         // and evict all state from partial nodes
-        let to_evict: Vec<_> = self.domains
+        let workers = &self.workers;
+        let to_evict: Vec<_> = self
+            .domains
             .iter_mut()
             .map(|(di, s)| {
-                s.send(box payload::Packet::GetStatistics).unwrap();
-                let to_evict: Vec<(NodeIndex, u64)> = s.wait_for_statistics()
+                s.send_to_healthy(box payload::Packet::GetStatistics, workers)
+                    .unwrap();
+                let to_evict: Vec<(NodeIndex, u64)> = s
+                    .wait_for_statistics()
                     .unwrap()
                     .into_iter()
                     .flat_map(move |(_, node_stats)| {
@@ -663,10 +703,13 @@ impl ControllerInner {
                 self.domains
                     .get_mut(&di)
                     .unwrap()
-                    .send(box payload::Packet::Evict {
-                        node: Some(*na),
-                        num_bytes: bytes as usize,
-                    })
+                    .send_to_healthy(
+                        box payload::Packet::Evict {
+                            node: Some(*na),
+                            num_bytes: bytes as usize,
+                        },
+                        workers,
+                    )
                     .expect("failed to send domain flush message");
                 total_evicted += bytes;
             }
@@ -680,7 +723,7 @@ impl ControllerInner {
         total_evicted
     }
 
-    pub fn create_universe(&mut self, context: HashMap<String, DataType>) {
+    pub fn create_universe(&mut self, context: HashMap<String, DataType>) -> Result<(), String> {
         let log = self.log.clone();
         let mut r = self.recipe.clone();
         let groups = self.recipe.security_groups();
@@ -694,9 +737,9 @@ impl ControllerInner {
         let uid = &[uid];
         if context.get("group").is_none() {
             for g in groups {
-                let rgb: Option<RemoteGetterBuilder> = self.getter_builder(&g);
-                let mut getter = rgb.map(|rgb| rgb.build_exclusive()).unwrap();
-                let my_groups: Vec<DataType> = getter
+                let rgb: Option<ViewBuilder> = self.view_builder(&g);
+                let mut view = rgb.map(|rgb| rgb.build_exclusive().unwrap()).unwrap();
+                let my_groups: Vec<DataType> = view
                     .lookup(uid, true)
                     .unwrap()
                     .iter()
@@ -716,56 +759,88 @@ impl ControllerInner {
                 }
                 Err(e) => {
                     crit!(log, "failed to create universe: {:?}", e);
-                    Err(RpcError::Other("failed to create universe".to_owned()))
+                    Err("failed to create universe".to_owned())
                 }
             }.unwrap();
         });
 
         self.recipe = r;
+        Ok(())
     }
 
-    pub fn set_security_config(&mut self, config: (String, String)) {
+    pub fn set_security_config(&mut self, config: (String, String)) -> Result<(), String> {
         let p = config.0;
         let url = config.1;
         self.recipe.set_security_config(&p, url);
+        Ok(())
     }
 
-    fn apply_recipe(&mut self, mut new: Recipe) -> Result<ActivationResult, RpcError> {
-        let mut err = Err(RpcError::Other("".to_owned())); // <3 type inference
-        self.migrate(|mig| {
-            err = new.activate(mig, false)
-                .map_err(|e| RpcError::Other(format!("failed to activate recipe: {}", e)))
+    fn apply_recipe(&mut self, mut new: Recipe) -> Result<ActivationResult, String> {
+        let r = self.migrate(|mig| {
+            new.activate(mig)
+                .map_err(|e| format!("failed to activate recipe: {}", e))
         });
 
-        match err {
+        match r {
             Ok(ref ra) => {
-                for leaf in &ra.removed_leaves {
-                    // There should be exactly one reader attached to each "leaf" node. Find it and
-                    // remove it along with any now unneeded ancestors.
-                    let readers: Vec<_> = self.ingredients
-                        .neighbors_directed(*leaf, petgraph::EdgeDirection::Outgoing)
-                        .collect();
-                    assert_eq!(readers.len(), 1);
-                    self.remove_node(readers[0]);
+                let (removed_bases, removed_other): (Vec<_>, Vec<_>) = ra
+                    .removed_leaves
+                    .iter()
+                    .cloned()
+                    .partition(|ni| self.ingredients[*ni].is_base());
+
+                // first remove query nodes in reverse topological order
+                let mut topo_removals = Vec::with_capacity(removed_other.len());
+                let mut topo = petgraph::visit::Topo::new(&self.ingredients);
+                while let Some(node) = topo.next(&self.ingredients) {
+                    if removed_other.contains(&node) {
+                        topo_removals.push(node);
+                    }
                 }
+                topo_removals.reverse();
+
+                for leaf in topo_removals {
+                    self.remove_leaf(leaf)?;
+                }
+
+                // now remove bases
+                for base in removed_bases {
+                    // TODO(malte): support removing bases that still have children?
+                    let children: Vec<NodeIndex> = self
+                        .ingredients
+                        .neighbors_directed(base, petgraph::EdgeDirection::Outgoing)
+                        .collect();
+                    // TODO(malte): what about domain crossings? can ingress/egress nodes be left
+                    // behind?
+                    assert_eq!(children.len(), 0);
+                    debug!(
+                        self.log,
+                        "Removing base \"{}\"",
+                        self.ingredients[base].name();
+                        "node" => base.index(),
+                    );
+                    // now drop the (orphaned) base
+                    self.remove_nodes(vec![base].as_slice()).unwrap();
+                }
+
                 self.recipe = new;
             }
             Err(ref e) => {
-                crit!(self.log, "{}", e.description());
+                crit!(self.log, "failed to apply recipe: {}", e);
                 // TODO(malte): a little yucky, since we don't really need the blank recipe
                 let recipe = mem::replace(&mut self.recipe, Recipe::blank(None));
                 self.recipe = recipe.revert();
             }
         }
 
-        err
+        r
     }
 
     pub fn extend_recipe<A: Authority + 'static>(
         &mut self,
         authority: &Arc<A>,
         add_txt: String,
-    ) -> Result<ActivationResult, RpcError> {
+    ) -> Result<ActivationResult, String> {
         // needed because self.apply_recipe needs to mutate self.recipe, so can't have it borrowed
         let new = mem::replace(&mut self.recipe, Recipe::blank(None));
         match new.extend(&add_txt) {
@@ -783,9 +858,7 @@ impl ControllerInner {
                     })
                     .is_err()
                 {
-                    return Err(RpcError::Other(
-                        "Failed to persist recipe extension".to_owned(),
-                    ));
+                    return Err("Failed to persist recipe extension".to_owned());
                 }
 
                 activation_result
@@ -794,7 +867,7 @@ impl ControllerInner {
                 // need to restore the old recipe
                 crit!(self.log, "failed to extend recipe: {:?}", e);
                 self.recipe = old;
-                Err(RpcError::Other("failed to extend recipe".to_owned()))
+                Err("failed to extend recipe".to_owned())
             }
         }
     }
@@ -803,11 +876,11 @@ impl ControllerInner {
         &mut self,
         authority: &Arc<A>,
         r_txt: String,
-    ) -> Result<ActivationResult, RpcError> {
+    ) -> Result<ActivationResult, String> {
         match Recipe::from_str(&r_txt, Some(self.log.clone())) {
             Ok(r) => {
                 let old = mem::replace(&mut self.recipe, Recipe::blank(None));
-                let mut new = old.replace(r).unwrap();
+                let new = old.replace(r).unwrap();
                 let activation_result = self.apply_recipe(new);
                 if authority
                     .read_modify_write(STATE_KEY, |state: Option<ControllerState>| match state {
@@ -821,15 +894,13 @@ impl ControllerInner {
                     })
                     .is_err()
                 {
-                    return Err(RpcError::Other(
-                        "Failed to persist recipe installation".to_owned(),
-                    ));
+                    return Err("Failed to persist recipe installation".to_owned());
                 }
                 activation_result
             }
             Err(e) => {
                 crit!(self.log, "failed to parse recipe: {:?}", e);
-                Err(RpcError::Other("failed to parse recipe".to_owned()))
+                Err("failed to parse recipe".to_owned())
             }
         }
     }
@@ -838,48 +909,193 @@ impl ControllerInner {
         graphviz(&self.ingredients, &self.materializations)
     }
 
-    pub fn remove_node(&mut self, node: NodeIndex) {
-        // Node must not have any children.
+    fn remove_leaf(&mut self, mut leaf: NodeIndex) -> Result<(), String> {
+        let mut removals = vec![];
+        let start = leaf;
+        assert!(!self.ingredients[leaf].is_source());
+
+        info!(
+            self.log,
+            "Computing removals for removing node {}",
+            leaf.index()
+        );
+
+        if self
+            .ingredients
+            .neighbors_directed(leaf, petgraph::EdgeDirection::Outgoing)
+            .count() > 0
+        {
+            // This query leaf node has children -- typically, these are readers, but they can also
+            // include egress nodes or other, dependent queries.
+            let mut has_non_reader_children = false;
+            let readers: Vec<_> = self
+                .ingredients
+                .neighbors_directed(leaf, petgraph::EdgeDirection::Outgoing)
+                .filter(|ni| {
+                    if self.ingredients[*ni].is_reader() {
+                        true
+                    } else {
+                        has_non_reader_children = true;
+                        false
+                    }
+                })
+                .collect();
+            if has_non_reader_children {
+                // should never happen, since we remove nodes in reverse topological order
+                crit!(
+                    self.log,
+                    "not removing node {} yet, as it still has non-reader children",
+                    leaf.index()
+                );
+                unreachable!();
+            }
+            // nodes can have only one reader attached
+            assert!(readers.len() <= 1);
+            debug!(
+                        self.log,
+                        "Removing query leaf \"{}\"", self.ingredients[leaf].name();
+                        "node" => leaf.index(),
+                    );
+            if !readers.is_empty() {
+                removals.push(readers[0]);
+                leaf = readers[0];
+            } else {
+                unreachable!();
+            }
+        }
+
+        // `node` now does not have any children any more
         assert_eq!(
             self.ingredients
-                .neighbors_directed(node, petgraph::EdgeDirection::Outgoing)
+                .neighbors_directed(leaf, petgraph::EdgeDirection::Outgoing)
                 .count(),
             0
         );
-        assert!(!self.ingredients[node].is_source());
 
-        let mut removals = HashMap::new();
-        let mut nodes = vec![node];
+        let mut nodes = vec![leaf];
         while let Some(node) = nodes.pop() {
-            let mut parents = self.ingredients
+            let mut parents = self
+                .ingredients
                 .neighbors_directed(node, petgraph::EdgeDirection::Incoming)
                 .detach();
             while let Some(parent) = parents.next_node(&self.ingredients) {
                 let edge = self.ingredients.find_edge(parent, node).unwrap();
                 self.ingredients.remove_edge(edge);
 
-                if !self.ingredients[parent].is_source() && !self.ingredients[parent].is_base()
-                    && self.ingredients
+                if !self.ingredients[parent].is_source()
+                    && !self.ingredients[parent].is_base()
+                    // ok to remove original start leaf
+                    && (parent == start || !self.recipe.sql_inc().is_leaf_address(parent))
+                    && self
+                        .ingredients
                         .neighbors_directed(parent, petgraph::EdgeDirection::Outgoing)
-                        .count() == 1
+                        .count() == 0
                 {
                     nodes.push(parent);
                 }
             }
 
-            removals
-                .entry(self.ingredients[node].domain())
-                .or_insert(Vec::new())
-                .push(*self.ingredients[node].local_addr());
-            self.ingredients[node].remove();
+            removals.push(node);
         }
 
-        for (domain, nodes) in removals {
-            self.domains
+        self.remove_nodes(removals.as_slice())
+    }
+
+    fn remove_nodes(&mut self, removals: &[NodeIndex]) -> Result<(), String> {
+        // Remove node from controller local state
+        let mut domain_removals: HashMap<DomainIndex, Vec<LocalNodeIndex>> = HashMap::default();
+        for ni in removals {
+            self.ingredients[*ni].remove();
+            debug!(self.log, "Removed node {}", ni.index());
+            domain_removals
+                .entry(self.ingredients[*ni].domain())
+                .or_insert(Vec::new())
+                .push(*self.ingredients[*ni].local_addr())
+        }
+
+        // Send messages to domains
+        for (domain, nodes) in domain_removals {
+            trace!(
+                self.log,
+                "Notifying domain {} of node removals",
+                domain.index(),
+            );
+
+            match self
+                .domains
                 .get_mut(&domain)
                 .unwrap()
-                .send(box payload::Packet::RemoveNodes { nodes })
-                .unwrap();
+                .send_to_healthy(box payload::Packet::RemoveNodes { nodes }, &self.workers)
+            {
+                Ok(_) => (),
+                Err(e) => match e {
+                    SendError::IoError(ref ioe) => {
+                        if ioe.kind() == io::ErrorKind::BrokenPipe
+                            && ioe.get_ref().unwrap().description() == "worker failed"
+                        {
+                            // message would have gone to a failed worker, so ignore error
+                        } else {
+                            panic!("failed to remove nodes: {:?}", e);
+                        }
+                    }
+                    _ => {
+                        panic!("failed to remove nodes: {:?}", e);
+                    }
+                },
+            }
+        }
+
+        Ok(())
+    }
+
+    fn get_failed_nodes(&self, lost_worker: &WorkerIdentifier) -> Vec<NodeIndex> {
+        // Find nodes directly impacted by worker failure.
+        let mut nodes: Vec<NodeIndex> = self.nodes_on_worker(Some(lost_worker));
+
+        // Add any other downstream nodes.
+        let mut failed_nodes = Vec::new();
+        while let Some(node) = nodes.pop() {
+            failed_nodes.push(node);
+            for child in self
+                .ingredients
+                .neighbors_directed(node, petgraph::EdgeDirection::Outgoing)
+            {
+                if !nodes.contains(&child) {
+                    nodes.push(child);
+                }
+            }
+        }
+        failed_nodes
+    }
+
+    /// List data-flow nodes, on a specific worker if `worker` specified.
+    fn nodes_on_worker(&self, worker: Option<&WorkerIdentifier>) -> Vec<NodeIndex> {
+        // NOTE(malte): this traverses all graph vertices in order to find those assigned to a
+        // domain. We do this to avoid keeping separate state that may get out of sync, but it
+        // could become a performance bottleneck in the future (e.g., when recovergin large
+        // graphs).
+        let domain_nodes = |i: DomainIndex| -> Vec<NodeIndex> {
+            self.ingredients
+                .node_indices()
+                .filter(|&ni| ni != self.source)
+                .filter(|&ni| !self.ingredients[ni].is_dropped())
+                .filter(|&ni| self.ingredients[ni].domain() == i)
+                .collect()
+        };
+
+        if worker.is_some() {
+            self.domains
+                .values()
+                .filter(|dh| dh.assigned_to_worker(worker.unwrap()))
+                .fold(Vec::new(), |mut acc, dh| {
+                    acc.extend(domain_nodes(dh.index()));
+                    acc
+                })
+        } else {
+            self.domains.values().fold(Vec::new(), |mut acc, dh| {
+                acc.extend(domain_nodes(dh.index()));
+                acc
+            })
         }
     }
 }
@@ -890,7 +1106,7 @@ impl Drop for ControllerInner {
             // XXX: this is a terrible ugly hack to ensure that all workers exit
             for _ in 0..100 {
                 // don't unwrap, because given domain may already have terminated
-                drop(d.send(box payload::Packet::Quit));
+                drop(d.send_to_healthy(box payload::Packet::Quit, &self.workers));
             }
         }
     }

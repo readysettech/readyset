@@ -170,7 +170,7 @@ pub fn assign(
                 // check our siblings too
                 // XXX: we could keep traversing here to find cousins and such
                 for &(pni, _) in &parents {
-                    let mut siblings = graph
+                    let siblings = graph
                         .neighbors_directed(pni, petgraph::EdgeDirection::Outgoing)
                         .map(|ni| &graph[ni]);
                     for s in siblings {

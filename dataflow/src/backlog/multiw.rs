@@ -1,6 +1,6 @@
 use super::{key_to_double, key_to_single, Key};
-use basics::{DataType, Record};
 use basics::data::SizeOf;
+use basics::{DataType, Record};
 use evmap;
 use fnv::FnvBuildHasher;
 
@@ -50,14 +50,6 @@ impl Handle {
             Handle::Single(ref mut h) => h.refresh(),
             Handle::Double(ref mut h) => h.refresh(),
             Handle::Many(ref mut h) => h.refresh(),
-        }
-    }
-
-    pub fn set_meta(&mut self, meta: i64) -> i64 {
-        match *self {
-            Handle::Single(ref mut h) => h.set_meta(meta),
-            Handle::Double(ref mut h) => h.set_meta(meta),
-            Handle::Many(ref mut h) => h.set_meta(meta),
         }
     }
 
@@ -124,7 +116,6 @@ impl Handle {
                             memory_delta -= r.deep_size_of() as isize;
                             h.remove(r[key[0]].clone(), r);
                         }
-                        Record::BaseOperation(..) => unreachable!(),
                     }
                 }
             }
@@ -141,7 +132,6 @@ impl Handle {
                             memory_delta -= r.deep_size_of() as isize;
                             h.remove((r[key[0]].clone(), r[key[1]].clone()), r);
                         }
-                        Record::BaseOperation(..) => unreachable!(),
                     }
                 }
             }
@@ -157,7 +147,6 @@ impl Handle {
                         memory_delta -= r.deep_size_of() as isize;
                         h.remove(key, r);
                     }
-                    Record::BaseOperation(..) => unreachable!(),
                 }
             },
         }

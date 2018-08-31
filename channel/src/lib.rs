@@ -7,22 +7,27 @@
 extern crate bincode;
 extern crate bufstream;
 extern crate byteorder;
+#[macro_use]
+extern crate failure;
 extern crate mio;
 extern crate net2;
 extern crate serde;
 #[macro_use]
 extern crate serde_derive;
+extern crate async_bincode;
 extern crate throttled_reader;
+extern crate tokio;
 
 use std::collections::HashMap;
 use std::hash::Hash;
-use std::io::{self, Read, Write};
+use std::io::{self, BufWriter, Read, Write};
 use std::marker::PhantomData;
 use std::net::SocketAddr;
 use std::ops::{Deref, DerefMut};
-use std::sync::Mutex;
 use std::sync::mpsc::{self, SendError};
+use std::sync::Mutex;
 
+use async_bincode::{AsyncBincodeWriter, AsyncDestination};
 use byteorder::{ByteOrder, NetworkEndian};
 use serde::{Deserialize, Deserializer, Serialize, Serializer};
 
@@ -30,23 +35,23 @@ pub mod poll;
 pub mod rpc;
 pub mod tcp;
 
-pub use tcp::{channel, TcpReceiver, TcpSender};
+pub use tcp::{channel, DualTcpStream, TcpReceiver, TcpSender};
 
-pub const CONNECTION_FROM_MUTATOR: u8 = 1;
+pub const CONNECTION_FROM_BASE: u8 = 1;
 pub const CONNECTION_FROM_DOMAIN: u8 = 0;
 
 pub struct DomainConnectionBuilder {
     sport: Option<u16>,
     addr: SocketAddr,
-    is_for_mutator: bool,
+    is_for_base: bool,
 }
 
 impl DomainConnectionBuilder {
-    pub fn for_mutator(addr: SocketAddr) -> Self {
+    pub fn for_base(addr: SocketAddr) -> Self {
         DomainConnectionBuilder {
             sport: None,
             addr,
-            is_for_mutator: true,
+            is_for_base: true,
         }
     }
 
@@ -54,7 +59,7 @@ impl DomainConnectionBuilder {
         DomainConnectionBuilder {
             sport: None,
             addr,
-            is_for_mutator: false,
+            is_for_base: false,
         }
     }
 
@@ -68,17 +73,32 @@ impl DomainConnectionBuilder {
         self
     }
 
+    pub fn build_async<T: serde::Serialize>(
+        self,
+    ) -> io::Result<AsyncBincodeWriter<BufWriter<tokio::net::TcpStream>, T, AsyncDestination>> {
+        // TODO: async
+        // we must currently write and call flush, because the remote end (currently) does a
+        // synchronous read upon accepting a connection.
+        let s = self.build::<T>()?.into_inner().into_inner()?;
+
+        tokio::net::TcpStream::from_std(s, &tokio::reactor::Handle::default())
+            .map(BufWriter::new)
+            .map(AsyncBincodeWriter::from)
+            .map(AsyncBincodeWriter::for_async)
+    }
+
     pub fn build<T: serde::Serialize>(self) -> io::Result<TcpSender<T>> {
         let mut s = TcpSender::connect_from(self.sport, &self.addr)?;
         {
             let s = s.get_mut();
-            s.write_all(&[if self.is_for_mutator {
-                CONNECTION_FROM_MUTATOR
+            s.write_all(&[if self.is_for_base {
+                CONNECTION_FROM_BASE
             } else {
                 CONNECTION_FROM_DOMAIN
             }])?;
             s.flush()?;
         }
+
         Ok(s)
     }
 }

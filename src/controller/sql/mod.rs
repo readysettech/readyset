@@ -10,14 +10,15 @@ use self::mir::{MirNodeRef, SqlToMirConverter};
 use self::query_graph::{to_query_graph, QueryGraph};
 use self::query_signature::Signature;
 use self::reuse::{ReuseConfig, ReuseConfigType};
+use basics::NodeIndex;
 use controller::mir_to_flow::mir_query_to_flow_parts;
 use controller::Migration;
-use basics::NodeIndex;
 use dataflow::prelude::DataType;
 use mir::query::{MirQuery, QueryFlowParts};
 use mir::reuse as mir_reuse;
+use mir::Column;
 use nom_sql::parser as sql_parser;
-use nom_sql::{ArithmeticBase, Column, CreateTableStatement, SqlQuery};
+use nom_sql::{ArithmeticBase, CreateTableStatement, SqlQuery};
 use nom_sql::{CompoundSelectOperator, CompoundSelectStatement, SelectStatement};
 
 use slog;
@@ -47,6 +48,7 @@ pub struct SqlIncorporator {
 
     named_queries: HashMap<String, u64>,
     query_graphs: HashMap<u64, QueryGraph>,
+    base_mir_queries: HashMap<String, MirQuery>,
     mir_queries: HashMap<(u64, UniverseId), MirQuery>,
     num_queries: usize,
 
@@ -54,7 +56,6 @@ pub struct SqlIncorporator {
     view_schemas: HashMap<String, Vec<String>>,
 
     schema_version: usize,
-    transactional: bool,
 
     reuse_type: ReuseConfigType,
 
@@ -72,6 +73,7 @@ impl Default for SqlIncorporator {
 
             named_queries: HashMap::default(),
             query_graphs: HashMap::default(),
+            base_mir_queries: HashMap::default(),
             mir_queries: HashMap::default(),
             num_queries: 0,
 
@@ -79,7 +81,6 @@ impl Default for SqlIncorporator {
             view_schemas: HashMap::default(),
 
             schema_version: 0,
-            transactional: false,
 
             reuse_type: ReuseConfigType::Finkelstein,
             universes: HashMap::default(),
@@ -96,11 +97,6 @@ impl SqlIncorporator {
             mir_converter: SqlToMirConverter::with_logger(lc),
             ..Default::default()
         }
-    }
-
-    /// Make any future base nodes added be transactional.
-    pub fn set_transactional(&mut self, transactional: bool) {
-        self.transactional = transactional;
     }
 
     /// Disable node reuse for future migrations.
@@ -171,6 +167,17 @@ impl SqlIncorporator {
         }
     }
 
+    pub fn is_leaf_address(&self, ni: NodeIndex) -> bool {
+        self.leaf_addresses.values().any(|nn| *nn == ni)
+    }
+
+    pub fn get_queries_for_node(&self, ni: NodeIndex) -> Vec<String> {
+        self.leaf_addresses
+            .iter()
+            .filter_map(|(name, idx)| if *idx == ni { Some(name.clone()) } else { None })
+            .collect()
+    }
+
     fn consider_query_graph(
         &mut self,
         query_name: &str,
@@ -198,7 +205,8 @@ impl SqlIncorporator {
         match self.mir_queries.get(&(qg_hash, universe.clone())) {
             None => (),
             Some(ref mir_query) => {
-                let existing_qg = self.query_graphs
+                let existing_qg = self
+                    .query_graphs
                     .get(&qg_hash)
                     .expect("query graph should be present");
                 // note that this also checks the *order* in which parameters are specified; a
@@ -286,7 +294,11 @@ impl SqlIncorporator {
                         // present in the query graph (because a later migration added the column to
                         // a base schema after the query was added to the graph). In this case, we
                         // move on to other reuse options.
-                        let params = qg.parameters().into_iter().cloned().collect();
+                        let params = qg
+                            .parameters()
+                            .into_iter()
+                            .map(|c| Column::from(c))
+                            .collect();
                         match mir_reuse::rewind_until_columns_found(mir_query.leaf.clone(), &params)
                         {
                             Some(mn) => {
@@ -409,8 +421,7 @@ impl SqlIncorporator {
         mut mig: &mut Migration,
     ) -> QueryFlowParts {
         // first, compute the MIR representation of the SQL query
-        let mut mir = self.mir_converter
-            .named_base_to_mir(query_name, query, self.transactional);
+        let mut mir = self.mir_converter.named_base_to_mir(query_name, query);
 
         trace!(self.log, "Base node MIR: {:#?}", mir);
 
@@ -542,17 +553,20 @@ impl SqlIncorporator {
     }
 
     pub fn remove_query(&mut self, query_name: &str, mig: &Migration) -> Option<NodeIndex> {
-        let nodeid = self.leaf_addresses
+        let nodeid = self
+            .leaf_addresses
             .remove(query_name)
             .expect("tried to remove unknown query");
 
-        let qg_hash = self.named_queries
-            .remove(query_name)
-            .expect("missing query hash for named query");
+        let qg_hash = self.named_queries.remove(query_name).expect(&format!(
+            "missing query hash for named query \"{}\"",
+            query_name
+        ));
         let mir = self.mir_queries.get(&(qg_hash, mig.universe())).unwrap();
 
         // traverse self.leaf__addresses
-        if self.leaf_addresses
+        if self
+            .leaf_addresses
             .values()
             .find(|&id| *id == nodeid)
             .is_none()
@@ -588,6 +602,22 @@ impl SqlIncorporator {
         }
     }
 
+    pub fn remove_base(&mut self, name: &str) {
+        info!(self.log, "Removing base {} from SqlIncorporator", name);
+        if self.base_schemas.remove(name).is_none() {
+            warn!(
+                self.log,
+                "Attempted to remove non-existant base node {} from SqlIncorporator", name
+            );
+        }
+
+        let mir = self
+            .base_mir_queries
+            .get(name)
+            .expect(&format!("tried to remove unknown base {}", name));
+        self.mir_converter.remove_base(name, mir)
+    }
+
     fn register_query(
         &mut self,
         query_name: &str,
@@ -597,7 +627,8 @@ impl SqlIncorporator {
     ) {
         // TODO(malte): we currently need to remember these for local state, but should figure out
         // a better plan (see below)
-        let fields = mir.leaf
+        let fields = mir
+            .leaf
             .borrow()
             .columns()
             .into_iter()
@@ -618,7 +649,10 @@ impl SqlIncorporator {
                 self.mir_queries.insert((qg_hash, universe), mir.clone());
                 self.named_queries.insert(query_name.to_owned(), qg_hash);
             }
-            None => (),
+            None => {
+                self.base_mir_queries
+                    .insert(query_name.to_owned(), mir.clone());
+            }
         }
     }
 
@@ -724,26 +758,29 @@ impl SqlIncorporator {
         // to existing views in the graph
         let mut fq = q.clone();
         for sq in fq.extract_subqueries() {
-            use self::passes::subqueries::{field_with_table_name, query_from_condition_base,
-                                           Subquery};
+            use self::passes::subqueries::{
+                field_with_table_name, query_from_condition_base, Subquery,
+            };
             use nom_sql::{JoinRightSide, Table};
             match sq {
                 Subquery::InComparison(cond_base) => {
                     let (sq, column) = query_from_condition_base(&cond_base);
 
-                    let qfp = self.add_parsed_query(sq, None, false, mig)
+                    let qfp = self
+                        .add_parsed_query(sq, None, false, mig)
                         .expect("failed to add subquery");
                     *cond_base = field_with_table_name(qfp.name.clone(), column);
                 }
                 Subquery::InJoin(join_right_side) => {
                     *join_right_side = match *join_right_side {
                         JoinRightSide::NestedSelect(box ref ns, ref alias) => {
-                            let qfp = self.add_parsed_query(
-                                SqlQuery::Select(ns.clone()),
-                                alias.clone(),
-                                false,
-                                mig,
-                            ).expect("failed to add subquery in join");
+                            let qfp =
+                                self.add_parsed_query(
+                                    SqlQuery::Select(ns.clone()),
+                                    alias.clone(),
+                                    false,
+                                    mig,
+                                ).expect("failed to add subquery in join");
                             JoinRightSide::Table(Table {
                                 name: qfp.name.clone(),
                                 alias: None,
@@ -885,7 +922,8 @@ mod tests {
 
     /// Helper to grab a reference to a named view.
     fn get_node<'a>(inc: &SqlIncorporator, mig: &'a Migration, name: &str) -> &'a Node {
-        let na = inc.get_flow_node_address(name, 0)
+        let na = inc
+            .get_flow_node_address(name, 0)
             .expect(&format!("No node named \"{}\" exists", name));
         mig.graph().node_weight(na).unwrap()
     }
@@ -964,14 +1002,16 @@ mod tests {
             assert_eq!(mig.graph().node_count(), 2);
             assert_eq!(get_node(&inc, mig, "users").name(), "users");
             assert_eq!(get_node(&inc, mig, "users").fields(), &["id", "name"]);
-            assert_eq!(get_node(&inc, mig, "users").description(), "B");
+            assert!(get_node(&inc, mig, "users").is_base());
 
             // Establish a base write type for "articles"
-            assert!(inc.add_query(
-                "CREATE TABLE articles (id int, author int, title varchar(255));",
-                None,
-                mig
-            ).is_ok());
+            assert!(
+                inc.add_query(
+                    "CREATE TABLE articles (id int, author int, title varchar(255));",
+                    None,
+                    mig
+                ).is_ok()
+            );
             // Should have source and "users" base table node
             assert_eq!(mig.graph().node_count(), 3);
             assert_eq!(get_node(&inc, mig, "articles").name(), "articles");
@@ -979,7 +1019,7 @@ mod tests {
                 get_node(&inc, mig, "articles").fields(),
                 &["id", "author", "title"]
             );
-            assert_eq!(get_node(&inc, mig, "articles").description(), "B");
+            assert!(get_node(&inc, mig, "articles").is_base());
 
             // Try a simple equi-JOIN query
             let q = "SELECT users.name, articles.title \
@@ -994,14 +1034,11 @@ mod tests {
             );
             // join node
             let new_join_view = get_node(&inc, mig, &format!("q_{:x}_n0", qid));
-            assert_eq!(
-                new_join_view.fields(),
-                &["id", "author", "title", "id", "name"]
-            );
+            assert_eq!(new_join_view.fields(), &["id", "author", "title", "name"]);
             // leaf node
             let new_leaf_view = get_node(&inc, mig, &q.unwrap().name);
             assert_eq!(new_leaf_view.fields(), &["name", "title", "bogokey"]);
-            assert_eq!(new_leaf_view.description(), format!("π[4, 2, lit: 0]"));
+            assert_eq!(new_leaf_view.description(), format!("π[3, 2, lit: 0]"));
         });
     }
 
@@ -1020,7 +1057,7 @@ mod tests {
             assert_eq!(mig.graph().node_count(), 2);
             assert_eq!(get_node(&inc, mig, "users").name(), "users");
             assert_eq!(get_node(&inc, mig, "users").fields(), &["id", "name"]);
-            assert_eq!(get_node(&inc, mig, "users").description(), "B");
+            assert!(get_node(&inc, mig, "users").is_base());
 
             // Try a simple query
             let res = inc.add_query(
@@ -1061,7 +1098,7 @@ mod tests {
             assert_eq!(mig.graph().node_count(), 2);
             assert_eq!(get_node(&inc, mig, "votes").name(), "votes");
             assert_eq!(get_node(&inc, mig, "votes").fields(), &["aid", "userid"]);
-            assert_eq!(get_node(&inc, mig, "votes").description(), "B");
+            assert!(get_node(&inc, mig, "votes").is_base());
 
             // Try a simple COUNT function
             let res = inc.add_query(
@@ -1142,7 +1179,7 @@ mod tests {
             assert_eq!(mig.graph().node_count(), 2);
             assert_eq!(get_node(&inc, mig, "users").name(), "users");
             assert_eq!(get_node(&inc, mig, "users").fields(), &["id", "name"]);
-            assert_eq!(get_node(&inc, mig, "users").description(), "B");
+            assert!(get_node(&inc, mig, "users").is_base());
 
             // Add a new query
             let res = inc.add_query("SELECT id, name FROM users WHERE users.id = 42;", None, mig);
@@ -1179,11 +1216,13 @@ mod tests {
         g.migrate(|mig| {
             let mut inc = SqlIncorporator::default();
             // Establish a base write type
-            assert!(inc.add_query(
-                "CREATE TABLE users (id int, name varchar(40), address varchar(40));",
-                None,
-                mig
-            ).is_ok());
+            assert!(
+                inc.add_query(
+                    "CREATE TABLE users (id int, name varchar(40), address varchar(40));",
+                    None,
+                    mig
+                ).is_ok()
+            );
             // Should have source and "users" base table node
             assert_eq!(mig.graph().node_count(), 2);
             assert_eq!(get_node(&inc, mig, "users").name(), "users");
@@ -1191,7 +1230,7 @@ mod tests {
                 get_node(&inc, mig, "users").fields(),
                 &["id", "name", "address"]
             );
-            assert_eq!(get_node(&inc, mig, "users").description(), "B");
+            assert!(get_node(&inc, mig, "users").is_base());
 
             // Add a new query
             let res = inc.add_query("SELECT id, name FROM users WHERE users.id = ?;", None, mig);
@@ -1239,6 +1278,57 @@ mod tests {
     }
 
     #[test]
+    fn it_reuses_by_extending_existing_query() {
+        use super::sql_parser;
+        // set up graph
+        let mut g = integration::build_local("it_reuses_by_extending_existing_query");
+        g.migrate(|mig| {
+            let mut inc = SqlIncorporator::default();
+            // Add base tables
+            assert!(
+                inc.add_query(
+                    "CREATE TABLE articles (id int, title varchar(40));",
+                    None,
+                    mig
+                ).is_ok()
+            );
+            assert!(
+                inc.add_query("CREATE TABLE votes (aid int, uid int);", None, mig)
+                    .is_ok()
+            );
+            // Should have source, "articles" and "votes" base tables
+            assert_eq!(mig.graph().node_count(), 3);
+
+            // Add a new query
+            let res = inc.add_parsed_query(
+                sql_parser::parse_query("SELECT COUNT(uid) AS vc FROM votes GROUP BY aid;")
+                    .unwrap(),
+                Some("votecount".into()),
+                false,
+                mig,
+            );
+            assert!(res.is_ok());
+
+            // Add a query that can reuse votecount by extending it.
+            let ncount = mig.graph().node_count();
+            let res = inc.add_parsed_query(
+                sql_parser::parse_query(
+                    "SELECT COUNT(uid) AS vc FROM votes WHERE vc > 5 GROUP BY aid;",
+                ).unwrap(),
+                Some("highvotes".into()),
+                true,
+                mig,
+            );
+            assert!(res.is_ok());
+            // should have added three more nodes: a join, a projection, and a reader
+            let qfp = res.unwrap();
+            assert_eq!(mig.graph().node_count(), ncount + 3);
+            // only the join and projection nodes are returned in the vector of new nodes
+            assert_eq!(qfp.new_nodes.len(), 2);
+        });
+    }
+
+    #[test]
     fn it_incorporates_aggregation_no_group_by() {
         // set up graph
         let mut g = integration::build_local("it_incorporates_aggregation_no_group_by");
@@ -1253,7 +1343,7 @@ mod tests {
             assert_eq!(mig.graph().node_count(), 2);
             assert_eq!(get_node(&inc, mig, "votes").name(), "votes");
             assert_eq!(get_node(&inc, mig, "votes").fields(), &["aid", "userid"]);
-            assert_eq!(get_node(&inc, mig, "votes").description(), "B");
+            assert!(get_node(&inc, mig, "votes").is_base());
             // Try a simple COUNT function without a GROUP BY clause
             let res = inc.add_query("SELECT COUNT(votes.userid) AS count FROM votes;", None, mig);
             assert!(res.is_ok());
@@ -1305,7 +1395,7 @@ mod tests {
             assert_eq!(mig.graph().node_count(), 2);
             assert_eq!(get_node(&inc, mig, "votes").name(), "votes");
             assert_eq!(get_node(&inc, mig, "votes").fields(), &["userid", "aid"]);
-            assert_eq!(get_node(&inc, mig, "votes").description(), "B");
+            assert!(get_node(&inc, mig, "votes").is_base());
             // Try a simple COUNT function without a GROUP BY clause
             let res = inc.add_query(
                 "SELECT COUNT(*) AS count FROM votes GROUP BY votes.userid;",
@@ -1354,11 +1444,13 @@ mod tests {
                 inc.add_query("CREATE TABLE votes (aid int, uid int);", None, mig)
                     .is_ok()
             );
-            assert!(inc.add_query(
-                "CREATE TABLE articles (aid int, title varchar(255), author int);",
-                None,
-                mig
-            ).is_ok());
+            assert!(
+                inc.add_query(
+                    "CREATE TABLE articles (aid int, title varchar(255), author int);",
+                    None,
+                    mig
+                ).is_ok()
+            );
 
             // Try an explicit multi-way-join
             let q = "SELECT users.name, articles.title, votes.uid \
@@ -1405,11 +1497,13 @@ mod tests {
                 inc.add_query("CREATE TABLE votes (aid int, uid int);", None, mig)
                     .is_ok()
             );
-            assert!(inc.add_query(
-                "CREATE TABLE articles (aid int, title varchar(255), author int);",
-                None,
-                mig
-            ).is_ok());
+            assert!(
+                inc.add_query(
+                    "CREATE TABLE articles (aid int, title varchar(255), author int);",
+                    None,
+                    mig
+                ).is_ok()
+            );
 
             // Try an implicit multi-way-join
             let q = "SELECT users.name, articles.title, votes.uid \
@@ -1436,20 +1530,90 @@ mod tests {
                 ],
             );
             let join1_view = get_node(&inc, mig, &format!("q_{:x}_n0", qid));
-            // articles join votes
-            assert_eq!(
-                join1_view.fields(),
-                &["aid", "title", "author", "id", "name"]
-            );
+            // articles join users
+            assert_eq!(join1_view.fields(), &["aid", "title", "author", "name"]);
             let join2_view = get_node(&inc, mig, &format!("q_{:x}_n1", qid));
-            // join1_view join users
+            // join1_view join vptes
             assert_eq!(
                 join2_view.fields(),
-                &["aid", "title", "author", "id", "name", "aid", "uid"]
+                &["aid", "title", "author", "name", "uid"]
             );
             // leaf view
             let leaf_view = get_node(&inc, mig, "q_3");
             assert_eq!(leaf_view.fields(), &["name", "title", "uid", "bogokey"]);
+        });
+    }
+
+    #[test]
+    #[allow_fail]
+    fn it_incorporates_join_projecting_join_columns() {
+        // set up graph
+        let mut g = integration::build_local("it_incorporates_join_projecting_join_columns");
+        g.migrate(|mig| {
+            let mut inc = SqlIncorporator::default();
+            assert!(
+                inc.add_query("CREATE TABLE users (id int, name varchar(40));", None, mig)
+                    .is_ok()
+            );
+            assert!(
+                inc.add_query(
+                    "CREATE TABLE articles (id int, author int, title varchar(255));",
+                    None,
+                    mig
+                ).is_ok()
+            );
+            let q = "SELECT users.id, users.name, articles.author, articles.title \
+                     FROM articles, users \
+                     WHERE users.id = articles.author;";
+            let q = inc.add_query(q, None, mig);
+            assert!(q.is_ok());
+            let qid = query_id_hash(
+                &["articles", "users"],
+                &[&Column::from("articles.author"), &Column::from("users.id")],
+                &[
+                    &Column::from("users.id"),
+                    &Column::from("users.name"),
+                    &Column::from("articles.author"),
+                    &Column::from("articles.title"),
+                ],
+            );
+            // join node
+            let new_join_view = get_node(&inc, mig, &format!("q_{:x}_n0", qid));
+            assert_eq!(new_join_view.fields(), &["id", "author", "title", "name"]);
+            // leaf node
+            let new_leaf_view = get_node(&inc, mig, &q.unwrap().name);
+            assert_eq!(
+                new_leaf_view.fields(),
+                &["id", "name", "author", "title", "bogokey"]
+            );
+            assert_eq!(
+                new_leaf_view.description(),
+                format!("π[1, 3, 1, 2, lit: 0]")
+            );
+        });
+    }
+
+    #[test]
+    fn it_incorporates_self_join() {
+        // set up graph
+        let mut g = integration::build_local("it_incorporates_self_join");
+        g.migrate(|mig| {
+            let mut inc = SqlIncorporator::default();
+            assert!(
+                inc.add_query("CREATE TABLE friends (id int, friend int);", None, mig)
+                    .is_ok()
+            );
+
+            // Try a friends-of-friends type computation via self join
+            let q = "SELECT f1.id, f2.friend AS fof \
+                     FROM friends AS f1 \
+                     JOIN (SELECT * FROM friends) AS f2 ON (f1.friend = f2.id)
+                     WHERE f1.id = ?;";
+
+            let q = inc.add_query(q, None, mig);
+            assert!(q.is_ok());
+            let leaf_view = get_node(&inc, mig, "q_1");
+            assert_eq!(leaf_view.fields(), &["id", "fof"]);
         });
     }
 
@@ -1511,11 +1675,13 @@ mod tests {
                 inc.add_query("CREATE TABLE users (id int, name varchar(40));", None, mig)
                     .is_ok()
             );
-            assert!(inc.add_query(
-                "CREATE TABLE articles (id int, author int, title varchar(255));",
-                None,
-                mig
-            ).is_ok());
+            assert!(
+                inc.add_query(
+                    "CREATE TABLE articles (id int, author int, title varchar(255));",
+                    None,
+                    mig
+                ).is_ok()
+            );
 
             let q = "SELECT nested_users.name, articles.title \
                      FROM articles \
@@ -1536,14 +1702,11 @@ mod tests {
             );
             // join node
             let new_join_view = get_node(&inc, mig, &format!("q_{:x}_n0", qid));
-            assert_eq!(
-                new_join_view.fields(),
-                &["id", "author", "title", "id", "name"]
-            );
+            assert_eq!(new_join_view.fields(), &["id", "author", "title", "name"]);
             // leaf node
             let new_leaf_view = get_node(&inc, mig, &q.unwrap().name);
             assert_eq!(new_leaf_view.fields(), &["name", "title", "bogokey"]);
-            assert_eq!(new_leaf_view.description(), format!("π[4, 2, lit: 0]"));
+            assert_eq!(new_leaf_view.description(), format!("π[3, 2, lit: 0]"));
         });
     }
 
@@ -1591,7 +1754,7 @@ mod tests {
             assert_eq!(mig.graph().node_count(), 2);
             assert_eq!(get_node(&inc, mig, "users").name(), "users");
             assert_eq!(get_node(&inc, mig, "users").fields(), &["id", "name"]);
-            assert_eq!(get_node(&inc, mig, "users").description(), "B");
+            assert!(get_node(&inc, mig, "users").is_base());
 
             // Add a new query
             let res = inc.add_query("SELECT id, name FROM users WHERE users.id = 42;", None, mig);

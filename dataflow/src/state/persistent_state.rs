@@ -1,9 +1,12 @@
 use bincode;
 use itertools::Itertools;
 use rocksdb::{self, ColumnFamily, SliceTransform, SliceTransformFns, WriteBatch};
+use serde;
+use tempfile::{tempdir, TempDir};
 
-use data::SizeOf;
-use *;
+use basics::data::SizeOf;
+use prelude::*;
+use state::{RecordResult, State};
 
 // Incremented on each PersistentState initialization so that IndexSeq
 // can be used to create unique identifiers for rows.
@@ -46,13 +49,11 @@ impl PersistentIndex {
 
 /// PersistentState stores data in RocksDB.
 pub struct PersistentState {
-    name: String,
     db_opts: rocksdb::Options,
     // We don't really want DB to be an option, but doing so lets us drop it manually in
     // PersistenState's Drop by setting `self.db = None` - after which we can then discard the
     // persisted files if we want to.
     db: Option<rocksdb::DB>,
-    durability_mode: DurabilityMode,
     // The first element is always considered the primary index, where the actual data is stored.
     // Subsequent indices maintain pointers to the data in the first index, and cause an additional
     // read during lookups. When `self.has_unique_index` is true the first index is a primary key,
@@ -61,6 +62,9 @@ pub struct PersistentState {
     seq: IndexSeq,
     epoch: IndexEpoch,
     has_unique_index: bool,
+    // With DurabilityMode::DeleteOnExit,
+    // RocksDB files are stored in a temporary directory.
+    _directory: Option<TempDir>,
 }
 
 struct PrefixTransform;
@@ -148,7 +152,6 @@ impl State for PersistentState {
                 Record::Negative(ref r) => {
                     self.remove(&mut batch, r);
                 }
-                Record::BaseOperation(..) => unreachable!(),
             }
         }
 
@@ -160,7 +163,8 @@ impl State for PersistentState {
 
     fn lookup(&self, columns: &[usize], key: &KeyType) -> LookupResult {
         let db = self.db.as_ref().unwrap();
-        let index_id = self.indices
+        let index_id = self
+            .indices
             .iter()
             .position(|index| &index.columns[..] == columns)
             .expect("lookup on non-indexed column set");
@@ -189,7 +193,8 @@ impl State for PersistentState {
 
     fn add_key(&mut self, columns: &[usize], partial: Option<Vec<Tag>>) {
         assert!(partial.is_none(), "Bases can't be partial");
-        let existing = self.indices
+        let existing = self
+            .indices
             .iter()
             .any(|index| &index.columns[..] == columns);
 
@@ -201,7 +206,8 @@ impl State for PersistentState {
         // We'll store all the pointers (or values if this is index 0) for
         // this index in its own column family:
         let index_id = self.indices.len().to_string();
-        let column_family = self.db
+        let column_family = self
+            .db
             .as_mut()
             .unwrap()
             .create_cf(&index_id, &self.db_opts)
@@ -247,7 +253,8 @@ impl State for PersistentState {
     fn rows(&self) -> usize {
         let db = self.db.as_ref().unwrap();
         let cf = db.cf_handle("0").unwrap();
-        let total_keys = db.property_int_value_cf(cf, "rocksdb.estimate-num-keys")
+        let total_keys = db
+            .property_int_value_cf(cf, "rocksdb.estimate-num-keys")
             .unwrap() as usize;
 
         (total_keys / self.indices.len())
@@ -285,7 +292,16 @@ impl PersistentState {
         params: &PersistenceParameters,
     ) -> Self {
         use rocksdb::{ColumnFamilyDescriptor, DB};
-        let full_name = format!("{}.db", name);
+        let (directory, full_name) = match params.mode {
+            DurabilityMode::Permanent => (None, format!("{}.db", name)),
+            _ => {
+                let dir = tempdir().unwrap();
+                let path = dir.path().join(name.clone());
+                let full_name = format!("{}.db", path.to_str().unwrap());
+                (Some(dir), full_name)
+            }
+        };
+
         let opts = Self::build_options(&name, params);
         // We use a column for each index, and one for meta information.
         // When opening the DB the exact same column families needs to be used,
@@ -295,14 +311,27 @@ impl PersistentState {
             Err(_err) => vec![DEFAULT_CF.to_string()],
         };
 
-        let cfs: Vec<_> = column_family_names
-            .iter()
-            .map(|cf| ColumnFamilyDescriptor::new(cf.clone(), Self::build_options(&name, &params)))
-            .collect();
+        let make_cfs = || {
+            column_family_names
+                .iter()
+                .map(|cf| {
+                    ColumnFamilyDescriptor::new(cf.clone(), Self::build_options(&name, &params))
+                })
+                .collect()
+        };
 
-        let mut db = DB::open_cf_descriptors(&opts, &full_name, cfs).unwrap();
+        let mut db = DB::open_cf_descriptors(&opts, &full_name, make_cfs());
+        for _ in 0..100 {
+            if db.is_ok() {
+                break;
+            }
+            ::std::thread::sleep(::std::time::Duration::from_millis(50));
+            db = DB::open_cf_descriptors(&opts, &full_name, make_cfs());
+        }
+        let mut db = db.unwrap();
         let meta = Self::retrieve_and_update_meta(&db);
-        let indices: Vec<PersistentIndex> = meta.indices
+        let indices: Vec<PersistentIndex> = meta
+            .indices
             .into_iter()
             .enumerate()
             .map(|(i, columns)| {
@@ -325,8 +354,7 @@ impl PersistentState {
             epoch: meta.epoch,
             db_opts: opts,
             db: Some(db),
-            durability_mode: params.mode.clone(),
-            name: full_name,
+            _directory: directory,
         };
 
         if primary_key.is_some() && state.indices.len() == 0 {
@@ -371,7 +399,7 @@ impl PersistentState {
         }
 
         // Create prefixes with PrefixTransform on all new inserted keys:
-        let transform = SliceTransform::create("key", box PrefixTransform);
+        let transform = SliceTransform::create("key", Box::new(PrefixTransform));
         opts.set_prefix_extractor(transform);
 
         // Assigns the number of threads for compactions and flushes in RocksDB.
@@ -548,7 +576,8 @@ impl PersistentState {
                 // This would imply that we're trying to delete a different row than the one we
                 // found when we resolved the DeleteRequest in Base. This really shouldn't happen,
                 // but we'll leave a check here in debug mode for now.
-                let raw = db.get_cf(value_cf, &prefix)
+                let raw = db
+                    .get_cf(value_cf, &prefix)
                     .unwrap()
                     .expect("tried removing non-existant primary key row");
                 let value: Vec<DataType> = bincode::deserialize(&*raw).unwrap();
@@ -557,7 +586,8 @@ impl PersistentState {
 
             do_remove(&prefix[..]);
         } else {
-            let (key, _value) = db.prefix_iterator_cf(value_cf, &prefix)
+            let (key, _value) = db
+                .prefix_iterator_cf(value_cf, &prefix)
                 .unwrap()
                 .find(|(_, raw_value)| {
                     let value: Vec<DataType> = bincode::deserialize(&*raw_value).unwrap();
@@ -569,41 +599,29 @@ impl PersistentState {
     }
 }
 
-impl Drop for PersistentState {
-    fn drop(&mut self) {
-        if self.durability_mode != DurabilityMode::Permanent {
-            self.indices.clear();
-            self.db = None;
-            rocksdb::DB::destroy(&self.db_opts, &self.name).unwrap()
-        }
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::path::Path;
-    use std::time::{SystemTime, UNIX_EPOCH};
-
     use bincode;
+    use std::path::PathBuf;
 
     fn insert<S: State>(state: &mut S, row: Vec<DataType>) {
         let record: Record = row.into();
         state.process_records(&mut record.into(), None);
     }
 
-    fn get_name(prefix: &str) -> String {
-        let current_time = SystemTime::now().duration_since(UNIX_EPOCH).unwrap();
-        format!(
-            "{}.{}.{}",
-            prefix,
-            current_time.as_secs(),
-            current_time.subsec_nanos()
-        )
+    fn get_tmp_path() -> (TempDir, String) {
+        let dir = tempdir().unwrap();
+        let path = dir.path().join("soup");
+        (dir, path.to_string_lossy().into())
     }
 
     fn setup_persistent(prefix: &str) -> PersistentState {
-        PersistentState::new(get_name(prefix), None, &PersistenceParameters::default())
+        PersistentState::new(
+            String::from(prefix),
+            None,
+            &PersistenceParameters::default(),
+        )
     }
 
     #[test]
@@ -685,8 +703,11 @@ mod tests {
     #[test]
     fn persistent_state_primary_key() {
         let pk = &[0, 1];
-        let name = get_name("persistent_state_primary_key");
-        let mut state = PersistentState::new(name, Some(pk), &PersistenceParameters::default());
+        let mut state = PersistentState::new(
+            String::from("persistent_state_primary_key"),
+            Some(pk),
+            &PersistenceParameters::default(),
+        );
         let first: Vec<DataType> = vec![1.into(), 2.into(), "Cat".into()];
         let second: Vec<DataType> = vec![10.into(), 20.into(), "Cat".into()];
         state.add_key(pk, None);
@@ -729,8 +750,11 @@ mod tests {
     #[test]
     fn persistent_state_primary_key_delete() {
         let pk = &[0];
-        let name = get_name("persistent_state_primary_key_delete");
-        let mut state = PersistentState::new(name, Some(pk), &PersistenceParameters::default());
+        let mut state = PersistentState::new(
+            String::from("persistent_state_primary_key_delete"),
+            Some(pk),
+            &PersistenceParameters::default(),
+        );
         let first: Vec<DataType> = vec![1.into(), 2.into()];
         let second: Vec<DataType> = vec![10.into(), 20.into()];
         state.add_key(pk, None);
@@ -815,7 +839,7 @@ mod tests {
 
     #[test]
     fn persistent_state_recover() {
-        let name = get_name("persistent_state_recover");
+        let (_dir, name) = get_tmp_path();
         let mut params = PersistenceParameters::default();
         params.mode = DurabilityMode::Permanent;
         let first: Vec<DataType> = vec![10.into(), "Cat".into()];
@@ -827,7 +851,6 @@ mod tests {
             state.process_records(&mut vec![first.clone(), second.clone()].into(), None);
         }
 
-        params.mode = DurabilityMode::DeleteOnExit;
         let state = PersistentState::new(name, None, &params);
         match state.lookup(&[0], &KeyType::Single(&10.into())) {
             LookupResult::Some(RecordResult::Owned(rows)) => {
@@ -848,7 +871,7 @@ mod tests {
 
     #[test]
     fn persistent_state_recover_unique_key() {
-        let name = get_name("persistent_state_recover_unique_key");
+        let (_dir, name) = get_tmp_path();
         let mut params = PersistenceParameters::default();
         params.mode = DurabilityMode::Permanent;
         let first: Vec<DataType> = vec![10.into(), "Cat".into()];
@@ -860,7 +883,6 @@ mod tests {
             state.process_records(&mut vec![first.clone(), second.clone()].into(), None);
         }
 
-        params.mode = DurabilityMode::DeleteOnExit;
         let state = PersistentState::new(name, Some(&[0]), &params);
         match state.lookup(&[0], &KeyType::Single(&10.into())) {
             LookupResult::Some(RecordResult::Owned(rows)) => {
@@ -962,16 +984,17 @@ mod tests {
 
     #[test]
     fn persistent_state_dangling_indices() {
-        let name = get_name("persistent_state_dangling_indices");
+        let (_dir, name) = get_tmp_path();
         let mut rows = vec![];
         for i in 0..10 {
             let row = vec![DataType::from(i); 10];
             rows.push(row);
         }
 
+        let mut params = PersistenceParameters::default();
+        params.mode = DurabilityMode::Permanent;
+
         {
-            let mut params = PersistenceParameters::default();
-            params.mode = DurabilityMode::Permanent;
             let mut state = PersistentState::new(name.clone(), None, &params);
             state.add_key(&[0], None);
             state.process_records(&mut rows.clone().into(), None);
@@ -994,7 +1017,6 @@ mod tests {
 
         // During recovery we should now remove all the rows for the second index,
         // since it won't exist in PersistentMeta.indices:
-        let params = PersistenceParameters::default();
         let mut state = PersistentState::new(name, None, &params);
         assert_eq!(state.indices.len(), 1);
         // Now, re-add the second index which should trigger an index build:
@@ -1048,16 +1070,19 @@ mod tests {
 
     #[test]
     fn persistent_state_drop() {
-        let name = ".s-o_u#p.";
-        let db_name = format!("{}.db", name);
-        let path = Path::new(&db_name);
-        {
-            let _state =
-                PersistentState::new(String::from(name), None, &PersistenceParameters::default());
+        let path = {
+            let state = PersistentState::new(
+                String::from(".s-o_u#p."),
+                None,
+                &PersistenceParameters::default(),
+            );
+            let dir = state._directory.unwrap();
+            let path = dir.path();
             assert!(path.exists());
-        }
+            String::from(path.to_str().unwrap())
+        };
 
-        assert!(!path.exists());
+        assert!(!PathBuf::from(path).exists());
     }
 
     #[test]
@@ -1121,7 +1146,7 @@ mod tests {
         assert!(k.starts_with(&prefix));
 
         // 2) Compare(prefix(key), key) <= 0.
-        assert!(prefix <= &k);
+        assert!(prefix <= &k[..]);
 
         // 3) If Compare(k1, k2) <= 0, then Compare(prefix(k1), prefix(k2)) <= 0
         let other_k = PersistentState::serialize_prefix(&r);
