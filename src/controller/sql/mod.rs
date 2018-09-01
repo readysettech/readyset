@@ -1772,4 +1772,45 @@ mod tests {
             assert_eq!(mig.graph().node_count(), ncount + 3);
         });
     }
+
+    #[test]
+    #[ignore]
+    fn it_queries_over_aliased_view() {
+        let mut g = integration::build_local("it_queries_over_aliased_view");
+        g.migrate(|mig| {
+            let mut inc = SqlIncorporator::default();
+            assert!(
+                inc.add_query("CREATE TABLE users (id int, name varchar(40));", None, mig)
+                    .is_ok()
+            );
+            // Add first copy of new query, called "tq1"
+            let res = inc.add_query(
+                "SELECT id, name FROM users WHERE users.id = 42;",
+                Some("tq1".into()),
+                mig,
+            );
+            assert!(res.is_ok());
+            let leaf = res.unwrap().query_leaf;
+
+            // Add the same query again, this time as "tq2"
+            let ncount = mig.graph().node_count();
+            let res = inc.add_query(
+                "SELECT id, name FROM users WHERE users.id = 42;",
+                Some("tq2".into()),
+                mig,
+            );
+            assert!(res.is_ok());
+            // should have added no more nodes
+            let qfp = res.unwrap();
+            assert_eq!(qfp.new_nodes, vec![]);
+            assert_eq!(mig.graph().node_count(), ncount);
+            // should have ended up with the same leaf node
+            assert_eq!(qfp.query_leaf, leaf);
+
+            // Add a query over tq2, which really is tq1
+            let _res = inc.add_query("SELECT tq2.id FROM tq2;", Some("over_tq2".into()), mig);
+            // should have added a projection and a reader
+            assert_eq!(mig.graph().node_count(), ncount + 2);
+        });
+    }
 }
