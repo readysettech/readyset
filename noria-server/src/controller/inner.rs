@@ -761,21 +761,7 @@ impl ControllerInner {
         self.find_view_for(node).map(|r| {
             let domain = self.ingredients[r].domain();
             let columns = self.ingredients[r].fields().to_vec();
-            let schema = self.recipe.schema_for(name).map(|s| match s {
-                Schema::View(s) => {
-                    use std::convert::From;
-                    // XXX(malte): properly derive columns and types by looking at graph here
-                    s.into_iter()
-                        .map(|c| ColumnSpecification::new(Column {
-                            name: c,
-                            table: Some(name.to_owned()),
-                            alias: None,
-                            function: None,
-                        }, SqlType::Text))
-                        .collect()
-                }
-                _ => panic!("non-view schema {:?} returned for view '{}'", s, name),
-            });
+            let schema = self.view_schema(r);
             let shards = (0..self.domains[&domain].shards())
                 .map(|i| self.read_addrs[&self.domains[&domain].assignment(i)].clone())
                 .collect();
@@ -784,10 +770,82 @@ impl ControllerInner {
                 local_ports: vec![],
                 node: r,
                 columns,
-                schema,
+                schema: Some(schema),
                 shards,
             }
         })
+    }
+
+    fn view_schema(&self, view_ni: NodeIndex) -> Vec<ColumnSpecification> {
+        use controller::keys::provenance_of;
+
+        let vn = &self.ingredients[view_ni];
+        let column_names = vn.fields();
+
+        column_names
+            .into_iter()
+            .enumerate()
+            .map(|(i, f)| {
+                let paths = provenance_of(&self.ingredients, view_ni, &[i], |_, _, _| None);
+                let mut col_types = vec![];
+                for p in paths {
+                    // column originates at last element of the path whose second element is not
+                    // None
+                    if let Some((ni, cols)) =
+                        p.into_iter().rfind(|e| e.1.iter().any(|c| c.is_some()))
+                    {
+                        // TODO(malte): why would we trace back to >1 column in a single view or
+                        // table?
+                        assert_eq!(cols.len(), 1);
+                        let source_node = &self.ingredients[ni];
+                        if source_node.is_base() {
+                            // projected base table column
+                            col_types.push(
+                                match self.recipe.schema_for(source_node.name()).unwrap() {
+                                    Schema::Table(ref s) => {
+                                        s.fields[cols.first().unwrap().unwrap()].sql_type.clone()
+                                    }
+                                    _ => unreachable!(),
+                                },
+                            );
+                        } else {
+                            // column originates at internal view: literal, aggregation output
+                            // FIXME(malte): return correct type depending on what column does
+                            col_types.push(SqlType::Text);
+                            //let sql_type = match *(*source_node) {
+                            //    dataflow::ops::NodeOperator::Project(ref o) => {
+                            //        assert!(i > o.emit.len());
+                            //        if i <= o.emit.len() + o.expressions.len() {
+                            //            // computed expression
+                            //            unimplemented!();
+                            //        } else {
+                            //            // literal
+                            //            let off = i - (o.emit.len() + o.expressions.len());
+                            //            match o.additional.as_ref().unwrap()[off] {
+                            //                DataType::Int(_) => SqlType::Int,
+                            //                _ => unimplemented!(),
+                            //            }
+                            //        }
+                            //    }
+                            //    _ => unimplemented!(),
+                            //};
+                        }
+                    }
+                }
+                assert_eq!(col_types.len(), 1);
+                let col_type = col_types.first().unwrap();
+
+                let cs = ColumnSpecification::new(
+                    Column {
+                        name: f.to_owned(),
+                        table: Some(vn.name().to_owned()),
+                        alias: None,
+                        function: None,
+                    },
+                    col_type.clone(),
+                );
+                cs
+            }).collect()
     }
 
     /// Obtain a TableBuild that can be used to construct a Table to perform writes and deletes
