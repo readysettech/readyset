@@ -3,6 +3,7 @@ use crate::controller::{
     ControllerState, DomainHandle, DomainShardHandle, Migration, Recipe, Worker, WorkerIdentifier,
 };
 use crate::controller::recipe::Schema;
+use crate::controller::schema;
 use crate::coordination::{CoordinationMessage, CoordinationPayload, DomainDescriptor};
 use dataflow::payload::ControlReplyPacket;
 use dataflow::prelude::*;
@@ -14,7 +15,7 @@ use noria::channel::tcp::{SendError, TcpSender};
 use noria::consensus::{Authority, Epoch, STATE_KEY};
 use noria::debug::stats::{DomainStats, GraphStats, NodeStats};
 use noria::ActivationResult;
-use nom_sql::{Column, ColumnSpecification, SqlType};
+use nom_sql::ColumnSpecification;
 use petgraph;
 use petgraph::visit::Bfs;
 use slog;
@@ -770,84 +771,24 @@ impl ControllerInner {
                 local_ports: vec![],
                 node: r,
                 columns,
-                schema: Some(schema),
+                schema: schema,
                 shards,
             }
         })
     }
 
-    fn view_schema(&self, view_ni: NodeIndex) -> Vec<ColumnSpecification> {
-        use controller::keys::provenance_of;
-
-        let vn = &self.ingredients[view_ni];
-        let column_names = vn.fields();
-
-        column_names
+    fn view_schema(&self, view_ni: NodeIndex) -> Option<Vec<ColumnSpecification>> {
+        let n = &self.ingredients[view_ni];
+        let schema: Vec<_> = (0..n.fields().len())
             .into_iter()
-            .enumerate()
-            .map(|(i, f)| {
-                let paths = provenance_of(&self.ingredients, view_ni, &[i], |_, _, _| None);
-                let mut col_types = vec![];
-                for p in paths {
-                    // column originates at last element of the path whose second element is not
-                    // None
-                    if let Some((ni, cols)) =
-                        p.into_iter().rfind(|e| e.1.iter().any(|c| c.is_some()))
-                    {
-                        // TODO(malte): why would we trace back to >1 column in a single view or
-                        // table?
-                        assert_eq!(cols.len(), 1);
-                        let source_node = &self.ingredients[ni];
-                        if source_node.is_base() {
-                            // projected base table column
-                            col_types.push(
-                                match self.recipe.schema_for(source_node.name()).unwrap() {
-                                    Schema::Table(ref s) => {
-                                        s.fields[cols.first().unwrap().unwrap()].sql_type.clone()
-                                    }
-                                    _ => unreachable!(),
-                                },
-                            );
-                        } else {
-                            // column originates at internal view: literal, aggregation output
-                            // FIXME(malte): return correct type depending on what column does
-                            col_types.push(SqlType::Text);
-                            //let sql_type = match *(*source_node) {
-                            //    dataflow::ops::NodeOperator::Project(ref o) => {
-                            //        assert!(i > o.emit.len());
-                            //        if i <= o.emit.len() + o.expressions.len() {
-                            //            // computed expression
-                            //            unimplemented!();
-                            //        } else {
-                            //            // literal
-                            //            let off = i - (o.emit.len() + o.expressions.len());
-                            //            match o.additional.as_ref().unwrap()[off] {
-                            //                DataType::Int(_) => SqlType::Int,
-                            //                _ => unimplemented!(),
-                            //            }
-                            //        }
-                            //    }
-                            //    _ => unimplemented!(),
-                            //};
-                        }
-                    }
-                }
-                let col_type = col_types.pop().unwrap();
-                // all columns this column traces back to must have the same type (otherwise we
-                // have a join between columns of different types, which isn't supported)
-                //assert!(col_types.into_iter().all(|ct| ct == col_type));
+            .map(|i| schema::column_schema(&self.ingredients, view_ni, &self.recipe, i, &self.log))
+            .collect();
 
-                let cs = ColumnSpecification::new(
-                    Column {
-                        name: f.to_owned(),
-                        table: Some(vn.name().to_owned()),
-                        alias: None,
-                        function: None,
-                    },
-                    col_type.clone(),
-                );
-                cs
-            }).collect()
+        if schema.iter().any(|cs| cs.is_none()) {
+            None
+        } else {
+            Some(schema.into_iter().map(|cs| cs.unwrap()).collect())
+        }
     }
 
     /// Obtain a TableBuild that can be used to construct a Table to perform writes and deletes

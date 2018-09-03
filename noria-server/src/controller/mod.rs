@@ -63,6 +63,7 @@ mod handle;
 mod inner;
 mod mir_to_flow;
 mod readers;
+mod schema;
 
 pub use crate::controller::builder::ControllerBuilder;
 pub use crate::controller::handle::LocalControllerHandle;
