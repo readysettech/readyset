@@ -832,8 +832,10 @@ impl ControllerInner {
                         }
                     }
                 }
-                assert_eq!(col_types.len(), 1);
-                let col_type = col_types.first().unwrap();
+                let col_type = col_types.pop().unwrap();
+                // all columns this column traces back to must have the same type (otherwise we
+                // have a join between columns of different types, which isn't supported)
+                //assert!(col_types.into_iter().all(|ct| ct == col_type));
 
                 let cs = ColumnSpecification::new(
                     Column {
