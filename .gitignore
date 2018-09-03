@@ -4,6 +4,9 @@ run.sh
 *-log-*.json
 *.png
 *.log
+*.svg
+*.folded
+*.host
 *.db
 plotting/*.png
 
