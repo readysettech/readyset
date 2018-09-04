@@ -1,5 +1,6 @@
 use controller::keys::provenance_of;
 use controller::recipe::{Recipe, Schema};
+use dataflow::ops;
 use dataflow::prelude::*;
 use nom_sql::{Column, ColumnSpecification, SqlType};
 
@@ -46,24 +47,24 @@ pub fn column_schema(
             } else {
                 // column originates at internal view: literal, aggregation output
                 // FIXME(malte): return correct type depending on what column does
-                col_type = Some(SqlType::Text);
-                //let sql_type = match *(*source_node) {
-                //    dataflow::ops::NodeOperator::Project(ref o) => {
-                //        assert!(i > o.emit.len());
-                //        if i <= o.emit.len() + o.expressions.len() {
-                //            // computed expression
-                //            unimplemented!();
-                //        } else {
-                //            // literal
-                //            let off = i - (o.emit.len() + o.expressions.len());
-                //            match o.additional.as_ref().unwrap()[off] {
-                //                DataType::Int(_) => SqlType::Int,
-                //                _ => unimplemented!(),
-                //            }
-                //        }
-                //    }
-                //    _ => unimplemented!(),
-                //};
+                col_type = match *(*source_node) {
+                    ops::NodeOperator::Project(ref o) => {
+                        let emits = o.emits();
+                        assert!(column_index > emits.0.len());
+                        if column_index <= emits.0.len() + emits.2.len() {
+                            // computed expression
+                            unimplemented!();
+                        } else {
+                            // literal
+                            let off = column_index - (emits.0.len() + emits.2.len());
+                            match emits.1[off] {
+                                DataType::Int(_) => Some(SqlType::Int(32)),
+                                _ => unimplemented!(),
+                            }
+                        }
+                    }
+                    _ => unimplemented!(),
+                };
             }
         }
     }
