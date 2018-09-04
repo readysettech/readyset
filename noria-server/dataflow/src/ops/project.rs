@@ -94,6 +94,20 @@ impl Project {
             self.emit.as_ref().map_or(col, |emit| emit[col])
         }
     }
+
+    pub fn emits(&self) -> (&[usize], &[DataType], &[ProjectExpression]) {
+        (
+            self.emit.as_ref().map(|e| e.as_slice()).unwrap_or(&[]),
+            self.additional
+                .as_ref()
+                .map(|e| e.as_slice())
+                .unwrap_or(&[]),
+            self.expressions
+                .as_ref()
+                .map(|e| e.as_slice())
+                .unwrap_or(&[]),
+        )
+    }
 }
 
 fn eval_expression(expression: &ProjectExpression, record: &[DataType]) -> DataType {
