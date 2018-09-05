@@ -6,6 +6,7 @@ run.sh
 *.log
 *.svg
 *.folded
+*.strace
 *.host
 *.db
 plotting/*.png
