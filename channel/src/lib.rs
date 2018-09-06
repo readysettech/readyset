@@ -1,5 +1,4 @@
 #![feature(bufreader_buffer)]
-#![feature(ip_constructors)]
 #![feature(custom_attribute)]
 #![feature(try_from)]
 #![deny(unused_extern_crates)]
@@ -9,12 +8,10 @@ extern crate bufstream;
 extern crate byteorder;
 #[macro_use]
 extern crate failure;
+extern crate async_bincode;
 extern crate mio;
 extern crate net2;
 extern crate serde;
-#[macro_use]
-extern crate serde_derive;
-extern crate async_bincode;
 extern crate throttled_reader;
 extern crate tokio;
 

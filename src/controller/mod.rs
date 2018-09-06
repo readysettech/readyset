@@ -9,11 +9,11 @@ use channel::{
     DomainConnectionBuilder, DualTcpStream, TcpSender, CONNECTION_FROM_BASE,
 };
 use consensus::{Authority, Epoch, STATE_KEY};
-use controller::domain_handle::DomainHandle;
-use controller::inner::{ControllerInner, WorkerStatus};
-use controller::recipe::Recipe;
-use controller::sql::reuse::ReuseConfigType;
-use coordination::{CoordinationMessage, CoordinationPayload};
+use crate::controller::domain_handle::DomainHandle;
+use crate::controller::inner::{ControllerInner, WorkerStatus};
+use crate::controller::recipe::Recipe;
+use crate::controller::sql::reuse::ReuseConfigType;
+use crate::coordination::{CoordinationMessage, CoordinationPayload};
 use dataflow::{
     payload::SourceChannelIdentifier, prelude::Executor, Domain, DomainBuilder, DomainConfig,
     Packet, PersistenceParameters, Readers,
@@ -65,9 +65,9 @@ mod readers;
 
 pub use api::builders::*;
 pub use api::prelude::*;
-pub use controller::builder::ControllerBuilder;
-pub use controller::handle::LocalControllerHandle;
-pub use controller::migrate::Migration;
+pub use crate::controller::builder::ControllerBuilder;
+pub use crate::controller::handle::LocalControllerHandle;
+pub use crate::controller::migrate::Migration;
 
 type WorkerIdentifier = SocketAddr;
 type WorkerEndpoint = Arc<Mutex<TcpSender<CoordinationMessage>>>;
@@ -673,7 +673,7 @@ fn listen_df(
             .fold(ctrl_tx, move |ctrl_tx, d| {
                 let idx = d.index;
                 let shard = d.shard.unwrap_or(0);
-                let addr: io::Result<_> = do catch {
+                let addr: io::Result<_> = try {
                     let on = tokio::net::TcpListener::bind(&SocketAddr::new(on, 0))?;
                     let addr = on.local_addr()?;
 
@@ -1300,7 +1300,7 @@ impl Future for Replica {
     type Item = ();
     type Error = ();
     fn poll(&mut self) -> Result<Async<Self::Item>, Self::Error> {
-        let r: Result<Async<Self::Item>, failure::Error> = do catch {
+        let r: Result<Async<Self::Item>, failure::Error> = try {
             // FIXME: check if we should call update_state_sizes (every evict_every)
 
             // first, try sending packets to downstream domains if they blocked before

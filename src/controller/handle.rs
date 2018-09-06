@@ -1,6 +1,6 @@
 use consensus::Authority;
 #[cfg(test)]
-use controller::migrate::Migration;
+use crate::controller::migrate::Migration;
 use dataflow::prelude::*;
 
 use std::collections::HashMap;
@@ -8,7 +8,7 @@ use std::ops::{Deref, DerefMut};
 use std::sync::Arc;
 
 use api::prelude::*;
-use controller::Event;
+use crate::controller::Event;
 use futures::{self, Future};
 use stream_cancel::Trigger;
 use tokio;
@@ -169,7 +169,7 @@ mod tests {
     #[test]
     #[should_panic]
     fn limit_mutator_creation() {
-        use controller::ControllerBuilder;
+        use crate::controller::ControllerBuilder;
         let r_txt = "CREATE TABLE a (x int, y int, z int);\n
                      CREATE TABLE b (r int, s int);\n";
 

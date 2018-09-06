@@ -1,8 +1,8 @@
-use controller::sql::mir::rewrite::make_rewrite_nodes;
-use controller::sql::mir::SqlToMirConverter;
-use controller::sql::query_graph::QueryGraph;
-use controller::sql::query_signature::Signature;
-use controller::sql::UniverseId;
+use crate::controller::sql::mir::rewrite::make_rewrite_nodes;
+use crate::controller::sql::mir::SqlToMirConverter;
+use crate::controller::sql::query_graph::QueryGraph;
+use crate::controller::sql::query_signature::Signature;
+use crate::controller::sql::UniverseId;
 use mir::MirNodeRef;
 use std::collections::HashMap;
 
@@ -31,7 +31,7 @@ impl SecurityBoundary for SqlToMirConverter {
         ancestors: &Vec<MirNodeRef>,
         node_count: usize,
     ) -> Vec<MirNodeRef> {
-        use controller::sql::mir::grouped::make_grouped;
+        use crate::controller::sql::mir::grouped::make_grouped;
 
         let mut nodes_added = Vec::new();
         let mut node_count = node_count;
@@ -168,7 +168,7 @@ fn make_security_nodes(
             base_nodes.push(view_for_rel.clone());
         }
 
-        use controller::sql::mir::join::make_joins;
+        use crate::controller::sql::mir::join::make_joins;
 
         // handles predicate nodes
         for rel in &sorted_rels {

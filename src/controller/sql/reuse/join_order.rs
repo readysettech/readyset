@@ -1,12 +1,12 @@
-use controller::sql::query_graph::{JoinRef, QueryGraph, QueryGraphEdge};
-use controller::sql::reuse::helpers::predicate_implication::predicate_is_equivalent;
+use crate::controller::sql::query_graph::{JoinRef, QueryGraph, QueryGraphEdge};
+use crate::controller::sql::reuse::helpers::predicate_implication::predicate_is_equivalent;
 use nom_sql::ConditionTree;
 use std::collections::HashSet;
 use std::vec::Vec;
 
 use std::mem;
 
-use controller::sql::reuse::ReuseType;
+use crate::controller::sql::reuse::ReuseType;
 
 #[derive(Debug, Clone)]
 struct JoinChain {

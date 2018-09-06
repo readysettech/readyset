@@ -1,6 +1,5 @@
 #![feature(allow_fail)]
 #![feature(box_syntax)]
-#![feature(option_filter)]
 
 #[macro_use]
 extern crate failure;

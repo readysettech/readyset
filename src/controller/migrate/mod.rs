@@ -27,7 +27,7 @@ use rand::{thread_rng, Rng};
 use std::collections::{HashMap, HashSet};
 use std::time::Instant;
 
-use controller::{ControllerInner, DomainHandle, WorkerEndpoint, WorkerIdentifier};
+use crate::controller::{ControllerInner, DomainHandle, WorkerEndpoint, WorkerIdentifier};
 
 use petgraph;
 use slog;

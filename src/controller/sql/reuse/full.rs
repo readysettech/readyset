@@ -1,5 +1,5 @@
-use controller::sql::query_graph::QueryGraph;
-use controller::sql::reuse::{ReuseConfiguration, ReuseType};
+use crate::controller::sql::query_graph::QueryGraph;
+use crate::controller::sql::reuse::{ReuseConfiguration, ReuseType};
 
 use std::collections::HashMap;
 use std::vec::Vec;

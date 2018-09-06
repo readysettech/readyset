@@ -1,5 +1,5 @@
-use controller::sql::mir::SqlToMirConverter;
-use controller::sql::query_graph::{JoinRef, QueryGraph, QueryGraphEdge};
+use crate::controller::sql::mir::SqlToMirConverter;
+use crate::controller::sql::query_graph::{JoinRef, QueryGraph, QueryGraphEdge};
 use dataflow::ops::join::JoinType;
 use mir::MirNodeRef;
 use nom_sql::ConditionTree;

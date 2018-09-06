@@ -70,7 +70,7 @@ impl<T: Serialize> TcpSender<T> {
     pub fn connect_from(sport: Option<u16>, addr: &SocketAddr) -> Result<Self, io::Error> {
         let s = net2::TcpBuilder::new_v4()?
             .reuse_address(true)?
-            .bind((Ipv4Addr::unspecified(), sport.unwrap_or(0)))?
+            .bind((Ipv4Addr::UNSPECIFIED, sport.unwrap_or(0)))?
             .connect(addr)?;
         Self::new(s)
     }

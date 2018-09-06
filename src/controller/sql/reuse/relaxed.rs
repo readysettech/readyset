@@ -1,7 +1,7 @@
-use controller::sql::query_graph::{QueryGraph, QueryGraphEdge};
-use controller::sql::query_signature::Signature;
-use controller::sql::reuse::helpers::predicate_implication::complex_predicate_implies;
-use controller::sql::reuse::{ReuseConfiguration, ReuseType};
+use crate::controller::sql::query_graph::{QueryGraph, QueryGraphEdge};
+use crate::controller::sql::query_signature::Signature;
+use crate::controller::sql::reuse::helpers::predicate_implication::complex_predicate_implies;
+use crate::controller::sql::reuse::{ReuseConfiguration, ReuseType};
 
 use std::collections::HashMap;
 use std::vec::Vec;
