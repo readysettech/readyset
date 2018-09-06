@@ -1,15 +1,15 @@
 use nom::IResult;
-use std::str;
 use std::fmt;
+use std::str;
 
-use create::{creation, view_creation, CreateTableStatement, CreateViewStatement};
-use insert::{insertion, InsertStatement};
 use compound_select::{compound_selection, CompoundSelectStatement};
-use select::{selection, SelectStatement};
+use create::{creation, view_creation, CreateTableStatement, CreateViewStatement};
 use delete::{deletion, DeleteStatement};
 use drop::{drop_table, DropTableStatement};
-use update::{updating, UpdateStatement};
+use insert::{insertion, InsertStatement};
+use select::{selection, SelectStatement};
 use set::{set, SetStatement};
+use update::{updating, UpdateStatement};
 
 #[derive(Clone, Debug, Eq, Hash, PartialEq, Serialize, Deserialize)]
 pub enum SqlQuery {
@@ -69,8 +69,8 @@ pub fn parse_query(input: &str) -> Result<SqlQuery, &str> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::hash::{Hash, Hasher};
     use std::collections::hash_map::DefaultHasher;
+    use std::hash::{Hash, Hasher};
 
     use column::Column;
     use table::Table;
