@@ -316,8 +316,7 @@ impl PersistentState {
                 .iter()
                 .map(|cf| {
                     ColumnFamilyDescriptor::new(cf.clone(), Self::build_options(&name, &params))
-                })
-                .collect()
+                }).collect()
         };
 
         let mut db = DB::open_cf_descriptors(&opts, &full_name, make_cfs());
@@ -337,8 +336,7 @@ impl PersistentState {
             .map(|(i, columns)| {
                 let cf = db.cf_handle(&i.to_string()).unwrap();
                 PersistentIndex::new(cf, columns)
-            })
-            .collect();
+            }).collect();
 
         // If there are more column families than indices (-1 to account for the default column
         // family) we probably crashed while trying to build the last index (in Self::add_key), so
@@ -592,8 +590,7 @@ impl PersistentState {
                 .find(|(_, raw_value)| {
                     let value: Vec<DataType> = bincode::deserialize(&*raw_value).unwrap();
                     r == &value[..]
-                })
-                .expect("tried removing non-existant row");
+                }).expect("tried removing non-existant row");
             do_remove(&key[..]);
         };
     }

@@ -80,13 +80,11 @@ impl<'a> Plan<'a> {
                             found = true;
                         }
                         true
-                    })
-                    .map(|(_, segment)| segment)
+                    }).map(|(_, segment)| segment)
                     .collect();
                 path.reverse();
                 path
-            })
-            .collect();
+            }).collect();
 
         // since we cut off part of each path, we *may* now have multiple paths that are the same
         // (i.e., if there was a union above the nearest materialization). this would be bad, as it
@@ -179,8 +177,7 @@ impl<'a> Plan<'a> {
                     .map(|&(ni, ref key)| ReplayPathSegment {
                         node: *self.graph[ni].local_addr(),
                         partial_key: key.clone(),
-                    })
-                    .collect();
+                    }).collect();
 
                 // the first domain in the chain may *only* have the source node
                 // in which case it doesn't need to know about the path
@@ -323,8 +320,7 @@ impl<'a> Plan<'a> {
                                     new_tag: Some((tag, segments[i + 1].1[0].0.into())),
                                 },
                                 workers,
-                            )
-                            .unwrap();
+                            ).unwrap();
                     } else {
                         assert!(n.is_sharder());
                     }
@@ -381,8 +377,7 @@ impl<'a> Plan<'a> {
                         gid: self.node,
                     }
                 }
-            })
-            .ok()
+            }).ok()
             .unwrap_or_else(|| {
                 // not a reader
                 if self.partial {
@@ -407,8 +402,7 @@ impl<'a> Plan<'a> {
                     state: s,
                 },
                 self.workers,
-            )
-            .unwrap();
+            ).unwrap();
 
         if !self.partial {
             // we know that this must be a *new* fully materialized node:

@@ -69,8 +69,7 @@ impl Join {
                     join_columns.push((lc, rc));
                     (true, lc)
                 }
-            })
-            .collect();
+            }).collect();
 
         assert_eq!(join_columns.len(), 1, "only supports single column joins");
         let on = *join_columns.iter().next().unwrap();
@@ -106,8 +105,7 @@ impl Join {
                         } else {
                             (from_left, c)
                         }
-                    })
-                    .collect::<Vec<_>>()
+                    }).collect::<Vec<_>>()
             };
 
             (compute_in_place_emit(true), compute_in_place_emit(false))
@@ -147,8 +145,7 @@ impl Join {
                         right[col].clone()
                     }
                 }
-            })
-            .collect()
+            }).collect()
     }
 
     fn regenerate_row(
@@ -191,8 +188,7 @@ impl Join {
                 } else {
                     DataType::None
                 }
-            })
-            .collect()
+            }).collect()
     }
 }
 
@@ -272,8 +268,7 @@ impl Ingredient for Join {
                             unreachable!()
                         }
                     }
-                })
-                .collect()
+                }).collect()
         });
 
         // First, we want to be smart about multiple added/removed rows with the same join key
@@ -293,8 +288,8 @@ impl Ingredient for Join {
             let prev_join_key = rs[at][from_key].clone();
 
             if from == *self.right && self.kind == JoinType::Left {
-                let rc =
-                    self.lookup(
+                let rc = self
+                    .lookup(
                         *self.right,
                         &[self.on.1],
                         &KeyType::Single(&prev_join_key),
@@ -326,8 +321,8 @@ impl Ingredient for Join {
             }
 
             // get rows from the other side
-            let mut other_rows =
-                self.lookup(
+            let mut other_rows = self
+                .lookup(
                     other,
                     &[other_key],
                     &KeyType::Single(&prev_join_key),
@@ -442,14 +437,16 @@ impl Ingredient for Join {
                                 (
                                     self.generate_row(&row, &other, Preprocessed::Neither),
                                     positive,
-                                ).into(),
+                                )
+                                    .into(),
                             );
                         } else {
                             ret.push(
                                 (
                                     self.generate_row(&other, &row, Preprocessed::Neither),
                                     positive,
-                                ).into(),
+                                )
+                                    .into(),
                             );
                         }
                         if let Some(true) = make_null {
@@ -468,7 +465,8 @@ impl Ingredient for Join {
                         (
                             self.regenerate_row(row, &other, from == *self.left, false),
                             positive,
-                        ).into(),
+                        )
+                            .into(),
                     );
                     if let Some(true) = make_null {
                         // we need to generate a +NULL for the last left too
@@ -490,20 +488,23 @@ impl Ingredient for Join {
                             let r = (
                                 self.generate_row(&row, &ret[i], Preprocessed::Right),
                                 positive,
-                            ).into();
+                            )
+                                .into();
                             ret.push(r);
                         } else {
                             let r = (
                                 self.generate_row(&ret[i], &row, Preprocessed::Left),
                                 positive,
-                            ).into();
+                            )
+                                .into();
                             ret.push(r);
                         }
                     }
                     let r = (
                         self.regenerate_row(row, &ret[end - 1], from == *self.left, true),
                         positive,
-                    ).into();
+                    )
+                        .into();
                     ret.push(r);
                 }
             }
@@ -520,7 +521,7 @@ impl Ingredient for Join {
             (self.left.as_global(), (vec![self.on.0], true)),
             (self.right.as_global(), (vec![self.on.1], true)),
         ].into_iter()
-            .collect()
+        .collect()
     }
 
     fn resolve(&self, col: usize) -> Option<Vec<(NodeIndex, usize)>> {
@@ -537,14 +538,9 @@ impl Ingredient for Join {
             .emit
             .iter()
             .map(|&(from_left, col)| {
-                let src = if from_left {
-                    self.left
-                } else {
-                    self.right
-                };
+                let src = if from_left { self.left } else { self.right };
                 format!("{}:{}", src.as_global().index(), col)
-            })
-            .collect::<Vec<_>>()
+            }).collect::<Vec<_>>()
             .join(", ");
 
         let op = match self.kind {
@@ -720,7 +716,7 @@ mod tests {
             (l.as_global(), (vec![0], true)), /* join column for left */
             (r.as_global(), (vec![0], true)), /* join column for right */
         ].into_iter()
-            .collect();
+        .collect();
         assert_eq!(g.node().suggest_indexes(me), hm);
     }
 

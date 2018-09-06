@@ -373,8 +373,7 @@ pub mod test {
                 .filter_map(|ni| {
                     let ni = *self.graph[ni.as_global()].local_addr();
                     self.states.get(&ni).map(move |s| (ni, !s.is_useful()))
-                })
-                .filter(|&(_, x)| x)
+                }).filter(|&(_, x)| x)
                 .collect();
             for (ni, _) in unused {
                 self.states.remove(&ni);
@@ -407,8 +406,7 @@ pub mod test {
                 .map(|(_, n)| {
                     use std::cell;
                     (*n.local_addr(), cell::RefCell::new(n))
-                })
-                .collect();
+                }).collect();
         }
 
         pub fn seed(&mut self, base: IndexPair, data: Vec<DataType>) {

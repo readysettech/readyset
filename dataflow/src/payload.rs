@@ -431,8 +431,7 @@ impl Packet {
                     .send(Event {
                         instant: time::Instant::now(),
                         event: EventType::PacketEvent(event, tag),
-                    })
-                    .unwrap();
+                    }).unwrap();
             }
             _ => {}
         }

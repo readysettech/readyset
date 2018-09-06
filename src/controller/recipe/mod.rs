@@ -230,8 +230,7 @@ impl Recipe {
                     }
                 }
                 (qid.into(), (n, q, is_leaf))
-            })
-            .collect::<HashMap<QueryID, (Option<String>, SqlQuery, bool)>>();
+            }).collect::<HashMap<QueryID, (Option<String>, SqlQuery, bool)>>();
 
         let inc = match log {
             None => SqlIncorporator::default(),
@@ -445,8 +444,7 @@ impl Recipe {
                         .unwrap()
                         .remove_query(n.as_ref().unwrap(), mig),
                 }
-            })
-            .collect();
+            }).collect();
 
         Ok(result)
     }
@@ -547,8 +545,7 @@ impl Recipe {
                     None => l.trim(),
                     Some(pos) => &l[0..pos - 1].trim(),
                 }
-            })
-            .collect();
+            }).collect();
         let mut query_strings = Vec::new();
         let mut q = String::new();
         for l in lines {
@@ -586,8 +583,7 @@ impl Recipe {
             .map(|(_, t)| {
                 let pr = t.unwrap().1;
                 (pr.1, pr.2, pr.0)
-            })
-            .collect::<Vec<_>>())
+            }).collect::<Vec<_>>())
     }
 
     /// Returns the predecessor from which this `Recipe` was migrated to.
@@ -655,8 +651,7 @@ impl Recipe {
                     .as_ref()
                     .expect("need SQL incorporator")
                     .get_queries_for_node(*ni)
-            })
-            .collect()
+            }).collect()
     }
 
     pub(crate) fn make_recovery(&self, mut affected_queries: Vec<String>) -> (Recipe, Recipe) {

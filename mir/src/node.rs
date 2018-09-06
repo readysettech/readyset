@@ -79,8 +79,7 @@ impl MirNode {
                             .iter()
                             .map(|c| ((*c).clone(), None))
                             .collect::<Vec<(ColumnSpecification, Option<usize>)>>(),
-                    )
-                    .collect();
+                    ).collect();
                 let new_columns: Vec<Column> = new_column_specs
                     .iter()
                     .map(|&(ref cs, _)| Column::from(&cs.column))
@@ -735,8 +734,7 @@ impl Debug for MirNodeType {
                                 )),
                             },
                             None => None,
-                        })
-                        .collect::<Vec<_>>()
+                        }).collect::<Vec<_>>()
                         .as_slice()
                         .join(", ")
                 )
@@ -859,8 +857,7 @@ impl Debug for MirNodeType {
                             .map(|e| e.name.clone())
                             .collect::<Vec<_>>()
                             .join(", ")
-                    })
-                    .collect::<Vec<_>>()
+                    }).collect::<Vec<_>>()
                     .join(" ⋃ ");
 
                 write!(f, "{}", cols)

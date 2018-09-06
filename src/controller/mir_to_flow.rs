@@ -319,8 +319,7 @@ pub(crate) fn adapt_base_node(
             .filter_map(|c| match *c {
                 ColumnConstraint::DefaultValue(ref dv) => Some(dv.into()),
                 _ => None,
-            })
-            .next()
+            }).next()
         {
             None => DataType::None,
             Some(dv) => dv,
@@ -384,8 +383,7 @@ pub(crate) fn make_base_node(
                 }
             }
             return DataType::None;
-        })
-        .collect::<Vec<DataType>>();
+        }).collect::<Vec<DataType>>();
 
     let base = if pkey_columns.len() > 0 {
         let pkey_column_ids = pkey_columns
@@ -396,8 +394,7 @@ pub(crate) fn make_base_node(
                     .iter()
                     .position(|&(ref cs, _)| Column::from(&cs.column) == *pkc)
                     .unwrap()
-            })
-            .collect();
+            }).collect();
         node::special::Base::new(default_values).with_key(pkey_column_ids)
     } else {
         node::special::Base::new(default_values)
@@ -637,8 +634,7 @@ pub(crate) fn make_join_node(
             } else {
                 None
             }
-        })
-        .chain(
+        }).chain(
             right
                 .borrow()
                 .columns
@@ -651,8 +647,7 @@ pub(crate) fn make_join_node(
                         None
                     }
                 }),
-        )
-        .collect();
+        ).collect();
 
     let left_na = left.borrow().flow_node_addr().unwrap();
     let right_na = right.borrow().flow_node_addr().unwrap();
@@ -732,8 +727,7 @@ pub(crate) fn make_project_node(
                 generate_projection_base(&parent, &e.left),
                 generate_projection_base(&parent, &e.right),
             )
-        })
-        .collect();
+        }).collect();
 
     let n = mig.add_ingredient(
         String::from(name),
@@ -785,8 +779,7 @@ pub(crate) fn make_topk_node(
                         OrderType::OrderDescending => OrderType::OrderAscending,
                     };
                     (parent.borrow().column_id_for_column(c), reversed_order_type)
-                })
-                .collect();
+                }).collect();
 
             columns
         }

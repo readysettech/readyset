@@ -115,8 +115,7 @@ impl KeyedState {
                 .filter(|r| Rc::strong_count(&r.0) == 1)
                 .map(SizeOf::deep_size_of)
                 .sum()
-        })
-            .unwrap_or(0)
+        }).unwrap_or(0)
     }
 }
 

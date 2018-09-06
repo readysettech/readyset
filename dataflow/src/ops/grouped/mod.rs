@@ -128,8 +128,7 @@ where
                     // this column does not appear in output
                     None
                 }
-            })
-            .collect();
+            }).collect();
         self.colfix.extend(colfix.into_iter());
     }
 

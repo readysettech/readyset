@@ -118,8 +118,7 @@ impl ViewBuilder {
                         Ok(c)
                     }
                 }
-            })
-            .collect::<io::Result<Vec<_>>>()?;
+            }).collect::<io::Result<Vec<_>>>()?;
 
         Ok(View {
             node: self.node,
@@ -193,8 +192,7 @@ impl<E> View<E> {
             let reply = shard
                 .send(&ReadQuery::Size {
                     target: (self.node, 0),
-                })
-                .map_err(TransportError::from)?;
+                }).map_err(TransportError::from)?;
             match reply {
                 ReadReply::Size(rows) => Ok(rows),
                 _ => unreachable!(),
@@ -208,8 +206,7 @@ impl<E> View<E> {
                     let reply = shard
                         .send(&ReadQuery::Size {
                             target: (self.node, shardi),
-                        })
-                        .map_err(TransportError::from)?;
+                        }).map_err(TransportError::from)?;
 
                     match reply {
                         ReadReply::Size(rows) => Ok(acc + rows),
@@ -235,8 +232,7 @@ impl<E> View<E> {
                     target: (self.node, 0),
                     keys,
                     block,
-                })
-                .map_err(TransportError::from)?;
+                }).map_err(TransportError::from)?;
             match reply {
                 ReadReply::Normal(Ok(rows)) => Ok(rows),
                 ReadReply::Normal(Err(())) => Err(ViewError::NotYetAvailable),
@@ -264,10 +260,8 @@ impl<E> View<E> {
                             target: (self.node, shardi),
                             keys: mem::replace(shard_queries, Vec::new()),
                             block,
-                        })
-                        .map_err(TransportError::from)?)
-                })
-                .collect::<Result<Vec<_>, ViewError>>()?;
+                        }).map_err(TransportError::from)?)
+                }).collect::<Result<Vec<_>, ViewError>>()?;
 
             let mut results = Vec::new();
             for res in qs {

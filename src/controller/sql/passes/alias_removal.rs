@@ -149,8 +149,7 @@ impl AliasRemoval for SqlQuery {
                             }
                         }
                         f => f,
-                    })
-                    .collect();
+                    }).collect();
                 // Remove them from join clauses
                 sq.join = sq
                     .join
@@ -163,8 +162,7 @@ impl AliasRemoval for SqlQuery {
                             c @ JoinConstraint::Using(..) => c,
                         };
                         jc
-                    })
-                    .collect();
+                    }).collect();
                 // Remove them from conditions
                 sq.where_clause = match sq.where_clause {
                     None => None,

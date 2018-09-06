@@ -57,8 +57,7 @@ pub fn shard(
                     } else {
                         None
                     }
-                })
-                .unwrap_or(Sharding::ForcedNone);
+                }).unwrap_or(Sharding::ForcedNone);
             if s.is_none() {
                 info!(log, "de-sharding prior to stream-only reader"; "node" => ?node);
             } else {
@@ -398,7 +397,8 @@ pub fn shard(
                 // if the base has other children, sharding it may have other effects
                 if graph
                     .neighbors_directed(p, petgraph::EdgeDirection::Outgoing)
-                    .count() != 1
+                    .count()
+                    != 1
                 {
                     // TODO: technically we could still do this if the other children were
                     // sharded by the same column.

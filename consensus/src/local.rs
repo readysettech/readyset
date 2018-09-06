@@ -132,8 +132,7 @@ mod tests {
                 .read_modify_write("/a", |arg: Option<u32>| -> Result<u32, u32> {
                     assert!(arg.is_none());
                     Ok(12)
-                })
-                .unwrap(),
+                }).unwrap(),
             Ok(12)
         );
         assert_eq!(

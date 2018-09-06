@@ -380,8 +380,7 @@ impl Domain {
                         .send(box Packet::RequestPartialReplay {
                             tag,
                             key: key.clone(), // sad to clone here
-                        })
-                        .is_err()
+                        }).is_err()
                     {
                         // we're shutting down -- it's fine.
                     }
@@ -448,8 +447,7 @@ impl Domain {
                             } else {
                                 false
                             }
-                        })
-                        .count()
+                        }).count()
                 };
 
                 // we also sent that many requests *per key*.
@@ -503,7 +501,8 @@ impl Domain {
                 ref to,
                 ref mut buffered,
                 ..
-            } if to == &me =>
+            }
+                if to == &me =>
             {
                 buffered.push_back(m);
                 return output_messages;
@@ -604,13 +603,10 @@ impl Domain {
                                             .find(|&(ni, _)| ni == from)
                                             .ok_or(())
                                             .map(|k| k.1.unwrap())
-                                    })
-                                    .collect::<Result<Vec<_>, _>>()
+                                    }).collect::<Result<Vec<_>, _>>()
                                     .ok()
-                            })
-                            .map(move |k| (tag, k))
-                    })
-                    .collect();
+                            }).map(move |k| (tag, k))
+                    }).collect();
 
                 let mut evictions = HashMap::new();
                 for miss in misses {
@@ -874,8 +870,7 @@ impl Domain {
                                                         .unwrap(),
                                                     local,
                                                 )
-                                            })
-                                            .unwrap();
+                                            }).unwrap();
 
                                         tokio::spawn(
                                             self.shutdown_valve
@@ -891,8 +886,7 @@ impl Domain {
                                                         m = m.make_local();
                                                     }
                                                     m
-                                                })
-                                                .fold(sender, move |sender, m| {
+                                                }).fold(sender, move |sender, m| {
                                                     sender.send(m).map_err(|e| {
                                                         // domain went away?
                                                         eprintln!(
@@ -900,12 +894,10 @@ impl Domain {
                                                             e
                                                         );
                                                     })
-                                                })
-                                                .map(|_| ()),
+                                                }).map(|_| ()),
                                         );
                                         tx
-                                    })
-                                    .collect::<Vec<_>>();
+                                    }).collect::<Vec<_>>();
                                 let (r_part, w_part) =
                                     backlog::new_partial(cols, &k[..], move |miss| {
                                         let n = txs.len();
@@ -928,8 +920,7 @@ impl Domain {
                                             .insert(
                                                 (gid, *self.shard.as_ref().unwrap_or(&0)),
                                                 r_part
-                                            )
-                                            .is_none()
+                                            ).is_none()
                                     );
 
                                     // make sure Reader is actually prepared to receive state
@@ -949,8 +940,7 @@ impl Domain {
                                             .insert(
                                                 (gid, *self.shard.as_ref().unwrap_or(&0)),
                                                 r_part
-                                            )
-                                            .is_none()
+                                            ).is_none()
                                     );
 
                                     // make sure Reader is actually prepared to receive state
@@ -997,8 +987,7 @@ impl Domain {
                                             DomainConnectionBuilder::for_domain(addr)
                                                 .build()
                                                 .unwrap()
-                                        })
-                                        .unwrap()
+                                        }).unwrap()
                                 };
 
                                 let (ask_all, options) = match selection {
@@ -1047,16 +1036,14 @@ impl Domain {
                                     .expect("reader replay requested for non-ready reader")
                                     .0
                                     .is_none()
-                            })
-                            .expect("reader replay requested for non-reader node");
+                            }).expect("reader replay requested for non-reader node");
 
                         // ensure that we haven't already requested a replay of this key
-                        if still_miss
-                            && self
-                                .reader_triggered
-                                .entry(node)
-                                .or_default()
-                                .insert(key.clone())
+                        if still_miss && self
+                            .reader_triggered
+                            .entry(node)
+                            .or_default()
+                            .insert(key.clone())
                         {
                             self.find_tags_and_replay(key, &cols[..], node);
                         }
@@ -1151,14 +1138,13 @@ impl Domain {
                                         .domain()
                                         .index(),
                                     link.src
-                                ))
-                                .spawn(move || {
+                                )).spawn(move || {
                                     use itertools::Itertools;
 
-                                    let mut chunked_replay_tx = DomainConnectionBuilder::for_domain(
-                                        domain_addr,
-                                    ).build()
-                                        .unwrap();
+                                    let mut chunked_replay_tx =
+                                        DomainConnectionBuilder::for_domain(domain_addr)
+                                            .build()
+                                            .unwrap();
 
                                     let start = time::Instant::now();
                                     debug!(log, "starting state chunker"; "node" => %link.dst);
@@ -1192,8 +1178,7 @@ impl Domain {
                                    "node" => %link.dst,
                                    "μs" => start.elapsed().as_micros() as u64
                                 );
-                                })
-                                .unwrap();
+                                }).unwrap();
                         }
 
                         self.handle_replay(p, sends);
@@ -1318,8 +1303,7 @@ impl Domain {
                                 } else {
                                     None
                                 }
-                            })
-                            .collect();
+                            }).collect();
 
                         self.control_reply_tx
                             .send(ControlReplyPacket::Statistics(domain_stats, node_stats))
@@ -1356,8 +1340,7 @@ impl Domain {
                             }
                             None
                         }
-                    })
-                    .collect()
+                    }).collect()
             };
             for (tag, keys) in elapsed_replays {
                 self.seed_all(tag, keys, sends);
@@ -1761,8 +1744,7 @@ impl Domain {
 
                         // ignore duplicate misses
                         misses.sort_unstable_by(|a, b| {
-                            a.on
-                                .cmp(&b.on)
+                            a.on.cmp(&b.on)
                                 .then_with(|| a.replay_cols.cmp(&b.replay_cols))
                                 .then_with(|| a.lookup_idx.cmp(&b.lookup_idx))
                                 .then_with(|| a.lookup_cols.cmp(&b.lookup_cols))
@@ -2077,8 +2059,7 @@ impl Domain {
                                    "left" => left);
                                 None
                             }
-                        })
-                        .collect();
+                        }).collect();
 
                     for (tag, replay_key) in replay {
                         self.delayed_for_self
@@ -2303,8 +2284,7 @@ impl Domain {
                                     .filter(|state| state.is_partial())
                                     .map(|state| (local_index, state.deep_size_of()))
                             }
-                        })
-                        .filter(|&(_, s)| s > 0)
+                        }).filter(|&(_, s)| s > 0)
                         .max_by_key(|&(_, s)| s)
                         .map(|(n, s)| {
                             trace!(self.log, "chose to evict from node {:?} with size {}", n, s);
@@ -2456,8 +2436,7 @@ impl Domain {
                         .map(|state| state.deep_size_of())
                         .unwrap_or(0)
                 }
-            })
-            .sum();
+            }).sum();
 
         self.state_size.store(total as usize, Ordering::Relaxed);
         // no response sent, as worker will read the atomic
@@ -2483,8 +2462,7 @@ impl Domain {
                             self.replay_batch_timeout
                                 .checked_sub(now.duration_since(first))
                                 .unwrap_or(time::Duration::from_millis(0))
-                        })
-                        .min()
+                        }).min()
                 });
                 ProcessResult::KeepPolling
             }

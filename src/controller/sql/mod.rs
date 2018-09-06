@@ -372,8 +372,7 @@ impl SqlIncorporator {
                     .map(|c| {
                         let sig = (c.1).0;
                         (sig, uid.clone())
-                    })
-                    .collect();
+                    }).collect();
 
                 mir_queries.extend(mqs);
             }
@@ -460,8 +459,7 @@ impl SqlIncorporator {
                 self.add_select_query(&format!("{}_csq_{}", query_name, i), &sq.1, false, mig)
                     .1
                     .unwrap()
-            })
-            .collect();
+            }).collect();
 
         let mut combined_mir_query = self.mir_converter.compound_query_to_mir(
             query_name,
@@ -774,8 +772,8 @@ impl SqlIncorporator {
                 Subquery::InJoin(join_right_side) => {
                     *join_right_side = match *join_right_side {
                         JoinRightSide::NestedSelect(box ref ns, ref alias) => {
-                            let qfp =
-                                self.add_parsed_query(
+                            let qfp = self
+                                .add_parsed_query(
                                     SqlQuery::Select(ns.clone()),
                                     alias.clone(),
                                     false,
@@ -799,9 +797,9 @@ impl SqlIncorporator {
             // if we're just about to create the table, we don't need to check if it exists. If it
             // does, we will amend or reuse it; if it does not, we create it.
             SqlQuery::CreateTable(_) => (),
-            | SqlQuery::CreateView(_) => (),
+            SqlQuery::CreateView(_) => (),
             // other kinds of queries *do* require their referred tables to exist!
-            | ref q @ SqlQuery::CompoundSelect(_)
+            ref q @ SqlQuery::CompoundSelect(_)
             | ref q @ SqlQuery::Select(_)
             | ref q @ SqlQuery::Set(_)
             | ref q @ SqlQuery::Update(_)

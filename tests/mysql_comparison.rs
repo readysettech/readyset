@@ -214,8 +214,7 @@ fn generate_target_results(schemas: &BTreeMap<String, Schema>) {
                             format!("{:?}", v)
                                 .trim_matches(|c| c == '\'' || c == '"')
                                 .to_owned()
-                        })
-                        .collect();
+                        }).collect();
                     target_data
                         .get_mut(query_name)
                         .unwrap()
@@ -242,11 +241,10 @@ fn compare_results(mysql: &Vec<Vec<String>>, soup: &Vec<Vec<String>>) -> Option<
     soup.sort();
 
     // TODO: Remove hack to drop key column from Soup output.
-    if mysql.len() == soup.len()
-        && mysql
-            .iter()
-            .zip(soup.iter())
-            .all(|(m, s)| m == s || m[..] == s[..(s.len() - 1)])
+    if mysql.len() == soup.len() && mysql
+        .iter()
+        .zip(soup.iter())
+        .all(|(m, s)| m == s || m[..] == s[..(s.len() - 1)])
     {
         return None;
     }
@@ -313,10 +311,8 @@ fn check_query(
                         DataType::Real(i, f) => ((i as f64) + (f as f64) * 1.0e-9).to_string(),
                         DataType::Text(_) | DataType::TinyText(_) => v.into(),
                         DataType::Timestamp(_) => unimplemented!(),
-                    })
-                    .collect()
-            })
-            .collect();
+                    }).collect()
+            }).collect();
 
         match compare_results(&target_results, &query_results) {
             Some(diff) => {

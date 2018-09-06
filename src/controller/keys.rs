@@ -84,8 +84,7 @@ where
             let origins = n.parent_columns(c);
             assert!(!origins.is_empty());
             origins.into_iter().map(move |o| (i, o))
-        })
-        .fold(
+        }).fold(
             HashMap::new(),
             |mut by_ancestor, (coli, (ancestor, column))| {
                 {
