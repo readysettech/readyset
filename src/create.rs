@@ -302,6 +302,13 @@ named!(pub column_constraint<&[u8], Option<ColumnConstraint>>,
           )
         | do_parse!(
               opt_multispace >>
+              tag_no_case!("character set") >>
+              multispace >>
+              charset: map_res!(sql_identifier, str::from_utf8) >>
+              (Some(ColumnConstraint::CharacterSet(charset.to_owned())))
+          )
+        | do_parse!(
+              opt_multispace >>
               tag_no_case!("collate") >>
               multispace >>
               collation: map_res!(sql_identifier, str::from_utf8) >>
