@@ -14,7 +14,7 @@ use std::io::BufReader;
 use std::{fmt, thread, time};
 use tsunami::*;
 
-const AMI: &str = "ami-7342f90c";
+const AMI: &str = "ami-0045afb291973573a";
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 enum Backend {
@@ -34,40 +34,60 @@ impl fmt::Display for Backend {
 }
 
 fn git_and_cargo(ssh: &mut Session, dir: &str, bin: &str) -> Result<(), failure::Error> {
-    if dir != "distributary" {
-        eprintln!(" -> git reset");
-        ssh.cmd(&format!("bash -c 'git -C {} reset --hard 2>&1'", dir))
-            .map(|out| {
-                let out = out.trim_right();
-                if !out.is_empty() && !out.contains("Already up-to-date.") {
-                    eprintln!("{}", out);
-                }
-            })?;
+    eprintln!(" -> git reset");
+    ssh.cmd(&format!("bash -c 'git -C {} reset --hard 2>&1'", dir))
+        .map(|out| {
+            let out = out.trim_right();
+            if !out.is_empty() && !out.contains("Already up-to-date.") {
+                eprintln!("{}", out);
+            }
+        })?;
 
-        eprintln!(" -> git update");
-        ssh.cmd(&format!("bash -c 'git -C {} pull 2>&1'", dir))
+    eprintln!(" -> git update");
+    ssh.cmd(&format!("bash -c 'git -C {} pull 2>&1'", dir))
+        .map(|out| {
+            let out = out.trim_right();
+            if !out.is_empty() && !out.contains("Already up-to-date.") {
+                eprintln!("{}", out);
+            }
+        })?;
+
+    if dir == "shim" {
+        eprintln!(" -> force local distributary");
+        ssh.cmd(&format!("sed -i -e 's/^###//g' {}/Cargo.toml", dir))
             .map(|out| {
                 let out = out.trim_right();
-                if !out.is_empty() && !out.contains("Already up-to-date.") {
+                if !out.is_empty() {
                     eprintln!("{}", out);
                 }
             })?;
     }
 
-    eprintln!(" -> rebuild");
-    ssh.cmd(&format!(
-        "bash -c 'cd {} && cargo b --release --bin {} 2>&1'",
-        dir, bin
-    )).map(|out| {
-            let out = out.trim_right();
-            if !out.is_empty() {
-                eprintln!("{}", out);
-            }
-        })
-        .map_err(|e| {
-            eprintln!(" -> rebuild failed!\n{:?}", e);
-            e
-        })?;
+    if !bin.is_empty() {
+        let cmd = if dir.starts_with("benchmarks") {
+            eprintln!(" -> rebuild (unshared)");
+            format!(
+                "bash -c 'cd {} && env -u CARGO_TARGET_DIR cargo b --release --bin {} 2>&1'",
+                dir, bin
+            )
+        } else {
+            eprintln!(" -> rebuild");
+            format!(
+                "bash -c 'cd {} && cargo b --release --bin {} 2>&1'",
+                dir, bin
+            )
+        };
+        ssh.cmd(&cmd)
+            .map(|out| {
+                let out = out.trim_right();
+                if !out.is_empty() {
+                    eprintln!("{}", out);
+                }
+            }).map_err(|e| {
+                eprintln!(" -> rebuild failed!\n{:?}", e);
+                e
+            })?;
+    }
 
     Ok(())
 }
@@ -80,20 +100,17 @@ fn main() {
                 .takes_value(true)
                 .long("memory-limit")
                 .help("Partial state size limit / eviction threshold [in bytes]."),
-        )
-        .arg(
+        ).arg(
             Arg::with_name("memscale")
                 .takes_value(true)
                 .default_value("1")
                 .long("memscale")
                 .help("Memscale to use [default: 1]."),
-        )
-        .arg(
+        ).arg(
             Arg::with_name("SCALE")
                 .help("Run the given scale(s).")
                 .multiple(true),
-        )
-        .get_matches();
+        ).get_matches();
 
     let mut b = TsunamiBuilder::default();
     b.use_term_logger();
@@ -105,6 +122,8 @@ fn main() {
             git_and_cargo(ssh, "benchmarks/lobsters/mysql", "trawler-mysql")?;
             eprintln!("==> setting up trawler w/ soup hacks");
             git_and_cargo(ssh, "benchmarks-soup/lobsters/mysql", "trawler-mysql")?;
+            eprintln!("==> updating distributary");
+            git_and_cargo(ssh, "distributary", "")?;
             eprintln!("==> setting up shim");
             git_and_cargo(ssh, "shim", "distributary-mysql")?;
             Ok(())
@@ -118,6 +137,9 @@ fn main() {
             git_and_cargo(ssh, "distributary", "souplet")?;
             eprintln!("==> setting up zk-util");
             git_and_cargo(ssh, "distributary/consensus", "zk-util")?;
+            // we'll need zookeeper running
+            ssh.cmd("sudo systemctl start zookeeper")?;
+
             Ok(())
         }).as_user("ubuntu"),
     );
@@ -135,40 +157,23 @@ fn main() {
         None,
     );
 
-    b.set_max_duration(5);
+    b.set_max_duration(4);
+    //b.set_region(rusoto_core::Region::EuCentral1);
     b.set_region(rusoto_core::Region::UsEast1);
+    b.set_availability_zone("us-east-1a");
     b.wait_limit(time::Duration::from_secs(60));
 
-    let scales: Box<Iterator<Item = usize>> = args.values_of("SCALE")
+    let scales: Box<Iterator<Item = usize>> = args
+        .values_of("SCALE")
         .map(|it| Box::new(it.map(|s| s.parse().unwrap())) as Box<_>)
         .unwrap_or(Box::new(
             [
                 //100, 200, 400, 800, 1000usize, 1250, 1500, 2000, 3000, 4000, 4500, 5000, 5500,
                 //6000, 6500, 7000, 8000, 8500, 9000, 9500, 10_000,
-                100usize,
-                400,
-                800,
-                1000,
-                1250,
-                1500,
-                2000,
-                2500,
-                3000,
-                3500,
-                4000,
-                4500,
-                5000,
-                5500,
-                6000,
-                6500,
-                7000,
-                7500,
-                8000,
-                8500,
-                9000,
-                9500,
-                10_000,
-            ].into_iter()
+                100usize, 400, 800, 1000, 1250, 1500, 2000, 2500, 3000, 3500, 4000, 4500, 5000,
+                5500, 6000, 6500, 7000, 7500, 8000, 8500, 9000, 9500, 10_000,
+            ]
+                .into_iter()
                 .map(|&s| s),
         ) as Box<_>);
 
@@ -217,9 +222,9 @@ fn main() {
                     Backend::Mysql => {
                         let ssh = server.ssh.as_mut().unwrap();
                         ssh.cmd("sudo mount -t tmpfs -o size=16G tmpfs /mnt")?;
-                        // sudo rm -rf /var/lib/mysql
                         ssh.cmd("sudo cp -r /var/lib/mysql.clean /mnt/mysql")?;
-                        // sudo ln -s /mnt/mysql /var/lib/mysql
+                        ssh.cmd("sudo rm -rf /var/lib/mysql")?;
+                        ssh.cmd("sudo ln -sfn /mnt/mysql /var/lib/mysql/")?;
                         ssh.cmd("sudo chown -R mysql:mysql /var/lib/mysql/")?;
                     }
                     Backend::Soup | Backend::Soupy => {
@@ -253,15 +258,15 @@ fn main() {
                             .as_mut()
                             .unwrap()
                             .cmd(
-                                "distributary/target/release/zk-util \
+                                "~/target/release/zk-util \
                                  --clean --deployment trawler",
-                            )
-                            .map(|out| {
+                            ).map(|out| {
                                 let out = out.trim_right();
                                 if !out.is_empty() {
                                     eprintln!(" -> wiped soup state...\n{}", out);
                                 }
                             })?;
+
                         // Don't hit Soup listening timeout think
                         thread::sleep(time::Duration::from_secs(10));
                     }
@@ -283,13 +288,13 @@ fn main() {
                     Backend::Soup | Backend::Soupy => {
                         let mut cmd = format!(
                             "bash -c 'nohup \
-                             env RUST_BACKTRACE=1 \
-                             distributary/target/release/souplet \
+                             env \
+                             RUST_BACKTRACE=1 \
+                             ~/target/release/souplet \
                              --deployment trawler \
                              --durability memory \
                              --no-reuse \
                              --address {} \
-                             --readers 60 -w 5 \
                              --shards 0 ",
                             server.private_ip
                         );
@@ -308,15 +313,14 @@ fn main() {
                             .cmd(&format!(
                                 "bash -c 'nohup \
                                  env RUST_BACKTRACE=1 \
-                                 shim/target/release/distributary-mysql \
+                                 ~/target/release/distributary-mysql \
                                  --deployment trawler \
                                  --no-sanitize --no-static-responses \
                                  -z {}:2181 \
                                  -p 3306 \
                                  &> shim.log &'",
                                 server.private_ip,
-                            ))
-                            .map(|_| ())?;
+                            )).map(|_| ())?;
 
                         // give soup a chance to start
                         thread::sleep(time::Duration::from_secs(5));
@@ -350,10 +354,10 @@ fn main() {
                          --runtime 0 \
                          --issuers 24 \
                          --prime \
-                         \"mysql://lobsters:$(cat ~/mysql.pass)@{}/lobsters\"",
+                         \"mysql://lobsters:$(cat ~/mysql.pass)@{}/lobsters\" \
+                         2>&1",
                         dir, memscale, ip
-                    ))
-                    .map(|out| {
+                    )).map(|out| {
                         let out = out.trim_right();
                         if !out.is_empty() {
                             eprintln!(" -> priming finished...\n{}", out);
@@ -374,10 +378,10 @@ fn main() {
                          --warmup 120 \
                          --runtime 0 \
                          --issuers 24 \
-                         \"mysql://lobsters:$(cat ~/mysql.pass)@{}/lobsters\"",
+                         \"mysql://lobsters:$(cat ~/mysql.pass)@{}/lobsters\" \
+                         2>&1",
                         dir, memscale, ip
-                    ))
-                    .map(|out| {
+                    )).map(|out| {
                         let out = out.trim_right();
                         if !out.is_empty() {
                             eprintln!(" -> warming finished...\n{}", out);
@@ -414,8 +418,7 @@ fn main() {
                          {}
                          \"mysql://lobsters:$(cat ~/mysql.pass)@{}/lobsters\"",
                         dir, scale, memscale, hist_output, ip
-                    ))
-                    .and_then(|out| Ok(output.write_all(&out[..]).map(|_| ())?))?;
+                    )).and_then(|out| Ok(output.write_all(&out[..]).map(|_| ())?))?;
 
                 drop(output);
                 eprintln!(" -> finished at {}", Local::now().time().format("%H:%M:%S"));
@@ -495,8 +498,7 @@ fn main() {
                             .cmd_raw(&format!(
                                 "wget http://{}:9000/get_statistics",
                                 server.private_ip
-                            ))
-                            .and_then(|out| Ok(sizefile.write_all(&out[..]).map(|_| ())?))?;
+                            )).and_then(|out| Ok(sizefile.write_all(&out[..]).map(|_| ())?))?;
 
                         server
                             .ssh
