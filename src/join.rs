@@ -1,5 +1,5 @@
-use std::str;
 use std::fmt;
+use std::str;
 
 use column::Column;
 use condition::ConditionExpression;
@@ -98,11 +98,11 @@ named!(pub join_operator<&[u8], JoinOperator>,
 #[cfg(test)]
 mod tests {
     use super::*;
-    use select::{selection, JoinClause, SelectStatement};
     use common::{FieldDefinitionExpression, Operator};
     use condition::ConditionBase::*;
-    use condition::ConditionTree;
     use condition::ConditionExpression::{self, *};
+    use condition::ConditionTree;
+    use select::{selection, JoinClause, SelectStatement};
 
     #[test]
     fn inner_join() {
@@ -120,13 +120,11 @@ mod tests {
         let expected_stmt = SelectStatement {
             tables: vec![Table::from("tags")],
             fields: vec![FieldDefinitionExpression::AllInTable("tags".into())],
-            join: vec![
-                JoinClause {
-                    operator: JoinOperator::InnerJoin,
-                    right: JoinRightSide::Table(Table::from("taggings")),
-                    constraint: JoinConstraint::On(join_cond),
-                },
-            ],
+            join: vec![JoinClause {
+                operator: JoinOperator::InnerJoin,
+                right: JoinRightSide::Table(Table::from("taggings")),
+                constraint: JoinConstraint::On(join_cond),
+            }],
             ..Default::default()
         };
 

@@ -1,10 +1,12 @@
 use nom::multispace;
-use std::str;
 use std::fmt;
+use std::str;
 
-use common::{assignment_expr_list, field_list, opt_multispace, statement_terminator,
-             table_reference, value_list, FieldValueExpression, Literal};
 use column::Column;
+use common::{
+    assignment_expr_list, field_list, opt_multispace, statement_terminator, table_reference,
+    value_list, FieldValueExpression, Literal,
+};
 use keywords::escape_if_keyword;
 use table::Table;
 
@@ -41,8 +43,7 @@ impl fmt::Display for InsertStatement {
                         .map(|l| l.to_string())
                         .collect::<Vec<_>>()
                         .join(", ")
-                ))
-                .collect::<Vec<_>>()
+                )).collect::<Vec<_>>()
                 .join(", ")
         )
     }
@@ -159,14 +160,12 @@ mod tests {
                     Column::from("2"),
                     Column::from("3"),
                 ],
-                data: vec![
-                    vec![
-                        42.into(),
-                        "test".into(),
-                        "test".into(),
-                        Literal::CurrentTimestamp,
-                    ],
-                ],
+                data: vec![vec![
+                    42.into(),
+                    "test".into(),
+                    "test".into(),
+                    Literal::CurrentTimestamp,
+                ],],
                 ..Default::default()
             }
         );
@@ -258,12 +257,10 @@ mod tests {
                 table: Table::from("keystores"),
                 fields: vec![Column::from("key"), Column::from("value")],
                 data: vec![vec![Literal::Placeholder, Literal::Placeholder]],
-                on_duplicate: Some(vec![
-                    (
-                        Column::from("value"),
-                        FieldValueExpression::Arithmetic(expected_ae),
-                    ),
-                ]),
+                on_duplicate: Some(vec![(
+                    Column::from("value"),
+                    FieldValueExpression::Arithmetic(expected_ae),
+                ),]),
                 ..Default::default()
             }
         );

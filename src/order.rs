@@ -1,9 +1,9 @@
 use nom::multispace;
-use std::str;
 use std::fmt;
+use std::str;
 
-use common::{column_identifier_no_alias, opt_multispace};
 use column::Column;
+use common::{column_identifier_no_alias, opt_multispace};
 use keywords::escape_if_keyword;
 
 #[derive(Clone, Debug, Eq, Hash, PartialEq, Serialize, Deserialize)]
