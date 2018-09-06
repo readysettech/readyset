@@ -407,6 +407,20 @@ named!(pub creation<&[u8], CreateTableStatement>,
         opt!(
             complete!(
                 do_parse!(
+                    tag_no_case!("collate") >>
+                    opt_multispace >>
+                    tag!("=") >>
+                    opt_multispace >>
+                    // TODO(malte): imprecise hack, should not accept everything
+                    sql_identifier >>
+                    ()
+                )
+            )
+        ) >>
+        opt_multispace >>
+        opt!(
+            complete!(
+                do_parse!(
                     tag_no_case!("comment") >>
                     opt_multispace >>
                     tag!("=") >>
