@@ -1,10 +1,10 @@
 use nom::multispace;
-use std::str;
 use std::fmt;
+use std::str;
 
 use common::{opt_multispace, statement_terminator};
-use select::{limit_clause, nested_selection, LimitClause, SelectStatement};
 use order::{order_clause, OrderClause};
+use select::{limit_clause, nested_selection, LimitClause, SelectStatement};
 
 #[derive(Clone, Debug, Eq, Hash, PartialEq, Deserialize, Serialize)]
 pub enum CompoundSelectOperator {

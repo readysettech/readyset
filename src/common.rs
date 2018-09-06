@@ -937,7 +937,6 @@ named!(pub parse_comment<&[u8], String>,
     )
 );
 
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -964,7 +963,8 @@ mod tests {
         let ok = ["bool", "integer(16)", "datetime"];
         let not_ok = ["varchar"];
 
-        let res_ok: Vec<_> = ok.iter()
+        let res_ok: Vec<_> = ok
+            .iter()
             .map(|t| type_identifier(t.as_bytes()).unwrap().1)
             .collect();
         let res_not_ok: Vec<_> = not_ok
@@ -991,7 +991,7 @@ mod tests {
             table: None,
             function: Some(Box::new(FunctionExpression::Max(Column::from("addr_id")))),
         };
-    assert_eq!(res.unwrap().1, expected);
+        assert_eq!(res.unwrap().1, expected);
     }
 
     #[test]
