@@ -17,12 +17,13 @@ dependencies = [
 [[package]]
 name = "api"
 version = "0.1.0"
+source = "git+https://github.com/mit-pdos/distributary.git#13b38dcc59d857c576c53277340203aff46b4f2d"
 dependencies = [
  "assert_infrequent 0.1.0 (git+https://github.com/fintelia/assert_infrequent.git?rev=720e140bc8516d65dad7008abdc1d38796700c09)",
- "basics 0.1.0",
+ "basics 0.1.0 (git+https://github.com/mit-pdos/distributary.git)",
  "bincode 1.0.1 (registry+https://github.com/rust-lang/crates.io-index)",
- "channel 0.1.0",
- "consensus 0.1.0",
+ "channel 0.1.0 (git+https://github.com/mit-pdos/distributary.git)",
+ "consensus 0.1.0 (git+https://github.com/mit-pdos/distributary.git)",
  "failure 0.1.2 (registry+https://github.com/rust-lang/crates.io-index)",
  "futures 0.1.24 (registry+https://github.com/rust-lang/crates.io-index)",
  "hyper 0.12.9 (registry+https://github.com/rust-lang/crates.io-index)",
@@ -129,6 +130,7 @@ dependencies = [
 [[package]]
 name = "basics"
 version = "0.1.0"
+source = "git+https://github.com/mit-pdos/distributary.git#13b38dcc59d857c576c53277340203aff46b4f2d"
 dependencies = [
  "arccstr 1.2.1 (registry+https://github.com/rust-lang/crates.io-index)",
  "chrono 0.4.6 (registry+https://github.com/rust-lang/crates.io-index)",
@@ -263,6 +265,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 [[package]]
 name = "channel"
 version = "0.1.0"
+source = "git+https://github.com/mit-pdos/distributary.git#13b38dcc59d857c576c53277340203aff46b4f2d"
 dependencies = [
  "async-bincode 0.4.5 (registry+https://github.com/rust-lang/crates.io-index)",
  "bincode 1.0.1 (registry+https://github.com/rust-lang/crates.io-index)",
@@ -323,6 +326,7 @@ dependencies = [
 [[package]]
 name = "consensus"
 version = "0.1.0"
+source = "git+https://github.com/mit-pdos/distributary.git#13b38dcc59d857c576c53277340203aff46b4f2d"
 dependencies = [
  "clap 2.32.0 (registry+https://github.com/rust-lang/crates.io-index)",
  "failure 0.1.2 (registry+https://github.com/rust-lang/crates.io-index)",
@@ -395,12 +399,13 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 [[package]]
 name = "dataflow"
 version = "0.1.0"
+source = "git+https://github.com/mit-pdos/distributary.git#13b38dcc59d857c576c53277340203aff46b4f2d"
 dependencies = [
- "api 0.1.0",
+ "api 0.1.0 (git+https://github.com/mit-pdos/distributary.git)",
  "backtrace 0.3.9 (registry+https://github.com/rust-lang/crates.io-index)",
- "basics 0.1.0",
+ "basics 0.1.0 (git+https://github.com/mit-pdos/distributary.git)",
  "bincode 1.0.1 (registry+https://github.com/rust-lang/crates.io-index)",
- "channel 0.1.0",
+ "channel 0.1.0 (git+https://github.com/mit-pdos/distributary.git)",
  "evmap 4.0.0 (git+https://github.com/ms705/rust-evmap)",
  "fnv 1.0.6 (registry+https://github.com/rust-lang/crates.io-index)",
  "futures 0.1.24 (registry+https://github.com/rust-lang/crates.io-index)",
@@ -434,23 +439,24 @@ dependencies = [
 [[package]]
 name = "distributary"
 version = "0.1.0"
+source = "git+https://github.com/mit-pdos/distributary.git#13b38dcc59d857c576c53277340203aff46b4f2d"
 dependencies = [
- "api 0.1.0",
+ "api 0.1.0 (git+https://github.com/mit-pdos/distributary.git)",
  "async-bincode 0.4.5 (registry+https://github.com/rust-lang/crates.io-index)",
- "basics 0.1.0",
+ "basics 0.1.0 (git+https://github.com/mit-pdos/distributary.git)",
  "bincode 1.0.1 (registry+https://github.com/rust-lang/crates.io-index)",
  "bufstream 0.1.3 (registry+https://github.com/rust-lang/crates.io-index)",
- "channel 0.1.0",
+ "channel 0.1.0 (git+https://github.com/mit-pdos/distributary.git)",
  "clap 2.32.0 (registry+https://github.com/rust-lang/crates.io-index)",
- "consensus 0.1.0",
- "dataflow 0.1.0",
+ "consensus 0.1.0 (git+https://github.com/mit-pdos/distributary.git)",
+ "dataflow 0.1.0 (git+https://github.com/mit-pdos/distributary.git)",
  "failure 0.1.2 (registry+https://github.com/rust-lang/crates.io-index)",
  "fnv 1.0.6 (registry+https://github.com/rust-lang/crates.io-index)",
  "futures 0.1.24 (registry+https://github.com/rust-lang/crates.io-index)",
  "hostname 0.1.5 (registry+https://github.com/rust-lang/crates.io-index)",
  "hyper 0.12.9 (registry+https://github.com/rust-lang/crates.io-index)",
  "mio 0.6.16 (registry+https://github.com/rust-lang/crates.io-index)",
- "mir 0.1.0",
+ "mir 0.1.0 (git+https://github.com/mit-pdos/distributary.git)",
  "mysql 14.1.0 (registry+https://github.com/rust-lang/crates.io-index)",
  "nom 3.2.1 (registry+https://github.com/rust-lang/crates.io-index)",
  "nom-sql 0.0.3 (git+https://github.com/ms705/nom-sql.git?rev=3e7ae4c4d32b77342051d5c217549ab8fcb68e85)",
@@ -476,11 +482,11 @@ dependencies = [
 name = "distributary-mysql"
 version = "0.1.0"
 dependencies = [
- "api 0.1.0",
+ "api 0.1.0 (git+https://github.com/mit-pdos/distributary.git)",
  "arccstr 1.2.1 (registry+https://github.com/rust-lang/crates.io-index)",
  "chrono 0.4.6 (registry+https://github.com/rust-lang/crates.io-index)",
  "clap 2.32.0 (registry+https://github.com/rust-lang/crates.io-index)",
- "distributary 0.1.0",
+ "distributary 0.1.0 (git+https://github.com/mit-pdos/distributary.git)",
  "failure 0.1.2 (registry+https://github.com/rust-lang/crates.io-index)",
  "lazy_static 1.1.0 (registry+https://github.com/rust-lang/crates.io-index)",
  "msql-srv 0.6.2 (registry+https://github.com/rust-lang/crates.io-index)",
@@ -926,9 +932,10 @@ dependencies = [
 [[package]]
 name = "mir"
 version = "0.1.0"
+source = "git+https://github.com/mit-pdos/distributary.git#13b38dcc59d857c576c53277340203aff46b4f2d"
 dependencies = [
- "basics 0.1.0",
- "dataflow 0.1.0",
+ "basics 0.1.0 (git+https://github.com/mit-pdos/distributary.git)",
+ "dataflow 0.1.0 (git+https://github.com/mit-pdos/distributary.git)",
  "nom-sql 0.0.3 (git+https://github.com/ms705/nom-sql.git?rev=3e7ae4c4d32b77342051d5c217549ab8fcb68e85)",
  "regex 1.0.4 (registry+https://github.com/rust-lang/crates.io-index)",
  "slog 2.3.3 (registry+https://github.com/rust-lang/crates.io-index)",
@@ -2051,6 +2058,7 @@ dependencies = [
 [metadata]
 "checksum aho-corasick 0.6.8 (registry+https://github.com/rust-lang/crates.io-index)" = "68f56c7353e5a9547cbd76ed90f7bb5ffc3ba09d4ea9bd1d8c06c8b1142eeb5a"
 "checksum ansi_term 0.11.0 (registry+https://github.com/rust-lang/crates.io-index)" = "ee49baf6cb617b853aa8d93bf420db2383fab46d314482ca2803b40d5fde979b"
+"checksum api 0.1.0 (git+https://github.com/mit-pdos/distributary.git)" = "<none>"
 "checksum arccstr 1.2.1 (registry+https://github.com/rust-lang/crates.io-index)" = "77c65cfcf00d80eb1ee2ec172b2ce123a1055057f01cf9b863b42bfb0a72acd6"
 "checksum arrayref 0.3.5 (registry+https://github.com/rust-lang/crates.io-index)" = "0d382e583f07208808f6b1249e60848879ba3543f57c32277bf52d69c2f0f0ee"
 "checksum arrayvec 0.4.7 (registry+https://github.com/rust-lang/crates.io-index)" = "a1e964f9e24d588183fcb43503abda40d288c8657dfc27311516ce2f05675aef"
@@ -2061,6 +2069,7 @@ dependencies = [
 "checksum backtrace 0.3.9 (registry+https://github.com/rust-lang/crates.io-index)" = "89a47830402e9981c5c41223151efcced65a0510c13097c769cede7efb34782a"
 "checksum backtrace-sys 0.1.24 (registry+https://github.com/rust-lang/crates.io-index)" = "c66d56ac8dabd07f6aacdaf633f4b8262f5b3601a810a0dcddffd5c22c69daa0"
 "checksum base64 0.9.2 (registry+https://github.com/rust-lang/crates.io-index)" = "85415d2594767338a74a30c1d370b2f3262ec1b4ed2d7bba5b3faf4de40467d9"
+"checksum basics 0.1.0 (git+https://github.com/mit-pdos/distributary.git)" = "<none>"
 "checksum bincode 1.0.1 (registry+https://github.com/rust-lang/crates.io-index)" = "9f2fb9e29e72fd6bc12071533d5dc7664cb01480c59406f656d7ac25c7bd8ff7"
 "checksum bindgen 0.37.4 (registry+https://github.com/rust-lang/crates.io-index)" = "1b25ab82877ea8fe6ce1ce1f8ac54361f0218bad900af9eb11803994bf67c221"
 "checksum bit-vec 0.4.4 (registry+https://github.com/rust-lang/crates.io-index)" = "02b4ff8b16e6076c3e14220b39fbc1fabb6737522281a388998046859400895f"
@@ -2078,17 +2087,21 @@ dependencies = [
 "checksum cc 1.0.23 (registry+https://github.com/rust-lang/crates.io-index)" = "c37f0efaa4b9b001fa6f02d4b644dee4af97d3414df07c51e3e4f015f3a3e131"
 "checksum cexpr 0.2.3 (registry+https://github.com/rust-lang/crates.io-index)" = "42aac45e9567d97474a834efdee3081b3c942b2205be932092f53354ce503d6c"
 "checksum cfg-if 0.1.5 (registry+https://github.com/rust-lang/crates.io-index)" = "0c4e7bb64a8ebb0d856483e1e682ea3422f883c5f5615a90d51a2c82fe87fdd3"
+"checksum channel 0.1.0 (git+https://github.com/mit-pdos/distributary.git)" = "<none>"
 "checksum chrono 0.4.6 (registry+https://github.com/rust-lang/crates.io-index)" = "45912881121cb26fad7c38c17ba7daa18764771836b34fab7d3fbd93ed633878"
 "checksum clang-sys 0.23.0 (registry+https://github.com/rust-lang/crates.io-index)" = "d7f7c04e52c35222fffcc3a115b5daf5f7e2bfb71c13c4e2321afe1fc71859c2"
 "checksum clap 2.32.0 (registry+https://github.com/rust-lang/crates.io-index)" = "b957d88f4b6a63b9d70d5f454ac8011819c6efa7727858f458ab71c756ce2d3e"
 "checksum cloudabi 0.0.3 (registry+https://github.com/rust-lang/crates.io-index)" = "ddfc5b9aa5d4507acaf872de71051dfd0e309860e88966e1051e462a077aac4f"
+"checksum consensus 0.1.0 (git+https://github.com/mit-pdos/distributary.git)" = "<none>"
 "checksum crossbeam-deque 0.2.0 (registry+https://github.com/rust-lang/crates.io-index)" = "f739f8c5363aca78cfb059edf753d8f0d36908c348f3d8d1503f03d8b75d9cf3"
 "checksum crossbeam-deque 0.6.1 (registry+https://github.com/rust-lang/crates.io-index)" = "3486aefc4c0487b9cb52372c97df0a48b8c249514af1ee99703bf70d2f2ceda1"
 "checksum crossbeam-epoch 0.3.1 (registry+https://github.com/rust-lang/crates.io-index)" = "927121f5407de9956180ff5e936fe3cf4324279280001cd56b669d28ee7e9150"
 "checksum crossbeam-epoch 0.5.2 (registry+https://github.com/rust-lang/crates.io-index)" = "30fecfcac6abfef8771151f8be4abc9e4edc112c2bcb233314cafde2680536e9"
 "checksum crossbeam-utils 0.2.2 (registry+https://github.com/rust-lang/crates.io-index)" = "2760899e32a1d58d5abb31129f8fae5de75220bc2176e77ff7c627ae45c918d9"
 "checksum crossbeam-utils 0.5.0 (registry+https://github.com/rust-lang/crates.io-index)" = "677d453a17e8bd2b913fa38e8b9cf04bcdbb5be790aa294f2389661d72036015"
+"checksum dataflow 0.1.0 (git+https://github.com/mit-pdos/distributary.git)" = "<none>"
 "checksum digest 0.7.5 (registry+https://github.com/rust-lang/crates.io-index)" = "5b29c278aa8fd30796bd977169e8004b4aa88cdcd2f32a6eb22bc2d5d38df94a"
+"checksum distributary 0.1.0 (git+https://github.com/mit-pdos/distributary.git)" = "<none>"
 "checksum either 1.5.0 (registry+https://github.com/rust-lang/crates.io-index)" = "3be565ca5c557d7f59e7cfcf1844f9e3033650c929c6566f511e8005f205c1d0"
 "checksum env_logger 0.5.13 (registry+https://github.com/rust-lang/crates.io-index)" = "15b0a4d2e39f8420210be8b27eeda28029729e2fd4291019455016c348240c38"
 "checksum evmap 4.0.0 (git+https://github.com/ms705/rust-evmap)" = "<none>"
@@ -2139,6 +2152,7 @@ dependencies = [
 "checksum mio-uds 0.6.7 (registry+https://github.com/rust-lang/crates.io-index)" = "966257a94e196b11bb43aca423754d87429960a768de9414f3691d6957abf125"
 "checksum miow 0.1.5 (registry+https://github.com/rust-lang/crates.io-index)" = "3e690c5df6b2f60acd45d56378981e827ff8295562fc8d34f573deb267a59cd1"
 "checksum miow 0.2.1 (registry+https://github.com/rust-lang/crates.io-index)" = "8c1f2f3b1cf331de6896aabf6e9d55dca90356cc9960cca7eaaf408a355ae919"
+"checksum mir 0.1.0 (git+https://github.com/mit-pdos/distributary.git)" = "<none>"
 "checksum msql-srv 0.6.2 (registry+https://github.com/rust-lang/crates.io-index)" = "799f1224e798183d9970cf719d917604b92a5311df2c8f7b54049791d3ad4acc"
 "checksum mysql 12.3.1 (registry+https://github.com/rust-lang/crates.io-index)" = "f916d63851d87a1c989722a6e165cd7e88dafbd0ecddf9ee5da230950da1f588"
 "checksum mysql 14.1.0 (registry+https://github.com/rust-lang/crates.io-index)" = "e5637e744f6b4512cb89e203b04af2bd2157807561bc00a6de29ff5dc9df5d25"
