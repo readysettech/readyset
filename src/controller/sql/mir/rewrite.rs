@@ -1,4 +1,4 @@
-use controller::sql::mir::SqlToMirConverter;
+use crate::controller::sql::mir::SqlToMirConverter;
 use mir::node::{MirNode, MirNodeType};
 use mir::MirNodeRef;
 

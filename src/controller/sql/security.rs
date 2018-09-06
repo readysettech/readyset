@@ -1,7 +1,7 @@
-use controller::security::SecurityConfig;
-use controller::sql::query_graph::{to_query_graph, QueryGraph};
-use controller::sql::{QueryFlowParts, SqlIncorporator};
-use controller::Migration;
+use crate::controller::security::SecurityConfig;
+use crate::controller::sql::query_graph::{to_query_graph, QueryGraph};
+use crate::controller::sql::{QueryFlowParts, SqlIncorporator};
+use crate::controller::Migration;
 use dataflow::prelude::DataType;
 use nom_sql::parser as sql_parser;
 use nom_sql::SqlQuery;

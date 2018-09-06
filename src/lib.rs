@@ -310,45 +310,20 @@
 #![feature(box_syntax)]
 #![feature(duration_as_u128)]
 #![feature(nll)]
-#![feature(entry_or_default)]
+#![feature(try_blocks)]
 #![deny(missing_docs)]
-#![feature(use_extern_macros)]
 #![deny(unused_extern_crates)]
 #![feature(fnbox)]
 #![feature(vec_remove_item)]
-#![feature(catch_expr)]
 
-extern crate api;
-extern crate basics;
-extern crate bincode;
-extern crate channel;
-extern crate consensus;
-extern crate dataflow;
 #[macro_use]
 extern crate failure;
-extern crate fnv;
-extern crate futures;
-extern crate hyper;
-extern crate mio;
-extern crate mir;
 #[macro_use]
 extern crate nom;
-extern crate nom_sql;
-extern crate petgraph;
-extern crate rand;
 #[macro_use]
 extern crate serde_derive;
-extern crate serde_json;
 #[macro_use]
 extern crate slog;
-extern crate async_bincode;
-extern crate bufstream;
-extern crate slog_term;
-extern crate stream_cancel;
-extern crate streamunordered;
-extern crate tokio;
-extern crate tokio_io_pool;
-extern crate tokio_threadpool;
 
 mod controller;
 mod coordination;
@@ -364,8 +339,8 @@ pub use dataflow::{DurabilityMode, PersistenceParameters};
 
 pub use api::*;
 
-pub use controller::sql::reuse::ReuseConfigType;
-pub use controller::{ControllerBuilder, LocalControllerHandle};
+pub use crate::controller::sql::reuse::ReuseConfigType;
+pub use crate::controller::{ControllerBuilder, LocalControllerHandle};
 
 /// Just give me a damn terminal logger
 pub fn logger_pls() -> slog::Logger {

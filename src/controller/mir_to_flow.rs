@@ -4,7 +4,7 @@ use nom_sql::{
 use std::collections::HashMap;
 
 use basics::{DataType, NodeIndex};
-use controller::Migration;
+use crate::controller::Migration;
 use dataflow::ops::filter::FilterCondition;
 use dataflow::ops::join::{Join, JoinType};
 use dataflow::ops::latest::Latest;

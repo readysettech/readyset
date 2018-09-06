@@ -12,9 +12,9 @@ use std::{io, time};
 
 use api::builders::*;
 use api::ActivationResult;
-use controller::migrate::materialization::Materializations;
-use controller::{ControllerState, DomainHandle, Migration, Recipe, WorkerIdentifier};
-use coordination::CoordinationMessage;
+use crate::controller::migrate::materialization::Materializations;
+use crate::controller::{ControllerState, DomainHandle, Migration, Recipe, WorkerIdentifier};
+use crate::coordination::CoordinationMessage;
 
 use hyper::{self, Method, StatusCode};
 use mio::net::TcpListener;

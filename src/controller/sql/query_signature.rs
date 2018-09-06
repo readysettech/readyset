@@ -4,7 +4,7 @@ use nom_sql::ConditionExpression::*;
 use std::collections::HashSet;
 use std::hash::{Hash, Hasher};
 
-use controller::sql::query_graph::{OutputColumn, QueryGraph, QueryGraphEdge};
+use crate::controller::sql::query_graph::{OutputColumn, QueryGraph, QueryGraphEdge};
 
 pub trait Signature {
     fn signature(&self) -> QuerySignature;
@@ -199,7 +199,7 @@ mod tests {
 
     #[test]
     fn it_generalizes() {
-        use controller::sql::query_graph::to_query_graph;
+        use crate::controller::sql::query_graph::to_query_graph;
         use nom_sql::parser::{parse_query, SqlQuery};
 
         let qa =
@@ -237,7 +237,7 @@ mod tests {
 
     #[test]
     fn it_compares_signatures() {
-        use controller::sql::query_graph::to_query_graph;
+        use crate::controller::sql::query_graph::to_query_graph;
         use nom_sql::parser::{parse_query, SqlQuery};
 
         let qa = parse_query("SELECT b.c3 FROM a, b WHERE a.c1 = 42;").unwrap();

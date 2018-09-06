@@ -5,8 +5,8 @@ use std::collections::HashMap;
 pub mod group;
 pub mod policy;
 
-use controller::security::group::Group;
-use controller::security::policy::Policy;
+use crate::controller::security::group::Group;
+use crate::controller::security::policy::Policy;
 
 #[derive(Clone, Debug)]
 pub struct SecurityConfig {

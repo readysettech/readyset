@@ -14,8 +14,8 @@ use dataflow::payload::ControlReplyPacket;
 use dataflow::prelude::*;
 use dataflow::{DomainBuilder, DomainConfig};
 
-use controller::{WorkerEndpoint, WorkerIdentifier, WorkerStatus};
-use coordination::{CoordinationMessage, CoordinationPayload};
+use crate::controller::{WorkerEndpoint, WorkerIdentifier, WorkerStatus};
+use crate::coordination::{CoordinationMessage, CoordinationPayload};
 
 #[derive(Debug)]
 pub enum WaitError {

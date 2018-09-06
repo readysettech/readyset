@@ -1,5 +1,5 @@
-use controller::sql::mir::SqlToMirConverter;
-use controller::sql::query_graph::{QueryGraph, QueryGraphEdge};
+use crate::controller::sql::mir::SqlToMirConverter;
+use crate::controller::sql::query_graph::{QueryGraph, QueryGraphEdge};
 use mir::{Column, MirNodeRef};
 use nom_sql::FunctionExpression::*;
 use nom_sql::{self, ConditionExpression, FunctionExpression};

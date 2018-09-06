@@ -8,8 +8,8 @@ use std::time;
 use failure;
 use slog;
 
-use controller::sql::reuse::ReuseConfigType;
-use controller::{self, ControllerConfig, LocalControllerHandle};
+use crate::controller::sql::reuse::ReuseConfigType;
+use crate::controller::{self, ControllerConfig, LocalControllerHandle};
 
 /// Used to construct a controller.
 pub struct ControllerBuilder {

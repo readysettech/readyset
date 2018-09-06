@@ -1,7 +1,10 @@
+cargo-features = ["edition"]
+
 [package]
 name = "distributary"
 version = "0.1.0"
 authors = ["Jon Gjengset <jon@thesquareplanet.com>"]
+edition = '2018'
 
 [workspace]
 members = ["benchmarks", "consensus", "channel", "basics", "mir", "api"]

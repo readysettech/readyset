@@ -5,8 +5,8 @@
 //! domains, but does not perform that copying itself (that is the role of the `augmentation`
 //! module).
 
-use controller::domain_handle::DomainHandle;
-use controller::{inner::graphviz, keys, WorkerIdentifier, WorkerStatus};
+use crate::controller::domain_handle::DomainHandle;
+use crate::controller::{inner::graphviz, keys, WorkerIdentifier, WorkerStatus};
 use dataflow::prelude::*;
 use petgraph;
 use petgraph::graph::NodeIndex;
@@ -345,7 +345,7 @@ impl Materializations {
                 }
             }
 
-            'try: for index in &indexes {
+            'attempt: for index in &indexes {
                 if !able {
                     break;
                 }
@@ -358,7 +358,7 @@ impl Materializations {
                             warn!(self.log, "full because column {} does not resolve", index[p];
                                   "node" => ni.index(), "broken at" => pni.index());
                             able = false;
-                            break 'try;
+                            break 'attempt;
                         }
                         let index: Vec<_> = cols.into_iter().map(|c| c.unwrap()).collect();
                         if let Some(m) = self.have.get(&pni) {

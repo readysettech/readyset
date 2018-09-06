@@ -1,5 +1,5 @@
-use controller::domain_handle::DomainHandle;
-use controller::{inner::graphviz, keys, WorkerIdentifier, WorkerStatus};
+use crate::controller::domain_handle::DomainHandle;
+use crate::controller::{inner::graphviz, keys, WorkerIdentifier, WorkerStatus};
 use dataflow::payload::{SourceSelection, TriggerEndpoint};
 use dataflow::prelude::*;
 use std::collections::{HashMap, HashSet};

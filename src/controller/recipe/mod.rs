@@ -1,9 +1,9 @@
 use api::ActivationResult;
 use basics::NodeIndex;
-use controller::security::SecurityConfig;
-use controller::sql::reuse::ReuseConfigType;
-use controller::sql::SqlIncorporator;
-use controller::Migration;
+use crate::controller::security::SecurityConfig;
+use crate::controller::sql::reuse::ReuseConfigType;
+use crate::controller::sql::SqlIncorporator;
+use crate::controller::Migration;
 use dataflow::ops::trigger::Trigger;
 use dataflow::ops::trigger::TriggerEvent;
 use dataflow::prelude::DataType;
@@ -263,7 +263,7 @@ impl Recipe {
         mig: &mut Migration,
         universe_groups: HashMap<String, Vec<DataType>>,
     ) -> Result<ActivationResult, String> {
-        use controller::sql::security::Multiverse;
+        use crate::controller::sql::security::Multiverse;
 
         let mut result = ActivationResult {
             new_nodes: HashMap::default(),

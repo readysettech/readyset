@@ -11,8 +11,8 @@ use self::query_graph::{to_query_graph, QueryGraph};
 use self::query_signature::Signature;
 use self::reuse::{ReuseConfig, ReuseConfigType};
 use basics::NodeIndex;
-use controller::mir_to_flow::mir_query_to_flow_parts;
-use controller::Migration;
+use crate::controller::mir_to_flow::mir_query_to_flow_parts;
+use crate::controller::Migration;
 use dataflow::prelude::DataType;
 use mir::query::{MirQuery, QueryFlowParts};
 use mir::reuse as mir_reuse;
@@ -740,14 +740,14 @@ impl SqlIncorporator {
 
     /// Runs some standard rewrite passes on the query.
     fn rewrite_query(&mut self, q: SqlQuery, mig: &mut Migration) -> SqlQuery {
-        use controller::sql::passes::alias_removal::AliasRemoval;
-        use controller::sql::passes::count_star_rewrite::CountStarRewrite;
-        use controller::sql::passes::implied_tables::ImpliedTableExpansion;
-        use controller::sql::passes::key_def_coalescing::KeyDefinitionCoalescing;
-        use controller::sql::passes::negation_removal::NegationRemoval;
-        use controller::sql::passes::star_expansion::StarExpansion;
-        use controller::sql::passes::subqueries::SubQueries;
-        use controller::sql::query_utils::ReferredTables;
+        use crate::controller::sql::passes::alias_removal::AliasRemoval;
+        use crate::controller::sql::passes::count_star_rewrite::CountStarRewrite;
+        use crate::controller::sql::passes::implied_tables::ImpliedTableExpansion;
+        use crate::controller::sql::passes::key_def_coalescing::KeyDefinitionCoalescing;
+        use crate::controller::sql::passes::negation_removal::NegationRemoval;
+        use crate::controller::sql::passes::star_expansion::StarExpansion;
+        use crate::controller::sql::passes::subqueries::SubQueries;
+        use crate::controller::sql::query_utils::ReferredTables;
 
         // need to increment here so that each subquery has a unique name.
         // (subqueries call recursively into `nodes_for_named_query` via `add_parsed_query` below,
@@ -876,9 +876,9 @@ pub trait ToFlowParts {
     /// string in the `Option<String>` in the third argument.
     fn to_flow_parts(
         &self,
-        &mut SqlIncorporator,
-        Option<String>,
-        &mut Migration,
+        inc: &mut SqlIncorporator,
+        name: Option<String>,
+        mig: &mut Migration,
     ) -> Result<QueryFlowParts, String>;
 }
 
@@ -914,9 +914,9 @@ impl<'a> ToFlowParts for &'a str {
 #[cfg(test)]
 mod tests {
     use super::{SqlIncorporator, ToFlowParts};
-    use controller::Migration;
+    use crate::controller::Migration;
+    use crate::integration;
     use dataflow::prelude::*;
-    use integration;
     use nom_sql::Column;
     use nom_sql::FunctionExpression;
 
@@ -932,7 +932,7 @@ mod tests {
     /// Note that the argument slices must be ordered in the same way as &str and &Column are
     /// ordered by `Ord`.
     fn query_id_hash(relations: &[&str], attrs: &[&Column], columns: &[&Column]) -> u64 {
-        use controller::sql::query_graph::OutputColumn;
+        use crate::controller::sql::query_graph::OutputColumn;
         use std::collections::hash_map::DefaultHasher;
         use std::hash::{Hash, Hasher};
 

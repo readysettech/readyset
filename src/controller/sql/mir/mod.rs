@@ -7,8 +7,8 @@ use dataflow::ops::filter::FilterCondition;
 use dataflow::ops::join::JoinType;
 pub use mir::FlowNode;
 
-use controller::sql::query_graph::{OutputColumn, QueryGraph};
-use controller::sql::query_signature::Signature;
+use crate::controller::sql::query_graph::{OutputColumn, QueryGraph};
+use crate::controller::sql::query_signature::Signature;
 use nom_sql::{
     ArithmeticExpression, ColumnSpecification, CompoundSelectOperator, ConditionBase,
     ConditionExpression, ConditionTree, Literal, Operator, SqlQuery, TableKey,
@@ -21,8 +21,8 @@ use std::collections::{HashMap, HashSet};
 use std::ops::Deref;
 use std::vec::Vec;
 
-use controller::sql::security::Universe;
-use controller::sql::UniverseId;
+use crate::controller::sql::security::Universe;
+use crate::controller::sql::UniverseId;
 
 mod grouped;
 mod join;
@@ -1322,9 +1322,9 @@ impl SqlToMirConverter {
         has_leaf: bool,
         universe: UniverseId,
     ) -> Vec<MirNodeRef> {
-        use controller::sql::mir::grouped::make_grouped;
-        use controller::sql::mir::grouped::make_predicates_above_grouped;
-        use controller::sql::mir::join::make_joins;
+        use crate::controller::sql::mir::grouped::make_grouped;
+        use crate::controller::sql::mir::grouped::make_predicates_above_grouped;
+        use crate::controller::sql::mir::join::make_joins;
         use std::collections::HashMap;
 
         let mut nodes_added: Vec<MirNodeRef>;
@@ -1422,7 +1422,7 @@ impl SqlToMirConverter {
             new_node_count += predicates_above_group_by_nodes.len();
 
             // 3. Create security boundary
-            use controller::sql::mir::security::SecurityBoundary;
+            use crate::controller::sql::mir::security::SecurityBoundary;
             let (last_policy_nodes, policy_nodes) =
                 self.make_security_boundary(universe.clone(), &mut node_for_rel, prev_node.clone());
 

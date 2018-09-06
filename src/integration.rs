@@ -1,10 +1,8 @@
-extern crate tempfile;
-
 use basics::DataType;
 use consensus::LocalAuthority;
-use controller::recipe::Recipe;
-use controller::sql::SqlIncorporator;
-use controller::{ControllerBuilder, LocalControllerHandle};
+use crate::controller::recipe::Recipe;
+use crate::controller::sql::SqlIncorporator;
+use crate::controller::{ControllerBuilder, LocalControllerHandle};
 use dataflow::node::special::Base;
 use dataflow::ops::grouped::aggregate::Aggregation;
 use dataflow::ops::identity::Identity;
@@ -52,7 +50,7 @@ fn build(
     sharding: Option<usize>,
     log: bool,
 ) -> LocalControllerHandle<LocalAuthority> {
-    use logger_pls;
+    use crate::logger_pls;
     let mut builder = ControllerBuilder::default();
     if log {
         builder.log_with(logger_pls());
