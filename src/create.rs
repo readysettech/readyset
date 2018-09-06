@@ -1,16 +1,18 @@
 use nom::{alphanumeric, digit, multispace};
+use std::fmt;
 use std::str;
 use std::str::FromStr;
-use std::fmt;
 
-use common::{column_identifier_no_alias, integer_literal, opt_multispace, parse_comment,
-             sql_identifier, statement_terminator, string_literal, table_reference, type_identifier, Literal,
-             Real, SqlType, TableKey};
 use column::{Column, ColumnConstraint, ColumnSpecification};
+use common::{
+    column_identifier_no_alias, integer_literal, opt_multispace, parse_comment, sql_identifier,
+    statement_terminator, string_literal, table_reference, type_identifier, Literal, Real, SqlType,
+    TableKey,
+};
 use compound_select::{compound_selection, CompoundSelectStatement};
 use keywords::escape_if_keyword;
-use select::{nested_selection, SelectStatement};
 use order::{order_type, OrderType};
+use select::{nested_selection, SelectStatement};
 use table::Table;
 
 #[derive(Clone, Debug, Default, Eq, Hash, PartialEq, Serialize, Deserialize)]
@@ -679,9 +681,10 @@ mod tests {
                     ColumnSpecification::new(Column::from("users.name"), SqlType::Varchar(255)),
                     ColumnSpecification::new(Column::from("users.email"), SqlType::Varchar(255)),
                 ],
-                keys: Some(vec![
-                    TableKey::UniqueKey(Some(String::from("id_k")), vec![Column::from("users.id")]),
-                ]),
+                keys: Some(vec![TableKey::UniqueKey(
+                    Some(String::from("id_k")),
+                    vec![Column::from("users.id")]
+                ),]),
                 ..Default::default()
             }
         );
@@ -795,8 +798,8 @@ mod tests {
 
     #[test]
     fn simple_create_view() {
-        use condition::{ConditionBase, ConditionExpression, ConditionTree};
         use common::{FieldDefinitionExpression, Operator};
+        use condition::{ConditionBase, ConditionExpression, ConditionTree};
 
         let qstring = "CREATE VIEW v AS SELECT * FROM users WHERE username = \"bob\";";
 
