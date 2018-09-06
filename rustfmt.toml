@@ -1,0 +1,2 @@
+# this will soon have to change: https://github.com/rust-lang-nursery/rustfmt/pull/2984
+edition = "Edition2018"
