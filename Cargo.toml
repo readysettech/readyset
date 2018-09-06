@@ -36,9 +36,9 @@ debug=true
 name = "mysoupql"
 path = "src/lib.rs"
 
-#[patch."https://github.com/mit-pdos/distributary.git"]
-#distributary = { path = "../distributary" }
-#api = { path = "../distributary/api" }
-#basics = { path = "../distributary/basics" }
-#channel = { path = "../distributary/channel" }
-#consensus = { path = "../distributary/consensus" }
+###[patch."https://github.com/mit-pdos/distributary.git"]
+###distributary = { path = "../distributary" }
+###api = { path = "../distributary/api" }
+###basics = { path = "../distributary/basics" }
+###channel = { path = "../distributary/channel" }
+###consensus = { path = "../distributary/consensus" }
