@@ -123,11 +123,8 @@ fn main() {
     );
 
     // https://github.com/rusoto/rusoto/blob/master/AWS-CREDENTIALS.md
-    let sts = rusoto_sts::StsClient::new(
-        rusoto_core::default_tls_client().unwrap(),
-        rusoto_core::EnvironmentProvider,
-        rusoto_core::Region::UsEast1,
-    );
+    //let sts = rusoto_sts::StsClient::new(rusoto_core::Region::EuCentral1);
+    let sts = rusoto_sts::StsClient::new(rusoto_core::Region::UsEast1);
     let provider = rusoto_sts::StsAssumeRoleSessionCredentialsProvider::new(
         sts,
         "arn:aws:sts::125163634912:role/soup".to_owned(),
