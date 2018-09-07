@@ -14,7 +14,7 @@ use std::io::BufReader;
 use std::{fmt, thread, time};
 use tsunami::*;
 
-const AMI: &str = "ami-0045afb291973573a";
+const AMI: &str = "ami-0a979d5bb8e9cf9bb";
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 enum Backend {
@@ -224,7 +224,7 @@ fn main() {
                         ssh.cmd("sudo mount -t tmpfs -o size=16G tmpfs /mnt")?;
                         ssh.cmd("sudo cp -r /var/lib/mysql.clean /mnt/mysql")?;
                         ssh.cmd("sudo rm -rf /var/lib/mysql")?;
-                        ssh.cmd("sudo ln -sfn /mnt/mysql /var/lib/mysql/")?;
+                        ssh.cmd("sudo ln -sfn /mnt/mysql /var/lib/mysql")?;
                         ssh.cmd("sudo chown -R mysql:mysql /var/lib/mysql/")?;
                     }
                     Backend::Soup | Backend::Soupy => {
@@ -278,7 +278,7 @@ fn main() {
                         .ssh
                         .as_mut()
                         .unwrap()
-                        .cmd("bash -c 'sudo systemctl start mysql 2>&1'")
+                        .cmd("bash -c 'sudo systemctl start mariadb 2>&1'")
                         .map(|out| {
                             let out = out.trim_right();
                             if !out.is_empty() {
@@ -415,8 +415,9 @@ fn main() {
                          --warmup 20 \
                          --runtime 30 \
                          --issuers 24 \
-                         {}
-                         \"mysql://lobsters:$(cat ~/mysql.pass)@{}/lobsters\"",
+                         {} \
+                         \"mysql://lobsters:$(cat ~/mysql.pass)@{}/lobsters\" \
+                         2> run.err",
                         dir, scale, memscale, hist_output, ip
                     )).and_then(|out| Ok(output.write_all(&out[..]).map(|_| ())?))?;
 
@@ -471,7 +472,7 @@ fn main() {
                             .ssh
                             .as_mut()
                             .unwrap()
-                            .cmd("bash -c 'sudo systemctl stop mysql 2>&1'")
+                            .cmd("bash -c 'sudo systemctl stop mariadb 2>&1'")
                             .map(|out| {
                                 let out = out.trim_right();
                                 if !out.is_empty() {
