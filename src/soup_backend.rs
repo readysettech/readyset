@@ -362,8 +362,7 @@ impl SoupBackend {
                     let mut cc = c.clone();
                     cc.table = Some(q.table.name.clone());
                     schema_for_column(table_schemas, &cc)
-                })
-                .collect()
+                }).collect()
         };
 
         let q = if let nom_sql::SqlQuery::Insert(q) = sql_q {
@@ -612,8 +611,7 @@ impl SoupBackend {
                     }
                 }
                 None
-            })
-            .collect();
+            }).collect();
 
         let mut buf = vec![vec![DataType::None; schema.len()]; data.len()];
 
@@ -892,8 +890,7 @@ impl<W: io::Write> MysqlShim<W> for SoupBackend {
                                     .chain(params.iter().skip(first_rewritten + nrewritten))
                                     .cloned()
                                     .collect()
-                            })
-                            .collect()
+                            }).collect()
                     }
                     None => vec![
                         params
@@ -988,8 +985,7 @@ impl<W: io::Write> MysqlShim<W> for SoupBackend {
                             column: String::from(c.0),
                             coltype: ColumnType::MYSQL_TYPE_STRING,
                             colflags: ColumnFlags::empty(),
-                        })
-                        .collect();
+                        }).collect();
                     let mut writer = results.start(&cols[..])?;
                     for &(_, ref r) in columns {
                         writer.write_col(String::from(*r))?;
