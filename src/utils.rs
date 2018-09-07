@@ -291,10 +291,9 @@ pub(crate) fn get_parameter_columns(query: &SqlQuery) -> Vec<&Column> {
                 .iter()
                 .enumerate()
                 .filter_map(|(i, v)| match *v {
-                    Literal::Placeholder => Some(&query.fields[i]),
+                    Literal::Placeholder => Some(&query.fields.as_ref().unwrap()[i]),
                     _ => None,
-                })
-                .collect()
+                }).collect()
         }
         SqlQuery::Update(ref query) => {
             let field_params = query.fields.iter().filter_map(|f| {

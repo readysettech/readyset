@@ -31,7 +31,7 @@ pub(crate) fn schema_for_insert(
     q: &InsertStatement,
 ) -> Vec<msql_srv::Column> {
     let mut schema = Vec::new();
-    for c in &q.fields {
+    for c in q.fields.as_ref().unwrap() {
         // XXX(malte): ewww the hackery
         let mut cc = c.clone();
         cc.table = Some(q.table.name.clone());
