@@ -58,40 +58,34 @@ fn main() {
                 .takes_value(true)
                 .required(true)
                 .help("Soup deployment ID to attach to."),
-        )
-        .arg(
+        ).arg(
             Arg::with_name("zk_addr")
                 .long("zookeeper-address")
                 .short("z")
                 .default_value("127.0.0.1:2181")
                 .help("IP:PORT for Zookeeper."),
-        )
-        .arg(
+        ).arg(
             Arg::with_name("port")
                 .long("port")
                 .short("p")
                 .default_value("3306")
                 .takes_value(true)
                 .help("Port to listen on."),
-        )
-        .arg(
+        ).arg(
             Arg::with_name("slowlog")
                 .long("log-slow")
                 .help("Log slow queries (> 5ms)"),
-        )
-        .arg(
+        ).arg(
             Arg::with_name("no-static-responses")
                 .long("no-static-responses")
                 .takes_value(false)
                 .help("Disable checking for queries requiring static responses. Improves latency."),
-        )
-        .arg(
+        ).arg(
             Arg::with_name("no-sanitize")
                 .long("no-sanitize")
                 .takes_value(false)
                 .help("Disable query sanitization. Improves latency."),
-        )
-        .arg(Arg::with_name("verbose").long("verbose").short("v"))
+        ).arg(Arg::with_name("verbose").long("verbose").short("v"))
         .get_matches();
 
     let deployment = matches.value_of("deployment").unwrap().to_owned();
@@ -152,8 +146,7 @@ fn main() {
                         panic!(e);
                     }
                 }
-            })
-            .unwrap();
+            }).unwrap();
         threads.push(jh);
         i += 1;
     }

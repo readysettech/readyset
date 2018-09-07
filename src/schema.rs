@@ -118,8 +118,7 @@ pub(crate) fn schema_for_column(
                     None
                 }
                 _ => None,
-            })
-            .next()
+            }).next()
             .expect(&format!("column {} not found", c.name))
     };
 

@@ -26,13 +26,12 @@ pub(crate) fn expand_stars(sq: &mut SelectStatement, table_schemas: &HashMap<Str
                         FieldValueExpression::Arithmetic(ref a) => &a.alias,
                         FieldValueExpression::Literal(ref l) => &l.alias,
                     }.clone()
-                        .unwrap(),
+                    .unwrap(),
                     alias: None,
                     function: None,
                 }),
                 _ => unimplemented!(),
-            })
-            .collect::<Vec<_>>()
+            }).collect::<Vec<_>>()
     };
 
     let expand_table = |table_name: String| match table_schemas
@@ -49,8 +48,7 @@ pub(crate) fn expand_stars(sq: &mut SelectStatement, table_schemas: &HashMap<Str
                     alias: None,
                     function: None,
                 })
-            })
-            .collect::<Vec<_>>(),
+            }).collect::<Vec<_>>(),
         Schema::View(CreateViewStatement {
             ref name,
             ref definition,
@@ -85,8 +83,7 @@ pub(crate) fn expand_stars(sq: &mut SelectStatement, table_schemas: &HashMap<Str
             FieldDefinitionExpression::Col(c) => {
                 vec![FieldDefinitionExpression::Col(c)].into_iter()
             }
-        })
-        .collect();
+        }).collect();
 }
 
 fn collapse_where_in_recursive(
@@ -140,19 +137,19 @@ fn collapse_where_in_recursive(
         }
         ConditionExpression::ComparisonOp(ref mut ct) => {
             let mut do_it = false;
-            let literals = if let ConditionExpression::Base(ConditionBase::LiteralList(
-                ref mut list,
-            )) = *ct.right
-            {
-                if rewrite_literals || list.iter().all(|l| *l == Literal::Placeholder) {
-                    do_it = true;
-                    mem::replace(list, Vec::new())
+            let literals =
+                if let ConditionExpression::Base(ConditionBase::LiteralList(ref mut list)) =
+                    *ct.right
+                {
+                    if rewrite_literals || list.iter().all(|l| *l == Literal::Placeholder) {
+                        do_it = true;
+                        mem::replace(list, Vec::new())
+                    } else {
+                        Vec::new()
+                    }
                 } else {
                     Vec::new()
-                }
-            } else {
-                Vec::new()
-            };
+                };
 
             if !do_it {
                 return collapse_where_in_recursive(

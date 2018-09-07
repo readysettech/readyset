@@ -130,7 +130,8 @@ fn do_flatten_conditional(
             left: box ConditionExpression::Base(ConditionBase::Literal(ref left)),
             right: box ConditionExpression::Base(ConditionBase::Literal(ref right)),
             operator: Operator::Equal,
-        }) if left == right =>
+        })
+            if left == right =>
         {
             true
         }
@@ -185,8 +186,7 @@ pub(crate) fn flatten_conditional(
                 }
 
                 key.into_iter().map(|(_c, v)| v).collect()
-            })
-            .collect();
+            }).collect();
 
         Some(keys)
     } else {
@@ -210,8 +210,7 @@ pub(crate) fn get_primary_key(schema: &CreateTableStatement) -> Vec<(usize, &Col
                 }),
                 _ => false,
             }
-        })
-        .map(|(i, cs)| (i, &cs.column))
+        }).map(|(i, cs)| (i, &cs.column))
         .collect()
 }
 
@@ -231,7 +230,8 @@ fn get_parameter_columns_recurse(cond: &ConditionExpression) -> Vec<&Column> {
             left: box ConditionExpression::Base(ConditionBase::Field(ref c)),
             right: box ConditionExpression::Base(ConditionBase::LiteralList(ref literals)),
             operator: Operator::In,
-        }) if (|| literals.iter().all(|l| *l == Literal::Placeholder))() =>
+        })
+            if (|| literals.iter().all(|l| *l == Literal::Placeholder))() =>
         {
             // the weird extra closure above is due to
             // https://github.com/rust-lang/rfcs/issues/1006
@@ -462,8 +462,7 @@ mod tests {
                 table: Some(String::from("T")),
                 alias: None,
                 function: None,
-            })
-            .collect();
+            }).collect();
 
         let pkey_ref = pkey.iter().map(|c| c).collect();
         if let Some(mut actual) = flatten_conditional(&cond, &pkey_ref) {
