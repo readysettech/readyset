@@ -72,7 +72,6 @@ mod tests {
     use std::collections::hash_map::DefaultHasher;
     use std::hash::{Hash, Hasher};
 
-    use column::Column;
     use table::Table;
 
     #[test]
@@ -83,7 +82,7 @@ mod tests {
 
         let expected = SqlQuery::Insert(InsertStatement {
             table: Table::from("users"),
-            fields: vec![Column::from("0"), Column::from("1")],
+            fields: None,
             data: vec![vec![42.into(), "test".into()]],
             ..Default::default()
         });
@@ -194,7 +193,7 @@ mod tests {
     #[test]
     fn display_insert_query_no_columns() {
         let qstring = "INSERT INTO users VALUES ('aaa', 'xxx')";
-        let expected = "INSERT INTO users (0, 1) VALUES ('aaa', 'xxx')";
+        let expected = "INSERT INTO users VALUES ('aaa', 'xxx')";
         let res = parse_query(qstring);
         assert!(res.is_ok());
         assert_eq!(expected, format!("{}", res.unwrap()));

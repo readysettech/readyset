@@ -13,7 +13,7 @@ use table::Table;
 #[derive(Clone, Debug, Default, Eq, Hash, PartialEq, Serialize, Deserialize)]
 pub struct InsertStatement {
     pub table: Table,
-    pub fields: Vec<Column>,
+    pub fields: Option<Vec<Column>>,
     pub data: Vec<Vec<Literal>>,
     pub ignore: bool,
     pub on_duplicate: Option<Vec<(Column, FieldValueExpression)>>,
@@ -22,23 +22,25 @@ pub struct InsertStatement {
 impl fmt::Display for InsertStatement {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         write!(f, "INSERT INTO {}", escape_if_keyword(&self.table.name))?;
-        write!(
-            f,
-            " ({})",
-            self.fields
-                .iter()
-                .map(|ref col| col.name.to_owned())
-                .collect::<Vec<_>>()
-                .join(", ")
-        )?;
+        if let Some(ref fields) = self.fields {
+            write!(
+                f,
+                " ({})",
+                fields
+                    .iter()
+                    .map(|ref col| col.name.to_owned())
+                    .collect::<Vec<_>>()
+                    .join(", ")
+            )?;
+        }
         write!(
             f,
             " VALUES {}",
             self.data
                 .iter()
-                .map(|fields| format!(
+                .map(|datas| format!(
                     "({})",
-                    fields
+                    datas
                         .into_iter()
                         .map(|l| l.to_string())
                         .collect::<Vec<_>>()
@@ -101,19 +103,7 @@ named!(pub insertion<&[u8], InsertStatement>,
             assert!(table.alias.is_none());
             InsertStatement {
                 table: table,
-                fields: match fields {
-                    Some(ref f) =>
-                        f.iter()
-                         .cloned()
-                         .collect(),
-                    None =>
-                        data[0].iter()
-                              .enumerate()
-                              .map(|(i, _)| {
-                                  Column::from(format!("{}", i).as_str())
-                              })
-                              .collect(),
-                },
+                fields: fields,
                 data: data,
                 ignore: ignore.is_some(),
                 on_duplicate: upd_if_dup,
@@ -138,7 +128,7 @@ mod tests {
             res.unwrap().1,
             InsertStatement {
                 table: Table::from("users"),
-                fields: vec![Column::from("0"), Column::from("1")],
+                fields: None,
                 data: vec![vec![42.into(), "test".into()]],
                 ..Default::default()
             }
@@ -154,12 +144,7 @@ mod tests {
             res.unwrap().1,
             InsertStatement {
                 table: Table::from("users"),
-                fields: vec![
-                    Column::from("0"),
-                    Column::from("1"),
-                    Column::from("2"),
-                    Column::from("3"),
-                ],
+                fields: None,
                 data: vec![vec![
                     42.into(),
                     "test".into(),
@@ -180,7 +165,7 @@ mod tests {
             res.unwrap().1,
             InsertStatement {
                 table: Table::from("users"),
-                fields: vec![Column::from("id"), Column::from("name")],
+                fields: Some(vec![Column::from("id"), Column::from("name")]),
                 data: vec![vec![42.into(), "test".into()]],
                 ..Default::default()
             }
@@ -197,7 +182,7 @@ mod tests {
             res.unwrap().1,
             InsertStatement {
                 table: Table::from("users"),
-                fields: vec![Column::from("id"), Column::from("name")],
+                fields: Some(vec![Column::from("id"), Column::from("name")]),
                 data: vec![vec![42.into(), "test".into()]],
                 ..Default::default()
             }
@@ -213,7 +198,7 @@ mod tests {
             res.unwrap().1,
             InsertStatement {
                 table: Table::from("users"),
-                fields: vec![Column::from("id"), Column::from("name")],
+                fields: Some(vec![Column::from("id"), Column::from("name")]),
                 data: vec![
                     vec![42.into(), "test".into()],
                     vec![21.into(), "test2".into()],
@@ -232,7 +217,7 @@ mod tests {
             res.unwrap().1,
             InsertStatement {
                 table: Table::from("users"),
-                fields: vec![Column::from("id"), Column::from("name")],
+                fields: Some(vec![Column::from("id"), Column::from("name")]),
                 data: vec![vec![Literal::Placeholder, Literal::Placeholder]],
                 ..Default::default()
             }
@@ -255,7 +240,7 @@ mod tests {
             res.unwrap().1,
             InsertStatement {
                 table: Table::from("keystores"),
-                fields: vec![Column::from("key"), Column::from("value")],
+                fields: Some(vec![Column::from("key"), Column::from("value")]),
                 data: vec![vec![Literal::Placeholder, Literal::Placeholder]],
                 on_duplicate: Some(vec![(
                     Column::from("value"),
