@@ -821,9 +821,9 @@ impl SqlToMirConverter {
 
         let mut out_nodes = Vec::new();
 
-        let mknode = |over: &Column, t: GroupedNodeType, d: bool| {
-            if d {
-                let new_name = name.clone().to_owned() + "distinct";
+        let mknode = |over: &Column, t: GroupedNodeType, distinct: bool| {
+            if distinct {
+                let new_name = name.clone().to_owned() + "_distinct";
                 let mut dist_col = Vec::new();
                 dist_col.push(over);
                 dist_col.extend(group_cols.clone());
@@ -840,15 +840,15 @@ impl SqlToMirConverter {
 
         let func = func_col.function.as_ref().unwrap();
         match *func.deref() {
-            Sum(ref col, ref d) => mknode(
+            Sum(ref col, distinct) => mknode(
                 &Column::from(col),
                 GroupedNodeType::Aggregation(Aggregation::SUM),
-                *d
+                distinct,
             ),
-            Count(ref col, ref d) => mknode(
+            Count(ref col, distinct) => mknode(
                 &Column::from(col),
                 GroupedNodeType::Aggregation(Aggregation::COUNT),
-                *d
+                distinct,
             ),
             CountStar => {
                 // XXX(malte): there is no "over" column, but our aggregation operators' API
