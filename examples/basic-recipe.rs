@@ -13,7 +13,7 @@ fn main() {
                CREATE TABLE Vote (aid int, uid int);
 
                # read queries
-               VoteCount: SELECT Vote.aid, COUNT(Distinct uid) AS votes \
+               VoteCount: SELECT Vote.aid, COUNT(DISTINCT uid) AS votes \
                             FROM Vote GROUP BY Vote.aid;
                QUERY ArticleWithVoteCount: \
                             SELECT Article.aid, title, url, VoteCount.votes AS votes \
@@ -62,7 +62,7 @@ fn main() {
         .unwrap()
         .as_secs() as i64;
 
-    // There should only be one additional vote given, because of the distinct.
+    // Double-voting has no effect on final count due to DISTINCT
     vote.insert(vec![aid.into(), uid.into()]).unwrap();
     vote.insert(vec![aid.into(), uid.into()]).unwrap();
 
