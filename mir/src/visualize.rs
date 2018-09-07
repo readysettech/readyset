@@ -277,10 +277,13 @@ impl GraphViz for MirNodeType {
             MirNodeType::Reuse { ref node } => {
                 write!(out, "Reuse | using: {}", node.borrow().versioned_name(),)?;
             }
-            MirNodeType::Distinct {
-                ref group_by
-            } => {
-                write!(out, "Distinct | group_by: {:?}", group_by)?;
+            MirNodeType::Distinct { ref group_by } => {
+                let key_cols = group_by
+                    .iter()
+                    .map(|k| print_col(k))
+                    .collect::<Vec<_>>()
+                    .join(", ");
+                write!(out, "Distinct | γ: {}", key_cols)?;
             }
             MirNodeType::TopK {
                 ref order, ref k, ..

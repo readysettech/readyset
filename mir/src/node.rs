@@ -867,9 +867,14 @@ impl Debug for MirNodeType {
                 node.borrow().versioned_name(),
                 node.borrow()
             ),
-            MirNodeType::Distinct {
-                ref group_by
-            } => write!(f, "Distinct [group_by: {:?}]", group_by),
+            MirNodeType::Distinct { ref group_by } => {
+                let key_cols = group_by
+                    .iter()
+                    .map(|k| k.name.clone())
+                    .collect::<Vec<_>>()
+                    .join(", ");
+                write!(f, "Distinct [γ: {}]", key_cols)
+            }
             MirNodeType::TopK {
                 ref order, ref k, ..
             } => write!(f, "TopK [k: {}, {:?}]", k, order),
