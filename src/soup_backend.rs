@@ -725,7 +725,7 @@ impl SoupBackend {
 
         let cols = Vec::from(getter.columns());
         let bogo = vec![vec![DataType::from(0 as i32)]];
-        let is_bogo = keys.is_empty();
+        let is_bogo = keys.is_empty() || keys.iter().all(|k| k.is_empty());
         let keys = if is_bogo { bogo } else { keys };
 
         // if first lookup fails, there's no reason to try the others
