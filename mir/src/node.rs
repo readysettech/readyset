@@ -389,6 +389,10 @@ pub enum MirNodeType {
         k: usize,
         offset: usize,
     },
+    // Get the distinct element sorted by a specific column
+    Distinct{
+        group_by: Vec<Column>,
+    },
     /// reuse another node
     Reuse { node: MirNodeRef },
     /// leaf (reader) node, keys
@@ -435,6 +439,11 @@ impl MirNodeType {
             }
             MirNodeType::Union { ref mut emit } => for e in emit.iter_mut() {
                 e.push(c.clone());
+            },
+            MirNodeType::Distinct {
+                ref mut group_by, ..
+            } => {
+                group_by.push(c);
             },
             MirNodeType::TopK {
                 ref mut group_by, ..
@@ -564,6 +573,16 @@ impl MirNodeType {
                     ref literals,
                     ref arithmetic,
                 } => our_emit == emit && our_literals == literals && our_arithmetic == arithmetic,
+                _ => false,
+            },
+            MirNodeType::Distinct {
+                group_by: ref our_group_by,
+            } => match *other {
+                MirNodeType::Distinct {
+                    ref group_by,
+                } => {
+                     group_by == our_group_by
+                }
                 _ => false,
             },
             MirNodeType::Reuse { node: ref us } => {
@@ -846,6 +865,14 @@ impl Debug for MirNodeType {
                 node.borrow().versioned_name(),
                 node.borrow()
             ),
+            MirNodeType::Distinct { ref group_by } => {
+                let key_cols = group_by
+                    .iter()
+                    .map(|k| k.name.clone())
+                    .collect::<Vec<_>>()
+                    .join(", ");
+                write!(f, "Distinct [γ: {}]", key_cols)
+            }
             MirNodeType::TopK {
                 ref order, ref k, ..
             } => write!(f, "TopK [k: {}, {:?}]", k, order),

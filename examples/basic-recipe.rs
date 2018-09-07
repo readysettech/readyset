@@ -13,7 +13,7 @@ fn main() {
                CREATE TABLE Vote (aid int, uid int);
 
                # read queries
-               VoteCount: SELECT Vote.aid, COUNT(uid) AS votes \
+               VoteCount: SELECT Vote.aid, COUNT(DISTINCT uid) AS votes \
                             FROM Vote GROUP BY Vote.aid;
                QUERY ArticleWithVoteCount: \
                             SELECT Article.aid, title, url, VoteCount.votes AS votes \
@@ -30,6 +30,7 @@ fn main() {
 
     // set up Soup via recipe
     let mut builder = ControllerBuilder::default();
+
     builder.log_with(distributary::logger_pls());
     builder.set_persistence(persistence_params);
 
@@ -60,11 +61,14 @@ fn main() {
         .duration_since(UNIX_EPOCH)
         .unwrap()
         .as_secs() as i64;
+
+    // Double-voting has no effect on final count due to DISTINCT
+    vote.insert(vec![aid.into(), uid.into()]).unwrap();
     vote.insert(vec![aid.into(), uid.into()]).unwrap();
 
     println!("Finished writing! Let's wait for things to propagate...");
     thread::sleep(Duration::from_millis(1000));
 
     println!("Reading...");
-    println!("{:#?}", awvc.lookup(&[1.into()], true))
+    println!("{:#?}", awvc.lookup(&[aid.into()], true))
 }

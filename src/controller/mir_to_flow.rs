@@ -247,6 +247,19 @@ pub fn mir_node_to_flow_parts(mir_node: &mut MirNode, mig: &mut Migration) -> Fl
                         mig,
                     )
                 }
+                MirNodeType::Distinct {
+                    ref group_by,
+                } => {
+                    assert_eq!(mir_node.ancestors.len(), 1);
+                    let parent = mir_node.ancestors[0].clone();
+                    make_distinct_node(
+                        &name,
+                        parent,
+                        mir_node.columns.as_slice(),
+                        group_by,
+                        mig,
+                    )
+                }
                 MirNodeType::TopK {
                     ref order,
                     ref group_by,
@@ -740,6 +753,38 @@ pub(crate) fn make_project_node(
         ),
     );
     FlowNode::New(n)
+}
+
+pub(crate) fn make_distinct_node(
+    name: &str,
+    parent: MirNodeRef,
+    columns: &[Column],
+    group_by: &Vec<Column>,
+    mig: &mut Migration,
+) -> FlowNode {
+    let parent_na = parent.borrow().flow_node_addr().unwrap();
+    let column_names = column_names(columns);
+
+    let group_by_indx = if group_by.is_empty() {
+        // no query parameters, so we index on the first column
+        columns.clone()
+            .iter()
+            .map(|c| parent.borrow().column_id_for_column(c))
+            .collect::<Vec<_>>()
+    } else {
+        group_by
+            .iter()
+            .map(|c| parent.borrow().column_id_for_column(c))
+            .collect::<Vec<_>>()
+    };
+
+    // make the new operator and record its metadata
+    let na = mig.add_ingredient(
+        String::from(name),
+        column_names.as_slice(),
+        ops::distinct::Distinct::new(parent_na, group_by_indx),
+    );
+    FlowNode::New(na)
 }
 
 pub(crate) fn make_topk_node(
