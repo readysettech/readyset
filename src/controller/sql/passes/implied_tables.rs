@@ -241,9 +241,7 @@ impl ImpliedTableExpansion for SqlQuery {
                 // Expand within field list
                 iq.fields = iq
                     .fields
-                    .into_iter()
-                    .map(|c| set_table(c, &table))
-                    .collect();
+                    .map(|fields| fields.into_iter().map(|c| set_table(c, &table)).collect());
                 SqlQuery::Insert(iq)
             }
             _ => unreachable!(),
