@@ -212,7 +212,7 @@ pub fn make_grouped(
                     (parent_node, group_cols)
                 };
 
-                let mut nodes: Vec<MirNodeRef> = mir_converter.make_function_node(
+                let nodes: Vec<MirNodeRef> = mir_converter.make_function_node(
                     name,
                     &Column::from(computed_col),
                     group_cols.iter().collect(),
