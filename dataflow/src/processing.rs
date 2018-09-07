@@ -216,8 +216,7 @@ where
             .and_then(move |state| match state.lookup(columns, key) {
                 LookupResult::Some(rs) => Some(Some(Box::new(rs.into_iter()) as Box<_>)),
                 LookupResult::Missing => Some(None),
-            })
-            .or_else(|| {
+            }).or_else(|| {
                 // this is a long-shot.
                 // if our ancestor can be queried *through*, then we just use that state instead
                 let parent = nodes.get(&parent).unwrap().borrow();

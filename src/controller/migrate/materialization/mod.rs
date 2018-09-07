@@ -188,10 +188,8 @@ impl Materializations {
                                     col
                                 )
                             })
-                        })
-                        .collect()
-                })
-                .collect()
+                        }).collect()
+                }).collect()
         }
 
         // lookup obligations are fairly rigid, in that they require a materialization, and can
@@ -688,8 +686,7 @@ impl Materializations {
                             state: InitialState::IndexedLocal(index_on),
                         },
                         workers,
-                    )
-                    .unwrap();
+                    ).unwrap();
             }
         }
 
@@ -702,8 +699,7 @@ impl Materializations {
                 .map(|idxs| {
                     assert!(!idxs.is_empty());
                     idxs
-                })
-                .unwrap_or_else(HashSet::new);
+                }).unwrap_or_else(HashSet::new);
 
             let start = ::std::time::Instant::now();
             self.ready_one(ni, &mut index_on, graph, domains, workers);
@@ -723,8 +719,7 @@ impl Materializations {
                         index: index_on,
                     },
                     workers,
-                )
-                .unwrap();
+                ).unwrap();
             domain.wait_for_ack().unwrap();
             trace!(self.log, "node ready"; "node" => ni.index());
 
@@ -814,8 +809,7 @@ impl Materializations {
                     if let Some(rh) = r.key() {
                         index_on.insert(Vec::from(rh));
                     }
-                })
-                .unwrap();
+                }).unwrap();
         }
 
         // construct and disseminate a plan for each index
@@ -845,8 +839,7 @@ impl Materializations {
                             from: pending.source,
                         },
                         workers,
-                    )
-                    .unwrap();
+                    ).unwrap();
             }
 
             // and then wait for the last domain to receive all the records

@@ -516,8 +516,7 @@ impl<'a> Migration<'a> {
                         mainline
                             .ingredients
                             .neighbors_directed(eni, petgraph::EdgeDirection::Outgoing)
-                    })
-                    .collect()
+                    }).collect()
             } else {
                 // ingress nodes don't need to know about deleted columns, because those are only
                 // relevant when new writes enter the graph.

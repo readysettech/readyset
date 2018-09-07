@@ -162,8 +162,7 @@ pub fn merge_mir_for_queries(
             .map(|a| match reuse.get(&a.borrow().versioned_name()) {
                 None => a,
                 Some(ref reused) => reused,
-            })
-            .cloned()
+            }).cloned()
             .collect();
         let original_children: Vec<_> = n.borrow().children().iter().cloned().collect();
         let children: Vec<_> = n
@@ -173,8 +172,7 @@ pub fn merge_mir_for_queries(
             .map(|c| match reuse.get(&c.borrow().versioned_name()) {
                 None => c,
                 Some(ref reused) => reused,
-            })
-            .cloned()
+            }).cloned()
             .collect();
 
         let real_n = match reuse.get(&n.borrow().versioned_name()) {

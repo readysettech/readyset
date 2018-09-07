@@ -83,8 +83,7 @@ where
                 Token(self.channels.len() + CHANNEL_OFFSET),
                 Ready::readable(),
                 PollOpt::level(),
-            )
-            .unwrap();
+            ).unwrap();
         self.channels.push(Some(TcpReceiver::new(stream)));
     }
     fn remove_channel(&mut self, channel: usize) {
@@ -99,8 +98,7 @@ where
                 Token(self.rpc_endpoints.len() + RPC_OFFSET),
                 Ready::readable(),
                 PollOpt::level(),
-            )
-            .unwrap();
+            ).unwrap();
         self.rpc_endpoints
             .push(Some(RpcServiceEndpoint::new(stream)));
     }

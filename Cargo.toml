@@ -48,7 +48,7 @@ serde = { version = "1.0.8", features = ["rc"] }
 
 # git deps
 petgraph = { version = "0.4.11", features = ["serde-1"] }
-nom-sql = { git = "https://github.com/ms705/nom-sql.git", rev = "3e7ae4c4d32b77342051d5c217549ab8fcb68e85" }
+nom-sql = { git = "https://github.com/ms705/nom-sql.git", rev = "791c0f5117b6e02c1e3f146cc4a2689ef7da7a54" }
 
 # local deps
 channel = { path = "channel" }

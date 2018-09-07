@@ -22,10 +22,18 @@ pub struct Input {
 #[derive(Debug, Fail)]
 pub enum TableError {
     /// The wrong number of columns was given when inserting a row.
-    #[fail(display = "wrong number of columns specified: expected {}, got {}", _0, _1)]
+    #[fail(
+        display = "wrong number of columns specified: expected {}, got {}",
+        _0,
+        _1
+    )]
     WrongColumnCount(usize, usize),
     /// The wrong number of key columns was given when modifying a row.
-    #[fail(display = "wrong number of key columns used: expected {}, got {}", _0, _1)]
+    #[fail(
+        display = "wrong number of key columns used: expected {}, got {}",
+        _0,
+        _1
+    )]
     WrongKeyColumnCount(usize, usize),
     /// The underlying connection to Soup produced an error.
     #[fail(display = "{}", _0)]
@@ -331,13 +339,11 @@ impl<E> Table<E> {
                     return Err(TableError::WrongColumnCount(self.columns.len(), row.len()));
                 }
                 Ok(TableOperation::Insert(row))
-            })
-            .collect::<Result<Vec<_>, _>>()
+            }).collect::<Result<Vec<_>, _>>()
             .and_then(|data| {
                 self.send(data)?;
                 Ok(())
-            })
-            .map(|_| ())
+            }).map(|_| ())
     }
 
     /// Delete the row with the given key from this base table.
@@ -447,8 +453,7 @@ impl DomainInputHandle {
                     local_port = Some(c.local_addr()?.port());
                 }
                 Ok(c)
-            })
-            .collect();
+            }).collect();
 
         Ok(Self { txs: txs? })
     }

@@ -316,7 +316,8 @@ impl Node {
         self.index
             .as_ref()
             .map(|idx| idx.has_local())
-            .unwrap_or(false) && self.domain.is_some()
+            .unwrap_or(false)
+            && self.domain.is_some()
     }
 
     pub fn add_to(&mut self, domain: domain::Index) {

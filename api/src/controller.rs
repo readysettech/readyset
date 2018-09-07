@@ -108,11 +108,9 @@ impl<A: Authority> ControllerHandle<A> {
                                 .and_then(|res| {
                                     let status = res.status();
                                     res.into_body().concat2().map(move |body| (status, body))
-                                })
-                                .and_then(move |r| tx.send(r).map_err(|_| unreachable!()))
+                                }).and_then(move |r| tx.send(r).map_err(|_| unreachable!()))
                         },
-                    )
-                    .map_err(|_| unreachable!()),
+                    ).map_err(|_| unreachable!()),
             );
             rt.run().unwrap()
         })?;

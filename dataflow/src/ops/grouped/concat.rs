@@ -209,8 +209,7 @@ impl GroupedOperation for GroupConcat {
             .map(|c| match *c {
                 TextComponent::Literal(ref s) => format!("\"{}\"", s),
                 TextComponent::Column(ref i) => i.to_string(),
-            })
-            .collect::<Vec<_>>()
+            }).collect::<Vec<_>>()
             .join(", ");
 
         // Sort group by columns for consistent output.

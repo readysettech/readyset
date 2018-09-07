@@ -125,8 +125,7 @@ impl DomainHandle {
                                 DomainConnectionBuilder::for_domain(addr).build().unwrap(),
                                 is_local,
                             )
-                        })
-                        .unwrap(),
+                        }).unwrap(),
                 );
 
                 // TODO(malte): this is a hack, and not an especially neat one. In response to a
@@ -171,8 +170,7 @@ impl DomainHandle {
                     worker,
                     tx,
                 }
-            })
-            .collect();
+            }).collect();
 
         DomainHandle {
             idx: idx,
@@ -204,8 +202,7 @@ impl DomainHandle {
             .map(|(ni, _)| {
                 let node = graph.node_weight_mut(ni).unwrap().take();
                 node.finalize(graph)
-            })
-            .map(|nd| (*nd.local_addr(), cell::RefCell::new(nd)))
+            }).map(|nd| (*nd.local_addr(), cell::RefCell::new(nd)))
             .collect()
     }
 

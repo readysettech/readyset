@@ -307,8 +307,7 @@ pub(super) fn connect(
                                     new_tag: None,
                                 },
                                 workers,
-                            )
-                            .unwrap();
+                            ).unwrap();
                     }
                 } else {
                     // consider the case where len != 1. that must mean that the
@@ -324,8 +323,7 @@ pub(super) fn connect(
                                 new_tag: None,
                             },
                             workers,
-                        )
-                        .unwrap();
+                        ).unwrap();
                 }
             } else if sender_node.is_sharder() {
                 trace!(log,
@@ -345,8 +343,7 @@ pub(super) fn connect(
                             new_txs: (*n.local_addr(), txs),
                         },
                         workers,
-                    )
-                    .unwrap();
+                    ).unwrap();
             } else if sender_node.is_source() {
             } else {
                 unreachable!("ingress parent is not a sender");

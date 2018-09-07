@@ -178,8 +178,9 @@ impl Ingredient for TopK {
                     if false {
                         let all_new_bottom = $current[start..]
                             .iter()
-                            .take_while(|(ref r, _)| $order.cmp(r, &$current[start].0) == Ordering::Equal)
-                            .all(|&(_, is_new)| is_new);
+                            .take_while(|(ref r, _)| {
+                                $order.cmp(r, &$current[start].0) == Ordering::Equal
+                            }).all(|&(_, is_new)| is_new);
                         if all_new_bottom {
                             eprintln!("topk is guesstimating bottom row");
                         }

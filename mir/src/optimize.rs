@@ -85,13 +85,13 @@ fn end_filter_chain(chained_filters: &mut Vec<MirNodeRef>) {
         let last_node = chained_filters.last().unwrap();
         let schema_version = first_node.borrow().from_version.clone();
 
-        let name = chained_filters.iter().fold(
-            "merged_filter_".to_string(),
-            |mut acc, ref node| {
-                acc.push_str(node.borrow().name());
-                acc
-            },
-        );
+        let name =
+            chained_filters
+                .iter()
+                .fold("merged_filter_".to_string(), |mut acc, ref node| {
+                    acc.push_str(node.borrow().name());
+                    acc
+                });
 
         let prev_node = first_node.borrow().ancestors.first().unwrap().clone();
         let fields: Vec<_> = prev_node.borrow().columns().iter().cloned().collect();

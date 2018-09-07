@@ -455,46 +455,44 @@ pub fn to_query_graph(st: &SelectStatement) -> Result<QueryGraph, String> {
     let mut qg = QueryGraph::new();
 
     // a handy closure for making new relation nodes
-    let new_node = |rel: String,
-                    preds: Vec<ConditionExpression>,
-                    st: &SelectStatement|
-     -> QueryGraphNode {
-        QueryGraphNode {
-            rel_name: rel.clone(),
-            predicates: preds,
-            columns: st
-                .fields
-                .iter()
-                .filter_map(|field| match *field {
-                    // unreachable because SQL rewrite passes will have expanded these already
-                    FieldDefinitionExpression::All => unreachable!(),
-                    FieldDefinitionExpression::AllInTable(_) => unreachable!(),
-                    // No need to do anything for literals and arithmetic expressions here, as they
-                    // aren't associated with a relation (and thus have no QGN)
-                    FieldDefinitionExpression::Value(_) => None,
-                    FieldDefinitionExpression::Col(ref c) => {
-                        match c.table.as_ref() {
-                            None => {
-                                match c.function {
-                                    // XXX(malte): don't drop aggregation columns
-                                    Some(_) => None,
-                                    None => {
-                                        panic!("No table name set for column {} on {}", c.name, rel)
+    let new_node =
+        |rel: String, preds: Vec<ConditionExpression>, st: &SelectStatement| -> QueryGraphNode {
+            QueryGraphNode {
+                rel_name: rel.clone(),
+                predicates: preds,
+                columns: st
+                    .fields
+                    .iter()
+                    .filter_map(|field| match *field {
+                        // unreachable because SQL rewrite passes will have expanded these already
+                        FieldDefinitionExpression::All => unreachable!(),
+                        FieldDefinitionExpression::AllInTable(_) => unreachable!(),
+                        // No need to do anything for literals and arithmetic expressions here, as they
+                        // aren't associated with a relation (and thus have no QGN)
+                        FieldDefinitionExpression::Value(_) => None,
+                        FieldDefinitionExpression::Col(ref c) => {
+                            match c.table.as_ref() {
+                                None => {
+                                    match c.function {
+                                        // XXX(malte): don't drop aggregation columns
+                                        Some(_) => None,
+                                        None => panic!(
+                                            "No table name set for column {} on {}",
+                                            c.name, rel
+                                        ),
                                     }
                                 }
+                                Some(t) => if *t == rel {
+                                    Some(c.clone())
+                                } else {
+                                    None
+                                },
                             }
-                            Some(t) => if *t == rel {
-                                Some(c.clone())
-                            } else {
-                                None
-                            },
                         }
-                    }
-                })
-                .collect(),
-            parameters: Vec::new(),
-        }
-    };
+                    }).collect(),
+                parameters: Vec::new(),
+            }
+        };
 
     // 1. Add any relations mentioned in the query to the query graph.
     // This is needed so that we don't end up with an empty query graph when there are no
@@ -776,8 +774,7 @@ pub fn to_query_graph(st: &SelectStatement) -> Result<QueryGraph, String> {
                     .entry((
                         String::from("computed_columns"),
                         column.table.as_ref().unwrap().clone(),
-                    ))
-                    .or_insert_with(|| QueryGraphEdge::GroupBy(vec![]));
+                    )).or_insert_with(|| QueryGraphEdge::GroupBy(vec![]));
                 match *e {
                     QueryGraphEdge::GroupBy(ref mut cols) => cols.push(column.clone()),
                     _ => unreachable!(),
@@ -808,8 +805,7 @@ pub fn to_query_graph(st: &SelectStatement) -> Result<QueryGraph, String> {
                             src: src.clone(),
                             dst: dst.clone(),
                             index: idx,
-                        })
-                        .collect::<Vec<_>>(),
+                        }).collect::<Vec<_>>(),
                 ),
                 QueryGraphEdge::LeftJoin(ref jps) => qg.join_order.extend(
                     jps.iter()
@@ -818,8 +814,7 @@ pub fn to_query_graph(st: &SelectStatement) -> Result<QueryGraph, String> {
                             src: src.clone(),
                             dst: dst.clone(),
                             index: idx,
-                        })
-                        .collect::<Vec<_>>(),
+                        }).collect::<Vec<_>>(),
                 ),
                 QueryGraphEdge::GroupBy(_) => continue,
             }

@@ -88,8 +88,7 @@ fn value_columns_needed_for_predicates(
                 oc.clone(),
             )),
             OutputColumn::Data(_) => None,
-        })
-        .filter(|(c, _)| pred_columns.contains(c))
+        }).filter(|(c, _)| pred_columns.contains(c))
         .collect()
 }
 
@@ -282,8 +281,7 @@ impl SqlToMirConverter {
                 .map(|mut c| {
                     sanitize_leaf_column(&mut c, name);
                     c
-                })
-                .collect(),
+                }).collect(),
             MirNodeType::Leaf {
                 node: parent.clone(),
                 keys: params.clone(),
@@ -339,8 +337,7 @@ impl SqlToMirConverter {
             .map(|mut c| {
                 sanitize_leaf_column(&mut c, name);
                 c
-            })
-            .collect();
+            }).collect();
 
         if limit.is_some() {
             let (topk_name, topk_columns) = if !has_leaf {
@@ -606,13 +603,15 @@ impl SqlToMirConverter {
                             columns.push((*added).clone());
                         }
                         for removed in &columns_removed {
-                            let pos = columns.iter().position(|cc| cc == *removed).expect(
-                                &format!(
-                                    "couldn't find column \"{:#?}\", \
-                                     which we're removing",
-                                    removed
-                                ),
-                            );
+                            let pos =
+                                columns
+                                    .iter()
+                                    .position(|cc| cc == *removed)
+                                    .expect(&format!(
+                                        "couldn't find column \"{:#?}\", \
+                                         which we're removing",
+                                        removed
+                                    ));
                             columns.remove(pos);
                         }
                         assert_eq!(
@@ -651,8 +650,7 @@ impl SqlToMirConverter {
                 .filter_map(|k| match *k {
                     ref k @ TableKey::PrimaryKey(..) => Some(k),
                     _ => None,
-                })
-                .collect(),
+                }).collect(),
         };
         assert!(primary_keys.len() <= 1);
 
@@ -998,8 +996,7 @@ impl SqlToMirConverter {
                     // keep unaffected columns
                     Some(f)
                 }
-            })
-            .collect();
+            }).collect();
 
         left_join_columns.push(l_col);
         right_join_columns.push(r_col);
@@ -1072,15 +1069,13 @@ impl SqlToMirConverter {
                     sanitize_leaf_column(&mut c, name);
                 }
                 c
-            })
-            .chain(names.into_iter().map(|n| {
+            }).chain(names.into_iter().map(|n| {
                 if is_leaf {
                     Column::new(Some(&name), &n)
                 } else {
                     Column::new(None, &n)
                 }
-            }))
-            .collect();
+            })).collect();
 
         let emit_cols = proj_cols.into_iter().cloned().collect();
 
@@ -1278,8 +1273,7 @@ impl SqlToMirConverter {
                         }
                         OutputColumn::Data(_) => None,
                         OutputColumn::Literal(_) => None,
-                    })
-                    .collect();
+                    }).collect();
             let projected_literals: Vec<(String, DataType)> = arith_and_lit_columns_needed
                 .iter()
                 .filter_map(|&(_, ref oc)| match oc {
@@ -1288,8 +1282,7 @@ impl SqlToMirConverter {
                     OutputColumn::Literal(ref lc) => {
                         Some((lc.name.clone(), DataType::from(&lc.value)))
                     }
-                })
-                .collect();
+                }).collect();
 
             // prev_node must be set at this point
             let parent = match prev_node {
@@ -1426,30 +1419,34 @@ impl SqlToMirConverter {
             let (last_policy_nodes, policy_nodes) =
                 self.make_security_boundary(universe.clone(), &mut node_for_rel, prev_node.clone());
 
-            let mut ancestors = self.universe.member_of.iter().fold(
-                vec![],
-                |mut acc, (gname, gids)| {
-                    let group_views: Vec<MirNodeRef> = gids
-                        .iter()
-                        .filter_map(|gid| {
-                            // This is a little annoying, but because of the way we name universe queries,
-                            // we need to strip the view name of the _u{uid} suffix
-                            let root = name.trim_right_matches(&uformat);
-                            if root == name {
-                                None
-                            } else {
-                                let view_name =
-                                    format!("{}_{}{}", root, gname.to_string(), gid.to_string());
-                                Some(self.get_view(&view_name))
-                            }
-                        })
-                        .collect();
+            let mut ancestors =
+                self.universe
+                    .member_of
+                    .iter()
+                    .fold(vec![], |mut acc, (gname, gids)| {
+                        let group_views: Vec<MirNodeRef> = gids
+                            .iter()
+                            .filter_map(|gid| {
+                                // This is a little annoying, but because of the way we name universe queries,
+                                // we need to strip the view name of the _u{uid} suffix
+                                let root = name.trim_right_matches(&uformat);
+                                if root == name {
+                                    None
+                                } else {
+                                    let view_name = format!(
+                                        "{}_{}{}",
+                                        root,
+                                        gname.to_string(),
+                                        gid.to_string()
+                                    );
+                                    Some(self.get_view(&view_name))
+                                }
+                            }).collect();
 
-                    trace!(self.log, "group views {:?}", group_views);
-                    acc.extend(group_views);
-                    acc
-                },
-            );
+                        trace!(self.log, "group views {:?}", group_views);
+                        acc.extend(group_views);
+                        acc
+                    });
 
             nodes_added = base_nodes
                 .into_iter()
@@ -1667,8 +1664,7 @@ impl SqlToMirConverter {
                         OutputColumn::Arithmetic(_) => None,
                         OutputColumn::Data(ref c) => Some(Column::from(c)),
                         OutputColumn::Literal(_) => None,
-                    })
-                    .collect()
+                    }).collect()
             } else {
                 // If we are creating a query for a group universe, we project
                 // all columns in the final node. When a user universe that
@@ -1703,8 +1699,7 @@ impl SqlToMirConverter {
                     }
                     OutputColumn::Data(_) => None,
                     OutputColumn::Literal(_) => None,
-                })
-                .collect();
+                }).collect();
             let mut projected_literals: Vec<(String, DataType)> = qg
                 .columns
                 .iter()
@@ -1719,8 +1714,7 @@ impl SqlToMirConverter {
                             None
                         }
                     }
-                })
-                .collect();
+                }).collect();
 
             // if this query does not have any parameters, we must add a bogokey
             let has_bogokey = if has_leaf && qg.parameters().is_empty() {
@@ -1761,8 +1755,7 @@ impl SqlToMirConverter {
                     .map(|mut c| {
                         sanitize_leaf_column(&mut c, name);
                         c
-                    })
-                    .collect();
+                    }).collect();
 
                 let query_params = if has_bogokey {
                     vec![Column::new(None, "bogokey")]

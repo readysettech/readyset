@@ -372,8 +372,7 @@ impl SqlIncorporator {
                     .map(|c| {
                         let sig = (c.1).0;
                         (sig, uid.clone())
-                    })
-                    .collect();
+                    }).collect();
 
                 mir_queries.extend(mqs);
             }
@@ -460,8 +459,7 @@ impl SqlIncorporator {
                 self.add_select_query(&format!("{}_csq_{}", query_name, i), &sq.1, false, mig)
                     .1
                     .unwrap()
-            })
-            .collect();
+            }).collect();
 
         let mut combined_mir_query = self.mir_converter.compound_query_to_mir(
             query_name,
@@ -774,8 +772,8 @@ impl SqlIncorporator {
                 Subquery::InJoin(join_right_side) => {
                     *join_right_side = match *join_right_side {
                         JoinRightSide::NestedSelect(box ref ns, ref alias) => {
-                            let qfp =
-                                self.add_parsed_query(
+                            let qfp = self
+                                .add_parsed_query(
                                     SqlQuery::Select(ns.clone()),
                                     alias.clone(),
                                     false,
@@ -799,9 +797,9 @@ impl SqlIncorporator {
             // if we're just about to create the table, we don't need to check if it exists. If it
             // does, we will amend or reuse it; if it does not, we create it.
             SqlQuery::CreateTable(_) => (),
-            | SqlQuery::CreateView(_) => (),
+            SqlQuery::CreateView(_) => (),
             // other kinds of queries *do* require their referred tables to exist!
-            | ref q @ SqlQuery::CompoundSelect(_)
+            ref q @ SqlQuery::CompoundSelect(_)
             | ref q @ SqlQuery::Select(_)
             | ref q @ SqlQuery::Set(_)
             | ref q @ SqlQuery::Update(_)
@@ -1770,6 +1768,47 @@ mod tests {
             assert_ne!(qfp.query_leaf, leaf);
             // should have added three more nodes (filter, project and reader)
             assert_eq!(mig.graph().node_count(), ncount + 3);
+        });
+    }
+
+    #[test]
+    #[ignore]
+    fn it_queries_over_aliased_view() {
+        let mut g = integration::build_local("it_queries_over_aliased_view");
+        g.migrate(|mig| {
+            let mut inc = SqlIncorporator::default();
+            assert!(
+                inc.add_query("CREATE TABLE users (id int, name varchar(40));", None, mig)
+                    .is_ok()
+            );
+            // Add first copy of new query, called "tq1"
+            let res = inc.add_query(
+                "SELECT id, name FROM users WHERE users.id = 42;",
+                Some("tq1".into()),
+                mig,
+            );
+            assert!(res.is_ok());
+            let leaf = res.unwrap().query_leaf;
+
+            // Add the same query again, this time as "tq2"
+            let ncount = mig.graph().node_count();
+            let res = inc.add_query(
+                "SELECT id, name FROM users WHERE users.id = 42;",
+                Some("tq2".into()),
+                mig,
+            );
+            assert!(res.is_ok());
+            // should have added no more nodes
+            let qfp = res.unwrap();
+            assert_eq!(qfp.new_nodes, vec![]);
+            assert_eq!(mig.graph().node_count(), ncount);
+            // should have ended up with the same leaf node
+            assert_eq!(qfp.query_leaf, leaf);
+
+            // Add a query over tq2, which really is tq1
+            let _res = inc.add_query("SELECT tq2.id FROM tq2;", Some("over_tq2".into()), mig);
+            // should have added a projection and a reader
+            assert_eq!(mig.graph().node_count(), ncount + 2);
         });
     }
 }

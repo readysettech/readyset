@@ -76,8 +76,7 @@ impl GraphViz for MirNode {
                 .map(|c| match c.table {
                     None => c.name.clone(),
                     Some(ref t) => format!("{}.{}", t, c.name),
-                })
-                .collect::<Vec<_>>()
+                }).collect::<Vec<_>>()
                 .join(",\\n"),
         )?;
         Ok(out)
@@ -179,8 +178,7 @@ impl GraphViz for MirNodeType {
                                 )),
                             },
                             None => None,
-                        })
-                        .collect::<Vec<_>>()
+                        }).collect::<Vec<_>>()
                         .as_slice()
                         .join(", ")
                 )?;
@@ -298,8 +296,7 @@ impl GraphViz for MirNodeType {
                             .iter()
                             .map(|(c, o)| format!("{}: {}", c.name.as_str(), o))
                             .collect::<Vec<_>>()
-                            .join(", "))
-                        .unwrap_or("".into())
+                            .join(", ")).unwrap_or("".into())
                 )?;
             }
             MirNodeType::Union { ref emit } => {
@@ -310,8 +307,7 @@ impl GraphViz for MirNodeType {
                             .map(|e| print_col(e))
                             .collect::<Vec<_>>()
                             .join(", ")
-                    })
-                    .collect::<Vec<_>>()
+                    }).collect::<Vec<_>>()
                     .join(" ⋃ ");
 
                 write!(out, "{}", cols)?;

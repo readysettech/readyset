@@ -122,8 +122,8 @@ impl Ingredient for Rewrite {
                 }
             } else if from == *self.signal {
                 let key = r[0].clone();
-                let other_rows =
-                    self.lookup(
+                let other_rows = self
+                    .lookup(
                         *self.src,
                         &[self.signal_key],
                         &KeyType::Single(&key),
@@ -170,7 +170,7 @@ impl Ingredient for Rewrite {
             (self.signal.as_global(), (vec![0], true)),
             (self.src.as_global(), (vec![self.signal_key], true)),
         ].into_iter()
-            .collect()
+        .collect()
     }
 
     fn resolve(&self, col: usize) -> Option<Vec<(NodeIndex, usize)>> {

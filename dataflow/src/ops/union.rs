@@ -72,7 +72,10 @@ impl Union {
             let mut last = &emit[0];
             for i in emit {
                 if i < last {
-                    unimplemented!("union doesn't support column reordering; got emit = {:?}", emit);
+                    unimplemented!(
+                        "union doesn't support column reordering; got emit = {:?}",
+                        emit
+                    );
                 }
                 last = i;
             }
@@ -154,16 +157,14 @@ impl Ingredient for Union {
                         k.remap(remap);
                         emit_l.insert(*k, v.clone());
                         (k, v)
-                    })
-                    .collect();
+                    }).collect();
                 let mapped_cols = cols
                     .drain()
                     .map(|(mut k, v)| {
                         k.remap(remap);
                         cols_l.insert(*k, v.clone());
                         (k, v)
-                    })
-                    .collect();
+                    }).collect();
                 mem::replace(emit, mapped_emit);
                 mem::replace(cols, mapped_cols);
             }
@@ -203,8 +204,7 @@ impl Ingredient for Union {
                         } else {
                             Record::Negative(res)
                         }
-                    })
-                    .collect();
+                    }).collect();
                 ProcessingResult {
                     results: rs,
                     misses: Vec::new(),
@@ -468,8 +468,7 @@ impl Ingredient for Union {
                                     .iter()
                                     .map(|(src, emit)| {
                                         (*src, key_cols.iter().map(|&c| emit[c]).collect())
-                                    })
-                                    .collect(),
+                                    }).collect(),
                             );
                         }
                     }
@@ -488,8 +487,7 @@ impl Ingredient for Union {
                             key_cols.iter().map(|&c| r[c].clone()).collect::<Vec<_>>(),
                             r,
                         )
-                    })
-                    .fold(HashMap::new(), |mut hm, (key, r)| {
+                    }).fold(HashMap::new(), |mut hm, (key, r)| {
                         hm.entry(key).or_insert_with(Records::default).push(r);
                         hm
                     });
@@ -553,20 +551,17 @@ impl Ingredient for Union {
                                     }
                                 }
                             }
-                        })
-                        .flat_map(|(key, pieces)| {
+                        }).flat_map(|(key, pieces)| {
                             if pieces.evict {
                                 // TODO XXX TODO XXX TODO XXX TODO
                                 eprintln!("!!! need to issue an eviction after replaying key");
                             }
                             released.insert(key.clone());
                             pieces.buffered.into_iter()
-                        })
-                        .flat_map(|(from, rs)| {
+                        }).flat_map(|(from, rs)| {
                             self.on_input(from, rs, tracer, Some(&key_cols[..]), n, s)
                                 .results
-                        })
-                        .collect()
+                        }).collect()
                 };
 
                 // and swap back replay pieces
@@ -653,8 +648,7 @@ impl Ingredient for Union {
                             .collect::<Vec<_>>()
                             .join(", ");
                         format!("{}:[{}]", src.as_global().index(), cols)
-                    })
-                    .collect::<Vec<_>>()
+                    }).collect::<Vec<_>>()
                     .join(" ⋃ ")
             }
         }

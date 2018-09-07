@@ -155,8 +155,7 @@ impl Ingredient for Filter {
                         )),
                     },
                     None => None,
-                })
-                .collect::<Vec<_>>()
+                }).collect::<Vec<_>>()
                 .as_slice()
                 .join(", ")
         ).into()
