@@ -15,9 +15,9 @@ msql-srv = "0.6"
 # can't rename dep because of https://github.com/rust-lang/rust/issues/51796
 #distributary = { path = "../distributary/api", package = "api" }
 #distributary = { git = "https://github.com/mit-pdos/distributary.git", package = "api" }
-api = { git = "https://github.com/mit-pdos/distributary.git" }
+api = { git = "https://github.com/mit-pdos/distributary.git", rev = "9e42b6137357b1f41e2e1348846acc7c80359cdc" }
 lazy_static = "1.0.0"
-nom-sql = { git = "https://github.com/ms705/nom-sql.git", rev = "3e7ae4c4d32b77342051d5c217549ab8fcb68e85" }
+nom-sql = { git = "https://github.com/ms705/nom-sql.git", rev = "791c0f5117b6e02c1e3f146cc4a2689ef7da7a54" }
 slog = "2.2.2"
 #slog = { version = "2.2.2", features = ["max_level_trace", "release_max_level_trace"] }
 slog-term = "2.3.0"
@@ -27,7 +27,7 @@ chrono = "0.4"
 [dev-dependencies]
 mysql = "12.0.4"
 zookeeper = { git = "https://github.com/bonifaido/rust-zookeeper", rev = "1167cfce5f5088112bd53983614145e5787b4c8f" }
-distributary = { git = "https://github.com/mit-pdos/distributary.git" }
+distributary = { git = "https://github.com/mit-pdos/distributary.git", rev = "9e42b6137357b1f41e2e1348846acc7c80359cdc" }
 
 [profile.release]
 debug=true

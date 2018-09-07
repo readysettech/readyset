@@ -315,11 +315,24 @@ impl SoupBackend {
 
     fn prepare_insert<W: io::Write>(
         &mut self,
-        sql_q: nom_sql::SqlQuery,
+        mut sql_q: nom_sql::SqlQuery,
         info: StatementMetaWriter<W>,
     ) -> io::Result<()> {
         let ts_lock = self.table_schemas.read().unwrap();
         let table_schemas = &(*ts_lock);
+
+        match sql_q {
+            // set column names (insert schema) if not set
+            nom_sql::SqlQuery::Insert(ref mut q) => if q.fields.is_none() {
+                match table_schemas[&q.table.name] {
+                    Schema::Table(ref ts) => {
+                        q.fields = Some(ts.fields.iter().map(|cs| cs.column.clone()).collect());
+                    }
+                    _ => unreachable!(),
+                }
+            },
+            _ => (),
+        }
 
         let params: Vec<_> = {
             let q = if let nom_sql::SqlQuery::Insert(ref q) = sql_q {
@@ -506,7 +519,7 @@ impl SoupBackend {
         data: Vec<DataType>,
         results: QueryResultWriter<W>,
     ) -> io::Result<()> {
-        assert_eq!(q.fields.len(), data.len());
+        assert_eq!(q.fields.as_ref().unwrap().len(), data.len());
         self.do_insert(&q, vec![data], results)
     }
 
@@ -536,7 +549,7 @@ impl SoupBackend {
         results: QueryResultWriter<W>,
     ) -> io::Result<()> {
         let table = &q.table.name;
-        let columns_specified = &q.fields;
+        let columns_specified = &q.fields.as_ref().unwrap();
 
         // create a mutator if we don't have one for this table already
         let putter = self.inner.get_or_make_mutator(table);
