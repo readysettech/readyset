@@ -265,9 +265,22 @@ impl SoupBackend {
 
     fn handle_insert<W: io::Write>(
         &mut self,
-        q: nom_sql::InsertStatement,
+        mut q: nom_sql::InsertStatement,
         results: QueryResultWriter<W>,
     ) -> io::Result<()> {
+        // set column names (insert schema) if not set
+        if q.fields.is_none() {
+            let ts_lock = self.table_schemas.read().unwrap();
+            let table_schemas = &(*ts_lock);
+
+            match table_schemas[&q.table.name] {
+                Schema::Table(ref ts) => {
+                    q.fields = Some(ts.fields.iter().map(|cs| cs.column.clone()).collect());
+                }
+                _ => unreachable!(),
+            }
+        }
+
         let data: Vec<Vec<DataType>> = q
             .data
             .iter()
