@@ -729,6 +729,12 @@ impl SqlToMirConverter {
                 .all(|a| a.borrow().columns().iter().any(|ac| *ac.name == c.name))
             {
                 selected_cols.insert(c.name.clone());
+            } else {
+                panic!(
+                    "column with name '{}' not found all union ancestors: all ancestors' \
+                     output columns must have the same names",
+                    c.name
+                );
             }
         }
         assert_eq!(
