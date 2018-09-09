@@ -833,12 +833,23 @@ impl SqlToMirConverter {
                 dist_col.extend(group_cols.clone());
                 let node = self.make_distinct_node(&new_name, parent, dist_col.clone());
                 out_nodes.push(node.clone());
-                out_nodes.push(self.make_grouped_node(name, &func_col, (node, &over), group_cols, t));
+                out_nodes.push(self.make_grouped_node(
+                    name,
+                    &func_col,
+                    (node, &over),
+                    group_cols,
+                    t,
+                ));
                 out_nodes
             } else {
-                out_nodes.push(self.make_grouped_node(name, &func_col, (parent, &over), group_cols, t));
+                out_nodes.push(self.make_grouped_node(
+                    name,
+                    &func_col,
+                    (parent, &over),
+                    group_cols,
+                    t,
+                ));
                 out_nodes
-
             }
         };
 
@@ -863,12 +874,20 @@ impl SqlToMirConverter {
                 // (but we also don't have a NULL value, so maybe we're okay).
                 panic!("COUNT(*) should have been rewritten earlier!")
             }
-            Max(ref col) => mknode(&Column::from(col), GroupedNodeType::Extremum(Extremum::MAX), false),
-            Min(ref col) => mknode(&Column::from(col), GroupedNodeType::Extremum(Extremum::MIN), false),
+            Max(ref col) => mknode(
+                &Column::from(col),
+                GroupedNodeType::Extremum(Extremum::MAX),
+                false,
+            ),
+            Min(ref col) => mknode(
+                &Column::from(col),
+                GroupedNodeType::Extremum(Extremum::MIN),
+                false,
+            ),
             GroupConcat(ref col, ref separator) => mknode(
                 &Column::from(col),
                 GroupedNodeType::GroupConcat(separator.clone()),
-                false
+                false,
             ),
             _ => unimplemented!(),
         }
@@ -1624,7 +1643,11 @@ impl SqlToMirConverter {
                 }
 
                 if st.distinct {
-                    let group_by: Vec<Column> = qg.parameters().into_iter().map(|col| Column::from(col)).collect();
+                    let group_by: Vec<Column> = qg
+                        .parameters()
+                        .into_iter()
+                        .map(|col| Column::from(col))
+                        .collect();
 
                     let node = self.make_distinct_node(
                         &format!("q_{:x}_n{}{}", qg.signature().hash, new_node_count, uformat),
@@ -1634,7 +1657,6 @@ impl SqlToMirConverter {
                     func_nodes.push(node.clone());
                     final_node = node;
                     new_node_count += 1;
-
                 }
 
                 // we're now done with the query, so remember all the nodes we've added so far

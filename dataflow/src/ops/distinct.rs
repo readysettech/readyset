@@ -1,5 +1,5 @@
-use std::collections::HashMap;
 use std::cmp::Ordering;
+use std::collections::HashMap;
 
 use prelude::*;
 
@@ -15,11 +15,7 @@ pub struct Distinct {
 }
 
 impl Distinct {
-    pub fn new(
-        src: NodeIndex,
-        group_by: Vec<usize>,
-        ) -> Self {
-
+    pub fn new(src: NodeIndex, group_by: Vec<usize>) -> Self {
         let mut group_by = group_by;
         group_by.sort();
         Distinct {
@@ -64,10 +60,7 @@ impl Ingredient for Distinct {
             .get(&*us)
             .expect("Distinct must have its own state initialized");
 
-        let pos_comp = |a: &Record, b: &Record| {
-            a.is_positive().cmp(
-                &b.is_positive())
-        };
+        let pos_comp = |a: &Record, b: &Record| a.is_positive().cmp(&b.is_positive());
 
         let mut rs: Vec<_> = rs.into();
         // Sort by positive or negative
@@ -87,14 +80,14 @@ impl Ingredient for Distinct {
         // execute two queries. We'll do this by sorting the batch by our group by.
         rs.sort_by(&group_cmp);
 
-
         let mut output = Vec::new();
         let mut prev_grp = Vec::new();
         let mut prev_pos = false;
 
-        for rec in rs{
+        for rec in rs {
             let group_by = &self.group_by[..];
-            let group = rec.iter()
+            let group = rec
+                .iter()
                 .enumerate()
                 .filter_map(|(i, v)| {
                     if self.group_by.iter().any(|col| col == &i) {
@@ -102,14 +95,13 @@ impl Ingredient for Distinct {
                     } else {
                         None
                     }
-                })
-                .cloned()
+                }).cloned()
                 .collect::<Vec<_>>();
 
             // Do not take overlapping elements
-            if prev_grp.iter().cmp(
-                group_by.iter().map(|&col| &rec[col])) == Ordering::Equal
-                && prev_pos == rec.is_positive(){
+            if prev_grp.iter().cmp(group_by.iter().map(|&col| &rec[col])) == Ordering::Equal
+                && prev_pos == rec.is_positive()
+            {
                 continue;
             }
 
@@ -131,13 +123,10 @@ impl Ingredient for Distinct {
                             output.push(rec.clone());
                         }
                     }
-                },
-                LookupResult::Missing => {
-                    unimplemented!("Distinct does not yet support partial")
                 }
+                LookupResult::Missing => unimplemented!("Distinct does not yet support partial"),
             }
         }
-
 
         ProcessingResult {
             results: output.into(),
@@ -149,9 +138,7 @@ impl Ingredient for Distinct {
         "Distinct".into()
     }
 
-
-    fn on_connected(&mut self, _: &Graph) {
-    }
+    fn on_connected(&mut self, _: &Graph) {}
 
     fn on_commit(&mut self, us: NodeIndex, remap: &HashMap<NodeIndex, IndexPair>) {
         self.src.remap(remap);
@@ -171,9 +158,8 @@ impl Ingredient for Distinct {
     }
 
     fn suggest_indexes(&self, this: NodeIndex) -> HashMap<NodeIndex, (Vec<usize>, bool)> {
-        vec![
-            (this, (self.group_by.clone(), true)),
-        ].into_iter()
+        vec![(this, (self.group_by.clone(), true))]
+            .into_iter()
             .collect()
     }
 }
@@ -187,7 +173,6 @@ mod tests {
 
     fn setup(materialized: bool) -> ops::test::MockGraph {
         let mut g = ops::test::MockGraph::new();
-
 
         let s = g.add_base("source", &["x", "y", "z"]);
         g.set_op(
@@ -226,21 +211,21 @@ mod tests {
         let r3: Vec<DataType> = vec![3.into(), "c".into(), 2.into()];
 
         let a = g.narrow_one_row(r1.clone(), true);
-        println!("{:?}",a);
+        println!("{:?}", a);
         assert_eq!(a, vec![r1.clone()].into());
 
         let a = g.narrow_one_row(r2.clone(), true);
-        println!("{:?}",a);
+        println!("{:?}", a);
         assert_eq!(a, vec![r2.clone()].into());
 
         let a = g.narrow_one_row(r3.clone(), true);
         assert_eq!(a, vec![r3.clone()].into());
 
         let a = g.narrow_one_row((r1.clone(), false), true);
-        println!("{:?}",a);
+        println!("{:?}", a);
 
         let a = g.narrow_one_row((r1.clone(), true), true);
-        println!("{:?}",a);
+        println!("{:?}", a);
         assert_eq!(a, vec![r1.clone()].into());
     }
 
@@ -252,8 +237,15 @@ mod tests {
         let r2: Vec<DataType> = vec![2.into(), "a".into(), 2.into()];
         let r3: Vec<DataType> = vec![3.into(), "c".into(), 2.into()];
 
-        let a = g.narrow_one(vec![(r2.clone(), true), (r1.clone(), true),
-                                  (r1.clone(), true), (r3.clone(), true)], true);
+        let a = g.narrow_one(
+            vec![
+                (r2.clone(), true),
+                (r1.clone(), true),
+                (r1.clone(), true),
+                (r3.clone(), true),
+            ],
+            true,
+        );
         assert!(a.iter().any(|r| r == &(r1.clone(), true).into()));
         assert!(a.iter().any(|r| r == &(r2.clone(), true).into()));
         assert!(a.iter().any(|r| r == &(r3.clone(), true).into()));
