@@ -93,6 +93,7 @@
 #![deny(missing_docs)]
 #![deny(unused_extern_crates)]
 
+#[cfg(debug_assertions)]
 extern crate assert_infrequent;
 extern crate basics;
 extern crate bincode;
