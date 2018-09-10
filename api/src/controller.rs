@@ -1,3 +1,4 @@
+#[cfg(debug_assertions)]
 use assert_infrequent;
 use basics::*;
 use consensus::{self, Authority};
