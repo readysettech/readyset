@@ -81,6 +81,15 @@ pub(crate) fn handle_message(
                     return Ok(ReadReply::Normal(Err(())));
                 }
 
+                if !block {
+                    // trigger backfills for all the keys we missed on for later
+                    for key in &keys {
+                        if !key.is_empty() {
+                            reader.trigger(key);
+                        }
+                    }
+                }
+
                 Err((keys, ret))
             });
 

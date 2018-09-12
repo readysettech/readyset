@@ -220,6 +220,8 @@ impl<E> View<E> {
     /// Retrieve the query results for the given parameter values.
     ///
     /// The method will block if the results are not yet available only when `block` is `true`.
+    /// If `block` is false, misses will be returned as empty results. Any requested keys that have
+    /// missing state will be backfilled (asynchronously if `block` is `false`).
     pub fn multi_lookup(
         &mut self,
         keys: Vec<Vec<DataType>>,
