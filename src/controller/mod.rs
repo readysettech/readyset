@@ -1,3 +1,6 @@
+/// Only allow processing this many inputs in a domain before we handle timer events, acks, etc.
+const FORCE_INPUT_YIELD_EVERY: usize = 128;
+
 use api::{ControllerDescriptor, Input};
 use async_bincode::{AsyncBincodeReader, AsyncBincodeWriter, AsyncDestination, SyncDestination};
 use basics::DomainIndex;
@@ -1301,7 +1304,7 @@ impl Future for Replica {
             self.try_timeout().context("check timeout")?;
 
             // and now, finally, we see if there's new input for us
-            loop {
+            for i in 0.. {
                 match self.inputs.poll() {
                     Ok(Async::Ready(Some((StreamYield::Item(packet), _)))) => {
                         let d = &mut self.domain;
@@ -1330,6 +1333,13 @@ impl Future for Replica {
                         error!(self.log, "input stream failed: {:?}", e);
                         break;
                     }
+                }
+
+                if i >= FORCE_INPUT_YIELD_EVERY {
+                    // we could keep processing inputs, but make sure we send some ACKs too!
+                    // we have to self-notify so that we'll wake up again though!
+                    task::current().notify();
+                    break;
                 }
             }
 
