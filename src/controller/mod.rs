@@ -1304,68 +1304,71 @@ impl Future for Replica {
             self.try_timeout().context("check timeout")?;
 
             // and now, finally, we see if there's new input for us
-            for i in 0.. {
-                match self.inputs.poll() {
-                    Ok(Async::Ready(Some((StreamYield::Item(packet), _)))) => {
-                        let d = &mut self.domain;
-                        let sb = &mut self.sendback;
-                        let ob = &mut self.outbox;
+            loop {
+                let mut interrupted = false;
+                for i in 0..FORCE_INPUT_YIELD_EVERY {
+                    match self.inputs.poll() {
+                        Ok(Async::Ready(Some((StreamYield::Item(packet), _)))) => {
+                            let d = &mut self.domain;
+                            let sb = &mut self.sendback;
+                            let ob = &mut self.outbox;
 
-                        // TODO: carry_local
-                        if let ProcessResult::StopPolling =
-                            block_on(|| d.on_event(sb, PollEvent::Process(packet), ob))
-                        {
-                            // domain got a message to quit
-                            return Ok(Async::Ready(()));
+                            // TODO: carry_local
+                            if let ProcessResult::StopPolling =
+                                block_on(|| d.on_event(sb, PollEvent::Process(packet), ob))
+                            {
+                                // domain got a message to quit
+                                return Ok(Async::Ready(()));
+                            }
+                        }
+                        Ok(Async::Ready(Some((StreamYield::Finished(_stream), streami)))) => {
+                            self.sendback.back.remove(&streami);
+                            self.sendback.pending.remove(&streami);
+                            // FIXME: what about if a later flush flushes to this stream?
+                        }
+                        Ok(Async::Ready(None)) => {
+                            // we probably haven't booted yet
+                            break;
+                        }
+                        Ok(Async::NotReady) => break,
+                        Err(e) => {
+                            error!(self.log, "input stream failed: {:?}", e);
+                            break;
                         }
                     }
-                    Ok(Async::Ready(Some((StreamYield::Finished(_stream), streami)))) => {
-                        self.sendback.back.remove(&streami);
-                        self.sendback.pending.remove(&streami);
-                        // FIXME: what about if a later flush flushes to this stream?
-                    }
-                    Ok(Async::Ready(None)) => {
-                        // we probably haven't booted yet
-                        break;
-                    }
-                    Ok(Async::NotReady) => break,
-                    Err(e) => {
-                        error!(self.log, "input stream failed: {:?}", e);
-                        break;
+
+                    if i == FORCE_INPUT_YIELD_EVERY - 1 {
+                        // we could keep processing inputs, but make sure we send some ACKs too!
+                        interrupted = true;
                     }
                 }
 
-                if i >= FORCE_INPUT_YIELD_EVERY {
-                    // we could keep processing inputs, but make sure we send some ACKs too!
-                    // we have to self-notify so that we'll wake up again though!
-                    task::current().notify();
-                    break;
+                // check if we now need to set a timeout
+                let mut timeout = None;
+                self.domain.on_event(
+                    &mut self.sendback,
+                    PollEvent::ResumePolling(&mut timeout),
+                    &mut self.outbox,
+                );
+
+                if let Some(timeout) = timeout {
+                    self.timeout = Some(tokio::timer::Delay::new(time::Instant::now() + timeout));
+
+                    // we need to poll the delay to ensure we'll get woken up
+                    self.try_timeout().context("check timeout after setting")?;
+                }
+
+                // send to downstream
+                // TODO: send fail == exiting?
+                self.try_flush().context("downstream flush (after)")?;
+
+                // and also acks
+                self.try_ack()?;
+
+                if !interrupted {
+                    break Async::NotReady;
                 }
             }
-
-            // check if we now need to set a timeout
-            let mut timeout = None;
-            self.domain.on_event(
-                &mut self.sendback,
-                PollEvent::ResumePolling(&mut timeout),
-                &mut self.outbox,
-            );
-
-            if let Some(timeout) = timeout {
-                self.timeout = Some(tokio::timer::Delay::new(time::Instant::now() + timeout));
-
-                // we need to poll the delay to ensure we'll get woken up
-                self.try_timeout().context("check timeout after setting")?;
-            }
-
-            // send to downstream
-            // TODO: send fail == exiting?
-            self.try_flush().context("downstream flush (after)")?;
-
-            // and also acks
-            self.try_ack()?;
-
-            Async::NotReady
         };
 
         match r {
