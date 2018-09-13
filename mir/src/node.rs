@@ -363,8 +363,6 @@ pub enum MirNodeType {
         project: Vec<Column>,
     },
     /// on left column, on right column, emit columns
-    // currently unused
-    #[allow(dead_code)]
     LeftJoin {
         on_left: Vec<Column>,
         on_right: Vec<Column>,
