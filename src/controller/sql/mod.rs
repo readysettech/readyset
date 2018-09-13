@@ -830,32 +830,41 @@ impl SqlIncorporator {
         is_leaf: bool,
         mig: &mut Migration,
     ) -> Result<QueryFlowParts, String> {
+        // short-circuit if we're dealing with a CreateView query; this avoids having to deal with
+        // CreateView in all of our rewrite passes.
+        if let SqlQuery::CreateView(cvq) = q {
+            use nom_sql::SelectSpecification;
+            let name = cvq.name.clone();
+            match *cvq.definition {
+                SelectSpecification::Compound(csq) => {
+                    return self.nodes_for_named_query(
+                        SqlQuery::CompoundSelect(csq),
+                        name,
+                        is_leaf,
+                        mig,
+                    )
+                }
+                SelectSpecification::Simple(sq) => {
+                    return self.nodes_for_named_query(SqlQuery::Select(sq), name, is_leaf, mig)
+                }
+            }
+        };
+
         let q = self.rewrite_query(q, mig);
 
         // TODO(larat): extend existing should handle policy nodes
         // if this is a selection, we compute its `QueryGraph` and consider the existing ones we
         // hold for reuse or extension
         let qfp = match q {
-            SqlQuery::CompoundSelect(ref csq) => {
+            SqlQuery::CompoundSelect(csq) => {
                 // NOTE(malte): We can't currently reuse complete compound select queries, since
                 // our reuse logic operates on `SqlQuery` structures. Their subqueries do get
                 // reused, however.
-                self.add_compound_query(&query_name, csq, is_leaf, mig)
+                self.add_compound_query(&query_name, &csq, is_leaf, mig)
                     .unwrap()
             }
-            SqlQuery::Select(ref sq) => self.add_select_query(&query_name, sq, is_leaf, mig).0,
-            SqlQuery::CreateView(ref cvq) => {
-                use nom_sql::SelectSpecification;
-                match *cvq.definition {
-                    SelectSpecification::Compound(ref csq) => {
-                        self.add_compound_query(&cvq.name, csq, is_leaf, mig)?
-                    }
-                    SelectSpecification::Simple(ref sq) => {
-                        self.add_select_query(&cvq.name, sq, is_leaf, mig).0
-                    }
-                }
-            }
-            ref q @ SqlQuery::CreateTable { .. } => self.add_base_via_mir(&query_name, q, mig),
+            SqlQuery::Select(sq) => self.add_select_query(&query_name, &sq, is_leaf, mig).0,
+            ref q @ SqlQuery::CreateTable { .. } => self.add_base_via_mir(&query_name, &q, mig),
             ref q @ _ => panic!("unhandled query type in recipe: {:?}", q),
         };
 
