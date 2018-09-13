@@ -2066,6 +2066,62 @@ fn recipe_activates_and_migrates_with_join() {
     assert_eq!(g.outputs().unwrap().len(), 1);
 }
 
+fn test_queries(test: &str, file: &'static str, shard: bool, reuse: bool, log: bool) {
+    use crate::logger_pls;
+    use std::fs::File;
+    use std::io::Read;
+
+    let logger = if log { Some(logger_pls()) } else { None };
+
+    // set up graph
+    let mut g = if shard {
+        build_local(test)
+    } else {
+        build_local_unsharded(test)
+    };
+
+    // move needed for some funny lifetime reason
+    g.migrate(move |mig| {
+        let mut r = Recipe::blank(logger);
+        if !reuse {
+            r.disable_reuse();
+        }
+        let mut f = File::open(&file).unwrap();
+        let mut s = String::new();
+
+        // Load queries
+        f.read_to_string(&mut s).unwrap();
+        let lines: Vec<String> = s
+            .lines()
+            .filter(|l| {
+                !l.is_empty()
+                    && !l.starts_with("--")
+                    && !l.starts_with('#')
+                    && !l.starts_with("DROP TABLE")
+            }).map(|l| {
+                if !(l.ends_with('\n') || l.ends_with(';')) {
+                    String::from(l) + "\n"
+                } else {
+                    String::from(l)
+                }
+            }).collect();
+
+        // Add them one by one
+        for (i, q) in lines.iter().enumerate() {
+            //println!("{}: {}", i, q);
+            r = match r.extend(q) {
+                Ok(mut nr) => {
+                    assert!(nr.activate(mig).is_ok());
+                    nr
+                }
+                Err(e) => {
+                    panic!("{:?}", e);
+                }
+            }
+        }
+    });
+}
+
 #[test]
 fn finkelstein1982_queries() {
     use std::fs::File;
@@ -2100,86 +2156,23 @@ fn finkelstein1982_queries() {
 
 #[test]
 fn tpc_w() {
-    use std::fs::File;
-    use std::io::Read;
-
-    // set up graph
-    let mut g = build_local("tpc_w");
-    g.migrate(|mig| {
-        let mut r = Recipe::blank(None);
-        let mut f = File::open("tests/tpc-w-queries.txt").unwrap();
-        let mut s = String::new();
-
-        // Load queries
-        f.read_to_string(&mut s).unwrap();
-        let lines: Vec<String> = s
-            .lines()
-            .filter(|l| !l.is_empty() && !l.starts_with('#'))
-            .map(|l| {
-                if !(l.ends_with('\n') || l.ends_with(';')) {
-                    String::from(l) + "\n"
-                } else {
-                    String::from(l)
-                }
-            }).collect();
-
-        // Add them one by one
-        for (_i, q) in lines.iter().enumerate() {
-            //println!("{}: {}", i, q);
-            let or = r.clone();
-            r = match r.extend(q) {
-                Ok(mut nr) => {
-                    assert!(nr.activate(mig).is_ok());
-                    nr
-                }
-                Err(e) => {
-                    println!("{:?}", e);
-                    or
-                }
-            }
-        }
-    });
+    test_queries("tpc-w", "tests/tpc-w-queries.txt", false, false, false);
 }
 
 #[test]
 fn lobsters() {
-    use std::fs::File;
-    use std::io::Read;
+    test_queries("lobsters", "tests/lobsters-schema.txt", false, false, false);
+}
 
-    // set up graph
-    let mut g = build_local_unsharded("lobsters");
-    g.migrate(|mig| {
-        let mut r = Recipe::blank(None);
-        let mut f = File::open("tests/lobsters-schema.txt").unwrap();
-        let mut s = String::new();
-
-        // Load queries
-        f.read_to_string(&mut s).unwrap();
-        let lines: Vec<String> = s
-            .lines()
-            .filter(|l| !l.is_empty() && !l.starts_with('#') && !l.starts_with("DROP TABLE"))
-            .map(|l| {
-                if !(l.ends_with('\n') || l.ends_with(';')) {
-                    String::from(l) + "\n"
-                } else {
-                    String::from(l)
-                }
-            }).collect();
-
-        // Add them one by one
-        for (_i, q) in lines.iter().enumerate() {
-            //println!("{}: {}", i, q);
-            r = match r.extend(q) {
-                Ok(mut nr) => {
-                    assert!(nr.activate(mig).is_ok());
-                    nr
-                }
-                Err(e) => {
-                    panic!("{:?}", e);
-                }
-            }
-        }
-    });
+#[test]
+fn soupy_lobsters() {
+    test_queries(
+        "soupy_lobsters",
+        "tests/soupy-lobsters-schema.txt",
+        false,
+        false,
+        false,
+    );
 }
 
 #[test]
