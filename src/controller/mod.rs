@@ -1,5 +1,5 @@
 /// Only allow processing this many inputs in a domain before we handle timer events, acks, etc.
-const FORCE_INPUT_YIELD_EVERY: usize = 128;
+const FORCE_INPUT_YIELD_EVERY: usize = 1024;
 
 use api::{ControllerDescriptor, Input};
 use async_bincode::{AsyncBincodeReader, AsyncBincodeWriter, AsyncDestination, SyncDestination};
