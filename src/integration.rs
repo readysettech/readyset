@@ -2107,7 +2107,7 @@ fn test_queries(test: &str, file: &'static str, shard: bool, reuse: bool, log: b
             }).collect();
 
         // Add them one by one
-        for (i, q) in lines.iter().enumerate() {
+        for (_i, q) in lines.iter().enumerate() {
             //println!("{}: {}", i, q);
             r = match r.extend(q) {
                 Ok(mut nr) => {
