@@ -2156,7 +2156,7 @@ fn finkelstein1982_queries() {
 
 #[test]
 fn tpc_w() {
-    test_queries("tpc-w", "tests/tpc-w-queries.txt", false, false, false);
+    test_queries("tpc-w", "tests/tpc-w-queries.txt", true, true, false);
 }
 
 #[test]
