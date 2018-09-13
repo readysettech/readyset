@@ -1287,24 +1287,17 @@ impl Future for Replica {
         let r: Result<Async<Self::Item>, failure::Error> = try {
             // FIXME: check if we should call update_state_sizes (every evict_every)
 
-            // first, try sending packets to downstream domains if they blocked before
-            // TODO: send fail == exiting?
-            self.try_flush().context("downstream flush (before)")?;
-
-            // then, try to send any acks we haven't sent yet
-            self.try_ack()?;
-
-            // then, see if there are any new connections
+            // are there are any new connections?
             if !self.try_new().context("check for new connections")? {
                 // incoming socket closed -- no more clients will arrive
                 return Ok(Async::Ready(()));
             }
 
-            // then, see if our timer has expired
+            // have any of our timers expired?
             self.try_timeout().context("check timeout")?;
 
-            // and now, finally, we see if there's new input for us
-            loop {
+            // is there any new input for us?
+            let readiness = loop {
                 let mut interrupted = false;
                 for i in 0..FORCE_INPUT_YIELD_EVERY {
                     match self.inputs.poll() {
@@ -1343,26 +1336,11 @@ impl Future for Replica {
                     }
                 }
 
-                // check if we now need to set a timeout
-                let mut timeout = None;
-                self.domain.on_event(
-                    &mut self.sendback,
-                    PollEvent::ResumePolling(&mut timeout),
-                    &mut self.outbox,
-                );
-
-                if let Some(timeout) = timeout {
-                    self.timeout = Some(tokio::timer::Delay::new(time::Instant::now() + timeout));
-
-                    // we need to poll the delay to ensure we'll get woken up
-                    self.try_timeout().context("check timeout after setting")?;
-                }
-
                 // send to downstream
                 // TODO: send fail == exiting?
                 self.try_flush().context("downstream flush (after)")?;
 
-                // and also acks
+                // send acks
                 self.try_ack()?;
 
                 if interrupted {
@@ -1370,7 +1348,24 @@ impl Future for Replica {
                     continue;
                 }
                 break Async::NotReady;
+            };
+
+            // check if we now need to set a timeout
+            let mut timeout = None;
+            self.domain.on_event(
+                &mut self.sendback,
+                PollEvent::ResumePolling(&mut timeout),
+                &mut self.outbox,
+            );
+
+            if let Some(timeout) = timeout {
+                self.timeout = Some(tokio::timer::Delay::new(time::Instant::now() + timeout));
+
+                // we need to poll the delay to ensure we'll get woken up
+                self.try_timeout().context("check timeout after setting")?;
             }
+
+            readiness
         };
 
         match r {
