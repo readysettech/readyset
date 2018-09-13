@@ -1365,9 +1365,11 @@ impl Future for Replica {
                 // and also acks
                 self.try_ack()?;
 
-                if !interrupted {
-                    break Async::NotReady;
+                if interrupted {
+                    // resume reading from our non-depleted inputs
+                    continue;
                 }
+                break Async::NotReady;
             }
         };
 
