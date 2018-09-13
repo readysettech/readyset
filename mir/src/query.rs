@@ -67,14 +67,21 @@ impl MirQuery {
         nodes
     }
 
-    pub fn optimize(mut self) -> MirQuery {
-        super::rewrite::pull_required_base_columns(&mut self);
+    pub fn optimize(mut self, table_mapping: Option<HashMap<String, String>>, sec: bool) -> MirQuery {
+        super::rewrite::pull_required_base_columns(&mut self, table_mapping, sec);
         super::optimize::optimize(self)
     }
 
     pub fn optimize_post_reuse(mut self) -> MirQuery {
         super::optimize::optimize_post_reuse(&mut self);
         self
+    }
+
+    pub fn make_universe_naming_consistent(mut self,
+                                           table_mapping: HashMap<String, String>,
+                                           base_name: String)  -> MirQuery{
+           super::rewrite::make_universe_naming_consistent(&mut self, table_mapping, base_name);
+           self
     }
 }
 

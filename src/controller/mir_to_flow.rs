@@ -14,7 +14,7 @@ use mir::node::{GroupedNodeType, MirNode, MirNodeType};
 use mir::query::{MirQuery, QueryFlowParts};
 use mir::{Column, FlowNode, MirNodeRef};
 
-pub fn mir_query_to_flow_parts(mir_query: &mut MirQuery, mig: &mut Migration) -> QueryFlowParts {
+pub fn mir_query_to_flow_parts(mir_query: &mut MirQuery, mig: &mut Migration, table_mapping: Option<HashMap<String, String>>) -> QueryFlowParts {
     use std::collections::VecDeque;
 
     let mut new_nodes = Vec::new();
@@ -30,13 +30,11 @@ pub fn mir_query_to_flow_parts(mir_query: &mut MirQuery, mig: &mut Migration) ->
     while !node_queue.is_empty() {
         let n = node_queue.pop_front().unwrap();
         assert_eq!(in_edge_counts[&n.borrow().versioned_name()], 0);
-
-        let flow_node = mir_node_to_flow_parts(&mut n.borrow_mut(), mig);
+        let flow_node = mir_node_to_flow_parts(&mut n.borrow_mut(), mig, table_mapping.clone());
         match flow_node {
             FlowNode::New(na) => new_nodes.push(na),
             FlowNode::Existing(na) => reused_nodes.push(na),
         }
-
         for child in n.borrow().children.iter() {
             let nd = child.borrow().versioned_name();
             let in_edges = if in_edge_counts.contains_key(&nd) {
@@ -52,7 +50,6 @@ pub fn mir_query_to_flow_parts(mir_query: &mut MirQuery, mig: &mut Migration) ->
             in_edge_counts.insert(nd, in_edges - 1);
         }
     }
-
     let leaf_na = mir_query
         .leaf
         .borrow()
@@ -69,7 +66,7 @@ pub fn mir_query_to_flow_parts(mir_query: &mut MirQuery, mig: &mut Migration) ->
     }
 }
 
-pub fn mir_node_to_flow_parts(mir_node: &mut MirNode, mig: &mut Migration) -> FlowNode {
+pub fn mir_node_to_flow_parts(mir_node: &mut MirNode, mig: &mut Migration, table_mapping: Option<HashMap<String,String>>) -> FlowNode {
     let name = mir_node.name.clone();
     match mir_node.flow_node {
         None => {
@@ -89,6 +86,7 @@ pub fn mir_node_to_flow_parts(mir_node: &mut MirNode, mig: &mut Migration) -> Fl
                         group_by,
                         GroupedNodeType::Aggregation(kind.clone()),
                         mig,
+                        table_mapping,
                     )
                 }
                 MirNodeType::Base {
@@ -120,6 +118,7 @@ pub fn mir_node_to_flow_parts(mir_node: &mut MirNode, mig: &mut Migration) -> Fl
                         group_by,
                         GroupedNodeType::Extremum(kind.clone()),
                         mig,
+                        table_mapping,
                     )
                 }
                 MirNodeType::Filter { ref conditions } => {
@@ -142,6 +141,7 @@ pub fn mir_node_to_flow_parts(mir_node: &mut MirNode, mig: &mut Migration) -> Fl
                         &group_cols,
                         GroupedNodeType::GroupConcat(separator.to_string()),
                         mig,
+                        table_mapping,
                     )
                 }
                 MirNodeType::Identity => {
@@ -245,20 +245,21 @@ pub fn mir_node_to_flow_parts(mir_node: &mut MirNode, mig: &mut Migration) -> Fl
                         emit,
                         mir_node.ancestors(),
                         mig,
+                        table_mapping,
                     )
                 }
                 MirNodeType::Distinct {
-                    ref group_by,
+                   ref group_by,
                 } => {
-                    assert_eq!(mir_node.ancestors.len(), 1);
-                    let parent = mir_node.ancestors[0].clone();
-                    make_distinct_node(
-                        &name,
-                        parent,
-                        mir_node.columns.as_slice(),
-                        group_by,
-                        mig,
-                    )
+                   assert_eq!(mir_node.ancestors.len(), 1);
+                   let parent = mir_node.ancestors[0].clone();
+                   make_distinct_node(
+                       &name,
+                       parent,
+                       mir_node.columns.as_slice(),
+                       group_by,
+                       mig,
+                   )
                 }
                 MirNodeType::TopK {
                     ref order,
@@ -297,7 +298,7 @@ pub fn mir_node_to_flow_parts(mir_node: &mut MirNode, mig: &mut Migration) -> Fl
                         key,
                         mig,
                     )
-                }
+                },
             };
 
             // any new flow nodes have been instantiated by now, so we replace them with
@@ -422,6 +423,7 @@ pub(crate) fn make_union_node(
     emit: &Vec<Vec<Column>>,
     ancestors: &[MirNodeRef],
     mig: &mut Migration,
+    table_mapping: Option<HashMap<String, String>>
 ) -> FlowNode {
     let column_names = column_names(columns);
     let mut emit_column_id: HashMap<NodeIndex, Vec<usize>> = HashMap::new();
@@ -432,7 +434,7 @@ pub(crate) fn make_union_node(
     for (i, n) in ancestors.clone().iter().enumerate() {
         let emit_cols = emit[i]
             .iter()
-            .map(|c| n.borrow().column_id_for_column(c))
+            .map(|c| n.borrow().column_id_for_column(c, table_mapping.clone()))
             .collect::<Vec<_>>();
 
         let ni = n.borrow().flow_node_addr().unwrap();
@@ -489,7 +491,6 @@ pub(crate) fn make_filter_node(
 ) -> FlowNode {
     let parent_na = parent.borrow().flow_node_addr().unwrap();
     let column_names = column_names(columns);
-
     let node = mig.add_ingredient(
         String::from(name),
         column_names.as_slice(),
@@ -506,6 +507,7 @@ pub(crate) fn make_grouped_node(
     group_by: &Vec<Column>,
     kind: GroupedNodeType,
     mig: &mut Migration,
+    table_mapping: Option<HashMap<String,String>>,
 ) -> FlowNode {
     assert!(group_by.len() > 0);
     assert!(
@@ -520,30 +522,32 @@ pub(crate) fn make_grouped_node(
     let parent_na = parent.borrow().flow_node_addr().unwrap();
     let column_names = column_names(columns);
 
-    let over_col_indx = parent.borrow().column_id_for_column(on);
+
+    let over_col_indx = parent.borrow().column_id_for_column(on, table_mapping.clone());
+
     let group_col_indx = group_by
         .iter()
-        .map(|c| parent.borrow().column_id_for_column(c))
+        .map(|c| parent.borrow().column_id_for_column(c, table_mapping.clone()))
         .collect::<Vec<_>>();
 
     assert!(group_col_indx.len() > 0);
 
     let na = match kind {
-        GroupedNodeType::Aggregation(agg) => mig.add_ingredient(
-            String::from(name),
-            column_names.as_slice(),
-            agg.over(parent_na, over_col_indx, group_col_indx.as_slice()),
-        ),
-        GroupedNodeType::Extremum(extr) => mig.add_ingredient(
-            String::from(name),
-            column_names.as_slice(),
-            extr.over(parent_na, over_col_indx, group_col_indx.as_slice()),
-        ),
+        GroupedNodeType::Aggregation(agg) => {
+            mig.add_ingredient(String::from(name),
+                                column_names.as_slice(),
+                                agg.over(parent_na, over_col_indx, group_col_indx.as_slice()))
+            },
+        GroupedNodeType::Extremum(extr) => {
+            mig.add_ingredient(String::from(name),
+                                column_names.as_slice(),
+                                extr.over(parent_na, over_col_indx, group_col_indx.as_slice()))
+        },
         GroupedNodeType::GroupConcat(sep) => {
             use dataflow::ops::grouped::concat::{GroupConcat, TextComponent};
-
             let gc = GroupConcat::new(parent_na, vec![TextComponent::Column(over_col_indx)], sep);
             mig.add_ingredient(String::from(name), column_names.as_slice(), gc)
+
         }
     };
     FlowNode::New(na)
@@ -686,7 +690,7 @@ pub(crate) fn make_latest_node(
 
     let group_col_indx = group_by
         .iter()
-        .map(|c| parent.borrow().column_id_for_column(c))
+        .map(|c| parent.borrow().column_id_for_column(c, None))
         .collect::<Vec<_>>();
 
     // latest doesn't support compound group by
@@ -703,7 +707,7 @@ pub(crate) fn make_latest_node(
 fn generate_projection_base(parent: &MirNodeRef, base: &ArithmeticBase) -> ProjectExpressionBase {
     match *base {
         ArithmeticBase::Column(ref column) => {
-            let column_id = parent.borrow().column_id_for_column(&Column::from(column));
+            let column_id = parent.borrow().column_id_for_column(&Column::from(column), None);
             ProjectExpressionBase::Column(column_id)
         }
         ArithmeticBase::Scalar(ref literal) => {
@@ -727,7 +731,7 @@ pub(crate) fn make_project_node(
 
     let projected_column_ids = emit
         .iter()
-        .map(|c| parent.borrow().column_id_for_column(c))
+        .map(|c| parent.borrow().column_id_for_column(c, None))
         .collect::<Vec<_>>();
 
     let (_, literal_values): (Vec<_>, Vec<_>) = literals.iter().cloned().unzip();
@@ -755,6 +759,7 @@ pub(crate) fn make_project_node(
     FlowNode::New(n)
 }
 
+
 pub(crate) fn make_distinct_node(
     name: &str,
     parent: MirNodeRef,
@@ -769,12 +774,12 @@ pub(crate) fn make_distinct_node(
         // no query parameters, so we index on the first column
         columns.clone()
             .iter()
-            .map(|c| parent.borrow().column_id_for_column(c))
+            .map(|c| parent.borrow().column_id_for_column(c, None))
             .collect::<Vec<_>>()
     } else {
         group_by
             .iter()
-            .map(|c| parent.borrow().column_id_for_column(c))
+            .map(|c| parent.borrow().column_id_for_column(c, None))
             .collect::<Vec<_>>()
     };
 
@@ -786,6 +791,7 @@ pub(crate) fn make_distinct_node(
     );
     FlowNode::New(na)
 }
+
 
 pub(crate) fn make_topk_node(
     name: &str,
@@ -807,7 +813,7 @@ pub(crate) fn make_topk_node(
 
     let group_by_indx = group_by
         .iter()
-        .map(|c| parent.borrow().column_id_for_column(c))
+        .map(|c| parent.borrow().column_id_for_column(c, None))
         .collect::<Vec<_>>();
 
     let cmp_rows = match *order {
@@ -823,7 +829,7 @@ pub(crate) fn make_topk_node(
                         OrderType::OrderAscending => OrderType::OrderDescending,
                         OrderType::OrderDescending => OrderType::OrderAscending,
                     };
-                    (parent.borrow().column_id_for_column(c), reversed_order_type)
+                    (parent.borrow().column_id_for_column(c, None), reversed_order_type)
                 }).collect();
 
             columns
@@ -858,7 +864,7 @@ pub(crate) fn materialize_leaf_node(
     if !key_cols.is_empty() {
         let key_cols: Vec<_> = key_cols
             .iter()
-            .map(|c| parent.borrow().column_id_for_column(c))
+            .map(|c| parent.borrow().column_id_for_column(c, None))
             .collect();
         mig.maintain(name, na, &key_cols[..]);
     } else {

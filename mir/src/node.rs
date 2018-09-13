@@ -10,6 +10,7 @@ use dataflow::ops::filter::FilterCondition;
 use dataflow::ops::grouped::aggregate::Aggregation as AggregationKind;
 use dataflow::ops::grouped::extremum::Extremum as ExtremumKind;
 use {FlowNode, MirNodeRef};
+use std::collections::HashMap;
 
 /// Helper enum to avoid having separate `make_aggregation_node` and `make_extremum_node` functions
 pub enum GroupedNodeType {
@@ -205,7 +206,7 @@ impl MirNode {
         self.columns.as_slice()
     }
 
-    pub fn column_id_for_column(&self, c: &Column) -> usize {
+    pub fn column_id_for_column(&self, c: &Column, table_mapping: Option<HashMap<String,String>>) -> usize {
         match self.inner {
             // if we're a base, translate to absolute column ID (taking into account deleted
             // columns). We use the column specifications here, which track a tuple of (column
@@ -227,16 +228,86 @@ impl MirNode {
                     .1
                     .expect("must have an absolute column ID on base"),
             },
-            MirNodeType::Reuse { ref node } => node.borrow().column_id_for_column(c),
+            MirNodeType::Reuse { ref node } => node.borrow().column_id_for_column(c, table_mapping.clone()),
             // otherwise, just look up in the column set
-            _ => match self.columns.iter().position(|cc| cc == c) {
+            _ =>
+            match self.columns.iter().position(|cc| cc == c) {
                 None => {
-                    panic!(
-                        "tried to look up non-existent column {:?} on node \"{}\" (columns: {:?})",
-                        c, self.name, self.columns
-                    );
-                }
-                Some(id) => id,
+                    // See if table mapping was passed in
+                    match table_mapping {
+                        // if mapping was passed in, then see if c has an associated table, and check
+                        // the mapping for a key based on this
+                        Some(map) => {
+                            match c.table.clone() {
+                                Some(table) => {
+                                    let keyed = format!("{}:{}", c.clone().name, table);
+                                    match map.get(&keyed) {
+                                        Some(ref mut t_name) => {
+
+                                            let mut ind = 0;
+                                            for self_column in &self.columns {
+                                                if self_column.name == c.name && self_column.table == Some(t_name.clone()) {
+                                                    return ind;
+                                                }
+
+                                                ind = ind + 1;
+                                            }
+                                            panic!("tried to look up non-existent column {:?} on node \"{}\" (columns: {:?})",
+                                                   c, self.name, self.columns);
+                                        },
+                                        None => {
+                                            let mut cn = c.clone().name;
+                                            match map.get(&cn) {
+                                                Some(ref mut res) => {
+                                                    let mut ind = 0;
+                                                    for self_column in &self.columns {
+                                                        if self_column.name == c.name && self_column.table == Some(res.clone()) {
+                                                            return ind;
+                                                        }
+                                                        ind = ind + 1;
+                                                    }
+                                                    panic!("tried to look up non-existent column {:?} on node \"{}\" (columns: {:?})",
+                                                           c, self.name, self.columns);
+                                                },
+                                                None => {
+                                                    panic!("alias is not in mapping table!");
+                                                }
+                                            }
+                                        }
+                                    }
+                                },
+                                None => {
+                                    let keyed = c.clone().name;
+                                    match map.get(&keyed) {
+                                        Some(ref mut t_n) => {
+                                            let mut ind = 0;
+                                            for self_column in &self.columns {
+                                                if self_column.name == c.name && self_column.table == Some(t_n.clone()) {
+                                                    return ind;
+                                                }
+                                                ind = ind + 1;
+                                            }
+                                            panic!("tried to look up non-existent column {:?} on node \"{}\" (columns: {:?})",
+                                                   c, self.name, self.columns);
+                                        },
+                                        None => {
+                                            panic!("tried to look up non-existent column {:?} on node \"{}\" (columns: {:?})",
+                                                   c, self.name, self.columns);
+                                        }
+                                    }
+                                }
+                            }
+                        },
+                        // panic if no mapping was passed in
+                        None => {
+                            panic!("tried to look up non-existent column {:?} on node \"{}\" (columns: {:?})",
+                                   c, self.name, self.columns);
+                        }
+                    }
+                },
+                Some(id) => {
+                    id
+                },
             },
         }
     }

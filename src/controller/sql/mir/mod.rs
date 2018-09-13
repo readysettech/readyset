@@ -207,7 +207,7 @@ impl SqlToMirConverter {
 
         let absolute_column_ids: Vec<usize> = columns
             .iter()
-            .map(|c| n.borrow().column_id_for_column(c))
+            .map(|c| n.borrow().column_id_for_column(c, None))
             .collect();
         let max_column_id = *absolute_column_ids.iter().max().unwrap();
         let num_columns = max(columns.len(), max_column_id + 1);
@@ -475,8 +475,8 @@ impl SqlToMirConverter {
         qg: &QueryGraph,
         has_leaf: bool,
         universe: UniverseId,
-    ) -> MirQuery {
-        let nodes = self.make_nodes_for_selection(&name, sq, qg, has_leaf, universe);
+    ) -> (bool, MirQuery, Option<HashMap<String, String>>, String) {
+        let (sec, nodes, table_mapping, base_name) = self.make_nodes_for_selection(&name, sq, qg, has_leaf, universe);
         let mut roots = Vec::new();
         let mut leaves = Vec::new();
         for mn in nodes.into_iter() {
@@ -497,24 +497,25 @@ impl SqlToMirConverter {
                 leaves.push(mn);
             }
         }
-
         assert_eq!(
             leaves.len(),
             1,
             "expected just one leaf! leaves: {:?}",
             leaves
         );
-
         let leaf = leaves.into_iter().next().unwrap();
         self.current
             .insert(String::from(leaf.borrow().name()), self.schema_version);
 
+        (sec,
         MirQuery {
-            name: String::from(name),
-            roots: roots,
-            leaf: leaf,
-        }
+        name: String::from(name),
+        roots: roots,
+        leaf: leaf},
+        table_mapping,
+        base_name)
     }
+
 
     pub fn upgrade_schema(&mut self, new_version: usize) {
         assert!(new_version > self.schema_version);
@@ -771,6 +772,108 @@ impl SqlToMirConverter {
             vec![],
         )
     }
+
+
+    // Creates union node for universe creation - returns the resulting node ref and a universe table mapping
+    fn make_union_node_sec(&self, name: &str, ancestors: &Vec<MirNodeRef>) -> (MirNodeRef, Option<HashMap<String, String>>) {
+        let mut emit: Vec<Vec<Column>> = Vec::new();
+        assert!(ancestors.len() > 1, "union must have more than 1 ancestors");
+
+        let ucols: Vec<Column> = ancestors
+            .first()
+            .unwrap()
+            .borrow()
+            .columns()
+            .iter()
+            .cloned()
+            .collect();
+        let num_ucols = ucols.len();
+
+        let mut selected_cols = HashSet::new();
+        let mut selected_col_objects = HashSet::new();
+        for c in ucols {
+            if ancestors
+                .iter()
+                .all(|a| a.borrow().columns().iter().any(|ac| *ac.name == c.name))
+            {
+                selected_cols.insert(c.name.clone());
+                selected_col_objects.insert(c.clone());
+            }
+        }
+
+        let mut precedent_table = " ".to_string();
+        for col in selected_col_objects.clone() {
+            match &col.table {
+                Some(x) => {
+                            debug!(self.log, "Selected column {} from table {} for UNION.", col.name, x);
+                            precedent_table = col.table.unwrap();
+                        },
+                None => {
+                            debug!(self.log, "Selected column {} with no table name for UNION.", col.name);
+                            precedent_table = "None".to_string();
+                        },
+            }
+        }
+
+        assert_eq!(
+            num_ucols,
+            selected_cols.len(),
+            "union drops ancestor columns"
+        );
+
+        let mut universe_table_mapping : Option<HashMap<String,String>> = None;
+        let mut table_mapping = HashMap::new();
+
+        for ancestor in ancestors.iter() {
+            let mut acols: Vec<Column> = Vec::new();
+            for ac in ancestor.borrow().columns() {
+                if selected_cols.contains(&ac.name)
+                    && acols.iter().find(|c| ac.name == *c.name).is_none()
+                {
+                    acols.push(ac.clone());
+                }
+            }
+
+            for col in acols.clone() {
+                match col.table {
+                    Some(x) => {
+                                debug!(self.log, "About to push column {} from table {} onto emit.", col.name, x);
+                                let col_n: String = col.name.to_owned();
+                                let tab_n: String = x.to_owned();
+                                let keyed = format!("{}:{}", col_n, tab_n);
+
+                                table_mapping.insert(keyed.clone(), precedent_table.to_string());
+                                universe_table_mapping = Some(table_mapping.clone());
+                            },
+                    None => {
+                        debug!(self.log, "About to push column {} onto emit.", col.name);
+                        table_mapping.insert(col.clone().name.to_owned(), precedent_table.to_string());
+                        universe_table_mapping = Some(table_mapping.clone());
+                    }
+                }
+            }
+
+            emit.push(acols.clone());
+        }
+
+
+        assert!(
+            emit.iter().all(|e| e.len() == selected_cols.len()),
+            "all ancestors columns must have the same size, but got emit: {:?}, selected: {:?}",
+            emit,
+            selected_cols
+        );
+
+        (MirNode::new(
+            name,
+            self.schema_version,
+            emit.first().unwrap().clone(),
+            MirNodeType::Union { emit },
+            ancestors.clone(),
+            vec![],
+        ), universe_table_mapping)
+    }
+
 
     fn make_union_from_same_base(
         &self,
@@ -1332,460 +1435,301 @@ impl SqlToMirConverter {
     }
 
     /// Returns list of nodes added
-    fn make_nodes_for_selection(
-        &mut self,
-        name: &str,
-        st: &SelectStatement,
-        qg: &QueryGraph,
-        has_leaf: bool,
-        universe: UniverseId,
-    ) -> Vec<MirNodeRef> {
-        use crate::controller::sql::mir::grouped::make_grouped;
-        use crate::controller::sql::mir::grouped::make_predicates_above_grouped;
-        use crate::controller::sql::mir::join::make_joins;
-        use std::collections::HashMap;
+    /// Returns list of nodes added
+fn make_nodes_for_selection(
+    &mut self,
+    name: &str,
+    st: &SelectStatement,
+    qg: &QueryGraph,
+    has_leaf: bool,
+    universe: UniverseId,
+) -> (bool, Vec<MirNodeRef>, Option<HashMap<String, String>>, String) {
+    use crate::controller::sql::mir::grouped::make_grouped;
+    use crate::controller::sql::mir::grouped::make_predicates_above_grouped;
+    use crate::controller::sql::mir::join::make_joins;
+    use std::collections::HashMap;
 
-        let mut nodes_added: Vec<MirNodeRef>;
-        let mut new_node_count = 0;
+    let mut nodes_added: Vec<MirNodeRef>;
+    let mut new_node_count = 0;
 
-        let (uid, _) = universe.clone();
+    let (uid, _) = universe.clone();
 
-        let uformat = if uid == "global".into() {
-            String::from("")
-        } else {
-            format!("_u{}", uid.to_string())
+    let uformat = if uid == "global".into() {
+        String::from("")
+    } else {
+        format!("_u{}", uid.to_string())
+    };
+
+    let mut table_mapping = None;
+    let mut sec_round = false;
+    let mut union_base_name = " ".to_string();
+
+    // Canonical operator order: B-J-G-F-P-R
+    // (Base, Join, GroupBy, Filter, Project, Reader)
+    {
+        let mut node_for_rel: HashMap<&str, MirNodeRef> = HashMap::default();
+
+        // 0. Base nodes (always reused)
+        let mut base_nodes: Vec<MirNodeRef> = Vec::new();
+        let mut sorted_rels: Vec<&str> = qg.relations.keys().map(String::as_str).collect();
+        sorted_rels.sort();
+        for rel in &sorted_rels {
+            if *rel == "computed_columns" {
+                continue;
+            }
+
+            let base_for_rel = self.get_view(rel);
+
+            base_nodes.push(base_for_rel.clone());
+            node_for_rel.insert(*rel, base_for_rel);
+        }
+
+        let join_nodes = make_joins(
+            self,
+            &format!("q_{:x}{}", qg.signature().hash, uformat),
+            qg,
+            &node_for_rel,
+            new_node_count,
+        );
+
+        new_node_count += join_nodes.len();
+
+        let mut prev_node = match join_nodes.last() {
+            Some(n) => Some(n.clone()),
+            None => {
+                assert_eq!(base_nodes.len(), 1);
+                Some(base_nodes.last().unwrap().clone())
+            }
         };
 
-        // Canonical operator order: B-J-G-F-P-R
-        // (Base, Join, GroupBy, Filter, Project, Reader)
-        {
-            let mut node_for_rel: HashMap<&str, MirNodeRef> = HashMap::default();
+        // 2. Get columns used by each predicate. This will be used to check
+        // if we need to reorder predicates before group_by nodes.
+        let mut column_to_predicates: HashMap<Column, Vec<&ConditionExpression>> =
+            HashMap::new();
 
-            // 0. Base nodes (always reused)
-            let mut base_nodes: Vec<MirNodeRef> = Vec::new();
-            let mut sorted_rels: Vec<&str> = qg.relations.keys().map(String::as_str).collect();
-            sorted_rels.sort();
-            for rel in &sorted_rels {
-                if *rel == "computed_columns" {
-                    continue;
-                }
-
-                let base_for_rel = self.get_view(rel);
-
-                base_nodes.push(base_for_rel.clone());
-                node_for_rel.insert(*rel, base_for_rel);
+        for rel in &sorted_rels {
+            if *rel == "computed_columns" {
+                continue;
             }
 
-            let join_nodes = make_joins(
+            let qgn = &qg.relations[*rel];
+            for pred in &qgn.predicates {
+                let cols = predicate_columns(pred);
+
+                for col in cols {
+                    column_to_predicates.entry(col).or_default().push(pred);
+                }
+            }
+
+            for pred in &qg.global_predicates {
+                let cols = predicate_columns(pred);
+
+                for col in cols {
+                    column_to_predicates.entry(col).or_default().push(pred);
+                }
+            }
+        }
+
+        // 2a. Reorder some predicates before group by nodes
+        // FIXME(malte): This doesn't currently work correctly with arithmetic and literal
+        // projections that form input to these filters -- these need to be lifted above them
+        // (and above the aggregations).
+        let (created_predicates, predicates_above_group_by_nodes) =
+            make_predicates_above_grouped(
                 self,
                 &format!("q_{:x}{}", qg.signature().hash, uformat),
-                qg,
+                &qg,
                 &node_for_rel,
                 new_node_count,
+                &column_to_predicates,
+                &mut prev_node,
             );
 
-            new_node_count += join_nodes.len();
+        new_node_count += predicates_above_group_by_nodes.len();
 
-            let mut prev_node = match join_nodes.last() {
-                Some(n) => Some(n.clone()),
-                None => {
-                    assert_eq!(base_nodes.len(), 1);
-                    Some(base_nodes.last().unwrap().clone())
-                }
-            };
+        // 3. Create security boundary
+        use crate::controller::sql::mir::security::SecurityBoundary;
+        let (last_policy_nodes, policy_nodes) =
+            self.make_security_boundary(universe.clone(), &mut node_for_rel, prev_node.clone());
 
-            // 2. Get columns used by each predicate. This will be used to check
-            // if we need to reorder predicates before group_by nodes.
-            let mut column_to_predicates: HashMap<Column, Vec<&ConditionExpression>> =
-                HashMap::new();
+        let mut ancestors =
+            self.universe
+                .member_of
+                .iter()
+                .fold(vec![], |mut acc, (gname, gids)| {
+                    let group_views: Vec<MirNodeRef> = gids
+                        .iter()
+                        .filter_map(|gid| {
+                            // This is a little annoying, but because of the way we name universe queries,
+                            // we need to strip the view name of the _u{uid} suffix
+                            let root = name.trim_right_matches(&uformat);
+                            if root == name {
+                                None
+                            } else {
+                                let view_name = format!(
+                                    "{}_{}{}",
+                                    root,
+                                    gname.to_string(),
+                                    gid.to_string()
+                                );
+                                Some(self.get_view(&view_name))
+                            }
+                        }).collect();
 
+                    trace!(self.log, "group views {:?}", group_views);
+                    acc.extend(group_views);
+                    acc
+                });
+
+        nodes_added = base_nodes
+            .into_iter()
+            .chain(join_nodes.into_iter())
+            .chain(predicates_above_group_by_nodes.into_iter())
+            .chain(policy_nodes.into_iter())
+            .chain(ancestors.clone().into_iter())
+            .collect();
+
+        // For each policy chain, create a version of the query
+        // All query versions, including group queries will be reconciled at the end
+        for n in last_policy_nodes.iter() {
+            prev_node = Some(n.clone());
+
+            // 3. Add function and grouped nodes
+            let mut func_nodes: Vec<MirNodeRef> = make_grouped(
+                self,
+                &format!("q_{:x}{}", qg.signature().hash, uformat),
+                &qg,
+                &node_for_rel,
+                new_node_count,
+                &mut prev_node,
+                false,
+            );
+
+            new_node_count += func_nodes.len();
+
+            let mut predicate_nodes = Vec::new();
+            // 4. Generate the necessary filter nodes for local predicates associated with each
+            // relation node in the query graph.
+            //
+            // Need to iterate over relations in a deterministic order, as otherwise nodes will be
+            // added in a different order every time, which will yield different node identifiers
+            // and make it difficult for applications to check what's going on.
             for rel in &sorted_rels {
+                let qgn = &qg.relations[*rel];
+                // we've already handled computed columns
                 if *rel == "computed_columns" {
                     continue;
                 }
 
-                let qgn = &qg.relations[*rel];
-                for pred in &qgn.predicates {
-                    let cols = predicate_columns(pred);
+                // the following conditional is required to avoid "empty" nodes (without any
+                // projected columns) that are required as inputs to joins
+                if !qgn.predicates.is_empty() {
+                    // add a predicate chain for each query graph node's predicates
+                    for (i, ref p) in qgn.predicates.iter().enumerate() {
+                        if created_predicates.contains(p) {
+                            continue;
+                        }
 
-                    for col in cols {
-                        column_to_predicates.entry(col).or_default().push(pred);
-                    }
-                }
+                        let parent = match prev_node {
+                            None => node_for_rel[rel].clone(),
+                            Some(pn) => pn,
+                        };
 
-                for pred in &qg.global_predicates {
-                    let cols = predicate_columns(pred);
+                        let fns = self.make_predicate_nodes(
+                            &format!(
+                                "q_{:x}_n{}_p{}{}",
+                                qg.signature().hash,
+                                new_node_count,
+                                i,
+                                uformat
+                            ),
+                            parent,
+                            p,
+                            0,
+                        );
 
-                    for col in cols {
-                        column_to_predicates.entry(col).or_default().push(pred);
+                        assert!(fns.len() > 0);
+                        new_node_count += fns.len();
+                        prev_node = Some(fns.iter().last().unwrap().clone());
+                        predicate_nodes.extend(fns);
                     }
                 }
             }
 
-            // 2a. Reorder some predicates before group by nodes
-            // FIXME(malte): This doesn't currently work correctly with arithmetic and literal
-            // projections that form input to these filters -- these need to be lifted above them
-            // (and above the aggregations).
-            let (created_predicates, predicates_above_group_by_nodes) =
-                make_predicates_above_grouped(
-                    self,
-                    &format!("q_{:x}{}", qg.signature().hash, uformat),
-                    &qg,
-                    &node_for_rel,
-                    new_node_count,
-                    &column_to_predicates,
-                    &mut prev_node,
-                );
+            let num_local_predicates = predicate_nodes.len();
 
-            new_node_count += predicates_above_group_by_nodes.len();
+            // 5. Determine literals and arithmetic expressions that global predicates depend
+            //    on and add them here; remembering that we've already added them-
+            if let Some(projected) =
+                self.make_value_project_node(&qg, prev_node.clone(), new_node_count, &uformat)
+            {
+                new_node_count += 1;
+                nodes_added.push(projected.clone());
+                prev_node = Some(projected);
+            }
 
-            // 3. Create security boundary
-            use crate::controller::sql::mir::security::SecurityBoundary;
-            let (last_policy_nodes, policy_nodes) =
-                self.make_security_boundary(universe.clone(), &mut node_for_rel, prev_node.clone());
-
-            let mut ancestors =
-                self.universe
-                    .member_of
-                    .iter()
-                    .fold(vec![], |mut acc, (gname, gids)| {
-                        let group_views: Vec<MirNodeRef> = gids
-                            .iter()
-                            .filter_map(|gid| {
-                                // This is a little annoying, but because of the way we name universe queries,
-                                // we need to strip the view name of the _u{uid} suffix
-                                let root = name.trim_right_matches(&uformat);
-                                if root == name {
-                                    None
-                                } else {
-                                    let view_name = format!(
-                                        "{}_{}{}",
-                                        root,
-                                        gname.to_string(),
-                                        gid.to_string()
-                                    );
-                                    Some(self.get_view(&view_name))
-                                }
-                            }).collect();
-
-                        trace!(self.log, "group views {:?}", group_views);
-                        acc.extend(group_views);
-                        acc
-                    });
-
-            nodes_added = base_nodes
-                .into_iter()
-                .chain(join_nodes.into_iter())
-                .chain(predicates_above_group_by_nodes.into_iter())
-                .chain(policy_nodes.into_iter())
-                .chain(ancestors.clone().into_iter())
-                .collect();
-
-            // For each policy chain, create a version of the query
-            // All query versions, including group queries will be reconciled at the end
-            for n in last_policy_nodes.iter() {
-                prev_node = Some(n.clone());
-
-                // 3. Add function and grouped nodes
-                let mut func_nodes: Vec<MirNodeRef> = make_grouped(
-                    self,
-                    &format!("q_{:x}{}", qg.signature().hash, uformat),
-                    &qg,
-                    &node_for_rel,
-                    new_node_count,
-                    &mut prev_node,
-                    false,
-                );
-
-                new_node_count += func_nodes.len();
-
-                let mut predicate_nodes = Vec::new();
-                // 4. Generate the necessary filter nodes for local predicates associated with each
-                // relation node in the query graph.
-                //
-                // Need to iterate over relations in a deterministic order, as otherwise nodes will be
-                // added in a different order every time, which will yield different node identifiers
-                // and make it difficult for applications to check what's going on.
-                for rel in &sorted_rels {
-                    let qgn = &qg.relations[*rel];
-                    // we've already handled computed columns
-                    if *rel == "computed_columns" {
-                        continue;
-                    }
-
-                    // the following conditional is required to avoid "empty" nodes (without any
-                    // projected columns) that are required as inputs to joins
-                    if !qgn.predicates.is_empty() {
-                        // add a predicate chain for each query graph node's predicates
-                        for (i, ref p) in qgn.predicates.iter().enumerate() {
-                            if created_predicates.contains(p) {
-                                continue;
-                            }
-
-                            let parent = match prev_node {
-                                None => node_for_rel[rel].clone(),
-                                Some(pn) => pn,
-                            };
-
-                            let fns = self.make_predicate_nodes(
-                                &format!(
-                                    "q_{:x}_n{}_p{}{}",
-                                    qg.signature().hash,
-                                    new_node_count,
-                                    i,
-                                    uformat
-                                ),
-                                parent,
-                                p,
-                                0,
-                            );
-
-                            assert!(fns.len() > 0);
-                            new_node_count += fns.len();
-                            prev_node = Some(fns.iter().last().unwrap().clone());
-                            predicate_nodes.extend(fns);
-                        }
-                    }
+            // 5. Global predicates
+            for (i, ref p) in qg.global_predicates.iter().enumerate() {
+                if created_predicates.contains(p) {
+                    continue;
                 }
 
-                let num_local_predicates = predicate_nodes.len();
-
-                // 5. Determine literals and arithmetic expressions that global predicates depend
-                //    on and add them here; remembering that we've already added them-
-                if let Some(projected) =
-                    self.make_value_project_node(&qg, prev_node.clone(), new_node_count, &uformat)
-                {
-                    new_node_count += 1;
-                    nodes_added.push(projected.clone());
-                    prev_node = Some(projected);
-                }
-
-                // 5. Global predicates
-                for (i, ref p) in qg.global_predicates.iter().enumerate() {
-                    if created_predicates.contains(p) {
-                        continue;
-                    }
-
-                    let parent = match prev_node {
-                        None => unimplemented!(),
-                        Some(pn) => pn,
-                    };
-
-                    let fns = self.make_predicate_nodes(
-                        &format!(
-                            "q_{:x}_n{}_{}{}",
-                            qg.signature().hash,
-                            new_node_count,
-                            num_local_predicates + i,
-                            uformat,
-                        ),
-                        parent,
-                        p,
-                        0,
-                    );
-
-                    assert!(fns.len() > 0);
-                    new_node_count += fns.len();
-                    prev_node = Some(fns.iter().last().unwrap().clone());
-                    predicate_nodes.extend(fns);
-                }
-
-                // 6. Get the final node
-                let mut final_node: MirNodeRef = if prev_node.is_some() {
-                    prev_node.unwrap().clone()
-                } else {
-                    // no join, filter, or function node --> base node is parent
-                    assert_eq!(sorted_rels.len(), 1);
-                    node_for_rel[sorted_rels.last().unwrap()].clone()
+                let parent = match prev_node {
+                    None => unimplemented!(),
+                    Some(pn) => pn,
                 };
 
-                // 7. Potentially insert TopK node below the final node
-                // XXX(malte): this adds a bogokey if there are no parameter columns to do the TopK
-                // over, but we could end up in a stick place if we reconcile/combine multiple
-                // queries (due to security universes or due to compound select queries) that do
-                // not all have the bogokey!
-                if let Some(ref limit) = st.limit {
-                    let group_by = if qg.parameters().is_empty() {
-                        // need to add another projection to introduce a bogokey to group by
-                        let cols: Vec<_> = final_node.borrow().columns().iter().cloned().collect();
-                        let table =
-                            format!("q_{:x}_n{}{}", qg.signature().hash, new_node_count, uformat);
-                        let bogo_project = self.make_project_node(
-                            &table,
-                            final_node.clone(),
-                            cols.iter().collect(),
-                            vec![],
-                            vec![("bogokey".into(), DataType::from(0 as i32))],
-                            false,
-                        );
-                        new_node_count += 1;
-                        nodes_added.push(bogo_project.clone());
-                        final_node = bogo_project;
-
-                        vec![Column::new(None, "bogokey")]
-                    } else {
-                        qg.parameters()
-                            .into_iter()
-                            .map(|c| Column::from(c))
-                            .collect()
-                    };
-
-                    let topk_node = self.make_topk_node(
-                        &format!("q_{:x}_n{}{}", qg.signature().hash, new_node_count, uformat),
-                        final_node,
-                        group_by.iter().collect(),
-                        &st.order,
-                        limit,
-                    );
-                    func_nodes.push(topk_node.clone());
-                    final_node = topk_node;
-                    new_node_count += 1;
-                }
-
-                if st.distinct {
-                    let group_by: Vec<Column> = qg
-                        .parameters()
-                        .into_iter()
-                        .map(|col| Column::from(col))
-                        .collect();
-
-                    let node = self.make_distinct_node(
-                        &format!("q_{:x}_n{}{}", qg.signature().hash, new_node_count, uformat),
-                        final_node,
-                        group_by.iter().collect(),
-                    );
-                    func_nodes.push(node.clone());
-                    final_node = node;
-                    new_node_count += 1;
-                }
-
-                // we're now done with the query, so remember all the nodes we've added so far
-                nodes_added.extend(func_nodes);
-                nodes_added.extend(predicate_nodes);
-
-                ancestors.push(final_node);
-            }
-
-            let final_node = if ancestors.len() > 1 {
-                // If we have multiple queries, reconcile them.
-                let nodes = self.reconcile(
-                    &format!("q_{:x}{}", qg.signature().hash, uformat),
-                    &qg,
-                    &ancestors,
-                    new_node_count,
+                let fns = self.make_predicate_nodes(
+                    &format!(
+                        "q_{:x}_n{}_{}{}",
+                        qg.signature().hash,
+                        new_node_count,
+                        num_local_predicates + i,
+                        uformat,
+                    ),
+                    parent,
+                    p,
+                    0,
                 );
-                new_node_count += nodes.len();
-                nodes_added.extend(nodes.clone());
 
-                nodes.last().unwrap().clone()
-            } else {
-                ancestors.last().unwrap().clone()
-            };
-
-            let final_node_cols: Vec<Column> =
-                final_node.borrow().columns().iter().cloned().collect();
-            // 8. Generate leaf views that expose the query result
-            let mut projected_columns: Vec<Column> = if universe.1.is_none() {
-                qg.columns
-                    .iter()
-                    .filter_map(|oc| match *oc {
-                        OutputColumn::Arithmetic(_) => None,
-                        OutputColumn::Data(ref c) => Some(Column::from(c)),
-                        OutputColumn::Literal(_) => None,
-                    }).collect()
-            } else {
-                // If we are creating a query for a group universe, we project
-                // all columns in the final node. When a user universe that
-                // belongs to this group, the proper projection and leaf node
-                // will be added.
-                final_node_cols.iter().cloned().collect()
-            };
-
-            for pc in qg.parameters() {
-                let pc = Column::from(pc);
-                if !projected_columns.contains(&pc) {
-                    projected_columns.push(pc);
-                }
+                assert!(fns.len() > 0);
+                new_node_count += fns.len();
+                prev_node = Some(fns.iter().last().unwrap().clone());
+                predicate_nodes.extend(fns);
             }
 
-            // We may already have added some of the arithmetic and literal columns
-            let (_, already_computed): (Vec<_>, Vec<_>) =
-                value_columns_needed_for_predicates(&qg.columns, &qg.global_predicates)
-                    .into_iter()
-                    .unzip();
-            let projected_arithmetic: Vec<(String, ArithmeticExpression)> = qg
-                .columns
-                .iter()
-                .filter_map(|oc| match *oc {
-                    OutputColumn::Arithmetic(ref ac) => {
-                        if !already_computed.contains(oc) {
-                            Some((ac.name.clone(), ac.expression.clone()))
-                        } else {
-                            projected_columns.push(Column::new(None, &ac.name));
-                            None
-                        }
-                    }
-                    OutputColumn::Data(_) => None,
-                    OutputColumn::Literal(_) => None,
-                }).collect();
-            let mut projected_literals: Vec<(String, DataType)> = qg
-                .columns
-                .iter()
-                .filter_map(|oc| match *oc {
-                    OutputColumn::Arithmetic(_) => None,
-                    OutputColumn::Data(_) => None,
-                    OutputColumn::Literal(ref lc) => {
-                        if !already_computed.contains(oc) {
-                            Some((lc.name.clone(), DataType::from(&lc.value)))
-                        } else {
-                            projected_columns.push(Column::new(None, &lc.name));
-                            None
-                        }
-                    }
-                }).collect();
-
-            // if this query does not have any parameters, we must add a bogokey
-            let has_bogokey = if has_leaf && qg.parameters().is_empty() {
-                // only add the bogokey if we haven't already added it prior to a TopK above
-                if !projected_columns.contains(&Column::new(None, "bogokey")) {
-                    projected_literals.push(("bogokey".into(), DataType::from(0 as i32)));
-                }
-                true
+            // 6. Get the final node
+            let mut final_node: MirNodeRef = if prev_node.is_some() {
+                prev_node.unwrap().clone()
             } else {
-                false
+                // no join, filter, or function node --> base node is parent
+                assert_eq!(sorted_rels.len(), 1);
+                node_for_rel[sorted_rels.last().unwrap()].clone()
             };
 
-            let ident = if has_leaf {
-                format!("q_{:x}_n{}{}", qg.signature().hash, new_node_count, uformat)
-            } else {
-                String::from(name)
-            };
+            // 7. Potentially insert TopK node below the final node
+            // XXX(malte): this adds a bogokey if there are no parameter columns to do the TopK
+            // over, but we could end up in a stick place if we reconcile/combine multiple
+            // queries (due to security universes or due to compound select queries) that do
+            // not all have the bogokey!
+            if let Some(ref limit) = st.limit {
+                let group_by = if qg.parameters().is_empty() {
+                    // need to add another projection to introduce a bogokey to group by
+                    let cols: Vec<_> = final_node.borrow().columns().iter().cloned().collect();
+                    let table =
+                        format!("q_{:x}_n{}{}", qg.signature().hash, new_node_count, uformat);
+                    let bogo_project = self.make_project_node(
+                        &table,
+                        final_node.clone(),
+                        cols.iter().collect(),
+                        vec![],
+                        vec![("bogokey".into(), DataType::from(0 as i32))],
+                        false,
+                    );
+                    new_node_count += 1;
+                    nodes_added.push(bogo_project.clone());
+                    final_node = bogo_project;
 
-            let leaf_project_node = self.make_project_node(
-                &ident,
-                final_node,
-                projected_columns.iter().collect(),
-                projected_arithmetic,
-                projected_literals,
-                !has_leaf,
-            );
-
-            nodes_added.push(leaf_project_node.clone());
-
-            if has_leaf {
-                // We are supposed to add a `MaterializedLeaf` node keyed on the query
-                // parameters. For purely internal views (e.g., subqueries), this is not set.
-                let columns = leaf_project_node
-                    .borrow()
-                    .columns()
-                    .iter()
-                    .cloned()
-                    .map(|mut c| {
-                        sanitize_leaf_column(&mut c, name);
-                        c
-                    }).collect();
-
-                let query_params = if has_bogokey {
                     vec![Column::new(None, "bogokey")]
                 } else {
                     qg.parameters()
@@ -1794,27 +1738,185 @@ impl SqlToMirConverter {
                         .collect()
                 };
 
-                let leaf_node = MirNode::new(
-                    name,
-                    self.schema_version,
-                    columns,
-                    MirNodeType::Leaf {
-                        node: leaf_project_node.clone(),
-                        keys: query_params,
-                    },
-                    vec![leaf_project_node.clone()],
-                    vec![],
+                let topk_node = self.make_topk_node(
+                    &format!("q_{:x}_n{}{}", qg.signature().hash, new_node_count, uformat),
+                    final_node,
+                    group_by.iter().collect(),
+                    &st.order,
+                    limit,
                 );
-                nodes_added.push(leaf_node);
+                func_nodes.push(topk_node.clone());
+                final_node = topk_node;
+                new_node_count += 1;
             }
 
-            debug!(
-                self.log,
-                "Added final MIR node for query named \"{}\"", name
-            );
+            // we're now done with the query, so remember all the nodes we've added so far
+            nodes_added.extend(func_nodes);
+            nodes_added.extend(predicate_nodes);
+
+            ancestors.push(final_node);
         }
 
-        // finally, we output all the nodes we generated
-        nodes_added
+        let final_node = if ancestors.len() > 1 {
+            // If we have multiple queries, reconcile them.
+            sec_round = true;
+            if uid != "global".into() {
+                sec_round = true;
+            }
+
+            let (nodes, tables, union_base_node_name) = self.reconcile(
+                &format!("q_{:x}{}", qg.signature().hash, uformat),
+                &qg,
+                &ancestors,
+                new_node_count,
+                sec_round
+            );
+
+            if sec_round {
+                table_mapping = tables;
+                union_base_name = union_base_node_name;
+            }
+
+            new_node_count += nodes.len();
+            nodes_added.extend(nodes.clone());
+            nodes.last().unwrap().clone()
+
+        } else {
+            ancestors.last().unwrap().clone()
+        };
+
+        let final_node_cols: Vec<Column> =
+            final_node.borrow().columns().iter().cloned().collect();
+        // 8. Generate leaf views that expose the query result
+        let mut projected_columns: Vec<Column> = if universe.1.is_none() {
+            qg.columns
+                .iter()
+                .filter_map(|oc| match *oc {
+                    OutputColumn::Arithmetic(_) => None,
+                    OutputColumn::Data(ref c) => Some(Column::from(c)),
+                    OutputColumn::Literal(_) => None,
+                }).collect()
+        } else {
+            // If we are creating a query for a group universe, we project
+            // all columns in the final node. When a user universe that
+            // belongs to this group, the proper projection and leaf node
+            // will be added.
+            final_node_cols.iter().cloned().collect()
+        };
+
+        for pc in qg.parameters() {
+            let pc = Column::from(pc);
+            if !projected_columns.contains(&pc) {
+                projected_columns.push(pc);
+            }
+        }
+
+        // We may already have added some of the arithmetic and literal columns
+        let (_, already_computed): (Vec<_>, Vec<_>) =
+            value_columns_needed_for_predicates(&qg.columns, &qg.global_predicates)
+                .into_iter()
+                .unzip();
+        let projected_arithmetic: Vec<(String, ArithmeticExpression)> = qg
+            .columns
+            .iter()
+            .filter_map(|oc| match *oc {
+                OutputColumn::Arithmetic(ref ac) => {
+                    if !already_computed.contains(oc) {
+                        Some((ac.name.clone(), ac.expression.clone()))
+                    } else {
+                        projected_columns.push(Column::new(None, &ac.name));
+                        None
+                    }
+                }
+                OutputColumn::Data(_) => None,
+                OutputColumn::Literal(_) => None,
+            }).collect();
+        let mut projected_literals: Vec<(String, DataType)> = qg
+            .columns
+            .iter()
+            .filter_map(|oc| match *oc {
+                OutputColumn::Arithmetic(_) => None,
+                OutputColumn::Data(_) => None,
+                OutputColumn::Literal(ref lc) => {
+                    if !already_computed.contains(oc) {
+                        Some((lc.name.clone(), DataType::from(&lc.value)))
+                    } else {
+                        projected_columns.push(Column::new(None, &lc.name));
+                        None
+                    }
+                }
+            }).collect();
+
+        // if this query does not have any parameters, we must add a bogokey
+        let has_bogokey = if has_leaf && qg.parameters().is_empty() {
+            // only add the bogokey if we haven't already added it prior to a TopK above
+            if !projected_columns.contains(&Column::new(None, "bogokey")) {
+                projected_literals.push(("bogokey".into(), DataType::from(0 as i32)));
+            }
+            true
+        } else {
+            false
+        };
+
+        let ident = if has_leaf {
+            format!("q_{:x}_n{}{}", qg.signature().hash, new_node_count, uformat)
+        } else {
+            String::from(name)
+        };
+
+        let leaf_project_node = self.make_project_node(
+            &ident,
+            final_node,
+            projected_columns.iter().collect(),
+            projected_arithmetic,
+            projected_literals,
+            !has_leaf,
+        );
+
+        nodes_added.push(leaf_project_node.clone());
+
+        if has_leaf {
+            // We are supposed to add a `MaterializedLeaf` node keyed on the query
+            // parameters. For purely internal views (e.g., subqueries), this is not set.
+            let columns = leaf_project_node
+                .borrow()
+                .columns()
+                .iter()
+                .cloned()
+                .map(|mut c| {
+                    sanitize_leaf_column(&mut c, name);
+                    c
+                }).collect();
+
+            let query_params = if has_bogokey {
+                vec![Column::new(None, "bogokey")]
+            } else {
+                qg.parameters()
+                    .into_iter()
+                    .map(|c| Column::from(c))
+                    .collect()
+            };
+
+            let leaf_node = MirNode::new(
+                name,
+                self.schema_version,
+                columns,
+                MirNodeType::Leaf {
+                    node: leaf_project_node.clone(),
+                    keys: query_params,
+                },
+                vec![leaf_project_node.clone()],
+                vec![],
+            );
+            nodes_added.push(leaf_node);
+        }
+
+        debug!(
+            self.log,
+            "Added final MIR node for query named \"{}\"", name
+        );
     }
+    // finally, we output all the nodes we generated
+    (sec_round, nodes_added, table_mapping, union_base_name)
+}
 }

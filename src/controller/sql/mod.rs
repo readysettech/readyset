@@ -406,7 +406,7 @@ impl SqlIncorporator {
 
         // push it into the flow graph using the migration in `mig`, and obtain `QueryFlowParts`.
         // Note that we don't need to optimize the MIR here, because the query is trivial.
-        let qfp = mir_query_to_flow_parts(&mut mir, &mut mig);
+        let qfp = mir_query_to_flow_parts(&mut mir, &mut mig, None);
 
         self.register_query(query_name, None, &mir, mig.universe());
 
@@ -427,7 +427,7 @@ impl SqlIncorporator {
         // no optimization, because standalone base nodes can't be optimized
 
         // push it into the flow graph using the migration in `mig`, and obtain `QueryFlowParts`
-        let qfp = mir_query_to_flow_parts(&mut mir, &mut mig);
+        let qfp = mir_query_to_flow_parts(&mut mir, &mut mig, None);
 
         // remember the schema in case we need it later
         // on base table schema change, we will overwrite the existing schema here.
@@ -470,7 +470,7 @@ impl SqlIncorporator {
             is_leaf,
         );
 
-        let qfp = mir_query_to_flow_parts(&mut combined_mir_query, &mut mig);
+        let qfp = mir_query_to_flow_parts(&mut combined_mir_query, &mut mig, None);
 
         self.register_query(query_name, None, &combined_mir_query, mig.universe());
 
@@ -526,7 +526,7 @@ impl SqlIncorporator {
         let universe = mig.universe();
         // no QG-level reuse possible, so we'll build a new query.
         // first, compute the MIR representation of the SQL query
-        let mut mir = self.mir_converter.named_query_to_mir(
+        let (sec, og_mir, table_mapping, base_name) = self.mir_converter.named_query_to_mir(
             query_name,
             query,
             &qg,
@@ -534,21 +534,33 @@ impl SqlIncorporator {
             universe.clone(),
         );
 
-        trace!(self.log, "Unoptimized MIR:\n{}", mir.to_graphviz().unwrap());
+        trace!(self.log, "Unoptimized MIR:\n{}", og_mir.to_graphviz().unwrap());
 
         // run MIR-level optimizations
-        mir = mir.optimize();
+        let mut mir = og_mir.optimize(table_mapping.clone(), sec);
 
         trace!(self.log, "Optimized MIR:\n{}", mir.to_graphviz().unwrap());
 
+        if sec {
+            match table_mapping.clone() {
+                Some(x) => {
+                    mir = mir.make_universe_naming_consistent(x, base_name);
+                },
+                None => {
+                    panic!("Missing table mapping when reconciling universe table names!");
+                }
+            }
+        }
+
         // push it into the flow graph using the migration in `mig`, and obtain `QueryFlowParts`
-        let qfp = mir_query_to_flow_parts(&mut mir, &mut mig);
+        let qfp = mir_query_to_flow_parts(&mut mir, &mut mig, None);
 
         // register local state
         self.register_query(query_name, Some(qg), &mir, universe);
 
         (qfp, mir)
     }
+
 
     pub fn remove_query(&mut self, query_name: &str, mig: &Migration) -> Option<NodeIndex> {
         let nodeid = self
@@ -669,7 +681,7 @@ impl SqlIncorporator {
 
         // no QG-level reuse possible, so we'll build a new query.
         // first, compute the MIR representation of the SQL query
-        let new_query_mir = self.mir_converter.named_query_to_mir(
+        let (sec, new_query_mir, table_mapping, base_name) = self.mir_converter.named_query_to_mir(
             query_name,
             query,
             &qg,
@@ -677,8 +689,9 @@ impl SqlIncorporator {
             universe.clone(),
         );
 
-        // TODO(malte): should we run the MIR-level optimizations here?
-        let new_opt_mir = new_query_mir.optimize();
+        trace!(self.log, "Original MIR:\n{}", new_query_mir.to_graphviz().unwrap());
+
+        let new_opt_mir = new_query_mir.optimize(table_mapping.clone(), sec);
 
         trace!(
             self.log,
@@ -703,13 +716,26 @@ impl SqlIncorporator {
 
         let mut post_reuse_opt_mir = reused_mir.optimize_post_reuse();
 
+        // traverse universe subgraph and update table names for
+        // internal consistency using the table mapping as guidance
+        if sec {
+            match table_mapping.clone() {
+                Some(x) => {
+                    post_reuse_opt_mir = post_reuse_opt_mir.make_universe_naming_consistent(x, base_name);
+                },
+                None => {
+                    panic!("Missing table mapping when reconciling universe table names!");
+                }
+            }
+        }
+
         trace!(
             self.log,
             "Post-reuse optimized MIR:\n{}",
             post_reuse_opt_mir.to_graphviz().unwrap()
         );
 
-        let qfp = mir_query_to_flow_parts(&mut post_reuse_opt_mir, &mut mig);
+        let qfp = mir_query_to_flow_parts(&mut post_reuse_opt_mir, &mut mig, table_mapping);
 
         info!(
             self.log,

@@ -13,7 +13,8 @@ pub trait SecurityBoundary {
         qg: &QueryGraph,
         ancestors: &Vec<MirNodeRef>,
         node_count: usize,
-    ) -> Vec<MirNodeRef>;
+        sec: bool
+    ) -> (Vec<MirNodeRef>, Option<HashMap<String, String>>, String);
 
     fn make_security_boundary(
         &mut self,
@@ -30,39 +31,57 @@ impl SecurityBoundary for SqlToMirConverter {
         qg: &QueryGraph,
         ancestors: &Vec<MirNodeRef>,
         node_count: usize,
-    ) -> Vec<MirNodeRef> {
+        sec: bool
+    ) -> (Vec<MirNodeRef>, Option<HashMap<String, String>>, String) {
         use crate::controller::sql::mir::grouped::make_grouped;
 
         let mut nodes_added = Vec::new();
         let mut node_count = node_count;
 
-        // First, union the results from all ancestors
-        let union = self.make_union_node(&format!("{}_n{}", name, node_count), &ancestors);
-        nodes_added.push(union.clone());
-        node_count += 1;
-
         // If query DOESN'T have any computed columns, we are done.
         if qg.relations.get("computed_columns").is_none() {
-            return nodes_added;
+            return (nodes_added, None, "".to_string());
         }
 
-        // If query has computed columns, we need to reconcile grouped
-        // results. This means grouping and aggregation the results one
-        // more time.
-        let grouped = make_grouped(
-            self,
-            name,
-            &qg,
-            &HashMap::new(), // we only care about this, if no parent node is specified.
-            node_count,
-            &mut Some(union),
-            true,
-        );
+        let mut union: Option<MirNodeRef> = None;
+        let mut mapping: Option<HashMap<String, String>> = None;
 
-        nodes_added.extend(grouped);
+        // First, union the results from all ancestors
+        if !sec {
+            union = Some(self.make_union_node(&format!("{}_n{}", name, node_count), &ancestors));
+        } else {
+            let (_union, _mapping) = self.make_union_node_sec(&format!("{}_n{}", name, node_count), &ancestors);
+            union = Some(_union);
+            mapping = _mapping;
+        }
 
-        nodes_added
+        match union {
+            Some(node) => {
+                let n = node.borrow().name.clone();
+                nodes_added.push(node.clone());
+                node_count += 1;
+
+                // If query has computed columns, we need to reconcile grouped
+                // results. This means grouping and aggregation the results one
+                // more time.
+                let grouped = make_grouped(
+                    self,
+                    name,
+                    &qg,
+                    &HashMap::new(), // we only care about this, if no parent node is specified.
+                    node_count,
+                    &mut Some(node.clone()),
+                    true,
+                );
+
+                nodes_added.extend(grouped);
+                return (nodes_added, mapping, n);
+
+            },
+            None => {panic!("union not computed correctly");}
+        }
     }
+
     // TODO(larat): this is basically make_selection_nodes
     fn make_security_boundary(
         &mut self,
