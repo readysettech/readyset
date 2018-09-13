@@ -730,6 +730,7 @@ impl SqlIncorporator {
     ) -> Result<QueryFlowParts, String> {
         let name = match q {
             SqlQuery::CreateTable(ref ctq) => ctq.table.name.clone(),
+            SqlQuery::CreateView(ref cvq) => cvq.name.clone(),
             SqlQuery::Select(_) | SqlQuery::CompoundSelect(_) => format!("q_{}", self.num_queries),
             _ => panic!("only CREATE TABLE and SELECT queries can be added to the graph!"),
         };
@@ -843,6 +844,17 @@ impl SqlIncorporator {
                     .unwrap()
             }
             SqlQuery::Select(ref sq) => self.add_select_query(&query_name, sq, is_leaf, mig).0,
+            SqlQuery::CreateView(ref cvq) => {
+                use nom_sql::SelectSpecification;
+                match *cvq.definition {
+                    SelectSpecification::Compound(ref csq) => {
+                        self.add_compound_query(&cvq.name, csq, is_leaf, mig)?
+                    }
+                    SelectSpecification::Simple(ref sq) => {
+                        self.add_select_query(&cvq.name, sq, is_leaf, mig).0
+                    }
+                }
+            }
             ref q @ SqlQuery::CreateTable { .. } => self.add_base_via_mir(&query_name, q, mig),
             ref q @ _ => panic!("unhandled query type in recipe: {:?}", q),
         };
