@@ -32,6 +32,7 @@ mod security;
 fn sanitize_leaf_column(c: &mut Column, view_name: &str) {
     c.table = Some(view_name.to_string());
     c.function = None;
+    c.aliases = vec![];
 }
 
 /// Returns all collumns used in a predicate
