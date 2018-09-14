@@ -853,18 +853,45 @@ named!(pub float_literal<&[u8], Literal>,
 );
 
 /// String literal value
+
+named!(raw_string_singlequoted< Vec<u8> >, delimited!(
+    tag!("'"),
+    fold_many0!(
+        alt!(
+            is_not!("'\\") |
+            map!(complete!(tag!("''")), |_| &b"'"[..]) |
+            map!(complete!(tag!("\\'")), |_| &b"'"[..])
+        ),
+        Vec::new(),
+        |mut acc: Vec<u8>, bytes: &[u8]| {
+            acc.extend(bytes);
+            acc
+        }
+    ),
+    tag!("'")
+));
+
+named!(raw_string_doublequoted< Vec<u8> >, delimited!(
+    tag!("\""),
+    fold_many0!(
+        alt!(
+            is_not!("\"\\") |
+            map!(complete!(tag!("\"\"")), |_| &b"\""[..]) |
+            map!(complete!(tag!(r#"\""#)), |_| &b"\""[..])
+        ),
+        Vec::new(),
+        |mut acc: Vec<u8>, bytes: &[u8]| {
+            acc.extend(bytes);
+            acc
+        }
+    ),
+    tag!("\"")
+));
+
 named!(pub string_literal<&[u8], Literal>,
-    do_parse!(
-        val: alt_complete!(
-              delimited!(tag!("\""), opt!(take_until!("\"")), tag!("\""))
-            | delimited!(tag!("'"), opt!(take_until!("'")), tag!("'"))
-        ) >>
-        ({
-            let val = val.unwrap_or("".as_bytes());
-            let s = String::from(str::from_utf8(val).unwrap());
-            Literal::String(s)
-        })
-    )
+       map!(alt_complete!(raw_string_singlequoted | raw_string_doublequoted),
+             |bytes| Literal::String(String::from_utf8(bytes).unwrap_or("�".to_string()))
+           )
 );
 
 /// Any literal value.
@@ -940,6 +967,7 @@ named!(pub parse_comment<&[u8], String>,
 #[cfg(test)]
 mod tests {
     use super::*;
+    use nom::IResult;
 
     #[test]
     fn sql_identifiers() {
@@ -998,5 +1026,26 @@ mod tests {
     fn comment_data() {
         let res = parse_comment(b" COMMENT 'test'");
         assert_eq!(res.unwrap().1, "test");
+    }
+
+    #[test]
+    fn literal_string_single_backslash_escape() {
+        let res = string_literal(br#"'a\'b'"#);
+        let expected = Literal::String("a'b".to_string());
+        assert_eq!(res, IResult::Done(&b""[..], expected));
+    }
+
+    #[test]
+    fn literal_string_single_quote() {
+        let res = string_literal(b"'a''b'");
+        let expected = Literal::String("a'b".to_string());
+        assert_eq!(res, IResult::Done(&b""[..], expected));
+    }
+
+    #[test]
+    fn literal_string_double_quote() {
+        let res = string_literal(br#""a""b""#);
+        let expected = Literal::String(r#"a"b"#.to_string());
+        assert_eq!(res, IResult::Done(&b""[..], expected));
     }
 }
