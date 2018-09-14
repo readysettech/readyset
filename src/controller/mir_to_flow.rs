@@ -634,6 +634,8 @@ pub(crate) fn make_join_node(
             right.borrow().columns
         ));
 
+    let mut from_left = 0;
+    let mut from_right = 0;
     let join_config = left
         .borrow()
         .columns
@@ -641,8 +643,10 @@ pub(crate) fn make_join_node(
         .enumerate()
         .filter_map(|(i, c)| {
             if i == left_join_col_id {
+                from_left += 1;
                 Some(JoinSource::B(i, right_join_col_id))
             } else if projected_cols_left.contains(c) {
+                from_left += 1;
                 Some(JoinSource::L(i))
             } else {
                 None
@@ -655,12 +659,15 @@ pub(crate) fn make_join_node(
                 .enumerate()
                 .filter_map(|(i, c)| {
                     if projected_cols_right.contains(c) {
+                        from_right += 1;
                         Some(JoinSource::R(i))
                     } else {
                         None
                     }
                 }),
         ).collect();
+    assert_eq!(from_left, projected_cols_left.len());
+    assert_eq!(from_right, projected_cols_right.len());
 
     let left_na = left.borrow().flow_node_addr().unwrap();
     let right_na = right.borrow().flow_node_addr().unwrap();
