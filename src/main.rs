@@ -143,7 +143,7 @@ fn main() {
                     MysqlIntermediary::run_on(soup, BufReader::new(rs), BufWriter::new(s))
                 {
                     if e.kind() != io::ErrorKind::ConnectionReset {
-                        panic!(e);
+                        panic!("{:?}", e);
                     }
                 }
             }).unwrap();
