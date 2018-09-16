@@ -1,0 +1,29 @@
+
+select a + b from c;
+select a + 2 from c;
+select a+ 2 from c;
+select a+2 from c;
+
+SELECT n+10 FROM tens WHERE n+10 >= 100;
+SELECT n+10 FROM tens WHERE n+10 < 100;
+SELECT n+10 FROM tens WHERE n+10 > 100;
+SELECT n+10 FROM tens WHERE n+10<= 100;
+SELECT n+10 FROM tens WHERE n+10 = 100;
+
+SELECT n+10 FROM tens WHERE (n+10) >= 100;
+SELECT n+10 FROM tens WHERE (n+10 )< 100;
+SELECT n+10 FROM tens WHERE (n+10) > 100;
+SELECT n+10 FROM tens WHERE (n+10 )<= 100;
+SELECT n+10 FROM tens WHERE ( n+10 ) = 100;
+
+SELECT n+10 FROM tens WHERE 100 >= (n+10);
+SELECT n+10 FROM tens WHERE 100 >(n+10 ) ;
+SELECT n+10 FROM tens WHERE 100<( n+10) ;
+SELECT n+10 FROM tens WHERE 100>=(n+10 ) ;
+SELECT n+10 FROM tens WHERE 100 = ( n+10 );
+
+SELECT n+10 FROM tens WHERE n >= 100;
+SELECT n+10 FROM tens WHERE n <100;
+SELECT n+10 FROM tens WHERE n >100;
+SELECT n+10 FROM tens WHERE n<= 100;
+SELECT n+10 FROM tens WHERE n= 100;
