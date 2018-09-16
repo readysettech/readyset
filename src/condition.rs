@@ -1,12 +1,14 @@
 use nom::multispace;
 use std::collections::{HashSet, VecDeque};
-use std::str;
 use std::fmt;
+use std::str;
 
-use column::Column;
-use common::{binary_comparison_operator, column_identifier, literal, opt_multispace, value_list,
-             Literal, Operator};
 use arithmetic::{arithmetic_expression, ArithmeticExpression};
+use column::Column;
+use common::{
+    binary_comparison_operator, column_identifier, literal, opt_multispace, value_list, Literal,
+    Operator,
+
 use select::{nested_selection, SelectStatement};
 
 #[derive(Clone, Debug, Eq, Hash, PartialEq, Serialize, Deserialize)]
@@ -560,9 +562,9 @@ mod tests {
     fn parenthesis() {
         let cond = "(foo = ? or bar = 12) and foobar = 'a'";
 
-        use ConditionExpression::*;
-        use ConditionBase::*;
         use common::Literal;
+        use ConditionBase::*;
+        use ConditionExpression::*;
 
         let a = ComparisonOp(ConditionTree {
             operator: Operator::Equal,
@@ -602,9 +604,9 @@ mod tests {
     fn order_of_operations() {
         let cond = "foo = ? and bar = 12 or foobar = 'a'";
 
-        use ConditionExpression::*;
-        use ConditionBase::*;
         use common::Literal;
+        use ConditionBase::*;
+        use ConditionExpression::*;
 
         let a = ComparisonOp(ConditionTree {
             operator: Operator::Equal,
@@ -644,9 +646,9 @@ mod tests {
     fn negation() {
         let cond = "not bar = 12 or foobar = 'a'";
 
-        use ConditionExpression::*;
-        use ConditionBase::*;
         use common::Literal::*;
+        use ConditionBase::*;
+        use ConditionExpression::*;
 
         let left = NegationOp(Box::new(ComparisonOp(ConditionTree {
             operator: Operator::Equal,
@@ -673,9 +675,9 @@ mod tests {
     #[test]
     fn nested_select() {
         use select::SelectStatement;
+        use std::default::Default;
         use table::Table;
         use ConditionBase::*;
-        use std::default::Default;
 
         let cond = "bar in (select col from foo)";
 
@@ -699,9 +701,9 @@ mod tests {
     #[test]
     fn and_with_nested_select() {
         use select::SelectStatement;
+        use std::default::Default;
         use table::Table;
         use ConditionBase::*;
-        use std::default::Default;
 
         let cond = "paperId in (select paperId from PaperConflict) and size > 0";
 
@@ -749,8 +751,8 @@ mod tests {
 
     #[test]
     fn is_null() {
-        use ConditionBase::*;
         use common::Literal;
+        use ConditionBase::*;
 
         let cond = "bar IS NULL";
 
@@ -772,8 +774,8 @@ mod tests {
 
     #[test]
     fn complex_bracketing() {
-        use ConditionBase::*;
         use common::Literal;
+        use ConditionBase::*;
 
         let cond = "`read_ribbons`.`is_following` = 1 \
                     AND `comments`.`user_id` <> `read_ribbons`.`user_id` \

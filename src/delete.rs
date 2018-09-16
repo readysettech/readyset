@@ -3,8 +3,8 @@ use std::{fmt, str};
 use common::{opt_multispace, statement_terminator, table_reference};
 use condition::ConditionExpression;
 use keywords::escape_if_keyword;
-use table::Table;
 use select::where_clause;
+use table::Table;
 
 #[derive(Clone, Debug, Default, Eq, Hash, PartialEq, Serialize, Deserialize)]
 pub struct DeleteStatement {

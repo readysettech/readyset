@@ -1,9 +1,11 @@
 use nom::multispace;
 use std::{fmt, str};
 
-use common::{as_alias, column_identifier_no_alias, integer_literal, opt_multispace,
-             type_identifier, Literal, SqlType};
 use column::Column;
+use common::{
+    as_alias, column_identifier_no_alias, integer_literal, opt_multispace, type_identifier,
+    Literal, SqlType,
+};
 
 #[derive(Debug, Clone, Deserialize, Eq, Hash, PartialEq, Serialize)]
 pub enum ArithmeticOperator {
@@ -142,10 +144,10 @@ mod tests {
 
     #[test]
     fn it_parses_arithmetic_expressions() {
-        use column::FunctionExpression;
-        use super::ArithmeticOperator::*;
-        use super::ArithmeticBase::Scalar;
         use super::ArithmeticBase::Column as ABColumn;
+        use super::ArithmeticBase::Scalar;
+        use super::ArithmeticOperator::*;
+        use column::FunctionExpression;
 
         let lit_ae = [
             "5 + 42",
@@ -218,9 +220,9 @@ mod tests {
 
     #[test]
     fn it_displays_arithmetic_expressions() {
-        use super::ArithmeticOperator::*;
-        use super::ArithmeticBase::Scalar;
         use super::ArithmeticBase::Column as ABColumn;
+        use super::ArithmeticBase::Scalar;
+        use super::ArithmeticOperator::*;
 
         let expressions = [
             ArithmeticExpression::new(Add, ABColumn("foo".into()), Scalar(5.into()), None),
@@ -248,9 +250,9 @@ mod tests {
 
     #[test]
     fn it_parses_arithmetic_casts() {
-        use super::ArithmeticOperator::*;
-        use super::ArithmeticBase::Scalar;
         use super::ArithmeticBase::Column as ABColumn;
+        use super::ArithmeticBase::Scalar;
+        use super::ArithmeticOperator::*;
 
         let exprs = [
             "CAST(`t`.`foo` AS signed int) + CAST(`t`.`bar` AS signed int) ",

@@ -1,15 +1,15 @@
 use nom::IResult;
-use std::str;
 use std::fmt;
+use std::str;
 
-use create::{creation, view_creation, CreateTableStatement, CreateViewStatement};
-use insert::{insertion, InsertStatement};
 use compound_select::{compound_selection, CompoundSelectStatement};
-use select::{selection, SelectStatement};
+use create::{creation, view_creation, CreateTableStatement, CreateViewStatement};
 use delete::{deletion, DeleteStatement};
 use drop::{drop_table, DropTableStatement};
-use update::{updating, UpdateStatement};
+use insert::{insertion, InsertStatement};
+use select::{selection, SelectStatement};
 use set::{set, SetStatement};
+use update::{updating, UpdateStatement};
 
 #[derive(Clone, Debug, Eq, Hash, PartialEq, Serialize, Deserialize)]
 pub enum SqlQuery {
@@ -55,8 +55,6 @@ named!(pub sql_query<&[u8], SqlQuery>,
 );
 
 pub fn parse_query(input: &str) -> Result<SqlQuery, &str> {
-    // we process all queries in lowercase to avoid having to deal with capitalization in the
-    // parser.
     let q_bytes = String::from(input.trim()).into_bytes();
 
     match sql_query(&q_bytes) {
@@ -69,10 +67,9 @@ pub fn parse_query(input: &str) -> Result<SqlQuery, &str> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::hash::{Hash, Hasher};
     use std::collections::hash_map::DefaultHasher;
+    use std::hash::{Hash, Hasher};
 
-    use column::Column;
     use table::Table;
 
     #[test]
@@ -83,7 +80,7 @@ mod tests {
 
         let expected = SqlQuery::Insert(InsertStatement {
             table: Table::from("users"),
-            fields: vec![Column::from("0"), Column::from("1")],
+            fields: None,
             data: vec![vec![42.into(), "test".into()]],
             ..Default::default()
         });
@@ -194,7 +191,7 @@ mod tests {
     #[test]
     fn display_insert_query_no_columns() {
         let qstring = "INSERT INTO users VALUES ('aaa', 'xxx')";
-        let expected = "INSERT INTO users (0, 1) VALUES ('aaa', 'xxx')";
+        let expected = "INSERT INTO users VALUES ('aaa', 'xxx')";
         let res = parse_query(qstring);
         assert!(res.is_ok());
         assert_eq!(expected, format!("{}", res.unwrap()));
