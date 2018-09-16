@@ -55,8 +55,6 @@ named!(pub sql_query<&[u8], SqlQuery>,
 );
 
 pub fn parse_query(input: &str) -> Result<SqlQuery, &str> {
-    // we process all queries in lowercase to avoid having to deal with capitalization in the
-    // parser.
     let q_bytes = String::from(input.trim()).into_bytes();
 
     match sql_query(&q_bytes) {
