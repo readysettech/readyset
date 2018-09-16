@@ -398,7 +398,14 @@ named!(pub creation<&[u8], CreateTableStatement>,
                     opt_multispace >>
                     tag!("=") >>
                     opt_multispace >>
-                    alt_complete!(tag!("utf8mb4") | tag!("utf8") | tag!("latin1")) >>
+                    alt_complete!(
+                        tag!("utf8mb4") |
+                        tag!("utf8") |
+                        tag!("binary") |
+                        tag!("big5") |
+                        tag!("ucs2") |
+                        tag!("latin1")
+                        ) >>
                     ()
                 )
             )
@@ -677,6 +684,26 @@ mod tests {
     }
 
     #[test]
+    fn mediawiki_externallinks() {
+        let qstring = "CREATE TABLE `externallinks` (
+          `el_id` int(10) unsigned NOT NULL AUTO_INCREMENT,
+          `el_from` int(8) unsigned NOT NULL DEFAULT '0',
+          `el_from_namespace` int(11) NOT NULL DEFAULT '0',
+          `el_to` blob NOT NULL,
+          `el_index` blob NOT NULL,
+          `el_index_60` varbinary(60) NOT NULL,
+          PRIMARY KEY (`el_id`),
+          KEY `el_from` (`el_from`,`el_to`(40)),
+          KEY `el_to` (`el_to`(60),`el_from`),
+          KEY `el_index` (`el_index`(60)),
+          KEY `el_backlinks_to` (`el_from_namespace`,`el_to`(60),`el_from`),
+          KEY `el_index_60` (`el_index_60`,`el_id`),
+          KEY `el_from_index_60` (`el_from`,`el_index_60`,`el_id`)
+        ) ENGINE=InnoDB AUTO_INCREMENT=413856661 DEFAULT CHARSET=binary;";
+        creation(qstring.as_bytes()).unwrap();
+    }
+
+    #[test]
     fn keys() {
         // simple primary key
         let qstring = "CREATE TABLE users (id bigint(20), name varchar(255), email varchar(255), \
@@ -713,8 +740,8 @@ mod tests {
                 ],
                 keys: Some(vec![TableKey::UniqueKey(
                     Some(String::from("id_k")),
-                    vec![Column::from("users.id")]
-                ),]),
+                    vec![Column::from("users.id")],
+                ), ]),
                 ..Default::default()
             }
         );
