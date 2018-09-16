@@ -3,6 +3,7 @@ use std::collections::{HashSet, VecDeque};
 use std::fmt;
 use std::str;
 
+use arithmetic::{arithmetic_expression, ArithmeticExpression};
 use column::Column;
 use common::{
     binary_comparison_operator, column_identifier, literal, opt_multispace, value_list, Literal,
@@ -85,6 +86,7 @@ pub enum ConditionExpression {
     LogicalOp(ConditionTree),
     NegationOp(Box<ConditionExpression>),
     Base(ConditionBase),
+    Arithmetic(Box<ArithmeticExpression>),
     Bracketed(Box<ConditionExpression>),
 }
 
@@ -96,6 +98,7 @@ impl fmt::Display for ConditionExpression {
             ConditionExpression::NegationOp(ref expr) => write!(f, "NOT {}", expr),
             ConditionExpression::Bracketed(ref expr) => write!(f, "({})", expr),
             ConditionExpression::Base(ref base) => write!(f, "{}", base),
+            ConditionExpression::Arithmetic(ref expr) => write!(f, "{}", expr),
         }
     }
 }
@@ -141,7 +144,27 @@ named!(pub and_expr<&[u8], ConditionExpression>,
 
 named!(pub parenthetical_expr<&[u8], ConditionExpression>,
        alt_complete!(
-           map!(
+           do_parse!(
+                tag!("(") >>
+                opt_multispace >>
+                left: simple_expr >>
+                opt_multispace >>
+                tag!(")") >>
+                opt_multispace >>
+                op: binary_comparison_operator >>
+                opt_multispace >>
+                right: simple_expr >>
+                (ConditionExpression::ComparisonOp(
+                    ConditionTree {
+                        operator: op,
+                        left: Box::new(
+                            ConditionExpression::Bracketed(Box::new(left))
+                        ),
+                        right: Box::new(right)
+                    })
+                )
+            )
+        |    map!(
                delimited!(
                    do_parse!(tag!("(") >> opt_multispace >> ()),
                    condition_expr,
@@ -244,6 +267,20 @@ named!(predicate<&[u8], ConditionExpression>,
 named!(simple_expr<&[u8], ConditionExpression>,
     alt_complete!(
             do_parse!(
+                arit_expr: arithmetic_expression >>
+                (ConditionExpression::Arithmetic(Box::new(arit_expr)))
+            )
+        |   do_parse!(
+                tag!("(") >>
+                opt_multispace >>
+                arit_expr: arithmetic_expression >>
+                opt_multispace >>
+                tag!(")") >>
+                (ConditionExpression::Bracketed(Box::new(
+                    ConditionExpression::Arithmetic(Box::new(arit_expr))
+                )))
+            )
+        |    do_parse!(
                 lit: literal >>
                 (ConditionExpression::Base(ConditionBase::Literal(lit)))
             )
@@ -267,6 +304,7 @@ mod tests {
     use super::*;
     use column::Column;
     use common::{FieldDefinitionExpression, Literal, Operator};
+    use arithmetic::{ArithmeticBase, ArithmeticOperator};
 
     fn columns(cols: &[&str]) -> Vec<FieldDefinitionExpression> {
         cols.iter()
@@ -320,6 +358,139 @@ mod tests {
             )
         );
     }
+
+    fn x_operator_value(op: ArithmeticOperator, value: Literal) -> ConditionExpression {
+        ConditionExpression::Arithmetic(
+            Box::new(ArithmeticExpression::new(
+                op,
+                ArithmeticBase::Column(Column::from("x")),
+                ArithmeticBase::Scalar(value),
+                None
+                )
+            )
+        )
+    }
+    #[test]
+    fn simple_arithmetic_expression() {
+        let cond = "x + 3";
+
+        let res = simple_expr(cond.as_bytes());
+        assert_eq!(
+            res.unwrap().1,
+            x_operator_value(ArithmeticOperator::Add, 3.into())
+        );
+    }
+
+    #[test]
+    fn simple_arithmetic_expression_with_parenthesis() {
+        let cond = "( x - 2 )";
+
+        let res = simple_expr(cond.as_bytes());
+        assert_eq!(
+            res.unwrap().1,
+            ConditionExpression::Bracketed(Box::new(
+                x_operator_value(ArithmeticOperator::Subtract, 2.into())
+            ))
+        );
+    }
+
+    #[test]
+    fn parenthetical_arithmetic_expression() {
+        let cond = "( x * 5 )";
+
+        let res = parenthetical_expr(cond.as_bytes());
+        assert_eq!(
+            res.unwrap().1,
+            ConditionExpression::Bracketed(Box::new(
+                x_operator_value(ArithmeticOperator::Multiply, 5.into())
+            ))
+        );
+    }
+
+    #[test]
+    fn condition_expression_with_arithmetics() {
+        let cond = "x * 3 = 21";
+
+        let res = condition_expr(cond.as_bytes());
+        assert_eq!(
+            res.unwrap().1,
+            ConditionExpression::ComparisonOp(ConditionTree {
+                operator: Operator::Equal,
+                left: Box::new(
+                    x_operator_value(ArithmeticOperator::Multiply, 3.into())
+                ),
+                right: Box::new(
+                    ConditionExpression::Base(ConditionBase::Literal(21.into()))
+                )
+            })
+        );
+    }
+    #[test]
+    fn condition_expression_with_arithmetics_and_parenthesis() {
+        let cond = "(x - 7 = 15)";
+
+        let res = condition_expr(cond.as_bytes());
+        assert_eq!(
+            res.unwrap().1,
+            ConditionExpression::Bracketed(Box::new(
+                ConditionExpression::ComparisonOp(ConditionTree {
+                    operator: Operator::Equal,
+                    left: Box::new(
+                        x_operator_value(ArithmeticOperator::Subtract, 7.into())
+                    ),
+                    right: Box::new(
+                        ConditionExpression::Base(ConditionBase::Literal(15.into()))
+                    )
+                })
+            ))
+        );
+    }
+
+    #[test]
+    fn condition_expression_with_arithmetics_in_parenthesis() {
+        let cond = "( x + 2) = 15";
+
+        let res = condition_expr(cond.as_bytes());
+        assert_eq!(
+            res.unwrap().1,
+            ConditionExpression::ComparisonOp(ConditionTree {
+                operator: Operator::Equal,
+                left: Box::new(
+                    ConditionExpression::Bracketed(Box::new(
+                        x_operator_value(ArithmeticOperator::Add, 2.into())
+                    ))
+                ),
+                right: Box::new(
+                    ConditionExpression::Base(ConditionBase::Literal(15.into()))
+                )
+            })
+        );
+    }
+
+    #[test]
+    fn condition_expression_with_arithmetics_in_parenthesis_in_both_side() {
+        let cond = "( x + 2) =(x*3)";
+
+        let res = condition_expr(cond.as_bytes());
+        assert_eq!(
+            res.unwrap().1,
+            ConditionExpression::ComparisonOp(ConditionTree {
+                operator: Operator::Equal,
+                left: Box::new(
+                    ConditionExpression::Bracketed(Box::new(
+                        x_operator_value(ArithmeticOperator::Add, 2.into())
+                    ))
+                ),
+                right: Box::new(
+                    ConditionExpression::Bracketed(Box::new(
+                        x_operator_value(ArithmeticOperator::Multiply, 3.into())
+                    ))
+                )
+            })
+        );
+    }
+
+
 
     #[test]
     fn equality_literals() {
