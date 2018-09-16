@@ -38,6 +38,7 @@ mod common;
 mod compound_select;
 mod condition;
 mod create;
+mod create_table_options;
 mod delete;
 mod drop;
 mod insert;
