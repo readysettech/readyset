@@ -740,10 +740,12 @@ impl SoupBackend {
                         }
 
                         for c in schema {
-                            let coli = cols.iter().position(|f| f == &c.column).expect(&format!(
-                                "tried to emit column {:?} not in getter for {:?} with schema {:?}",
-                                c.column, qname, cols
-                            ));
+                            let coli = cols.iter().position(|f| f == &c.column).unwrap_or_else(|| {
+                                panic!(
+                                    "tried to emit column {:?} not in getter for {:?} with schema {:?}",
+                                    c.column, qname, cols
+                                );
+                            });
                             write_column(&mut rw, &r[coli], c);
                         }
                         rw.end_row()?;
