@@ -8,6 +8,7 @@ use column::Column;
 use common::{
     binary_comparison_operator, column_identifier, literal, opt_multispace, value_list, Literal,
     Operator,
+};
 
 use select::{nested_selection, SelectStatement};
 
