@@ -1,8 +1,8 @@
 extern crate nom_sql;
 
 use std::fs::File;
-use std::path::Path;
 use std::io::Read;
+use std::path::Path;
 
 fn parse_queryset(queries: Vec<String>) -> (i32, i32) {
     let mut parsed_ok = Vec::new();
@@ -37,7 +37,8 @@ fn test_queries_from_file(f: &Path, name: &str) -> Result<i32, i32> {
 
     // Load queries
     f.read_to_string(&mut s).unwrap();
-    let lines: Vec<String> = s.lines()
+    let lines: Vec<String> = s
+        .lines()
         .filter(|l| !l.is_empty() && !l.starts_with("#"))
         .map(|l| {
             if !(l.ends_with("\n") || l.ends_with(";")) {
@@ -45,8 +46,7 @@ fn test_queries_from_file(f: &Path, name: &str) -> Result<i32, i32> {
             } else {
                 String::from(l)
             }
-        })
-        .collect();
+        }).collect();
     println!("Loaded {} {} queries", lines.len(), name);
 
     // Try parsing them all
@@ -62,12 +62,16 @@ fn parse_file(path: &str) -> (i32, i32) {
 
     // Load queries
     f.read_to_string(&mut s).unwrap();
-    let lines: Vec<&str> = s.lines()
+    let lines: Vec<&str> = s
+        .lines()
         .map(str::trim)
         .filter(|l| {
-            !l.is_empty() && !l.starts_with("#") && !l.starts_with("--") && !l.starts_with("DROP") && !l.starts_with("/*")
-        })
-        .collect();
+            !l.is_empty()
+                && !l.starts_with("#")
+                && !l.starts_with("--")
+                && !l.starts_with("DROP")
+                && !l.starts_with("/*")
+        }).collect();
     let mut q = String::new();
     let mut queries = Vec::new();
     for l in lines {
@@ -124,12 +128,12 @@ fn hotcrp_schema() {
 
     // Load queries
     f.read_to_string(&mut s).unwrap();
-    let lines: Vec<&str> = s.lines()
+    let lines: Vec<&str> = s
+        .lines()
         .map(str::trim)
         .filter(|l| {
             !l.is_empty() && !l.starts_with("#") && !l.starts_with("--") && !l.starts_with("DROP")
-        })
-        .collect();
+        }).collect();
     let mut q = String::new();
     let mut queries = Vec::new();
     for l in lines {

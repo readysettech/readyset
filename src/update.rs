@@ -1,13 +1,15 @@
 use nom::multispace;
 use std::{fmt, str};
 
-use common::{assignment_expr_list, opt_multispace, statement_terminator, table_reference,
-             FieldValueExpression};
+use column::Column;
+use common::{
+    assignment_expr_list, opt_multispace, statement_terminator, table_reference,
+    FieldValueExpression,
+};
 use condition::ConditionExpression;
 use keywords::escape_if_keyword;
-use table::Table;
-use column::Column;
 use select::where_clause;
+use table::Table;
 
 #[derive(Clone, Debug, Default, Eq, Hash, PartialEq, Serialize, Deserialize)]
 pub struct UpdateStatement {
@@ -62,11 +64,11 @@ mod tests {
     use super::*;
     use arithmetic::{ArithmeticBase, ArithmeticExpression, ArithmeticOperator};
     use column::Column;
-    use table::Table;
     use common::{Literal, LiteralExpression, Operator, Real};
     use condition::ConditionBase::*;
     use condition::ConditionExpression::*;
     use condition::ConditionTree;
+    use table::Table;
 
     #[test]
     fn simple_update() {
@@ -150,17 +152,15 @@ mod tests {
             res.unwrap().1,
             UpdateStatement {
                 table: Table::from("stories"),
-                fields: vec![
-                    (
-                        Column::from("hotness"),
-                        FieldValueExpression::Literal(LiteralExpression::from(
-                            Literal::FixedPoint(Real {
-                                integral: -19216,
-                                fractional: 5479744,
-                            }),
-                        )),
-                    ),
-                ],
+                fields: vec![(
+                    Column::from("hotness"),
+                    FieldValueExpression::Literal(LiteralExpression::from(Literal::FixedPoint(
+                        Real {
+                            integral: -19216,
+                            fractional: 5479744,
+                        }
+                    ),)),
+                ),],
                 where_clause: expected_where_cond,
                 ..Default::default()
             }
@@ -187,12 +187,10 @@ mod tests {
             res.unwrap().1,
             UpdateStatement {
                 table: Table::from("users"),
-                fields: vec![
-                    (
-                        Column::from("karma"),
-                        FieldValueExpression::Arithmetic(expected_ae),
-                    ),
-                ],
+                fields: vec![(
+                    Column::from("karma"),
+                    FieldValueExpression::Arithmetic(expected_ae),
+                ),],
                 where_clause: expected_where_cond,
                 ..Default::default()
             }
@@ -214,12 +212,10 @@ mod tests {
             res.unwrap().1,
             UpdateStatement {
                 table: Table::from("users"),
-                fields: vec![
-                    (
-                        Column::from("karma"),
-                        FieldValueExpression::Arithmetic(expected_ae),
-                    ),
-                ],
+                fields: vec![(
+                    Column::from("karma"),
+                    FieldValueExpression::Arithmetic(expected_ae),
+                ),],
                 ..Default::default()
             }
         );

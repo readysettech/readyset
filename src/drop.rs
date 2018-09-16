@@ -16,7 +16,8 @@ impl fmt::Display for DropTableStatement {
         if self.if_exists {
             write!(f, "IF EXISTS ")?;
         }
-        let ts = self.tables
+        let ts = self
+            .tables
             .iter()
             .map(|t| escape_if_keyword(&t.name))
             .collect::<Vec<_>>()

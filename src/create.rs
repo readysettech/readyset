@@ -1,16 +1,18 @@
 use nom::{alphanumeric, digit, multispace};
+use std::fmt;
 use std::str;
 use std::str::FromStr;
-use std::fmt;
 
-use common::{column_identifier_no_alias, integer_literal, opt_multispace, parse_comment,
-             sql_identifier, statement_terminator, string_literal, table_reference, type_identifier, Literal,
-             Real, SqlType, TableKey};
 use column::{Column, ColumnConstraint, ColumnSpecification};
+use common::{
+    column_identifier_no_alias, integer_literal, opt_multispace, parse_comment, sql_identifier,
+    statement_terminator, string_literal, table_reference, type_identifier, Literal, Real, SqlType,
+    TableKey,
+};
 use compound_select::{compound_selection, CompoundSelectStatement};
 use keywords::escape_if_keyword;
-use select::{nested_selection, SelectStatement};
 use order::{order_type, OrderType};
+use select::{nested_selection, SelectStatement};
 use table::Table;
 
 #[derive(Clone, Debug, Default, Eq, Hash, PartialEq, Serialize, Deserialize)]
@@ -302,6 +304,13 @@ named!(pub column_constraint<&[u8], Option<ColumnConstraint>>,
           )
         | do_parse!(
               opt_multispace >>
+              tag_no_case!("character set") >>
+              multispace >>
+              charset: map_res!(sql_identifier, str::from_utf8) >>
+              (Some(ColumnConstraint::CharacterSet(charset.to_owned())))
+          )
+        | do_parse!(
+              opt_multispace >>
               tag_no_case!("collate") >>
               multispace >>
               collation: map_res!(sql_identifier, str::from_utf8) >>
@@ -319,7 +328,7 @@ named!(pub creation<&[u8], CreateTableStatement>,
         tag_no_case!("table") >>
         multispace >>
         table: table_reference >>
-        multispace >>
+        opt_multispace >>
         tag!("(") >>
         opt_multispace >>
         fields: field_specification_list >>
@@ -389,7 +398,28 @@ named!(pub creation<&[u8], CreateTableStatement>,
                     opt_multispace >>
                     tag!("=") >>
                     opt_multispace >>
-                    alt_complete!(tag!("utf8mb4") | tag!("utf8")) >>
+                    alt_complete!(
+                        tag!("utf8mb4") |
+                        tag!("utf8") |
+                        tag!("binary") |
+                        tag!("big5") |
+                        tag!("ucs2") |
+                        tag!("latin1")
+                        ) >>
+                    ()
+                )
+            )
+        ) >>
+        opt_multispace >>
+        opt!(
+            complete!(
+                do_parse!(
+                    tag_no_case!("collate") >>
+                    opt_multispace >>
+                    tag!("=") >>
+                    opt_multispace >>
+                    // TODO(malte): imprecise hack, should not accept everything
+                    sql_identifier >>
                     ()
                 )
             )
@@ -571,6 +601,22 @@ mod tests {
     }
 
     #[test]
+    fn create_without_space_after_tablename() {
+        let qstring = "CREATE TABLE t(x integer);";
+        let res = creation(qstring.as_bytes());
+        assert_eq!(
+            res.unwrap().1,
+            CreateTableStatement {
+                table: Table::from("t"),
+                fields: vec![
+                    ColumnSpecification::new(Column::from("t.x"), SqlType::Int(32)),
+                ],
+                ..Default::default()
+            }
+        );
+    }
+
+    #[test]
     fn mediawiki_create() {
         let qstring = "CREATE TABLE user_newtalk (  user_id int(5) NOT NULL default '0',  user_ip \
                        varchar(40) NOT NULL default '') TYPE=MyISAM;";
@@ -638,6 +684,26 @@ mod tests {
     }
 
     #[test]
+    fn mediawiki_externallinks() {
+        let qstring = "CREATE TABLE `externallinks` (
+          `el_id` int(10) unsigned NOT NULL AUTO_INCREMENT,
+          `el_from` int(8) unsigned NOT NULL DEFAULT '0',
+          `el_from_namespace` int(11) NOT NULL DEFAULT '0',
+          `el_to` blob NOT NULL,
+          `el_index` blob NOT NULL,
+          `el_index_60` varbinary(60) NOT NULL,
+          PRIMARY KEY (`el_id`),
+          KEY `el_from` (`el_from`,`el_to`(40)),
+          KEY `el_to` (`el_to`(60),`el_from`),
+          KEY `el_index` (`el_index`(60)),
+          KEY `el_backlinks_to` (`el_from_namespace`,`el_to`(60),`el_from`),
+          KEY `el_index_60` (`el_index_60`,`el_id`),
+          KEY `el_from_index_60` (`el_from`,`el_index_60`,`el_id`)
+        ) ENGINE=InnoDB AUTO_INCREMENT=413856661 DEFAULT CHARSET=binary;";
+        creation(qstring.as_bytes()).unwrap();
+    }
+
+    #[test]
     fn keys() {
         // simple primary key
         let qstring = "CREATE TABLE users (id bigint(20), name varchar(255), email varchar(255), \
@@ -672,9 +738,10 @@ mod tests {
                     ColumnSpecification::new(Column::from("users.name"), SqlType::Varchar(255)),
                     ColumnSpecification::new(Column::from("users.email"), SqlType::Varchar(255)),
                 ],
-                keys: Some(vec![
-                    TableKey::UniqueKey(Some(String::from("id_k")), vec![Column::from("users.id")]),
-                ]),
+                keys: Some(vec![TableKey::UniqueKey(
+                    Some(String::from("id_k")),
+                    vec![Column::from("users.id")],
+                ), ]),
                 ..Default::default()
             }
         );
@@ -788,8 +855,8 @@ mod tests {
 
     #[test]
     fn simple_create_view() {
-        use condition::{ConditionBase, ConditionExpression, ConditionTree};
         use common::{FieldDefinitionExpression, Operator};
+        use condition::{ConditionBase, ConditionExpression, ConditionTree};
 
         let qstring = "CREATE VIEW v AS SELECT * FROM users WHERE username = \"bob\";";
 
