@@ -328,7 +328,7 @@ named!(pub creation<&[u8], CreateTableStatement>,
         tag_no_case!("table") >>
         multispace >>
         table: table_reference >>
-        multispace >>
+        opt_multispace >>
         tag!("(") >>
         opt_multispace >>
         fields: field_specification_list >>
@@ -594,6 +594,22 @@ mod tests {
                     ColumnSpecification::new(Column::from("users.id"), SqlType::Bigint(20)),
                     ColumnSpecification::new(Column::from("users.name"), SqlType::Varchar(255)),
                     ColumnSpecification::new(Column::from("users.email"), SqlType::Varchar(255)),
+                ],
+                ..Default::default()
+            }
+        );
+    }
+
+    #[test]
+    fn create_without_space_after_tablename() {
+        let qstring = "CREATE TABLE t(x integer);";
+        let res = creation(qstring.as_bytes());
+        assert_eq!(
+            res.unwrap().1,
+            CreateTableStatement {
+                table: Table::from("t"),
+                fields: vec![
+                    ColumnSpecification::new(Column::from("t.x"), SqlType::Int(32)),
                 ],
                 ..Default::default()
             }
