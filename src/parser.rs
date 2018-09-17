@@ -1,7 +1,6 @@
 use nom::IResult;
 use std::fmt;
 use std::str;
-use std::ops::Deref;
 
 use compound_select::{compound_selection, CompoundSelectStatement};
 use create::{creation, view_creation, CreateTableStatement, CreateViewStatement};
@@ -56,16 +55,17 @@ named!(sql_query<&[u8], SqlQuery>,
 );
 
 pub fn parse_query_bytes<T>(input: T) -> Result<SqlQuery, &'static str>
-    where T: Deref<Target=[u8]> {
-    match sql_query(&input[..]) {
+    where T: AsRef<[u8]> {
+    match sql_query(input.as_ref()) {
         IResult::Done(_, o) => Ok(o),
         IResult::Error(_) => Err("failed to parse query"),
         IResult::Incomplete(_) => unreachable!(),
     }
 }
 
-pub fn parse_query(input: &str) -> Result<SqlQuery, &'static str> {
-    parse_query_bytes(input.trim().as_bytes())
+pub fn parse_query<T>(input: T) -> Result<SqlQuery, &'static str>
+    where T: AsRef<str> {
+    parse_query_bytes(input.as_ref().trim().as_bytes())
 }
 
 #[cfg(test)]
@@ -112,7 +112,7 @@ mod tests {
     #[test]
     fn parse_byte_vector() {
         let qstring: Vec<u8> = b"INSERT INTO users VALUES (42, \"test\");".to_vec();
-        let res = parse_query_bytes(qstring);
+        let res = parse_query_bytes(&qstring);
         assert!(res.is_ok());
     }
 
