@@ -40,7 +40,7 @@ impl fmt::Display for SqlQuery {
     }
 }
 
-named!(pub sql_query<&[u8], SqlQuery>,
+named!(sql_query<&[u8], SqlQuery>,
     alt_complete!(
           do_parse!(c: creation >> (SqlQuery::CreateTable(c)))
         | do_parse!(i: insertion >> (SqlQuery::Insert(i)))
@@ -54,14 +54,16 @@ named!(pub sql_query<&[u8], SqlQuery>,
     )
 );
 
-pub fn parse_query(input: &str) -> Result<SqlQuery, &str> {
-    let q_bytes = String::from(input.trim()).into_bytes();
-
-    match sql_query(&q_bytes) {
+pub fn parse_query_bytes<'a, T: Into<&'a [u8]>>(input: T) -> Result<SqlQuery, &'static str> {
+    match sql_query(input.into()) {
         IResult::Done(_, o) => Ok(o),
         IResult::Error(_) => Err("failed to parse query"),
         IResult::Incomplete(_) => unreachable!(),
     }
+}
+
+pub fn parse_query(input: &str) -> Result<SqlQuery, &'static str> {
+    parse_query_bytes(input.trim().as_bytes())
 }
 
 #[cfg(test)]
