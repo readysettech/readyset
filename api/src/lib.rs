@@ -118,7 +118,7 @@ mod controller;
 mod table;
 mod view;
 
-pub use basics::{DataType, Modification, Operation};
+pub use basics::{DataType, Modification, Operation, TableOperation};
 
 pub use consensus::{LocalAuthority, ZookeeperAuthority};
 

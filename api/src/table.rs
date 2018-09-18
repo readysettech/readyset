@@ -339,6 +339,32 @@ impl<E> Table<E> {
         Ok(())
     }
 
+    /// Perform multiple batch operations on this base table and only wait for acks once they have
+    /// all been enqueued.
+    pub fn batch_insert_then_wait<I>(&mut self, i: I) -> Result<(), TableError>
+    where
+        I: IntoIterator<Item = Vec<TableOperation>>,
+    {
+        let mut dih = self.domain_input_handle.borrow_mut();
+        let mut batch_putter = dih.sender();
+
+        for batch in i {
+            if let Some(cols) = batch[0].row() {
+                if cols.len() != self.columns.len() {
+                    return Err(TableError::WrongColumnCount(self.columns.len(), cols.len()));
+                }
+            }
+
+            let tracer = self.tracer.clone();
+            let m = self.prep_records(tracer, batch);
+            batch_putter.enqueue(m, &self.key[..])?;
+        }
+
+        self.tracer.take();
+        batch_putter.wait()?;
+        Ok(())
+    }
+
     /// Insert a single row of data into this base table.
     pub fn insert<V>(&mut self, u: V) -> Result<(), TableError>
     where
