@@ -90,6 +90,11 @@ impl ControllerBuilder {
         self.config.reuse = reuse_type;
     }
 
+    /// Set the number of pool threads to use (default is #cores)
+    pub fn set_threads(&mut self, threads: usize) {
+        self.config.threads = Some(threads);
+    }
+
     /// Build a controller and return a handle to it.
     pub fn build<A: Authority + 'static>(
         self,

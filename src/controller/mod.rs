@@ -98,6 +98,7 @@ pub(crate) struct ControllerConfig {
     pub healthcheck_every: Duration,
     pub quorum: usize,
     pub reuse: ReuseConfigType,
+    pub threads: Option<usize>,
 }
 impl Default for ControllerConfig {
     fn default() -> Self {
@@ -116,6 +117,10 @@ impl Default for ControllerConfig {
             healthcheck_every: Duration::from_secs(10),
             quorum: 1,
             reuse: ReuseConfigType::Finkelstein,
+            #[cfg(any(debug_assertions, test))]
+            threads: Some(2),
+            #[cfg(not(any(debug_assertions, test)))]
+            threads: None,
         }
     }
 }
@@ -179,8 +184,8 @@ fn start_instance<A: Authority + 'static>(
 ) -> Result<LocalControllerHandle<A>, failure::Error> {
     let mut pool = tokio::executor::thread_pool::Builder::new();
     pool.name_prefix("tokio-pool-");
-    if cfg!(debug_assertions) {
-        pool.pool_size(2);
+    if let Some(threads) = config.threads {
+        pool.pool_size(threads);
     }
     let mut rt = tokio::runtime::Builder::new();
     rt.threadpool_builder(pool);
@@ -188,8 +193,8 @@ fn start_instance<A: Authority + 'static>(
 
     let mut pool = tokio_io_pool::Builder::default();
     pool.name_prefix("tokio-io-pool-");
-    if cfg!(debug_assertions) {
-        pool.pool_size(2);
+    if let Some(threads) = config.threads {
+        pool.pool_size(threads);
     }
     let iopool = pool.build().unwrap();
     let ioh = iopool.handle().clone();
