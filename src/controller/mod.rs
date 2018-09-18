@@ -183,7 +183,7 @@ fn start_instance<A: Authority + 'static>(
     log: slog::Logger,
 ) -> Result<LocalControllerHandle<A>, failure::Error> {
     let mut pool = tokio::executor::thread_pool::Builder::new();
-    pool.name_prefix("tokio-pool-");
+    pool.name_prefix("worker-");
     if let Some(threads) = config.threads {
         pool.pool_size(threads);
     }
@@ -192,7 +192,7 @@ fn start_instance<A: Authority + 'static>(
     let mut rt = rt.build().unwrap();
 
     let mut pool = tokio_io_pool::Builder::default();
-    pool.name_prefix("tokio-io-pool-");
+    pool.name_prefix("io-worker-");
     if let Some(threads) = config.threads {
         pool.pool_size(threads);
     }
