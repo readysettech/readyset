@@ -8,7 +8,7 @@ use std::io;
 use std::net::SocketAddr;
 use std::rc::Rc;
 use vec_map::VecMap;
-use {ExclusiveConnection, SharedConnection, TransportError};
+use {ExclusiveConnection, LocalOrNot, SharedConnection, TransportError};
 
 #[doc(hidden)]
 #[derive(Clone, Serialize, Deserialize)]
@@ -169,6 +169,11 @@ impl<E> Table<E> {
     /// Get the name of this base table.
     pub fn table_name(&self) -> &str {
         &self.table_name
+    }
+
+    #[doc(hidden)]
+    pub fn i_promise_dst_is_same_process(&mut self) {
+        self.domain_input_handle.borrow_mut().dst_is_local = true;
     }
 
     /// Get the list of columns in this base table.
@@ -492,7 +497,8 @@ impl<E> Table<E> {
 }
 
 pub(crate) struct DomainInputHandle {
-    txs: Vec<TcpSender<Input>>,
+    txs: Vec<TcpSender<LocalOrNot<Input>>>,
+    dst_is_local: bool,
 }
 
 pub(crate) type TableRpc = Rc<RefCell<DomainInputHandle>>;
@@ -511,7 +517,10 @@ impl DomainInputHandle {
                 Ok(c)
             }).collect();
 
-        Ok(Self { txs: txs? })
+        Ok(Self {
+            txs: txs?,
+            dst_is_local: false,
+        })
     }
 
     pub(crate) fn new(txs: &[SocketAddr]) -> Result<Self, io::Error> {
@@ -548,7 +557,11 @@ impl<'a> BatchSendHandle<'a> {
 
     pub(crate) fn enqueue(&mut self, mut i: Input, key: &[usize]) -> Result<(), TransportError> {
         if self.dih.txs.len() == 1 {
-            self.dih.txs[0].send(i)?;
+            self.dih.txs[0].send(if self.dih.dst_is_local {
+                unsafe { LocalOrNot::for_local_transfer(i) }
+            } else {
+                LocalOrNot::new(i)
+            })?;
             self.sent[0] += 1;
         } else {
             if key.is_empty() {
@@ -576,11 +589,23 @@ impl<'a> BatchSendHandle<'a> {
 
             for (s, rs) in shard_writes.drain(..).enumerate() {
                 if !rs.is_empty() {
-                    self.dih.txs[s].send(Input {
-                        link: i.link,
-                        tracer: i.tracer.clone(),
-                        data: rs,
-                    })?;
+                    let p = if self.dih.dst_is_local {
+                        unsafe {
+                            LocalOrNot::for_local_transfer(Input {
+                                link: i.link,
+                                tracer: i.tracer.clone(),
+                                data: rs,
+                            })
+                        }
+                    } else {
+                        LocalOrNot::new(Input {
+                            link: i.link,
+                            tracer: i.tracer.clone(),
+                            data: rs,
+                        })
+                    };
+
+                    self.dih.txs[s].send(p)?;
                     self.sent[s] += 1;
                 }
             }

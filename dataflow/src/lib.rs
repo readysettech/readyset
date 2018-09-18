@@ -54,7 +54,7 @@ pub type Readers = Arc<Mutex<HashMap<(basics::NodeIndex, usize), backlog::Single
 pub type DomainConfig = domain::Config;
 
 pub use domain::{Domain, DomainBuilder, Index};
-pub use payload::{LocalBypass, Packet};
+pub use payload::Packet;
 
 #[derive(Copy, Clone, PartialEq, Eq, Debug, Serialize, Deserialize)]
 pub enum Sharding {

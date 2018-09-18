@@ -860,7 +860,7 @@ impl Domain {
                                     .map(|shard| {
                                         let key = key.clone();
                                         let (tx, rx) = futures::sync::mpsc::unbounded();
-                                        let (sender, is_local) = self
+                                        let (sender, _is_local) = self
                                             .channel_coordinator
                                             .get_dest(&(trigger_domain, shard))
                                             .map(|(addr, local)| {
@@ -875,17 +875,10 @@ impl Domain {
                                         tokio::spawn(
                                             self.shutdown_valve
                                                 .wrap(rx)
-                                                .map(move |miss| {
-                                                    let mut m = box Packet::RequestReaderReplay {
-                                                        key: miss,
-                                                        cols: key.clone(),
-                                                        node: node,
-                                                    };
-
-                                                    if is_local {
-                                                        m = m.make_local();
-                                                    }
-                                                    m
+                                                .map(move |miss| box Packet::RequestReaderReplay {
+                                                    key: miss,
+                                                    cols: key.clone(),
+                                                    node: node,
                                                 }).fold(sender, move |sender, m| {
                                                     sender.send(m).map_err(|e| {
                                                         // domain went away?

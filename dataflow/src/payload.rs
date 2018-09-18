@@ -1,7 +1,8 @@
 use petgraph;
-use serde::{Deserialize, Deserializer, Serialize, Serializer};
+use serde::{Deserialize, Serialize};
 
 use api;
+use api::LocalOrNot;
 #[cfg(debug_assertions)]
 use backtrace::Backtrace;
 use channel;
@@ -13,76 +14,6 @@ use std::collections::{HashMap, HashSet};
 use std::fmt;
 use std::net::SocketAddr;
 use std::time;
-
-pub struct LocalBypass<T>(*mut T);
-
-impl<T> LocalBypass<T> {
-    pub fn make(t: Box<T>) -> Self {
-        LocalBypass(Box::into_raw(t))
-    }
-
-    pub unsafe fn deref(&self) -> &T {
-        &*self.0
-    }
-
-    pub unsafe fn take(self) -> Box<T> {
-        Box::from_raw(self.0)
-    }
-}
-
-unsafe impl<T> Send for LocalBypass<T> {}
-impl<T> Serialize for LocalBypass<T> {
-    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
-    where
-        S: Serializer,
-    {
-        (self.0 as usize).serialize(serializer)
-    }
-}
-impl<'de, T> Deserialize<'de> for LocalBypass<T> {
-    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
-    where
-        D: Deserializer<'de>,
-    {
-        usize::deserialize(deserializer).map(|p| LocalBypass(p as *mut T))
-    }
-}
-impl<T> Clone for LocalBypass<T> {
-    fn clone(&self) -> LocalBypass<T> {
-        panic!("LocalBypass types cannot be cloned");
-    }
-}
-
-#[derive(Serialize, Deserialize)]
-pub enum LocalOrNot<T> {
-    Local(LocalBypass<T>),
-    Not(T),
-}
-
-impl<T> LocalOrNot<T> {
-    pub fn is_local(&self) -> bool {
-        if let LocalOrNot::Local(..) = *self {
-            true
-        } else {
-            false
-        }
-    }
-
-    pub fn make(t: T, local: bool) -> Self {
-        if local {
-            LocalOrNot::Local(LocalBypass::make(Box::new(t)))
-        } else {
-            LocalOrNot::Not(t)
-        }
-    }
-
-    pub unsafe fn take(self) -> T {
-        match self {
-            LocalOrNot::Local(l) => *l.take(),
-            LocalOrNot::Not(t) => t,
-        }
-    }
-}
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct ReplayPathSegment {
@@ -150,10 +81,11 @@ pub enum Packet {
     // Data messages
     //
     Input {
-        inner: Input,
+        inner: LocalOrNot<Input>,
         src: Option<SourceChannelIdentifier>,
         senders: Vec<SourceChannelIdentifier>,
     },
+
     /// Regular data-flow update.
     Message {
         link: Link,
@@ -297,19 +229,12 @@ pub enum Packet {
 
     /// Ask domain to log its state size
     UpdateStateSize,
-
-    /// The packet is being sent locally, so a pointer is sent to avoid
-    /// serialization/deserialization costs.
-    Local(LocalBypass<Packet>),
 }
 
 impl Packet {
     pub fn link(&self) -> &Link {
         match *self {
-            Packet::Input {
-                inner: Input { ref link, .. },
-                ..
-            } => link,
+            Packet::Input { ref inner, .. } => &unsafe { inner.deref() }.link,
             Packet::Message { ref link, .. } => link,
             Packet::ReplayPiece { ref link, .. } => link,
             _ => unreachable!(),
@@ -443,32 +368,6 @@ impl Packet {
             _ => None,
         }
     }
-
-    /// If self is `Packet::Local` then replace with the packet pointed to.
-    pub fn extract_local(&mut self) -> Option<Box<Self>> {
-        if let Packet::Local(..) = *self {
-            use std::mem;
-            if let Packet::Local(local) = mem::replace(self, Packet::Spin) {
-                Some(unsafe { local.take() })
-            } else {
-                unreachable!();
-            }
-        } else {
-            None
-        }
-    }
-
-    pub fn is_local(&self) -> bool {
-        if let Packet::Local(..) = *self {
-            true
-        } else {
-            false
-        }
-    }
-
-    pub fn make_local(self: Box<Self>) -> Box<Self> {
-        Box::new(Packet::Local(LocalBypass::make(self)))
-    }
 }
 
 impl fmt::Debug for Packet {
@@ -487,11 +386,6 @@ impl fmt::Debug for Packet {
                 tag.id(),
                 data.len()
             ),
-            Packet::Local(ref lp) => {
-                let lp = unsafe { lp.deref() };
-                let s = write!(f, "local {:?}", lp)?;
-                Ok(s)
-            }
             ref p => {
                 use std::mem;
                 write!(f, "Packet::Control({:?})", mem::discriminant(p))

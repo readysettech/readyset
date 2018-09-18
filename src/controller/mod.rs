@@ -1,7 +1,7 @@
 /// Only allow processing this many inputs in a domain before we handle timer events, acks, etc.
 const FORCE_INPUT_YIELD_EVERY: usize = 64;
 
-use api::{ControllerDescriptor, Input};
+use api::{ControllerDescriptor, Input, LocalOrNot};
 use async_bincode::{AsyncBincodeReader, AsyncBincodeWriter, AsyncDestination, SyncDestination};
 use basics::DomainIndex;
 use bincode;
@@ -1021,7 +1021,12 @@ struct Replica {
 
     incoming: Valved<tokio::net::Incoming>,
     inputs: StreamUnordered<
-        DualTcpStream<BufStream<tokio::net::TcpStream>, Box<Packet>, Input, SyncDestination>,
+        DualTcpStream<
+            BufStream<tokio::net::TcpStream>,
+            Box<Packet>,
+            LocalOrNot<Input>,
+            SyncDestination,
+        >,
     >,
     outputs: FnvHashMap<
         ReplicaIndex,
@@ -1146,7 +1151,7 @@ impl Replica {
                 continue;
             }
 
-            let &mut (ref mut tx, ref mut pending, is_local) =
+            let &mut (ref mut tx, ref mut pending, _is_local) =
                 outputs.entry(ri).or_insert_with(|| {
                     let mut dest = None;
                     while dest.is_none() {
@@ -1159,11 +1164,7 @@ impl Replica {
                     (tx, true, is_local)
                 });
 
-            while let Some(mut m) = ms.pop_front() {
-                if is_local && !m.is_local() {
-                    m = m.make_local();
-                }
-
+            while let Some(m) = ms.pop_front() {
                 match tx.start_send(m) {
                     Ok(AsyncSink::Ready) => {
                         // we queued something, so we'll need to send!

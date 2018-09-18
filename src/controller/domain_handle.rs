@@ -212,10 +212,8 @@ impl DomainHandle {
         workers: &HashMap<WorkerIdentifier, WorkerStatus>,
     ) -> Result<(), tcp::SendError> {
         for shard in self.shards.iter_mut() {
-            if shard.is_local {
-                // TODO: avoid clone on last iteration.
-                shard.tx.send(p.clone().make_local())?;
-            } else if workers[&shard.worker].healthy {
+            let _ = shard.is_local;
+            if workers[&shard.worker].healthy {
                 shard.tx.send_ref(&p)?;
             } else {
                 error!(
@@ -231,12 +229,10 @@ impl DomainHandle {
     pub(super) fn send_to_healthy_shard(
         &mut self,
         i: usize,
-        mut p: Box<Packet>,
+        p: Box<Packet>,
         workers: &HashMap<WorkerIdentifier, WorkerStatus>,
     ) -> Result<(), tcp::SendError> {
-        if self.shards[i].is_local {
-            p = p.make_local();
-        }
+        let _ = self.shards[i].is_local;
         if workers[&self.shards[i].worker].healthy {
             self.shards[i].tx.send_ref(&p)?;
         } else {

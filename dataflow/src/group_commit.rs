@@ -1,3 +1,4 @@
+use api::LocalOrNot;
 use prelude::*;
 use std::time;
 
@@ -96,10 +97,12 @@ impl GroupCommitQueueSet {
         let merged_data = packets.fold(Vec::new(), |mut acc, p| {
             match *p {
                 Packet::Input {
-                    inner: Input { link, data, tracer },
+                    inner,
                     src,
                     senders,
                 } => {
+                    let Input { link, data, tracer } = unsafe { inner.take() };
+
                     assert_eq!(senders.len(), 0);
                     assert_eq!(merged_link, link);
                     acc.extend(data);
@@ -129,11 +132,11 @@ impl GroupCommitQueueSet {
         });
 
         Some(Box::new(Packet::Input {
-            inner: Input {
+            inner: LocalOrNot::new(Input {
                 link: merged_link,
                 data: merged_data,
                 tracer: merged_tracer,
-            },
+            }),
             src: None,
             senders: all_senders,
         }))

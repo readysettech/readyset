@@ -33,10 +33,11 @@ impl Node {
                 // NOTE: bases only accept BaseOperations
                 match m.take() {
                     Some(box Packet::Input {
-                        inner: Input { link, data, tracer },
+                        inner,
                         src,
                         mut senders,
                     }) => {
+                        let Input { link, data, tracer } = unsafe { inner.take() };
                         let mut rs = b.process(addr, data, &*state);
 
                         // When a replay originates at a base node, we replay the data *through* that

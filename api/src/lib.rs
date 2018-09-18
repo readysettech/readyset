@@ -115,12 +115,15 @@ use basics::*;
 use std::collections::HashMap;
 
 mod controller;
+mod proto;
 mod table;
 mod view;
 
 pub use basics::{DataType, Modification, Operation, TableOperation};
 
 pub use consensus::{LocalAuthority, ZookeeperAuthority};
+
+pub use proto::LocalOrNot;
 
 /// The prelude contains most of the types needed in everyday operation.
 pub mod prelude {
