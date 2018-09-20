@@ -109,7 +109,7 @@ pub struct PersistenceParameters {
 impl Default for PersistenceParameters {
     fn default() -> Self {
         Self {
-            flush_timeout: time::Duration::new(0, 100_000),
+            flush_timeout: time::Duration::new(0, 1_000_000),
             mode: DurabilityMode::MemoryOnly,
             log_prefix: String::from("soup"),
             log_dir: None,
