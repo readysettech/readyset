@@ -8,7 +8,7 @@ use slog::Logger;
 
 use api::debug::stats::{DomainStats, NodeStats};
 use channel::poll::{KeepPolling, PollEvent, PollingLoop, StopPolling};
-use channel::{tcp, DomainConnectionBuilder, TcpReceiver, TcpSender};
+use channel::{self, tcp, TcpReceiver};
 use consensus::Epoch;
 use dataflow::payload::ControlReplyPacket;
 use dataflow::prelude::*;
@@ -24,8 +24,7 @@ pub enum WaitError {
 
 struct DomainShardHandle {
     worker: WorkerIdentifier,
-    tx: TcpSender<Box<Packet>>,
-    is_local: bool,
+    tx: Box<dyn channel::Sender<Item = Box<Packet>> + Send>,
 }
 
 pub struct DomainHandle {
@@ -115,17 +114,14 @@ impl DomainHandle {
         cr_poll.run_polling_loop(|event| match event {
             PollEvent::ResumePolling(_) => KeepPolling,
             PollEvent::Process(ControlReplyPacket::Booted(shard, addr)) => {
-                channel_coordinator.insert_addr((idx, shard), addr.clone(), false);
+                channel_coordinator.insert_remote((idx, shard), addr);
                 txs.insert(
                     shard,
                     channel_coordinator
-                        .get_dest(&(idx, shard))
-                        .map(|(addr, is_local)| {
-                            (
-                                DomainConnectionBuilder::for_domain(addr).build().unwrap(),
-                                is_local,
-                            )
-                        }).unwrap(),
+                        .builder_for(&(idx, shard))
+                        .unwrap()
+                        .build_sync()
+                        .unwrap(),
                 );
 
                 // TODO(malte): this is a hack, and not an especially neat one. In response to a
@@ -164,12 +160,8 @@ impl DomainHandle {
             .into_iter()
             .enumerate()
             .map(|(i, worker)| {
-                let (tx, is_local) = txs.remove(&i).unwrap();
-                DomainShardHandle {
-                    is_local,
-                    worker,
-                    tx,
-                }
+                let tx = txs.remove(&i).unwrap();
+                DomainShardHandle { worker, tx }
             }).collect();
 
         DomainHandle {
@@ -212,9 +204,8 @@ impl DomainHandle {
         workers: &HashMap<WorkerIdentifier, WorkerStatus>,
     ) -> Result<(), tcp::SendError> {
         for shard in self.shards.iter_mut() {
-            let _ = shard.is_local;
             if workers[&shard.worker].healthy {
-                shard.tx.send_ref(&p)?;
+                shard.tx.send(p.clone())?;
             } else {
                 error!(
                     self.log,
@@ -232,9 +223,8 @@ impl DomainHandle {
         p: Box<Packet>,
         workers: &HashMap<WorkerIdentifier, WorkerStatus>,
     ) -> Result<(), tcp::SendError> {
-        let _ = self.shards[i].is_local;
         if workers[&self.shards[i].worker].healthy {
-            self.shards[i].tx.send_ref(&p)?;
+            self.shards[i].tx.send(p)?;
         } else {
             error!(
                 self.log,

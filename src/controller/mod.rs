@@ -1,15 +1,18 @@
 /// Only allow processing this many inputs in a domain before we handle timer events, acks, etc.
 const FORCE_INPUT_YIELD_EVERY: usize = 64;
 
+/// Queue size for local domain-to-domain channels
+const LOCAL_CHANNEL_CAPACITY: usize = 64;
+
 use api::{ControllerDescriptor, Input, LocalOrNot};
-use async_bincode::{AsyncBincodeReader, AsyncBincodeWriter, AsyncDestination, SyncDestination};
+use async_bincode::{AsyncBincodeReader, AsyncBincodeWriter, SyncDestination};
 use basics::DomainIndex;
 use bincode;
 use bufstream::BufStream;
 use channel::{
     self,
     poll::{PollEvent, ProcessResult},
-    DomainConnectionBuilder, DualTcpStream, TcpSender, CONNECTION_FROM_BASE,
+    DualTcpStream, TcpSender, CONNECTION_FROM_BASE,
 };
 use consensus::{Authority, Epoch, STATE_KEY};
 use crate::controller::domain_handle::DomainHandle;
@@ -33,7 +36,7 @@ use serde_json;
 use slog;
 use std::collections::{HashMap, VecDeque};
 use std::fs;
-use std::io::{self, BufWriter, ErrorKind};
+use std::io::{self, ErrorKind};
 use std::net::{IpAddr, SocketAddr};
 use std::sync::{
     atomic::{AtomicUsize, Ordering},
@@ -76,7 +79,7 @@ type WorkerIdentifier = SocketAddr;
 type WorkerEndpoint = Arc<Mutex<TcpSender<CoordinationMessage>>>;
 
 type ReplicaIndex = (DomainIndex, usize);
-type ChannelCoordinator = channel::ChannelCoordinator<ReplicaIndex>;
+type ChannelCoordinator = channel::ChannelCoordinator<ReplicaIndex, Box<Packet>>;
 
 fn block_on<F, T>(f: F) -> T
 where
@@ -316,7 +319,7 @@ fn start_instance<A: Authority + 'static>(
                                             shard,
                                             addr
                                         );
-                                        coord.insert_addr((domain, shard), addr, false);
+                                        coord.insert_remote((domain, shard), addr);
                                     }
                                 }
                             }
@@ -677,16 +680,21 @@ fn listen_df(
                         log.clone(),
                         readers.clone(),
                         coord.clone(),
-                        addr,
                         &valve,
                         state_size.clone(),
                     );
 
-                    // need to register the domain with the local channel coordinator
-                    coord.insert_addr((idx, shard), addr, false);
+                    let (tx, rx) = futures::sync::mpsc::channel(LOCAL_CHANNEL_CAPACITY);
+
+                    // need to register the domain with the local channel coordinator.
+                    // local first to ensure that we don't unnecessarily give away remote for a
+                    // local thing if there's a race
+                    coord.insert_local((idx, shard), tx);
+                    coord.insert_remote((idx, shard), addr);
+
                     block_on(|| state_sizes.lock().unwrap().insert((idx, shard), state_size));
 
-                    tokio::spawn(Replica::new(&valve, d, on, log.clone(), coord.clone()));
+                    tokio::spawn(Replica::new(&valve, d, on, rx, log.clone(), coord.clone()));
 
                     trace!(
                         log,
@@ -1020,6 +1028,7 @@ struct Replica {
     coord: Arc<ChannelCoordinator>,
 
     incoming: Valved<tokio::net::Incoming>,
+    locals: futures::sync::mpsc::Receiver<Box<Packet>>,
     inputs: StreamUnordered<
         DualTcpStream<
             BufStream<tokio::net::TcpStream>,
@@ -1031,8 +1040,7 @@ struct Replica {
     outputs: FnvHashMap<
         ReplicaIndex,
         (
-            AsyncBincodeWriter<BufWriter<tokio::net::TcpStream>, Box<Packet>, AsyncDestination>,
-            bool,
+            Box<dyn Sink<SinkItem = Box<Packet>, SinkError = bincode::Error> + Send>,
             bool,
         ),
     >,
@@ -1047,6 +1055,7 @@ impl Replica {
         valve: &Valve,
         mut domain: Domain,
         on: tokio::net::TcpListener,
+        locals: futures::sync::mpsc::Receiver<Box<Packet>>,
         log: slog::Logger,
         cc: Arc<ChannelCoordinator>,
     ) -> Self {
@@ -1057,6 +1066,7 @@ impl Replica {
             coord: cc,
             domain,
             incoming: valve.wrap(on.incoming()),
+            locals,
             log: log.new(o!{"id" => id}),
             inputs: Default::default(),
             outputs: Default::default(),
@@ -1151,18 +1161,11 @@ impl Replica {
                 continue;
             }
 
-            let &mut (ref mut tx, ref mut pending, _is_local) =
-                outputs.entry(ri).or_insert_with(|| {
-                    let mut dest = None;
-                    while dest.is_none() {
-                        dest = cc.get_dest(&ri);
-                    }
-                    let (addr, is_local) = dest.unwrap();
-                    let tx = DomainConnectionBuilder::for_domain(addr)
-                        .build_async()
-                        .unwrap();
-                    (tx, true, is_local)
-                });
+            let &mut (ref mut tx, ref mut pending) = outputs.entry(ri).or_insert_with(|| {
+                while !cc.has(&ri) {}
+                let tx = cc.builder_for(&ri).unwrap().build_async().unwrap();
+                (tx, true)
+            });
 
             while let Some(m) = ms.pop_front() {
                 match tx.start_send(m) {
@@ -1189,7 +1192,7 @@ impl Replica {
         }
 
         // then, try to do any sends that are still pending
-        for &mut (ref mut tx, ref mut pending, _) in outputs.values_mut() {
+        for &mut (ref mut tx, ref mut pending) in outputs.values_mut() {
             if !*pending {
                 continue;
             }
@@ -1302,38 +1305,102 @@ impl Future for Replica {
             // have any of our timers expired?
             self.try_timeout().context("check timeout")?;
 
-            // is there any new input for us?
+            // we have three logical input sources: receives from local domains, receives from
+            // remote domains, and remote mutators. we want to achieve some kind of fairness among
+            // these, but bias the data-flow towards finishing work it has accepted (i.e., domain
+            // operations) to accepting new work. however, this is complicated by two facts:
+            //
+            //  - we cannot (currently) differentiate between receives from remote domains and
+            //    receives from mutators. they are all remote tcp channels. we *could*
+            //    differentiate them using `is_base` in `try_new` to store them separately, but
+            //    it's also unclear how that would change the receive heuristic.
+            //  - domain operations are not all "completing starting work". in many cases, traffic
+            //    from domains will be replay-related, in which case favoring domains would favor
+            //    writes over reads. while we do in general want reads to be fast, we don't want
+            //    them to fully starve writes.
+            //
+            // the current stategy is therefore that we alternate reading once from the local
+            // channel and once from the set of remote channels. this biases slightly in favor of
+            // local sends, without starving either. we also stop alternating once either source is
+            // depleted.
+            let mut local_done = false;
+            let mut remote_done = false;
+            let mut check_local = true;
             let readiness = loop {
                 let mut interrupted = false;
                 for i in 0..FORCE_INPUT_YIELD_EVERY {
-                    match self.inputs.poll() {
-                        Ok(Async::Ready(Some((StreamYield::Item(packet), _)))) => {
-                            let d = &mut self.domain;
-                            let sb = &mut self.sendback;
-                            let ob = &mut self.outbox;
+                    if !local_done && (check_local || remote_done) {
+                        match self.locals.poll() {
+                            Ok(Async::Ready(Some(packet))) => {
+                                let d = &mut self.domain;
+                                let sb = &mut self.sendback;
+                                let ob = &mut self.outbox;
 
-                            // TODO: carry_local
-                            if let ProcessResult::StopPolling =
-                                block_on(|| d.on_event(sb, PollEvent::Process(packet), ob))
-                            {
-                                // domain got a message to quit
+                                if let ProcessResult::StopPolling =
+                                    block_on(|| d.on_event(sb, PollEvent::Process(packet), ob))
+                                {
+                                    // domain got a message to quit
+                                    // TODO: should we finish up remaining work?
+                                    return Ok(Async::Ready(()));
+                                }
+                            }
+                            Ok(Async::Ready(None)) => {
+                                // local input stream finished?
+                                // TODO: should we finish up remaining work?
                                 return Ok(Async::Ready(()));
                             }
+                            Ok(Async::NotReady) => {
+                                local_done = true;
+                            }
+                            Err(e) => {
+                                error!(self.log, "local input stream failed: {:?}", e);
+                                local_done = true;
+                                break;
+                            }
                         }
-                        Ok(Async::Ready(Some((StreamYield::Finished(_stream), streami)))) => {
-                            self.sendback.back.remove(&streami);
-                            self.sendback.pending.remove(&streami);
-                            // FIXME: what about if a later flush flushes to this stream?
+                    }
+
+                    if !remote_done && (!check_local || local_done) {
+                        match self.inputs.poll() {
+                            Ok(Async::Ready(Some((StreamYield::Item(packet), _)))) => {
+                                let d = &mut self.domain;
+                                let sb = &mut self.sendback;
+                                let ob = &mut self.outbox;
+
+                                if let ProcessResult::StopPolling =
+                                    block_on(|| d.on_event(sb, PollEvent::Process(packet), ob))
+                                {
+                                    // domain got a message to quit
+                                    // TODO: should we finish up remaining work?
+                                    return Ok(Async::Ready(()));
+                                }
+                            }
+                            Ok(Async::Ready(Some((StreamYield::Finished(_stream), streami)))) => {
+                                self.sendback.back.remove(&streami);
+                                self.sendback.pending.remove(&streami);
+                                // FIXME: what about if a later flush flushes to this stream?
+                            }
+                            Ok(Async::Ready(None)) => {
+                                // we probably haven't booted yet
+                                remote_done = true;
+                            }
+                            Ok(Async::NotReady) => {
+                                remote_done = true;
+                            }
+                            Err(e) => {
+                                error!(self.log, "input stream failed: {:?}", e);
+                                remote_done = true;
+                                break;
+                            }
                         }
-                        Ok(Async::Ready(None)) => {
-                            // we probably haven't booted yet
-                            break;
-                        }
-                        Ok(Async::NotReady) => break,
-                        Err(e) => {
-                            error!(self.log, "input stream failed: {:?}", e);
-                            break;
-                        }
+                    }
+
+                    // alternate between input sources
+                    check_local = !check_local;
+
+                    // nothing more to do -- wait to be polled again
+                    if local_done && remote_done {
+                        break;
                     }
 
                     if i == FORCE_INPUT_YIELD_EVERY - 1 {

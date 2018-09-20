@@ -104,3 +104,5 @@ impl<T> LocalOrNot<T> {
         self.0.take()
     }
 }
+
+unsafe impl<T> Send for LocalOrNot<T> where T: Send {}
