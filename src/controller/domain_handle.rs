@@ -47,7 +47,6 @@ impl DomainHandle {
         persistence_params: &PersistenceParameters,
         listen_addr: &IpAddr,
         channel_coordinator: &Arc<ChannelCoordinator>,
-        debug_addr: &Option<SocketAddr>,
         placer: &'a mut Box<Iterator<Item = (WorkerIdentifier, WorkerEndpoint)>>,
         workers: &'a mut Vec<WorkerEndpoint>,
         epoch: Epoch,
@@ -79,7 +78,6 @@ impl DomainHandle {
                 nodes,
                 persistence_parameters: persistence_params.clone(),
                 control_addr: control_listener.local_addr().unwrap(),
-                debug_addr: debug_addr.clone(),
             };
 
             // TODO(malte): simple round-robin placement for the moment

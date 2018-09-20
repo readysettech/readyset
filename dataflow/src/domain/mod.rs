@@ -115,8 +115,6 @@ pub struct DomainBuilder {
     pub persistence_parameters: PersistenceParameters,
     /// The socket address at which this domain receives control messages.
     pub control_addr: SocketAddr,
-    /// The socket address for debug interactions with this domain.
-    pub debug_addr: Option<SocketAddr>,
     /// Configuration parameters for the domain.
     pub config: Config,
 }
@@ -141,11 +139,6 @@ impl DomainBuilder {
             .collect();
 
         let log = log.new(o!("domain" => self.index.index(), "shard" => self.shard.unwrap_or(0)));
-
-        let debug_tx = self
-            .debug_addr
-            .as_ref()
-            .map(|addr| TcpSender::connect(addr).unwrap());
         let control_reply_tx = TcpSender::connect(&self.control_addr).unwrap();
         let group_commit_queues = GroupCommitQueueSet::new(&self.persistence_parameters);
 
@@ -168,7 +161,6 @@ impl DomainBuilder {
 
             shutdown_valve: shutdown_valve.clone(),
             readers,
-            _debug_tx: debug_tx,
             control_reply_tx,
             channel_coordinator,
 
@@ -219,7 +211,6 @@ pub struct Domain {
 
     shutdown_valve: Valve,
     readers: Readers,
-    _debug_tx: Option<TcpSender<api::debug::trace::Event>>,
     control_reply_tx: TcpSender<ControlReplyPacket>,
     channel_coordinator: Arc<ChannelCoordinator>,
 
