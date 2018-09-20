@@ -15,7 +15,7 @@ use dataflow::prelude::*;
 use dataflow::{DomainBuilder, DomainConfig};
 
 use crate::controller::{WorkerEndpoint, WorkerIdentifier, WorkerStatus};
-use crate::coordination::{CoordinationMessage, CoordinationPayload};
+use crate::coordination::{CoordinationMessage, CoordinationPayload, DomainDescriptor};
 
 #[derive(Debug)]
 pub enum WaitError {
@@ -138,7 +138,9 @@ impl DomainHandle {
                     let msg = CoordinationMessage {
                         epoch,
                         source: s.local_addr().unwrap(),
-                        payload: CoordinationPayload::DomainBooted((idx, shard), addr),
+                        payload: CoordinationPayload::DomainBooted(DomainDescriptor::new(
+                            idx, shard, addr,
+                        )),
                     };
 
                     s.send(msg).unwrap();

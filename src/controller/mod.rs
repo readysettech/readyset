@@ -19,7 +19,7 @@ use crate::controller::domain_handle::DomainHandle;
 use crate::controller::inner::{ControllerInner, WorkerStatus};
 use crate::controller::recipe::Recipe;
 use crate::controller::sql::reuse::ReuseConfigType;
-use crate::coordination::{CoordinationMessage, CoordinationPayload};
+use crate::coordination::{CoordinationMessage, CoordinationPayload, DomainDescriptor};
 use dataflow::{
     payload::SourceChannelIdentifier, prelude::Executor, Domain, DomainBuilder, DomainConfig,
     Packet, PersistenceParameters, Readers,
@@ -309,9 +309,12 @@ fn start_instance<A: Authority + 'static>(
                                     unreachable!();
                                 }
                             }
-                            CoordinationPayload::DomainBooted((domain, shard), addr) => {
+                            CoordinationPayload::DomainBooted(dd) => {
                                 if let InstanceState::Active { epoch, .. } = worker_state {
                                     if epoch == msg.epoch {
+                                        let domain = dd.domain();
+                                        let shard = dd.shard();
+                                        let addr = dd.addr();
                                         trace!(
                                             log,
                                             "found that domain {}.{} is at {:?}",
@@ -711,8 +714,9 @@ fn listen_df(
                     Ok(addr) => Either::A(
                         ctrl_tx
                             .clone()
-                            .send(CoordinationPayload::DomainBooted((idx, shard), addr))
-                            .map_err(|_| {
+                            .send(CoordinationPayload::DomainBooted(DomainDescriptor::new(
+                                idx, shard, addr,
+                            ))).map_err(|_| {
                                 // controller went away -- exit?
                                 io::Error::new(io::ErrorKind::Other, "controller went away")
                             }),
