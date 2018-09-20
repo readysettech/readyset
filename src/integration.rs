@@ -81,7 +81,6 @@ fn it_works_basic() {
     let mut b = ControllerBuilder::default();
     b.set_persistence(PersistenceParameters::new(
         DurabilityMode::DeleteOnExit,
-        128,
         Duration::from_millis(1),
         Some(String::from("it_works_basic")),
         1,
@@ -720,7 +719,6 @@ fn it_recovers_persisted_bases() {
     let path = dir.path().join("it_recovers_persisted_bases");
     let persistence_params = PersistenceParameters::new(
         DurabilityMode::Permanent,
-        128,
         Duration::from_millis(1),
         Some(path.to_string_lossy().into()),
         1,
@@ -820,7 +818,6 @@ fn it_recovers_persisted_bases_w_multiple_nodes() {
     let tables = vec!["A", "B", "C"];
     let persistence_parameters = PersistenceParameters::new(
         DurabilityMode::Permanent,
-        128,
         Duration::from_millis(1),
         Some(path.to_string_lossy().into()),
         1,
@@ -2182,7 +2179,6 @@ fn node_removal() {
     let mut b = ControllerBuilder::default();
     b.set_persistence(PersistenceParameters::new(
         DurabilityMode::DeleteOnExit,
-        128,
         Duration::from_millis(1),
         Some(String::from("domain_removal")),
         1,

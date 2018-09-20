@@ -94,9 +94,7 @@ pub enum DurabilityMode {
 /// Parameters to control the operation of GroupCommitQueue.
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
 pub struct PersistenceParameters {
-    /// Number of elements to buffer before flushing.
-    pub queue_capacity: usize,
-    /// Amount of time to wait before flushing despite not reaching `queue_capacity`.
+    /// Force a flush if packets have been in the base table queue for this long.
     pub flush_timeout: time::Duration,
     /// Whether the output files should be deleted when the GroupCommitQueue is dropped.
     pub mode: DurabilityMode,
@@ -111,7 +109,6 @@ pub struct PersistenceParameters {
 impl Default for PersistenceParameters {
     fn default() -> Self {
         Self {
-            queue_capacity: 256,
             flush_timeout: time::Duration::new(0, 100_000),
             mode: DurabilityMode::MemoryOnly,
             log_prefix: String::from("soup"),
@@ -131,13 +128,8 @@ impl PersistenceParameters {
     ///     persistent files are deleted once the `ControllerHandle` is dropped. Useful for tests.
     ///  3. `DurabilityMode::MemoryOnly`: no writes to disk, store all writes in memory.
     ///     Useful for baseline numbers.
-    ///
-    /// `queue_capacity` indicates the number of packets that should be buffered until
-    /// flushing, and `flush_timeout` indicates the length of time to wait before flushing
-    /// anyway.
     pub fn new(
         mode: DurabilityMode,
-        queue_capacity: usize,
         flush_timeout: time::Duration,
         log_prefix: Option<String>,
         persistence_threads: i32,
@@ -146,7 +138,6 @@ impl PersistenceParameters {
         assert!(!log_prefix.contains("-"));
 
         Self {
-            queue_capacity,
             flush_timeout,
             mode,
             log_prefix,

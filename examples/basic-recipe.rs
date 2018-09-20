@@ -22,7 +22,6 @@ fn main() {
 
     let persistence_params = distributary::PersistenceParameters::new(
         distributary::DurabilityMode::Permanent,
-        512,
         Duration::from_millis(1),
         Some(String::from("example")),
         1,

@@ -156,7 +156,6 @@ fn main() {
             "memory" => distributary::DurabilityMode::MemoryOnly,
             _ => unreachable!(),
         },
-        512,
         Duration::new(0, flush_ns),
         Some(deployment_name.to_string()),
         persistence_threads,

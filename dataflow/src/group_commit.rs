@@ -4,24 +4,15 @@ use std::time;
 
 pub struct GroupCommitQueueSet {
     /// Packets that are queued to be persisted.
-    pending_packets: Map<Vec<Box<Packet>>>,
-
-    /// Time when the first packet was inserted into pending_packets, or none if pending_packets is
-    /// empty. A flush should occur on or before wait_start + timeout.
-    wait_start: Map<time::Instant>,
-
+    pending_packets: Map<(time::Instant, Vec<Box<Packet>>)>,
     params: PersistenceParameters,
 }
 
 impl GroupCommitQueueSet {
     /// Create a new `GroupCommitQueue`.
     pub fn new(params: &PersistenceParameters) -> Self {
-        assert!(params.queue_capacity > 0);
-
         Self {
             pending_packets: Map::default(),
-            wait_start: Map::default(),
-
             params: params.clone(),
         }
     }
@@ -38,49 +29,54 @@ impl GroupCommitQueueSet {
 
     /// Find the first queue that has timed out waiting for more packets, and flush it to disk.
     pub fn flush_if_necessary(&mut self) -> Option<Box<Packet>> {
-        let mut needs_flush = None;
-        for (node, wait_start) in self.wait_start.iter() {
-            if wait_start.elapsed() >= self.params.flush_timeout {
-                needs_flush = Some(node);
-                break;
-            }
-        }
+        let to = self.params.flush_timeout;
+        let node = self
+            .pending_packets
+            .iter()
+            .find(|(_, &(ref first, _))| first.elapsed() >= to)
+            .map(|(n, _)| n);
 
-        needs_flush.and_then(|node| self.flush_internal(&node))
+        if let Some(node) = node {
+            self.flush_internal(&node)
+        } else {
+            None
+        }
     }
 
     /// Merge any pending packets.
     fn flush_internal(&mut self, node: &LocalNodeIndex) -> Option<Box<Packet>> {
-        self.wait_start.remove(node);
-        Self::merge_packets(&mut self.pending_packets[node])
+        Self::merge_packets(&mut self.pending_packets[node].1)
     }
 
     /// Add a new packet to be persisted, and if this triggered a flush return an iterator over the
     /// packets that were written.
     pub fn append<'a>(&mut self, p: Box<Packet>) -> Option<Box<Packet>> {
         let node = p.link().dst;
-        if !self.pending_packets.contains_key(&node) {
-            self.pending_packets
-                .insert(node.clone(), Vec::with_capacity(self.params.queue_capacity));
+        let pp = self
+            .pending_packets
+            .entry(node)
+            .or_insert_with(|| (time::Instant::now(), Vec::new()));
+
+        if pp.1.is_empty() {
+            pp.0 = time::Instant::now();
         }
 
-        self.pending_packets[&node].push(p);
-        if self.pending_packets[&node].len() >= self.params.queue_capacity {
-            return self.flush_internal(&node);
-        } else if !self.wait_start.contains_key(&node) {
-            self.wait_start.insert(node, time::Instant::now());
+        pp.1.push(p);
+        if pp.0.elapsed() >= self.params.flush_timeout {
+            self.flush_internal(&node)
+        } else {
+            None
         }
-        None
     }
 
     /// Returns how long until a flush should occur.
     pub fn duration_until_flush(&self) -> Option<time::Duration> {
-        self.wait_start
+        self.pending_packets
             .values()
-            .map(|i| {
+            .map(|p| {
                 self.params
                     .flush_timeout
-                    .checked_sub(i.elapsed())
+                    .checked_sub(p.0.elapsed())
                     .unwrap_or(time::Duration::from_millis(0))
             }).min()
     }
