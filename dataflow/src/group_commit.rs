@@ -33,7 +33,7 @@ impl GroupCommitQueueSet {
         let node = self
             .pending_packets
             .iter()
-            .find(|(_, &(ref first, _))| first.elapsed() >= to)
+            .find(|(_, &(ref first, ref ps))| first.elapsed() >= to && !ps.is_empty())
             .map(|(n, _)| n);
 
         if let Some(node) = node {
