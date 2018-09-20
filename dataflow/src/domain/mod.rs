@@ -2468,22 +2468,28 @@ impl Domain {
                 // queue.
                 if self.group_commit_queues.should_append(&packet, &self.nodes) {
                     packet.trace(PacketEvent::ExitInputChannel);
-                    let merged_packet = self.group_commit_queues.append(packet);
-                    if let Some(packet) = merged_packet {
+                    if let Some(packet) = self.group_commit_queues.append(packet) {
                         self.handle(packet, sends, executor, true);
                     }
                 } else {
                     self.handle(packet, sends, executor, true);
                 }
 
+                while let Some(m) = self.group_commit_queues.flush_if_necessary() {
+                    self.handle(m, sends, executor, true);
+                }
+
                 ProcessResult::KeepPolling
             }
             PollEvent::Timeout => {
-                if let Some(m) = self.group_commit_queues.flush_if_necessary() {
+                while let Some(m) = self.group_commit_queues.flush_if_necessary() {
                     self.handle(m, sends, executor, true);
-                } else if self.has_buffered_replay_requests {
+                }
+
+                if self.has_buffered_replay_requests {
                     self.handle(box Packet::Spin, sends, executor, true);
                 }
+
                 ProcessResult::KeepPolling
             }
         };
