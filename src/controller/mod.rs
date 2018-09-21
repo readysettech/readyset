@@ -1,9 +1,6 @@
 /// Only allow processing this many inputs in a domain before we handle timer events, acks, etc.
 const FORCE_INPUT_YIELD_EVERY: usize = 64;
 
-/// Queue size for local domain-to-domain channels
-const LOCAL_CHANNEL_CAPACITY: usize = 64;
-
 use api::{ControllerDescriptor, Input, LocalOrNot};
 use async_bincode::{AsyncBincodeReader, AsyncBincodeWriter, SyncDestination};
 use basics::DomainIndex;
@@ -687,7 +684,7 @@ fn listen_df(
                         state_size.clone(),
                     );
 
-                    let (tx, rx) = futures::sync::mpsc::channel(LOCAL_CHANNEL_CAPACITY);
+                    let (tx, rx) = futures::sync::mpsc::unbounded();
 
                     // need to register the domain with the local channel coordinator.
                     // local first to ensure that we don't unnecessarily give away remote for a
@@ -1032,7 +1029,7 @@ struct Replica {
     coord: Arc<ChannelCoordinator>,
 
     incoming: Valved<tokio::net::Incoming>,
-    locals: futures::sync::mpsc::Receiver<Box<Packet>>,
+    locals: futures::sync::mpsc::UnboundedReceiver<Box<Packet>>,
     inputs: StreamUnordered<
         DualTcpStream<
             BufStream<tokio::net::TcpStream>,
@@ -1059,7 +1056,7 @@ impl Replica {
         valve: &Valve,
         mut domain: Domain,
         on: tokio::net::TcpListener,
-        locals: futures::sync::mpsc::Receiver<Box<Packet>>,
+        locals: futures::sync::mpsc::UnboundedReceiver<Box<Packet>>,
         log: slog::Logger,
         cc: Arc<ChannelCoordinator>,
     ) -> Self {

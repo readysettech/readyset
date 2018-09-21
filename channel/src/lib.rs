@@ -46,7 +46,7 @@ pub struct MaybeLocal;
 pub struct DomainConnectionBuilder<D, T> {
     sport: Option<u16>,
     addr: SocketAddr,
-    chan: Option<futures::sync::mpsc::Sender<T>>,
+    chan: Option<futures::sync::mpsc::UnboundedSender<T>>,
     is_for_base: bool,
     _marker: D,
 }
@@ -115,11 +115,11 @@ pub trait Sender {
     fn send(&mut self, t: Self::Item) -> Result<(), tcp::SendError>;
 }
 
-impl<T> Sender for futures::sink::Wait<futures::sync::mpsc::Sender<T>> {
+impl<T> Sender for futures::sync::mpsc::UnboundedSender<T> {
     type Item = T;
 
     fn send(&mut self, t: Self::Item) -> Result<(), tcp::SendError> {
-        self.send(t).map_err(|_| {
+        self.unbounded_send(t).map_err(|_| {
             tcp::SendError::IoError(io::Error::new(
                 io::ErrorKind::BrokenPipe,
                 "local peer went away",
@@ -154,7 +154,7 @@ where
 
     pub fn build_sync(self) -> io::Result<Box<dyn Sender<Item = T> + Send>> {
         if let Some(chan) = self.chan {
-            Ok(Box::new(chan.wait()))
+            Ok(Box::new(chan))
         } else {
             DomainConnectionBuilder {
                 sport: self.sport,
@@ -249,7 +249,7 @@ struct ChannelCoordinatorInner<K: Eq + Hash + Clone, T> {
     /// Map from key to remote address.
     addrs: HashMap<K, SocketAddr>,
     /// Map from key to channel sender for local connections.
-    locals: HashMap<K, futures::sync::mpsc::Sender<T>>,
+    locals: HashMap<K, futures::sync::mpsc::UnboundedSender<T>>,
 }
 
 pub struct ChannelCoordinator<K: Eq + Hash + Clone, T> {
@@ -271,7 +271,7 @@ impl<K: Eq + Hash + Clone, T> ChannelCoordinator<K, T> {
         inner.addrs.insert(key, addr);
     }
 
-    pub fn insert_local(&self, key: K, chan: futures::sync::mpsc::Sender<T>) {
+    pub fn insert_local(&self, key: K, chan: futures::sync::mpsc::UnboundedSender<T>) {
         let mut inner = self.inner.write().unwrap();
         inner.locals.insert(key, chan);
     }
