@@ -163,19 +163,15 @@ fn main() {
     b.set_availability_zone("us-east-1a");
     b.wait_limit(time::Duration::from_secs(60));
 
-    let scales: Box<Iterator<Item = usize>> = args
+    let scales = args
         .values_of("SCALE")
-        .map(|it| Box::new(it.map(|s| s.parse().unwrap())) as Box<_>)
-        .unwrap_or(Box::new(
-            [
-                //100, 200, 400, 800, 1000usize, 1250, 1500, 2000, 3000, 4000, 4500, 5000, 5500,
-                //6000, 6500, 7000, 8000, 8500, 9000, 9500, 10_000,
-                100usize, 400, 800, 1000, 1250, 1500, 2000, 2500, 3000, 3500, 4000, 4500, 5000,
-                5500, 6000, 6500, 7000, 7500, 8000, 8500, 9000, 9500, 10_000,
+        .map(|it| it.map(|s| s.parse().unwrap()).collect())
+        .unwrap_or_else(|| {
+            vec![
+                100usize, 500, 1000, 1250, 1500, 1750, 2000, 2500, 2750, 3000, 3500, 4500, 5500,
+                6500, 7000, 7500, 8000, 8500, 9000, 9500, 10_000,
             ]
-                .into_iter()
-                .map(|&s| s),
-        ) as Box<_>);
+        });
 
     let memscale = value_t_or_exit!(args, "memscale", usize);
     let memlimit = args.value_of("memory_limit");
