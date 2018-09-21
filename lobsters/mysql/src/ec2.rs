@@ -117,7 +117,7 @@ fn main() {
     b.add_set(
         "trawler",
         1,
-        MachineSetup::new("m5.12xlarge", AMI, |ssh| {
+        MachineSetup::new("m5.24xlarge", AMI, |ssh| {
             eprintln!("==> setting up trawler");
             git_and_cargo(ssh, "benchmarks/lobsters/mysql", "trawler-mysql")?;
             eprintln!("==> setting up trawler w/ soup hacks");
