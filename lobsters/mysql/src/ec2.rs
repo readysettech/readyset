@@ -197,7 +197,6 @@ fn main() {
         let mut trawler = vms.remove("trawler").unwrap().swap_remove(0);
 
         let backends = [Backend::Mysql, Backend::Soup, Backend::Soupy];
-        let mut survived_last: HashMap<_, _> = backends.iter().map(|b| (b, true)).collect();
 
         // allow reuse of time-wait ports
         trawler
@@ -206,10 +205,11 @@ fn main() {
             .unwrap()
             .cmd("bash -c 'echo 1 | sudo tee /proc/sys/net/ipv4/tcp_tw_reuse'")?;
 
-        for scale in scales {
-            for backend in &backends {
-                if !survived_last[backend] {
-                    continue;
+        for backend in &backends {
+            let mut survived_last = true;
+            for &scale in &scales {
+                if !survived_last {
+                    break;
                 }
 
                 eprintln!("==> benchmark {} w/ {}x load", backend, scale);
@@ -541,7 +541,6 @@ fn main() {
 
                 if sload > 16.5 {
                     eprintln!(" -> backend is probably not keeping up");
-                    //*survived_last.get_mut(backend).unwrap() = false;
                 }
 
                 // also parse achived ops/s to check that we're *really* keeping up
@@ -561,7 +560,7 @@ fn main() {
                             eprintln!(" -> achieved {} ops/s (target: {})", actual, target);
                             if actual < target * 3.0 / 4.0 {
                                 eprintln!(" -> backend is really not keeping up");
-                                *survived_last.get_mut(backend).unwrap() = false;
+                                survived_last = false;
                             }
                             break;
                         }
