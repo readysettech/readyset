@@ -490,7 +490,6 @@ impl<'a> Migration<'a> {
                 &mainline.persistence,
                 &mainline.listen_addr,
                 &mainline.channel_coordinator,
-                &mainline.debug_channel,
                 &mut placer,
                 &mut workers,
                 mainline.epoch,

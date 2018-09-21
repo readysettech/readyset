@@ -9,12 +9,14 @@ extern crate byteorder;
 #[macro_use]
 extern crate failure;
 extern crate async_bincode;
+extern crate futures;
 extern crate mio;
 extern crate net2;
 extern crate serde;
 extern crate throttled_reader;
 extern crate tokio;
 
+use std::borrow::Borrow;
 use std::collections::HashMap;
 use std::hash::Hash;
 use std::io::{self, BufWriter, Read, Write};
@@ -22,11 +24,12 @@ use std::marker::PhantomData;
 use std::net::SocketAddr;
 use std::ops::{Deref, DerefMut};
 use std::sync::mpsc::{self, SendError};
-use std::sync::Mutex;
+use std::sync::RwLock;
 
 use async_bincode::{AsyncBincodeWriter, AsyncDestination};
 use byteorder::{ByteOrder, NetworkEndian};
 use serde::{Deserialize, Deserializer, Serialize, Serializer};
+use tokio::prelude::*;
 
 pub mod poll;
 pub mod rpc;
@@ -37,29 +40,30 @@ pub use tcp::{channel, DualTcpStream, TcpReceiver, TcpSender};
 pub const CONNECTION_FROM_BASE: u8 = 1;
 pub const CONNECTION_FROM_DOMAIN: u8 = 0;
 
-pub struct DomainConnectionBuilder {
+pub struct Remote;
+pub struct MaybeLocal;
+
+pub struct DomainConnectionBuilder<D, T> {
     sport: Option<u16>,
     addr: SocketAddr,
+    chan: Option<futures::sync::mpsc::UnboundedSender<T>>,
     is_for_base: bool,
+    _marker: D,
 }
 
-impl DomainConnectionBuilder {
+impl<T> DomainConnectionBuilder<Remote, T> {
     pub fn for_base(addr: SocketAddr) -> Self {
         DomainConnectionBuilder {
             sport: None,
+            chan: None,
             addr,
             is_for_base: true,
+            _marker: Remote,
         }
     }
+}
 
-    pub fn for_domain(addr: SocketAddr) -> Self {
-        DomainConnectionBuilder {
-            sport: None,
-            addr,
-            is_for_base: false,
-        }
-    }
-
+impl<D, T> DomainConnectionBuilder<D, T> {
     pub fn maybe_on_port(mut self, sport: Option<u16>) -> Self {
         self.sport = sport;
         self
@@ -69,14 +73,19 @@ impl DomainConnectionBuilder {
         self.sport = Some(sport);
         self
     }
+}
 
-    pub fn build_async<T: serde::Serialize>(
+impl<T> DomainConnectionBuilder<Remote, T>
+where
+    T: serde::Serialize,
+{
+    pub fn build_async(
         self,
     ) -> io::Result<AsyncBincodeWriter<BufWriter<tokio::net::TcpStream>, T, AsyncDestination>> {
         // TODO: async
         // we must currently write and call flush, because the remote end (currently) does a
         // synchronous read upon accepting a connection.
-        let s = self.build::<T>()?.into_inner().into_inner()?;
+        let s = self.build_sync()?.into_inner().into_inner()?;
 
         tokio::net::TcpStream::from_std(s, &tokio::reactor::Handle::default())
             .map(BufWriter::new)
@@ -84,7 +93,7 @@ impl DomainConnectionBuilder {
             .map(AsyncBincodeWriter::for_async)
     }
 
-    pub fn build<T: serde::Serialize>(self) -> io::Result<TcpSender<T>> {
+    pub fn build_sync(self) -> io::Result<TcpSender<T>> {
         let mut s = TcpSender::connect_from(self.sport, &self.addr)?;
         {
             let s = s.get_mut();
@@ -97,6 +106,65 @@ impl DomainConnectionBuilder {
         }
 
         Ok(s)
+    }
+}
+
+pub trait Sender {
+    type Item;
+
+    fn send(&mut self, t: Self::Item) -> Result<(), tcp::SendError>;
+}
+
+impl<T> Sender for futures::sync::mpsc::UnboundedSender<T> {
+    type Item = T;
+
+    fn send(&mut self, t: Self::Item) -> Result<(), tcp::SendError> {
+        self.unbounded_send(t).map_err(|_| {
+            tcp::SendError::IoError(io::Error::new(
+                io::ErrorKind::BrokenPipe,
+                "local peer went away",
+            ))
+        })
+    }
+}
+
+impl<T> DomainConnectionBuilder<MaybeLocal, T>
+where
+    T: serde::Serialize + 'static + Send,
+{
+    pub fn build_async(
+        self,
+    ) -> io::Result<Box<dyn Sink<SinkItem = T, SinkError = bincode::Error> + Send>> {
+        if let Some(chan) = self.chan {
+            Ok(
+                Box::new(chan.sink_map_err(|_| serde::de::Error::custom("failed to do local send")))
+                    as Box<_>,
+            )
+        } else {
+            DomainConnectionBuilder {
+                sport: self.sport,
+                chan: None,
+                addr: self.addr,
+                is_for_base: false,
+                _marker: Remote,
+            }.build_async()
+            .map(|c| Box::new(c) as Box<_>)
+        }
+    }
+
+    pub fn build_sync(self) -> io::Result<Box<dyn Sender<Item = T> + Send>> {
+        if let Some(chan) = self.chan {
+            Ok(Box::new(chan))
+        } else {
+            DomainConnectionBuilder {
+                sport: self.sport,
+                chan: None,
+                addr: self.addr,
+                is_for_base: false,
+                _marker: Remote,
+            }.build_sync()
+            .map(|c| Box::new(c) as Box<_>)
+        }
     }
 }
 
@@ -177,39 +245,74 @@ pub type TraceSender<T> = ChannelSender<T>;
 pub type TransactionReplySender<T> = ChannelSender<T>;
 pub type StreamSender<T> = ChannelSender<T>;
 
-struct ChannelCoordinatorInner<K: Eq + Hash + Clone> {
-    /// Map from key to tuple of address and whether the endpoint is local.
-    addrs: HashMap<K, (SocketAddr, bool)>,
+struct ChannelCoordinatorInner<K: Eq + Hash + Clone, T> {
+    /// Map from key to remote address.
+    addrs: HashMap<K, SocketAddr>,
+    /// Map from key to channel sender for local connections.
+    locals: HashMap<K, futures::sync::mpsc::UnboundedSender<T>>,
 }
 
-pub struct ChannelCoordinator<K: Eq + Hash + Clone> {
-    inner: Mutex<ChannelCoordinatorInner<K>>,
+pub struct ChannelCoordinator<K: Eq + Hash + Clone, T> {
+    inner: RwLock<ChannelCoordinatorInner<K, T>>,
 }
 
-impl<K: Eq + Hash + Clone> ChannelCoordinator<K> {
+impl<K: Eq + Hash + Clone, T> ChannelCoordinator<K, T> {
     pub fn new() -> Self {
         Self {
-            inner: Mutex::new(ChannelCoordinatorInner {
-                addrs: HashMap::new(),
+            inner: RwLock::new(ChannelCoordinatorInner {
+                addrs: Default::default(),
+                locals: Default::default(),
             }),
         }
     }
 
-    pub fn insert_addr(&self, key: K, addr: SocketAddr, local: bool) {
-        let mut inner = self.inner.lock().unwrap();
-        inner.addrs.insert(key, (addr, local));
+    pub fn insert_remote(&self, key: K, addr: SocketAddr) {
+        let mut inner = self.inner.write().unwrap();
+        inner.addrs.insert(key, addr);
     }
 
-    pub fn get_addr(&self, key: &K) -> Option<SocketAddr> {
-        self.inner.lock().unwrap().addrs.get(key).map(|a| a.0)
+    pub fn insert_local(&self, key: K, chan: futures::sync::mpsc::UnboundedSender<T>) {
+        let mut inner = self.inner.write().unwrap();
+        inner.locals.insert(key, chan);
     }
 
-    pub fn is_local(&self, key: &K) -> Option<bool> {
-        self.inner.lock().unwrap().addrs.get(key).map(|a| a.1)
+    pub fn has<Q>(&self, key: &Q) -> bool
+    where
+        K: Borrow<Q>,
+        Q: Hash + Eq + ?Sized,
+    {
+        self.inner.read().unwrap().addrs.contains_key(key)
     }
 
-    pub fn get_dest(&self, key: &K) -> Option<(SocketAddr, bool)> {
-        self.inner.lock().unwrap().addrs.get(key).cloned()
+    pub fn get_addr<Q>(&self, key: &Q) -> Option<SocketAddr>
+    where
+        K: Borrow<Q>,
+        Q: Hash + Eq + ?Sized,
+    {
+        self.inner.read().unwrap().addrs.get(key).cloned()
+    }
+
+    pub fn is_local<Q>(&self, key: &Q) -> Option<bool>
+    where
+        K: Borrow<Q>,
+        Q: Hash + Eq + ?Sized,
+    {
+        self.inner.read().unwrap().locals.get(key).map(|_| true)
+    }
+
+    pub fn builder_for<Q>(&self, key: &Q) -> Option<DomainConnectionBuilder<MaybeLocal, T>>
+    where
+        K: Borrow<Q>,
+        Q: Hash + Eq + ?Sized,
+    {
+        let inner = self.inner.read().unwrap();
+        Some(DomainConnectionBuilder {
+            sport: None,
+            addr: *inner.addrs.get(key)?,
+            chan: inner.locals.get(key).cloned(),
+            is_for_base: false,
+            _marker: MaybeLocal,
+        })
     }
 }
 

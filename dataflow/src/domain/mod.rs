@@ -14,7 +14,7 @@ use std::time;
 use api;
 pub use basics::DomainIndex as Index;
 use channel::poll::{PollEvent, ProcessResult};
-use channel::{DomainConnectionBuilder, TcpSender};
+use channel::{self, TcpSender};
 use futures;
 use group_commit::GroupCommitQueueSet;
 use payload::{ControlReplyPacket, ReplayPieceContext};
@@ -60,7 +60,7 @@ enum TriggerEndpoint {
     Start(Vec<usize>),
     End {
         ask_all: bool,
-        options: Vec<TcpSender<Box<Packet>>>,
+        options: Vec<Box<dyn channel::Sender<Item = Box<Packet>> + Send>>,
     },
     Local(Vec<usize>),
 }
@@ -115,8 +115,6 @@ pub struct DomainBuilder {
     pub persistence_parameters: PersistenceParameters,
     /// The socket address at which this domain receives control messages.
     pub control_addr: SocketAddr,
-    /// The socket address for debug interactions with this domain.
-    pub debug_addr: Option<SocketAddr>,
     /// Configuration parameters for the domain.
     pub config: Config,
 }
@@ -130,7 +128,6 @@ impl DomainBuilder {
         log: Logger,
         readers: Readers,
         channel_coordinator: Arc<ChannelCoordinator>,
-        addr: SocketAddr,
         shutdown_valve: &Valve,
         state_size: Arc<AtomicUsize>,
     ) -> Domain {
@@ -142,20 +139,13 @@ impl DomainBuilder {
             .collect();
 
         let log = log.new(o!("domain" => self.index.index(), "shard" => self.shard.unwrap_or(0)));
-
-        let debug_tx = self
-            .debug_addr
-            .as_ref()
-            .map(|addr| TcpSender::connect(addr).unwrap());
         let control_reply_tx = TcpSender::connect(&self.control_addr).unwrap();
-
         let group_commit_queues = GroupCommitQueueSet::new(&self.persistence_parameters);
 
         Domain {
             index: self.index,
             shard: self.shard,
             _nshards: self.nshards,
-            domain_addr: addr,
 
             persistence_parameters: self.persistence_parameters,
             nodes: self.nodes,
@@ -171,7 +161,6 @@ impl DomainBuilder {
 
             shutdown_valve: shutdown_valve.clone(),
             readers,
-            _debug_tx: debug_tx,
             control_reply_tx,
             channel_coordinator,
 
@@ -200,7 +189,6 @@ pub struct Domain {
     index: Index,
     shard: Option<usize>,
     _nshards: usize,
-    domain_addr: SocketAddr,
 
     nodes: DomainNodes,
     state: StateMap,
@@ -223,7 +211,6 @@ pub struct Domain {
 
     shutdown_valve: Valve,
     readers: Readers,
-    _debug_tx: Option<TcpSender<api::debug::trace::Event>>,
     control_reply_tx: TcpSender<ControlReplyPacket>,
     channel_coordinator: Arc<ChannelCoordinator>,
 
@@ -860,17 +847,12 @@ impl Domain {
                                     .map(|shard| {
                                         let key = key.clone();
                                         let (tx, rx) = futures::sync::mpsc::unbounded();
-                                        let (sender, _is_local) = self
+                                        let sender = self
                                             .channel_coordinator
-                                            .get_dest(&(trigger_domain, shard))
-                                            .map(|(addr, local)| {
-                                                (
-                                                    DomainConnectionBuilder::for_domain(addr)
-                                                        .build_async()
-                                                        .unwrap(),
-                                                    local,
-                                                )
-                                            }).unwrap();
+                                            .builder_for(&(trigger_domain, shard))
+                                            .unwrap()
+                                            .build_async()
+                                            .unwrap();
 
                                         tokio::spawn(
                                             self.shutdown_valve
@@ -973,14 +955,12 @@ impl Domain {
                             payload::TriggerEndpoint::Local(v) => TriggerEndpoint::Local(v),
                             payload::TriggerEndpoint::End(selection, domain) => {
                                 let shard = |shardi| {
-                                    // TODO: take advantage of local channels for replay paths.
+                                    // TODO: make async
                                     self.channel_coordinator
-                                        .get_addr(&(domain, shardi))
-                                        .map(|addr| {
-                                            DomainConnectionBuilder::for_domain(addr)
-                                                .build()
-                                                .unwrap()
-                                        }).unwrap()
+                                        .builder_for(&(domain, shardi))
+                                        .unwrap()
+                                        .build_sync()
+                                        .unwrap()
                                 };
 
                                 let (ask_all, options) = match selection {
@@ -1096,7 +1076,6 @@ impl Domain {
 
                         if !state.is_empty() {
                             let log = self.log.new(o!());
-                            let domain_addr = self.domain_addr;
 
                             let added_cols = self.ingress_inject.get(&from).cloned();
                             let default = {
@@ -1120,6 +1099,11 @@ impl Domain {
                                 r
                             };
 
+                            let replay_tx_desc = self
+                                .channel_coordinator
+                                .builder_for(&(self.index, self.shard.unwrap_or(0)))
+                                .unwrap();
+
                             thread::Builder::new()
                                 .name(format!(
                                     "replay{}.{}",
@@ -1134,10 +1118,9 @@ impl Domain {
                                 )).spawn(move || {
                                     use itertools::Itertools;
 
+                                    // TODO: make async
                                     let mut chunked_replay_tx =
-                                        DomainConnectionBuilder::for_domain(domain_addr)
-                                            .build()
-                                            .unwrap();
+                                        replay_tx_desc.build_sync().unwrap();
 
                                     let start = time::Instant::now();
                                     debug!(log, "starting state chunker"; "node" => %link.dst);

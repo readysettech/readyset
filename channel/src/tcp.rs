@@ -67,7 +67,7 @@ impl<T: Serialize> TcpSender<T> {
         })
     }
 
-    pub fn connect_from(sport: Option<u16>, addr: &SocketAddr) -> Result<Self, io::Error> {
+    pub(crate) fn connect_from(sport: Option<u16>, addr: &SocketAddr) -> Result<Self, io::Error> {
         let s = net2::TcpBuilder::new_v4()?
             .reuse_address(true)?
             .bind((Ipv4Addr::UNSPECIFIED, sport.unwrap_or(0)))?
@@ -115,6 +115,13 @@ impl<T: Serialize> TcpSender<T> {
 
     pub fn reader<'a>(&'a mut self) -> impl io::Read + 'a {
         &mut self.stream
+    }
+}
+
+impl<T: Serialize> super::Sender for TcpSender<T> {
+    type Item = T;
+    fn send(&mut self, t: T) -> Result<(), SendError> {
+        self.send_ref(&t)
     }
 }
 

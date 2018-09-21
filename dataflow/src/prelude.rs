@@ -31,7 +31,7 @@ pub use PersistenceParameters;
 // channel related types
 use channel;
 /// Channel coordinator type specialized for domains
-pub type ChannelCoordinator = channel::ChannelCoordinator<(DomainIndex, usize)>;
+pub type ChannelCoordinator = channel::ChannelCoordinator<(DomainIndex, usize), Box<Packet>>;
 pub trait Executor {
     fn send_back(&mut self, SourceChannelIdentifier, ());
 }

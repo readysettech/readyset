@@ -510,7 +510,7 @@ impl DomainInputHandle {
             .map(|addr| {
                 let c = DomainConnectionBuilder::for_base(*addr)
                     .maybe_on_port(local_port)
-                    .build()?;
+                    .build_sync()?;
                 if local_port.is_none() {
                     local_port = Some(c.local_addr()?.port());
                 }
