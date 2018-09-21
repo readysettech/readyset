@@ -142,8 +142,11 @@ fn main() {
                 if let Err(e) =
                     MysqlIntermediary::run_on(soup, BufReader::new(rs), BufWriter::new(s))
                 {
-                    if e.kind() != io::ErrorKind::ConnectionReset {
-                        panic!("{:?}", e);
+                    match e.kind() {
+                        io::ErrorKind::ConnectionReset | io::ErrorKind::BrokenPipe => {}
+                        _ => {
+                            panic!("{:?}", e);
+                        }
                     }
                 }
             }).unwrap();
