@@ -182,13 +182,11 @@ fn start_instance<A: Authority + 'static>(
     memory_check_frequency: Option<Duration>,
     log: slog::Logger,
 ) -> Result<LocalControllerHandle<A>, failure::Error> {
-    let mut pool = tokio::executor::thread_pool::Builder::new();
-    pool.name_prefix("worker-");
-    if let Some(threads) = config.threads {
-        pool.pool_size(threads);
-    }
     let mut rt = tokio::runtime::Builder::new();
-    rt.threadpool_builder(pool);
+    rt.name_prefix("worker-");
+    if let Some(threads) = config.threads {
+        rt.core_threads(threads);
+    }
     let mut rt = rt.build().unwrap();
 
     let mut pool = tokio_io_pool::Builder::default();
@@ -272,8 +270,10 @@ fn start_instance<A: Authority + 'static>(
                     Event::CampaignError(..) => fw(e, true),
                     #[cfg(test)]
                     Event::IsReady(..) => fw(e, true),
-                }.map_err(|e| panic!("{:?}", e))
-            }).map(|_| ()),
+                }
+                .map_err(|e| panic!("{:?}", e))
+            })
+            .map(|_| ()),
     );
 
     {
@@ -385,7 +385,8 @@ fn start_instance<A: Authority + 'static>(
                         e => unreachable!("{:?} is not a worker event", e),
                     }
                     Either::B(futures::future::ok(()))
-                }).and_then(|v| {
+                })
+                .and_then(|v| {
                     // shutting down...
                     //
                     // NOTE: the Trigger in InstanceState::Active is dropped when the for_each
@@ -393,7 +394,8 @@ fn start_instance<A: Authority + 'static>(
                     //
                     // TODO: maybe flush things or something?
                     Ok(v)
-                }).map_err(|e| panic!("{:?}", e)),
+                })
+                .map_err(|e| panic!("{:?}", e)),
         );
     }
 
@@ -470,7 +472,8 @@ fn start_instance<A: Authority + 'static>(
                                         .as_ref()
                                         .map(|ctrl| !ctrl.workers.is_empty())
                                         .unwrap_or(false),
-                                ).unwrap();
+                                )
+                                .unwrap();
                         }
                         Event::WonLeaderElection(state) => {
                             let c = campaign.take().unwrap();
@@ -487,7 +490,8 @@ fn start_instance<A: Authority + 'static>(
                         e => unreachable!("{:?} is not a controller event", e),
                     }
                     Ok(controller)
-                }).and_then(move |controller| {
+                })
+                .and_then(move |controller| {
                     // shutting down
                     if controller.is_some() {
                         if let Err(e) = authority2.surrender_leadership() {
@@ -496,7 +500,8 @@ fn start_instance<A: Authority + 'static>(
                         }
                     }
                     Ok(())
-                }).map_err(|e| panic!("{:?}", e)),
+                })
+                .map_err(|e| panic!("{:?}", e)),
         );
     }
 
@@ -540,7 +545,8 @@ fn listen_reads(
             .or_else(|_| {
                 // io error from client: just ignore it
                 Ok(None)
-            }).filter_map(|c| c)
+            })
+            .filter_map(|c| c)
             .map(move |stream| {
                 use tokio::prelude::AsyncRead;
 
@@ -551,13 +557,15 @@ fn listen_reads(
                 r.and_then(move |req| readers::handle_message(req, &mut readers))
                     .map_err(|_| -> () {
                         eprintln!("!!! reader client protocol error");
-                    }).forward(w.sink_map_err(|_| ()))
+                    })
+                    .forward(w.sink_map_err(|_| ()))
                     .then(|_| {
                         // we're probably just shutting down
                         Ok(())
                     })
             }),
-    ).map_err(|e: tokio_io_pool::StreamSpawnError<()>| {
+    )
+    .map_err(|e: tokio_io_pool::StreamSpawnError<()>| {
         eprintln!(
             "io pool is shutting down, so can't handle more reads: {:?}",
             e
@@ -611,12 +619,14 @@ fn listen_df(
                 source: ctrl_addr,
                 payload: cm,
                 epoch,
-            }).map_err(|e| panic!("{:?}", e))
+            })
+            .map_err(|e| panic!("{:?}", e))
             .forward(ctrl.sink_map_err(|e| {
                 // if the controller goes away, another will be elected, and the worker will be
                 // restarted, so there's no reason to do anything too drastic here.
                 eprintln!("controller went away: {:?}", e);
-            })).map(|_| ()),
+            }))
+            .map(|_| ()),
     );
 
     // also start readers
@@ -634,14 +644,16 @@ fn listen_df(
                 addr: waddr,
                 read_listen_addr: raddr,
                 log_files,
-            }).and_then(move |ctrl_tx| {
+            })
+            .and_then(move |ctrl_tx| {
                 // and start sending heartbeats
                 timer
                     .map(|_| CoordinationPayload::Heartbeat)
                     .map_err(|e| -> futures::sync::mpsc::SendError<_> { panic!("{:?}", e) })
                     .forward(ctrl_tx.clone())
                     .map(|_| ())
-            }).map_err(|_| {
+            })
+            .map_err(|_| {
                 // we're probably just shutting down
                 ()
             }),
@@ -661,7 +673,8 @@ fn listen_df(
                 .for_each(move |_| {
                     do_eviction(&log, memory_limit, &mut domain_senders, &state_sizes)
                         .map_err(|e| panic!("{:?}", e))
-                }).map_err(|e| panic!("{:?}", e)),
+                })
+                .map_err(|e| panic!("{:?}", e)),
         );
     }
 
@@ -713,14 +726,16 @@ fn listen_df(
                             .clone()
                             .send(CoordinationPayload::DomainBooted(DomainDescriptor::new(
                                 idx, shard, addr,
-                            ))).map_err(|_| {
+                            )))
+                            .map_err(|_| {
                                 // controller went away -- exit?
                                 io::Error::new(io::ErrorKind::Other, "controller went away")
                             }),
                     ),
                     Err(e) => Either::B(future::err(e)),
                 }
-            }).map_err(|e| panic!("{:?}", e))
+            })
+            .map_err(|e| panic!("{:?}", e))
             .map(|_| ()),
     );
 
@@ -747,11 +762,13 @@ fn listen_internal(
                         event_tx
                             .clone()
                             .sink_map_err(|_| format_err!("main event loop went away")),
-                    ).map(|_| ())
+                    )
+                    .map(|_| ())
                     .map_err(|e| panic!("{:?}", e)),
             );
             Ok(())
-        }).map_err(move |e| {
+        })
+        .map_err(move |e| {
             warn!(log, "internal connection failed: {:?}", e);
         })
 }
@@ -759,7 +776,7 @@ fn listen_internal(
 struct ExternalServer<A: Authority>(UnboundedSender<Event>, Arc<A>);
 fn listen_external<A: Authority + 'static>(
     event_tx: UnboundedSender<Event>,
-    on: Valved<tokio::net::Incoming>,
+    on: Valved<tokio::net::tcp::Incoming>,
     authority: Arc<A>,
 ) -> impl Future<Item = (), Error = hyper::Error> + Send {
     use hyper::{
@@ -950,7 +967,8 @@ fn instance_campaign<A: Authority + 'static>(
                 .send(Event::WonLeaderElection(state.clone().unwrap()))
                 .and_then(|event_tx| {
                     event_tx.send(Event::LeaderChange(state.unwrap(), descriptor.clone()))
-                }).wait()
+                })
+                .wait()
                 .map(|_| ())
                 .map_err(|_| format_err!("send failed"));
         }
@@ -962,7 +980,8 @@ fn instance_campaign<A: Authority + 'static>(
             if let Err(e) = campaign_inner(event_tx.clone()) {
                 let _ = event_tx.send(Event::CampaignError(e));
             }
-        }).unwrap()
+        })
+        .unwrap()
 }
 
 fn do_eviction(
@@ -989,7 +1008,8 @@ fn do_eviction(
                     size
                 );
                 (ds.clone(), size)
-            }).collect()
+            })
+            .collect()
     });
 
     // 3. are we above the limit?
@@ -1013,7 +1033,8 @@ fn do_eviction(
                     tx.send(box Packet::Evict {
                         node: None,
                         num_bytes: cmp::min(largest.1, total - limit),
-                    }).unwrap()
+                    })
+                    .unwrap()
                 });
             }
         }
@@ -1028,7 +1049,7 @@ struct Replica {
 
     coord: Arc<ChannelCoordinator>,
 
-    incoming: Valved<tokio::net::Incoming>,
+    incoming: Valved<tokio::net::tcp::Incoming>,
     locals: futures::sync::mpsc::UnboundedReceiver<Box<Packet>>,
     inputs: StreamUnordered<
         DualTcpStream<

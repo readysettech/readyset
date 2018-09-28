@@ -305,7 +305,8 @@ impl<E> Table<E> {
                     }
                 }
                 Ok(row)
-            }).collect::<Result<_, _>>()?;
+            })
+            .collect::<Result<_, _>>()?;
 
         let tracer = self.tracer.clone();
         let m = self.prep_records(tracer, data);
@@ -400,11 +401,13 @@ impl<E> Table<E> {
                     return Err(TableError::WrongColumnCount(self.columns.len(), row.len()));
                 }
                 Ok(TableOperation::Insert(row))
-            }).collect::<Result<Vec<_>, _>>()
+            })
+            .collect::<Result<Vec<_>, _>>()
             .and_then(|data| {
                 self.send(data)?;
                 Ok(())
-            }).map(|_| ())
+            })
+            .map(|_| ())
     }
 
     /// Delete the row with the given key from this base table.
@@ -515,7 +518,8 @@ impl DomainInputHandle {
                     local_port = Some(c.local_addr()?.port());
                 }
                 Ok(c)
-            }).collect();
+            })
+            .collect();
 
         Ok(Self {
             txs: txs?,

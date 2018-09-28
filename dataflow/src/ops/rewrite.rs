@@ -129,7 +129,8 @@ impl Ingredient for Rewrite {
                         &KeyType::Single(&key),
                         nodes,
                         state,
-                    ).unwrap();
+                    )
+                    .unwrap();
 
                 if other_rows.is_none() {
                     // replays always happen from the `src` side,
@@ -169,7 +170,8 @@ impl Ingredient for Rewrite {
         vec![
             (self.signal.as_global(), (vec![0], true)),
             (self.src.as_global(), (vec![self.signal_key], true)),
-        ].into_iter()
+        ]
+        .into_iter()
         .collect()
     }
 
@@ -236,7 +238,8 @@ mod tests {
         let result = vec![
             ((vec![1.into(), "a".into()], false)),
             ((vec![1.into(), "NONE".into()], true)),
-        ].into();
+        ]
+        .into();
         rw.seed(should_rw, rw1.clone());
         let rs = rw.one_row(should_rw, rw1.clone(), false);
         assert_eq!(rs, result);

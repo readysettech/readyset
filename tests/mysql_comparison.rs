@@ -99,7 +99,8 @@ fn set_panic_hook(panic_state: Arc<Mutex<Option<PanicState>>>) {
                 Some(s) => &**s,
                 None => "Box<Any>",
             },
-        }.to_owned();
+        }
+        .to_owned();
 
         let (file, line) = match info.location() {
             Some(ref l) => (l.file().to_owned(), l.line()),
@@ -214,7 +215,8 @@ fn generate_target_results(schemas: &BTreeMap<String, Schema>) {
                             format!("{:?}", v)
                                 .trim_matches(|c| c == '\'' || c == '"')
                                 .to_owned()
-                        }).collect();
+                        })
+                        .collect();
                     target_data
                         .get_mut(query_name)
                         .unwrap()
@@ -311,8 +313,10 @@ fn check_query(
                         DataType::Real(i, f) => ((i as f64) + (f as f64) * 1.0e-9).to_string(),
                         DataType::Text(_) | DataType::TinyText(_) => v.into(),
                         DataType::Timestamp(_) => unimplemented!(),
-                    }).collect()
-            }).collect();
+                    })
+                    .collect()
+            })
+            .collect();
 
         match compare_results(&target_results, &query_results) {
             Some(diff) => {

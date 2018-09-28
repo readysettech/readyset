@@ -90,7 +90,8 @@ pub fn make_grouped(
                 .filter(|e| match **e {
                     QueryGraphEdge::Join(_) | QueryGraphEdge::LeftJoin(_) => false,
                     QueryGraphEdge::GroupBy(_) => true,
-                }).collect();
+                })
+                .collect();
 
             for computed_col in computed_cols_cgn.columns.iter() {
                 let computed_col = if is_reconcile {

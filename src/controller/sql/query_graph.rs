@@ -64,14 +64,16 @@ impl Ord for OutputColumn {
                     name: ref other_name,
                     table: ref other_table,
                     ..
-                }) => if table.is_some() && other_table.is_some() {
-                    match table.cmp(&other_table) {
-                        Ordering::Equal => name.cmp(&other_name),
-                        x => x,
+                }) => {
+                    if table.is_some() && other_table.is_some() {
+                        match table.cmp(&other_table) {
+                            Ordering::Equal => name.cmp(&other_name),
+                            x => x,
+                        }
+                    } else {
+                        name.cmp(&other_name)
                     }
-                } else {
-                    name.cmp(&other_name)
-                },
+                }
             },
         }
     }
@@ -109,16 +111,18 @@ impl PartialOrd for OutputColumn {
                     name: ref other_name,
                     table: ref other_table,
                     ..
-                }) => if table.is_some() && other_table.is_some() {
-                    match table.cmp(&other_table) {
-                        Ordering::Equal => Some(name.cmp(&other_name)),
-                        x => Some(x),
+                }) => {
+                    if table.is_some() && other_table.is_some() {
+                        match table.cmp(&other_table) {
+                            Ordering::Equal => Some(name.cmp(&other_name)),
+                            x => Some(x),
+                        }
+                    } else if table.is_none() && other_table.is_none() {
+                        Some(name.cmp(&other_name))
+                    } else {
+                        None
                     }
-                } else if table.is_none() && other_table.is_none() {
-                    Some(name.cmp(&other_name))
-                } else {
-                    None
-                },
+                }
             },
         }
     }
@@ -482,14 +486,17 @@ pub fn to_query_graph(st: &SelectStatement) -> Result<QueryGraph, String> {
                                         ),
                                     }
                                 }
-                                Some(t) => if *t == rel {
-                                    Some(c.clone())
-                                } else {
-                                    None
-                                },
+                                Some(t) => {
+                                    if *t == rel {
+                                        Some(c.clone())
+                                    } else {
+                                        None
+                                    }
+                                }
                             }
                         }
-                    }).collect(),
+                    })
+                    .collect(),
                 parameters: Vec::new(),
             }
         };
@@ -505,12 +512,14 @@ pub fn to_query_graph(st: &SelectStatement) -> Result<QueryGraph, String> {
     }
     for jc in &st.join {
         match jc.right {
-            JoinRightSide::Table(ref table) => if !qg.relations.contains_key(&table.name) {
-                qg.relations.insert(
-                    table.name.clone(),
-                    new_node(table.name.clone(), Vec::new(), st),
-                );
-            },
+            JoinRightSide::Table(ref table) => {
+                if !qg.relations.contains_key(&table.name) {
+                    qg.relations.insert(
+                        table.name.clone(),
+                        new_node(table.name.clone(), Vec::new(), st),
+                    );
+                }
+            }
             _ => unimplemented!(),
         }
     }
@@ -774,7 +783,8 @@ pub fn to_query_graph(st: &SelectStatement) -> Result<QueryGraph, String> {
                     .entry((
                         String::from("computed_columns"),
                         column.table.as_ref().unwrap().clone(),
-                    )).or_insert_with(|| QueryGraphEdge::GroupBy(vec![]));
+                    ))
+                    .or_insert_with(|| QueryGraphEdge::GroupBy(vec![]));
                 match *e {
                     QueryGraphEdge::GroupBy(ref mut cols) => cols.push(column.clone()),
                     _ => unreachable!(),
@@ -805,7 +815,8 @@ pub fn to_query_graph(st: &SelectStatement) -> Result<QueryGraph, String> {
                             src: src.clone(),
                             dst: dst.clone(),
                             index: idx,
-                        }).collect::<Vec<_>>(),
+                        })
+                        .collect::<Vec<_>>(),
                 ),
                 QueryGraphEdge::LeftJoin(ref jps) => qg.join_order.extend(
                     jps.iter()
@@ -814,7 +825,8 @@ pub fn to_query_graph(st: &SelectStatement) -> Result<QueryGraph, String> {
                             src: src.clone(),
                             dst: dst.clone(),
                             index: idx,
-                        }).collect::<Vec<_>>(),
+                        })
+                        .collect::<Vec<_>>(),
                 ),
                 QueryGraphEdge::GroupBy(_) => continue,
             }

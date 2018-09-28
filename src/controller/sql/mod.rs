@@ -10,13 +10,13 @@ use self::mir::{MirNodeRef, SqlToMirConverter};
 use self::query_graph::{to_query_graph, QueryGraph};
 use self::query_signature::Signature;
 use self::reuse::{ReuseConfig, ReuseConfigType};
+use ::mir::query::{MirQuery, QueryFlowParts};
+use ::mir::reuse as mir_reuse;
+use ::mir::Column;
 use basics::NodeIndex;
 use crate::controller::mir_to_flow::mir_query_to_flow_parts;
 use crate::controller::Migration;
 use dataflow::prelude::DataType;
-use mir::query::{MirQuery, QueryFlowParts};
-use mir::reuse as mir_reuse;
-use mir::Column;
 use nom_sql::parser as sql_parser;
 use nom_sql::{ArithmeticBase, CreateTableStatement, SqlQuery};
 use nom_sql::{CompoundSelectOperator, CompoundSelectStatement, SelectStatement};
@@ -302,7 +302,7 @@ impl SqlIncorporator {
                         match mir_reuse::rewind_until_columns_found(mir_query.leaf.clone(), &params)
                         {
                             Some(mn) => {
-                                use mir::node::MirNodeType;
+                                use ::mir::node::MirNodeType;
                                 let project_columns = match mn.borrow().inner {
                                     MirNodeType::Project { .. } => None,
                                     _ => {
@@ -372,7 +372,8 @@ impl SqlIncorporator {
                     .map(|c| {
                         let sig = (c.1).0;
                         (sig, uid.clone())
-                    }).collect();
+                    })
+                    .collect();
 
                 mir_queries.extend(mqs);
             }
@@ -459,7 +460,8 @@ impl SqlIncorporator {
                 self.add_select_query(&format!("{}_csq_{}", query_name, i), &sq.1, false, mig)
                     .1
                     .unwrap()
-            }).collect();
+            })
+            .collect();
 
         let mut combined_mir_query = self.mir_converter.compound_query_to_mir(
             query_name,
@@ -522,7 +524,7 @@ impl SqlIncorporator {
         is_leaf: bool,
         mut mig: &mut Migration,
     ) -> (QueryFlowParts, MirQuery) {
-        use mir::visualize::GraphViz;
+        use ::mir::visualize::GraphViz;
         let universe = mig.universe();
         // no QG-level reuse possible, so we'll build a new query.
         // first, compute the MIR representation of the SQL query
@@ -663,8 +665,8 @@ impl SqlIncorporator {
         is_leaf: bool,
         mut mig: &mut Migration,
     ) -> QueryFlowParts {
-        use mir::reuse::merge_mir_for_queries;
-        use mir::visualize::GraphViz;
+        use ::mir::reuse::merge_mir_for_queries;
+        use ::mir::visualize::GraphViz;
         let universe = mig.universe();
 
         // no QG-level reuse possible, so we'll build a new query.
@@ -779,7 +781,8 @@ impl SqlIncorporator {
                                     alias.clone(),
                                     false,
                                     mig,
-                                ).expect("failed to add subquery in join");
+                                )
+                                .expect("failed to add subquery in join");
                             JoinRightSide::Table(Table {
                                 name: qfp.name.clone(),
                                 alias: None,
@@ -806,11 +809,13 @@ impl SqlIncorporator {
             | ref q @ SqlQuery::Update(_)
             | ref q @ SqlQuery::Delete(_)
             | ref q @ SqlQuery::DropTable(_)
-            | ref q @ SqlQuery::Insert(_) => for t in &q.referred_tables() {
-                if !self.view_schemas.contains_key(&t.name) {
-                    panic!("query refers to unknown table \"{}\"", t.name);
+            | ref q @ SqlQuery::Insert(_) => {
+                for t in &q.referred_tables() {
+                    if !self.view_schemas.contains_key(&t.name) {
+                        panic!("query refers to unknown table \"{}\"", t.name);
+                    }
                 }
-            },
+            }
         }
 
         // Run some standard rewrite passes on the query. This makes the later work easier,
@@ -1029,7 +1034,8 @@ mod tests {
                     "CREATE TABLE articles (id int, author int, title varchar(255));",
                     None,
                     mig
-                ).is_ok()
+                )
+                .is_ok()
             );
             // Should have source and "users" base table node
             assert_eq!(mig.graph().node_count(), 3);
@@ -1240,7 +1246,8 @@ mod tests {
                     "CREATE TABLE users (id int, name varchar(40), address varchar(40));",
                     None,
                     mig
-                ).is_ok()
+                )
+                .is_ok()
             );
             // Should have source and "users" base table node
             assert_eq!(mig.graph().node_count(), 2);
@@ -1309,7 +1316,8 @@ mod tests {
                     "CREATE TABLE articles (id int, title varchar(40));",
                     None,
                     mig
-                ).is_ok()
+                )
+                .is_ok()
             );
             assert!(
                 inc.add_query("CREATE TABLE votes (aid int, uid int);", None, mig)
@@ -1333,7 +1341,8 @@ mod tests {
             let res = inc.add_parsed_query(
                 sql_parser::parse_query(
                     "SELECT COUNT(uid) AS vc FROM votes WHERE vc > 5 GROUP BY aid;",
-                ).unwrap(),
+                )
+                .unwrap(),
                 Some("highvotes".into()),
                 true,
                 mig,
@@ -1468,7 +1477,8 @@ mod tests {
                     "CREATE TABLE articles (aid int, title varchar(255), author int);",
                     None,
                     mig
-                ).is_ok()
+                )
+                .is_ok()
             );
 
             // Try an explicit multi-way-join
@@ -1521,7 +1531,8 @@ mod tests {
                     "CREATE TABLE articles (aid int, title varchar(255), author int);",
                     None,
                     mig
-                ).is_ok()
+                )
+                .is_ok()
             );
 
             // Try an implicit multi-way-join
@@ -1579,7 +1590,8 @@ mod tests {
                     "CREATE TABLE articles (id int, author int, title varchar(255));",
                     None,
                     mig
-                ).is_ok()
+                )
+                .is_ok()
             );
             let q = "SELECT users.id, users.name, articles.author, articles.title \
                      FROM articles, users \
@@ -1699,7 +1711,8 @@ mod tests {
                     "CREATE TABLE articles (id int, author int, title varchar(255));",
                     None,
                     mig
-                ).is_ok()
+                )
+                .is_ok()
             );
 
             let q = "SELECT nested_users.name, articles.title \

@@ -95,7 +95,8 @@ impl Ingredient for Distinct {
                     } else {
                         None
                     }
-                }).cloned()
+                })
+                .cloned()
                 .collect::<Vec<_>>();
 
             // Do not take overlapping elements

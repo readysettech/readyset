@@ -99,12 +99,14 @@ pub fn complex_predicate_implies(np: &ConditionExpression, ep: &ConditionExpress
     match *ep {
         LogicalOp(ref ect) => {
             match *np {
-                LogicalOp(ref nct) => if nct.operator == ect.operator {
-                    return (complex_predicate_implies(&*nct.left, &*ect.left)
-                        && complex_predicate_implies(&*nct.right, &*ect.right))
-                        || (complex_predicate_implies(&*nct.left, &*ect.right)
-                            && complex_predicate_implies(&*nct.right, &*ect.left));
-                },
+                LogicalOp(ref nct) => {
+                    if nct.operator == ect.operator {
+                        return (complex_predicate_implies(&*nct.left, &*ect.left)
+                            && complex_predicate_implies(&*nct.right, &*ect.right))
+                            || (complex_predicate_implies(&*nct.left, &*ect.right)
+                                && complex_predicate_implies(&*nct.right, &*ect.left));
+                    }
+                }
                 _ => (),
             }
 

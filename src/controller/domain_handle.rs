@@ -99,7 +99,8 @@ impl DomainHandle {
                 epoch,
                 source: src,
                 payload: CoordinationPayload::AssignDomain(domain),
-            }).unwrap();
+            })
+            .unwrap();
 
             assignments.push(identifier);
 
@@ -162,7 +163,8 @@ impl DomainHandle {
             .map(|(i, worker)| {
                 let tx = txs.remove(&i).unwrap();
                 DomainShardHandle { worker, tx }
-            }).collect();
+            })
+            .collect();
 
         DomainHandle {
             idx: idx,
@@ -194,7 +196,8 @@ impl DomainHandle {
             .map(|(ni, _)| {
                 let node = graph.node_weight_mut(ni).unwrap().take();
                 node.finalize(graph)
-            }).map(|nd| (*nd.local_addr(), cell::RefCell::new(nd)))
+            })
+            .map(|nd| (*nd.local_addr(), cell::RefCell::new(nd)))
             .collect()
     }
 

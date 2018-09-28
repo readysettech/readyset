@@ -26,11 +26,13 @@ impl Node {
         let mut s = String::new();
         let border = match self.sharded_by {
             Sharding::ByColumn(_, _) | Sharding::Random(_) => "filled,dashed",
-            _ => if Self::is_security(self.name()) {
-                "filled,rounded"
-            } else {
-                "filled"
-            },
+            _ => {
+                if Self::is_security(self.name()) {
+                    "filled,rounded"
+                } else {
+                    "filled"
+                }
+            }
         };
 
         s.push_str(&format!(
@@ -56,11 +58,13 @@ impl Node {
         };
 
         let addr = match self.index {
-            Some(ref idx) => if idx.has_local() {
-                format!("{} / {}", idx.as_global().index(), **idx)
-            } else {
-                format!("{} / -", idx.as_global().index())
-            },
+            Some(ref idx) => {
+                if idx.has_local() {
+                    format!("{} / {}", idx.as_global().index(), **idx)
+                } else {
+                    format!("{} / -", idx.as_global().index())
+                }
+            }
             None => format!("{} / -", idx.index()),
         };
 

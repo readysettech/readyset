@@ -147,7 +147,8 @@ where
                 addr: self.addr,
                 is_for_base: false,
                 _marker: Remote,
-            }.build_async()
+            }
+            .build_async()
             .map(|c| Box::new(c) as Box<_>)
         }
     }
@@ -162,7 +163,8 @@ where
                 addr: self.addr,
                 is_for_base: false,
                 _marker: Remote,
-            }.build_sync()
+            }
+            .build_sync()
             .map(|c| Box::new(c) as Box<_>)
         }
     }

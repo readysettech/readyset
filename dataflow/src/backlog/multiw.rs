@@ -135,20 +135,22 @@ impl Handle {
                     }
                 }
             }
-            Handle::Many(ref mut h) => for r in rs {
-                debug_assert!(r.len() >= cols);
-                let key = key.iter().map(|&k| &r[k]).cloned().collect();
-                match r {
-                    Record::Positive(r) => {
-                        memory_delta += r.deep_size_of() as isize;
-                        h.insert(key, r);
-                    }
-                    Record::Negative(r) => {
-                        memory_delta -= r.deep_size_of() as isize;
-                        h.remove(key, r);
+            Handle::Many(ref mut h) => {
+                for r in rs {
+                    debug_assert!(r.len() >= cols);
+                    let key = key.iter().map(|&k| &r[k]).cloned().collect();
+                    match r {
+                        Record::Positive(r) => {
+                            memory_delta += r.deep_size_of() as isize;
+                            h.insert(key, r);
+                        }
+                        Record::Negative(r) => {
+                            memory_delta -= r.deep_size_of() as isize;
+                            h.remove(key, r);
+                        }
                     }
                 }
-            },
+            }
         }
         memory_delta
     }

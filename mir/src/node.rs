@@ -79,7 +79,8 @@ impl MirNode {
                             .iter()
                             .map(|c| ((*c).clone(), None))
                             .collect::<Vec<(ColumnSpecification, Option<usize>)>>(),
-                    ).collect();
+                    )
+                    .collect();
                 let new_columns: Vec<Column> = new_column_specs
                     .iter()
                     .map(|&(ref cs, _)| Column::from(&cs.column))
@@ -295,11 +296,13 @@ impl MirNode {
                     }
                 }
             }
-            MirNodeType::Project { ref emit, .. } => for c in emit {
-                if !columns.contains(&c) {
-                    columns.push(c.clone());
+            MirNodeType::Project { ref emit, .. } => {
+                for c in emit {
+                    if !columns.contains(&c) {
+                        columns.push(c.clone());
+                    }
                 }
-            },
+            }
             _ => (),
         }
         columns
@@ -353,7 +356,10 @@ pub enum MirNodeType {
         conditions: Vec<Option<FilterCondition>>,
     },
     /// over column, separator
-    GroupConcat { on: Column, separator: String },
+    GroupConcat {
+        on: Column,
+        separator: String,
+    },
     /// no extra info required
     Identity,
     /// left node, right node, on left columns, on right columns, emit columns
@@ -371,7 +377,9 @@ pub enum MirNodeType {
     /// group columns
     // currently unused
     #[allow(dead_code)]
-    Latest { group_by: Vec<Column> },
+    Latest {
+        group_by: Vec<Column>,
+    },
     /// emit columns
     Project {
         emit: Vec<Column>,
@@ -379,7 +387,9 @@ pub enum MirNodeType {
         literals: Vec<(String, DataType)>,
     },
     /// emit columns
-    Union { emit: Vec<Vec<Column>> },
+    Union {
+        emit: Vec<Vec<Column>>,
+    },
     /// order function, group columns, k
     TopK {
         order: Option<Vec<(Column, OrderType)>>,
@@ -388,13 +398,18 @@ pub enum MirNodeType {
         offset: usize,
     },
     // Get the distinct element sorted by a specific column
-    Distinct{
+    Distinct {
         group_by: Vec<Column>,
     },
     /// reuse another node
-    Reuse { node: MirNodeRef },
+    Reuse {
+        node: MirNodeRef,
+    },
     /// leaf (reader) node, keys
-    Leaf { node: MirNodeRef, keys: Vec<Column> },
+    Leaf {
+        node: MirNodeRef,
+        keys: Vec<Column>,
+    },
     /// Rewrite node
     Rewrite {
         value: String,
@@ -435,14 +450,16 @@ impl MirNodeType {
             MirNodeType::Project { ref mut emit, .. } => {
                 emit.push(c);
             }
-            MirNodeType::Union { ref mut emit } => for e in emit.iter_mut() {
-                e.push(c.clone());
-            },
+            MirNodeType::Union { ref mut emit } => {
+                for e in emit.iter_mut() {
+                    e.push(c.clone());
+                }
+            }
             MirNodeType::Distinct {
                 ref mut group_by, ..
             } => {
                 group_by.push(c);
-            },
+            }
             MirNodeType::TopK {
                 ref mut group_by, ..
             } => {
@@ -576,11 +593,7 @@ impl MirNodeType {
             MirNodeType::Distinct {
                 group_by: ref our_group_by,
             } => match *other {
-                MirNodeType::Distinct {
-                    ref group_by,
-                } => {
-                     group_by == our_group_by
-                }
+                MirNodeType::Distinct { ref group_by } => group_by == our_group_by,
                 _ => false,
             },
             MirNodeType::Reuse { node: ref us } => {
@@ -751,7 +764,8 @@ impl Debug for MirNodeType {
                                 )),
                             },
                             None => None,
-                        }).collect::<Vec<_>>()
+                        })
+                        .collect::<Vec<_>>()
                         .as_slice()
                         .join(", ")
                 )
@@ -882,7 +896,8 @@ impl Debug for MirNodeType {
                             .map(|e| e.name.clone())
                             .collect::<Vec<_>>()
                             .join(", ")
-                    }).collect::<Vec<_>>()
+                    })
+                    .collect::<Vec<_>>()
                     .join(" ⋃ ");
 
                 write!(f, "{}", cols)

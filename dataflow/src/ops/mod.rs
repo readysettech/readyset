@@ -3,6 +3,7 @@ use std::collections::{HashMap, HashSet};
 
 use prelude::*;
 
+pub mod distinct;
 pub mod filter;
 pub mod grouped;
 pub mod identity;
@@ -12,7 +13,6 @@ pub mod project;
 pub mod rewrite;
 pub mod topk;
 pub mod trigger;
-pub mod distinct;
 pub mod union;
 
 #[derive(Clone, Serialize, Deserialize)]
@@ -300,11 +300,13 @@ pub mod test {
                 let node = &self.graph[index];
                 let materialization_status = if node.is_localized() {
                     match self.states.get(&node.local_addr()) {
-                        Some(ref s) => if s.is_partial() {
-                            MaterializationStatus::Partial
-                        } else {
-                            MaterializationStatus::Full
-                        },
+                        Some(ref s) => {
+                            if s.is_partial() {
+                                MaterializationStatus::Partial
+                            } else {
+                                MaterializationStatus::Full
+                            }
+                        }
                         None => MaterializationStatus::Not,
                     }
                 } else {
@@ -378,7 +380,8 @@ pub mod test {
                 .filter_map(|ni| {
                     let ni = *self.graph[ni.as_global()].local_addr();
                     self.states.get(&ni).map(move |s| (ni, !s.is_useful()))
-                }).filter(|&(_, x)| x)
+                })
+                .filter(|&(_, x)| x)
                 .collect();
             for (ni, _) in unused {
                 self.states.remove(&ni);
@@ -411,7 +414,8 @@ pub mod test {
                 .map(|(_, n)| {
                     use std::cell;
                     (*n.local_addr(), cell::RefCell::new(n))
-                }).collect();
+                })
+                .collect();
         }
 
         pub fn seed(&mut self, base: IndexPair, data: Vec<DataType>) {

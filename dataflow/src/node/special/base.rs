@@ -147,7 +147,8 @@ impl Base {
                     } else {
                         unreachable!("unkeyed base got non-insert operation {:?}", r);
                     }
-                }).collect();
+                })
+                .collect();
         }
 
         let key_cols = &self.primary_key.as_ref().unwrap()[..];

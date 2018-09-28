@@ -34,7 +34,8 @@ pub fn pull_required_base_columns(q: &mut MirQuery) {
                     .ancestors()
                     .iter()
                     .any(|a| a.borrow().columns().iter().any(|ac| ac == c))
-            }).collect();
+            })
+            .collect();
 
         let mut found: Vec<&Column> = Vec::new();
         for ancestor in mn.borrow().ancestors() {

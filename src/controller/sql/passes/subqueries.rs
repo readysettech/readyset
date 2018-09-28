@@ -51,7 +51,8 @@ pub fn query_from_condition_base(cond: &ConditionBase) -> (SqlQuery, Column) {
                 .map(|fe| match *fe {
                     FieldDefinitionExpression::Col(ref c) => c.clone(),
                     _ => unreachable!(),
-                }).nth(0)
+                })
+                .nth(0)
                 .unwrap();
         }
         _ => unreachable!(),

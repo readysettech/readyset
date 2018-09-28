@@ -190,7 +190,8 @@ fn base_mutation() {
         .update(
             vec![1.into()],
             vec![(1, Modification::Apply(Operation::Add, 1.into()))],
-        ).unwrap();
+        )
+        .unwrap();
     sleep();
     assert_eq!(
         read.lookup(&[1.into()], true).unwrap(),
@@ -202,7 +203,8 @@ fn base_mutation() {
         .insert_or_update(
             vec![1.into(), 2.into()],
             vec![(1, Modification::Apply(Operation::Add, 1.into()))],
-        ).unwrap();
+        )
+        .unwrap();
     sleep();
     assert_eq!(
         read.lookup(&[1.into()], true).unwrap(),
@@ -219,7 +221,8 @@ fn base_mutation() {
         .insert_or_update(
             vec![1.into(), 2.into()],
             vec![(1, Modification::Apply(Operation::Add, 1.into()))],
-        ).unwrap();
+        )
+        .unwrap();
     sleep();
     assert_eq!(
         read.lookup(&[1.into()], true).unwrap(),
@@ -2095,13 +2098,15 @@ fn test_queries(test: &str, file: &'static str, shard: bool, reuse: bool, log: b
                     && !l.starts_with("--")
                     && !l.starts_with('#')
                     && !l.starts_with("DROP TABLE")
-            }).map(|l| {
+            })
+            .map(|l| {
                 if !(l.ends_with('\n') || l.ends_with(';')) {
                     String::from(l) + "\n"
                 } else {
                     String::from(l)
                 }
-            }).collect();
+            })
+            .collect();
 
         // Add them one by one
         for (_i, q) in lines.iter().enumerate() {
@@ -2142,7 +2147,8 @@ fn finkelstein1982_queries() {
                 } else {
                     String::from(l)
                 }
-            }).collect();
+            })
+            .collect();
 
         // Add them one by one
         for q in lines.iter() {

@@ -104,10 +104,12 @@ impl Signature for QueryGraph {
         for n in self.relations.values() {
             for p in &n.predicates {
                 match *p {
-                    ComparisonOp(ref ct) | LogicalOp(ref ct) => for c in &ct.contained_columns() {
-                        attrs_vec.push(c);
-                        attrs.insert(c);
-                    },
+                    ComparisonOp(ref ct) | LogicalOp(ref ct) => {
+                        for c in &ct.contained_columns() {
+                            attrs_vec.push(c);
+                            attrs.insert(c);
+                        }
+                    }
                     _ => unreachable!(),
                 }
             }
@@ -115,26 +117,32 @@ impl Signature for QueryGraph {
         for e in self.edges.values() {
             match *e {
                 QueryGraphEdge::Join(ref join_predicates)
-                | QueryGraphEdge::LeftJoin(ref join_predicates) => for p in join_predicates {
-                    for c in &p.contained_columns() {
+                | QueryGraphEdge::LeftJoin(ref join_predicates) => {
+                    for p in join_predicates {
+                        for c in &p.contained_columns() {
+                            attrs_vec.push(c);
+                            attrs.insert(c);
+                        }
+                    }
+                }
+                QueryGraphEdge::GroupBy(ref cols) => {
+                    for c in cols {
                         attrs_vec.push(c);
                         attrs.insert(c);
                     }
-                },
-                QueryGraphEdge::GroupBy(ref cols) => for c in cols {
-                    attrs_vec.push(c);
-                    attrs.insert(c);
-                },
+                }
             }
         }
 
         // Global predicates are part of the attributes too
         for p in &self.global_predicates {
             match *p {
-                ComparisonOp(ref ct) | LogicalOp(ref ct) => for c in &ct.contained_columns() {
-                    attrs_vec.push(c);
-                    attrs.insert(c);
-                },
+                ComparisonOp(ref ct) | LogicalOp(ref ct) => {
+                    for c in &ct.contained_columns() {
+                        attrs_vec.push(c);
+                        attrs.insert(c);
+                    }
+                }
                 _ => unreachable!(),
             }
         }

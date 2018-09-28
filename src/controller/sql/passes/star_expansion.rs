@@ -44,7 +44,8 @@ impl StarExpansion for SqlQuery {
                     FieldDefinitionExpression::Col(c) => {
                         vec![FieldDefinitionExpression::Col(c)].into_iter()
                     }
-                }).collect();
+                })
+                .collect();
         }
         self
     }

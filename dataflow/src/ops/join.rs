@@ -69,7 +69,8 @@ impl Join {
                     join_columns.push((lc, rc));
                     (true, lc)
                 }
-            }).collect();
+            })
+            .collect();
 
         assert_eq!(join_columns.len(), 1, "only supports single column joins");
         let on = *join_columns.iter().next().unwrap();
@@ -105,7 +106,8 @@ impl Join {
                         } else {
                             (from_left, c)
                         }
-                    }).collect::<Vec<_>>()
+                    })
+                    .collect::<Vec<_>>()
             };
 
             (compute_in_place_emit(true), compute_in_place_emit(false))
@@ -145,7 +147,8 @@ impl Join {
                         right[col].clone()
                     }
                 }
-            }).collect()
+            })
+            .collect()
     }
 
     fn regenerate_row(
@@ -188,7 +191,8 @@ impl Join {
                 } else {
                     DataType::None
                 }
-            }).collect()
+            })
+            .collect()
     }
 }
 
@@ -268,7 +272,8 @@ impl Ingredient for Join {
                             unreachable!()
                         }
                     }
-                }).collect()
+                })
+                .collect()
         });
 
         // First, we want to be smart about multiple added/removed rows with the same join key
@@ -295,7 +300,8 @@ impl Ingredient for Join {
                         &KeyType::Single(&prev_join_key),
                         nodes,
                         state,
-                    ).unwrap();
+                    )
+                    .unwrap();
 
                 if rc.is_none() {
                     // we got something from right, but that row's key is not in right??
@@ -328,7 +334,8 @@ impl Ingredient for Join {
                     &KeyType::Single(&prev_join_key),
                     nodes,
                     state,
-                ).unwrap();
+                )
+                .unwrap();
 
             if other_rows.is_none() {
                 // we missed in the other side!
@@ -520,7 +527,8 @@ impl Ingredient for Join {
         vec![
             (self.left.as_global(), (vec![self.on.0], true)),
             (self.right.as_global(), (vec![self.on.1], true)),
-        ].into_iter()
+        ]
+        .into_iter()
         .collect()
     }
 
@@ -540,7 +548,8 @@ impl Ingredient for Join {
             .map(|&(from_left, col)| {
                 let src = if from_left { self.left } else { self.right };
                 format!("{}:{}", src.as_global().index(), col)
-            }).collect::<Vec<_>>()
+            })
+            .collect::<Vec<_>>()
             .join(", ");
 
         let op = match self.kind {
@@ -655,7 +664,8 @@ mod tests {
                 (vec![3.into(), "c".into(), "w".into()], true),
                 (vec![3.into(), "c".into(), DataType::None], false),
                 (vec![3.into(), "c".into(), "w".into()], true),
-            ].into()
+            ]
+            .into()
         );
 
         // Negative followed by positive should not trigger nulls.
@@ -668,7 +678,8 @@ mod tests {
                 (vec![3.into(), "c".into(), "w".into()], false),
                 (vec![3.into(), "c".into(), "w".into()], true),
                 (vec![3.into(), "c".into(), "w".into()], true),
-            ].into()
+            ]
+            .into()
         );
 
         // forward from left with single matching record on right
@@ -687,7 +698,8 @@ mod tests {
             vec![
                 ((vec![1.into(), "a".into(), "x".into()], true)),
                 ((vec![1.into(), "a".into(), "y".into()], true)),
-            ].into()
+            ]
+            .into()
         );
 
         // forward from right with two matching records on left (and one more on right)
@@ -698,7 +710,8 @@ mod tests {
             vec![
                 ((vec![3.into(), "c".into(), "w".into()], true)),
                 ((vec![3.into(), "c".into(), "w".into()], true)),
-            ].into()
+            ]
+            .into()
         );
 
         // unmatched forward from right should have no effect
@@ -715,7 +728,8 @@ mod tests {
         let hm: HashMap<_, _> = vec![
             (l.as_global(), (vec![0], true)), /* join column for left */
             (r.as_global(), (vec![0], true)), /* join column for right */
-        ].into_iter()
+        ]
+        .into_iter()
         .collect();
         assert_eq!(g.node().suggest_indexes(me), hm);
     }

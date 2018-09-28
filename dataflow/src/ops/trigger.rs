@@ -56,7 +56,8 @@ impl Trigger {
                 hyper::Request::post(&url)
                     .body(hyper::Body::from(serde_json::to_string(&req).unwrap()))
                     .unwrap()
-            }).collect();
+            })
+            .collect();
 
         // TODO: instead of spawing a thred for each request, we could have a
         // long running thread that we just send requests to.
@@ -86,7 +87,8 @@ impl Trigger {
                         group_context.insert(String::from("id"), gid.clone());
                         group_context.insert(String::from("group"), group.clone().into());
                         group_context
-                    }).collect();
+                    })
+                    .collect();
 
                 self.rpc("create_universe", contexts, controller_url);
             }
@@ -143,7 +145,8 @@ impl Ingredient for Trigger {
                     }
                 }
                 LookupResult::Missing => unimplemented!(),
-            }).cloned()
+            })
+            .cloned()
             .collect();
 
         self.trigger(keys);

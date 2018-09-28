@@ -233,7 +233,8 @@ mod tests {
             (vec![2.into(), "B".into()], true),
             (vec![3.into(), "C".into()], true),
             (vec![1.into(), "A".into()], false),
-        ].into();
+        ]
+        .into();
 
         state.add_key(&[0], None);
         state.process_records(&mut Vec::from(&records[..3]).into(), None);

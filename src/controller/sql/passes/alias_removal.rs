@@ -112,12 +112,14 @@ impl AliasRemoval for SqlQuery {
                                 None => (),
                                 Some(ref a) => add_alias(a, &t.name),
                             },
-                            JoinRightSide::Tables(ref ts) => for t in ts {
-                                match t.alias {
-                                    None => (),
-                                    Some(ref a) => add_alias(a, &t.name),
+                            JoinRightSide::Tables(ref ts) => {
+                                for t in ts {
+                                    match t.alias {
+                                        None => (),
+                                        Some(ref a) => add_alias(a, &t.name),
+                                    }
                                 }
-                            },
+                            }
                             JoinRightSide::NestedJoin(_) => unimplemented!(),
                             _ => (),
                         }
@@ -149,7 +151,8 @@ impl AliasRemoval for SqlQuery {
                             }
                         }
                         f => f,
-                    }).collect();
+                    })
+                    .collect();
                 // Remove them from join clauses
                 sq.join = sq
                     .join
@@ -162,7 +165,8 @@ impl AliasRemoval for SqlQuery {
                             c @ JoinConstraint::Using(..) => c,
                         };
                         jc
-                    }).collect();
+                    })
+                    .collect();
                 // Remove them from conditions
                 sq.where_clause = match sq.where_clause {
                     None => None,

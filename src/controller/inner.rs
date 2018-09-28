@@ -182,8 +182,10 @@ impl ControllerInner {
                             } else {
                                 None
                             }
-                        }).collect::<Vec<_>>(),
-                ).unwrap()))
+                        })
+                        .collect::<Vec<_>>(),
+                )
+                .unwrap()))
             }
             (Method::POST, "/table_builder") => json::from_slice(&body)
                 .map_err(|_| StatusCode::BAD_REQUEST)
@@ -496,7 +498,8 @@ impl ControllerInner {
                 let base = &self.ingredients[n];
                 assert!(base.is_base());
                 (base.name().to_owned(), n.into())
-            }).collect()
+            })
+            .collect()
     }
 
     /// Get a Vec of all known output nodes.
@@ -513,8 +516,10 @@ impl ControllerInner {
                         // we want to give the the node address that is being materialized not that of
                         // the reader node itself.
                         (name, r.is_for())
-                    }).ok()
-            }).collect()
+                    })
+                    .ok()
+            })
+            .collect()
     }
 
     fn find_view_for(&self, node: NodeIndex) -> Option<NodeIndex> {
@@ -598,7 +603,8 @@ impl ControllerInner {
                 self.channel_coordinator
                     .get_addr(&(node.domain(), i))
                     .unwrap()
-            }).collect();
+            })
+            .collect();
 
         let base_operator = node
             .get_base()
@@ -651,7 +657,8 @@ impl ControllerInner {
 
                         ((di.clone(), i), (domain_stats, node_map))
                     })
-            }).collect();
+            })
+            .collect();
 
         GraphStats { domains: domains }
     }
@@ -684,9 +691,11 @@ impl ControllerInner {
                                 MaterializationStatus::Partial => Some((ni, ns.mem_size)),
                                 _ => None,
                             })
-                    }).collect();
+                    })
+                    .collect();
                 (*di, to_evict)
-            }).collect();
+            })
+            .collect();
 
         let mut total_evicted = 0;
         for (di, nodes) in to_evict {
@@ -701,7 +710,8 @@ impl ControllerInner {
                             num_bytes: bytes as usize,
                         },
                         workers,
-                    ).expect("failed to send domain flush message");
+                    )
+                    .expect("failed to send domain flush message");
                 total_evicted += bytes;
             }
         }
@@ -752,7 +762,8 @@ impl ControllerInner {
                     crit!(log, "failed to create universe: {:?}", e);
                     Err("failed to create universe".to_owned())
                 }
-            }.unwrap();
+            }
+            .unwrap();
         });
 
         self.recipe = r;
@@ -846,7 +857,8 @@ impl ControllerInner {
                             state.recipes.push(add_txt.clone());
                             Ok(state)
                         }
-                    }).is_err()
+                    })
+                    .is_err()
                 {
                     return Err("Failed to persist recipe extension".to_owned());
                 }
@@ -881,7 +893,8 @@ impl ControllerInner {
                             state.recipes = vec![r_txt.clone()];
                             Ok(state)
                         }
-                    }).is_err()
+                    })
+                    .is_err()
                 {
                     return Err("Failed to persist recipe installation".to_owned());
                 }
@@ -928,7 +941,8 @@ impl ControllerInner {
                         has_non_reader_children = true;
                         false
                     }
-                }).collect();
+                })
+                .collect();
             if has_non_reader_children {
                 // should never happen, since we remove nodes in reverse topological order
                 crit!(

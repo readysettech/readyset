@@ -55,7 +55,8 @@ pub(crate) fn handle_message(
                     .map(|key| {
                         let rs = reader.try_find_and(key, dup).map(|r| r.0);
                         (key, rs)
-                    }).enumerate();
+                    })
+                    .enumerate();
 
                 let mut ready = true;
                 for (i, (key, v)) in found {

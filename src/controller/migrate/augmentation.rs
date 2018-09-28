@@ -64,7 +64,8 @@ pub fn inform(
                     parents: old_parents,
                 },
                 &controller.workers,
-            ).unwrap();
+            )
+            .unwrap();
         }
     }
 }

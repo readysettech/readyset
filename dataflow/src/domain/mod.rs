@@ -367,7 +367,8 @@ impl Domain {
                         .send(box Packet::RequestPartialReplay {
                             tag,
                             key: key.clone(), // sad to clone here
-                        }).is_err()
+                        })
+                        .is_err()
                     {
                         // we're shutting down -- it's fine.
                     }
@@ -434,7 +435,8 @@ impl Domain {
                             } else {
                                 false
                             }
-                        }).count()
+                        })
+                        .count()
                 };
 
                 // we also sent that many requests *per key*.
@@ -590,10 +592,13 @@ impl Domain {
                                             .find(|&(ni, _)| ni == from)
                                             .ok_or(())
                                             .map(|k| k.1.unwrap())
-                                    }).collect::<Result<Vec<_>, _>>()
+                                    })
+                                    .collect::<Result<Vec<_>, _>>()
                                     .ok()
-                            }).map(move |k| (tag, k))
-                    }).collect();
+                            })
+                            .map(move |k| (tag, k))
+                    })
+                    .collect();
 
                 let mut evictions = HashMap::new();
                 for miss in misses {
@@ -861,7 +866,8 @@ impl Domain {
                                                     key: miss,
                                                     cols: key.clone(),
                                                     node: node,
-                                                }).fold(sender, move |sender, m| {
+                                                })
+                                                .fold(sender, move |sender, m| {
                                                     sender.send(m).map_err(|e| {
                                                         // domain went away?
                                                         eprintln!(
@@ -869,10 +875,12 @@ impl Domain {
                                                             e
                                                         );
                                                     })
-                                                }).map(|_| ()),
+                                                })
+                                                .map(|_| ()),
                                         );
                                         tx
-                                    }).collect::<Vec<_>>();
+                                    })
+                                    .collect::<Vec<_>>();
                                 let (r_part, w_part) =
                                     backlog::new_partial(cols, &k[..], move |miss| {
                                         let n = txs.len();
@@ -895,12 +903,14 @@ impl Domain {
                                             .insert(
                                                 (gid, *self.shard.as_ref().unwrap_or(&0)),
                                                 r_part
-                                            ).is_none()
+                                            )
+                                            .is_none()
                                     );
 
                                     // make sure Reader is actually prepared to receive state
                                     r.set_write_handle(w_part)
-                                }).unwrap();
+                                })
+                                .unwrap();
                             }
                             InitialState::Global { gid, cols, key } => {
                                 use backlog;
@@ -915,12 +925,14 @@ impl Domain {
                                             .insert(
                                                 (gid, *self.shard.as_ref().unwrap_or(&0)),
                                                 r_part
-                                            ).is_none()
+                                            )
+                                            .is_none()
                                     );
 
                                     // make sure Reader is actually prepared to receive state
                                     r.set_write_handle(w_part)
-                                }).unwrap();
+                                })
+                                .unwrap();
                             }
                         }
                     }
@@ -1009,7 +1021,8 @@ impl Domain {
                                     .expect("reader replay requested for non-ready reader")
                                     .0
                                     .is_none()
-                            }).expect("reader replay requested for non-reader node");
+                            })
+                            .expect("reader replay requested for non-reader node");
 
                         // ensure that we haven't already requested a replay of this key
                         if still_miss && self
@@ -1115,7 +1128,8 @@ impl Domain {
                                         .domain()
                                         .index(),
                                     link.src
-                                )).spawn(move || {
+                                ))
+                                .spawn(move || {
                                     use itertools::Itertools;
 
                                     // TODO: make async
@@ -1154,7 +1168,8 @@ impl Domain {
                                    "node" => %link.dst,
                                    "μs" => start.elapsed().as_micros() as u64
                                 );
-                                }).unwrap();
+                                })
+                                .unwrap();
                         }
 
                         self.handle_replay(p, sends);
@@ -1207,7 +1222,8 @@ impl Domain {
                                         state.swap();
                                         trace!(self.log, "state swapped"; "local" => node.id());
                                     }
-                                }).unwrap();
+                                })
+                                .unwrap();
                             }
                         }
 
@@ -1262,7 +1278,8 @@ impl Domain {
                                         } else {
                                             MaterializationStatus::Full
                                         }
-                                    }).unwrap()
+                                    })
+                                    .unwrap()
                                 };
 
                                 if time.is_some() && ptime.is_some() {
@@ -1279,7 +1296,8 @@ impl Domain {
                                 } else {
                                     None
                                 }
-                            }).collect();
+                            })
+                            .collect();
 
                         self.control_reply_tx
                             .send(ControlReplyPacket::Statistics(domain_stats, node_stats))
@@ -1316,7 +1334,8 @@ impl Domain {
                             }
                             None
                         }
-                    }).collect()
+                    })
+                    .collect()
             };
             for (tag, keys) in elapsed_replays {
                 self.seed_all(tag, keys, sends);
@@ -1702,7 +1721,8 @@ impl Domain {
                                             wh.mut_with_key(&key[..]).mark_filled();
                                         }
                                     });
-                                }).unwrap();
+                                })
+                                .unwrap();
                             }
                         }
 
@@ -1755,13 +1775,15 @@ impl Domain {
                                                 wh.mut_with_key(&miss[..]).mark_hole();
                                             }
                                         });
-                                    }).unwrap();
+                                    })
+                                    .unwrap();
                                 }
                             } else if is_reader {
                                 // we filled a hole! swap the reader.
                                 n.with_reader_mut(|r| {
                                     r.writer_mut().map(|wh| wh.swap());
-                                }).unwrap();
+                                })
+                                .unwrap();
                                 // and also unmark the replay request
                                 if let Some(ref mut prev) =
                                     self.reader_triggered.get_mut(&segment.node)
@@ -1787,7 +1809,8 @@ impl Domain {
                                             wh.mut_with_key(&key[..]).mark_hole();
                                         }
                                     });
-                                }).unwrap();
+                                })
+                                .unwrap();
                             }
                         }
 
@@ -2035,7 +2058,8 @@ impl Domain {
                                    "left" => left);
                                 None
                             }
-                        }).collect();
+                        })
+                        .collect();
 
                     for (tag, replay_key) in replay {
                         self.delayed_for_self
@@ -2252,7 +2276,8 @@ impl Domain {
                                     if r.is_partial() {
                                         size = r.state_size().unwrap_or(0)
                                     }
-                                }).unwrap();
+                                })
+                                .unwrap();
                                 Some((local_index, size))
                             } else {
                                 self.state
@@ -2260,7 +2285,8 @@ impl Domain {
                                     .filter(|state| state.is_partial())
                                     .map(|state| (local_index, state.deep_size_of()))
                             }
-                        }).filter(|&(_, s)| s > 0)
+                        })
+                        .filter(|&(_, s)| s > 0)
                         .max_by_key(|&(_, s)| s)
                         .map(|(n, s)| {
                             trace!(self.log, "chose to evict from node {:?} with size {}", n, s);
@@ -2402,7 +2428,8 @@ impl Domain {
                         if r.is_partial() {
                             size = r.state_size().unwrap_or(0)
                         }
-                    }).unwrap();
+                    })
+                    .unwrap();
                     size
                 } else {
                     // Not a reader, state is with domain
@@ -2412,7 +2439,8 @@ impl Domain {
                         .map(|state| state.deep_size_of())
                         .unwrap_or(0)
                 }
-            }).sum();
+            })
+            .sum();
 
         self.state_size.store(total as usize, Ordering::Relaxed);
         // no response sent, as worker will read the atomic
@@ -2438,7 +2466,8 @@ impl Domain {
                             self.replay_batch_timeout
                                 .checked_sub(now.duration_since(first))
                                 .unwrap_or(time::Duration::from_millis(0))
-                        }).min()
+                        })
+                        .min()
                 });
                 ProcessResult::KeepPolling
             }

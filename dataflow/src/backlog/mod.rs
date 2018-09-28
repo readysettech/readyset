@@ -143,7 +143,8 @@ impl<'a> MutWriteHandleEntry<'a> {
             .handle
             .meta_get_and(Cow::Borrowed(&*self.key), |rs| {
                 rs.iter().map(|r| r.deep_size_of()).sum()
-            }).map(|r| r.0.unwrap_or(0))
+            })
+            .map(|r| r.0.unwrap_or(0))
             .unwrap_or(0);
         self.handle.mem_size = self.handle.mem_size.checked_sub(size as usize).unwrap();
         self.handle.handle.empty(self.key)
@@ -441,9 +442,10 @@ mod tests {
         assert!(
             r.try_find_and(&a[0..1], |rs| rs
                 .iter()
-                .any(|r| r[0] == a[0] && r[1] == a[1])).unwrap()
-            .0
-            .unwrap()
+                .any(|r| r[0] == a[0] && r[1] == a[1]))
+                .unwrap()
+                .0
+                .unwrap()
         );
     }
 
@@ -487,9 +489,10 @@ mod tests {
         assert!(
             r.try_find_and(&a[0..1], |rs| rs
                 .iter()
-                .any(|r| r[0] == a[0] && r[1] == a[1])).unwrap()
-            .0
-            .unwrap()
+                .any(|r| r[0] == a[0] && r[1] == a[1]))
+                .unwrap()
+                .0
+                .unwrap()
         );
     }
 
@@ -509,16 +512,18 @@ mod tests {
         assert!(
             r.try_find_and(&a[0..1], |rs| rs
                 .iter()
-                .any(|r| r[0] == a[0] && r[1] == a[1])).unwrap()
-            .0
-            .unwrap()
+                .any(|r| r[0] == a[0] && r[1] == a[1]))
+                .unwrap()
+                .0
+                .unwrap()
         );
         assert!(
             r.try_find_and(&a[0..1], |rs| rs
                 .iter()
-                .any(|r| r[0] == b[0] && r[1] == b[1])).unwrap()
-            .0
-            .unwrap()
+                .any(|r| r[0] == b[0] && r[1] == b[1]))
+                .unwrap()
+                .0
+                .unwrap()
         );
     }
 
@@ -537,9 +542,10 @@ mod tests {
         assert!(
             r.try_find_and(&a[0..1], |rs| rs
                 .iter()
-                .any(|r| r[0] == b[0] && r[1] == b[1])).unwrap()
-            .0
-            .unwrap()
+                .any(|r| r[0] == b[0] && r[1] == b[1]))
+                .unwrap()
+                .0
+                .unwrap()
         );
     }
 
@@ -559,9 +565,10 @@ mod tests {
         assert!(
             r.try_find_and(&a[0..1], |rs| rs
                 .iter()
-                .any(|r| r[0] == b[0] && r[1] == b[1])).unwrap()
-            .0
-            .unwrap()
+                .any(|r| r[0] == b[0] && r[1] == b[1]))
+                .unwrap()
+                .0
+                .unwrap()
         );
     }
 
@@ -582,16 +589,18 @@ mod tests {
         assert!(
             r.try_find_and(&a[0..1], |rs| rs
                 .iter()
-                .any(|r| r[0] == a[0] && r[1] == a[1])).unwrap()
-            .0
-            .unwrap()
+                .any(|r| r[0] == a[0] && r[1] == a[1]))
+                .unwrap()
+                .0
+                .unwrap()
         );
         assert!(
             r.try_find_and(&a[0..1], |rs| rs
                 .iter()
-                .any(|r| r[0] == b[0] && r[1] == b[1])).unwrap()
-            .0
-            .unwrap()
+                .any(|r| r[0] == b[0] && r[1] == b[1]))
+                .unwrap()
+                .0
+                .unwrap()
         );
 
         w.add(vec![
@@ -605,9 +614,10 @@ mod tests {
         assert!(
             r.try_find_and(&a[0..1], |rs| rs
                 .iter()
-                .any(|r| r[0] == b[0] && r[1] == b[1])).unwrap()
-            .0
-            .unwrap()
+                .any(|r| r[0] == b[0] && r[1] == b[1]))
+                .unwrap()
+                .0
+                .unwrap()
         );
     }
 }

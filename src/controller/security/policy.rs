@@ -107,7 +107,8 @@ impl Policy {
                     _ => panic!("Unsupported policy action {}", action),
                 },
                 None => Policy::parse_row_policy(p, Action::Allow),
-            }).collect()
+            })
+            .collect()
     }
 
     fn parse_row_policy(p: &Value, action: Action) -> Policy {

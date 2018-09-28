@@ -30,7 +30,8 @@ impl Group {
                     membership: sql_parser::parse_query(membership).unwrap(),
                     policies: Policy::parse(&policies),
                 }
-            }).collect()
+            })
+            .collect()
     }
 
     pub fn membership(&self) -> SqlQuery {

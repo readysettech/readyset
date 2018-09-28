@@ -32,28 +32,32 @@ fn main() {
                 .takes_value(true)
                 .default_value("127.0.0.1:2181")
                 .help("Zookeeper connection info."),
-        ).arg(
+        )
+        .arg(
             Arg::with_name("deployment")
                 .long("deployment")
                 .short("d")
                 .required(true)
                 .takes_value(true)
                 .help("Soup deployment ID."),
-        ).arg(
+        )
+        .arg(
             Arg::with_name("clean")
                 .short("c")
                 .long("clean")
                 .takes_value(false)
                 .required_unless("show")
                 .help("Remove existing configuration."),
-        ).arg(
+        )
+        .arg(
             Arg::with_name("show")
                 .short("s")
                 .long("show")
                 .takes_value(false)
                 .required_unless("clean")
                 .help("Print current configuration to stdout."),
-        ).get_matches();
+        )
+        .get_matches();
 
     let deployment = matches.value_of("deployment").unwrap();
     let zookeeper_addr = format!("{}/{}", matches.value_of("zookeeper").unwrap(), deployment);

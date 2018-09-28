@@ -78,7 +78,8 @@ impl GroupCommitQueueSet {
                     .flush_timeout
                     .checked_sub(p.0.elapsed())
                     .unwrap_or(time::Duration::from_millis(0))
-            }).min()
+            })
+            .min()
     }
 
     fn merge_committed_packets<I>(packets: I) -> Option<Box<Packet>>
@@ -114,7 +115,8 @@ impl GroupCommitQueueSet {
                                 .send(Event {
                                     instant: time::Instant::now(),
                                     event: EventType::PacketEvent(PacketEvent::Merged(mtag), tag),
-                                }).unwrap();
+                                })
+                                .unwrap();
                         }
                         (_, mut tracer @ Some(_)) => {
                             merged_tracer = tracer.take();

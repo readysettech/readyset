@@ -96,7 +96,8 @@ fn rewrite_selection(
                     // preserve all tables if there are no tables in the query
                     true
                 }
-            }).filter_map(|(t, ws)| {
+            })
+            .filter_map(|(t, ws)| {
                 let num_matching = ws.iter().filter(|c| **c == f.name).count();
                 assert!(num_matching <= 1);
                 if num_matching == 1 {
@@ -104,7 +105,8 @@ fn rewrite_selection(
                 } else {
                     None
                 }
-            }).collect::<Vec<String>>();
+            })
+            .collect::<Vec<String>>();
         if matches.len() > 1 {
             println!(
                 "Ambiguous column {} exists in tables: {} -- picking a random one",

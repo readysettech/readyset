@@ -151,7 +151,8 @@ impl Ingredient for Project {
                             "should never be queried for generated columns"
                         );
                         emit[outi]
-                    }).collect(),
+                    })
+                    .collect(),
             );
         }
 
@@ -412,7 +413,8 @@ mod tests {
                 "c".into(),
                 "hello".into(),
                 42.into(),
-            ]].into()
+            ]]
+            .into()
         );
     }
 
@@ -529,7 +531,8 @@ mod tests {
                 &KeyType::Single(&key),
                 &DomainNodes::default(),
                 &states,
-            ).unwrap()
+            )
+            .unwrap()
             .unwrap();
         assert_eq!(expected, iter.next().unwrap().into_owned());
     }

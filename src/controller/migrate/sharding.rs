@@ -57,7 +57,8 @@ pub fn shard(
                     } else {
                         None
                     }
-                }).unwrap_or(Sharding::ForcedNone);
+                })
+                .unwrap_or(Sharding::ForcedNone);
             if s.is_none() {
                 info!(log, "de-sharding prior to stream-only reader"; "node" => ?node);
             } else {
