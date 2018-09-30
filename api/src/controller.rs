@@ -209,7 +209,7 @@ impl<A: Authority> ControllerHandle<A> {
         // This call attempts to detect if this function is being called in a loop. If this
         // is getting false positives, then it is safe to increase the allowed hit count.
         #[cfg(debug_assertions)]
-        assert_infrequent::at_most(200);
+        assert_infrequent::at_most(2000);
 
         self.rpc::<_, Option<ViewBuilder>>("view_builder", name)
             .context(format!("building View for {}", name))?
@@ -235,7 +235,7 @@ impl<A: Authority> ControllerHandle<A> {
         // This call attempts to detect if this function is being called in a loop. If this
         // is getting false positives, then it is safe to increase the allowed hit count.
         #[cfg(debug_assertions)]
-        assert_infrequent::at_most(200);
+        assert_infrequent::at_most(2000);
 
         self.rpc::<_, Option<TableBuilder>>("table_builder", name)
             .context(format!("building Table for {}", name))?

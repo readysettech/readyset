@@ -1,7 +1,7 @@
 [package]
 name = "channel"
 version = "0.1.0"
-authors = ["The Distributary Developers"]
+authors = ["The Noria developers <noria@pdos.csail.mit.edu>"]
 
 [dependencies]
 bincode = "1.0.0"

@@ -1,6 +1,6 @@
-extern crate distributary;
+extern crate noria;
 
-use distributary::{ControllerHandle, ZookeeperAuthority};
+use noria::{ControllerHandle, ZookeeperAuthority};
 
 use std::collections::BTreeMap;
 use std::thread;
@@ -18,15 +18,15 @@ fn main() {
                 FROM Article, VoteCount \
                 WHERE Article.aid = VoteCount.aid AND Article.aid = ?;";
 
-    // let persistence_params = distributary::PersistenceParameters::new(
-    //     distributary::DurabilityMode::Permanent,
+    // let persistence_params = noria::PersistenceParameters::new(
+    //     noria::DurabilityMode::Permanent,
     //     512,
     //     Duration::from_millis(1),
     //     Some(String::from("example")),
     //     1,
     // );
 
-    let log = distributary::logger_pls();
+    let log = noria::logger_pls();
 
     // set up Soup via recipe
     let mut auth = ZookeeperAuthority::new("127.0.0.1:2181/basicdist").unwrap();

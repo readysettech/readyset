@@ -126,7 +126,7 @@
 //! for clarity)
 //!
 //! ```rust,ignore
-//! # use distributary::{Blender, Base, Aggregation, Join, JoinType};
+//! # use noria::{Blender, Base, Aggregation, Join, JoinType};
 //! // set up graph
 //! let mut g = Blender::new();
 //! g.migrate(|mig| {
@@ -141,7 +141,7 @@
 //!     // joins are trickier because you need to specify what to join on. the vec![1, 0] here
 //!     // signifies that the first field of article and vc should be equal,
 //!     // and the second field can be whatever.
-//!     use distributary::JoinSource::*;
+//!     use noria::JoinSource::*;
 //!     let j = Join::new(article, vc, JoinType::Inner, vec![B(0, 0), L(1), R(1)]);
 //!     let awvc = mig.add_ingredient("end", &["id", "title", "votes"], j);
 //!
@@ -170,7 +170,7 @@
 //! the new record to the put function on a mutator obtained for article.
 //!
 //! ```rust,ignore
-//! # use distributary::{Blender, Base};
+//! # use noria::{Blender, Base};
 //! # let mut g = Blender::new();
 //! # let article = g.migrate(|mig|
 //! #     mig.add_ingredient("article", &["id", "title"], Base::default())
@@ -230,7 +230,7 @@
 //! Let's next trace what happens when a `Vote` is introduced into the system using
 //!
 //! ```rust,ignore
-//! # use distributary::{Blender, Base};
+//! # use noria::{Blender, Base};
 //! # let mut g = Blender::new();
 //! # let vote = g.migrate(|mig| mig.add_ingredient("vote", &["user", "id"], Base::default()));
 //! let mut mutv = g.get_mutator(vote);

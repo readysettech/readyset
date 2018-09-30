@@ -1,7 +1,7 @@
 [package]
 name = "api"
 version = "0.1.0"
-authors = ["Jon Gjengset <jon@thesquareplanet.com>"]
+authors = ["The Noria developers <noria@pdos.csail.mit.edu>"]
 
 [dependencies]
 failure = "0.1"

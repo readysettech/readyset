@@ -1,11 +1,11 @@
 #[macro_use]
 extern crate clap;
 extern crate consensus;
-extern crate distributary;
+extern crate noria;
 extern crate slog;
 
 use consensus::ZookeeperAuthority;
-use distributary::{ControllerBuilder, ReuseConfigType};
+use noria::{ControllerBuilder, ReuseConfigType};
 use std::path::PathBuf;
 use std::sync::Arc;
 use std::time::Duration;
@@ -116,7 +116,7 @@ fn main() {
         )
         .get_matches();
 
-    let log = distributary::logger_pls();
+    let log = noria::logger_pls();
 
     let durability = matches.value_of("durability").unwrap();
     let listen_addr = matches.value_of("address").unwrap().parse().unwrap();
@@ -149,11 +149,11 @@ fn main() {
         builder.set_reuse(ReuseConfigType::NoReuse);
     }
 
-    let mut persistence_params = distributary::PersistenceParameters::new(
+    let mut persistence_params = noria::PersistenceParameters::new(
         match durability {
-            "persistent" => distributary::DurabilityMode::Permanent,
-            "ephemeral" => distributary::DurabilityMode::DeleteOnExit,
-            "memory" => distributary::DurabilityMode::MemoryOnly,
+            "persistent" => noria::DurabilityMode::Permanent,
+            "ephemeral" => noria::DurabilityMode::DeleteOnExit,
+            "memory" => noria::DurabilityMode::MemoryOnly,
             _ => unreachable!(),
         },
         Duration::new(0, flush_ns),

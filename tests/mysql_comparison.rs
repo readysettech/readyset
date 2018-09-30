@@ -2,7 +2,7 @@
 
 extern crate backtrace;
 extern crate diff;
-extern crate distributary;
+extern crate noria;
 extern crate mysql;
 #[macro_use]
 extern crate serde_derive;
@@ -25,7 +25,7 @@ use std::panic;
 use std::thread;
 use std::time;
 
-use distributary::{ControllerBuilder, DataType};
+use noria::{ControllerBuilder, DataType};
 
 const DIRECTORY_PREFIX: &str = "tests/mysql_comparison_tests";
 

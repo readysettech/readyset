@@ -4,7 +4,7 @@ use std::cmp::Ordering;
 use std::collections::HashMap;
 use vec_map::VecMap;
 
-/// Base is used to represent the root nodes of the distributary data flow graph.
+/// Base is used to represent the root nodes of the Noria data flow graph.
 ///
 /// These nodes perform no computation, and their job is merely to persist all received updates and
 /// forward them to interested downstream operators. A base node should only be sent updates of the

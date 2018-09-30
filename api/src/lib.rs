@@ -1,9 +1,9 @@
-//! This create contains client bindings for the [Soup](https://github.com/mit-pdos/distributary)
+//! This create contains client bindings for the [Noria](https://github.com/mit-pdos/noria)
 //! database.
 //!
-//! # What is Soup?
+//! # What is Noria?
 //!
-//! Soup is a work-in-progress implementation of a new streaming data-flow system designed to
+//! Noria is a work-in-progress implementation of a new streaming data-flow system designed to
 //! provide a high-performance storage backend for read-heavy applications. At a high level, it
 //! takes a set of parameterized SQL queries similar to prepared SQL statements, and produces a
 //! [data-flow program](https://en.wikipedia.org/wiki/Stream_processing) that maintains
@@ -11,21 +11,21 @@
 //! queries. This yields high read throughput, as queries can usually be satisfied with a single
 //! key-value lookup, much like when using a cache. The data-flow provides _incremental view
 //! maintenance_, and efficiently keeps the cached query results up-to-date as new writes arrive.
-//! For further details, see https://github.com/mit-pdos/distributary.
+//! For further details, see https://github.com/mit-pdos/noria.
 //!
-//! # Interacting with Soup
+//! # Interacting with Noria
 //!
-//! Like most databases, Soup follows a server-client model where many clients connect to a
+//! Like most databases, Noria follows a server-client model where many clients connect to a
 //! (potentially distributed) server. The server in this case is the binary `souplet` in the
-//! [`distributary` crate](https://github.com/mit-pdos/distributary). The server must be started
+//! [`noria` crate](https://github.com/mit-pdos/noria). The server must be started
 //! before clients can connect.
 //!
-//! Soup uses [Apache ZooKeeper](https://zookeeper.apache.org/) to announce the location of its
-//! servers. To connect to a Soup, pass the ZooKeeper address to [`ControllerHandle::from_zk`].
+//! Noria uses [Apache ZooKeeper](https://zookeeper.apache.org/) to announce the location of its
+//! servers. To connect to a Noria, pass the ZooKeeper address to [`ControllerHandle::from_zk`].
 //! This will give yield a [`ControllerHandle`] which is then used to further issue commands to
-//! Soup.
+//! Noria.
 //!
-//! Reads work quite differently in Soup compared to traditional relational databases. In
+//! Reads work quite differently in Noria compared to traditional relational databases. In
 //! particular, a query, or _view_, must be _registered_ before it can be executed, much like SQL
 //! prepared statements. To register new views, use [`ControllerHandle::extend_recipe`]. Once a
 //! view has been registered, a handle for executing it is made by passing the view's name to
@@ -40,13 +40,13 @@
 //! [`Table::update`], [`Table::delete`], and also more esoteric operations like
 //! [`Table::insert_or_update`].
 //!
-//! More concretely, a first interaction with Soup might look like this:
+//! More concretely, a first interaction with Noria might look like this:
 //!
 //! ```ignore
 //! # use api::*;
 //! let soup = ControllerHandle::from_zk(zookeeper_addr);
 //!
-//! // if this is the first time we interact with Soup, we must give it the schema
+//! // if this is the first time we interact with Noria, we must give it the schema
 //! soup.install_recipe("
 //!     CREATE TABLE Article (aid int, title varchar(255), \
 //!                           url text, PRIMARY KEY(aid));
@@ -85,8 +85,8 @@
 //!
 //! # Is there an easier way? What about other languages?
 //!
-//! There is a [MySQL shim](https://github.com/mit-pdos/distributary-mysql) that can translate the
-//! MySQL binary protocol directly to Soup operations. While it works decently well, and can be
+//! There is a [MySQL shim](https://github.com/mit-pdos/noria-mysql) that can translate the
+//! MySQL binary protocol directly to Noria operations. While it works decently well, and can be
 //! useful to provide backwards-compatibility, we recommend using the client bindings directly
 //! where possible.
 #![feature(transpose_result)]
@@ -143,10 +143,10 @@ pub mod builders {
     pub use super::view::ViewBuilder;
 }
 
-/// Types used when debugging Soup.
+/// Types used when debugging Noria.
 pub mod debug;
 
-/// Marker for a handle that has its own connection to Soup.
+/// Marker for a handle that has its own connection to Noria.
 ///
 /// Such a handle can freely be sent between threads.
 pub struct ExclusiveConnection;

@@ -1,6 +1,6 @@
-extern crate distributary;
+extern crate noria;
 
-use distributary::ControllerBuilder;
+use noria::ControllerBuilder;
 
 use std::thread;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
@@ -20,8 +20,8 @@ fn main() {
                             FROM Article, VoteCount \
                             WHERE Article.aid = VoteCount.aid AND Article.aid = ?;";
 
-    let persistence_params = distributary::PersistenceParameters::new(
-        distributary::DurabilityMode::Permanent,
+    let persistence_params = noria::PersistenceParameters::new(
+        noria::DurabilityMode::Permanent,
         Duration::from_millis(1),
         Some(String::from("example")),
         1,
@@ -30,7 +30,7 @@ fn main() {
     // set up Soup via recipe
     let mut builder = ControllerBuilder::default();
 
-    builder.log_with(distributary::logger_pls());
+    builder.log_with(noria::logger_pls());
     builder.set_persistence(persistence_params);
 
     let mut blender = builder.build_local().unwrap();
