@@ -1,4 +1,4 @@
-# distributary: a data-flow based database with automatic materialization
+# noria: a data-flow system for web applications
 
 [![Build Status](https://travis-ci.org/mit-pdos/distributary.svg?branch=master)](https://travis-ci.org/mit-pdos/distributary)
 
@@ -15,7 +15,7 @@ maintenance of the views through the data-flow graph also yields high
 write throughput.
 
 There is also a [binary MySQL protocol](https://github.com/mit-pdos/distributary-mysql)
-adapter for distributary.
+adapter for Noria.
 
 ## Code
 
@@ -40,7 +40,7 @@ Run the test suite:
 $ cargo test
 ```
 
-Build the documentation (in `target/doc/distributary/`):
+Build the documentation (in `target/doc/noria/`):
 ```console
 $ cargo doc
 ```
