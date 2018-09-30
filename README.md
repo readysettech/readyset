@@ -1,6 +1,6 @@
 # noria: a data-flow system for web applications
 
-[![Build Status](https://travis-ci.org/mit-pdos/distributary.svg?branch=master)](https://travis-ci.org/mit-pdos/distributary)
+[![Build Status](https://travis-ci.org/mit-pdos/noria.svg?branch=master)](https://travis-ci.org/mit-pdos/noria)
 
 This repository contains the work-in-process implementation of a new
 streaming data-flow system designed to pre-compute relational query
