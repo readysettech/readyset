@@ -95,6 +95,10 @@ impl<T> LocalOrNot<T> {
     }
 
     #[doc(hidden)]
+    #[cfg_attr(
+        feature = "cargo-clippy",
+        allow(clippy::should_implement_trait)
+    )]
     pub unsafe fn deref(&self) -> &T {
         self.0.deref()
     }

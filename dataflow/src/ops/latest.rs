@@ -58,7 +58,7 @@ impl Ingredient for Latest {
         // find the current value for each group
         let us = self.us.unwrap();
         let db = state
-            .get(&us)
+            .get(*us)
             .expect("latest must have its own state materialized");
 
         let mut misses = Vec::new();

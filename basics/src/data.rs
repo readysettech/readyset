@@ -8,7 +8,7 @@ use std::fmt;
 use std::hash::{Hash, Hasher};
 use std::ops::{Add, Deref, DerefMut, Div, Mul, Sub};
 
-const FLOAT_PRECISION: f64 = 1000_000_000.0;
+const FLOAT_PRECISION: f64 = 1_000_000_000.0;
 const TINYTEXT_WIDTH: usize = 15;
 
 /// The main type used for user data throughout the codebase.
@@ -52,12 +52,12 @@ impl DataType {
             DataType::Real(i, frac) => {
                 if i == 0 && frac < 0 {
                     // We have to insert the negative sign ourselves.
-                    format!("{}", format!("-0.{:09}", frac.abs()))
+                    format!("-0.{:09}", frac.abs())
                 } else {
-                    format!("{}", format!("{}.{:09}", i, frac.abs()))
+                    format!("{}.{:09}", i, frac.abs())
                 }
             }
-            DataType::Timestamp(ts) => format!("{}", format!("{}", ts.format("%c"))),
+            DataType::Timestamp(ts) => format!("{}", ts.format("%c")),
         }
     }
 }
@@ -80,8 +80,10 @@ impl PartialEq for DataType {
         unsafe {
             use std::{mem, slice};
             // if the two datatypes are byte-for-byte identical, they're the same.
-            let a: &[u8] = slice::from_raw_parts(mem::transmute(self), mem::size_of::<Self>());
-            let b: &[u8] = slice::from_raw_parts(mem::transmute(other), mem::size_of::<Self>());
+            let a: &[u8] =
+                slice::from_raw_parts(&*self as *const _ as *const u8, mem::size_of::<Self>());
+            let b: &[u8] =
+                slice::from_raw_parts(&*other as *const _ as *const u8, mem::size_of::<Self>());
             if a == b {
                 return true;
             }
@@ -205,10 +207,10 @@ impl From<f64> for DataType {
 
         let mut i = f.trunc() as i64;
         let mut frac = (f.fract() * FLOAT_PRECISION).round() as i32;
-        if frac == 1000_000_000 {
+        if frac == 1_000_000_000 {
             i += 1;
             frac = 0;
-        } else if frac == -1000_000_000 {
+        } else if frac == -1_000_000_000 {
             i -= 1;
             frac = 0;
         }
@@ -227,7 +229,9 @@ impl<'a> From<&'a Literal> for DataType {
                 let ts = chrono::Local::now().naive_local();
                 DataType::Timestamp(ts)
             }
-            Literal::FixedPoint(ref r) => DataType::Real(r.integral as i64, r.fractional as i32),
+            Literal::FixedPoint(ref r) => {
+                DataType::Real(i64::from(r.integral), r.fractional as i32)
+            }
             _ => unimplemented!(),
         }
     }
@@ -243,7 +247,7 @@ impl From<Literal> for DataType {
                 let ts = chrono::Local::now().naive_local();
                 DataType::Timestamp(ts)
             }
-            Literal::FixedPoint(r) => DataType::Real(r.integral as i64, r.fractional as i32),
+            Literal::FixedPoint(r) => DataType::Real(i64::from(r.integral), r.fractional as i32),
             _ => unimplemented!(),
         }
     }
@@ -289,7 +293,7 @@ impl Into<i64> for DataType {
     fn into(self) -> i64 {
         match self {
             DataType::BigInt(s) => s,
-            DataType::Int(s) => s as i64,
+            DataType::Int(s) => i64::from(s),
             _ => unreachable!(),
         }
     }
@@ -299,7 +303,7 @@ impl<'a> Into<i64> for &'a DataType {
     fn into(self) -> i64 {
         match *self {
             DataType::BigInt(s) => s,
-            DataType::Int(s) => s as i64,
+            DataType::Int(s) => i64::from(s),
             _ => unreachable!(),
         }
     }
@@ -317,10 +321,10 @@ impl Into<i32> for DataType {
 
 impl<'a> Into<f64> for &'a DataType {
     fn into(self) -> f64 {
-        match self {
-            &DataType::Real(i, f) => i as f64 + (f as f64) / FLOAT_PRECISION,
-            &DataType::Int(i) => i as f64,
-            &DataType::BigInt(i) => i as f64,
+        match *self {
+            DataType::Real(i, f) => i as f64 + f64::from(f) / FLOAT_PRECISION,
+            DataType::Int(i) => f64::from(i),
+            DataType::BigInt(i) => i as f64,
             _ => unreachable!(),
         }
     }
@@ -357,8 +361,8 @@ macro_rules! arithmetic_operation (
             (&DataType::None, _) | (_, &DataType::None) => DataType::None,
             (&DataType::Int(a), &DataType::Int(b)) => (a $op b).into(),
             (&DataType::BigInt(a), &DataType::BigInt(b)) => (a $op b).into(),
-            (&DataType::Int(a), &DataType::BigInt(b)) => ((a as i64) $op b).into(),
-            (&DataType::BigInt(a), &DataType::Int(b)) => (a $op (b as i64)).into(),
+            (&DataType::Int(a), &DataType::BigInt(b)) => (i64::from(a) $op b).into(),
+            (&DataType::BigInt(a), &DataType::Int(b)) => (a $op i64::from(b)).into(),
 
             (first @ &DataType::Int(..), second @ &DataType::Real(..)) |
             (first @ &DataType::Real(..), second @ &DataType::Int(..)) |

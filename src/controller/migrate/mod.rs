@@ -528,12 +528,12 @@ impl<'a> Migration<'a> {
                 let n = &mainline.ingredients[ni];
                 let m = match change.clone() {
                     ColumnChange::Add(field, default) => box payload::Packet::AddBaseColumn {
-                        node: *n.local_addr(),
+                        node: n.local_addr(),
                         field: field,
                         default: default,
                     },
                     ColumnChange::Drop(column) => box payload::Packet::DropBaseColumn {
-                        node: *n.local_addr(),
+                        node: n.local_addr(),
                         column: column,
                     },
                 };

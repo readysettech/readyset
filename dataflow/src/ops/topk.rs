@@ -145,7 +145,7 @@ impl Ingredient for TopK {
 
         let us = self.us.unwrap();
         let db = state
-            .get(&*us)
+            .get(*us)
             .expect("topk operators must have their own state materialized");
 
         let mut out = Vec::new();
@@ -340,7 +340,7 @@ mod tests {
     #[test]
     fn it_keeps_topk() {
         let (mut g, _) = setup(false);
-        let ni = *g.node().local_addr();
+        let ni = g.node().local_addr();
 
         let r12: Vec<DataType> = vec![1.into(), "z".into(), 12.into()];
         let r10: Vec<DataType> = vec![2.into(), "z".into(), 10.into()];
@@ -355,11 +355,11 @@ mod tests {
         g.narrow_one_row(r5.clone(), true);
         g.narrow_one_row(r10b.clone(), true);
         g.narrow_one_row(r10c.clone(), true);
-        assert_eq!(g.states[&ni].rows(), 3);
+        assert_eq!(g.states[ni].rows(), 3);
 
         g.narrow_one_row(r15.clone(), true);
         g.narrow_one_row(r10.clone(), true);
-        assert_eq!(g.states[&ni].rows(), 3);
+        assert_eq!(g.states[ni].rows(), 3);
     }
 
     #[test]
@@ -514,7 +514,7 @@ mod tests {
     #[test]
     fn it_handles_updates() {
         let (mut g, _) = setup(false);
-        let ni = *g.node().local_addr();
+        let ni = g.node().local_addr();
 
         let r1: Vec<DataType> = vec![1.into(), "z".into(), 10.into()];
         let r2: Vec<DataType> = vec![2.into(), "z".into(), 10.into()];
@@ -530,7 +530,7 @@ mod tests {
         // a positive for a row not in the Top-K should not change the Top-K and shouldn't emit
         // anything
         let emit = g.narrow_one_row(r4.clone(), true);
-        assert_eq!(g.states[&ni].rows(), 3);
+        assert_eq!(g.states[ni].rows(), 3);
         assert_eq!(emit, Vec::<Record>::new().into());
 
         // should now have 3 rows in Top-K
@@ -554,7 +554,7 @@ mod tests {
 
         // now [4, z, 11] is in, BUT we still only keep 3 elements
         // and have to remove one of the existing ones
-        assert_eq!(g.states[&ni].rows(), 3);
+        assert_eq!(g.states[ni].rows(), 3);
         assert_eq!(emit.len(), 2); // 1 pos, 1 neg
         assert!(emit.iter().any(|r| !r.is_positive() && r[2] == 10.into()));
         assert!(emit.iter().any(|r| r.is_positive() && r[2] == 11.into()));

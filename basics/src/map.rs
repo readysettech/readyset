@@ -67,32 +67,26 @@ impl<'a, V> Entry<'a, V> {
 
 impl<'a, V> VacantEntry<'a, V> {
     pub fn insert(self, value: V) -> &'a mut V {
-        let index = self.index;
-        self.map.insert(index, value);
-        &mut self.map[&index]
+        self.map.insert(self.index, value);
+        &mut self.map[self.index]
     }
 }
 
 impl<'a, V> OccupiedEntry<'a, V> {
     pub fn get(&self) -> &V {
-        let index = self.index;
-        &self.map[&index]
+        &self.map[self.index]
     }
     pub fn get_mut(&mut self) -> &mut V {
-        let index = self.index;
-        &mut self.map[&index]
+        &mut self.map[self.index]
     }
     pub fn into_mut(self) -> &'a mut V {
-        let index = self.index;
-        &mut self.map[&index]
+        &mut self.map[self.index]
     }
     pub fn insert(&mut self, value: V) -> V {
-        let index = self.index;
-        self.map.insert(index, value).unwrap()
+        self.map.insert(self.index, value).unwrap()
     }
     pub fn remove(self) -> V {
-        let index = self.index;
-        self.map.remove(&index).unwrap()
+        self.map.remove(self.index).unwrap()
     }
 }
 
@@ -120,22 +114,22 @@ impl<T> Map<T> {
         old
     }
 
-    pub fn get(&self, addr: &LocalNodeIndex) -> Option<&T> {
+    pub fn get(&self, addr: LocalNodeIndex) -> Option<&T> {
         self.things.get(addr.id()).and_then(|v| v.as_ref())
     }
 
-    pub fn get_mut(&mut self, addr: &LocalNodeIndex) -> Option<&mut T> {
+    pub fn get_mut(&mut self, addr: LocalNodeIndex) -> Option<&mut T> {
         self.things.get_mut(addr.id()).and_then(|v| v.as_mut())
     }
 
-    pub fn contains_key(&self, addr: &LocalNodeIndex) -> bool {
+    pub fn contains_key(&self, addr: LocalNodeIndex) -> bool {
         self.things
             .get(addr.id())
             .map(|v| v.is_some())
             .unwrap_or(false)
     }
 
-    pub fn remove(&mut self, addr: &LocalNodeIndex) -> Option<T> {
+    pub fn remove(&mut self, addr: LocalNodeIndex) -> Option<T> {
         let i = addr.id();
         if i >= self.things.len() {
             return None;
@@ -170,8 +164,12 @@ impl<T> Map<T> {
         self.n
     }
 
+    pub fn is_empty(&self) -> bool {
+        self.n == 0
+    }
+
     pub fn entry(&mut self, key: LocalNodeIndex) -> Entry<T> {
-        if self.contains_key(&key) {
+        if self.contains_key(key) {
             Entry::Occupied(OccupiedEntry {
                 map: self,
                 index: key,
@@ -195,14 +193,14 @@ where
     }
 }
 
-impl<'a, T> Index<&'a LocalNodeIndex> for Map<T> {
+impl<T> Index<LocalNodeIndex> for Map<T> {
     type Output = T;
-    fn index(&self, index: &LocalNodeIndex) -> &Self::Output {
+    fn index(&self, index: LocalNodeIndex) -> &Self::Output {
         self.get(index).unwrap()
     }
 }
-impl<'a, T> IndexMut<&'a LocalNodeIndex> for Map<T> {
-    fn index_mut(&mut self, index: &LocalNodeIndex) -> &mut Self::Output {
+impl<T> IndexMut<LocalNodeIndex> for Map<T> {
+    fn index_mut(&mut self, index: LocalNodeIndex) -> &mut Self::Output {
         self.get_mut(index).unwrap()
     }
 }
@@ -233,7 +231,7 @@ impl<T> FromIterator<(LocalNodeIndex, T)> for Map<T> {
             vs.push(Some(v));
         }
 
-        Map { n: n, things: vs }
+        Map { n, things: vs }
     }
 }
 

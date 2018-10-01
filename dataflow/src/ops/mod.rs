@@ -299,7 +299,7 @@ pub mod test {
             for index in self.graph.node_indices() {
                 let node = &self.graph[index];
                 let materialization_status = if node.is_localized() {
-                    match self.states.get(&node.local_addr()) {
+                    match self.states.get(node.local_addr()) {
                         Some(ref s) => {
                             if s.is_partial() {
                                 MaterializationStatus::Partial
@@ -378,13 +378,13 @@ pub mod test {
                 .remap
                 .values()
                 .filter_map(|ni| {
-                    let ni = *self.graph[ni.as_global()].local_addr();
-                    self.states.get(&ni).map(move |s| (ni, !s.is_useful()))
+                    let ni = self.graph[ni.as_global()].local_addr();
+                    self.states.get(ni).map(move |s| (ni, !s.is_useful()))
                 })
                 .filter(|&(_, x)| x)
                 .collect();
             for (ni, _) in unused {
-                self.states.remove(&ni);
+                self.states.remove(ni);
             }
 
             // we're now committing to testing this op
@@ -413,7 +413,7 @@ pub mod test {
                 .into_iter()
                 .map(|(_, n)| {
                     use std::cell;
-                    (*n.local_addr(), cell::RefCell::new(n))
+                    (n.local_addr(), cell::RefCell::new(n))
                 })
                 .collect();
         }
@@ -431,7 +431,7 @@ pub mod test {
             // no need to call on_input since base tables just forward anyway
 
             // if the base node has state, keep it
-            if let Some(ref mut state) = self.states.get_mut(&*base) {
+            if let Some(ref mut state) = self.states.get_mut(*base) {
                 state.process_records(&mut vec![data].into(), None);
             } else {
                 assert!(
@@ -458,21 +458,21 @@ pub mod test {
 
         pub fn one<U: Into<Records>>(&mut self, src: IndexPair, u: U, remember: bool) -> Records {
             assert!(self.nut.is_some());
-            assert!(!remember || self.states.contains_key(&*self.nut.unwrap()));
+            assert!(!remember || self.states.contains_key(*self.nut.unwrap()));
 
             let mut u = {
                 let id = self.nut.unwrap();
-                let mut n = self.nodes[&*id].borrow_mut();
+                let mut n = self.nodes[*id].borrow_mut();
                 let m = n.on_input(*src, u.into(), &mut None, None, &self.nodes, &self.states);
                 assert_eq!(m.misses, vec![]);
                 m.results
             };
 
-            if !remember || !self.states.contains_key(&*self.nut.unwrap()) {
+            if !remember || !self.states.contains_key(*self.nut.unwrap()) {
                 return u;
             }
 
-            node::materialize(&mut u, None, self.states.get_mut(&*self.nut.unwrap()));
+            node::materialize(&mut u, None, self.states.get_mut(*self.nut.unwrap()));
             u
         }
 
@@ -495,7 +495,7 @@ pub mod test {
         }
 
         pub fn node(&self) -> cell::Ref<Node> {
-            self.nodes[&*self.nut.unwrap()].borrow()
+            self.nodes[*self.nut.unwrap()].borrow()
         }
 
         pub fn narrow_base_id(&self) -> IndexPair {

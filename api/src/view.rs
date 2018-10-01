@@ -175,7 +175,10 @@ impl View<SharedConnection> {
     }
 }
 
-#[cfg_attr(feature = "cargo-clippy", allow(len_without_is_empty))]
+#[cfg_attr(
+    feature = "cargo-clippy",
+    allow(clippy::len_without_is_empty)
+)]
 impl<E> View<E> {
     /// Get the list of columns in this view.
     pub fn columns(&self) -> &[String] {
@@ -202,8 +205,7 @@ impl<E> View<E> {
             }
         } else {
             let shard_queries = 0..self.shards.len();
-
-            shard_queries.into_iter().fold(Ok(0), |acc, shardi| {
+            shard_queries.fold(Ok(0), |acc, shardi| {
                 acc.and_then(|acc| {
                     let mut shard = self.shards[shardi].borrow_mut();
                     let reply = shard

@@ -177,7 +177,7 @@ impl<'a> Plan<'a> {
                     .iter()
                     .skip(skip_first)
                     .map(|&(ni, ref key)| ReplayPathSegment {
-                        node: *self.graph[ni].local_addr(),
+                        node: self.graph[ni].local_addr(),
                         partial_key: key.clone(),
                     })
                     .collect();
@@ -201,7 +201,7 @@ impl<'a> Plan<'a> {
                 // the first domain also gets to know source node
                 if i == 0 {
                     if let box Packet::SetupReplayPath { ref mut source, .. } = setup {
-                        *source = Some(*self.graph[nodes[0].0].local_addr());
+                        *source = Some(self.graph[nodes[0].0].local_addr());
                     }
                 }
 
@@ -297,7 +297,7 @@ impl<'a> Plan<'a> {
                             assert!(pending.is_none());
                             pending = Some(PendingReplay {
                                 tag: tag,
-                                source: *self.graph[segments[0].1[0].0].local_addr(),
+                                source: self.graph[segments[0].1[0].0].local_addr(),
                                 source_domain: segments[0].0,
                                 target_domain: domain,
                             });
@@ -318,7 +318,7 @@ impl<'a> Plan<'a> {
                             .unwrap()
                             .send_to_healthy(
                                 box Packet::UpdateEgress {
-                                    node: *n.local_addr(),
+                                    node: n.local_addr(),
                                     new_tx: None,
                                     new_tag: Some((tag, segments[i + 1].1[0].0.into())),
                                 },
@@ -403,7 +403,7 @@ impl<'a> Plan<'a> {
             .unwrap()
             .send_to_healthy(
                 box Packet::PrepareState {
-                    node: *self.graph[self.node].local_addr(),
+                    node: self.graph[self.node].local_addr(),
                     state: s,
                 },
                 self.workers,

@@ -212,7 +212,7 @@ where
         states: &'a StateMap,
     ) -> Option<Option<Box<Iterator<Item = Cow<'a, [DataType]>> + 'a>>> {
         states
-            .get(&parent)
+            .get(parent)
             .and_then(move |state| match state.lookup(columns, key) {
                 LookupResult::Some(rs) => Some(Some(Box::new(rs.into_iter()) as Box<_>)),
                 LookupResult::Missing => Some(None),
@@ -220,7 +220,7 @@ where
             .or_else(|| {
                 // this is a long-shot.
                 // if our ancestor can be queried *through*, then we just use that state instead
-                let parent = nodes.get(&parent).unwrap().borrow();
+                let parent = nodes[parent].borrow();
                 if parent.is_internal() {
                     parent.query_through(columns, key, nodes, states)
                 } else {

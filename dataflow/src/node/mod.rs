@@ -73,7 +73,7 @@ impl DanglingDomainNode {
         n.children = graph
             .neighbors_directed(ni, petgraph::EdgeDirection::Outgoing)
             .filter(|&c| graph[c].domain() == dm)
-            .map(|ni| *graph[ni].local_addr())
+            .map(|ni| graph[ni].local_addr())
             .collect();
         n
     }
@@ -268,9 +268,9 @@ impl Node {
         }
     }
 
-    pub fn local_addr(&self) -> &LocalNodeIndex {
+    pub fn local_addr(&self) -> LocalNodeIndex {
         match self.index {
-            Some(ref idx) if idx.has_local() => &*idx,
+            Some(idx) if idx.has_local() => *idx,
             Some(_) | None => unreachable!("asked for unset addr for {:?}", self),
         }
     }

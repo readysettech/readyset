@@ -684,7 +684,7 @@ impl Materializations {
                     .unwrap()
                     .send_to_healthy(
                         box Packet::PrepareState {
-                            node: *n.local_addr(),
+                            node: n.local_addr(),
                             state: InitialState::IndexedLocal(index_on),
                         },
                         workers,
@@ -719,7 +719,7 @@ impl Materializations {
             domain
                 .send_to_healthy(
                     box Packet::Ready {
-                        node: *n.local_addr(),
+                        node: n.local_addr(),
                         index: index_on,
                     },
                     workers,

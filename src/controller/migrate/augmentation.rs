@@ -54,7 +54,7 @@ pub fn inform(
                 .filter(|ni| old_nodes.contains(ni))
                 .map(|ni| &graph[ni])
                 .filter(|n| n.domain() == domain)
-                .map(|n| *n.local_addr())
+                .map(|n| n.local_addr())
                 .collect();
 
             trace!(log, "request addition of node"; "node" => ni.index());

@@ -57,7 +57,7 @@ impl Ingredient for Distinct {
 
         let us = self.us.unwrap();
         let db = state
-            .get(&*us)
+            .get(*us)
             .expect("Distinct must have its own state initialized");
 
         let pos_comp = |a: &Record, b: &Record| a.is_positive().cmp(&b.is_positive());

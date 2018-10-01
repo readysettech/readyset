@@ -302,8 +302,8 @@ pub(super) fn connect(
                             .send_to_healthy_shard(
                                 i,
                                 box Packet::UpdateEgress {
-                                    node: *sender_node.local_addr(),
-                                    new_tx: Some((node.into(), *n.local_addr(), (n.domain(), i))),
+                                    node: sender_node.local_addr(),
+                                    new_tx: Some((node.into(), n.local_addr(), (n.domain(), i))),
                                     new_tag: None,
                                 },
                                 workers,
@@ -319,8 +319,8 @@ pub(super) fn connect(
                     domain
                         .send_to_healthy(
                             box Packet::UpdateEgress {
-                                node: *sender_node.local_addr(),
-                                new_tx: Some((node.into(), *n.local_addr(), (n.domain(), 0))),
+                                node: sender_node.local_addr(),
+                                new_tx: Some((node.into(), n.local_addr(), (n.domain(), 0))),
                                 new_tag: None,
                             },
                             workers,
@@ -341,8 +341,8 @@ pub(super) fn connect(
                     .unwrap()
                     .send_to_healthy(
                         box Packet::UpdateSharder {
-                            node: *sender_node.local_addr(),
-                            new_txs: (*n.local_addr(), txs),
+                            node: sender_node.local_addr(),
+                            new_txs: (n.local_addr(), txs),
                         },
                         workers,
                     )

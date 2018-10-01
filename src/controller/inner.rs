@@ -625,7 +625,7 @@ impl ControllerInner {
         Some(TableBuilder {
             local_port: None,
             txs,
-            addr: (*node.local_addr()).into(),
+            addr: node.local_addr().into(),
             key: key,
             key_is_primary: is_primary,
             dropped: base_operator.get_dropped(),
@@ -706,7 +706,7 @@ impl ControllerInner {
                     .unwrap()
                     .send_to_healthy(
                         box payload::Packet::Evict {
-                            node: Some(*na),
+                            node: Some(na),
                             num_bytes: bytes as usize,
                         },
                         workers,
@@ -1013,7 +1013,7 @@ impl ControllerInner {
             domain_removals
                 .entry(self.ingredients[*ni].domain())
                 .or_insert(Vec::new())
-                .push(*self.ingredients[*ni].local_addr())
+                .push(self.ingredients[*ni].local_addr())
         }
 
         // Send messages to domains

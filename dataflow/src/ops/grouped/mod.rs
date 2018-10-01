@@ -176,7 +176,7 @@ where
         // find the current value for this group
         let us = self.us.unwrap();
         let db = state
-            .get(&*us)
+            .get(*us)
             .expect("grouped operators must have their own state materialized");
 
         let mut misses = Vec::new();

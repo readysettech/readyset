@@ -135,7 +135,7 @@ impl DomainBuilder {
         let not_ready = self
             .nodes
             .values()
-            .map(|n| *n.borrow().local_addr())
+            .map(|n| n.borrow().local_addr())
             .collect();
 
         let log = log.new(o!("domain" => self.index.index(), "shard" => self.shard.unwrap_or(0)));
@@ -311,7 +311,7 @@ impl Domain {
         use std::ops::AddAssign;
 
         // when the replay eventually succeeds, we want to re-do the replay.
-        let mut w = self.waiting.remove(&miss_in).unwrap_or_default();
+        let mut w = self.waiting.remove(miss_in).unwrap_or_default();
 
         let mut redundant = false;
         let redo = (needed_for, replay_key.clone());
@@ -504,7 +504,7 @@ impl Domain {
         }
 
         let (mut m, evictions) = {
-            let mut n = self.nodes[&me].borrow_mut();
+            let mut n = self.nodes[me].borrow_mut();
             self.process_times.start(me);
             self.process_ptimes.start(me);
             let mut m = Some(m);
@@ -568,7 +568,7 @@ impl Domain {
                 //
                 // but, for now, here we go:
                 // first, what partial replay paths go through this node?
-                let from = self.nodes[&src].borrow().global_addr();
+                let from = self.nodes[src].borrow().global_addr();
                 let deps: Vec<_> = self
                     .replay_paths
                     .iter()
@@ -645,7 +645,7 @@ impl Domain {
             ref m => unreachable!("dispatch process got {:?}", m),
         }
 
-        let nchildren = self.nodes[&me].borrow().nchildren();
+        let nchildren = self.nodes[me].borrow().nchildren();
         for i in 0..nchildren {
             // avoid cloning if we can
             let mut m = if i == nchildren - 1 {
@@ -654,10 +654,10 @@ impl Domain {
                 m.as_ref().map(|m| box m.clone_data()).unwrap()
             };
 
-            let childi = *self.nodes[&me].borrow().child(i);
+            let childi = *self.nodes[me].borrow().child(i);
             let (child_is_output, child_is_merger) = {
                 // XXX: shouldn't NLL make this unnecessary?
-                let c = self.nodes[&childi].borrow();
+                let c = self.nodes[childi].borrow();
                 (c.is_output(), c.is_shard_merger())
             };
 
@@ -719,21 +719,21 @@ impl Domain {
                 match consumed {
                     // workaround #16223
                     Packet::AddNode { node, parents } => {
-                        let addr = *node.local_addr();
+                        let addr = node.local_addr();
                         self.not_ready.insert(addr);
 
                         for p in parents {
                             self.nodes
-                                .get_mut(&p)
+                                .get_mut(p)
                                 .unwrap()
                                 .borrow_mut()
-                                .add_child(*node.local_addr());
+                                .add_child(node.local_addr());
                         }
                         self.nodes.insert(addr, cell::RefCell::new(node));
                         trace!(self.log, "new node incorporated"; "local" => addr.id());
                     }
                     Packet::RemoveNodes { nodes } => {
-                        for node in &nodes {
+                        for &node in &nodes {
                             self.nodes[node].borrow_mut().remove();
                             self.state.remove(node);
                             trace!(self.log, "node removed"; "local" => node.id());
@@ -750,7 +750,7 @@ impl Domain {
                         field,
                         default,
                     } => {
-                        let mut n = self.nodes[&node].borrow_mut();
+                        let mut n = self.nodes[node].borrow_mut();
                         n.add_column(&field);
                         if let Some(b) = n.get_base_mut() {
                             b.add_column(default);
@@ -768,7 +768,7 @@ impl Domain {
                             .unwrap();
                     }
                     Packet::DropBaseColumn { node, column } => {
-                        let mut n = self.nodes[&node].borrow_mut();
+                        let mut n = self.nodes[node].borrow_mut();
                         n.get_base_mut()
                             .expect("told to drop base column from non-base node")
                             .drop_column(column);
@@ -781,7 +781,7 @@ impl Domain {
                         new_tx,
                         new_tag,
                     } => {
-                        let mut n = self.nodes[&node].borrow_mut();
+                        let mut n = self.nodes[node].borrow_mut();
                         n.with_egress_mut(move |e| {
                             if let Some((node, local, addr)) = new_tx {
                                 e.add_tx(node, local, addr);
@@ -792,22 +792,21 @@ impl Domain {
                         });
                     }
                     Packet::UpdateSharder { node, new_txs } => {
-                        let mut n = self.nodes[&node].borrow_mut();
+                        let mut n = self.nodes[node].borrow_mut();
                         n.with_sharder_mut(move |s| {
                             s.add_sharded_child(new_txs.0, new_txs.1);
                         });
                     }
                     Packet::AddStreamer { node, new_streamer } => {
-                        let mut n = self.nodes[&node].borrow_mut();
+                        let mut n = self.nodes[node].borrow_mut();
                         n.with_reader_mut(|r| r.add_streamer(new_streamer).unwrap())
                             .unwrap();
                     }
                     Packet::StateSizeProbe { node } => {
-                        let row_count =
-                            self.state.get(&node).map(|state| state.rows()).unwrap_or(0);
+                        let row_count = self.state.get(node).map(|state| state.rows()).unwrap_or(0);
                         let mem_size = self
                             .state
-                            .get(&node)
+                            .get(node)
                             .map(|state| state.deep_size_of())
                             .unwrap_or(0);
                         self.control_reply_tx
@@ -818,10 +817,10 @@ impl Domain {
                         use payload::InitialState;
                         match state {
                             InitialState::PartialLocal(index) => {
-                                if !self.state.contains_key(&node) {
+                                if !self.state.contains_key(node) {
                                     self.state.insert(node, box MemoryState::default());
                                 }
-                                let state = self.state.get_mut(&node).unwrap();
+                                let state = self.state.get_mut(node).unwrap();
                                 for (key, tags) in index {
                                     info!(self.log, "told to prepare partial state";
                                            "key" => ?key,
@@ -830,10 +829,10 @@ impl Domain {
                                 }
                             }
                             InitialState::IndexedLocal(index) => {
-                                if !self.state.contains_key(&node) {
+                                if !self.state.contains_key(node) {
                                     self.state.insert(node, box MemoryState::default());
                                 }
-                                let state = self.state.get_mut(&node).unwrap();
+                                let state = self.state.get_mut(node).unwrap();
                                 for idx in index {
                                     info!(self.log, "told to prepare full state";
                                            "key" => ?idx);
@@ -894,7 +893,7 @@ impl Domain {
                                         tx.unbounded_send(Vec::from(miss)).unwrap();
                                     });
 
-                                let mut n = self.nodes[&node].borrow_mut();
+                                let mut n = self.nodes[node].borrow_mut();
                                 n.with_reader_mut(|r| {
                                     assert!(
                                         self.readers
@@ -916,7 +915,7 @@ impl Domain {
                                 use backlog;
                                 let (r_part, w_part) = backlog::new(cols, &key[..]);
 
-                                let mut n = self.nodes[&node].borrow_mut();
+                                let mut n = self.nodes[node].borrow_mut();
                                 n.with_reader_mut(|r| {
                                     assert!(
                                         self.readers
@@ -1008,7 +1007,7 @@ impl Domain {
                         // the reader could have raced with us filling in the key after some
                         // *other* reader requested it, so let's double check that it indeed still
                         // misses!
-                        let still_miss = self.nodes[&node]
+                        let still_miss = self.nodes[node]
                             .borrow_mut()
                             .with_reader_mut(|r| {
                                 let w = r
@@ -1060,7 +1059,7 @@ impl Domain {
                         // is being replayed.
                         let state = self
                             .state
-                            .get(&from)
+                            .get(from)
                             .expect("migration replay path started with non-materialized node")
                             .cloned_records();
 
@@ -1090,9 +1089,9 @@ impl Domain {
                         if !state.is_empty() {
                             let log = self.log.new(o!());
 
-                            let added_cols = self.ingress_inject.get(&from).cloned();
+                            let added_cols = self.ingress_inject.get(from).cloned();
                             let default = {
-                                let n = self.nodes[&from].borrow();
+                                let n = self.nodes[from].borrow();
                                 let mut default = None;
                                 if let Some(b) = n.get_base() {
                                     let mut row = Vec::new();
@@ -1182,7 +1181,7 @@ impl Domain {
 
                         if !index.is_empty() {
                             let mut s: Box<State> = {
-                                let n = self.nodes[&node].borrow();
+                                let n = self.nodes[node].borrow();
                                 let params = &self.persistence_parameters;
                                 match (n.get_base(), &params.mode) {
                                     (Some(base), &DurabilityMode::DeleteOnExit)
@@ -1214,7 +1213,7 @@ impl Domain {
 
                         // swap replayed reader nodes to expose new state
                         {
-                            let mut n = self.nodes[&node].borrow_mut();
+                            let mut n = self.nodes[node].borrow_mut();
                             if n.is_reader() {
                                 n.with_reader_mut(|r| {
                                     if let Some(ref mut state) = r.writer_mut() {
@@ -1243,7 +1242,7 @@ impl Domain {
                             .values()
                             .filter_map(|nd| {
                                 let ref n = *nd.borrow();
-                                let local_index: LocalNodeIndex = *n.local_addr();
+                                let local_index = n.local_addr();
                                 let node_index: NodeIndex = n.global_addr();
 
                                 let time = self.process_times.num_nanoseconds(local_index);
@@ -1255,13 +1254,13 @@ impl Domain {
                                     size
                                 } else {
                                     self.state
-                                        .get(&local_index)
+                                        .get(local_index)
                                         .map(|state| state.deep_size_of())
                                         .unwrap_or(0)
                                 };
 
                                 let mat_state = if !n.is_reader() {
-                                    match self.state.get(&local_index) {
+                                    match self.state.get(local_index) {
                                         Some(ref s) => {
                                             if s.is_partial() {
                                                 MaterializationStatus::Partial
@@ -1357,14 +1356,14 @@ impl Domain {
     }
 
     fn seed_row<'a>(&self, source: LocalNodeIndex, row: Cow<'a, [DataType]>) -> Record {
-        if let Some(&(start, ref defaults)) = self.ingress_inject.get(&source) {
+        if let Some(&(start, ref defaults)) = self.ingress_inject.get(source) {
             let mut v = Vec::with_capacity(start + defaults.len());
             v.extend(row.iter().cloned());
             v.extend(defaults.iter().cloned());
             return (v, true).into();
         }
 
-        let n = self.nodes[&source].borrow();
+        let n = self.nodes[source].borrow();
         if let Some(b) = n.get_base() {
             let mut row = row.into_owned();
             b.fix(&mut row);
@@ -1384,7 +1383,7 @@ impl Domain {
             } => {
                 let state = self
                     .state
-                    .get(&source)
+                    .get(source)
                     .expect("migration replay path started with non-materialized node");
 
                 let mut rs = Vec::new();
@@ -1500,7 +1499,7 @@ impl Domain {
             } => {
                 let rs = self
                     .state
-                    .get(&source)
+                    .get(source)
                     .expect("migration replay path started with non-materialized node")
                     .lookup(&cols[..], &KeyType::from(&key[..]));
 
@@ -1551,7 +1550,7 @@ impl Domain {
 
     fn handle_replay(&mut self, m: Box<Packet>, sends: &mut EnqueuedSends) {
         let tag = m.tag().unwrap();
-        if self.nodes[&self.replay_paths[&tag].path.last().unwrap().node]
+        if self.nodes[self.replay_paths[&tag].path.last().unwrap().node]
             .borrow()
             .is_dropped()
         {
@@ -1617,11 +1616,11 @@ impl Domain {
 
                     // let's collect some information about the destination of this replay
                     let dst = path.last().unwrap().node;
-                    let dst_is_reader = self.nodes[&dst]
+                    let dst_is_reader = self.nodes[dst]
                         .borrow()
                         .with_reader(|r| r.is_materialized())
                         .unwrap_or(false);
-                    let dst_is_target = !self.nodes[&dst].borrow().is_sender();
+                    let dst_is_target = !self.nodes[dst].borrow().is_sender();
 
                     if dst_is_target {
                         // prune keys and data for keys we're not waiting for
@@ -1631,12 +1630,12 @@ impl Domain {
                         {
                             let had = for_keys.len();
                             let partial_keys = path.last().unwrap().partial_key.as_ref().unwrap();
-                            if let Some(w) = self.waiting.get(&dst) {
+                            if let Some(w) = self.waiting.get(dst) {
                                 // discard all the keys that we aren't waiting for
                                 for_keys.retain(|k| {
                                     w.redos.contains_key(&(partial_keys.clone(), k.clone()))
                                 });
-                            } else if let Some(ref prev) = self.reader_triggered.get(&dst) {
+                            } else if let Some(ref prev) = self.reader_triggered.get(dst) {
                                 // discard all the keys that we aren't waiting for
                                 for_keys.retain(|k| prev.contains(k));
                             } else {
@@ -1674,7 +1673,7 @@ impl Domain {
                     let mut m = Some(m);
 
                     for (i, segment) in path.iter().enumerate() {
-                        let mut n = self.nodes[&segment.node].borrow_mut();
+                        let mut n = self.nodes[segment.node].borrow_mut();
                         let is_reader = n.with_reader(|r| r.is_materialized()).unwrap_or(false);
 
                         // keep track of whether we're filling any partial holes
@@ -1707,7 +1706,7 @@ impl Domain {
                             // mark the state for the key being replayed as *not* a hole otherwise
                             // we'll just end up with the same "need replay" response that
                             // triggered this replay initially.
-                            if let Some(state) = self.state.get_mut(&segment.node) {
+                            if let Some(state) = self.state.get_mut(segment.node) {
                                 for key in backfill_keys.iter() {
                                     state.mark_filled(key.clone(), &tag);
                                 }
@@ -1764,7 +1763,7 @@ impl Domain {
                             if !misses.is_empty() {
                                 // we missed while processing
                                 // it's important that we clear out any partially-filled holes.
-                                if let Some(state) = self.state.get_mut(&segment.node) {
+                                if let Some(state) = self.state.get_mut(segment.node) {
                                     for miss in &missed_on {
                                         state.mark_hole(&miss[..], &tag);
                                     }
@@ -1786,7 +1785,7 @@ impl Domain {
                                 .unwrap();
                                 // and also unmark the replay request
                                 if let Some(ref mut prev) =
-                                    self.reader_triggered.get_mut(&segment.node)
+                                    self.reader_triggered.get_mut(segment.node)
                                 {
                                     for key in backfill_keys.as_ref().unwrap().iter() {
                                         prev.remove(&key[..]);
@@ -1798,7 +1797,7 @@ impl Domain {
                         if target && !captured.is_empty() {
                             // materialized union ate some of our keys,
                             // so we didn't *actually* fill those keys after all!
-                            if let Some(state) = self.state.get_mut(&segment.node) {
+                            if let Some(state) = self.state.get_mut(segment.node) {
                                 for key in &captured {
                                     state.mark_hole(&key[..], &tag);
                                 }
@@ -1922,7 +1921,7 @@ impl Domain {
 
                         if i != path.len() - 1 {
                             // update link for next iteration
-                            if self.nodes[&path[i + 1].node].borrow().is_shard_merger() {
+                            if self.nodes[path[i + 1].node].borrow().is_shard_merger() {
                                 // we need to preserve the egress src for shard mergers
                                 // (which includes shard identifier)
                             } else {
@@ -2009,7 +2008,7 @@ impl Domain {
             trace!(self.log, "partial replay finished";
                    "node" => ?ni,
                    "keys" => ?for_keys);
-            if let Some(mut waiting) = self.waiting.remove(&ni) {
+            if let Some(mut waiting) = self.waiting.remove(ni) {
                 trace!(
                     self.log,
                     "partial replay finished to node with waiting backfills";
@@ -2208,11 +2207,11 @@ impl Domain {
 
                     if let TriggerEndpoint::Local(_) = path.trigger {
                         let target = replay_paths[&tag].path.last().unwrap();
-                        if nodes[&target.node].borrow().is_reader() {
+                        if nodes[target.node].borrow().is_reader() {
                             // already evicted from in walk_path
                             continue;
                         }
-                        if !state.contains_key(&target.node) {
+                        if !state.contains_key(target.node) {
                             // this is probably because
                             if !not_ready.contains(&target.node) {
                                 debug!(log, "got eviction for ready but stateless node";
@@ -2221,7 +2220,7 @@ impl Domain {
                             continue;
                         }
 
-                        state[&target.node].evict_keys(&tag, &keys[..]);
+                        state[target.node].evict_keys(&tag, &keys[..]);
                         trigger_downstream_evictions(
                             log,
                             &target.partial_key.as_ref().unwrap()[..],
@@ -2249,7 +2248,7 @@ impl Domain {
         ) {
             let mut from = path[0].node;
             for segment in path {
-                nodes[&segment.node].borrow_mut().process_eviction(
+                nodes[segment.node].borrow_mut().process_eviction(
                     from,
                     &segment.partial_key.as_ref().unwrap()[..],
                     keys,
@@ -2268,7 +2267,7 @@ impl Domain {
                         .values()
                         .filter_map(|nd| {
                             let ref n = *nd.borrow();
-                            let local_index: LocalNodeIndex = *n.local_addr();
+                            let local_index = n.local_addr();
 
                             if n.is_reader() {
                                 let mut size = 0;
@@ -2281,7 +2280,7 @@ impl Domain {
                                 Some((local_index, size))
                             } else {
                                 self.state
-                                    .get(&local_index)
+                                    .get(local_index)
                                     .filter(|state| state.is_partial())
                                     .map(|state| (local_index, state.deep_size_of()))
                             }
@@ -2297,13 +2296,13 @@ impl Domain {
                 if let Some((node, num_bytes)) = node {
                     let mut freed = 0u64;
                     while freed < num_bytes as u64 {
-                        if self.nodes[&node].borrow().is_dropped() {
+                        if self.nodes[node].borrow().is_dropped() {
                             break; // Node was dropped. Give up.
-                        } else if self.nodes[&node].borrow().is_reader() {
+                        } else if self.nodes[node].borrow().is_reader() {
                             // we can only evict one key a time here because the freed memory
                             // calculation is based on the key that *will* be evicted. We may count
                             // the same individual key twice if we batch evictions here.
-                            let freed_now = self.nodes[&node]
+                            let freed_now = self.nodes[node]
                                 .borrow_mut()
                                 .with_reader_mut(|r| r.evict_random_key())
                                 .unwrap();
@@ -2314,7 +2313,7 @@ impl Domain {
                             }
                         } else {
                             let (key_columns, keys, bytes) = {
-                                let k = self.state[&node].evict_random_keys(100);
+                                let k = self.state[node].evict_random_keys(100);
                                 (k.0.to_vec(), k.1, k.2)
                             };
                             freed += bytes;
@@ -2332,7 +2331,7 @@ impl Domain {
                                 &mut self.nodes,
                             );
 
-                            if self.state[&node].deep_size_of() == 0 {
+                            if self.state[node].deep_size_of() == 0 {
                                 break;
                             }
                         }
@@ -2371,14 +2370,14 @@ impl Domain {
                         // from it, and then propagate the eviction further downstream.
                         let target = path.last().unwrap().node;
                         // We've already evicted from readers in walk_path
-                        if self.nodes[&target].borrow().is_reader() {
+                        if self.nodes[target].borrow().is_reader() {
                             return;
                         }
                         // No need to continue if node was dropped.
-                        if self.nodes[&target].borrow().is_dropped() {
+                        if self.nodes[target].borrow().is_dropped() {
                             return;
                         }
-                        if let Some(evicted) = self.state[&target].evict_keys(&tag, &keys) {
+                        if let Some(evicted) = self.state[target].evict_keys(&tag, &keys) {
                             let key_columns = evicted.0.to_vec();
                             trigger_downstream_evictions(
                                 &self.log,
@@ -2419,7 +2418,7 @@ impl Domain {
             .values()
             .map(|nd| {
                 let ref n = *nd.borrow();
-                let local_index: LocalNodeIndex = *n.local_addr();
+                let local_index = n.local_addr();
 
                 if n.is_reader() {
                     // We are a reader, which has its own kind of state
@@ -2434,7 +2433,7 @@ impl Domain {
                 } else {
                     // Not a reader, state is with domain
                     self.state
-                        .get(&local_index)
+                        .get(local_index)
                         .filter(|state| state.is_partial())
                         .map(|state| state.deep_size_of())
                         .unwrap_or(0)

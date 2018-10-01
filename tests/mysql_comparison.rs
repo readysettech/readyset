@@ -2,8 +2,8 @@
 
 extern crate backtrace;
 extern crate diff;
-extern crate noria;
 extern crate mysql;
+extern crate noria;
 #[macro_use]
 extern crate serde_derive;
 extern crate toml;

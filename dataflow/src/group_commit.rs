@@ -20,7 +20,7 @@ impl GroupCommitQueueSet {
     /// Returns whether the given packet should be persisted.
     pub fn should_append(&self, p: &Box<Packet>, nodes: &DomainNodes) -> bool {
         if let Packet::Input { .. } = **p {
-            assert!(nodes[&p.link().dst].borrow().is_base());
+            assert!(nodes[p.link().dst].borrow().is_base());
             true
         } else {
             false
@@ -37,14 +37,14 @@ impl GroupCommitQueueSet {
             .map(|(n, _)| n);
 
         if let Some(node) = node {
-            self.flush_internal(&node)
+            self.flush_internal(node)
         } else {
             None
         }
     }
 
     /// Merge any pending packets.
-    fn flush_internal(&mut self, node: &LocalNodeIndex) -> Option<Box<Packet>> {
+    fn flush_internal(&mut self, node: LocalNodeIndex) -> Option<Box<Packet>> {
         Self::merge_packets(&mut self.pending_packets[node].1)
     }
 
@@ -63,7 +63,7 @@ impl GroupCommitQueueSet {
 
         pp.1.push(p);
         if pp.0.elapsed() >= self.params.flush_timeout {
-            self.flush_internal(&node)
+            self.flush_internal(node)
         } else {
             None
         }

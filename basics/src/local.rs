@@ -16,7 +16,7 @@ impl Into<usize> for DomainIndex {
 }
 
 impl DomainIndex {
-    pub fn index(&self) -> usize {
+    pub fn index(self) -> usize {
         self.0
     }
 }
@@ -24,7 +24,7 @@ impl DomainIndex {
 #[derive(Clone, Copy, Eq, PartialEq, Ord, PartialOrd, Hash, Debug, Serialize, Deserialize)]
 pub struct Tag(pub u32);
 impl Tag {
-    pub fn id(&self) -> u32 {
+    pub fn id(self) -> u32 {
         self.0
     }
 }

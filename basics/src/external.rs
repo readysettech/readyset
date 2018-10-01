@@ -9,7 +9,7 @@ pub struct Link {
 
 impl Link {
     pub fn new(src: LocalNodeIndex, dst: LocalNodeIndex) -> Self {
-        Link { src: src, dst: dst }
+        Link { src, dst }
     }
 }
 

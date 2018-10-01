@@ -1,7 +1,7 @@
 dist: trusty
 language: rust
 rust:
-  - nightly-2018-09-28
+  - nightly-2018-10-01
 env:
   - SETTLE_TIME=2000
 script:

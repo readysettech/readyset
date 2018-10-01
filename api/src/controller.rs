@@ -94,29 +94,31 @@ impl<A: Authority> ControllerHandle<A> {
     #[doc(hidden)]
     pub fn make(authority: Arc<A>) -> Result<Self, failure::Error> {
         let (tx, rx) = mpsc::unbounded();
-        let rt = thread::Builder::new().name(format!("api")).spawn(move || {
-            let client = Client::new();
-            let mut rt = tokio::runtime::current_thread::Runtime::new().unwrap();
-            rt.spawn(
-                rx.map_err(|_| unreachable!())
-                    .for_each(
-                        move |(req, tx): (
-                            hyper::Request<hyper::Body>,
-                            oneshot::Sender<(hyper::StatusCode, hyper::Chunk)>,
-                        )| {
-                            client
-                                .request(req)
-                                .and_then(|res| {
-                                    let status = res.status();
-                                    res.into_body().concat2().map(move |body| (status, body))
-                                })
-                                .and_then(move |r| tx.send(r).map_err(|_| unreachable!()))
-                        },
-                    )
-                    .map_err(|_| unreachable!()),
-            );
-            rt.run().unwrap()
-        })?;
+        let rt = thread::Builder::new()
+            .name("api".to_string())
+            .spawn(move || {
+                let client = Client::new();
+                let mut rt = tokio::runtime::current_thread::Runtime::new().unwrap();
+                rt.spawn(
+                    rx.map_err(|_| unreachable!())
+                        .for_each(
+                            move |(req, tx): (
+                                hyper::Request<hyper::Body>,
+                                oneshot::Sender<(hyper::StatusCode, hyper::Chunk)>,
+                            )| {
+                                client
+                                    .request(req)
+                                    .and_then(|res| {
+                                        let status = res.status();
+                                        res.into_body().concat2().map(move |body| (status, body))
+                                    })
+                                    .and_then(move |r| tx.send(r).map_err(|_| unreachable!()))
+                            },
+                        )
+                        .map_err(|_| unreachable!()),
+                );
+                rt.run().unwrap()
+            })?;
 
         Ok(ControllerHandle {
             url: None,

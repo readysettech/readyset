@@ -15,7 +15,7 @@ impl LocalNodeIndex {
         LocalNodeIndex { id }
     }
 
-    pub fn id(&self) -> usize {
+    pub fn id(self) -> usize {
         self.id as usize
     }
 }

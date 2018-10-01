@@ -19,13 +19,13 @@ impl Node {
     ) -> (Vec<Miss>, HashSet<Vec<DataType>>) {
         m.as_mut().unwrap().trace(PacketEvent::Process);
 
-        let addr = *self.local_addr();
+        let addr = self.local_addr();
         match self.inner {
             NodeType::Ingress => {
                 let m = m.as_mut().unwrap();
                 let tag = m.tag();
                 m.map_data(|rs| {
-                    materialize(rs, tag, state.get_mut(&addr));
+                    materialize(rs, tag, state.get_mut(addr));
                 });
                 (vec![], HashSet::new())
             }
@@ -48,7 +48,7 @@ impl Node {
                         //
                         // So: only materialize if the message we're processing is not a replay!
                         if keyed_by.is_none() {
-                            materialize(&mut rs, None, state.get_mut(&addr));
+                            materialize(&mut rs, None, state.get_mut(addr));
                         }
 
                         // Send write-ACKs to all the clients with updates that made
@@ -212,7 +212,7 @@ impl Node {
                     _ => None,
                 };
                 m.map_data(|rs| {
-                    materialize(rs, tag, state.get_mut(&addr));
+                    materialize(rs, tag, state.get_mut(addr));
                 });
 
                 for miss in misses.iter_mut() {
@@ -240,7 +240,7 @@ impl Node {
         on_shard: Option<usize>,
         output: &mut FnvHashMap<ReplicaAddr, VecDeque<Box<Packet>>>,
     ) {
-        let addr = *self.local_addr();
+        let addr = self.local_addr();
         match self.inner {
             NodeType::Base(..) => {}
             NodeType::Egress(Some(ref mut e)) => {
@@ -277,7 +277,7 @@ impl Node {
 // ancestor. We need to ensure that a replay is done to there, not the query_through node itself,
 // by translating the Miss into the right parent.
 fn reroute_miss(nodes: &DomainNodes, miss: &mut Miss) {
-    let node = nodes[&miss.on].borrow();
+    let node = nodes[miss.on].borrow();
     if node.is_internal() && node.can_query_through() {
         let mut new_parent: Option<IndexPair> = None;
         for col in miss.lookup_idx.iter_mut() {
@@ -297,7 +297,7 @@ fn reroute_miss(nodes: &DomainNodes, miss: &mut Miss) {
                     .find(|n| n.borrow().global_addr() == parent_global)
                     .unwrap();
                 let mut pair: IndexPair = parent_global.into();
-                pair.set_local(*parent_node.borrow().local_addr());
+                pair.set_local(parent_node.borrow().local_addr());
                 new_parent = Some(pair);
             }
 

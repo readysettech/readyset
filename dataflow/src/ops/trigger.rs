@@ -125,7 +125,7 @@ impl Ingredient for Trigger {
 
         let us = self.us.unwrap();
         let db = state
-            .get(&*us)
+            .get(*us)
             .expect("trigger must have its own state materialized");
 
         let mut trigger_keys: Vec<DataType> = rs.iter().map(|r| r[self.key].clone()).collect();

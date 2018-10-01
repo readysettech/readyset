@@ -90,6 +90,7 @@
 //! useful to provide backwards-compatibility, we recommend using the client bindings directly
 //! where possible.
 #![feature(transpose_result)]
+#![feature(tool_lints)]
 #![deny(missing_docs)]
 #![deny(unused_extern_crates)]
 
