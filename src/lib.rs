@@ -1,11 +1,11 @@
-//! Welcome to Soup.
+//! Welcome to Noria.
 //!
-//! Soup is a database built to provide incrementally maintained materialized views for a known set
-//! of queries. This can improve application performance drastically, as all computation is
+//! Noria is a database built to provide incrementally maintained materialized views for a known
+//! set of queries. This can improve application performance drastically, as all computation is
 //! performed at write-time, and reads are equivalent to cache reads.
 //!
-//! In Soup, a user provides only the *base types* that can arrive into the system (i.e., the
-//! possible writes Soup will observe), and the queries the application cares about over those
+//! In Noria, a user provides only the *base types* that can arrive into the system (i.e., the
+//! possible writes Noria will observe), and the queries the application cares about over those
 //! writes. Each such query is called a *view*. Queries can be expressed solely in terms of the
 //! base write types, or they can read from other views, producing *derived views*.
 //!
@@ -24,13 +24,13 @@
 //! order to compute derived records (e.g. a two-way join of `A` and `B` will conceptually query
 //! back to `B` upon receiving an `A` record to construct the resulting output set).
 //!
-//! Nodes in the graph can be *materialized*, indicating that Soup should keep the current state of
-//! those nodes to allow efficient querying of that state. The leaves of the DAG will generally be
-//! materialized to enable application queries against them, but internal nodes that need to query
-//! their own state (e.g., aggregations) could also be for performance reasons. If a node is
-//! materialized, any record it forwards is kept in an in-memory data structure. Soup will also use
-//! the semantics of the given view's computation to determine what indices should be added to the
-//! materialization (the group by field for an aggregation is a good candidate for example).
+//! Nodes in the graph can be *materialized*, indicating that Noria should keep the current state
+//! of those nodes to allow efficient querying of that state. The leaves of the DAG will generally
+//! be materialized to enable application queries against them, but internal nodes that need to
+//! query their own state (e.g., aggregations) could also be for performance reasons. If a node is
+//! materialized, any record it forwards is kept in an in-memory data structure. Noria will also
+//! use the semantics of the given view's computation to determine what indices should be added to
+//! the materialization (the group by field for an aggregation is a good candidate for example).
 //!
 //! The data flow graph is logically divided into *domains*. Each domain is handled by a single
 //! computational entity (currently threads, but eventually different domains could be run by
@@ -58,14 +58,14 @@
 //!
 //! # Code structure
 //!
-//! At a high level, Soup consists of a couple of main components that can generally be understood
+//! At a high level, Noria consists of a couple of main components that can generally be understood
 //! in isolation, even though they interact heavily during standard operation.
 //!
 //!  - `flow::ControllerHandle`, which "owns" the data flow graph, and provides methods for
 //!    inspecting it.  `ControllerHandle` is principally used to start a `Migration` that adds new
 //!    queries to the system, or removes old ones.
 //!  - `flow::Migration`, which handles all the plumbing needed to hook in new queries into an
-//!    existing Soup graph. This includes spinning up new `Domain`s where appropriate, and to set
+//!    existing Noria graph. This includes spinning up new `Domain`s where appropriate, and to set
 //!    up channels between different domains when the data flow graph has inter-domain
 //!    dependencies.
 //!  - `flow::domain::*`, which sets up and runs the internal machinery of each domain. For each
@@ -74,14 +74,14 @@
 //!    domains. The buffering required to implement atomic transactions also lives mainly within
 //!    each domain.
 //!  - `flow::Ingredient` and `ops::*`, which provide the interface for and implementation of the
-//!    various computational operators supported by Soup. The most important among these is the
+//!    various computational operators supported by Noria. The most important among these is the
 //!    `on_input` method, which specifies what a node does when it receives a new record, and how
 //!    its output changes.
 //!
 //! There are also a number of important secondary components that the components above depend on,
 //! but aren't immediately useful on their own:
 //!
-//!  - `DataType` in `query/`, which encapsulates the data types provided by Soup to end-users.
+//!  - `DataType` in `query/`, which encapsulates the data types provided by Noria to end-users.
 //!  - `Update` and `Record` in `ops/mod.rs`, which are used pervasively in the code to move
 //!    records between views.
 //!  - `BufferedStore` in `backlog/`, which provides an eventually consistent `HashMap` where
@@ -154,7 +154,7 @@
 //! ```
 //!
 //! This may look daunting, but reading through you should quickly recognize the queries from
-//! above. Note that we didn't specify any domains in this migration, so Soup will automatically
+//! above. Note that we didn't specify any domains in this migration, so Noria will automatically
 //! put each node in a separate domain.
 //!
 //! When you `commit` the `Migration`, it will set up a bunch of data structures used for
@@ -179,7 +179,7 @@
 //! muta.put(vec![1.into(), "Hello world".into()]);
 //! ```
 //!
-//! The `.into()` calls here turn the given values into Soup's internal `DataType`. Soup records
+//! The `.into()` calls here turn the given values into Noria's internal `DataType`. Noria records
 //! are always represented as vectors of `DataType` things, where the `n`th element corresponds to
 //! the value of the `n`th column of that record's view. Internally in the data flow graph, they
 //! are also wrapped in the `Record` type to indicate if they are "positive" or "negative" (we'll
@@ -247,7 +247,7 @@
 //! count. The grouped operator then, as expected, emits a record with the new count. However, it
 //! also does something slightly weird --- it first emits a *negative* record. Why..?
 //!
-//! Negative records are Soup's way of signaling that already materialized state has changed. They
+//! Negative records are Noria's way of signaling that already materialized state has changed. They
 //! indicate to descendant views that a past record is no longer valid, and should be discarded. In
 //! the case of our vote, we would get the output:
 //!
