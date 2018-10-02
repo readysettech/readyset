@@ -6,12 +6,10 @@ authors = ["The Noria developers <noria@pdos.csail.mit.edu>"]
 [dependencies]
 arccstr = "1.2.0"
 fnv = "1.0.5"
+nom-sql = "0.0.4"
 serde_derive = "1.0.8"
 
 # need features
 chrono = { version = "0.4.0", features = ["serde"] }
 petgraph = { version = "0.4.11", features = ["serde-1"] }
 serde = { version = "1.0.8", features = ["rc"] }
-
-# git deps
-nom-sql = { git = "https://github.com/ms705/nom-sql.git", rev = "791c0f5117b6e02c1e3f146cc4a2689ef7da7a54" }
