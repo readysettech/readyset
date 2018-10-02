@@ -1,0 +1,14 @@
+[package]
+name = "mir"
+version = "0.1.0"
+authors = ["The Noria developers <noria@pdos.csail.mit.edu>"]
+publish = false
+
+[dependencies]
+nom-sql = "0.0.4"
+regex = "1.0.0"
+slog = "2.4.0"
+
+# local deps
+basics = { path = "../../basics" }
+dataflow = { path = "../dataflow" }

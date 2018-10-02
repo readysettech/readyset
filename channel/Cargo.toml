@@ -2,6 +2,7 @@
 name = "channel"
 version = "0.1.0"
 authors = ["The Noria developers <noria@pdos.csail.mit.edu>"]
+publish = false
 
 [dependencies]
 bincode = "1.0.0"
