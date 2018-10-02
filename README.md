@@ -7,21 +7,20 @@ storage backend for read-heavy web applications based on [this
 paper](https://jon.tsp.io/papers/osdi18-noria.pdf) from
 [OSDI'18](https://www.usenix.org/conference/osdi18/presentation/gjengset).
 It acts like a databases, but pre-computes and caches relational query
-results so that reads are blazingly fast (§8). The cached results are
-also automatically kept up-to-date as the underlying data changes
-through database inserts and updates (§3.4). Noria uses
-partially-materialized state to bound memory overhead (§4), and supports
-dynamic, runtime installation of new queries (§5).
+results so that reads are blazingly fast. Noria automatically keeps cached
+results up-to-date as the underlying data, stored in persistent _base
+tables_ change. Noria uses partially-stateful data-flow to reduce memory
+overhead, and supports dynamic, runtime data-flow and query change.
 
 Noria comes with [a MySQL
 adapter](https://github.com/mit-pdos/noria-mysql) that implements the
 binary MySQL protocol. This lets any application that currently talks to
-MySQL or MariaDB switch to Noria with minimal effort (§7). For example,
+MySQL or MariaDB switch to Noria with minimal effort. For example,
 running a [Lobsters-like workload](https://github.com/jonhoo/trawler)
 that issues the [same SQL
 queries](https://github.com/mit-pdos/soup-benchmarks/tree/master/lobsters/mysql)
-as the real Lobsters website, Noria improves performance by up to 5x
-(§8.1):
+as the real [Lobsters website](https://lobste.rs), Noria improves
+throughput supported by up to 5x:
 
 ![Noria speeds up Lobsters queries by 5x](lobsters-perf.svg)
 
@@ -32,9 +31,9 @@ produces a [data-flow program](https://en.wikipedia.org/wiki/Dataflow)
 that maintains [materialized
 views](https://en.wikipedia.org/wiki/Materialized_view) for the output
 of those queries. Reads now become fast lookups directly into these
-materialized views, as if the value has been directly cached in
+materialized views, as if the value had been directly cached in
 memcached. The views are then kept up-to-date incrementally through the
-data-flow program, which yields high write throughput.
+data-flow, which yields high write throughput.
 
 ## Running Noria
 
@@ -120,9 +119,9 @@ The sub-crates each serve a distinct role:
    folder. These will likely move into
    [noria-benchmarks](https://github.com/mit-pdos/noria-benchmarks) in
    the near future. The most frequently used one is `vote`, which runs
-   the vote benchmark from §8.2 in the paper. You can run it in a bunch
-   of different ways (`--help` should be useful), and with a bunch of
-   different backends. The `localsoup` backend is the one that's easiest
+   the vote benchmark from §8.2 of the OSDI paper. You can run it in a
+   bunch of different ways (`--help` should be useful), and with a bunch
+   of different backends. The `localsoup` backend is the one that's easiest
    to get up and running with.
  - [`channel/`](channel/): a wrapper around TCP channels that Noria uses
    to communicate between clients and servers, and inside the data-flow
