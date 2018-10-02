@@ -175,7 +175,7 @@ mod tests {
 
         let mut c = ControllerBuilder::default().build_local().unwrap();
         assert!(c.install_recipe(r_txt).is_ok());
-        for _ in 0..250 {
+        for _ in 0..2500 {
             let _ = c.table("a").unwrap();
         }
     }
