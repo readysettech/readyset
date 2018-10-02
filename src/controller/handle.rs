@@ -168,6 +168,7 @@ impl<A: Authority> Drop for LocalControllerHandle<A> {
 mod tests {
     #[test]
     #[should_panic]
+    #[cfg_attr(not(debug_assertions), allow_fail)]
     fn limit_mutator_creation() {
         use crate::controller::ControllerBuilder;
         let r_txt = "CREATE TABLE a (x int, y int, z int);\n

@@ -208,8 +208,9 @@ impl<A: Authority> ControllerHandle<A> {
 
     /// Obtain a `View` that allows you to query the given external view.
     pub fn view(&mut self, name: &str) -> Result<View, failure::Error> {
-        // This call attempts to detect if this function is being called in a loop. If this
-        // is getting false positives, then it is safe to increase the allowed hit count.
+        // This call attempts to detect if this function is being called in a loop. If this is
+        // getting false positives, then it is safe to increase the allowed hit count, however, the
+        // limit_mutator_creation test in src/controller/handle.rs should then be updated as well.
         #[cfg(debug_assertions)]
         assert_infrequent::at_most(2000);
 
