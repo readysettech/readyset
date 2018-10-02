@@ -1065,7 +1065,7 @@ impl Domain {
 
                         debug!(self.log,
                                "current state cloned for replay";
-                               "μs" => start.elapsed().as_micros() as u64
+                               "μs" => start.elapsed().as_micros()
                         );
 
                         let link = Link::new(from, self.replay_paths[&tag].path[0].node);
@@ -1165,7 +1165,7 @@ impl Domain {
                                     debug!(log,
                                    "state chunker finished";
                                    "node" => %link.dst,
-                                   "μs" => start.elapsed().as_micros() as u64
+                                   "μs" => start.elapsed().as_micros()
                                 );
                                 })
                                 .unwrap();

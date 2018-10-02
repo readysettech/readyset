@@ -730,7 +730,7 @@ impl Materializations {
 
             if reconstructed {
                 info!(self.log, "reconstruction completed";
-                      "ms" => start.elapsed().as_millis() as u64,
+                      "ms" => start.elapsed().as_millis(),
                       "node" => ni.index(),
                       );
             }

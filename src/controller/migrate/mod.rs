@@ -565,6 +565,6 @@ impl<'a> Migration<'a> {
             &mainline.workers,
         );
 
-        warn!(log, "migration completed"; "ms" => start.elapsed().as_millis() as u64);
+        warn!(log, "migration completed"; "ms" => start.elapsed().as_millis());
     }
 }
