@@ -29,22 +29,25 @@ workload and one to configure the chosen backend. For example, to run
 ```console
 $ cargo b --release --bin vote
 $ target/release/vote \
-   --target 1000000 --write-every 20 --threads 96 \
+   --target 100000 --write-every 20 --threads 16 \
    localsoup \
-   --shards 4
+   --shards 2
 ```
 
-Here, we're running `vote` with a target load of 1M requests per second,
-where one in every 20 requests is a write (so a 95/5 read mix). We run
-96 load generation threads, which should be plenty (NOTE: this argument
-will go away soon). We choose the `localsoup` backend, and configure it
-to run with 4 shards. See `vote --help` and `vote <backend> --help` for
-what other arguments and backends are available.
+Here, we're running `vote` with a target load of 100k requests per
+second, where one in every 20 requests is a write (so a 95/5 read mix).
+We run 20 load generation threads, which should be plenty (NOTE: this
+argument will go away soon—it's annoying). We choose the `localsoup`
+backend, and configure it to run with 2 shards (to increase write
+throughput). See `vote --help` and `vote <backend> --help` for what
+other arguments and backends are available.
 
 When `vote` finishes, it prints the latencies it observed during
 execution:
 
 ```text
+# generated ops/s: 16673.66
+# actual ops/s: 16683.94
 # op   pct  sojourn  remote
 write  50   1903     1271    (all µs)
 read   50   847      311     (all µs)
