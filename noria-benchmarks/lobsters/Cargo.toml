@@ -24,10 +24,10 @@ rusoto_core = { git = "https://github.com/rusoto/rusoto.git", optional = true }
 rusoto_sts = { git = "https://github.com/rusoto/rusoto.git", optional = true }
 
 [[bin]]
-name = "trawler-mysql"
+name = "lobsters"
 path = "src/main.rs"
 
 [[bin]]
-name = "trawler-mysql-ec2"
+name = "lobsters-ec2"
 path = "src/ec2.rs"
 required-features = ["orchestration"]

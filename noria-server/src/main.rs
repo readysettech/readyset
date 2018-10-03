@@ -12,7 +12,6 @@ fn main() {
     use clap::{App, Arg};
     let matches = App::new("controller")
         .version("0.0.1")
-        .about("Delivers scalable Soup distribution.")
         .arg(
             Arg::with_name("address")
                 .short("a")
@@ -26,7 +25,7 @@ fn main() {
                 .long("deployment")
                 .required(true)
                 .takes_value(true)
-                .help("Soup deployment ID."),
+                .help("Noria deployment ID."),
         )
         .arg(
             Arg::with_name("durability")
@@ -96,7 +95,7 @@ fn main() {
                 .long("quorum")
                 .takes_value(true)
                 .default_value("1")
-                .help("Number of souplets to wait for before starting (including this one)."),
+                .help("Number of workers to wait for before starting (including this one)."),
         )
         .arg(
             Arg::with_name("shards")

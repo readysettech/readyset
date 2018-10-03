@@ -19,14 +19,14 @@ use std::time;
 use trawler::{LobstersRequest, UserId};
 
 const ORIGINAL_SCHEMA: &'static str = include_str!("../db-schema/original.sql");
-const SOUP_SCHEMA: &'static str = include_str!("../db-schema/soup.sql");
-const SOUPY_SCHEMA: &'static str = include_str!("../db-schema/soupy.sql");
+const NORIA_SCHEMA: &'static str = include_str!("../db-schema/noria.sql");
+const NATURAL_SCHEMA: &'static str = include_str!("../db-schema/natural.sql");
 
 #[derive(Clone, Copy, Eq, PartialEq, Debug)]
 enum Variant {
     Original,
-    Soup,
-    Soupy,
+    Noria,
+    Natural,
 }
 
 struct MysqlSpawner {
@@ -104,8 +104,8 @@ impl trawler::LobstersClient for MysqlTrawler {
         let mut current_q = String::new();
         let schema = match spawner.variant {
             Variant::Original => ORIGINAL_SCHEMA,
-            Variant::Soup => SOUP_SCHEMA,
-            Variant::Soupy => SOUPY_SCHEMA,
+            Variant::Norai => NORIA_SCHEMA,
+            Variant::Natural => NATURAL_SCHEMA,
         };
         for q in schema.lines() {
             if q.starts_with("--") || q.is_empty() {
@@ -249,8 +249,8 @@ impl trawler::LobstersClient for MysqlTrawler {
 
         let c = match this.variant {
             Variant::Original => handle_req!(original, req),
-            Variant::Soup => handle_req!(soup, req),
-            Variant::Soupy => handle_req!(soupy, req),
+            Variant::Noria => handle_req!(noria, req),
+            Variant::Natural => handle_req!(natural, req),
         };
 
         // notifications
@@ -263,8 +263,8 @@ impl trawler::LobstersClient for MysqlTrawler {
                 Either::B(match this.variant {
                     Variant::Original => Box::new(endpoints::original::notifications(c, uid))
                         as Box<Future<Item = my::Conn, Error = my::errors::Error>>,
-                    Variant::Soup => Box::new(endpoints::soup::notifications(c, uid)),
-                    Variant::Soupy => Box::new(endpoints::soupy::notifications(c, uid)),
+                    Variant::Noria => Box::new(endpoints::noria::notifications(c, uid)),
+                    Variant::Natural => Box::new(endpoints::natural::notifications(c, uid)),
                 })
             }))
         } else {
@@ -315,7 +315,7 @@ fn main() {
             Arg::with_name("queries")
                 .short("q")
                 .long("queries")
-                .possible_values(&["original", "soup", "soupy"])
+                .possible_values(&["original", "noria", "natural"])
                 .takes_value(true)
                 .required(true)
                 .help("Which set of queries to run"),
@@ -364,8 +364,8 @@ fn main() {
 
     let variant = match args.value_of("queries").unwrap() {
         "original" => Variant::Original,
-        "soup" => Variant::Soup,
-        "soupy" => Variant::Soupy,
+        "noria" => Variant::Noria,
+        "natural" => Variant::Natural,
         _ => unreachable!(),
     };
     let simulate_shards = args
