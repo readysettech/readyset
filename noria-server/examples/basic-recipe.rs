@@ -1,6 +1,6 @@
-extern crate noriad;
+extern crate noria_server;
 
-use noriad::ControllerBuilder;
+use noria_server::ControllerBuilder;
 
 use std::thread;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
@@ -20,8 +20,8 @@ fn main() {
                             FROM Article, VoteCount \
                             WHERE Article.aid = VoteCount.aid AND Article.aid = ?;";
 
-    let persistence_params = noriad::PersistenceParameters::new(
-        noriad::DurabilityMode::Permanent,
+    let persistence_params = noria_server::PersistenceParameters::new(
+        noria_server::DurabilityMode::Permanent,
         Duration::from_millis(1),
         Some(String::from("example")),
         1,
@@ -30,7 +30,7 @@ fn main() {
     // set up Soup via recipe
     let mut builder = ControllerBuilder::default();
 
-    builder.log_with(noriad::logger_pls());
+    builder.log_with(noria_server::logger_pls());
     builder.set_persistence(persistence_params);
 
     let mut blender = builder.build_local().unwrap();

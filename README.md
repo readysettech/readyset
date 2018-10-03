@@ -41,30 +41,33 @@ the data-flow, which yields high write throughput.
 
 Like most databases, Noria follows a server-client model where many
 clients connect to a (potentially distributed) server. The server in
-this case is the `noriad` binary, and must be started before clients can
-connect. Noria also uses [Apache
+this case is the `noria-server` binary, and must be started before
+clients can connect. Noria also uses [Apache
 ZooKeeper](https://zookeeper.apache.org/) to announce the location of
 its servers, so ZooKeeper must be running.
 
-You (currently) need nightly Rust to build `noriad`. This will be
+You (currently) need nightly Rust to build `noria-server`. This will be
 arranged for
 [automatically](https://github.com/rust-lang-nursery/rustup.rs#the-toolchain-file)
-if you're using [`rustup.rs`](https://rustup.rs/). To build `noriad`,
-run
+if you're using [`rustup.rs`](https://rustup.rs/). To build
+`noria-server`, run
+
 ```console
-$ cargo build --release --bin noriad
+$ cargo build --release --bin noria-server
 ```
 
-To start a long-running `noriad` instance, ensure that ZooKeeper is
-running, and then run:
+To start a long-running `noria-server` instance, ensure that ZooKeeper
+is running, and then run:
+
 ```console
 $ cargo r --release --bin souplet -- --deployment myapp --no-reuse --address 172.16.0.19 --shards 0
 ```
 
-`myapp` here is a _deployment_. Many `noriad` instances can operate in a
-single deployment at the same time, and will share the workload between
-them. Workers in the same deployment automatically elect a leader and
-discovery each other via [ZooKeeper](http://zookeeper.apache.org/).
+`myapp` here is a _deployment_. Many `noria-server` instances can
+operate in a single deployment at the same time, and will share the
+workload between them. Workers in the same deployment automatically
+elect a leader and discovery each other via
+[ZooKeeper](http://zookeeper.apache.org/).
 
 ## Interacting with Noria
 
@@ -77,12 +80,12 @@ ZooKeeper is not running on `localhost:2181`).
 ## Rust bindings
 
 The [`noria` crate](https://crates.io/crates/noria) provides native Rust
-bindings to interact with `noriad`. See the [`noria`
+bindings to interact with `noria-server`. See the [`noria`
 documentation](https://docs.rs/noria/) for detailed instructions on how
 to use the library. You can also take a look at the [example Noria
 program](noria/examples/basic-recipe.rs). You can also see a
-self-contained version that embeds `noriad` (and doesn't require
-ZooKeeper) in [this example](noriad/examples/basic-recipe.rs).
+self-contained version that embeds `noria-server` (and doesn't require
+ZooKeeper) in [this example](noria-server/examples/basic-recipe.rs).
 
 ## MySQL adapter
 
@@ -105,15 +108,15 @@ using the [Noria web interface](https://github.com/mit-pdos/noria-ui).
 Noria is a large piece of software that spans many sub-crates and
 external tools (see links in the text above). Each sub-crate is
 responsible for a component of Noria's architecture, such as external
-API (`noria`), mapping SQL to data-flow (`noriad/mir`), and executing data-flow
-operators (`noriad/dataflow`). The code in `noriad/src/` is the glue
-that ties these pieces together by establishing materializations,
-scheduling data-flow work, orchestrating Noria program changes, handling
-failovers, etc.
+API (`noria`), mapping SQL to data-flow (`noria-server/mir`), and
+executing data-flow operators (`noria-server/dataflow`). The code in
+`noria-server/src/` is the glue that ties these pieces together by
+establishing materializations, scheduling data-flow work, orchestrating
+Noria program changes, handling failovers, etc.
 
-[`noriad/lib.rs`](src/lib.rs) has a pretty extensive comment at the top
-of it that goes through how the Noria internals fit together at an
-implementation level. While it occasionally lags behind, especially
+[`noria-server/lib.rs`](src/lib.rs) has a pretty extensive comment at
+the top of it that goes through how the Noria internals fit together at
+an implementation level. While it occasionally lags behind, especially
 following larger changes, it should serve to get you familiarized with
 the basic building blocks relatively quickly.
 
@@ -136,30 +139,30 @@ The sub-crates each serve a distinct role:
    bunch of different ways (`--help` should be useful), and with many
    different backends. The `localsoup` backend is the one that's easiest
    to get up and running with.
- - [`noriad/src/`](noriad/src/): the Noria server, including high-level
-   components such as RPC handling, domain scheduling, connection
-   management, and all the controller operations (listening for
-   heartbeats, handling failed workers, etc.). It contains two notable
-   sub-crates:
+ - [`noria-server/src/`](noria-server/src/): the Noria server, including
+   high-level components such as RPC handling, domain scheduling,
+   connection management, and all the controller operations (listening
+   for heartbeats, handling failed workers, etc.). It contains two
+   notable sub-crates:
 
-   - [`dataflow/`](noriad/dataflow/): the code that implements the
+   - [`dataflow/`](noria-server/dataflow/): the code that implements the
      internals of the data-flow graph. This includes implementations of
-     the different operators ([`ops/`](noriad/dataflow/src/ops/)),
+     the different operators ([`ops/`](noria-server/dataflow/src/ops/)),
      "special" operators like leaf views and sharders
-     ([`node/special/`](noriad/dataflow/src/node/special/)),
+     ([`node/special/`](noria-server/dataflow/src/node/special/)),
      implementations of view storage ([`state/`](dataflow/src/state/)),
      and the code that coordinates execution of control, data, and
      backfill messages within a thread domain
-     ([`domain/`](noriad/dataflow/src/domain/)).
-   - [`mir/`](noriad/mir/): the code that implements Noria's
+     ([`domain/`](noria-server/dataflow/src/domain/)).
+   - [`mir/`](noria-server/mir/): the code that implements Noria's
      SQL-to-dataflow mapping. This includes resolving columns and keys,
      creating dataflow operators, and detecting reuse opportunities, and
      triggering migrations to make changes after new SQL queries have
      been added. @ms705 is the primary author of this particular
      subcrate, and it builds largely upon
      [`nom-sql`](https://docs.rs/nom-sql/).
-   - [`common/`](noriad/common/): data-structures that are shared
-     between the various `noriad` sub-crates.
+   - [`common/`](noria-server/common/): data-structures that are shared
+     between the various `noria-server` sub-crates.
 
 To run the test suite, use:
 ```console
@@ -171,11 +174,11 @@ Build and open the documentation with:
 $ cargo doc --open
 ```
 
-Once `noriad` is running, you can discover its REST API port through
-ZooKeeper via this command:
+Once `noria-server` is running, you can discover its REST API port
+through ZooKeeper via this command:
 
 ```console
-$ cargo run --bin noriad-zk -- \
+$ cargo run --bin noria-zk -- \
     --show --deployment testing
     | grep external | cut -d' ' -f4
 ```

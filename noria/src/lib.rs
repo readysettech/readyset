@@ -13,9 +13,9 @@
 //! # Infrastructure
 //!
 //! Like most databases, Noria follows a server-client model where many clients connect to a
-//! (potentially distributed) server. The server in this case is the `noriad`
-//! binary, and must be started before clients can connect. See `noriad --help` for details and
-//! the [Noria repository README](https://github.com/mit-pdos/noria) for details. Noria uses
+//! (potentially distributed) server. The server in this case is the `noria-server`
+//! binary, and must be started before clients can connect. See `noria-server --help` for details
+//! and the [Noria repository README](https://github.com/mit-pdos/noria) for details. Noria uses
 //! [Apache ZooKeeper](https://zookeeper.apache.org/) to announce the location of its servers, so
 //! ZooKeeper must also be running.
 //!

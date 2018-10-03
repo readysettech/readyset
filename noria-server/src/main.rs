@@ -1,9 +1,9 @@
 #[macro_use]
 extern crate clap;
-extern crate noriad;
+extern crate noria_server;
 extern crate slog;
 
-use noriad::{ControllerBuilder, ReuseConfigType, ZookeeperAuthority};
+use noria_server::{ControllerBuilder, ReuseConfigType, ZookeeperAuthority};
 use std::path::PathBuf;
 use std::sync::Arc;
 use std::time::Duration;
@@ -114,7 +114,7 @@ fn main() {
         )
         .get_matches();
 
-    let log = noriad::logger_pls();
+    let log = noria_server::logger_pls();
 
     let durability = matches.value_of("durability").unwrap();
     let listen_addr = matches.value_of("address").unwrap().parse().unwrap();
@@ -147,11 +147,11 @@ fn main() {
         builder.set_reuse(ReuseConfigType::NoReuse);
     }
 
-    let mut persistence_params = noriad::PersistenceParameters::new(
+    let mut persistence_params = noria_server::PersistenceParameters::new(
         match durability {
-            "persistent" => noriad::DurabilityMode::Permanent,
-            "ephemeral" => noriad::DurabilityMode::DeleteOnExit,
-            "memory" => noriad::DurabilityMode::MemoryOnly,
+            "persistent" => noria_server::DurabilityMode::Permanent,
+            "ephemeral" => noria_server::DurabilityMode::DeleteOnExit,
+            "memory" => noria_server::DurabilityMode::MemoryOnly,
             _ => unreachable!(),
         },
         Duration::new(0, flush_ns),

@@ -1,7 +1,7 @@
 cargo-features = ["rename-dependency"]
 
 [package]
-name = "noriad"
+name = "noria-server"
 version = "0.1.0"
 authors = ["The Noria developers <noria@pdos.csail.mit.edu>"]
 edition = '2018'
@@ -63,15 +63,15 @@ diff = "0.1.10"
 tempfile = "3.0.2"
 
 [lib]
-name = "noriad"
+name = "noria_server"
 path = "src/lib.rs"
 
 [[bin]]
-name = "noriad"
+name = "noria-server"
 path = "src/main.rs"
 
 [[bin]]
-name = "noriad-zk"
+name = "noria-zk"
 path = "src/bin/zk.rs"
 
 [[example]]
