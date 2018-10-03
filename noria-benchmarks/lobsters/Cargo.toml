@@ -1,0 +1,33 @@
+[package]
+name = "trawler-mysql"
+version = "0.1.0"
+authors = ["Jon Gjengset <jon@thesquareplanet.com>"]
+
+[features]
+orchestration = ["tsunami", "rusoto_core", "rusoto_sts", "failure"]
+default = []
+
+[profile.release]
+debug = true
+
+[dependencies]
+trawler = "0.5.10"
+mysql_async = "0.14"
+tokio-core = "0.1"
+clap = "2.31"
+futures = "0.1"
+chrono = "0.4"
+
+failure = { version = "0.1.1", optional = true }
+tsunami = { git = "https://github.com/jonhoo/tsunami", optional = true }
+rusoto_core = { git = "https://github.com/rusoto/rusoto.git", optional = true }
+rusoto_sts = { git = "https://github.com/rusoto/rusoto.git", optional = true }
+
+[[bin]]
+name = "trawler-mysql"
+path = "src/main.rs"
+
+[[bin]]
+name = "trawler-mysql-ec2"
+path = "src/ec2.rs"
+required-features = ["orchestration"]
