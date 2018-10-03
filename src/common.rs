@@ -890,7 +890,10 @@ named!(raw_string_doublequoted< Vec<u8> >, delimited!(
 
 named!(pub string_literal<&[u8], Literal>,
        map!(alt_complete!(raw_string_singlequoted | raw_string_doublequoted),
-             |bytes| Literal::String(String::from_utf8(bytes).unwrap_or("�".to_string()))
+             |bytes| match String::from_utf8(bytes) {
+                 Ok(s) => Literal::String(s),
+                 Err(err) => Literal::Blob(err.into_bytes())
+             }
            )
 );
 
