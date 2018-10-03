@@ -1,5 +1,7 @@
 # Noria: a high-performance web applications backend
 
+[![Crates.io](https://img.shields.io/crates/v/noria.svg)](https://crates.io/crates/noria)
+[![Documentation](https://docs.rs/noria/badge.svg)](https://docs.rs/noria/)
 [![Build Status](https://travis-ci.org/mit-pdos/noria.svg?branch=master)](https://travis-ci.org/mit-pdos/noria)
 
 Noria is a new streaming data-flow system designed to act as a fast
