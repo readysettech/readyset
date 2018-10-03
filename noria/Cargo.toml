@@ -4,6 +4,18 @@ version = "0.1.0"
 authors = ["The Noria developers <noria@pdos.csail.mit.edu>"]
 edition = "2018"
 
+description = "Client bindings for Noria"
+readme = "../README.md"
+
+homepage = "https://pdos.csail.mit.edu/noria"
+repository = "https://github.com/mit-pdos/noria.git"
+
+keywords = ["database", "dataflow", "backend", "storage", "sql"]
+categories = ["api-bindings", "database"]
+
+[badges]
+travis-ci = { repository = "mit-pdos/noria" }
+
 [dependencies]
 assert_infrequent = "0.1.0"
 failure = "0.1"
@@ -25,12 +37,6 @@ chrono = { version = "0.4.0", features = ["serde"] }
 internal = { path = "../internal" }
 channel = { path = "../channel" }
 consensus = { path = "../consensus" }
-
-[dev-dependencies]
-backtrace = { version = "0.3.2", features = ["serialize-serde"] }
-slog = "2.4.0"
-#slog = { version = "2.4.0", features = ["max_level_trace", "release_max_level_trace"] }
-slog-term = "2.4.0"
 
 [lib]
 path = "src/lib.rs"

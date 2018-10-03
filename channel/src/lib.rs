@@ -2,18 +2,13 @@
 #![feature(try_from)]
 #![deny(unused_extern_crates)]
 
-extern crate bincode;
-extern crate bufstream;
-extern crate byteorder;
 #[macro_use]
 extern crate failure;
-extern crate async_bincode;
-extern crate futures;
-extern crate mio;
-extern crate net2;
-extern crate serde;
-extern crate throttled_reader;
-extern crate tokio;
+
+// the compiler sometimes warns that this macro_use isn't necessary
+// that's not true...
+#[macro_use]
+extern crate serde_derive;
 
 use std::borrow::Borrow;
 use std::collections::HashMap;
@@ -34,7 +29,7 @@ pub mod poll;
 pub mod rpc;
 pub mod tcp;
 
-pub use tcp::{channel, DualTcpStream, TcpReceiver, TcpSender};
+pub use crate::tcp::{channel, DualTcpStream, TcpReceiver, TcpSender};
 
 pub const CONNECTION_FROM_BASE: u8 = 1;
 pub const CONNECTION_FROM_DOMAIN: u8 = 0;

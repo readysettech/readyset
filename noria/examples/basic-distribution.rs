@@ -1,15 +1,6 @@
-extern crate noria;
-#[macro_use]
-extern crate slog;
-extern crate slog_term;
-
 use noria::{ControllerHandle, ZookeeperAuthority};
 
-use slog::Drain;
-use slog::Logger;
-use slog_term::term_full;
 use std::collections::BTreeMap;
-use std::sync::Mutex;
 use std::thread;
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
@@ -26,24 +17,20 @@ fn main() {
                 WHERE Article.aid = VoteCount.aid AND Article.aid = ?;";
 
     // set up Noria via recipe
-    let log = Logger::root(Mutex::new(term_full()).fuse(), o!());
-    let mut auth = ZookeeperAuthority::new("127.0.0.1:2181/basicdist").unwrap();
-    auth.log_with(log.clone());
-
-    let mut blender = ControllerHandle::new(auth).unwrap();
-    blender.extend_recipe(sql1).unwrap();
-    blender.extend_recipe(sql2).unwrap();
-    blender.extend_recipe(sql3).unwrap();
-    blender.extend_recipe(sql4).unwrap();
-    println!("{}", blender.graphviz().unwrap());
+    let auth = ZookeeperAuthority::new("127.0.0.1:2181/basicdist").unwrap();
+    let mut db = ControllerHandle::new(auth).unwrap();
+    db.extend_recipe(sql1).unwrap();
+    db.extend_recipe(sql2).unwrap();
+    db.extend_recipe(sql3).unwrap();
+    db.extend_recipe(sql4).unwrap();
+    println!("{}", db.graphviz().unwrap());
 
     let get_view = |b: &mut ControllerHandle<ZookeeperAuthority>, n| loop {
         match b.view(n) {
             Ok(v) => return v,
             Err(_) => {
                 thread::sleep(Duration::from_millis(50));
-                let mut auth = ZookeeperAuthority::new("127.0.0.1:2181/basicdist").unwrap();
-                auth.log_with(log.clone());
+                let auth = ZookeeperAuthority::new("127.0.0.1:2181/basicdist").unwrap();
                 *b = ControllerHandle::new(auth).unwrap();
             }
         }
@@ -54,17 +41,16 @@ fn main() {
             Ok(v) => return v,
             Err(_) => {
                 thread::sleep(Duration::from_millis(50));
-                let mut auth = ZookeeperAuthority::new("127.0.0.1:2181/basicdist").unwrap();
-                auth.log_with(log.clone());
+                let auth = ZookeeperAuthority::new("127.0.0.1:2181/basicdist").unwrap();
                 *b = ControllerHandle::new(auth).unwrap();
             }
         }
     };
 
     // Get mutators and getter.
-    let mut vote = get_table(&mut blender, "Vote");
-    let mut article = get_table(&mut blender, "Article");
-    let mut awvc = get_view(&mut blender, "ArticleWithVoteCount");
+    let mut vote = get_table(&mut db, "Vote");
+    let mut article = get_table(&mut db, "Article");
+    let mut awvc = get_view(&mut db, "ArticleWithVoteCount");
 
     println!("Creating article...");
     let aid = 1;
@@ -105,14 +91,14 @@ fn main() {
             .unwrap()
             .as_secs() as i64;
         while let Err(_) = vote.insert(vec![aid.into(), uid.into()]) {
-            vote = get_table(&mut blender, "Vote");
+            vote = get_table(&mut db, "Vote");
         }
 
         times.push(start.elapsed().as_secs());
         // thread::sleep(Duration::from_millis(1000));
 
         // while let Err(_) = awvc.lookup(&[1.into()], false) {
-        //     awvc = get_view(&mut blender, "ArticleWithVoteCount");
+        //     awvc = get_view(&mut db, "ArticleWithVoteCount");
         // }
         // println!(" Done");
     }

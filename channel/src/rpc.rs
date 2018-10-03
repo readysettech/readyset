@@ -1,17 +1,15 @@
+use bincode;
+use bufstream::BufStream;
+use byteorder::{NetworkEndian, WriteBytesExt};
+use crate::tcp::{SendError, TryRecvError};
+use crate::{DeserializeReceiver, NonBlockingWriter, ReceiveError};
+use mio::{self, Evented, Poll, PollOpt, Ready, Token};
+use net2;
+use serde::{Deserialize, Serialize};
 use std;
 use std::io::{self, Write};
 use std::marker::PhantomData;
 use std::net::{Ipv4Addr, SocketAddr};
-
-use bincode;
-use bufstream::BufStream;
-use byteorder::{NetworkEndian, WriteBytesExt};
-use mio::{self, Evented, Poll, PollOpt, Ready, Token};
-use net2;
-use serde::{Deserialize, Serialize};
-
-use super::{DeserializeReceiver, NonBlockingWriter, ReceiveError};
-use tcp::{SendError, TryRecvError};
 
 pub struct RpcClient<Q, R> {
     stream: BufStream<std::net::TcpStream>,
