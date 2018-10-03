@@ -1,7 +1,7 @@
 use rand::{Rng, ThreadRng};
 use std::rc::Rc;
 
-use basics::data::SizeOf;
+use common::SizeOf;
 use prelude::*;
 use state::keyed_state::KeyedState;
 

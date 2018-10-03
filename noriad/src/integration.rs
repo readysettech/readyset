@@ -1,4 +1,3 @@
-use basics::DataType;
 use consensus::LocalAuthority;
 use crate::controller::recipe::Recipe;
 use crate::controller::sql::SqlIncorporator;
@@ -11,6 +10,7 @@ use dataflow::ops::join::{Join, JoinSource, JoinType};
 use dataflow::ops::project::Project;
 use dataflow::ops::union::Union;
 use dataflow::{DurabilityMode, PersistenceParameters};
+use noria::DataType;
 
 use std::collections::HashMap;
 use std::sync::Arc;
@@ -156,7 +156,7 @@ fn it_works_basic() {
 
 #[test]
 fn base_mutation() {
-    use basics::{Modification, Operation};
+    use noria::{Modification, Operation};
 
     let mut g = build_local("base_mutation");
     g.migrate(|mig| {

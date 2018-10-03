@@ -5,7 +5,7 @@ members = [
 	"noria-benchmarks",
 	"consensus",
 	"channel",
-	"basics",
+	"internal",
 ]
 
 [profile.release]

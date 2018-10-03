@@ -2,7 +2,7 @@ use fnv::FnvBuildHasher;
 use rahashmap::HashMap as RaHashMap;
 use std::rc::Rc;
 
-use basics::data::SizeOf;
+use common::SizeOf;
 use prelude::*;
 
 type FnvHashMap<K, V> = RaHashMap<K, V, FnvBuildHasher>;

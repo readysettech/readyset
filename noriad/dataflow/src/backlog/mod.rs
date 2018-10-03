@@ -1,6 +1,6 @@
-use basics::data::SizeOf;
-use basics::{DataType, Record};
+use common::SizeOf;
 use fnv::FnvBuildHasher;
+use prelude::*;
 use std::borrow::Cow;
 
 use rand::{Rng, ThreadRng};

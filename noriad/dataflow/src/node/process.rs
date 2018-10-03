@@ -37,7 +37,7 @@ impl Node {
                         src,
                         mut senders,
                     }) => {
-                        let Input { link, data, tracer } = unsafe { inner.take() };
+                        let Input { dst, data, tracer } = unsafe { inner.take() };
                         let mut rs = b.process(addr, data, &*state);
 
                         // When a replay originates at a base node, we replay the data *through* that
@@ -58,7 +58,7 @@ impl Node {
                         }
 
                         *m = Some(Box::new(Packet::Message {
-                            link,
+                            link: Link::new(dst, dst),
                             src,
                             data: rs,
                             tracer,
@@ -95,7 +95,7 @@ impl Node {
 
                 {
                     let m = m.as_mut().unwrap();
-                    let from = m.link().src;
+                    let from = m.src();
 
                     let mut replay = match (&mut **m,) {
                         (&mut Packet::ReplayPiece {

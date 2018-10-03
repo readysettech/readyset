@@ -3,7 +3,7 @@ use nom_sql::{
 };
 use std::collections::HashMap;
 
-use basics::{DataType, NodeIndex};
+use common::DataType;
 use crate::controller::Migration;
 use dataflow::ops::filter::FilterCondition;
 use dataflow::ops::join::{Join, JoinType};
@@ -13,6 +13,7 @@ use dataflow::{node, ops};
 use mir::node::{GroupedNodeType, MirNode, MirNodeType};
 use mir::query::{MirQuery, QueryFlowParts};
 use mir::{Column, FlowNode, MirNodeRef};
+use petgraph::graph::NodeIndex;
 
 pub fn mir_query_to_flow_parts(mir_query: &mut MirQuery, mig: &mut Migration) -> QueryFlowParts {
     use std::collections::VecDeque;

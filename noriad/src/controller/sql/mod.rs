@@ -13,13 +13,13 @@ use self::reuse::{ReuseConfig, ReuseConfigType};
 use ::mir::query::{MirQuery, QueryFlowParts};
 use ::mir::reuse as mir_reuse;
 use ::mir::Column;
-use basics::NodeIndex;
 use crate::controller::mir_to_flow::mir_query_to_flow_parts;
 use crate::controller::Migration;
 use dataflow::prelude::DataType;
 use nom_sql::parser as sql_parser;
 use nom_sql::{ArithmeticBase, CreateTableStatement, SqlQuery};
 use nom_sql::{CompoundSelectOperator, CompoundSelectStatement, SelectStatement};
+use petgraph::graph::NodeIndex;
 
 use slog;
 use std::collections::HashMap;

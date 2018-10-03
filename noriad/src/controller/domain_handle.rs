@@ -6,13 +6,13 @@ use std::{self, cell, io};
 use mio;
 use slog::Logger;
 
-use api::debug::stats::{DomainStats, NodeStats};
 use channel::poll::{KeepPolling, PollEvent, PollingLoop, StopPolling};
 use channel::{self, tcp, TcpReceiver};
 use consensus::Epoch;
 use dataflow::payload::ControlReplyPacket;
 use dataflow::prelude::*;
 use dataflow::{DomainBuilder, DomainConfig};
+use noria::debug::stats::{DomainStats, NodeStats};
 
 use crate::controller::{WorkerEndpoint, WorkerIdentifier, WorkerStatus};
 use crate::coordination::{CoordinationMessage, CoordinationPayload, DomainDescriptor};

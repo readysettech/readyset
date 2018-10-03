@@ -5,18 +5,19 @@
 #![feature(if_while_or_patterns)]
 #![deny(unused_extern_crates)]
 
-extern crate api;
 #[cfg(debug_assertions)]
 extern crate backtrace;
-extern crate basics;
 extern crate bincode;
 extern crate channel;
+extern crate common;
 extern crate evmap;
 extern crate fnv;
 extern crate futures;
 extern crate hyper;
+extern crate internal;
 extern crate itertools;
 extern crate nom_sql;
+extern crate noria;
 extern crate petgraph;
 extern crate rahashmap;
 extern crate rand;
@@ -50,7 +51,8 @@ use std::path::PathBuf;
 use std::sync::{Arc, Mutex};
 use std::time;
 
-pub type Readers = Arc<Mutex<HashMap<(basics::NodeIndex, usize), backlog::SingleReadHandle>>>;
+pub type Readers =
+    Arc<Mutex<HashMap<(petgraph::graph::NodeIndex, usize), backlog::SingleReadHandle>>>;
 pub type DomainConfig = domain::Config;
 
 pub use domain::{Domain, DomainBuilder, Index};
@@ -147,4 +149,4 @@ impl PersistenceParameters {
     }
 }
 
-pub use basics::shard_by;
+pub use noria::shard_by;

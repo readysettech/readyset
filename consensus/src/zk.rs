@@ -36,6 +36,7 @@ impl Watcher for UnparkWatcher {
     }
 }
 
+/// Coordinator that shares connection information between workers and clients using ZooKeeper.
 pub struct ZookeeperAuthority {
     zk: ZooKeeper,
     log: slog::Logger,

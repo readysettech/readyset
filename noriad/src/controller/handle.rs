@@ -7,9 +7,9 @@ use std::collections::HashMap;
 use std::ops::{Deref, DerefMut};
 use std::sync::Arc;
 
-use api::prelude::*;
 use crate::controller::Event;
 use futures::{self, Future};
+use noria::prelude::*;
 use stream_cancel::Trigger;
 use tokio;
 use tokio_io_pool;

@@ -27,13 +27,13 @@ throughput supported by up to 5x:
 At a high level, Noria takes a set of parameterized SQL queries (think
 [prepared
 statements](https://en.wikipedia.org/wiki/Prepared_statement)), and
-produces a [data-flow program](https://en.wikipedia.org/wiki/Dataflow)
-that maintains [materialized
-views](https://en.wikipedia.org/wiki/Materialized_view) for the output
-of those queries. Reads now become fast lookups directly into these
-materialized views, as if the value had been directly cached in
-memcached. The views are then kept up-to-date incrementally through the
-data-flow, which yields high write throughput.
+produces a [data-flow
+program](https://en.wikipedia.org/wiki/Stream_processing) that maintains
+[materialized views](https://en.wikipedia.org/wiki/Materialized_view)
+for the output of those queries. Reads now become fast lookups directly
+into these materialized views, as if the value had been directly cached
+in memcached. The views are then kept up-to-date incrementally through
+the data-flow, which yields high write throughput.
 
 ## Running Noria
 

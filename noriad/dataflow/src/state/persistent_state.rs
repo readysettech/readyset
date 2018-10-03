@@ -4,7 +4,7 @@ use rocksdb::{self, ColumnFamily, SliceTransform, SliceTransformFns, WriteBatch}
 use serde;
 use tempfile::{tempdir, TempDir};
 
-use basics::data::SizeOf;
+use common::SizeOf;
 use prelude::*;
 use state::{RecordResult, State};
 

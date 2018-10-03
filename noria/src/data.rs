@@ -6,7 +6,7 @@ use nom_sql::Literal;
 
 use std::fmt;
 use std::hash::{Hash, Hasher};
-use std::ops::{Add, Deref, DerefMut, Div, Mul, Sub};
+use std::ops::{Add, Div, Mul, Sub};
 
 const FLOAT_PRECISION: f64 = 1_000_000_000.0;
 const TINYTEXT_WIDTH: usize = 15;
@@ -39,25 +39,46 @@ pub enum DataType {
     Timestamp(NaiveDateTime),
 }
 
-impl DataType {
-    pub fn to_string(&self) -> String {
+impl fmt::Display for DataType {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         match *self {
-            DataType::None => String::from("*"),
+            DataType::None => write!(f, "*"),
             DataType::Text(..) | DataType::TinyText(..) => {
                 let text: Cow<str> = self.into();
-                format!("{}", text)
+                // TODO: do we really want to produce quoted strings?
+                write!(f, "\"{}\"", text)
             }
-            DataType::Int(n) => format!("{}", n),
-            DataType::BigInt(n) => format!("{}", n),
+            DataType::Int(n) => write!(f, "{}", n),
+            DataType::BigInt(n) => write!(f, "{}", n),
             DataType::Real(i, frac) => {
                 if i == 0 && frac < 0 {
                     // We have to insert the negative sign ourselves.
-                    format!("-0.{:09}", frac.abs())
+                    write!(f, "-0.{:09}", frac.abs())
                 } else {
-                    format!("{}.{:09}", i, frac.abs())
+                    write!(f, "{}.{:09}", i, frac.abs())
                 }
             }
-            DataType::Timestamp(ts) => format!("{}", ts.format("%c")),
+            DataType::Timestamp(ts) => write!(f, "{}", ts.format("%c")),
+        }
+    }
+}
+
+impl fmt::Debug for DataType {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        match *self {
+            DataType::None => write!(f, "None"),
+            DataType::Text(..) => {
+                let text: Cow<str> = self.into();
+                write!(f, "Text({:?})", text)
+            }
+            DataType::TinyText(..) => {
+                let text: Cow<str> = self.into();
+                write!(f, "TinyText({:?})", text)
+            }
+            DataType::Timestamp(ts) => write!(f, "Timestamp({:?})", ts),
+            DataType::Real(..) => write!(f, "Real({})", self),
+            DataType::Int(n) => write!(f, "Int({})", n),
+            DataType::BigInt(n) => write!(f, "BigInt({})", n),
         }
     }
 }
@@ -415,79 +436,55 @@ impl<'a, 'b> Div<&'b DataType> for &'a DataType {
     }
 }
 
-impl fmt::Debug for DataType {
-    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        match *self {
-            DataType::None => write!(f, "None"),
-            DataType::Text(..) => {
-                let text: Cow<str> = self.into();
-                write!(f, "Text({:?})", text)
-            }
-            DataType::TinyText(..) => {
-                let text: Cow<str> = self.into();
-                write!(f, "TinyText({:?})", text)
-            }
-            DataType::Timestamp(ts) => write!(f, "Timestamp({:?})", ts),
-            DataType::Real(..) => write!(f, "Real({})", self),
-            DataType::Int(n) => write!(f, "Int({})", n),
-            DataType::BigInt(n) => write!(f, "BigInt({})", n),
-        }
-    }
-}
-
-impl fmt::Display for DataType {
-    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        match *self {
-            DataType::None => write!(f, "*"),
-            DataType::Text(..) | DataType::TinyText(..) => {
-                let text: Cow<str> = self.into();
-                write!(f, "\"{}\"", text)
-            }
-            DataType::Int(n) => write!(f, "{}", n),
-            DataType::BigInt(n) => write!(f, "{}", n),
-            DataType::Real(i, frac) => {
-                if i == 0 && frac < 0 {
-                    // We have to insert the negative sign ourselves.
-                    write!(f, "{}", format!("-0.{:09}", frac.abs()))
-                } else {
-                    write!(f, "{}", format!("{}.{:09}", i, frac.abs()))
-                }
-            }
-            DataType::Timestamp(ts) => write!(f, "{}", format!("{}", ts.format("%c"))),
-        }
-    }
-}
-
+/// A modification to make to an existing value.
 #[derive(Clone, PartialEq, Eq, Debug, Serialize, Deserialize)]
 pub enum Operation {
+    /// Add the given value to the existing one.
     Add,
+    /// Subtract the given value from the existing value.
     Sub,
 }
 
+/// A modification to make to a column in an existing row.
 #[derive(Clone, PartialEq, Eq, Debug, Serialize, Deserialize)]
 pub enum Modification {
+    /// Set the cell to this value.
     Set(DataType),
+    /// Use the given [`Operation`] to combine the existing value and this one.
     Apply(Operation, DataType),
+    /// Leave the existing value as-is.
     None,
 }
 
+/// An operation to apply to a base table.
 #[derive(Clone, PartialEq, Eq, Debug, Serialize, Deserialize)]
 pub enum TableOperation {
+    /// Insert the contained row.
     Insert(Vec<DataType>),
+    /// Delete a row with the contained key.
     Delete {
+        /// The key.
         key: Vec<DataType>,
     },
+    /// If a row exists with the same key as the contained row, update it using `update`, otherwise
+    /// insert `row`.
     InsertOrUpdate {
+        /// This row will be inserted if no existing row is found.
         row: Vec<DataType>,
+        /// These modifications will be applied to the columns of an existing row.
         update: Vec<Modification>,
     },
+    /// Update an existing row with the given `key`.
     Update {
+        /// The modifications to make to each column of the existing row.
         set: Vec<Modification>,
+        /// The key used to identify the row to update.
         key: Vec<DataType>,
     },
 }
 
 impl TableOperation {
+    #[doc(hidden)]
     pub fn row(&self) -> Option<&[DataType]> {
         match *self {
             TableOperation::Insert(ref r) => Some(r),
@@ -503,190 +500,8 @@ impl From<Vec<DataType>> for TableOperation {
     }
 }
 
-/// A record is a single positive or negative data record with an associated time stamp.
-#[derive(Clone, PartialEq, Eq, Debug, Serialize, Deserialize)]
-#[warn(variant_size_differences)]
-pub enum Record {
-    Positive(Vec<DataType>),
-    Negative(Vec<DataType>),
-}
-
-impl Record {
-    pub fn rec(&self) -> &[DataType] {
-        match *self {
-            Record::Positive(ref v) | Record::Negative(ref v) => &v[..],
-        }
-    }
-
-    pub fn is_positive(&self) -> bool {
-        if let Record::Positive(..) = *self {
-            true
-        } else {
-            false
-        }
-    }
-
-    pub fn extract(self) -> (Vec<DataType>, bool) {
-        match self {
-            Record::Positive(v) => (v, true),
-            Record::Negative(v) => (v, false),
-        }
-    }
-}
-
-impl Deref for Record {
-    type Target = Vec<DataType>;
-    fn deref(&self) -> &Self::Target {
-        match *self {
-            Record::Positive(ref r) | Record::Negative(ref r) => r,
-        }
-    }
-}
-
-impl DerefMut for Record {
-    fn deref_mut(&mut self) -> &mut Self::Target {
-        match *self {
-            Record::Positive(ref mut r) | Record::Negative(ref mut r) => r,
-        }
-    }
-}
-
-impl From<Vec<DataType>> for Record {
-    fn from(other: Vec<DataType>) -> Self {
-        Record::Positive(other)
-    }
-}
-
-impl From<(Vec<DataType>, bool)> for Record {
-    fn from(other: (Vec<DataType>, bool)) -> Self {
-        if other.1 {
-            Record::Positive(other.0)
-        } else {
-            Record::Negative(other.0)
-        }
-    }
-}
-
-impl Into<Vec<Record>> for Records {
-    fn into(self) -> Vec<Record> {
-        self.0
-    }
-}
-
-use std::iter::FromIterator;
-impl FromIterator<Record> for Records {
-    fn from_iter<I>(iter: I) -> Self
-    where
-        I: IntoIterator<Item = Record>,
-    {
-        Records(iter.into_iter().collect())
-    }
-}
-impl FromIterator<Vec<DataType>> for Records {
-    fn from_iter<I>(iter: I) -> Self
-    where
-        I: IntoIterator<Item = Vec<DataType>>,
-    {
-        Records(iter.into_iter().map(Record::Positive).collect())
-    }
-}
-
-impl IntoIterator for Records {
-    type Item = Record;
-    type IntoIter = ::std::vec::IntoIter<Record>;
-    fn into_iter(self) -> Self::IntoIter {
-        self.0.into_iter()
-    }
-}
-impl<'a> IntoIterator for &'a Records {
-    type Item = &'a Record;
-    type IntoIter = ::std::slice::Iter<'a, Record>;
-    fn into_iter(self) -> Self::IntoIter {
-        self.0.iter()
-    }
-}
-
 /// Represents a set of records returned from a query.
 pub type Datas = Vec<Vec<DataType>>;
-
-#[derive(Clone, Default, PartialEq, Debug, Serialize, Deserialize)]
-pub struct Records(Vec<Record>);
-
-impl Deref for Records {
-    type Target = Vec<Record>;
-    fn deref(&self) -> &Self::Target {
-        &self.0
-    }
-}
-
-impl DerefMut for Records {
-    fn deref_mut(&mut self) -> &mut Self::Target {
-        &mut self.0
-    }
-}
-
-impl Into<Records> for Record {
-    fn into(self) -> Records {
-        Records(vec![self])
-    }
-}
-
-impl Into<Records> for Vec<Record> {
-    fn into(self) -> Records {
-        Records(self)
-    }
-}
-
-impl Into<Records> for Vec<Vec<DataType>> {
-    fn into(self) -> Records {
-        Records(self.into_iter().map(|r| r.into()).collect())
-    }
-}
-
-impl Into<Records> for Vec<(Vec<DataType>, bool)> {
-    fn into(self) -> Records {
-        Records(self.into_iter().map(|r| r.into()).collect())
-    }
-}
-
-pub trait SizeOf {
-    fn deep_size_of(&self) -> u64;
-    fn size_of(&self) -> u64;
-}
-
-impl SizeOf for DataType {
-    fn deep_size_of(&self) -> u64 {
-        use std::mem::size_of_val;
-
-        let inner = match *self {
-            DataType::Text(ref t) => size_of_val(t) as u64 + t.to_bytes().len() as u64,
-            _ => 0u64,
-        };
-
-        self.size_of() + inner
-    }
-
-    fn size_of(&self) -> u64 {
-        use std::mem::size_of;
-
-        // doesn't include data if stored externally
-        size_of::<DataType>() as u64
-    }
-}
-
-impl SizeOf for Vec<DataType> {
-    fn deep_size_of(&self) -> u64 {
-        use std::mem::size_of_val;
-
-        size_of_val(self) as u64 + self.iter().fold(0u64, |acc, d| acc + d.deep_size_of())
-    }
-
-    fn size_of(&self) -> u64 {
-        use std::mem::{size_of, size_of_val};
-
-        size_of_val(self) as u64 + size_of::<DataType>() as u64 * self.len() as u64
-    }
-}
 
 #[cfg(test)]
 mod tests {
@@ -1030,33 +845,5 @@ mod tests {
         assert_ne!(hash(&long), hash(&real));
         assert_ne!(hash(&long), hash(&time));
         assert_ne!(hash(&long), hash(&shrt6));
-    }
-
-    #[test]
-    fn data_type_mem_size() {
-        use std::convert::TryFrom;
-        use std::mem::{size_of, size_of_val};
-
-        let txt: DataType = DataType::Text(ArcCStr::try_from("hi").unwrap());
-        let shrt = DataType::Int(5);
-        let long = DataType::BigInt(5);
-        let time = DataType::Timestamp(NaiveDateTime::from_timestamp(0, 42_000_000));
-
-        let rec = vec![DataType::Int(5), "asdfasdfasdfasdf".into(), "asdf".into()];
-
-        // DataType should always use 16 bytes itself
-        assert_eq!(size_of::<DataType>(), 16);
-        assert_eq!(size_of_val(&txt), 16);
-        assert_eq!(size_of_val(&txt) as u64, txt.size_of());
-        assert_eq!(txt.deep_size_of(), txt.size_of() + 8 + 2); // DataType + ArcCStr's ptr + 2 chars
-        assert_eq!(size_of_val(&shrt), 16);
-        assert_eq!(size_of_val(&long), 16);
-        assert_eq!(size_of_val(&time), 16);
-        assert_eq!(size_of_val(&time) as u64, time.size_of());
-        assert_eq!(time.deep_size_of(), 16); // DataType + inline NaiveDateTime
-
-        assert_eq!(size_of_val(&rec), 24);
-        assert_eq!(rec.size_of(), 24 + 3 * 16);
-        assert_eq!(rec.deep_size_of(), 24 + 3 * 16 + (8 + 16));
     }
 }

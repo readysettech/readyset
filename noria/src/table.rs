@@ -1,6 +1,8 @@
-use basics::*;
 use channel::{tcp, DomainConnectionBuilder, TcpSender};
+use data::*;
 use debug::trace::Tracer;
+use error::TransportError;
+use internal::*;
 use nom_sql::CreateTableStatement;
 use std::cell::RefCell;
 use std::collections::HashMap;
@@ -8,12 +10,12 @@ use std::io;
 use std::net::SocketAddr;
 use std::rc::Rc;
 use vec_map::VecMap;
-use {ExclusiveConnection, LocalOrNot, SharedConnection, TransportError};
+use {ExclusiveConnection, LocalOrNot, SharedConnection};
 
 #[doc(hidden)]
 #[derive(Clone, Serialize, Deserialize)]
 pub struct Input {
-    pub link: Link,
+    pub dst: LocalNodeIndex,
     pub data: Vec<TableOperation>,
     pub tracer: Tracer,
 }
@@ -272,7 +274,7 @@ impl<E> Table<E> {
     fn prep_records(&self, tracer: Tracer, mut ops: Vec<TableOperation>) -> Input {
         self.inject_dropped_cols(&mut ops);
         Input {
-            link: Link::new(self.addr, self.addr),
+            dst: self.addr,
             data: ops,
             tracer,
         }
@@ -586,7 +588,7 @@ impl<'a> BatchSendHandle<'a> {
                         TableOperation::Update { ref key, .. } => &key[0],
                         TableOperation::InsertOrUpdate { ref row, .. } => &row[key_col],
                     };
-                    shard_by(key, self.dih.txs.len())
+                    ::shard_by(key, self.dih.txs.len())
                 };
                 shard_writes[shard].push(r);
             }
@@ -596,14 +598,14 @@ impl<'a> BatchSendHandle<'a> {
                     let p = if self.dih.dst_is_local {
                         unsafe {
                             LocalOrNot::for_local_transfer(Input {
-                                link: i.link,
+                                dst: i.dst,
                                 tracer: i.tracer.clone(),
                                 data: rs,
                             })
                         }
                     } else {
                         LocalOrNot::new(Input {
-                            link: i.link,
+                            dst: i.dst,
                             tracer: i.tracer.clone(),
                             data: rs,
                         })

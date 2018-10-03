@@ -8,7 +8,7 @@ use std::ops::Deref;
 use std::rc::Rc;
 use std::{slice, vec};
 
-use basics::data::SizeOf;
+use common::SizeOf;
 use prelude::*;
 
 pub use self::memory_state::MemoryState;

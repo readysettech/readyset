@@ -1,4 +1,4 @@
-use api::LocalOrNot;
+use internal::LocalOrNot;
 use prelude::*;
 use std::time;
 
@@ -20,7 +20,7 @@ impl GroupCommitQueueSet {
     /// Returns whether the given packet should be persisted.
     pub fn should_append(&self, p: &Box<Packet>, nodes: &DomainNodes) -> bool {
         if let Packet::Input { .. } = **p {
-            assert!(nodes[p.link().dst].borrow().is_base());
+            assert!(nodes[p.dst()].borrow().is_base());
             true
         } else {
             false
@@ -51,7 +51,7 @@ impl GroupCommitQueueSet {
     /// Add a new packet to be persisted, and if this triggered a flush return an iterator over the
     /// packets that were written.
     pub fn append<'a>(&mut self, p: Box<Packet>) -> Option<Box<Packet>> {
-        let node = p.link().dst;
+        let node = p.dst();
         let pp = self
             .pending_packets
             .entry(node)
@@ -87,7 +87,7 @@ impl GroupCommitQueueSet {
         I: Iterator<Item = Box<Packet>>,
     {
         let mut packets = packets.peekable();
-        let merged_link = packets.peek().as_mut().unwrap().link().clone();
+        let merged_dst = packets.peek().as_mut().unwrap().dst();
         let mut merged_tracer: Tracer = None;
 
         let mut all_senders = vec![];
@@ -98,10 +98,10 @@ impl GroupCommitQueueSet {
                     src,
                     senders,
                 } => {
-                    let Input { link, data, tracer } = unsafe { inner.take() };
+                    let Input { dst, data, tracer } = unsafe { inner.take() };
 
                     assert_eq!(senders.len(), 0);
-                    assert_eq!(merged_link, link);
+                    assert_eq!(merged_dst, dst);
                     acc.extend(data);
 
                     if let Some(src) = src {
@@ -110,7 +110,7 @@ impl GroupCommitQueueSet {
 
                     match (&merged_tracer, tracer) {
                         (&Some((mtag, _)), Some((tag, Some(sender)))) => {
-                            use api::debug::trace::*;
+                            use noria::debug::trace::*;
                             sender
                                 .send(Event {
                                     instant: time::Instant::now(),
@@ -131,7 +131,7 @@ impl GroupCommitQueueSet {
 
         Some(Box::new(Packet::Input {
             inner: LocalOrNot::new(Input {
-                link: merged_link,
+                dst: merged_dst,
                 data: merged_data,
                 tracer: merged_tracer,
             }),

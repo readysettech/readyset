@@ -1,5 +1,4 @@
 #![feature(bufreader_buffer)]
-#![feature(custom_attribute)]
 #![feature(try_from)]
 #![deny(unused_extern_crates)]
 

@@ -1,7 +1,8 @@
-use basics::{DataType, NodeIndex};
 use mir::node::{GroupedNodeType, MirNode, MirNodeType};
 use mir::query::MirQuery;
 pub use mir::{Column, MirNodeRef};
+use noria::DataType;
+use petgraph::graph::NodeIndex;
 // TODO(malte): remove if possible
 use dataflow::ops::filter::FilterCondition;
 use dataflow::ops::join::JoinType;

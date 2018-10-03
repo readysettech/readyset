@@ -8,7 +8,8 @@ publish = false
 nom-sql = "0.0.4"
 regex = "1.0.0"
 slog = "2.4.0"
+petgraph = { version = "0.4.11", features = ["serde-1"] }
 
 # local deps
-basics = { path = "../../basics" }
+common = { path = "../common" }
 dataflow = { path = "../dataflow" }

@@ -1,16 +1,16 @@
 #![deny(unused_extern_crates)]
 
-extern crate basics;
+extern crate common;
 extern crate dataflow;
 extern crate nom_sql;
+extern crate petgraph;
 extern crate regex;
 #[macro_use]
 extern crate slog;
 
+use petgraph::graph::NodeIndex;
 use std::cell::RefCell;
 use std::rc::Rc;
-
-use basics::*;
 
 mod column;
 pub mod node;

@@ -1,4 +1,5 @@
-use basics::*;
+use internal::*;
+use petgraph::graph::NodeIndex;
 use serde::{Deserialize, Deserializer, Serialize, Serializer};
 use std::collections::HashMap;
 use MaterializationStatus;

@@ -1,13 +1,13 @@
 use petgraph;
 use serde::{Deserialize, Serialize};
 
-use api;
-use api::LocalOrNot;
 #[cfg(debug_assertions)]
 use backtrace::Backtrace;
 use channel;
 use domain;
+use internal::LocalOrNot;
 use node;
+use noria;
 use prelude::*;
 
 use std::collections::{HashMap, HashSet};
@@ -232,11 +232,23 @@ pub enum Packet {
 }
 
 impl Packet {
-    pub fn link(&self) -> &Link {
+    pub fn src(&self) -> LocalNodeIndex {
         match *self {
-            Packet::Input { ref inner, .. } => &unsafe { inner.deref() }.link,
-            Packet::Message { ref link, .. } => link,
-            Packet::ReplayPiece { ref link, .. } => link,
+            Packet::Input { ref inner, .. } => {
+                // inputs come "from" the base table too
+                unsafe { inner.deref() }.dst
+            }
+            Packet::Message { ref link, .. } => link.src,
+            Packet::ReplayPiece { ref link, .. } => link.src,
+            _ => unreachable!(),
+        }
+    }
+
+    pub fn dst(&self) -> LocalNodeIndex {
+        match *self {
+            Packet::Input { ref inner, .. } => unsafe { inner.deref() }.dst,
+            Packet::Message { ref link, .. } => link.dst,
+            Packet::ReplayPiece { ref link, .. } => link.dst,
             _ => unreachable!(),
         }
     }
@@ -351,7 +363,7 @@ impl Packet {
                 tracer: Some((tag, Some(ref sender))),
                 ..
             } => {
-                use api::debug::trace::{Event, EventType};
+                use noria::debug::trace::{Event, EventType};
                 sender
                     .send(Event {
                         instant: time::Instant::now(),
@@ -404,8 +416,8 @@ pub enum ControlReplyPacket {
     /// (number of rows, size in bytes)
     StateSize(usize, u64),
     Statistics(
-        api::debug::stats::DomainStats,
-        HashMap<petgraph::graph::NodeIndex, api::debug::stats::NodeStats>,
+        noria::debug::stats::DomainStats,
+        HashMap<petgraph::graph::NodeIndex, noria::debug::stats::NodeStats>,
     ),
     Booted(usize, SocketAddr),
 }

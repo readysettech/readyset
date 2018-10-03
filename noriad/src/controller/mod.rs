@@ -1,9 +1,7 @@
 /// Only allow processing this many inputs in a domain before we handle timer events, acks, etc.
 const FORCE_INPUT_YIELD_EVERY: usize = 64;
 
-use api::{ControllerDescriptor, Input, LocalOrNot};
 use async_bincode::{AsyncBincodeReader, AsyncBincodeWriter, SyncDestination};
-use basics::DomainIndex;
 use bincode;
 use bufstream::BufStream;
 use channel::{
@@ -28,6 +26,8 @@ use futures::{self, Future, Sink, Stream};
 use hyper::header::CONTENT_TYPE;
 use hyper::server;
 use hyper::{self, Method, StatusCode};
+use internal::{DomainIndex, LocalOrNot};
+use noria::{ControllerDescriptor, Input};
 use rand;
 use serde_json;
 use slog;
@@ -66,11 +66,11 @@ mod inner;
 mod mir_to_flow;
 mod readers;
 
-pub use api::builders::*;
-pub use api::prelude::*;
 pub use crate::controller::builder::ControllerBuilder;
 pub use crate::controller::handle::LocalControllerHandle;
 pub use crate::controller::migrate::Migration;
+pub use noria::builders::*;
+pub use noria::prelude::*;
 
 type WorkerIdentifier = SocketAddr;
 type WorkerEndpoint = Arc<Mutex<TcpSender<CoordinationMessage>>>;

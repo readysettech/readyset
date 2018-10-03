@@ -331,16 +331,12 @@ mod coordination;
 #[cfg(test)]
 mod integration;
 
-pub use consensus::{LocalAuthority, ZookeeperAuthority};
-
-pub use basics::{DataType, Datas, Modification, NodeIndex, Operation};
-
-pub use dataflow::{DurabilityMode, PersistenceParameters};
-
-pub use api::*;
-
+pub use consensus::LocalAuthority;
 pub use crate::controller::sql::reuse::ReuseConfigType;
 pub use crate::controller::{ControllerBuilder, LocalControllerHandle};
+pub use dataflow::{DurabilityMode, PersistenceParameters};
+pub use noria::*;
+pub use petgraph::graph::NodeIndex;
 
 /// Just give me a damn terminal logger
 pub fn logger_pls() -> slog::Logger {

@@ -3,7 +3,7 @@ use std::rc::Rc;
 
 use rand::{self, Rng};
 
-use basics::data::SizeOf;
+use common::SizeOf;
 use prelude::*;
 use state::single_state::SingleState;
 

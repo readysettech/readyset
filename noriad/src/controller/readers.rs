@@ -9,7 +9,7 @@ use std::{mem, time};
 use tokio;
 use tokio::prelude::*;
 
-use api::{ReadQuery, ReadReply};
+use noria::{ReadQuery, ReadReply};
 
 /// If a blocking reader finds itself waiting this long for a backfill to complete, it will
 /// re-issue the replay request. To avoid the system falling over if replays are slow for a little

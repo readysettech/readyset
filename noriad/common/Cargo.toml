@@ -1,0 +1,14 @@
+[package]
+name = "common"
+version = "0.1.0"
+authors = ["Jon Gjengset <jon@thesquareplanet.com>"]
+edition = "2018"
+
+[dependencies]
+arccstr = "1.2.0"
+internal = { path = "../../internal" }
+noria = { path = "../../noria" }
+chrono = { version = "0.4.0", features = ["serde"] }
+serde_derive = "1.0.8"
+serde = { version = "1.0.8", features = ["rc"] }
+petgraph = { version = "0.4.11", features = ["serde-1"] }

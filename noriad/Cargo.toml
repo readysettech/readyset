@@ -49,10 +49,11 @@ zookeeper = "0.5.3"
 # local deps
 channel = { path = "../channel" }
 consensus = { path = "../consensus" }
-basics = { path = "../basics" }
+internal = { path = "../internal" }
 dataflow = { path = "dataflow" }
 mir = { path = "mir" }
-api = { path = "../noria", package = "noria" }
+common = { path = "common" }
+noria = { path = "../noria" }
 
 [dependencies.timekeeper]
 version = "0.3.0"

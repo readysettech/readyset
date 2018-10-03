@@ -1,130 +1,137 @@
-//! This create contains client bindings for the [Noria](https://github.com/mit-pdos/noria)
-//! database.
+//! This create contains client bindings for [Noria](https://github.com/mit-pdos/noria).
 //!
 //! # What is Noria?
 //!
-//! Noria is a work-in-progress implementation of a new streaming data-flow system designed to
-//! provide a high-performance storage backend for read-heavy applications. At a high level, it
-//! takes a set of parameterized SQL queries similar to prepared SQL statements, and produces a
-//! [data-flow program](https://en.wikipedia.org/wiki/Stream_processing) that maintains
-//! [materialized views](https://en.wikipedia.org/wiki/Materialized_view) for the output of those
-//! queries. This yields high read throughput, as queries can usually be satisfied with a single
-//! key-value lookup, much like when using a cache. The data-flow provides _incremental view
-//! maintenance_, and efficiently keeps the cached query results up-to-date as new writes arrive.
-//! For further details, see https://github.com/mit-pdos/noria.
+//! Noria is a new streaming data-flow system designed to act as a fast storage backend for
+//! read-heavy web applications based on [this paper](https://jon.tsp.io/papers/osdi18-noria.pdf)
+//! from [OSDI'18](https://www.usenix.org/conference/osdi18/presentation/gjengset). It acts like a
+//! databases, but pre-computes and caches relational query results so that reads are blazingly
+//! fast. Noria automatically keeps cached results up-to-date as the underlying data, stored in
+//! persistent _base tables_ change. Noria uses partially-stateful data-flow to reduce memory
+//! overhead, and supports dynamic, runtime data-flow and query change.
 //!
-//! # Interacting with Noria
+//! # Infrastructure
 //!
 //! Like most databases, Noria follows a server-client model where many clients connect to a
-//! (potentially distributed) server. The server in this case is the binary `souplet` in the
-//! [`noria` crate](https://github.com/mit-pdos/noria). The server must be started
-//! before clients can connect.
+//! (potentially distributed) server. The server in this case is the `noriad`
+//! binary, and must be started before clients can connect. See `noriad --help` for details and
+//! the [Noria repository README](https://github.com/mit-pdos/noria) for details. Noria uses
+//! [Apache ZooKeeper](https://zookeeper.apache.org/) to announce the location of its servers, so
+//! ZooKeeper must also be running.
 //!
-//! Noria uses [Apache ZooKeeper](https://zookeeper.apache.org/) to announce the location of its
-//! servers. To connect to a Noria, pass the ZooKeeper address to [`ControllerHandle::from_zk`].
-//! This will give yield a [`ControllerHandle`] which is then used to further issue commands to
-//! Noria.
+//! # Quickstart example
 //!
-//! Reads work quite differently in Noria compared to traditional relational databases. In
-//! particular, a query, or _view_, must be _registered_ before it can be executed, much like SQL
-//! prepared statements. To register new views, use [`ControllerHandle::extend_recipe`]. Once a
-//! view has been registered, a handle for executing it is made by passing the view's name to
-//! [`ControllerHandle::view`]. The returned [`View`] can be used to query the view with
-//! different values for it's declared parameters (i.e., values in place of `?` in the query)
-//! through [`View::lookup`] and [`View::multi_lookup`].
+//! If you just want to get up and running quickly, here's something to chew on:
 //!
-//! Writes, in contrast, are quite similar to those in relational databases. To add a new table,
-//! you extend the recipe (using [`ControllerHandle::extend_recipe`]) with a `CREATE TABLE`
-//! statement, and then use [`ControllerHandle::table`] to get a handle to the new base table.
-//! Table tables support similar operations and SQL tables, such as [`Table::insert`],
-//! [`Table::update`], [`Table::delete`], and also more esoteric operations like
-//! [`Table::insert_or_update`].
-//!
-//! More concretely, a first interaction with Noria might look like this:
-//!
-//! ```ignore
-//! # use api::*;
-//! let soup = ControllerHandle::from_zk(zookeeper_addr);
+//! ```no_run
+//! # use noria::*;
+//! # let zookeeper_addr = "127.0.0.1:2181";
+//! let db = ControllerHandle::from_zk(zookeeper_addr);
 //!
 //! // if this is the first time we interact with Noria, we must give it the schema
-//! soup.install_recipe("
-//!     CREATE TABLE Article (aid int, title varchar(255), \
-//!                           url text, PRIMARY KEY(aid));
-//!     CREATE TABLE Vote (aid int, uid int);");
+//! db.install_recipe("
+//!     CREATE TABLE Article (aid int, title varchar(255), url text, PRIMARY KEY(aid));
+//!     CREATE TABLE Vote (aid int, uid int);
+//! ");
 //!
 //! // we can then get handles that let us insert into the new tables
-//! let mut article = soup.table("Article").unwrap();
-//! let mut vote = soup.table("Vote").unwrap();
+//! let mut article = db.table("Article").unwrap();
+//! let mut vote = db.table("Vote").unwrap();
 //!
-//! // so let us make a new article
-//! let aid = 1;
-//! let title = "test title";
+//! // let's make a new article
+//! let aid = 42;
+//! let title = "I love Soup";
 //! let url = "https://pdos.csail.mit.edu";
 //! article
 //!     .insert(vec![aid.into(), title.into(), url.into()])
 //!     .unwrap();
 //!
-//! // and also a vote
-//! vote.insert(vec![aid.into(), 42.into()]).unwrap();
+//! // and then vote for it
+//! vote.insert(vec![aid.into(), 1.into()]).unwrap();
 //!
-//! // we can also declare views that the application will want to query
-//! soup.extend_recipe("
+//! // we can also declare views that we want want to query
+//! db.extend_recipe("
 //!     VoteCount: \
 //!       SELECT Vote.aid, COUNT(uid) AS votes \
 //!       FROM Vote GROUP BY Vote.aid;
 //!     QUERY ArticleWithVoteCount: \
 //!       SELECT Article.aid, title, url, VoteCount.votes AS votes \
-//!       FROM Article \
-//!       LEFT JOIN VoteCount ON (Article.aid = VoteCount.aid) \
+//!       FROM Article LEFT JOIN VoteCount ON (Article.aid = VoteCount.aid) \
 //!       WHERE Article.aid = ?;");
 //!
-//! // and then get handles that let us execute those queries
-//! let mut awvc = soup.view("ArticleWithVoteCount").unwrap();
-//! assert_eq!(awvc.lookup(&[1.into()], vec![aid.into(), title.into(), url.into(), 1.into()]));
+//! // and then get handles that let us execute those queries to fetch their results
+//! let mut awvc = db.view("ArticleWithVoteCount").unwrap();
+//! assert_eq!(
+//!     awvc.lookup(&[aid.into()]),                          // looking up article 42
+//!     vec![aid.into(), title.into(), url.into(), 1.into()] // should give the right result!
+//! ));
 //! ```
 //!
-//! # Is there an easier way? What about other languages?
+//! # Client model
 //!
-//! There is a [MySQL shim](https://github.com/mit-pdos/noria-mysql) that can translate the
-//! MySQL binary protocol directly to Noria operations. While it works decently well, and can be
-//! useful to provide backwards-compatibility, we recommend using the client bindings directly
-//! where possible.
-#![feature(transpose_result)]
-#![feature(tool_lints)]
+//! Noria accepts a set of parameterized SQL queries (think [prepared
+//! statements](https://en.wikipedia.org/wiki/Prepared_statement)), and produces a [data-flow
+//! program](https://en.wikipedia.org/wiki/Stream_processing) that maintains [materialized
+//! views](https://en.wikipedia.org/wiki/Materialized_view) for the output of those queries. Reads
+//! now become fast lookups directly into these materialized views, as if the value had been
+//! directly read from a cache (like memcached). The views are automatically kept up-to-date by
+//! Noria through the data-flow.
+//!
+//! Reads work quite differently in Noria compared to traditional relational databases. In
+//! particular, a query, or _view_, must be _registered_ before it can be executed, much like SQL
+//! prepared statements. Use [`ControllerHandle::extend_recipe`] to register new base tables and
+//! views. Once a view has been registered, you can get a handle that lets you execute the
+//! corresponding query by passing the view's name to [`ControllerHandle::view`]. The returned
+//! [`View`] can be used to query the view with different values for its declared parameters
+//! (values in place of `?` in the query) through [`View::lookup`] and [`View::multi_lookup`].
+//!
+//! Writes are fairly similar to those in relational databases. To add a new table, you extend the
+//! recipe (using [`ControllerHandle::extend_recipe`]) with a `CREATE TABLE` statement, and then
+//! use [`ControllerHandle::table`] to get a handle to the new base table. Base tables support
+//! similar operations as SQL tables, such as [`Table::insert`], [`Table::update`],
+//! [`Table::delete`], and also more esoteric operations like [`Table::insert_or_update`].
+//!
+//! # Alternatives
+//!
+//! Noria provides a [MySQL adapter](https://github.com/mit-pdos/noria-mysql) that implements the
+//! binary MySQL protocol, which provides a compatibility layer for applications that wish to
+//! continue to issue ad-hoc MySQL queries through existing MySQL client libraries.
+#![feature(try_from)]
 #![deny(missing_docs)]
 #![deny(unused_extern_crates)]
 
 #[cfg(debug_assertions)]
 extern crate assert_infrequent;
-extern crate basics;
 extern crate bincode;
 extern crate channel;
 extern crate consensus;
+extern crate internal;
 #[macro_use]
 extern crate failure;
 extern crate futures;
 extern crate hyper;
 extern crate nom_sql;
+extern crate petgraph;
 extern crate serde;
 #[macro_use]
 extern crate serde_derive;
+extern crate arccstr;
+extern crate chrono;
+extern crate fnv;
 extern crate serde_json;
 extern crate tokio;
 extern crate vec_map;
 
-use basics::*;
+use internal::*;
+use petgraph::graph::NodeIndex;
 use std::collections::HashMap;
 
 mod controller;
-mod proto;
+mod data;
 mod table;
 mod view;
 
-pub use basics::{DataType, Modification, Operation, TableOperation};
-
-pub use consensus::{LocalAuthority, ZookeeperAuthority};
-
-pub use proto::LocalOrNot;
+pub use consensus::ZookeeperAuthority;
 
 /// The prelude contains most of the types needed in everyday operation.
 pub mod prelude {
@@ -134,9 +141,45 @@ pub mod prelude {
     pub use super::View;
 }
 
+/// Noria errors.
+pub mod error {
+    pub use table::TableError;
+    pub use view::ViewError;
+
+    /// An error occured during transport (i.e., while sending or receiving).
+    #[derive(Debug, Fail)]
+    pub enum TransportError {
+        /// A network-level error occurred.
+        #[fail(display = "{}", _0)]
+        Channel(#[cause] channel::tcp::SendError),
+        /// A protocol-level error occurred.
+        #[fail(display = "{}", _0)]
+        Serialization(#[cause] bincode::Error),
+    }
+
+    impl From<channel::tcp::SendError> for TransportError {
+        fn from(e: channel::tcp::SendError) -> Self {
+            TransportError::Channel(e)
+        }
+    }
+
+    impl From<bincode::Error> for TransportError {
+        fn from(e: bincode::Error) -> Self {
+            TransportError::Serialization(e)
+        }
+    }
+}
+
 pub use controller::{ControllerDescriptor, ControllerHandle, ControllerPointer};
-pub use table::{Input, Table, TableError};
-pub use view::{ReadQuery, ReadReply, View, ViewError};
+pub use data::{DataType, Modification, Operation, TableOperation};
+pub use table::Table;
+pub use view::View;
+
+#[doc(hidden)]
+pub use table::Input;
+
+#[doc(hidden)]
+pub use view::{ReadQuery, ReadReply};
 
 #[doc(hidden)]
 pub mod builders {
@@ -171,25 +214,24 @@ pub struct ActivationResult {
     pub expressions_removed: usize,
 }
 
-/// An error occured during transport (i.e., while sending or receiving).
-#[derive(Debug, Fail)]
-pub enum TransportError {
-    /// A network-level error occurred.
-    #[fail(display = "{}", _0)]
-    Channel(#[cause] channel::tcp::SendError),
-    /// A protocol-level error occurred.
-    #[fail(display = "{}", _0)]
-    Serialization(#[cause] bincode::Error),
-}
-
-impl From<channel::tcp::SendError> for TransportError {
-    fn from(e: channel::tcp::SendError) -> Self {
-        TransportError::Channel(e)
-    }
-}
-
-impl From<bincode::Error> for TransportError {
-    fn from(e: bincode::Error) -> Self {
-        TransportError::Serialization(e)
+#[doc(hidden)]
+#[inline]
+pub fn shard_by(dt: &DataType, shards: usize) -> usize {
+    match *dt {
+        DataType::Int(n) => n as usize % shards,
+        DataType::BigInt(n) => n as usize % shards,
+        DataType::Text(..) | DataType::TinyText(..) => {
+            use std::borrow::Cow;
+            use std::hash::Hasher;
+            let mut hasher = fnv::FnvHasher::default();
+            let s: Cow<str> = dt.into();
+            hasher.write(s.as_bytes());
+            hasher.finish() as usize % shards
+        }
+        // a bit hacky: send all NULL values to the first shard
+        DataType::None => 0,
+        ref x => {
+            unimplemented!("asked to shard on value {:?}", x);
+        }
     }
 }

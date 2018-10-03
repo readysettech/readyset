@@ -11,12 +11,11 @@ use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::Arc;
 use std::time;
 
-use api;
-pub use basics::DomainIndex as Index;
 use channel::poll::{PollEvent, ProcessResult};
 use channel::{self, TcpSender};
 use futures;
 use group_commit::GroupCommitQueueSet;
+pub use internal::DomainIndex as Index;
 use payload::{ControlReplyPacket, ReplayPieceContext};
 use prelude::*;
 use slog::Logger;
@@ -480,8 +479,8 @@ impl Domain {
         sends: &mut EnqueuedSends,
         executor: Option<&mut Executor>,
     ) -> HashMap<LocalNodeIndex, Vec<Record>> {
-        let src = m.link().src;
-        let me = m.link().dst;
+        let src = m.src();
+        let me = m.dst();
         let mut output_messages = HashMap::new();
 
         match self.mode {
@@ -1231,7 +1230,7 @@ impl Domain {
                             .unwrap();
                     }
                     Packet::GetStatistics => {
-                        let domain_stats = api::debug::stats::DomainStats {
+                        let domain_stats = noria::debug::stats::DomainStats {
                             total_time: self.total_time.num_nanoseconds(),
                             total_ptime: self.total_ptime.num_nanoseconds(),
                             wait_time: self.wait_time.num_nanoseconds(),
@@ -1284,7 +1283,7 @@ impl Domain {
                                 if time.is_some() && ptime.is_some() {
                                     Some((
                                         node_index,
-                                        api::debug::stats::NodeStats {
+                                        noria::debug::stats::NodeStats {
                                             desc: format!("{:?}", n),
                                             process_time: time.unwrap(),
                                             process_ptime: ptime.unwrap(),

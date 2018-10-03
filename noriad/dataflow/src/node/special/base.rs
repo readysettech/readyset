@@ -1,3 +1,4 @@
+use noria::{Modification, Operation, TableOperation};
 use prelude::*;
 use std::borrow::Cow;
 use std::cmp::Ordering;

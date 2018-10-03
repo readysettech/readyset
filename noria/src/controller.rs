@@ -1,6 +1,5 @@
 #[cfg(debug_assertions)]
 use assert_infrequent;
-use basics::*;
 use consensus::{self, Authority};
 use debug::stats;
 use failure::{self, ResultExt};
@@ -9,6 +8,7 @@ use futures::{
     Future, Stream,
 };
 use hyper::{self, Client};
+use petgraph::graph::NodeIndex;
 use serde::de::DeserializeOwned;
 use serde::Serialize;
 use serde_json;

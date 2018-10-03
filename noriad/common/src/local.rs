@@ -1,28 +1,25 @@
+use internal::LocalNodeIndex;
+use noria::DataType;
 use petgraph::graph::NodeIndex;
+use serde::{Deserialize, Deserializer, Serialize, Serializer};
 use std::collections::HashMap;
 use std::fmt;
 
-use serde::{Deserialize, Deserializer, Serialize, Serializer};
-
-/// A domain-local node identifier.
-#[derive(Eq, PartialEq, Ord, PartialOrd, Hash, Clone, Copy, Debug, Serialize, Deserialize)]
-pub struct LocalNodeIndex {
-    id: u32, // not a tuple struct so this field can be made private
+#[derive(Clone, Copy, PartialEq, Serialize, Deserialize)]
+pub struct Link {
+    pub src: LocalNodeIndex,
+    pub dst: LocalNodeIndex,
 }
 
-impl LocalNodeIndex {
-    pub unsafe fn make(id: u32) -> LocalNodeIndex {
-        LocalNodeIndex { id }
-    }
-
-    pub fn id(self) -> usize {
-        self.id as usize
+impl Link {
+    pub fn new(src: LocalNodeIndex, dst: LocalNodeIndex) -> Self {
+        Link { src, dst }
     }
 }
 
-impl fmt::Display for LocalNodeIndex {
+impl fmt::Debug for Link {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        write!(f, "l{}", self.id)
+        write!(f, "{:?} -> {:?}", self.src, self.dst)
     }
 }
 
@@ -110,5 +107,63 @@ impl<'de> Deserialize<'de> for IndexPair {
                 local: def.local,
             }
         })
+    }
+}
+
+#[derive(Clone, Copy, Eq, PartialEq, Ord, PartialOrd, Hash, Debug, Serialize, Deserialize)]
+pub struct Tag(pub u32);
+impl Tag {
+    pub fn id(self) -> u32 {
+        self.0
+    }
+}
+
+#[derive(Clone, Debug, Serialize)]
+pub enum KeyType<'a> {
+    Single(&'a DataType),
+    Double((DataType, DataType)),
+    Tri((DataType, DataType, DataType)),
+    Quad((DataType, DataType, DataType, DataType)),
+    Quin((DataType, DataType, DataType, DataType, DataType)),
+    Sex((DataType, DataType, DataType, DataType, DataType, DataType)),
+}
+
+impl<'a> KeyType<'a> {
+    pub fn from<I>(other: I) -> Self
+    where
+        I: IntoIterator<Item = &'a DataType>,
+        <I as IntoIterator>::IntoIter: ExactSizeIterator,
+    {
+        let mut other = other.into_iter();
+        let len = other.len();
+        let mut more = move || other.next().unwrap();
+        match len {
+            0 => unreachable!(),
+            1 => KeyType::Single(more()),
+            2 => KeyType::Double((more().clone(), more().clone())),
+            3 => KeyType::Tri((more().clone(), more().clone(), more().clone())),
+            4 => KeyType::Quad((
+                more().clone(),
+                more().clone(),
+                more().clone(),
+                more().clone(),
+            )),
+            5 => KeyType::Quin((
+                more().clone(),
+                more().clone(),
+                more().clone(),
+                more().clone(),
+                more().clone(),
+            )),
+            6 => KeyType::Sex((
+                more().clone(),
+                more().clone(),
+                more().clone(),
+                more().clone(),
+                more().clone(),
+                more().clone(),
+            )),
+            _ => unimplemented!(),
+        }
     }
 }

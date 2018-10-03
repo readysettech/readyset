@@ -1,5 +1,3 @@
-use api::ActivationResult;
-use basics::NodeIndex;
 use crate::controller::security::SecurityConfig;
 use crate::controller::sql::reuse::ReuseConfigType;
 use crate::controller::sql::SqlIncorporator;
@@ -9,6 +7,8 @@ use dataflow::ops::trigger::TriggerEvent;
 use dataflow::prelude::DataType;
 use nom_sql::parser as sql_parser;
 use nom_sql::SqlQuery;
+use noria::ActivationResult;
+use petgraph::graph::NodeIndex;
 
 use nom::{self, is_alphanumeric, multispace};
 use nom_sql::CreateTableStatement;

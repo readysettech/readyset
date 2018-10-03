@@ -1,10 +1,11 @@
 use nom_sql::{ArithmeticExpression, ColumnSpecification, OrderType};
+use petgraph::graph::NodeIndex;
 use std::cell::RefCell;
 use std::fmt::{Debug, Display, Error, Formatter};
 use std::rc::Rc;
 
-use basics::{DataType, NodeIndex};
 use column::Column;
+use common::DataType;
 use dataflow::ops;
 use dataflow::ops::filter::FilterCondition;
 use dataflow::ops::grouped::aggregate::Aggregation as AggregationKind;

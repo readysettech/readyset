@@ -1,8 +1,8 @@
-use api::debug::stats::GraphStats;
 use channel::tcp::{SendError, TcpSender};
 use consensus::{Authority, Epoch, STATE_KEY};
 use dataflow::prelude::*;
 use dataflow::{node, payload, DomainConfig};
+use noria::debug::stats::GraphStats;
 
 use std::collections::{BTreeMap, HashMap};
 use std::net::{IpAddr, SocketAddr};
@@ -10,11 +10,11 @@ use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 use std::{io, time};
 
-use api::builders::*;
-use api::ActivationResult;
 use crate::controller::migrate::materialization::Materializations;
 use crate::controller::{ControllerState, DomainHandle, Migration, Recipe, WorkerIdentifier};
 use crate::coordination::CoordinationMessage;
+use noria::builders::*;
+use noria::ActivationResult;
 
 use hyper::{self, Method, StatusCode};
 use mio::net::TcpListener;
