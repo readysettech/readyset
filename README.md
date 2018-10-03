@@ -77,7 +77,7 @@ adapter](https://github.com/mit-pdos/noria-mysql). They both
 automatically locate the running worker through ZooKeeper (use `-z` if
 ZooKeeper is not running on `localhost:2181`).
 
-## Rust bindings
+### Rust bindings
 
 The [`noria` crate](https://crates.io/crates/noria) provides native Rust
 bindings to interact with `noria-server`. See the [`noria`
@@ -87,7 +87,7 @@ program](noria/examples/basic-recipe.rs). You can also see a
 self-contained version that embeds `noria-server` (and doesn't require
 ZooKeeper) in [this example](noria-server/examples/basic-recipe.rs).
 
-## MySQL adapter
+### MySQL adapter
 
 We have built a [MySQL
 adapter](https://github.com/mit-pdos/noria-mysql) for Noria that accepts
