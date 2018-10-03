@@ -27,7 +27,7 @@
 //! ```no_run
 //! # use noria::*;
 //! # let zookeeper_addr = "127.0.0.1:2181";
-//! let db = ControllerHandle::from_zk(zookeeper_addr);
+//! let mut db = ControllerHandle::from_zk(zookeeper_addr).unwrap();
 //!
 //! // if this is the first time we interact with Noria, we must give it the schema
 //! db.install_recipe("
@@ -62,10 +62,11 @@
 //!
 //! // and then get handles that let us execute those queries to fetch their results
 //! let mut awvc = db.view("ArticleWithVoteCount").unwrap();
+//! // looking up article 42 should yield the article we inserted with a vote count of 1
 //! assert_eq!(
-//!     awvc.lookup(&[aid.into()]),                          // looking up article 42
-//!     vec![aid.into(), title.into(), url.into(), 1.into()] // should give the right result!
-//! ));
+//!     awvc.lookup(&[aid.into()], true).unwrap(),
+//!     vec![vec![DataType::from(aid), title.into(), url.into(), 1.into()]]
+//! );
 //! ```
 //!
 //! # Client model
