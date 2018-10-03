@@ -18,14 +18,27 @@ use std::rc::Rc;
 use std::time;
 use trawler::{LobstersRequest, UserId};
 
+const ORIGINAL_SCHEMA: &'static str = include_str!("../db-schema/original.sql");
+const SOUP_SCHEMA: &'static str = include_str!("../db-schema/soup.sql");
+const SOUPY_SCHEMA: &'static str = include_str!("../db-schema/soupy.sql");
+
+#[derive(Clone, Copy, Eq, PartialEq, Debug)]
+enum Variant {
+    Original,
+    Soup,
+    Soupy,
+}
+
 struct MysqlSpawner {
     opts: my::OptsBuilder,
+    variant: Variant,
     simulate_shards: Option<u32>,
 }
 impl MysqlSpawner {
-    fn new(opts: my::OptsBuilder, simulate_shards: Option<u32>) -> Self {
+    fn new(opts: my::OptsBuilder, v: Variant, simulate_shards: Option<u32>) -> Self {
         MysqlSpawner {
             opts,
+            variant: v,
             simulate_shards,
         }
     }
@@ -33,12 +46,14 @@ impl MysqlSpawner {
 
 struct MysqlTrawler {
     c: my::Pool,
+    variant: Variant,
     tokens: RefCell<HashMap<u32, String>>,
     simulate_shards: Option<u32>,
 }
 impl MysqlTrawler {
     fn new(
         handle: &tokio_core::reactor::Handle,
+        variant: Variant,
         opts: my::Opts,
         simulate_shards: Option<u32>,
     ) -> Self {
@@ -46,6 +61,7 @@ impl MysqlTrawler {
             c: my::Pool::new(opts, handle),
             tokens: HashMap::new().into(),
             simulate_shards,
+            variant,
         }
     }
 }
@@ -63,7 +79,12 @@ impl trawler::LobstersClient for MysqlTrawler {
     type Factory = MysqlSpawner;
 
     fn spawn(spawner: &mut Self::Factory, handle: &tokio_core::reactor::Handle) -> Self {
-        MysqlTrawler::new(handle, spawner.opts.clone().into(), spawner.simulate_shards)
+        MysqlTrawler::new(
+            handle,
+            spawner.variant,
+            spawner.opts.clone().into(),
+            spawner.simulate_shards,
+        )
     }
 
     fn setup(spawner: &mut Self::Factory) {
@@ -78,9 +99,15 @@ impl trawler::LobstersClient for MysqlTrawler {
                 .and_then(|c| c.drop_query(&format!("DROP DATABASE {}", db)))
                 .and_then(|c| c.drop_query(&format!("CREATE DATABASE {}", db)))
                 .and_then(|c| c.drop_query(&format!("USE {}", db))),
-        ).unwrap();
+        )
+        .unwrap();
         let mut current_q = String::new();
-        for q in include_str!("../db-schema.sql").lines() {
+        let schema = match spawner.variant {
+            Variant::Original => ORIGINAL_SCHEMA,
+            Variant::Soup => SOUP_SCHEMA,
+            Variant::Soupy => SOUPY_SCHEMA,
+        };
+        for q in schema.lines() {
             if q.starts_with("--") || q.is_empty() {
                 continue;
             }
@@ -156,63 +183,74 @@ impl trawler::LobstersClient for MysqlTrawler {
         });
         */
 
-        let c = match req {
-            LobstersRequest::User(uid) => endpoints::user::handle(c, acting_as, uid),
-            LobstersRequest::Frontpage => endpoints::frontpage::handle(c, acting_as),
-            LobstersRequest::Comments => endpoints::comments::handle(c, acting_as),
-            LobstersRequest::Recent => endpoints::recent::handle(c, acting_as),
-            LobstersRequest::Login => {
-                Box::new(
-                    c.and_then(move |c| {
-                        c.first_exec::<_, _, my::Row>(
-                            "\
-                             SELECT  1 as one \
-                             FROM `users` \
-                             WHERE `users`.`username` = ?",
-                            (format!("user{}", acting_as.unwrap()),),
+        macro_rules! handle_req {
+            ($module:tt, $req:expr) => {
+                match req {
+                    LobstersRequest::User(uid) => endpoints::$module::user::handle(c, acting_as, uid),
+                    LobstersRequest::Frontpage => endpoints::$module::frontpage::handle(c, acting_as),
+                    LobstersRequest::Comments => endpoints::$module::comments::handle(c, acting_as),
+                    LobstersRequest::Recent => endpoints::$module::recent::handle(c, acting_as),
+                    LobstersRequest::Login => {
+                        Box::new(
+                            c.and_then(move |c| {
+                                c.first_exec::<_, _, my::Row>(
+                                    "\
+                                     SELECT  1 as one \
+                                     FROM `users` \
+                                     WHERE `users`.`username` = ?",
+                                    (format!("user{}", acting_as.unwrap()),),
+                                )
+                            })
+                            .and_then(move |(c, user)| {
+                                if user.is_none() {
+                                    let uid = acting_as.unwrap();
+                                    futures::future::Either::A(c.drop_exec(
+                                        "\
+                                         INSERT INTO `users` \
+                                         (`username`, `email`, `password_digest`, `created_at`, \
+                                         `session_token`, `rss_token`, `mailing_list_token`) \
+                                         VALUES (?, ?, ?, ?, ?, ?, ?)",
+                                        (
+                                            format!("user{}", uid),
+                                            format!("user{}@example.com", uid),
+                                            "$2a$10$Tq3wrGeC0xtgzuxqOlc3v.07VTUvxvwI70kuoVihoO2cE5qj7ooka", // test
+                                            chrono::Local::now().naive_local(),
+                                            format!("token{}", uid),
+                                            format!("rsstoken{}", uid),
+                                            format!("mtok{}", uid),
+                                        ),
+                                    ))
+                                } else {
+                                    futures::future::Either::B(futures::future::ok(c))
+                                }
+                            })
+                            .map(|c| (c, false)),
                         )
-                    }).and_then(move |(c, user)| {
-                            if user.is_none() {
-                                let uid = acting_as.unwrap();
-                                futures::future::Either::A(c.drop_exec(
-                            "\
-                             INSERT INTO `users` \
-                             (`username`, `email`, `password_digest`, `created_at`, \
-                             `session_token`, `rss_token`, `mailing_list_token`) \
-                             VALUES (?, ?, ?, ?, ?, ?, ?)",
-                            (
-                                format!("user{}", uid),
-                                format!("user{}@example.com", uid),
-                                "$2a$10$Tq3wrGeC0xtgzuxqOlc3v.07VTUvxvwI70kuoVihoO2cE5qj7ooka", // test
-                                chrono::Local::now().naive_local(),
-                                format!("token{}", uid),
-                                format!("rsstoken{}", uid),
-                                format!("mtok{}", uid),
-                            ),
-                        ))
-                            } else {
-                                futures::future::Either::B(futures::future::ok(c))
-                            }
-                        })
-                        .map(|c| (c, false)),
-                )
+                    }
+                    LobstersRequest::Logout => Box::new(c.map(|c| (c, false))),
+                    LobstersRequest::Story(id) => {
+                        endpoints::$module::story::handle(c, acting_as, this.simulate_shards, id)
+                    }
+                    LobstersRequest::StoryVote(story, v) => {
+                        endpoints::$module::story_vote::handle(c, acting_as, story, v)
+                    }
+                    LobstersRequest::CommentVote(comment, v) => {
+                        endpoints::$module::comment_vote::handle(c, acting_as, comment, v)
+                    }
+                    LobstersRequest::Submit { id, title } => {
+                        endpoints::$module::submit::handle(c, acting_as, id, title)
+                    }
+                    LobstersRequest::Comment { id, story, parent } => {
+                        endpoints::$module::comment::handle(c, acting_as, id, story, parent)
+                    }
+                }
             }
-            LobstersRequest::Logout => Box::new(c.map(|c| (c, false))),
-            LobstersRequest::Story(id) => {
-                endpoints::story::handle(c, acting_as, this.simulate_shards, id)
-            }
-            LobstersRequest::StoryVote(story, v) => {
-                endpoints::story_vote::handle(c, acting_as, story, v)
-            }
-            LobstersRequest::CommentVote(comment, v) => {
-                endpoints::comment_vote::handle(c, acting_as, comment, v)
-            }
-            LobstersRequest::Submit { id, title } => {
-                endpoints::submit::handle(c, acting_as, id, title)
-            }
-            LobstersRequest::Comment { id, story, parent } => {
-                endpoints::comment::handle(c, acting_as, id, story, parent)
-            }
+        };
+
+        let c = match this.variant {
+            Variant::Original => handle_req!(original, req),
+            Variant::Soup => handle_req!(soup, req),
+            Variant::Soupy => handle_req!(soupy, req),
         };
 
         // notifications
@@ -222,29 +260,23 @@ impl trawler::LobstersClient for MysqlTrawler {
                     return Either::A(futures::future::ok(c));
                 }
 
-                Either::B(c.drop_exec(
-                    "SELECT COUNT(*) \
-                     FROM `replying_comments_for_count`
-                     WHERE `replying_comments_for_count`.`user_id` = ? \
-                     GROUP BY `replying_comments_for_count`.`user_id` \
-                     ",
-                    (uid,),
-                ).and_then(move |c| {
-                    c.drop_exec(
-                        "SELECT `keystores`.* \
-                         FROM `keystores` \
-                         WHERE `keystores`.`key` = ?",
-                        (format!("user:{}:unread_messages", uid),),
-                    )
-                }))
+                Either::B(match this.variant {
+                    Variant::Original => Box::new(endpoints::original::notifications(c, uid))
+                        as Box<Future<Item = my::Conn, Error = my::errors::Error>>,
+                    Variant::Soup => Box::new(endpoints::soup::notifications(c, uid)),
+                    Variant::Soupy => Box::new(endpoints::soupy::notifications(c, uid)),
+                })
             }))
         } else {
             Either::B(c.map(|(c, _)| c))
         };
 
-        Box::new(c.map_err(|e| {
-            eprintln!("{:?}", e);
-        }).map(move |_| sent.elapsed()))
+        Box::new(
+            c.map_err(|e| {
+                eprintln!("{:?}", e);
+            })
+            .map(move |_| sent.elapsed()),
+        )
     }
 }
 
@@ -278,6 +310,15 @@ fn main() {
             Arg::with_name("prime")
                 .long("prime")
                 .help("Set if the backend must be primed with initial stories and comments."),
+        )
+        .arg(
+            Arg::with_name("queries")
+                .short("q")
+                .long("queries")
+                .possible_values(&["original", "soup", "soupy"])
+                .takes_value(true)
+                .required(true)
+                .help("Which set of queries to run"),
         )
         .arg(
             Arg::with_name("runtime")
@@ -321,7 +362,14 @@ fn main() {
         )
         .get_matches();
 
-    let simulate_shards = args.value_of("fakeshards")
+    let variant = match args.value_of("queries").unwrap() {
+        "original" => Variant::Original,
+        "soup" => Variant::Soup,
+        "soupy" => Variant::Soupy,
+        _ => unreachable!(),
+    };
+    let simulate_shards = args
+        .value_of("fakeshards")
         .map(|_| value_t_or_exit!(args, "fakeshards", u32));
     assert!(
         simulate_shards.is_none() || value_t_or_exit!(args, "memscale", f64) == 1.0,
@@ -332,12 +380,13 @@ fn main() {
     wl.scale(
         value_t_or_exit!(args, "memscale", f64),
         value_t_or_exit!(args, "reqscale", f64),
-    ).issuers(value_t_or_exit!(args, "issuers", usize))
-        .time(
-            time::Duration::from_secs(value_t_or_exit!(args, "warmup", u64)),
-            time::Duration::from_secs(value_t_or_exit!(args, "runtime", u64)),
-        )
-        .in_flight(50);
+    )
+    .issuers(value_t_or_exit!(args, "issuers", usize))
+    .time(
+        time::Duration::from_secs(value_t_or_exit!(args, "warmup", u64)),
+        time::Duration::from_secs(value_t_or_exit!(args, "runtime", u64)),
+    )
+    .in_flight(50);
 
     if let Some(h) = args.value_of("histogram") {
         wl.with_histogram(h);
@@ -348,7 +397,7 @@ fn main() {
     opts.tcp_nodelay(true);
     opts.pool_min(Some(50usize));
     opts.pool_max(Some(50usize));
-    let mut s = MysqlSpawner::new(opts, simulate_shards);
+    let mut s = MysqlSpawner::new(opts, variant, simulate_shards);
 
     if !args.is_present("prime") {
         let mut core = tokio_core::reactor::Core::new().unwrap();
