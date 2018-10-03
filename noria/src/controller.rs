@@ -1,7 +1,10 @@
 #[cfg(debug_assertions)]
 use assert_infrequent;
 use consensus::{self, Authority};
-use debug::stats;
+use crate::debug::stats;
+use crate::table::{Table, TableBuilder, TableRpc};
+use crate::view::{View, ViewBuilder, ViewRpc};
+use crate::ActivationResult;
 use failure::{self, ResultExt};
 use futures::{
     sync::{mpsc, oneshot},
@@ -17,10 +20,7 @@ use std::net::SocketAddr;
 use std::sync::Arc;
 use std::thread;
 use std::time::Duration;
-use table::{Table, TableBuilder, TableRpc};
 use tokio;
-use view::{View, ViewBuilder, ViewRpc};
-use ActivationResult;
 
 /// Describes a running controller instance.
 ///

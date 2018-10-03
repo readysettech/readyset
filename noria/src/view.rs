@@ -1,13 +1,13 @@
 use channel::rpc::RpcClient;
-use data::*;
-use error::TransportError;
+use crate::data::*;
+use crate::error::TransportError;
+use crate::{ExclusiveConnection, SharedConnection};
 use petgraph::graph::NodeIndex;
 use std::cell::RefCell;
 use std::collections::HashMap;
 use std::io;
 use std::net::SocketAddr;
 use std::rc::Rc;
-use {ExclusiveConnection, SharedConnection};
 
 pub(crate) type ViewRpc = Rc<RefCell<RpcClient<ReadQuery, ReadReply>>>;
 
@@ -253,7 +253,7 @@ impl<E> View<E> {
             assert!(keys.iter().all(|k| k.len() == 1));
             let mut shard_queries = vec![Vec::new(); self.shards.len()];
             for key in keys {
-                let shard = ::shard_by(&key[0], self.shards.len());
+                let shard = crate::shard_by(&key[0], self.shards.len());
                 shard_queries[shard].push(key);
             }
 

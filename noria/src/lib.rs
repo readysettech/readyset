@@ -100,27 +100,10 @@
 #![deny(missing_docs)]
 #![deny(unused_extern_crates)]
 
-#[cfg(debug_assertions)]
-extern crate assert_infrequent;
-extern crate bincode;
-extern crate channel;
-extern crate consensus;
-extern crate internal;
 #[macro_use]
 extern crate failure;
-extern crate futures;
-extern crate hyper;
-extern crate nom_sql;
-extern crate petgraph;
-extern crate serde;
 #[macro_use]
 extern crate serde_derive;
-extern crate arccstr;
-extern crate chrono;
-extern crate fnv;
-extern crate serde_json;
-extern crate tokio;
-extern crate vec_map;
 
 use internal::*;
 use petgraph::graph::NodeIndex;
@@ -143,8 +126,8 @@ pub mod prelude {
 
 /// Noria errors.
 pub mod error {
-    pub use table::TableError;
-    pub use view::ViewError;
+    pub use crate::table::TableError;
+    pub use crate::view::ViewError;
 
     /// An error occured during transport (i.e., while sending or receiving).
     #[derive(Debug, Fail)]
@@ -170,16 +153,16 @@ pub mod error {
     }
 }
 
-pub use controller::{ControllerDescriptor, ControllerHandle, ControllerPointer};
-pub use data::{DataType, Modification, Operation, TableOperation};
-pub use table::Table;
-pub use view::View;
+pub use crate::controller::{ControllerDescriptor, ControllerHandle, ControllerPointer};
+pub use crate::data::{DataType, Modification, Operation, TableOperation};
+pub use crate::table::Table;
+pub use crate::view::View;
 
 #[doc(hidden)]
-pub use table::Input;
+pub use crate::table::Input;
 
 #[doc(hidden)]
-pub use view::{ReadQuery, ReadReply};
+pub use crate::view::{ReadQuery, ReadReply};
 
 #[doc(hidden)]
 pub mod builders {

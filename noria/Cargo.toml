@@ -2,6 +2,7 @@
 name = "noria"
 version = "0.1.0"
 authors = ["The Noria developers <noria@pdos.csail.mit.edu>"]
+edition = "2018"
 
 [dependencies]
 assert_infrequent = "0.1.0"

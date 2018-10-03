@@ -1,7 +1,8 @@
 use channel::{tcp, DomainConnectionBuilder, TcpSender};
-use data::*;
-use debug::trace::Tracer;
-use error::TransportError;
+use crate::data::*;
+use crate::debug::trace::Tracer;
+use crate::error::TransportError;
+use crate::{ExclusiveConnection, LocalOrNot, SharedConnection};
 use internal::*;
 use nom_sql::CreateTableStatement;
 use std::cell::RefCell;
@@ -10,7 +11,6 @@ use std::io;
 use std::net::SocketAddr;
 use std::rc::Rc;
 use vec_map::VecMap;
-use {ExclusiveConnection, LocalOrNot, SharedConnection};
 
 #[doc(hidden)]
 #[derive(Clone, Serialize, Deserialize)]
@@ -588,7 +588,7 @@ impl<'a> BatchSendHandle<'a> {
                         TableOperation::Update { ref key, .. } => &key[0],
                         TableOperation::InsertOrUpdate { ref row, .. } => &row[key_col],
                     };
-                    ::shard_by(key, self.dih.txs.len())
+                    crate::shard_by(key, self.dih.txs.len())
                 };
                 shard_writes[shard].push(r);
             }
