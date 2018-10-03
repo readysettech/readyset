@@ -5,7 +5,7 @@ authors = ["The Noria developers <noria@pdos.csail.mit.edu>"]
 edition = "2018"
 
 description = "Client bindings for Noria"
-readme = "../README.md"
+readme = "README.md"
 
 homepage = "https://pdos.csail.mit.edu/noria"
 repository = "https://github.com/mit-pdos/noria.git"
