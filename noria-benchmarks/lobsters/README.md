@@ -3,7 +3,7 @@
 This benchmark uses [`trawler`](https://github.com/jonhoo/trawler) to
 generate a workload that is similar to that of the
 [lobste.rs](https://lobste.rs) news aggregator. It is the same benchmark
-that was used in §8.2 in the [OSDI'18 Noria
+that was used in §8.1 in the [OSDI'18 Noria
 paper](https://jon.tsp.io/papers/osdi18-noria.pdf).
 
 The benchmark issues SQL queries from the [Lobsters code
