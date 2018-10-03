@@ -1,11 +1,9 @@
 #[macro_use]
 extern crate clap;
-extern crate consensus;
 extern crate noriad;
 extern crate slog;
 
-use consensus::ZookeeperAuthority;
-use noriad::{ControllerBuilder, ReuseConfigType};
+use noriad::{ControllerBuilder, ReuseConfigType, ZookeeperAuthority};
 use std::path::PathBuf;
 use std::sync::Arc;
 use std::time::Duration;

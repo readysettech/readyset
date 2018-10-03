@@ -1,27 +1,24 @@
-use channel::tcp::{SendError, TcpSender};
-use consensus::{Authority, Epoch, STATE_KEY};
+use crate::controller::migrate::materialization::Materializations;
+use crate::controller::{ControllerState, DomainHandle, Migration, Recipe, WorkerIdentifier};
+use crate::coordination::CoordinationMessage;
 use dataflow::prelude::*;
 use dataflow::{node, payload, DomainConfig};
+use hyper::{self, Method, StatusCode};
+use mio::net::TcpListener;
+use noria::builders::*;
+use noria::channel::tcp::{SendError, TcpSender};
+use noria::consensus::{Authority, Epoch, STATE_KEY};
 use noria::debug::stats::GraphStats;
-
+use noria::ActivationResult;
+use petgraph;
+use petgraph::visit::Bfs;
+use slog;
 use std::collections::{BTreeMap, HashMap};
+use std::mem;
 use std::net::{IpAddr, SocketAddr};
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 use std::{io, time};
-
-use crate::controller::migrate::materialization::Materializations;
-use crate::controller::{ControllerState, DomainHandle, Migration, Recipe, WorkerIdentifier};
-use crate::coordination::CoordinationMessage;
-use noria::builders::*;
-use noria::ActivationResult;
-
-use hyper::{self, Method, StatusCode};
-use mio::net::TcpListener;
-use petgraph;
-use petgraph::visit::Bfs;
-use slog;
-use std::mem;
 
 #[derive(Clone)]
 pub(crate) struct WorkerStatus {

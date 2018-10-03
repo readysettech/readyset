@@ -1,6 +1,6 @@
 #[cfg(debug_assertions)]
 use assert_infrequent;
-use consensus::{self, Authority};
+use crate::consensus::{self, Authority};
 use crate::debug::stats;
 use crate::table::{Table, TableBuilder, TableRpc};
 use crate::view::{View, ViewBuilder, ViewRpc};

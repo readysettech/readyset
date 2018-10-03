@@ -11,7 +11,6 @@ publish = false
 orchestration = ["rusoto_core", "rusoto_sts", "tsunami"]
 
 [dependencies]
-channel = { path = "../channel" }
 chrono = { version = "0.4.0", features = ["serde"] }
 noria = { path = "../noriad", package = "noriad" }
 nom-sql = "0.0.4"

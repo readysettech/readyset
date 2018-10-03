@@ -8,13 +8,11 @@
 #[cfg(debug_assertions)]
 extern crate backtrace;
 extern crate bincode;
-extern crate channel;
 extern crate common;
 extern crate evmap;
 extern crate fnv;
 extern crate futures;
 extern crate hyper;
-extern crate internal;
 extern crate itertools;
 extern crate nom_sql;
 extern crate noria;

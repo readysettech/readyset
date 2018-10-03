@@ -3,7 +3,7 @@ use std::cell;
 
 // core types
 pub use common::*;
-pub use internal::*;
+pub use noria::internal::*;
 pub use ops::NodeOperator;
 pub use petgraph::graph::NodeIndex;
 pub use processing::Ingredient;
@@ -30,10 +30,8 @@ pub type ReplicaAddr = (DomainIndex, usize);
 pub use DurabilityMode;
 pub use PersistenceParameters;
 
-// channel related types
-use channel;
 /// Channel coordinator type specialized for domains
-pub type ChannelCoordinator = channel::ChannelCoordinator<(DomainIndex, usize), Box<Packet>>;
+pub type ChannelCoordinator = noria::channel::ChannelCoordinator<(DomainIndex, usize), Box<Packet>>;
 pub trait Executor {
     fn send_back(&mut self, client: SourceChannelIdentifier, ack: ());
 }

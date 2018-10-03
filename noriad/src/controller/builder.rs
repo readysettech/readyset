@@ -1,15 +1,12 @@
-use consensus::{Authority, LocalAuthority};
+use crate::controller::sql::reuse::ReuseConfigType;
+use crate::controller::{self, ControllerConfig, LocalControllerHandle};
 use dataflow::PersistenceParameters;
-
+use failure;
+use noria::consensus::{Authority, LocalAuthority};
+use slog;
 use std::net::IpAddr;
 use std::sync::Arc;
 use std::time;
-
-use failure;
-use slog;
-
-use crate::controller::sql::reuse::ReuseConfigType;
-use crate::controller::{self, ControllerConfig, LocalControllerHandle};
 
 /// Used to construct a controller.
 pub struct ControllerBuilder {

@@ -331,10 +331,10 @@ mod coordination;
 #[cfg(test)]
 mod integration;
 
-pub use consensus::LocalAuthority;
 pub use crate::controller::sql::reuse::ReuseConfigType;
 pub use crate::controller::{ControllerBuilder, LocalControllerHandle};
 pub use dataflow::{DurabilityMode, PersistenceParameters};
+pub use noria::consensus::LocalAuthority;
 pub use noria::*;
 pub use petgraph::graph::NodeIndex;
 

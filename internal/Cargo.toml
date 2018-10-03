@@ -1,9 +1,0 @@
-[package]
-name = "internal"
-version = "0.1.0"
-authors = ["The Noria developers <noria@pdos.csail.mit.edu>"]
-publish = false
-
-[dependencies]
-serde_derive = "1.0.8"
-serde = { version = "1.0.8", features = ["rc"] }

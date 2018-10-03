@@ -3,11 +3,11 @@ use serde::{Deserialize, Serialize};
 
 #[cfg(debug_assertions)]
 use backtrace::Backtrace;
-use channel;
 use domain;
-use internal::LocalOrNot;
 use node;
 use noria;
+use noria::channel;
+use noria::internal::LocalOrNot;
 use prelude::*;
 
 use std::collections::{HashMap, HashSet};

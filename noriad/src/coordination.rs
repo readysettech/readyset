@@ -1,8 +1,7 @@
-use std::net::SocketAddr;
-
-use consensus::Epoch;
 use dataflow::prelude::*;
 use dataflow::DomainBuilder;
+use noria::consensus::Epoch;
+use std::net::SocketAddr;
 
 /// Coordination-layer message wrapper; adds a mandatory `source` field to each message.
 #[derive(Clone, Debug, Deserialize, Serialize)]

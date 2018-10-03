@@ -1,9 +1,9 @@
-use channel::{tcp, DomainConnectionBuilder, TcpSender};
+use crate::channel::{tcp, DomainConnectionBuilder, TcpSender};
 use crate::data::*;
 use crate::debug::trace::Tracer;
 use crate::error::TransportError;
+use crate::internal::*;
 use crate::{ExclusiveConnection, LocalOrNot, SharedConnection};
-use internal::*;
 use nom_sql::CreateTableStatement;
 use std::cell::RefCell;
 use std::collections::HashMap;

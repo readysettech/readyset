@@ -1,9 +1,9 @@
 extern crate clap;
-extern crate consensus;
+extern crate noria;
 extern crate serde_json;
 extern crate zookeeper;
 
-use consensus::{CONTROLLER_KEY, STATE_KEY};
+use noria::consensus::{CONTROLLER_KEY, STATE_KEY};
 use serde_json::Value;
 use std::process;
 use std::time::Duration;

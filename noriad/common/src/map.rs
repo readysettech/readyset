@@ -1,4 +1,4 @@
-use internal::*;
+use noria::internal::*;
 use std::iter::FromIterator;
 use std::ops::{Index, IndexMut};
 

@@ -1,5 +1,5 @@
 use backlog;
-use channel;
+use noria::channel;
 use prelude::*;
 
 /// A StreamUpdate reflects the addition or deletion of a row from a reader node.

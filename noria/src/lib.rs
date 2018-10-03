@@ -98,6 +98,8 @@
 //! binary MySQL protocol, which provides a compatibility layer for applications that wish to
 //! continue to issue ad-hoc MySQL queries through existing MySQL client libraries.
 #![feature(try_from)]
+#![feature(allow_fail)]
+#![feature(bufreader_buffer)]
 #![deny(missing_docs)]
 #![deny(unused_extern_crates)]
 
@@ -105,8 +107,9 @@
 extern crate failure;
 #[macro_use]
 extern crate serde_derive;
+#[macro_use]
+extern crate slog;
 
-use internal::*;
 use petgraph::graph::NodeIndex;
 use std::collections::HashMap;
 
@@ -115,7 +118,15 @@ mod data;
 mod table;
 mod view;
 
-pub use consensus::ZookeeperAuthority;
+#[doc(hidden)]
+pub mod channel;
+#[doc(hidden)]
+pub mod consensus;
+#[doc(hidden)]
+pub mod internal;
+
+pub use crate::consensus::ZookeeperAuthority;
+use crate::internal::*;
 
 /// The prelude contains most of the types needed in everyday operation.
 pub mod prelude {
@@ -135,14 +146,14 @@ pub mod error {
     pub enum TransportError {
         /// A network-level error occurred.
         #[fail(display = "{}", _0)]
-        Channel(#[cause] channel::tcp::SendError),
+        Channel(#[cause] crate::channel::tcp::SendError),
         /// A protocol-level error occurred.
         #[fail(display = "{}", _0)]
         Serialization(#[cause] bincode::Error),
     }
 
-    impl From<channel::tcp::SendError> for TransportError {
-        fn from(e: channel::tcp::SendError) -> Self {
+    impl From<crate::channel::tcp::SendError> for TransportError {
+        fn from(e: crate::channel::tcp::SendError) -> Self {
             TransportError::Channel(e)
         }
     }

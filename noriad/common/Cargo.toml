@@ -7,7 +7,6 @@ publish = false
 
 [dependencies]
 arccstr = "1.2.0"
-internal = { path = "../../internal" }
 noria = { path = "../../noria" }
 chrono = { version = "0.4.0", features = ["serde"] }
 serde_derive = "1.0.8"

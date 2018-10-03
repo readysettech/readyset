@@ -11,11 +11,11 @@ use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::Arc;
 use std::time;
 
-use channel::poll::{PollEvent, ProcessResult};
-use channel::{self, TcpSender};
 use futures;
 use group_commit::GroupCommitQueueSet;
-pub use internal::DomainIndex as Index;
+use noria::channel::poll::{PollEvent, ProcessResult};
+use noria::channel::{self, TcpSender};
+pub use noria::internal::DomainIndex as Index;
 use payload::{ControlReplyPacket, ReplayPieceContext};
 use prelude::*;
 use slog::Logger;

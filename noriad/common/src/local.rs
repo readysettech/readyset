@@ -1,4 +1,4 @@
-use internal::LocalNodeIndex;
+use noria::internal::LocalNodeIndex;
 use noria::DataType;
 use petgraph::graph::NodeIndex;
 use serde::{Deserialize, Deserializer, Serialize, Serializer};

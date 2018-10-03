@@ -1,21 +1,18 @@
+use crate::controller::{WorkerEndpoint, WorkerIdentifier, WorkerStatus};
+use crate::coordination::{CoordinationMessage, CoordinationPayload, DomainDescriptor};
+use dataflow::payload::ControlReplyPacket;
+use dataflow::prelude::*;
+use dataflow::{DomainBuilder, DomainConfig};
+use mio;
+use noria::channel::poll::{KeepPolling, PollEvent, PollingLoop, StopPolling};
+use noria::channel::{tcp, TcpReceiver};
+use noria::consensus::Epoch;
+use noria::debug::stats::{DomainStats, NodeStats};
+use slog::Logger;
 use std::collections::HashMap;
 use std::net::{IpAddr, SocketAddr};
 use std::sync::Arc;
 use std::{self, cell, io};
-
-use mio;
-use slog::Logger;
-
-use channel::poll::{KeepPolling, PollEvent, PollingLoop, StopPolling};
-use channel::{self, tcp, TcpReceiver};
-use consensus::Epoch;
-use dataflow::payload::ControlReplyPacket;
-use dataflow::prelude::*;
-use dataflow::{DomainBuilder, DomainConfig};
-use noria::debug::stats::{DomainStats, NodeStats};
-
-use crate::controller::{WorkerEndpoint, WorkerIdentifier, WorkerStatus};
-use crate::coordination::{CoordinationMessage, CoordinationPayload, DomainDescriptor};
 
 #[derive(Debug)]
 pub enum WaitError {
@@ -24,7 +21,7 @@ pub enum WaitError {
 
 struct DomainShardHandle {
     worker: WorkerIdentifier,
-    tx: Box<dyn channel::Sender<Item = Box<Packet>> + Send>,
+    tx: Box<dyn noria::channel::Sender<Item = Box<Packet>> + Send>,
 }
 
 pub struct DomainHandle {

@@ -1,4 +1,4 @@
-use channel;
+use crate::channel;
 use std::time;
 
 #[doc(hidden)]

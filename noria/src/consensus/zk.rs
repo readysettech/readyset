@@ -9,9 +9,9 @@ use serde_json;
 use slog;
 use zookeeper::{Acl, CreateMode, KeeperState, Stat, WatchedEvent, Watcher, ZkError, ZooKeeper};
 
-use Authority;
-use Epoch;
-use CONTROLLER_KEY;
+use super::Authority;
+use super::Epoch;
+use super::CONTROLLER_KEY;
 
 struct EventWatcher;
 impl Watcher for EventWatcher {

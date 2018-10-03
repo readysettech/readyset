@@ -1,5 +1,5 @@
+use crate::internal::*;
 use crate::MaterializationStatus;
-use internal::*;
 use petgraph::graph::NodeIndex;
 use serde::{Deserialize, Deserializer, Serialize, Serializer};
 use std::collections::HashMap;

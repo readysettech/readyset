@@ -32,8 +32,6 @@ serde = { version = "1.0.8", features = ["rc"] }
 timekeeper = {version = "0.3.0", default-features = false }
 
 # local deps
-channel = { path = "../../channel" }
-internal = { path = "../../internal" }
 common = { path = "../common" }
 noria = { path = "../../noria" }
 

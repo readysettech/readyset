@@ -1,25 +1,11 @@
-#![feature(allow_fail)]
-
-#[macro_use]
-extern crate failure;
-#[macro_use]
-extern crate serde_derive;
-
-extern crate serde;
-extern crate serde_json;
-#[macro_use]
-extern crate slog;
-extern crate slog_term;
-extern crate zookeeper;
-
 use failure::Error;
 use serde::de::DeserializeOwned;
 use serde::Serialize;
 
 mod local;
 mod zk;
-pub use local::LocalAuthority;
-pub use zk::ZookeeperAuthority;
+pub use self::local::LocalAuthority;
+pub use self::zk::ZookeeperAuthority;
 
 pub const CONTROLLER_KEY: &str = "/controller";
 pub const STATE_KEY: &str = "/state";

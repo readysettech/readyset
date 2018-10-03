@@ -6,9 +6,9 @@ use serde::de::DeserializeOwned;
 use serde::Serialize;
 use serde_json;
 
-use Authority;
-use Epoch;
-use CONTROLLER_KEY;
+use super::Authority;
+use super::Epoch;
+use super::CONTROLLER_KEY;
 
 struct LocalAuthorityInner {
     keys: BTreeMap<String, Vec<u8>>,

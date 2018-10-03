@@ -1,8 +1,8 @@
+use super::tcp::{SendError, TryRecvError};
+use super::{DeserializeReceiver, NonBlockingWriter, ReceiveError};
 use bincode;
 use bufstream::BufStream;
 use byteorder::{NetworkEndian, WriteBytesExt};
-use crate::tcp::{SendError, TryRecvError};
-use crate::{DeserializeReceiver, NonBlockingWriter, ReceiveError};
 use mio::{self, Evented, Poll, PollOpt, Ready, Token};
 use net2;
 use serde::{Deserialize, Serialize};

@@ -1,15 +1,3 @@
-#![feature(bufreader_buffer)]
-#![feature(try_from)]
-#![deny(unused_extern_crates)]
-
-#[macro_use]
-extern crate failure;
-
-// the compiler sometimes warns that this macro_use isn't necessary
-// that's not true...
-#[macro_use]
-extern crate serde_derive;
-
 use std::borrow::Borrow;
 use std::collections::HashMap;
 use std::hash::Hash;
@@ -29,7 +17,7 @@ pub mod poll;
 pub mod rpc;
 pub mod tcp;
 
-pub use crate::tcp::{channel, DualTcpStream, TcpReceiver, TcpSender};
+pub use self::tcp::{channel, DualTcpStream, TcpReceiver, TcpSender};
 
 pub const CONNECTION_FROM_BASE: u8 = 1;
 pub const CONNECTION_FROM_DOMAIN: u8 = 0;

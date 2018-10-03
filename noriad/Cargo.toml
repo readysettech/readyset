@@ -47,9 +47,6 @@ serde = { version = "1.0.8", features = ["rc"] }
 zookeeper = "0.5.3"
 
 # local deps
-channel = { path = "../channel" }
-consensus = { path = "../consensus" }
-internal = { path = "../internal" }
 dataflow = { path = "dataflow" }
 mir = { path = "mir" }
 common = { path = "common" }

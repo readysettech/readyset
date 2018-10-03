@@ -1,15 +1,13 @@
-use consensus::Authority;
 #[cfg(test)]
 use crate::controller::migrate::Migration;
+use crate::controller::Event;
 use dataflow::prelude::*;
-
+use futures::{self, Future};
+use noria::consensus::Authority;
+use noria::prelude::*;
 use std::collections::HashMap;
 use std::ops::{Deref, DerefMut};
 use std::sync::Arc;
-
-use crate::controller::Event;
-use futures::{self, Future};
-use noria::prelude::*;
 use stream_cancel::Trigger;
 use tokio;
 use tokio_io_pool;

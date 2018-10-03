@@ -3,9 +3,6 @@ members = [
 	"noriad",
 	"noria",
 	"noria-benchmarks",
-	"consensus",
-	"channel",
-	"internal",
 ]
 
 [profile.release]

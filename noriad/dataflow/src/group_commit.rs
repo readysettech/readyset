@@ -1,4 +1,4 @@
-use internal::LocalOrNot;
+use noria::internal::LocalOrNot;
 use prelude::*;
 use std::time;
 

@@ -1,4 +1,4 @@
-use channel::rpc::RpcClient;
+use crate::channel::rpc::RpcClient;
 use crate::data::*;
 use crate::error::TransportError;
 use crate::{ExclusiveConnection, SharedConnection};

@@ -4,12 +4,6 @@ const FORCE_INPUT_YIELD_EVERY: usize = 64;
 use async_bincode::{AsyncBincodeReader, AsyncBincodeWriter, SyncDestination};
 use bincode;
 use bufstream::BufStream;
-use channel::{
-    self,
-    poll::{PollEvent, ProcessResult},
-    DualTcpStream, TcpSender, CONNECTION_FROM_BASE,
-};
-use consensus::{Authority, Epoch, STATE_KEY};
 use crate::controller::domain_handle::DomainHandle;
 use crate::controller::inner::{ControllerInner, WorkerStatus};
 use crate::controller::recipe::Recipe;
@@ -26,7 +20,13 @@ use futures::{self, Future, Sink, Stream};
 use hyper::header::CONTENT_TYPE;
 use hyper::server;
 use hyper::{self, Method, StatusCode};
-use internal::{DomainIndex, LocalOrNot};
+use noria::channel::{
+    self,
+    poll::{PollEvent, ProcessResult},
+    DualTcpStream, TcpSender, CONNECTION_FROM_BASE,
+};
+use noria::consensus::{Authority, Epoch, STATE_KEY};
+use noria::internal::{DomainIndex, LocalOrNot};
 use noria::{ControllerDescriptor, Input};
 use rand;
 use serde_json;
