@@ -39,44 +39,60 @@ the data-flow, which yields high write throughput.
 
 ## Running Noria
 
-You need nightly Rust to run this code. This will be arranged for
-automatically if you're using [`rustup.rs`](https://rustup.rs/).
+Like most databases, Noria follows a server-client model where many
+clients connect to a (potentially distributed) server. The server in
+this case is the `noriad` binary, and must be started before clients can
+connect. Noria also uses [Apache
+ZooKeeper](https://zookeeper.apache.org/) to announce the location of
+its servers, so ZooKeeper must be running.
 
-You build the Noria library and its associated worker binary with
+You (currently) need nightly Rust to build `noriad`. This will be
+arranged for
+[automatically](https://github.com/rust-lang-nursery/rustup.rs#the-toolchain-file)
+if you're using [`rustup.rs`](https://rustup.rs/). To build `noriad`,
+run
 ```console
-$ cargo build --release
+$ cargo build --release --bin noriad
 ```
 
-To start a long-running Noria worker, ensure that ZooKeeper is running,
-and then run:
+To start a long-running `noriad` instance, ensure that ZooKeeper is
+running, and then run:
 ```console
 $ cargo r --release --bin souplet -- --deployment myapp --no-reuse --address 172.16.0.19 --shards 0
 ```
 
-`myapp` here is a _deployment_. Many Noria workers can operate in a
+`myapp` here is a _deployment_. Many `noriad` instances can operate in a
 single deployment at the same time, and will share the workload between
 them. Workers in the same deployment automatically elect a leader and
 discovery each other via [ZooKeeper](http://zookeeper.apache.org/).
 
-Once the Noria worker is running, you can discover its REST API port
-through Zookeeper via this command:
-```console
-$ cargo run --manifest-path=consensus/Cargo.toml --bin zk-util -- \
-    --show --deployment testing
-    | grep external | cut -d' ' -f4
-```
+## Interacting with Noria
 
-A basic graphical UI runs at `http://IP:PORT/graph.html` and shows
-the running data-flow graph.
-
-You can now start the [MySQL
-adapter](https://github.com/mit-pdos/noria-mysql), and it should
+There are two primary ways to interact with Noria: through the [Rust
+bindings](https://crates.io/crates/noria) or through the [MySQL
+adapter](https://github.com/mit-pdos/noria-mysql). They both
 automatically locate the running worker through ZooKeeper (use `-z` if
-it ZooKeeper is not running on `localhost:2181`).
+ZooKeeper is not running on `localhost:2181`).
 
-You should then be able to point your application at `localhost:3306` to
-send queries to Noria. If your application crashes, this is a bug, and
-we would appreciate it if you [open an
+## Rust bindings
+
+The [`noria` crate](https://crates.io/crates/noria) provides native Rust
+bindings to interact with `noriad`. See the [`noria`
+documentation](https://docs.rs/noria/) for detailed instructions on how
+to use the library. You can also take a look at the [example Noria
+program](noria/examples/basic-recipe.rs). You can also see a
+self-contained version that embeds `noriad` (and doesn't require
+ZooKeeper) in [this example](noriad/examples/basic-recipe.rs).
+
+## MySQL adapter
+
+We have built a [MySQL
+adapter](https://github.com/mit-pdos/noria-mysql) for Noria that accepts
+standard MySQL queries and speaks the MySQL protocol to make it easy to
+try Noria out for existing applications. Once the adapter is running
+(see its `README`), you should be able to point your application at
+`localhost:3306` to send queries to Noria. If your application crashes,
+this is a bug, and we would appreciate it if you [open an
 issue](https://github.com/mit-pdos/noria/issues). You may also want to
 try to disable automatic re-use (with `--no-reuse`) or sharding (with
 `--shards 0`) in case those are misbehaving.
@@ -84,74 +100,66 @@ try to disable automatic re-use (with `--no-reuse`) or sharding (with
 You can manually inspect the database using the `mysql` CLI, or by
 using the [Noria web interface](https://github.com/mit-pdos/noria-ui).
 
-You can also run the self-contained Noria
-[example](examples/basic-recipe.rs), which does not require ZooKeeper:
-```console
-$ cargo run --example basic-recipe
-```
-
 ## Noria development
 
 Noria is a large piece of software that spans many sub-crates and
 external tools (see links in the text above). Each sub-crate is
 responsible for a component of Noria's architecture, such as external
-API (`api`), mapping SQL to data-flow (`mir`), and executing data-flow
-operators (`dataflow`). The code in `src/` is the glue that ties these
-pieces together by establishing materializations, scheduling data-flow
-work, orchestrating Noria program changes, handling failovers, etc.
+API (`noria`), mapping SQL to data-flow (`noriad/mir`), and executing data-flow
+operators (`noriad/dataflow`). The code in `noriad/src/` is the glue
+that ties these pieces together by establishing materializations,
+scheduling data-flow work, orchestrating Noria program changes, handling
+failovers, etc.
 
-[`src/lib.rs`](src/lib.rs) has a pretty extensive comment at the top of
-it that goes through how the Noria internals fit together at an
+[`noriad/lib.rs`](src/lib.rs) has a pretty extensive comment at the top
+of it that goes through how the Noria internals fit together at an
 implementation level. While it occasionally lags behind, especially
 following larger changes, it should serve to get you familiarized with
 the basic building blocks relatively quickly.
 
 The sub-crates each serve a distinct role:
 
- - [`api/`](api/): everything that an external program communicating
+ - [`noria/`](noria/): everything that an external program communicating
    with Noria needs. This includes types used in RPCs as
    arguments/return types, as well as code for discovering Noria workers
    through ZooKeeper, establishing a connection to Noria through
    ZooKeeper, and invoking the various RPC exposed by the Noria
    controller ([`src/controller/inner.rs`](src/controller/inner.rs)).
- - [`basics/`](basics/): core data-structures and types used throughout
-   Noria, including [`DataType`](basics/src/data.rs) (Noria's "value"
-   type), node addresses, base table operations, etc.
- - [`benchmarks/`](benchmarks/): various Noria benchmarks, one in each
-   folder. These will likely move into
-   [noria-benchmarks](https://github.com/mit-pdos/noria-benchmarks) in
-   the near future. The most frequently used one is `vote`, which runs
+   The `noria` sub-crate also contains a number of internal
+   data-structures that must be shared between the client and the
+   server like [`DataType`](basics/src/data.rs) (Noria's "value"
+   type). These are annotated with `#[doc(hidden)]`, and should be easy
+   to spot in `noria/src/lib.rs`.
+ - [`noria-benchmarks/`](noria-benchmarks/): a collection of various
+   Noria benchmarks. The most frequently used one is `vote`, which runs
    the vote benchmark from §8.2 of the OSDI paper. You can run it in a
-   bunch of different ways (`--help` should be useful), and with a bunch
-   of different backends. The `localsoup` backend is the one that's easiest
+   bunch of different ways (`--help` should be useful), and with many
+   different backends. The `localsoup` backend is the one that's easiest
    to get up and running with.
- - [`channel/`](channel/): a wrapper around TCP channels that Noria uses
-   to communicate between clients and servers, and inside the data-flow
-   graph. At this point, this is mostly a thin wrapper around
-   [`async-bincode`](https://docs.rs/async-bincode/), and it might go
-   away in the long run.
- - [`consensus/`](consensus/): code for interacting with ZooKeeper to
-   determine which Noria worker acts as the controller, and for
-   detecting failed controllers which necessitate a controller
-   changeover.
- - [`dataflow/`](dataflow/): the code that implements the internals of
-   the data-flow graph. This includes implementations of the different
-   operators ([`ops/`](dataflow/src/ops/)), "special" operators like
-   leaf views and sharders
-   ([`node/special/`](dataflow/src/node/special/)), implementations of
-   view storage ([`state/`](dataflow/src/state/)), and the code that
-   coordinates execution of control, data, and backfill messages within
-   a thread domain ([`domain/`](dataflow/src/domain/)).
- - [`mir/`](mir/): the code that implements Noria's SQL-to-dataflow
-   mapping. This includes resolving columns and keys, creating dataflow
-   operators, and detecting reuse opportunities, and triggering
-   migrations to make changes after new SQL queries have been added.
-   @ms705 is the primary author of this particular subcrate, and it
-   builds largely upon [`nom-sql`](https://docs.rs/nom-sql/).
- - [`src/`](src/): the "high-level" components of Noria such as RPC
-   handling, domain scheduling, connection management, and all the
-   controller operations (listening for heartbeats, handling failed
-   workers, etc.).
+ - [`noriad/src/`](noriad/src/): the Noria server, including high-level
+   components such as RPC handling, domain scheduling, connection
+   management, and all the controller operations (listening for
+   heartbeats, handling failed workers, etc.). It contains two notable
+   sub-crates:
+
+   - [`dataflow/`](noriad/dataflow/): the code that implements the
+     internals of the data-flow graph. This includes implementations of
+     the different operators ([`ops/`](noriad/dataflow/src/ops/)),
+     "special" operators like leaf views and sharders
+     ([`node/special/`](noriad/dataflow/src/node/special/)),
+     implementations of view storage ([`state/`](dataflow/src/state/)),
+     and the code that coordinates execution of control, data, and
+     backfill messages within a thread domain
+     ([`domain/`](noriad/dataflow/src/domain/)).
+   - [`mir/`](noriad/mir/): the code that implements Noria's
+     SQL-to-dataflow mapping. This includes resolving columns and keys,
+     creating dataflow operators, and detecting reuse opportunities, and
+     triggering migrations to make changes after new SQL queries have
+     been added. @ms705 is the primary author of this particular
+     subcrate, and it builds largely upon
+     [`nom-sql`](https://docs.rs/nom-sql/).
+   - [`common/`](noriad/common/): data-structures that are shared
+     between the various `noriad` sub-crates.
 
 To run the test suite, use:
 ```console
@@ -162,3 +170,15 @@ Build and open the documentation with:
 ```console
 $ cargo doc --open
 ```
+
+Once `noriad` is running, you can discover its REST API port through
+ZooKeeper via this command:
+
+```console
+$ cargo run --bin noriad-zk -- \
+    --show --deployment testing
+    | grep external | cut -d' ' -f4
+```
+
+A basic graphical UI runs at `http://IP:PORT/graph.html` and shows
+the running data-flow graph.
