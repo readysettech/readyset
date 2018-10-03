@@ -1,4 +1,3 @@
-use consensus::LocalAuthority;
 use crate::controller::recipe::Recipe;
 use crate::controller::sql::SqlIncorporator;
 use crate::controller::{ControllerBuilder, LocalControllerHandle};
@@ -10,6 +9,7 @@ use dataflow::ops::join::{Join, JoinSource, JoinType};
 use dataflow::ops::project::Project;
 use dataflow::ops::union::Union;
 use dataflow::{DurabilityMode, PersistenceParameters};
+use noria::consensus::LocalAuthority;
 use noria::DataType;
 
 use std::collections::HashMap;

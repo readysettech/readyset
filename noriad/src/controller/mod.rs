@@ -1476,7 +1476,7 @@ impl Future for Replica {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use consensus::ZookeeperAuthority;
+    use noria::consensus::ZookeeperAuthority;
 
     // Controller without any domains gets dropped once it leaves the scope.
     #[test]
