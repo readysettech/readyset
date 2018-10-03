@@ -1,4 +1,4 @@
-use nom::{alphanumeric, digit, is_alphanumeric, line_ending, multispace};
+use nom::{alphanumeric, digit, is_alphanumeric, line_ending, multispace, IResult};
 use std::fmt::{self, Display};
 use std::str;
 use std::str::FromStr;
@@ -854,39 +854,40 @@ named!(pub float_literal<&[u8], Literal>,
 
 /// String literal value
 
-named!(raw_string_singlequoted< Vec<u8> >, delimited!(
-    tag!("'"),
-    fold_many0!(
-        alt!(
-            is_not!("'\\") |
-            map!(complete!(tag!("''")), |_| &b"'"[..]) |
-            map!(complete!(tag!("\\'")), |_| &b"'"[..])
+fn raw_string_quoted(input: &[u8], quote: u8) -> IResult<&[u8], Vec<u8>> { 
+    let quote_slice: &[u8] = &[quote];
+    let double_quote_slice: &[u8] = &[quote, quote];
+    let backslash_quote: &[u8] = &[b'\\', quote];
+    delimited!(input,
+        tag!(quote_slice),
+        fold_many0!(
+            alt!(
+                is_not!(backslash_quote) |
+                map!(complete!(tag!(double_quote_slice)), |_| quote_slice) |
+                map!(complete!(tag!("\\\\")), |_| &b"\\"[..]) |
+                map!(complete!(tag!("\\b")), |_| &b"\x7f"[..]) |
+                map!(complete!(tag!("\\r")), |_| &b"\r"[..]) |
+                map!(complete!(tag!("\\n")), |_| &b"\n"[..]) |
+                map!(complete!(tag!("\\t")), |_| &b"\t"[..]) |
+                map!(complete!(tag!("\\0")), |_| &b"\0"[..]) |
+                map!(complete!(tag!("\\Z")), |_| &b"\x1A"[..]) |
+                do_parse!(
+                        _escape: tag!("\\") >>
+                        escaped: take!(1) >>
+                        ({ escaped }))
+            ),
+            Vec::new(),
+            |mut acc: Vec<u8>, bytes: &[u8]| {
+                acc.extend(bytes);
+                acc
+            }
         ),
-        Vec::new(),
-        |mut acc: Vec<u8>, bytes: &[u8]| {
-            acc.extend(bytes);
-            acc
-        }
-    ),
-    tag!("'")
-));
+        tag!(quote_slice)
+    )
+}
 
-named!(raw_string_doublequoted< Vec<u8> >, delimited!(
-    tag!("\""),
-    fold_many0!(
-        alt!(
-            is_not!("\"\\") |
-            map!(complete!(tag!("\"\"")), |_| &b"\""[..]) |
-            map!(complete!(tag!(r#"\""#)), |_| &b"\""[..])
-        ),
-        Vec::new(),
-        |mut acc: Vec<u8>, bytes: &[u8]| {
-            acc.extend(bytes);
-            acc
-        }
-    ),
-    tag!("\"")
-));
+named!(raw_string_singlequoted< Vec<u8> >, call!(raw_string_quoted, b'\''));
+named!(raw_string_doublequoted< Vec<u8> >, call!(raw_string_quoted, b'"'));
 
 named!(pub string_literal<&[u8], Literal>,
        map!(alt_complete!(raw_string_singlequoted | raw_string_doublequoted),
@@ -1033,9 +1034,13 @@ mod tests {
 
     #[test]
     fn literal_string_single_backslash_escape() {
-        let res = string_literal(br#"'a\'b'"#);
-        let expected = Literal::String("a'b".to_string());
-        assert_eq!(res, IResult::Done(&b""[..], expected));
+        let all_escaped = br#"\0\'\"\b\n\r\t\Z\\\%\_"#;
+        for quote in [&b"'"[..], &b"\""[..]].iter() {
+            let quoted = &[quote, &all_escaped[..], quote].concat();
+            let res = string_literal(quoted);
+            let expected = Literal::String("\0\'\"\x7F\n\r\t\x1a\\%_".to_string());
+            assert_eq!(res, IResult::Done(&b""[..], expected));
+        }
     }
 
     #[test]
