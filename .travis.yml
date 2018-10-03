@@ -1,5 +1,6 @@
 dist: trusty
 language: rust
+cache: cargo
 rust:
   - nightly-2018-10-01
 env:
@@ -11,3 +12,6 @@ addons:
   apt:
     packages:
     - liblz4-dev
+before_cache:
+  - rm -rf /home/travis/.cargo/registry
+  - rm -rf $TRAVIS_BUILD_DIR/target/incremental
