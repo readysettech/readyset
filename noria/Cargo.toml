@@ -13,6 +13,8 @@ repository = "https://github.com/mit-pdos/noria.git"
 keywords = ["database", "dataflow", "backend", "storage", "sql"]
 categories = ["api-bindings", "database"]
 
+license = "MIT/Apache-2.0"
+
 [badges]
 travis-ci = { repository = "mit-pdos/noria" }
 
