@@ -1,12 +1,13 @@
-use nom::{alphanumeric, digit, multispace};
+use nom::{digit, multispace};
 use std::fmt;
 use std::str;
 use std::str::FromStr;
 
+use create_table_options::table_options;
 use column::{Column, ColumnConstraint, ColumnSpecification};
 use common::{
-    column_identifier_no_alias, integer_literal, opt_multispace, parse_comment, sql_identifier,
-    statement_terminator, string_literal, table_reference, type_identifier, Literal, Real, SqlType,
+    column_identifier_no_alias, opt_multispace, parse_comment, sql_identifier,
+    statement_terminator, table_reference, type_identifier, Literal, Real, SqlType,
     TableKey,
 };
 use compound_select::{compound_selection, CompoundSelectStatement};
@@ -337,131 +338,7 @@ named!(pub creation<&[u8], CreateTableStatement>,
         opt_multispace >>
         tag!(")") >>
         opt_multispace >>
-        // XXX(malte): wrap the two below in a permutation! rule that permits arbitrary ordering
-        opt!(
-            complete!(
-                do_parse!(
-                    tag_no_case!("type") >>
-                    opt_multispace >>
-                    tag!("=") >>
-                    opt_multispace >>
-                    alphanumeric >>
-                    ()
-                )
-            )
-        ) >>
-        opt_multispace >>
-        opt!(
-            complete!(
-                do_parse!(
-                    tag_no_case!("pack_keys") >>
-                    opt_multispace >>
-                    tag!("=") >>
-                    opt_multispace >>
-                    alt_complete!(tag!("0") | tag!("1")) >>
-                    ()
-                )
-            )
-        ) >>
-        opt_multispace >>
-        opt!(
-            complete!(
-                do_parse!(
-                    tag_no_case!("engine") >>
-                    opt_multispace >>
-                    tag!("=") >>
-                    opt_multispace >>
-                    opt!(alphanumeric) >>
-                    opt!(tag!(",")) >>
-                    ()
-                )
-            )
-        ) >>
-        opt_multispace >>
-        opt!(
-            complete!(
-                do_parse!(
-                    tag_no_case!("auto_increment") >>
-                    opt_multispace >>
-                    tag!("=") >>
-                    opt_multispace >>
-                    integer_literal >>
-                    ()
-                )
-            )
-        ) >>
-        opt_multispace >>
-        opt!(
-            complete!(
-                do_parse!(
-                    tag_no_case!("default charset") >>
-                    opt_multispace >>
-                    tag!("=") >>
-                    opt_multispace >>
-                    alt_complete!(
-                        tag!("utf8mb4") |
-                        tag!("utf8") |
-                        tag!("binary") |
-                        tag!("big5") |
-                        tag!("ucs2") |
-                        tag!("latin1")
-                        ) >>
-                    ()
-                )
-            )
-        ) >>
-        opt_multispace >>
-        opt!(
-            complete!(
-                do_parse!(
-                    tag_no_case!("collate") >>
-                    opt_multispace >>
-                    tag!("=") >>
-                    opt_multispace >>
-                    // TODO(malte): imprecise hack, should not accept everything
-                    sql_identifier >>
-                    ()
-                )
-            )
-        ) >>
-        opt_multispace >>
-        opt!(
-            complete!(
-                do_parse!(
-                    tag_no_case!("comment") >>
-                    opt_multispace >>
-                    tag!("=") >>
-                    opt_multispace >>
-                    string_literal >>
-                    ()
-                )
-            )
-        ) >>
-        opt!(
-            complete!(
-                do_parse!(
-                    tag_no_case!("max_rows") >>
-                    opt_multispace >>
-                    opt!(tag!("=")) >>
-                    opt_multispace >>
-                    integer_literal >>
-                    ()
-                )
-            )
-        ) >>
-        opt_multispace >>
-        opt!(
-            complete!(
-                do_parse!(
-                    tag_no_case!("avg_row_length") >>
-                    opt_multispace >>
-                    opt!(tag!("=")) >>
-                    opt_multispace >>
-                    integer_literal >>
-                    ()
-                )
-            )
-        ) >>
+        table_options >>
         statement_terminator >>
         ({
             // "table AS alias" isn't legal in CREATE statements
@@ -699,7 +576,7 @@ mod tests {
           KEY `el_backlinks_to` (`el_from_namespace`,`el_to`(60),`el_from`),
           KEY `el_index_60` (`el_index_60`,`el_id`),
           KEY `el_from_index_60` (`el_from`,`el_index_60`,`el_id`)
-        ) ENGINE=InnoDB AUTO_INCREMENT=413856661 DEFAULT CHARSET=binary;";
+        )";
         creation(qstring.as_bytes()).unwrap();
     }
 
