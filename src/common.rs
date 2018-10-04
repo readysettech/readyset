@@ -28,7 +28,7 @@ pub enum SqlType {
     Longtext,
     Text,
     Date,
-    DateTime,
+    DateTime(u16),
     Timestamp,
     Binary(u16),
     Varbinary(u16),
@@ -57,7 +57,7 @@ impl fmt::Display for SqlType {
             SqlType::Longtext => write!(f, "LONGTEXT"),
             SqlType::Text => write!(f, "TEXT"),
             SqlType::Date => write!(f, "DATE"),
-            SqlType::DateTime => write!(f, "DATETIME"),
+            SqlType::DateTime(len) => write!(f, "DATETIME({})", len),
             SqlType::Timestamp => write!(f, "TIMESTAMP"),
             SqlType::Binary(len) => write!(f, "BINARY({})", len),
             SqlType::Varbinary(len) => write!(f, "VARBINARY({})", len),
@@ -421,7 +421,11 @@ named!(pub type_identifier<&[u8], SqlType>,
            )
          | do_parse!(
                tag_no_case!("datetime") >>
-               (SqlType::DateTime)
+               fsp: opt!(delimited!(tag!("("), digit, tag!(")"))) >>
+               (SqlType::DateTime(match fsp {
+                   Some(fsp) => len_as_u16(fsp),
+                   None => 0 as u16,
+               }))
            )
          | do_parse!(
                tag_no_case!("date") >>
@@ -477,7 +481,7 @@ named!(pub type_identifier<&[u8], SqlType>,
                    Some((m, Some(d))) => SqlType::Decimal(m, d),
                 })
            )
-    )
+       )
 );
 
 /// Parses the arguments for an agregation function, and also returns whether the distinct flag is
@@ -992,7 +996,7 @@ mod tests {
 
     #[test]
     fn sql_types() {
-        let ok = ["bool", "integer(16)", "datetime"];
+        let ok = ["bool", "integer(16)", "datetime(16)"];
         let not_ok = ["varchar"];
 
         let res_ok: Vec<_> = ok
@@ -1006,7 +1010,7 @@ mod tests {
 
         assert_eq!(
             res_ok,
-            vec![SqlType::Bool, SqlType::Int(16), SqlType::DateTime]
+            vec![SqlType::Bool, SqlType::Int(16), SqlType::DateTime(16)]
         );
 
         assert!(res_not_ok.into_iter().all(|r| r == false));

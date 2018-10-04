@@ -652,7 +652,7 @@ mod tests {
                     ),
                     ColumnSpecification::with_constraints(
                         Column::from("django_admin_log.action_time"),
-                        SqlType::DateTime,
+                        SqlType::DateTime(0),
                         vec![ColumnConstraint::NotNull],
                     ),
                     ColumnSpecification::with_constraints(
