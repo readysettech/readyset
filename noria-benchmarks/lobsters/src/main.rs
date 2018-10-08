@@ -104,7 +104,7 @@ impl trawler::LobstersClient for MysqlTrawler {
         let mut current_q = String::new();
         let schema = match spawner.variant {
             Variant::Original => ORIGINAL_SCHEMA,
-            Variant::Norai => NORIA_SCHEMA,
+            Variant::Noria => NORIA_SCHEMA,
             Variant::Natural => NATURAL_SCHEMA,
         };
         for q in schema.lines() {

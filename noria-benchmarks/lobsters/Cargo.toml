@@ -7,9 +7,6 @@ authors = ["Jon Gjengset <jon@thesquareplanet.com>"]
 orchestration = ["tsunami", "rusoto_core", "rusoto_sts", "failure"]
 default = []
 
-[profile.release]
-debug = true
-
 [dependencies]
 trawler = "0.5.10"
 mysql_async = "0.14"
@@ -19,9 +16,9 @@ futures = "0.1"
 chrono = "0.4"
 
 failure = { version = "0.1.1", optional = true }
-tsunami = { git = "https://github.com/jonhoo/tsunami", optional = true }
-rusoto_core = { git = "https://github.com/rusoto/rusoto.git", optional = true }
-rusoto_sts = { git = "https://github.com/rusoto/rusoto.git", optional = true }
+rusoto_core = { optional = true, version = "0.34" }
+rusoto_sts = { optional = true, version = "0.34" }
+tsunami = { optional = true, version = "0.7.1" }
 
 [[bin]]
 name = "lobsters"
