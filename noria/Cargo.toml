@@ -1,0 +1,60 @@
+[package]
+name = "noria"
+version = "0.1.0"
+authors = ["The Noria developers <noria@pdos.csail.mit.edu>"]
+edition = "2018"
+
+description = "Client bindings for Noria"
+readme = "README.md"
+
+homepage = "https://pdos.csail.mit.edu/noria"
+repository = "https://github.com/mit-pdos/noria.git"
+
+keywords = ["database", "dataflow", "backend", "storage", "sql"]
+categories = ["api-bindings", "database"]
+
+license = "MIT/Apache-2.0"
+
+[badges]
+travis-ci = { repository = "mit-pdos/noria" }
+
+[dependencies]
+assert_infrequent = "0.1.0"
+failure = "0.1"
+futures = "0.1.16"
+hyper = "0.12.0"
+nom-sql = "0.0.4"
+serde = { version = "1.0.8", features = ["rc"] }
+serde_derive = "1.0.8"
+serde_json = "1.0.2"
+tokio = "0.1"
+bincode = "1.0.0"
+vec_map = { version = "0.8.0", features = ["eders"] }
+petgraph = { version = "0.4.11", features = ["serde-1"] }
+arccstr = "1.2.0"
+fnv = "1.0.5"
+chrono = { version = "0.4.0", features = ["serde"] }
+
+# consensus/
+slog = "2.4.0"
+#slog = { version = "2.4.0", features = ["max_level_trace", "release_max_level_debug"] }
+slog-term = "2.4.0"
+zookeeper = "0.5.3"
+
+# channel/
+bufstream = "0.1.3"
+byteorder = "1.0.0"
+mio = "0.6.9"
+throttled-reader = "1.0.0"
+net2 = "0.2"
+async-bincode = "0.4.5"
+
+[lib]
+path = "src/lib.rs"
+name = "noria"
+
+[[example]]
+name = "basic-recipe"
+
+[[example]]
+name = "basic-distribution"

@@ -1,0 +1,51 @@
+<!DOCTYPE html>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/require.js/2.1.15/require.min.js"></script>
+<div id="graph"><div /></div>
+<script>
+
+  requirejs.config({
+	//By default load any module IDs from js/lib
+	baseUrl: 'js',
+	//except, if the module ID starts with "app",
+	//load it from the js/app directory. paths
+	//config is relative to the baseUrl, and
+	//never includes a ".js" extension since
+	//the paths config could be for a directory.
+	paths: {
+		d3: 'https://cdnjs.cloudflare.com/ajax/libs/d3/4.7.4/d3.min',
+		'dot-checker': 'https://cdn.rawgit.com/mstefaniuk/graph-viz-d3-js/546cc2e419bff3a10cdd981ed90d858a5324a526/dist/dot-checker',
+		'layout-worker': 'layout-worker',
+        renderer: 'https://cdn.rawgit.com/mstefaniuk/graph-viz-d3-js/546cc2e419bff3a10cdd981ed90d858a5324a526/dist/renderer',
+        jquery: 'https://ajax.googleapis.com/ajax/libs/jquery/3.3.1/jquery.min',
+	}
+  });
+
+require(["renderer", "jquery"], function (renderer, $) {
+	renderer.init("#graph");
+
+	var params = new URLSearchParams(new URL(window.location).search);
+	var endpoint = params.has("detailed") ? "graph" : "simple_graph";
+
+	$.ajax({
+		url: endpoint,
+		dataType: "text",
+		success: function(data) {
+			renderer.render(data);
+		},
+		error: function(e) {
+			renderer.render('digraph {}');
+		}
+	});
+
+	setInterval(function(){
+		$.ajax({
+			url: endpoint,
+			dataType: "text",
+			success: function(data) {
+				renderer.render(data);
+			},
+		});
+	}, 1000);
+});
+</script>
+

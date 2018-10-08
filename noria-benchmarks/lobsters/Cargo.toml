@@ -1,0 +1,30 @@
+[package]
+name = "trawler-mysql"
+version = "0.1.0"
+authors = ["Jon Gjengset <jon@thesquareplanet.com>"]
+
+[features]
+orchestration = ["tsunami", "rusoto_core", "rusoto_sts", "failure"]
+default = []
+
+[dependencies]
+trawler = "0.5.10"
+mysql_async = "0.14"
+tokio-core = "0.1"
+clap = "2.31"
+futures = "0.1"
+chrono = "0.4"
+
+failure = { version = "0.1.1", optional = true }
+rusoto_core = { optional = true, version = "0.34" }
+rusoto_sts = { optional = true, version = "0.34" }
+tsunami = { optional = true, version = "0.7.1" }
+
+[[bin]]
+name = "lobsters"
+path = "src/main.rs"
+
+[[bin]]
+name = "lobsters-ec2"
+path = "src/ec2.rs"
+required-features = ["orchestration"]
