@@ -24,7 +24,7 @@ queries](https://github.com/mit-pdos/soup-benchmarks/tree/master/lobsters/mysql)
 as the real [Lobsters website](https://lobste.rs), Noria improves
 throughput supported by 5x:
 
-![Noria speeds up Lobsters queries by 5x](https://github.com/mit-pdos/noria/raw/master/lobsters-perf.svg)
+![Noria speeds up Lobsters queries by 5x](https://people.csail.mit.edu/malte/projects/noria/lobsters-perf.svg)
 
 At a high level, Noria takes a set of parameterized SQL queries (think
 [prepared
