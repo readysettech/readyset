@@ -58,11 +58,11 @@ impl Node {
                 }
                 NodeType::Reader(_) => {
                     s.push_str(&format!(
-                        "[style=\"bold{}\", shape=box3d, label=\"{}\"]\n",
+                        "[style=\"bold,filled\", fillcolor=\"{}\", shape=box3d, label=\"{}\"]\n",
                         if let MaterializationStatus::Full = materialization_status {
-                            ",filled"
+                            "#0C6FA9"
                         } else {
-                            ""
+                            "#5CBFF9"
                         },
                         Self::escape(self.name())
                     ));
@@ -77,14 +77,14 @@ impl Node {
                         MaterializationStatus::Not => {}
                         MaterializationStatus::Full | MaterializationStatus::Partial => {
                             s.push_str(&format!(
-                                "n{}_m [shape=tab, color=\"#AA4444\", {}, label=\"\"]\n\
+                                "n{}_m [shape=tab, style=\"bold,filled\", color=\"#AA4444\", {}, label=\"\"]\n\
                                  n{} -> n{}_m {{ dir=none }}\n\
                                  {{rank=same; n{} n{}_m}}\n",
                                 idx.index(),
                                 if let MaterializationStatus::Full = materialization_status {
-                                    "style=\"bold,filled\", fillcolor=\"#AA4444\""
+                                    "fillcolor=\"#AA4444\""
                                 } else {
-                                    "style=bold"
+                                    "fillcolor=\"#EE9999\""
                                 },
                                 idx.index(),
                                 idx.index(),

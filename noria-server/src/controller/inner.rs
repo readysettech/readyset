@@ -100,7 +100,7 @@ pub(crate) fn graphviz(
     if detailed {
         s.push_str("node [shape=record, fontsize=10]\n");
     } else {
-        s.push_str("graph [ fontsize=24 fontcolor=\"#0C6fA9\" ]\n");
+        s.push_str("graph [ fontsize=24 fontcolor=\"#0C6fA9\", outputorder=edgesfirst ]\n");
         s.push_str("edge [ color=\"#0C6fA9\", style=bold ]\n");
         s.push_str("node [ color=\"#0C6fA9\", shape=box, style=\"rounded,bold\" ]\n");
     }
@@ -123,6 +123,8 @@ pub(crate) fn graphviz(
             edge.target().index(),
             if graph[edge.source()].is_egress() {
                 "color=\"#CCCCCC\""
+            } else if graph[edge.source()].is_source() {
+                "style=invis"
             } else {
                 ""
             }
