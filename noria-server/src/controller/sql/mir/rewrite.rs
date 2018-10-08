@@ -3,12 +3,12 @@ use mir::node::{MirNode, MirNodeType};
 use mir::MirNodeRef;
 
 pub fn make_rewrite_nodes(
-    mir_converter: &mut SqlToMirConverter,
+    mir_converter: &SqlToMirConverter,
     name: &str,
     prev_node: MirNodeRef,
     table: &str,
     node_count: usize,
-) -> Vec<MirNodeRef> {
+) -> Result<Vec<MirNodeRef>, String> {
     let mut nodes = Vec::new();
     let rewrite_policies = match mir_converter
         .universe
@@ -17,7 +17,7 @@ pub fn make_rewrite_nodes(
     {
         Some(p) => p.clone(),
         // no policies associated with this base node
-        None => return nodes,
+        None => return Ok(nodes),
     };
 
     let mut node_count = node_count;
@@ -33,7 +33,7 @@ pub fn make_rewrite_nodes(
 
     for p in rewrite_policies {
         let fields = parent.borrow().columns().iter().cloned().collect();
-        let should_rewrite = mir_converter.get_view(&p.rewrite_view);
+        let should_rewrite = mir_converter.get_view(&p.rewrite_view)?;
 
         let rw = MirNode::new(
             &format!("{}_n{}", name, node_count),
@@ -52,5 +52,5 @@ pub fn make_rewrite_nodes(
         node_count += 1;
     }
 
-    nodes
+    Ok(nodes)
 }

@@ -25,7 +25,7 @@ fn target_columns_from_computed_column(computed_col: &nom_sql::Column) -> Column
 
 // Move predicates above grouped_by nodes
 pub fn make_predicates_above_grouped<'a>(
-    mir_converter: &mut SqlToMirConverter,
+    mir_converter: &SqlToMirConverter,
     name: &str,
     qg: &QueryGraph,
     node_for_rel: &HashMap<&str, MirNodeRef>,
@@ -70,7 +70,7 @@ pub fn make_predicates_above_grouped<'a>(
 }
 
 pub fn make_grouped(
-    mir_converter: &mut SqlToMirConverter,
+    mir_converter: &SqlToMirConverter,
     name: &str,
     qg: &QueryGraph,
     node_for_rel: &HashMap<&str, MirNodeRef>,

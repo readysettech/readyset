@@ -34,7 +34,7 @@ impl JoinChain {
 // a new join chain is started for the current predicate. And we assume that
 // a future predicate will bring these chains together.
 pub fn make_joins(
-    mir_converter: &mut SqlToMirConverter,
+    mir_converter: &SqlToMirConverter,
     name: &str,
     qg: &QueryGraph,
     node_for_rel: &HashMap<&str, MirNodeRef>,

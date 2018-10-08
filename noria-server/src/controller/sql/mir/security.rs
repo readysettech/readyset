@@ -16,11 +16,11 @@ pub trait SecurityBoundary {
     ) -> Vec<MirNodeRef>;
 
     fn make_security_boundary(
-        &mut self,
+        &self,
         universe: UniverseId,
         node_for_rel: &mut HashMap<&str, MirNodeRef>,
         prev_node: Option<MirNodeRef>,
-    ) -> (Vec<MirNodeRef>, Vec<MirNodeRef>);
+    ) -> Result<(Vec<MirNodeRef>, Vec<MirNodeRef>), String>;
 }
 
 impl SecurityBoundary for SqlToMirConverter {
@@ -65,22 +65,22 @@ impl SecurityBoundary for SqlToMirConverter {
     }
     // TODO(larat): this is basically make_selection_nodes
     fn make_security_boundary(
-        &mut self,
+        &self,
         universe: UniverseId,
         node_for_rel: &mut HashMap<&str, MirNodeRef>,
         prev_node: Option<MirNodeRef>,
-    ) -> (Vec<MirNodeRef>, Vec<MirNodeRef>) {
+    ) -> Result<(Vec<MirNodeRef>, Vec<MirNodeRef>), String> {
         let mut security_nodes: Vec<MirNodeRef> = Vec::new();
         let mut last_security_nodes: Vec<MirNodeRef> = Vec::new();
         let mut prev_node = prev_node.unwrap().clone();
 
         if universe.0 == "global".into() {
-            return (vec![prev_node], security_nodes);
+            return Ok((vec![prev_node], security_nodes));
         }
 
         for (rel, _) in &node_for_rel.clone() {
             let (last_nodes, nodes) =
-                make_security_nodes(self, *rel, &prev_node, node_for_rel.clone());
+                make_security_nodes(self, *rel, &prev_node, node_for_rel.clone())?;
             debug!(
                 self.log,
                 "Created {} security nodes for table {}",
@@ -104,16 +104,16 @@ impl SecurityBoundary for SqlToMirConverter {
             last_security_nodes.push(prev_node.clone());
         }
 
-        (last_security_nodes, security_nodes)
+        Ok((last_security_nodes, security_nodes))
     }
 }
 
 fn make_security_nodes(
-    mir_converter: &mut SqlToMirConverter,
+    mir_converter: &SqlToMirConverter,
     table: &str,
     prev_node: &MirNodeRef,
     node_for_rel: HashMap<&str, MirNodeRef>,
-) -> (Vec<MirNodeRef>, Vec<MirNodeRef>) {
+) -> Result<(Vec<MirNodeRef>, Vec<MirNodeRef>), String> {
     let policies = match mir_converter
         .universe
         .row_policies
@@ -121,7 +121,7 @@ fn make_security_nodes(
     {
         Some(p) => p.clone(),
         // no policies associated with this base node
-        None => return (vec![], vec![]),
+        None => return Ok((vec![], vec![])),
     };
 
     let mut node_count = 0;
@@ -162,7 +162,7 @@ fn make_security_nodes(
                 continue;
             }
 
-            let view_for_rel = mir_converter.get_view(rel);
+            let view_for_rel = mir_converter.get_view(rel)?;
 
             local_node_for_rel.insert(*rel, view_for_rel.clone());
             base_nodes.push(view_for_rel.clone());
@@ -226,7 +226,7 @@ fn make_security_nodes(
             prev_node,
             table,
             node_count,
-        );
+        )?;
 
         node_count += rewrite_nodes.len();
 
@@ -243,5 +243,5 @@ fn make_security_nodes(
         last_policy_nodes.push(policy_nodes.last().unwrap().clone())
     }
 
-    (last_policy_nodes, security_nodes)
+    Ok((last_policy_nodes, security_nodes))
 }

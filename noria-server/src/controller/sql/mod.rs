@@ -452,20 +452,21 @@ impl SqlIncorporator {
         is_leaf: bool,
         mut mig: &mut Migration,
     ) -> Result<QueryFlowParts, String> {
-        let subqueries: Vec<MirQuery> = query
+        let subqueries: Result<Vec<_>, String> = query
             .selects
             .iter()
             .enumerate()
             .map(|(i, sq)| {
-                self.add_select_query(&format!("{}_csq_{}", query_name, i), &sq.1, false, mig)
+                Ok(self
+                    .add_select_query(&format!("{}_csq_{}", query_name, i), &sq.1, false, mig)?
                     .1
-                    .unwrap()
+                    .unwrap())
             })
             .collect();
 
         let mut combined_mir_query = self.mir_converter.compound_query_to_mir(
             query_name,
-            subqueries.iter().collect(),
+            subqueries?.iter().collect(),
             CompoundSelectOperator::Union,
             &query.order,
             &query.limit,
@@ -487,9 +488,9 @@ impl SqlIncorporator {
         sq: &SelectStatement,
         is_leaf: bool,
         mig: &mut Migration,
-    ) -> (QueryFlowParts, Option<MirQuery>) {
+    ) -> Result<(QueryFlowParts, Option<MirQuery>), String> {
         let (qg, reuse) = self.consider_query_graph(&query_name, mig.universe(), sq);
-        match reuse {
+        Ok(match reuse {
             QueryGraphReuse::ExactMatch(mn) => {
                 let flow_node = mn.borrow().flow_node.as_ref().unwrap().address();
                 let qfp = QueryFlowParts {
@@ -501,7 +502,7 @@ impl SqlIncorporator {
                 (qfp, None)
             }
             QueryGraphReuse::ExtendExisting(mqs) => {
-                let qfp = self.extend_existing_query(&query_name, sq, qg, mqs, is_leaf, mig);
+                let qfp = self.extend_existing_query(&query_name, sq, qg, mqs, is_leaf, mig)?;
                 (qfp, None)
             }
             QueryGraphReuse::ReaderOntoExisting(mn, project_columns, params) => {
@@ -510,10 +511,10 @@ impl SqlIncorporator {
                 (qfp, None)
             }
             QueryGraphReuse::None => {
-                let (qfp, mir) = self.add_query_via_mir(&query_name, sq, qg, is_leaf, mig);
+                let (qfp, mir) = self.add_query_via_mir(&query_name, sq, qg, is_leaf, mig)?;
                 (qfp, Some(mir))
             }
-        }
+        })
     }
 
     fn add_query_via_mir(
@@ -523,7 +524,7 @@ impl SqlIncorporator {
         qg: QueryGraph,
         is_leaf: bool,
         mut mig: &mut Migration,
-    ) -> (QueryFlowParts, MirQuery) {
+    ) -> Result<(QueryFlowParts, MirQuery), String> {
         use ::mir::visualize::GraphViz;
         let universe = mig.universe();
         // no QG-level reuse possible, so we'll build a new query.
@@ -534,7 +535,7 @@ impl SqlIncorporator {
             &qg,
             is_leaf,
             universe.clone(),
-        );
+        )?;
 
         trace!(self.log, "Unoptimized MIR:\n{}", mir.to_graphviz().unwrap());
 
@@ -549,7 +550,7 @@ impl SqlIncorporator {
         // register local state
         self.register_query(query_name, Some(qg), &mir, universe);
 
-        (qfp, mir)
+        Ok((qfp, mir))
     }
 
     pub fn remove_query(&mut self, query_name: &str, mig: &Migration) -> Option<NodeIndex> {
@@ -664,7 +665,7 @@ impl SqlIncorporator {
         reuse_mirs: Vec<(u64, UniverseId)>,
         is_leaf: bool,
         mut mig: &mut Migration,
-    ) -> QueryFlowParts {
+    ) -> Result<QueryFlowParts, String> {
         use ::mir::reuse::merge_mir_for_queries;
         use ::mir::visualize::GraphViz;
         let universe = mig.universe();
@@ -677,7 +678,7 @@ impl SqlIncorporator {
             &qg,
             is_leaf,
             universe.clone(),
-        );
+        )?;
 
         // TODO(malte): should we run the MIR-level optimizations here?
         let new_opt_mir = new_query_mir.optimize();
@@ -721,7 +722,7 @@ impl SqlIncorporator {
         // register local state
         self.register_query(query_name, Some(qg), &post_reuse_opt_mir, universe);
 
-        qfp
+        Ok(qfp)
     }
 
     fn nodes_for_query(
@@ -740,7 +741,9 @@ impl SqlIncorporator {
     }
 
     /// Runs some standard rewrite passes on the query.
-    fn rewrite_query(&mut self, q: SqlQuery, mig: &mut Migration) -> SqlQuery {
+    fn rewrite_query(&mut self, q: SqlQuery, mig: &mut Migration) -> Result<SqlQuery, String> {
+        // TODO: make this not take &mut self
+
         use crate::controller::sql::passes::alias_removal::AliasRemoval;
         use crate::controller::sql::passes::count_star_rewrite::CountStarRewrite;
         use crate::controller::sql::passes::implied_tables::ImpliedTableExpansion;
@@ -812,7 +815,7 @@ impl SqlIncorporator {
             | ref q @ SqlQuery::Insert(_) => {
                 for t in &q.referred_tables() {
                     if !self.view_schemas.contains_key(&t.name) {
-                        panic!("query refers to unknown table \"{}\"", t.name);
+                        return Err(format!("query refers to unknown table \"{}\"", t.name));
                     }
                 }
             }
@@ -820,12 +823,13 @@ impl SqlIncorporator {
 
         // Run some standard rewrite passes on the query. This makes the later work easier,
         // as we no longer have to consider complications like aliases.
-        fq.expand_table_aliases(mig.context())
+        Ok(fq
+            .expand_table_aliases(mig.context())
             .remove_negation()
             .coalesce_key_definitions()
             .expand_stars(&self.view_schemas)
             .expand_implied_tables(&self.view_schemas)
-            .rewrite_count_star(&self.view_schemas)
+            .rewrite_count_star(&self.view_schemas))
     }
 
     fn nodes_for_named_query(
@@ -855,7 +859,7 @@ impl SqlIncorporator {
             }
         };
 
-        let q = self.rewrite_query(q, mig);
+        let q = self.rewrite_query(q, mig)?;
 
         // TODO(larat): extend existing should handle policy nodes
         // if this is a selection, we compute its `QueryGraph` and consider the existing ones we
@@ -868,7 +872,7 @@ impl SqlIncorporator {
                 self.add_compound_query(&query_name, &csq, is_leaf, mig)
                     .unwrap()
             }
-            SqlQuery::Select(sq) => self.add_select_query(&query_name, &sq, is_leaf, mig).0,
+            SqlQuery::Select(sq) => self.add_select_query(&query_name, &sq, is_leaf, mig)?.0,
             ref q @ SqlQuery::CreateTable { .. } => self.add_base_via_mir(&query_name, &q, mig),
             ref q @ _ => panic!("unhandled query type in recipe: {:?}", q),
         };

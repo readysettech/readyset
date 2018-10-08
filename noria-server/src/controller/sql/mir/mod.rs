@@ -141,23 +141,17 @@ impl SqlToMirConverter {
         self.universe = Universe::default();
     }
 
-    fn get_view(&self, view_name: &str) -> MirNodeRef {
-        let latest_existing = self.current.get(view_name);
-        match latest_existing {
-            None => panic!("Query refers to unknown view \"{}\"", view_name),
-            Some(v) => {
-                let existing = self.nodes.get(&(String::from(view_name), *v));
-                match existing {
-                    None => {
-                        panic!(
-                            "Inconsistency: view \"{}\" does not exist at v{}",
-                            view_name, v
-                        );
-                    }
-                    Some(bmn) => MirNode::reuse(bmn.clone(), self.schema_version),
-                }
-            }
-        }
+    fn get_view(&self, view_name: &str) -> Result<MirNodeRef, String> {
+        self.current
+            .get(view_name)
+            .ok_or_else(|| format!("Query refers to unknown view \"{}\"", view_name))
+            .and_then(|v| match self.nodes.get(&(String::from(view_name), *v)) {
+                None => Err(format!(
+                    "Inconsistency: view \"{}\" does not exist at v{}",
+                    view_name, v
+                )),
+                Some(bmn) => Ok(MirNode::reuse(bmn.clone(), self.schema_version)),
+            })
     }
 
     /// Converts a condition tree stored in the `ConditionExpr` returned by the SQL parser
@@ -480,8 +474,8 @@ impl SqlToMirConverter {
         qg: &QueryGraph,
         has_leaf: bool,
         universe: UniverseId,
-    ) -> MirQuery {
-        let nodes = self.make_nodes_for_selection(&name, sq, qg, has_leaf, universe);
+    ) -> Result<MirQuery, String> {
+        let nodes = self.make_nodes_for_selection(&name, sq, qg, has_leaf, universe)?;
         let mut roots = Vec::new();
         let mut leaves = Vec::new();
         for mn in nodes.into_iter() {
@@ -514,11 +508,11 @@ impl SqlToMirConverter {
         self.current
             .insert(String::from(leaf.borrow().name()), self.schema_version);
 
-        MirQuery {
+        Ok(MirQuery {
             name: String::from(name),
             roots: roots,
             leaf: leaf,
-        }
+        })
     }
 
     pub fn upgrade_schema(&mut self, new_version: usize) {
@@ -819,7 +813,7 @@ impl SqlToMirConverter {
     }
 
     fn make_function_node(
-        &mut self,
+        &self,
         name: &str,
         func_col: &Column,
         group_cols: Vec<&Column>,
@@ -900,7 +894,7 @@ impl SqlToMirConverter {
     }
 
     fn make_grouped_node(
-        &mut self,
+        &self,
         name: &str,
         computed_col: &Column,
         over: (MirNodeRef, &Column),
@@ -1058,7 +1052,7 @@ impl SqlToMirConverter {
     }
 
     fn make_projection_helper(
-        &mut self,
+        &self,
         name: &str,
         parent: MirNodeRef,
         fn_col: &Column,
@@ -1074,7 +1068,7 @@ impl SqlToMirConverter {
     }
 
     fn make_project_node(
-        &mut self,
+        &self,
         name: &str,
         parent_node: MirNodeRef,
         proj_cols: Vec<&Column>,
@@ -1128,7 +1122,7 @@ impl SqlToMirConverter {
     }
 
     fn make_distinct_node(
-        &mut self,
+        &self,
         name: &str,
         parent: MirNodeRef,
         group_by: Vec<&Column>,
@@ -1148,7 +1142,7 @@ impl SqlToMirConverter {
         )
     }
     fn make_topk_node(
-        &mut self,
+        &self,
         name: &str,
         parent: MirNodeRef,
         group_by: Vec<&Column>,
@@ -1258,7 +1252,7 @@ impl SqlToMirConverter {
     }
 
     fn predicates_above_group_by<'a>(
-        &mut self,
+        &self,
         name: &str,
         column_to_predicates: &HashMap<Column, Vec<&'a ConditionExpression>>,
         over_col: Column,
@@ -1288,7 +1282,7 @@ impl SqlToMirConverter {
     }
 
     fn make_value_project_node(
-        &mut self,
+        &self,
         qg: &QueryGraph,
         prev_node: Option<MirNodeRef>,
         node_count: usize,
@@ -1350,7 +1344,8 @@ impl SqlToMirConverter {
         qg: &QueryGraph,
         has_leaf: bool,
         universe: UniverseId,
-    ) -> Vec<MirNodeRef> {
+    ) -> Result<Vec<MirNodeRef>, String> {
+        // TODO: make this take &self!
         use crate::controller::sql::mir::grouped::make_grouped;
         use crate::controller::sql::mir::grouped::make_predicates_above_grouped;
         use crate::controller::sql::mir::join::make_joins;
@@ -1381,7 +1376,7 @@ impl SqlToMirConverter {
                     continue;
                 }
 
-                let base_for_rel = self.get_view(rel);
+                let base_for_rel = self.get_view(rel)?;
 
                 base_nodes.push(base_for_rel.clone());
                 node_for_rel.insert(*rel, base_for_rel);
@@ -1452,15 +1447,17 @@ impl SqlToMirConverter {
 
             // 3. Create security boundary
             use crate::controller::sql::mir::security::SecurityBoundary;
-            let (last_policy_nodes, policy_nodes) =
-                self.make_security_boundary(universe.clone(), &mut node_for_rel, prev_node.clone());
+            let (last_policy_nodes, policy_nodes) = self.make_security_boundary(
+                universe.clone(),
+                &mut node_for_rel,
+                prev_node.clone(),
+            )?;
 
-            let mut ancestors =
-                self.universe
-                    .member_of
-                    .iter()
-                    .fold(vec![], |mut acc, (gname, gids)| {
-                        let group_views: Vec<MirNodeRef> = gids
+            let mut ancestors = self.universe.member_of.iter().fold(
+                Ok(vec![]),
+                |acc: Result<_, String>, (gname, gids)| {
+                    acc.and_then(|mut acc| {
+                        let group_views: Result<Vec<_>, String> = gids
                             .iter()
                             .filter_map(|gid| {
                                 // This is a little annoying, but because of the way we name universe queries,
@@ -1480,10 +1477,12 @@ impl SqlToMirConverter {
                             })
                             .collect();
 
-                        trace!(self.log, "group views {:?}", group_views);
-                        acc.extend(group_views);
-                        acc
-                    });
+                        trace!(&self.log, "group views {:?}", group_views);
+                        acc.extend(group_views?);
+                        Ok(acc)
+                    })
+                },
+            )?;
 
             nodes_added = base_nodes
                 .into_iter()
@@ -1831,6 +1830,6 @@ impl SqlToMirConverter {
         }
 
         // finally, we output all the nodes we generated
-        nodes_added
+        Ok(nodes_added)
     }
 }

@@ -277,7 +277,7 @@ impl Recipe {
                 &self.security_config.clone().unwrap(),
                 universe_groups,
                 mig,
-            );
+            )?;
 
             for qfp in qfps {
                 result.new_nodes.insert(qfp.name.clone(), qfp.query_leaf);

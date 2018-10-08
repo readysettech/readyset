@@ -45,7 +45,7 @@ pub trait Multiverse {
         config: &SecurityConfig,
         universe_groups: HashMap<String, Vec<DataType>>,
         mig: &mut Migration,
-    ) -> Vec<QueryFlowParts>;
+    ) -> Result<Vec<QueryFlowParts>, String>;
 
     fn add_base(
         &mut self,
@@ -61,7 +61,7 @@ impl Multiverse for SqlIncorporator {
         config: &SecurityConfig,
         universe_groups: HashMap<String, Vec<DataType>>,
         mig: &mut Migration,
-    ) -> Vec<QueryFlowParts> {
+    ) -> Result<Vec<QueryFlowParts>, String> {
         let mut qfps = Vec::new();
 
         self.mir_converter.clear_universe();
@@ -127,7 +127,7 @@ impl Multiverse for SqlIncorporator {
             }
 
             trace!(self.log, "Adding row policy {:?}", policy.name());
-            let predicate = self.rewrite_query(policy.predicate(), mig);
+            let predicate = self.rewrite_query(policy.predicate(), mig)?;
             let st = match predicate {
                 SqlQuery::Select(ref st) => st,
                 _ => unreachable!(),
@@ -155,7 +155,7 @@ impl Multiverse for SqlIncorporator {
 
         self.mir_converter.set_universe(universe);
 
-        qfps
+        Ok(qfps)
     }
 
     fn add_base(

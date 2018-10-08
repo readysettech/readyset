@@ -172,17 +172,19 @@ impl<A: Authority> ControllerHandle<A> {
                     thread::sleep(Duration::from_millis(100));
                     continue;
                 }
-                status @ hyper::StatusCode::INTERNAL_SERVER_ERROR
-                | status @ hyper::StatusCode::OK => {
-                    if let hyper::StatusCode::OK = status {
-                        return Ok(serde_json::from_slice::<R>(&body)
-                            .context(format!("while decoding rpc reply from {}", path))?);
-                    } else {
-                        bail!(
-                            serde_json::from_slice::<String>(&body)
-                                .context(format!("while decoding rpc error reply from {}", path))?
-                        );
-                    }
+                hyper::StatusCode::OK => {
+                    return Ok(serde_json::from_slice::<R>(&body).context(format!(
+                        "while decoding rpc reply for {}: {}",
+                        path,
+                        String::from_utf8_lossy(&*body)
+                    ))?);
+                }
+                hyper::StatusCode::INTERNAL_SERVER_ERROR => {
+                    bail!(
+                        "rpc call to {} failed: {}",
+                        path,
+                        String::from_utf8_lossy(&*body)
+                    );
                 }
                 _ => {
                     self.url = None;
@@ -276,15 +278,15 @@ impl<A: Authority> ControllerHandle<A> {
         recipe_addition: &str,
     ) -> Result<ActivationResult, failure::Error> {
         Ok(self
-            .rpc("extend_recipe", recipe_addition)
-            .context(format!("extending recipe with : {}", recipe_addition))?)
+            .rpc::<_, ActivationResult>("extend_recipe", recipe_addition)
+            .context(String::from(recipe_addition))?)
     }
 
     /// Replace the existing recipe with this one.
     pub fn install_recipe(&mut self, new_recipe: &str) -> Result<ActivationResult, failure::Error> {
         Ok(self
-            .rpc("install_recipe", new_recipe)
-            .context(format!("installing new recipe: {}", new_recipe))?)
+            .rpc::<_, ActivationResult>("install_recipe", new_recipe)
+            .context(String::from(new_recipe))?)
     }
 
     /// Fetch a graphviz description of the dataflow graph.
