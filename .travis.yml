@@ -7,7 +7,7 @@ env:
   - SETTLE_TIME=2000
 script:
   - cargo check --all --all-targets
-    #- cargo test --all -- --test-threads=1
+  - cargo test --all -- --test-threads=1
 addons:
   apt:
     packages:
