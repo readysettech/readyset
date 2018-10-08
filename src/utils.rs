@@ -1,7 +1,7 @@
 use std::collections::HashSet;
 
 use convert::ToDataType;
-use distributary::{DataType, Modification, Operation};
+use noria::{DataType, Modification, Operation};
 use msql_srv::ParamParser;
 use nom_sql::{
     ArithmeticBase, ArithmeticExpression, ArithmeticOperator, Column, ColumnConstraint,

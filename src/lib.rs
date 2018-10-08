@@ -2,7 +2,7 @@
 #![feature(nll)]
 #![feature(try_from)]
 
-extern crate api as distributary;
+extern crate noria;
 extern crate arccstr;
 extern crate chrono;
 extern crate msql_srv;
@@ -17,8 +17,8 @@ extern crate slog;
 mod convert;
 mod rewrite;
 mod schema;
-mod soup_backend;
+mod backend;
 mod utils;
 
 pub use schema::Schema;
-pub use soup_backend::SoupBackend;
+pub use backend::NoriaBackend;
