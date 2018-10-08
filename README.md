@@ -190,7 +190,7 @@ $ cargo run --bin noria-zk -- \
 ```
 
 A basic graphical UI runs at `http://IP:PORT/graph.html` and shows
-the running data-flow graph. Alternatively, you can deploy Noria's
+the running data-flow graph. You can also deploy Noria's
 [more advanced web UI](https://github.com/mit-pdos/noria-ui) that serves
-the REST API endpoints in more human-digestiable form and includes the
+the REST API endpoints in a human-digestiable form and includes the
 graph visualization.
