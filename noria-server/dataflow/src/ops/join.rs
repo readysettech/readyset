@@ -541,7 +541,14 @@ impl Ingredient for Join {
         }
     }
 
-    fn description(&self) -> String {
+    fn description(&self, detailed: bool) -> String {
+        if !detailed {
+            return String::from(match self.kind {
+                JoinType::Left => "⋉",
+                JoinType::Inner => "⋈",
+            });
+        }
+
         let emit = self
             .emit
             .iter()

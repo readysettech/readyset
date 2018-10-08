@@ -298,7 +298,11 @@ impl Ingredient for TopK {
         Some(vec![(self.src.as_global(), col)])
     }
 
-    fn description(&self) -> String {
+    fn description(&self, detailed: bool) -> String {
+        if !detailed {
+            return String::from("TopK");
+        }
+
         let group_cols = self
             .group_by
             .iter()

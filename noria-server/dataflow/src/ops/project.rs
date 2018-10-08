@@ -259,7 +259,11 @@ impl Ingredient for Project {
         Some(vec![(self.src.as_global(), self.resolve_col(col))])
     }
 
-    fn description(&self) -> String {
+    fn description(&self, detailed: bool) -> String {
+        if !detailed {
+            return String::from("π");
+        }
+
         let mut emit_cols = vec![];
         match self.emit.as_ref() {
             None => emit_cols.push("*".to_string()),

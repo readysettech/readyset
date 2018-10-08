@@ -116,7 +116,9 @@ where
         false
     }
 
-    /// Produce a compact, human-readable description of this node.
+    /// Produce a compact, human-readable description of this node for Graphviz.
+    ///
+    /// If `detailed` is true, emit more info.
     ///
     ///  Symbol   Description
     /// --------|-------------
@@ -129,7 +131,7 @@ where
     ///    ⋈    |  Join
     ///    ⋉    |  Left join
     ///    ⋃    |  Union
-    fn description(&self) -> String;
+    fn description(&self, detailed: bool) -> String;
 
     /// Called when a node is first connected to the graph.
     ///

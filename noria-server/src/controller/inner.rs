@@ -83,7 +83,11 @@ pub struct ControllerInner {
     log: slog::Logger,
 }
 
-pub(crate) fn graphviz(graph: &Graph, materializations: &Materializations) -> String {
+pub(crate) fn graphviz(
+    graph: &Graph,
+    detailed: bool,
+    materializations: &Materializations,
+) -> String {
     let mut s = String::new();
 
     let indentln = |s: &mut String| s.push_str("    ");
@@ -93,24 +97,35 @@ pub(crate) fn graphviz(graph: &Graph, materializations: &Materializations) -> St
 
     // global formatting.
     indentln(&mut s);
-    s.push_str("node [shape=record, fontsize=10]\n");
+    if detailed {
+        s.push_str("node [shape=record, fontsize=10]\n");
+    } else {
+        s.push_str("graph [ fontsize=24 fontcolor=\"#0C6fA9\" ]\n");
+        s.push_str("edge [ color=\"#0C6fA9\", style=bold ]\n");
+        s.push_str("node [ color=\"#0C6fA9\", shape=box, style=\"rounded,bold\" ]\n");
+    }
 
     // node descriptions.
     for index in graph.node_indices() {
         let node = &graph[index];
         let materialization_status = materializations.get_status(&index, node);
         indentln(&mut s);
-        s.push_str(&format!("{}", index.index()));
-        s.push_str(&node.describe(index, materialization_status));
+        s.push_str(&format!("n{}", index.index()));
+        s.push_str(&node.describe(index, detailed, materialization_status));
     }
 
     // edges.
     for (_, edge) in graph.raw_edges().iter().enumerate() {
         indentln(&mut s);
         s.push_str(&format!(
-            "{} -> {}",
+            "n{} -> n{} [ {} ]",
             edge.source().index(),
-            edge.target().index()
+            edge.target().index(),
+            if graph[edge.source()].is_egress() {
+                "color=\"#CCCCCC\""
+            } else {
+                ""
+            }
         ));
         s.push_str("\n");
     }
@@ -133,9 +148,13 @@ impl ControllerInner {
         use serde_json as json;
 
         match (&method, path.as_ref()) {
-            (&Method::GET, "/graph") => return Ok(Ok(self.graphviz())),
+            (&Method::GET, "/simple_graph") => return Ok(Ok(self.graphviz(false))),
+            (&Method::POST, "/simple_graphviz") => {
+                return Ok(Ok(json::to_string(&self.graphviz(false)).unwrap()))
+            }
+            (&Method::GET, "/graph") => return Ok(Ok(self.graphviz(true))),
             (&Method::POST, "/graphviz") => {
-                return Ok(Ok(json::to_string(&self.graphviz()).unwrap()))
+                return Ok(Ok(json::to_string(&self.graphviz(true)).unwrap()))
             }
             (&Method::GET, "/get_statistics") => {
                 return Ok(Ok(json::to_string(&self.get_statistics()).unwrap()))
@@ -175,7 +194,7 @@ impl ControllerInner {
                         .filter_map(|ni| {
                             let n = &self.ingredients[ni];
                             if n.is_internal() {
-                                Some((ni, n.name(), n.description()))
+                                Some((ni, n.name(), n.description(true)))
                             } else {
                                 None
                             }
@@ -904,8 +923,8 @@ impl ControllerInner {
         }
     }
 
-    pub fn graphviz(&self) -> String {
-        graphviz(&self.ingredients, &self.materializations)
+    pub fn graphviz(&self, detailed: bool) -> String {
+        graphviz(&self.ingredients, detailed, &self.materializations)
     }
 
     fn remove_leaf(&mut self, mut leaf: NodeIndex) -> Result<(), String> {

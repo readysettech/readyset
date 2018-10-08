@@ -121,8 +121,12 @@ impl Ingredient for Latest {
         Some(vec![(self.src.as_global(), col)])
     }
 
-    fn description(&self) -> String {
-        format!("⧖ γ[{}]", self.key)
+    fn description(&self, detailed: bool) -> String {
+        if !detailed {
+            String::from("⧖")
+        } else {
+            format!("⧖ γ[{}]", self.key)
+        }
     }
 
     fn parent_columns(&self, column: usize) -> Vec<(NodeIndex, Option<usize>)> {

@@ -23,8 +23,11 @@
 require(["renderer", "jquery"], function (renderer, $) {
 	renderer.init("#graph");
 
+	var params = new URLSearchParams(new URL(window.location).search);
+	var endpoint = params.has("detailed") ? "graph" : "simple_graph";
+
 	$.ajax({
-		url: "graph",
+		url: endpoint,
 		dataType: "text",
 		success: function(data) {
 			renderer.render(data);
@@ -36,7 +39,7 @@ require(["renderer", "jquery"], function (renderer, $) {
 
 	setInterval(function(){
 		$.ajax({
-			url: "graph",
+			url: endpoint,
 			dataType: "text",
 			success: function(data) {
 				renderer.render(data);

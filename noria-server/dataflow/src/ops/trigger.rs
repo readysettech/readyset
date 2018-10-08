@@ -166,7 +166,7 @@ impl Ingredient for Trigger {
         Some(vec![(self.src.as_global(), col)])
     }
 
-    fn description(&self) -> String {
+    fn description(&self, _: bool) -> String {
         "T".into()
     }
 

@@ -107,7 +107,14 @@ impl GroupedOperation for Aggregator {
         diffs.into_iter().fold(n, |n, d| n + d).into()
     }
 
-    fn description(&self) -> String {
+    fn description(&self, detailed: bool) -> String {
+        if !detailed {
+            return String::from(match self.op {
+                Aggregation::COUNT => "+",
+                Aggregation::SUM => "𝛴",
+            });
+        }
+
         let op_string = match self.op {
             Aggregation::COUNT => "|*|".into(),
             Aggregation::SUM => format!("𝛴({})", self.over),

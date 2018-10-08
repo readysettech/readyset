@@ -58,7 +58,7 @@ pub trait GroupedOperation: fmt::Debug + Clone {
         diffs: &mut Iterator<Item = Self::Diff>,
     ) -> DataType;
 
-    fn description(&self) -> String;
+    fn description(&self, detailed: bool) -> String;
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -286,8 +286,8 @@ where
         Some(vec![(self.src.as_global(), self.colfix[col])])
     }
 
-    fn description(&self) -> String {
-        self.inner.description()
+    fn description(&self, detailed: bool) -> String {
+        self.inner.description(detailed)
     }
 
     fn parent_columns(&self, column: usize) -> Vec<(NodeIndex, Option<usize>)> {

@@ -294,6 +294,13 @@ impl<A: Authority> ControllerHandle<A> {
             .context("fetching graphviz representation")?)
     }
 
+    /// Fetch a simplified graphviz description of the dataflow graph.
+    pub fn simple_graphviz(&mut self) -> Result<String, failure::Error> {
+        Ok(self
+            .rpc("simple_graphviz", &())
+            .context("fetching simple graphviz representation")?)
+    }
+
     /// Remove the given external view from the graph.
     pub fn remove_node(&mut self, view: NodeIndex) -> Result<(), failure::Error> {
         // TODO: this should likely take a view name, and we should verify that it's a Reader.

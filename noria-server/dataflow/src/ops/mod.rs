@@ -124,8 +124,8 @@ impl Ingredient for NodeOperator {
     fn is_join(&self) -> bool {
         impl_ingredient_fn_ref!(self, is_join,)
     }
-    fn description(&self) -> String {
-        impl_ingredient_fn_ref!(self, description,)
+    fn description(&self, detailed: bool) -> String {
+        impl_ingredient_fn_ref!(self, description, detailed)
     }
     fn on_connected(&mut self, graph: &Graph) {
         impl_ingredient_fn_mut!(self, on_connected, graph)

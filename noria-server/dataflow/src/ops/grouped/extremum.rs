@@ -158,7 +158,14 @@ impl GroupedOperation for ExtremumOperator {
         // TODO: handle this case by querying into the parent.
         unimplemented!();
     }
-    fn description(&self) -> String {
+    fn description(&self, detailed: bool) -> String {
+        if !detailed {
+            return String::from(match self.op {
+                Extremum::MIN => "MIN",
+                Extremum::MAX => "MAX",
+            });
+        }
+
         let op_string = match self.op {
             Extremum::MIN => format!("min({})", self.over),
             Extremum::MAX => format!("max({})", self.over),

@@ -184,7 +184,11 @@ impl Ingredient for Rewrite {
         }
     }
 
-    fn description(&self) -> String {
+    fn description(&self, detailed: bool) -> String {
+        if !detailed {
+            return String::from("Rw");
+        }
+
         format!("Rw[{}]", self.rw_col)
     }
 

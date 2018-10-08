@@ -202,7 +202,11 @@ impl GroupedOperation for GroupConcat {
         new.into()
     }
 
-    fn description(&self) -> String {
+    fn description(&self, detailed: bool) -> String {
+        if !detailed {
+            return String::from("CONCAT");
+        }
+
         let fields = self
             .components
             .iter()

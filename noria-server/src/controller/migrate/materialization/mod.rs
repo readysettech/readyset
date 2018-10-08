@@ -466,7 +466,7 @@ impl Materializations {
                 }
 
                 if let Some(pi) = any_partial(self, graph, ni) {
-                    println!("{}", graphviz(graph, &self));
+                    println!("{}", graphviz(graph, true, &self));
                     crit!(self.log, "partial materializations above full materialization";
                               "full" => ni.index(),
                               "partial" => pi.index());
@@ -514,7 +514,7 @@ impl Materializations {
                                                 .find(|c| !index.contains(&c))
                                         });
                                     if let Some(not_shared) = unshared {
-                                        println!("{}", graphviz(graph, &self));
+                                        println!("{}", graphviz(graph, true, &self));
                                         crit!(self.log, "partially overlapping partial indices";
                                                   "parent" => pni.index(),
                                                   "pcols" => ?index,
@@ -641,7 +641,7 @@ impl Materializations {
                             != self.have.get(&child).map(|i| i.len()).unwrap_or(0)
                         {
                             // node was previously materialized!
-                            println!("{}", graphviz(graph, &self));
+                            println!("{}", graphviz(graph, true, &self));
                             crit!(
                                 self.log,
                                 "attempting to make old non-materialized node with children partial";
@@ -672,7 +672,7 @@ impl Materializations {
                 index_on.clear();
             } else if !n.sharded_by().is_none() {
                 // what do we even do here?!
-                println!("{}", graphviz(graph, &self));
+                println!("{}", graphviz(graph, true, &self));
                 crit!(self.log, "asked to add index to sharded node";
                            "node" => node.index(),
                            "cols" => ?index_on);

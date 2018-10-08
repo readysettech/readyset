@@ -126,8 +126,12 @@ impl Ingredient for Filter {
         Some(vec![(self.src.as_global(), col)])
     }
 
-    fn description(&self) -> String {
+    fn description(&self, detailed: bool) -> String {
         use regex::Regex;
+
+        if !detailed {
+            return String::from("σ");
+        }
 
         let escape = |s: &str| {
             Regex::new("([<>])")

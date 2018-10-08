@@ -135,7 +135,7 @@ impl Ingredient for Distinct {
         }
     }
 
-    fn description(&self) -> String {
+    fn description(&self, _: bool) -> String {
         "Distinct".into()
     }
 

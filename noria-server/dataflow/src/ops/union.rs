@@ -641,10 +641,11 @@ impl Ingredient for Union {
         }
     }
 
-    fn description(&self) -> String {
+    fn description(&self, detailed: bool) -> String {
         // Ensure we get a consistent output by sorting.
         match self.emit {
             Emit::AllFrom(..) => "⊍".to_string(),
+            Emit::Project { .. } if !detailed => String::from("⋃"),
             Emit::Project { ref emit, .. } => {
                 let mut emit = emit.iter().collect::<Vec<_>>();
                 emit.sort();

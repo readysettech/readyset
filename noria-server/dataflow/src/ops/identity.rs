@@ -54,7 +54,7 @@ impl Ingredient for Identity {
         Some(vec![(self.src.as_global(), col)])
     }
 
-    fn description(&self) -> String {
+    fn description(&self, _: bool) -> String {
         "≡".into()
     }
 

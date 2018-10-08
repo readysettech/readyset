@@ -845,9 +845,13 @@ fn listen_external<A: Authority + 'static>(
                     .then(move |reply| match reply {
                         Ok(reply) => {
                             let res = match reply {
-                                Ok(Ok(reply)) => res.body(hyper::Body::from(reply)),
+                                Ok(Ok(reply)) => {
+                                    res.header("Content-Type", "application/json; charset=utf-8");
+                                    res.body(hyper::Body::from(reply))
+                                }
                                 Ok(Err(reply)) => {
                                     res.status(StatusCode::INTERNAL_SERVER_ERROR);
+                                    res.header("Content-Type", "text/plain; charset=utf-8");
                                     res.body(hyper::Body::from(reply))
                                 }
                                 Err(status_code) => {
