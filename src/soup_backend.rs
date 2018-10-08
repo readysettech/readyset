@@ -296,7 +296,20 @@ impl SoupBackend {
         use_params: Vec<Literal>,
         results: QueryResultWriter<W>,
     ) -> io::Result<()> {
-        let qname = self.get_or_create_view(&q, false)?;
+        let qname = match self.get_or_create_view(&q, false) {
+            Ok(qn) => qn,
+            Err(e) => {
+                if e.kind() == io::ErrorKind::Other {
+                    // maybe ER_SYNTAX_ERROR ?
+                    // would be good to narrow these down
+                    // TODO: why are the actual error contents never printed?
+                    use std::error::Error;
+                    return results.error(msql_srv::ErrorKind::ER_UNKNOWN_ERROR, e.description().as_bytes());
+                } else {
+                    return Err(e);
+                }
+            }
+        };
         let keys: Vec<_> = use_params
             .into_iter()
             .map(|l| vec![l.to_datatype()])
@@ -426,6 +439,7 @@ impl SoupBackend {
                                 .soup
                                 .extend_recipe(&format!("QUERY {}: {};", qname, q))
                             {
+                                error!(self.log, "{:?}", e);
                                 return Err(io::Error::new(io::ErrorKind::Other, e.compat()));
                             }
 
