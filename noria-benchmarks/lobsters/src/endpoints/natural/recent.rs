@@ -22,60 +22,57 @@ where
     // also note the `NOW()` hack to support dbs primed a while ago
     let main = c.and_then(|c| {
         c.query(
-            "SELECT `stories`.*, \
-             CAST(upvotes AS signed int) - CAST(downvotes AS signed int) AS saldo \
-             FROM `stories` \
+            "SELECT `stories`.id FROM `stories` \
              WHERE `stories`.`merged_story_id` IS NULL \
              AND `stories`.`is_expired` = 0 \
              ORDER BY stories.id DESC LIMIT 51",
-             //AND saldo <= 5 \
         )
-    }).and_then(|stories| {
-            stories.reduce_and_drop(
-                (HashSet::new(), HashSet::new()),
-                |(mut users, mut stories), story| {
-                    users.insert(story.get::<u32, _>("user_id").unwrap());
-                    stories.insert(story.get::<u32, _>("id").unwrap());
-                    (users, stories)
-                },
-            )
+    }).and_then(|res| {
+            res.reduce_and_drop(Vec::new(), |mut xs, x| {
+                xs.push(x.get::<u32, _>("id").unwrap());
+                xs
+            })
         })
-        .and_then(move |(c, (users, stories))| {
+        .and_then(|(c, stories)| {
             if stories.is_empty() {
                 panic!("got no stories from /recent");
             }
 
-            let stories_in = stories
+            let s = stories
                 .iter()
                 .map(|id| format!("{}", id))
                 .collect::<Vec<_>>()
                 .join(",");
 
+            c.query(&format!(
+                "SELECT `story_with_votes`.* \
+                 FROM `story_with_votes` \
+                 WHERE `story_with_votes`.`id` IN ({})",
+                s
+            )).map(move |x| (x, stories, s))
+        })
+        .and_then(|(res, stories, s)| {
+            res.reduce_and_drop(HashSet::new(), |mut users, story| {
+                users.insert(story.get::<u32, _>("user_id").unwrap());
+                users
+            }).map(|(c, users)| (c, users, stories, s))
+        })
+        .and_then(move |(c, users, stories, stories_in)| {
             match acting_as {
-                Some(uid) => Either::A(
-                    c.drop_exec(
-                        "SELECT `hidden_stories`.`story_id` \
-                         FROM `hidden_stories` \
-                         WHERE `hidden_stories`.`user_id` = ?",
-                        (uid,),
-                    ).and_then(move |c| {
-                            c.drop_exec(
-                                "SELECT `tag_filters`.* FROM `tag_filters` \
-                                 WHERE `tag_filters`.`user_id` = ?",
-                                (uid,),
-                            )
-                        })
-                        .and_then(move |c| {
-                            c.drop_query(format!(
-                                "SELECT `taggings`.`story_id` \
-                                 FROM `taggings` \
-                                 WHERE `taggings`.`story_id` IN ({})",
-                                //AND `taggings`.`tag_id` IN ({})",
-                                stories_in,
-                                //tags
-                            )).map(move |c| (c, (users, stories_in, stories)))
-                        }),
-                ),
+                Some(uid) => Either::A(c.drop_exec(
+                    "SELECT `tag_filters`.* FROM `tag_filters` \
+                     WHERE `tag_filters`.`user_id` = ?",
+                    (uid,),
+                ).and_then(move |c| {
+                    c.drop_query(format!(
+                        "SELECT `taggings`.`story_id` \
+                         FROM `taggings` \
+                         WHERE `taggings`.`story_id` IN ({})",
+                        //AND `taggings`.`tag_id` IN ({})",
+                        stories_in,
+                        //tags
+                    )).map(move |c| (c, (users, stories_in, stories)))
+                })),
                 None => Either::B(future::ok((c, (users, stories_in, stories)))),
             }
         })
