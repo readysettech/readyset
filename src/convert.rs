@@ -1,5 +1,5 @@
 use chrono;
-use distributary::DataType;
+use noria::DataType;
 use msql_srv::{Value, ValueInner};
 use nom_sql::{Literal, Real};
 

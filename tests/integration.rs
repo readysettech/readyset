@@ -1,4 +1,4 @@
-extern crate distributary;
+extern crate noria_server;
 extern crate msql_srv;
 extern crate mysql;
 extern crate nom_sql;
@@ -6,7 +6,7 @@ extern crate nom_sql;
 extern crate slog;
 extern crate zookeeper;
 
-extern crate mysoupql;
+extern crate noria_mysql;
 
 use std::collections::HashMap;
 use std::env;
@@ -16,12 +16,12 @@ use std::sync::{Arc, RwLock};
 use std::thread;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
-use distributary::{ControllerBuilder, ZookeeperAuthority};
+use noria_server::{ControllerBuilder, ZookeeperAuthority};
 use msql_srv::MysqlIntermediary;
 use nom_sql::SelectStatement;
 use zookeeper::{WatchedEvent, ZooKeeper, ZooKeeperExt};
 
-use mysoupql::{Schema, SoupBackend};
+use noria_mysql::{Schema, NoriaBackend};
 
 // Appends a unique ID to deployment strings, to avoid collisions between tests.
 struct Deployment {
@@ -61,7 +61,7 @@ fn sleep() {
     thread::sleep(Duration::from_millis(200));
 }
 
-// Initializes a souplet and starts processing MySQL queries against it.
+// Initializes a Noria worker and starts processing MySQL queries against it.
 fn setup(deployment: &Deployment) -> mysql::Opts {
     let zk_addr = "127.0.0.1:2181";
     // Run with VERBOSE=1 for log output.
@@ -74,7 +74,7 @@ fn setup(deployment: &Deployment) -> mysql::Opts {
     };
 
     let logger = if verbose {
-        distributary::logger_pls()
+        noria_server::logger_pls()
     } else {
         slog::Logger::root(slog::Discard, o!())
     };
@@ -101,7 +101,7 @@ fn setup(deployment: &Deployment) -> mysql::Opts {
     thread::spawn(move || {
         let (s, _) = listener.accept().unwrap();
 
-        let soup = SoupBackend::new(
+        let b = NoriaBackend::new(
             zk_addr,
             &deployment_id,
             schemas,
@@ -114,7 +114,7 @@ fn setup(deployment: &Deployment) -> mysql::Opts {
             logger,
         );
 
-        MysqlIntermediary::run_on_tcp(soup, s).unwrap();
+        MysqlIntermediary::run_on_tcp(b, s).unwrap();
     });
 
     let mut builder = mysql::OptsBuilder::default();
@@ -410,7 +410,7 @@ fn update_basic() {
         .first("SELECT Cats.name FROM Cats WHERE Cats.id = 1")
         .unwrap()
         .unwrap();
-    assert_eq!(name, String::from("Rusty"));
+    assert_eq!(name, String::from("\"Rusty\""));
 }
 
 #[test]
@@ -440,7 +440,7 @@ fn update_basic_prepared() {
         .first("SELECT Cats.name FROM Cats WHERE Cats.id = 1")
         .unwrap()
         .unwrap();
-    assert_eq!(name, String::from("Rusty"));
+    assert_eq!(name, String::from("\"Rusty\""));
 
     {
         let updated = conn
@@ -483,11 +483,11 @@ fn update_compound_primary_key() {
 
     let q = "SELECT Vote.reason FROM Vote WHERE Vote.aid = 1 AND Vote.uid = 2";
     let name: String = conn.first(q).unwrap().unwrap();
-    assert_eq!(name, String::from("better"));
+    assert_eq!(name, String::from("\"better\""));
 
     let q = "SELECT Vote.reason FROM Vote WHERE Vote.aid = 1 AND Vote.uid = 3";
     let name: String = conn.first(q).unwrap().unwrap();
-    assert_eq!(name, String::from("still okay"));
+    assert_eq!(name, String::from("\"still okay\""));
 }
 
 #[test]
@@ -516,7 +516,7 @@ fn update_only_constraint() {
         .first("SELECT Cats.name FROM Cats WHERE Cats.id = 1")
         .unwrap()
         .unwrap();
-    assert_eq!(name, String::from("Rusty"));
+    assert_eq!(name, String::from("\"Rusty\""));
 }
 
 #[test]
@@ -543,7 +543,7 @@ fn update_pkey() {
         .first("SELECT Cats.name FROM Cats WHERE Cats.id = 10")
         .unwrap()
         .unwrap();
-    assert_eq!(name, String::from("Rusty"));
+    assert_eq!(name, String::from("\"Rusty\""));
     let old_row = conn
         .query("SELECT Cats.name FROM Cats WHERE Cats.id = 1")
         .unwrap()
@@ -584,7 +584,7 @@ fn update_separate() {
         .first("SELECT Cats.name FROM Cats WHERE Cats.id = 1")
         .unwrap()
         .unwrap();
-    assert_eq!(name, String::from("Rusty II"));
+    assert_eq!(name, String::from("\"Rusty II\""));
 }
 
 #[test]
@@ -673,8 +673,8 @@ fn select_collapse_where_in() {
         .map(|row| row.unwrap().take::<String, _>(0).unwrap())
         .collect();
     assert_eq!(names.len(), 2);
-    assert!(names.iter().any(|s| s == "Bob"));
-    assert!(names.iter().any(|s| s == "Jane"));
+    assert!(names.iter().any(|s| s == "\"Bob\""));
+    assert!(names.iter().any(|s| s == "\"Jane\""));
 
     let names: Vec<String> = conn
         .prep_exec("SELECT Cats.name FROM Cats WHERE Cats.id IN (?, ?)", (1, 2))
@@ -682,8 +682,8 @@ fn select_collapse_where_in() {
         .map(|row| row.unwrap().take::<String, _>(0).unwrap())
         .collect();
     assert_eq!(names.len(), 2);
-    assert!(names.iter().any(|s| s == "Bob"));
-    assert!(names.iter().any(|s| s == "Jane"));
+    assert!(names.iter().any(|s| s == "\"Bob\""));
+    assert!(names.iter().any(|s| s == "\"Jane\""));
 
     // some lookups give empty results
     let names: Vec<String> = conn
@@ -692,8 +692,8 @@ fn select_collapse_where_in() {
         .map(|row| row.unwrap().take::<String, _>(0).unwrap())
         .collect();
     assert_eq!(names.len(), 2);
-    assert!(names.iter().any(|s| s == "Bob"));
-    assert!(names.iter().any(|s| s == "Jane"));
+    assert!(names.iter().any(|s| s == "\"Bob\""));
+    assert!(names.iter().any(|s| s == "\"Jane\""));
 
     let names: Vec<String> = conn
         .prep_exec(
@@ -703,8 +703,8 @@ fn select_collapse_where_in() {
         .map(|row| row.unwrap().take::<String, _>(0).unwrap())
         .collect();
     assert_eq!(names.len(), 2);
-    assert!(names.iter().any(|s| s == "Bob"));
-    assert!(names.iter().any(|s| s == "Jane"));
+    assert!(names.iter().any(|s| s == "\"Bob\""));
+    assert!(names.iter().any(|s| s == "\"Jane\""));
 
     // also track another parameter
     let names: Vec<String> = conn
@@ -713,7 +713,7 @@ fn select_collapse_where_in() {
         .map(|row| row.unwrap().take::<String, _>(0).unwrap())
         .collect();
     assert_eq!(names.len(), 1);
-    assert!(names.iter().any(|s| s == "Bob"));
+    assert!(names.iter().any(|s| s == "\"Bob\""));
 
     let names: Vec<String> = conn
         .prep_exec(
@@ -723,5 +723,5 @@ fn select_collapse_where_in() {
         .map(|row| row.unwrap().take::<String, _>(0).unwrap())
         .collect();
     assert_eq!(names.len(), 1);
-    assert!(names.iter().any(|s| s == "Bob"));
+    assert!(names.iter().any(|s| s == "\"Bob\""));
 }

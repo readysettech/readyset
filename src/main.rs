@@ -6,7 +6,7 @@ extern crate arccstr;
 extern crate chrono;
 #[macro_use]
 extern crate clap;
-extern crate api as distributary;
+extern crate noria;
 extern crate msql_srv;
 extern crate nom_sql;
 
@@ -21,7 +21,7 @@ extern crate regex;
 mod convert;
 mod rewrite;
 mod schema;
-mod soup_backend;
+mod backend;
 mod utils;
 
 use msql_srv::MysqlIntermediary;
@@ -34,7 +34,7 @@ use std::sync::{Arc, RwLock};
 use std::thread;
 
 use schema::Schema;
-use soup_backend::SoupBackend;
+use backend::NoriaBackend;
 
 // Just give me a damn terminal logger
 // Duplicated from distributary, as the API subcrate doesn't export it.
@@ -51,13 +51,13 @@ fn main() {
 
     let matches = App::new("distributary-mysql")
         .version("0.0.1")
-        .about("MySQL shim for Soup.")
+        .about("MySQL shim for Noria.")
         .arg(
             Arg::with_name("deployment")
                 .long("deployment")
                 .takes_value(true)
                 .required(true)
-                .help("Soup deployment ID to attach to."),
+                .help("Noria deployment ID to attach to."),
         ).arg(
             Arg::with_name("zk_addr")
                 .long("zookeeper-address")
@@ -126,7 +126,7 @@ fn main() {
 
         let jh = builder
             .spawn(move || {
-                let soup = SoupBackend::new(
+                let b = NoriaBackend::new(
                     &zk_addr,
                     &deployment,
                     schemas,
@@ -140,7 +140,7 @@ fn main() {
                 );
                 let rs = s.try_clone().unwrap();
                 if let Err(e) =
-                    MysqlIntermediary::run_on(soup, BufReader::new(rs), BufWriter::new(s))
+                    MysqlIntermediary::run_on(b, BufReader::new(rs), BufWriter::new(s))
                 {
                     match e.kind() {
                         io::ErrorKind::ConnectionReset | io::ErrorKind::BrokenPipe => {}

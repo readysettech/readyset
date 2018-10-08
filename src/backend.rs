@@ -1,4 +1,4 @@
-use distributary::{ControllerHandle, DataType, Table, View, ZookeeperAuthority};
+use noria::{ControllerHandle, DataType, Table, View, ZookeeperAuthority};
 
 use msql_srv::{self, *};
 use nom_sql::{
@@ -43,59 +43,59 @@ impl fmt::Debug for PreparedStatement {
     }
 }
 
-struct SoupBackendInner {
-    soup: ControllerHandle<ZookeeperAuthority>,
+struct NoriaBackendInner {
+    noria: ControllerHandle<ZookeeperAuthority>,
     inputs: BTreeMap<String, Table>,
     outputs: BTreeMap<String, View>,
 }
 
-impl SoupBackendInner {
+impl NoriaBackendInner {
     fn new(zk_addr: &str, deployment: &str, log: &slog::Logger) -> Self {
         let mut zk_auth = ZookeeperAuthority::new(&format!("{}/{}", zk_addr, deployment)).unwrap();
         zk_auth.log_with(log.clone());
 
-        debug!(log, "Connecting to Soup...",);
+        debug!(log, "Connecting to Noria...",);
         let mut ch = ControllerHandle::new(zk_auth).unwrap();
 
-        let soup = SoupBackendInner {
+        let b = NoriaBackendInner {
             inputs: ch
                 .inputs()
-                .expect("couldn't get inputs from Soup")
+                .expect("couldn't get inputs from Noria")
                 .into_iter()
                 .map(|(n, _)| (n.clone(), ch.table(&n).unwrap()))
                 .collect::<BTreeMap<String, Table>>(),
             outputs: ch
                 .outputs()
-                .expect("couldn't get outputs from Soup")
+                .expect("couldn't get outputs from Noria")
                 .into_iter()
                 .map(|(n, _)| (n.clone(), ch.view(&n).unwrap()))
                 .collect::<BTreeMap<String, View>>(),
-            soup: ch,
+            noria: ch,
         };
 
         debug!(log, "Connected!");
 
-        soup
+        b
     }
 
     fn get_or_make_mutator<'a, 'b>(&'a mut self, table: &'b str) -> &'a mut Table {
-        let soup = &mut self.soup;
+        let n = &mut self.noria;
         self.inputs.entry(table.to_owned()).or_insert_with(|| {
-            soup.table(table)
+            n.table(table)
                 .expect(&format!("no table named {}", table))
         })
     }
 
     fn get_or_make_getter<'a, 'b>(&'a mut self, view: &'b str) -> &'a mut View {
-        let soup = &mut self.soup;
+        let n = &mut self.noria;
         self.outputs
             .entry(view.to_owned())
-            .or_insert_with(|| soup.view(view).expect(&format!("no view named '{}'", view)))
+            .or_insert_with(|| n.view(view).expect(&format!("no view named '{}'", view)))
     }
 }
 
-pub struct SoupBackend {
-    inner: SoupBackendInner,
+pub struct NoriaBackend {
+    inner: NoriaBackendInner,
     log: slog::Logger,
 
     table_schemas: Arc<RwLock<HashMap<String, Schema>>>,
@@ -118,7 +118,7 @@ pub struct SoupBackend {
     static_responses: bool,
 }
 
-impl SoupBackend {
+impl NoriaBackend {
     pub fn new(
         zk_addr: &str,
         deployment: &str,
@@ -131,8 +131,8 @@ impl SoupBackend {
         sanitize: bool,
         log: slog::Logger,
     ) -> Self {
-        SoupBackend {
-            inner: SoupBackendInner::new(zk_addr, deployment, &log),
+        NoriaBackend {
+            inner: NoriaBackendInner::new(zk_addr, deployment, &log),
             log: log,
 
             table_schemas: schemas,
@@ -160,8 +160,8 @@ impl SoupBackend {
         results: QueryResultWriter<W>,
     ) -> io::Result<()> {
         // TODO(malte): we should perhaps check our usual caches here, rather than just blindly
-        // doing a migration on Soup ever time. On the other hand, CREATE TABLE is rare...
-        match self.inner.soup.extend_recipe(&format!("{};", q)) {
+        // doing a migration on Noria ever time. On the other hand, CREATE TABLE is rare...
+        match self.inner.noria.extend_recipe(&format!("{};", q)) {
             Ok(_) => {
                 let mut ts_lock = self.table_schemas.write().unwrap();
                 ts_lock.insert(q.table.name.clone(), Schema::Table(q));
@@ -179,7 +179,7 @@ impl SoupBackend {
         results: QueryResultWriter<W>,
     ) -> io::Result<()> {
         // TODO(malte): we should perhaps check our usual caches here, rather than just blindly
-        // doing a migration on Soup ever time. On the other hand, CREATE VIEW is rare...
+        // doing a migration on Noria ever time. On the other hand, CREATE VIEW is rare...
 
         // NOTE(jon): expand stars here so that we don't have to recursively walk them when given a
         // view.* at query-time.
@@ -198,11 +198,11 @@ impl SoupBackend {
 
         info!(
             self.log,
-            "Adding view \"{}\" to Soup as {}", q.definition, q.name
+            "Adding view \"{}\" to Noria as {}", q.definition, q.name
         );
         match self
             .inner
-            .soup
+            .noria
             .extend_recipe(&format!("{}: {};", q.name, q.definition))
         {
             Ok(_) => {
@@ -422,21 +422,21 @@ impl SoupBackend {
                                 .fetch_add(1, sync::atomic::Ordering::SeqCst);
                             let qname = format!("q_{}", qc);
 
-                            // add the query to Soup
+                            // add the query to Noria
                             if prepared {
                                 info!(
                                     self.log,
-                                    "Adding parameterized query \"{}\" to Soup as {}", q, qname
+                                    "Adding parameterized query \"{}\" to Noria as {}", q, qname
                                 );
                             } else {
                                 info!(
                                     self.log,
-                                    "Adding ad-hoc query \"{}\" to Soup as {}", q, qname
+                                    "Adding ad-hoc query \"{}\" to Noria as {}", q, qname
                                 );
                             }
                             if let Err(e) = self
                                 .inner
-                                .soup
+                                .noria
                                 .extend_recipe(&format!("QUERY {}: {};", qname, q))
                             {
                                 error!(self.log, "{:?}", e);
@@ -771,7 +771,7 @@ impl SoupBackend {
                 error!(self.log, "error executing SELECT: {:?}", e);
                 results.error(
                     msql_srv::ErrorKind::ER_UNKNOWN_ERROR,
-                    "Soup returned an error".as_bytes(),
+                    "Noria returned an error".as_bytes(),
                 )
             }
         }
@@ -810,7 +810,7 @@ impl SoupBackend {
     }
 }
 
-impl<W: io::Write> MysqlShim<W> for SoupBackend {
+impl<W: io::Write> MysqlShim<W> for NoriaBackend {
     fn on_prepare(&mut self, query: &str, info: StatementMetaWriter<W>) -> io::Result<()> {
         trace!(self.log, "prepare: {}", query);
 
@@ -835,7 +835,7 @@ impl<W: io::Write> MysqlShim<W> for SoupBackend {
                     sql_q
                 }
                 Err(e) => {
-                    // if nom-sql rejects the query, there is no chance Soup will like it
+                    // if nom-sql rejects the query, there is no chance Noria will like it
                     error!(self.log, "query can't be parsed: \"{}\"", query);
                     return info.error(msql_srv::ErrorKind::ER_PARSE_ERROR, e.as_bytes());
                 }
@@ -848,7 +848,7 @@ impl<W: io::Write> MysqlShim<W> for SoupBackend {
             nom_sql::SqlQuery::Insert(_) => self.prepare_insert(sql_q, info),
             nom_sql::SqlQuery::Update(_) => self.prepare_update(sql_q, info),
             _ => {
-                // Soup only supports prepared SELECT statements at the moment
+                // Noria only supports prepared SELECT statements at the moment
                 error!(
                     self.log,
                     "unsupported query for prepared statement: {}", query
@@ -1032,7 +1032,7 @@ impl<W: io::Write> MysqlShim<W> for SoupBackend {
                         (q, use_params)
                     }
                     Err(_e) => {
-                        // if nom-sql rejects the query, there is no chance Soup will like it
+                        // if nom-sql rejects the query, there is no chance Noria will like it
                         error!(self.log, "query can't be parsed: \"{}\"", query);
                         return results.completed(0, 0);
                         //return results.error(msql_srv::ErrorKind::ER_PARSE_ERROR, e.as_bytes());
