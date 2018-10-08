@@ -177,14 +177,20 @@ Build and open the documentation with:
 $ cargo doc --open
 ```
 
-Once `noria-server` is running, you can discover its REST API port
+Once `noria-server` is running, its API is available on port 6033 at the
+specified listen address.
+
+Alternatively, you can discover Noria's REST API listen address and port
 through ZooKeeper via this command:
 
 ```console
 $ cargo run --bin noria-zk -- \
-    --show --deployment testing
+    --show --deployment myapp
     | grep external | cut -d' ' -f4
 ```
 
 A basic graphical UI runs at `http://IP:PORT/graph.html` and shows
-the running data-flow graph.
+the running data-flow graph. Alternatively, you can deploy Noria's
+[more advanced web UI](https://github.com/mit-pdos/noria-ui) that serves
+the REST API endpoints in more human-digestiable form and includes the
+graph visualization.
