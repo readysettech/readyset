@@ -33,3 +33,10 @@ You can now access the UI in your browser at
 Use the top-right hand control to point the UI to a running controller's
 external REST API address.
 
+Noria prints this address on startup:
+```
+Oct 08 18:01:56.004 INFO became leader at epoch 587761
+Oct 08 18:01:56.006 INFO found initial leader
+Oct 08 18:01:56.007 INFO leader listening on external address V4(127.0.0.1:6033)
+```
+The last line specifies the external address and port; the default port is 6033.
