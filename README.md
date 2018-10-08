@@ -1,4 +1,4 @@
-# Noria: a high-performance web applications backend
+# Noria: data-flow for high-performance web applications
 
 [![Build Status](https://travis-ci.org/mit-pdos/noria.svg?branch=master)](https://travis-ci.org/mit-pdos/noria)
 
@@ -6,10 +6,10 @@ Noria is a new streaming data-flow system designed to act as a fast
 storage backend for read-heavy web applications based on [this
 paper](https://jon.tsp.io/papers/osdi18-noria.pdf) from
 [OSDI'18](https://www.usenix.org/conference/osdi18/presentation/gjengset).
-It acts like a databases, but pre-computes and caches relational query
+It acts like a database, but precomputes and caches relational query
 results so that reads are blazingly fast. Noria automatically keeps cached
 results up-to-date as the underlying data, stored in persistent _base
-tables_ change. Noria uses partially-stateful data-flow to reduce memory
+tables_, change. Noria uses partially-stateful data-flow to reduce memory
 overhead, and supports dynamic, runtime data-flow and query change.
 
 Noria comes with [a MySQL
@@ -20,7 +20,7 @@ running a [Lobsters-like workload](https://github.com/jonhoo/trawler)
 that issues the [same SQL
 queries](https://github.com/mit-pdos/soup-benchmarks/tree/master/lobsters/mysql)
 as the real [Lobsters website](https://lobste.rs), Noria improves
-throughput supported by up to 5x:
+throughput supported by 5x:
 
 ![Noria speeds up Lobsters queries by 5x](lobsters-perf.svg)
 
