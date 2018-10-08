@@ -358,26 +358,29 @@ mod tests {
     #[test]
     fn it_describes() {
         let p = setup(false, false, true);
-        assert_eq!(p.node().description(), "π[2, 0, lit: \"hello\", lit: 42]");
+        assert_eq!(
+            p.node().description(true),
+            "π[2, 0, lit: \"hello\", lit: 42]"
+        );
     }
 
     #[test]
     fn it_describes_arithmetic() {
         let p = setup_column_arithmetic(ArithmeticOperator::Add);
-        assert_eq!(p.node().description(), "π[0, 1, 0 + 1]");
+        assert_eq!(p.node().description(true), "π[0, 1, 0 + 1]");
     }
 
     #[test]
     fn it_describes_all() {
         let p = setup(false, true, false);
-        assert_eq!(p.node().description(), "π[*]");
+        assert_eq!(p.node().description(true), "π[*]");
     }
 
     #[test]
     fn it_describes_all_w_literals() {
         let p = setup(false, true, true);
         assert_eq!(
-            p.node().description(),
+            p.node().description(true),
             "π[0, 1, 2, lit: \"hello\", lit: 42]"
         );
     }

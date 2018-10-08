@@ -314,7 +314,7 @@ pub mod test {
                 };
                 indentln(&mut s);
                 s.push_str(&format!("{}", index.index()));
-                s.push_str(&node.describe(index, materialization_status));
+                s.push_str(&node.describe(index, true, materialization_status));
             }
 
             // edges.

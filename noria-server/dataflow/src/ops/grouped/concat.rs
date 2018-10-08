@@ -259,7 +259,10 @@ mod tests {
     #[test]
     fn it_describes() {
         let c = setup(true);
-        assert_eq!(c.node().description(), "||([\".\", 1, \";\"], \"#\") γ[0]");
+        assert_eq!(
+            c.node().description(true),
+            "||([\".\", 1, \";\"], \"#\") γ[0]"
+        );
     }
 
     #[test]

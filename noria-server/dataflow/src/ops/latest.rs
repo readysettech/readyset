@@ -152,7 +152,7 @@ mod tests {
     #[test]
     fn it_describes() {
         let c = setup(0, false);
-        assert_eq!(c.node().description(), "⧖ γ[0]");
+        assert_eq!(c.node().description(true), "⧖ γ[0]");
     }
 
     #[test]

@@ -696,7 +696,7 @@ mod tests {
     fn it_describes() {
         let (u, l, r) = setup();
         assert_eq!(
-            u.node().description(),
+            u.node().description(true),
             format!("{}:[0, 1] ⋃ {}:[0, 2]", l, r)
         );
     }

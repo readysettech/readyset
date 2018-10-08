@@ -1067,7 +1067,7 @@ mod tests {
             // leaf node
             let new_leaf_view = get_node(&inc, mig, &q.unwrap().name);
             assert_eq!(new_leaf_view.fields(), &["name", "title", "bogokey"]);
-            assert_eq!(new_leaf_view.description(), format!("π[3, 2, lit: 0]"));
+            assert_eq!(new_leaf_view.description(true), "π[3, 2, lit: 0]");
         });
     }
 
@@ -1104,11 +1104,11 @@ mod tests {
             // filter node
             let filter = get_node(&inc, mig, &format!("q_{:x}_n0_p0_f0", qid));
             assert_eq!(filter.fields(), &["id", "name"]);
-            assert_eq!(filter.description(), format!("σ[f0 = 42]"));
+            assert_eq!(filter.description(true), "σ[f0 = 42]");
             // leaf view node
             let edge = get_node(&inc, mig, &res.unwrap().name);
             assert_eq!(edge.fields(), &["name", "bogokey"]);
-            assert_eq!(edge.description(), format!("π[1, lit: 0]"));
+            assert_eq!(edge.description(true), "π[1, lit: 0]");
         });
     }
 
@@ -1156,11 +1156,11 @@ mod tests {
             );
             let agg_view = get_node(&inc, mig, &format!("q_{:x}_n0", qid));
             assert_eq!(agg_view.fields(), &["aid", "votes"]);
-            assert_eq!(agg_view.description(), format!("|*| γ[0]"));
+            assert_eq!(agg_view.description(true), "|*| γ[0]");
             // check edge view
             let edge_view = get_node(&inc, mig, &res.unwrap().name);
             assert_eq!(edge_view.fields(), &["votes", "bogokey"]);
-            assert_eq!(edge_view.description(), format!("π[1, lit: 0]"));
+            assert_eq!(edge_view.description(true), "π[1, lit: 0]");
         });
     }
 
@@ -1281,7 +1281,7 @@ mod tests {
             assert_eq!(mig.graph().node_count(), ncount + 2);
             // only the identity node is returned in the vector of new nodes
             assert_eq!(qfp.new_nodes.len(), 1);
-            assert_eq!(get_node(&inc, mig, &qfp.name).description(), "≡");
+            assert_eq!(get_node(&inc, mig, &qfp.name).description(true), "≡");
             // we should be based off the identity as our leaf
             let id_node = qfp.new_nodes.iter().next().unwrap();
             assert_eq!(qfp.query_leaf, *id_node);
@@ -1300,7 +1300,10 @@ mod tests {
             assert_eq!(mig.graph().node_count(), ncount + 2);
             // only the projection node is returned in the vector of new nodes
             assert_eq!(qfp.new_nodes.len(), 1);
-            assert_eq!(get_node(&inc, mig, &qfp.name).description(), "π[0, 1, 2]");
+            assert_eq!(
+                get_node(&inc, mig, &qfp.name).description(true),
+                "π[0, 1, 2]"
+            );
             // we should be based off the new projection as our leaf
             let id_node = qfp.new_nodes.iter().next().unwrap();
             assert_eq!(qfp.query_leaf, *id_node);
@@ -1398,17 +1401,17 @@ mod tests {
             );
             let proj_helper_view = get_node(&inc, mig, &format!("q_{:x}_n0_prj_hlpr", qid));
             assert_eq!(proj_helper_view.fields(), &["userid", "grp"]);
-            assert_eq!(proj_helper_view.description(), format!("π[1, lit: 0]"));
+            assert_eq!(proj_helper_view.description(true), "π[1, lit: 0]");
             // check aggregation view
             let agg_view = get_node(&inc, mig, &format!("q_{:x}_n0", qid));
             assert_eq!(agg_view.fields(), &["grp", "count"]);
-            assert_eq!(agg_view.description(), format!("|*| γ[1]"));
+            assert_eq!(agg_view.description(true), "|*| γ[1]");
             // check edge view -- note that it's not actually currently possible to read from
             // this for a lack of key (the value would be the key). Hence, the view also has a
             // bogokey column.
             let edge_view = get_node(&inc, mig, &res.unwrap().name);
             assert_eq!(edge_view.fields(), &["count", "bogokey"]);
-            assert_eq!(edge_view.description(), format!("π[1, lit: 0]"));
+            assert_eq!(edge_view.description(true), "π[1, lit: 0]");
         });
     }
 
@@ -1451,13 +1454,13 @@ mod tests {
             );
             let agg_view = get_node(&inc, mig, &format!("q_{:x}_n0", qid));
             assert_eq!(agg_view.fields(), &["userid", "count"]);
-            assert_eq!(agg_view.description(), format!("|*| γ[0]"));
+            assert_eq!(agg_view.description(true), "|*| γ[0]");
             // check edge view -- note that it's not actually currently possible to read from
             // this for a lack of key (the value would be the key). Hence, the view also has a
             // bogokey column.
             let edge_view = get_node(&inc, mig, &res.unwrap().name);
             assert_eq!(edge_view.fields(), &["count", "bogokey"]);
-            assert_eq!(edge_view.description(), format!("π[1, lit: 0]"));
+            assert_eq!(edge_view.description(true), "π[1, lit: 0]");
         });
     }
 
@@ -1621,10 +1624,7 @@ mod tests {
                 new_leaf_view.fields(),
                 &["id", "name", "author", "title", "bogokey"]
             );
-            assert_eq!(
-                new_leaf_view.description(),
-                format!("π[1, 3, 1, 2, lit: 0]")
-            );
+            assert_eq!(new_leaf_view.description(true), "π[1, 3, 1, 2, lit: 0]");
         });
     }
 
@@ -1669,7 +1669,7 @@ mod tests {
             // leaf view node
             let edge = get_node(&inc, mig, &res.unwrap().name);
             assert_eq!(edge.fields(), &["name", "1", "bogokey"]);
-            assert_eq!(edge.description(), format!("π[1, lit: 1, lit: 0]"));
+            assert_eq!(edge.description(true), "π[1, lit: 1, lit: 0]");
         });
     }
 
@@ -1695,8 +1695,8 @@ mod tests {
             let edge = get_node(&inc, mig, &res.unwrap().name);
             assert_eq!(edge.fields(), &["2 * users.age", "twenty", "bogokey"]);
             assert_eq!(
-                edge.description(),
-                format!("π[(lit: 2) * 1, (lit: 2) * (lit: 10), lit: 0]")
+                edge.description(true),
+                "π[(lit: 2) * 1, (lit: 2) * (lit: 10), lit: 0]"
             );
         });
     }
@@ -1742,7 +1742,7 @@ mod tests {
             // leaf node
             let new_leaf_view = get_node(&inc, mig, &q.unwrap().name);
             assert_eq!(new_leaf_view.fields(), &["name", "title", "bogokey"]);
-            assert_eq!(new_leaf_view.description(), format!("π[3, 2, lit: 0]"));
+            assert_eq!(new_leaf_view.description(true), "π[3, 2, lit: 0]");
         });
     }
 
@@ -1771,7 +1771,7 @@ mod tests {
             // the leaf of this query (node above the reader) is a union
             let union_view = get_node(&inc, mig, &res.unwrap().name);
             assert_eq!(union_view.fields(), &["id", "name"]);
-            assert_eq!(union_view.description(), format!("3:[0, 1] ⋃ 6:[0, 1]"));
+            assert_eq!(union_view.description(true), "3:[0, 1] ⋃ 6:[0, 1]");
         });
     }
 

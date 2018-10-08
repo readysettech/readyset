@@ -619,7 +619,7 @@ mod tests {
     fn it_describes() {
         let (j, l, r) = setup();
         assert_eq!(
-            j.node().description(),
+            j.node().description(true),
             format!("[{}:0, {}:1, {}:1] {}:0 ⋉ {}:0", l, l, r, l, r)
         );
     }

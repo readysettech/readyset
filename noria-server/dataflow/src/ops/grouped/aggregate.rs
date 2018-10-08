@@ -164,10 +164,10 @@ mod tests {
         let s = 0.into();
 
         let c = Aggregation::COUNT.over(s, 1, &[0, 2]);
-        assert_eq!(c.description(), "|*| γ[0, 2]");
+        assert_eq!(c.description(true), "|*| γ[0, 2]");
 
         let s = Aggregation::SUM.over(s, 1, &[2, 0]);
-        assert_eq!(s.description(), "𝛴(1) γ[2, 0]");
+        assert_eq!(s.description(true), "𝛴(1) γ[2, 0]");
     }
 
     #[test]
