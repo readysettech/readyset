@@ -100,8 +100,11 @@ issue](https://github.com/mit-pdos/noria/issues). You may also want to
 try to disable automatic re-use (with `--no-reuse`) or sharding (with
 `--shards 0`) in case those are misbehaving.
 
-You can manually inspect the database using the `mysql` CLI, or by
-using the [Noria web interface](https://github.com/mit-pdos/noria-ui).
+## CLI and Web UI
+
+You can manually inspect the data stored in Noria using any MySQL client
+(e.g., the `mysql` CLI), or use [Noria's own web
+interface](https://github.com/mit-pdos/noria-ui).
 
 ## Noria development
 
