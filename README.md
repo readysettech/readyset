@@ -153,7 +153,7 @@ The sub-crates each serve a distinct role:
      the different operators ([`ops/`](noria-server/dataflow/src/ops/)),
      "special" operators like leaf views and sharders
      ([`node/special/`](noria-server/dataflow/src/node/special/)),
-     implementations of view storage ([`state/`](dataflow/src/state/)),
+     implementations of view storage ([`state/`](noria-server/dataflow/src/state/)),
      and the code that coordinates execution of control, data, and
      backfill messages within a thread domain
      ([`domain/`](noria-server/dataflow/src/domain/)).
