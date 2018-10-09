@@ -1,7 +1,7 @@
 # Noria: data-flow for high-performance web applications
 
 [![Crates.io](https://img.shields.io/crates/v/noria.svg)](https://crates.io/crates/noria)
-[![Documentation](https://docs.rs/noria/badge.svg)](https://docs.rs/noria/)
+[![Documentation](https://docs.rs/noria/badge.svg)](https://jon.thesquareplanet.com/crates/noria/)
 [![Build Status](https://travis-ci.org/mit-pdos/noria.svg?branch=master)](https://travis-ci.org/mit-pdos/noria)
 
 Noria is a new streaming data-flow system designed to act as a fast
@@ -81,7 +81,7 @@ ZooKeeper is not running on `localhost:2181`).
 
 The [`noria` crate](https://crates.io/crates/noria) provides native Rust
 bindings to interact with `noria-server`. See the [`noria`
-documentation](https://docs.rs/noria/) for detailed instructions on how
+documentation](https://jon.thesquareplanet.com/crates/noria/) for detailed instructions on how
 to use the library. You can also take a look at the [example Noria
 program](noria/examples/basic-recipe.rs). You can also see a
 self-contained version that embeds `noria-server` (and doesn't require
