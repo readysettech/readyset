@@ -11,7 +11,6 @@ use byteorder::{NetworkEndian, WriteBytesExt};
 use mio::{self, Evented, Poll, PollOpt, Ready, Token};
 use net2;
 use serde::{Deserialize, Serialize};
-use throttled_reader::ThrottledReader;
 use tokio::prelude::*;
 
 use super::{DeserializeReceiver, NonBlockingWriter, ReceiveError};
@@ -211,7 +210,7 @@ where
 }
 
 pub struct TcpReceiver<T> {
-    pub(crate) stream: BufReader<ThrottledReader<NonBlockingWriter<mio::net::TcpStream>>>,
+    pub(crate) stream: BufReader<NonBlockingWriter<mio::net::TcpStream>>,
     poisoned: bool,
     deserialize_receiver: DeserializeReceiver<T>,
 
@@ -232,7 +231,7 @@ where
 
     fn new_inner(cap: Option<usize>, stream: mio::net::TcpStream) -> Self {
         stream.set_nodelay(true).unwrap(); // for acks
-        let stream = ThrottledReader::new(NonBlockingWriter::new(stream));
+        let stream = NonBlockingWriter::new(stream);
         let stream = if let Some(cap) = cap {
             BufReader::with_capacity(cap, stream)
         } else {
@@ -262,13 +261,6 @@ where
 
     pub fn is_empty(&self) -> bool {
         self.stream.buffer().is_empty()
-    }
-
-    pub fn syscall_limit(&mut self, limit: Option<usize>) {
-        match limit {
-            Some(l) => self.stream.get_mut().set_limit(l),
-            None => self.stream.get_mut().unthrottle(),
-        }
     }
 
     pub fn try_recv(&mut self) -> Result<T, TryRecvError> {
