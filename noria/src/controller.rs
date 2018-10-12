@@ -30,7 +30,8 @@ use tokio;
 #[doc(hidden)]
 pub struct ControllerDescriptor {
     pub external_addr: SocketAddr,
-    pub internal_addr: SocketAddr,
+    pub worker_addr: SocketAddr,
+    pub domain_addr: SocketAddr,
     pub nonce: u64,
 }
 

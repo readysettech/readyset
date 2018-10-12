@@ -1,41 +1,29 @@
 use crate::controller::migrate::materialization::Materializations;
-use crate::controller::{ControllerState, DomainHandle, Migration, Recipe, WorkerIdentifier};
-use crate::coordination::CoordinationMessage;
+use crate::controller::{
+    ControllerState, DomainHandle, DomainShardHandle, Migration, Recipe, Worker, WorkerIdentifier,
+};
+use crate::coordination::{CoordinationMessage, CoordinationPayload, DomainDescriptor};
+use dataflow::payload::ControlReplyPacket;
 use dataflow::prelude::*;
-use dataflow::{node, payload, DomainConfig};
+use dataflow::{node, payload, DomainBuilder, DomainConfig};
 use hyper::{self, Method, StatusCode};
 use mio::net::TcpListener;
 use noria::builders::*;
 use noria::channel::tcp::{SendError, TcpSender};
 use noria::consensus::{Authority, Epoch, STATE_KEY};
-use noria::debug::stats::GraphStats;
+use noria::debug::stats::{DomainStats, GraphStats, NodeStats};
 use noria::ActivationResult;
 use petgraph;
 use petgraph::visit::Bfs;
 use slog;
+use slog::Logger;
 use std::collections::{BTreeMap, HashMap};
 use std::mem;
-use std::net::{IpAddr, SocketAddr};
-use std::sync::{Arc, Mutex};
+use std::net::SocketAddr;
+use std::sync::Arc;
 use std::time::{Duration, Instant};
-use std::{io, time};
-
-#[derive(Clone)]
-pub(crate) struct WorkerStatus {
-    pub(crate) healthy: bool,
-    last_heartbeat: Instant,
-    pub(crate) sender: Arc<Mutex<TcpSender<CoordinationMessage>>>,
-}
-
-impl WorkerStatus {
-    pub fn new(sender: Arc<Mutex<TcpSender<CoordinationMessage>>>) -> Self {
-        WorkerStatus {
-            healthy: true,
-            last_heartbeat: Instant::now(),
-            sender,
-        }
-    }
-}
+use std::{cell, io, thread, time};
+use tokio::prelude::*;
 
 /// `Controller` is the core component of the alternate Soup implementation.
 ///
@@ -62,11 +50,9 @@ pub struct ControllerInner {
     pub(super) channel_coordinator: Arc<ChannelCoordinator>,
     pub(super) debug_channel: Option<SocketAddr>,
 
-    pub(super) listen_addr: IpAddr,
-
     /// Map from worker address to the address the worker is listening on for reads.
     read_addrs: HashMap<WorkerIdentifier, SocketAddr>,
-    pub(super) workers: HashMap<WorkerIdentifier, WorkerStatus>,
+    pub(super) workers: HashMap<WorkerIdentifier, Worker>,
 
     /// State between migrations
     pub(super) remap: HashMap<DomainIndex, HashMap<NodeIndex, IndexPair>>,
@@ -81,6 +67,60 @@ pub struct ControllerInner {
     last_checked_workers: Instant,
 
     log: slog::Logger,
+
+    pub(crate) replies: DomainReplies,
+}
+
+pub(crate) struct DomainReplies(futures::sync::mpsc::UnboundedReceiver<ControlReplyPacket>);
+
+impl DomainReplies {
+    fn read_n_domain_replies(&mut self, n: usize) -> Vec<ControlReplyPacket> {
+        let mut crps = Vec::with_capacity(n);
+
+        // TODO
+        // TODO: it's so stupid to spin here now...
+        // TODO
+        loop {
+            match self.0.poll() {
+                Ok(Async::NotReady) => thread::yield_now(),
+                Ok(Async::Ready(Some(crp))) => {
+                    crps.push(crp);
+                    if crps.len() == n {
+                        return crps;
+                    }
+                }
+                Ok(Async::Ready(None)) => {
+                    unreachable!("got unexpected EOF from domain reply channel");
+                }
+                Err(e) => {
+                    unimplemented!("failed to read control reply packet: {:?}", e);
+                }
+            }
+        }
+    }
+
+    pub(crate) fn wait_for_acks(&mut self, d: &DomainHandle) {
+        for r in self.read_n_domain_replies(d.shards()) {
+            match r {
+                ControlReplyPacket::Ack(_) => {}
+                r => unreachable!("got unexpected non-ack control reply: {:?}", r),
+            }
+        }
+    }
+
+    pub(crate) fn wait_for_statistics(
+        &mut self,
+        d: &DomainHandle,
+    ) -> Vec<(DomainStats, HashMap<NodeIndex, NodeStats>)> {
+        let mut stats = Vec::with_capacity(d.shards());
+        for r in self.read_n_domain_replies(d.shards()) {
+            match r {
+                ControlReplyPacket::Statistics(d, s) => stats.push((d, s)),
+                r => unreachable!("got unexpected non-stats control reply: {:?}", r),
+            }
+        }
+        stats
+    }
 }
 
 pub(crate) fn graphviz(
@@ -256,8 +296,8 @@ impl ControllerInner {
             "new worker registered from {:?}, which listens on {:?}", msg.source, remote
         );
 
-        let sender = Arc::new(Mutex::new(TcpSender::connect(remote)?));
-        let ws = WorkerStatus::new(sender.clone());
+        let sender = TcpSender::connect(remote)?;
+        let ws = Worker::new(sender);
         self.workers.insert(msg.source.clone(), ws);
         self.read_addrs.insert(msg.source.clone(), read_listen_addr);
 
@@ -357,7 +397,11 @@ impl ControllerInner {
     }
 
     /// Construct `ControllerInner` with a specified listening interface
-    pub(super) fn new(listen_addr: IpAddr, log: slog::Logger, state: ControllerState) -> Self {
+    pub(super) fn new(
+        log: slog::Logger,
+        state: ControllerState,
+        drx: futures::sync::mpsc::UnboundedReceiver<ControlReplyPacket>,
+    ) -> Self {
         let mut g = petgraph::Graph::new();
         let source = g.add_node(node::Node::new(
             "source",
@@ -386,7 +430,6 @@ impl ControllerInner {
             ingredients: g,
             source: source,
             ndomains: 0,
-            listen_addr,
 
             materializations,
             sharding: state.config.sharding,
@@ -410,6 +453,8 @@ impl ControllerInner {
 
             pending_recovery,
             last_checked_workers: Instant::now(),
+
+            replies: DomainReplies(drx),
         }
     }
 
@@ -446,6 +491,142 @@ impl ControllerInner {
     pub fn with_persistence_options(&mut self, params: PersistenceParameters) {
         assert_eq!(self.ndomains, 0);
         self.persistence = params;
+    }
+
+    pub(crate) fn place_domain(
+        &mut self,
+        idx: DomainIndex,
+        num_shards: Option<usize>,
+        log: &Logger,
+        nodes: Vec<(NodeIndex, bool)>,
+    ) -> DomainHandle {
+        // TODO: can we just redirect all domain traffic through the worker's connection?
+        let mut assignments = Vec::new();
+        let mut nodes = Some(
+            nodes
+                .into_iter()
+                .map(|(ni, _)| {
+                    let node = self.ingredients.node_weight_mut(ni).unwrap().take();
+                    node.finalize(&self.ingredients)
+                })
+                .map(|nd| (nd.local_addr(), cell::RefCell::new(nd)))
+                .collect(),
+        );
+
+        // TODO(malte): simple round-robin placement for the moment
+        let mut wi = self.workers.iter_mut();
+
+        // Send `AssignDomain` to each shard of the given domain
+        for i in 0..num_shards.unwrap_or(1) {
+            let nodes = if i == num_shards.unwrap_or(1) - 1 {
+                nodes.take().unwrap()
+            } else {
+                nodes.clone().unwrap()
+            };
+
+            let domain = DomainBuilder {
+                index: idx,
+                shard: if num_shards.is_some() { Some(i) } else { None },
+                nshards: num_shards.unwrap_or(1),
+                config: self.domain_config.clone(),
+                nodes,
+                persistence_parameters: self.persistence.clone(),
+            };
+
+            let (identifier, w) = loop {
+                if let Some((i, w)) = wi.next() {
+                    if w.healthy {
+                        break (*i, w);
+                    }
+                } else {
+                    wi = self.workers.iter_mut();
+                }
+            };
+
+            // send domain to worker
+            info!(
+                log,
+                "sending domain {}.{} to worker {:?}",
+                domain.index.index(),
+                domain.shard.unwrap_or(0),
+                w.sender.peer_addr()
+            );
+            let src = w.sender.local_addr().unwrap();
+            w.sender
+                .send(CoordinationMessage {
+                    epoch: self.epoch,
+                    source: src,
+                    payload: CoordinationPayload::AssignDomain(domain),
+                })
+                .unwrap();
+
+            assignments.push(identifier);
+        }
+
+        // Wait for all the domains to acknowledge.
+        let mut txs = HashMap::new();
+        let mut announce = Vec::new();
+        let replies = self.replies.read_n_domain_replies(num_shards.unwrap_or(1));
+        for r in replies {
+            match r {
+                ControlReplyPacket::Booted(shard, addr) => {
+                    self.channel_coordinator.insert_remote((idx, shard), addr);
+                    announce.push(DomainDescriptor::new(idx, shard, addr));
+                    txs.insert(
+                        shard,
+                        self.channel_coordinator
+                            .builder_for(&(idx, shard))
+                            .unwrap()
+                            .build_sync()
+                            .unwrap(),
+                    );
+                }
+                crp => {
+                    unreachable!("got unexpected control reply packet: {:?}", crp);
+                }
+            }
+        }
+
+        // Tell all workers about the new domain(s)
+        // TODO(jon): figure out how much of the below is still true
+        // TODO(malte): this is a hack, and not an especially neat one. In response to a
+        // domain boot message, we broadcast information about this new domain to all
+        // workers, which inform their ChannelCoordinators about it. This is required so
+        // that domains can find each other when starting up.
+        // Moreover, it is required for us to do this *here*, since this code runs on
+        // the thread that initiated the migration, and which will query domains to ask
+        // if they're ready. No domain will be ready until it has found its neighbours,
+        // so by sending out the information here, we ensure that we cannot deadlock
+        // with the migration waiting for a domain to become ready when trying to send
+        // the information. (We used to do this in the controller thread, with the
+        // result of a nasty deadlock.)
+        for endpoint in self.workers.values_mut() {
+            for &dd in &announce {
+                endpoint
+                    .sender
+                    .send(CoordinationMessage {
+                        epoch: self.epoch,
+                        source: endpoint.sender.local_addr().unwrap(),
+                        payload: CoordinationPayload::DomainBooted(dd),
+                    })
+                    .unwrap();
+            }
+        }
+
+        let shards = assignments
+            .into_iter()
+            .enumerate()
+            .map(|(i, worker)| {
+                let tx = txs.remove(&i).unwrap();
+                DomainShardHandle { worker, tx }
+            })
+            .collect();
+
+        DomainHandle {
+            idx: idx,
+            shards,
+            log: log.clone(),
+        }
     }
 
     /// Set the `Logger` to use for internal log messages.
@@ -656,6 +837,7 @@ impl ControllerInner {
     /// Get statistics about the time spent processing different parts of the graph.
     pub fn get_statistics(&mut self) -> GraphStats {
         let workers = &self.workers;
+        let replies = &mut self.replies;
         // TODO: request stats from domains in parallel.
         let domains = self
             .domains
@@ -663,18 +845,16 @@ impl ControllerInner {
             .flat_map(|(di, s)| {
                 s.send_to_healthy(box payload::Packet::GetStatistics, workers)
                     .unwrap();
-                s.wait_for_statistics()
-                    .unwrap()
-                    .into_iter()
-                    .enumerate()
-                    .map(move |(i, (domain_stats, node_stats))| {
+                replies.wait_for_statistics(&s).into_iter().enumerate().map(
+                    move |(i, (domain_stats, node_stats))| {
                         let node_map = node_stats
                             .into_iter()
                             .map(|(ni, ns)| (ni.into(), ns))
                             .collect();
 
                         ((di.clone(), i), (domain_stats, node_map))
-                    })
+                    },
+                )
             })
             .collect();
 
@@ -692,15 +872,15 @@ impl ControllerInner {
         // get statistics for current domain sizes
         // and evict all state from partial nodes
         let workers = &self.workers;
+        let replies = &mut self.replies;
         let to_evict: Vec<_> = self
             .domains
             .iter_mut()
             .map(|(di, s)| {
                 s.send_to_healthy(box payload::Packet::GetStatistics, workers)
                     .unwrap();
-                let to_evict: Vec<(NodeIndex, u64)> = s
-                    .wait_for_statistics()
-                    .unwrap()
+                let to_evict: Vec<(NodeIndex, u64)> = replies
+                    .wait_for_statistics(&s)
                     .into_iter()
                     .flat_map(move |(_, node_stats)| {
                         node_stats

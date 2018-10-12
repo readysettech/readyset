@@ -6,7 +6,10 @@
 //! module).
 
 use crate::controller::domain_handle::DomainHandle;
-use crate::controller::{inner::graphviz, keys, WorkerIdentifier, WorkerStatus};
+use crate::controller::{
+    inner::{graphviz, DomainReplies},
+    keys, Worker, WorkerIdentifier,
+};
 use dataflow::prelude::*;
 use petgraph;
 use petgraph::graph::NodeIndex;
@@ -437,7 +440,8 @@ impl Materializations {
         graph: &Graph,
         new: &HashSet<NodeIndex>,
         domains: &mut HashMap<DomainIndex, DomainHandle>,
-        workers: &HashMap<WorkerIdentifier, WorkerStatus>,
+        workers: &HashMap<WorkerIdentifier, Worker>,
+        replies: &mut DomainReplies,
     ) {
         self.extend(graph, new);
 
@@ -667,7 +671,7 @@ impl Materializations {
                 info!(self.log, "adding partial index to existing {:?}", n);
                 let log = self.log.new(o!("node" => node.index()));
                 let log = mem::replace(&mut self.log, log);
-                self.setup(node, &mut index_on, graph, domains, workers);
+                self.setup(node, &mut index_on, graph, domains, workers, replies);
                 mem::replace(&mut self.log, log);
                 index_on.clear();
             } else if !n.sharded_by().is_none() {
@@ -706,7 +710,7 @@ impl Materializations {
                 .unwrap_or_else(HashSet::new);
 
             let start = ::std::time::Instant::now();
-            self.ready_one(ni, &mut index_on, graph, domains, workers);
+            self.ready_one(ni, &mut index_on, graph, domains, workers, replies);
             let reconstructed = index_on.is_empty();
 
             // communicate to the domain in charge of a particular node that it should start
@@ -725,7 +729,7 @@ impl Materializations {
                     workers,
                 )
                 .unwrap();
-            domain.wait_for_ack().unwrap();
+            replies.wait_for_acks(&domain);
             trace!(self.log, "node ready"; "node" => ni.index());
 
             if reconstructed {
@@ -747,7 +751,8 @@ impl Materializations {
         index_on: &mut HashSet<Vec<usize>>,
         graph: &Graph,
         domains: &mut HashMap<DomainIndex, DomainHandle>,
-        workers: &HashMap<WorkerIdentifier, WorkerStatus>,
+        workers: &HashMap<WorkerIdentifier, Worker>,
+        replies: &mut DomainReplies,
     ) {
         let n = &graph[ni];
         let mut has_state = !index_on.is_empty();
@@ -787,7 +792,7 @@ impl Materializations {
         info!(self.log, "beginning reconstruction of {:?}", n);
         let log = self.log.new(o!("node" => ni.index()));
         let log = mem::replace(&mut self.log, log);
-        self.setup(ni, index_on, graph, domains, workers);
+        self.setup(ni, index_on, graph, domains, workers, replies);
         mem::replace(&mut self.log, log);
 
         // NOTE: the state has already been marked ready by the replay completing, but we want to
@@ -804,7 +809,8 @@ impl Materializations {
         index_on: &mut HashSet<Vec<usize>>,
         graph: &Graph,
         domains: &mut HashMap<DomainIndex, DomainHandle>,
-        workers: &HashMap<WorkerIdentifier, WorkerStatus>,
+        workers: &HashMap<WorkerIdentifier, Worker>,
+        replies: &mut DomainReplies,
     ) {
         if index_on.is_empty() {
             // we must be reconstructing a Reader.
@@ -823,7 +829,7 @@ impl Materializations {
         let pending = {
             let mut plan = plan::Plan::new(self, graph, ni, domains, workers);
             for index in index_on.drain() {
-                plan.add(index);
+                plan.add(index, replies);
             }
             plan.finalize()
         };
@@ -857,7 +863,7 @@ impl Materializations {
                "domain" => target.index(),
             );
 
-            domains.get_mut(&target).unwrap().wait_for_ack().unwrap();
+            replies.wait_for_acks(&domains[&target]);
         }
     }
 }

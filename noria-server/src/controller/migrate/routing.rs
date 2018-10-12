@@ -7,7 +7,7 @@
 //!  - Egress nodes that gain new children must gain channels to facilitate forwarding
 
 use crate::controller::domain_handle::DomainHandle;
-use crate::controller::{WorkerIdentifier, WorkerStatus};
+use crate::controller::{Worker, WorkerIdentifier};
 use dataflow::node;
 use dataflow::prelude::*;
 use petgraph;
@@ -266,7 +266,7 @@ pub(super) fn connect(
     log: &Logger,
     graph: &mut Graph,
     domains: &mut HashMap<DomainIndex, DomainHandle>,
-    workers: &HashMap<WorkerIdentifier, WorkerStatus>,
+    workers: &HashMap<WorkerIdentifier, Worker>,
     new: &HashSet<NodeIndex>,
 ) {
     // ensure all egress nodes contain the tx channel of the domains of their child ingress nodes

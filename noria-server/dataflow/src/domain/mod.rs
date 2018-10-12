@@ -13,7 +13,6 @@ use std::time;
 
 use futures;
 use group_commit::GroupCommitQueueSet;
-use noria::channel::poll::{PollEvent, ProcessResult};
 use noria::channel::{self, TcpSender};
 pub use noria::internal::DomainIndex as Index;
 use payload::{ControlReplyPacket, ReplayPieceContext};
@@ -26,6 +25,20 @@ use tokio::{self, prelude::*};
 use Readers;
 
 type EnqueuedSends = FnvHashMap<ReplicaAddr, VecDeque<Box<Packet>>>;
+
+#[derive(Debug)]
+pub enum PollEvent {
+    ResumePolling,
+    Process(Box<Packet>),
+    Timeout,
+}
+
+#[derive(Debug)]
+pub enum ProcessResult {
+    KeepPolling(Option<time::Duration>),
+    Processed,
+    StopPolling,
+}
 
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
 pub struct Config {
@@ -112,8 +125,6 @@ pub struct DomainBuilder {
     pub nodes: DomainNodes,
     /// The domain's persistence setting.
     pub persistence_parameters: PersistenceParameters,
-    /// The socket address at which this domain receives control messages.
-    pub control_addr: SocketAddr,
     /// Configuration parameters for the domain.
     pub config: Config,
 }
@@ -127,6 +138,7 @@ impl DomainBuilder {
         log: Logger,
         readers: Readers,
         channel_coordinator: Arc<ChannelCoordinator>,
+        control_addr: SocketAddr,
         shutdown_valve: &Valve,
         state_size: Arc<AtomicUsize>,
     ) -> Domain {
@@ -138,7 +150,7 @@ impl DomainBuilder {
             .collect();
 
         let log = log.new(o!("domain" => self.index.index(), "shard" => self.shard.unwrap_or(0)));
-        let control_reply_tx = TcpSender::connect(&self.control_addr).unwrap();
+        let control_reply_tx = TcpSender::connect(&control_addr).unwrap();
         let group_commit_queues = GroupCommitQueueSet::new(&self.persistence_parameters);
 
         Domain {
@@ -2447,15 +2459,15 @@ impl Domain {
     pub fn on_event(
         &mut self,
         executor: &mut Executor,
-        event: PollEvent<Box<Packet>>,
+        event: PollEvent,
         sends: &mut EnqueuedSends,
     ) -> ProcessResult {
         self.wait_time.stop();
         //self.total_time.start();
         //self.total_ptime.start();
         let res = match event {
-            PollEvent::ResumePolling(timeout) => {
-                *timeout = self.group_commit_queues.duration_until_flush().or_else(|| {
+            PollEvent::ResumePolling => ProcessResult::KeepPolling(
+                self.group_commit_queues.duration_until_flush().or_else(|| {
                     let now = time::Instant::now();
                     self.buffered_replay_requests
                         .iter()
@@ -2466,9 +2478,8 @@ impl Domain {
                                 .unwrap_or(time::Duration::from_millis(0))
                         })
                         .min()
-                });
-                ProcessResult::KeepPolling
-            }
+                }),
+            ),
             PollEvent::Process(packet) => {
                 if let Packet::Quit = *packet {
                     return ProcessResult::StopPolling;
@@ -2489,7 +2500,7 @@ impl Domain {
                     self.handle(m, sends, executor, true);
                 }
 
-                ProcessResult::KeepPolling
+                ProcessResult::Processed
             }
             PollEvent::Timeout => {
                 while let Some(m) = self.group_commit_queues.flush_if_necessary() {
@@ -2500,7 +2511,7 @@ impl Domain {
                     self.handle(box Packet::Spin, sends, executor, true);
                 }
 
-                ProcessResult::KeepPolling
+                ProcessResult::Processed
             }
         };
         self.wait_time.start();

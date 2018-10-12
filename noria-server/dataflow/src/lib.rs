@@ -53,7 +53,7 @@ pub type Readers =
     Arc<Mutex<HashMap<(petgraph::graph::NodeIndex, usize), backlog::SingleReadHandle>>>;
 pub type DomainConfig = domain::Config;
 
-pub use domain::{Domain, DomainBuilder, Index};
+pub use domain::{Domain, DomainBuilder, Index, PollEvent, ProcessResult};
 pub use payload::Packet;
 
 #[derive(Copy, Clone, PartialEq, Eq, Debug, Serialize, Deserialize)]

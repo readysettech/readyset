@@ -17,7 +17,6 @@ use byteorder::{ByteOrder, NetworkEndian};
 use serde::{Deserialize, Deserializer, Serialize, Serializer};
 use tokio::prelude::*;
 
-pub mod poll;
 pub mod rpc;
 pub mod tcp;
 

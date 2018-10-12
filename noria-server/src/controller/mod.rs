@@ -4,14 +4,16 @@ const FORCE_INPUT_YIELD_EVERY: usize = 64;
 use async_bincode::{AsyncBincodeReader, AsyncBincodeWriter, SyncDestination};
 use bincode;
 use bufstream::BufStream;
-use crate::controller::domain_handle::DomainHandle;
-use crate::controller::inner::{ControllerInner, WorkerStatus};
+use crate::controller::domain_handle::{DomainHandle, DomainShardHandle};
+use crate::controller::inner::ControllerInner;
 use crate::controller::recipe::Recipe;
 use crate::controller::sql::reuse::ReuseConfigType;
 use crate::coordination::{CoordinationMessage, CoordinationPayload, DomainDescriptor};
 use dataflow::{
-    payload::SourceChannelIdentifier, prelude::Executor, Domain, DomainBuilder, DomainConfig,
-    Packet, PersistenceParameters, Readers,
+    payload::{ControlReplyPacket, SourceChannelIdentifier},
+    prelude::Executor,
+    Domain, DomainBuilder, DomainConfig, Packet, PersistenceParameters, PollEvent, ProcessResult,
+    Readers,
 };
 use failure::{self, ResultExt};
 use fnv::{FnvHashMap, FnvHashSet};
@@ -20,11 +22,7 @@ use futures::{self, Future, Sink, Stream};
 use hyper::header::CONTENT_TYPE;
 use hyper::server;
 use hyper::{self, Method, StatusCode};
-use noria::channel::{
-    self,
-    poll::{PollEvent, ProcessResult},
-    DualTcpStream, TcpSender, CONNECTION_FROM_BASE,
-};
+use noria::channel::{self, DualTcpStream, TcpSender, CONNECTION_FROM_BASE};
 use noria::consensus::{Authority, Epoch, STATE_KEY};
 use noria::internal::{DomainIndex, LocalOrNot};
 use noria::{ControllerDescriptor, Input};
@@ -72,8 +70,23 @@ pub use crate::controller::migrate::Migration;
 pub use noria::builders::*;
 pub use noria::prelude::*;
 
+pub(crate) struct Worker {
+    pub(crate) healthy: bool,
+    last_heartbeat: time::Instant,
+    pub(crate) sender: TcpSender<CoordinationMessage>,
+}
+
+impl Worker {
+    pub fn new(sender: TcpSender<CoordinationMessage>) -> Self {
+        Worker {
+            healthy: true,
+            last_heartbeat: time::Instant::now(),
+            sender,
+        }
+    }
+}
+
 type WorkerIdentifier = SocketAddr;
-type WorkerEndpoint = Arc<Mutex<TcpSender<CoordinationMessage>>>;
 
 type ReplicaIndex = (DomainIndex, usize);
 type ChannelCoordinator = channel::ChannelCoordinator<ReplicaIndex, Box<Packet>>;
@@ -206,7 +219,7 @@ fn start_instance<A: Authority + 'static>(
     let waddr = wport.local_addr()?;
     rt.spawn(listen_internal(&valve, log.clone(), tx.clone(), wport));
 
-    // and second, messages from the "real world"
+    // second, messages from the "real world"
     let xport = tokio::net::TcpListener::bind(&SocketAddr::new(listen_addr, 6033))
         .or_else(|_| tokio::net::TcpListener::bind(&SocketAddr::new(listen_addr, 0)))?;
     let xaddr = xport.local_addr()?;
@@ -219,6 +232,19 @@ fn start_instance<A: Authority + 'static>(
         ),
     );
 
+    // and third, domain control traffic. this traffic is a little special, since we may need to
+    // receive from it while handling control messages (e.g., for replay acks). because of this, we
+    // give it its own channel.
+    let (dtx, drx) = futures::sync::mpsc::unbounded();
+    let cport = tokio::net::TcpListener::bind(&SocketAddr::new(listen_addr, 0))?;
+    let caddr = cport.local_addr()?;
+    rt.spawn(listen_domain_replies(
+        &valve,
+        log.clone(),
+        dtx.clone(),
+        cport,
+    ));
+
     // shared df state
     let coord = Arc::new(ChannelCoordinator::new());
 
@@ -226,15 +252,11 @@ fn start_instance<A: Authority + 'static>(
 
     let descriptor = ControllerDescriptor {
         external_addr: xaddr,
-        internal_addr: waddr,
+        worker_addr: waddr,
+        domain_addr: caddr,
         nonce: rand::random(),
     };
-    let campaign = Some(instance_campaign(
-        tx.clone(),
-        authority.clone(),
-        descriptor,
-        config,
-    ));
+    let campaign = instance_campaign(tx.clone(), authority.clone(), descriptor, config);
 
     // set up different loops for the controller "part" and the worker "part" of us. this is
     // necessary because sometimes the two need to communicate (e.g., for migrations), and if they
@@ -348,7 +370,11 @@ fn start_instance<A: Authority + 'static>(
                             );
                             debug!(
                                 log,
-                                "leader's internal listen address: {:?}", descriptor.internal_addr
+                                "leader's worker listen address: {:?}", descriptor.worker_addr
+                            );
+                            debug!(
+                                log,
+                                "leader's domain listen address: {:?}", descriptor.domain_addr
                             );
 
                             // we need to make a new valve that we can use to shut down *just* the
@@ -407,7 +433,9 @@ fn start_instance<A: Authority + 'static>(
         let log2 = log.clone();
         let authority2 = authority.clone();
 
-        let mut campaign = campaign;
+        // state that this instance will take if it becomes the controller
+        let mut campaign = Some(campaign);
+        let mut drx = Some(drx);
         rt.spawn(
             ctrl_rx
                 .map_err(|_| unreachable!())
@@ -479,11 +507,9 @@ fn start_instance<A: Authority + 'static>(
                         Event::WonLeaderElection(state) => {
                             let c = campaign.take().unwrap();
                             block_on(move || c.join().unwrap());
-                            controller = Some(ControllerInner::new(
-                                listen_addr,
-                                log.clone(),
-                                state.clone(),
-                            ));
+                            let drx = drx.take().unwrap();
+                            controller =
+                                Some(ControllerInner::new(log.clone(), state.clone(), drx));
                         }
                         Event::CampaignError(e) => {
                             panic!("{:?}", e);
@@ -587,7 +613,7 @@ fn listen_df(
     replicas: futures::sync::mpsc::UnboundedReceiver<DomainBuilder>,
 ) -> Result<(), failure::Error> {
     // first, try to connect to controller
-    let ctrl = ::std::net::TcpStream::connect(&desc.internal_addr)?;
+    let ctrl = ::std::net::TcpStream::connect(&desc.worker_addr)?;
     let ctrl = tokio::net::TcpStream::from_std(ctrl, &Default::default())?;
     let ctrl_addr = ctrl.local_addr()?;
 
@@ -679,6 +705,8 @@ fn listen_df(
         );
     }
 
+    // Now we're ready to accept new domains.
+    let dcaddr = desc.domain_addr;
     tokio::spawn(
         replicas
             .map_err(|e| -> io::Error { panic!("{:?}", e) })
@@ -694,6 +722,7 @@ fn listen_df(
                         log.clone(),
                         readers.clone(),
                         coord.clone(),
+                        dcaddr,
                         &valve,
                         state_size.clone(),
                     );
@@ -741,6 +770,36 @@ fn listen_df(
     );
 
     Ok(())
+}
+
+fn listen_domain_replies(
+    valve: &Valve,
+    log: slog::Logger,
+    reply_tx: UnboundedSender<ControlReplyPacket>,
+    on: tokio::net::TcpListener,
+) -> impl Future<Item = (), Error = ()> {
+    let valve = valve.clone();
+    valve
+        .wrap(on.incoming())
+        .map_err(failure::Error::from)
+        .for_each(move |sock| {
+            tokio::spawn(
+                valve
+                    .wrap(AsyncBincodeReader::from(sock))
+                    .map_err(failure::Error::from)
+                    .forward(
+                        reply_tx
+                            .clone()
+                            .sink_map_err(|_| format_err!("main event loop went away")),
+                    )
+                    .map(|_| ())
+                    .map_err(|e| panic!("{:?}", e)),
+            );
+            Ok(())
+        })
+        .map_err(move |e| {
+            warn!(log, "domain reply connection failed: {:?}", e);
+        })
 }
 
 fn listen_internal(
@@ -1451,18 +1510,24 @@ impl Future for Replica {
             };
 
             // check if we now need to set a timeout
-            let mut timeout = None;
-            self.domain.on_event(
+            match self.domain.on_event(
                 &mut self.sendback,
-                PollEvent::ResumePolling(&mut timeout),
+                PollEvent::ResumePolling,
                 &mut self.outbox,
-            );
+            ) {
+                ProcessResult::KeepPolling(timeout) => {
+                    if let Some(timeout) = timeout {
+                        self.timeout =
+                            Some(tokio::timer::Delay::new(time::Instant::now() + timeout));
 
-            if let Some(timeout) = timeout {
-                self.timeout = Some(tokio::timer::Delay::new(time::Instant::now() + timeout));
-
-                // we need to poll the delay to ensure we'll get woken up
-                self.try_timeout().context("check timeout after setting")?;
+                        // we need to poll the delay to ensure we'll get woken up
+                        self.try_timeout().context("check timeout after setting")?;
+                    }
+                }
+                pr => {
+                    // TODO: just have resume_polling be a method...
+                    unreachable!("unexpected ResumePolling result {:?}", pr)
+                }
             }
 
             readiness

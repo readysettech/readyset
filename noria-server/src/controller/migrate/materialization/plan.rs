@@ -1,5 +1,8 @@
 use crate::controller::domain_handle::DomainHandle;
-use crate::controller::{inner::graphviz, keys, WorkerIdentifier, WorkerStatus};
+use crate::controller::{
+    inner::{graphviz, DomainReplies},
+    keys, Worker, WorkerIdentifier,
+};
 use dataflow::payload::{SourceSelection, TriggerEndpoint};
 use dataflow::prelude::*;
 use std::collections::{HashMap, HashSet};
@@ -9,7 +12,7 @@ pub(crate) struct Plan<'a> {
     graph: &'a Graph,
     node: NodeIndex,
     domains: &'a mut HashMap<DomainIndex, DomainHandle>,
-    workers: &'a HashMap<WorkerIdentifier, WorkerStatus>,
+    workers: &'a HashMap<WorkerIdentifier, Worker>,
     partial: bool,
 
     tags: HashMap<Vec<usize>, Vec<(Tag, DomainIndex)>>,
@@ -31,7 +34,7 @@ impl<'a> Plan<'a> {
         graph: &'a Graph,
         node: NodeIndex,
         domains: &'a mut HashMap<DomainIndex, DomainHandle>,
-        workers: &'a HashMap<WorkerIdentifier, WorkerStatus>,
+        workers: &'a HashMap<WorkerIdentifier, Worker>,
     ) -> Plan<'a> {
         let partial = m.partial.contains(&node);
         Plan {
@@ -103,7 +106,7 @@ impl<'a> Plan<'a> {
     /// Finds the appropriate replay paths for the given index, and inform all domains on those
     /// paths about them. It also notes if any data backfills will need to be run, which is
     /// eventually reported back by `finalize`.
-    pub fn add(&mut self, index_on: Vec<usize>) {
+    pub fn add(&mut self, index_on: Vec<usize>, replies: &mut DomainReplies) {
         if !self.partial && !self.paths.is_empty() {
             // non-partial views should not have one replay path per index. that would cause us to
             // replay several times, even though one full replay should always be sufficient.
@@ -333,7 +336,7 @@ impl<'a> Plan<'a> {
                 trace!(self.m.log, "telling domain about replay path"; "domain" => domain.index());
                 let ctx = self.domains.get_mut(&domain).unwrap();
                 ctx.send_to_healthy(setup, self.workers).unwrap();
-                ctx.wait_for_ack().unwrap();
+                replies.wait_for_acks(&ctx);
             }
 
             if !self.partial {

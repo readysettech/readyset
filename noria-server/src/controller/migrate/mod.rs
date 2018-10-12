@@ -20,14 +20,11 @@
 //!
 //! Beware, Here be dragons™
 
+use crate::controller::ControllerInner;
 use dataflow::prelude::*;
 use dataflow::{node, payload};
-
-use rand::{thread_rng, Rng};
 use std::collections::{HashMap, HashSet};
 use std::time::Instant;
-
-use crate::controller::{ControllerInner, DomainHandle, WorkerEndpoint, WorkerIdentifier};
 
 use petgraph;
 use slog;
@@ -454,23 +451,6 @@ impl<'a> Migration<'a> {
                 dns
             });
 
-        let mut workers: Vec<_> = mainline
-            .workers
-            .values()
-            .map(|w| w.sender.clone())
-            .collect();
-        let mut placer_workers: Vec<_> = mainline
-            .workers
-            .iter()
-            .filter(|(_, status)| status.healthy)
-            .map(|(id, status)| (id.clone(), status.sender.clone()))
-            .collect();
-        // Randomize worker iteration order, so that we avoid putting the domains on machines in
-        // the same sequence on each migration.
-        thread_rng().shuffle(&mut placer_workers);
-        let mut placer: Box<Iterator<Item = (WorkerIdentifier, WorkerEndpoint)>> =
-            Box::new(placer_workers.into_iter().cycle());
-
         // Boot up new domains (they'll ignore all updates for now)
         debug!(log, "booting new domains");
         for domain in changed_domains {
@@ -480,19 +460,11 @@ impl<'a> Migration<'a> {
             }
 
             let nodes = uninformed_domain_nodes.remove(&domain).unwrap();
-            let d = DomainHandle::new(
+            let d = mainline.place_domain(
                 domain,
                 mainline.ingredients[nodes[0].0].sharded_by().shards(),
                 &log,
-                &mut mainline.ingredients,
-                &mainline.domain_config,
                 nodes,
-                &mainline.persistence,
-                &mainline.listen_addr,
-                &mainline.channel_coordinator,
-                &mut placer,
-                &mut workers,
-                mainline.epoch,
             );
             mainline.domains.insert(domain, d);
         }
@@ -541,7 +513,7 @@ impl<'a> Migration<'a> {
                 let domain = mainline.domains.get_mut(&n.domain()).unwrap();
 
                 domain.send_to_healthy(m, &mainline.workers).unwrap();
-                domain.wait_for_ack().unwrap();
+                mainline.replies.wait_for_acks(&domain);
             }
         }
 
@@ -563,6 +535,7 @@ impl<'a> Migration<'a> {
             &new,
             &mut mainline.domains,
             &mainline.workers,
+            &mut mainline.replies,
         );
 
         warn!(log, "migration completed"; "ms" => start.elapsed().as_millis());
