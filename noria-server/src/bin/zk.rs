@@ -103,9 +103,15 @@ fn main() {
     }
 
     if clean {
+        match zk.delete(CONTROLLER_KEY, None) {
+            // any version
+            Ok(_) => println!("Controller configuration cleaned."),
+            Err(e) => println!("Failed to clean: {:?}", e),
+        }
+
         match zk.delete(STATE_KEY, None) {
             // any version
-            Ok(_) => println!("Configuration cleaned."),
+            Ok(_) => println!("State cleaned."),
             Err(e) => println!("Failed to clean: {:?}", e),
         }
     }
