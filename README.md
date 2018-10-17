@@ -60,7 +60,7 @@ To start a long-running `noria-server` instance, ensure that ZooKeeper
 is running, and then run:
 
 ```console
-$ cargo r --release --bin souplet -- --deployment myapp --no-reuse --address 172.16.0.19 --shards 0
+$ cargo r --release --bin noria-server -- --deployment myapp --no-reuse --address 172.16.0.19 --shards 0
 ```
 
 `myapp` here is a _deployment_. Many `noria-server` instances can
