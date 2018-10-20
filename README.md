@@ -19,9 +19,9 @@ adapter](https://github.com/mit-pdos/noria-mysql) that implements the
 binary MySQL protocol. This lets any application that currently talks to
 MySQL or MariaDB switch to Noria with minimal effort. For example,
 running a [Lobsters-like workload](https://github.com/jonhoo/trawler)
-that issues the [same SQL
-queries](https://github.com/mit-pdos/soup-benchmarks/tree/master/lobsters/mysql)
-as the real [Lobsters website](https://lobste.rs), Noria improves
+that issues the [equivalent SQL
+queries](https://github.com/mit-pdos/noria/tree/master/noria-benchmarks/lobsters/src/endpoints/natural)
+to the real [Lobsters website](https://lobste.rs), Noria improves
 throughput supported by 5x:
 
 ![Noria speeds up Lobsters queries by 5x](https://people.csail.mit.edu/malte/projects/noria/lobsters-perf.svg)
