@@ -166,7 +166,7 @@ pub mod error {
     }
 }
 
-pub use crate::controller::{ControllerDescriptor, ControllerHandle, ControllerPointer};
+pub use crate::controller::{ControllerDescriptor, ControllerHandle};
 pub use crate::data::{DataType, Modification, Operation, TableOperation};
 pub use crate::table::Table;
 pub use crate::view::View;

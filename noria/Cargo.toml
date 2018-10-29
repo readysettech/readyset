@@ -36,6 +36,12 @@ petgraph = { version = "0.4.11", features = ["serde-1"] }
 arccstr = "1.2.0"
 fnv = "1.0.5"
 chrono = { version = "0.4.0", features = ["serde"] }
+#tower-service = "0.1"
+tower-service = { git = "https://github.com/tower-rs/tower.git" }
+tower-balance = { git = "https://github.com/tower-rs/tower.git" }
+#tower-buffer = { git = "https://github.com/tower-rs/tower.git" }
+#tokio-tower = { git = "https://github.com/jonhoo/tokio-tower-wip.git" }
+tokio-tower = { git = "https://github.com/jonhoo/tokio-tower-wip.git", branch = "direct_service" }
 
 # consensus/
 slog = "2.4.0"
