@@ -35,9 +35,7 @@ zipf = "4.0.0"
 hdrhistogram = "6.1"
 # mssql
 futures-state-stream = "0.1"
-# move back to versioned once a new release is cut after 0.3.0
-# https://github.com/steffengy/tiberius/issues/56#issuecomment-422475667
-tiberius = { git = "https://github.com/steffengy/tiberius.git" }
+tiberius = "0.3.1"
 # mysql
 mysql = "14.0.0"
 # memcached
