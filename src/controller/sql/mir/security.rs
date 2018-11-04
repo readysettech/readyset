@@ -39,9 +39,9 @@ impl SecurityBoundary for SqlToMirConverter {
         let mut node_count = node_count;
 
         // If query DOESN'T have any computed columns, we are done.
-        if qg.relations.get("computed_columns").is_none() {
-            return (nodes_added, None, "".to_string());
-        }
+        // if qg.relations.get("computed_columns").is_none() {
+        //     return (nodes_added, None, "".to_string());
+        // }
 
         let mut union: Option<MirNodeRef> = None;
         let mut mapping: Option<HashMap<String, String>> = None;

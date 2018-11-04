@@ -222,6 +222,7 @@ pub fn mir_node_to_flow_parts(mir_node: &mut MirNode, mig: &mut Migration, table
                         arithmetic,
                         literals,
                         mig,
+                        table_mapping.clone()
                     )
                 }
                 MirNodeType::Reuse { ref node } => {
@@ -725,13 +726,14 @@ pub(crate) fn make_project_node(
     arithmetic: &Vec<(String, ArithmeticExpression)>,
     literals: &Vec<(String, DataType)>,
     mig: &mut Migration,
+    table_mapping: Option<HashMap<String,String>>,
 ) -> FlowNode {
     let parent_na = parent.borrow().flow_node_addr().unwrap();
     let column_names = column_names(columns);
 
     let projected_column_ids = emit
         .iter()
-        .map(|c| parent.borrow().column_id_for_column(c, None))
+        .map(|c| parent.borrow().column_id_for_column(c, table_mapping.clone()))
         .collect::<Vec<_>>();
 
     let (_, literal_values): (Vec<_>, Vec<_>) = literals.iter().cloned().unzip();
