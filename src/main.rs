@@ -89,6 +89,8 @@ fn main() {
         .get_matches();
 
     let deployment = matches.value_of("deployment").unwrap().to_owned();
+    assert!(!deployment.contains("-"));
+
     let port = value_t_or_exit!(matches, "port", u16);
     let slowlog = matches.is_present("slowlog");
     let zk_addr = matches.value_of("zk_addr").unwrap().to_owned();
