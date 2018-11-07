@@ -26,15 +26,13 @@ pub enum TableError {
     /// The wrong number of columns was given when inserting a row.
     #[fail(
         display = "wrong number of columns specified: expected {}, got {}",
-        _0,
-        _1
+        _0, _1
     )]
     WrongColumnCount(usize, usize),
     /// The wrong number of key columns was given when modifying a row.
     #[fail(
         display = "wrong number of key columns used: expected {}, got {}",
-        _0,
-        _1
+        _0, _1
     )]
     WrongKeyColumnCount(usize, usize),
     /// The underlying connection to Soup produced an error.
@@ -60,17 +58,9 @@ pub struct TableBuilder {
     pub table_name: String,
     pub columns: Vec<String>,
     pub schema: Option<CreateTableStatement>,
-
-    pub local_port: Option<u16>,
 }
 
 impl TableBuilder {
-    /// Set the local port to bind to when making the shared connection.
-    pub(crate) fn with_local_port(mut self, port: u16) -> TableBuilder {
-        self.local_port = Some(port);
-        self
-    }
-
     pub(crate) fn build(
         self,
         rpcs: &mut HashMap<Vec<SocketAddr>, TableRpc>,
@@ -80,7 +70,7 @@ impl TableBuilder {
         let dih = match rpcs.entry(self.txs.clone()) {
             Entry::Occupied(e) => Rc::clone(e.get()),
             Entry::Vacant(h) => {
-                let c = DomainInputHandle::new_on(self.local_port, h.key())?;
+                let c = DomainInputHandle::new_on(None, h.key())?;
                 let c = Rc::new(RefCell::new(c));
                 h.insert(Rc::clone(&c));
                 c

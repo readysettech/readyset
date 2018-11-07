@@ -1,25 +1,67 @@
 use async_bincode::{AsyncBincodeStream, AsyncDestination};
 use crate::data::*;
-use net2;
 use petgraph::graph::NodeIndex;
+use slab;
 use std::collections::HashMap;
 use std::io;
-use std::net::Ipv4Addr;
 use std::net::SocketAddr;
 use std::sync::{Arc, Mutex};
 use tokio::prelude::*;
-use tokio_tower::buffer::Buffer;
-use tokio_tower::multiplex::Client;
-use tower_balance::Balance;
-//use tower_buffer::Buffer;
+use tokio_tower::multiplex;
+use tokio_tower::NewTransport;
+use tower_balance::{choose, Pool};
+use tower_buffer::Buffer;
 use tower_service::Service;
 
-type Transport =
-    AsyncBincodeStream<tokio::net::tcp::TcpStream, ReadReply, ReadQuery, AsyncDestination>;
+type Transport = AsyncBincodeStream<
+    tokio::net::tcp::TcpStream,
+    Tagged<ReadReply>,
+    Tagged<ReadQuery>,
+    AsyncDestination,
+>;
 
-// TODO: Need to update Balance to handle DirectService
-// TODO: How do we add another connection to Balance dynamically?
-pub(crate) type ViewRpc = Buffer<Balance<Client<Transport, ViewError>, ReadQuery>, ReadQuery>;
+#[derive(Debug, Default)]
+#[doc(hidden)]
+// only pub because we use it to figure out the error type for ViewError
+pub struct Tagger(slab::Slab<()>);
+
+impl multiplex::TagStore<Tagged<ReadQuery>, Tagged<ReadReply>> for Tagger {
+    type Tag = usize;
+
+    fn assign_tag(&mut self, r: &mut Tagged<ReadQuery>) -> Self::Tag {
+        r.tag = self.0.insert(());
+        r.tag
+    }
+    fn finish_tag(&mut self, r: &Tagged<ReadReply>) -> Self::Tag {
+        self.0.remove(r.tag);
+        r.tag
+    }
+}
+
+#[derive(Debug)]
+#[doc(hidden)]
+// only pub because we use it to figure out the error type for ViewError
+pub struct ViewEndpoint(SocketAddr);
+
+impl NewTransport<Tagged<ReadQuery>> for ViewEndpoint {
+    type InitError = tokio::io::Error;
+    type Transport = multiplex::MultiplexTransport<Transport, Tagger>;
+    type TransportFut = Box<Future<Item = Self::Transport, Error = Self::InitError> + Send>;
+
+    fn new_transport(&self) -> Self::TransportFut {
+        Box::new(
+            tokio::net::TcpStream::connect(&self.0)
+                .map(AsyncBincodeStream::from)
+                .map(AsyncBincodeStream::for_async)
+                .map(|t| multiplex::MultiplexTransport::new(t, Tagger::default())),
+        )
+    }
+}
+
+pub(crate) type ViewRpc = Buffer<
+    Tagged<ReadQuery>,
+    <Pool<choose::RoundRobin, multiplex::client::Maker<ViewEndpoint>, Tagged<ReadQuery>> as Service<Tagged<ReadQuery>>>::Future,
+>;
 
 /// A failed View operation.
 #[derive(Debug, Fail)]
@@ -29,12 +71,25 @@ pub enum ViewError {
     NotYetAvailable,
     /// A lower-level error occurred while communicating with Soup.
     #[fail(display = "{}", _0)]
-    TransportError(#[cause] tokio_tower::pipeline::ClientError<Transport>),
+    TransportError(#[cause] <ViewRpc as Service<Tagged<ReadQuery>>>::Error),
 }
 
-impl From<tokio_tower::pipeline::ClientError<Transport>> for ViewError {
-    fn from(e: tokio_tower::pipeline::ClientError<Transport>) -> Self {
+impl From<<ViewRpc as Service<Tagged<ReadQuery>>>::Error> for ViewError {
+    fn from(e: <ViewRpc as Service<Tagged<ReadQuery>>>::Error) -> Self {
         ViewError::TransportError(e)
+    }
+}
+
+#[doc(hidden)]
+#[derive(Serialize, Deserialize, Debug)]
+pub struct Tagged<T> {
+    tag: usize,
+    v: T,
+}
+
+impl<T> From<T> for Tagged<T> {
+    fn from(t: T) -> Self {
+        Tagged { tag: 0, v: t }
     }
 }
 
@@ -72,27 +127,17 @@ pub struct ViewBuilder {
     pub node: NodeIndex,
     pub columns: Vec<String>,
     pub shards: Vec<SocketAddr>,
-    // one per shard
-    pub local_ports: Vec<u16>,
 }
 
 impl ViewBuilder {
-    /// Set the local port to bind to when making the shared connection.
-    pub(crate) fn with_local_port(mut self, port: u16) -> ViewBuilder {
-        assert!(self.local_ports.is_empty());
-        self.local_ports = vec![port];
-        self
-    }
-
     /// Build a `View` out of a `ViewBuilder`
     pub(crate) fn build(
-        mut self,
+        &self,
         rpcs: Arc<Mutex<HashMap<(SocketAddr, usize), ViewRpc>>>,
     ) -> impl Future<Item = View, Error = io::Error> {
-        let node = self.node;
-        let columns = self.columns;
-        let shards = self.shards;
-        let sports = self.local_ports;
+        let node = self.node.clone();
+        let columns = self.columns.clone();
+        let shards = self.shards.clone();
         future::join_all(shards.into_iter().enumerate().map(move |(shardi, addr)| {
             use std::collections::hash_map::Entry;
 
@@ -100,30 +145,18 @@ impl ViewBuilder {
             // they happen to be targeting the same machine.
             let mut rpcs = rpcs.lock().unwrap();
             match rpcs.entry((addr, shardi)) {
-                Entry::Occupied(e) => Ok((
-                    addr,
-                    e.get_mut().shared_clone().expect("no running executor?"),
-                )),
+                Entry::Occupied(e) => Ok((addr, e.get().clone())),
                 Entry::Vacant(h) => {
-                    let s = net2::TcpBuilder::new_v4()?
-                        .reuse_address(true)?
-                        .bind((
-                            Ipv4Addr::UNSPECIFIED,
-                            sports.get(shardi).cloned().unwrap_or(0),
-                        ))?
-                        .connect(addr)?;
-
-                    let s = tokio::net::tcp::TcpStream::from_std(
-                        s,
-                        &tokio::reactor::Handle::default(),
-                    )?;
-                    let laddr = s.local_addr()?;
-
-                    let c = AsyncBincodeStream::from(s).for_async();
-                    let c = Client::new(c);
-                    let c = Balance::new(c);
-                    let c = Buffer::new(c & tokio::executor::DefaultExecutor::current())
-                        .unwrap_or_else(|_| unreachable!("no running executor?"));
+                    // TODO: maybe always use the same local port?
+                    let c = Buffer::new(
+                        Pool::new(
+                            multiplex::client::Maker::new(ViewEndpoint(addr)),
+                            choose::RoundRobin::default(),
+                        ),
+                        0,
+                        &tokio::executor::DefaultExecutor::current(),
+                    )
+                    .unwrap_or_else(|_| panic!("no active tokio runtime"));
                     h.insert(c.clone());
                     Ok((addr, c))
                 }
@@ -143,10 +176,11 @@ impl ViewBuilder {
 
 /// A `View` is used to query previously defined external views.
 ///
-/// If you create multiple `View` handles from a single `ControllerHandle`, they may share
-/// connections to the Soup workers. For this reason, `View` is *not* `Send` or `Sync`. To
-/// get a handle that can be sent to a different thread (i.e., one with its own dedicated
-/// connections), call `View::into_exclusive`.
+/// Note that if you create multiple `View` handles from a single `ControllerHandle`, they may
+/// share connections to the Soup workers.
+///
+/// TODO: load scaling
+#[derive(Clone)]
 pub struct View {
     node: NodeIndex,
     columns: Vec<String>,
@@ -154,19 +188,11 @@ pub struct View {
     shard_addrs: Vec<SocketAddr>,
 }
 
-#[cfg_attr(
-    feature = "cargo-clippy",
-    allow(clippy::len_without_is_empty)
-)]
+#[cfg_attr(feature = "cargo-clippy", allow(clippy::len_without_is_empty))]
 impl View {
     /// Get the list of columns in this view.
     pub fn columns(&self) -> &[String] {
         self.columns.as_slice()
-    }
-
-    /// Get the local addresses this `View` is bound to.
-    pub fn local_addr(&self) -> impl Iterator<Item = &SocketAddr> {
-        self.shards.iter().map(|v| &v.local_addr)
     }
 
     /// Get the current size of this view.
@@ -178,13 +204,17 @@ impl View {
         for (shardi, shard) in self.shards.iter_mut().enumerate() {
             futures.push(
                 shard
-                    .call(ReadQuery::Size {
-                        target: (node, shardi),
-                    })
-                    .map(move |reply| match reply {
+                    .call(
+                        ReadQuery::Size {
+                            target: (node, shardi),
+                        }
+                        .into(),
+                    )
+                    .map(move |reply| match reply.v {
                         ReadReply::Size(rows) => rows,
                         _ => unreachable!(),
-                    }),
+                    })
+                    .map_err(ViewError::from),
             );
         }
         futures.fold(0, |acc, rs| future::ok::<_, ViewError>(acc + rs))
@@ -205,12 +235,16 @@ impl View {
                 self.shards
                     .get_mut(0)
                     .unwrap()
-                    .call(ReadQuery::Normal {
-                        target: (self.node, 0),
-                        keys,
-                        block,
-                    })
-                    .and_then(|reply| match reply {
+                    .call(
+                        ReadQuery::Normal {
+                            target: (self.node, 0),
+                            keys,
+                            block,
+                        }
+                        .into(),
+                    )
+                    .map_err(ViewError::from)
+                    .and_then(|reply| match reply.v {
                         ReadReply::Normal(Ok(rows)) => Ok(rows),
                         ReadReply::Normal(Err(())) => Err(ViewError::NotYetAvailable),
                         _ => unreachable!(),
@@ -224,6 +258,7 @@ impl View {
                 shard_queries[shard].push(key);
             }
 
+            let node = self.node;
             future::Either::B(
                 futures::stream::futures_ordered(
                     self.shards
@@ -232,14 +267,19 @@ impl View {
                         .zip(shard_queries.into_iter())
                         .filter(|&(_, ref sq)| !sq.is_empty())
                         .map(|((shardi, shard), shard_queries)| {
-                            shard.call(ReadQuery::Normal {
-                                target: (self.node, shardi),
-                                keys: shard_queries,
-                                block,
-                            })
+                            shard
+                                .call(
+                                    ReadQuery::Normal {
+                                        target: (node, shardi),
+                                        keys: shard_queries,
+                                        block,
+                                    }
+                                    .into(),
+                                )
+                                .map_err(ViewError::from)
                         }),
                 )
-                .fold(Vec::new(), |mut results, reply| match reply {
+                .fold(Vec::new(), |mut results, reply| match reply.v {
                     ReadReply::Normal(Ok(rows)) => {
                         results.extend(rows);
                         Ok(results)

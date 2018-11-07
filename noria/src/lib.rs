@@ -101,6 +101,7 @@
 #![feature(try_from)]
 #![feature(allow_fail)]
 #![feature(bufreader_buffer)]
+#![feature(try_blocks)]
 #![deny(missing_docs)]
 #![deny(unused_extern_crates)]
 
