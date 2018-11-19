@@ -1,7 +1,7 @@
 use async_bincode::{AsyncBincodeStream, AsyncDestination};
 use crate::data::*;
+use crate::{Tagged, Tagger};
 use petgraph::graph::NodeIndex;
-use slab;
 use std::collections::HashMap;
 use std::io;
 use std::net::SocketAddr;
@@ -19,24 +19,6 @@ type Transport = AsyncBincodeStream<
     Tagged<ReadQuery>,
     AsyncDestination,
 >;
-
-#[derive(Debug, Default)]
-#[doc(hidden)]
-// only pub because we use it to figure out the error type for ViewError
-pub struct Tagger(slab::Slab<()>);
-
-impl multiplex::TagStore<Tagged<ReadQuery>, Tagged<ReadReply>> for Tagger {
-    type Tag = usize;
-
-    fn assign_tag(&mut self, r: &mut Tagged<ReadQuery>) -> Self::Tag {
-        r.tag = self.0.insert(());
-        r.tag
-    }
-    fn finish_tag(&mut self, r: &Tagged<ReadReply>) -> Self::Tag {
-        self.0.remove(r.tag);
-        r.tag
-    }
-}
 
 #[derive(Debug)]
 #[doc(hidden)]
@@ -59,8 +41,13 @@ impl NewTransport<Tagged<ReadQuery>> for ViewEndpoint {
 }
 
 pub(crate) type ViewRpc = Buffer<
+    Pool<
+        choose::RoundRobin,
+        multiplex::client::Maker<ViewEndpoint, Tagged<ReadQuery>>,
+        (),
+        Tagged<ReadQuery>,
+    >,
     Tagged<ReadQuery>,
-    <Pool<choose::RoundRobin, multiplex::client::Maker<ViewEndpoint>, Tagged<ReadQuery>> as Service<Tagged<ReadQuery>>>::Future,
 >;
 
 /// A failed View operation.
@@ -77,19 +64,6 @@ pub enum ViewError {
 impl From<<ViewRpc as Service<Tagged<ReadQuery>>>::Error> for ViewError {
     fn from(e: <ViewRpc as Service<Tagged<ReadQuery>>>::Error) -> Self {
         ViewError::TransportError(e)
-    }
-}
-
-#[doc(hidden)]
-#[derive(Serialize, Deserialize, Debug)]
-pub struct Tagged<T> {
-    tag: usize,
-    v: T,
-}
-
-impl<T> From<T> for Tagged<T> {
-    fn from(t: T) -> Self {
-        Tagged { tag: 0, v: t }
     }
 }
 
@@ -151,6 +125,7 @@ impl ViewBuilder {
                     let c = Buffer::new(
                         Pool::new(
                             multiplex::client::Maker::new(ViewEndpoint(addr)),
+                            (),
                             choose::RoundRobin::default(),
                         ),
                         0,

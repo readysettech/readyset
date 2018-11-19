@@ -154,8 +154,8 @@ pub struct ControllerHandle<A>
 where
     A: 'static + Authority,
 {
-    handle: Buffer<ControllerRequest, <Controller<A> as Service<ControllerRequest>>::Future>,
-    domains: Arc<Mutex<HashMap<Vec<SocketAddr>, TableRpc>>>,
+    handle: Buffer<Controller<A>, ControllerRequest>,
+    domains: Arc<Mutex<HashMap<(SocketAddr, usize), TableRpc>>>,
     views: Arc<Mutex<HashMap<(SocketAddr, usize), ViewRpc>>>,
 }
 
@@ -269,14 +269,11 @@ impl<A: Authority> ControllerHandle<A> {
             .map_err(|e| format_err!("failed to fetch table builder: {:?}", e))
             .and_then(move |body: hyper::Chunk| {
                 match serde_json::from_slice::<Option<TableBuilder>>(&body) {
-                    Ok(Some(tb)) => {
-                        let mut domains = domains.lock().unwrap();
-                        future::Either::A(
-                            tb.build(&mut *domains)
-                                .into_future()
-                                .map_err(failure::Error::from),
-                        )
-                    }
+                    Ok(Some(tb)) => future::Either::A(
+                        tb.build(domains)
+                            .into_future()
+                            .map_err(failure::Error::from),
+                    ),
                     Ok(None) => {
                         future::Either::B(future::err(failure::err_msg("view table not exist")))
                     }

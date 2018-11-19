@@ -111,9 +111,12 @@ extern crate failure;
 extern crate serde_derive;
 #[macro_use]
 extern crate slog;
+#[macro_use]
+extern crate futures;
 
 use petgraph::graph::NodeIndex;
 use std::collections::HashMap;
+use tokio_tower::multiplex;
 
 mod controller;
 mod data;
@@ -142,28 +145,36 @@ pub mod prelude {
 pub mod error {
     pub use crate::table::TableError;
     pub use crate::view::ViewError;
+}
 
-    /// An error occured during transport (i.e., while sending or receiving).
-    #[derive(Debug, Fail)]
-    pub enum TransportError {
-        /// A network-level error occurred.
-        #[fail(display = "{}", _0)]
-        Channel(#[cause] crate::channel::tcp::SendError),
-        /// A protocol-level error occurred.
-        #[fail(display = "{}", _0)]
-        Serialization(#[cause] bincode::Error),
+#[derive(Debug, Default)]
+#[doc(hidden)]
+// only pub because we use it to figure out the error type for ViewError
+pub struct Tagger(slab::Slab<()>);
+
+impl<Request, Response> multiplex::TagStore<Tagged<Request>, Tagged<Response>> for Tagger {
+    type Tag = usize;
+
+    fn assign_tag(&mut self, r: &mut Tagged<Request>) -> Self::Tag {
+        r.tag = self.0.insert(());
+        r.tag
     }
-
-    impl From<crate::channel::tcp::SendError> for TransportError {
-        fn from(e: crate::channel::tcp::SendError) -> Self {
-            TransportError::Channel(e)
-        }
+    fn finish_tag(&mut self, r: &Tagged<Response>) -> Self::Tag {
+        self.0.remove(r.tag);
+        r.tag
     }
+}
 
-    impl From<bincode::Error> for TransportError {
-        fn from(e: bincode::Error) -> Self {
-            TransportError::Serialization(e)
-        }
+#[doc(hidden)]
+#[derive(Serialize, Deserialize, Debug)]
+pub struct Tagged<T> {
+    tag: usize,
+    v: T,
+}
+
+impl<T> From<T> for Tagged<T> {
+    fn from(t: T) -> Self {
+        Tagged { tag: 0, v: t }
     }
 }
 
