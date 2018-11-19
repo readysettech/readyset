@@ -13,7 +13,7 @@ use tokio;
 use tokio_io_pool;
 
 /// A handle to a controller that is running in the same process as this one.
-pub struct LocalControllerHandle<A: Authority> {
+pub struct LocalControllerHandle<A: Authority + 'static> {
     c: Option<ControllerHandle<A>>,
     #[allow(dead_code)]
     event_tx: Option<futures::sync::mpsc::UnboundedSender<Event>>,
