@@ -179,9 +179,8 @@ impl Recipe {
     }
 
     /// Set recipe's security configuration
-    pub fn set_security_config(&mut self, config_text: &str, url: String) {
+    pub fn set_security_config(&mut self, config_text: &str) {
         let mut config = SecurityConfig::parse(config_text);
-        config.url = url;
         self.security_config = Some(config);
     }
 
@@ -377,7 +376,6 @@ impl Recipe {
 
                 /// Add trigger node below group membership views
                 let group_creation = TriggerEvent::GroupCreation {
-                    controller_url: config.url.clone(),
                     group: group.name(),
                 };
                 let trigger = Trigger::new(qfp.query_leaf, group_creation, 1);

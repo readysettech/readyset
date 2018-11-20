@@ -105,7 +105,8 @@ pub struct ViewBuilder {
 
 impl ViewBuilder {
     /// Build a `View` out of a `ViewBuilder`
-    pub(crate) fn build(
+    #[doc(hidden)]
+    pub fn build(
         &self,
         rpcs: Arc<Mutex<HashMap<(SocketAddr, usize), ViewRpc>>>,
     ) -> impl Future<Item = View, Error = io::Error> {

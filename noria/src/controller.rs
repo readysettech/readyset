@@ -149,7 +149,6 @@ where
 /// To establish a new connection to Noria, use `ControllerHandle::new`, and pass in the
 /// appropriate `Authority`. In the likely case that you are using Zookeeper, use
 /// `ControllerHandle::from_zk`.
-#[derive(Clone)]
 pub struct ControllerHandle<A>
 where
     A: 'static + Authority,
@@ -157,6 +156,19 @@ where
     handle: Buffer<Controller<A>, ControllerRequest>,
     domains: Arc<Mutex<HashMap<(SocketAddr, usize), TableRpc>>>,
     views: Arc<Mutex<HashMap<(SocketAddr, usize), ViewRpc>>>,
+}
+
+impl<A> Clone for ControllerHandle<A>
+where
+    A: 'static + Authority,
+{
+    fn clone(&self) -> Self {
+        ControllerHandle {
+            handle: self.handle.clone(),
+            domains: self.domains.clone(),
+            views: self.views.clone(),
+        }
+    }
 }
 
 impl ControllerHandle<consensus::ZookeeperAuthority> {
@@ -283,39 +295,39 @@ impl<A: Authority> ControllerHandle<A> {
             })
     }
 
-    // TODO:
-    // this method currently assumes that the returned future is tied to the lifetime of Q.
-    // the fix for this is to use existential types, because there's no way to make impl Trait
-    // *not* associate itself with all provided type arguments :'(
-    // once we're using existentials, we can remove String::from from callers
-    fn rpc<Q: Serialize, R>(
+    // TODO: we can't use impl Trait here, because it would assume that the returned future is tied
+    // to the lifetime of Q, which is not the case. existential types fix this issue.
+    #[doc(hidden)]
+    pub fn rpc<Q: Serialize, R: 'static>(
         &mut self,
         path: &'static str,
         r: Q,
         err: &'static str,
-    ) -> impl Future<Item = R, Error = failure::Error>
+    ) -> Box<Future<Item = R, Error = failure::Error>>
     where
         for<'de> R: Deserialize<'de>,
     {
-        self.handle
-            .call(ControllerRequest::new(path, r).unwrap())
-            .map_err(move |e| format_err!("{}: {:?}", err, e))
-            .and_then(move |body: hyper::Chunk| {
-                serde_json::from_slice::<R>(&body)
-                    .context("failed to response")
-                    .context(err)
-                    .map_err(failure::Error::from)
-            })
+        Box::new(
+            self.handle
+                .call(ControllerRequest::new(path, r).unwrap())
+                .map_err(move |e| format_err!("{}: {:?}", err, e))
+                .and_then(move |body: hyper::Chunk| {
+                    serde_json::from_slice::<R>(&body)
+                        .context("failed to response")
+                        .context(err)
+                        .map_err(failure::Error::from)
+                }),
+        )
     }
 
     /// Get statistics about the time spent processing different parts of the graph.
     pub fn statistics(&mut self) -> impl Future<Item = stats::GraphStats, Error = failure::Error> {
-        self.rpc("get_statistics", &(), "failed to get stats")
+        self.rpc("get_statistics", (), "failed to get stats")
     }
 
     /// Flush all partial state, evicting all rows present.
     pub fn flush_partial(&mut self) -> impl Future<Item = (), Error = failure::Error> {
-        self.rpc("flush_partial", &(), "failed to flush partial")
+        self.rpc("flush_partial", (), "failed to flush partial")
     }
 
     /// Extend the existing recipe with the given set of queries.
@@ -323,11 +335,7 @@ impl<A: Authority> ControllerHandle<A> {
         &mut self,
         recipe_addition: &str,
     ) -> impl Future<Item = ActivationResult, Error = failure::Error> {
-        self.rpc(
-            "extend_recipe",
-            String::from(recipe_addition),
-            "failed to extend recipe",
-        )
+        self.rpc("extend_recipe", recipe_addition, "failed to extend recipe")
     }
 
     /// Replace the existing recipe with this one.
@@ -335,23 +343,19 @@ impl<A: Authority> ControllerHandle<A> {
         &mut self,
         new_recipe: &str,
     ) -> impl Future<Item = ActivationResult, Error = failure::Error> {
-        self.rpc(
-            "install_recipe",
-            String::from(new_recipe),
-            "failed to install recipe",
-        )
+        self.rpc("install_recipe", new_recipe, "failed to install recipe")
     }
 
     /// Fetch a graphviz description of the dataflow graph.
     pub fn graphviz(&mut self) -> impl Future<Item = String, Error = failure::Error> {
-        self.rpc("graphviz", &(), "failed to fetch graphviz output")
+        self.rpc("graphviz", (), "failed to fetch graphviz output")
     }
 
     /// Fetch a simplified graphviz description of the dataflow graph.
     pub fn simple_graphviz(&mut self) -> impl Future<Item = String, Error = failure::Error> {
         self.rpc(
             "simple_graphviz",
-            &(),
+            (),
             "failed to fetch simple graphviz output",
         )
     }

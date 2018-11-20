@@ -44,7 +44,7 @@ impl<A: Authority> LocalControllerHandle<A> {
         io: tokio_io_pool::Runtime,
     ) -> Self {
         LocalControllerHandle {
-            c: Some(ControllerHandle::make(authority).unwrap()),
+            c: Some(ControllerHandle::make(authority)),
             event_tx: Some(event_tx),
             kill: Some(kill),
             runtime: Some(rt),
@@ -97,38 +97,49 @@ impl<A: Authority> LocalControllerHandle<A> {
     }
 
     /// Install a new set of policies on the controller.
-    pub fn set_security_config(&mut self, p: String) {
-        let url = match (&**self).url() {
-            Some(ref url) => String::from(*url),
-            None => panic!("url not defined"),
-        };
-
-        self.rpc("set_security_config", &(p, url)).unwrap()
+    pub fn set_security_config(
+        &mut self,
+        p: String,
+    ) -> impl Future<Item = (), Error = failure::Error> {
+        self.rpc("set_security_config", p, "failed to set security config")
     }
 
     /// Install a new set of policies on the controller.
-    pub fn create_universe(&mut self, context: HashMap<String, DataType>) {
+    pub fn create_universe(
+        &mut self,
+        context: HashMap<String, DataType>,
+    ) -> impl Future<Item = (), Error = failure::Error> {
+        let mut c = self.c.clone().unwrap();
+
         let uid = context
             .get("id")
             .expect("Universe context must have id")
             .clone();
-        self.rpc::<_, ()>("create_universe", &context).unwrap();
+        self.rpc::<_, ()>(
+            "create_universe",
+            &context,
+            "failed to create security universe",
+        )
+        .and_then(move |_| {
+            // Write to Context table
+            let bname = match context.get("group") {
+                None => format!("UserContext_{}", uid.to_string()),
+                Some(g) => format!("GroupContext_{}_{}", g.to_string(), uid.to_string()),
+            };
 
-        // Write to Context table
-        let bname = match context.get("group") {
-            None => format!("UserContext_{}", uid.to_string()),
-            Some(g) => format!("GroupContext_{}_{}", g.to_string(), uid.to_string()),
-        };
+            let mut fields: Vec<_> = context.keys().collect();
+            fields.sort();
+            let record: Vec<DataType> = fields
+                .iter()
+                .map(|&f| context.get(f).unwrap().clone())
+                .collect();
 
-        let mut fields: Vec<_> = context.keys().collect();
-        fields.sort();
-        let record: Vec<DataType> = fields
-            .iter()
-            .map(|&f| context.get(f).unwrap().clone())
-            .collect();
-        let mut table = self.table(&bname).unwrap();
-
-        table.insert(record).unwrap();
+            c.table(&bname).and_then(|table| {
+                table
+                    .insert(record)
+                    .map_err(|e| format_err!("failed to make table: {:?}", e))
+            })
+        })
     }
 
     /// Inform the local instance that it should exit, and wait for that to happen

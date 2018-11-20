@@ -12,7 +12,6 @@ use crate::controller::security::policy::Policy;
 pub struct SecurityConfig {
     pub groups: HashMap<String, Group>,
     policies: Vec<Policy>,
-    pub url: String,
 }
 
 impl SecurityConfig {
@@ -34,7 +33,6 @@ impl SecurityConfig {
         SecurityConfig {
             groups: groups_map,
             policies: policies,
-            url: String::new(),
         }
     }
 

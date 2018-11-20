@@ -3,7 +3,6 @@ use petgraph::graph::NodeIndex;
 use std::borrow::Cow;
 use std::cell;
 use std::cmp;
-use std::collections::hash_map::Entry;
 use std::collections::{HashMap, HashSet, VecDeque};
 use std::mem;
 use std::net::SocketAddr;
@@ -487,9 +486,8 @@ impl Domain {
     fn dispatch(
         &mut self,
         m: Box<Packet>,
-        enable_output: bool,
         sends: &mut EnqueuedSends,
-        executor: Option<&mut Executor>,
+        executor: &mut Executor,
     ) -> HashMap<LocalNodeIndex, Vec<Record>> {
         let src = m.src();
         let me = m.dst();
@@ -501,9 +499,7 @@ impl Domain {
                 ref to,
                 ref mut buffered,
                 ..
-            }
-                if to == &me =>
-            {
+            } if to == &me => {
                 buffered.push_back(m);
                 return output_messages;
             }
@@ -666,39 +662,27 @@ impl Domain {
             };
 
             let childi = *self.nodes[me].borrow().child(i);
-            let (child_is_output, child_is_merger) = {
+            let child_is_merger = {
                 // XXX: shouldn't NLL make this unnecessary?
                 let c = self.nodes[childi].borrow();
-                (c.is_output(), c.is_shard_merger())
+                c.is_shard_merger()
             };
 
-            if enable_output || !child_is_output {
-                if child_is_merger {
-                    // we need to preserve the egress src (which includes shard identifier)
-                } else {
-                    m.link_mut().src = me;
-                }
-                m.link_mut().dst = childi;
-
-                for (k, mut v) in self.dispatch(m, enable_output, sends, None) {
-                    use std::collections::hash_map::Entry;
-                    match output_messages.entry(k) {
-                        Entry::Occupied(mut rs) => rs.get_mut().append(&mut v),
-                        Entry::Vacant(slot) => {
-                            slot.insert(v);
-                        }
-                    }
-                }
+            if child_is_merger {
+                // we need to preserve the egress src (which includes shard identifier)
             } else {
-                let mut data = m.take_data();
-                match output_messages.entry(childi) {
-                    Entry::Occupied(entry) => {
-                        entry.into_mut().append(&mut data);
+                m.link_mut().src = me;
+            }
+            m.link_mut().dst = childi;
+
+            for (k, mut v) in self.dispatch(m, sends, executor) {
+                use std::collections::hash_map::Entry;
+                match output_messages.entry(k) {
+                    Entry::Occupied(mut rs) => rs.get_mut().append(&mut v),
+                    Entry::Vacant(slot) => {
+                        slot.insert(v);
                     }
-                    Entry::Vacant(entry) => {
-                        entry.insert(data.into());
-                    }
-                };
+                }
             }
         }
 
@@ -718,10 +702,10 @@ impl Domain {
         match *m {
             Packet::Message { .. } | Packet::Input { .. } => {
                 // WO for https://github.com/rust-lang/rfcs/issues/1403
-                self.dispatch(m, true, sends, Some(executor));
+                self.dispatch(m, sends, executor);
             }
             Packet::ReplayPiece { .. } => {
-                self.handle_replay(m, sends);
+                self.handle_replay(m, sends, executor);
             }
             Packet::Evict { .. } | Packet::EvictKeys { .. } => {
                 self.handle_eviction(m, sends);
@@ -906,16 +890,12 @@ impl Domain {
 
                                 let mut n = self.nodes[node].borrow_mut();
                                 n.with_reader_mut(|r| {
-                                    assert!(
-                                        self.readers
-                                            .lock()
-                                            .unwrap()
-                                            .insert(
-                                                (gid, *self.shard.as_ref().unwrap_or(&0)),
-                                                r_part
-                                            )
-                                            .is_none()
-                                    );
+                                    assert!(self
+                                        .readers
+                                        .lock()
+                                        .unwrap()
+                                        .insert((gid, *self.shard.as_ref().unwrap_or(&0)), r_part)
+                                        .is_none());
 
                                     // make sure Reader is actually prepared to receive state
                                     r.set_write_handle(w_part)
@@ -928,16 +908,12 @@ impl Domain {
 
                                 let mut n = self.nodes[node].borrow_mut();
                                 n.with_reader_mut(|r| {
-                                    assert!(
-                                        self.readers
-                                            .lock()
-                                            .unwrap()
-                                            .insert(
-                                                (gid, *self.shard.as_ref().unwrap_or(&0)),
-                                                r_part
-                                            )
-                                            .is_none()
-                                    );
+                                    assert!(self
+                                        .readers
+                                        .lock()
+                                        .unwrap()
+                                        .insert((gid, *self.shard.as_ref().unwrap_or(&0)), r_part)
+                                        .is_none());
 
                                     // make sure Reader is actually prepared to receive state
                                     r.set_write_handle(w_part)
@@ -1035,11 +1011,12 @@ impl Domain {
                             .expect("reader replay requested for non-reader node");
 
                         // ensure that we haven't already requested a replay of this key
-                        if still_miss && self
-                            .reader_triggered
-                            .entry(node)
-                            .or_default()
-                            .insert(key.clone())
+                        if still_miss
+                            && self
+                                .reader_triggered
+                                .entry(node)
+                                .or_default()
+                                .insert(key.clone())
                         {
                             self.find_tags_and_replay(key, &cols[..], node);
                         }
@@ -1051,7 +1028,7 @@ impl Domain {
                            "tag" => tag.id(),
                            "key" => format!("{:?}", key)
                         );
-                        self.seed_replay(tag, &key[..], sends);
+                        self.seed_replay(tag, &key[..], sends, executor);
                     }
                     Packet::StartReplay { tag, from } => {
                         use std::thread;
@@ -1182,10 +1159,10 @@ impl Domain {
                                 .unwrap();
                         }
 
-                        self.handle_replay(p, sends);
+                        self.handle_replay(p, sends, executor);
                     }
                     Packet::Finish(tag, ni) => {
-                        self.finish_replay(tag, ni, sends);
+                        self.finish_replay(tag, ni, sends, executor);
                     }
                     Packet::Ready { node, index } => {
                         assert_eq!(self.mode, DomainMode::Forwarding);
@@ -1348,7 +1325,7 @@ impl Domain {
                     .collect()
             };
             for (tag, keys) in elapsed_replays {
-                self.seed_all(tag, keys, sends);
+                self.seed_all(tag, keys, sends, executor);
             }
         }
 
@@ -1384,7 +1361,13 @@ impl Domain {
         return row.into_owned().into();
     }
 
-    fn seed_all(&mut self, tag: Tag, keys: HashSet<Vec<DataType>>, sends: &mut EnqueuedSends) {
+    fn seed_all(
+        &mut self,
+        tag: Tag,
+        keys: HashSet<Vec<DataType>>,
+        sends: &mut EnqueuedSends,
+        ex: &mut Executor,
+    ) {
         let (m, source, is_miss) = match self.replay_paths[&tag] {
             ReplayPath {
                 source: Some(source),
@@ -1461,11 +1444,17 @@ impl Domain {
                 unreachable!();
             }
 
-            self.handle_replay(m, sends);
+            self.handle_replay(m, sends, ex);
         }
     }
 
-    fn seed_replay(&mut self, tag: Tag, key: &[DataType], sends: &mut EnqueuedSends) {
+    fn seed_replay(
+        &mut self,
+        tag: Tag,
+        key: &[DataType],
+        sends: &mut EnqueuedSends,
+        ex: &mut Executor,
+    ) {
         if let ReplayPath {
             trigger: TriggerEndpoint::Start(..),
             ..
@@ -1555,11 +1544,11 @@ impl Domain {
         }
 
         if let Some(m) = m {
-            self.handle_replay(m, sends);
+            self.handle_replay(m, sends, ex);
         }
     }
 
-    fn handle_replay(&mut self, m: Box<Packet>, sends: &mut EnqueuedSends) {
+    fn handle_replay(&mut self, m: Box<Packet>, sends: &mut EnqueuedSends, ex: &mut Executor) {
         let tag = m.tag().unwrap();
         if self.nodes[self.replay_paths[&tag].path.last().unwrap().node]
             .borrow()
@@ -1745,7 +1734,7 @@ impl Domain {
                             self.shard,
                             false,
                             sends,
-                            None,
+                            ex,
                         );
 
                         // ignore duplicate misses
@@ -2104,7 +2093,13 @@ impl Domain {
         }
     }
 
-    fn finish_replay(&mut self, tag: Tag, node: LocalNodeIndex, sends: &mut EnqueuedSends) {
+    fn finish_replay(
+        &mut self,
+        tag: Tag,
+        node: LocalNodeIndex,
+        sends: &mut EnqueuedSends,
+        ex: &mut Executor,
+    ) {
         let mut was = mem::replace(&mut self.mode, DomainMode::Forwarding);
         let finished = if let DomainMode::Replaying {
             ref to,
@@ -2135,7 +2130,7 @@ impl Domain {
                     // NOTE: we specifically need to override the buffering behavior that our
                     // self.replaying_to = Some above would initiate.
                     self.mode = DomainMode::Forwarding;
-                    self.dispatch(m, true, sends, None);
+                    self.dispatch(m, sends, ex);
                 } else {
                     unreachable!();
                 }

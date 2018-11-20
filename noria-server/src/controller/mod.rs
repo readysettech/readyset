@@ -11,7 +11,7 @@ use crate::controller::sql::reuse::ReuseConfigType;
 use crate::coordination::{CoordinationMessage, CoordinationPayload, DomainDescriptor};
 use dataflow::{
     payload::{ControlReplyPacket, SourceChannelIdentifier},
-    prelude::Executor,
+    prelude::{DataType, Executor},
     Domain, DomainBuilder, DomainConfig, Packet, PersistenceParameters, PollEvent, ProcessResult,
     Readers,
 };
@@ -284,6 +284,7 @@ fn start_instance<A: Authority + 'static>(
                         CoordinationPayload::DomainBooted(..) => fw(e, false),
                         CoordinationPayload::Register { .. } => fw(e, true),
                         CoordinationPayload::Heartbeat => fw(e, true),
+                        CoordinationPayload::CreateUniverse(..) => fw(e, true),
                     },
                     Event::ExternalRequest(..) => fw(e, true),
                     #[cfg(test)]
@@ -356,6 +357,7 @@ fn start_instance<A: Authority + 'static>(
                             } = worker_state.take()
                             {
                                 // XXX: should we wait for current DF to be fully shut down?
+                                // FIXME: what about messages in listen_df's ctrl_tx?
                                 info!(log, "detected leader change");
                                 drop(add_domain);
                                 trigger.cancel();
@@ -444,6 +446,11 @@ fn start_instance<A: Authority + 'static>(
                         Event::InternalMessage(msg) => match msg.payload {
                             CoordinationPayload::Deregister => {
                                 unimplemented!();
+                            }
+                            CoordinationPayload::CreateUniverse(universe) => {
+                                if let Some(ref mut ctrl) = controller {
+                                    block_on(|| ctrl.create_universe(universe).unwrap());
+                                }
                             }
                             CoordinationPayload::Register {
                                 ref addr,
@@ -737,7 +744,15 @@ fn listen_df(
 
                     block_on(|| state_sizes.lock().unwrap().insert((idx, shard), state_size));
 
-                    tokio::spawn(Replica::new(&valve, d, on, rx, log.clone(), coord.clone()));
+                    tokio::spawn(Replica::new(
+                        &valve,
+                        d,
+                        on,
+                        rx,
+                        ctrl_tx.clone(),
+                        log.clone(),
+                        coord.clone(),
+                    ));
 
                     trace!(
                         log,
@@ -753,7 +768,6 @@ fn listen_df(
                 match addr {
                     Ok(addr) => Either::A(
                         ctrl_tx
-                            .clone()
                             .send(CoordinationPayload::DomainBooted(DomainDescriptor::new(
                                 idx, shard, addr,
                             )))
@@ -1133,7 +1147,7 @@ struct Replica {
 
     outbox: FnvHashMap<ReplicaIndex, VecDeque<Box<Packet>>>,
     timeout: Option<tokio::timer::Delay>,
-    sendback: Sendback,
+    oob: OutOfBand,
 }
 
 impl Replica {
@@ -1142,6 +1156,7 @@ impl Replica {
         mut domain: Domain,
         on: tokio::net::TcpListener,
         locals: futures::sync::mpsc::UnboundedReceiver<Box<Packet>>,
+        ctrl_tx: futures::sync::mpsc::UnboundedSender<CoordinationPayload>,
         log: slog::Logger,
         cc: Arc<ChannelCoordinator>,
     ) -> Self {
@@ -1157,18 +1172,18 @@ impl Replica {
             inputs: Default::default(),
             outputs: Default::default(),
             outbox: Default::default(),
-            sendback: Default::default(),
+            oob: OutOfBand::new(ctrl_tx),
             timeout: None,
         }
     }
 
-    fn try_ack(&mut self) -> Result<(), failure::Error> {
+    fn try_oob(&mut self) -> Result<(), failure::Error> {
         let inputs = &mut self.inputs;
-        let pending = &mut self.sendback.pending;
+        let pending = &mut self.oob.pending;
 
         // first, queue up any additional writes we have to do
         let mut err = Vec::new();
-        self.sendback.back.retain(|&streami, n| {
+        self.oob.back.retain(|&streami, n| {
             use std::ops::SubAssign;
 
             let stream = &mut inputs[streami];
@@ -1239,7 +1254,7 @@ impl Replica {
         let cc = &self.coord;
         let outputs = &mut self.outputs;
 
-        // just like in try_ack:
+        // just like in try_oob:
         // first, queue up any additional writes we have to do
         let mut err = Vec::new();
         for (&ri, ms) in &mut self.outbox {
@@ -1351,7 +1366,7 @@ impl Replica {
             if let Async::Ready(()) = to.poll()? {
                 block_on(|| {
                     self.domain
-                        .on_event(&mut self.sendback, PollEvent::Timeout, &mut self.outbox)
+                        .on_event(&mut self.oob, PollEvent::Timeout, &mut self.outbox)
                 });
             } else {
                 self.timeout = Some(to);
@@ -1361,17 +1376,35 @@ impl Replica {
     }
 }
 
-#[derive(Default)]
-struct Sendback {
+struct OutOfBand {
     // map from inputi to number of (empty) ACKs
     back: FnvHashMap<usize, usize>,
     pending: FnvHashSet<usize>,
+
+    // for sending messages to the controller
+    ctrl_tx: futures::sync::mpsc::UnboundedSender<CoordinationPayload>,
 }
 
-impl Executor for Sendback {
+impl OutOfBand {
+    fn new(ctrl_tx: futures::sync::mpsc::UnboundedSender<CoordinationPayload>) -> Self {
+        OutOfBand {
+            back: Default::default(),
+            pending: Default::default(),
+            ctrl_tx,
+        }
+    }
+}
+
+impl Executor for OutOfBand {
     fn send_back(&mut self, id: SourceChannelIdentifier, _: ()) {
         use std::ops::AddAssign;
         self.back.entry(id.token).or_insert(0).add_assign(1);
+    }
+
+    fn create_universe(&mut self, universe: HashMap<String, DataType>) {
+        self.ctrl_tx
+            .unbounded_send(CoordinationPayload::CreateUniverse(universe))
+            .expect("asked to send to controller, but controller has gone away");
     }
 }
 
@@ -1419,11 +1452,11 @@ impl Future for Replica {
                         match self.locals.poll() {
                             Ok(Async::Ready(Some(packet))) => {
                                 let d = &mut self.domain;
-                                let sb = &mut self.sendback;
+                                let oob = &mut self.oob;
                                 let ob = &mut self.outbox;
 
                                 if let ProcessResult::StopPolling =
-                                    block_on(|| d.on_event(sb, PollEvent::Process(packet), ob))
+                                    block_on(|| d.on_event(oob, PollEvent::Process(packet), ob))
                                 {
                                     // domain got a message to quit
                                     // TODO: should we finish up remaining work?
@@ -1450,11 +1483,11 @@ impl Future for Replica {
                         match self.inputs.poll() {
                             Ok(Async::Ready(Some((StreamYield::Item(packet), _)))) => {
                                 let d = &mut self.domain;
-                                let sb = &mut self.sendback;
+                                let oob = &mut self.oob;
                                 let ob = &mut self.outbox;
 
                                 if let ProcessResult::StopPolling =
-                                    block_on(|| d.on_event(sb, PollEvent::Process(packet), ob))
+                                    block_on(|| d.on_event(oob, PollEvent::Process(packet), ob))
                                 {
                                     // domain got a message to quit
                                     // TODO: should we finish up remaining work?
@@ -1462,8 +1495,8 @@ impl Future for Replica {
                                 }
                             }
                             Ok(Async::Ready(Some((StreamYield::Finished(_stream), streami)))) => {
-                                self.sendback.back.remove(&streami);
-                                self.sendback.pending.remove(&streami);
+                                self.oob.back.remove(&streami);
+                                self.oob.pending.remove(&streami);
                                 // FIXME: what about if a later flush flushes to this stream?
                             }
                             Ok(Async::Ready(None)) => {
@@ -1500,7 +1533,7 @@ impl Future for Replica {
                 self.try_flush().context("downstream flush (after)")?;
 
                 // send acks
-                self.try_ack()?;
+                self.try_oob()?;
 
                 if interrupted {
                     // resume reading from our non-depleted inputs
@@ -1510,11 +1543,10 @@ impl Future for Replica {
             };
 
             // check if we now need to set a timeout
-            match self.domain.on_event(
-                &mut self.sendback,
-                PollEvent::ResumePolling,
-                &mut self.outbox,
-            ) {
+            match self
+                .domain
+                .on_event(&mut self.oob, PollEvent::ResumePolling, &mut self.outbox)
+            {
                 ProcessResult::KeepPolling(timeout) => {
                     if let Some(timeout) = timeout {
                         self.timeout =

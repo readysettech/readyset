@@ -148,6 +148,7 @@ where
     /// children.
     fn on_input(
         &mut self,
+        executor: &mut Executor,
         from: LocalNodeIndex,
         data: Records,
         tracer: &mut Tracer,
@@ -158,6 +159,7 @@ where
 
     fn on_input_raw(
         &mut self,
+        executor: &mut Executor,
         from: LocalNodeIndex,
         data: Records,
         tracer: &mut Tracer,
@@ -166,6 +168,7 @@ where
         states: &StateMap,
     ) -> RawProcessingResult {
         RawProcessingResult::Regular(self.on_input(
+            executor,
             from,
             data,
             tracer,

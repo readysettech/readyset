@@ -74,6 +74,7 @@ impl Ingredient for Filter {
 
     fn on_input(
         &mut self,
+        _: &mut Executor,
         _: LocalNodeIndex,
         mut rs: Records,
         _: &mut Tracer,

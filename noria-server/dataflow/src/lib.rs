@@ -12,7 +12,6 @@ extern crate common;
 extern crate evmap;
 extern crate fnv;
 extern crate futures;
-extern crate hyper;
 extern crate itertools;
 extern crate nom_sql;
 extern crate noria;
@@ -24,7 +23,6 @@ extern crate rocksdb;
 extern crate serde;
 #[macro_use]
 extern crate serde_derive;
-extern crate serde_json;
 #[macro_use]
 extern crate slog;
 extern crate stream_cancel;

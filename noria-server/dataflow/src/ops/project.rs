@@ -217,6 +217,7 @@ impl Ingredient for Project {
 
     fn on_input(
         &mut self,
+        _: &mut Executor,
         from: LocalNodeIndex,
         mut rs: Records,
         _: &mut Tracer,

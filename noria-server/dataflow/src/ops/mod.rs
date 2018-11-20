@@ -135,6 +135,7 @@ impl Ingredient for NodeOperator {
     }
     fn on_input(
         &mut self,
+        ex: &mut Executor,
         from: LocalNodeIndex,
         data: Records,
         tracer: &mut Tracer,
@@ -145,6 +146,7 @@ impl Ingredient for NodeOperator {
         impl_ingredient_fn_mut!(
             self,
             on_input,
+            ex,
             from,
             data,
             tracer,
@@ -155,6 +157,7 @@ impl Ingredient for NodeOperator {
     }
     fn on_input_raw(
         &mut self,
+        ex: &mut Executor,
         from: LocalNodeIndex,
         data: Records,
         tracer: &mut Tracer,
@@ -165,6 +168,7 @@ impl Ingredient for NodeOperator {
         impl_ingredient_fn_mut!(
             self,
             on_input_raw,
+            ex,
             from,
             data,
             tracer,

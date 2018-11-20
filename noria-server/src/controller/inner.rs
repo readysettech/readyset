@@ -20,7 +20,7 @@ use slog::Logger;
 use std::collections::{BTreeMap, HashMap};
 use std::mem;
 use std::net::SocketAddr;
-use std::sync::Arc;
+use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 use std::{cell, io, thread, time};
 use tokio::prelude::*;
@@ -764,7 +764,6 @@ impl ControllerInner {
                 .collect();
 
             ViewBuilder {
-                local_ports: vec![],
                 node: r,
                 columns,
                 shards,
@@ -822,7 +821,6 @@ impl ControllerInner {
         let schema = self.recipe.get_base_schema(base);
 
         Some(TableBuilder {
-            local_port: None,
             txs,
             addr: node.local_addr().into(),
             key: key,
@@ -935,11 +933,16 @@ impl ControllerInner {
             .clone();
         let uid = &[uid];
         if context.get("group").is_none() {
+            let x = Arc::new(Mutex::new(HashMap::new()));
             for g in groups {
+                // TODO: this should use external APIs through noria::ControllerHandle
+                // TODO: can this move to the client entirely?
                 let rgb: Option<ViewBuilder> = self.view_builder(&g);
-                let mut view = rgb.map(|rgb| rgb.build_exclusive().unwrap()).unwrap();
+                // TODO: is it even okay to use wait() here?
+                let mut view = rgb.map(|rgb| rgb.build(x.clone()).wait().unwrap()).unwrap();
                 let my_groups: Vec<DataType> = view
                     .lookup(uid, true)
+                    .wait()
                     .unwrap()
                     .iter()
                     .map(|v| v[1].clone())
@@ -968,10 +971,8 @@ impl ControllerInner {
         Ok(())
     }
 
-    pub fn set_security_config(&mut self, config: (String, String)) -> Result<(), String> {
-        let p = config.0;
-        let url = config.1;
-        self.recipe.set_security_config(&p, url);
+    pub fn set_security_config(&mut self, p: String) -> Result<(), String> {
+        self.recipe.set_security_config(&p);
         Ok(())
     }
 

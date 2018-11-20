@@ -229,6 +229,7 @@ impl Ingredient for Join {
 
     fn on_input(
         &mut self,
+        _: &mut Executor,
         from: LocalNodeIndex,
         rs: Records,
         _: &mut Tracer,

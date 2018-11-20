@@ -1,5 +1,6 @@
 use petgraph;
 use std::cell;
+use std::collections::HashMap;
 
 // core types
 pub use common::*;
@@ -34,4 +35,5 @@ pub use PersistenceParameters;
 pub type ChannelCoordinator = noria::channel::ChannelCoordinator<(DomainIndex, usize), Box<Packet>>;
 pub trait Executor {
     fn send_back(&mut self, client: SourceChannelIdentifier, ack: ());
+    fn create_universe(&mut self, req: HashMap<String, DataType>);
 }

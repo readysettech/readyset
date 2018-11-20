@@ -1,6 +1,7 @@
 use dataflow::prelude::*;
 use dataflow::DomainBuilder;
 use noria::consensus::Epoch;
+use std::collections::HashMap;
 use std::net::SocketAddr;
 
 /// Coordination-layer message wrapper; adds a mandatory `source` field to each message.
@@ -36,6 +37,8 @@ pub enum CoordinationPayload {
     RemoveDomain,
     /// Domain connectivity gossip.
     DomainBooted(DomainDescriptor),
+    /// Create a new security universe.
+    CreateUniverse(HashMap<String, DataType>),
 }
 
 #[derive(Clone, Copy, Debug, Deserialize, Serialize)]

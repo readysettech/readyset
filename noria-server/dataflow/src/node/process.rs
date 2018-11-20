@@ -15,7 +15,7 @@ impl Node {
         on_shard: Option<usize>,
         swap: bool,
         output: &mut FnvHashMap<ReplicaAddr, VecDeque<Box<Packet>>>,
-        executor: Option<&mut Executor>,
+        ex: &mut Executor,
     ) -> (Vec<Miss>, HashSet<Vec<DataType>>) {
         m.as_mut().unwrap().trace(PacketEvent::Process);
 
@@ -53,9 +53,7 @@ impl Node {
 
                         // Send write-ACKs to all the clients with updates that made
                         // it into this merged packet:
-                        if let Some(ex) = executor {
-                            senders.drain(..).for_each(|src| ex.send_back(src, ()));
-                        }
+                        senders.drain(..).for_each(|src| ex.send_back(src, ()));
 
                         *m = Some(Box::new(Packet::Message {
                             link: Link::new(dst, dst),
@@ -126,7 +124,8 @@ impl Node {
                         // we need to own the data
                         let old_data = mem::replace(data, Records::default());
 
-                        match i.on_input_raw(from, old_data, &mut tracer, &replay, nodes, state) {
+                        match i.on_input_raw(ex, from, old_data, &mut tracer, &replay, nodes, state)
+                        {
                             RawProcessingResult::Regular(m) => {
                                 mem::replace(data, m.results);
                                 misses = m.misses;
