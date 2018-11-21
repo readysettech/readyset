@@ -1,3 +1,5 @@
+cargo-features = ["edition"]
+
 [workspace]
 members = [
 	"noria",

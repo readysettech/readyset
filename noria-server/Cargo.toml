@@ -1,4 +1,4 @@
-cargo-features = ["rename-dependency"]
+cargo-features = ["rename-dependency", "edition"]
 
 [package]
 name = "noria-server"
