@@ -36,7 +36,7 @@ $ target/release/vote \
 
 Here, we're running `vote` with a target load of 100k requests per
 second, where one in every 20 requests is a write (so a 95/5 read mix).
-We run 20 load generation threads, which should be plenty (NOTE: this
+We run 16 load generation threads, which should be plenty (NOTE: this
 argument will go away soon—it's annoying). We choose the `localsoup`
 backend, and configure it to run with 2 shards (to increase write
 throughput). See `vote --help` and `vote <backend> --help` for what
