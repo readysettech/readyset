@@ -6,6 +6,20 @@ use nom_sql::{Column, ColumnSpecification, SqlType};
 
 use slog;
 
+fn to_sql_type(d: &DataType) -> Option<SqlType> {
+    match d {
+        DataType::Int(_) => Some(SqlType::Int(32)),
+        DataType::BigInt(_) => Some(SqlType::Bigint(64)),
+        DataType::Real(_, _) => Some(SqlType::Real),
+        DataType::Text(_) => Some(SqlType::Text),
+        DataType::TinyText(_) => Some(SqlType::Varchar(8)),
+        // TODO(malte): There is no SqlType for `NULL` (as it's not a
+        // type), so caller must handle appropriately.
+        DataType::None => None,
+        DataType::Timestamp(_) => Some(SqlType::Timestamp),
+    }
+}
+
 pub fn column_schema(
     graph: &Graph,
     view: NodeIndex,
@@ -57,10 +71,7 @@ pub fn column_schema(
                         } else {
                             // literal
                             let off = column_index - (emits.0.len() + emits.2.len());
-                            match emits.1[off] {
-                                DataType::Int(_) => Some(SqlType::Int(32)),
-                                _ => unimplemented!(),
-                            }
+                            to_sql_type(&emits.1[off])
                         }
                     }
                     _ => unimplemented!(),
