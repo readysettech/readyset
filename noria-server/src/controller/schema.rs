@@ -63,20 +63,52 @@ pub fn column_schema(
             } else {
                 // column originates at internal view: literal, aggregation output
                 // FIXME(malte): return correct type depending on what column does
-                col_type = match *(*source_node) {
+                match *(*source_node) {
                     ops::NodeOperator::Project(ref o) => {
                         let emits = o.emits();
                         assert!(source_column_index >= emits.0.len());
                         if source_column_index < emits.0.len() + emits.2.len() {
                             // computed expression
-                            unimplemented!();
+                            // TODO(malte): trace the actual column types, since this could be a
+                            // real-valued arithmetic operation
+                            col_type = Some(SqlType::Bigint(64));
                         } else {
                             // literal
                             let off = source_column_index - (emits.0.len() + emits.2.len());
-                            to_sql_type(&emits.1[off])
+                            col_type = to_sql_type(&emits.1[off]);
                         }
                     }
-                    _ => unimplemented!(),
+                    ops::NodeOperator::Sum(ref o) => {
+                        if source_column_index == source_node.fields().len() - 1 {
+                            // counts and sums always produce integral columns
+                            col_type = Some(SqlType::Bigint(64));
+                        } else {
+                            // no column that isn't the aggregation result column should ever trace
+                            // back to an aggregation.
+                            unreachable!();
+                        }
+                    }
+                    ops::NodeOperator::Extremum(ref o) => {
+                        // TODO(malte): use type of the "over" column
+                        unimplemented!();
+                    }
+                    ops::NodeOperator::Concat(ref o) => {
+                        // group_concat always outputs a string
+                        if source_column_index == source_node.fields().len() - 1 {
+                            col_type = Some(SqlType::Text);
+                        } else {
+                            // no column that isn't the concat result column should ever trace
+                            // back to a group_concat.
+                            unreachable!();
+                        }
+                    }
+                    ops::NodeOperator::Join(_) => {
+                        // join doesn't "generate" columns, but they may come from one of the other
+                        // ancestors; so keep iterating to try the other paths
+                        ()
+                    }
+                    // no other operators should every generate columns
+                    _ => unreachable!(),
                 };
             }
         }
