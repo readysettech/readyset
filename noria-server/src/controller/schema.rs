@@ -46,6 +46,8 @@ pub fn column_schema(
             assert_eq!(cols.len(), 1);
 
             let source_node = &graph[ni];
+            let source_column_index = cols[0].unwrap();
+
             if source_node.is_base() {
                 if let Some(schema) = recipe.schema_for(source_node.name()) {
                     // projected base table column
@@ -64,13 +66,13 @@ pub fn column_schema(
                 col_type = match *(*source_node) {
                     ops::NodeOperator::Project(ref o) => {
                         let emits = o.emits();
-                        assert!(column_index > emits.0.len());
-                        if column_index <= emits.0.len() + emits.2.len() {
+                        assert!(source_column_index >= emits.0.len());
+                        if source_column_index < emits.0.len() + emits.2.len() {
                             // computed expression
                             unimplemented!();
                         } else {
                             // literal
-                            let off = column_index - (emits.0.len() + emits.2.len());
+                            let off = source_column_index - (emits.0.len() + emits.2.len());
                             to_sql_type(&emits.1[off])
                         }
                     }
