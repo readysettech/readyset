@@ -58,7 +58,7 @@ pub fn column_schema(
                         _ => unreachable!(),
                     };
                 } else {
-                    warn!(log, "no schema for view '{}'", source_node.name());
+                    warn!(log, "no schema for base '{}'", source_node.name());
                 }
             } else {
                 // column originates at internal view: literal, aggregation output
