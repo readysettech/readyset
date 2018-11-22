@@ -59,6 +59,7 @@ pub trait GroupedOperation: fmt::Debug + Clone {
     ) -> DataType;
 
     fn description(&self, detailed: bool) -> String;
+    fn over_columns(&self) -> Vec<usize>;
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -88,6 +89,10 @@ impl<T: GroupedOperation> GroupedOperator<T> {
             out_key: Vec::new(),
             colfix: Vec::new(),
         }
+    }
+
+    pub fn over_columns(&self) -> Vec<usize> {
+        self.inner.over_columns()
     }
 }
 

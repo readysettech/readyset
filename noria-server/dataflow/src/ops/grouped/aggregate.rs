@@ -127,6 +127,10 @@ impl GroupedOperation for Aggregator {
             .join(", ");
         format!("{} γ[{}]", op_string, group_cols)
     }
+
+    fn over_columns(&self) -> Vec<usize> {
+        vec![self.over]
+    }
 }
 
 #[cfg(test)]
