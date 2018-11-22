@@ -78,7 +78,7 @@ pub fn column_schema(
                             col_type = to_sql_type(&emits.1[off]);
                         }
                     }
-                    ops::NodeOperator::Sum(ref o) => {
+                    ops::NodeOperator::Sum(_) => {
                         if source_column_index == source_node.fields().len() - 1 {
                             // counts and sums always produce integral columns
                             col_type = Some(SqlType::Bigint(64));
@@ -88,11 +88,11 @@ pub fn column_schema(
                             unreachable!();
                         }
                     }
-                    ops::NodeOperator::Extremum(ref o) => {
+                    ops::NodeOperator::Extremum(_) => {
                         // TODO(malte): use type of the "over" column
                         unimplemented!();
                     }
-                    ops::NodeOperator::Concat(ref o) => {
+                    ops::NodeOperator::Concat(_) => {
                         // group_concat always outputs a string
                         if source_column_index == source_node.fields().len() - 1 {
                             col_type = Some(SqlType::Text);
