@@ -40,12 +40,12 @@ pub fn column_schema(
     let mut col_type = None;
     for p in paths {
         // column originates at last element of the path whose second element is not None
-        if let Some((ni, cols)) = p.into_iter().rfind(|e| e.1.iter().any(|c| c.is_some())) {
+        if let Some((ni, cols)) = p.iter().rfind(|e| e.1.iter().any(|c| c.is_some())) {
             // We invoked provenance_of with a singleton slice, so must have got
             // results for a single column
             assert_eq!(cols.len(), 1);
 
-            let source_node = &graph[ni];
+            let source_node = &graph[*ni];
             let source_column_index = cols[0].unwrap();
 
             if source_node.is_base() {
@@ -89,9 +89,19 @@ pub fn column_schema(
                             unreachable!();
                         }
                     }
-                    ops::NodeOperator::Extremum(_) => {
+                    ops::NodeOperator::Extremum(ref o) => {
                         // TODO(malte): use type of the "over" column
-                        unimplemented!();
+                        let over_columns = o.over_columns();
+                        assert_eq!(over_columns.len(), 1);
+                        let parent_node_index = p[p
+                            .iter()
+                            .rposition(|e| e.1.iter().any(|c| c.is_some()))
+                            .unwrap()
+                            + 1]
+                        .0;
+                        col_type =
+                            column_schema(graph, parent_node_index, recipe, over_columns[0], log)
+                                .map(|cs| cs.sql_type);
                     }
                     ops::NodeOperator::Concat(_) => {
                         // group_concat always outputs a string as the last column
