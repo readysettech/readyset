@@ -158,6 +158,7 @@ impl GroupedOperation for ExtremumOperator {
         // TODO: handle this case by querying into the parent.
         unimplemented!();
     }
+
     fn description(&self, detailed: bool) -> String {
         if !detailed {
             return String::from(match self.op {
