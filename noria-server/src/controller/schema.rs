@@ -79,6 +79,7 @@ pub fn column_schema(
                         }
                     }
                     ops::NodeOperator::Sum(_) => {
+                        // computed column is always emitted last
                         if source_column_index == source_node.fields().len() - 1 {
                             // counts and sums always produce integral columns
                             col_type = Some(SqlType::Bigint(64));
@@ -93,7 +94,7 @@ pub fn column_schema(
                         unimplemented!();
                     }
                     ops::NodeOperator::Concat(_) => {
-                        // group_concat always outputs a string
+                        // group_concat always outputs a string as the last column
                         if source_column_index == source_node.fields().len() - 1 {
                             col_type = Some(SqlType::Text);
                         } else {
