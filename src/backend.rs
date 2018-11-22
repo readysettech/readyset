@@ -305,17 +305,17 @@ impl NoriaBackend {
         mut q: nom_sql::InsertStatement,
         results: QueryResultWriter<W>,
     ) -> io::Result<()> {
+        let table = &q.table.name;
+
+        // create a mutator if we don't have one for this table already
+        let putter = self.inner.ensure_mutator(table);
+        let schema = putter
+            .schema()
+            .expect(&format!("no schema for table '{}'", table));
+
         // set column names (insert schema) if not set
         if q.fields.is_none() {
-            let ts_lock = self.table_schemas.read().unwrap();
-            let table_schemas = &(*ts_lock);
-
-            match table_schemas[&q.table.name] {
-                Schema::Table(ref ts) => {
-                    q.fields = Some(ts.fields.iter().map(|cs| cs.column.clone()).collect());
-                }
-                _ => unreachable!(),
-            }
+            q.fields = Some(schema.fields.iter().map(|cs| cs.column.clone()).collect());
         }
 
         let data: Vec<Vec<DataType>> = q
@@ -628,6 +628,13 @@ impl NoriaBackend {
         results: QueryResultWriter<W>,
     ) -> io::Result<()> {
         let table = &q.table.name;
+
+        // create a mutator if we don't have one for this table already
+        let putter = self.inner.ensure_mutator(table);
+        let schema = putter
+            .schema()
+            .expect(&format!("no schema for table '{}'", table));
+
         let columns_specified: Vec<_> = q
             .fields
             .as_ref()
@@ -637,13 +644,8 @@ impl NoriaBackend {
             .map(|mut c| {
                 c.table = Some(q.table.name.clone());
                 c
-            }).collect();
-
-        // create a mutator if we don't have one for this table already
-        let putter = self.inner.ensure_mutator(table);
-        let schema = putter
-            .schema()
-            .expect(&format!("no schema for table '{}'", table));
+            })
+            .collect();
 
         // handle auto increment
         let auto_increment_columns: Vec<_> = schema
