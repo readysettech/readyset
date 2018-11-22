@@ -774,7 +774,7 @@ fn create_view() {
     assert_eq!(rows.len(), 1);
     assert_eq!(
         rows.into_iter().map(|r| r.unwrap()).collect::<Vec<_>>(),
-        vec![vec!["4".into(), "2".into()]]
+        vec![vec![4.into(), 2.into()]]
     );
 }
 
