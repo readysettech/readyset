@@ -341,7 +341,10 @@ impl NoriaBackend {
                     // would be good to narrow these down
                     // TODO: why are the actual error contents never printed?
                     use std::error::Error;
-                    return results.error(msql_srv::ErrorKind::ER_UNKNOWN_ERROR, e.description().as_bytes());
+                    return results.error(
+                        msql_srv::ErrorKind::ER_UNKNOWN_ERROR,
+                        e.description().as_bytes(),
+                    );
                 } else {
                     return Err(e);
                 }
@@ -397,9 +400,20 @@ impl NoriaBackend {
 
         match sql_q {
             // set column names (insert schema) if not set
-            nom_sql::SqlQuery::Insert(ref mut q) => if q.fields.is_none() {
-                q.fields = Some(mutator.schema().as_ref().unwrap().fields.iter().map(|cs| cs.column.clone()).collect());
-            },
+            nom_sql::SqlQuery::Insert(ref mut q) => {
+                if q.fields.is_none() {
+                    q.fields = Some(
+                        mutator
+                            .schema()
+                            .as_ref()
+                            .unwrap()
+                            .fields
+                            .iter()
+                            .map(|cs| cs.column.clone())
+                            .collect(),
+                    );
+                }
+            }
             _ => (),
         }
 
@@ -417,7 +431,8 @@ impl NoriaBackend {
                         .cloned()
                         .find(|mc| c.name == mc.column)
                         .expect(&format!("column '{}' missing in mutator schema", c))
-                }).collect()
+                })
+                .collect()
         };
 
         self.prepared_count += 1;
@@ -667,7 +682,8 @@ impl NoriaBackend {
                     }
                 }
                 None
-            }).collect();
+            })
+            .collect();
 
         let mut buf = vec![vec![DataType::None; schema.fields.len()]; data.len()];
 
@@ -799,12 +815,13 @@ impl NoriaBackend {
                         }
 
                         for c in schema {
-                            let coli = cols.iter().position(|f| f == &c.column).unwrap_or_else(|| {
-                                panic!(
+                            let coli =
+                                cols.iter().position(|f| f == &c.column).unwrap_or_else(|| {
+                                    panic!(
                                     "tried to emit column {:?} not in getter for {:?} with schema {:?}",
                                     c.column, qname, cols
                                 );
-                            });
+                                });
                             write_column(&mut rw, &r[coli], c);
                         }
                         rw.end_row()?;
@@ -948,14 +965,13 @@ impl<W: io::Write> MysqlShim<W> for NoriaBackend {
                                     .chain(params.iter().skip(first_rewritten + nrewritten))
                                     .cloned()
                                     .collect()
-                            }).collect()
+                            })
+                            .collect()
                     }
-                    None => vec![
-                        params
-                            .into_iter()
-                            .map(|pv| pv.value.to_datatype())
-                            .collect::<Vec<_>>(),
-                    ],
+                    None => vec![params
+                        .into_iter()
+                        .map(|pv| pv.value.to_datatype())
+                        .collect::<Vec<_>>()],
                 };
                 self.execute_select(&qname, key, schema, results)
             }
@@ -1042,7 +1058,8 @@ impl<W: io::Write> MysqlShim<W> for NoriaBackend {
                             column: String::from(c.0),
                             coltype: ColumnType::MYSQL_TYPE_STRING,
                             colflags: ColumnFlags::empty(),
-                        }).collect();
+                        })
+                        .collect();
                     let mut writer = results.start(&cols[..])?;
                     for &(_, ref r) in columns {
                         writer.write_col(String::from(*r))?;
