@@ -266,11 +266,11 @@ dependencies = [
 [[package]]
 name = "common"
 version = "0.1.0"
-source = "git+https://github.com/mit-pdos/noria.git#08664d4f24fb972150a0164812c775e4df50fdf2"
+source = "git+https://github.com/mit-pdos/noria.git#cdcd5f7bef46ab4c1e8d8c9571355c849687f46d"
 dependencies = [
  "arccstr 1.2.1 (registry+https://github.com/rust-lang/crates.io-index)",
  "chrono 0.4.6 (registry+https://github.com/rust-lang/crates.io-index)",
- "noria 0.1.0 (git+https://github.com/mit-pdos/noria.git)",
+ "noria 0.1.2 (git+https://github.com/mit-pdos/noria.git)",
  "petgraph 0.4.13 (registry+https://github.com/rust-lang/crates.io-index)",
  "serde 1.0.79 (registry+https://github.com/rust-lang/crates.io-index)",
  "serde_derive 1.0.79 (registry+https://github.com/rust-lang/crates.io-index)",
@@ -337,7 +337,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 [[package]]
 name = "dataflow"
 version = "0.1.0"
-source = "git+https://github.com/mit-pdos/noria.git#08664d4f24fb972150a0164812c775e4df50fdf2"
+source = "git+https://github.com/mit-pdos/noria.git#cdcd5f7bef46ab4c1e8d8c9571355c849687f46d"
 dependencies = [
  "backtrace 0.3.9 (registry+https://github.com/rust-lang/crates.io-index)",
  "bincode 1.0.1 (registry+https://github.com/rust-lang/crates.io-index)",
@@ -348,9 +348,9 @@ dependencies = [
  "hyper 0.12.11 (registry+https://github.com/rust-lang/crates.io-index)",
  "itertools 0.7.8 (registry+https://github.com/rust-lang/crates.io-index)",
  "nom-sql 0.0.4 (registry+https://github.com/rust-lang/crates.io-index)",
- "noria 0.1.0 (git+https://github.com/mit-pdos/noria.git)",
+ "noria 0.1.2 (git+https://github.com/mit-pdos/noria.git)",
  "petgraph 0.4.13 (registry+https://github.com/rust-lang/crates.io-index)",
- "rahashmap 0.2.12 (registry+https://github.com/rust-lang/crates.io-index)",
+ "rahashmap 0.2.13 (registry+https://github.com/rust-lang/crates.io-index)",
  "rand 0.5.5 (registry+https://github.com/rust-lang/crates.io-index)",
  "regex 1.0.5 (registry+https://github.com/rust-lang/crates.io-index)",
  "rocksdb 0.10.0 (git+https://github.com/ekmartin/rust-rocksdb.git?branch=custom)",
@@ -395,7 +395,7 @@ name = "evmap"
 version = "4.0.0"
 source = "git+https://github.com/ms705/rust-evmap#bdd67f2d4c8aa6e1129335db9efde5171b2195ef"
 dependencies = [
- "rahashmap 0.2.12 (registry+https://github.com/rust-lang/crates.io-index)",
+ "rahashmap 0.2.13 (registry+https://github.com/rust-lang/crates.io-index)",
 ]
 
 [[package]]
@@ -649,7 +649,7 @@ dependencies = [
 [[package]]
 name = "librocksdb-sys"
 version = "5.14.2"
-source = "git+https://github.com/ekmartin/rust-rocksdb.git?branch=custom#d8bbbf1da9d425ac279e22dc769d6edb7bddff45"
+source = "git+https://github.com/ekmartin/rust-rocksdb.git?branch=custom#20f8595a8b3010902ff2d8c64ea6e13d4dcab8b3"
 dependencies = [
  "bindgen 0.37.4 (registry+https://github.com/rust-lang/crates.io-index)",
  "cc 1.0.25 (registry+https://github.com/rust-lang/crates.io-index)",
@@ -769,7 +769,7 @@ dependencies = [
 [[package]]
 name = "mir"
 version = "0.1.0"
-source = "git+https://github.com/mit-pdos/noria.git#08664d4f24fb972150a0164812c775e4df50fdf2"
+source = "git+https://github.com/mit-pdos/noria.git#cdcd5f7bef46ab4c1e8d8c9571355c849687f46d"
 dependencies = [
  "common 0.1.0 (git+https://github.com/mit-pdos/noria.git)",
  "dataflow 0.1.0 (git+https://github.com/mit-pdos/noria.git)",
@@ -960,8 +960,8 @@ dependencies = [
 
 [[package]]
 name = "noria"
-version = "0.1.0"
-source = "git+https://github.com/mit-pdos/noria.git#08664d4f24fb972150a0164812c775e4df50fdf2"
+version = "0.1.2"
+source = "git+https://github.com/mit-pdos/noria.git#cdcd5f7bef46ab4c1e8d8c9571355c849687f46d"
 dependencies = [
  "arccstr 1.2.1 (registry+https://github.com/rust-lang/crates.io-index)",
  "assert_infrequent 0.1.0 (registry+https://github.com/rust-lang/crates.io-index)",
@@ -983,7 +983,6 @@ dependencies = [
  "serde_json 1.0.32 (registry+https://github.com/rust-lang/crates.io-index)",
  "slog 2.4.1 (registry+https://github.com/rust-lang/crates.io-index)",
  "slog-term 2.4.0 (registry+https://github.com/rust-lang/crates.io-index)",
- "throttled-reader 1.0.0 (registry+https://github.com/rust-lang/crates.io-index)",
  "tokio 0.1.11 (registry+https://github.com/rust-lang/crates.io-index)",
  "vec_map 0.8.1 (registry+https://github.com/rust-lang/crates.io-index)",
  "zookeeper 0.5.4 (registry+https://github.com/rust-lang/crates.io-index)",
@@ -1001,7 +1000,7 @@ dependencies = [
  "msql-srv 0.6.2 (registry+https://github.com/rust-lang/crates.io-index)",
  "mysql 12.3.1 (registry+https://github.com/rust-lang/crates.io-index)",
  "nom-sql 0.0.4 (registry+https://github.com/rust-lang/crates.io-index)",
- "noria 0.1.0 (git+https://github.com/mit-pdos/noria.git)",
+ "noria 0.1.2 (git+https://github.com/mit-pdos/noria.git)",
  "noria-server 0.1.0 (git+https://github.com/mit-pdos/noria.git)",
  "regex 1.0.5 (registry+https://github.com/rust-lang/crates.io-index)",
  "slog 2.4.1 (registry+https://github.com/rust-lang/crates.io-index)",
@@ -1012,7 +1011,7 @@ dependencies = [
 [[package]]
 name = "noria-server"
 version = "0.1.0"
-source = "git+https://github.com/mit-pdos/noria.git#08664d4f24fb972150a0164812c775e4df50fdf2"
+source = "git+https://github.com/mit-pdos/noria.git#cdcd5f7bef46ab4c1e8d8c9571355c849687f46d"
 dependencies = [
  "async-bincode 0.4.5 (registry+https://github.com/rust-lang/crates.io-index)",
  "bincode 1.0.1 (registry+https://github.com/rust-lang/crates.io-index)",
@@ -1030,7 +1029,7 @@ dependencies = [
  "mysql 14.1.0 (registry+https://github.com/rust-lang/crates.io-index)",
  "nom 3.2.1 (registry+https://github.com/rust-lang/crates.io-index)",
  "nom-sql 0.0.4 (registry+https://github.com/rust-lang/crates.io-index)",
- "noria 0.1.0 (git+https://github.com/mit-pdos/noria.git)",
+ "noria 0.1.2 (git+https://github.com/mit-pdos/noria.git)",
  "petgraph 0.4.13 (registry+https://github.com/rust-lang/crates.io-index)",
  "rand 0.5.5 (registry+https://github.com/rust-lang/crates.io-index)",
  "serde 1.0.79 (registry+https://github.com/rust-lang/crates.io-index)",
@@ -1174,7 +1173,7 @@ dependencies = [
 
 [[package]]
 name = "rahashmap"
-version = "0.2.12"
+version = "0.2.13"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 dependencies = [
  "rand 0.5.5 (registry+https://github.com/rust-lang/crates.io-index)",
@@ -1290,7 +1289,7 @@ dependencies = [
 [[package]]
 name = "rocksdb"
 version = "0.10.0"
-source = "git+https://github.com/ekmartin/rust-rocksdb.git?branch=custom#d8bbbf1da9d425ac279e22dc769d6edb7bddff45"
+source = "git+https://github.com/ekmartin/rust-rocksdb.git?branch=custom#20f8595a8b3010902ff2d8c64ea6e13d4dcab8b3"
 dependencies = [
  "libc 0.2.43 (registry+https://github.com/rust-lang/crates.io-index)",
  "librocksdb-sys 5.14.2 (git+https://github.com/ekmartin/rust-rocksdb.git?branch=custom)",
@@ -1544,11 +1543,6 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 dependencies = [
  "lazy_static 1.1.0 (registry+https://github.com/rust-lang/crates.io-index)",
 ]
-
-[[package]]
-name = "throttled-reader"
-version = "1.0.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
 
 [[package]]
 name = "time"
@@ -2043,7 +2037,7 @@ dependencies = [
 "checksum nom 3.2.1 (registry+https://github.com/rust-lang/crates.io-index)" = "05aec50c70fd288702bcd93284a8444607f3292dbdf2a30de5ea5dcdbe72287b"
 "checksum nom 4.1.0 (registry+https://github.com/rust-lang/crates.io-index)" = "50b5469365a145d6c39ca7eff1a3048465206268c3f46617bb40c7752397be07"
 "checksum nom-sql 0.0.4 (registry+https://github.com/rust-lang/crates.io-index)" = "098d79ffae622e60dfda616f3f96bef57bca80872ffe9c591708400878f96dd5"
-"checksum noria 0.1.0 (git+https://github.com/mit-pdos/noria.git)" = "<none>"
+"checksum noria 0.1.2 (git+https://github.com/mit-pdos/noria.git)" = "<none>"
 "checksum noria-server 0.1.0 (git+https://github.com/mit-pdos/noria.git)" = "<none>"
 "checksum num-bigint 0.2.0 (registry+https://github.com/rust-lang/crates.io-index)" = "3eceac7784c5dc97c2d6edf30259b4e153e6e2b42b3c85e9a6e9f45d06caef6e"
 "checksum num-integer 0.1.39 (registry+https://github.com/rust-lang/crates.io-index)" = "e83d528d2677f0518c570baf2b7abdcf0cd2d248860b68507bdcb3e91d4c0cea"
@@ -2061,7 +2055,7 @@ dependencies = [
 "checksum quick-error 1.2.2 (registry+https://github.com/rust-lang/crates.io-index)" = "9274b940887ce9addde99c4eee6b5c44cc494b182b97e73dc8ffdcb3397fd3f0"
 "checksum quote 0.5.2 (registry+https://github.com/rust-lang/crates.io-index)" = "9949cfe66888ffe1d53e6ec9d9f3b70714083854be20fd5e271b232a017401e8"
 "checksum quote 0.6.8 (registry+https://github.com/rust-lang/crates.io-index)" = "dd636425967c33af890042c483632d33fa7a18f19ad1d7ea72e8998c6ef8dea5"
-"checksum rahashmap 0.2.12 (registry+https://github.com/rust-lang/crates.io-index)" = "f48af954463b96dc3de8220896932fb0923e11fbf48d91fe8a7ac31f42f43c2a"
+"checksum rahashmap 0.2.13 (registry+https://github.com/rust-lang/crates.io-index)" = "0986686670be062d851d22b1b1d6b112086af083c43361c0b9a3959855e2b1c0"
 "checksum rand 0.5.5 (registry+https://github.com/rust-lang/crates.io-index)" = "e464cd887e869cddcae8792a4ee31d23c7edd516700695608f5b98c67ee0131c"
 "checksum rand_core 0.2.2 (registry+https://github.com/rust-lang/crates.io-index)" = "1961a422c4d189dfb50ffa9320bf1f2a9bd54ecb92792fb9477f99a1045f3372"
 "checksum rand_core 0.3.0 (registry+https://github.com/rust-lang/crates.io-index)" = "0905b6b7079ec73b314d4c748701f6931eb79fd97c668caa3f1899b22b32c6db"
@@ -2108,7 +2102,6 @@ dependencies = [
 "checksum termion 1.5.1 (registry+https://github.com/rust-lang/crates.io-index)" = "689a3bdfaab439fd92bc87df5c4c78417d3cbe537487274e9b0b2dce76e92096"
 "checksum textwrap 0.10.0 (registry+https://github.com/rust-lang/crates.io-index)" = "307686869c93e71f94da64286f9a9524c0f308a9e1c87a583de8e9c9039ad3f6"
 "checksum thread_local 0.3.6 (registry+https://github.com/rust-lang/crates.io-index)" = "c6b53e329000edc2b34dbe8545fd20e55a333362d0a321909685a19bd28c3f1b"
-"checksum throttled-reader 1.0.0 (registry+https://github.com/rust-lang/crates.io-index)" = "d57a2c9d70b741a7afc496022a3626a178174ae1931ce67ebd4128ac89ae9409"
 "checksum time 0.1.40 (registry+https://github.com/rust-lang/crates.io-index)" = "d825be0eb33fda1a7e68012d51e9c7f451dc1a69391e7fdc197060bb8c56667b"
 "checksum timekeeper 0.3.0 (registry+https://github.com/rust-lang/crates.io-index)" = "a5bb9b8201d620a812b747fd1e8c523db6d7961ec3aa0915772256fee504bce7"
 "checksum timer_heap 0.3.0 (registry+https://github.com/rust-lang/crates.io-index)" = "fe71c4d1bf15d70c971c2660d9fb00887edd0fb8008507ae3fc996c9c77dfd6e"
