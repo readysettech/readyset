@@ -1,8 +1,8 @@
 use config::{parse_config, Benchmark, Config};
-use Commit;
 use git2;
-use Push;
 use repo::Workspace;
+use Commit;
+use Push;
 
 use std::collections::HashMap;
 use std::io;
@@ -288,29 +288,34 @@ pub fn taste_commit(
         },
     };
 
-    let bench_results =
-        match branch {
-            Some(ref branch) => {
-                let branch_history = history.entry(branch.clone()).or_insert(HashMap::new());
-                cfg.benchmarks
+    let bench_results = match branch {
+        Some(ref branch) => {
+            let branch_history = history.entry(branch.clone()).or_insert(HashMap::new());
+            cfg.benchmarks
                 .iter()
                 .map(|b| {
-                    let (status, res) =
-                        benchmark(&ws.path, &cfg, b, commit.id, branch_history.get(&b.name),
-                                  timeout);
+                    let (status, res) = benchmark(
+                        &ws.path,
+                        &cfg,
+                        b,
+                        commit.id,
+                        branch_history.get(&b.name),
+                        timeout,
+                    );
                     branch_history.insert(b.name.clone(), res.clone());
                     (b.clone(), status, res)
                 })
                 .collect::<Vec<(Benchmark, ExitStatus, HashMap<String, BenchmarkResult<f64>>)>>()
-            }
-            None => cfg.benchmarks
-                .iter()
-                .map(|b| {
-                    let (status, res) = benchmark(&ws.path, &cfg, b, commit.id, None, timeout);
-                    (b.clone(), status, res)
-                })
-                .collect::<Vec<(Benchmark, ExitStatus, HashMap<String, BenchmarkResult<f64>>)>>(),
-        };
+        }
+        None => cfg
+            .benchmarks
+            .iter()
+            .map(|b| {
+                let (status, res) = benchmark(&ws.path, &cfg, b, commit.id, None, timeout);
+                (b.clone(), status, res)
+            })
+            .collect::<Vec<(Benchmark, ExitStatus, HashMap<String, BenchmarkResult<f64>>)>>(),
+    };
     let bench_success = bench_results.iter().all(|x| x.1.success());
 
     Ok((
