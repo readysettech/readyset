@@ -208,12 +208,16 @@ pub fn taste_commit(
         },
     };
 
+    let version_output = version(&ws.path);
+    write_output(&version_output, commit.id, "version");
+
     let do_update = !Path::new(&format!("{}/Cargo.lock", ws.path)).exists();
 
     let build_success = {
         let update_success = if do_update {
             println!("running 'cargo update'");
             let update_output = update(&ws.path);
+            write_output(&update_output, commit.id, "update");
             if !update_output.status.success() {
                 println!("update failed: output status is {:?}", update_output.status);
             }
@@ -353,4 +357,12 @@ fn update(workdir: &str) -> Output {
         .arg("update")
         .output()
         .expect("Failed to execute 'cargo update'!")
+}
+
+fn version(workdir: &str) -> Output {
+    Command::new("rustc")
+        .current_dir(workdir)
+        .arg("--version")
+        .output()
+        .expect("Failed to execute 'rustc --version'!")
 }
