@@ -118,7 +118,6 @@ pub struct NoriaBackend {
     inner: NoriaBackendInner,
     log: slog::Logger,
 
-    table_schemas: Arc<RwLock<HashMap<String, Schema>>>,
     auto_increments: Arc<RwLock<HashMap<String, atomic::AtomicUsize>>>,
 
     query_count: Arc<atomic::AtomicUsize>,
@@ -142,7 +141,6 @@ impl NoriaBackend {
     pub fn new(
         zk_addr: &str,
         deployment: &str,
-        schemas: Arc<RwLock<HashMap<String, Schema>>>,
         auto_increments: Arc<RwLock<HashMap<String, atomic::AtomicUsize>>>,
         query_cache: Arc<RwLock<HashMap<SelectStatement, String>>>,
         query_counter: Arc<atomic::AtomicUsize>,
@@ -155,7 +153,6 @@ impl NoriaBackend {
             inner: NoriaBackendInner::new(zk_addr, deployment, &log),
             log: log,
 
-            table_schemas: schemas,
             auto_increments: auto_increments,
 
             query_count: query_counter,
@@ -175,35 +172,26 @@ impl NoriaBackend {
     }
 
     fn fetch_endpoints(&mut self, need: Vec<nom_sql::Table>) -> Result<(), failure::Error> {
-        let mut table_schemas = (*self.table_schemas).write().unwrap();
         for t in need {
             //  1. check inner.inputs/inner.outputs
-            if let Some(th) = self.inner.inputs.get(&t.name) {
-                if !table_schemas.contains_key(&t.name) {
-                    table_schemas.insert(t.name, Schema::Table(th.schema().unwrap().clone()));
-                }
-            } else if let Some(vh) = self.inner.outputs.get(&t.name) {
-                if !table_schemas.contains_key(&t.name) {
-                    table_schemas.insert(t.name, Schema::View(vh.schema().unwrap().to_vec()));
-                }
+            if self.inner.inputs.contains_key(&t.name) {
+                // already have mutator, nothing more to do
+                continue;
+            } else if self.inner.outputs.contains_key(&t.name) {
+                // already have getter, nothing more to do
+                continue;
             } else {
                 //  2. If nothing, RPC for view
-                if let Ok(vh) = self.inner.get_or_make_getter(&t.name) {
-                    table_schemas.insert(
-                        t.name.clone(),
-                        Schema::View(
-                            vh.schema()
-                                .expect(&format!("no schema on view '{}'", t.name))
-                                .to_vec(),
-                        ),
-                    );
-                } else {
-                    //  3. If nothing, RPC for table
-                    if let Ok(th) = self.inner.get_or_make_mutator(&t.name) {
-                        table_schemas.insert(t.name, Schema::Table(th.schema().unwrap().clone()));
-                    } else {
-                        //  4. If still nothing, panic
-                        bail!("no view or table named '{}'", t.name);
+                match self.inner.get_or_make_getter(&t.name) {
+                    // TODO(malte): the error handling here is lame, as it doesn't differentiate
+                    // between "no such view/table" errors and transport or network errors.
+                    Ok(_) => continue,
+                    Err(_) => {
+                        //  3. If nothing, RPC for table
+                        if self.inner.get_or_make_mutator(&t.name).is_err() {
+                            //  4. If still nothing, panic
+                            bail!("no view or table named '{}'", t.name);
+                        }
                     }
                 }
             }
@@ -515,21 +503,14 @@ impl NoriaBackend {
         mut sql_q: nom_sql::SqlQuery,
         info: StatementMetaWriter<W>,
     ) -> io::Result<()> {
-        let params = {
-            let ts_lock = self.table_schemas.read().unwrap();
-            let table_schemas = &(*ts_lock);
-
-            // extract parameter columns
-            // note that we have to do this *before* collapsing WHERE IN, otherwise the
-            // client will be confused about the number of parameters it's supposed to
-            // give.
-            let params: Vec<msql_srv::Column> = utils::get_parameter_columns(&sql_q)
-                .into_iter()
-                .map(|c| schema_for_column(table_schemas, c))
-                .collect();
-
-            params
-        };
+        // extract parameter columns
+        // note that we have to do this *before* collapsing WHERE IN, otherwise the
+        // client will be confused about the number of parameters it's supposed to
+        // give.
+        let params: Vec<nom_sql::Column> = utils::get_parameter_columns(&sql_q)
+            .into_iter()
+            .cloned()
+            .collect();
 
         let rewritten = rewrite::collapse_where_in(&mut sql_q, false);
         let q = if let nom_sql::SqlQuery::Select(q) = sql_q {
@@ -542,17 +523,23 @@ impl NoriaBackend {
         let qname = self.get_or_create_view(&q, true)?;
 
         // extract result schema
-        let schema = schema::convert_schema(&Schema::View(
+        let schema = Schema::View(
             self.inner
                 .ensure_getter(&qname)
                 .schema()
                 .expect(&format!("no schema for view '{}'", qname))
                 .to_vec(),
-        ));
+        );
+
+        // now convert params to msql_srv types; we have to do this here because we don't have
+        // access to the schema yet when we extract them above.
+        let params: Vec<msql_srv::Column> = params
+            .into_iter()
+            .map(|c| schema_for_column(&schema, &c))
+            .collect();
+        let schema = schema::convert_schema(&schema);
 
         self.prepared_count += 1;
-
-        // TODO(malte): proactively get getter, to avoid &mut ref on exec?
         info.reply(self.prepared_count, params.as_slice(), schema.as_slice())?;
 
         // register a new prepared statement
@@ -569,12 +556,19 @@ impl NoriaBackend {
         sql_q: nom_sql::SqlQuery,
         info: StatementMetaWriter<W>,
     ) -> io::Result<()> {
+        let q = if let nom_sql::SqlQuery::Update(ref q) = sql_q {
+            q
+        } else {
+            unreachable!()
+        };
+        let mutator = self.inner.ensure_mutator(&q.table.name);
+        let schema = Schema::Table(mutator.schema().unwrap().clone());
+
         // extract parameter columns
         let params: Vec<msql_srv::Column> = {
-            let ts = self.table_schemas.read().unwrap();
             utils::get_parameter_columns(&sql_q)
                 .into_iter()
-                .map(|c| schema_for_column(&*ts, c))
+                .map(|c| schema_for_column(&schema, c))
                 .collect()
         };
 

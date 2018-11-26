@@ -1,28 +1,10 @@
 use msql_srv;
-use nom_sql::{
-    self, ColumnConstraint, ColumnSpecification, CreateTableStatement, FieldValueExpression,
-    InsertStatement, Literal, SelectStatement, SqlQuery, SqlType,
-};
-
-use std::collections::HashMap;
+use nom_sql::{self, ColumnConstraint, ColumnSpecification, CreateTableStatement, SqlType};
 
 #[derive(Debug)]
 pub enum Schema {
     Table(CreateTableStatement),
     View(Vec<ColumnSpecification>),
-}
-
-#[allow(dead_code)]
-pub(crate) fn schema_for_query(
-    schemas: &HashMap<String, Schema>,
-    q: &SqlQuery,
-) -> Vec<msql_srv::Column> {
-    match *q {
-        SqlQuery::Select(ref q) => schema_for_select(schemas, q),
-        SqlQuery::Insert(ref q) => schema_for_insert(schemas, q),
-
-        _ => unimplemented!(),
-    }
 }
 
 pub(crate) fn convert_column(cs: &ColumnSpecification) -> msql_srv::Column {
@@ -75,71 +57,9 @@ pub(crate) fn convert_schema(schema: &Schema) -> Vec<msql_srv::Column> {
     }
 }
 
-pub(crate) fn schema_for_insert(
-    schemas: &HashMap<String, Schema>,
-    q: &InsertStatement,
-) -> Vec<msql_srv::Column> {
-    let mut schema = Vec::new();
-    for c in q.fields.as_ref().unwrap() {
-        // XXX(malte): ewww the hackery
-        let mut cc = c.clone();
-        cc.table = Some(q.table.name.clone());
-        schema.push(schema_for_column(schemas, &cc));
-    }
-    schema
-}
-
-pub(crate) fn schema_for_select(
-    table_schemas: &HashMap<String, Schema>,
-    q: &SelectStatement,
-) -> Vec<msql_srv::Column> {
-    let mut schema = Vec::new();
-    for fe in &q.fields {
-        match *fe {
-            nom_sql::FieldDefinitionExpression::Col(ref c) => {
-                schema.push(schema_for_column(table_schemas, &c));
-            }
-            nom_sql::FieldDefinitionExpression::Value(FieldValueExpression::Literal(ref le)) => {
-                schema.push(msql_srv::Column {
-                    table: "".to_owned(),
-                    column: match le.alias {
-                        Some(ref a) => a.to_owned(),
-                        None => le.value.to_string(),
-                    },
-                    coltype: match le.value {
-                        Literal::Integer(_) => msql_srv::ColumnType::MYSQL_TYPE_LONG,
-                        Literal::String(_) => msql_srv::ColumnType::MYSQL_TYPE_VAR_STRING,
-                        _ => unimplemented!(),
-                    },
-                    colflags: msql_srv::ColumnFlags::empty(),
-                })
-            }
-            nom_sql::FieldDefinitionExpression::Value(FieldValueExpression::Arithmetic(ref ae)) => {
-                schema.push(msql_srv::Column {
-                    table: "".to_owned(),
-                    column: match ae.alias {
-                        Some(ref a) => a.to_owned(),
-                        None => format!("{}", ae),
-                    },
-                    coltype: msql_srv::ColumnType::MYSQL_TYPE_LONG,
-                    colflags: msql_srv::ColumnFlags::empty(),
-                })
-            }
-            _ => unimplemented!(),
-        }
-    }
-    schema
-}
-
-pub(crate) fn schema_for_column(
-    schemas: &HashMap<String, Schema>,
-    c: &nom_sql::Column,
-) -> msql_srv::Column {
+pub(crate) fn schema_for_column(schema: &Schema, c: &nom_sql::Column) -> msql_srv::Column {
     if let Some(ref table) = c.table {
-        match schemas
-            .get(table)
-            .expect(&format!("Table/view {} not found!", table))
-        {
+        match schema {
             Schema::Table(CreateTableStatement { ref fields, .. }) => {
                 let colspec = fields
                     .iter()

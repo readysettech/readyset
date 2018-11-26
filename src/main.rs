@@ -37,7 +37,6 @@ use std::sync::atomic::AtomicUsize;
 use std::sync::{Arc, RwLock};
 use std::thread;
 
-use schema::Schema;
 use backend::NoriaBackend;
 
 // Just give me a damn terminal logger
@@ -108,7 +107,6 @@ fn main() {
     info!(log, "listening on port {}", port);
 
     let query_counter = Arc::new(AtomicUsize::new(0));
-    let schemas: Arc<RwLock<HashMap<String, Schema>>> = Arc::default();
     let auto_increments: Arc<RwLock<HashMap<String, AtomicUsize>>> = Arc::default();
     let query_cache: Arc<RwLock<HashMap<SelectStatement, String>>> = Arc::default();
 
@@ -119,8 +117,7 @@ fn main() {
 
         let builder = thread::Builder::new().name(format!("handler{}", i));
 
-        let (schemas, auto_increments, query_cache, query_counter, log) = (
-            schemas.clone(),
+        let (auto_increments, query_cache, query_counter, log) = (
             auto_increments.clone(),
             query_cache.clone(),
             query_counter.clone(),
@@ -135,7 +132,6 @@ fn main() {
                 let b = NoriaBackend::new(
                     &zk_addr,
                     &deployment,
-                    schemas,
                     auto_increments,
                     query_cache,
                     query_counter,
