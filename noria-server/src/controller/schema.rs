@@ -6,6 +6,11 @@ use nom_sql::{Column, ColumnSpecification, SqlType};
 
 use slog;
 
+type Path = std::vec::Vec<(
+    petgraph::graph::NodeIndex,
+    std::vec::Vec<std::option::Option<usize>>,
+)>;
+
 fn to_sql_type(d: &DataType) -> Option<SqlType> {
     match d {
         DataType::Int(_) => Some(SqlType::Int(32)),
@@ -17,6 +22,128 @@ fn to_sql_type(d: &DataType) -> Option<SqlType> {
         // type), so caller must handle appropriately.
         DataType::None => None,
         DataType::Timestamp(_) => Some(SqlType::Timestamp),
+    }
+}
+
+fn type_for_internal_column(
+    node: &dataflow::node::Node,
+    column_index: usize,
+    next_node_on_path: NodeIndex,
+    recipe: &Recipe,
+    graph: &Graph,
+    log: &slog::Logger,
+) -> Option<SqlType> {
+    // column originates at internal view: literal, aggregation output
+    // FIXME(malte): return correct type depending on what column does
+    match *(*node) {
+        ops::NodeOperator::Project(ref o) => {
+            let emits = o.emits();
+            assert!(column_index >= emits.0.len());
+            if column_index < emits.0.len() + emits.2.len() {
+                // computed expression
+                // TODO(malte): trace the actual column types, since this could be a
+                // real-valued arithmetic operation
+                Some(SqlType::Bigint(64))
+            } else {
+                // literal
+                let off = column_index - (emits.0.len() + emits.2.len());
+                to_sql_type(&emits.1[off])
+            }
+        }
+        ops::NodeOperator::Sum(_) => {
+            // computed column is always emitted last
+            if column_index == node.fields().len() - 1 {
+                // counts and sums always produce integral columns
+                Some(SqlType::Bigint(64))
+            } else {
+                // no column that isn't the aggregation result column should ever trace
+                // back to an aggregation.
+                unreachable!();
+            }
+        }
+        ops::NodeOperator::Extremum(ref o) => {
+            let over_columns = o.over_columns();
+            assert_eq!(over_columns.len(), 1);
+            // use type of the "over" column
+            column_schema(graph, next_node_on_path, recipe, over_columns[0], log)
+                .map(|cs| cs.sql_type)
+        }
+        ops::NodeOperator::Concat(_) => {
+            // group_concat always outputs a string as the last column
+            if column_index == node.fields().len() - 1 {
+                Some(SqlType::Text)
+            } else {
+                // no column that isn't the concat result column should ever trace
+                // back to a group_concat.
+                unreachable!();
+            }
+        }
+        ops::NodeOperator::Join(_) => {
+            // join doesn't "generate" columns, but they may come from one of the other
+            // ancestors; so keep iterating to try the other paths
+            None
+        }
+        // no other operators should every generate columns
+        _ => unreachable!(),
+    }
+}
+
+fn type_for_base_column(
+    recipe: &Recipe,
+    base: &str,
+    column_index: usize,
+    log: &slog::Logger,
+) -> Option<SqlType> {
+    if let Some(schema) = recipe.schema_for(base) {
+        // projected base table column
+        match schema {
+            Schema::Table(ref s) => Some(s.fields[column_index].sql_type.clone()),
+            _ => unreachable!(),
+        }
+    } else {
+        error!(log, "no schema for base '{}'", base);
+        None
+    }
+}
+
+fn trace_column_type_on_path(
+    path: Path,
+    graph: &Graph,
+    recipe: &Recipe,
+    log: &slog::Logger,
+) -> Option<SqlType> {
+    // column originates at last element of the path whose second element is not None
+    if let Some(pos) = path.iter().rposition(|e| e.1.iter().any(|c| c.is_some())) {
+        let (ni, cols) = &path[pos];
+
+        // We invoked provenance_of with a singleton slice, so must have got
+        // results for a single column
+        assert_eq!(cols.len(), 1);
+
+        let source_node = &graph[*ni];
+        let source_column_index = cols[0].unwrap();
+
+        if source_node.is_base() {
+            type_for_base_column(
+                recipe,
+                source_node.name(),
+                cols.first().unwrap().unwrap(),
+                log,
+            )
+        } else {
+            let parent_node_index = path[pos + 1].0;
+
+            type_for_internal_column(
+                source_node,
+                source_column_index,
+                parent_node_index,
+                recipe,
+                graph,
+                log,
+            )
+        }
+    } else {
+        None
     }
 }
 
@@ -32,88 +159,9 @@ pub fn column_schema(
 
     let mut col_type = None;
     for p in paths {
-        // column originates at last element of the path whose second element is not None
-        if let Some((ni, cols)) = p.iter().rfind(|e| e.1.iter().any(|c| c.is_some())) {
-            // We invoked provenance_of with a singleton slice, so must have got
-            // results for a single column
-            assert_eq!(cols.len(), 1);
-
-            let source_node = &graph[*ni];
-            let source_column_index = cols[0].unwrap();
-
-            if source_node.is_base() {
-                if let Some(schema) = recipe.schema_for(source_node.name()) {
-                    // projected base table column
-                    col_type = match schema {
-                        Schema::Table(ref s) => {
-                            Some(s.fields[cols.first().unwrap().unwrap()].sql_type.clone())
-                        }
-                        _ => unreachable!(),
-                    };
-                } else {
-                    warn!(log, "no schema for base '{}'", source_node.name());
-                }
-            } else {
-                // column originates at internal view: literal, aggregation output
-                // FIXME(malte): return correct type depending on what column does
-                match *(*source_node) {
-                    ops::NodeOperator::Project(ref o) => {
-                        let emits = o.emits();
-                        assert!(source_column_index >= emits.0.len());
-                        if source_column_index < emits.0.len() + emits.2.len() {
-                            // computed expression
-                            // TODO(malte): trace the actual column types, since this could be a
-                            // real-valued arithmetic operation
-                            col_type = Some(SqlType::Bigint(64));
-                        } else {
-                            // literal
-                            let off = source_column_index - (emits.0.len() + emits.2.len());
-                            col_type = to_sql_type(&emits.1[off]);
-                        }
-                    }
-                    ops::NodeOperator::Sum(_) => {
-                        // computed column is always emitted last
-                        if source_column_index == source_node.fields().len() - 1 {
-                            // counts and sums always produce integral columns
-                            col_type = Some(SqlType::Bigint(64));
-                        } else {
-                            // no column that isn't the aggregation result column should ever trace
-                            // back to an aggregation.
-                            unreachable!();
-                        }
-                    }
-                    ops::NodeOperator::Extremum(ref o) => {
-                        let over_columns = o.over_columns();
-                        assert_eq!(over_columns.len(), 1);
-                        let pos = p
-                            .iter()
-                            .rposition(|e| e.1.iter().any(|c| c.is_some()))
-                            .unwrap();
-                        let parent_node_index = p[pos + 1].0;
-                        // use type of the "over" column
-                        col_type =
-                            column_schema(graph, parent_node_index, recipe, over_columns[0], log)
-                                .map(|cs| cs.sql_type);
-                    }
-                    ops::NodeOperator::Concat(_) => {
-                        // group_concat always outputs a string as the last column
-                        if source_column_index == source_node.fields().len() - 1 {
-                            col_type = Some(SqlType::Text);
-                        } else {
-                            // no column that isn't the concat result column should ever trace
-                            // back to a group_concat.
-                            unreachable!();
-                        }
-                    }
-                    ops::NodeOperator::Join(_) => {
-                        // join doesn't "generate" columns, but they may come from one of the other
-                        // ancestors; so keep iterating to try the other paths
-                        ()
-                    }
-                    // no other operators should every generate columns
-                    _ => unreachable!(),
-                };
-            }
+        match trace_column_type_on_path(p, graph, recipe, log) {
+            t @ Some(_) => col_type = t,
+            _ => (),
         }
     }
 
