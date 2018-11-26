@@ -72,7 +72,8 @@ fn collapse_where_in_recursive(
                     leftmost_param_index,
                     &mut *ct.left,
                     rewrite_literals,
-                ).or_else(|| {
+                )
+                .or_else(|| {
                     collapse_where_in_recursive(
                         leftmost_param_index,
                         &mut *ct.right,
@@ -172,7 +173,8 @@ mod tests {
 
         let mut q = nom_sql::parse_query(
             "SELECT * FROM t WHERE x IN (SELECT * FROM z WHERE a = ?) AND y IN (?, ?) OR z = ?",
-        ).unwrap();
+        )
+        .unwrap();
         let rewritten = collapse_where_in(&mut q, false).unwrap();
         assert_eq!(rewritten.0, 1);
         assert_eq!(rewritten.1.len(), 2);
@@ -180,12 +182,14 @@ mod tests {
             q,
             nom_sql::parse_query(
                 "SELECT * FROM t WHERE x IN (SELECT * FROM z WHERE a = ?) AND y = ? OR z = ?"
-            ).unwrap()
+            )
+            .unwrap()
         );
 
         let mut q = nom_sql::parse_query(
             "SELECT * FROM t WHERE x IN (SELECT * FROM z WHERE b = ? AND a IN (?, ?)) OR z = ?",
-        ).unwrap();
+        )
+        .unwrap();
         let rewritten = collapse_where_in(&mut q, false).unwrap();
         assert_eq!(rewritten.0, 1);
         assert_eq!(rewritten.1.len(), 2);
@@ -193,7 +197,8 @@ mod tests {
             q,
             nom_sql::parse_query(
                 "SELECT * FROM t WHERE x IN (SELECT * FROM z WHERE b = ? AND a = ?) OR z = ?",
-            ).unwrap()
+            )
+            .unwrap()
         );
     }
 
