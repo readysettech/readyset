@@ -7,6 +7,7 @@ extern crate rusoto_sts;
 extern crate tsunami;
 
 use clap::{App, Arg};
+use rusoto_core::Region;
 use std::collections::HashMap;
 use std::fs::{File, OpenOptions};
 use std::io::prelude::*;
@@ -19,21 +20,36 @@ const AMI: &str = "ami-04db1e82afa245def";
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 enum Backend {
     Mysql,
-    Soup,
-    Soupy,
+    Noria,
+    Natural,
 }
 
 impl fmt::Display for Backend {
     fn fmt(&self, f: &mut fmt::Formatter) -> Result<(), fmt::Error> {
         match *self {
             Backend::Mysql => write!(f, "mysql"),
-            Backend::Soup => write!(f, "soup"),
-            Backend::Soupy => write!(f, "soupy"),
+            Backend::Noria => write!(f, "noria"),
+            Backend::Natural => write!(f, "natural"),
         }
     }
 }
 
-fn git_and_cargo(ssh: &mut Session, dir: &str, bin: &str) -> Result<(), failure::Error> {
+impl Backend {
+    fn queries(&self) -> &'static str {
+        match *self {
+            Backend::Mysql => "original",
+            Backend::Noria => "noria",
+            Backend::Natural => "natural",
+        }
+    }
+}
+
+fn git_and_cargo(
+    ssh: &mut Session,
+    dir: &str,
+    bin: &str,
+    branch: Option<&str>,
+) -> Result<(), failure::Error> {
     eprintln!(" -> git reset");
     ssh.cmd(&format!("bash -c 'git -C {} reset --hard 2>&1'", dir))
         .map(|out| {
@@ -42,6 +58,20 @@ fn git_and_cargo(ssh: &mut Session, dir: &str, bin: &str) -> Result<(), failure:
                 eprintln!("{}", out);
             }
         })?;
+
+    if let Some(branch) = branch {
+        eprintln!(" -> git checkout {}", branch);
+        ssh.cmd(&format!(
+            "bash -c 'git -C {} checkout {} 2>&1'",
+            dir, branch
+        ))
+        .map(|out| {
+            let out = out.trim_right();
+            if !out.is_empty() {
+                eprintln!("{}", out);
+            }
+        })?;
+    }
 
     eprintln!(" -> git update");
     ssh.cmd(&format!("bash -c 'git -C {} pull 2>&1'", dir))
@@ -53,7 +83,7 @@ fn git_and_cargo(ssh: &mut Session, dir: &str, bin: &str) -> Result<(), failure:
         })?;
 
     if dir == "shim" {
-        eprintln!(" -> force local distributary");
+        eprintln!(" -> force local noria");
         ssh.cmd(&format!("sed -i -e 's/^###//g' {}/Cargo.toml", dir))
             .map(|out| {
                 let out = out.trim_right();
@@ -94,8 +124,8 @@ fn git_and_cargo(ssh: &mut Session, dir: &str, bin: &str) -> Result<(), failure:
 }
 
 fn main() {
-    let args = App::new("trawler-mysql ec2 orchestrator")
-        .about("Run the MySQL trawler benchmark on ec2")
+    let args = App::new("noria lobsters ec2 orchestrator")
+        .about("Run the noria lobste.rs benchmark on ec2")
         .arg(
             Arg::with_name("memory_limit")
                 .takes_value(true)
@@ -105,9 +135,24 @@ fn main() {
         .arg(
             Arg::with_name("memscale")
                 .takes_value(true)
-                .default_value("1")
+                .default_value("1.0")
                 .long("memscale")
-                .help("Memscale to use [default: 1]."),
+                .help("Memory scale factor for workload"),
+        )
+        .arg(
+            Arg::with_name("availability_zone")
+                .long("availability-zone")
+                .value_name("AZ")
+                .default_value("us-east-1c")
+                .takes_value(true)
+                .help("EC2 availability zone to use for launching instances"),
+        )
+        .arg(
+            Arg::with_name("branch")
+                .takes_value(true)
+                .default_value("master")
+                .long("branch")
+                .help("Which branch of noria to benchmark"),
         )
         .arg(
             Arg::with_name("SCALE")
@@ -116,32 +161,49 @@ fn main() {
         )
         .get_matches();
 
+    let az = args.value_of("availability_zone").unwrap();
+
     let mut b = TsunamiBuilder::default();
+    b.set_region(Region::UsEast1);
+    b.set_availability_zone(az);
     b.use_term_logger();
+    let branch = args.value_of("branch").map(String::from);
     b.add_set(
         "trawler",
         1,
-        MachineSetup::new("m5.24xlarge", AMI, |ssh| {
-            eprintln!("==> setting up trawler");
-            git_and_cargo(ssh, "benchmarks/lobsters/mysql", "trawler-mysql")?;
-            eprintln!("==> setting up trawler w/ soup hacks");
-            git_and_cargo(ssh, "benchmarks-soup/lobsters/mysql", "trawler-mysql")?;
-            eprintln!("==> updating distributary");
-            git_and_cargo(ssh, "distributary", "")?;
+        MachineSetup::new("m5.24xlarge", AMI, move |ssh| {
+            eprintln!("==> setting up benchmark client");
+            git_and_cargo(
+                ssh,
+                "noria",
+                "lobsters",
+                branch.as_ref().map(String::as_str),
+            )?;
             eprintln!("==> setting up shim");
-            git_and_cargo(ssh, "shim", "distributary-mysql")?;
+            git_and_cargo(ssh, "shim", "noria-mysql", None)?;
             Ok(())
         })
         .as_user("ubuntu"),
     );
+    let branch = args.value_of("branch").map(String::from);
     b.add_set(
         "server",
         1,
-        MachineSetup::new("c5.4xlarge", AMI, |ssh| {
-            eprintln!("==> setting up souplet");
-            git_and_cargo(ssh, "distributary", "souplet")?;
-            eprintln!("==> setting up zk-util");
-            git_and_cargo(ssh, "distributary/consensus", "zk-util")?;
+        MachineSetup::new("c5d.4xlarge", AMI, move |ssh| {
+            eprintln!("==> setting up noria-server");
+            git_and_cargo(
+                ssh,
+                "noria",
+                "noria-server",
+                branch.as_ref().map(String::as_str),
+            )?;
+            eprintln!("==> setting up noria-zk");
+            git_and_cargo(
+                ssh,
+                "noria",
+                "noria-zk",
+                branch.as_ref().map(String::as_str),
+            )?;
             // we'll need zookeeper running
             ssh.cmd("sudo systemctl start zookeeper")?;
 
@@ -179,7 +241,7 @@ fn main() {
             ]
         });
 
-    let memscale = value_t_or_exit!(args, "memscale", usize);
+    let memscale = value_t_or_exit!(args, "memscale", f64);
     let memlimit = args.value_of("memory_limit");
 
     let mut load = if args.is_present("SCALE") {
@@ -202,7 +264,20 @@ fn main() {
         let mut server = vms.remove("server").unwrap().swap_remove(0);
         let mut trawler = vms.remove("trawler").unwrap().swap_remove(0);
 
-        let backends = [Backend::Mysql, Backend::Soup, Backend::Soupy];
+        // write out host files for ergonomic ssh
+        let r: io::Result<()> = try {
+            let mut f = File::create("server.host")?;
+            writeln!(f, "ubuntu@{}", server.public_dns)?;
+
+            let mut f = File::create("client.host")?;
+            writeln!(f, "ubuntu@{}", trawler.public_dns)?;
+        };
+
+        if let Err(e) = r {
+            eprintln!("failed to write out host files: {:?}", e);
+        }
+
+        let backends = [Backend::Mysql, Backend::Noria, Backend::Natural];
 
         // allow reuse of time-wait ports
         trawler
@@ -229,24 +304,24 @@ fn main() {
                         ssh.cmd("sudo ln -sfn /mnt/mysql /var/lib/mysql")?;
                         ssh.cmd("sudo chown -R mysql:mysql /var/lib/mysql/")?;
                     }
-                    Backend::Soup | Backend::Soupy => {
+                    Backend::Noria | Backend::Natural => {
                         // just to make totally sure
                         server
                             .ssh
                             .as_mut()
                             .unwrap()
-                            .cmd("bash -c 'pkill -9 -f souplet 2>&1'")
+                            .cmd("bash -c 'pkill -9 -f noria-server 2>&1'")
                             .map(|out| {
                                 let out = out.trim_right();
                                 if !out.is_empty() {
-                                    eprintln!(" -> force stopped soup...\n{}", out);
+                                    eprintln!(" -> force stopped noria...\n{}", out);
                                 }
                             })?;
                         trawler
                             .ssh
                             .as_mut()
                             .unwrap()
-                            .cmd("bash -c 'pkill -9 -f distributary-mysql 2>&1'")
+                            .cmd("bash -c 'pkill -9 -f noria-mysql 2>&1'")
                             .map(|out| {
                                 let out = out.trim_right();
                                 if !out.is_empty() {
@@ -260,17 +335,17 @@ fn main() {
                             .as_mut()
                             .unwrap()
                             .cmd(
-                                "~/target/release/zk-util \
+                                "~/target/release/noria-zk \
                                  --clean --deployment trawler",
                             )
                             .map(|out| {
                                 let out = out.trim_right();
                                 if !out.is_empty() {
-                                    eprintln!(" -> wiped soup state...\n{}", out);
+                                    eprintln!(" -> wiped noria state...\n{}", out);
                                 }
                             })?;
 
-                        // Don't hit Soup listening timeout think
+                        // Don't hit Noria listening timeout think
                         thread::sleep(time::Duration::from_secs(10));
                     }
                 }
@@ -288,12 +363,12 @@ fn main() {
                                 eprintln!(" -> started mysql...\n{}", out);
                             }
                         })?,
-                    Backend::Soup | Backend::Soupy => {
+                    Backend::Noria | Backend::Natural => {
                         let mut cmd = format!(
                             "bash -c 'nohup \
                              env \
                              RUST_BACKTRACE=1 \
-                             ~/target/release/souplet \
+                             ~/target/release/noria-server \
                              --deployment trawler \
                              --durability memory \
                              --no-reuse \
@@ -304,11 +379,11 @@ fn main() {
                         if let Some(memlimit) = memlimit {
                             cmd.push_str(&format!("--memory {} ", memlimit));
                         }
-                        cmd.push_str(" &> souplet.log &'");
+                        cmd.push_str(" &> noria-server.log &'");
 
                         server.ssh.as_mut().unwrap().cmd(&cmd).map(|_| ())?;
 
-                        // start the shim (which will block until soup is available)
+                        // start the shim (which will block until noria is available)
                         trawler
                             .ssh
                             .as_mut()
@@ -316,7 +391,7 @@ fn main() {
                             .cmd(&format!(
                                 "bash -c 'nohup \
                                  env RUST_BACKTRACE=1 \
-                                 ~/target/release/distributary-mysql \
+                                 ~/target/release/noria-mysql \
                                  --deployment trawler \
                                  --no-sanitize --no-static-responses \
                                  -z {}:2181 \
@@ -326,7 +401,7 @@ fn main() {
                             ))
                             .map(|_| ())?;
 
-                        // give soup a chance to start
+                        // give noria a chance to start
                         thread::sleep(time::Duration::from_secs(5));
                     }
                 }
@@ -335,15 +410,9 @@ fn main() {
                 // XXX: with MySQL we *could* just reprime by copying over the old ramdisk again
                 eprintln!(" -> priming at {}", Local::now().time().format("%H:%M:%S"));
 
-                let dir = match backend {
-                    Backend::Mysql => "benchmarks",
-                    Backend::Soup => "benchmarks-soup",
-                    Backend::Soupy => "benchmarks-soupy",
-                };
-
                 let ip = match backend {
                     Backend::Mysql => &*server.private_ip,
-                    Backend::Soup | Backend::Soupy => "127.0.0.1",
+                    Backend::Noria | Backend::Natural => "127.0.0.1",
                 };
 
                 trawler
@@ -352,15 +421,18 @@ fn main() {
                     .unwrap()
                     .cmd(&format!(
                         "env RUST_BACKTRACE=1 \
-                         {}/lobsters/mysql/target/release/trawler-mysql \
+                         ~/target/release/lobsters \
                          --memscale {} \
                          --warmup 0 \
                          --runtime 0 \
                          --issuers 24 \
                          --prime \
+                         --queries {} \
                          \"mysql://lobsters:$(cat ~/mysql.pass)@{}/lobsters\" \
                          2>&1",
-                        dir, memscale, ip
+                        memscale,
+                        backend.queries(),
+                        ip
                     ))
                     .map(|out| {
                         let out = out.trim_right();
@@ -377,15 +449,18 @@ fn main() {
                     .unwrap()
                     .cmd(&format!(
                         "env RUST_BACKTRACE=1 \
-                         {}/lobsters/mysql/target/release/trawler-mysql \
+                         ~/target/release/lobsters \
                          --reqscale 3000 \
                          --memscale {} \
                          --warmup 120 \
                          --runtime 0 \
                          --issuers 24 \
+                         --queries {} \
                          \"mysql://lobsters:$(cat ~/mysql.pass)@{}/lobsters\" \
                          2>&1",
-                        dir, memscale, ip
+                        memscale,
+                        backend.queries(),
+                        ip
                     ))
                     .map(|out| {
                         let out = out.trim_right();
@@ -415,16 +490,21 @@ fn main() {
                     .unwrap()
                     .cmd_raw(&format!(
                         "env RUST_BACKTRACE=1 \
-                         {}/lobsters/mysql/target/release/trawler-mysql \
+                         ~/target/release/lobsters \
                          --reqscale {} \
                          --memscale {} \
                          --warmup 20 \
                          --runtime 30 \
                          --issuers 24 \
+                         --queries {} \
                          {} \
                          \"mysql://lobsters:$(cat ~/mysql.pass)@{}/lobsters\" \
                          2> run.err",
-                        dir, scale, memscale, hist_output, ip
+                        scale,
+                        memscale,
+                        backend.queries(),
+                        hist_output,
+                        ip
                     ))
                     .and_then(|out| Ok(output.write_all(&out[..]).map(|_| ())?))?;
 
@@ -488,7 +568,7 @@ fn main() {
                             })?;
                         server.ssh.as_mut().unwrap().cmd("sudo umount /mnt")?;
                     }
-                    Backend::Soup | Backend::Soupy => {
+                    Backend::Noria | Backend::Natural => {
                         // gather state size
                         let mem_limit = if let Some(limit) = memlimit {
                             format!("l{}", limit)
@@ -513,18 +593,18 @@ fn main() {
                             .ssh
                             .as_mut()
                             .unwrap()
-                            .cmd("bash -c 'pkill -f souplet 2>&1'")
+                            .cmd("bash -c 'pkill -f noria-server 2>&1'")
                             .map(|out| {
                                 let out = out.trim_right();
                                 if !out.is_empty() {
-                                    eprintln!(" -> stopped soup...\n{}", out);
+                                    eprintln!(" -> stopped noria...\n{}", out);
                                 }
                             })?;
                         trawler
                             .ssh
                             .as_mut()
                             .unwrap()
-                            .cmd("bash -c 'pkill -f distributary-mysql 2>&1'")
+                            .cmd("bash -c 'pkill -f noria-mysql 2>&1'")
                             .map(|out| {
                                 let out = out.trim_right();
                                 if !out.is_empty() {
