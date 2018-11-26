@@ -83,15 +83,14 @@ pub fn column_schema(
                         }
                     }
                     ops::NodeOperator::Extremum(ref o) => {
-                        // TODO(malte): use type of the "over" column
                         let over_columns = o.over_columns();
                         assert_eq!(over_columns.len(), 1);
-                        let parent_node_index = p[p
+                        let pos = p
                             .iter()
                             .rposition(|e| e.1.iter().any(|c| c.is_some()))
-                            .unwrap()
-                            + 1]
-                        .0;
+                            .unwrap();
+                        let parent_node_index = p[pos + 1].0;
+                        // use type of the "over" column
                         col_type =
                             column_schema(graph, parent_node_index, recipe, over_columns[0], log)
                                 .map(|cs| cs.sql_type);
