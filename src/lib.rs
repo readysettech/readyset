@@ -3,9 +3,9 @@
 #![feature(try_from)]
 #![feature(allow_fail)]
 
-extern crate noria;
 extern crate arccstr;
 extern crate chrono;
+extern crate noria;
 #[macro_use]
 extern crate failure;
 extern crate msql_srv;
@@ -17,12 +17,12 @@ extern crate lazy_static;
 #[macro_use]
 extern crate slog;
 
+mod backend;
 mod convert;
 mod referred_tables;
 mod rewrite;
 mod schema;
-mod backend;
 mod utils;
 
-pub use schema::Schema;
 pub use backend::NoriaBackend;
+pub use schema::Schema;

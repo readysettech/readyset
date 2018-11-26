@@ -1,7 +1,7 @@
-extern crate noria_server;
 extern crate msql_srv;
 extern crate mysql;
 extern crate nom_sql;
+extern crate noria_server;
 #[macro_use]
 extern crate slog;
 extern crate zookeeper;
@@ -16,12 +16,12 @@ use std::sync::{Arc, RwLock};
 use std::thread;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
-use noria_server::{ControllerBuilder, ZookeeperAuthority};
 use msql_srv::MysqlIntermediary;
 use nom_sql::SelectStatement;
+use noria_server::{ControllerBuilder, ZookeeperAuthority};
 use zookeeper::{WatchedEvent, ZooKeeper, ZooKeeperExt};
 
-use noria_mysql::{Schema, NoriaBackend};
+use noria_mysql::{NoriaBackend, Schema};
 
 // Appends a unique ID to deployment strings, to avoid collisions between tests.
 struct Deployment {
@@ -432,7 +432,8 @@ fn update_basic_prepared() {
             .prep_exec(
                 "UPDATE Cats SET Cats.name = \"Rusty\" WHERE Cats.id = ?",
                 (1,),
-            ).unwrap();
+            )
+            .unwrap();
         assert_eq!(updated.affected_rows(), 1);
         sleep();
     }
@@ -448,7 +449,8 @@ fn update_basic_prepared() {
             .prep_exec(
                 "UPDATE Cats SET Cats.name = ? WHERE Cats.id = ?",
                 ("Bob", 1),
-            ).unwrap();
+            )
+            .unwrap();
         assert_eq!(updated.affected_rows(), 1);
         sleep();
     }
@@ -700,7 +702,8 @@ fn select_collapse_where_in() {
         .prep_exec(
             "SELECT Cats.name FROM Cats WHERE Cats.id IN (?, ?, ?)",
             (1, 2, 3),
-        ).unwrap()
+        )
+        .unwrap()
         .map(|row| row.unwrap().take::<String, _>(0).unwrap())
         .collect();
     assert_eq!(names.len(), 2);
@@ -720,7 +723,8 @@ fn select_collapse_where_in() {
         .prep_exec(
             "SELECT Cats.name FROM Cats WHERE Cats.name = ? AND Cats.id IN (?, ?)",
             ("Bob", 1, 2),
-        ).unwrap()
+        )
+        .unwrap()
         .map(|row| row.unwrap().take::<String, _>(0).unwrap())
         .collect();
     assert_eq!(names.len(), 1);
