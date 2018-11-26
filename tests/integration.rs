@@ -357,6 +357,7 @@ fn delete_compound_primary_key() {
 }
 
 #[test]
+#[ignore]
 fn delete_multi_compound_primary_key() {
     let d = Deployment::new("delete_multi_compound_primary_key");
     let opts = setup(&d);
