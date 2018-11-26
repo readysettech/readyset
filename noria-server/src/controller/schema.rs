@@ -29,13 +29,6 @@ pub fn column_schema(
 ) -> Option<ColumnSpecification> {
     let paths = provenance_of(graph, view, &[column_index], |_, _, _| None);
     let vn = &graph[view];
-    debug!(
-        log,
-        "provenance of {} ({}) is: {:?}",
-        view.index(),
-        vn.name(),
-        paths
-    );
 
     let mut col_type = None;
     for p in paths {
@@ -140,6 +133,5 @@ pub fn column_schema(
         },
         col_type.unwrap(),
     );
-    debug!(log, "CS: {:?}", cs);
     Some(cs)
 }
