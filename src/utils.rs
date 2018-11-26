@@ -559,6 +559,7 @@ mod tests {
     }
 
     #[test]
+    #[ignore]
     fn test_flatten_conditional_compound_key() {
         compare_flatten(
             "DELETE FROM T WHERE T.a = 1 AND T.b = 2",
