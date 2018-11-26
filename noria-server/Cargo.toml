@@ -1,5 +1,3 @@
-cargo-features = ["rename-dependency", "edition"]
-
 [package]
 name = "noria-server"
 version = "0.1.0"

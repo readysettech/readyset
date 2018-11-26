@@ -1,5 +1,3 @@
-cargo-features = ["edition"]
-
 [package]
 name = "common"
 version = "0.1.0"

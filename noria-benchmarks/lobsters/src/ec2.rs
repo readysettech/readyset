@@ -1,17 +1,14 @@
-extern crate chrono;
+#![feature(try_blocks)]
+
 #[macro_use]
 extern crate clap;
-extern crate failure;
-extern crate rusoto_core;
-extern crate rusoto_sts;
-extern crate tsunami;
 
 use clap::{App, Arg};
 use rusoto_core::Region;
 use std::collections::HashMap;
 use std::fs::{File, OpenOptions};
-use std::io::prelude::*;
 use std::io::BufReader;
+use std::io::{self, prelude::*};
 use std::{fmt, thread, time};
 use tsunami::*;
 
