@@ -32,7 +32,7 @@ impl<'a> ServerHandle<'a> {
                     unimplemented!();
                 }
 
-                let _ = server.just_exec(&["pkill", "-f", "souplet"])?;
+                let _ = server.just_exec(&["pkill", "-f", "noria-server"])?;
 
                 let mut stdout = String::new();
                 let mut stderr = String::new();
@@ -41,9 +41,9 @@ impl<'a> ServerHandle<'a> {
                 w.wait_eof()?;
 
                 if !stderr.is_empty() {
-                    println!("souplet stdout");
+                    println!("noria-server stdout");
                     println!("{}", stdout);
-                    println!("souplet stderr");
+                    println!("noria-server stderr");
                     println!("{}", stderr);
                 }
 
@@ -215,7 +215,7 @@ impl<'a> Server<'a> {
                     "soup",
                     "soup",
                     "<",
-                    "distributary/benchmarks/vote/mysql_stat.sql",
+                    "noria/benchmarks/vote/mysql_stat.sql",
                 ])?;
 
                 w.write_all(b"tables:\n")?;
@@ -224,8 +224,8 @@ impl<'a> Server<'a> {
             }
             Backend::Netsoup { .. } => {
                 let mem = self
-                    .get_mem("souplet")?
-                    .ok_or(format_err!("couldn't find souplet memory usage"))?;
+                    .get_mem("noria-server")?
+                    .ok_or(format_err!("couldn't find noria-server memory usage"))?;
                 w.write_all(format!("memory: {}", mem).as_bytes())?;
             }
             Backend::Mysql => {
@@ -237,7 +237,7 @@ impl<'a> Server<'a> {
                     "soup",
                     "soup",
                     "<",
-                    "distributary/benchmarks/vote/mysql_stat.sql",
+                    "noria/benchmarks/vote/mysql_stat.sql",
                 ])?;
 
                 w.write_all(b"tables:\n")?;
@@ -257,7 +257,7 @@ impl<'a> Server<'a> {
                     "-U",
                     "SA",
                     "-i",
-                    "distributary/benchmarks/vote/mssql_stat.sql",
+                    "noria/benchmarks/vote/mssql_stat.sql",
                     // assume password is set in SQLCMDPASSWORD
                     "-S",
                     "127.0.0.1",
@@ -284,7 +284,7 @@ pub(crate) fn start<'a>(
     let sh = match *b {
         Backend::Netsoup { shards } => {
             // build worker if it hasn't been built already
-            match server.in_distributary(&["cargo", "b", "--release", "--bin", "souplet"]) {
+            match server.in_noria(&["cargo", "b", "--release", "--bin", "noria-server"]) {
                 Ok(Ok(_)) => {}
                 Ok(Err(e)) => return Ok(Err(e)),
                 Err(e) => return Err(e),
@@ -320,12 +320,12 @@ pub(crate) fn start<'a>(
             // TODO: should we worry about the running directory being on an SSD here?
             let shards = format!("{}", shards.unwrap_or(0));
             let w = {
-                let mut cmd: Vec<Cow<str>> = ["cd", "distributary", "&&"]
+                let mut cmd: Vec<Cow<str>> = ["cd", "noria", "&&"]
                     .into_iter()
                     .map(|&s| s.into())
                     .collect();
                 cmd.extend(vec![
-                    "/home/ubuntu/target/release/souplet".into(),
+                    "/home/ubuntu/target/release/noria-server".into(),
                     "--durability".into(),
                     "memory".into(),
                     "--shards".into(),

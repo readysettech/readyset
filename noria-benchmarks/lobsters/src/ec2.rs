@@ -14,7 +14,7 @@ use std::io::BufReader;
 use std::{fmt, thread, time};
 use tsunami::*;
 
-const AMI: &str = "ami-05df93bcec8de09d8";
+const AMI: &str = "ami-04db1e82afa245def";
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 enum Backend {
@@ -83,7 +83,8 @@ fn git_and_cargo(ssh: &mut Session, dir: &str, bin: &str) -> Result<(), failure:
                 if !out.is_empty() {
                     eprintln!("{}", out);
                 }
-            }).map_err(|e| {
+            })
+            .map_err(|e| {
                 eprintln!(" -> rebuild failed!\n{:?}", e);
                 e
             })?;
@@ -100,17 +101,20 @@ fn main() {
                 .takes_value(true)
                 .long("memory-limit")
                 .help("Partial state size limit / eviction threshold [in bytes]."),
-        ).arg(
+        )
+        .arg(
             Arg::with_name("memscale")
                 .takes_value(true)
                 .default_value("1")
                 .long("memscale")
                 .help("Memscale to use [default: 1]."),
-        ).arg(
+        )
+        .arg(
             Arg::with_name("SCALE")
                 .help("Run the given scale(s).")
                 .multiple(true),
-        ).get_matches();
+        )
+        .get_matches();
 
     let mut b = TsunamiBuilder::default();
     b.use_term_logger();
@@ -127,7 +131,8 @@ fn main() {
             eprintln!("==> setting up shim");
             git_and_cargo(ssh, "shim", "distributary-mysql")?;
             Ok(())
-        }).as_user("ubuntu"),
+        })
+        .as_user("ubuntu"),
     );
     b.add_set(
         "server",
@@ -141,7 +146,8 @@ fn main() {
             ssh.cmd("sudo systemctl start zookeeper")?;
 
             Ok(())
-        }).as_user("ubuntu"),
+        })
+        .as_user("ubuntu"),
     );
 
     // https://github.com/rusoto/rusoto/blob/master/AWS-CREDENTIALS.md
@@ -256,7 +262,8 @@ fn main() {
                             .cmd(
                                 "~/target/release/zk-util \
                                  --clean --deployment trawler",
-                            ).map(|out| {
+                            )
+                            .map(|out| {
                                 let out = out.trim_right();
                                 if !out.is_empty() {
                                     eprintln!(" -> wiped soup state...\n{}", out);
@@ -316,7 +323,8 @@ fn main() {
                                  -p 3306 \
                                  &> shim.log &'",
                                 server.private_ip,
-                            )).map(|_| ())?;
+                            ))
+                            .map(|_| ())?;
 
                         // give soup a chance to start
                         thread::sleep(time::Duration::from_secs(5));
@@ -353,7 +361,8 @@ fn main() {
                          \"mysql://lobsters:$(cat ~/mysql.pass)@{}/lobsters\" \
                          2>&1",
                         dir, memscale, ip
-                    )).map(|out| {
+                    ))
+                    .map(|out| {
                         let out = out.trim_right();
                         if !out.is_empty() {
                             eprintln!(" -> priming finished...\n{}", out);
@@ -377,7 +386,8 @@ fn main() {
                          \"mysql://lobsters:$(cat ~/mysql.pass)@{}/lobsters\" \
                          2>&1",
                         dir, memscale, ip
-                    )).map(|out| {
+                    ))
+                    .map(|out| {
                         let out = out.trim_right();
                         if !out.is_empty() {
                             eprintln!(" -> warming finished...\n{}", out);
@@ -415,7 +425,8 @@ fn main() {
                          \"mysql://lobsters:$(cat ~/mysql.pass)@{}/lobsters\" \
                          2> run.err",
                         dir, scale, memscale, hist_output, ip
-                    )).and_then(|out| Ok(output.write_all(&out[..]).map(|_| ())?))?;
+                    ))
+                    .and_then(|out| Ok(output.write_all(&out[..]).map(|_| ())?))?;
 
                 drop(output);
                 eprintln!(" -> finished at {}", Local::now().time().format("%H:%M:%S"));
@@ -495,7 +506,8 @@ fn main() {
                             .cmd_raw(&format!(
                                 "wget http://{}:9000/get_statistics",
                                 server.private_ip
-                            )).and_then(|out| Ok(sizefile.write_all(&out[..]).map(|_| ())?))?;
+                            ))
+                            .and_then(|out| Ok(sizefile.write_all(&out[..]).map(|_| ())?))?;
 
                         server
                             .ssh
@@ -571,5 +583,6 @@ fn main() {
         }
 
         Ok(())
-    }).unwrap();
+    })
+    .unwrap();
 }
