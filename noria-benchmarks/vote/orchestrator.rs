@@ -17,7 +17,7 @@ use std::fs::File;
 use std::io::prelude::*;
 use std::{io, thread, time};
 
-const SOUP_AMI: &str = "ami-05df93bcec8de09d8";
+const SOUP_AMI: &str = "ami-04db1e82afa245def";
 
 #[derive(Clone, Copy)]
 struct ClientParameters<'a> {
@@ -183,7 +183,7 @@ fn main() {
         ).arg(
             Arg::with_name("ctype")
                 .long("client")
-                .default_value("c5.4xlarge")
+                .default_value("c5d.4xlarge")
                 .required(true)
                 .takes_value(true)
                 .help("Instance type for clients"),
@@ -201,6 +201,11 @@ fn main() {
             Arg::with_name("cohost")
                 .long("cohost")
                 .help("Host all clients on a single instance"),
+        ).arg(
+            Arg::with_name("branch")
+                .long("branch")
+                .takes_value(true)
+                .help("Check out this branch before building Noria"),
         ).arg(
             Arg::with_name("clients")
                 .long("clients")
@@ -224,6 +229,7 @@ fn main() {
         .unwrap()
         .map(|rp| rp.parse().unwrap())
         .collect();
+    let branch = args.value_of("branch").map(String::from);
     let skewed = match args.value_of("distribution").unwrap() {
         "uniform" => &[false][..],
         "skewed" => &[true][..],
@@ -245,7 +251,7 @@ fn main() {
     let stype = if args.is_present("metal") {
         "i3.metal"
     } else {
-        "c5.4xlarge"
+        "c5d.4xlarge"
     };
     let ctype = args.value_of("ctype").unwrap();
 
@@ -279,6 +285,7 @@ fn main() {
         None,
     );
 
+    let xbranch = branch.clone();
     let mut b = tsunami::TsunamiBuilder::default();
     b.set_region(Region::UsEast1);
     b.set_availability_zone(az);
@@ -288,8 +295,15 @@ fn main() {
         1,
         tsunami::MachineSetup::new(stype, SOUP_AMI, move |host| {
             // ensure we don't have stale soup (yuck)
-            host.just_exec(&["git", "-C", "distributary", "pull", "2>&1"])?
+            host.just_exec(&["git", "-C", "noria", "pull", "2>&1"])?
                 .is_ok();
+
+            // check out desired branch (if any)
+            if let Some(ref branch) = xbranch {
+                eprintln!(" -> checking out branch '{}'", branch);
+                host.just_exec(&["git", "-C", "noria", "checkout", branch, "2>&1"])?
+                    .is_ok();
+            }
 
             if do_perf.is_active() {
                 // allow kernel debugging
@@ -325,16 +339,16 @@ fn main() {
             host.just_exec(&["sudo", "/opt/mssql/ramdisk.sh"])?.is_ok();
 
             let build = |host: &tsunami::Session| {
-                eprintln!(" -> building souplet on server");
+                eprintln!(" -> building noria-server");
                 host.just_exec(&[
                     "cd",
-                    "distributary",
+                    "noria",
                     "&&",
                     "cargo",
                     "b",
                     "--release",
                     "--bin",
-                    "souplet",
+                    "noria-server",
                     "2>&1",
                 ])?
                 .is_ok();
@@ -356,20 +370,25 @@ fn main() {
         "client",
         if cohost_clients { 1 } else { nclients as u32 },
         tsunami::MachineSetup::new(ctype, SOUP_AMI, move |host| {
-            host.just_exec(&["git", "-C", "distributary", "pull", "2>&1"])?
+            host.just_exec(&["git", "-C", "noria", "pull", "2>&1"])?
                 .is_ok();
+
+            // check out desired branch (if any)
+            if let Some(ref branch) = branch {
+                eprintln!(" -> checking out branch '{}'", branch);
+                host.just_exec(&["git", "-C", "noria", "checkout", branch, "2>&1"])?
+                    .is_ok();
+            }
 
             let build = |host: &tsunami::Session| {
                 eprintln!(" -> building vote client on client");
                 host.just_exec(&[
                     "cd",
-                    "distributary",
+                    "noria",
                     "&&",
                     "cargo",
                     "b",
                     "--release",
-                    "--manifest-path",
-                    "benchmarks/Cargo.toml",
                     "--bin",
                     "vote",
                     "2>&1",
@@ -708,7 +727,7 @@ fn run_clients(
     } else if let Backend::Netsoup { .. } = params.backend {
         let r: Result<_, failure::Error> = try {
             server.server.set_compress(true);
-            let mut c = server.server.exec(&["pgrep", "souplet"])?;
+            let mut c = server.server.exec(&["pgrep", "noria-server"])?;
             let mut stdout = String::new();
             c.read_to_string(&mut stdout)?;
             c.wait_eof()?;
@@ -966,7 +985,7 @@ where
         .expect("rocksdb make clean");
     host.just_exec(&["cd", "rocksdb", "&&", "make", "-j32", "shared_lib"])?
         .expect("rocksdb make shared_lib");
-    host.just_exec(&["cd", "distributary", "&&", "cargo", "clean"])?
+    host.just_exec(&["cd", "noria", "&&", "cargo", "clean"])?
         .expect("cargo clean");
 
     // then build
@@ -1016,8 +1035,8 @@ impl ConvenientSession for tsunami::Session {
         Ok(Ok(()))
     }
 
-    fn in_distributary(&self, cmd: &[&str]) -> Result<Result<(), String>, Error> {
-        let mut args = vec!["cd", "distributary", "&&"];
+    fn in_noria(&self, cmd: &[&str]) -> Result<Result<(), String>, Error> {
+        let mut args = vec!["cd", "noria", "&&"];
         args.extend(cmd);
         self.just_exec(&args[..])
     }
@@ -1026,5 +1045,5 @@ impl ConvenientSession for tsunami::Session {
 trait ConvenientSession {
     fn exec<'a>(&'a self, cmd: &[&str]) -> Result<ssh2::Channel<'a>, Error>;
     fn just_exec(&self, cmd: &[&str]) -> Result<Result<(), String>, Error>;
-    fn in_distributary(&self, cmd: &[&str]) -> Result<Result<(), String>, Error>;
+    fn in_noria(&self, cmd: &[&str]) -> Result<Result<(), String>, Error>;
 }
