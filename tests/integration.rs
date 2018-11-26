@@ -90,7 +90,6 @@ fn setup(deployment: &Deployment) -> mysql::Opts {
     });
 
     let query_counter = Arc::new(AtomicUsize::new(0));
-    let schemas: Arc<RwLock<HashMap<String, Schema>>> = Arc::default();
     let auto_increments: Arc<RwLock<HashMap<String, AtomicUsize>>> = Arc::default();
     let query_cache: Arc<RwLock<HashMap<SelectStatement, String>>> = Arc::default();
     let listener = TcpListener::bind("127.0.0.1:0").unwrap();
@@ -104,7 +103,6 @@ fn setup(deployment: &Deployment) -> mysql::Opts {
         let b = NoriaBackend::new(
             zk_addr,
             &deployment_id,
-            schemas,
             auto_increments,
             query_cache,
             query_counter,
