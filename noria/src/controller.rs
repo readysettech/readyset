@@ -174,10 +174,10 @@ where
 impl ControllerHandle<consensus::ZookeeperAuthority> {
     /// Fetch information about the current Soup controller from Zookeeper running at the given
     /// address, and create a `ControllerHandle` from that.
-    pub fn from_zk(zookeeper_address: &str) -> Result<Self, failure::Error> {
-        Ok(ControllerHandle::new(consensus::ZookeeperAuthority::new(
-            zookeeper_address,
-        )?))
+    pub fn from_zk(zookeeper_address: &str) -> impl Future<Item = Self, Error = failure::Error> {
+        // need to use lazy otherwise current executor won't be known
+        let auth = consensus::ZookeeperAuthority::new(zookeeper_address);
+        future::lazy(move || Ok(ControllerHandle::new(auth?)))
     }
 }
 
