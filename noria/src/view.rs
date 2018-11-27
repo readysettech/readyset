@@ -1,6 +1,6 @@
-use async_bincode::{AsyncBincodeStream, AsyncDestination};
 use crate::data::*;
 use crate::{Tagged, Tagger};
+use async_bincode::{AsyncBincodeStream, AsyncDestination};
 use petgraph::graph::NodeIndex;
 use std::collections::HashMap;
 use std::io;
@@ -130,7 +130,6 @@ impl ViewBuilder {
                             choose::RoundRobin::default(),
                         ),
                         0,
-                        &tokio::executor::DefaultExecutor::current(),
                     )
                     .unwrap_or_else(|_| panic!("no active tokio runtime"));
                     h.insert(c.clone());

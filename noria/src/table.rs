@@ -1,9 +1,9 @@
-use async_bincode::{AsyncBincodeStream, AsyncDestination};
 use crate::data::*;
 use crate::debug::trace::Tracer;
 use crate::internal::*;
 use crate::LocalOrNot;
 use crate::{Tagged, Tagger};
+use async_bincode::{AsyncBincodeStream, AsyncDestination};
 use futures::stream::futures_unordered::FuturesUnordered;
 use nom_sql::CreateTableStatement;
 use std::collections::HashMap;
@@ -143,7 +143,6 @@ impl TableBuilder {
                                     choose::RoundRobin::default(),
                                 ),
                                 0,
-                                &tokio::executor::DefaultExecutor::current(),
                             )
                             .unwrap_or_else(|_| panic!("no active tokio runtime"));
                             h.insert(c.clone());

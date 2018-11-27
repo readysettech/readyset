@@ -1,10 +1,10 @@
-#[cfg(debug_assertions)]
-use assert_infrequent;
 use crate::consensus::{self, Authority};
 use crate::debug::stats;
 use crate::table::{Table, TableBuilder, TableRpc};
 use crate::view::{View, ViewBuilder, ViewRpc};
 use crate::ActivationResult;
+#[cfg(debug_assertions)]
+use assert_infrequent;
 use failure::{self, ResultExt};
 use hyper;
 use petgraph::graph::NodeIndex;
@@ -193,7 +193,6 @@ impl<A: Authority> ControllerHandle<A> {
                     client: hyper::Client::new(),
                 },
                 0,
-                &tokio::executor::DefaultExecutor::current(),
             )
             .unwrap_or_else(|_| panic!("no running tokio executor")),
         }

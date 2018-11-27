@@ -1,14 +1,14 @@
 /// Only allow processing this many inputs in a domain before we handle timer events, acks, etc.
 const FORCE_INPUT_YIELD_EVERY: usize = 64;
 
-use async_bincode::{AsyncBincodeReader, AsyncBincodeWriter, SyncDestination};
-use bincode;
-use bufstream::BufStream;
 use crate::controller::domain_handle::{DomainHandle, DomainShardHandle};
 use crate::controller::inner::ControllerInner;
 use crate::controller::recipe::Recipe;
 use crate::controller::sql::reuse::ReuseConfigType;
 use crate::coordination::{CoordinationMessage, CoordinationPayload, DomainDescriptor};
+use async_bincode::{AsyncBincodeReader, AsyncBincodeStream, AsyncBincodeWriter, SyncDestination};
+use bincode;
+use bufstream::BufStream;
 use dataflow::{
     payload::{ControlReplyPacket, SourceChannelIdentifier},
     prelude::{DataType, Executor},
@@ -19,9 +19,7 @@ use failure::{self, ResultExt};
 use fnv::{FnvHashMap, FnvHashSet};
 use futures::sync::mpsc::UnboundedSender;
 use futures::{self, Future, Sink, Stream};
-use hyper::header::CONTENT_TYPE;
-use hyper::server;
-use hyper::{self, Method, StatusCode};
+use hyper::{self, header::CONTENT_TYPE, Method, StatusCode};
 use noria::channel::{self, DualTcpStream, TcpSender, CONNECTION_FROM_BASE};
 use noria::consensus::{Authority, Epoch, STATE_KEY};
 use noria::internal::{DomainIndex, LocalOrNot};
@@ -46,6 +44,8 @@ use tokio::prelude::future::{poll_fn, Either};
 use tokio::prelude::*;
 use tokio_io_pool;
 use tokio_threadpool::blocking;
+use tokio_tower::multiplex::server;
+use tower_util::ServiceFn;
 
 #[cfg(test)]
 use std::boxed::FnBox;
@@ -582,21 +582,15 @@ fn listen_reads(
             })
             .filter_map(|c| c)
             .map(move |stream| {
-                use tokio::prelude::AsyncRead;
-
-                let mut readers = readers.clone();
-                let (r, w) = stream.split();
-                let w = AsyncBincodeWriter::from(w);
-                let r = AsyncBincodeReader::from(r);
-                r.and_then(move |req| readers::handle_message(req, &mut readers))
-                    .map_err(|_| -> () {
-                        eprintln!("!!! reader client protocol error");
-                    })
-                    .forward(w.sink_map_err(|_| ()))
-                    .then(|_| {
-                        // we're probably just shutting down
-                        Ok(())
-                    })
+                let readers = readers.clone();
+                server::Server::multiplexed(
+                    AsyncBincodeStream::from(stream).for_async(),
+                    ServiceFn::new(move |req| readers::handle_message(req, &readers)),
+                    None,
+                )
+                .map_err(|e| -> () {
+                    eprintln!("!!! reader client protocol error: {:?}", e);
+                })
             }),
     )
     .map_err(|e: tokio_io_pool::StreamSpawnError<()>| {
@@ -956,7 +950,7 @@ fn listen_external<A: Authority + 'static>(
     }
 
     let service = ExternalServer(event_tx, authority);
-    server::Server::builder(on).serve(service)
+    hyper::server::Server::builder(on).serve(service)
 }
 
 // NOTE: tokio::net::TcpStream doesn't expose underlying stream :(
@@ -1168,7 +1162,7 @@ impl Replica {
             domain,
             incoming: valve.wrap(on.incoming()),
             locals,
-            log: log.new(o!{"id" => id}),
+            log: log.new(o! {"id" => id}),
             inputs: Default::default(),
             outputs: Default::default(),
             outbox: Default::default(),

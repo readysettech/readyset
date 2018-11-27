@@ -168,8 +168,8 @@ impl<Request, Response> multiplex::TagStore<Tagged<Request>, Tagged<Response>> f
 #[doc(hidden)]
 #[derive(Serialize, Deserialize, Debug)]
 pub struct Tagged<T> {
-    tag: usize,
-    v: T,
+    pub tag: usize,
+    pub v: T,
 }
 
 impl<T> From<T> for Tagged<T> {

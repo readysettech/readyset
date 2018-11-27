@@ -9,7 +9,7 @@ use std::{mem, time};
 use tokio;
 use tokio::prelude::*;
 
-use noria::{ReadQuery, ReadReply};
+use noria::{ReadQuery, ReadReply, Tagged};
 
 /// If a blocking reader finds itself waiting this long for a backfill to complete, it will
 /// re-issue the replay request. To avoid the system falling over if replays are slow for a little
@@ -30,10 +30,11 @@ fn dup(rs: &[Vec<DataType>]) -> Vec<Vec<DataType>> {
 }
 
 pub(crate) fn handle_message(
-    m: ReadQuery,
-    s: &mut Readers,
-) -> impl Future<Item = ReadReply, Error = bincode::Error> + Send {
-    match m {
+    m: Tagged<ReadQuery>,
+    s: &Readers,
+) -> impl Future<Item = Tagged<ReadReply>, Error = ()> + Send {
+    let tag = m.tag;
+    match m.v {
         ReadQuery::Normal {
             target,
             mut keys,
@@ -79,7 +80,10 @@ pub(crate) fn handle_message(
                 }
 
                 if !ready {
-                    return Ok(ReadReply::Normal(Err(())));
+                    return Ok(Tagged {
+                        tag,
+                        v: ReadReply::Normal(Err(())),
+                    });
                 }
 
                 if !block {
@@ -98,12 +102,16 @@ pub(crate) fn handle_message(
                 Ok(reply) => Either::A(Either::A(future::ok(reply))),
                 Err((keys, ret)) => {
                     if !block {
-                        Either::A(Either::A(future::ok(ReadReply::Normal(Ok(ret)))))
+                        Either::A(Either::A(future::ok(Tagged {
+                            tag,
+                            v: ReadReply::Normal(Ok(ret)),
+                        })))
                     } else {
                         let trigger = time::Duration::from_micros(RETRY_TIMEOUT_US);
                         let retry = time::Duration::from_micros(10);
                         let now = time::Instant::now();
                         Either::A(Either::B(BlockingRead {
+                            tag,
                             target,
                             keys,
                             read: ret,
@@ -127,12 +135,16 @@ pub(crate) fn handle_message(
                 reader.len()
             });
 
-            Either::B(future::ok(ReadReply::Size(size)))
+            Either::B(future::ok(Tagged {
+                tag,
+                v: ReadReply::Size(size),
+            }))
         }
     }
 }
 
 struct BlockingRead {
+    tag: usize,
     read: Vec<Vec<Vec<DataType>>>,
     target: (NodeIndex, usize),
     keys: Vec<Vec<DataType>>,
@@ -143,8 +155,8 @@ struct BlockingRead {
 }
 
 impl Future for BlockingRead {
-    type Item = ReadReply;
-    type Error = bincode::Error;
+    type Item = Tagged<ReadReply>;
+    type Error = ();
     fn poll(&mut self) -> Result<Async<Self::Item>, Self::Error> {
         READERS.with(move |readers_cache| {
             let mut readers_cache = readers_cache.borrow_mut();
@@ -200,10 +212,10 @@ impl Future for BlockingRead {
                     }
                 }
             } else {
-                Ok(Async::Ready(ReadReply::Normal(Ok(mem::replace(
-                    &mut self.read,
-                    Vec::new(),
-                )))))
+                Ok(Async::Ready(Tagged {
+                    tag: self.tag,
+                    v: ReadReply::Normal(Ok(mem::replace(&mut self.read, Vec::new()))),
+                }))
             }
         })
     }
