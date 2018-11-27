@@ -134,7 +134,7 @@ impl<A: Authority> LocalControllerHandle<A> {
                 .map(|&f| context.get(f).unwrap().clone())
                 .collect();
 
-            c.table(&bname).and_then(|table| {
+            c.table(&bname).and_then(|mut table| {
                 table
                     .insert(record)
                     .map_err(|e| format_err!("failed to make table: {:?}", e))

@@ -417,22 +417,28 @@ impl Table {
         }
     }
 
-    fn quick_n_dirty<Request>(&self, r: Request) -> Box<Future<Item = (), Error = TableError>>
+    fn quick_n_dirty<Request>(
+        &mut self,
+        r: Request,
+    ) -> Box<Future<Item = (), Error = TableError>>
     where
         Request: 'static,
         Self: Service<Request, Error = TableError>,
     {
+        let tracer = self.tracer.take();
+        let mut this = self.clone();
+        this.tracer = tracer;
+
         // Box is needed for https://github.com/rust-lang/rust/issues/53984
         Box::new(
-            self.clone()
-                .ready()
+            this.ready()
                 .and_then(move |mut svc| svc.call(r))
                 .map(|_| ()),
         )
     }
 
     /// Insert a single row of data into this base table.
-    pub fn insert<V>(self, u: V) -> impl Future<Item = (), Error = TableError>
+    pub fn insert<V>(&mut self, u: V) -> impl Future<Item = (), Error = TableError>
     where
         V: Into<Vec<DataType>>,
     {
