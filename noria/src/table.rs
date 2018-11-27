@@ -120,7 +120,7 @@ impl TableBuilder {
     pub(crate) fn build(
         self,
         rpcs: Arc<Mutex<HashMap<(SocketAddr, usize), TableRpc>>>,
-    ) -> impl Future<Item = Table, Error = io::Error> {
+    ) -> impl Future<Item = Table, Error = io::Error> + Send {
         future::join_all(
             self.txs
                 .clone()
@@ -197,7 +197,7 @@ pub struct Table {
 impl Service<Input> for Table {
     type Error = TableError;
     type Response = <TableRpc as Service<Tagged<LocalOrNot<Input>>>>::Response;
-    type Future = Box<Future<Item = Tagged<()>, Error = Self::Error>>;
+    type Future = Box<Future<Item = Tagged<()>, Error = Self::Error> + Send>;
 
     fn poll_ready(&mut self) -> Poll<(), Self::Error> {
         for s in &mut self.shards {
@@ -420,10 +420,11 @@ impl Table {
     fn quick_n_dirty<Request>(
         &mut self,
         r: Request,
-    ) -> Box<Future<Item = (), Error = TableError>>
+    ) -> Box<Future<Item = (), Error = TableError> + Send>
     where
-        Request: 'static,
+        Request: Send + 'static,
         Self: Service<Request, Error = TableError>,
+        <Self as Service<Request>>::Future: Send,
     {
         let tracer = self.tracer.take();
         let mut this = self.clone();
@@ -438,7 +439,7 @@ impl Table {
     }
 
     /// Insert a single row of data into this base table.
-    pub fn insert<V>(&mut self, u: V) -> impl Future<Item = (), Error = TableError>
+    pub fn insert<V>(&mut self, u: V) -> impl Future<Item = (), Error = TableError> + Send
     where
         V: Into<Vec<DataType>>,
     {
@@ -446,7 +447,7 @@ impl Table {
     }
 
     /// Insert multiple rows of data into this base table.
-    pub fn insert_all<I, V>(&mut self, i: I) -> impl Future<Item = (), Error = TableError>
+    pub fn insert_all<I, V>(&mut self, i: I) -> impl Future<Item = (), Error = TableError> + Send
     where
         I: IntoIterator<Item = V>,
         V: Into<Vec<DataType>>,
@@ -459,7 +460,7 @@ impl Table {
     }
 
     /// Delete the row with the given key from this base table.
-    pub fn delete<I>(&mut self, key: I) -> impl Future<Item = (), Error = TableError>
+    pub fn delete<I>(&mut self, key: I) -> impl Future<Item = (), Error = TableError> + Send
     where
         I: Into<Vec<DataType>>,
     {
@@ -474,7 +475,7 @@ impl Table {
         &mut self,
         key: Vec<DataType>,
         u: V,
-    ) -> impl Future<Item = (), Error = TableError>
+    ) -> impl Future<Item = (), Error = TableError> + Send
     where
         V: IntoIterator<Item = (usize, Modification)>,
     {
@@ -510,7 +511,7 @@ impl Table {
         &mut self,
         insert: Vec<DataType>,
         update: V,
-    ) -> Box<Future<Item = (), Error = <Self as Service<TableOperation>>::Error>>
+    ) -> Box<Future<Item = (), Error = <Self as Service<TableOperation>>::Error> + Send>
     where
         V: IntoIterator<Item = (usize, Modification)>,
     {

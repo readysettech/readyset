@@ -109,7 +109,7 @@ impl ViewBuilder {
     pub fn build(
         &self,
         rpcs: Arc<Mutex<HashMap<(SocketAddr, usize), ViewRpc>>>,
-    ) -> impl Future<Item = View, Error = io::Error> {
+    ) -> impl Future<Item = View, Error = io::Error> + Send {
         let node = self.node.clone();
         let columns = self.columns.clone();
         let shards = self.shards.clone();
@@ -174,7 +174,7 @@ impl View {
     /// Get the current size of this view.
     ///
     /// Note that you must also continue to poll this `View` for the returned future to resolve.
-    pub fn len(&mut self) -> impl Future<Item = usize, Error = ViewError> {
+    pub fn len(&mut self) -> impl Future<Item = usize, Error = ViewError> + Send {
         let mut futures = futures::stream::futures_unordered::FuturesUnordered::new();
         let node = self.node;
         for (shardi, shard) in self.shards.iter_mut().enumerate() {
@@ -205,7 +205,7 @@ impl View {
         &mut self,
         keys: Vec<Vec<DataType>>,
         block: bool,
-    ) -> impl Future<Item = Vec<Datas>, Error = ViewError> {
+    ) -> impl Future<Item = Vec<Datas>, Error = ViewError> + Send {
         if self.shards.len() == 1 {
             future::Either::A(
                 self.shards
@@ -274,7 +274,7 @@ impl View {
         &mut self,
         key: &[DataType],
         block: bool,
-    ) -> impl Future<Item = Datas, Error = ViewError> {
+    ) -> impl Future<Item = Datas, Error = ViewError> + Send {
         // TODO: Optimized version of this function?
         self.multi_lookup(vec![Vec::from(key)], block)
             .map(|rs| rs.into_iter().next().unwrap())

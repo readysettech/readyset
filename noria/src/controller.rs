@@ -212,7 +212,7 @@ impl<A: Authority> ControllerHandle<A> {
     /// These have all been created in response to a `CREATE TABLE` statement in a recipe.
     pub fn inputs(
         &mut self,
-    ) -> impl Future<Item = BTreeMap<String, NodeIndex>, Error = failure::Error> {
+    ) -> impl Future<Item = BTreeMap<String, NodeIndex>, Error = failure::Error> + Send {
         self.handle
             .call(ControllerRequest::new("inputs", &()).unwrap())
             .map_err(|e| format_err!("failed to fetch inputs: {:?}", e))
@@ -228,7 +228,7 @@ impl<A: Authority> ControllerHandle<A> {
     /// These have all been created in response to a `CREATE EXT VIEW` statement in a recipe.
     pub fn outputs(
         &mut self,
-    ) -> impl Future<Item = BTreeMap<String, NodeIndex>, Error = failure::Error> {
+    ) -> impl Future<Item = BTreeMap<String, NodeIndex>, Error = failure::Error> + Send {
         self.handle
             .call(ControllerRequest::new("outputs", &()).unwrap())
             .map_err(|e| format_err!("failed to fetch outputs: {:?}", e))
@@ -240,7 +240,7 @@ impl<A: Authority> ControllerHandle<A> {
     }
 
     /// Obtain a `View` that allows you to query the given external view.
-    pub fn view(&mut self, name: &str) -> impl Future<Item = View, Error = failure::Error> {
+    pub fn view(&mut self, name: &str) -> impl Future<Item = View, Error = failure::Error> + Send {
         // This call attempts to detect if this function is being called in a loop. If this is
         // getting false positives, then it is safe to increase the allowed hit count, however, the
         // limit_mutator_creation test in src/controller/handle.rs should then be updated as well.
@@ -268,7 +268,10 @@ impl<A: Authority> ControllerHandle<A> {
 
     /// Obtain a `Table` that allows you to perform writes, deletes, and other operations on the
     /// given base table.
-    pub fn table(&mut self, name: &str) -> impl Future<Item = Table, Error = failure::Error> {
+    pub fn table(
+        &mut self,
+        name: &str,
+    ) -> impl Future<Item = Table, Error = failure::Error> + Send {
         // This call attempts to detect if this function is being called in a loop. If this
         // is getting false positives, then it is safe to increase the allowed hit count.
         #[cfg(debug_assertions)]
@@ -303,9 +306,10 @@ impl<A: Authority> ControllerHandle<A> {
         path: &'static str,
         r: Q,
         err: &'static str,
-    ) -> Box<Future<Item = R, Error = failure::Error>>
+    ) -> Box<Future<Item = R, Error = failure::Error> + Send>
     where
         for<'de> R: Deserialize<'de>,
+        R: Send,
     {
         Box::new(
             self.handle
@@ -321,12 +325,14 @@ impl<A: Authority> ControllerHandle<A> {
     }
 
     /// Get statistics about the time spent processing different parts of the graph.
-    pub fn statistics(&mut self) -> impl Future<Item = stats::GraphStats, Error = failure::Error> {
+    pub fn statistics(
+        &mut self,
+    ) -> impl Future<Item = stats::GraphStats, Error = failure::Error> + Send {
         self.rpc("get_statistics", (), "failed to get stats")
     }
 
     /// Flush all partial state, evicting all rows present.
-    pub fn flush_partial(&mut self) -> impl Future<Item = (), Error = failure::Error> {
+    pub fn flush_partial(&mut self) -> impl Future<Item = (), Error = failure::Error> + Send {
         self.rpc("flush_partial", (), "failed to flush partial")
     }
 
@@ -334,7 +340,7 @@ impl<A: Authority> ControllerHandle<A> {
     pub fn extend_recipe(
         &mut self,
         recipe_addition: &str,
-    ) -> impl Future<Item = ActivationResult, Error = failure::Error> {
+    ) -> impl Future<Item = ActivationResult, Error = failure::Error> + Send {
         self.rpc("extend_recipe", recipe_addition, "failed to extend recipe")
     }
 
@@ -342,17 +348,17 @@ impl<A: Authority> ControllerHandle<A> {
     pub fn install_recipe(
         &mut self,
         new_recipe: &str,
-    ) -> impl Future<Item = ActivationResult, Error = failure::Error> {
+    ) -> impl Future<Item = ActivationResult, Error = failure::Error> + Send {
         self.rpc("install_recipe", new_recipe, "failed to install recipe")
     }
 
     /// Fetch a graphviz description of the dataflow graph.
-    pub fn graphviz(&mut self) -> impl Future<Item = String, Error = failure::Error> {
+    pub fn graphviz(&mut self) -> impl Future<Item = String, Error = failure::Error> + Send {
         self.rpc("graphviz", (), "failed to fetch graphviz output")
     }
 
     /// Fetch a simplified graphviz description of the dataflow graph.
-    pub fn simple_graphviz(&mut self) -> impl Future<Item = String, Error = failure::Error> {
+    pub fn simple_graphviz(&mut self) -> impl Future<Item = String, Error = failure::Error> + Send {
         self.rpc(
             "simple_graphviz",
             (),
@@ -364,7 +370,7 @@ impl<A: Authority> ControllerHandle<A> {
     pub fn remove_node(
         &mut self,
         view: NodeIndex,
-    ) -> impl Future<Item = (), Error = failure::Error> {
+    ) -> impl Future<Item = (), Error = failure::Error> + Send {
         // TODO: this should likely take a view name, and we should verify that it's a Reader.
         self.rpc("remove_node", view, "failed to remove node")
     }
