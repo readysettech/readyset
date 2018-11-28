@@ -1,3 +1,6 @@
+#![feature(try_from)]
+#![feature(try_blocks)]
+
 #[macro_use]
 extern crate clap;
 

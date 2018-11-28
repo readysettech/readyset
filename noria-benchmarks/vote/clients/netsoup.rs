@@ -1,48 +1,80 @@
-use clap;
 use crate::clients::localsoup::graph::RECIPE;
 use crate::clients::{Parameters, VoteClient, VoteClientConstructor};
+use clap;
 use failure::Error;
+use futures::Future;
 use noria::{self, ControllerHandle, DataType, ZookeeperAuthority};
+use tokio::runtime::current_thread::Runtime;
 
-use std::thread;
 use std::time::Duration;
+use std::{mem, thread};
 
 pub(crate) struct Client {
-    c: Constructor,
-    r: noria::View<noria::ExclusiveConnection>,
+    addr: String,
+    c: Conn,
+    r: noria::View,
     #[allow(dead_code)]
-    w: noria::Table<noria::ExclusiveConnection>,
+    w: noria::Table,
 }
 
-type Handle = ControllerHandle<ZookeeperAuthority>;
+impl Client {
+    fn new(addr: &str) -> Result<Self, Error> {
+        let mut c = Conn::new(addr)?;
+        let r = c.make_getter("ArticleWithVoteCount")?;
+        let w = c.make_mutator("Vote")?;
+        Ok(Client {
+            addr: addr.to_string(),
+            c,
+            r,
+            w,
+        })
+    }
 
-fn make_mutator(
-    c: &mut Handle,
-    view: &str,
-) -> Result<noria::Table<noria::ExclusiveConnection>, Error> {
-    Ok(c.table(view)?.into_exclusive()?)
+    fn reconnect(&mut self) -> Result<(), Error> {
+        let ch = self
+            .c
+            .rt
+            .block_on(ControllerHandle::new(ZookeeperAuthority::new(&self.addr)?))?;
+        let old_ch = mem::replace(&mut self.c.ch, ch);
+        let res = try {
+            let r = self.c.make_getter("ArticleWithVoteCount")?;
+            let w = self.c.make_mutator("Vote")?;
+            mem::replace(&mut self.r, r);
+            mem::replace(&mut self.w, w);
+        };
+
+        if let Err(e) = res {
+            mem::replace(&mut self.c.ch, old_ch);
+            Err(e)
+        } else {
+            Ok(())
+        }
+    }
 }
 
-fn make_getter(
-    c: &mut Handle,
-    view: &str,
-) -> Result<noria::View<noria::ExclusiveConnection>, Error> {
-    Ok(c.view(view)?.into_exclusive()?)
+struct Conn {
+    ch: ControllerHandle<ZookeeperAuthority>,
+    rt: Runtime,
+}
+
+impl Conn {
+    fn new(addr: &str) -> Result<Self, Error> {
+        let mut rt = Runtime::new().unwrap();
+        let ch = rt.block_on(ControllerHandle::new(ZookeeperAuthority::new(addr)?))?;
+        Ok(Conn { ch, rt })
+    }
+
+    fn make_mutator(&mut self, base: &str) -> Result<noria::Table, Error> {
+        Ok(self.rt.block_on(self.ch.table(base))?)
+    }
+
+    fn make_getter(&mut self, view: &str) -> Result<noria::View, Error> {
+        Ok(self.rt.block_on(self.ch.view(view))?)
+    }
 }
 
 #[derive(Clone)]
 pub(crate) struct Constructor(String);
-impl Constructor {
-    fn try_make(&mut self) -> Result<Client, Error> {
-        let mut ch = Handle::new(ZookeeperAuthority::new(&self.0).unwrap()).unwrap();
-
-        Ok(Client {
-            c: self.clone(),
-            r: make_getter(&mut ch, "ArticleWithVoteCount")?,
-            w: make_mutator(&mut ch, "Vote")?,
-        })
-    }
-}
 
 impl VoteClientConstructor for Constructor {
     type Instance = Client;
@@ -56,15 +88,18 @@ impl VoteClientConstructor for Constructor {
 
         if params.prime {
             // for prepop, we need a mutator
-            let mut ch = Handle::new(ZookeeperAuthority::new(&zk).unwrap()).unwrap();
-            ch.install_recipe(RECIPE).unwrap();
-            let mut m = make_mutator(&mut ch, "Article").unwrap();
+            let mut c = Conn::new(&zk).unwrap();
+            c.rt.block_on(c.ch.install_recipe(RECIPE)).unwrap();
+            let mut m = c.make_mutator("Article").unwrap();
             let mut id = 0;
             while id < params.articles {
                 let end = ::std::cmp::min(id + 1000, params.articles);
-                m.batch_insert(
-                    (id..end)
-                        .map(|i| vec![((i + 1) as i32).into(), format!("Article #{}", i).into()]),
+                c.rt.block_on(
+                    m.perform_all(
+                        (id..end).map(|i| {
+                            vec![((i + 1) as i32).into(), format!("Article #{}", i).into()]
+                        }),
+                    ),
                 )
                 .unwrap();
                 id = end;
@@ -75,13 +110,7 @@ impl VoteClientConstructor for Constructor {
     }
 
     fn make(&mut self) -> Self::Instance {
-        let mut ch = Handle::new(ZookeeperAuthority::new(&self.0).unwrap()).unwrap();
-
-        Client {
-            c: self.clone(),
-            r: make_getter(&mut ch, "ArticleWithVoteCount").unwrap(),
-            w: make_mutator(&mut ch, "Vote").unwrap(),
-        }
+        Client::new(&self.0).unwrap()
     }
 }
 
@@ -92,12 +121,8 @@ impl VoteClient for Client {
             .map(|&article_id| vec![(article_id as usize).into(), 0.into()])
             .collect();
 
-        while let Err(_) = self.w.insert_all(data.clone()) {
-            loop {
-                if let Ok(c) = self.c.try_make() {
-                    *self = c;
-                    break;
-                }
+        while let Err(_) = self.w.perform_all(data.clone()).wait() {
+            while self.reconnect().is_err() {
                 thread::sleep(Duration::from_millis(100));
             }
         }
@@ -110,7 +135,7 @@ impl VoteClient for Client {
             .collect();
 
         loop {
-            match self.r.multi_lookup(arg.clone(), true) {
+            match self.r.multi_lookup(arg.clone(), true).wait() {
                 Ok(rows) => {
                     let rows = rows
                         .into_iter()
@@ -122,13 +147,11 @@ impl VoteClient for Client {
                     assert_eq!(rows, ids.len());
                     break;
                 }
-                Err(_) => loop {
-                    if let Ok(c) = self.c.try_make() {
-                        *self = c;
-                        break;
+                Err(_) => {
+                    while self.reconnect().is_err() {
+                        thread::sleep(Duration::from_millis(100));
                     }
-                    thread::sleep(Duration::from_millis(100));
-                },
+                }
             }
         }
     }

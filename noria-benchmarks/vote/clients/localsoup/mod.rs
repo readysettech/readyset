@@ -1,5 +1,6 @@
-use clap;
 use crate::clients::{Parameters, VoteClient, VoteClientConstructor};
+use clap;
+use futures::Future;
 use noria::{self, DataType};
 use std::path::PathBuf;
 use std::thread;
@@ -8,7 +9,6 @@ use std::time;
 pub(crate) mod graph;
 
 pub(crate) struct Client {
-    _ch: noria::ControllerHandle<noria::LocalAuthority>,
     r: noria::View,
     #[allow(dead_code)]
     w: noria::Table,
@@ -63,12 +63,13 @@ impl VoteClientConstructor for Constructor {
             println!("Prepopulating with {} articles", params.articles);
         }
         let mut a = g.graph.table("Article").unwrap();
-        a.batch_insert((0..params.articles).map(|i| {
+        a.perform_all((0..params.articles).map(|i| {
             vec![
                 ((i + 1) as i32).into(),
                 format!("Article #{}", i + 1).into(),
             ]
         }))
+        .wait()
         .unwrap();
         if verbose {
             println!("Done with prepopulation");
@@ -83,14 +84,13 @@ impl VoteClientConstructor for Constructor {
     }
 
     fn make(&mut self) -> Self::Instance {
-        let mut ch = self.0.graph.pointer().connect().unwrap();
-        let r = ch.view("ArticleWithVoteCount").unwrap();
-        let mut w = ch.table("Vote").unwrap();
+        let r = self.0.graph.view("ArticleWithVoteCount").unwrap();
+        let mut w = self.0.graph.table("Vote").unwrap();
         if self.1 {
             // fudge write rpcs by sending just the pointer over tcp
             w.i_promise_dst_is_same_process();
         }
-        Client { _ch: ch, r, w }
+        Client { r, w }
     }
 
     fn spawns_threads() -> bool {
@@ -105,7 +105,7 @@ impl VoteClient for Client {
             .map(|&article_id| vec![(article_id as usize).into(), 0.into()])
             .collect();
 
-        self.w.insert_all(data).unwrap();
+        self.w.perform_all(data).wait().unwrap();
     }
 
     fn handle_reads(&mut self, ids: &[i32]) {
@@ -117,6 +117,7 @@ impl VoteClient for Client {
         let rows = self
             .r
             .multi_lookup(arg, true)
+            .wait()
             .unwrap()
             .into_iter()
             .map(|_rows| {

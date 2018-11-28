@@ -445,17 +445,13 @@ impl Table {
         self.quick_n_dirty(TableOperation::Insert(u.into()))
     }
 
-    /// Insert multiple rows of data into this base table.
-    pub fn insert_all<I, V>(&mut self, i: I) -> impl Future<Item = (), Error = TableError> + Send
+    /// Perform multiple operation on this base table.
+    pub fn perform_all<I, V>(&mut self, i: I) -> impl Future<Item = (), Error = TableError> + Send
     where
         I: IntoIterator<Item = V>,
-        V: Into<Vec<DataType>>,
+        V: Into<TableOperation>,
     {
-        self.quick_n_dirty(
-            i.into_iter()
-                .map(|r| TableOperation::Insert(r.into()))
-                .collect::<Vec<_>>(),
-        )
+        self.quick_n_dirty(i.into_iter().map(|r| r.into()).collect::<Vec<_>>())
     }
 
     /// Delete the row with the given key from this base table.

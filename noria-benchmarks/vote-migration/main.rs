@@ -4,6 +4,7 @@ const WRITE_BATCH_SIZE: usize = 1000;
 
 #[macro_use]
 extern crate clap;
+extern crate futures;
 extern crate noria;
 extern crate rand;
 extern crate zipf;
@@ -11,6 +12,7 @@ extern crate zipf;
 #[path = "../vote/clients/localsoup/graph.rs"]
 mod graph;
 
+use futures::Future;
 use noria::{DataType, TableOperation};
 use rand::{distributions::Distribution, Rng};
 use std::io::prelude::*;
@@ -70,21 +72,17 @@ fn one(s: &graph::Setup, skewed: bool, args: &clap::ArgMatches, w: Option<fs::Fi
     eprintln!("Setting up soup");
     let mut g = s.make(persistence_params);
     eprintln!("Getting accessors");
-    let mut articles = g.graph.table("Article").unwrap().into_exclusive().unwrap();
-    let mut votes = g.graph.table("Vote").unwrap().into_exclusive().unwrap();
-    let mut read_old = g
-        .graph
-        .view("ArticleWithVoteCount")
-        .unwrap()
-        .into_exclusive()
-        .unwrap();
+    let mut articles = g.graph.table("Article").wait().unwrap();
+    let mut votes = g.graph.table("Vote").wait().unwrap();
+    let mut read_old = g.graph.view("ArticleWithVoteCount").wait().unwrap();
 
     // prepopulate
     eprintln!("Prepopulating with {} articles", narticles);
     articles
-        .insert_then_wait(
+        .perform_all(
             (0..narticles).map(|i| vec![(i as i32).into(), format!("Article #{}", i + 1).into()]),
         )
+        .wait()
         .unwrap();
 
     let (stat, stat_rx) = mpsc::channel();
@@ -104,13 +102,14 @@ fn one(s: &graph::Setup, skewed: bool, args: &clap::ArgMatches, w: Option<fs::Fi
             let start = time::Instant::now();
             while start.elapsed() < runtime {
                 votes
-                    .batch_insert((0..WRITE_BATCH_SIZE).map(|i| {
+                    .perform_all((0..WRITE_BATCH_SIZE).map(|i| {
                         // always generate both so that we aren't artifically faster with one
                         let id_uniform = rng.gen_range(0, narticles);
                         let id_zipf = zipf.sample(&mut rng);
                         let id = if skewed { id_zipf } else { id_uniform };
                         TableOperation::from(vec![DataType::from(id), i.into()])
                     }))
+                    .wait()
                     .unwrap();
 
                 if let Some((took, count)) = reporter.report(WRITE_BATCH_SIZE) {
@@ -135,7 +134,10 @@ fn one(s: &graph::Setup, skewed: bool, args: &clap::ArgMatches, w: Option<fs::Fi
                 let id_uniform = rng.gen_range(0, narticles);
                 let id_zipf = zipf.sample(&mut rng);
                 let id = if skewed { id_zipf } else { id_uniform };
-                read_old.lookup(&[DataType::from(id)], false).unwrap();
+                read_old
+                    .lookup(&[DataType::from(id)], false)
+                    .wait()
+                    .unwrap();
                 thread::sleep(time::Duration::new(0, 10_000));
             }
         })
@@ -165,13 +167,8 @@ fn one(s: &graph::Setup, skewed: bool, args: &clap::ArgMatches, w: Option<fs::Fi
     stat.send(("MIG START", 0.0)).unwrap();
     g.transition();
     stat.send(("MIG FINISHED", 0.0)).unwrap();
-    let mut ratings = g.graph.table("Rating").unwrap().into_exclusive().unwrap();
-    let mut read_new = g
-        .graph
-        .view("ArticleWithScore")
-        .unwrap()
-        .into_exclusive()
-        .unwrap();
+    let mut ratings = g.graph.table("Rating").wait().unwrap();
+    let mut read_new = g.graph.view("ArticleWithScore").wait().unwrap();
 
     // start writer that just does a bunch of new writes
     eprintln!("Starting new writer");
@@ -186,12 +183,13 @@ fn one(s: &graph::Setup, skewed: bool, args: &clap::ArgMatches, w: Option<fs::Fi
             let mut reporter = Reporter::new(every);
             while start.elapsed() < runtime {
                 ratings
-                    .batch_insert((0..WRITE_BATCH_SIZE).map(|i| {
+                    .perform_all((0..WRITE_BATCH_SIZE).map(|i| {
                         let id_uniform = rng.gen_range(0, narticles);
                         let id_zipf = zipf.sample(&mut rng);
                         let id = if skewed { id_zipf } else { id_uniform };
                         TableOperation::from(vec![DataType::from(id), i.into(), 5.into()])
                     }))
+                    .wait()
                     .unwrap();
 
                 if let Some((took, count)) = reporter.report(WRITE_BATCH_SIZE) {
@@ -223,7 +221,7 @@ fn one(s: &graph::Setup, skewed: bool, args: &clap::ArgMatches, w: Option<fs::Fi
                         vec![DataType::from(if skewed { id_zipf } else { id_uniform })]
                     })
                     .collect();
-                match read_new.multi_lookup(ids, false) {
+                match read_new.multi_lookup(ids, false).wait() {
                     Ok(rss) => {
                         hits += rss.into_iter().filter(|rs| !rs.is_empty()).count();
                     }

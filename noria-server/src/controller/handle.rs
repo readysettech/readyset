@@ -36,15 +36,68 @@ impl<A: Authority> DerefMut for LocalControllerHandle<A> {
 }
 
 impl<A: Authority> LocalControllerHandle<A> {
+    /// Run the given `Future` on the runtime that is running this worker.
+    ///
+    /// This is helpful if you want to run futures returned by `ControllerHandle`, since those
+    /// cannot directly be waited on.
+    pub fn run<F>(&mut self, fut: F) -> Result<F::Item, F::Error>
+    where
+        F: Future + Send + 'static,
+        F::Item: Send,
+        F::Error: Send,
+    {
+        self.runtime.as_mut().unwrap().block_on(fut)
+    }
+
+    /// Get a handle to a [`noria::Table`].
+    ///
+    /// See [`noria::ControllerHandle::table`].
+    pub fn table<S: AsRef<str>>(&mut self, table: S) -> Result<noria::Table, failure::Error> {
+        let fut = self.c.as_mut().unwrap().table(table.as_ref());
+        self.run(fut)
+    }
+
+    /// Get a handle to a [`noria::View`].
+    ///
+    /// See [`noria::ControllerHandle::view`].
+    pub fn view<S: AsRef<str>>(&mut self, view: S) -> Result<noria::View, failure::Error> {
+        let fut = self.c.as_mut().unwrap().view(view.as_ref());
+        self.run(fut)
+    }
+
+    /// Install a Noria recipe.
+    ///
+    /// See [`noria::ControllerHandle::install_recipe`].
+    pub fn install_recipe<S: AsRef<str>>(
+        &mut self,
+        r: S,
+    ) -> Result<noria::ActivationResult, failure::Error> {
+        let fut = self.c.as_mut().unwrap().install_recipe(r.as_ref());
+        self.run(fut)
+    }
+
+    /// Extend the Noria recipe.
+    ///
+    /// See [`noria::ControllerHandle::extend_recipe`].
+    pub fn extend_recipe<S: AsRef<str>>(
+        &mut self,
+        r: S,
+    ) -> Result<noria::ActivationResult, failure::Error> {
+        let fut = self.c.as_mut().unwrap().extend_recipe(r.as_ref());
+        self.run(fut)
+    }
+}
+
+impl<A: Authority> LocalControllerHandle<A> {
     pub(super) fn new(
         authority: Arc<A>,
         event_tx: futures::sync::mpsc::UnboundedSender<Event>,
         kill: Trigger,
-        rt: tokio::runtime::Runtime,
+        mut rt: tokio::runtime::Runtime,
         io: tokio_io_pool::Runtime,
     ) -> Self {
         LocalControllerHandle {
-            c: Some(ControllerHandle::make(authority)),
+            c: Some(rt.block_on(ControllerHandle::make(authority)).unwrap()),
             event_tx: Some(event_tx),
             kill: Some(kill),
             runtime: Some(rt),

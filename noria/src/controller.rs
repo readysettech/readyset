@@ -97,14 +97,21 @@ where
             future::Either::B(
                 client
                     .request(r)
-                    .and_then(|res| {
-                        let status = res.status();
-                        res.into_body().concat2().map(move |body| (status, body))
-                    })
                     .map_err(|he| {
                         failure::Error::from(he)
                             .context("hyper request failed")
                             .into()
+                    })
+                    .and_then(|res| {
+                        let status = res.status();
+                        res.into_body()
+                            .concat2()
+                            .map(move |body| (status, body))
+                            .map_err(|he| {
+                                failure::Error::from(he)
+                                    .context("hyper response failed")
+                                    .into()
+                            })
                     })
                     .and_then(move |(status, body)| match status {
                         hyper::StatusCode::OK => future::Either::B(future::Either::A(future::ok(
@@ -149,6 +156,13 @@ where
 /// To establish a new connection to Noria, use `ControllerHandle::new`, and pass in the
 /// appropriate `Authority`. In the likely case that you are using Zookeeper, use
 /// `ControllerHandle::from_zk`.
+///
+/// Note that whatever Tokio Runtime you use to execute the `Future` that resolves into the
+/// `ControllerHandle` will also be the one that executes all your reads and writes through `View`
+/// and `Table`. Make sure that that `Runtime` stays alive, and continues to be driven, otherwise
+/// none of your operations will ever complete! Furthermore, you *must* use the `Runtime` to
+/// execute any futures returned from `ControllerHandle` (that is, you cannot just call `.wait()`
+/// on them).
 pub struct ControllerHandle<A>
 where
     A: 'static + Authority,
@@ -175,34 +189,41 @@ impl ControllerHandle<consensus::ZookeeperAuthority> {
     /// Fetch information about the current Soup controller from Zookeeper running at the given
     /// address, and create a `ControllerHandle` from that.
     pub fn from_zk(zookeeper_address: &str) -> impl Future<Item = Self, Error = failure::Error> {
-        // need to use lazy otherwise current executor won't be known
-        let auth = consensus::ZookeeperAuthority::new(zookeeper_address);
-        future::lazy(move || Ok(ControllerHandle::new(auth?)))
+        match consensus::ZookeeperAuthority::new(zookeeper_address) {
+            Ok(auth) => future::Either::A(ControllerHandle::new(auth)),
+            Err(e) => future::Either::B(future::err(e)),
+        }
     }
 }
 
 impl<A: Authority> ControllerHandle<A> {
     #[doc(hidden)]
-    pub fn make(authority: Arc<A>) -> Self {
-        ControllerHandle {
-            views: Default::default(),
-            domains: Default::default(),
-            handle: Buffer::new(
-                Controller {
-                    authority,
-                    client: hyper::Client::new(),
-                },
-                0,
-            )
-            .unwrap_or_else(|_| panic!("no running tokio executor")),
-        }
+    pub fn make(authority: Arc<A>) -> impl Future<Item = Self, Error = failure::Error> {
+        // need to use lazy otherwise current executor won't be known
+        future::lazy(move || {
+            Ok(ControllerHandle {
+                views: Default::default(),
+                domains: Default::default(),
+                handle: Buffer::new(
+                    Controller {
+                        authority,
+                        client: hyper::Client::new(),
+                    },
+                    0,
+                )
+                .unwrap_or_else(|_| panic!("no running tokio executor")),
+            })
+        })
     }
 
     /// Create a `ControllerHandle` that bootstraps a connection to Noria via the configuration
     /// stored in the given `authority`.
     ///
     /// You *probably* want to use `ControllerHandle::from_zk` instead.
-    pub fn new(authority: A) -> Self {
+    pub fn new(authority: A) -> impl Future<Item = Self, Error = failure::Error> + Send
+    where
+        A: Send + 'static,
+    {
         Self::make(Arc::new(authority))
     }
 
