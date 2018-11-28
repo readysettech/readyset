@@ -112,7 +112,6 @@ fn main() {
 
     info!(log, "listening on port {}", port);
 
-    let query_counter = Arc::new(AtomicUsize::new(0));
     let auto_increments: Arc<RwLock<HashMap<String, AtomicUsize>>> = Arc::default();
     let query_cache: Arc<RwLock<HashMap<SelectStatement, String>>> = Arc::default();
 
@@ -123,12 +122,8 @@ fn main() {
 
         let builder = thread::Builder::new().name(format!("handler{}", i));
 
-        let (auto_increments, query_cache, query_counter, log) = (
-            auto_increments.clone(),
-            query_cache.clone(),
-            query_counter.clone(),
-            log.clone(),
-        );
+        let (auto_increments, query_cache, log) =
+            (auto_increments.clone(), query_cache.clone(), log.clone());
 
         let zk_addr = zk_addr.clone();
         let deployment = deployment.clone();
@@ -140,7 +135,6 @@ fn main() {
                     &deployment,
                     auto_increments,
                     query_cache,
-                    query_counter,
                     slowlog,
                     static_responses,
                     sanitize,

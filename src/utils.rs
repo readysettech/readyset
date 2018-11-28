@@ -5,7 +5,7 @@ use msql_srv::ParamParser;
 use nom_sql::{
     ArithmeticBase, ArithmeticExpression, ArithmeticOperator, Column, ColumnConstraint,
     ConditionBase, ConditionExpression, ConditionTree, CreateTableStatement, FieldValueExpression,
-    Literal, LiteralExpression, Operator, SqlQuery, TableKey, UpdateStatement,
+    Literal, LiteralExpression, Operator, SelectStatement, SqlQuery, TableKey, UpdateStatement,
 };
 use noria::{DataType, Modification, Operation};
 use regex::Regex;
@@ -52,6 +52,15 @@ lazy_static! {
     ];
     pub(crate) static ref COLLAPSE_SPACES: (Regex, &'static str) =
         (Regex::new(r" +").unwrap(), " ");
+}
+
+pub(crate) fn hash_select_query(q: &SelectStatement) -> u64 {
+    use std::collections::hash_map::DefaultHasher;
+    use std::hash::{Hash, Hasher};
+
+    let mut h = DefaultHasher::new();
+    q.hash(&mut h);
+    h.finish()
 }
 
 pub(crate) fn sanitize_query(query: &str) -> String {

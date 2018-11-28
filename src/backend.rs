@@ -12,7 +12,7 @@ use std::collections::{BTreeMap, HashMap};
 use std::fmt;
 use std::io;
 use std::sync::atomic;
-use std::sync::{self, Arc, RwLock};
+use std::sync::{Arc, RwLock};
 use std::time;
 
 use convert::ToDataType;
@@ -120,8 +120,6 @@ pub struct NoriaBackend {
 
     auto_increments: Arc<RwLock<HashMap<String, atomic::AtomicUsize>>>,
 
-    query_count: Arc<atomic::AtomicUsize>,
-
     prepared: HashMap<u32, PreparedStatement>,
     prepared_count: u32,
 
@@ -143,7 +141,6 @@ impl NoriaBackend {
         deployment: &str,
         auto_increments: Arc<RwLock<HashMap<String, atomic::AtomicUsize>>>,
         query_cache: Arc<RwLock<HashMap<SelectStatement, String>>>,
-        query_counter: Arc<atomic::AtomicUsize>,
         slowlog: bool,
         static_responses: bool,
         sanitize: bool,
@@ -154,8 +151,6 @@ impl NoriaBackend {
             log: log,
 
             auto_increments: auto_increments,
-
-            query_count: query_counter,
 
             prepared: HashMap::new(),
             prepared_count: 0,
@@ -457,10 +452,8 @@ impl NoriaBackend {
                         if let Some(qname) = gc.get(q) {
                             qname.clone()
                         } else {
-                            let qc = self
-                                .query_count
-                                .fetch_add(1, sync::atomic::Ordering::SeqCst);
-                            let qname = format!("q_{}", qc);
+                            let qh = utils::hash_select_query(q);
+                            let qname = format!("q_{:x}", qh);
 
                             // add the query to Noria
                             if prepared {
