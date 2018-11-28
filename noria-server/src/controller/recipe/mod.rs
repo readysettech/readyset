@@ -245,6 +245,11 @@ impl Recipe {
                 match n {
                     None => (),
                     Some(ref name) => {
+                        assert!(
+                            !aliases.contains_key(name) || aliases[name] == qid,
+                            "Query name exists but existing query is different: {}",
+                            name
+                        );
                         aliases.insert(name.clone(), qid);
                     }
                 }
@@ -534,6 +539,13 @@ impl Recipe {
             new.expression_order.push(qid);
         }
 
+        for (n, qid) in &add_rp.aliases {
+            assert!(
+                !new.aliases.contains_key(n) || new.aliases[n] == *qid,
+                "Query name exists but existing query is different: {}",
+                n
+            );
+        }
         new.aliases.extend(add_rp.aliases);
 
         // return new recipe as replacement for self
@@ -768,5 +780,24 @@ mod tests {
         assert_eq!(r2.version, 2);
         assert_eq!(r2.expressions.len(), 2);
         assert_eq!(r2.prior, Some(Box::new(r1_copy)));
+    }
+
+    #[test]
+    #[should_panic(expected = "Query name exists but existing query is different")]
+    fn it_avoids_spurious_aliasing() {
+        let r0 = Recipe::blank(None);
+
+        let r1_txt = "q_0: SELECT a FROM b;\nq_1: SELECT a, c FROM b WHERE x = 42;";
+        let r1_t = Recipe::from_str(r1_txt, None).unwrap();
+        let r1 = r0.replace(r1_t).unwrap();
+        assert_eq!(r1.version, 1);
+        assert_eq!(r1.expressions.len(), 2);
+
+        let r2_txt = "q_0: SELECT a, c FROM b WHERE x = 21;\nq_1: SELECT c FROM b;";
+        // we expect this to panic, since both q_0 and q_1 already exist with a different
+        // definition
+        let r2 = r1.extend(r2_txt).unwrap();
+        assert_eq!(r2.version, 2);
+        assert_eq!(r2.expressions.len(), 4);
     }
 }
