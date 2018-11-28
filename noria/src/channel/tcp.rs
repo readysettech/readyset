@@ -4,7 +4,8 @@ use std::io::{self, BufReader, Write};
 use std::marker::PhantomData;
 use std::net::{Ipv4Addr, SocketAddr};
 
-use async_bincode::{AsyncBincodeStream, AsyncBincodeWriter, SyncDestination};
+use crate::Tagged;
+use async_bincode::{AsyncBincodeStream, AsyncBincodeWriter, AsyncDestination};
 use bincode;
 use bufstream::BufStream;
 use byteorder::{NetworkEndian, WriteBytesExt};
@@ -138,22 +139,23 @@ pub enum RecvError {
 }
 
 pub enum DualTcpStream<S, T, T2, D> {
-    Passthrough(AsyncBincodeStream<S, T, bool, D>),
+    Passthrough(AsyncBincodeStream<S, T, Tagged<()>, D>),
     Upgrade(
-        AsyncBincodeStream<S, T2, bool, D>,
+        AsyncBincodeStream<S, T2, Tagged<()>, D>,
         Box<FnMut(T2) -> T + Send + Sync>,
     ),
 }
 
-impl<S, T, T2> From<S> for DualTcpStream<S, T, T2, SyncDestination> {
+impl<S, T, T2> From<S> for DualTcpStream<S, T, T2, AsyncDestination> {
     fn from(stream: S) -> Self {
-        DualTcpStream::Passthrough(AsyncBincodeStream::from(stream))
+        DualTcpStream::Passthrough(AsyncBincodeStream::from(stream).for_async())
     }
 }
 
-impl<S, T, T2> DualTcpStream<S, T, T2, SyncDestination> {
+impl<S, T, T2> DualTcpStream<S, T, T2, AsyncDestination> {
     pub fn upgrade<F: 'static + FnMut(T2) -> T + Send + Sync>(stream: S, f: F) -> Self {
-        let s: AsyncBincodeStream<S, T2, bool, SyncDestination> = AsyncBincodeStream::from(stream);
+        let s: AsyncBincodeStream<S, T2, Tagged<()>, AsyncDestination> =
+            AsyncBincodeStream::from(stream).for_async();
         DualTcpStream::Upgrade(s, Box::new(f))
     }
 
@@ -168,9 +170,9 @@ impl<S, T, T2> DualTcpStream<S, T, T2, SyncDestination> {
 impl<S, T, T2, D> Sink for DualTcpStream<S, T, T2, D>
 where
     S: AsyncWrite,
-    AsyncBincodeWriter<S, bool, D>: Sink<SinkItem = bool, SinkError = bincode::Error>,
+    AsyncBincodeWriter<S, Tagged<()>, D>: Sink<SinkItem = Tagged<()>, SinkError = bincode::Error>,
 {
-    type SinkItem = bool;
+    type SinkItem = Tagged<()>;
     type SinkError = bincode::Error;
     fn start_send(
         &mut self,

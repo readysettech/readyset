@@ -6,7 +6,7 @@ use crate::controller::inner::ControllerInner;
 use crate::controller::recipe::Recipe;
 use crate::controller::sql::reuse::ReuseConfigType;
 use crate::coordination::{CoordinationMessage, CoordinationPayload, DomainDescriptor};
-use async_bincode::{AsyncBincodeReader, AsyncBincodeStream, AsyncBincodeWriter, SyncDestination};
+use async_bincode::{AsyncBincodeReader, AsyncBincodeStream, AsyncBincodeWriter, AsyncDestination};
 use bincode;
 use bufstream::BufStream;
 use dataflow::{
@@ -23,7 +23,7 @@ use hyper::{self, header::CONTENT_TYPE, Method, StatusCode};
 use noria::channel::{self, DualTcpStream, TcpSender, CONNECTION_FROM_BASE};
 use noria::consensus::{Authority, Epoch, STATE_KEY};
 use noria::internal::{DomainIndex, LocalOrNot};
-use noria::{ControllerDescriptor, Input};
+use noria::{ControllerDescriptor, Input, Tagged};
 use rand;
 use serde_json;
 use slog;
@@ -1127,8 +1127,8 @@ struct Replica {
         DualTcpStream<
             BufStream<tokio::net::TcpStream>,
             Box<Packet>,
-            LocalOrNot<Input>,
-            SyncDestination,
+            Tagged<LocalOrNot<Input>>,
+            AsyncDestination,
         >,
     >,
     outputs: FnvHashMap<
@@ -1177,31 +1177,30 @@ impl Replica {
 
         // first, queue up any additional writes we have to do
         let mut err = Vec::new();
-        self.oob.back.retain(|&streami, n| {
-            use std::ops::SubAssign;
-
+        self.oob.back.retain(|&streami, tags| {
             let stream = &mut inputs[streami];
 
-            let end = *n;
-            for i in 0..end {
-                match stream.start_send(true) {
-                    Ok(AsyncSink::Ready) => {
-                        if i == 0 {
-                            pending.insert(streami);
-                        }
-                        n.sub_assign(1);
-                    }
+            let had = tags.len();
+            tags.retain(|&tag| {
+                match stream.start_send(Tagged { tag, v: () }) {
+                    Ok(AsyncSink::Ready) => false,
                     Ok(AsyncSink::NotReady(_)) => {
-                        break;
+                        // TODO: also break?
+                        true
                     }
                     Err(e) => {
                         // start_send shouldn't generally error
                         err.push(e.into());
+                        true
                     }
                 }
+            });
+
+            if had != tags.len() {
+                pending.insert(streami);
             }
 
-            *n > 0
+            !tags.is_empty()
         });
 
         if !err.is_empty() {
@@ -1335,13 +1334,16 @@ impl Replica {
                     let slot = self.inputs.stream_slot();
                     let token = slot.token();
                     let tcp = if is_base {
-                        DualTcpStream::upgrade(BufStream::new(stream), move |input| {
-                            Box::new(Packet::Input {
-                                inner: input,
-                                src: Some(SourceChannelIdentifier { token }),
-                                senders: Vec::new(),
-                            })
-                        })
+                        DualTcpStream::upgrade(
+                            BufStream::new(stream),
+                            move |Tagged { v: input, tag }| {
+                                Box::new(Packet::Input {
+                                    inner: input,
+                                    src: Some(SourceChannelIdentifier { token, tag }),
+                                    senders: Vec::new(),
+                                })
+                            },
+                        )
                     } else {
                         BufStream::with_capacities(2 * 1024 * 1024, 4 * 1024, stream).into()
                     };
@@ -1372,7 +1374,7 @@ impl Replica {
 
 struct OutOfBand {
     // map from inputi to number of (empty) ACKs
-    back: FnvHashMap<usize, usize>,
+    back: FnvHashMap<usize, Vec<u32>>,
     pending: FnvHashSet<usize>,
 
     // for sending messages to the controller
@@ -1390,9 +1392,8 @@ impl OutOfBand {
 }
 
 impl Executor for OutOfBand {
-    fn send_back(&mut self, id: SourceChannelIdentifier, _: ()) {
-        use std::ops::AddAssign;
-        self.back.entry(id.token).or_insert(0).add_assign(1);
+    fn ack(&mut self, id: SourceChannelIdentifier) {
+        self.back.entry(id.token).or_default().push(id.tag);
     }
 
     fn create_universe(&mut self, universe: HashMap<String, DataType>) {

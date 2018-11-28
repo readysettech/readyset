@@ -74,6 +74,7 @@ pub enum ReplayPieceContext {
 #[derive(Clone, Copy, Serialize, Deserialize)]
 pub struct SourceChannelIdentifier {
     pub token: usize,
+    pub tag: u32,
 }
 
 #[derive(Clone, Serialize, Deserialize)]
@@ -89,10 +90,8 @@ pub enum Packet {
     /// Regular data-flow update.
     Message {
         link: Link,
-        src: Option<SourceChannelIdentifier>,
         data: Records,
         tracer: Tracer,
-        senders: Vec<SourceChannelIdentifier>,
     },
 
     /// Update that is part of a tagged data-flow replay path.
@@ -331,16 +330,12 @@ impl Packet {
         match *self {
             Packet::Message {
                 ref link,
-                src: _,
                 ref data,
                 ref tracer,
-                ref senders,
             } => Packet::Message {
                 link: link.clone(),
-                src: None,
                 data: data.clone(),
                 tracer: tracer.clone(),
-                senders: senders.clone(),
             },
             Packet::ReplayPiece {
                 ref link,

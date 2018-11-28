@@ -153,14 +153,14 @@ pub mod error {
 pub struct Tagger(slab::Slab<()>);
 
 impl<Request, Response> multiplex::TagStore<Tagged<Request>, Tagged<Response>> for Tagger {
-    type Tag = usize;
+    type Tag = u32;
 
     fn assign_tag(&mut self, r: &mut Tagged<Request>) -> Self::Tag {
-        r.tag = self.0.insert(());
+        r.tag = self.0.insert(()) as u32;
         r.tag
     }
     fn finish_tag(&mut self, r: &Tagged<Response>) -> Self::Tag {
-        self.0.remove(r.tag);
+        self.0.remove(r.tag as usize);
         r.tag
     }
 }
@@ -168,7 +168,7 @@ impl<Request, Response> multiplex::TagStore<Tagged<Request>, Tagged<Response>> f
 #[doc(hidden)]
 #[derive(Serialize, Deserialize, Debug)]
 pub struct Tagged<T> {
-    pub tag: usize,
+    pub tag: u32,
     pub v: T,
 }
 

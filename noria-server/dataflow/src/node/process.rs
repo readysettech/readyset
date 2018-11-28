@@ -33,9 +33,7 @@ impl Node {
                 // NOTE: bases only accept BaseOperations
                 match m.take() {
                     Some(box Packet::Input {
-                        inner,
-                        src,
-                        mut senders,
+                        inner, mut senders, ..
                     }) => {
                         let Input { dst, data, tracer } = unsafe { inner.take() };
                         let mut rs = b.process(addr, data, &*state);
@@ -53,14 +51,12 @@ impl Node {
 
                         // Send write-ACKs to all the clients with updates that made
                         // it into this merged packet:
-                        senders.drain(..).for_each(|src| ex.send_back(src, ()));
+                        senders.drain(..).for_each(|src| ex.ack(src));
 
                         *m = Some(Box::new(Packet::Message {
                             link: Link::new(dst, dst),
-                            src,
                             data: rs,
                             tracer,
-                            senders,
                         }));
                     }
                     Some(ref p) => {

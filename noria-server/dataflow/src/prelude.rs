@@ -34,6 +34,6 @@ pub use PersistenceParameters;
 /// Channel coordinator type specialized for domains
 pub type ChannelCoordinator = noria::channel::ChannelCoordinator<(DomainIndex, usize), Box<Packet>>;
 pub trait Executor {
-    fn send_back(&mut self, client: SourceChannelIdentifier, ack: ());
+    fn ack(&mut self, tag: SourceChannelIdentifier);
     fn create_universe(&mut self, req: HashMap<String, DataType>);
 }

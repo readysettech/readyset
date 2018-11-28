@@ -144,7 +144,7 @@ pub(crate) fn handle_message(
 }
 
 struct BlockingRead {
-    tag: usize,
+    tag: u32,
     read: Vec<Vec<Vec<DataType>>>,
     target: (NodeIndex, usize),
     keys: Vec<Vec<DataType>>,
