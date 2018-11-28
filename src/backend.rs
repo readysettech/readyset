@@ -528,7 +528,10 @@ impl NoriaBackend {
         // access to the schema yet when we extract them above.
         let params: Vec<msql_srv::Column> = params
             .into_iter()
-            .map(|c| schema_for_column(&schema, &c))
+            .map(|mut c| {
+                c.table = Some(qname.clone());
+                schema_for_column(&schema, &c)
+            })
             .collect();
         let schema = schema::convert_schema(&schema);
 
