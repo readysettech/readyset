@@ -1,6 +1,6 @@
 [package]
 name = "msql-srv"
-version = "0.8.0"
+version = "0.8.1"
 
 description = "Bindings for emulating a MySQL/MariaDB server"
 readme = "README.md"
@@ -20,6 +20,7 @@ license = "MIT/Apache-2.0"
 travis-ci = { repository = "jonhoo/msql-srv" }
 appveyor = { repository = "jonhoo/msql-srv", branch = "master", service = "github" }
 codecov = { repository = "jonhoo/msql-srv", branch = "master", service = "github" }
+maintenance = { status = "experimental" }
 
 [dependencies]
 nom = "4.0.0-beta3"
