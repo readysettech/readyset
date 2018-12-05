@@ -39,6 +39,7 @@ tower-balance = "0.1"
 tower-discover = "0.1"
 tower-buffer = "0.1"
 tokio-tower = { git = "https://github.com/tower-rs/tokio-tower-wip.git" }
+tower-util = "0.1"
 slab = "0.4"
 
 # consensus/

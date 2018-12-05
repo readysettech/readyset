@@ -16,6 +16,7 @@ use tokio_tower::NewTransport;
 use tower_balance::{choose, Pool};
 use tower_buffer::Buffer;
 use tower_service::Service;
+use tower_util::ext::ServiceExt;
 use vec_map::VecMap;
 
 type Transport = AsyncBincodeStream<
