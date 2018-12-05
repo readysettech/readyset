@@ -23,7 +23,7 @@ pub mod tcp;
 pub use self::tcp::{channel, DualTcpStream, TcpReceiver, TcpSender};
 
 pub const CONNECTION_FROM_BASE: u8 = 1;
-pub const CONNECTION_FROM_DOMAIN: u8 = 0;
+pub const CONNECTION_FROM_DOMAIN: u8 = 2;
 
 pub struct Remote;
 pub struct MaybeLocal;
