@@ -1306,6 +1306,7 @@ impl Replica {
                 Some(stream) => {
                     // we know that any new connection to a domain will first send a one-byte
                     // token to indicate whether the connection is from a base or not.
+                    debug!(self.log, "accepted new connection");
                     self.first_byte
                         .push(tokio::io::read_exact(stream, vec![0; 1]));
                 }
@@ -1318,7 +1319,7 @@ impl Replica {
         while let Async::Ready(Some((stream, tag))) = self.first_byte.poll()? {
             let is_base = tag[0] == CONNECTION_FROM_BASE;
 
-            debug!(self.log, "accepted new connection"; "base" => ?is_base);
+            debug!(self.log, "established new connection"; "base" => ?is_base);
             let slot = self.inputs.stream_slot();
             let token = slot.token();
             let tcp = if is_base {
