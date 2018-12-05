@@ -1,3 +1,4 @@
+use crate::channel::CONNECTION_FROM_BASE;
 use crate::data::*;
 use crate::debug::trace::Tracer;
 use crate::internal::*;
@@ -39,6 +40,11 @@ impl NewTransport<Tagged<LocalOrNot<Input>>> for TableEndpoint {
     fn new_transport(&self) -> Self::TransportFut {
         Box::new(
             tokio::net::TcpStream::connect(&self.0)
+                .map(|mut s| {
+                    s.write_all(&[CONNECTION_FROM_BASE]).unwrap();
+                    s.flush().unwrap();
+                    s
+                })
                 .map(AsyncBincodeStream::from)
                 .map(AsyncBincodeStream::for_async)
                 .map(|t| multiplex::MultiplexTransport::new(t, Tagger::default())),
