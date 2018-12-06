@@ -9,6 +9,7 @@ use dataflow::ops::join::{Join, JoinSource, JoinType};
 use dataflow::ops::project::Project;
 use dataflow::ops::union::Union;
 use dataflow::{DurabilityMode, PersistenceParameters};
+use futures::Future;
 use noria::consensus::LocalAuthority;
 use noria::DataType;
 
@@ -108,44 +109,44 @@ fn it_works_basic() {
     assert_eq!(muta.columns(), &["a", "b"]);
 
     // send a value on a
-    muta.insert(vec![id.clone(), 2.into()]).unwrap();
+    muta.insert(vec![id.clone(), 2.into()]).wait().unwrap();
 
     // give it some time to propagate
     sleep();
 
     // send a query to c
     assert_eq!(
-        cq.lookup(&[id.clone()], true).unwrap(),
+        cq.lookup(&[id.clone()], true).wait().unwrap(),
         vec![vec![1.into(), 2.into()]]
     );
 
     // update value again
-    mutb.insert(vec![id.clone(), 4.into()]).unwrap();
+    mutb.insert(vec![id.clone(), 4.into()]).wait().unwrap();
 
     // give it some time to propagate
     sleep();
 
     // check that value was updated again
-    let res = cq.lookup(&[id.clone()], true).unwrap();
+    let res = cq.lookup(&[id.clone()], true).wait().unwrap();
     assert!(res.iter().any(|r| r == &vec![id.clone(), 2.into()]));
     assert!(res.iter().any(|r| r == &vec![id.clone(), 4.into()]));
 
     // Delete first record
-    muta.delete(vec![id.clone()]).unwrap();
+    muta.delete(vec![id.clone()]).wait().unwrap();
 
     // give it some time to propagate
     sleep();
 
     // send a query to c
     assert_eq!(
-        cq.lookup(&[id.clone()], true).unwrap(),
+        cq.lookup(&[id.clone()], true).wait().unwrap(),
         vec![vec![1.into(), 4.into()]]
     );
 
     // Update second record
     // TODO(malte): disabled until we have update support on bases; the current way of doing this
     // is incompatible with bases' enforcement of the primary key uniqueness constraint.
-    //mutb.update(vec![id.clone(), 6.into()]).unwrap();
+    //mutb.update(vec![id.clone(), 6.into()]).wait().unwrap();
 
     // give it some time to propagate
     //sleep();
@@ -168,20 +169,21 @@ fn base_mutation() {
     let mut write = g.table("a").unwrap();
 
     // insert a new record
-    write.insert(vec![1.into(), 2.into()]).unwrap();
+    write.insert(vec![1.into(), 2.into()]).wait().unwrap();
     sleep();
     assert_eq!(
-        read.lookup(&[1.into()], true).unwrap(),
+        read.lookup(&[1.into()], true).wait().unwrap(),
         vec![vec![1.into(), 2.into()]]
     );
 
     // update that record in place (set)
     write
         .update(vec![1.into()], vec![(1, Modification::Set(3.into()))])
+        .wait()
         .unwrap();
     sleep();
     assert_eq!(
-        read.lookup(&[1.into()], true).unwrap(),
+        read.lookup(&[1.into()], true).wait().unwrap(),
         vec![vec![1.into(), 3.into()]]
     );
 
@@ -191,10 +193,11 @@ fn base_mutation() {
             vec![1.into()],
             vec![(1, Modification::Apply(Operation::Add, 1.into()))],
         )
+        .wait()
         .unwrap();
     sleep();
     assert_eq!(
-        read.lookup(&[1.into()], true).unwrap(),
+        read.lookup(&[1.into()], true).wait().unwrap(),
         vec![vec![1.into(), 4.into()]]
     );
 
@@ -204,17 +207,18 @@ fn base_mutation() {
             vec![1.into(), 2.into()],
             vec![(1, Modification::Apply(Operation::Add, 1.into()))],
         )
+        .wait()
         .unwrap();
     sleep();
     assert_eq!(
-        read.lookup(&[1.into()], true).unwrap(),
+        read.lookup(&[1.into()], true).wait().unwrap(),
         vec![vec![1.into(), 5.into()]]
     );
 
     // delete should, well, delete
-    write.delete(vec![1.into()]).unwrap();
+    write.delete(vec![1.into()]).wait().unwrap();
     sleep();
-    assert!(read.lookup(&[1.into()], true).unwrap().is_empty());
+    assert!(read.lookup(&[1.into()], true).wait().unwrap().is_empty());
 
     // insert or update should insert
     write
@@ -222,10 +226,11 @@ fn base_mutation() {
             vec![1.into(), 2.into()],
             vec![(1, Modification::Apply(Operation::Add, 1.into()))],
         )
+        .wait()
         .unwrap();
     sleep();
     assert_eq!(
-        read.lookup(&[1.into()], true).unwrap(),
+        read.lookup(&[1.into()], true).wait().unwrap(),
         vec![vec![1.into(), 2.into()]]
     );
 }
@@ -256,27 +261,27 @@ fn shared_interdomain_ancestor() {
     let id: DataType = 1.into();
 
     // send a value on a
-    muta.insert(vec![id.clone(), 2.into()]).unwrap();
+    muta.insert(vec![id.clone(), 2.into()]).wait().unwrap();
     sleep();
     assert_eq!(
-        bq.lookup(&[id.clone()], true).unwrap(),
+        bq.lookup(&[id.clone()], true).wait().unwrap(),
         vec![vec![id.clone(), 2.into()]]
     );
     assert_eq!(
-        cq.lookup(&[id.clone()], true).unwrap(),
+        cq.lookup(&[id.clone()], true).wait().unwrap(),
         vec![vec![id.clone(), 2.into()]]
     );
 
     // update value again
     let id: DataType = 2.into();
-    muta.insert(vec![id.clone(), 4.into()]).unwrap();
+    muta.insert(vec![id.clone(), 4.into()]).wait().unwrap();
     sleep();
     assert_eq!(
-        bq.lookup(&[id.clone()], true).unwrap(),
+        bq.lookup(&[id.clone()], true).wait().unwrap(),
         vec![vec![id.clone(), 4.into()]]
     );
     assert_eq!(
-        cq.lookup(&[id.clone()], true).unwrap(),
+        cq.lookup(&[id.clone()], true).wait().unwrap(),
         vec![vec![id.clone(), 4.into()]]
     );
 }
@@ -304,31 +309,31 @@ fn it_works_w_mat() {
     let id: DataType = 1.into();
 
     // send a few values on a
-    muta.insert(vec![id.clone(), 1.into()]).unwrap();
-    muta.insert(vec![id.clone(), 2.into()]).unwrap();
-    muta.insert(vec![id.clone(), 3.into()]).unwrap();
+    muta.insert(vec![id.clone(), 1.into()]).wait().unwrap();
+    muta.insert(vec![id.clone(), 2.into()]).wait().unwrap();
+    muta.insert(vec![id.clone(), 3.into()]).wait().unwrap();
 
     // give them some time to propagate
     sleep();
 
     // send a query to c
     // we should see all the a values
-    let res = cq.lookup(&[id.clone()], true).unwrap();
+    let res = cq.lookup(&[id.clone()], true).wait().unwrap();
     assert_eq!(res.len(), 3);
     assert!(res.iter().any(|r| r == &vec![id.clone(), 1.into()]));
     assert!(res.iter().any(|r| r == &vec![id.clone(), 2.into()]));
     assert!(res.iter().any(|r| r == &vec![id.clone(), 3.into()]));
 
     // update value again (and again send some secondary updates)
-    mutb.insert(vec![id.clone(), 4.into()]).unwrap();
-    mutb.insert(vec![id.clone(), 5.into()]).unwrap();
-    mutb.insert(vec![id.clone(), 6.into()]).unwrap();
+    mutb.insert(vec![id.clone(), 4.into()]).wait().unwrap();
+    mutb.insert(vec![id.clone(), 5.into()]).wait().unwrap();
+    mutb.insert(vec![id.clone(), 6.into()]).wait().unwrap();
 
     // give it some time to propagate
     sleep();
 
     // check that value was updated again
-    let res = cq.lookup(&[id.clone()], true).unwrap();
+    let res = cq.lookup(&[id.clone()], true).wait().unwrap();
     assert_eq!(res.len(), 6);
     assert!(res.iter().any(|r| r == &vec![id.clone(), 1.into()]));
     assert!(res.iter().any(|r| r == &vec![id.clone(), 2.into()]));
@@ -352,9 +357,9 @@ fn it_works_w_partial_mat() {
     let id: DataType = 1.into();
 
     // send a few values on a
-    muta.insert(vec![id.clone(), 1.into()]).unwrap();
-    muta.insert(vec![id.clone(), 2.into()]).unwrap();
-    muta.insert(vec![id.clone(), 3.into()]).unwrap();
+    muta.insert(vec![id.clone(), 1.into()]).wait().unwrap();
+    muta.insert(vec![id.clone(), 2.into()]).wait().unwrap();
+    muta.insert(vec![id.clone(), 3.into()]).wait().unwrap();
 
     // give it some time to propagate
     sleep();
@@ -375,17 +380,17 @@ fn it_works_w_partial_mat() {
     let mut cq = g.view("c").unwrap();
 
     // because the reader is partial, we should have no key until we read
-    assert_eq!(cq.len().unwrap(), 0);
+    assert_eq!(cq.len().wait().unwrap(), 0);
 
     // now do some reads
-    let res = cq.lookup(&[id.clone()], true).unwrap();
+    let res = cq.lookup(&[id.clone()], true).wait().unwrap();
     assert_eq!(res.len(), 3);
     assert!(res.iter().any(|r| r == &vec![id.clone(), 1.into()]));
     assert!(res.iter().any(|r| r == &vec![id.clone(), 2.into()]));
     assert!(res.iter().any(|r| r == &vec![id.clone(), 3.into()]));
 
     // should have one key in the reader now
-    assert_eq!(cq.len().unwrap(), 1);
+    assert_eq!(cq.len().wait().unwrap(), 1);
 }
 
 #[test]
@@ -409,9 +414,9 @@ fn it_works_w_partial_mat_below_empty() {
     let id: DataType = 1.into();
 
     // send a few values on a
-    muta.insert(vec![id.clone(), 1.into()]).unwrap();
-    muta.insert(vec![id.clone(), 2.into()]).unwrap();
-    muta.insert(vec![id.clone(), 3.into()]).unwrap();
+    muta.insert(vec![id.clone(), 1.into()]).wait().unwrap();
+    muta.insert(vec![id.clone(), 2.into()]).wait().unwrap();
+    muta.insert(vec![id.clone(), 3.into()]).wait().unwrap();
 
     // give it some time to propagate
     sleep();
@@ -420,17 +425,17 @@ fn it_works_w_partial_mat_below_empty() {
 
     // despite the empty base tables, we'll make the reader partial and therefore we should have no
     // key until we read
-    assert_eq!(cq.len().unwrap(), 0);
+    assert_eq!(cq.len().wait().unwrap(), 0);
 
     // now do some reads
-    let res = cq.lookup(&[id.clone()], true).unwrap();
+    let res = cq.lookup(&[id.clone()], true).wait().unwrap();
     assert_eq!(res.len(), 3);
     assert!(res.iter().any(|r| r == &vec![id.clone(), 1.into()]));
     assert!(res.iter().any(|r| r == &vec![id.clone(), 2.into()]));
     assert!(res.iter().any(|r| r == &vec![id.clone(), 3.into()]));
 
     // should have one key in the reader now
-    assert_eq!(cq.len().unwrap(), 1);
+    assert_eq!(cq.len().wait().unwrap(), 1);
 }
 
 #[test]
@@ -455,27 +460,29 @@ fn it_works_deletion() {
     let mut mutb = g.table("b").unwrap();
 
     // send a value on a
-    muta.insert(vec![1.into(), 2.into()]).unwrap();
+    muta.insert(vec![1.into(), 2.into()]).wait().unwrap();
     sleep();
     assert_eq!(
-        cq.lookup(&[1.into()], true).unwrap(),
+        cq.lookup(&[1.into()], true).wait().unwrap(),
         vec![vec![1.into(), 2.into()]]
     );
 
     // send a value on b
-    mutb.insert(vec![0.into(), 1.into(), 4.into()]).unwrap();
+    mutb.insert(vec![0.into(), 1.into(), 4.into()])
+        .wait()
+        .unwrap();
     sleep();
 
-    let res = cq.lookup(&[1.into()], true).unwrap();
+    let res = cq.lookup(&[1.into()], true).wait().unwrap();
     assert_eq!(res.len(), 2);
     assert!(res.contains(&vec![1.into(), 2.into()]));
     assert!(res.contains(&vec![1.into(), 4.into()]));
 
     // delete first value
-    muta.delete(vec![2.into()]).unwrap();
+    muta.delete(vec![2.into()]).wait().unwrap();
     sleep();
     assert_eq!(
-        cq.lookup(&[1.into()], true).unwrap(),
+        cq.lookup(&[1.into()], true).wait().unwrap(),
         vec![vec![1.into(), 4.into()]]
     );
 }
@@ -497,14 +504,14 @@ fn it_works_with_sql_recipe() {
 
     let brands = vec!["Volvo", "Volvo", "Volkswagen"];
     for (i, &brand) in brands.iter().enumerate() {
-        mutator.insert(vec![i.into(), brand.into()]).unwrap();
+        mutator.insert(vec![i.into(), brand.into()]).wait().unwrap();
     }
 
     // Let writes propagate:
     sleep();
 
     // Retrieve the result of the count query:
-    let result = getter.lookup(&["Volvo".into()], true).unwrap();
+    let result = getter.lookup(&["Volvo".into()], true).wait().unwrap();
     assert_eq!(result.len(), 1);
     assert_eq!(result[0][0], 2.into());
 }
@@ -530,17 +537,23 @@ fn it_works_with_vote() {
     let mut vote = g.table("Vote").unwrap();
     let mut awvc = g.view("ArticleWithVoteCount").unwrap();
 
-    article.insert(vec![0i64.into(), "Article".into()]).unwrap();
-    article.insert(vec![1i64.into(), "Article".into()]).unwrap();
-    vote.insert(vec![0i64.into(), 0.into()]).unwrap();
+    article
+        .insert(vec![0i64.into(), "Article".into()])
+        .wait()
+        .unwrap();
+    article
+        .insert(vec![1i64.into(), "Article".into()])
+        .wait()
+        .unwrap();
+    vote.insert(vec![0i64.into(), 0.into()]).wait().unwrap();
 
     sleep();
 
-    let rs = awvc.lookup(&[0i64.into()], true).unwrap();
+    let rs = awvc.lookup(&[0i64.into()], true).wait().unwrap();
     assert_eq!(rs.len(), 1);
     assert_eq!(rs[0], vec![0i64.into(), "Article".into(), 1.into()]);
 
-    let empty = awvc.lookup(&[1i64.into()], true).unwrap();
+    let empty = awvc.lookup(&[1i64.into()], true).wait().unwrap();
     assert_eq!(empty.len(), 1);
     assert_eq!(
         empty[0],
@@ -576,17 +589,17 @@ fn it_works_with_double_query_through() {
     let mut b = g.table("B").unwrap();
     let mut getter = g.view("ReadJoin").unwrap();
 
-    a.insert(vec![1i64.into(), 5.into()]).unwrap();
-    a.insert(vec![2i64.into(), 10.into()]).unwrap();
-    b.insert(vec![1i64.into()]).unwrap();
+    a.insert(vec![1i64.into(), 5.into()]).wait().unwrap();
+    a.insert(vec![2i64.into(), 10.into()]).wait().unwrap();
+    b.insert(vec![1i64.into()]).wait().unwrap();
 
     sleep();
 
-    let rs = getter.lookup(&[1i64.into()], true).unwrap();
+    let rs = getter.lookup(&[1i64.into()], true).wait().unwrap();
     assert_eq!(rs.len(), 1);
     assert_eq!(rs[0], vec![1i64.into(), 5.into()]);
 
-    let empty = getter.lookup(&[2i64.into()], true).unwrap();
+    let empty = getter.lookup(&[2i64.into()], true).wait().unwrap();
     assert_eq!(empty.len(), 0);
 }
 
@@ -609,14 +622,14 @@ fn it_works_with_reads_before_writes() {
     let aid = 1;
     let uid = 10;
 
-    assert!(awvc.lookup(&[aid.into()], true).unwrap().is_empty());
-    article.insert(vec![aid.into()]).unwrap();
+    assert!(awvc.lookup(&[aid.into()], true).wait().unwrap().is_empty());
+    article.insert(vec![aid.into()]).wait().unwrap();
     sleep();
 
-    vote.insert(vec![aid.into(), uid.into()]).unwrap();
+    vote.insert(vec![aid.into(), uid.into()]).wait().unwrap();
     sleep();
 
-    let result = awvc.lookup(&[aid.into()], true).unwrap();
+    let result = awvc.lookup(&[aid.into()], true).wait().unwrap();
     assert_eq!(result.len(), 1);
     assert_eq!(result[0], vec![aid.into(), uid.into()]);
 }
@@ -644,14 +657,18 @@ fn forced_shuffle_despite_same_shard() {
 
     price_mutator
         .insert(vec![pid.into(), price.into()])
+        .wait()
         .unwrap();
-    car_mutator.insert(vec![cid.into(), pid.into()]).unwrap();
+    car_mutator
+        .insert(vec![cid.into(), pid.into()])
+        .wait()
+        .unwrap();
 
     // Let writes propagate:
     sleep();
 
     // Retrieve the result of the count query:
-    let result = getter.lookup(&[cid.into()], true).unwrap();
+    let result = getter.lookup(&[cid.into()], true).wait().unwrap();
     assert_eq!(result.len(), 1);
     assert_eq!(result[0][1], price.into());
 }
@@ -676,14 +693,18 @@ fn double_shuffle() {
 
     price_mutator
         .insert(vec![pid.into(), price.into()])
+        .wait()
         .unwrap();
-    car_mutator.insert(vec![cid.into(), pid.into()]).unwrap();
+    car_mutator
+        .insert(vec![cid.into(), pid.into()])
+        .wait()
+        .unwrap();
 
     // Let writes propagate:
     sleep();
 
     // Retrieve the result of the count query:
-    let result = getter.lookup(&[cid.into()], true).unwrap();
+    let result = getter.lookup(&[cid.into()], true).wait().unwrap();
     assert_eq!(result.len(), 1);
     assert_eq!(result[0][1], price.into());
 }
@@ -704,13 +725,14 @@ fn it_works_with_arithmetic_aliases() {
     let price = 10000;
     price_mutator
         .insert(vec![pid.into(), price.into()])
+        .wait()
         .unwrap();
 
     // Let writes propagate:
     sleep();
 
     // Retrieve the result of the count query:
-    let result = getter.lookup(&[pid.into()], true).unwrap();
+    let result = getter.lookup(&[pid.into()], true).wait().unwrap();
     assert_eq!(result.len(), 1);
     assert_eq!(result[0][1], (price / 100).into());
 }
@@ -742,7 +764,7 @@ fn it_recovers_persisted_bases() {
 
         for i in 1..10 {
             let price = i * 10;
-            mutator.insert(vec![i.into(), price.into()]).unwrap();
+            mutator.insert(vec![i.into(), price.into()]).wait().unwrap();
         }
 
         // Let writes propagate:
@@ -757,7 +779,7 @@ fn it_recovers_persisted_bases() {
     // Make sure that the new graph contains the old writes
     for i in 1..10 {
         let price = i * 10;
-        let result = getter.lookup(&[i.into()], true).unwrap();
+        let result = getter.lookup(&[i.into()], true).wait().unwrap();
         assert_eq!(result.len(), 1);
         assert_eq!(result[0][0], price.into());
     }
@@ -795,6 +817,7 @@ fn mutator_churn() {
             g.table("vote")
                 .unwrap()
                 .insert(vec![user.clone(), i.into()])
+                .wait()
                 .unwrap();
         }
     }
@@ -805,7 +828,7 @@ fn mutator_churn() {
     // check that all writes happened the right number of times
     for i in 0..ids {
         assert_eq!(
-            vc_state.lookup(&[i.into()], true).unwrap(),
+            vc_state.lookup(&[i.into()], true).wait().unwrap(),
             vec![vec![i.into(), votes.into()]]
         );
     }
@@ -843,7 +866,7 @@ fn it_recovers_persisted_bases_w_multiple_nodes() {
         g.install_recipe(sql).unwrap();
         for (i, table) in tables.iter().enumerate() {
             let mut mutator = g.table(table).unwrap();
-            mutator.insert(vec![i.into()]).unwrap();
+            mutator.insert(vec![i.into()]).wait().unwrap();
         }
         sleep();
     }
@@ -855,7 +878,7 @@ fn it_recovers_persisted_bases_w_multiple_nodes() {
     let mut g = g.build(authority.clone()).unwrap();
     for (i, table) in tables.iter().enumerate() {
         let mut getter = g.view(&format!("{}ID", table)).unwrap();
-        let result = getter.lookup(&[i.into()], true).unwrap();
+        let result = getter.lookup(&[i.into()], true).wait().unwrap();
         assert_eq!(result.len(), 1);
         assert_eq!(result[0][0], i.into());
     }
@@ -876,13 +899,13 @@ fn it_works_with_simple_arithmetic() {
     let mut getter = g.view("CarPrice").unwrap();
     let id: DataType = 1.into();
     let price: DataType = 123.into();
-    mutator.insert(vec![id.clone(), price]).unwrap();
+    mutator.insert(vec![id.clone(), price]).wait().unwrap();
 
     // Let writes propagate:
     sleep();
 
     // Retrieve the result of the count query:
-    let result = getter.lookup(&[id.clone()], true).unwrap();
+    let result = getter.lookup(&[id.clone()], true).wait().unwrap();
     assert_eq!(result.len(), 1);
     assert_eq!(result[0][1], 246.into());
 }
@@ -899,13 +922,13 @@ fn it_works_with_multiple_arithmetic_expressions() {
     let mut getter = g.view("CarPrice").unwrap();
     let id: DataType = 1.into();
     let price: DataType = 123.into();
-    mutator.insert(vec![id.clone(), price]).unwrap();
+    mutator.insert(vec![id.clone(), price]).wait().unwrap();
 
     // Let writes propagate:
     sleep();
 
     // Retrieve the result of the count query:
-    let result = getter.lookup(&[id.clone()], true).unwrap();
+    let result = getter.lookup(&[id.clone()], true).wait().unwrap();
     assert_eq!(result.len(), 1);
     assert_eq!(result[0][1], 100.into());
     assert_eq!(result[0][2], 246.into());
@@ -933,17 +956,24 @@ fn it_works_with_join_arithmetic() {
     let id = 1;
     let price = 123;
     let fraction = 0.7;
-    car_mutator.insert(vec![id.into(), id.into()]).unwrap();
-    price_mutator.insert(vec![id.into(), price.into()]).unwrap();
+    car_mutator
+        .insert(vec![id.into(), id.into()])
+        .wait()
+        .unwrap();
+    price_mutator
+        .insert(vec![id.into(), price.into()])
+        .wait()
+        .unwrap();
     sales_mutator
         .insert(vec![id.into(), id.into(), fraction.into()])
+        .wait()
         .unwrap();
 
     // Let writes propagate:
     sleep();
 
     // Retrieve the result of the count query:
-    let result = getter.lookup(&[id.into()], true).unwrap();
+    let result = getter.lookup(&[id.into()], true).wait().unwrap();
     assert_eq!(result.len(), 1);
     assert_eq!(result[0][1], (price as f64 * fraction).into());
 }
@@ -962,13 +992,16 @@ fn it_works_with_function_arithmetic() {
     let max_price = 20;
     for (i, price) in (10..max_price + 1).enumerate() {
         let id = i + 1;
-        mutator.insert(vec![id.into(), price.into()]).unwrap();
+        mutator
+            .insert(vec![id.into(), price.into()])
+            .wait()
+            .unwrap();
     }
 
     // Let writes propagate:
     sleep();
 
-    let result = getter.lookup(&[0.into()], true).unwrap();
+    let result = getter.lookup(&[0.into()], true).wait().unwrap();
     assert_eq!(result.len(), 1);
     assert_eq!(result[0][0], DataType::from(max_price * 2));
 }
@@ -1021,19 +1054,19 @@ fn votes() {
     let a2: DataType = 2.into();
 
     // make one article
-    mut1.insert(vec![a1.clone(), 2.into()]).unwrap();
+    mut1.insert(vec![a1.clone(), 2.into()]).wait().unwrap();
 
     // give it some time to propagate
     sleep();
 
     // query articles to see that it was updated
     assert_eq!(
-        articleq.lookup(&[a1.clone()], true).unwrap(),
+        articleq.lookup(&[a1.clone()], true).wait().unwrap(),
         vec![vec![a1.clone(), 2.into()]]
     );
 
     // make another article
-    mut2.insert(vec![a2.clone(), 4.into()]).unwrap();
+    mut2.insert(vec![a2.clone(), 4.into()]).wait().unwrap();
 
     // give it some time to propagate
     sleep();
@@ -1041,27 +1074,27 @@ fn votes() {
     // query articles again to see that the new article was absorbed
     // and that the old one is still present
     assert_eq!(
-        articleq.lookup(&[a1.clone()], true).unwrap(),
+        articleq.lookup(&[a1.clone()], true).wait().unwrap(),
         vec![vec![a1.clone(), 2.into()]]
     );
     assert_eq!(
-        articleq.lookup(&[a2.clone()], true).unwrap(),
+        articleq.lookup(&[a2.clone()], true).wait().unwrap(),
         vec![vec![a2.clone(), 4.into()]]
     );
 
     // create a vote (user 1 votes for article 1)
-    mutv.insert(vec![1.into(), a1.clone()]).unwrap();
+    mutv.insert(vec![1.into(), a1.clone()]).wait().unwrap();
 
     // give it some time to propagate
     sleep();
 
     // query vote count to see that the count was updated
-    let res = vcq.lookup(&[a1.clone()], true).unwrap();
+    let res = vcq.lookup(&[a1.clone()], true).wait().unwrap();
     assert!(res.iter().all(|r| r[0] == a1.clone() && r[1] == 1.into()));
     assert_eq!(res.len(), 1);
 
     // check that article 1 appears in the join view with a vote count of one
-    let res = endq.lookup(&[a1.clone()], true).unwrap();
+    let res = endq.lookup(&[a1.clone()], true).wait().unwrap();
     assert!(
         res.iter()
             .any(|r| r[0] == a1.clone() && r[1] == 2.into() && r[2] == 1.into()),
@@ -1071,7 +1104,7 @@ fn votes() {
     assert_eq!(res.len(), 1);
 
     // check that article 2 doesn't have any votes
-    let res = endq.lookup(&[a2.clone()], true).unwrap();
+    let res = endq.lookup(&[a2.clone()], true).wait().unwrap();
     assert!(res.len() <= 1) // could be 1 if we had zero-rows
 }
 
@@ -1100,25 +1133,25 @@ fn empty_migration() {
     let id: DataType = 1.into();
 
     // send a value on a
-    muta.insert(vec![id.clone(), 2.into()]).unwrap();
+    muta.insert(vec![id.clone(), 2.into()]).wait().unwrap();
 
     // give it some time to propagate
     sleep();
 
     // send a query to c
     assert_eq!(
-        cq.lookup(&[id.clone()], true).unwrap(),
+        cq.lookup(&[id.clone()], true).wait().unwrap(),
         vec![vec![1.into(), 2.into()]]
     );
 
     // update value again
-    mutb.insert(vec![id.clone(), 4.into()]).unwrap();
+    mutb.insert(vec![id.clone(), 4.into()]).wait().unwrap();
 
     // give it some time to propagate
     sleep();
 
     // check that value was updated again
-    let res = cq.lookup(&[id.clone()], true).unwrap();
+    let res = cq.lookup(&[id.clone()], true).wait().unwrap();
     assert!(res.iter().any(|r| r == &vec![id.clone(), 2.into()]));
     assert!(res.iter().any(|r| r == &vec![id.clone(), 4.into()]));
 }
@@ -1139,14 +1172,14 @@ fn simple_migration() {
     let mut muta = g.table("a").unwrap();
 
     // send a value on a
-    muta.insert(vec![id.clone(), 2.into()]).unwrap();
+    muta.insert(vec![id.clone(), 2.into()]).wait().unwrap();
 
     // give it some time to propagate
     sleep();
 
     // check that a got it
     assert_eq!(
-        aq.lookup(&[id.clone()], true).unwrap(),
+        aq.lookup(&[id.clone()], true).wait().unwrap(),
         vec![vec![1.into(), 2.into()]]
     );
 
@@ -1161,14 +1194,14 @@ fn simple_migration() {
     let mut mutb = g.table("b").unwrap();
 
     // send a value on b
-    mutb.insert(vec![id.clone(), 4.into()]).unwrap();
+    mutb.insert(vec![id.clone(), 4.into()]).wait().unwrap();
 
     // give it some time to propagate
     sleep();
 
     // check that b got it
     assert_eq!(
-        bq.lookup(&[id.clone()], true).unwrap(),
+        bq.lookup(&[id.clone()], true).wait().unwrap(),
         vec![vec![1.into(), 4.into()]]
     );
 }
@@ -1188,12 +1221,12 @@ fn add_columns() {
     let mut muta = g.table("a").unwrap();
 
     // send a value on a
-    muta.insert(vec![id.clone(), "y".into()]).unwrap();
+    muta.insert(vec![id.clone(), "y".into()]).wait().unwrap();
     sleep();
 
     // check that a got it
     assert_eq!(
-        aq.lookup(&[id.clone()], true).unwrap(),
+        aq.lookup(&[id.clone()], true).wait().unwrap(),
         vec![vec![id.clone(), "y".into()]]
     );
 
@@ -1204,11 +1237,11 @@ fn add_columns() {
     sleep();
 
     // send another (old) value on a
-    muta.insert(vec![id.clone(), "z".into()]).unwrap();
+    muta.insert(vec![id.clone(), "z".into()]).wait().unwrap();
     sleep();
 
     // check that a got it, and added the new, third column's default
-    let res = aq.lookup(&[id.clone()], true).unwrap();
+    let res = aq.lookup(&[id.clone()], true).wait().unwrap();
     assert_eq!(res.len(), 2);
     assert!(res.contains(&vec![id.clone(), "y".into()]));
     assert!(res.contains(&vec![id.clone(), "z".into(), 3.into()]));
@@ -1216,11 +1249,12 @@ fn add_columns() {
     // get a new muta and send a new value on it
     let mut muta = g.table("a").unwrap();
     muta.insert(vec![id.clone(), "a".into(), 10.into()])
+        .wait()
         .unwrap();
     sleep();
 
     // check that a got it, and included the third column
-    let res = aq.lookup(&[id.clone()], true).unwrap();
+    let res = aq.lookup(&[id.clone()], true).wait().unwrap();
     assert_eq!(res.len(), 3);
     assert!(res.contains(&vec![id.clone(), "y".into()]));
     assert!(res.contains(&vec![id.clone(), "z".into(), 3.into()]));
@@ -1240,7 +1274,7 @@ fn migrate_added_columns() {
     let mut muta = g.table("a").unwrap();
 
     // send a value on a
-    muta.insert(vec![id.clone(), "y".into()]).unwrap();
+    muta.insert(vec![id.clone(), "y".into()]).wait().unwrap();
     sleep();
 
     // add a third column to a, and a view that uses it
@@ -1254,10 +1288,11 @@ fn migrate_added_columns() {
     let mut bq = g.view("x").unwrap();
 
     // send another (old) value on a
-    muta.insert(vec![id.clone(), "z".into()]).unwrap();
+    muta.insert(vec![id.clone(), "z".into()]).wait().unwrap();
     // and an entirely new value
     let mut muta = g.table("a").unwrap();
     muta.insert(vec![id.clone(), "a".into(), 10.into()])
+        .wait()
         .unwrap();
 
     // give it some time to propagate
@@ -1265,7 +1300,7 @@ fn migrate_added_columns() {
 
     // we should now see the pre-migration write and the old post-migration write with the default
     // value, and the new post-migration write with the value it contained.
-    let res = bq.lookup(&[id.clone()], true).unwrap();
+    let res = bq.lookup(&[id.clone()], true).wait().unwrap();
     assert_eq!(res.len(), 3);
     assert_eq!(
         res.iter()
@@ -1291,11 +1326,11 @@ fn migrate_drop_columns() {
     let mut muta1 = g.table("a").unwrap();
 
     // send a value on a
-    muta1.insert(vec![id.clone(), "bx".into()]).unwrap();
+    muta1.insert(vec![id.clone(), "bx".into()]).wait().unwrap();
 
     // check that it's there
     sleep();
-    let res = aq.lookup(&[id.clone()], true).unwrap();
+    let res = aq.lookup(&[id.clone()], true).wait().unwrap();
     assert_eq!(res.len(), 1);
     assert!(res.contains(&vec![id.clone(), "bx".into()]));
 
@@ -1308,11 +1343,11 @@ fn migrate_drop_columns() {
     // new mutator should only require one column
     // and should inject default for a.b
     let mut muta2 = g.table("a").unwrap();
-    muta2.insert(vec![id.clone()]).unwrap();
+    muta2.insert(vec![id.clone()]).wait().unwrap();
 
     // so two rows now!
     sleep();
-    let res = aq.lookup(&[id.clone()], true).unwrap();
+    let res = aq.lookup(&[id.clone()], true).wait().unwrap();
     assert_eq!(res.len(), 2);
     assert!(res.contains(&vec![id.clone(), "bx".into()]));
     assert!(res.contains(&vec![id.clone(), "b".into()]));
@@ -1324,16 +1359,16 @@ fn migrate_drop_columns() {
 
     // new mutator allows putting two values, and injects default for a.b
     let mut muta3 = g.table("a").unwrap();
-    muta3.insert(vec![id.clone(), "cy".into()]).unwrap();
+    muta3.insert(vec![id.clone(), "cy".into()]).wait().unwrap();
 
     // using an old putter now should add default for c
-    muta1.insert(vec![id.clone(), "bz".into()]).unwrap();
+    muta1.insert(vec![id.clone(), "bz".into()]).wait().unwrap();
 
     // using putter that knows of neither b nor c should result in defaults for both
-    muta2.insert(vec![id.clone()]).unwrap();
+    muta2.insert(vec![id.clone()]).wait().unwrap();
     sleep();
 
-    let res = aq.lookup(&[id.clone()], true).unwrap();
+    let res = aq.lookup(&[id.clone()], true).wait().unwrap();
     assert_eq!(res.len(), 5);
     // NOTE: if we *hadn't* read bx and b above, they would have also have c because it would have
     // been added when the lookups caused partial backfills.
@@ -1363,7 +1398,7 @@ fn key_on_added() {
 
     // make sure we can read (may trigger a replay)
     let mut bq = g.view("x").unwrap();
-    assert!(bq.lookup(&[3.into()], true).unwrap().is_empty());
+    assert!(bq.lookup(&[3.into()], true).wait().unwrap().is_empty());
 }
 
 #[test]
@@ -1408,19 +1443,19 @@ fn replay_during_replay() {
     let mut mutu2 = g.table("u2").unwrap();
 
     // as are numbers
-    muta.insert(vec![1.into()]).unwrap();
-    muta.insert(vec![2.into()]).unwrap();
-    muta.insert(vec![3.into()]).unwrap();
+    muta.insert(vec![1.into()]).wait().unwrap();
+    muta.insert(vec![2.into()]).wait().unwrap();
+    muta.insert(vec![3.into()]).wait().unwrap();
 
     // us are strings
-    mutu1.insert(vec!["a".into()]).unwrap();
-    mutu1.insert(vec!["b".into()]).unwrap();
-    mutu1.insert(vec!["c".into()]).unwrap();
+    mutu1.insert(vec!["a".into()]).wait().unwrap();
+    mutu1.insert(vec!["b".into()]).wait().unwrap();
+    mutu1.insert(vec!["c".into()]).wait().unwrap();
 
     // we want there to be data for all keys
-    mutu2.insert(vec!["a".into(), 1.into()]).unwrap();
-    mutu2.insert(vec!["b".into(), 2.into()]).unwrap();
-    mutu2.insert(vec!["c".into(), 3.into()]).unwrap();
+    mutu2.insert(vec!["a".into(), 1.into()]).wait().unwrap();
+    mutu2.insert(vec!["b".into(), 2.into()]).wait().unwrap();
+    mutu2.insert(vec!["c".into(), 3.into()]).wait().unwrap();
 
     sleep();
 
@@ -1429,7 +1464,7 @@ fn replay_during_replay() {
     let mut r = g.view("end").unwrap();
 
     assert_eq!(
-        r.lookup(&[1.into()], true).unwrap(),
+        r.lookup(&[1.into()], true).wait().unwrap(),
         vec![vec![1.into(), "a".into()]]
     );
 
@@ -1444,7 +1479,7 @@ fn replay_during_replay() {
     // second is partial and empty, so any read should trigger a replay.
     // though that shouldn't interact with target in any way.
     assert_eq!(
-        second.lookup(&["a".into()], true).unwrap(),
+        second.lookup(&["a".into()], true).wait().unwrap(),
         vec![vec!["a".into(), 1.into()]]
     );
 
@@ -1454,18 +1489,18 @@ fn replay_during_replay() {
     // "a" value for which u has a hole. that record is then going to be forwarded to *both*
     // children, and it'll be interesting to see what the join then does.
     assert_eq!(
-        second.lookup(&["b".into()], true).unwrap(),
+        second.lookup(&["b".into()], true).wait().unwrap(),
         vec![vec!["b".into(), 2.into()]]
     );
 
     // u has a hole for a=2, but not for u=b, and so should forward this to both children
-    mutu2.insert(vec!["b".into(), 2.into()]).unwrap();
+    mutu2.insert(vec!["b".into(), 2.into()]).wait().unwrap();
 
     sleep();
 
     // what happens if we now query for 2?
     assert_eq!(
-        r.lookup(&[2.into()], true).unwrap(),
+        r.lookup(&[2.into()], true).wait().unwrap(),
         vec![vec![2.into(), "b".into()], vec![2.into(), "b".into()]]
     );
 }
@@ -1500,29 +1535,29 @@ fn cascading_replays_with_sharding() {
     let mut mutv = g.table("v").unwrap();
 
     //                f1           f2
-    mutf.insert(vec!["u1".into(), "u3".into()]).unwrap();
-    mutf.insert(vec!["u2".into(), "u3".into()]).unwrap();
-    mutf.insert(vec!["u3".into(), "u1".into()]).unwrap();
+    mutf.insert(vec!["u1".into(), "u3".into()]).wait().unwrap();
+    mutf.insert(vec!["u2".into(), "u3".into()]).wait().unwrap();
+    mutf.insert(vec!["u3".into(), "u1".into()]).wait().unwrap();
 
     //                u
-    mutv.insert(vec!["u1".into(), 1.into()]).unwrap();
-    mutv.insert(vec!["u2".into(), 1.into()]).unwrap();
-    mutv.insert(vec!["u3".into(), 1.into()]).unwrap();
+    mutv.insert(vec!["u1".into(), 1.into()]).wait().unwrap();
+    mutv.insert(vec!["u2".into(), 1.into()]).wait().unwrap();
+    mutv.insert(vec!["u3".into(), 1.into()]).wait().unwrap();
 
     sleep();
 
     let mut e = g.view("end").unwrap();
 
     assert_eq!(
-        e.lookup(&["u1".into()], true).unwrap(),
+        e.lookup(&["u1".into()], true).wait().unwrap(),
         vec![vec!["u1".into(), 1.into()]]
     );
     assert_eq!(
-        e.lookup(&["u2".into()], true).unwrap(),
+        e.lookup(&["u2".into()], true).wait().unwrap(),
         Vec::<Vec<DataType>>::new()
     );
     assert_eq!(
-        e.lookup(&["u3".into()], true).unwrap(),
+        e.lookup(&["u3".into()], true).wait().unwrap(),
         vec![vec!["u3".into(), 2.into()]]
     );
 
@@ -1556,28 +1591,28 @@ fn full_aggregation_with_bogokey() {
     let mut base = g.table("base").unwrap();
 
     // insert some values
-    base.insert(vec![1.into()]).unwrap();
-    base.insert(vec![2.into()]).unwrap();
-    base.insert(vec![3.into()]).unwrap();
+    base.insert(vec![1.into()]).wait().unwrap();
+    base.insert(vec![2.into()]).wait().unwrap();
+    base.insert(vec![3.into()]).wait().unwrap();
 
     // give it some time to propagate
     sleep();
 
     // send a query to aggregation materialization
     assert_eq!(
-        aggq.lookup(&[0.into()], true).unwrap(),
+        aggq.lookup(&[0.into()], true).wait().unwrap(),
         vec![vec![0.into(), 3.into()]]
     );
 
     // update value again
-    base.insert(vec![4.into()]).unwrap();
+    base.insert(vec![4.into()]).wait().unwrap();
 
     // give it some time to propagate
     sleep();
 
     // check that value was updated again
     assert_eq!(
-        aggq.lookup(&[0.into()], true).unwrap(),
+        aggq.lookup(&[0.into()], true).wait().unwrap(),
         vec![vec![0.into(), 4.into()]]
     );
 }
@@ -1609,19 +1644,19 @@ fn crossing_migration() {
     let id: DataType = 1.into();
 
     // send a value on a
-    muta.insert(vec![id.clone(), 2.into()]).unwrap();
+    muta.insert(vec![id.clone(), 2.into()]).wait().unwrap();
     sleep();
 
     assert_eq!(
-        cq.lookup(&[id.clone()], true).unwrap(),
+        cq.lookup(&[id.clone()], true).wait().unwrap(),
         vec![vec![id.clone(), 2.into()]]
     );
 
     // update value again
-    mutb.insert(vec![id.clone(), 4.into()]).unwrap();
+    mutb.insert(vec![id.clone(), 4.into()]).wait().unwrap();
     sleep();
 
-    let res = cq.lookup(&[id.clone()], true).unwrap();
+    let res = cq.lookup(&[id.clone()], true).wait().unwrap();
     assert_eq!(res.len(), 2);
     assert!(res.contains(&vec![id.clone(), 2.into()]));
     assert!(res.contains(&vec![id.clone(), 4.into()]));
@@ -1643,14 +1678,14 @@ fn independent_domain_migration() {
     let mut muta = g.table("a").unwrap();
 
     // send a value on a
-    muta.insert(vec![id.clone(), 2.into()]).unwrap();
+    muta.insert(vec![id.clone(), 2.into()]).wait().unwrap();
 
     // give it some time to propagate
     sleep();
 
     // check that a got it
     assert_eq!(
-        aq.lookup(&[id.clone()], true).unwrap(),
+        aq.lookup(&[id.clone()], true).wait().unwrap(),
         vec![vec![1.into(), 2.into()]]
     );
 
@@ -1665,14 +1700,14 @@ fn independent_domain_migration() {
     let mut mutb = g.table("b").unwrap();
 
     // send a value on b
-    mutb.insert(vec![id.clone(), 4.into()]).unwrap();
+    mutb.insert(vec![id.clone(), 4.into()]).wait().unwrap();
 
     // give it some time to propagate
     sleep();
 
     // check that a got it
     assert_eq!(
-        bq.lookup(&[id.clone()], true).unwrap(),
+        bq.lookup(&[id.clone()], true).wait().unwrap(),
         vec![vec![1.into(), 4.into()]]
     );
 }
@@ -1703,19 +1738,19 @@ fn domain_amend_migration() {
     let id: DataType = 1.into();
 
     // send a value on a
-    muta.insert(vec![id.clone(), 2.into()]).unwrap();
+    muta.insert(vec![id.clone(), 2.into()]).wait().unwrap();
     sleep();
 
     assert_eq!(
-        cq.lookup(&[id.clone()], true).unwrap(),
+        cq.lookup(&[id.clone()], true).wait().unwrap(),
         vec![vec![id.clone(), 2.into()]]
     );
 
     // update value again
-    mutb.insert(vec![id.clone(), 4.into()]).unwrap();
+    mutb.insert(vec![id.clone(), 4.into()]).wait().unwrap();
     sleep();
 
-    let res = cq.lookup(&[id.clone()], true).unwrap();
+    let res = cq.lookup(&[id.clone()], true).wait().unwrap();
     assert_eq!(res.len(), 2);
     assert!(res.contains(&vec![id.clone(), 2.into()]));
     assert!(res.contains(&vec![id.clone(), 4.into()]));
@@ -1793,16 +1828,16 @@ fn do_full_vote_migration(old_puts_after: bool) {
     let raten: DataType = 5.into();
 
     for i in 0..n {
-        muta.insert(vec![i.into(), title.clone()]).unwrap();
+        muta.insert(vec![i.into(), title.clone()]).wait().unwrap();
     }
     for i in 0..n {
-        mutv.insert(vec![1.into(), i.into()]).unwrap();
+        mutv.insert(vec![1.into(), i.into()]).wait().unwrap();
     }
 
     let mut last = g.view("awvc").unwrap();
     thread::sleep(get_settle_time().checked_mul(3).unwrap());
     for i in 0..n {
-        let rows = last.lookup(&[i.into()], true).unwrap();
+        let rows = last.lookup(&[i.into()], true).wait().unwrap();
         assert!(!rows.is_empty(), "every article should be voted for");
         assert_eq!(rows.len(), 1, "every article should have only one entry");
         let row = rows.into_iter().next().unwrap();
@@ -1847,15 +1882,16 @@ fn do_full_vote_migration(old_puts_after: bool) {
     let mut mutr = g.table("rating").unwrap();
     for i in 0..n {
         if old_puts_after {
-            mutv.insert(vec![2.into(), i.into()]).unwrap();
+            mutv.insert(vec![2.into(), i.into()]).wait().unwrap();
         }
         mutr.insert(vec![2.into(), i.into(), raten.clone()])
+            .wait()
             .unwrap();
     }
 
     thread::sleep(get_settle_time().checked_mul(3).unwrap());
     for i in 0..n {
-        let rows = last.lookup(&[i.into()], true).unwrap();
+        let rows = last.lookup(&[i.into()], true).wait().unwrap();
         assert!(!rows.is_empty(), "every article should be voted for");
         assert_eq!(rows.len(), 1, "every article should have only one entry");
         let row = rows.into_iter().next().unwrap();
@@ -1905,7 +1941,7 @@ fn live_writes() {
     });
 
     let mut vc_state = g.view("votecount").unwrap();
-    let mut add = g.table("vote").unwrap().into_exclusive().unwrap();
+    let mut add = g.table("vote").unwrap();
 
     let ids = 1000;
     let votes = 7;
@@ -1914,7 +1950,8 @@ fn live_writes() {
     let jh = thread::spawn(move || {
         let user: DataType = 0.into();
         // we need to use a batch putter because otherwise we'd wait for 7000 batch intervals
-        add.batch_insert((0..votes).flat_map(|_| (0..ids).map(|i| vec![user.clone(), i.into()])))
+        add.perform_all((0..votes).flat_map(|_| (0..ids).map(|i| vec![user.clone(), i.into()])))
+            .wait()
             .unwrap()
     });
 
@@ -1945,11 +1982,11 @@ fn live_writes() {
     // check that all writes happened the right number of times
     for i in 0..ids {
         assert_eq!(
-            vc_state.lookup(&[i.into()], true).unwrap(),
+            vc_state.lookup(&[i.into()], true).wait().unwrap(),
             vec![vec![i.into(), votes.into()]]
         );
         assert_eq!(
-            vc2_state.lookup(&[i.into()], true).unwrap(),
+            vc2_state.lookup(&[i.into()], true).wait().unwrap(),
             vec![vec![i.into(), votes.into()]]
         );
     }
@@ -1972,11 +2009,11 @@ fn state_replay_migration_query() {
     let mut mutb = g.table("b").unwrap();
 
     // make a couple of records
-    muta.insert(vec![1.into(), "a".into()]).unwrap();
-    muta.insert(vec![1.into(), "b".into()]).unwrap();
-    muta.insert(vec![2.into(), "c".into()]).unwrap();
-    mutb.insert(vec![1.into(), "n".into()]).unwrap();
-    mutb.insert(vec![2.into(), "o".into()]).unwrap();
+    muta.insert(vec![1.into(), "a".into()]).wait().unwrap();
+    muta.insert(vec![1.into(), "b".into()]).wait().unwrap();
+    muta.insert(vec![2.into(), "c".into()]).wait().unwrap();
+    mutb.insert(vec![1.into(), "n".into()]).wait().unwrap();
+    mutb.insert(vec![2.into(), "o".into()]).wait().unwrap();
 
     let _ = g.migrate(move |mig| {
         // add join and a reader node
@@ -1993,24 +2030,22 @@ fn state_replay_migration_query() {
     // if all went according to plan, the join should now be fully populated!
     // there are (/should be) two records in a with x == 1
     // they may appear in any order
-    let res = out.lookup(&[1.into()], true).unwrap();
-    assert!(
-        res.iter()
-            .any(|r| r == &vec![1.into(), "a".into(), "n".into()])
-    );
-    assert!(
-        res.iter()
-            .any(|r| r == &vec![1.into(), "b".into(), "n".into()])
-    );
+    let res = out.lookup(&[1.into()], true).wait().unwrap();
+    assert!(res
+        .iter()
+        .any(|r| r == &vec![1.into(), "a".into(), "n".into()]));
+    assert!(res
+        .iter()
+        .any(|r| r == &vec![1.into(), "b".into(), "n".into()]));
 
     // there are (/should be) one record in a with x == 2
     assert_eq!(
-        out.lookup(&[2.into()], true).unwrap(),
+        out.lookup(&[2.into()], true).wait().unwrap(),
         vec![vec![2.into(), "c".into(), "o".into()]]
     );
 
     // there are (/should be) no records with x == 3
-    assert!(out.lookup(&[3.into()], true).unwrap().is_empty());
+    assert!(out.lookup(&[3.into()], true).wait().unwrap().is_empty());
 }
 
 #[test]
@@ -2211,32 +2246,35 @@ fn node_removal() {
     assert_eq!(muta.columns(), &["a", "b"]);
 
     // send a value on a
-    muta.insert(vec![id.clone(), 2.into()]).unwrap();
+    muta.insert(vec![id.clone(), 2.into()]).wait().unwrap();
 
     // give it some time to propagate
     sleep();
 
     // send a query to c
     assert_eq!(
-        cq.lookup(&[id.clone()], true).unwrap(),
+        cq.lookup(&[id.clone()], true).wait().unwrap(),
         vec![vec![1.into(), 2.into()]]
     );
 
-    g.remove_node(cid).unwrap();
+    {
+        let fut = g.remove_node(cid);
+        g.run(fut).unwrap();
+    }
 
     // update value again
-    mutb.insert(vec![id.clone(), 4.into()]).unwrap();
+    mutb.insert(vec![id.clone(), 4.into()]).wait().unwrap();
 
     // give it some time to propagate
     sleep();
 
     // // check that value was updated again
-    // let res = cq.lookup(&[id.clone()], true).unwrap();
+    // let res = cq.lookup(&[id.clone()], true).wait().unwrap();
     // assert!(res.iter().any(|r| r == &vec![id.clone(), 2.into()]));
     // assert!(res.iter().any(|r| r == &vec![id.clone(), 4.into()]));
 
     // Delete first record
-    muta.delete(vec![id.clone()]).unwrap();
+    muta.delete(vec![id.clone()]).wait().unwrap();
 
     // give it some time to propagate
     sleep();
@@ -2267,12 +2305,15 @@ fn remove_query() {
     let mut qb = g.view("qb").unwrap();
 
     mutb.insert(vec![42.into(), "2".into(), "3".into()])
+        .wait()
         .unwrap();
-    mutb.insert(vec![1.into(), "4".into(), "5".into()]).unwrap();
+    mutb.insert(vec![1.into(), "4".into(), "5".into()])
+        .wait()
+        .unwrap();
     sleep();
 
-    assert_eq!(qa.lookup(&[0.into()], true).unwrap().len(), 2);
-    assert_eq!(qb.lookup(&[0.into()], true).unwrap().len(), 1);
+    assert_eq!(qa.lookup(&[0.into()], true).wait().unwrap().len(), 2);
+    assert_eq!(qb.lookup(&[0.into()], true).wait().unwrap().len(), 1);
 
     // Remove qb and check that the graph still functions as expected.
     g.install_recipe(r2_txt).unwrap();
@@ -2281,9 +2322,10 @@ fn remove_query() {
     assert!(g.view("qb").is_err());
 
     mutb.insert(vec![42.into(), "6".into(), "7".into()])
+        .wait()
         .unwrap();
     sleep();
 
-    assert_eq!(qa.lookup(&[0.into()], true).unwrap().len(), 3);
-    assert_eq!(qb.lookup(&[0.into()], true).unwrap().len(), 1);
+    assert_eq!(qa.lookup(&[0.into()], true).wait().unwrap().len(), 3);
+    assert_eq!(qb.lookup(&[0.into()], true).wait().unwrap().len(), 1);
 }

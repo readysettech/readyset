@@ -5,6 +5,7 @@ use dataflow::prelude::*;
 use futures::{self, Future};
 use noria::consensus::Authority;
 use noria::prelude::*;
+use std::collections::BTreeMap;
 use std::collections::HashMap;
 use std::ops::{Deref, DerefMut};
 use std::sync::Arc;
@@ -47,6 +48,22 @@ impl<A: Authority> LocalControllerHandle<A> {
         F::Error: Send,
     {
         self.runtime.as_mut().unwrap().block_on(fut)
+    }
+
+    /// Enumerate all known base tables.
+    ///
+    /// See [`noria::ControllerHandle::inputs`].
+    pub fn inputs(&mut self) -> Result<BTreeMap<String, NodeIndex>, failure::Error> {
+        let fut = self.c.as_mut().unwrap().inputs();
+        self.run(fut)
+    }
+
+    /// Enumerate all known external views.
+    ///
+    /// See [`noria::ControllerHandle::outputs`].
+    pub fn outputs(&mut self) -> Result<BTreeMap<String, NodeIndex>, failure::Error> {
+        let fut = self.c.as_mut().unwrap().outputs();
+        self.run(fut)
     }
 
     /// Get a handle to a [`noria::Table`].

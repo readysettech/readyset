@@ -464,10 +464,25 @@ pub mod test {
             assert!(self.nut.is_some());
             assert!(!remember || self.states.contains_key(*self.nut.unwrap()));
 
+            struct Ex;
+
+            impl Executor for Ex {
+                fn ack(&mut self, _: SourceChannelIdentifier) {}
+                fn create_universe(&mut self, _: HashMap<String, DataType>) {}
+            }
+
             let mut u = {
                 let id = self.nut.unwrap();
                 let mut n = self.nodes[*id].borrow_mut();
-                let m = n.on_input(*src, u.into(), &mut None, None, &self.nodes, &self.states);
+                let m = n.on_input(
+                    &mut Ex,
+                    *src,
+                    u.into(),
+                    &mut None,
+                    None,
+                    &self.nodes,
+                    &self.states,
+                );
                 assert_eq!(m.misses, vec![]);
                 m.results
             };
