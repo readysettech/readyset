@@ -8,9 +8,9 @@ use async_bincode::{AsyncBincodeStream, AsyncDestination};
 use futures::stream::futures_unordered::FuturesUnordered;
 use nom_sql::CreateTableStatement;
 use std::collections::HashMap;
-use std::io;
 use std::net::SocketAddr;
 use std::sync::{Arc, Mutex};
+use std::{fmt, io};
 use tokio::prelude::*;
 use tokio_tower::multiplex;
 use tokio_tower::NewTransport;
@@ -107,6 +107,16 @@ pub struct Input {
     pub dst: LocalNodeIndex,
     pub data: Vec<TableOperation>,
     pub tracer: Tracer,
+}
+
+impl fmt::Debug for Input {
+    fn fmt(&self, fmt: &mut fmt::Formatter) -> fmt::Result {
+        fmt.debug_struct("Input")
+            .field("dst", &self.dst)
+            .field("data", &self.data)
+            .field("tracer", &"_")
+            .finish()
+    }
 }
 
 #[doc(hidden)]

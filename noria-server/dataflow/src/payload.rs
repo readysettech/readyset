@@ -71,7 +71,7 @@ pub enum ReplayPieceContext {
     },
 }
 
-#[derive(Clone, Copy, Serialize, Deserialize)]
+#[derive(Clone, Copy, Debug, Serialize, Deserialize)]
 pub struct SourceChannelIdentifier {
     pub token: usize,
     pub tag: u32,

@@ -618,6 +618,7 @@ fn listen_df(
     let ctrl = ::std::net::TcpStream::connect(&desc.worker_addr)?;
     let ctrl = tokio::net::TcpStream::from_std(ctrl, &Default::default())?;
     let ctrl_addr = ctrl.local_addr()?;
+    info!(log, "connected to controller"; "src" => ?ctrl_addr);
 
     let log_prefix = state.config.persistence.log_prefix.clone();
     let prefix = format!("{}-log-", log_prefix);
@@ -639,6 +640,7 @@ fn listen_df(
     let readers = Arc::new(Mutex::new(HashMap::new()));
     let rport = tokio::net::TcpListener::bind(&SocketAddr::new(on, 0))?;
     let raddr = rport.local_addr()?;
+    info!(log, "listening for reads"; "on" => ?raddr);
 
     // start controller message handler
     let ctrl = AsyncBincodeWriter::from(ctrl).for_async();
@@ -749,7 +751,7 @@ fn listen_df(
                         coord.clone(),
                     ));
 
-                    trace!(
+                    info!(
                         log,
                         "informed controller that domain {}.{} is at {:?}",
                         idx.index(),
@@ -1306,7 +1308,7 @@ impl Replica {
                 Some(stream) => {
                     // we know that any new connection to a domain will first send a one-byte
                     // token to indicate whether the connection is from a base or not.
-                    debug!(self.log, "accepted new connection");
+                    debug!(self.log, "accepted new connection"; "from" => ?stream.peer_addr().unwrap());
                     self.first_byte
                         .push(tokio::io::read_exact(stream, vec![0; 1]));
                 }
