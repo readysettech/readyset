@@ -1,5 +1,7 @@
+extern crate futures;
 extern crate noria_server;
 
+use futures::Future;
 use noria_server::ControllerBuilder;
 
 use std::thread;
@@ -45,12 +47,13 @@ fn main() {
     println!("Creating article...");
     let aid = 1;
     // Make sure the article exists:
-    if awvc.lookup(&[aid.into()], true).unwrap().is_empty() {
+    if awvc.lookup(&[aid.into()], true).wait().unwrap().is_empty() {
         println!("Creating new article...");
         let title = "test title";
         let url = "http://pdos.csail.mit.edu";
         article
             .insert(vec![aid.into(), title.into(), url.into()])
+            .wait()
             .unwrap();
     }
 
@@ -62,12 +65,12 @@ fn main() {
         .as_secs() as i64;
 
     // Double-voting has no effect on final count due to DISTINCT
-    vote.insert(vec![aid.into(), uid.into()]).unwrap();
-    vote.insert(vec![aid.into(), uid.into()]).unwrap();
+    vote.insert(vec![aid.into(), uid.into()]).wait().unwrap();
+    vote.insert(vec![aid.into(), uid.into()]).wait().unwrap();
 
     println!("Finished writing! Let's wait for things to propagate...");
     thread::sleep(Duration::from_millis(1000));
 
     println!("Reading...");
-    println!("{:#?}", awvc.lookup(&[aid.into()], true))
+    println!("{:#?}", awvc.lookup(&[aid.into()], true).wait())
 }

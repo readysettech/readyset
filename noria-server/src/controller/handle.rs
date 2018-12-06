@@ -103,6 +103,14 @@ impl<A: Authority> LocalControllerHandle<A> {
         let fut = self.c.as_mut().unwrap().extend_recipe(r.as_ref());
         self.run(fut)
     }
+
+    /// Fetch a graphviz description of the dataflow graph.
+    ///
+    /// See [`noria::ControllerHandle::graphviz`].
+    pub fn graphviz(&mut self) -> Result<String, failure::Error> {
+        let fut = self.c.as_mut().unwrap().graphviz();
+        self.run(fut)
+    }
 }
 
 impl<A: Authority> LocalControllerHandle<A> {

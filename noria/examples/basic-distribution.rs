@@ -1,5 +1,6 @@
-use noria::{ControllerHandle, ZookeeperAuthority};
+use noria::{SyncControllerHandle, ZookeeperAuthority};
 
+use futures::Future;
 use std::collections::BTreeMap;
 use std::thread;
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
@@ -18,31 +19,29 @@ fn main() {
 
     // set up Noria via recipe
     let auth = ZookeeperAuthority::new("127.0.0.1:2181/basicdist").unwrap();
-    let mut db = ControllerHandle::new(auth).unwrap();
+    let mut db = SyncControllerHandle::new(auth).unwrap();
     db.extend_recipe(sql1).unwrap();
     db.extend_recipe(sql2).unwrap();
     db.extend_recipe(sql3).unwrap();
     db.extend_recipe(sql4).unwrap();
     println!("{}", db.graphviz().unwrap());
 
-    let get_view = |b: &mut ControllerHandle<ZookeeperAuthority>, n| loop {
+    let get_view = |b: &mut SyncControllerHandle<ZookeeperAuthority>, n| loop {
         match b.view(n) {
             Ok(v) => return v,
             Err(_) => {
                 thread::sleep(Duration::from_millis(50));
-                let auth = ZookeeperAuthority::new("127.0.0.1:2181/basicdist").unwrap();
-                *b = ControllerHandle::new(auth).unwrap();
+                *b = SyncControllerHandle::from_zk("127.0.0.1:2181/basicdist").unwrap();
             }
         }
     };
 
-    let get_table = |b: &mut ControllerHandle<ZookeeperAuthority>, n| loop {
+    let get_table = |b: &mut SyncControllerHandle<ZookeeperAuthority>, n| loop {
         match b.table(n) {
             Ok(v) => return v,
             Err(_) => {
                 thread::sleep(Duration::from_millis(50));
-                let auth = ZookeeperAuthority::new("127.0.0.1:2181/basicdist").unwrap();
-                *b = ControllerHandle::new(auth).unwrap();
+                *b = SyncControllerHandle::from_zk("127.0.0.1:2181/basicdist").unwrap();
             }
         }
     };
@@ -55,12 +54,13 @@ fn main() {
     println!("Creating article...");
     let aid = 1;
     // Make sure the article exists:
-    if awvc.lookup(&[aid.into()], true).unwrap().is_empty() {
+    if awvc.lookup(&[aid.into()], true).wait().unwrap().is_empty() {
         println!("Creating new article...");
         let title = "test title";
         let url = "http://pdos.csail.mit.edu";
         article
             .insert(vec![aid.into(), title.into(), url.into()])
+            .wait()
             .unwrap();
     }
 
@@ -90,7 +90,7 @@ fn main() {
             .duration_since(UNIX_EPOCH)
             .unwrap()
             .as_secs() as i64;
-        while let Err(_) = vote.insert(vec![aid.into(), uid.into()]) {
+        while let Err(_) = vote.insert(vec![aid.into(), uid.into()]).wait() {
             vote = get_table(&mut db, "Vote");
         }
 

@@ -395,3 +395,130 @@ impl<A: Authority> ControllerHandle<A> {
         self.rpc("remove_node", view, "failed to remove node")
     }
 }
+
+/// A synchronous handle to a Noria controller.
+///
+/// This handle lets you interact with a Noria controller without thinking about asynchrony.
+pub struct SyncControllerHandle<A>
+where
+    A: 'static + Authority,
+{
+    handle: ControllerHandle<A>,
+    _rt: Arc<tokio::runtime::Runtime>,
+    executor: tokio::runtime::TaskExecutor,
+}
+
+impl<A> Clone for SyncControllerHandle<A>
+where
+    A: Authority,
+{
+    fn clone(&self) -> Self {
+        SyncControllerHandle {
+            handle: self.handle.clone(),
+            _rt: self._rt.clone(),
+            executor: self.executor.clone(),
+        }
+    }
+}
+
+impl SyncControllerHandle<consensus::ZookeeperAuthority> {
+    /// Fetch information about the current Soup controller from Zookeeper running at the given
+    /// address, and create a `ControllerHandle` from that.
+    pub fn from_zk(zookeeper_address: &str) -> Result<Self, failure::Error> {
+        Self::new(consensus::ZookeeperAuthority::new(zookeeper_address)?)
+    }
+}
+
+impl<A: Authority> SyncControllerHandle<A> {
+    /// Create a `SyncControllerHandle` that bootstraps a connection to Noria via the configuration
+    /// stored in the given `authority`.
+    ///
+    /// You *probably* want to use `SyncControllerHandle::from_zk` instead.
+    pub fn new(authority: A) -> Result<Self, failure::Error>
+    where
+        A: Send + 'static,
+    {
+        let mut rt = tokio::runtime::Runtime::new().unwrap();
+        let handle = rt.block_on(ControllerHandle::new(authority))?;
+        let executor = rt.executor();
+        Ok(SyncControllerHandle {
+            _rt: Arc::new(rt),
+            executor,
+            handle,
+        })
+    }
+
+    fn run<F>(&mut self, fut: F) -> Result<F::Item, F::Error>
+    where
+        F: Future + Send + 'static,
+        F::Item: Send,
+        F::Error: Send,
+    {
+        let (tx, rx) = futures::sync::oneshot::channel();
+        self.executor
+            .spawn(fut.then(move |r| tx.send(r)).map_err(|_| unreachable!()));
+        rx.wait().expect("controller handle went away")
+    }
+
+    /// Enumerate all known base tables.
+    ///
+    /// See [`ControllerHandle::inputs`].
+    pub fn inputs(&mut self) -> Result<BTreeMap<String, NodeIndex>, failure::Error> {
+        let fut = self.handle.inputs();
+        self.run(fut)
+    }
+
+    /// Enumerate all known external views.
+    ///
+    /// See [`ControllerHandle::outputs`].
+    pub fn outputs(&mut self) -> Result<BTreeMap<String, NodeIndex>, failure::Error> {
+        let fut = self.handle.outputs();
+        self.run(fut)
+    }
+
+    /// Get a handle to a [`Table`].
+    ///
+    /// See [`ControllerHandle::table`].
+    pub fn table<S: AsRef<str>>(&mut self, table: S) -> Result<Table, failure::Error> {
+        let fut = self.handle.table(table.as_ref());
+        self.run(fut)
+    }
+
+    /// Get a handle to a [`View`].
+    ///
+    /// See [`ControllerHandle::view`].
+    pub fn view<S: AsRef<str>>(&mut self, view: S) -> Result<View, failure::Error> {
+        let fut = self.handle.view(view.as_ref());
+        self.run(fut)
+    }
+
+    /// Install a Noria recipe.
+    ///
+    /// See [`ControllerHandle::install_recipe`].
+    pub fn install_recipe<S: AsRef<str>>(
+        &mut self,
+        r: S,
+    ) -> Result<ActivationResult, failure::Error> {
+        let fut = self.handle.install_recipe(r.as_ref());
+        self.run(fut)
+    }
+
+    /// Extend the Noria recipe.
+    ///
+    /// See [`ControllerHandle::extend_recipe`].
+    pub fn extend_recipe<S: AsRef<str>>(
+        &mut self,
+        r: S,
+    ) -> Result<ActivationResult, failure::Error> {
+        let fut = self.handle.extend_recipe(r.as_ref());
+        self.run(fut)
+    }
+
+    /// Fetch a graphviz description of the dataflow graph.
+    ///
+    /// See [`ControllerHandle::graphviz`].
+    pub fn graphviz(&mut self) -> Result<String, failure::Error> {
+        let fut = self.handle.graphviz();
+        self.run(fut)
+    }
+}
