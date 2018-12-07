@@ -2,6 +2,8 @@ use crate::controller::migrate::materialization::Materializations;
 use crate::controller::{
     ControllerState, DomainHandle, DomainShardHandle, Migration, Recipe, Worker, WorkerIdentifier,
 };
+use crate::controller::recipe::Schema;
+use crate::controller::schema;
 use crate::coordination::{CoordinationMessage, CoordinationPayload, DomainDescriptor};
 use dataflow::payload::ControlReplyPacket;
 use dataflow::prelude::*;
@@ -13,6 +15,7 @@ use noria::channel::tcp::{SendError, TcpSender};
 use noria::consensus::{Authority, Epoch, STATE_KEY};
 use noria::debug::stats::{DomainStats, GraphStats, NodeStats};
 use noria::ActivationResult;
+use nom_sql::ColumnSpecification;
 use petgraph;
 use petgraph::visit::Bfs;
 use slog;
@@ -759,6 +762,7 @@ impl ControllerInner {
         self.find_view_for(node).map(|r| {
             let domain = self.ingredients[r].domain();
             let columns = self.ingredients[r].fields().to_vec();
+            let schema = self.view_schema(r);
             let shards = (0..self.domains[&domain].shards())
                 .map(|i| self.read_addrs[&self.domains[&domain].assignment(i)].clone())
                 .collect();
@@ -766,9 +770,24 @@ impl ControllerInner {
             ViewBuilder {
                 node: r,
                 columns,
+                schema: schema,
                 shards,
             }
         })
+    }
+
+    fn view_schema(&self, view_ni: NodeIndex) -> Option<Vec<ColumnSpecification>> {
+        let n = &self.ingredients[view_ni];
+        let schema: Vec<_> = (0..n.fields().len())
+            .into_iter()
+            .map(|i| schema::column_schema(&self.ingredients, view_ni, &self.recipe, i, &self.log))
+            .collect();
+
+        if schema.iter().any(|cs| cs.is_none()) {
+            None
+        } else {
+            Some(schema.into_iter().map(|cs| cs.unwrap()).collect())
+        }
     }
 
     /// Obtain a TableBuild that can be used to construct a Table to perform writes and deletes
@@ -818,7 +837,10 @@ impl ControllerInner {
             columns.len(),
             node.fields().len() - base_operator.get_dropped().len()
         );
-        let schema = self.recipe.get_base_schema(base);
+        let schema = self.recipe.schema_for(base).map(|s| match s {
+            Schema::Table(s) => s,
+            _ => panic!("non-base schema {:?} returned for table '{}'", s, base),
+        });
 
         Some(TableBuilder {
             txs,

@@ -43,7 +43,7 @@ CREATE TABLE `Role` (
   `r_uid` int(11) NOT NULL,
   `r_cid` int(11) NOT NULL,
   `r_role` tinyint(1) NOT NULL default '0',
-  PRIMARY KEY  (`r_uid`),
-  UNIQUE KEY `r_uid` (`r_uid`),
+  PRIMARY KEY  (`r_uid`, `r_cid`),
+  KEY `r_uid` (`r_uid`),
   KEY `r_cid` (`r_cid`),
 ) ENGINE=MyISAM DEFAULT CHARSET=utf8;

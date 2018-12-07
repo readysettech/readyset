@@ -153,6 +153,10 @@ impl SqlIncorporator {
         self.base_schemas.get(name).cloned()
     }
 
+    pub fn get_view_schema(&self, name: &str) -> Option<Vec<String>> {
+        self.view_schemas.get(name).cloned()
+    }
+
     #[cfg(test)]
     fn get_flow_node_address(&self, name: &str, v: usize) -> Option<NodeIndex> {
         self.mir_converter.get_flow_node_address(name, v)

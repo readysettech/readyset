@@ -94,6 +94,47 @@ impl DataType {
             ref dt => dt.clone(),
         }
     }
+
+    /// Checks if this value is `DataType::None`.
+    pub fn is_none(&self) -> bool {
+        match *self {
+            DataType::None => true,
+            _ => false,
+        }
+    }
+
+    /// Checks if this value is of an integral data type (i.e., can be converted into integral types).
+    pub fn is_integer(&self) -> bool {
+        match *self {
+            DataType::Int(_) | DataType::BigInt(_) => true,
+            _ => false,
+        }
+    }
+
+    /// Checks if this value is of a real data type (i.e., can be converted into `f64`).
+    pub fn is_real(&self) -> bool {
+        match *self {
+            DataType::Real(_, _) => true,
+            _ => false,
+        }
+    }
+
+    /// Checks if this value is of a string data type (i.e., can be converted into `String` and
+    /// `&str`).
+    pub fn is_string(&self) -> bool {
+        match *self {
+            DataType::Text(_) | DataType::TinyText(_) => true,
+            _ => false,
+        }
+    }
+
+    /// Checks if this values is of a timestamp data type.
+    pub fn is_datetime(&self) -> bool {
+        match *self {
+            DataType::Timestamp(_) => true,
+            _ => false,
+        }
+    }
 }
 
 impl PartialEq for DataType {

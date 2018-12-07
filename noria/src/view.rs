@@ -1,6 +1,7 @@
 use crate::data::*;
 use crate::{Tagged, Tagger};
 use async_bincode::{AsyncBincodeStream, AsyncDestination};
+use nom_sql::ColumnSpecification;
 use petgraph::graph::NodeIndex;
 use std::collections::HashMap;
 use std::io;
@@ -100,6 +101,7 @@ pub enum ReadReply {
 pub struct ViewBuilder {
     pub node: NodeIndex,
     pub columns: Vec<String>,
+    pub schema: Option<Vec<ColumnSpecification>>,
     pub shards: Vec<SocketAddr>,
 }
 
@@ -113,6 +115,7 @@ impl ViewBuilder {
         let node = self.node.clone();
         let columns = self.columns.clone();
         let shards = self.shards.clone();
+        let schema = self.schema.clone();
         future::join_all(shards.into_iter().enumerate().map(move |(shardi, addr)| {
             use std::collections::hash_map::Entry;
 
@@ -141,6 +144,7 @@ impl ViewBuilder {
             let (addrs, conns) = shards.into_iter().unzip();
             View {
                 node,
+                schema,
                 columns,
                 shard_addrs: addrs,
                 shards: conns,
@@ -159,6 +163,8 @@ impl ViewBuilder {
 pub struct View {
     node: NodeIndex,
     columns: Vec<String>,
+    schema: Option<Vec<ColumnSpecification>>,
+
     shards: Vec<ViewRpc>,
     shard_addrs: Vec<SocketAddr>,
 }
@@ -168,6 +174,11 @@ impl View {
     /// Get the list of columns in this view.
     pub fn columns(&self) -> &[String] {
         self.columns.as_slice()
+    }
+
+    /// Get the schema definition of this view.
+    pub fn schema(&self) -> Option<&[ColumnSpecification]> {
+        self.schema.as_ref().map(|s| s.as_slice())
     }
 
     /// Get the current size of this view.

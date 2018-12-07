@@ -158,6 +158,7 @@ impl GroupedOperation for ExtremumOperator {
         // TODO: handle this case by querying into the parent.
         unimplemented!();
     }
+
     fn description(&self, detailed: bool) -> String {
         if !detailed {
             return String::from(match self.op {
@@ -177,6 +178,10 @@ impl GroupedOperation for ExtremumOperator {
             .collect::<Vec<_>>()
             .join(", ");
         format!("{} γ[{}]", op_string, group_cols)
+    }
+
+    fn over_columns(&self) -> Vec<usize> {
+        vec![self.over]
     }
 }
 

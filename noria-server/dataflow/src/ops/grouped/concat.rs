@@ -231,6 +231,16 @@ impl GroupedOperation for GroupConcat {
             fields, self.separator, group_cols
         )
     }
+
+    fn over_columns(&self) -> Vec<usize> {
+        self.components
+            .iter()
+            .filter_map(|c| match *c {
+                TextComponent::Column(c) => Some(c),
+                _ => None,
+            })
+            .collect::<Vec<_>>()
+    }
 }
 
 #[cfg(test)]
