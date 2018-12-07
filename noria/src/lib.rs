@@ -200,17 +200,6 @@ pub mod builders {
 /// Types used when debugging Noria.
 pub mod debug;
 
-/// Marker for a handle that has its own connection to Noria.
-///
-/// Such a handle can freely be sent between threads.
-pub struct ExclusiveConnection;
-
-/// Marker for a handle that shares its underlying connection with other handles owned by the same
-/// thread.
-///
-/// This kind of handle can only be used on a single thread.
-pub struct SharedConnection;
-
 /// Represents the result of a recipe activation.
 #[derive(Clone, Debug, Deserialize, Serialize)]
 pub struct ActivationResult {
