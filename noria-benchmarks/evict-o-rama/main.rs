@@ -1,7 +1,7 @@
 extern crate noria;
 
+use futures::Future;
 use noria::ControllerBuilder;
-
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 static NUM_ARTICLES: usize = 10_000;
@@ -54,13 +54,14 @@ fn main() {
         let url = "http://pdos.csail.mit.edu";
         article
             .insert(vec![aid.into(), title.into(), url.into()])
+            .wait()
             .unwrap();
-        vote.insert(vec![aid.into(), 1.into()]).unwrap();
+        vote.insert(vec![aid.into(), 1.into()]).wait().unwrap();
     }
 
     println!("Reading articles...");
     for aid in 1..NUM_ARTICLES {
-        awvc.lookup(&[aid.into()], true).unwrap();
+        awvc.lookup(&[aid.into()], true).wait().unwrap();
     }
 
     println!("Casting votes...");
@@ -71,8 +72,10 @@ fn main() {
             .unwrap()
             .as_secs() as i64;
         aid = (aid + 1) % NUM_ARTICLES;
-        vote.insert(vec![(aid + 1).into(), uid.into()]).unwrap();
+        vote.insert(vec![(aid + 1).into(), uid.into()])
+            .wait()
+            .unwrap();
 
-        awvc.lookup(&[aid.into()], true).unwrap();
+        awvc.lookup(&[aid.into()], true).wait().unwrap();
     }
 }

@@ -7,6 +7,7 @@ extern crate rand;
 #[path = "../vote/clients/localsoup/graph.rs"]
 mod graph;
 
+use futures::Future;
 use noria::{DataType, DurabilityMode, PersistenceParameters, TableOperation};
 use rand::Rng;
 use std::{thread, time};
@@ -69,12 +70,13 @@ fn main() {
         eprintln!("==> prepopulating with {} articles", articles);
     }
     let mut a = g.graph.table("Article").unwrap();
-    a.batch_insert((0..articles).map(|i| {
+    a.perform_all((0..articles).map(|i| {
         vec![
             ((i + 1) as i32).into(),
             format!("Article #{}", i + 1).into(),
         ]
     }))
+    .wait()
     .unwrap();
     if args.is_present("verbose") {
         eprintln!("==> done with prepopulation");
@@ -90,18 +92,17 @@ fn main() {
     // start the benchmark
     let start = time::Instant::now();
     let mut n = 0;
-    v.batch_insert_then_wait((0..votes).step_by(batch).map(|_| {
+    for _ in (0..votes).step_by(batch) {
         n += batch;
-        (0..batch)
-            .map(|_| {
-                TableOperation::from(vec![
-                    DataType::from(rng.gen_range(0, articles) + 1),
-                    0.into(),
-                ])
-            })
-            .collect()
-    }))
-    .unwrap();
+        v.perform_all((0..batch).map(|_| {
+            TableOperation::from(vec![
+                DataType::from(rng.gen_range(0, articles) + 1),
+                0.into(),
+            ])
+        }))
+        .wait()
+        .unwrap();
+    }
     let took = start.elapsed();
 
     // all done!

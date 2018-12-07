@@ -1,6 +1,7 @@
 use chrono::naive::NaiveDate;
 use chrono::naive::NaiveDateTime;
 use chrono::naive::NaiveTime;
+use futures::Future;
 use std::fs::File;
 use std::io::{BufRead, BufReader};
 use std::str::FromStr;
@@ -19,7 +20,7 @@ macro_rules! dur_to_fsec {
 }
 
 fn populate(backend: &mut Backend, name: &'static str, mut records: Vec<Vec<DataType>>) -> usize {
-    let mut mutator = backend.g.table(name).unwrap().into_exclusive().unwrap();
+    let mut mutator = backend.g.table(name).unwrap();
 
     let i = records.len();
 
@@ -28,7 +29,7 @@ fn populate(backend: &mut Backend, name: &'static str, mut records: Vec<Vec<Data
 
         let i = records.len();
         for r in records.drain(..) {
-            mutator.insert(r).unwrap();
+            mutator.insert(r).wait().unwrap();
         }
 
         let dur = dur_to_fsec!(start.elapsed());

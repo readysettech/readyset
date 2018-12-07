@@ -1,6 +1,7 @@
 #[macro_use]
 extern crate clap;
 
+use futures::Future;
 use noria::{ControllerBuilder, DataType, LocalAuthority, LocalControllerHandle, ReuseConfigType};
 use std::collections::HashMap;
 use std::fs::File;
@@ -55,7 +56,7 @@ impl Backend {
 
         let i = records.len();
         for r in records.drain(..) {
-            mutator.insert(r).unwrap();
+            mutator.insert(r).wait().unwrap();
         }
 
         let dur = dur_to_fsec!(start.elapsed());
@@ -288,7 +289,7 @@ fn main() {
         let leaf = format!("post_count");
         let mut getter = backend.g.view(&leaf).unwrap();
         for author in 0..nusers / 4 {
-            getter.lookup(&[author.into()], false).unwrap();
+            getter.lookup(&[author.into()], false).wait().unwrap();
         }
     }
 
@@ -305,7 +306,7 @@ fn main() {
             let leaf = format!("post_count_u{}", i);
             let mut getter = backend.g.view(&leaf).unwrap();
             for author in 0..nusers / 4 {
-                getter.lookup(&[author.into()], false).unwrap();
+                getter.lookup(&[author.into()], false).wait().unwrap();
             }
         }
 
@@ -327,7 +328,7 @@ fn main() {
             let mut getter = backend.g.view(&leaf).unwrap();
             let start = time::Instant::now();
             for author in 0..nusers {
-                getter.lookup(&[author.into()], true).unwrap();
+                getter.lookup(&[author.into()], true).wait().unwrap();
             }
             dur += start.elapsed();
         }

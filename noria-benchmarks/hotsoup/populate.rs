@@ -4,6 +4,7 @@ use std::path::Path;
 use std::time;
 
 use super::Backend;
+use futures::Future;
 use noria::{DataType, Table};
 
 const NANOS_PER_SEC: u64 = 1_000_000_000;
@@ -18,7 +19,7 @@ fn do_put<'a>(mutator: &'a mut Table, tx: bool) -> Box<FnMut(Vec<DataType>) + 'a
     match tx {
         //true => Box::new(move |v| assert!(mutator.transactional.insert(v, Token::empty()).is_ok())),
         true => unimplemented!(),
-        false => Box::new(move |v| assert!(mutator.insert(v).is_ok())),
+        false => Box::new(move |v| assert!(mutator.insert(v).wait().is_ok())),
     }
 }
 

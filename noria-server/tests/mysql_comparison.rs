@@ -2,12 +2,14 @@
 
 extern crate backtrace;
 extern crate diff;
+extern crate futures;
 extern crate mysql;
 extern crate noria_server;
 #[macro_use]
 extern crate serde_derive;
 extern crate toml;
 
+use futures::Future;
 use mysql::OptsBuilder;
 use mysql::Params;
 
@@ -243,10 +245,11 @@ fn compare_results(mysql: &Vec<Vec<String>>, soup: &Vec<Vec<String>>) -> Option<
     soup.sort();
 
     // TODO: Remove hack to drop key column from Soup output.
-    if mysql.len() == soup.len() && mysql
-        .iter()
-        .zip(soup.iter())
-        .all(|(m, s)| m == s || m[..] == s[..(s.len() - 1)])
+    if mysql.len() == soup.len()
+        && mysql
+            .iter()
+            .zip(soup.iter())
+            .all(|(m, s)| m == s || m[..] == s[..(s.len() - 1)])
     {
         return None;
     }
@@ -289,7 +292,7 @@ fn check_query(
                 .enumerate()
                 .map(|(i, v)| table.types[i].make_datatype(v))
                 .collect();
-            mutator.insert(row).unwrap();
+            mutator.insert(row).wait().unwrap();
         }
     }
 
@@ -299,7 +302,7 @@ fn check_query(
 
     for (i, query_parameter) in query.values.iter().enumerate() {
         let query_param = query.types[0].make_datatype(&query_parameter[0]);
-        let query_results = getter.lookup(&[query_param], true).unwrap();
+        let query_results = getter.lookup(&[query_param], true).wait().unwrap();
 
         let target_results = &target[&i.to_string()];
         let query_results: Vec<Vec<String>> = query_results
@@ -323,7 +326,7 @@ fn check_query(
                 return Err(format!(
                     "MySQL and Soup results do not match for ? = {:?}\n{}",
                     query_parameter, diff
-                ))
+                ));
             }
             None => {}
         }

@@ -5,14 +5,13 @@ mod populate;
 extern crate clap;
 
 use crate::parameters::SampleKeys;
+use futures::Future;
+use noria::{ControllerBuilder, LocalAuthority, LocalControllerHandle};
 use rand::Rng;
 use std::collections::HashMap;
-use std::{thread, time};
-
 use std::sync::{Arc, Barrier};
 use std::thread::JoinHandle;
-
-use noria::{ControllerBuilder, LocalAuthority, LocalControllerHandle};
+use std::{thread, time};
 
 pub struct Backend {
     r: String,
@@ -161,9 +160,7 @@ impl Backend {
         let mut g = self
             .g
             .view(query_name)
-            .expect(&format!("no node for {}!", query_name))
-            .into_exclusive()
-            .unwrap();
+            .expect(&format!("no node for {}!", query_name));
         let query_name = String::from(query_name);
 
         let num = ((keys.keys_size(&query_name) as f32) * read_scale) as usize;
@@ -174,7 +171,7 @@ impl Backend {
 
             let start = time::Instant::now();
             for i in 0..num {
-                match g.lookup(&params[i..(i + 1)], true) {
+                match g.lookup(&params[i..(i + 1)], true).wait() {
                     Err(_) => continue,
                     Ok(datas) => {
                         if datas.len() > 0 {
@@ -204,8 +201,8 @@ impl Backend {
 }
 
 fn main() {
-    use clap::{App, Arg};
     use crate::populate::*;
+    use clap::{App, Arg};
 
     let matches = App::new("tpc_w")
         .version("0.1")
@@ -401,7 +398,7 @@ fn main() {
             let populated = backend.size(nq);
             let total = keys.key_space(nq);
             let ratio = (populated as f32) / (total as f32);
-        
+
             println!(
                 "{}: {} of {} keys populated ({})",
                 nq,

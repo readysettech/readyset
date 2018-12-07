@@ -1,5 +1,6 @@
 #[macro_use]
 extern crate clap;
+extern crate futures;
 extern crate hdrhistogram;
 extern crate itertools;
 extern crate noria;
@@ -14,6 +15,7 @@ use std::thread;
 use std::time::{Duration, Instant};
 
 use clap::{App, Arg};
+use futures::Future;
 use hdrhistogram::Histogram;
 use itertools::Itertools;
 use zookeeper::ZooKeeper;
@@ -84,7 +86,7 @@ fn populate(g: &mut LocalControllerHandle<ZookeeperAuthority>, rows: i64, skewed
         .into_iter()
         .for_each(|chunk| {
             let rs: Vec<Vec<DataType>> = chunk.collect();
-            mutator.insert_all(rs).unwrap();
+            mutator.perform_all(rs).wait().unwrap();
         });
 }
 
@@ -133,7 +135,7 @@ fn perform_primary_reads(
     for i in row_ids {
         let id: DataType = DataType::BigInt(i);
         let start = Instant::now();
-        let rs = getter.lookup(&[id], true).unwrap();
+        let rs = getter.lookup(&[id], true).wait().unwrap();
         let elapsed = start.elapsed();
         let us = elapsed.as_secs() * 1_000_000 + elapsed.subsec_nanos() as u64 / 1_000;
         assert_eq!(rs.len(), 1);
@@ -166,7 +168,7 @@ fn perform_secondary_reads(
         let start = Instant::now();
         // Pick an arbitrary secondary index to use:
         let getter = &mut getters[i as usize % (indices - 1)];
-        let rs = getter.lookup(&[id], true).unwrap();
+        let rs = getter.lookup(&[id], true).wait().unwrap();
         let elapsed = start.elapsed();
         let us = elapsed.as_secs() * 1_000_000 + elapsed.subsec_nanos() as u64 / 1_000;
         if skewed {

@@ -1,4 +1,5 @@
 use crate::Backend;
+use futures::Future;
 use noria::DataType;
 
 pub fn create_users(backend: &mut Backend) {
@@ -49,7 +50,7 @@ pub fn create_users(backend: &mut Backend) {
 
     let mut mutator = backend.g.table("UserProfile").unwrap();
 
-    mutator.insert_all(users).unwrap();
+    mutator.perform_all(users).wait().unwrap();
 }
 
 pub fn create_papers(backend: &mut Backend) {
@@ -94,20 +95,20 @@ pub fn create_papers(backend: &mut Backend) {
     ];
 
     let mut mutator = backend.g.table("Paper").unwrap();
-    mutator.insert_all(papers).unwrap();
+    mutator.perform_all(papers).wait().unwrap();
 
     let mut mutator = backend.g.table("PaperVersion").unwrap();
-    mutator.insert_all(paper_versions).unwrap();
+    mutator.perform_all(paper_versions).wait().unwrap();
 }
 
 pub fn dump_papers(backend: &mut Backend, user: &str) {
     let mut get = backend.g.view(&format!("PaperList_u{}", user)).unwrap();
 
-    println!("{:?}", get.lookup(&[0.into()], true));
+    println!("{:?}", get.lookup(&[0.into()], true).wait());
 }
 
 pub fn dump_all_papers(backend: &mut Backend) {
     let mut get = backend.g.view("PaperList").unwrap();
 
-    println!("{:?}", get.lookup(&[0.into()], true));
+    println!("{:?}", get.lookup(&[0.into()], true).wait());
 }
