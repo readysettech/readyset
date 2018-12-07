@@ -210,11 +210,13 @@
 //!
 //! ```no_run
 //! # extern crate noria;
+//! # extern crate futures;
+//! # use futures::Future;
 //! # fn main() {
 //! # let zookeeper_addr = "";
-//! let mut db = noria::ControllerHandle::from_zk(zookeeper_addr).unwrap();
+//! let mut db = noria::SyncControllerHandle::from_zk(zookeeper_addr).unwrap();
 //! let mut article = db.table("article").unwrap();
-//! article.insert(vec![noria::DataType::from(1), "Hello world".into()]);
+//! article.insert(vec![noria::DataType::from(1), "Hello world".into()]).wait();
 //! # }
 //! ```
 //!
@@ -265,11 +267,13 @@
 //!
 //! ```no_run
 //! # extern crate noria;
+//! # extern crate futures;
+//! # use futures::Future;
 //! # fn main() {
 //! # let zookeeper_addr = "";
-//! # let mut db = noria::ControllerHandle::from_zk(zookeeper_addr).unwrap();
+//! # let mut db = noria::SyncControllerHandle::from_zk(zookeeper_addr).unwrap();
 //! let mut vote = db.table("vote").unwrap();
-//! vote.insert(vec![noria::DataType::from(1000), 1.into()]);
+//! vote.insert(vec![noria::DataType::from(1000), 1.into()]).wait();
 //! # }
 //! ```
 //!

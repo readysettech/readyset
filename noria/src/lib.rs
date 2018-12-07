@@ -25,9 +25,10 @@
 //! requires a nightly release of Rust to run for the time being.
 //!
 //! ```no_run
+//! # use futures::Future;
 //! # use noria::*;
 //! # let zookeeper_addr = "127.0.0.1:2181";
-//! let mut db = ControllerHandle::from_zk(zookeeper_addr).unwrap();
+//! let mut db = SyncControllerHandle::from_zk(zookeeper_addr).unwrap();
 //!
 //! // if this is the first time we interact with Noria, we must give it the schema
 //! db.install_recipe("
@@ -45,10 +46,11 @@
 //! let url = "https://pdos.csail.mit.edu";
 //! article
 //!     .insert(vec![aid.into(), title.into(), url.into()])
+//!     .wait()
 //!     .unwrap();
 //!
 //! // and then vote for it
-//! vote.insert(vec![aid.into(), 1.into()]).unwrap();
+//! vote.insert(vec![aid.into(), 1.into()]).wait().unwrap();
 //!
 //! // we can also declare views that we want want to query
 //! db.extend_recipe("
@@ -64,7 +66,7 @@
 //! let mut awvc = db.view("ArticleWithVoteCount").unwrap();
 //! // looking up article 42 should yield the article we inserted with a vote count of 1
 //! assert_eq!(
-//!     awvc.lookup(&[aid.into()], true).unwrap(),
+//!     awvc.lookup(&[aid.into()], true).wait().unwrap(),
 //!     vec![vec![DataType::from(aid), title.into(), url.into(), 1.into()]]
 //! );
 //! ```
