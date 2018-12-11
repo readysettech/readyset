@@ -167,5 +167,13 @@ fn main() {
         builder.log_with(log);
     }
 
-    builder.build(Arc::new(authority)).unwrap().wait();
+    let mut rt = tokio::runtime::Builder::new();
+    rt.name_prefix("worker-");
+    if let Some(threads) = None {
+        rt.core_threads(threads);
+    }
+    rt.build()
+        .unwrap()
+        .block_on_all(builder.build(Arc::new(authority)))
+        .unwrap();
 }

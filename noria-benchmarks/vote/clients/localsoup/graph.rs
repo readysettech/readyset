@@ -1,5 +1,5 @@
 use noria::{
-    self, ControllerBuilder, LocalAuthority, LocalControllerHandle, NodeIndex,
+    self, ControllerBuilder, LocalAuthority, LocalSyncControllerHandle, NodeIndex,
     PersistenceParameters,
 };
 
@@ -19,10 +19,10 @@ pub struct Graph {
     pub vote: NodeIndex,
     pub article: NodeIndex,
     pub end: NodeIndex,
-    pub graph: LocalControllerHandle<LocalAuthority>,
+    pub graph: LocalSyncControllerHandle<LocalAuthority>,
 }
 
-pub struct Setup {
+pub struct Builder {
     pub stupid: bool,
     pub partial: bool,
     pub sharding: Option<usize>,
@@ -30,9 +30,9 @@ pub struct Setup {
     pub threads: Option<usize>,
 }
 
-impl Default for Setup {
+impl Default for Builder {
     fn default() -> Self {
-        Setup {
+        Builder {
             stupid: false,
             partial: true,
             sharding: None,
@@ -42,8 +42,12 @@ impl Default for Setup {
     }
 }
 
-impl Setup {
-    pub fn make(&self, persistence_params: PersistenceParameters) -> Graph {
+impl Builder {
+    pub fn build(
+        &self,
+        rt: Option<tokio::runtime::Runtime>,
+        persistence_params: PersistenceParameters,
+    ) -> Graph {
         // XXX: why isn't PersistenceParameters inside self?
         let mut g = ControllerBuilder::default();
         if !self.partial {
@@ -57,7 +61,13 @@ impl Setup {
         if let Some(threads) = self.threads {
             g.set_threads(threads);
         }
-        let mut graph = g.build_local().unwrap();
+
+        let mut graph = if let Some(mut rt) = rt {
+            let lch = rt.block_on(g.build_local()).unwrap();
+            lch.to_sync(rt)
+        } else {
+            g.build_local_sync().unwrap()
+        };
 
         graph.install_recipe(RECIPE).unwrap();
         let inputs = graph.inputs().unwrap();

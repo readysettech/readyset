@@ -5,13 +5,13 @@ extern crate clap;
 #[macro_use]
 extern crate slog;
 
-use noria::{ControllerBuilder, LocalAuthority, LocalControllerHandle};
+use noria::{ControllerBuilder, LocalAuthority, LocalSyncControllerHandle};
 
 pub struct Backend {
     blacklist: Vec<String>,
     r: String,
     log: slog::Logger,
-    g: LocalControllerHandle<LocalAuthority>,
+    g: LocalSyncControllerHandle<LocalAuthority>,
 }
 
 fn make(blacklist: &str, sharding: bool, partial: bool) -> Box<Backend> {
@@ -40,7 +40,7 @@ fn make(blacklist: &str, sharding: bool, partial: bool) -> Box<Backend> {
     if !partial {
         b.disable_partial();
     }
-    let g = b.build_local().unwrap();
+    let g = b.build_local_sync().unwrap();
 
     //recipe.enable_reuse(reuse);
     Box::new(Backend {

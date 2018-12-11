@@ -21,7 +21,7 @@ use itertools::Itertools;
 use zookeeper::ZooKeeper;
 
 use noria::{
-    ControllerBuilder, DataType, DurabilityMode, LocalControllerHandle, PersistenceParameters,
+    ControllerBuilder, DataType, DurabilityMode, LocalSyncControllerHandle, PersistenceParameters,
     ZookeeperAuthority,
 };
 
@@ -56,7 +56,7 @@ fn build_graph(
     authority: Arc<ZookeeperAuthority>,
     persistence: PersistenceParameters,
     verbose: bool,
-) -> LocalControllerHandle<ZookeeperAuthority> {
+) -> LocalSyncControllerHandle<ZookeeperAuthority> {
     let mut builder = ControllerBuilder::default();
     if verbose {
         builder.log_with(noria::logger_pls());
@@ -64,10 +64,10 @@ fn build_graph(
 
     builder.set_persistence(persistence);
     builder.set_sharding(None);
-    builder.build(authority).unwrap()
+    builder.build_sync(authority).unwrap()
 }
 
-fn populate(g: &mut LocalControllerHandle<ZookeeperAuthority>, rows: i64, skewed: bool) {
+fn populate(g: &mut LocalSyncControllerHandle<ZookeeperAuthority>, rows: i64, skewed: bool) {
     let mut mutator = g.table("TableRow").unwrap();
 
     (0..rows)
@@ -92,7 +92,7 @@ fn populate(g: &mut LocalControllerHandle<ZookeeperAuthority>, rows: i64, skewed
 
 // Synchronously read `reads` times, where each read should trigger a full replay from the base.
 fn perform_reads(
-    g: &mut LocalControllerHandle<ZookeeperAuthority>,
+    g: &mut LocalSyncControllerHandle<ZookeeperAuthority>,
     reads: i64,
     rows: i64,
     skewed: bool,
@@ -126,7 +126,7 @@ fn perform_reads(
 
 // Reads every row with the primary key index.
 fn perform_primary_reads(
-    g: &mut LocalControllerHandle<ZookeeperAuthority>,
+    g: &mut LocalSyncControllerHandle<ZookeeperAuthority>,
     hist: &mut Histogram<u64>,
     row_ids: Vec<i64>,
 ) {
@@ -152,7 +152,7 @@ fn perform_primary_reads(
 
 // Reads each row from one of the secondary indices.
 fn perform_secondary_reads(
-    g: &mut LocalControllerHandle<ZookeeperAuthority>,
+    g: &mut LocalSyncControllerHandle<ZookeeperAuthority>,
     hist: &mut Histogram<u64>,
     rows: i64,
     row_ids: Vec<i64>,

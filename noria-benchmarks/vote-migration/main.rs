@@ -55,7 +55,7 @@ impl Reporter {
     }
 }
 
-fn one(s: &graph::Setup, skewed: bool, args: &clap::ArgMatches, w: Option<fs::File>) {
+fn one(s: &graph::Builder, skewed: bool, args: &clap::ArgMatches, w: Option<fs::File>) {
     let narticles = value_t_or_exit!(args, "narticles", usize);
     let runtime = time::Duration::from_secs(value_t_or_exit!(args, "runtime", u64));
     let migrate_after = time::Duration::from_secs(value_t_or_exit!(args, "migrate", u64));
@@ -70,7 +70,7 @@ fn one(s: &graph::Setup, skewed: bool, args: &clap::ArgMatches, w: Option<fs::Fi
 
     // make the graph!
     eprintln!("Setting up soup");
-    let mut g = s.make(persistence_params);
+    let mut g = s.build(None, persistence_params);
     eprintln!("Getting accessors");
     let mut articles = g.graph.table("Article").unwrap();
     let mut votes = g.graph.table("Vote").unwrap();
@@ -335,7 +335,7 @@ fn main() {
         .get_matches();
 
     // set config options
-    let mut s = graph::Setup::default();
+    let mut s = graph::Builder::default();
     s.sharding = args
         .value_of("shards")
         .map(|_| value_t_or_exit!(args, "shards", usize));

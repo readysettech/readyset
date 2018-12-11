@@ -1,5 +1,5 @@
 use crate::controller::sql::reuse::ReuseConfigType;
-use crate::controller::{self, ControllerConfig, LocalControllerHandle};
+use crate::controller::{self, ControllerConfig, LocalControllerHandle, LocalSyncControllerHandle};
 use dataflow::PersistenceParameters;
 use failure;
 use noria::consensus::{Authority, LocalAuthority};
@@ -7,6 +7,7 @@ use slog;
 use std::net::IpAddr;
 use std::sync::Arc;
 use std::time;
+use tokio::prelude::*;
 
 /// Used to construct a controller.
 pub struct ControllerBuilder {
@@ -96,23 +97,49 @@ impl ControllerBuilder {
     pub fn build<A: Authority + 'static>(
         self,
         authority: Arc<A>,
-    ) -> Result<LocalControllerHandle<A>, failure::Error> {
-        controller::start_instance(
-            authority,
-            self.listen_addr,
-            self.config,
-            self.memory_limit,
-            self.memory_check_frequency,
-            self.log,
-        )
+    ) -> impl Future<Item = LocalControllerHandle<A>, Error = failure::Error> {
+        future::lazy(move || {
+            controller::start_instance(
+                authority,
+                self.listen_addr,
+                self.config,
+                self.memory_limit,
+                self.memory_check_frequency,
+                self.log,
+            )
+        })
+    }
+
+    /// Build a controller and an associated runtime.
+    pub fn build_sync<A: Authority + 'static>(
+        self,
+        authority: Arc<A>,
+    ) -> Result<LocalSyncControllerHandle<A>, failure::Error> {
+        let mut rt = tokio::runtime::Runtime::new()?;
+        let lch = rt.block_on(self.build(authority))?;
+        Ok(LocalSyncControllerHandle { lch, rt: Some(rt) })
     }
 
     /// Build a local controller, and return a ControllerHandle to provide access to it.
-    pub fn build_local(self) -> Result<LocalControllerHandle<LocalAuthority>, failure::Error> {
+    pub fn build_local(
+        self,
+    ) -> impl Future<Item = LocalControllerHandle<LocalAuthority>, Error = failure::Error> {
         #[allow(unused_mut)]
-        let mut lch = self.build(Arc::new(LocalAuthority::new()))?;
-        #[cfg(test)]
-        lch.wait_until_ready();
-        Ok(lch)
+        self.build(Arc::new(LocalAuthority::new()))
+            .and_then(|mut lch| {
+                #[cfg(test)]
+                return lch.ready();
+                #[cfg(not(test))]
+                Ok(lch)
+            })
+    }
+
+    /// Build a local controller and an associated runtime.
+    pub fn build_local_sync(
+        self,
+    ) -> Result<LocalSyncControllerHandle<LocalAuthority>, failure::Error> {
+        let mut rt = tokio::runtime::Runtime::new()?;
+        let lch = rt.block_on(self.build_local())?;
+        Ok(LocalSyncControllerHandle { lch, rt: Some(rt) })
     }
 }

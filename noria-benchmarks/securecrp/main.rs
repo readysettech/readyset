@@ -5,14 +5,16 @@ extern crate slog;
 
 mod test_populate;
 
-use noria::{ControllerBuilder, DataType, LocalAuthority, LocalControllerHandle, ReuseConfigType};
+use noria::{
+    ControllerBuilder, DataType, LocalAuthority, LocalSyncControllerHandle, ReuseConfigType,
+};
 use std::collections::HashMap;
 use std::fs::File;
 use std::io::Write;
 use std::{thread, time};
 
 pub struct Backend {
-    g: LocalControllerHandle<LocalAuthority>,
+    g: LocalSyncControllerHandle<LocalAuthority>,
 }
 
 impl Backend {
@@ -35,7 +37,7 @@ impl Backend {
             _ => panic!("reuse configuration not supported"),
         }
 
-        let g = cb.build_local().unwrap();
+        let g = cb.build_local_sync().unwrap();
 
         Backend { g: g }
     }

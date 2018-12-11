@@ -373,7 +373,7 @@ mod coordination;
 mod integration;
 
 pub use crate::controller::sql::reuse::ReuseConfigType;
-pub use crate::controller::{ControllerBuilder, LocalControllerHandle};
+pub use crate::controller::{ControllerBuilder, LocalControllerHandle, LocalSyncControllerHandle};
 pub use dataflow::{DurabilityMode, PersistenceParameters};
 pub use noria::consensus::LocalAuthority;
 pub use noria::*;

@@ -10,8 +10,33 @@ use std::collections::HashMap;
 use std::ops::{Deref, DerefMut};
 use std::sync::Arc;
 use stream_cancel::Trigger;
-use tokio;
 use tokio_io_pool;
+
+/// A handle to a local controller that also wraps the tokio runtime.
+pub struct LocalSyncControllerHandle<A: Authority + 'static> {
+    pub(crate) lch: LocalControllerHandle<A>,
+    pub(crate) rt: Option<tokio::runtime::Runtime>,
+}
+
+impl<A: Authority> Deref for LocalSyncControllerHandle<A> {
+    type Target = LocalControllerHandle<A>;
+    fn deref(&self) -> &Self::Target {
+        &self.lch
+    }
+}
+
+impl<A: Authority> DerefMut for LocalSyncControllerHandle<A> {
+    fn deref_mut(&mut self) -> &mut Self::Target {
+        &mut self.lch
+    }
+}
+
+impl<A: Authority> Drop for LocalSyncControllerHandle<A> {
+    fn drop(&mut self) {
+        self.lch.shutdown();
+        self.rt.take().unwrap().shutdown_on_idle().wait().unwrap();
+    }
+}
 
 /// A handle to a controller that is running in the same process as this one.
 pub struct LocalControllerHandle<A: Authority + 'static> {
@@ -19,8 +44,8 @@ pub struct LocalControllerHandle<A: Authority + 'static> {
     #[allow(dead_code)]
     event_tx: Option<futures::sync::mpsc::UnboundedSender<Event>>,
     kill: Option<Trigger>,
-    runtime: Option<tokio::runtime::Runtime>,
     iopool: Option<tokio_io_pool::Runtime>,
+    executor: tokio::runtime::TaskExecutor,
 }
 
 impl<A: Authority> Deref for LocalControllerHandle<A> {
@@ -47,7 +72,18 @@ impl<A: Authority> LocalControllerHandle<A> {
         F::Item: Send,
         F::Error: Send,
     {
-        self.runtime.as_mut().unwrap().block_on(fut)
+        let (tx, rx) = futures::sync::oneshot::channel();
+        self.executor
+            .spawn(fut.then(move |r| tx.send(r)).map_err(|_| unreachable!()));
+        rx.wait().expect("controller handle went away")
+    }
+
+    /// Bundle up the given runtime with this controller handle.
+    pub fn to_sync(self, rt: tokio::runtime::Runtime) -> LocalSyncControllerHandle<A> {
+        LocalSyncControllerHandle {
+            lch: self,
+            rt: Some(rt),
+        }
     }
 
     /// Enumerate all known base tables.
@@ -113,39 +149,38 @@ impl<A: Authority> LocalControllerHandle<A> {
     }
 }
 
-impl<A: Authority> LocalControllerHandle<A> {
+impl<A: Authority + 'static> LocalControllerHandle<A> {
     pub(super) fn new(
         authority: Arc<A>,
         event_tx: futures::sync::mpsc::UnboundedSender<Event>,
         kill: Trigger,
-        mut rt: tokio::runtime::Runtime,
         io: tokio_io_pool::Runtime,
-    ) -> Self {
-        LocalControllerHandle {
-            c: Some(rt.block_on(ControllerHandle::make(authority)).unwrap()),
+    ) -> impl Future<Item = Self, Error = failure::Error> {
+        ControllerHandle::make(authority).map(move |c| LocalControllerHandle {
+            c: Some(c),
             event_tx: Some(event_tx),
             kill: Some(kill),
-            runtime: Some(rt),
             iopool: Some(io),
-        }
+            executor: unimplemented!(),
+        })
     }
 
     #[cfg(test)]
-    pub(crate) fn wait_until_ready(&mut self) {
+    pub(crate) fn ready(self) -> impl Future<Item = Self, Error = ()> {
         let snd = self.event_tx.clone().unwrap();
-        loop {
+        future::loop_fn((self, snd), |(this, mut snd)| {
             let (tx, rx) = futures::sync::oneshot::channel();
             snd.unbounded_send(Event::IsReady(tx)).unwrap();
-            match rx.wait() {
-                Ok(true) => break,
-                Ok(false) => {
-                    use std::{thread, time};
-                    thread::sleep(time::Duration::from_millis(50));
-                    continue;
+            rx.and_then(|v| {
+                if v {
+                    future::Loop::Break(this)
+                } else {
+                    use std::time;
+                    tokio::timer::Delay::new(time::Instant::now() + time::Duration::from_millis(50))
+                        .map(move |_| Loop::Continue((this, snd)))
                 }
-                Err(e) => unreachable!("{:?}", e),
-            }
-        }
+            })
+        })
     }
 
     #[cfg(test)]
@@ -220,26 +255,12 @@ impl<A: Authority> LocalControllerHandle<A> {
         })
     }
 
-    /// Inform the local instance that it should exit, and wait for that to happen
-    pub fn shutdown_and_wait(&mut self) {
-        if let Some(rt) = self.runtime.take() {
+    /// Inform the local instance that it should exit.
+    pub fn shutdown(&mut self) {
+        if let Some(io) = self.iopool.take() {
             drop(self.c.take());
             drop(self.event_tx.take());
             drop(self.kill.take());
-            rt.shutdown_on_idle().wait().unwrap();
-        }
-        if let Some(io) = self.iopool.take() {
-            io.shutdown_on_idle();
-        }
-    }
-
-    /// Wait for associated local instance to exit (presumably with an error).
-    pub fn wait(mut self) {
-        drop(self.event_tx.take());
-        if let Some(rt) = self.runtime.take() {
-            rt.shutdown_on_idle().wait().unwrap();
-        }
-        if let Some(io) = self.iopool.take() {
             io.shutdown_on_idle();
         }
     }
@@ -247,7 +268,10 @@ impl<A: Authority> LocalControllerHandle<A> {
 
 impl<A: Authority> Drop for LocalControllerHandle<A> {
     fn drop(&mut self) {
-        self.shutdown_and_wait();
+        drop(self.event_tx.take());
+        if let Some(io) = self.iopool.take() {
+            io.shutdown_on_idle();
+        }
     }
 }
 

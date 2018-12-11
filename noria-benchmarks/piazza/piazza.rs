@@ -2,7 +2,9 @@
 extern crate clap;
 
 use futures::Future;
-use noria::{ControllerBuilder, DataType, LocalAuthority, LocalControllerHandle, ReuseConfigType};
+use noria::{
+    ControllerBuilder, DataType, LocalAuthority, LocalSyncControllerHandle, ReuseConfigType,
+};
 use std::collections::HashMap;
 use std::fs::File;
 use std::io::Write;
@@ -14,7 +16,7 @@ mod populate;
 use crate::populate::{Populate, NANOS_PER_SEC};
 
 pub struct Backend {
-    g: LocalControllerHandle<LocalAuthority>,
+    g: LocalSyncControllerHandle<LocalAuthority>,
 }
 
 #[derive(PartialEq)]
@@ -44,7 +46,7 @@ impl Backend {
 
         cb.log_with(blender_log);
 
-        let g = cb.build_local().unwrap();
+        let g = cb.build_local_sync().unwrap();
 
         Backend { g: g }
     }

@@ -67,7 +67,7 @@ mod readers;
 mod schema;
 
 pub use crate::controller::builder::ControllerBuilder;
-pub use crate::controller::handle::LocalControllerHandle;
+pub use crate::controller::handle::{LocalControllerHandle, LocalSyncControllerHandle};
 pub use crate::controller::migrate::Migration;
 pub use noria::builders::*;
 pub use noria::prelude::*;
@@ -188,7 +188,7 @@ impl fmt::Debug for Event {
 }
 
 /// Start up a new instance and return a handle to it. Dropping the handle will stop the
-/// controller.
+/// controller. Make sure that this method is run while on a runtime.
 fn start_instance<A: Authority + 'static>(
     authority: Arc<A>,
     listen_addr: IpAddr,
@@ -196,14 +196,7 @@ fn start_instance<A: Authority + 'static>(
     memory_limit: Option<usize>,
     memory_check_frequency: Option<Duration>,
     log: slog::Logger,
-) -> Result<LocalControllerHandle<A>, failure::Error> {
-    let mut rt = tokio::runtime::Builder::new();
-    rt.name_prefix("worker-");
-    if let Some(threads) = config.threads {
-        rt.core_threads(threads);
-    }
-    let mut rt = rt.build().unwrap();
-
+) -> impl Future<Item = LocalControllerHandle<A>, Error = failure::Error> {
     let mut pool = tokio_io_pool::Builder::default();
     pool.name_prefix("io-worker-");
     if let Some(threads) = config.threads {
@@ -215,32 +208,39 @@ fn start_instance<A: Authority + 'static>(
     let (trigger, valve) = Valve::new();
     let (tx, rx) = futures::sync::mpsc::unbounded();
 
-    // we'll be listening for a couple of different types of events:
-    // first, events from workers
-    let wport = tokio::net::TcpListener::bind(&SocketAddr::new(listen_addr, 0))?;
-    let waddr = wport.local_addr()?;
-    rt.spawn(listen_internal(&valve, log.clone(), tx.clone(), wport));
+    let (dtx, drx) = futures::sync::mpsc::unbounded();
+    let v = try {
+        // we'll be listening for a couple of different types of events:
+        // first, events from workers
+        let wport = tokio::net::TcpListener::bind(&SocketAddr::new(listen_addr, 0))?;
+        let waddr = wport.local_addr()?;
+        // second, messages from the "real world"
+        let xport = tokio::net::TcpListener::bind(&SocketAddr::new(listen_addr, 6033))
+            .or_else(|_| tokio::net::TcpListener::bind(&SocketAddr::new(listen_addr, 0)))?;
+        let xaddr = xport.local_addr()?;
+        // and third, domain control traffic. this traffic is a little special, since we may need to
+        // receive from it while handling control messages (e.g., for replay acks). because of this, we
+        // give it its own channel.
+        let cport = tokio::net::TcpListener::bind(&SocketAddr::new(listen_addr, 0))?;
+        let caddr = cport.local_addr()?;
+        ((wport, waddr), (xport, xaddr), (cport, caddr))
+    };
+    let ((wport, waddr), (xport, xaddr), (cport, caddr)) = match v {
+        Ok(v) => v,
+        Err(e) => return future::Either::A(future::err(e)),
+    };
 
-    // second, messages from the "real world"
-    let xport = tokio::net::TcpListener::bind(&SocketAddr::new(listen_addr, 6033))
-        .or_else(|_| tokio::net::TcpListener::bind(&SocketAddr::new(listen_addr, 0)))?;
-    let xaddr = xport.local_addr()?;
+    // spawn all of those
+    tokio::spawn(listen_internal(&valve, log.clone(), tx.clone(), wport));
     let ext_log = log.clone();
-    rt.spawn(
+    tokio::spawn(
         listen_external(tx.clone(), valve.wrap(xport.incoming()), authority.clone()).map_err(
             move |e| {
                 warn!(ext_log, "external request failed: {:?}", e);
             },
         ),
     );
-
-    // and third, domain control traffic. this traffic is a little special, since we may need to
-    // receive from it while handling control messages (e.g., for replay acks). because of this, we
-    // give it its own channel.
-    let (dtx, drx) = futures::sync::mpsc::unbounded();
-    let cport = tokio::net::TcpListener::bind(&SocketAddr::new(listen_addr, 0))?;
-    let caddr = cport.local_addr()?;
-    rt.spawn(listen_domain_replies(
+    tokio::spawn(listen_domain_replies(
         &valve,
         log.clone(),
         dtx.clone(),
@@ -267,7 +267,7 @@ fn start_instance<A: Authority + 'static>(
     let (worker_tx, worker_rx) = futures::sync::mpsc::unbounded();
 
     // first, a loop that just forwards to the appropriate place
-    rt.spawn(
+    tokio::spawn(
         rx.map_err(|_| unreachable!())
             .fold((ctrl_tx, worker_tx), move |(ctx, wtx), e| {
                 let fw = move |e, to_ctrl| {
@@ -305,7 +305,7 @@ fn start_instance<A: Authority + 'static>(
     {
         let mut worker_state = InstanceState::Pining;
         let log = log.clone();
-        rt.spawn(
+        tokio::spawn(
             worker_rx
                 .map_err(|_| unreachable!())
                 .for_each(move |e| {
@@ -440,7 +440,7 @@ fn start_instance<A: Authority + 'static>(
         // state that this instance will take if it becomes the controller
         let mut campaign = Some(campaign);
         let mut drx = Some(drx);
-        rt.spawn(
+        tokio::spawn(
             ctrl_rx
                 .map_err(|_| unreachable!())
                 .fold(None, move |mut controller: Option<ControllerInner>, e| {
@@ -541,9 +541,7 @@ fn start_instance<A: Authority + 'static>(
         );
     }
 
-    Ok(LocalControllerHandle::new(
-        authority, tx, trigger, rt, iopool,
-    ))
+    future::Either::B(LocalControllerHandle::new(authority, tx, trigger, iopool))
 }
 
 /*

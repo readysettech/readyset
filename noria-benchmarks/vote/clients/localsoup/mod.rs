@@ -1,34 +1,33 @@
-use crate::clients::{Parameters, VoteClient, VoteClientConstructor};
+use crate::clients::{Parameters, VoteClient};
 use clap;
 use futures::Future;
 use noria::{self, DataType};
 use std::path::PathBuf;
-use std::thread;
+use std::sync::Arc;
 use std::time;
 
 pub(crate) mod graph;
 
-pub(crate) struct Client {
+#[derive(Clone)]
+pub(crate) struct LocalNoria {
+    g: Arc<graph::Graph>,
     r: noria::View,
     #[allow(dead_code)]
     w: noria::Table,
 }
 
-pub(crate) struct Constructor(graph::Graph, bool);
+impl VoteClient for LocalNoria {
+    type NewFuture = Box<Future<Item = Self, Error = ()>>;
+    type ReadFuture = Box<Future<Item = (), Error = noria::ViewError>>;
+    type WriteFuture = Box<Future<Item = (), Error = noria::TableError>>;
 
-// this is *only* safe because the only method we call is `duplicate` which is safe to call from
-// other threads.
-unsafe impl Send for Constructor {}
-
-impl VoteClientConstructor for Constructor {
-    type Instance = Client;
-
-    fn new(params: &Parameters, args: &clap::ArgMatches) -> Self {
+    fn spawn(params: &Parameters, args: &clap::ArgMatches) -> Self::NewFuture {
         use noria::{DurabilityMode, PersistenceParameters};
 
         assert!(params.prime);
 
         let verbose = args.is_present("verbose");
+        let fudge = args.is_present("fudge-rpcs");
 
         let mut persistence = PersistenceParameters::default();
         persistence.mode = if args.is_present("durability") {
@@ -49,13 +48,15 @@ impl VoteClientConstructor for Constructor {
             .and_then(|p| Some(PathBuf::from(p)));
 
         // setup db
-        let mut s = graph::Setup::default();
+        let mut s = graph::Builder::default();
         s.logging = verbose;
         s.sharding = match value_t_or_exit!(args, "shards", usize) {
             0 => None,
             x => Some(x),
         };
         s.stupid = args.is_present("stupid");
+
+        // TODO: reuse pool
         let mut g = s.make(persistence);
 
         // prepopulate
@@ -63,68 +64,67 @@ impl VoteClientConstructor for Constructor {
             println!("Prepopulating with {} articles", params.articles);
         }
         let mut a = g.graph.table("Article").unwrap();
-        a.perform_all((0..params.articles).map(|i| {
-            vec![
-                ((i + 1) as i32).into(),
-                format!("Article #{}", i + 1).into(),
-            ]
-        }))
-        .wait()
-        .unwrap();
-        if verbose {
-            println!("Done with prepopulation");
+        if fudge {
+            a.i_promise_dst_is_same_process();
         }
 
-        let fudge = args.is_present("fudge-rpcs");
+        Box::new(
+            a.perform_all((0..params.articles).map(|i| {
+                vec![
+                    ((i + 1) as i32).into(),
+                    format!("Article #{}", i + 1).into(),
+                ]
+            }))
+            .and_then(move |_| {
+                if verbose {
+                    println!("Done with prepopulation");
+                }
 
-        // allow writes to propagate
-        thread::sleep(time::Duration::from_secs(1));
+                // TODO: allow writes to propagate
 
-        Constructor(g, fudge)
+                let r = g.graph.view("ArticleWithVoteCount").unwrap();
+                let mut w = g.graph.table("Vote").unwrap();
+                if fudge {
+                    // fudge write rpcs by sending just the pointer over tcp
+                    w.i_promise_dst_is_same_process();
+                }
+
+                LocalNoria {
+                    g: Arc::new(g),
+                    r,
+                    w,
+                }
+            }),
+        )
     }
 
-    fn make(&mut self) -> Self::Instance {
-        let r = self.0.graph.view("ArticleWithVoteCount").unwrap();
-        let mut w = self.0.graph.table("Vote").unwrap();
-        if self.1 {
-            // fudge write rpcs by sending just the pointer over tcp
-            w.i_promise_dst_is_same_process();
-        }
-        Client { r, w }
-    }
-
-    fn spawns_threads() -> bool {
-        true
-    }
-}
-
-impl VoteClient for Client {
-    fn handle_writes(&mut self, ids: &[i32]) {
+    fn handle_writes(&mut self, ids: &[i32]) -> Self::WriteFuture {
         let data: Vec<Vec<DataType>> = ids
             .into_iter()
             .map(|&article_id| vec![(article_id as usize).into(), 0.into()])
             .collect();
 
-        self.w.perform_all(data).wait().unwrap();
+        Box::new(self.w.perform_all(data))
     }
 
-    fn handle_reads(&mut self, ids: &[i32]) {
+    fn handle_reads(&mut self, ids: &[i32]) -> Self::ReadFuture {
         let arg = ids
             .into_iter()
             .map(|&article_id| vec![(article_id as usize).into()])
             .collect();
 
-        let rows = self
-            .r
-            .multi_lookup(arg, true)
-            .wait()
-            .unwrap()
-            .into_iter()
-            .map(|_rows| {
-                // TODO
-                //assert_eq!(rows.map(|rows| rows.len()), Ok(1));
-            })
-            .count();
-        assert_eq!(rows, ids.len());
+        let len = ids.len();
+        Box::new(
+            self.r
+                .multi_lookup(arg, true)
+                .map(|rows| {
+                    // TODO
+                    //assert_eq!(rows.map(|rows| rows.len()), Ok(1));
+                    rows.len()
+                })
+                .map(move |rows| {
+                    assert_eq!(rows, len);
+                }),
+        )
     }
 }

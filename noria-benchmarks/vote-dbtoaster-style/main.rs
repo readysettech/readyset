@@ -57,13 +57,13 @@ fn main() {
     persistence.log_prefix = "vote-dbtoaster".to_string();
 
     // setup db
-    let mut s = graph::Setup::default();
+    let mut s = graph::Builder::default();
     s.logging = args.is_present("verbose");
     s.sharding = None;
     s.stupid = false;
     s.partial = false;
     s.threads = Some(1);
-    let mut g = s.make(persistence);
+    let mut g = s.build(None, persistence);
 
     // prepopulate
     if args.is_present("verbose") {

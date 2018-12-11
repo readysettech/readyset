@@ -39,7 +39,7 @@ fn main() {
     // test passes again.
     //builder.disable_partial();
 
-    let mut blender = builder.build_local().unwrap();
+    let mut blender = builder.build_local_sync().unwrap();
     blender.install_recipe(sql).unwrap();
 
     // Get mutators and getter.

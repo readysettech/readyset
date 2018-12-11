@@ -4,17 +4,17 @@
 #[macro_use]
 extern crate clap;
 
-use futures_cpupool::CpuPool;
 use hdrhistogram::Histogram;
 use rand::Rng;
 use std::cell::RefCell;
 use std::fs;
+use std::mem;
 use std::sync::{atomic, Arc, Barrier, Mutex};
 use std::thread;
 use std::time;
+use tokio::prelude::*;
 
 thread_local! {
-    static CLIENT: RefCell<Option<Box<VoteClient>>> = RefCell::new(None);
     static SJRN_W: RefCell<Histogram<u64>> = RefCell::new(Histogram::new_with_bounds(10, 1_000_000, 4).unwrap());
     static SJRN_R: RefCell<Histogram<u64>> = RefCell::new(Histogram::new_with_bounds(10, 1_000_000, 4).unwrap());
     static RMT_W: RefCell<Histogram<u64>> = RefCell::new(Histogram::new_with_bounds(10, 1_000_000, 4).unwrap());
@@ -28,11 +28,11 @@ fn throughput(ops: usize, took: time::Duration) -> f64 {
 const MAX_BATCH_TIME_US: u32 = 1000;
 
 mod clients;
-use self::clients::{Parameters, VoteClient, VoteClientConstructor};
+use self::clients::{Parameters, VoteClient};
 
-fn run<CC>(global_args: &clap::ArgMatches, local_args: &clap::ArgMatches)
+fn run<C>(global_args: &clap::ArgMatches, local_args: &clap::ArgMatches)
 where
-    CC: VoteClientConstructor + Send + 'static,
+    C: VoteClient + Send + 'static,
 {
     // zipf takes ~66ns to generate a random number depending on the CPU,
     // so each load generator cannot reasonably generate much more than ~1M reqs/s.
@@ -82,56 +82,45 @@ where
     let rmt_r_t = Arc::new(Mutex::new(hists.3));
     let finished = Arc::new(Barrier::new(nthreads + ngen));
 
-    let cc = Arc::new(Mutex::new(CC::new(&params, local_args)));
-    let pool = {
-        let ts = (
-            sjrn_w_t.clone(),
-            sjrn_r_t.clone(),
-            rmt_w_t.clone(),
-            rmt_r_t.clone(),
-            finished.clone(),
-        );
+    let ts = (
+        sjrn_w_t.clone(),
+        sjrn_r_t.clone(),
+        rmt_w_t.clone(),
+        rmt_r_t.clone(),
+        finished.clone(),
+    );
+    let mut rt = tokio::runtime::Builder::new()
+        .name_prefix("vote-")
+        .before_stop(move || {
+            SJRN_W
+                .with(|h| ts.0.lock().unwrap().add(&*h.borrow()))
+                .unwrap();
+            SJRN_R
+                .with(|h| ts.1.lock().unwrap().add(&*h.borrow()))
+                .unwrap();
+            RMT_W
+                .with(|h| ts.2.lock().unwrap().add(&*h.borrow()))
+                .unwrap();
+            RMT_R
+                .with(|h| ts.3.lock().unwrap().add(&*h.borrow()))
+                .unwrap();
+        })
+        .build()
+        .unwrap();
 
-        let cc = cc.clone();
-        futures_cpupool::Builder::new()
-            .pool_size(nthreads)
-            .name_prefix("client-")
-            .after_start(move || {
-                CLIENT.with(|c| {
-                    *c.borrow_mut() = Some(Box::new(cc.lock().unwrap().make()));
-                })
-            })
-            .before_stop(move || {
-                SJRN_W
-                    .with(|h| ts.0.lock().unwrap().add(&*h.borrow()))
-                    .unwrap();
-                SJRN_R
-                    .with(|h| ts.1.lock().unwrap().add(&*h.borrow()))
-                    .unwrap();
-                RMT_W
-                    .with(|h| ts.2.lock().unwrap().add(&*h.borrow()))
-                    .unwrap();
-                RMT_R
-                    .with(|h| ts.3.lock().unwrap().add(&*h.borrow()))
-                    .unwrap();
-                // tokio relies heavily on TLS, and Runtime can't be dropped while TLS teardown is
-                // happening: https://gitter.im/tokio-rs/dev?at=5b96e0af7189ae6fdda687b6
-                // so, we drop it explicitly here.
-                CLIENT.with(|c| {
-                    *c.borrow_mut() = None;
-                });
-                ts.4.wait();
-            })
-            .create()
+    let handle: C = {
+        let local_args = local_args.clone();
+        // we know that we won't drop the original args until the runtime has exited
+        let local_args: clap::ArgMatches<'static> = unsafe { mem::transmute(local_args) };
+        rt.block_on(future::lazy(move || C::spawn(params, local_args)))
+            .unwrap()
     };
 
     let generators: Vec<_> = (0..ngen)
-        .map(|geni| {
-            let pool = pool.clone();
-            let finished = finished.clone();
+        .map(move |geni| {
+            let handle = handle.clone();
             let global_args = global_args.clone();
 
-            use std::mem;
             // we know that we won't drop the original args until the thread has exited
             let global_args: clap::ArgMatches<'static> = unsafe { mem::transmute(global_args) };
 
@@ -140,17 +129,15 @@ where
                 .spawn(move || {
                     let ops = if skewed {
                         run_generator(
-                            pool,
+                            handle,
                             zipf::ZipfDistribution::new(articles, 1.08).unwrap(),
-                            finished,
                             target,
                             global_args,
                         )
                     } else {
                         run_generator(
-                            pool,
+                            handle,
                             rand::distributions::Range::new(1, articles + 1),
-                            finished,
                             target,
                             global_args,
                         )
@@ -161,7 +148,7 @@ where
         })
         .collect();
 
-    drop(pool);
+    drop(handle);
     let mut ops = 0.0;
     let mut wops = 0.0;
     for gen in generators {
@@ -169,7 +156,7 @@ where
         ops += gen;
         wops += completed;
     }
-    drop(cc);
+    rt.shutdown_on_idle().wait().unwrap();
 
     // all done!
     println!("# generated ops/s: {:.2}", ops);
@@ -240,14 +227,14 @@ where
     );
 }
 
-fn run_generator<R>(
-    pool: CpuPool,
+fn run_generator<C, R>(
+    handle: C,
     id_rng: R,
-    finished: Arc<Barrier>,
     target: f64,
     global_args: clap::ArgMatches,
 ) -> (f64, f64)
 where
+    C: VoteClient,
     R: rand::distributions::Distribution<usize>,
 {
     let early_exit = !global_args.is_present("no-early-exit");
@@ -288,54 +275,49 @@ where
     use std::mem;
     let ndone: &'static atomic::AtomicUsize = unsafe { mem::transmute(&ndone) };
 
-    let enqueue = |queued: Vec<_>, mut keys: Vec<_>, write| {
-        move || -> Result<(), _> {
-            CLIENT.try_with(|c| {
-                let mut c = c.borrow_mut();
-                let client = c.as_mut().unwrap();
+    let enqueue = |client: &mut C, queued: Vec<_>, mut keys: Vec<_>, write| {
+        let n = keys.len();
+        let sent = time::Instant::now();
+        let fut = if write {
+            future::Either::A(client.handle_writes(&keys[..]))
+        } else {
+            // deduplicate requested keys, because not doing so would be silly
+            keys.sort_unstable();
+            keys.dedup();
+            future::Either::B(client.handle_reads(&keys[..]))
+        }
+        .and_then(move |_| {
+            let done = time::Instant::now();
+            ndone.fetch_add(n, atomic::Ordering::AcqRel);
 
-                let n = keys.len();
-                let sent = time::Instant::now();
-                if write {
-                    client.handle_writes(&keys[..]);
-                } else {
-                    // deduplicate requested keys, because not doing so would be silly
-                    keys.sort_unstable();
-                    keys.dedup();
-                    client.handle_reads(&keys[..]);
-                }
-                let done = time::Instant::now();
-                ndone.fetch_add(n, atomic::Ordering::AcqRel);
+            if sent.duration_since(start) > warmup {
+                let remote_t = done.duration_since(sent);
+                let rmt = if write { &RMT_W } else { &RMT_R };
+                let us = remote_t.as_secs() * 1_000_000 + remote_t.subsec_nanos() as u64 / 1_000;
+                rmt.with(|h| {
+                    let mut h = h.borrow_mut();
+                    if h.record(us).is_err() {
+                        let m = h.high();
+                        h.record(m).unwrap();
+                    }
+                });
 
-                if sent.duration_since(start) > warmup {
-                    let remote_t = done.duration_since(sent);
-                    let rmt = if write { &RMT_W } else { &RMT_R };
-                    let us =
-                        remote_t.as_secs() * 1_000_000 + remote_t.subsec_nanos() as u64 / 1_000;
-                    rmt.with(|h| {
+                let sjrn = if write { &SJRN_W } else { &SJRN_R };
+                for started in queued {
+                    let sjrn_t = done.duration_since(started);
+                    let us = sjrn_t.as_secs() * 1_000_000 + sjrn_t.subsec_nanos() as u64 / 1_000;
+                    sjrn.with(|h| {
                         let mut h = h.borrow_mut();
                         if h.record(us).is_err() {
                             let m = h.high();
                             h.record(m).unwrap();
                         }
                     });
-
-                    let sjrn = if write { &SJRN_W } else { &SJRN_R };
-                    for started in queued {
-                        let sjrn_t = done.duration_since(started);
-                        let us =
-                            sjrn_t.as_secs() * 1_000_000 + sjrn_t.subsec_nanos() as u64 / 1_000;
-                        sjrn.with(|h| {
-                            let mut h = h.borrow_mut();
-                            if h.record(us).is_err() {
-                                let m = h.high();
-                                h.record(m).unwrap();
-                            }
-                        });
-                    }
                 }
-            })
-        }
+            }
+        });
+
+        tokio::spawn(fut);
     };
 
     let mut worker_ops = None;
@@ -375,22 +357,22 @@ where
 
                 if !queued_w.is_empty() && now.duration_since(queued_w[0]) >= max_batch_time {
                     ops += queued_w.len();
-                    pool.spawn_fn(enqueue(
+                    enqueue(
+                        handle,
                         queued_w.split_off(0),
                         queued_w_keys.split_off(0),
                         true,
-                    ))
-                    .forget();
+                    );
                 }
 
                 if !queued_r.is_empty() && now.duration_since(queued_r[0]) >= max_batch_time {
                     ops += queued_r.len();
-                    pool.spawn_fn(enqueue(
+                    enqueue(
+                        handle,
                         queued_r.split_off(0),
                         queued_r_keys.split_off(0),
                         false,
-                    ))
-                    .forget();
+                    );
                 }
 
                 // since next_send = Some, we better have sent at least one batch!
@@ -452,8 +434,7 @@ where
 
     // need to drop the pool before waiting so that workers will exit
     // and thus hit the barrier
-    drop(pool);
-    finished.wait();
+    drop(handle);
     (gen, worker_ops.unwrap_or(0.0))
 }
 
@@ -702,13 +683,13 @@ fn main() {
         .get_matches();
 
     match args.subcommand() {
-        ("localsoup", Some(largs)) => run::<clients::localsoup::Constructor>(&args, largs),
-        ("netsoup", Some(largs)) => run::<clients::netsoup::Constructor>(&args, largs),
-        ("memcached", Some(largs)) => run::<clients::memcached::Constructor>(&args, largs),
-        ("mssql", Some(largs)) => run::<clients::mssql::Conf>(&args, largs),
-        ("mysql", Some(largs)) => run::<clients::mysql::Conf>(&args, largs),
-        ("hybrid", Some(largs)) => run::<clients::hybrid::Conf>(&args, largs),
-        ("null", Some(largs)) => run::<()>(&args, largs),
+        ("localsoup", Some(largs)) => run::<clients::localsoup::LocalNoria>(&args, largs),
+        //("netsoup", Some(largs)) => run::<clients::netsoup::Constructor>(&args, largs),
+        //("memcached", Some(largs)) => run::<clients::memcached::Constructor>(&args, largs),
+        //("mssql", Some(largs)) => run::<clients::mssql::Conf>(&args, largs),
+        //("mysql", Some(largs)) => run::<clients::mysql::Conf>(&args, largs),
+        //("hybrid", Some(largs)) => run::<clients::hybrid::Conf>(&args, largs),
+        //("null", Some(largs)) => run::<()>(&args, largs),
         (name, _) => eprintln!("unrecognized backend type '{}'", name),
     }
 }
