@@ -210,11 +210,13 @@
 //!
 //! ```no_run
 //! # extern crate noria;
+//! # extern crate tokio;
 //! # extern crate futures;
-//! # use futures::Future;
+//! use tokio::prelude::*;
 //! # fn main() {
 //! # let zookeeper_addr = "";
-//! let mut db = noria::SyncControllerHandle::from_zk(zookeeper_addr).unwrap();
+//! let mut rt = tokio::runtime::Runtime::new().unwrap();
+//! let mut db = noria::SyncControllerHandle::from_zk(zookeeper_addr, rt.executor()).unwrap();
 //! let mut article = db.table("article").unwrap();
 //! article.insert(vec![noria::DataType::from(1), "Hello world".into()]).wait();
 //! # }
@@ -267,11 +269,13 @@
 //!
 //! ```no_run
 //! # extern crate noria;
+//! # extern crate tokio;
 //! # extern crate futures;
-//! # use futures::Future;
+//! use tokio::prelude::*;
 //! # fn main() {
 //! # let zookeeper_addr = "";
-//! # let mut db = noria::SyncControllerHandle::from_zk(zookeeper_addr).unwrap();
+//! let mut rt = tokio::runtime::Runtime::new().unwrap();
+//! let mut db = noria::SyncControllerHandle::from_zk(zookeeper_addr, rt.executor()).unwrap();
 //! let mut vote = db.table("vote").unwrap();
 //! vote.insert(vec![noria::DataType::from(1000), 1.into()]).wait();
 //! # }

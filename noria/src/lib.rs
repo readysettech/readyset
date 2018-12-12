@@ -25,10 +25,11 @@
 //! requires a nightly release of Rust to run for the time being.
 //!
 //! ```no_run
-//! # use futures::Future;
+//! use tokio::prelude::*;
 //! # use noria::*;
 //! # let zookeeper_addr = "127.0.0.1:2181";
-//! let mut db = SyncControllerHandle::from_zk(zookeeper_addr).unwrap();
+//! let mut rt = tokio::runtime::Runtime::new().unwrap();
+//! let mut db = SyncControllerHandle::from_zk(zookeeper_addr, rt.executor()).unwrap();
 //!
 //! // if this is the first time we interact with Noria, we must give it the schema
 //! db.install_recipe("
