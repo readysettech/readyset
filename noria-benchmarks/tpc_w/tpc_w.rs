@@ -6,7 +6,7 @@ extern crate clap;
 
 use crate::parameters::SampleKeys;
 use futures::Future;
-use noria::{ControllerBuilder, LocalAuthority, LocalSyncControllerHandle};
+use noria::{LocalAuthority, SyncWorkerHandle, WorkerBuilder};
 use rand::Rng;
 use std::collections::HashMap;
 use std::sync::{Arc, Barrier};
@@ -15,7 +15,7 @@ use std::{thread, time};
 
 pub struct Backend {
     r: String,
-    g: LocalSyncControllerHandle<LocalAuthority>,
+    g: SyncWorkerHandle<LocalAuthority>,
     parallel_prepop: bool,
     prepop_counts: HashMap<String, usize>,
     barrier: Arc<Barrier>,
@@ -62,7 +62,7 @@ fn make(
     use std::io::Read;
 
     // set up graph
-    let mut b = ControllerBuilder::default();
+    let mut b = WorkerBuilder::default();
 
     let main_log = noria::logger_pls();
     b.log_with(main_log);
@@ -70,7 +70,7 @@ fn make(
         b.disable_partial();
     }
 
-    let mut g = b.build_local_sync().unwrap();
+    let mut g = b.start_simple().unwrap();
 
     let recipe = {
         let mut f = File::open(recipe_location).unwrap();

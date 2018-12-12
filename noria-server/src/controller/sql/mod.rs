@@ -10,11 +10,11 @@ use self::mir::{MirNodeRef, SqlToMirConverter};
 use self::query_graph::{to_query_graph, QueryGraph};
 use self::query_signature::Signature;
 use self::reuse::{ReuseConfig, ReuseConfigType};
+use crate::controller::mir_to_flow::mir_query_to_flow_parts;
+use crate::controller::Migration;
 use ::mir::query::{MirQuery, QueryFlowParts};
 use ::mir::reuse as mir_reuse;
 use ::mir::Column;
-use crate::controller::mir_to_flow::mir_query_to_flow_parts;
-use crate::controller::Migration;
 use dataflow::prelude::DataType;
 use nom_sql::parser as sql_parser;
 use nom_sql::{ArithmeticBase, CreateTableStatement, SqlQuery};
@@ -855,10 +855,10 @@ impl SqlIncorporator {
                         name,
                         is_leaf,
                         mig,
-                    )
+                    );
                 }
                 SelectSpecification::Simple(sq) => {
-                    return self.nodes_for_named_query(SqlQuery::Select(sq), name, is_leaf, mig)
+                    return self.nodes_for_named_query(SqlQuery::Select(sq), name, is_leaf, mig);
                 }
             }
         };
@@ -984,36 +984,30 @@ mod tests {
     #[test]
     fn it_parses() {
         // set up graph
-        let mut g = integration::build_local("it_parses");
+        let mut g = integration::start_simple("it_parses");
         g.migrate(|mig| {
             let mut inc = SqlIncorporator::default();
             // Must have a base node for type inference to work, so make one manually
-            assert!(
-                "CREATE TABLE users (id int, name varchar(40));"
-                    .to_flow_parts(&mut inc, None, mig)
-                    .is_ok()
-            );
+            assert!("CREATE TABLE users (id int, name varchar(40));"
+                .to_flow_parts(&mut inc, None, mig)
+                .is_ok());
 
             // Should have two nodes: source and "users" base table
             let ncount = mig.graph().node_count();
             assert_eq!(ncount, 2);
             assert_eq!(get_node(&inc, mig, "users").name(), "users");
 
-            assert!(
-                "SELECT users.id from users;"
-                    .to_flow_parts(&mut inc, None, mig)
-                    .is_ok()
-            );
+            assert!("SELECT users.id from users;"
+                .to_flow_parts(&mut inc, None, mig)
+                .is_ok());
             // Should now have source, "users", a leaf projection node for the new selection, and
             // a reader node
             assert_eq!(mig.graph().node_count(), ncount + 2);
 
             // Invalid query should fail parsing and add no nodes
-            assert!(
-                "foo bar from whatever;"
-                    .to_flow_parts(&mut inc, None, mig)
-                    .is_err()
-            );
+            assert!("foo bar from whatever;"
+                .to_flow_parts(&mut inc, None, mig)
+                .is_err());
             // Should still only have source, "users" and the two nodes for the above selection
             assert_eq!(mig.graph().node_count(), ncount + 2);
         });
@@ -1022,14 +1016,13 @@ mod tests {
     #[test]
     fn it_incorporates_simple_join() {
         // set up graph
-        let mut g = integration::build_local("it_incorporates_simple_join");
+        let mut g = integration::start_simple("it_incorporates_simple_join");
         g.migrate(|mig| {
             let mut inc = SqlIncorporator::default();
             // Establish a base write type for "users"
-            assert!(
-                inc.add_query("CREATE TABLE users (id int, name varchar(40));", None, mig)
-                    .is_ok()
-            );
+            assert!(inc
+                .add_query("CREATE TABLE users (id int, name varchar(40));", None, mig)
+                .is_ok());
             // Should have source and "users" base table node
             assert_eq!(mig.graph().node_count(), 2);
             assert_eq!(get_node(&inc, mig, "users").name(), "users");
@@ -1037,14 +1030,13 @@ mod tests {
             assert!(get_node(&inc, mig, "users").is_base());
 
             // Establish a base write type for "articles"
-            assert!(
-                inc.add_query(
+            assert!(inc
+                .add_query(
                     "CREATE TABLE articles (id int, author int, title varchar(255));",
                     None,
                     mig
                 )
-                .is_ok()
-            );
+                .is_ok());
             // Should have source and "users" base table node
             assert_eq!(mig.graph().node_count(), 3);
             assert_eq!(get_node(&inc, mig, "articles").name(), "articles");
@@ -1078,14 +1070,13 @@ mod tests {
     #[test]
     fn it_incorporates_simple_selection() {
         // set up graph
-        let mut g = integration::build_local("it_incorporates_simple_selection");
+        let mut g = integration::start_simple("it_incorporates_simple_selection");
         g.migrate(|mig| {
             let mut inc = SqlIncorporator::default();
             // Establish a base write type
-            assert!(
-                inc.add_query("CREATE TABLE users (id int, name varchar(40));", None, mig)
-                    .is_ok()
-            );
+            assert!(inc
+                .add_query("CREATE TABLE users (id int, name varchar(40));", None, mig)
+                .is_ok());
             // Should have source and "users" base table node
             assert_eq!(mig.graph().node_count(), 2);
             assert_eq!(get_node(&inc, mig, "users").name(), "users");
@@ -1119,14 +1110,13 @@ mod tests {
     #[test]
     fn it_incorporates_aggregation() {
         // set up graph
-        let mut g = integration::build_local("it_incorporates_aggregation");
+        let mut g = integration::start_simple("it_incorporates_aggregation");
         g.migrate(|mig| {
             let mut inc = SqlIncorporator::default();
             // Establish a base write types
-            assert!(
-                inc.add_query("CREATE TABLE votes (aid int, userid int);", None, mig)
-                    .is_ok()
-            );
+            assert!(inc
+                .add_query("CREATE TABLE votes (aid int, userid int);", None, mig)
+                .is_ok());
             // Should have source and "users" base table node
             assert_eq!(mig.graph().node_count(), 2);
             assert_eq!(get_node(&inc, mig, "votes").name(), "votes");
@@ -1171,14 +1161,13 @@ mod tests {
     #[test]
     fn it_does_not_reuse_if_disabled() {
         // set up graph
-        let mut g = integration::build_local("it_does_not_reuse_if_disabled");
+        let mut g = integration::start_simple("it_does_not_reuse_if_disabled");
         g.migrate(|mig| {
             let mut inc = SqlIncorporator::default();
             inc.disable_reuse();
-            assert!(
-                inc.add_query("CREATE TABLE users (id int, name varchar(40));", None, mig)
-                    .is_ok()
-            );
+            assert!(inc
+                .add_query("CREATE TABLE users (id int, name varchar(40));", None, mig)
+                .is_ok());
             let res = inc.add_query("SELECT id, name FROM users WHERE users.id = 42;", None, mig);
             assert!(res.is_ok());
             let leaf = res.unwrap().query_leaf;
@@ -1200,14 +1189,13 @@ mod tests {
     #[test]
     fn it_reuses_identical_query() {
         // set up graph
-        let mut g = integration::build_local("it_reuses_identical_query");
+        let mut g = integration::start_simple("it_reuses_identical_query");
         g.migrate(|mig| {
             let mut inc = SqlIncorporator::default();
             // Establish a base write type
-            assert!(
-                inc.add_query("CREATE TABLE users (id int, name varchar(40));", None, mig)
-                    .is_ok()
-            );
+            assert!(inc
+                .add_query("CREATE TABLE users (id int, name varchar(40));", None, mig)
+                .is_ok());
             // Should have source and "users" base table node
             assert_eq!(mig.graph().node_count(), 2);
             assert_eq!(get_node(&inc, mig, "users").name(), "users");
@@ -1245,18 +1233,17 @@ mod tests {
     #[test]
     fn it_reuses_with_different_parameter() {
         // set up graph
-        let mut g = integration::build_local("it_reuses_with_different_parameter");
+        let mut g = integration::start_simple("it_reuses_with_different_parameter");
         g.migrate(|mig| {
             let mut inc = SqlIncorporator::default();
             // Establish a base write type
-            assert!(
-                inc.add_query(
+            assert!(inc
+                .add_query(
                     "CREATE TABLE users (id int, name varchar(40), address varchar(40));",
                     None,
                     mig
                 )
-                .is_ok()
-            );
+                .is_ok());
             // Should have source and "users" base table node
             assert_eq!(mig.graph().node_count(), 2);
             assert_eq!(get_node(&inc, mig, "users").name(), "users");
@@ -1318,22 +1305,20 @@ mod tests {
     fn it_reuses_by_extending_existing_query() {
         use super::sql_parser;
         // set up graph
-        let mut g = integration::build_local("it_reuses_by_extending_existing_query");
+        let mut g = integration::start_simple("it_reuses_by_extending_existing_query");
         g.migrate(|mig| {
             let mut inc = SqlIncorporator::default();
             // Add base tables
-            assert!(
-                inc.add_query(
+            assert!(inc
+                .add_query(
                     "CREATE TABLE articles (id int, title varchar(40));",
                     None,
                     mig
                 )
-                .is_ok()
-            );
-            assert!(
-                inc.add_query("CREATE TABLE votes (aid int, uid int);", None, mig)
-                    .is_ok()
-            );
+                .is_ok());
+            assert!(inc
+                .add_query("CREATE TABLE votes (aid int, uid int);", None, mig)
+                .is_ok());
             // Should have source, "articles" and "votes" base tables
             assert_eq!(mig.graph().node_count(), 3);
 
@@ -1370,14 +1355,13 @@ mod tests {
     #[test]
     fn it_incorporates_aggregation_no_group_by() {
         // set up graph
-        let mut g = integration::build_local("it_incorporates_aggregation_no_group_by");
+        let mut g = integration::start_simple("it_incorporates_aggregation_no_group_by");
         g.migrate(|mig| {
             let mut inc = SqlIncorporator::default();
             // Establish a base write type
-            assert!(
-                inc.add_query("CREATE TABLE votes (aid int, userid int);", None, mig)
-                    .is_ok()
-            );
+            assert!(inc
+                .add_query("CREATE TABLE votes (aid int, userid int);", None, mig)
+                .is_ok());
             // Should have source and "users" base table node
             assert_eq!(mig.graph().node_count(), 2);
             assert_eq!(get_node(&inc, mig, "votes").name(), "votes");
@@ -1422,14 +1406,13 @@ mod tests {
     #[test]
     fn it_incorporates_aggregation_count_star() {
         // set up graph
-        let mut g = integration::build_local("it_incorporates_aggregation_count_star");
+        let mut g = integration::start_simple("it_incorporates_aggregation_count_star");
         g.migrate(|mig| {
             let mut inc = SqlIncorporator::default();
             // Establish a base write type
-            assert!(
-                inc.add_query("CREATE TABLE votes (userid int, aid int);", None, mig)
-                    .is_ok()
-            );
+            assert!(inc
+                .add_query("CREATE TABLE votes (userid int, aid int);", None, mig)
+                .is_ok());
             // Should have source and "users" base table node
             assert_eq!(mig.graph().node_count(), 2);
             assert_eq!(get_node(&inc, mig, "votes").name(), "votes");
@@ -1471,26 +1454,23 @@ mod tests {
     #[test]
     fn it_incorporates_explicit_multi_join() {
         // set up graph
-        let mut g = integration::build_local("it_incorporates_explicit_multi_join");
+        let mut g = integration::start_simple("it_incorporates_explicit_multi_join");
         g.migrate(|mig| {
             let mut inc = SqlIncorporator::default();
             // Establish base write types for "users" and "articles" and "votes"
-            assert!(
-                inc.add_query("CREATE TABLE users (id int, name varchar(40));", None, mig)
-                    .is_ok()
-            );
-            assert!(
-                inc.add_query("CREATE TABLE votes (aid int, uid int);", None, mig)
-                    .is_ok()
-            );
-            assert!(
-                inc.add_query(
+            assert!(inc
+                .add_query("CREATE TABLE users (id int, name varchar(40));", None, mig)
+                .is_ok());
+            assert!(inc
+                .add_query("CREATE TABLE votes (aid int, uid int);", None, mig)
+                .is_ok());
+            assert!(inc
+                .add_query(
                     "CREATE TABLE articles (aid int, title varchar(255), author int);",
                     None,
                     mig
                 )
-                .is_ok()
-            );
+                .is_ok());
 
             // Try an explicit multi-way-join
             let q = "SELECT users.name, articles.title, votes.uid \
@@ -1525,26 +1505,23 @@ mod tests {
     #[test]
     fn it_incorporates_implicit_multi_join() {
         // set up graph
-        let mut g = integration::build_local("it_incorporates_implicit_multi_join");
+        let mut g = integration::start_simple("it_incorporates_implicit_multi_join");
         g.migrate(|mig| {
             let mut inc = SqlIncorporator::default();
             // Establish base write types for "users" and "articles" and "votes"
-            assert!(
-                inc.add_query("CREATE TABLE users (id int, name varchar(40));", None, mig)
-                    .is_ok()
-            );
-            assert!(
-                inc.add_query("CREATE TABLE votes (aid int, uid int);", None, mig)
-                    .is_ok()
-            );
-            assert!(
-                inc.add_query(
+            assert!(inc
+                .add_query("CREATE TABLE users (id int, name varchar(40));", None, mig)
+                .is_ok());
+            assert!(inc
+                .add_query("CREATE TABLE votes (aid int, uid int);", None, mig)
+                .is_ok());
+            assert!(inc
+                .add_query(
                     "CREATE TABLE articles (aid int, title varchar(255), author int);",
                     None,
                     mig
                 )
-                .is_ok()
-            );
+                .is_ok());
 
             // Try an implicit multi-way-join
             let q = "SELECT users.name, articles.title, votes.uid \
@@ -1589,21 +1566,19 @@ mod tests {
     #[allow_fail]
     fn it_incorporates_join_projecting_join_columns() {
         // set up graph
-        let mut g = integration::build_local("it_incorporates_join_projecting_join_columns");
+        let mut g = integration::start_simple("it_incorporates_join_projecting_join_columns");
         g.migrate(|mig| {
             let mut inc = SqlIncorporator::default();
-            assert!(
-                inc.add_query("CREATE TABLE users (id int, name varchar(40));", None, mig)
-                    .is_ok()
-            );
-            assert!(
-                inc.add_query(
+            assert!(inc
+                .add_query("CREATE TABLE users (id int, name varchar(40));", None, mig)
+                .is_ok());
+            assert!(inc
+                .add_query(
                     "CREATE TABLE articles (id int, author int, title varchar(255));",
                     None,
                     mig
                 )
-                .is_ok()
-            );
+                .is_ok());
             let q = "SELECT users.id, users.name, articles.author, articles.title \
                      FROM articles, users \
                      WHERE users.id = articles.author;";
@@ -1635,13 +1610,12 @@ mod tests {
     #[test]
     fn it_incorporates_self_join() {
         // set up graph
-        let mut g = integration::build_local("it_incorporates_self_join");
+        let mut g = integration::start_simple("it_incorporates_self_join");
         g.migrate(|mig| {
             let mut inc = SqlIncorporator::default();
-            assert!(
-                inc.add_query("CREATE TABLE friends (id int, friend int);", None, mig)
-                    .is_ok()
-            );
+            assert!(inc
+                .add_query("CREATE TABLE friends (id int, friend int);", None, mig)
+                .is_ok());
 
             // Try a friends-of-friends type computation via self join
             let q = "SELECT f1.id, f2.friend AS fof \
@@ -1659,13 +1633,12 @@ mod tests {
     #[test]
     fn it_incorporates_literal_projection() {
         // set up graph
-        let mut g = integration::build_local("it_incorporates_literal_projection");
+        let mut g = integration::start_simple("it_incorporates_literal_projection");
         g.migrate(|mig| {
             let mut inc = SqlIncorporator::default();
-            assert!(
-                inc.add_query("CREATE TABLE users (id int, name varchar(40));", None, mig)
-                    .is_ok()
-            );
+            assert!(inc
+                .add_query("CREATE TABLE users (id int, name varchar(40));", None, mig)
+                .is_ok());
 
             let res = inc.add_query("SELECT users.name, 1 FROM users;", None, mig);
             assert!(res.is_ok());
@@ -1680,13 +1653,12 @@ mod tests {
     #[test]
     fn it_incorporates_arithmetic_projection() {
         // set up graph
-        let mut g = integration::build_local("it_incorporates_arithmetic_projection");
+        let mut g = integration::start_simple("it_incorporates_arithmetic_projection");
         g.migrate(|mig| {
             let mut inc = SqlIncorporator::default();
-            assert!(
-                inc.add_query("CREATE TABLE users (id int, age int);", None, mig)
-                    .is_ok()
-            );
+            assert!(inc
+                .add_query("CREATE TABLE users (id int, age int);", None, mig)
+                .is_ok());
 
             let res = inc.add_query(
                 "SELECT 2 * users.age, 2 * 10 as twenty FROM users;",
@@ -1707,21 +1679,19 @@ mod tests {
 
     #[test]
     fn it_incorporates_join_with_nested_query() {
-        let mut g = integration::build_local("it_incorporates_join_with_nested_query");
+        let mut g = integration::start_simple("it_incorporates_join_with_nested_query");
         g.migrate(|mig| {
             let mut inc = SqlIncorporator::default();
-            assert!(
-                inc.add_query("CREATE TABLE users (id int, name varchar(40));", None, mig)
-                    .is_ok()
-            );
-            assert!(
-                inc.add_query(
+            assert!(inc
+                .add_query("CREATE TABLE users (id int, name varchar(40));", None, mig)
+                .is_ok());
+            assert!(inc
+                .add_query(
                     "CREATE TABLE articles (id int, author int, title varchar(255));",
                     None,
                     mig
                 )
-                .is_ok()
-            );
+                .is_ok());
 
             let q = "SELECT nested_users.name, articles.title \
                      FROM articles \
@@ -1753,13 +1723,12 @@ mod tests {
     #[test]
     fn it_incorporates_compound_selection() {
         // set up graph
-        let mut g = integration::build_local("it_incorporates_compound_selection");
+        let mut g = integration::start_simple("it_incorporates_compound_selection");
         g.migrate(|mig| {
             let mut inc = SqlIncorporator::default();
-            assert!(
-                inc.add_query("CREATE TABLE users (id int, name varchar(40));", None, mig)
-                    .is_ok()
-            );
+            assert!(inc
+                .add_query("CREATE TABLE users (id int, name varchar(40));", None, mig)
+                .is_ok());
 
             let res = inc.add_query(
                 "SELECT users.id, users.name FROM users \
@@ -1782,14 +1751,13 @@ mod tests {
     #[test]
     fn it_distinguishes_predicates() {
         // set up graph
-        let mut g = integration::build_local("it_distinguishes_predicates");
+        let mut g = integration::start_simple("it_distinguishes_predicates");
         g.migrate(|mig| {
             let mut inc = SqlIncorporator::default();
             // Establish a base write type
-            assert!(
-                inc.add_query("CREATE TABLE users (id int, name varchar(40));", None, mig)
-                    .is_ok()
-            );
+            assert!(inc
+                .add_query("CREATE TABLE users (id int, name varchar(40));", None, mig)
+                .is_ok());
             // Should have source and "users" base table node
             assert_eq!(mig.graph().node_count(), 2);
             assert_eq!(get_node(&inc, mig, "users").name(), "users");
@@ -1816,13 +1784,12 @@ mod tests {
     #[test]
     #[ignore]
     fn it_queries_over_aliased_view() {
-        let mut g = integration::build_local("it_queries_over_aliased_view");
+        let mut g = integration::start_simple("it_queries_over_aliased_view");
         g.migrate(|mig| {
             let mut inc = SqlIncorporator::default();
-            assert!(
-                inc.add_query("CREATE TABLE users (id int, name varchar(40));", None, mig)
-                    .is_ok()
-            );
+            assert!(inc
+                .add_query("CREATE TABLE users (id int, name varchar(40));", None, mig)
+                .is_ok());
             // Add first copy of new query, called "tq1"
             let res = inc.add_query(
                 "SELECT id, name FROM users WHERE users.id = 42;",

@@ -63,7 +63,7 @@ fn main() {
     s.stupid = false;
     s.partial = false;
     s.threads = Some(1);
-    let mut g = s.build(None, persistence);
+    let mut g = s.start(None, persistence);
 
     // prepopulate
     if args.is_present("verbose") {

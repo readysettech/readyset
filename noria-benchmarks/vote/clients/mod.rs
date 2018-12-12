@@ -1,17 +1,22 @@
 use clap;
 use tokio::prelude::*;
 
+#[derive(Copy, Clone, Debug)]
 pub(crate) struct Parameters {
     pub(crate) prime: bool,
     pub(crate) articles: usize,
 }
 
 pub(crate) trait VoteClient: Clone {
-    type NewFuture: Future<Item = Self>;
-    type ReadFuture: Future<Item = ()>;
-    type WriteFuture: Future<Item = ()>;
+    type NewFuture: Future<Item = Self, Error = failure::Error> + Send + 'static;
+    type ReadFuture: Future<Item = (), Error = failure::Error> + Send + 'static;
+    type WriteFuture: Future<Item = (), Error = failure::Error> + Send + 'static;
 
-    fn spawn(params: &Parameters, args: &clap::ArgMatches) -> Self::NewFuture;
+    fn spawn(
+        ex: tokio::runtime::TaskExecutor,
+        params: Parameters,
+        args: clap::ArgMatches,
+    ) -> Self::NewFuture;
     fn handle_reads(&mut self, requests: &[i32]) -> Self::ReadFuture;
     fn handle_writes(&mut self, requests: &[i32]) -> Self::WriteFuture;
 }

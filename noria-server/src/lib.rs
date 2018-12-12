@@ -110,7 +110,7 @@
 //! This crate also provides `LocalAuthority`, which allows you to _embed_ a `noriad` worker, and
 //! not bother with setting up ZooKeeper or multiple workers. This provides no fault-tolerance and
 //! no multi-machine operations, but can be a convenient way to set things up for development and
-//! testing. See `ControllerBuilder::build_local` or the `basic-recipe` example for details.
+//! testing. See `WorkerBuilder::build_local` or the `basic-recipe` example for details.
 //!
 //! # I'm a visual learner
 //!
@@ -373,7 +373,7 @@ mod coordination;
 mod integration;
 
 pub use crate::controller::sql::reuse::ReuseConfigType;
-pub use crate::controller::{ControllerBuilder, LocalControllerHandle, LocalSyncControllerHandle};
+pub use crate::controller::{SyncWorkerHandle, WorkerBuilder, WorkerHandle};
 pub use dataflow::{DurabilityMode, PersistenceParameters};
 pub use noria::consensus::LocalAuthority;
 pub use noria::*;

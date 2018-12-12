@@ -4,6 +4,7 @@
 #[macro_use]
 extern crate clap;
 
+use failure::ResultExt;
 use hdrhistogram::Histogram;
 use rand::Rng;
 use std::cell::RefCell;
@@ -112,7 +113,8 @@ where
         let local_args = local_args.clone();
         // we know that we won't drop the original args until the runtime has exited
         let local_args: clap::ArgMatches<'static> = unsafe { mem::transmute(local_args) };
-        rt.block_on(future::lazy(move || C::spawn(params, local_args)))
+        let ex = rt.executor();
+        rt.block_on(future::lazy(move || C::spawn(ex, params, local_args)))
             .unwrap()
     };
 
@@ -148,7 +150,6 @@ where
         })
         .collect();
 
-    drop(handle);
     let mut ops = 0.0;
     let mut wops = 0.0;
     for gen in generators {
@@ -228,7 +229,7 @@ where
 }
 
 fn run_generator<C, R>(
-    handle: C,
+    mut handle: C,
     id_rng: R,
     target: f64,
     global_args: clap::ArgMatches,
@@ -279,14 +280,22 @@ where
         let n = keys.len();
         let sent = time::Instant::now();
         let fut = if write {
-            future::Either::A(client.handle_writes(&keys[..]))
+            future::Either::A(
+                client
+                    .handle_writes(&keys[..])
+                    .then(|r| r.context("failed to handle writes")),
+            )
         } else {
             // deduplicate requested keys, because not doing so would be silly
             keys.sort_unstable();
             keys.dedup();
-            future::Either::B(client.handle_reads(&keys[..]))
+            future::Either::B(
+                client
+                    .handle_reads(&keys[..])
+                    .then(|r| r.context("failed to handle reads")),
+            )
         }
-        .and_then(move |_| {
+        .map(move |_| {
             let done = time::Instant::now();
             ndone.fetch_add(n, atomic::Ordering::AcqRel);
 
@@ -317,7 +326,7 @@ where
             }
         });
 
-        tokio::spawn(fut);
+        tokio::spawn(fut.map_err(|e| panic!("{:?}", e)));
     };
 
     let mut worker_ops = None;
@@ -358,7 +367,7 @@ where
                 if !queued_w.is_empty() && now.duration_since(queued_w[0]) >= max_batch_time {
                     ops += queued_w.len();
                     enqueue(
-                        handle,
+                        &mut handle,
                         queued_w.split_off(0),
                         queued_w_keys.split_off(0),
                         true,
@@ -368,7 +377,7 @@ where
                 if !queued_r.is_empty() && now.duration_since(queued_r[0]) >= max_batch_time {
                     ops += queued_r.len();
                     enqueue(
-                        handle,
+                        &mut handle,
                         queued_r.split_off(0),
                         queued_r_keys.split_off(0),
                         false,

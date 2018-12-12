@@ -66,8 +66,8 @@ mod mir_to_flow;
 mod readers;
 mod schema;
 
-pub use crate::controller::builder::ControllerBuilder;
-pub use crate::controller::handle::{LocalControllerHandle, LocalSyncControllerHandle};
+pub use crate::controller::builder::WorkerBuilder;
+pub use crate::controller::handle::{SyncWorkerHandle, WorkerHandle};
 pub use crate::controller::migrate::Migration;
 pub use noria::builders::*;
 pub use noria::prelude::*;
@@ -104,7 +104,7 @@ where
 }
 
 #[derive(Clone, Serialize, Deserialize, PartialEq)]
-pub(crate) struct ControllerConfig {
+pub(crate) struct WorkerConfig {
     pub sharding: Option<usize>,
     pub partial_enabled: bool,
     pub domain_config: DomainConfig,
@@ -115,7 +115,7 @@ pub(crate) struct ControllerConfig {
     pub reuse: ReuseConfigType,
     pub threads: Option<usize>,
 }
-impl Default for ControllerConfig {
+impl Default for WorkerConfig {
     fn default() -> Self {
         Self {
             #[cfg(test)]
@@ -142,7 +142,7 @@ impl Default for ControllerConfig {
 
 #[derive(Clone, Serialize, Deserialize)]
 pub(crate) struct ControllerState {
-    pub config: ControllerConfig,
+    pub config: WorkerConfig,
     pub epoch: Epoch,
 
     pub recipe_version: usize,
@@ -192,11 +192,11 @@ impl fmt::Debug for Event {
 fn start_instance<A: Authority + 'static>(
     authority: Arc<A>,
     listen_addr: IpAddr,
-    config: ControllerConfig,
+    config: WorkerConfig,
     memory_limit: Option<usize>,
     memory_check_frequency: Option<Duration>,
     log: slog::Logger,
-) -> impl Future<Item = LocalControllerHandle<A>, Error = failure::Error> {
+) -> impl Future<Item = WorkerHandle<A>, Error = failure::Error> {
     let mut pool = tokio_io_pool::Builder::default();
     pool.name_prefix("io-worker-");
     if let Some(threads) = config.threads {
@@ -541,7 +541,7 @@ fn start_instance<A: Authority + 'static>(
         );
     }
 
-    future::Either::B(LocalControllerHandle::new(authority, tx, trigger, iopool))
+    future::Either::B(WorkerHandle::new(authority, tx, trigger, iopool))
 }
 
 /*
@@ -959,7 +959,7 @@ fn instance_campaign<A: Authority + 'static>(
     event_tx: UnboundedSender<Event>,
     authority: Arc<A>,
     descriptor: ControllerDescriptor,
-    config: ControllerConfig,
+    config: WorkerConfig,
 ) -> JoinHandle<()> {
     let descriptor_bytes = serde_json::to_vec(&descriptor).unwrap();
     let campaign_inner = move |mut event_tx: UnboundedSender<Event>| -> Result<(), failure::Error> {
@@ -1565,7 +1565,10 @@ mod tests {
         // Controller gets dropped. It doesn't have Domains, so we don't see any dropped.
         let authority = ZookeeperAuthority::new("127.0.0.1:2181/it_works_default").unwrap();
         {
-            let _c = ControllerBuilder::default().build(Arc::new(authority));
+            tokio::runtime::current_thread::block_on_all(
+                WorkerBuilder::default().start(Arc::new(authority)),
+            )
+            .unwrap();
             thread::sleep(Duration::from_millis(100));
         }
         thread::sleep(Duration::from_millis(100));
@@ -1587,10 +1590,12 @@ mod tests {
                 .collect::<String>()
         );
         let authority = ZookeeperAuthority::new(&zk).unwrap();
-        let mut c = ControllerBuilder::default()
-            .build(Arc::new(authority))
-            .unwrap();
-        assert!(c.install_recipe(r_txt).is_ok());
+        tokio::runtime::current_thread::block_on_all(
+            WorkerBuilder::default()
+                .start(Arc::new(authority))
+                .and_then(|mut c| c.install_recipe(r_txt)),
+        )
+        .unwrap();
     }
 
     // Controller without any domains gets dropped once it leaves the scope.
@@ -1599,7 +1604,7 @@ mod tests {
     fn it_works_default_local() {
         // Controller gets dropped. It doesn't have Domains, so we don't see any dropped.
         {
-            let _c = ControllerBuilder::default().build_local().unwrap();
+            let _c = WorkerBuilder::default().start_simple().unwrap();
             thread::sleep(Duration::from_millis(100));
         }
         thread::sleep(Duration::from_millis(100));
@@ -1611,7 +1616,7 @@ mod tests {
         let r_txt = "CREATE TABLE a (x int, y int, z int);\n
                      CREATE TABLE b (r int, s int);\n";
 
-        let mut c = ControllerBuilder::default().build_local().unwrap();
+        let mut c = WorkerBuilder::default().start_simple().unwrap();
         assert!(c.install_recipe(r_txt).is_ok());
     }
 }

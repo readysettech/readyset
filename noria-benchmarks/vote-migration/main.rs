@@ -70,7 +70,7 @@ fn one(s: &graph::Builder, skewed: bool, args: &clap::ArgMatches, w: Option<fs::
 
     // make the graph!
     eprintln!("Setting up soup");
-    let mut g = s.build(None, persistence_params);
+    let mut g = s.start(None, persistence_params);
     eprintln!("Getting accessors");
     let mut articles = g.graph.table("Article").unwrap();
     let mut votes = g.graph.table("Vote").unwrap();

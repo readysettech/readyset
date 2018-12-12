@@ -163,6 +163,8 @@ where
 /// none of your operations will ever complete! Furthermore, you *must* use the `Runtime` to
 /// execute any futures returned from `ControllerHandle` (that is, you cannot just call `.wait()`
 /// on them).
+// TODO: this should be renamed to NoriaHandle, or maybe just Connection, since it also provides
+// reads and writes, which aren't controller actions!
 pub struct ControllerHandle<A>
 where
     A: 'static + Authority,
@@ -394,70 +396,107 @@ impl<A: Authority> ControllerHandle<A> {
         // TODO: this should likely take a view name, and we should verify that it's a Reader.
         self.rpc("remove_node", view, "failed to remove node")
     }
+
+    /// Construct a synchronous interface to this controller instance using the given executor to
+    /// execute all operations.
+    ///
+    /// Note that the given executor *must* be the same as the one used to construct this
+    /// `ControllerHandle`.
+    pub fn sync_handle<E>(&self, executor: E) -> SyncControllerHandle<A, E>
+    where
+        E: tokio::executor::Executor,
+    {
+        SyncControllerHandle {
+            executor,
+            handle: self.clone(),
+        }
+    }
 }
 
 /// A synchronous handle to a Noria controller.
 ///
 /// This handle lets you interact with a Noria controller without thinking about asynchrony.
-pub struct SyncControllerHandle<A>
+pub struct SyncControllerHandle<A, E>
 where
     A: 'static + Authority,
 {
     handle: ControllerHandle<A>,
-    _rt: Arc<tokio::runtime::Runtime>,
-    executor: tokio::runtime::TaskExecutor,
+    executor: E,
 }
 
-impl<A> Clone for SyncControllerHandle<A>
+impl<A, E> Clone for SyncControllerHandle<A, E>
 where
     A: Authority,
+    E: Clone,
 {
     fn clone(&self) -> Self {
         SyncControllerHandle {
             handle: self.handle.clone(),
-            _rt: self._rt.clone(),
             executor: self.executor.clone(),
         }
     }
 }
 
-impl SyncControllerHandle<consensus::ZookeeperAuthority> {
+impl<E> SyncControllerHandle<consensus::ZookeeperAuthority, E>
+where
+    E: tokio::executor::Executor,
+{
     /// Fetch information about the current Soup controller from Zookeeper running at the given
     /// address, and create a `ControllerHandle` from that.
-    pub fn from_zk(zookeeper_address: &str) -> Result<Self, failure::Error> {
-        Self::new(consensus::ZookeeperAuthority::new(zookeeper_address)?)
+    pub fn from_zk(zookeeper_address: &str, executor: E) -> Result<Self, failure::Error> {
+        Self::new(
+            consensus::ZookeeperAuthority::new(zookeeper_address)?,
+            executor,
+        )
     }
 }
 
-impl<A: Authority> SyncControllerHandle<A> {
+impl<A, E> SyncControllerHandle<A, E>
+where
+    A: Authority,
+    E: tokio::executor::Executor,
+{
     /// Create a `SyncControllerHandle` that bootstraps a connection to Noria via the configuration
     /// stored in the given `authority`.
     ///
     /// You *probably* want to use `SyncControllerHandle::from_zk` instead.
-    pub fn new(authority: A) -> Result<Self, failure::Error>
+    pub fn new(authority: A, mut executor: E) -> Result<Self, failure::Error>
     where
         A: Send + 'static,
     {
-        let mut rt = tokio::runtime::Runtime::new().unwrap();
-        let handle = rt.block_on(ControllerHandle::new(authority))?;
-        let executor = rt.executor();
-        Ok(SyncControllerHandle {
-            _rt: Arc::new(rt),
-            executor,
-            handle,
-        })
+        let fut = ControllerHandle::new(authority);
+        let (tx, rx) = futures::sync::oneshot::channel();
+        executor
+            .spawn(Box::new(
+                fut.then(move |r| tx.send(r)).map_err(|_| unreachable!()),
+            ))
+            .expect("runtime went away");
+        let handle = rx.wait().expect("runtime went away")?;
+        Ok(SyncControllerHandle { executor, handle })
     }
 
-    fn run<F>(&mut self, fut: F) -> Result<F::Item, F::Error>
+    #[doc(hidden)]
+    pub fn run<F>(&mut self, fut: F) -> Result<F::Item, F::Error>
     where
-        F: Future + Send + 'static,
-        F::Item: Send,
-        F::Error: Send,
+        F: IntoFuture,
+        <F as IntoFuture>::Future: Send + 'static,
+        F::Item: Send + 'static,
+        F::Error: Send + 'static,
     {
         let (tx, rx) = futures::sync::oneshot::channel();
         self.executor
-            .spawn(fut.then(move |r| tx.send(r)).map_err(|_| unreachable!()));
-        rx.wait().expect("controller handle went away")
+            .spawn(Box::new(
+                fut.into_future()
+                    .then(move |r| tx.send(r))
+                    .map_err(|_| unreachable!()),
+            ))
+            .expect("runtime went away");
+        rx.wait().expect("runtime went away")
+    }
+
+    /// Get a handle to the underlying asynchronous controller handle.
+    pub fn handle(&mut self) -> &mut ControllerHandle<A> {
+        &mut self.handle
     }
 
     /// Enumerate all known base tables.
@@ -519,6 +558,14 @@ impl<A: Authority> SyncControllerHandle<A> {
     /// See [`ControllerHandle::graphviz`].
     pub fn graphviz(&mut self) -> Result<String, failure::Error> {
         let fut = self.handle.graphviz();
+        self.run(fut)
+    }
+
+    /// Remove the given external view from the graph.
+    ///
+    /// See [`ControllerHandle::remove_node`].
+    pub fn remove_node(&mut self, view: NodeIndex) -> Result<(), failure::Error> {
+        let fut = self.handle.remove_node(view);
         self.run(fut)
     }
 }

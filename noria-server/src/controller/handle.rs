@@ -2,184 +2,74 @@
 use crate::controller::migrate::Migration;
 use crate::controller::Event;
 use dataflow::prelude::*;
-use futures::{self, Future};
 use noria::consensus::Authority;
 use noria::prelude::*;
-use std::collections::BTreeMap;
+use noria::SyncControllerHandle;
 use std::collections::HashMap;
 use std::ops::{Deref, DerefMut};
 use std::sync::Arc;
 use stream_cancel::Trigger;
+use tokio::prelude::*;
 use tokio_io_pool;
 
-/// A handle to a local controller that also wraps the tokio runtime.
-pub struct LocalSyncControllerHandle<A: Authority + 'static> {
-    pub(crate) lch: LocalControllerHandle<A>,
-    pub(crate) rt: Option<tokio::runtime::Runtime>,
-}
-
-impl<A: Authority> Deref for LocalSyncControllerHandle<A> {
-    type Target = LocalControllerHandle<A>;
-    fn deref(&self) -> &Self::Target {
-        &self.lch
-    }
-}
-
-impl<A: Authority> DerefMut for LocalSyncControllerHandle<A> {
-    fn deref_mut(&mut self) -> &mut Self::Target {
-        &mut self.lch
-    }
-}
-
-impl<A: Authority> Drop for LocalSyncControllerHandle<A> {
-    fn drop(&mut self) {
-        self.lch.shutdown();
-        self.rt.take().unwrap().shutdown_on_idle().wait().unwrap();
-    }
-}
-
 /// A handle to a controller that is running in the same process as this one.
-pub struct LocalControllerHandle<A: Authority + 'static> {
+pub struct WorkerHandle<A: Authority + 'static> {
     c: Option<ControllerHandle<A>>,
     #[allow(dead_code)]
     event_tx: Option<futures::sync::mpsc::UnboundedSender<Event>>,
     kill: Option<Trigger>,
     iopool: Option<tokio_io_pool::Runtime>,
-    executor: tokio::runtime::TaskExecutor,
 }
 
-impl<A: Authority> Deref for LocalControllerHandle<A> {
+impl<A: Authority> Deref for WorkerHandle<A> {
     type Target = ControllerHandle<A>;
     fn deref(&self) -> &Self::Target {
         self.c.as_ref().unwrap()
     }
 }
 
-impl<A: Authority> DerefMut for LocalControllerHandle<A> {
+impl<A: Authority> DerefMut for WorkerHandle<A> {
     fn deref_mut(&mut self) -> &mut Self::Target {
         self.c.as_mut().unwrap()
     }
 }
 
-impl<A: Authority> LocalControllerHandle<A> {
-    /// Run the given `Future` on the runtime that is running this worker.
-    ///
-    /// This is helpful if you want to run futures returned by `ControllerHandle`, since those
-    /// cannot directly be waited on.
-    pub fn run<F>(&mut self, fut: F) -> Result<F::Item, F::Error>
-    where
-        F: Future + Send + 'static,
-        F::Item: Send,
-        F::Error: Send,
-    {
-        let (tx, rx) = futures::sync::oneshot::channel();
-        self.executor
-            .spawn(fut.then(move |r| tx.send(r)).map_err(|_| unreachable!()));
-        rx.wait().expect("controller handle went away")
-    }
-
-    /// Bundle up the given runtime with this controller handle.
-    pub fn to_sync(self, rt: tokio::runtime::Runtime) -> LocalSyncControllerHandle<A> {
-        LocalSyncControllerHandle {
-            lch: self,
-            rt: Some(rt),
-        }
-    }
-
-    /// Enumerate all known base tables.
-    ///
-    /// See [`noria::ControllerHandle::inputs`].
-    pub fn inputs(&mut self) -> Result<BTreeMap<String, NodeIndex>, failure::Error> {
-        let fut = self.c.as_mut().unwrap().inputs();
-        self.run(fut)
-    }
-
-    /// Enumerate all known external views.
-    ///
-    /// See [`noria::ControllerHandle::outputs`].
-    pub fn outputs(&mut self) -> Result<BTreeMap<String, NodeIndex>, failure::Error> {
-        let fut = self.c.as_mut().unwrap().outputs();
-        self.run(fut)
-    }
-
-    /// Get a handle to a [`noria::Table`].
-    ///
-    /// See [`noria::ControllerHandle::table`].
-    pub fn table<S: AsRef<str>>(&mut self, table: S) -> Result<noria::Table, failure::Error> {
-        let fut = self.c.as_mut().unwrap().table(table.as_ref());
-        self.run(fut)
-    }
-
-    /// Get a handle to a [`noria::View`].
-    ///
-    /// See [`noria::ControllerHandle::view`].
-    pub fn view<S: AsRef<str>>(&mut self, view: S) -> Result<noria::View, failure::Error> {
-        let fut = self.c.as_mut().unwrap().view(view.as_ref());
-        self.run(fut)
-    }
-
-    /// Install a Noria recipe.
-    ///
-    /// See [`noria::ControllerHandle::install_recipe`].
-    pub fn install_recipe<S: AsRef<str>>(
-        &mut self,
-        r: S,
-    ) -> Result<noria::ActivationResult, failure::Error> {
-        let fut = self.c.as_mut().unwrap().install_recipe(r.as_ref());
-        self.run(fut)
-    }
-
-    /// Extend the Noria recipe.
-    ///
-    /// See [`noria::ControllerHandle::extend_recipe`].
-    pub fn extend_recipe<S: AsRef<str>>(
-        &mut self,
-        r: S,
-    ) -> Result<noria::ActivationResult, failure::Error> {
-        let fut = self.c.as_mut().unwrap().extend_recipe(r.as_ref());
-        self.run(fut)
-    }
-
-    /// Fetch a graphviz description of the dataflow graph.
-    ///
-    /// See [`noria::ControllerHandle::graphviz`].
-    pub fn graphviz(&mut self) -> Result<String, failure::Error> {
-        let fut = self.c.as_mut().unwrap().graphviz();
-        self.run(fut)
-    }
-}
-
-impl<A: Authority + 'static> LocalControllerHandle<A> {
+impl<A: Authority + 'static> WorkerHandle<A> {
     pub(super) fn new(
         authority: Arc<A>,
         event_tx: futures::sync::mpsc::UnboundedSender<Event>,
         kill: Trigger,
         io: tokio_io_pool::Runtime,
     ) -> impl Future<Item = Self, Error = failure::Error> {
-        ControllerHandle::make(authority).map(move |c| LocalControllerHandle {
+        ControllerHandle::make(authority).map(move |c| WorkerHandle {
             c: Some(c),
             event_tx: Some(event_tx),
             kill: Some(kill),
             iopool: Some(io),
-            executor: unimplemented!(),
         })
     }
 
     #[cfg(test)]
-    pub(crate) fn ready(self) -> impl Future<Item = Self, Error = ()> {
+    pub(crate) fn ready<E>(self) -> impl Future<Item = Self, Error = E> {
         let snd = self.event_tx.clone().unwrap();
-        future::loop_fn((self, snd), |(this, mut snd)| {
+        future::loop_fn((self, snd), |(this, snd)| {
             let (tx, rx) = futures::sync::oneshot::channel();
             snd.unbounded_send(Event::IsReady(tx)).unwrap();
-            rx.and_then(|v| {
-                if v {
-                    future::Loop::Break(this)
-                } else {
-                    use std::time;
-                    tokio::timer::Delay::new(time::Instant::now() + time::Duration::from_millis(50))
-                        .map(move |_| Loop::Continue((this, snd)))
-                }
-            })
+            rx.map_err(|_| unimplemented!("worker loop went away"))
+                .and_then(|v| {
+                    if v {
+                        future::Either::A(future::ok(future::Loop::Break(this)))
+                    } else {
+                        use std::time;
+                        future::Either::B(
+                            tokio::timer::Delay::new(
+                                time::Instant::now() + time::Duration::from_millis(50),
+                            )
+                            .map(move |_| future::Loop::Continue((this, snd)))
+                            .map_err(|_| unimplemented!("no timer available")),
+                        )
+                    }
+                })
         })
     }
 
@@ -210,6 +100,7 @@ impl<A: Authority + 'static> LocalControllerHandle<A> {
     }
 
     /// Install a new set of policies on the controller.
+    #[must_use]
     pub fn set_security_config(
         &mut self,
         p: String,
@@ -218,6 +109,7 @@ impl<A: Authority + 'static> LocalControllerHandle<A> {
     }
 
     /// Install a new set of policies on the controller.
+    #[must_use]
     pub fn create_universe(
         &mut self,
         context: HashMap<String, DataType>,
@@ -266,12 +158,91 @@ impl<A: Authority + 'static> LocalControllerHandle<A> {
     }
 }
 
-impl<A: Authority> Drop for LocalControllerHandle<A> {
+impl<A: Authority> Drop for WorkerHandle<A> {
     fn drop(&mut self) {
         drop(self.event_tx.take());
         if let Some(io) = self.iopool.take() {
             io.shutdown_on_idle();
         }
+    }
+}
+
+/// A synchronous handle to a worker.
+pub struct SyncWorkerHandle<A: Authority + 'static> {
+    pub(crate) rt: Option<tokio::runtime::Runtime>,
+    pub(crate) wh: WorkerHandle<A>,
+    // this is an Option so we can drop it
+    pub(crate) sh: Option<SyncControllerHandle<A, tokio::runtime::TaskExecutor>>,
+}
+
+impl<A: Authority> SyncWorkerHandle<A> {
+    /// Construct a new synchronous handle on top of an existing runtime.
+    ///
+    /// Note that the given `WorkerHandle` must have been created through the given `Runtime`.
+    pub fn from_existing(rt: tokio::runtime::Runtime, wh: WorkerHandle<A>) -> Self {
+        let sch = wh.sync_handle(rt.executor());
+        SyncWorkerHandle {
+            rt: Some(rt),
+            wh,
+            sh: Some(sch),
+        }
+    }
+
+    /// Construct a new synchronous handle on top of an existing external runtime.
+    ///
+    /// Note that the given `WorkerHandle` must have been created through the `Runtime` backing the
+    /// given executor.
+    pub fn from_executor(ex: tokio::runtime::TaskExecutor, wh: WorkerHandle<A>) -> Self {
+        let sch = wh.sync_handle(ex);
+        SyncWorkerHandle {
+            rt: None,
+            wh,
+            sh: Some(sch),
+        }
+    }
+
+    /// Run an operation on the underlying asynchronous worker handle.
+    pub fn on_worker<F, FF>(&mut self, f: F) -> Result<FF::Item, FF::Error>
+    where
+        F: FnOnce(&mut WorkerHandle<A>) -> FF,
+        FF: IntoFuture,
+        FF::Future: Send + 'static,
+        FF::Item: Send + 'static,
+        FF::Error: Send + 'static,
+    {
+        let fut = f(&mut self.wh);
+        self.sh.as_mut().unwrap().run(fut)
+    }
+
+    #[cfg(test)]
+    pub fn migrate<F, T>(&mut self, f: F) -> T
+    where
+        F: FnOnce(&mut Migration) -> T + Send + 'static,
+        T: Send + 'static,
+    {
+        self.on_worker(move |w| -> Result<_, ()> { Ok(w.migrate(f)) })
+            .unwrap()
+    }
+}
+
+impl<A: Authority> Deref for SyncWorkerHandle<A> {
+    type Target = SyncControllerHandle<A, tokio::runtime::TaskExecutor>;
+    fn deref(&self) -> &Self::Target {
+        self.sh.as_ref().unwrap()
+    }
+}
+
+impl<A: Authority> DerefMut for SyncWorkerHandle<A> {
+    fn deref_mut(&mut self) -> &mut Self::Target {
+        self.sh.as_mut().unwrap()
+    }
+}
+
+impl<A: Authority + 'static> Drop for SyncWorkerHandle<A> {
+    fn drop(&mut self) {
+        drop(self.sh.take());
+        self.wh.shutdown();
+        self.rt.take().unwrap().shutdown_on_idle().wait().unwrap();
     }
 }
 
@@ -281,11 +252,11 @@ mod tests {
     #[should_panic]
     #[cfg_attr(not(debug_assertions), allow_fail)]
     fn limit_mutator_creation() {
-        use crate::controller::ControllerBuilder;
+        use crate::controller::WorkerBuilder;
         let r_txt = "CREATE TABLE a (x int, y int, z int);\n
                      CREATE TABLE b (r int, s int);\n";
 
-        let mut c = ControllerBuilder::default().build_local().unwrap();
+        let mut c = WorkerBuilder::default().start_simple().unwrap();
         assert!(c.install_recipe(r_txt).is_ok());
         for _ in 0..2500 {
             let _ = c.table("a").unwrap();

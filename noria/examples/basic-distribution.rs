@@ -1,6 +1,5 @@
-use noria::{SyncControllerHandle, ZookeeperAuthority};
-
 use futures::Future;
+use noria::SyncControllerHandle;
 use std::collections::BTreeMap;
 use std::thread;
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
@@ -18,30 +17,35 @@ fn main() {
                 WHERE Article.aid = VoteCount.aid AND Article.aid = ?;";
 
     // set up Noria via recipe
-    let auth = ZookeeperAuthority::new("127.0.0.1:2181/basicdist").unwrap();
-    let mut db = SyncControllerHandle::new(auth).unwrap();
+    let rt = tokio::runtime::Runtime::new().unwrap();
+    let executor = rt.executor();
+    let mut db = SyncControllerHandle::from_zk("127.0.0.1:2181/basicdist", executor).unwrap();
     db.extend_recipe(sql1).unwrap();
     db.extend_recipe(sql2).unwrap();
     db.extend_recipe(sql3).unwrap();
     db.extend_recipe(sql4).unwrap();
     println!("{}", db.graphviz().unwrap());
 
-    let get_view = |b: &mut SyncControllerHandle<ZookeeperAuthority>, n| loop {
+    let executor = rt.executor();
+    let get_view = move |b: &mut SyncControllerHandle<_, _>, n| loop {
         match b.view(n) {
             Ok(v) => return v,
             Err(_) => {
                 thread::sleep(Duration::from_millis(50));
-                *b = SyncControllerHandle::from_zk("127.0.0.1:2181/basicdist").unwrap();
+                *b = SyncControllerHandle::from_zk("127.0.0.1:2181/basicdist", executor.clone())
+                    .unwrap();
             }
         }
     };
 
-    let get_table = |b: &mut SyncControllerHandle<ZookeeperAuthority>, n| loop {
+    let executor = rt.executor();
+    let get_table = move |b: &mut SyncControllerHandle<_, _>, n| loop {
         match b.table(n) {
             Ok(v) => return v,
             Err(_) => {
                 thread::sleep(Duration::from_millis(50));
-                *b = SyncControllerHandle::from_zk("127.0.0.1:2181/basicdist").unwrap();
+                *b = SyncControllerHandle::from_zk("127.0.0.1:2181/basicdist", executor.clone())
+                    .unwrap();
             }
         }
     };

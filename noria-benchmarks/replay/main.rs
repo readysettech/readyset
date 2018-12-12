@@ -21,7 +21,7 @@ use itertools::Itertools;
 use zookeeper::ZooKeeper;
 
 use noria::{
-    ControllerBuilder, DataType, DurabilityMode, LocalSyncControllerHandle, PersistenceParameters,
+    DataType, DurabilityMode, PersistenceParameters, SyncWorkerHandle, WorkerBuilder,
     ZookeeperAuthority,
 };
 
@@ -56,18 +56,21 @@ fn build_graph(
     authority: Arc<ZookeeperAuthority>,
     persistence: PersistenceParameters,
     verbose: bool,
-) -> LocalSyncControllerHandle<ZookeeperAuthority> {
-    let mut builder = ControllerBuilder::default();
+) -> SyncWorkerHandle<ZookeeperAuthority> {
+    let mut builder = WorkerBuilder::default();
     if verbose {
         builder.log_with(noria::logger_pls());
     }
 
     builder.set_persistence(persistence);
     builder.set_sharding(None);
-    builder.build_sync(authority).unwrap()
+    let mut rt = tokio::runtime::Runtime::new().unwrap();
+    let fut = builder.start(authority);
+    let wh = rt.block_on(fut).unwrap();
+    SyncWorkerHandle::from_existing(rt, wh)
 }
 
-fn populate(g: &mut LocalSyncControllerHandle<ZookeeperAuthority>, rows: i64, skewed: bool) {
+fn populate(g: &mut SyncWorkerHandle<ZookeeperAuthority>, rows: i64, skewed: bool) {
     let mut mutator = g.table("TableRow").unwrap();
 
     (0..rows)
@@ -92,7 +95,7 @@ fn populate(g: &mut LocalSyncControllerHandle<ZookeeperAuthority>, rows: i64, sk
 
 // Synchronously read `reads` times, where each read should trigger a full replay from the base.
 fn perform_reads(
-    g: &mut LocalSyncControllerHandle<ZookeeperAuthority>,
+    g: &mut SyncWorkerHandle<ZookeeperAuthority>,
     reads: i64,
     rows: i64,
     skewed: bool,
@@ -126,7 +129,7 @@ fn perform_reads(
 
 // Reads every row with the primary key index.
 fn perform_primary_reads(
-    g: &mut LocalSyncControllerHandle<ZookeeperAuthority>,
+    g: &mut SyncWorkerHandle<ZookeeperAuthority>,
     hist: &mut Histogram<u64>,
     row_ids: Vec<i64>,
 ) {
@@ -152,7 +155,7 @@ fn perform_primary_reads(
 
 // Reads each row from one of the secondary indices.
 fn perform_secondary_reads(
-    g: &mut LocalSyncControllerHandle<ZookeeperAuthority>,
+    g: &mut SyncWorkerHandle<ZookeeperAuthority>,
     hist: &mut Histogram<u64>,
     rows: i64,
     row_ids: Vec<i64>,

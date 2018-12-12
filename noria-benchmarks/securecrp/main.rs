@@ -5,21 +5,19 @@ extern crate slog;
 
 mod test_populate;
 
-use noria::{
-    ControllerBuilder, DataType, LocalAuthority, LocalSyncControllerHandle, ReuseConfigType,
-};
+use noria::{DataType, LocalAuthority, ReuseConfigType, SyncWorkerHandle, WorkerBuilder};
 use std::collections::HashMap;
 use std::fs::File;
 use std::io::Write;
 use std::{thread, time};
 
 pub struct Backend {
-    g: LocalSyncControllerHandle<LocalAuthority>,
+    g: SyncWorkerHandle<LocalAuthority>,
 }
 
 impl Backend {
     pub fn new(partial: bool, _shard: bool, reuse: &str) -> Backend {
-        let mut cb = ControllerBuilder::default();
+        let mut cb = WorkerBuilder::default();
         let log = noria::logger_pls();
         let blender_log = log.clone();
 
@@ -37,13 +35,15 @@ impl Backend {
             _ => panic!("reuse configuration not supported"),
         }
 
-        let g = cb.build_local_sync().unwrap();
+        let g = cb.start_simple().unwrap();
 
         Backend { g: g }
     }
 
     fn login(&mut self, user_context: HashMap<String, DataType>) -> Result<(), String> {
-        self.g.create_universe(user_context.clone());
+        self.g
+            .on_worker(|w| w.create_universe(user_context.clone()))
+            .unwrap();
 
         Ok(())
     }
@@ -55,7 +55,7 @@ impl Backend {
         cf.read_to_string(&mut config).unwrap();
 
         // Install recipe with policies
-        self.g.set_security_config(config);
+        self.g.on_worker(|w| w.set_security_config(config)).unwrap();
     }
 
     fn migrate(&mut self, schema_file: &str, query_file: Option<&str>) -> Result<(), String> {

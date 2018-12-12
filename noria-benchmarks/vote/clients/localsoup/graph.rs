@@ -1,7 +1,7 @@
 use noria::{
-    self, ControllerBuilder, LocalAuthority, LocalSyncControllerHandle, NodeIndex,
-    PersistenceParameters,
+    self, LocalAuthority, NodeIndex, PersistenceParameters, SyncWorkerHandle, WorkerBuilder,
 };
+use tokio::prelude::*;
 
 pub(crate) const RECIPE: &str = "# base tables
 CREATE TABLE Article (id int, title varchar(255), PRIMARY KEY(id));
@@ -19,7 +19,7 @@ pub struct Graph {
     pub vote: NodeIndex,
     pub article: NodeIndex,
     pub end: NodeIndex,
-    pub graph: LocalSyncControllerHandle<LocalAuthority>,
+    pub graph: SyncWorkerHandle<LocalAuthority>,
 }
 
 pub struct Builder {
@@ -43,13 +43,13 @@ impl Default for Builder {
 }
 
 impl Builder {
-    pub fn build(
+    pub fn start(
         &self,
-        rt: Option<tokio::runtime::Runtime>,
+        ex: Option<tokio::runtime::TaskExecutor>,
         persistence_params: PersistenceParameters,
     ) -> Graph {
         // XXX: why isn't PersistenceParameters inside self?
-        let mut g = ControllerBuilder::default();
+        let mut g = WorkerBuilder::default();
         if !self.partial {
             g.disable_partial();
         }
@@ -62,11 +62,17 @@ impl Builder {
             g.set_threads(threads);
         }
 
-        let mut graph = if let Some(mut rt) = rt {
-            let lch = rt.block_on(g.build_local()).unwrap();
-            lch.to_sync(rt)
+        let mut graph = if let Some(ex) = ex {
+            let (tx, rx) = futures::sync::oneshot::channel();
+            ex.spawn(Box::new(
+                g.start_local()
+                    .then(move |r| tx.send(r))
+                    .map_err(|_| unreachable!()),
+            ));
+            let wh = rx.wait().expect("runtime went away").unwrap();
+            SyncWorkerHandle::from_executor(ex, wh)
         } else {
-            g.build_local_sync().unwrap()
+            g.start_simple().unwrap()
         };
 
         graph.install_recipe(RECIPE).unwrap();

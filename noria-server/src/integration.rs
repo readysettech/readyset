@@ -1,6 +1,6 @@
 use crate::controller::recipe::Recipe;
 use crate::controller::sql::SqlIncorporator;
-use crate::controller::{ControllerBuilder, LocalControllerHandle};
+use crate::controller::{SyncWorkerHandle, WorkerBuilder, WorkerHandle};
 use dataflow::node::special::Base;
 use dataflow::ops::grouped::aggregate::Aggregation;
 use dataflow::ops::identity::Identity;
@@ -10,7 +10,7 @@ use dataflow::ops::project::Project;
 use dataflow::ops::union::Union;
 use dataflow::{DurabilityMode, PersistenceParameters};
 use futures::Future;
-use noria::consensus::LocalAuthority;
+use noria::consensus::{Authority, LocalAuthority};
 use noria::DataType;
 
 use std::collections::HashMap;
@@ -31,34 +31,41 @@ fn get_persistence_params(prefix: &str) -> PersistenceParameters {
     params
 }
 
-// Builds a local controller with the given log prefix.
-pub fn build_local(prefix: &str) -> LocalControllerHandle<LocalAuthority> {
+// Builds a local worker with the given log prefix.
+pub fn start_simple(prefix: &str) -> SyncWorkerHandle<LocalAuthority> {
     build(prefix, DEFAULT_SHARDING, false)
 }
 
+fn wrap_sync<A, F>(fut: F) -> SyncWorkerHandle<A>
+where
+    A: Authority + 'static,
+    F: Future<Item = WorkerHandle<A>> + Send + 'static,
+    F::Error: std::fmt::Debug + Send,
+{
+    let mut rt = tokio::runtime::Runtime::new().unwrap();
+    let wh = rt.block_on(fut).unwrap();
+    SyncWorkerHandle::from_existing(rt, wh)
+}
+
 #[allow(dead_code)]
-pub fn build_local_unsharded(prefix: &str) -> LocalControllerHandle<LocalAuthority> {
+pub fn start_simple_unsharded(prefix: &str) -> SyncWorkerHandle<LocalAuthority> {
     build(prefix, None, false)
 }
 
 #[allow(dead_code)]
-pub fn build_local_logging(prefix: &str) -> LocalControllerHandle<LocalAuthority> {
+pub fn start_simple_logging(prefix: &str) -> SyncWorkerHandle<LocalAuthority> {
     build(prefix, DEFAULT_SHARDING, true)
 }
 
-fn build(
-    prefix: &str,
-    sharding: Option<usize>,
-    log: bool,
-) -> LocalControllerHandle<LocalAuthority> {
+fn build(prefix: &str, sharding: Option<usize>, log: bool) -> SyncWorkerHandle<LocalAuthority> {
     use crate::logger_pls;
-    let mut builder = ControllerBuilder::default();
+    let mut builder = WorkerBuilder::default();
     if log {
         builder.log_with(logger_pls());
     }
     builder.set_sharding(sharding);
     builder.set_persistence(get_persistence_params(prefix));
-    builder.build_local().unwrap()
+    builder.start_simple().unwrap()
 }
 
 fn get_settle_time() -> Duration {
@@ -79,14 +86,14 @@ fn sleep() {
 #[test]
 fn it_works_basic() {
     // set up graph
-    let mut b = ControllerBuilder::default();
+    let mut b = WorkerBuilder::default();
     b.set_persistence(PersistenceParameters::new(
         DurabilityMode::DeleteOnExit,
         Duration::from_millis(1),
         Some(String::from("it_works_basic")),
         1,
     ));
-    let mut g = b.build_local().unwrap();
+    let mut g = b.start_simple().unwrap();
     let _ = g.migrate(|mig| {
         let a = mig.add_base("a", &["a", "b"], Base::new(vec![]).with_key(vec![0]));
         let b = mig.add_base("b", &["a", "b"], Base::new(vec![]).with_key(vec![0]));
@@ -159,7 +166,7 @@ fn it_works_basic() {
 fn base_mutation() {
     use noria::{Modification, Operation};
 
-    let mut g = build_local("base_mutation");
+    let mut g = start_simple("base_mutation");
     g.migrate(|mig| {
         let a = mig.add_base("a", &["a", "b"], Base::new(vec![]).with_key(vec![0]));
         mig.maintain_anonymous(a, &[0]);
@@ -238,7 +245,7 @@ fn base_mutation() {
 #[test]
 fn shared_interdomain_ancestor() {
     // set up graph
-    let mut g = build_local("shared_interdomain_ancestor");
+    let mut g = start_simple("shared_interdomain_ancestor");
     let _ = g.migrate(|mig| {
         let a = mig.add_base("a", &["a", "b"], Base::default());
 
@@ -289,7 +296,7 @@ fn shared_interdomain_ancestor() {
 #[test]
 fn it_works_w_mat() {
     // set up graph
-    let mut g = build_local("it_works_w_mat");
+    let mut g = start_simple("it_works_w_mat");
     let _ = g.migrate(|mig| {
         let a = mig.add_base("a", &["a", "b"], Base::default());
         let b = mig.add_base("b", &["a", "b"], Base::default());
@@ -346,7 +353,7 @@ fn it_works_w_mat() {
 #[test]
 fn it_works_w_partial_mat() {
     // set up graph
-    let mut g = build_local("it_works_w_partial_mat");
+    let mut g = start_simple("it_works_w_partial_mat");
     let (a, b) = g.migrate(|mig| {
         let a = mig.add_base("a", &["a", "b"], Base::default());
         let b = mig.add_base("b", &["a", "b"], Base::default());
@@ -397,7 +404,7 @@ fn it_works_w_partial_mat() {
 fn it_works_w_partial_mat_below_empty() {
     // set up graph with all nodes added in a single migration. The base tables are therefore empty
     // for now.
-    let mut g = build_local("it_works_w_partial_mat_below_empty");
+    let mut g = start_simple("it_works_w_partial_mat_below_empty");
     let _ = g.migrate(|mig| {
         let a = mig.add_base("a", &["a", "b"], Base::default());
         let b = mig.add_base("b", &["a", "b"], Base::default());
@@ -441,7 +448,7 @@ fn it_works_w_partial_mat_below_empty() {
 #[test]
 fn it_works_deletion() {
     // set up graph
-    let mut g = build_local("it_works_deletion");
+    let mut g = start_simple("it_works_deletion");
     let _ = g.migrate(|mig| {
         let a = mig.add_base("a", &["x", "y"], Base::new(vec![]).with_key(vec![1]));
         let b = mig.add_base("b", &["_", "x", "y"], Base::new(vec![]).with_key(vec![2]));
@@ -489,7 +496,7 @@ fn it_works_deletion() {
 
 #[test]
 fn it_works_with_sql_recipe() {
-    let mut g = build_local("it_works_with_sql_recipe");
+    let mut g = start_simple("it_works_with_sql_recipe");
     let sql = "
         CREATE TABLE Car (id int, brand varchar(255), PRIMARY KEY(id));
         QUERY CountCars: SELECT COUNT(*) FROM Car WHERE brand = ?;
@@ -518,7 +525,7 @@ fn it_works_with_sql_recipe() {
 
 #[test]
 fn it_works_with_vote() {
-    let mut g = build_local("it_works_with_vote");
+    let mut g = start_simple("it_works_with_vote");
     let sql = "
         # base tables
         CREATE TABLE Article (id int, title varchar(255), PRIMARY KEY(id));
@@ -563,13 +570,13 @@ fn it_works_with_vote() {
 
 #[test]
 fn it_works_with_double_query_through() {
-    let mut builder = ControllerBuilder::default();
+    let mut builder = WorkerBuilder::default();
     builder.set_persistence(get_persistence_params("it_works_with_double_query_through"));
     // TODO: sharding::shard picks the wrong column to shard on, since both aid and bid resolves to
     // all ancestors (and bid comes first). The reader is on aid though, so the sharder should pick
     // that as well (and not bid!).
     builder.set_sharding(None);
-    let mut g = builder.build_local().unwrap();
+    let mut g = builder.start_simple().unwrap();
     let sql = "
         # base tables
         CREATE TABLE A (aid int, other int, PRIMARY KEY(aid));
@@ -605,7 +612,7 @@ fn it_works_with_double_query_through() {
 
 #[test]
 fn it_works_with_reads_before_writes() {
-    let mut g = build_local("it_works_with_reads_before_writes");
+    let mut g = start_simple("it_works_with_reads_before_writes");
     let sql = "
         CREATE TABLE Article (aid int, PRIMARY KEY(aid));
         CREATE TABLE Vote (aid int, uid int, PRIMARY KEY(aid, uid));
@@ -639,7 +646,7 @@ fn forced_shuffle_despite_same_shard() {
     // XXX: this test doesn't currently *fail* despite
     // multiple trailing replay responses that are simply ignored...
 
-    let mut g = build_local("forced_shuffle_despite_same_shard");
+    let mut g = start_simple("forced_shuffle_despite_same_shard");
     let sql = "
         CREATE TABLE Car (cid int, pid int, PRIMARY KEY(pid));
         CREATE TABLE Price (pid int, price int, PRIMARY KEY(pid));
@@ -675,7 +682,7 @@ fn forced_shuffle_despite_same_shard() {
 
 #[test]
 fn double_shuffle() {
-    let mut g = build_local("double_shuffle");
+    let mut g = start_simple("double_shuffle");
     let sql = "
         CREATE TABLE Car (cid int, pid int, PRIMARY KEY(cid));
         CREATE TABLE Price (pid int, price int, PRIMARY KEY(pid));
@@ -711,7 +718,7 @@ fn double_shuffle() {
 
 #[test]
 fn it_works_with_arithmetic_aliases() {
-    let mut g = build_local("it_works_with_arithmetic_aliases");
+    let mut g = start_simple("it_works_with_arithmetic_aliases");
     let sql = "
         CREATE TABLE Price (pid int, cent_price int, PRIMARY KEY(pid));
         ModPrice: SELECT pid, cent_price / 100 AS price FROM Price;
@@ -750,9 +757,9 @@ fn it_recovers_persisted_bases() {
     );
 
     {
-        let mut g = ControllerBuilder::default();
+        let mut g = WorkerBuilder::default();
         g.set_persistence(persistence_params.clone());
-        let mut g = g.build(authority.clone()).unwrap();
+        let mut g = wrap_sync(g.start(authority.clone()));
 
         let sql = "
             CREATE TABLE Car (id int, price int, PRIMARY KEY(id));
@@ -771,9 +778,9 @@ fn it_recovers_persisted_bases() {
         sleep();
     }
 
-    let mut g = ControllerBuilder::default();
+    let mut g = WorkerBuilder::default();
     g.set_persistence(persistence_params);
-    let mut g = g.build(authority.clone()).unwrap();
+    let mut g = wrap_sync(g.start(authority.clone()));
     let mut getter = g.view("CarPrice").unwrap();
 
     // Make sure that the new graph contains the old writes
@@ -787,7 +794,7 @@ fn it_recovers_persisted_bases() {
 
 #[test]
 fn mutator_churn() {
-    let mut g = build_local("mutator_churn");
+    let mut g = start_simple("mutator_churn");
     let _ = g.migrate(|mig| {
         // migrate
 
@@ -850,9 +857,9 @@ fn it_recovers_persisted_bases_w_multiple_nodes() {
     );
 
     {
-        let mut g = ControllerBuilder::default();
+        let mut g = WorkerBuilder::default();
         g.set_persistence(persistence_parameters.clone());
-        let mut g = g.build(authority.clone()).unwrap();
+        let mut g = wrap_sync(g.start(authority.clone()));
 
         let sql = "
             CREATE TABLE A (id int, PRIMARY KEY(id));
@@ -873,9 +880,9 @@ fn it_recovers_persisted_bases_w_multiple_nodes() {
 
     // Create a new controller with the same authority, and make sure that it recovers to the same
     // state that the other one had.
-    let mut g = ControllerBuilder::default();
+    let mut g = WorkerBuilder::default();
     g.set_persistence(persistence_parameters);
-    let mut g = g.build(authority.clone()).unwrap();
+    let mut g = wrap_sync(g.start(authority.clone()));
     for (i, table) in tables.iter().enumerate() {
         let mut getter = g.view(&format!("{}ID", table)).unwrap();
         let result = getter.lookup(&[i.into()], true).wait().unwrap();
@@ -886,7 +893,7 @@ fn it_recovers_persisted_bases_w_multiple_nodes() {
 
 #[test]
 fn it_works_with_simple_arithmetic() {
-    let mut g = build_local("it_works_with_simple_arithmetic");
+    let mut g = start_simple("it_works_with_simple_arithmetic");
 
     g.migrate(|mig| {
         let sql = "CREATE TABLE Car (id int, price int, PRIMARY KEY(id));
@@ -912,7 +919,7 @@ fn it_works_with_simple_arithmetic() {
 
 #[test]
 fn it_works_with_multiple_arithmetic_expressions() {
-    let mut g = build_local("it_works_with_multiple_arithmetic_expressions");
+    let mut g = start_simple("it_works_with_multiple_arithmetic_expressions");
     let sql = "CREATE TABLE Car (id int, price int, PRIMARY KEY(id));
                QUERY CarPrice: SELECT 10 * 10, 2 * price, 10 * price, FROM Car WHERE id = ?;
                ";
@@ -937,7 +944,7 @@ fn it_works_with_multiple_arithmetic_expressions() {
 
 #[test]
 fn it_works_with_join_arithmetic() {
-    let mut g = build_local("it_works_with_join_arithmetic");
+    let mut g = start_simple("it_works_with_join_arithmetic");
     let sql = "
         CREATE TABLE Car (car_id int, price_id int, PRIMARY KEY(car_id));
         CREATE TABLE Price (price_id int, price int, PRIMARY KEY(price_id));
@@ -980,7 +987,7 @@ fn it_works_with_join_arithmetic() {
 
 #[test]
 fn it_works_with_function_arithmetic() {
-    let mut g = build_local("it_works_with_function_arithmetic");
+    let mut g = start_simple("it_works_with_function_arithmetic");
     let sql = "
         CREATE TABLE Bread (id int, price int, PRIMARY KEY(id));
         QUERY Price: SELECT 2 * MAX(price) FROM Bread;
@@ -1009,7 +1016,7 @@ fn it_works_with_function_arithmetic() {
 #[test]
 fn votes() {
     // set up graph
-    let mut g = build_local("votes");
+    let mut g = start_simple("votes");
     let _ = g.migrate(|mig| {
         // add article base nodes (we use two so we can exercise unions too)
         let article1 = mig.add_base("article1", &["id", "title"], Base::default());
@@ -1111,7 +1118,7 @@ fn votes() {
 #[test]
 fn empty_migration() {
     // set up graph
-    let mut g = build_local("empty_migration");
+    let mut g = start_simple("empty_migration");
     g.migrate(|_| {});
 
     let _ = g.migrate(|mig| {
@@ -1161,7 +1168,7 @@ fn simple_migration() {
     let id: DataType = 1.into();
 
     // set up graph
-    let mut g = build_local("simple_migration");
+    let mut g = start_simple("simple_migration");
     let _ = g.migrate(|mig| {
         let a = mig.add_base("a", &["a", "b"], Base::default());
         mig.maintain_anonymous(a, &[0]);
@@ -1211,7 +1218,7 @@ fn add_columns() {
     let id: DataType = "x".into();
 
     // set up graph
-    let mut g = build_local("add_columns");
+    let mut g = start_simple("add_columns");
     let a = g.migrate(|mig| {
         let a = mig.add_base("a", &["a", "b"], Base::new(vec![1.into(), 2.into()]));
         mig.maintain_anonymous(a, &[0]);
@@ -1266,7 +1273,7 @@ fn migrate_added_columns() {
     let id: DataType = "x".into();
 
     // set up graph
-    let mut g = build_local("migrate_added_columns");
+    let mut g = start_simple("migrate_added_columns");
     let a = g.migrate(|mig| {
         let a = mig.add_base("a", &["a", "b"], Base::new(vec![1.into(), 2.into()]));
         a
@@ -1316,7 +1323,7 @@ fn migrate_drop_columns() {
     let id: DataType = "x".into();
 
     // set up graph
-    let mut g = build_local("migrate_drop_columns");
+    let mut g = start_simple("migrate_drop_columns");
     let a = g.migrate(|mig| {
         let a = mig.add_base("a", &["a", "b"], Base::new(vec!["a".into(), "b".into()]));
         mig.maintain_anonymous(a, &[0]);
@@ -1382,7 +1389,7 @@ fn migrate_drop_columns() {
 #[test]
 fn key_on_added() {
     // set up graph
-    let mut g = build_local("key_on_added");
+    let mut g = start_simple("key_on_added");
     let a = g.migrate(|mig| {
         let a = mig.add_base("a", &["a", "b"], Base::new(vec![1.into(), 2.into()]));
         a
@@ -1407,10 +1414,10 @@ fn replay_during_replay() {
     // the join key that does not exist in the view the record was sent from. since joins only do
     // lookups into the origin view during forward processing when it receives things from the
     // right in a left join, that's what we have to construct.
-    let mut g = ControllerBuilder::default();
+    let mut g = WorkerBuilder::default();
     g.disable_partial();
     g.set_persistence(get_persistence_params("replay_during_replay"));
-    let mut g = g.build_local().unwrap();
+    let mut g = g.start_simple().unwrap();
     let (a, u1, u2) = g.migrate(|mig| {
         // we need three bases:
         //
@@ -1507,10 +1514,10 @@ fn replay_during_replay() {
 
 #[test]
 fn cascading_replays_with_sharding() {
-    let mut g = ControllerBuilder::default();
+    let mut g = WorkerBuilder::default();
     g.set_sharding(Some(2));
     g.set_persistence(get_persistence_params("cascading_replays_with_sharding"));
-    let mut g = g.build_local().unwrap();
+    let mut g = g.start_simple().unwrap();
 
     // add each two bases. these are initially unsharded, but f will end up being sharded by u1,
     // while v will be sharded by u
@@ -1567,7 +1574,7 @@ fn cascading_replays_with_sharding() {
 #[test]
 fn full_aggregation_with_bogokey() {
     // set up graph
-    let mut g = build_local("full_aggregation_with_bogokey");
+    let mut g = start_simple("full_aggregation_with_bogokey");
     let base = g.migrate(|mig| mig.add_base("base", &["x"], Base::new(vec![1.into()])));
 
     // add an aggregation over the base with a bogo key.
@@ -1620,7 +1627,7 @@ fn full_aggregation_with_bogokey() {
 #[test]
 fn crossing_migration() {
     // set up graph
-    let mut g = build_local("crossing_migration");
+    let mut g = start_simple("crossing_migration");
     let (a, b) = g.migrate(|mig| {
         let a = mig.add_base("a", &["a", "b"], Base::default());
         let b = mig.add_base("b", &["a", "b"], Base::default());
@@ -1667,7 +1674,7 @@ fn independent_domain_migration() {
     let id: DataType = 1.into();
 
     // set up graph
-    let mut g = build_local("independent_domain_migration");
+    let mut g = start_simple("independent_domain_migration");
     let _ = g.migrate(|mig| {
         let a = mig.add_base("a", &["a", "b"], Base::default());
         mig.maintain_anonymous(a, &[0]);
@@ -1715,7 +1722,7 @@ fn independent_domain_migration() {
 #[test]
 fn domain_amend_migration() {
     // set up graph
-    let mut g = build_local("domain_amend_migration");
+    let mut g = start_simple("domain_amend_migration");
     let (a, b) = g.migrate(|mig| {
         let a = mig.add_base("a", &["a", "b"], Base::default());
         let b = mig.add_base("b", &["a", "b"], Base::default());
@@ -1765,7 +1772,7 @@ fn migration_depends_on_unchanged_domain() {
     // this is tricky, because the system must realize that n is materialized, even though it
     // normally wouldn't even look at that part of the data flow graph!
 
-    let mut g = build_local("migration_depends_on_unchanged_domain");
+    let mut g = start_simple("migration_depends_on_unchanged_domain");
     let left = g.migrate(|mig| {
         // base node, so will be materialized
         let left = mig.add_base("foo", &["a", "b"], Base::default());
@@ -1791,7 +1798,7 @@ fn migration_depends_on_unchanged_domain() {
 }
 
 fn do_full_vote_migration(old_puts_after: bool) {
-    let mut g = build_local(&format!("do_full_vote_migration_{}", old_puts_after));
+    let mut g = start_simple(&format!("do_full_vote_migration_{}", old_puts_after));
     let (article, _vote, vc, _end) = g.migrate(|mig| {
         // migrate
 
@@ -1922,7 +1929,7 @@ fn full_vote_migration_new_and_old() {
 
 #[test]
 fn live_writes() {
-    let mut g = build_local("live_writes");
+    let mut g = start_simple("live_writes");
     let (_vote, vc) = g.migrate(|mig| {
         // migrate
 
@@ -1998,7 +2005,7 @@ fn state_replay_migration_query() {
     // read from rather than relying on forwarding. to further stress the graph, *both* base nodes
     // are created and populated before the migration, meaning we have to replay through a join.
 
-    let mut g = build_local("state_replay_migration_query");
+    let mut g = start_simple("state_replay_migration_query");
     let (a, b) = g.migrate(|mig| {
         let a = mig.add_base("a", &["x", "y"], Base::default());
         let b = mig.add_base("b", &["x", "z"], Base::default());
@@ -2050,7 +2057,7 @@ fn state_replay_migration_query() {
 
 #[test]
 fn recipe_activates() {
-    let mut g = build_local("recipe_activates");
+    let mut g = start_simple("recipe_activates");
     g.migrate(|mig| {
         let r_txt = "CREATE TABLE b (a text, c text, x text);\n";
         let mut r = Recipe::from_str(r_txt, None).unwrap();
@@ -2069,7 +2076,7 @@ fn recipe_activates_and_migrates() {
     let r1_txt = "QUERY qa: SELECT a FROM b;\n
                   QUERY qb: SELECT a, c FROM b WHERE a = 42;";
 
-    let mut g = build_local("recipe_activates_and_migrates");
+    let mut g = start_simple("recipe_activates_and_migrates");
     g.install_recipe(r_txt).unwrap();
     // one base node
     assert_eq!(g.inputs().unwrap().len(), 1);
@@ -2087,7 +2094,7 @@ fn recipe_activates_and_migrates_with_join() {
                  CREATE TABLE b (r int, s int);\n";
     let r1_txt = "QUERY q: SELECT y, s FROM a, b WHERE a.x = b.r;";
 
-    let mut g = build_local("recipe_activates_and_migrates_with_join");
+    let mut g = start_simple("recipe_activates_and_migrates_with_join");
     g.install_recipe(r_txt).unwrap();
 
     // two base nodes
@@ -2110,9 +2117,9 @@ fn test_queries(test: &str, file: &'static str, shard: bool, reuse: bool, log: b
 
     // set up graph
     let mut g = if shard {
-        build_local(test)
+        start_simple(test)
     } else {
-        build_local_unsharded(test)
+        start_simple_unsharded(test)
     };
 
     // move needed for some funny lifetime reason
@@ -2165,7 +2172,7 @@ fn finkelstein1982_queries() {
     use std::io::Read;
 
     // set up graph
-    let mut g = build_local("finkelstein1982_queries");
+    let mut g = start_simple("finkelstein1982_queries");
     g.migrate(|mig| {
         let mut inc = SqlIncorporator::default();
         let mut f = File::open("tests/finkelstein82.txt").unwrap();
@@ -2217,14 +2224,14 @@ fn soupy_lobsters() {
 #[allow_fail]
 fn node_removal() {
     // set up graph
-    let mut b = ControllerBuilder::default();
+    let mut b = WorkerBuilder::default();
     b.set_persistence(PersistenceParameters::new(
         DurabilityMode::DeleteOnExit,
         Duration::from_millis(1),
         Some(String::from("domain_removal")),
         1,
     ));
-    let mut g = b.build_local().unwrap();
+    let mut g = b.start_simple().unwrap();
     let cid = g.migrate(|mig| {
         let a = mig.add_base("a", &["a", "b"], Base::new(vec![]).with_key(vec![0]));
         let b = mig.add_base("b", &["a", "b"], Base::new(vec![]).with_key(vec![0]));
@@ -2295,7 +2302,7 @@ fn remove_query() {
     let r2_txt = "CREATE TABLE b (a int, c text, x text);\n
                   QUERY qa: SELECT a FROM b;";
 
-    let mut g = ControllerBuilder::default().build_local().unwrap();
+    let mut g = WorkerBuilder::default().start_simple().unwrap();
     g.install_recipe(r_txt).unwrap();
     assert_eq!(g.inputs().unwrap().len(), 1);
     assert_eq!(g.outputs().unwrap().len(), 2);

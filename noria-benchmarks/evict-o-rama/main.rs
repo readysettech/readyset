@@ -1,7 +1,7 @@
 extern crate noria;
 
 use futures::Future;
-use noria::ControllerBuilder;
+use noria::WorkerBuilder;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 static NUM_ARTICLES: usize = 10_000;
@@ -30,7 +30,7 @@ fn main() {
     );
 
     // set up Soup via recipe
-    let mut builder = ControllerBuilder::default();
+    let mut builder = WorkerBuilder::default();
     builder.log_with(noria::logger_pls());
     builder.set_persistence(persistence_params);
     builder.set_memory_limit(100 * 1024, Duration::from_millis(1000));
@@ -39,7 +39,7 @@ fn main() {
     // test passes again.
     //builder.disable_partial();
 
-    let mut blender = builder.build_local_sync().unwrap();
+    let mut blender = builder.start_simple().unwrap();
     blender.install_recipe(sql).unwrap();
 
     // Get mutators and getter.

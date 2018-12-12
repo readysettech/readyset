@@ -1,5 +1,6 @@
 use crate::clients::{Parameters, VoteClient};
 use clap;
+use failure::ResultExt;
 use futures::Future;
 use noria::{self, DataType};
 use std::path::PathBuf;
@@ -10,18 +11,26 @@ pub(crate) mod graph;
 
 #[derive(Clone)]
 pub(crate) struct LocalNoria {
-    g: Arc<graph::Graph>,
+    _g: Arc<graph::Graph>,
     r: noria::View,
     #[allow(dead_code)]
     w: noria::Table,
 }
 
-impl VoteClient for LocalNoria {
-    type NewFuture = Box<Future<Item = Self, Error = ()>>;
-    type ReadFuture = Box<Future<Item = (), Error = noria::ViewError>>;
-    type WriteFuture = Box<Future<Item = (), Error = noria::TableError>>;
+// View and Table are both Send, but graph::Graph isn't Sync, so Arc<Graph> isn't Send.
+// We only stick Graph inside an Arc so that it won't be dropped, we never actually access it!
+unsafe impl Send for LocalNoria {}
 
-    fn spawn(params: &Parameters, args: &clap::ArgMatches) -> Self::NewFuture {
+impl VoteClient for LocalNoria {
+    type NewFuture = Box<Future<Item = Self, Error = failure::Error> + Send>;
+    type ReadFuture = Box<Future<Item = (), Error = failure::Error> + Send>;
+    type WriteFuture = Box<Future<Item = (), Error = failure::Error> + Send>;
+
+    fn spawn(
+        ex: tokio::runtime::TaskExecutor,
+        params: Parameters,
+        args: clap::ArgMatches,
+    ) -> Self::NewFuture {
         use noria::{DurabilityMode, PersistenceParameters};
 
         assert!(params.prime);
@@ -55,46 +64,58 @@ impl VoteClient for LocalNoria {
             x => Some(x),
         };
         s.stupid = args.is_present("stupid");
-
-        // TODO: reuse pool
-        let mut g = s.make(persistence);
+        let mut g = s.start(Some(ex), persistence);
 
         // prepopulate
         if verbose {
             println!("Prepopulating with {} articles", params.articles);
         }
-        let mut a = g.graph.table("Article").unwrap();
-        if fudge {
-            a.i_promise_dst_is_same_process();
-        }
 
         Box::new(
-            a.perform_all((0..params.articles).map(|i| {
-                vec![
-                    ((i + 1) as i32).into(),
-                    format!("Article #{}", i + 1).into(),
-                ]
-            }))
-            .and_then(move |_| {
-                if verbose {
-                    println!("Done with prepopulation");
-                }
+            g.graph
+                .handle()
+                .table("Article")
+                .and_then(move |mut a| {
+                    if fudge {
+                        a.i_promise_dst_is_same_process();
+                    }
 
-                // TODO: allow writes to propagate
+                    a.perform_all((0..params.articles).map(|i| {
+                        vec![
+                            ((i + 1) as i32).into(),
+                            format!("Article #{}", i + 1).into(),
+                        ]
+                    }))
+                    .map(move |_| g)
+                    .then(|r| {
+                        r.context("failed to do article prepopulation")
+                            .map_err(Into::into)
+                    })
+                })
+                .and_then(move |mut g| {
+                    if verbose {
+                        println!("Done with prepopulation");
+                    }
 
-                let r = g.graph.view("ArticleWithVoteCount").unwrap();
-                let mut w = g.graph.table("Vote").unwrap();
-                if fudge {
-                    // fudge write rpcs by sending just the pointer over tcp
-                    w.i_promise_dst_is_same_process();
-                }
+                    // TODO: allow writes to propagate
 
-                LocalNoria {
-                    g: Arc::new(g),
-                    r,
-                    w,
-                }
-            }),
+                    g.graph
+                        .handle()
+                        .view("ArticleWithVoteCount")
+                        .and_then(move |r| {
+                            g.graph.handle().table("Vote").map(move |mut w| {
+                                if fudge {
+                                    // fudge write rpcs by sending just the pointer over tcp
+                                    w.i_promise_dst_is_same_process();
+                                }
+                                LocalNoria {
+                                    _g: Arc::new(g),
+                                    r,
+                                    w,
+                                }
+                            })
+                        })
+                }),
         )
     }
 
@@ -104,7 +125,7 @@ impl VoteClient for LocalNoria {
             .map(|&article_id| vec![(article_id as usize).into(), 0.into()])
             .collect();
 
-        Box::new(self.w.perform_all(data))
+        Box::new(self.w.perform_all(data).map_err(failure::Error::from))
     }
 
     fn handle_reads(&mut self, ids: &[i32]) -> Self::ReadFuture {
@@ -124,7 +145,8 @@ impl VoteClient for LocalNoria {
                 })
                 .map(move |rows| {
                     assert_eq!(rows, len);
-                }),
+                })
+                .map_err(failure::Error::from),
         )
     }
 }
