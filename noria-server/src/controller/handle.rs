@@ -160,10 +160,7 @@ impl<A: Authority + 'static> WorkerHandle<A> {
 
 impl<A: Authority> Drop for WorkerHandle<A> {
     fn drop(&mut self) {
-        drop(self.event_tx.take());
-        if let Some(io) = self.iopool.take() {
-            io.shutdown_on_idle();
-        }
+        self.shutdown();
     }
 }
 
@@ -242,7 +239,9 @@ impl<A: Authority + 'static> Drop for SyncWorkerHandle<A> {
     fn drop(&mut self) {
         drop(self.sh.take());
         self.wh.shutdown();
-        self.rt.take().unwrap().shutdown_on_idle().wait().unwrap();
+        if let Some(rt) = self.rt.take() {
+            rt.shutdown_on_idle().wait().unwrap();
+        }
     }
 }
 

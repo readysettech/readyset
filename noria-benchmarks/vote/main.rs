@@ -119,7 +119,8 @@ where
     };
 
     let generators: Vec<_> = (0..ngen)
-        .map(move |geni| {
+        .map(|geni| {
+            let ex = rt.executor();
             let handle = handle.clone();
             let global_args = global_args.clone();
 
@@ -132,6 +133,7 @@ where
                     let ops = if skewed {
                         run_generator(
                             handle,
+                            ex,
                             zipf::ZipfDistribution::new(articles, 1.08).unwrap(),
                             target,
                             global_args,
@@ -139,6 +141,7 @@ where
                     } else {
                         run_generator(
                             handle,
+                            ex,
                             rand::distributions::Range::new(1, articles + 1),
                             target,
                             global_args,
@@ -157,6 +160,7 @@ where
         ops += gen;
         wops += completed;
     }
+    drop(handle);
     rt.shutdown_on_idle().wait().unwrap();
 
     // all done!
@@ -230,6 +234,7 @@ where
 
 fn run_generator<C, R>(
     mut handle: C,
+    ex: tokio::runtime::TaskExecutor,
     id_rng: R,
     target: f64,
     global_args: clap::ArgMatches,
@@ -276,7 +281,7 @@ where
     use std::mem;
     let ndone: &'static atomic::AtomicUsize = unsafe { mem::transmute(&ndone) };
 
-    let enqueue = |client: &mut C, queued: Vec<_>, mut keys: Vec<_>, write| {
+    let enqueue = move |client: &mut C, queued: Vec<_>, mut keys: Vec<_>, write| {
         let n = keys.len();
         let sent = time::Instant::now();
         let fut = if write {
@@ -326,7 +331,7 @@ where
             }
         });
 
-        tokio::spawn(fut.map_err(|e| panic!("{:?}", e)));
+        ex.spawn(fut.map_err(|e| eprintln!("enqueued request failed: {}", e)));
     };
 
     let mut worker_ops = None;

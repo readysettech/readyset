@@ -47,7 +47,7 @@ impl Builder {
         &self,
         ex: Option<tokio::runtime::TaskExecutor>,
         persistence_params: PersistenceParameters,
-    ) -> Graph {
+    ) -> impl Future<Item = Graph, Error = failure::Error> {
         // XXX: why isn't PersistenceParameters inside self?
         let mut g = WorkerBuilder::default();
         if !self.partial {
@@ -62,35 +62,36 @@ impl Builder {
             g.set_threads(threads);
         }
 
-        let mut graph = if let Some(ex) = ex {
-            let (tx, rx) = futures::sync::oneshot::channel();
-            ex.spawn(Box::new(
+        let graph = if let Some(ex) = ex {
+            future::Either::A(
                 g.start_local()
-                    .then(move |r| tx.send(r))
-                    .map_err(|_| unreachable!()),
-            ));
-            let wh = rx.wait().expect("runtime went away").unwrap();
-            SyncWorkerHandle::from_executor(ex, wh)
+                    .map(move |wh| SyncWorkerHandle::from_executor(ex, wh)),
+            )
         } else {
-            g.start_simple().unwrap()
+            future::Either::B(future::ok(g.start_simple().unwrap()))
         };
 
-        graph.install_recipe(RECIPE).unwrap();
-        let inputs = graph.inputs().unwrap();
-        let outputs = graph.outputs().unwrap();
-
-        if self.logging {
-            println!("inputs {:?}", inputs);
-            println!("outputs {:?}", outputs);
-        }
-
-        Graph {
-            vote: inputs["Vote"],
-            article: inputs["Article"],
-            end: outputs["ArticleWithVoteCount"],
-            stupid: self.stupid,
-            graph,
-        }
+        let logging = self.logging;
+        let stupid = self.stupid;
+        graph
+            .and_then(|mut graph| graph.handle().install_recipe(RECIPE).map(move |_| graph))
+            .and_then(|mut graph| graph.handle().inputs().map(move |x| (graph, x)))
+            .and_then(|(mut graph, inputs)| {
+                graph.handle().outputs().map(move |x| (graph, inputs, x))
+            })
+            .inspect(move |(_, inputs, outputs)| {
+                if logging {
+                    println!("inputs {:?}", inputs);
+                    println!("outputs {:?}", outputs);
+                }
+            })
+            .map(move |(graph, inputs, outputs)| Graph {
+                vote: inputs["Vote"],
+                article: inputs["Article"],
+                end: outputs["ArticleWithVoteCount"],
+                stupid: stupid,
+                graph,
+            })
     }
 }
 

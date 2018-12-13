@@ -157,8 +157,6 @@ impl ViewBuilder {
 ///
 /// Note that if you create multiple `View` handles from a single `ControllerHandle`, they may
 /// share connections to the Soup workers.
-///
-/// TODO: load scaling
 #[derive(Clone)]
 pub struct View {
     node: NodeIndex,

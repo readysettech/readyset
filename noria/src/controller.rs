@@ -36,6 +36,7 @@ struct Controller<A> {
     client: hyper::Client<hyper::client::HttpConnector>,
 }
 
+#[derive(Debug)]
 struct ControllerRequest {
     path: &'static str,
     request: Vec<u8>,

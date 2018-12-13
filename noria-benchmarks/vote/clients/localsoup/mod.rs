@@ -12,9 +12,10 @@ pub(crate) mod graph;
 #[derive(Clone)]
 pub(crate) struct LocalNoria {
     _g: Arc<graph::Graph>,
-    r: noria::View,
-    #[allow(dead_code)]
-    w: noria::Table,
+    // in Option because we need to drop them first
+    // see https://aochagavia.github.io/blog/enforcing-drop-order-in-rust/
+    r: Option<noria::View>,
+    w: Option<noria::Table>,
 }
 
 // View and Table are both Send, but graph::Graph isn't Sync, so Arc<Graph> isn't Send.
@@ -64,7 +65,7 @@ impl VoteClient for LocalNoria {
             x => Some(x),
         };
         s.stupid = args.is_present("stupid");
-        let mut g = s.start(Some(ex), persistence);
+        let g = s.start(Some(ex), persistence);
 
         // prepopulate
         if verbose {
@@ -72,10 +73,8 @@ impl VoteClient for LocalNoria {
         }
 
         Box::new(
-            g.graph
-                .handle()
-                .table("Article")
-                .and_then(move |mut a| {
+            g.and_then(|mut g| g.graph.handle().table("Article").map(move |a| (g, a)))
+                .and_then(move |(g, mut a)| {
                     if fudge {
                         a.i_promise_dst_is_same_process();
                     }
@@ -110,8 +109,8 @@ impl VoteClient for LocalNoria {
                                 }
                                 LocalNoria {
                                     _g: Arc::new(g),
-                                    r,
-                                    w,
+                                    r: Some(r),
+                                    w: Some(w),
                                 }
                             })
                         })
@@ -125,7 +124,13 @@ impl VoteClient for LocalNoria {
             .map(|&article_id| vec![(article_id as usize).into(), 0.into()])
             .collect();
 
-        Box::new(self.w.perform_all(data).map_err(failure::Error::from))
+        Box::new(
+            self.w
+                .as_mut()
+                .unwrap()
+                .perform_all(data)
+                .map_err(failure::Error::from),
+        )
     }
 
     fn handle_reads(&mut self, ids: &[i32]) -> Self::ReadFuture {
@@ -137,6 +142,8 @@ impl VoteClient for LocalNoria {
         let len = ids.len();
         Box::new(
             self.r
+                .as_mut()
+                .unwrap()
                 .multi_lookup(arg, true)
                 .map(|rows| {
                     // TODO
@@ -148,5 +155,12 @@ impl VoteClient for LocalNoria {
                 })
                 .map_err(failure::Error::from),
         )
+    }
+}
+
+impl Drop for LocalNoria {
+    fn drop(&mut self) {
+        drop(self.r.take());
+        drop(self.w.take());
     }
 }
