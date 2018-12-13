@@ -213,7 +213,7 @@ pub struct Table {
 impl Service<Input> for Table {
     type Error = TableError;
     type Response = <TableRpc as Service<Tagged<LocalOrNot<Input>>>>::Response;
-    type Future = Box<Future<Item = Tagged<()>, Error = Self::Error> + Send>;
+    existential type Future: Future<Item = Tagged<()>, Error = TableError>;
 
     fn poll_ready(&mut self) -> Poll<(), Self::Error> {
         for s in &mut self.shards {
@@ -228,7 +228,7 @@ impl Service<Input> for Table {
         // TODO: check each row's .len() against self.columns.len() -> WrongColumnCount
 
         if self.shards.len() == 1 {
-            Box::new(
+            future::Either::A(
                 self.shards[0]
                     .call(
                         if self.dst_is_local {
@@ -287,7 +287,7 @@ impl Service<Input> for Table {
                 }
             }
 
-            Box::new(
+            future::Either::B(
                 wait_for
                     .fold((), |_, _| Ok(()))
                     .map_err(TableError::from)
