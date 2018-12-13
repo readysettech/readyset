@@ -1,158 +1,102 @@
 use crate::clients::localsoup::graph::RECIPE;
-use crate::clients::{Parameters, VoteClient, VoteClientConstructor};
+use crate::clients::{Parameters, VoteClient};
 use clap;
-use failure::Error;
-use futures::Future;
+use failure::ResultExt;
 use noria::{self, ControllerHandle, DataType, ZookeeperAuthority};
-use tokio::runtime::current_thread::Runtime;
-
-use std::time::Duration;
-use std::{mem, thread};
-
-pub(crate) struct Client {
-    addr: String,
-    c: Conn,
-    r: noria::View,
-    #[allow(dead_code)]
-    w: noria::Table,
-}
-
-impl Client {
-    fn new(addr: &str) -> Result<Self, Error> {
-        let mut c = Conn::new(addr)?;
-        let r = c.make_getter("ArticleWithVoteCount")?;
-        let w = c.make_mutator("Vote")?;
-        Ok(Client {
-            addr: addr.to_string(),
-            c,
-            r,
-            w,
-        })
-    }
-
-    fn reconnect(&mut self) -> Result<(), Error> {
-        let ch = self
-            .c
-            .rt
-            .block_on(ControllerHandle::new(ZookeeperAuthority::new(&self.addr)?))?;
-        let old_ch = mem::replace(&mut self.c.ch, ch);
-        let res = try {
-            let r = self.c.make_getter("ArticleWithVoteCount")?;
-            let w = self.c.make_mutator("Vote")?;
-            mem::replace(&mut self.r, r);
-            mem::replace(&mut self.w, w);
-        };
-
-        if let Err(e) = res {
-            mem::replace(&mut self.c.ch, old_ch);
-            Err(e)
-        } else {
-            Ok(())
-        }
-    }
-}
-
-struct Conn {
-    ch: ControllerHandle<ZookeeperAuthority>,
-    rt: Runtime,
-}
-
-impl Conn {
-    fn new(addr: &str) -> Result<Self, Error> {
-        let mut rt = Runtime::new().unwrap();
-        let ch = rt.block_on(ControllerHandle::new(ZookeeperAuthority::new(addr)?))?;
-        Ok(Conn { ch, rt })
-    }
-
-    fn make_mutator(&mut self, base: &str) -> Result<noria::Table, Error> {
-        Ok(self.rt.block_on(self.ch.table(base))?)
-    }
-
-    fn make_getter(&mut self, view: &str) -> Result<noria::View, Error> {
-        Ok(self.rt.block_on(self.ch.view(view))?)
-    }
-}
+use tokio::prelude::*;
 
 #[derive(Clone)]
-pub(crate) struct Constructor(String);
+pub(crate) struct Conn {
+    ch: ControllerHandle<ZookeeperAuthority>,
+    r: Option<noria::View>,
+    w: Option<noria::Table>,
+}
 
-impl VoteClientConstructor for Constructor {
-    type Instance = Client;
+impl VoteClient for Conn {
+    existential type NewFuture: Future<Item = Self, Error = failure::Error>;
+    existential type ReadFuture: Future<Item = (), Error = failure::Error>;
+    existential type WriteFuture: Future<Item = (), Error = failure::Error>;
 
-    fn new(params: &Parameters, args: &clap::ArgMatches) -> Self {
+    fn spawn(
+        _: tokio::runtime::TaskExecutor,
+        params: Parameters,
+        args: clap::ArgMatches,
+    ) -> Self::NewFuture {
         let zk = format!(
             "{}/{}",
             args.value_of("zookeeper").unwrap(),
             args.value_of("deployment").unwrap()
         );
 
-        if params.prime {
-            // for prepop, we need a mutator
-            let mut c = Conn::new(&zk).unwrap();
-            c.rt.block_on(c.ch.install_recipe(RECIPE)).unwrap();
-            let mut m = c.make_mutator("Article").unwrap();
-            let mut id = 0;
-            while id < params.articles {
-                let end = ::std::cmp::min(id + 1000, params.articles);
-                c.rt.block_on(
-                    m.perform_all(
-                        (id..end).map(|i| {
-                            vec![((i + 1) as i32).into(), format!("Article #{}", i).into()]
-                        }),
-                    ),
-                )
-                .unwrap();
-                id = end;
-            }
-        }
-
-        Constructor(zk)
+        ZookeeperAuthority::new(&zk)
+            .into_future()
+            .and_then(ControllerHandle::new)
+            .and_then(move |mut c| {
+                if params.prime {
+                    // for prepop, we need a mutator
+                    future::Either::A(
+                        c.install_recipe(RECIPE)
+                            .and_then(move |_| c.table("Article").map(move |a| (c, a)))
+                            .and_then(move |(c, mut a)| {
+                                a.perform_all((0..params.articles).map(|i| {
+                                    vec![((i + 1) as i32).into(), format!("Article #{}", i).into()]
+                                }))
+                                .map(move |_| c)
+                                .then(|r| {
+                                    r.context("failed to do article prepopulation")
+                                        .map_err(Into::into)
+                                })
+                            }),
+                    )
+                } else {
+                    future::Either::B(future::ok(c))
+                }
+            })
+            .and_then(|mut c| c.table("Vote").map(move |v| (c, v)))
+            .and_then(|(mut c, v)| c.view("ArticleWithVoteCount").map(move |awvc| (c, v, awvc)))
+            .map(|(c, v, awvc)| Conn {
+                ch: c,
+                r: Some(awvc),
+                w: Some(v),
+            })
     }
 
-    fn make(&mut self) -> Self::Instance {
-        Client::new(&self.0).unwrap()
-    }
-}
-
-impl VoteClient for Client {
-    fn handle_writes(&mut self, ids: &[i32]) {
+    fn handle_writes(&mut self, ids: &[i32]) -> Self::WriteFuture {
         let data: Vec<Vec<DataType>> = ids
             .into_iter()
             .map(|&article_id| vec![(article_id as usize).into(), 0.into()])
             .collect();
 
-        while let Err(_) = self.w.perform_all(data.clone()).wait() {
-            while self.reconnect().is_err() {
-                thread::sleep(Duration::from_millis(100));
-            }
-        }
+        Box::new(
+            self.w
+                .as_mut()
+                .unwrap()
+                .perform_all(data)
+                .map_err(failure::Error::from),
+        )
     }
 
-    fn handle_reads(&mut self, ids: &[i32]) {
+    fn handle_reads(&mut self, ids: &[i32]) -> Self::ReadFuture {
         let arg: Vec<_> = ids
             .into_iter()
             .map(|&article_id| vec![(article_id as usize).into()])
             .collect();
 
-        loop {
-            match self.r.multi_lookup(arg.clone(), true).wait() {
-                Ok(rows) => {
-                    let rows = rows
-                        .into_iter()
-                        .map(|_rows| {
-                            // TODO
-                            //assert_eq!(rows.map(|rows| rows.len()), Ok(1));
-                        })
-                        .count();
-                    assert_eq!(rows, ids.len());
-                    break;
-                }
-                Err(_) => {
-                    while self.reconnect().is_err() {
-                        thread::sleep(Duration::from_millis(100));
-                    }
-                }
-            }
-        }
+        let len = ids.len();
+        Box::new(
+            self.r
+                .as_mut()
+                .unwrap()
+                .multi_lookup(arg, true)
+                .map(|rows| {
+                    // TODO
+                    //assert_eq!(rows.map(|rows| rows.len()), Ok(1));
+                    rows.len()
+                })
+                .map(move |rows| {
+                    assert_eq!(rows, len);
+                })
+                .map_err(failure::Error::from),
+        )
     }
 }
