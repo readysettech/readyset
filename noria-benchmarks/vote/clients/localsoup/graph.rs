@@ -43,9 +43,21 @@ impl Default for Builder {
 }
 
 impl Builder {
+    #[allow(unused)]
+    pub fn start_sync(
+        &self,
+        persistence_params: PersistenceParameters,
+    ) -> Result<Graph, failure::Error> {
+        let mut rt = tokio::runtime::Runtime::new().unwrap();
+        let mut g = rt.block_on(self.start(rt.executor(), persistence_params))?;
+        g.graph.wrap_rt(rt);
+        Ok(g)
+    }
+
+    #[allow(unused)]
     pub fn start(
         &self,
-        ex: Option<tokio::runtime::TaskExecutor>,
+        ex: tokio::runtime::TaskExecutor,
         persistence_params: PersistenceParameters,
     ) -> impl Future<Item = Graph, Error = failure::Error> {
         // XXX: why isn't PersistenceParameters inside self?
@@ -62,14 +74,9 @@ impl Builder {
             g.set_threads(threads);
         }
 
-        let graph = if let Some(ex) = ex {
-            future::Either::A(
-                g.start_local()
-                    .map(move |wh| SyncWorkerHandle::from_executor(ex, wh)),
-            )
-        } else {
-            future::Either::B(future::ok(g.start_simple().unwrap()))
-        };
+        let graph = g
+            .start_local()
+            .map(move |wh| SyncWorkerHandle::from_executor(ex, wh));
 
         let logging = self.logging;
         let stupid = self.stupid;

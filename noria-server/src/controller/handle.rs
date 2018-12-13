@@ -198,6 +198,11 @@ impl<A: Authority> SyncWorkerHandle<A> {
         }
     }
 
+    /// Stash away the given runtime inside this worker handle.
+    pub fn wrap_rt(&mut self, rt: tokio::runtime::Runtime) {
+        self.rt = Some(rt);
+    }
+
     /// Run an operation on the underlying asynchronous worker handle.
     pub fn on_worker<F, FF>(&mut self, f: F) -> Result<FF::Item, FF::Error>
     where
