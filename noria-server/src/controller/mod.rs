@@ -868,13 +868,6 @@ fn listen_external<A: Authority + 'static>(
                         let res = res.body(hyper::Body::from(include_str!("graph.html")));
                         return Box::new(futures::future::ok(res.unwrap()));
                     }
-                    "/js/layout-worker.js" => {
-                        let res = res.body(hyper::Body::from(
-                            "importScripts('https://cdn.rawgit.com/mstefaniuk/graph-viz-d3-js/\
-                             cf2160ee3ca39b843b081d5231d5d51f1a901617/dist/layout-worker.js');",
-                        ));
-                        return Box::new(futures::future::ok(res.unwrap()));
-                    }
                     path if path.starts_with("/zookeeper/") => {
                         let res = match self.1.try_read(&format!("/{}", &path[11..])) {
                             Ok(Some(data)) => {
