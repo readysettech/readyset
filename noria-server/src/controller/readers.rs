@@ -1,4 +1,3 @@
-use bincode;
 use dataflow::backlog::SingleReadHandle;
 use dataflow::prelude::*;
 use dataflow::Readers;
