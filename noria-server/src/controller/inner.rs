@@ -1295,7 +1295,7 @@ impl ControllerInner {
     fn nodes_on_worker(&self, worker: Option<&WorkerIdentifier>) -> Vec<NodeIndex> {
         // NOTE(malte): this traverses all graph vertices in order to find those assigned to a
         // domain. We do this to avoid keeping separate state that may get out of sync, but it
-        // could become a performance bottleneck in the future (e.g., when recovergin large
+        // could become a performance bottleneck in the future (e.g., when recovering large
         // graphs).
         let domain_nodes = |i: DomainIndex| -> Vec<NodeIndex> {
             self.ingredients
