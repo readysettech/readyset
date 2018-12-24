@@ -240,6 +240,10 @@ impl ControllerInner {
                             let n = &self.ingredients[ni];
                             if n.is_internal() {
                                 Some((ni, n.name(), n.description(true)))
+                            } else if n.is_base() {
+                                Some((ni, n.name(), "Base table".to_owned()))
+                            } else if n.is_reader() {
+                                Some((ni, n.name(), "Leaf view".to_owned()))
                             } else {
                                 None
                             }
