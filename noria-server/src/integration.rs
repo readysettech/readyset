@@ -2287,3 +2287,31 @@ fn remove_query() {
     assert_eq!(qa.lookup(&[0.into()], true).unwrap().len(), 3);
     assert_eq!(qb.lookup(&[0.into()], true).unwrap().len(), 1);
 }
+
+#[test]
+fn correct_nested_view_schema() {
+    use nom_sql::{ColumnSpecification, SqlType};
+
+    let r_txt = "CREATE TABLE votes (story int, user int);
+                 CREATE TABLE stories (id int, content text);
+                 VIEW swvc: SELECT stories.id, stories.content, COUNT(votes.user) AS vc \
+                     FROM stories \
+                     JOIN votes ON (stories.id = votes.story) \
+                     WHERE stories.id = ? GROUP BY votes.story;";
+
+    let mut b = ControllerBuilder::default();
+    // need to disable partial due to lack of support for key subsumption (#99)
+    b.disable_partial();
+    b.set_sharding(None);
+    let mut g = b.build_local().unwrap();
+    g.install_recipe(r_txt).unwrap();
+
+    let q = g.view("swvc").unwrap();
+
+    let expected_schema = vec![
+        ColumnSpecification::new("swvc.id".into(), SqlType::Int(32)),
+        ColumnSpecification::new("swvc.content".into(), SqlType::Text),
+        ColumnSpecification::new("swvc.vc".into(), SqlType::Bigint(64)),
+    ];
+    assert_eq!(q.schema(), Some(&expected_schema[..]));
+}

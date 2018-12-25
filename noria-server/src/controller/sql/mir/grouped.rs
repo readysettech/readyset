@@ -3,7 +3,7 @@ use crate::controller::sql::query_graph::{QueryGraph, QueryGraphEdge};
 use mir::{Column, MirNodeRef};
 use nom_sql::FunctionExpression::*;
 use nom_sql::{self, ConditionExpression, FunctionExpression};
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::ops::Deref;
 
 fn target_columns_from_computed_column(computed_col: &nom_sql::Column) -> Column {
@@ -171,11 +171,40 @@ pub fn make_grouped(
                             .chain(rel.parameters.iter().filter(|c| !gb_cols.contains(c)))
                             .collect()
                     });
-                    // combine
-                    let gb_and_param_cols: Vec<Column> = gb_cols
+                    // combine and dedup
+                    let dedup_gb_cols: Vec<_> = gb_cols
+                        .into_iter()
+                        .filter(|gbc| !param_cols.contains(gbc))
+                        .collect();
+                    let gb_and_param_cols: Vec<Column> = dedup_gb_cols
                         .into_iter()
                         .chain(param_cols.into_iter())
                         .map(|c| Column::from(c))
+                        .collect();
+
+                    let mut have_parent_cols = HashSet::new();
+                    // we cannot have duplicate columns at the data-flow level, as it confuses our
+                    // migration analysis code.
+                    let gb_and_param_cols = gb_and_param_cols
+                        .into_iter()
+                        .filter_map(|mut c| {
+                            let pn = parent_node.borrow();
+                            let pc = pn.columns().iter().position(|pc| *pc == c);
+                            if pc.is_none() {
+                                Some(c)
+                            } else if !have_parent_cols.contains(&pc) {
+                                have_parent_cols.insert(pc);
+                                let pc = pn.columns()[pc.unwrap()].clone();
+                                if pc.name != c.name || pc.table != c.table {
+                                    // remember the alias with the parent column
+                                    c.aliases.push(pc);
+                                }
+                                Some(c)
+                            } else {
+                                // we already have this column, so eliminate duplicate
+                                None
+                            }
+                        })
                         .collect();
 
                     (parent_node, gb_and_param_cols)

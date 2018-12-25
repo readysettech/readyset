@@ -154,11 +154,18 @@ pub fn column_schema(
     column_index: usize,
     log: &slog::Logger,
 ) -> Option<ColumnSpecification> {
+    trace!(
+        log,
+        "tracing provenance of {} on {} for schema",
+        column_index,
+        view.index()
+    );
     let paths = provenance_of(graph, view, &[column_index], |_, _, _| None);
     let vn = &graph[view];
 
     let mut col_type = None;
     for p in paths {
+        trace!(log, "considering path {:?}", p);
         match trace_column_type_on_path(p, graph, recipe, log) {
             t @ Some(_) => col_type = t,
             _ => (),
