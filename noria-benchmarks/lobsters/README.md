@@ -28,13 +28,16 @@ $ cargo b --release --bin lobsters
 Then start the backend you want to benchmark, you must first decide what
 target load (`reqscale`) you want to test. The `reqscale` is a scaling
 factor relative to that seen by the production Lobsters deployment. See
-the paper linked above for good values to try. Then, run
+the paper linked above for good values to try.
+
+Then, run, for example, with Noria's natural queries:
 
 ```console
 $ target/release/lobsters \
    --warmup 0 \
    --runtime 0 \
    --issuers 24 \
+   --queries natural \
    --prime \
    "mysql://lobsters:soup@127.0.0.1/lobsters"
 $ target/release/lobsters \
@@ -42,12 +45,14 @@ $ target/release/lobsters \
    --warmup 120 \
    --runtime 0 \
    --issuers 24 \
+   --queries natural \
    "mysql://lobsters:soup@127.0.0.1/lobsters"
 $ target/release/lobsters \
    --reqscale <target> \
    --warmup 20 \
    --runtime 30 \
    --issuers 24 \
+   --queries natural \
    "mysql://lobsters:soup@127.0.0.1/lobsters"
 ```
 
@@ -56,7 +61,7 @@ comments. The second warms up the database. The last issues requests at
 the given `target` rate for 50 seconds (discarding the first 20s) and
 reports the observed latencies for the different Lobsters pages.
 
-To run a different `reqscale` you only need to run the last command.
+To run a different `reqscale`, you only need to run the last command.
 
 ## Running the Noria backend
 
