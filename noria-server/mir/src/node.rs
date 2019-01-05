@@ -579,6 +579,24 @@ impl MirNodeType {
                     _ => false,
                 }
             }
+            MirNodeType::LeftJoin {
+                on_left: ref our_on_left,
+                on_right: ref our_on_right,
+                project: ref our_project,
+            } => {
+                match *other {
+                    MirNodeType::LeftJoin {
+                        ref on_left,
+                        ref on_right,
+                        ref project,
+                    } => {
+                        // TODO(malte): column order does not actually need to match, but this only
+                        // succeeds if it does.
+                        our_on_left == on_left && our_on_right == on_right && our_project == project
+                    }
+                    _ => false,
+                }
+            }
             MirNodeType::Project {
                 emit: ref our_emit,
                 literals: ref our_literals,
