@@ -253,15 +253,15 @@ pub fn mir_node_to_flow_parts(mir_node: &mut MirNode, mig: &mut Migration, table
                 MirNodeType::Distinct {
                    ref group_by,
                 } => {
-                   assert_eq!(mir_node.ancestors.len(), 1);
-                   let parent = mir_node.ancestors[0].clone();
-                   make_distinct_node(
-                       &name,
-                       parent,
-                       mir_node.columns.as_slice(),
-                       group_by,
-                       mig,
-                   )
+                    assert_eq!(mir_node.ancestors.len(), 1);
+                    let parent = mir_node.ancestors[0].clone();
+                    make_distinct_node(
+                        &name,
+                        parent,
+                        mir_node.columns.as_slice(),
+                        group_by,
+                        mig,
+                    )
                 }
                 MirNodeType::TopK {
                     ref order,
