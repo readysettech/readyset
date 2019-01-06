@@ -285,7 +285,7 @@ fn main() {
 
     // if partial, read 25% of the keys
     if partial {
-        let leaf = format!("post_count");
+        let leaf = format!("posts");
         let mut getter = backend.g.view(&leaf).unwrap();
         for author in 0..nusers / 4 {
             getter.lookup(&[author.into()], false).unwrap();
@@ -302,7 +302,7 @@ fn main() {
 
         // if partial, read 25% of the keys
         if partial {
-            let leaf = format!("post_count_u{}", i);
+            let leaf = format!("posts_u{}", i);
             let mut getter = backend.g.view(&leaf).unwrap();
             for author in 0..nusers / 4 {
                 getter.lookup(&[author.into()], false).unwrap();
@@ -323,7 +323,7 @@ fn main() {
     if !partial {
         let mut dur = time::Duration::from_millis(0);
         for uid in 0..nlogged {
-            let leaf = format!("post_count_u{}", uid);
+            let leaf = format!("posts_u{}", uid);
             let mut getter = backend.g.view(&leaf).unwrap();
             let start = time::Instant::now();
             for author in 0..nusers {
