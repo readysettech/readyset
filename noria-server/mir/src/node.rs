@@ -208,7 +208,7 @@ impl MirNode {
         self.columns.as_slice()
     }
 
-    pub fn column_id_for_column(&self, c: &Column, table_mapping: Option<HashMap<String,String>>) -> usize {
+    pub fn column_id_for_column(&self, c: &Column, table_mapping: Option<&HashMap<String,String>>) -> usize {
         match self.inner {
             // if we're a base, translate to absolute column ID (taking into account deleted
             // columns). We use the column specifications here, which track a tuple of (column
@@ -230,7 +230,7 @@ impl MirNode {
                     .1
                     .expect("must have an absolute column ID on base"),
             },
-            MirNodeType::Reuse { ref node } => node.borrow().column_id_for_column(c, table_mapping.clone()),
+            MirNodeType::Reuse { ref node } => node.borrow().column_id_for_column(c, table_mapping),
             // otherwise, just look up in the column set
             _ =>
             match self.columns.iter().position(|cc| cc == c) {
@@ -240,8 +240,8 @@ impl MirNode {
                         // if mapping was passed in, then see if c has an associated table, and check
                         // the mapping for a key based on this
                         Some(map) => {
-                            match c.table.clone() {
-                                Some(table) => {
+                            match c.table {
+                                Some(ref table) => {
                                     let keyed = format!("{}:{}", c.clone().name, table);
                                     match map.get(&keyed) {
                                         Some(ref mut t_name) => {

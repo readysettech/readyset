@@ -15,7 +15,7 @@ use mir::query::{MirQuery, QueryFlowParts};
 use mir::{Column, FlowNode, MirNodeRef};
 use petgraph::graph::NodeIndex;
 
-pub fn mir_query_to_flow_parts(mir_query: &mut MirQuery, mig: &mut Migration, table_mapping: Option<HashMap<String, String>>) -> QueryFlowParts {
+pub fn mir_query_to_flow_parts(mir_query: &mut MirQuery, mig: &mut Migration, table_mapping: Option<&HashMap<String, String>>) -> QueryFlowParts {
     use std::collections::VecDeque;
 
     let mut new_nodes = Vec::new();
@@ -31,7 +31,7 @@ pub fn mir_query_to_flow_parts(mir_query: &mut MirQuery, mig: &mut Migration, ta
     while !node_queue.is_empty() {
         let n = node_queue.pop_front().unwrap();
         assert_eq!(in_edge_counts[&n.borrow().versioned_name()], 0);
-        let flow_node = mir_node_to_flow_parts(&mut n.borrow_mut(), mig, table_mapping.clone());
+        let flow_node = mir_node_to_flow_parts(&mut n.borrow_mut(), mig, table_mapping);
         match flow_node {
             FlowNode::New(na) => new_nodes.push(na),
             FlowNode::Existing(na) => reused_nodes.push(na),
@@ -67,7 +67,7 @@ pub fn mir_query_to_flow_parts(mir_query: &mut MirQuery, mig: &mut Migration, ta
     }
 }
 
-pub fn mir_node_to_flow_parts(mir_node: &mut MirNode, mig: &mut Migration, table_mapping: Option<HashMap<String,String>>) -> FlowNode {
+pub fn mir_node_to_flow_parts(mir_node: &mut MirNode, mig: &mut Migration, table_mapping: Option<&HashMap<String,String>>) -> FlowNode {
     let name = mir_node.name.clone();
     match mir_node.flow_node {
         None => {
@@ -223,7 +223,7 @@ pub fn mir_node_to_flow_parts(mir_node: &mut MirNode, mig: &mut Migration, table
                         arithmetic,
                         literals,
                         mig,
-                        table_mapping.clone()
+                        table_mapping
                     )
                 }
                 MirNodeType::Reuse { ref node } => {
@@ -428,7 +428,7 @@ pub(crate) fn make_union_node(
     emit: &Vec<Vec<Column>>,
     ancestors: &[MirNodeRef],
     mig: &mut Migration,
-    table_mapping: Option<HashMap<String, String>>
+    table_mapping: Option<&HashMap<String, String>>
 ) -> FlowNode {
     let column_names = column_names(columns);
     let mut emit_column_id: HashMap<NodeIndex, Vec<usize>> = HashMap::new();
@@ -439,7 +439,7 @@ pub(crate) fn make_union_node(
     for (i, n) in ancestors.clone().iter().enumerate() {
         let emit_cols = emit[i]
             .iter()
-            .map(|c| n.borrow().column_id_for_column(c, table_mapping.clone()))
+            .map(|c| n.borrow().column_id_for_column(c, table_mapping))
             .collect::<Vec<_>>();
 
         let ni = n.borrow().flow_node_addr().unwrap();
@@ -512,7 +512,7 @@ pub(crate) fn make_grouped_node(
     group_by: &Vec<Column>,
     kind: GroupedNodeType,
     mig: &mut Migration,
-    table_mapping: Option<HashMap<String,String>>,
+    table_mapping: Option<&HashMap<String,String>>,
 ) -> FlowNode {
     assert!(group_by.len() > 0);
     assert!(
@@ -528,7 +528,7 @@ pub(crate) fn make_grouped_node(
     let column_names = column_names(columns);
 
 
-    let over_col_indx = parent.borrow().column_id_for_column(on, table_mapping.clone());
+    let over_col_indx = parent.borrow().column_id_for_column(on, table_mapping);
 
     let group_col_indx = group_by
         .iter()
@@ -739,14 +739,14 @@ pub(crate) fn make_project_node(
     arithmetic: &Vec<(String, ArithmeticExpression)>,
     literals: &Vec<(String, DataType)>,
     mig: &mut Migration,
-    table_mapping: Option<HashMap<String,String>>,
+    table_mapping: Option<&HashMap<String,String>>,
 ) -> FlowNode {
     let parent_na = parent.borrow().flow_node_addr().unwrap();
     let column_names = column_names(columns);
 
     let projected_column_ids = emit
         .iter()
-        .map(|c| parent.borrow().column_id_for_column(c, table_mapping.clone()))
+        .map(|c| parent.borrow().column_id_for_column(c, table_mapping))
         .collect::<Vec<_>>();
 
     let (_, literal_values): (Vec<_>, Vec<_>) = literals.iter().cloned().unzip();

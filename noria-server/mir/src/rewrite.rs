@@ -16,7 +16,7 @@ fn has_column(n: &MirNodeRef, column: &Column) -> bool {
     false
 }
 
-pub fn make_universe_naming_consistent(q: &mut MirQuery, table_mapping: HashMap<String, String>, base_name: String){
+pub fn make_universe_naming_consistent(q: &mut MirQuery, table_mapping: &HashMap<String, String>, base_name: String){
     let mut queue = Vec::new();
     let new_q = q.clone();
     queue.push(q.leaf.clone());
@@ -64,16 +64,18 @@ pub fn make_universe_naming_consistent(q: &mut MirQuery, table_mapping: HashMap<
     }
 }
 
-pub fn pull_required_base_columns(q: &mut MirQuery, table_mapping: Option<HashMap<String, String>>, sec: bool) {
+pub fn pull_required_base_columns(q: &mut MirQuery, table_mapping: Option<&HashMap<String, String>>, sec: bool) {
     let mut queue = Vec::new();
     queue.push(q.leaf.clone());
 
     if sec {
-        match table_mapping.clone() {
-            Some(x) => {for (k,v) in &x {
-                        println!("{} -> {}", k, v);
-                    }},
-            None => {panic!("no table mapping computed, but in secure universe.");}
+        match table_mapping {
+            Some(x) => {
+                for (k,v) in x {
+                    println!("{} -> {}", k, v);
+                }
+            },
+            None => panic!("no table mapping computed, but in secure universe."),
         }
     }
 
@@ -94,20 +96,18 @@ pub fn pull_required_base_columns(q: &mut MirQuery, table_mapping: Option<HashMa
             })
             .collect();
 
-        match table_mapping.clone() {
+        match table_mapping {
             Some(x) => {
-                        for (k, v) in &x {
-                            println!("alias: real table name {} -> universe table name {}", k, v);
-                        }
-                    },
-            None => {
-
-            }
+                for (k, v) in x {
+                    println!("alias: real table name {} -> universe table name {}", k, v);
+                }
+            },
+            None => (),
         }
 
         let mut found: Vec<&Column> = Vec::new();
-        match table_mapping.clone() {
-            Some(map) => {
+        match table_mapping {
+            Some(ref map) => {
                 for ancestor in mn.borrow().ancestors() {
                     if ancestor.borrow().ancestors().len() == 0 {
                         // base, do nothing

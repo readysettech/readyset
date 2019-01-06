@@ -544,13 +544,13 @@ impl SqlIncorporator {
         trace!(self.log, "Unoptimized MIR:\n{}", og_mir.to_graphviz().unwrap());
 
         // run MIR-level optimizations
-        let mut mir = og_mir.optimize(table_mapping.clone(), sec);
+        let mut mir = og_mir.optimize(table_mapping.as_ref(), sec);
 
         trace!(self.log, "Optimized MIR:\n{}", mir.to_graphviz().unwrap());
 
         if sec {
-            match table_mapping.clone() {
-                Some(x) => {
+            match table_mapping {
+                Some(ref x) => {
                     mir = mir.make_universe_naming_consistent(x, base_name);
                 },
                 None => {
@@ -698,7 +698,7 @@ impl SqlIncorporator {
 
         trace!(self.log, "Original MIR:\n{}", new_query_mir.to_graphviz().unwrap());
 
-        let new_opt_mir = new_query_mir.optimize(table_mapping.clone(), sec);
+        let new_opt_mir = new_query_mir.optimize(table_mapping.as_ref(), sec);
 
         trace!(
             self.log,
@@ -726,8 +726,8 @@ impl SqlIncorporator {
         // traverse universe subgraph and update table names for
         // internal consistency using the table mapping as guidance
         if sec {
-            match table_mapping.clone() {
-                Some(x) => {
+            match table_mapping {
+                Some(ref x) => {
                     post_reuse_opt_mir = post_reuse_opt_mir.make_universe_naming_consistent(x, base_name);
                 },
                 None => {
@@ -742,7 +742,7 @@ impl SqlIncorporator {
             post_reuse_opt_mir.to_graphviz().unwrap()
         );
 
-        let qfp = mir_query_to_flow_parts(&mut post_reuse_opt_mir, &mut mig, table_mapping);
+        let qfp = mir_query_to_flow_parts(&mut post_reuse_opt_mir, &mut mig, table_mapping.as_ref());
 
         info!(
             self.log,
