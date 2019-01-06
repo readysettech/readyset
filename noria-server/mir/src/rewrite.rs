@@ -47,9 +47,7 @@ pub fn make_universe_naming_consistent(q: &mut MirQuery, table_mapping: &HashMap
             let mut _res = {
                 match col.table {
                     Some(ref mut x) => {
-                        let col_n: String = col.name.to_owned();
-                        let tab_n: String = x.to_owned();
-                        let keyed = format!("{}:{}", col_n, tab_n);
+                        let keyed = format!("{}:{}", col.name, x);
                         table_mapping.get(&keyed).cloned()
 
                     },
