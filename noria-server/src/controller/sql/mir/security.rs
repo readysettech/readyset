@@ -43,16 +43,17 @@ impl SecurityBoundary for SqlToMirConverter {
         //     return (nodes_added, None, "".to_string());
         // }
 
-        let mut union: Option<MirNodeRef> = None;
-        let mut mapping: Option<HashMap<String, String>> = None;
+        let mut union: Option<MirNodeRef>;
+        let mut mapping: Option<HashMap<String, String>>;
 
         // First, union the results from all ancestors
         if !sec {
             union = Some(self.make_union_node(&format!("{}_n{}", name, node_count), &ancestors));
+            mapping = None;
         } else {
-            let (_union, _mapping) = self.make_union_node_sec(&format!("{}_n{}", name, node_count), &ancestors);
-            union = Some(_union);
-            mapping = _mapping;
+            let (u, m) = self.make_union_node_sec(&format!("{}_n{}", name, node_count), &ancestors);
+            union = Some(u);
+            mapping = m;
         }
 
         match union {
