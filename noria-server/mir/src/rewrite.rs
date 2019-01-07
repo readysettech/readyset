@@ -25,12 +25,12 @@ pub fn make_universe_naming_consistent(
     let new_q = q.clone();
     queue.push(q.leaf.clone());
 
-    let leaf_node : MirNodeRef = new_q.leaf;
-    let mut nodes_to_check : Vec<MirNodeRef> = Vec::new();
+    let leaf_node: MirNodeRef = new_q.leaf;
+    let mut nodes_to_check: Vec<MirNodeRef> = Vec::new();
     nodes_to_check.push(leaf_node.clone());
 
     // get the node that is the base table of the universe
-    let mut base_node : MirNodeRef = leaf_node.clone();
+    let mut base_node: MirNodeRef = leaf_node.clone();
     while !nodes_to_check.is_empty() {
         let node_to_check = nodes_to_check.pop().unwrap();
         if node_to_check.borrow().name == base_name {
@@ -42,7 +42,7 @@ pub fn make_universe_naming_consistent(
         }
     }
 
-    let mut nodes_to_rewrite : Vec<MirNodeRef> = Vec::new();
+    let mut nodes_to_rewrite: Vec<MirNodeRef> = Vec::new();
     nodes_to_rewrite.push(base_node.clone());
 
     while !nodes_to_rewrite.is_empty() {

@@ -515,18 +515,17 @@ impl SqlToMirConverter {
         self.current
             .insert(String::from(leaf.borrow().name()), self.schema_version);
 
-        Ok(
-            (sec,
-             MirQuery {
-                 name: String::from(name),
-                 roots: roots,
-                 leaf: leaf
-             },
-             table_mapping,
-             base_name)
-        )
+        Ok((
+            sec,
+            MirQuery {
+                name: String::from(name),
+                roots: roots,
+                leaf: leaf,
+            },
+            table_mapping,
+            base_name,
+        ))
     }
-
 
     pub fn upgrade_schema(&mut self, new_version: usize) {
         assert!(new_version > self.schema_version);
@@ -823,13 +822,19 @@ impl SqlToMirConverter {
         for col in selected_col_objects.clone() {
             match &col.table {
                 Some(x) => {
-                            debug!(self.log, "Selected column {} from table {} for UNION.", col.name, x);
-                            precedent_table = col.table.unwrap();
-                        },
+                    debug!(
+                        self.log,
+                        "Selected column {} from table {} for UNION.", col.name, x
+                    );
+                    precedent_table = col.table.unwrap();
+                }
                 None => {
-                            debug!(self.log, "Selected column {} with no table name for UNION.", col.name);
-                            precedent_table = "None".to_string();
-                        },
+                    debug!(
+                        self.log,
+                        "Selected column {} with no table name for UNION.", col.name
+                    );
+                    precedent_table = "None".to_string();
+                }
             }
         }
 
@@ -874,7 +879,6 @@ impl SqlToMirConverter {
 
             emit.push(acols.clone());
         }
-
 
         assert!(
             emit.iter().all(|e| e.len() == selected_cols.len()),
@@ -1808,7 +1812,7 @@ impl SqlToMirConverter {
                     &qg,
                     &ancestors,
                     new_node_count,
-                    sec_round
+                    sec_round,
                 );
 
                 if sec_round {
@@ -1819,7 +1823,6 @@ impl SqlToMirConverter {
                 new_node_count += nodes.len();
                 nodes_added.extend(nodes.clone());
                 nodes.last().unwrap().clone()
-
             } else {
                 ancestors.last().unwrap().clone()
             };

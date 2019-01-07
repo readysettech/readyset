@@ -236,16 +236,19 @@ impl MirNode {
             },
             MirNodeType::Reuse { ref node } => node.borrow().column_id_for_column(c, table_mapping),
             // otherwise, just look up in the column set
-            _ =>
-            match self.columns.iter().position(|cc| cc == c) {
+            _ => match self.columns.iter().position(|cc| cc == c) {
                 None => {
                     let get_column_index = |c: &Column, t_name: &str| -> usize {
                         let mut ac = c.clone();
                         ac.table = Some(t_name.to_owned());
-                        self.columns.iter().position(|cc| *cc == ac).expect(
-                            &format!("tried to look up non-existent column {:?} on node \
-                                     \"{}\" (columns: {:?})", c, self.name, self.columns),
-                        )
+                        self.columns
+                            .iter()
+                            .position(|cc| *cc == ac)
+                            .expect(&format!(
+                                "tried to look up non-existent column {:?} on node \
+                                 \"{}\" (columns: {:?})",
+                                c, self.name, self.columns
+                            ))
                     };
                     // See if table mapping was passed in
                     match table_mapping {
@@ -266,20 +269,24 @@ impl MirNode {
                             }
                             None => match map.get(&(c.name.clone(), None)) {
                                 Some(ref t_name) => get_column_index(c, t_name),
-                                None => panic!("tried to look up non-existent column {:?} on node \
-                                               \"{}\" (columns: {:?})", c, self.name, self.columns),
+                                None => panic!(
+                                    "tried to look up non-existent column {:?} on node \
+                                     \"{}\" (columns: {:?})",
+                                    c, self.name, self.columns
+                                ),
                             },
                         },
                         // panic if no mapping was passed in
                         None => {
-                            panic!("tried to look up non-existent column {:?} on node \"{}\" \
-                                   (columns: {:?})", c, self.name, self.columns);
+                            panic!(
+                                "tried to look up non-existent column {:?} on node \"{}\" \
+                                 (columns: {:?})",
+                                c, self.name, self.columns
+                            );
                         }
                     }
-                },
-                Some(id) => {
-                    id
-                },
+                }
+                Some(id) => id,
             },
         }
     }

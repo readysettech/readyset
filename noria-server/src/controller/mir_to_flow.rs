@@ -231,7 +231,7 @@ pub fn mir_node_to_flow_parts(
                         arithmetic,
                         literals,
                         mig,
-                        table_mapping
+                        table_mapping,
                     )
                 }
                 MirNodeType::Reuse { ref node } => {
@@ -258,18 +258,10 @@ pub fn mir_node_to_flow_parts(
                         table_mapping,
                     )
                 }
-                MirNodeType::Distinct {
-                   ref group_by,
-                } => {
+                MirNodeType::Distinct { ref group_by } => {
                     assert_eq!(mir_node.ancestors.len(), 1);
                     let parent = mir_node.ancestors[0].clone();
-                    make_distinct_node(
-                        &name,
-                        parent,
-                        mir_node.columns.as_slice(),
-                        group_by,
-                        mig,
-                    )
+                    make_distinct_node(&name, parent, mir_node.columns.as_slice(), group_by, mig)
                 }
                 MirNodeType::TopK {
                     ref order,
@@ -308,7 +300,7 @@ pub fn mir_node_to_flow_parts(
                         key,
                         mig,
                     )
-                },
+                }
             };
 
             // any new flow nodes have been instantiated by now, so we replace them with
@@ -535,32 +527,34 @@ pub(crate) fn make_grouped_node(
     let parent_na = parent.borrow().flow_node_addr().unwrap();
     let column_names = column_names(columns);
 
-
     let over_col_indx = parent.borrow().column_id_for_column(on, table_mapping);
 
     let group_col_indx = group_by
         .iter()
-        .map(|c| parent.borrow().column_id_for_column(c, table_mapping.clone()))
+        .map(|c| {
+            parent
+                .borrow()
+                .column_id_for_column(c, table_mapping.clone())
+        })
         .collect::<Vec<_>>();
 
     assert!(group_col_indx.len() > 0);
 
     let na = match kind {
-        GroupedNodeType::Aggregation(agg) => {
-            mig.add_ingredient(String::from(name),
-                                column_names.as_slice(),
-                                agg.over(parent_na, over_col_indx, group_col_indx.as_slice()))
-            },
-        GroupedNodeType::Extremum(extr) => {
-            mig.add_ingredient(String::from(name),
-                                column_names.as_slice(),
-                                extr.over(parent_na, over_col_indx, group_col_indx.as_slice()))
-        },
+        GroupedNodeType::Aggregation(agg) => mig.add_ingredient(
+            String::from(name),
+            column_names.as_slice(),
+            agg.over(parent_na, over_col_indx, group_col_indx.as_slice()),
+        ),
+        GroupedNodeType::Extremum(extr) => mig.add_ingredient(
+            String::from(name),
+            column_names.as_slice(),
+            extr.over(parent_na, over_col_indx, group_col_indx.as_slice()),
+        ),
         GroupedNodeType::GroupConcat(sep) => {
             use dataflow::ops::grouped::concat::{GroupConcat, TextComponent};
             let gc = GroupConcat::new(parent_na, vec![TextComponent::Column(over_col_indx)], sep);
             mig.add_ingredient(String::from(name), column_names.as_slice(), gc)
-
         }
     };
     FlowNode::New(na)
@@ -783,7 +777,6 @@ pub(crate) fn make_project_node(
     FlowNode::New(n)
 }
 
-
 pub(crate) fn make_distinct_node(
     name: &str,
     parent: MirNodeRef,
@@ -816,7 +809,6 @@ pub(crate) fn make_distinct_node(
     );
     FlowNode::New(na)
 }
-
 
 pub(crate) fn make_topk_node(
     name: &str,
@@ -854,8 +846,12 @@ pub(crate) fn make_topk_node(
                         OrderType::OrderAscending => OrderType::OrderDescending,
                         OrderType::OrderDescending => OrderType::OrderAscending,
                     };
-                    (parent.borrow().column_id_for_column(c, None), reversed_order_type)
-                }).collect();
+                    (
+                        parent.borrow().column_id_for_column(c, None),
+                        reversed_order_type,
+                    )
+                })
+                .collect();
 
             columns
         }

@@ -85,9 +85,10 @@ impl SecurityBoundary for SqlToMirConverter {
 
                 nodes_added.extend(grouped);
                 return (nodes_added, mapping, n);
-
-            },
-            None => {panic!("union not computed correctly");}
+            }
+            None => {
+                panic!("union not computed correctly");
+            }
         }
     }
 

@@ -552,7 +552,7 @@ impl SqlIncorporator {
             match table_mapping {
                 Some(ref x) => {
                     mir = mir.make_universe_naming_consistent(x, base_name);
-                },
+                }
                 None => {
                     panic!("Missing table mapping when reconciling universe table names!");
                 }
@@ -567,7 +567,6 @@ impl SqlIncorporator {
 
         Ok((qfp, mir))
     }
-
 
     pub fn remove_query(&mut self, query_name: &str, mig: &Migration) -> Option<NodeIndex> {
         let nodeid = self
@@ -688,15 +687,15 @@ impl SqlIncorporator {
 
         // no QG-level reuse possible, so we'll build a new query.
         // first, compute the MIR representation of the SQL query
-        let (sec, new_query_mir, table_mapping, base_name) = self.mir_converter.named_query_to_mir(
-            query_name,
-            query,
-            &qg,
-            is_leaf,
-            universe.clone(),
-        )?;
+        let (sec, new_query_mir, table_mapping, base_name) = self
+            .mir_converter
+            .named_query_to_mir(query_name, query, &qg, is_leaf, universe.clone())?;
 
-        trace!(self.log, "Original MIR:\n{}", new_query_mir.to_graphviz().unwrap());
+        trace!(
+            self.log,
+            "Original MIR:\n{}",
+            new_query_mir.to_graphviz().unwrap()
+        );
 
         let new_opt_mir = new_query_mir.optimize(table_mapping.as_ref(), sec);
 
@@ -728,8 +727,9 @@ impl SqlIncorporator {
         if sec {
             match table_mapping {
                 Some(ref x) => {
-                    post_reuse_opt_mir = post_reuse_opt_mir.make_universe_naming_consistent(x, base_name);
-                },
+                    post_reuse_opt_mir =
+                        post_reuse_opt_mir.make_universe_naming_consistent(x, base_name);
+                }
                 None => {
                     panic!("Missing table mapping when reconciling universe table names!");
                 }
@@ -742,7 +742,8 @@ impl SqlIncorporator {
             post_reuse_opt_mir.to_graphviz().unwrap()
         );
 
-        let qfp = mir_query_to_flow_parts(&mut post_reuse_opt_mir, &mut mig, table_mapping.as_ref());
+        let qfp =
+            mir_query_to_flow_parts(&mut post_reuse_opt_mir, &mut mig, table_mapping.as_ref());
 
         info!(
             self.log,
