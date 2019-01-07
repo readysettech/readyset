@@ -474,8 +474,17 @@ impl SqlToMirConverter {
         qg: &QueryGraph,
         has_leaf: bool,
         universe: UniverseId,
-    ) -> Result<(bool, MirQuery, Option<HashMap<String, String>>, String), String> {
-        let (sec, nodes, table_mapping, base_name) = self.make_nodes_for_selection(&name, sq, qg, has_leaf, universe)?;
+    ) -> Result<
+        (
+            bool,
+            MirQuery,
+            Option<HashMap<(String, Option<String>), String>>,
+            String,
+        ),
+        String,
+    > {
+        let (sec, nodes, table_mapping, base_name) =
+            self.make_nodes_for_selection(&name, sq, qg, has_leaf, universe)?;
         let mut roots = Vec::new();
         let mut leaves = Vec::new();
         for mn in nodes.into_iter() {
@@ -776,9 +785,15 @@ impl SqlToMirConverter {
         )
     }
 
-
     // Creates union node for universe creation - returns the resulting node ref and a universe table mapping
-    fn make_union_node_sec(&self, name: &str, ancestors: &Vec<MirNodeRef>) -> (MirNodeRef, Option<HashMap<String, String>>) {
+    fn make_union_node_sec(
+        &self,
+        name: &str,
+        ancestors: &Vec<MirNodeRef>,
+    ) -> (
+        MirNodeRef,
+        Option<HashMap<(String, Option<String>), String>>,
+    ) {
         let mut emit: Vec<Vec<Column>> = Vec::new();
         assert!(ancestors.len() > 1, "union must have more than 1 ancestors");
 
@@ -824,7 +839,6 @@ impl SqlToMirConverter {
             "union drops ancestor columns"
         );
 
-        let mut universe_table_mapping : Option<HashMap<String,String>> = None;
         let mut table_mapping = HashMap::new();
 
         for ancestor in ancestors.iter() {
@@ -840,18 +854,20 @@ impl SqlToMirConverter {
             for col in acols.clone() {
                 match col.table {
                     Some(x) => {
-                                debug!(self.log, "About to push column {} from table {} onto emit.", col.name, x);
-                                let col_n: String = col.name.to_owned();
-                                let tab_n: String = x.to_owned();
-                                let keyed = format!("{}:{}", col_n, tab_n);
+                        debug!(
+                            self.log,
+                            "About to push column {} from table {} onto emit.", col.name, x
+                        );
+                        let col_n: String = col.name.to_owned();
+                        let tab_n: String = x.to_owned();
+                        let key = (col_n, Some(tab_n));
 
-                                table_mapping.insert(keyed.clone(), precedent_table.to_string());
-                                universe_table_mapping = Some(table_mapping.clone());
-                            },
+                        table_mapping.insert(key, precedent_table.to_string());
+                    }
                     None => {
                         debug!(self.log, "About to push column {} onto emit.", col.name);
-                        table_mapping.insert(col.clone().name.to_owned(), precedent_table.to_string());
-                        universe_table_mapping = Some(table_mapping.clone());
+                        table_mapping
+                            .insert((col.name.to_owned(), None), precedent_table.to_string());
                     }
                 }
             }
@@ -867,16 +883,18 @@ impl SqlToMirConverter {
             selected_cols
         );
 
-        (MirNode::new(
-            name,
-            self.schema_version,
-            emit.first().unwrap().clone(),
-            MirNodeType::Union { emit },
-            ancestors.clone(),
-            vec![],
-        ), universe_table_mapping)
+        (
+            MirNode::new(
+                name,
+                self.schema_version,
+                emit.first().unwrap().clone(),
+                MirNodeType::Union { emit },
+                ancestors.clone(),
+                vec![],
+            ),
+            Some(table_mapping),
+        )
     }
-
 
     fn make_union_from_same_base(
         &self,
@@ -1450,7 +1468,15 @@ impl SqlToMirConverter {
         qg: &QueryGraph,
         has_leaf: bool,
         universe: UniverseId,
-    ) -> Result<(bool, Vec<MirNodeRef>, Option<HashMap<String, String>>, String), String> {
+    ) -> Result<
+        (
+            bool,
+            Vec<MirNodeRef>,
+            Option<HashMap<(String, Option<String>), String>>,
+            String,
+        ),
+        String,
+    > {
         // TODO: make this take &self!
         use crate::controller::sql::mir::grouped::make_grouped;
         use crate::controller::sql::mir::grouped::make_predicates_above_grouped;

@@ -13,8 +13,12 @@ pub trait SecurityBoundary {
         qg: &QueryGraph,
         ancestors: &Vec<MirNodeRef>,
         node_count: usize,
-        sec: bool
-    ) -> (Vec<MirNodeRef>, Option<HashMap<String, String>>, String);
+        sec: bool,
+    ) -> (
+        Vec<MirNodeRef>,
+        Option<HashMap<(String, Option<String>), String>>,
+        String,
+    );
 
     fn make_security_boundary(
         &self,
@@ -31,8 +35,12 @@ impl SecurityBoundary for SqlToMirConverter {
         qg: &QueryGraph,
         ancestors: &Vec<MirNodeRef>,
         node_count: usize,
-        sec: bool
-    ) -> (Vec<MirNodeRef>, Option<HashMap<String, String>>, String) {
+        sec: bool,
+    ) -> (
+        Vec<MirNodeRef>,
+        Option<HashMap<(String, Option<String>), String>>,
+        String,
+    ) {
         use crate::controller::sql::mir::grouped::make_grouped;
 
         let mut nodes_added = Vec::new();
@@ -44,7 +52,7 @@ impl SecurityBoundary for SqlToMirConverter {
         // }
 
         let mut union: Option<MirNodeRef>;
-        let mut mapping: Option<HashMap<String, String>>;
+        let mut mapping: Option<HashMap<(String, Option<String>), String>>;
 
         // First, union the results from all ancestors
         if !sec {

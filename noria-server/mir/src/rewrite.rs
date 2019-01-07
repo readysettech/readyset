@@ -16,7 +16,11 @@ fn has_column(n: &MirNodeRef, column: &Column) -> bool {
     false
 }
 
-pub fn make_universe_naming_consistent(q: &mut MirQuery, table_mapping: &HashMap<String, String>, base_name: String){
+pub fn make_universe_naming_consistent(
+    q: &mut MirQuery,
+    table_mapping: &HashMap<(String, Option<String>), String>,
+    base_name: String,
+) {
     let mut queue = Vec::new();
     let new_q = q.clone();
     queue.push(q.leaf.clone());
@@ -46,12 +50,11 @@ pub fn make_universe_naming_consistent(q: &mut MirQuery, table_mapping: &HashMap
         for mut col in &mut node_to_rewrite.borrow_mut().columns {
             let mut _res = {
                 match col.table {
-                    Some(ref mut x) => {
-                        let keyed = format!("{}:{}", col.name, x);
-                        table_mapping.get(&keyed).cloned()
-
-                    },
-                    None => {None}
+                    Some(ref table) => {
+                        let key = (col.name.to_owned(), Some(table.to_owned()));
+                        table_mapping.get(&key).cloned()
+                    }
+                    None => None,
                 }
             };
         }
@@ -62,7 +65,11 @@ pub fn make_universe_naming_consistent(q: &mut MirQuery, table_mapping: &HashMap
     }
 }
 
-pub fn pull_required_base_columns(q: &mut MirQuery, table_mapping: Option<&HashMap<String, String>>, sec: bool) {
+pub fn pull_required_base_columns(
+    q: &mut MirQuery,
+    table_mapping: Option<&HashMap<(String, Option<String>), String>>,
+    sec: bool,
+) {
     let mut queue = Vec::new();
     queue.push(q.leaf.clone());
 
@@ -99,31 +106,29 @@ pub fn pull_required_base_columns(q: &mut MirQuery, table_mapping: Option<&HashM
                         continue;
                     }
                     for c in &needed_columns {
-                        match c.table.clone() {
-                            Some(table) => {
-                                let lookup = format!("{}:{}", c.name, table);
-                                if !(map.contains_key(&lookup)) {
-                                    if !found.contains(&c) && has_column(ancestor, c) {
-                                        ancestor.borrow_mut().add_column(c.clone());
-                                        found.push(c);
-                                    }
-                                }
-                            },
-                            None => {
-                                let lookup = c.clone().name;
-                                if !(map.contains_key(&lookup)) {
+                        match c.table {
+                            Some(ref table) => {
+                                let key = (c.name.to_owned(), Some(table.to_owned()));
+                                if !map.contains_key(&key) {
                                     if !found.contains(&c) && has_column(ancestor, c) {
                                         ancestor.borrow_mut().add_column(c.clone());
                                         found.push(c);
                                     }
                                 }
                             }
-
+                            None => {
+                                if !map.contains_key(&(c.name.to_owned(), None)) {
+                                    if !found.contains(&c) && has_column(ancestor, c) {
+                                        ancestor.borrow_mut().add_column(c.clone());
+                                        found.push(c);
+                                    }
+                                }
+                            }
                         }
                     }
                     queue.push(ancestor.clone());
                 }
-            },
+            }
             None => {
                 for ancestor in mn.borrow().ancestors() {
                     if ancestor.borrow().ancestors().len() == 0 {

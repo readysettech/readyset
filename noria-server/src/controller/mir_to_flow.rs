@@ -15,7 +15,11 @@ use mir::query::{MirQuery, QueryFlowParts};
 use mir::{Column, FlowNode, MirNodeRef};
 use petgraph::graph::NodeIndex;
 
-pub fn mir_query_to_flow_parts(mir_query: &mut MirQuery, mig: &mut Migration, table_mapping: Option<&HashMap<String, String>>) -> QueryFlowParts {
+pub fn mir_query_to_flow_parts(
+    mir_query: &mut MirQuery,
+    mig: &mut Migration,
+    table_mapping: Option<&HashMap<(String, Option<String>), String>>,
+) -> QueryFlowParts {
     use std::collections::VecDeque;
 
     let mut new_nodes = Vec::new();
@@ -67,7 +71,11 @@ pub fn mir_query_to_flow_parts(mir_query: &mut MirQuery, mig: &mut Migration, ta
     }
 }
 
-pub fn mir_node_to_flow_parts(mir_node: &mut MirNode, mig: &mut Migration, table_mapping: Option<&HashMap<String,String>>) -> FlowNode {
+pub fn mir_node_to_flow_parts(
+    mir_node: &mut MirNode,
+    mig: &mut Migration,
+    table_mapping: Option<&HashMap<(String, Option<String>), String>>,
+) -> FlowNode {
     let name = mir_node.name.clone();
     match mir_node.flow_node {
         None => {
@@ -428,7 +436,7 @@ pub(crate) fn make_union_node(
     emit: &Vec<Vec<Column>>,
     ancestors: &[MirNodeRef],
     mig: &mut Migration,
-    table_mapping: Option<&HashMap<String, String>>
+    table_mapping: Option<&HashMap<(String, Option<String>), String>>,
 ) -> FlowNode {
     let column_names = column_names(columns);
     let mut emit_column_id: HashMap<NodeIndex, Vec<usize>> = HashMap::new();
@@ -512,7 +520,7 @@ pub(crate) fn make_grouped_node(
     group_by: &Vec<Column>,
     kind: GroupedNodeType,
     mig: &mut Migration,
-    table_mapping: Option<&HashMap<String,String>>,
+    table_mapping: Option<&HashMap<(String, Option<String>), String>>,
 ) -> FlowNode {
     assert!(group_by.len() > 0);
     assert!(
@@ -739,7 +747,7 @@ pub(crate) fn make_project_node(
     arithmetic: &Vec<(String, ArithmeticExpression)>,
     literals: &Vec<(String, DataType)>,
     mig: &mut Migration,
-    table_mapping: Option<&HashMap<String,String>>,
+    table_mapping: Option<&HashMap<(String, Option<String>), String>>,
 ) -> FlowNode {
     let parent_na = parent.borrow().flow_node_addr().unwrap();
     let column_names = column_names(columns);

@@ -208,7 +208,11 @@ impl MirNode {
         self.columns.as_slice()
     }
 
-    pub fn column_id_for_column(&self, c: &Column, table_mapping: Option<&HashMap<String,String>>) -> usize {
+    pub fn column_id_for_column(
+        &self,
+        c: &Column,
+        table_mapping: Option<&HashMap<(String, Option<String>), String>>,
+    ) -> usize {
         match self.inner {
             // if we're a base, translate to absolute column ID (taking into account deleted
             // columns). We use the column specifications here, which track a tuple of (column
@@ -249,10 +253,10 @@ impl MirNode {
                         // the mapping for a key based on this
                         Some(map) => match c.table {
                             Some(ref table) => {
-                                let keyed = format!("{}:{}", c.clone().name, table);
-                                match map.get(&keyed) {
+                                let key = (c.name.clone(), Some(table.clone()));
+                                match map.get(&key) {
                                     Some(ref t_name) => get_column_index(c, t_name),
-                                    None => match map.get(&c.name) {
+                                    None => match map.get(&(c.name.clone(), None)) {
                                         Some(ref t_name) => get_column_index(c, t_name),
                                         None => {
                                             panic!("alias is not in mapping table!");
@@ -260,7 +264,7 @@ impl MirNode {
                                     },
                                 }
                             }
-                            None => match map.get(&c.name) {
+                            None => match map.get(&(c.name.clone(), None)) {
                                 Some(ref t_name) => get_column_index(c, t_name),
                                 None => panic!("tried to look up non-existent column {:?} on node \
                                                \"{}\" (columns: {:?})", c, self.name, self.columns),
