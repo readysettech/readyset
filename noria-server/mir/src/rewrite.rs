@@ -75,7 +75,7 @@ pub fn pull_required_base_columns(
 
     if sec {
         match table_mapping {
-            Some(x) => (),
+            Some(_) => (),
             None => panic!("no table mapping computed, but in secure universe."),
         }
     }
