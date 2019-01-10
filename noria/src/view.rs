@@ -9,7 +9,6 @@ use std::net::SocketAddr;
 use std::sync::{Arc, Mutex};
 use tokio::prelude::*;
 use tokio_tower::multiplex;
-use tokio_tower::NewTransport;
 use tower_balance::{choose, Pool};
 use tower_buffer::Buffer;
 use tower_service::Service;
@@ -26,12 +25,16 @@ type Transport = AsyncBincodeStream<
 // only pub because we use it to figure out the error type for ViewError
 pub struct ViewEndpoint(SocketAddr);
 
-impl NewTransport<Tagged<ReadQuery>> for ViewEndpoint {
-    type InitError = tokio::io::Error;
-    type Transport = multiplex::MultiplexTransport<Transport, Tagger>;
-    type TransportFut = Box<Future<Item = Self::Transport, Error = Self::InitError> + Send>;
+impl Service<()> for ViewEndpoint {
+    type Response = multiplex::MultiplexTransport<Transport, Tagger>;
+    type Error = tokio::io::Error;
+    type Future = Box<Future<Item = Self::Response, Error = Self::Error> + Send>;
 
-    fn new_transport(&self) -> Self::TransportFut {
+    fn poll_ready(&mut self) -> Poll<(), Self::Error> {
+        Ok(Async::Ready(()))
+    }
+
+    fn call(&mut self, _: ()) -> Self::Future {
         Box::new(
             tokio::net::TcpStream::connect(&self.0)
                 .map(AsyncBincodeStream::from)

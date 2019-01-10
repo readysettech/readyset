@@ -583,10 +583,9 @@ fn listen_reads(
             .filter_map(|c| c)
             .map(move |stream| {
                 let readers = readers.clone();
-                server::Server::multiplexed(
+                server::Server::new(
                     AsyncBincodeStream::from(stream).for_async(),
                     ServiceFn::new(move |req| readers::handle_message(req, &readers)),
-                    None,
                 )
                 .map_err(|e| -> () {
                     eprintln!("!!! reader client protocol error: {:?}", e);
