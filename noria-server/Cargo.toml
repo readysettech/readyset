@@ -75,4 +75,4 @@ name = "noria-zk"
 path = "src/bin/zk.rs"
 
 [[example]]
-name = "basic-recipe"
+name = "local-server"

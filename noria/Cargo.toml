@@ -60,7 +60,7 @@ path = "src/lib.rs"
 name = "noria"
 
 [[example]]
-name = "basic-recipe"
+name = "quickstart"
 
 [[example]]
 name = "basic-distribution"
