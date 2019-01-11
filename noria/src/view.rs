@@ -4,6 +4,7 @@ use async_bincode::{AsyncBincodeStream, AsyncDestination};
 use nom_sql::ColumnSpecification;
 use petgraph::graph::NodeIndex;
 use std::collections::HashMap;
+use std::fmt;
 use std::io;
 use std::net::SocketAddr;
 use std::sync::{Arc, Mutex};
@@ -12,6 +13,7 @@ use tokio_tower::multiplex;
 use tower_balance::{choose, Pool};
 use tower_buffer::Buffer;
 use tower_service::Service;
+use tower_util::ServiceExt;
 
 type Transport = AsyncBincodeStream<
     tokio::net::tcp::TcpStream,
@@ -59,7 +61,7 @@ pub(crate) type ViewRpc = Buffer<
 pub enum ViewError {
     /// The given view is not yet available.
     #[fail(display = "the view is not yet available")]
-    NotYetAvailable,
+    NotYetAvailable(View),
     /// A lower-level error occurred while communicating with Soup.
     #[fail(display = "{}", _0)]
     TransportError(#[cause] <ViewRpc as Service<Tagged<ReadQuery>>>::Error),
@@ -170,6 +172,16 @@ pub struct View {
     shard_addrs: Vec<SocketAddr>,
 }
 
+impl fmt::Debug for View {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        f.debug_struct("View")
+            .field("node", &self.node)
+            .field("columns", &self.columns)
+            .field("shard_addrs", &self.shard_addrs)
+            .finish()
+    }
+}
+
 #[cfg_attr(feature = "cargo-clippy", allow(clippy::len_without_is_empty))]
 impl View {
     /// Get the list of columns in this view.
@@ -185,26 +197,32 @@ impl View {
     /// Get the current size of this view.
     ///
     /// Note that you must also continue to poll this `View` for the returned future to resolve.
-    pub fn len(&mut self) -> impl Future<Item = usize, Error = ViewError> + Send {
-        let mut futures = futures::stream::futures_unordered::FuturesUnordered::new();
+    pub fn len(mut self) -> impl Future<Item = (Self, usize), Error = ViewError> + Send {
         let node = self.node;
-        for (shardi, shard) in self.shards.iter_mut().enumerate() {
-            futures.push(
+        futures::stream::futures_ordered(self.shards.drain(..).enumerate().map(
+            |(shardi, shard)| {
                 shard
-                    .call(
-                        ReadQuery::Size {
-                            target: (node, shardi),
-                        }
-                        .into(),
-                    )
-                    .map(move |reply| match reply.v {
-                        ReadReply::Size(rows) => rows,
-                        _ => unreachable!(),
+                    .ready()
+                    .map_err(ViewError::from)
+                    .and_then(move |mut svc| {
+                        svc.call(
+                            ReadQuery::Size {
+                                target: (node, shardi),
+                            }
+                            .into(),
+                        )
+                        .map_err(ViewError::from)
+                        .map(move |reply| match reply.v {
+                            ReadReply::Size(rows) => (svc, rows),
+                            _ => unreachable!(),
+                        })
                     })
-                    .map_err(ViewError::from),
-            );
-        }
-        futures.fold(0, |acc, rs| future::ok::<_, ViewError>(acc + rs))
+            },
+        ))
+        .fold((self, 0), |(mut this, acc), (svc, rows)| {
+            this.shards.push(svc);
+            future::ok::<_, ViewError>((this, acc + rows))
+        })
     }
 
     /// Retrieve the query results for the given parameter values.
@@ -213,81 +231,82 @@ impl View {
     /// If `block` is false, misses will be returned as empty results. Any requested keys that have
     /// missing state will be backfilled (asynchronously if `block` is `false`).
     pub fn multi_lookup(
-        &mut self,
+        mut self,
         keys: Vec<Vec<DataType>>,
         block: bool,
-    ) -> impl Future<Item = Vec<Datas>, Error = ViewError> + Send {
-        if self.shards.len() == 1 {
-            future::Either::A(
-                self.shards
-                    .get_mut(0)
-                    .unwrap()
-                    .call(
-                        ReadQuery::Normal {
-                            target: (self.node, 0),
-                            keys,
-                            block,
-                        }
-                        .into(),
-                    )
-                    .map_err(ViewError::from)
-                    .and_then(|reply| match reply.v {
-                        ReadReply::Normal(Ok(rows)) => Ok(rows),
-                        ReadReply::Normal(Err(())) => Err(ViewError::NotYetAvailable),
-                        _ => unreachable!(),
-                    }),
-            )
-        } else {
-            assert!(keys.iter().all(|k| k.len() == 1));
-            let mut shard_queries = vec![Vec::new(); self.shards.len()];
-            for key in keys {
-                let shard = crate::shard_by(&key[0], self.shards.len());
-                shard_queries[shard].push(key);
-            }
-
-            let node = self.node;
-            future::Either::B(
-                futures::stream::futures_ordered(
-                    self.shards
-                        .iter_mut()
-                        .enumerate()
-                        .zip(shard_queries.into_iter())
-                        .filter(|&(_, ref sq)| !sq.is_empty())
-                        .map(|((shardi, shard), shard_queries)| {
-                            shard
-                                .call(
-                                    ReadQuery::Normal {
-                                        target: (node, shardi),
-                                        keys: shard_queries,
-                                        block,
-                                    }
-                                    .into(),
-                                )
-                                .map_err(ViewError::from)
-                        }),
-                )
-                .fold(Vec::new(), |mut results, reply| match reply.v {
-                    ReadReply::Normal(Ok(rows)) => {
-                        results.extend(rows);
-                        Ok(results)
-                    }
-                    ReadReply::Normal(Err(())) => Err(ViewError::NotYetAvailable),
-                    _ => unreachable!(),
-                }),
-            )
+    ) -> impl Future<Item = (Self, Vec<Datas>), Error = ViewError> + Send {
+        // TODO: optimize for when there's only one shard
+        assert!(keys.iter().all(|k| k.len() == 1));
+        let mut shard_queries = vec![Vec::new(); self.shards.len()];
+        for key in keys {
+            let shard = crate::shard_by(&key[0], self.shards.len());
+            shard_queries[shard].push(key);
         }
+
+        let node = self.node;
+        futures::stream::futures_ordered(
+            self.shards
+                .drain(..)
+                .enumerate()
+                .zip(shard_queries.into_iter())
+                .filter(|&(_, ref sq)| !sq.is_empty())
+                .map(|((shardi, shard), shard_queries)| {
+                    shard
+                        .ready()
+                        .map_err(ViewError::from)
+                        .and_then(move |mut svc| {
+                            svc.call(
+                                ReadQuery::Normal {
+                                    target: (node, shardi),
+                                    keys: shard_queries,
+                                    block,
+                                }
+                                .into(),
+                            )
+                            .map_err(ViewError::from)
+                            .map(move |reply| match reply.v {
+                                ReadReply::Normal(Ok(rows)) => Ok((svc, rows)),
+                                ReadReply::Normal(Err(())) => Err(svc),
+                                _ => unreachable!(),
+                            })
+                        })
+                }),
+        )
+        .fold((Ok(self), Vec::new()), |(this, mut acc), rs| {
+            match (this, rs) {
+                (Ok(mut this), Ok((svc, mut rows))) => {
+                    this.shards.push(svc);
+                    if acc.is_empty() {
+                        acc = rows;
+                    } else {
+                        acc.append(&mut rows);
+                    }
+                    future::ok::<_, ViewError>((Ok(this), acc))
+                }
+                (Ok(mut this), Err(svc))
+                | (Err(mut this), Ok((svc, _)))
+                | (Err(mut this), Err(svc)) => {
+                    this.shards.push(svc);
+                    future::ok::<_, ViewError>((Err(this), Vec::new()))
+                }
+            }
+        })
+        .and_then(|r| match r {
+            (Ok(this), rows) => Ok((this, rows)),
+            (Err(this), _) => Err(ViewError::NotYetAvailable(this)),
+        })
     }
 
     /// Retrieve the query results for the given parameter value.
     ///
     /// The method will block if the results are not yet available only when `block` is `true`.
     pub fn lookup(
-        &mut self,
+        self,
         key: &[DataType],
         block: bool,
-    ) -> impl Future<Item = Datas, Error = ViewError> + Send {
+    ) -> impl Future<Item = (Self, Datas), Error = ViewError> + Send {
         // TODO: Optimized version of this function?
         self.multi_lookup(vec![Vec::from(key)], block)
-            .map(|rs| rs.into_iter().next().unwrap())
+            .map(|(this, rs)| (this, rs.into_iter().next().unwrap()))
     }
 }

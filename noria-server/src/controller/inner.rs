@@ -966,6 +966,7 @@ impl ControllerInner {
                     .lookup(uid, true)
                     .wait()
                     .unwrap()
+                    .1
                     .iter()
                     .map(|v| v[1].clone())
                     .collect();
