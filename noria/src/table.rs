@@ -213,30 +213,11 @@ pub struct Table {
     shard_addrs: Vec<SocketAddr>,
 }
 
-// b/c of https://github.com/rust-lang/rust/issues/53546
-pub fn map1(
-    _: (),
-    _: Tagged<()>,
-) -> Result<
-    (),
-    tower_buffer::Error<
-        tower_balance::Error<
-            tower_buffer::Error<
-                tokio_tower::multiplex::client::Error<
-                    tokio_tower::multiplex::MultiplexTransport<Transport, Tagger>,
-                >,
-            >,
-            tokio_tower::multiplex::client::SpawnError<std::io::Error>,
-        >,
-    >,
-> {
-    Ok(())
-}
-
 impl Service<Input> for Table {
     type Error = TableError;
     type Response = <TableRpc as Service<Tagged<LocalOrNot<Input>>>>::Response;
-    existential type Future: Future<Item = Tagged<()>, Error = TableError>;
+    // existential once https://github.com/rust-lang/rust/issues/53443 is fixed
+    type Future = Box<Future<Item = Tagged<()>, Error = TableError> + Send>;
 
     fn poll_ready(&mut self) -> Poll<(), Self::Error> {
         for s in &mut self.shards {
@@ -251,7 +232,8 @@ impl Service<Input> for Table {
         // TODO: check each row's .len() against self.columns.len() -> WrongColumnCount
 
         if self.shards.len() == 1 {
-            future::Either::A(
+            // when Box goes away, this becomes future::Either::A
+            Box::new(
                 self.shards[0]
                     .call(
                         if self.dst_is_local {
@@ -310,9 +292,10 @@ impl Service<Input> for Table {
                 }
             }
 
-            future::Either::B(
+            // when Box goes away, this becomes future::Either::B
+            Box::new(
                 wait_for
-                    .fold((), map1)
+                    .fold((), |_, _| Ok(()))
                     .map_err(TableError::from)
                     .map(Tagged::from),
             )

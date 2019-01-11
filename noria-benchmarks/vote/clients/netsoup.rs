@@ -13,9 +13,10 @@ pub(crate) struct Conn {
 }
 
 impl VoteClient for Conn {
-    existential type NewFuture: Future<Item = Self, Error = failure::Error>;
-    existential type ReadFuture: Future<Item = (), Error = failure::Error>;
-    existential type WriteFuture: Future<Item = (), Error = failure::Error>;
+    // TODO: existential once https://github.com/rust-lang/rust/issues/53546 is fixed
+    type NewFuture = Box<Future<Item = Self, Error = failure::Error> + Send>;
+    type ReadFuture = Box<Future<Item = (), Error = failure::Error> + Send>;
+    type WriteFuture = Box<Future<Item = (), Error = failure::Error> + Send>;
 
     fn spawn(
         _: tokio::runtime::TaskExecutor,
@@ -28,37 +29,42 @@ impl VoteClient for Conn {
             args.value_of("deployment").unwrap()
         );
 
-        ZookeeperAuthority::new(&zk)
-            .into_future()
-            .and_then(ControllerHandle::new)
-            .and_then(move |mut c| {
-                if params.prime {
-                    // for prepop, we need a mutator
-                    future::Either::A(
-                        c.install_recipe(RECIPE)
-                            .and_then(move |_| c.table("Article").map(move |a| (c, a)))
-                            .and_then(move |(c, mut a)| {
-                                a.perform_all((0..params.articles).map(|i| {
-                                    vec![((i + 1) as i32).into(), format!("Article #{}", i).into()]
-                                }))
-                                .map(move |_| c)
-                                .then(|r| {
-                                    r.context("failed to do article prepopulation")
-                                        .map_err(Into::into)
-                                })
-                            }),
-                    )
-                } else {
-                    future::Either::B(future::ok(c))
-                }
-            })
-            .and_then(|mut c| c.table("Vote").map(move |v| (c, v)))
-            .and_then(|(mut c, v)| c.view("ArticleWithVoteCount").map(move |awvc| (c, v, awvc)))
-            .map(|(c, v, awvc)| Conn {
-                ch: c,
-                r: Some(awvc),
-                w: Some(v),
-            })
+        Box::new(
+            ZookeeperAuthority::new(&zk)
+                .into_future()
+                .and_then(ControllerHandle::new)
+                .and_then(move |mut c| {
+                    if params.prime {
+                        // for prepop, we need a mutator
+                        future::Either::A(
+                            c.install_recipe(RECIPE)
+                                .and_then(move |_| c.table("Article").map(move |a| (c, a)))
+                                .and_then(move |(c, mut a)| {
+                                    a.perform_all((0..params.articles).map(|i| {
+                                        vec![
+                                            ((i + 1) as i32).into(),
+                                            format!("Article #{}", i).into(),
+                                        ]
+                                    }))
+                                    .map(move |_| c)
+                                    .then(|r| {
+                                        r.context("failed to do article prepopulation")
+                                            .map_err(Into::into)
+                                    })
+                                }),
+                        )
+                    } else {
+                        future::Either::B(future::ok(c))
+                    }
+                })
+                .and_then(|mut c| c.table("Vote").map(move |v| (c, v)))
+                .and_then(|(mut c, v)| c.view("ArticleWithVoteCount").map(move |awvc| (c, v, awvc)))
+                .map(|(c, v, awvc)| Conn {
+                    ch: c,
+                    r: Some(awvc),
+                    w: Some(v),
+                }),
+        )
     }
 
     fn handle_writes(&mut self, ids: &[i32]) -> Self::WriteFuture {
