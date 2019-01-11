@@ -353,7 +353,6 @@
 #![feature(try_from)]
 #![feature(box_patterns)]
 #![feature(box_syntax)]
-#![feature(duration_as_u128)]
 #![feature(nll)]
 #![feature(try_blocks)]
 #![deny(missing_docs)]

@@ -199,7 +199,7 @@ impl ControllerHandle<consensus::ZookeeperAuthority> {
     }
 }
 
-impl<A: Authority> ControllerHandle<A> {
+impl<A: Authority + 'static> ControllerHandle<A> {
     #[doc(hidden)]
     pub fn make(authority: Arc<A>) -> impl Future<Item = Self, Error = failure::Error> {
         // need to use lazy otherwise current executor won't be known

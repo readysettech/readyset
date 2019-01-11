@@ -1,5 +1,3 @@
-#![feature(duration_as_u128)]
-
 const WRITE_BATCH_SIZE: usize = 1000;
 
 #[macro_use]

@@ -1462,7 +1462,7 @@ impl SqlToMirConverter {
                             .filter_map(|gid| {
                                 // This is a little annoying, but because of the way we name universe queries,
                                 // we need to strip the view name of the _u{uid} suffix
-                                let root = name.trim_right_matches(&uformat);
+                                let root = name.trim_end_matches(&uformat);
                                 if root == name {
                                     None
                                 } else {
