@@ -1797,8 +1797,13 @@ fn migration_depends_on_unchanged_domain() {
     assert!(true);
 }
 
-fn do_full_vote_migration(old_puts_after: bool) {
-    let mut g = start_simple(&format!("do_full_vote_migration_{}", old_puts_after));
+fn do_full_vote_migration(sharded: bool, old_puts_after: bool) {
+    let name = format!("do_full_vote_migration_{}", old_puts_after);
+    let mut g = if sharded {
+        start_simple(&name)
+    } else {
+        start_simple_unsharded(&name)
+    };
     let (article, _vote, vc, _end) = g.migrate(|mig| {
         // migrate
 
@@ -1919,12 +1924,17 @@ fn do_full_vote_migration(old_puts_after: bool) {
 
 #[test]
 fn full_vote_migration_only_new() {
-    do_full_vote_migration(false);
+    do_full_vote_migration(true, false);
 }
 
 #[test]
 fn full_vote_migration_new_and_old() {
-    do_full_vote_migration(true);
+    do_full_vote_migration(true, true);
+}
+
+#[test]
+fn full_vote_migration_new_and_old_unsharded() {
+    do_full_vote_migration(false, true);
 }
 
 #[test]
