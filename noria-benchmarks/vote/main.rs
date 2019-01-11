@@ -332,7 +332,7 @@ where
             }
         });
 
-        ex.spawn(fut.map_err(|e| eprintln!("enqueued request failed: {}", e)));
+        ex.spawn(fut.map_err(|e| eprintln!("enqueued request failed: {:?}", e)));
     };
 
     let mut worker_ops = None;
