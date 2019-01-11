@@ -213,6 +213,26 @@ pub struct Table {
     shard_addrs: Vec<SocketAddr>,
 }
 
+// b/c of https://github.com/rust-lang/rust/issues/53546
+pub fn map1(
+    _: (),
+    _: Tagged<()>,
+) -> Result<
+    (),
+    tower_buffer::Error<
+        tower_balance::Error<
+            tower_buffer::Error<
+                tokio_tower::multiplex::client::Error<
+                    tokio_tower::multiplex::MultiplexTransport<Transport, Tagger>,
+                >,
+            >,
+            tokio_tower::multiplex::client::SpawnError<std::io::Error>,
+        >,
+    >,
+> {
+    Ok(())
+}
+
 impl Service<Input> for Table {
     type Error = TableError;
     type Response = <TableRpc as Service<Tagged<LocalOrNot<Input>>>>::Response;
@@ -292,9 +312,9 @@ impl Service<Input> for Table {
 
             future::Either::B(
                 wait_for
-                    .fold((), |_, _| Ok(()))
+                    .fold((), map1)
                     .map_err(TableError::from)
-                    .map(|_| Tagged::from(())),
+                    .map(Tagged::from),
             )
         }
     }
