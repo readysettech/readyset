@@ -38,18 +38,18 @@ fn main() {
                 srv.view("ArticleWithVoteCount")
                     .map(move |awvc| (srv, awvc))
             })
-            .and_then(move |(mut srv, mut awvc)| {
+            .and_then(move |(mut srv, awvc)| {
                 println!("Creating article...");
                 awvc.lookup(&[aid.into()], true)
                     .map_err(|e| format_err!("failed to look up article: {:?}", e))
-                    .and_then(move |article| {
+                    .and_then(move |(awvc, article)| {
                         if article.is_empty() {
                             println!("Creating new article...");
                             let title = "test title";
                             let url = "http://pdos.csail.mit.edu";
                             future::Either::A(
                                 srv.table("Article")
-                                    .and_then(move |mut articles| {
+                                    .and_then(move |articles| {
                                         articles
                                             .insert(vec![aid.into(), title.into(), url.into()])
                                             .map_err(|e| {
@@ -65,7 +65,7 @@ fn main() {
             })
             .and_then(move |(mut srv, awvc)| {
                 srv.table("Vote")
-                    .and_then(move |mut vote| {
+                    .and_then(move |vote| {
                         // Then create a new vote:
                         println!("Casting vote...");
                         let uid = SystemTime::now()
@@ -74,11 +74,9 @@ fn main() {
                             .as_secs() as i64;
 
                         // Double-voting has no effect on final count due to DISTINCT
-                        future::join_all(vec![
-                            vote.insert(vec![aid.into(), uid.into()]),
-                            vote.insert(vec![aid.into(), uid.into()]),
-                        ])
-                        .map_err(|e| format_err!("failed to insert vote: {:?}", e))
+                        vote.insert(vec![aid.into(), uid.into()])
+                            .and_then(move |vote| vote.insert(vec![aid.into(), uid.into()]))
+                            .map_err(|e| format_err!("failed to insert vote: {:?}", e))
                     })
                     .map(move |_| (srv, awvc))
             })
@@ -88,7 +86,7 @@ fn main() {
                     .map(move |_| (srv, awvc))
                     .map_err(|_| unreachable!())
             })
-            .and_then(move |(_, mut awvc)| {
+            .and_then(move |(_, awvc)| {
                 println!("Reading...");
                 awvc.lookup(&[aid.into()], true)
                     .map_err(|e| format_err!("failed to look up article: {:?}", e))

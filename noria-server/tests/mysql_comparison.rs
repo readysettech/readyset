@@ -9,7 +9,6 @@ extern crate noria_server;
 extern crate serde_derive;
 extern crate toml;
 
-use futures::Future;
 use mysql::OptsBuilder;
 use mysql::Params;
 
@@ -284,7 +283,7 @@ fn check_query(
     g.install_recipe(&queries.join("\n")).unwrap();
 
     for (table_name, table) in tables.iter() {
-        let mut mutator = g.table(table_name).unwrap();
+        let mut mutator = g.table(table_name).unwrap().into_sync();
         for row in table.data.as_ref().unwrap().iter() {
             assert_eq!(row.len(), table.types.len());
             let row: Vec<DataType> = row
@@ -292,17 +291,17 @@ fn check_query(
                 .enumerate()
                 .map(|(i, v)| table.types[i].make_datatype(v))
                 .collect();
-            mutator.insert(row).wait().unwrap();
+            mutator.insert(row).unwrap();
         }
     }
 
     thread::sleep(time::Duration::from_millis(300));
 
-    let mut getter = g.view(query_name).unwrap();
+    let mut getter = g.view(query_name).unwrap().into_sync();
 
     for (i, query_parameter) in query.values.iter().enumerate() {
         let query_param = query.types[0].make_datatype(&query_parameter[0]);
-        let query_results = getter.lookup(&[query_param], true).wait().unwrap();
+        let query_results = getter.lookup(&[query_param], true).unwrap();
 
         let target_results = &target[&i.to_string()];
         let query_results: Vec<Vec<String>> = query_results

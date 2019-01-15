@@ -56,21 +56,36 @@ pub(crate) type ViewRpc = Buffer<
     Tagged<ReadQuery>,
 >;
 
-/// A failed View operation.
+/// A failed [`View`] operation.
+#[derive(Debug)]
+pub struct AsyncViewError {
+    /// The `View` whose operation failed.
+    ///
+    /// Not available if the underlying transport failed.
+    pub view: Option<View>,
+
+    /// The error that caused the operation to fail.
+    pub error: ViewError,
+}
+
+impl From<<ViewRpc as Service<Tagged<ReadQuery>>>::Error> for AsyncViewError {
+    fn from(e: <ViewRpc as Service<Tagged<ReadQuery>>>::Error) -> Self {
+        AsyncViewError {
+            view: None,
+            error: ViewError::TransportError(e),
+        }
+    }
+}
+
+/// A failed [`SyncView`] operation.
 #[derive(Debug, Fail)]
 pub enum ViewError {
     /// The given view is not yet available.
     #[fail(display = "the view is not yet available")]
-    NotYetAvailable(View),
+    NotYetAvailable,
     /// A lower-level error occurred while communicating with Soup.
     #[fail(display = "{}", _0)]
     TransportError(#[cause] <ViewRpc as Service<Tagged<ReadQuery>>>::Error),
-}
-
-impl From<<ViewRpc as Service<Tagged<ReadQuery>>>::Error> for ViewError {
-    fn from(e: <ViewRpc as Service<Tagged<ReadQuery>>>::Error) -> Self {
-        ViewError::TransportError(e)
-    }
 }
 
 #[doc(hidden)]
@@ -197,13 +212,13 @@ impl View {
     /// Get the current size of this view.
     ///
     /// Note that you must also continue to poll this `View` for the returned future to resolve.
-    pub fn len(mut self) -> impl Future<Item = (Self, usize), Error = ViewError> + Send {
+    pub fn len(mut self) -> impl Future<Item = (Self, usize), Error = AsyncViewError> + Send {
         let node = self.node;
         futures::stream::futures_ordered(self.shards.drain(..).enumerate().map(
             |(shardi, shard)| {
                 shard
                     .ready()
-                    .map_err(ViewError::from)
+                    .map_err(AsyncViewError::from)
                     .and_then(move |mut svc| {
                         svc.call(
                             ReadQuery::Size {
@@ -211,7 +226,7 @@ impl View {
                             }
                             .into(),
                         )
-                        .map_err(ViewError::from)
+                        .map_err(AsyncViewError::from)
                         .map(move |reply| match reply.v {
                             ReadReply::Size(rows) => (svc, rows),
                             _ => unreachable!(),
@@ -221,7 +236,7 @@ impl View {
         ))
         .fold((self, 0), |(mut this, acc), (svc, rows)| {
             this.shards.push(svc);
-            future::ok::<_, ViewError>((this, acc + rows))
+            future::ok::<_, AsyncViewError>((this, acc + rows))
         })
     }
 
@@ -234,7 +249,7 @@ impl View {
         mut self,
         keys: Vec<Vec<DataType>>,
         block: bool,
-    ) -> impl Future<Item = (Self, Vec<Datas>), Error = ViewError> + Send {
+    ) -> impl Future<Item = (Self, Vec<Datas>), Error = AsyncViewError> + Send {
         // TODO: optimize for when there's only one shard
         assert!(keys.iter().all(|k| k.len() == 1));
         let mut shard_queries = vec![Vec::new(); self.shards.len()];
@@ -249,12 +264,13 @@ impl View {
                 .drain(..)
                 .enumerate()
                 .zip(shard_queries.into_iter())
-                .filter(|&(_, ref sq)| !sq.is_empty())
                 .map(|((shardi, shard), shard_queries)| {
-                    shard
-                        .ready()
-                        .map_err(ViewError::from)
-                        .and_then(move |mut svc| {
+                    if shard_queries.is_empty() {
+                        return future::Either::A(future::ok(Ok((shard, Vec::new()))));
+                    }
+
+                    future::Either::B(shard.ready().map_err(AsyncViewError::from).and_then(
+                        move |mut svc| {
                             svc.call(
                                 ReadQuery::Normal {
                                     target: (node, shardi),
@@ -263,13 +279,14 @@ impl View {
                                 }
                                 .into(),
                             )
-                            .map_err(ViewError::from)
+                            .map_err(AsyncViewError::from)
                             .map(move |reply| match reply.v {
                                 ReadReply::Normal(Ok(rows)) => Ok((svc, rows)),
                                 ReadReply::Normal(Err(())) => Err(svc),
                                 _ => unreachable!(),
                             })
-                        })
+                        },
+                    ))
                 }),
         )
         .fold((Ok(self), Vec::new()), |(this, mut acc), rs| {
@@ -281,19 +298,22 @@ impl View {
                     } else {
                         acc.append(&mut rows);
                     }
-                    future::ok::<_, ViewError>((Ok(this), acc))
+                    future::ok::<_, AsyncViewError>((Ok(this), acc))
                 }
                 (Ok(mut this), Err(svc))
                 | (Err(mut this), Ok((svc, _)))
                 | (Err(mut this), Err(svc)) => {
                     this.shards.push(svc);
-                    future::ok::<_, ViewError>((Err(this), Vec::new()))
+                    future::ok::<_, AsyncViewError>((Err(this), Vec::new()))
                 }
             }
         })
         .and_then(|r| match r {
             (Ok(this), rows) => Ok((this, rows)),
-            (Err(this), _) => Err(ViewError::NotYetAvailable(this)),
+            (Err(this), _) => Err(AsyncViewError {
+                view: Some(this),
+                error: ViewError::NotYetAvailable,
+            }),
         })
     }
 
@@ -304,9 +324,68 @@ impl View {
         self,
         key: &[DataType],
         block: bool,
-    ) -> impl Future<Item = (Self, Datas), Error = ViewError> + Send {
+    ) -> impl Future<Item = (Self, Datas), Error = AsyncViewError> + Send {
         // TODO: Optimized version of this function?
         self.multi_lookup(vec![Vec::from(key)], block)
             .map(|(this, rs)| (this, rs.into_iter().next().unwrap()))
+    }
+
+    /// Switch to a synchronous interface for this view.
+    pub fn into_sync(self) -> SyncView {
+        SyncView(Some(self))
+    }
+}
+
+/// A synchronous wrapper around [`View`] where all methods block (using `wait`) for the operation
+/// to complete before returning.
+#[derive(Clone, Debug)]
+pub struct SyncView(Option<View>);
+
+macro_rules! sync {
+    ($self:ident.$method:ident($($args:expr),*)) => {
+        match $self
+            .0
+            .take()
+            .expect("tried to use View after its transport has failed")
+            .$method($($args),*)
+            .wait()
+        {
+            Ok((this, res)) => {
+                $self.0 = Some(this);
+                Ok(res)
+            }
+            Err(e) => {
+                $self.0 = e.view;
+                Err(e.error)
+            },
+        }
+    };
+}
+
+impl SyncView {
+    /// See [`View::len`].
+    pub fn len(&mut self) -> Result<usize, ViewError> {
+        sync!(self.len())
+    }
+
+    /// See [`View::multi_lookup`].
+    pub fn multi_lookup(
+        &mut self,
+        keys: Vec<Vec<DataType>>,
+        block: bool,
+    ) -> Result<Vec<Datas>, ViewError> {
+        sync!(self.multi_lookup(keys, block))
+    }
+
+    /// See [`View::lookup`].
+    pub fn lookup(&mut self, key: &[DataType], block: bool) -> Result<Datas, ViewError> {
+        sync!(self.lookup(key, block))
+    }
+
+    /// Switch back to an asynchronous interface for this view.
+    pub fn into_async(mut self) -> View {
+        self.0
+            .take()
+            .expect("tried to use View after its transport has failed")
     }
 }

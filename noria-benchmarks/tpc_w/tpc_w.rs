@@ -5,7 +5,6 @@ mod populate;
 extern crate clap;
 
 use crate::parameters::SampleKeys;
-use futures::Future;
 use noria::{LocalAuthority, SyncWorkerHandle, WorkerBuilder};
 use rand::Rng;
 use std::collections::HashMap;
@@ -160,7 +159,8 @@ impl Backend {
         let mut g = self
             .g
             .view(query_name)
-            .expect(&format!("no node for {}!", query_name));
+            .expect(&format!("no node for {}!", query_name))
+            .into_sync();
         let query_name = String::from(query_name);
 
         let num = ((keys.keys_size(&query_name) as f32) * read_scale) as usize;
@@ -171,7 +171,7 @@ impl Backend {
 
             let start = time::Instant::now();
             for i in 0..num {
-                match g.lookup(&params[i..(i + 1)], true).wait() {
+                match g.lookup(&params[i..(i + 1)], true) {
                     Err(_) => continue,
                     Ok(datas) => {
                         if datas.len() > 0 {

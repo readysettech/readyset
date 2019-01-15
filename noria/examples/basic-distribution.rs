@@ -1,4 +1,3 @@
-use futures::Future;
 use noria::SyncControllerHandle;
 use std::collections::BTreeMap;
 use std::thread;
@@ -29,7 +28,7 @@ fn main() {
     let executor = rt.executor();
     let get_view = move |b: &mut SyncControllerHandle<_, _>, n| loop {
         match b.view(n) {
-            Ok(v) => return v,
+            Ok(v) => return v.into_sync(),
             Err(_) => {
                 thread::sleep(Duration::from_millis(50));
                 *b = SyncControllerHandle::from_zk("127.0.0.1:2181/basicdist", executor.clone())
@@ -41,7 +40,7 @@ fn main() {
     let executor = rt.executor();
     let get_table = move |b: &mut SyncControllerHandle<_, _>, n| loop {
         match b.table(n) {
-            Ok(v) => return v,
+            Ok(v) => return v.into_sync(),
             Err(_) => {
                 thread::sleep(Duration::from_millis(50));
                 *b = SyncControllerHandle::from_zk("127.0.0.1:2181/basicdist", executor.clone())
@@ -58,13 +57,12 @@ fn main() {
     println!("Creating article...");
     let aid = 1;
     // Make sure the article exists:
-    if awvc.lookup(&[aid.into()], true).wait().unwrap().is_empty() {
+    if awvc.lookup(&[aid.into()], true).unwrap().is_empty() {
         println!("Creating new article...");
         let title = "test title";
         let url = "http://pdos.csail.mit.edu";
         article
             .insert(vec![aid.into(), title.into(), url.into()])
-            .wait()
             .unwrap();
     }
 
@@ -94,7 +92,7 @@ fn main() {
             .duration_since(UNIX_EPOCH)
             .unwrap()
             .as_secs() as i64;
-        while let Err(_) = vote.insert(vec![aid.into(), uid.into()]).wait() {
+        while let Err(_) = vote.insert(vec![aid.into(), uid.into()]) {
             vote = get_table(&mut db, "Vote");
         }
 

@@ -4,8 +4,7 @@ use std::path::Path;
 use std::time;
 
 use super::Backend;
-use futures::Future;
-use noria::{DataType, Table};
+use noria::{DataType, SyncTable};
 
 const NANOS_PER_SEC: u64 = 1_000_000_000;
 macro_rules! dur_to_fsec {
@@ -15,11 +14,11 @@ macro_rules! dur_to_fsec {
     }};
 }
 
-fn do_put<'a>(mutator: &'a mut Table, tx: bool) -> Box<FnMut(Vec<DataType>) + 'a> {
+fn do_put<'a>(mutator: &'a mut SyncTable, tx: bool) -> Box<FnMut(Vec<DataType>) + 'a> {
     match tx {
         //true => Box::new(move |v| assert!(mutator.transactional.insert(v, Token::empty()).is_ok())),
         true => unimplemented!(),
-        false => Box::new(move |v| assert!(mutator.insert(v).wait().is_ok())),
+        false => Box::new(move |v| assert!(mutator.insert(v).is_ok())),
     }
 }
 
@@ -27,7 +26,7 @@ fn populate_table(backend: &mut Backend, data: &Path, use_txn: bool) -> usize {
     use std::str::FromStr;
 
     let table_name = data.file_stem().unwrap().to_str().unwrap();
-    let mut putter = backend.g.table(table_name).unwrap();
+    let mut putter = backend.g.table(table_name).unwrap().into_sync();
 
     let f = File::open(data).unwrap();
     let mut reader = BufReader::new(f);

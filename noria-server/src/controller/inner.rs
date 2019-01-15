@@ -961,7 +961,7 @@ impl ControllerInner {
                 // TODO: can this move to the client entirely?
                 let rgb: Option<ViewBuilder> = self.view_builder(&g);
                 // TODO: is it even okay to use wait() here?
-                let mut view = rgb.map(|rgb| rgb.build(x.clone()).wait().unwrap()).unwrap();
+                let view = rgb.map(|rgb| rgb.build(x.clone()).wait().unwrap()).unwrap();
                 let my_groups: Vec<DataType> = view
                     .lookup(uid, true)
                     .wait()

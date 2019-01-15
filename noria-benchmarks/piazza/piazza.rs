@@ -1,7 +1,6 @@
 #[macro_use]
 extern crate clap;
 
-use futures::Future;
 use noria::{DataType, LocalAuthority, ReuseConfigType, SyncWorkerHandle, WorkerBuilder};
 use std::collections::HashMap;
 use std::fs::File;
@@ -50,13 +49,13 @@ impl Backend {
     }
 
     pub fn populate(&mut self, name: &'static str, mut records: Vec<Vec<DataType>>) -> usize {
-        let mut mutator = self.g.table(name).unwrap();
+        let mut mutator = self.g.table(name).unwrap().into_sync();
 
         let start = time::Instant::now();
 
         let i = records.len();
         for r in records.drain(..) {
-            mutator.insert(r).wait().unwrap();
+            mutator.insert(r).unwrap();
         }
 
         let dur = dur_to_fsec!(start.elapsed());
@@ -289,9 +288,9 @@ fn main() {
     // if partial, read 25% of the keys
     if partial {
         let leaf = format!("post_count");
-        let mut getter = backend.g.view(&leaf).unwrap();
+        let mut getter = backend.g.view(&leaf).unwrap().into_sync();
         for author in 0..nusers / 4 {
-            getter.lookup(&[author.into()], false).wait().unwrap();
+            getter.lookup(&[author.into()], false).unwrap();
         }
     }
 
@@ -306,9 +305,9 @@ fn main() {
         // if partial, read 25% of the keys
         if partial {
             let leaf = format!("post_count_u{}", i);
-            let mut getter = backend.g.view(&leaf).unwrap();
+            let mut getter = backend.g.view(&leaf).unwrap().into_sync();
             for author in 0..nusers / 4 {
-                getter.lookup(&[author.into()], false).wait().unwrap();
+                getter.lookup(&[author.into()], false).unwrap();
             }
         }
 
@@ -327,10 +326,10 @@ fn main() {
         let mut dur = time::Duration::from_millis(0);
         for uid in 0..nlogged {
             let leaf = format!("post_count_u{}", uid);
-            let mut getter = backend.g.view(&leaf).unwrap();
+            let mut getter = backend.g.view(&leaf).unwrap().into_sync();
             let start = time::Instant::now();
             for author in 0..nusers {
-                getter.lookup(&[author.into()], true).wait().unwrap();
+                getter.lookup(&[author.into()], true).unwrap();
             }
             dur += start.elapsed();
         }

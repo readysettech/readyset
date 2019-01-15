@@ -5,7 +5,6 @@ extern crate rand;
 #[path = "../vote/clients/localsoup/graph.rs"]
 mod graph;
 
-use futures::Future;
 use noria::{DataType, DurabilityMode, PersistenceParameters, TableOperation};
 use rand::Rng;
 use std::{thread, time};
@@ -67,14 +66,13 @@ fn main() {
     if args.is_present("verbose") {
         eprintln!("==> prepopulating with {} articles", articles);
     }
-    let mut a = g.graph.table("Article").unwrap();
+    let mut a = g.graph.table("Article").unwrap().into_sync();
     a.perform_all((0..articles).map(|i| {
         vec![
             ((i + 1) as i32).into(),
             format!("Article #{}", i + 1).into(),
         ]
     }))
-    .wait()
     .unwrap();
     if args.is_present("verbose") {
         eprintln!("==> done with prepopulation");
@@ -84,7 +82,7 @@ fn main() {
     thread::sleep(time::Duration::from_secs(1));
 
     let mut rng = rand::thread_rng();
-    let mut v = g.graph.table("Vote").unwrap();
+    let mut v = g.graph.table("Vote").unwrap().into_sync();
     v.i_promise_dst_is_same_process();
 
     // start the benchmark
@@ -98,7 +96,6 @@ fn main() {
                 0.into(),
             ])
         }))
-        .wait()
         .unwrap();
     }
     let took = start.elapsed();

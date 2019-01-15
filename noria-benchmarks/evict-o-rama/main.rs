@@ -1,6 +1,5 @@
 extern crate noria;
 
-use futures::Future;
 use noria::WorkerBuilder;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
@@ -43,9 +42,9 @@ fn main() {
     blender.install_recipe(sql).unwrap();
 
     // Get mutators and getter.
-    let mut article = blender.table("Article").unwrap();
-    let mut vote = blender.table("Vote").unwrap();
-    let mut awvc = blender.view("ArticleWithVoteCount").unwrap();
+    let mut article = blender.table("Article").unwrap().into_sync();
+    let mut vote = blender.table("Vote").unwrap().into_sync();
+    let mut awvc = blender.view("ArticleWithVoteCount").unwrap().into_sync();
 
     println!("Creating articles...");
     for aid in 1..NUM_ARTICLES {
@@ -54,14 +53,13 @@ fn main() {
         let url = "http://pdos.csail.mit.edu";
         article
             .insert(vec![aid.into(), title.into(), url.into()])
-            .wait()
             .unwrap();
-        vote.insert(vec![aid.into(), 1.into()]).wait().unwrap();
+        vote.insert(vec![aid.into(), 1.into()]).unwrap();
     }
 
     println!("Reading articles...");
     for aid in 1..NUM_ARTICLES {
-        awvc.lookup(&[aid.into()], true).wait().unwrap();
+        awvc.lookup(&[aid.into()], true).unwrap();
     }
 
     println!("Casting votes...");
@@ -72,10 +70,8 @@ fn main() {
             .unwrap()
             .as_secs() as i64;
         aid = (aid + 1) % NUM_ARTICLES;
-        vote.insert(vec![(aid + 1).into(), uid.into()])
-            .wait()
-            .unwrap();
+        vote.insert(vec![(aid + 1).into(), uid.into()]).unwrap();
 
-        awvc.lookup(&[aid.into()], true).wait().unwrap();
+        awvc.lookup(&[aid.into()], true).unwrap();
     }
 }

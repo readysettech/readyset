@@ -10,7 +10,6 @@ extern crate zipf;
 #[path = "../vote/clients/localsoup/graph.rs"]
 mod graph;
 
-use futures::Future;
 use noria::{DataType, TableOperation};
 use rand::{distributions::Distribution, Rng};
 use std::io::prelude::*;
@@ -70,9 +69,9 @@ fn one(s: &graph::Builder, skewed: bool, args: &clap::ArgMatches, w: Option<fs::
     eprintln!("Setting up soup");
     let mut g = s.start_sync(persistence_params).unwrap();
     eprintln!("Getting accessors");
-    let mut articles = g.graph.table("Article").unwrap();
-    let mut votes = g.graph.table("Vote").unwrap();
-    let mut read_old = g.graph.view("ArticleWithVoteCount").unwrap();
+    let mut articles = g.graph.table("Article").unwrap().into_sync();
+    let mut votes = g.graph.table("Vote").unwrap().into_sync();
+    let mut read_old = g.graph.view("ArticleWithVoteCount").unwrap().into_sync();
 
     // prepopulate
     eprintln!("Prepopulating with {} articles", narticles);
@@ -80,7 +79,6 @@ fn one(s: &graph::Builder, skewed: bool, args: &clap::ArgMatches, w: Option<fs::
         .perform_all(
             (0..narticles).map(|i| vec![(i as i32).into(), format!("Article #{}", i + 1).into()]),
         )
-        .wait()
         .unwrap();
 
     let (stat, stat_rx) = mpsc::channel();
@@ -107,7 +105,6 @@ fn one(s: &graph::Builder, skewed: bool, args: &clap::ArgMatches, w: Option<fs::
                         let id = if skewed { id_zipf } else { id_uniform };
                         TableOperation::from(vec![DataType::from(id), i.into()])
                     }))
-                    .wait()
                     .unwrap();
 
                 if let Some((took, count)) = reporter.report(WRITE_BATCH_SIZE) {
@@ -132,10 +129,7 @@ fn one(s: &graph::Builder, skewed: bool, args: &clap::ArgMatches, w: Option<fs::
                 let id_uniform = rng.gen_range(0, narticles);
                 let id_zipf = zipf.sample(&mut rng);
                 let id = if skewed { id_zipf } else { id_uniform };
-                read_old
-                    .lookup(&[DataType::from(id)], false)
-                    .wait()
-                    .unwrap();
+                read_old.lookup(&[DataType::from(id)], false).unwrap();
                 thread::sleep(time::Duration::new(0, 10_000));
             }
         })
@@ -165,8 +159,8 @@ fn one(s: &graph::Builder, skewed: bool, args: &clap::ArgMatches, w: Option<fs::
     stat.send(("MIG START", 0.0)).unwrap();
     g.transition();
     stat.send(("MIG FINISHED", 0.0)).unwrap();
-    let mut ratings = g.graph.table("Rating").unwrap();
-    let mut read_new = g.graph.view("ArticleWithScore").unwrap();
+    let mut ratings = g.graph.table("Rating").unwrap().into_sync();
+    let mut read_new = g.graph.view("ArticleWithScore").unwrap().into_sync();
 
     // start writer that just does a bunch of new writes
     eprintln!("Starting new writer");
@@ -187,7 +181,6 @@ fn one(s: &graph::Builder, skewed: bool, args: &clap::ArgMatches, w: Option<fs::
                         let id = if skewed { id_zipf } else { id_uniform };
                         TableOperation::from(vec![DataType::from(id), i.into(), 5.into()])
                     }))
-                    .wait()
                     .unwrap();
 
                 if let Some((took, count)) = reporter.report(WRITE_BATCH_SIZE) {
@@ -219,7 +212,7 @@ fn one(s: &graph::Builder, skewed: bool, args: &clap::ArgMatches, w: Option<fs::
                         vec![DataType::from(if skewed { id_zipf } else { id_uniform })]
                     })
                     .collect();
-                match read_new.multi_lookup(ids, false).wait() {
+                match read_new.multi_lookup(ids, false) {
                     Ok(rss) => {
                         hits += rss.into_iter().filter(|rs| !rs.is_empty()).count();
                     }

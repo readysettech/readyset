@@ -15,7 +15,6 @@ use std::thread;
 use std::time::{Duration, Instant};
 
 use clap::{App, Arg};
-use futures::Future;
 use hdrhistogram::Histogram;
 use itertools::Itertools;
 use zookeeper::ZooKeeper;
@@ -71,7 +70,7 @@ fn build_graph(
 }
 
 fn populate(g: &mut SyncWorkerHandle<ZookeeperAuthority>, rows: i64, skewed: bool) {
-    let mut mutator = g.table("TableRow").unwrap();
+    let mut mutator = g.table("TableRow").unwrap().into_sync();
 
     (0..rows)
         .map(|i| {
@@ -89,7 +88,7 @@ fn populate(g: &mut SyncWorkerHandle<ZookeeperAuthority>, rows: i64, skewed: boo
         .into_iter()
         .for_each(|chunk| {
             let rs: Vec<Vec<DataType>> = chunk.collect();
-            mutator.perform_all(rs).wait().unwrap();
+            mutator.perform_all(rs).unwrap();
         });
 }
 
@@ -133,12 +132,12 @@ fn perform_primary_reads(
     hist: &mut Histogram<u64>,
     row_ids: Vec<i64>,
 ) {
-    let mut getter = g.view("ReadRow").unwrap();
+    let mut getter = g.view("ReadRow").unwrap().into_sync();
 
     for i in row_ids {
         let id: DataType = DataType::BigInt(i);
         let start = Instant::now();
-        let rs = getter.lookup(&[id], true).wait().unwrap();
+        let rs = getter.lookup(&[id], true).unwrap();
         let elapsed = start.elapsed();
         let us = elapsed.as_secs() * 1_000_000 + elapsed.subsec_nanos() as u64 / 1_000;
         assert_eq!(rs.len(), 1);
@@ -162,7 +161,7 @@ fn perform_secondary_reads(
 ) {
     let indices = 10;
     let mut getters: Vec<_> = (1..indices)
-        .map(|i| g.view(&format!("query_c{}", i)).unwrap())
+        .map(|i| g.view(&format!("query_c{}", i)).unwrap().into_sync())
         .collect();
 
     let skewed = row_ids.len() == 1;
@@ -171,7 +170,7 @@ fn perform_secondary_reads(
         let start = Instant::now();
         // Pick an arbitrary secondary index to use:
         let getter = &mut getters[i as usize % (indices - 1)];
-        let rs = getter.lookup(&[id], true).wait().unwrap();
+        let rs = getter.lookup(&[id], true).unwrap();
         let elapsed = start.elapsed();
         let us = elapsed.as_secs() * 1_000_000 + elapsed.subsec_nanos() as u64 / 1_000;
         if skewed {

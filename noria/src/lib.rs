@@ -38,8 +38,8 @@
 //! ");
 //!
 //! // we can then get handles that let us insert into the new tables
-//! let mut article = db.table("Article").unwrap();
-//! let mut vote = db.table("Vote").unwrap();
+//! let mut article = db.table("Article").unwrap().into_sync();
+//! let mut vote = db.table("Vote").unwrap().into_sync();
 //!
 //! // let's make a new article
 //! let aid = 42;
@@ -47,11 +47,10 @@
 //! let url = "https://pdos.csail.mit.edu";
 //! article
 //!     .insert(vec![aid.into(), title.into(), url.into()])
-//!     .wait()
 //!     .unwrap();
 //!
 //! // and then vote for it
-//! vote.insert(vec![aid.into(), 1.into()]).wait().unwrap();
+//! vote.insert(vec![aid.into(), 1.into()]).unwrap();
 //!
 //! // we can also declare views that we want want to query
 //! db.extend_recipe("
@@ -64,10 +63,10 @@
 //!       WHERE Article.aid = ?;");
 //!
 //! // and then get handles that let us execute those queries to fetch their results
-//! let mut awvc = db.view("ArticleWithVoteCount").unwrap();
+//! let mut awvc = db.view("ArticleWithVoteCount").unwrap().into_sync();
 //! // looking up article 42 should yield the article we inserted with a vote count of 1
 //! assert_eq!(
-//!     awvc.lookup(&[aid.into()], true).wait().unwrap(),
+//!     awvc.lookup(&[aid.into()], true).unwrap(),
 //!     vec![vec![DataType::from(aid), title.into(), url.into(), 1.into()]]
 //! );
 //! ```
@@ -95,6 +94,14 @@
 //! use [`ControllerHandle::table`] to get a handle to the new base table. Base tables support
 //! similar operations as SQL tables, such as [`Table::insert`], [`Table::update`],
 //! [`Table::delete`], and also more esoteric operations like [`Table::insert_or_update`].
+//!
+//! # Synchronous and asynchronous operation
+//!
+//! By default, the Noria client operates with an asynchronous API based on futures. While this
+//! allows great flexibility for clients as to how they schedule concurrent requests, it can be
+//! awkward to work with when writing less performance-sensitive code. Most of the Noria API types
+//! also have a synchronous version with a `Sync` prefix in the name that you can get at by calling
+//! `into_sync` on the asynchronous handle.
 //!
 //! # Alternatives
 //!
@@ -141,8 +148,8 @@ use crate::internal::*;
 pub mod prelude {
     pub use super::ActivationResult;
     pub use super::ControllerHandle;
-    pub use super::Table;
-    pub use super::View;
+    pub use super::{SyncTable, Table};
+    pub use super::{SyncView, View};
 }
 
 /// Noria errors.
@@ -184,8 +191,8 @@ impl<T> From<T> for Tagged<T> {
 
 pub use crate::controller::{ControllerDescriptor, ControllerHandle, SyncControllerHandle};
 pub use crate::data::{DataType, Modification, Operation, TableOperation};
-pub use crate::table::Table;
-pub use crate::view::View;
+pub use crate::table::{SyncTable, Table};
+pub use crate::view::{SyncView, View};
 
 #[doc(hidden)]
 pub use crate::table::Input;

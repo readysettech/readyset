@@ -76,7 +76,28 @@ type E = tower_buffer::Error<
     >,
 >;
 
-/// A failed Table operation.
+/// A failed [`Table`] operation.
+#[derive(Debug)]
+pub struct AsyncTableError {
+    /// The `Table` whose operation failed.
+    ///
+    /// Not available if the underlying transport failed.
+    pub table: Option<Table>,
+
+    /// The error that caused the operation to fail.
+    pub error: TableError,
+}
+
+impl From<E> for AsyncTableError {
+    fn from(e: E) -> Self {
+        AsyncTableError {
+            table: None,
+            error: TableError::from(e),
+        }
+    }
+}
+
+/// A failed [`SyncTable`] operation.
 #[derive(Debug, Fail)]
 pub enum TableError {
     /// The wrong number of columns was given when inserting a row.
@@ -213,11 +234,27 @@ pub struct Table {
     shard_addrs: Vec<SocketAddr>,
 }
 
+impl fmt::Debug for Table {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        f.debug_struct("Table")
+            .field("node", &self.node)
+            .field("key_is_primary", &self.key_is_primary)
+            .field("key", &self.key)
+            .field("columns", &self.columns)
+            .field("dropped", &self.dropped)
+            .field("table_name", &self.table_name)
+            .field("schema", &self.schema)
+            .field("dst_is_local", &self.dst_is_local)
+            .field("shard_addrs", &self.shard_addrs)
+            .finish()
+    }
+}
+
 impl Service<Input> for Table {
     type Error = TableError;
     type Response = <TableRpc as Service<Tagged<LocalOrNot<Input>>>>::Response;
     // existential once https://github.com/rust-lang/rust/issues/53443 is fixed
-    type Future = Box<Future<Item = Tagged<()>, Error = TableError> + Send>;
+    type Future = Box<Future<Item = Tagged<()>, Error = Self::Error> + Send>;
 
     fn poll_ready(&mut self) -> Poll<(), Self::Error> {
         for s in &mut self.shards {
@@ -440,28 +477,35 @@ impl Table {
     }
 
     fn quick_n_dirty<Request>(
-        &mut self,
+        self,
         r: Request,
-    ) -> Box<Future<Item = (), Error = TableError> + Send>
+    ) -> Box<Future<Item = Self, Error = AsyncTableError> + Send>
     where
         Request: Send + 'static,
         Self: Service<Request, Error = TableError>,
         <Self as Service<Request>>::Future: Send,
     {
-        let tracer = self.tracer.take();
-        let mut this = self.clone();
-        this.tracer = tracer;
-
         // Box is needed for https://github.com/rust-lang/rust/issues/53984
         Box::new(
-            this.ready()
-                .and_then(move |mut svc| svc.call(r))
-                .map(|_| ()),
+            self.ready()
+                .map_err(|e| match e {
+                    TableError::TransportError(e) => AsyncTableError::from(e),
+                    e => unreachable!("{:?}", e),
+                })
+                .and_then(move |mut svc| {
+                    svc.call(r).then(move |r| match r {
+                        Ok(_) => Ok(svc),
+                        Err(e) => Err(AsyncTableError {
+                            table: Some(svc),
+                            error: e,
+                        }),
+                    })
+                }),
         )
     }
 
     /// Insert a single row of data into this base table.
-    pub fn insert<V>(&mut self, u: V) -> impl Future<Item = (), Error = TableError> + Send
+    pub fn insert<V>(self, u: V) -> impl Future<Item = Self, Error = AsyncTableError> + Send
     where
         V: Into<Vec<DataType>>,
     {
@@ -469,7 +513,7 @@ impl Table {
     }
 
     /// Perform multiple operation on this base table.
-    pub fn perform_all<I, V>(&mut self, i: I) -> impl Future<Item = (), Error = TableError> + Send
+    pub fn perform_all<I, V>(self, i: I) -> impl Future<Item = Self, Error = AsyncTableError> + Send
     where
         I: IntoIterator<Item = V>,
         V: Into<TableOperation>,
@@ -478,7 +522,7 @@ impl Table {
     }
 
     /// Delete the row with the given key from this base table.
-    pub fn delete<I>(&mut self, key: I) -> impl Future<Item = (), Error = TableError> + Send
+    pub fn delete<I>(self, key: I) -> impl Future<Item = Self, Error = AsyncTableError> + Send
     where
         I: Into<Vec<DataType>>,
     {
@@ -490,10 +534,10 @@ impl Table {
     /// `u` is a set of column-modification pairs, where for each pair `(i, m)`, the modification
     /// `m` will be applied to column `i` of the record with key `key`.
     pub fn update<V>(
-        &mut self,
+        self,
         key: Vec<DataType>,
         u: V,
-    ) -> impl Future<Item = (), Error = TableError> + Send
+    ) -> impl Future<Item = Self, Error = AsyncTableError> + Send
     where
         V: IntoIterator<Item = (usize, Modification)>,
     {
@@ -503,17 +547,21 @@ impl Table {
         );
 
         if key.len() != self.key.len() {
-            return Box::new(future::err(
-                TableError::WrongKeyColumnCount(self.key.len(), key.len()).into(),
-            )) as Box<_>;
+            let error = TableError::WrongKeyColumnCount(self.key.len(), key.len());
+            return Box::new(future::err(AsyncTableError {
+                table: Some(self),
+                error,
+            })) as Box<_>;
         }
 
         let mut set = vec![Modification::None; self.columns.len()];
         for (coli, m) in u {
             if coli >= self.columns.len() {
-                return Box::new(future::err(
-                    TableError::WrongColumnCount(self.columns.len(), coli + 1).into(),
-                )) as Box<_>;
+                let error = TableError::WrongColumnCount(self.columns.len(), coli + 1);
+                return Box::new(future::err(AsyncTableError {
+                    table: Some(self),
+                    error,
+                })) as Box<_>;
             }
             set[coli] = m;
         }
@@ -526,10 +574,10 @@ impl Table {
     /// If a row already exists for the key in `insert`, the existing row will instead be updated
     /// with the modifications in `u` (as documented in `Table::update`).
     pub fn insert_or_update<V>(
-        &mut self,
+        self,
         insert: Vec<DataType>,
         update: V,
-    ) -> Box<Future<Item = (), Error = <Self as Service<TableOperation>>::Error> + Send>
+    ) -> Box<Future<Item = Self, Error = AsyncTableError> + Send>
     where
         V: IntoIterator<Item = (usize, Modification)>,
     {
@@ -539,17 +587,21 @@ impl Table {
         );
 
         if insert.len() != self.columns.len() {
-            return Box::new(future::err(
-                TableError::WrongColumnCount(self.columns.len(), insert.len()).into(),
-            ));
+            let error = TableError::WrongColumnCount(self.columns.len(), insert.len());
+            return Box::new(future::err(AsyncTableError {
+                table: Some(self),
+                error,
+            }));
         }
 
         let mut set = vec![Modification::None; self.columns.len()];
         for (coli, m) in update {
             if coli >= self.columns.len() {
-                return Box::new(future::err(
-                    TableError::WrongColumnCount(self.columns.len(), coli + 1).into(),
-                ));
+                let error = TableError::WrongColumnCount(self.columns.len(), coli + 1);
+                return Box::new(future::err(AsyncTableError {
+                    table: Some(self),
+                    error,
+                }));
             }
             set[coli] = m;
         }
@@ -570,5 +622,108 @@ impl Table {
     /// Traced events are sent on the debug channel, and are tagged with the given `tag`.
     pub fn trace_next(&mut self, tag: u64) {
         self.tracer = Some((tag, None));
+    }
+
+    /// Switch to a synchronous interface for this table.
+    pub fn into_sync(self) -> SyncTable {
+        SyncTable(Some(self))
+    }
+}
+
+/// A synchronous wrapper around [`Table`] where all methods block (using `wait`) for the operation
+/// to complete before returning.
+#[derive(Clone, Debug)]
+pub struct SyncTable(Option<Table>);
+
+macro_rules! sync {
+    ($self:ident.$method:ident($($args:expr),*)) => {
+        match $self
+            .0
+            .take()
+            .expect("tried to use Table after its transport has failed")
+            .$method($($args),*)
+            .wait()
+        {
+            Ok(this) => {
+                $self.0 = Some(this);
+                Ok(())
+            }
+            Err(e) => {
+                $self.0 = e.table;
+                Err(e.error)
+            },
+        }
+    };
+}
+
+use std::ops::{Deref, DerefMut};
+impl Deref for SyncTable {
+    type Target = Table;
+    fn deref(&self) -> &Self::Target {
+        self.0
+            .as_ref()
+            .expect("tried to use Table after its transport has failed")
+    }
+}
+
+impl DerefMut for SyncTable {
+    fn deref_mut(&mut self) -> &mut Self::Target {
+        self.0
+            .as_mut()
+            .expect("tried to use Table after its transport has failed")
+    }
+}
+
+impl SyncTable {
+    /// See [`Table::insert`].
+    pub fn insert<V>(&mut self, u: V) -> Result<(), TableError>
+    where
+        V: Into<Vec<DataType>>,
+    {
+        sync!(self.insert(u))
+    }
+
+    /// See [`Table::perform_all`].
+    pub fn perform_all<I, V>(&mut self, i: I) -> Result<(), TableError>
+    where
+        I: IntoIterator<Item = V>,
+        V: Into<TableOperation>,
+    {
+        sync!(self.perform_all(i))
+    }
+
+    /// See [`Table::delete`].
+    pub fn delete<I>(&mut self, key: I) -> Result<(), TableError>
+    where
+        I: Into<Vec<DataType>>,
+    {
+        sync!(self.delete(key))
+    }
+
+    /// See [`Table::update`].
+    pub fn update<V>(&mut self, key: Vec<DataType>, u: V) -> Result<(), TableError>
+    where
+        V: IntoIterator<Item = (usize, Modification)>,
+    {
+        sync!(self.update(key, u))
+    }
+
+    /// See [`Table::insert_or_update`].
+    pub fn insert_or_update<V>(
+        &mut self,
+        insert: Vec<DataType>,
+        update: V,
+    ) -> Result<(), TableError>
+    where
+        V: IntoIterator<Item = (usize, Modification)>,
+    {
+        sync!(self.insert_or_update(insert, update))
+    }
+
+    /// Switch back to an asynchronous interface for this table.
+    pub fn into_async(mut self) -> Table {
+        self.0
+            .take()
+            .expect("tried to use Table after its transport has failed")
     }
 }
