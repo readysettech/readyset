@@ -1324,18 +1324,19 @@ impl Replica {
         Ok(true)
     }
 
-    fn try_timeout(&mut self) -> Result<(), tokio::timer::Error> {
+    fn try_timeout(&mut self) -> Poll<(), tokio::timer::Error> {
         if let Some(mut to) = self.timeout.take() {
             if let Async::Ready(()) = to.poll()? {
                 block_on(|| {
                     self.domain
                         .on_event(&mut self.sendback, PollEvent::Timeout, &mut self.outbox)
                 });
+                return Ok(Async::Ready(()));
             } else {
                 self.timeout = Some(to);
             }
         }
-        Ok(())
+        Ok(Async::NotReady)
     }
 }
 
@@ -1358,157 +1359,168 @@ impl Future for Replica {
     type Error = ();
     fn poll(&mut self) -> Result<Async<Self::Item>, Self::Error> {
         let r: Result<Async<Self::Item>, failure::Error> = try {
-            // FIXME: check if we should call update_state_sizes (every evict_every)
+            loop {
+                // FIXME: check if we should call update_state_sizes (every evict_every)
 
-            // are there are any new connections?
-            if !self.try_new().context("check for new connections")? {
-                // incoming socket closed -- no more clients will arrive
-                return Ok(Async::Ready(()));
-            }
+                // are there are any new connections?
+                if !self.try_new().context("check for new connections")? {
+                    // incoming socket closed -- no more clients will arrive
+                    return Ok(Async::Ready(()));
+                }
 
-            // have any of our timers expired?
-            self.try_timeout().context("check timeout")?;
+                // have any of our timers expired?
+                self.try_timeout().context("check timeout")?;
 
-            // we have three logical input sources: receives from local domains, receives from
-            // remote domains, and remote mutators. we want to achieve some kind of fairness among
-            // these, but bias the data-flow towards finishing work it has accepted (i.e., domain
-            // operations) to accepting new work. however, this is complicated by two facts:
-            //
-            //  - we cannot (currently) differentiate between receives from remote domains and
-            //    receives from mutators. they are all remote tcp channels. we *could*
-            //    differentiate them using `is_base` in `try_new` to store them separately, but
-            //    it's also unclear how that would change the receive heuristic.
-            //  - domain operations are not all "completing starting work". in many cases, traffic
-            //    from domains will be replay-related, in which case favoring domains would favor
-            //    writes over reads. while we do in general want reads to be fast, we don't want
-            //    them to fully starve writes.
-            //
-            // the current stategy is therefore that we alternate reading once from the local
-            // channel and once from the set of remote channels. this biases slightly in favor of
-            // local sends, without starving either. we also stop alternating once either source is
-            // depleted.
-            let mut local_done = false;
-            let mut remote_done = false;
-            let mut check_local = true;
-            let readiness = loop {
-                let mut interrupted = false;
-                for i in 0..FORCE_INPUT_YIELD_EVERY {
-                    if !local_done && (check_local || remote_done) {
-                        match self.locals.poll() {
-                            Ok(Async::Ready(Some(packet))) => {
-                                let d = &mut self.domain;
-                                let sb = &mut self.sendback;
-                                let ob = &mut self.outbox;
+                // we have three logical input sources: receives from local domains, receives from
+                // remote domains, and remote mutators. we want to achieve some kind of fairness among
+                // these, but bias the data-flow towards finishing work it has accepted (i.e., domain
+                // operations) to accepting new work. however, this is complicated by two facts:
+                //
+                //  - we cannot (currently) differentiate between receives from remote domains and
+                //    receives from mutators. they are all remote tcp channels. we *could*
+                //    differentiate them using `is_base` in `try_new` to store them separately, but
+                //    it's also unclear how that would change the receive heuristic.
+                //  - domain operations are not all "completing starting work". in many cases, traffic
+                //    from domains will be replay-related, in which case favoring domains would favor
+                //    writes over reads. while we do in general want reads to be fast, we don't want
+                //    them to fully starve writes.
+                //
+                // the current stategy is therefore that we alternate reading once from the local
+                // channel and once from the set of remote channels. this biases slightly in favor of
+                // local sends, without starving either. we also stop alternating once either source is
+                // depleted.
+                let mut local_done = false;
+                let mut remote_done = false;
+                let mut check_local = true;
+                let readiness = loop {
+                    let mut interrupted = false;
+                    for i in 0..FORCE_INPUT_YIELD_EVERY {
+                        if !local_done && (check_local || remote_done) {
+                            match self.locals.poll() {
+                                Ok(Async::Ready(Some(packet))) => {
+                                    let d = &mut self.domain;
+                                    let sb = &mut self.sendback;
+                                    let ob = &mut self.outbox;
 
-                                if let ProcessResult::StopPolling =
-                                    block_on(|| d.on_event(sb, PollEvent::Process(packet), ob))
-                                {
-                                    // domain got a message to quit
+                                    if let ProcessResult::StopPolling =
+                                        block_on(|| d.on_event(sb, PollEvent::Process(packet), ob))
+                                    {
+                                        // domain got a message to quit
+                                        // TODO: should we finish up remaining work?
+                                        return Ok(Async::Ready(()));
+                                    }
+                                }
+                                Ok(Async::Ready(None)) => {
+                                    // local input stream finished?
                                     // TODO: should we finish up remaining work?
                                     return Ok(Async::Ready(()));
                                 }
-                            }
-                            Ok(Async::Ready(None)) => {
-                                // local input stream finished?
-                                // TODO: should we finish up remaining work?
-                                return Ok(Async::Ready(()));
-                            }
-                            Ok(Async::NotReady) => {
-                                local_done = true;
-                            }
-                            Err(e) => {
-                                error!(self.log, "local input stream failed: {:?}", e);
-                                local_done = true;
-                                break;
-                            }
-                        }
-                    }
-
-                    if !remote_done && (!check_local || local_done) {
-                        match self.inputs.poll() {
-                            Ok(Async::Ready(Some((StreamYield::Item(packet), _)))) => {
-                                let d = &mut self.domain;
-                                let sb = &mut self.sendback;
-                                let ob = &mut self.outbox;
-
-                                if let ProcessResult::StopPolling =
-                                    block_on(|| d.on_event(sb, PollEvent::Process(packet), ob))
-                                {
-                                    // domain got a message to quit
-                                    // TODO: should we finish up remaining work?
-                                    return Ok(Async::Ready(()));
+                                Ok(Async::NotReady) => {
+                                    local_done = true;
+                                }
+                                Err(e) => {
+                                    error!(self.log, "local input stream failed: {:?}", e);
+                                    local_done = true;
+                                    break;
                                 }
                             }
-                            Ok(Async::Ready(Some((StreamYield::Finished(_stream), streami)))) => {
-                                self.sendback.back.remove(&streami);
-                                self.sendback.pending.remove(&streami);
-                                // FIXME: what about if a later flush flushes to this stream?
+                        }
+
+                        if !remote_done && (!check_local || local_done) {
+                            match self.inputs.poll() {
+                                Ok(Async::Ready(Some((StreamYield::Item(packet), _)))) => {
+                                    let d = &mut self.domain;
+                                    let sb = &mut self.sendback;
+                                    let ob = &mut self.outbox;
+
+                                    if let ProcessResult::StopPolling =
+                                        block_on(|| d.on_event(sb, PollEvent::Process(packet), ob))
+                                    {
+                                        // domain got a message to quit
+                                        // TODO: should we finish up remaining work?
+                                        return Ok(Async::Ready(()));
+                                    }
+                                }
+                                Ok(Async::Ready(Some((
+                                    StreamYield::Finished(_stream),
+                                    streami,
+                                )))) => {
+                                    self.sendback.back.remove(&streami);
+                                    self.sendback.pending.remove(&streami);
+                                    // FIXME: what about if a later flush flushes to this stream?
+                                }
+                                Ok(Async::Ready(None)) => {
+                                    // we probably haven't booted yet
+                                    remote_done = true;
+                                }
+                                Ok(Async::NotReady) => {
+                                    remote_done = true;
+                                }
+                                Err(e) => {
+                                    error!(self.log, "input stream failed: {:?}", e);
+                                    remote_done = true;
+                                    break;
+                                }
                             }
-                            Ok(Async::Ready(None)) => {
-                                // we probably haven't booted yet
-                                remote_done = true;
-                            }
-                            Ok(Async::NotReady) => {
-                                remote_done = true;
-                            }
-                            Err(e) => {
-                                error!(self.log, "input stream failed: {:?}", e);
-                                remote_done = true;
-                                break;
-                            }
+                        }
+
+                        // alternate between input sources
+                        check_local = !check_local;
+
+                        // nothing more to do -- wait to be polled again
+                        if local_done && remote_done {
+                            break;
+                        }
+
+                        if i == FORCE_INPUT_YIELD_EVERY - 1 {
+                            // we could keep processing inputs, but make sure we send some ACKs too!
+                            interrupted = true;
                         }
                     }
 
-                    // alternate between input sources
-                    check_local = !check_local;
+                    // send to downstream
+                    // TODO: send fail == exiting?
+                    self.try_flush().context("downstream flush (after)")?;
 
-                    // nothing more to do -- wait to be polled again
-                    if local_done && remote_done {
-                        break;
+                    // send acks
+                    self.try_ack()?;
+
+                    if interrupted {
+                        // resume reading from our non-depleted inputs
+                        continue;
                     }
+                    break Async::NotReady;
+                };
 
-                    if i == FORCE_INPUT_YIELD_EVERY - 1 {
-                        // we could keep processing inputs, but make sure we send some ACKs too!
-                        interrupted = true;
+                // check if we now need to set a timeout
+                match self.domain.on_event(
+                    &mut self.sendback,
+                    PollEvent::ResumePolling,
+                    &mut self.outbox,
+                ) {
+                    ProcessResult::KeepPolling(timeout) => {
+                        if let Some(timeout) = timeout {
+                            self.timeout =
+                                Some(tokio::timer::Delay::new(time::Instant::now() + timeout));
+
+                            // we need to poll the delay to ensure we'll get woken up
+                            if let Async::Ready(()) =
+                                self.try_timeout().context("check timeout after setting")?
+                            {
+                                // the timer expired and we did some stuff
+                                // make sure we don't return while there's more work to do
+                                continue;
+                            }
+                        }
                     }
-                }
-
-                // send to downstream
-                // TODO: send fail == exiting?
-                self.try_flush().context("downstream flush (after)")?;
-
-                // send acks
-                self.try_ack()?;
-
-                if interrupted {
-                    // resume reading from our non-depleted inputs
-                    continue;
-                }
-                break Async::NotReady;
-            };
-
-            // check if we now need to set a timeout
-            match self.domain.on_event(
-                &mut self.sendback,
-                PollEvent::ResumePolling,
-                &mut self.outbox,
-            ) {
-                ProcessResult::KeepPolling(timeout) => {
-                    if let Some(timeout) = timeout {
-                        self.timeout =
-                            Some(tokio::timer::Delay::new(time::Instant::now() + timeout));
-
-                        // we need to poll the delay to ensure we'll get woken up
-                        self.try_timeout().context("check timeout after setting")?;
+                    pr => {
+                        // TODO: just have resume_polling be a method...
+                        unreachable!("unexpected ResumePolling result {:?}", pr)
                     }
                 }
-                pr => {
-                    // TODO: just have resume_polling be a method...
-                    unreachable!("unexpected ResumePolling result {:?}", pr)
-                }
+
+                break readiness;
             }
-
-            readiness
         };
 
         match r {
