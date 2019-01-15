@@ -363,11 +363,11 @@ impl Domain {
                 // so we need to trigger on all the shards.
                 self.concurrent_replays += 1;
                 trace!(self.log, "sending shuffled shard replay request";
-                       "tag" => ?tag,
-                       "key" => ?key,
-                       "buffered" => self.replay_request_queue.len(),
-                       "concurrent" => self.concurrent_replays,
-                       );
+                "tag" => ?tag,
+                "key" => ?key,
+                "buffered" => self.replay_request_queue.len(),
+                "concurrent" => self.concurrent_replays,
+                );
 
                 for trigger in options {
                     if trigger
@@ -391,11 +391,11 @@ impl Domain {
             };
             self.concurrent_replays += 1;
             trace!(self.log, "sending replay request";
-                   "tag" => ?tag,
-                   "key" => ?key,
-                   "buffered" => self.replay_request_queue.len(),
-                   "concurrent" => self.concurrent_replays,
-                   );
+            "tag" => ?tag,
+            "key" => ?key,
+            "buffered" => self.replay_request_queue.len(),
+            "concurrent" => self.concurrent_replays,
+            );
             if options[shard]
                 .send(box Packet::RequestPartialReplay { tag, key })
                 .is_err()
@@ -413,10 +413,10 @@ impl Domain {
             self.send_partial_replay_request(tag, key);
         } else {
             trace!(self.log, "buffering replay request";
-                   "tag" => ?tag,
-                   "key" => ?key,
-                   "buffered" => self.replay_request_queue.len(),
-                   );
+            "tag" => ?tag,
+            "key" => ?key,
+            "buffered" => self.replay_request_queue.len(),
+            );
             self.replay_request_queue.push_back((tag, key));
         }
     }
@@ -453,18 +453,18 @@ impl Domain {
                 self.concurrent_replays =
                     self.concurrent_replays.saturating_sub(requests_satisfied);
                 trace!(self.log, "notified of finished replay";
-                       "#done" => requests_satisfied,
-                       "ongoing" => self.concurrent_replays,
-                       );
+                "#done" => requests_satisfied,
+                "ongoing" => self.concurrent_replays,
+                );
                 debug_assert!(self.concurrent_replays < self.max_concurrent_replays);
                 while self.concurrent_replays < self.max_concurrent_replays {
                     if let Some((tag, key)) = self.replay_request_queue.pop_front() {
                         trace!(self.log, "releasing replay request";
-                               "tag" => ?tag,
-                               "key" => ?key,
-                               "left" => self.replay_request_queue.len(),
-                               "ongoing" => self.concurrent_replays,
-                               );
+                        "tag" => ?tag,
+                        "key" => ?key,
+                        "left" => self.replay_request_queue.len(),
+                        "ongoing" => self.concurrent_replays,
+                        );
                         self.send_partial_replay_request(tag, key);
                     } else {
                         return;
@@ -1132,10 +1132,10 @@ impl Domain {
                                     }
 
                                     debug!(log,
-                                   "state chunker finished";
-                                   "node" => %link.dst,
-                                   "μs" => start.elapsed().as_micros()
-                                );
+                                       "state chunker finished";
+                                       "node" => %link.dst,
+                                       "μs" => start.elapsed().as_micros()
+                                    );
                                 })
                                 .unwrap();
                         }

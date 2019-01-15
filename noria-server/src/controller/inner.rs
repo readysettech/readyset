@@ -1,21 +1,21 @@
 use crate::controller::migrate::materialization::Materializations;
+use crate::controller::recipe::Schema;
+use crate::controller::schema;
 use crate::controller::{
     ControllerState, DomainHandle, DomainShardHandle, Migration, Recipe, Worker, WorkerIdentifier,
 };
-use crate::controller::recipe::Schema;
-use crate::controller::schema;
 use crate::coordination::{CoordinationMessage, CoordinationPayload, DomainDescriptor};
 use dataflow::payload::ControlReplyPacket;
 use dataflow::prelude::*;
 use dataflow::{node, payload, DomainBuilder, DomainConfig};
 use hyper::{self, Method, StatusCode};
 use mio::net::TcpListener;
+use nom_sql::ColumnSpecification;
 use noria::builders::*;
 use noria::channel::tcp::{SendError, TcpSender};
 use noria::consensus::{Authority, Epoch, STATE_KEY};
 use noria::debug::stats::{DomainStats, GraphStats, NodeStats};
 use noria::ActivationResult;
-use nom_sql::ColumnSpecification;
 use petgraph;
 use petgraph::visit::Bfs;
 use slog;
@@ -195,14 +195,14 @@ impl ControllerInner {
         match (&method, path.as_ref()) {
             (&Method::GET, "/simple_graph") => return Ok(Ok(self.graphviz(false))),
             (&Method::POST, "/simple_graphviz") => {
-                return Ok(Ok(json::to_string(&self.graphviz(false)).unwrap()))
+                return Ok(Ok(json::to_string(&self.graphviz(false)).unwrap()));
             }
             (&Method::GET, "/graph") => return Ok(Ok(self.graphviz(true))),
             (&Method::POST, "/graphviz") => {
-                return Ok(Ok(json::to_string(&self.graphviz(true)).unwrap()))
+                return Ok(Ok(json::to_string(&self.graphviz(true)).unwrap()));
             }
             (&Method::GET, "/get_statistics") => {
-                return Ok(Ok(json::to_string(&self.get_statistics()).unwrap()))
+                return Ok(Ok(json::to_string(&self.get_statistics()).unwrap()));
             }
             _ => {}
         }
@@ -1177,10 +1177,10 @@ impl ControllerInner {
             // nodes can have only one reader attached
             assert!(readers.len() <= 1);
             debug!(
-                        self.log,
-                        "Removing query leaf \"{}\"", self.ingredients[leaf].name();
-                        "node" => leaf.index(),
-                    );
+                self.log,
+                "Removing query leaf \"{}\"", self.ingredients[leaf].name();
+                "node" => leaf.index(),
+            );
             if !readers.is_empty() {
                 removals.push(readers[0]);
                 leaf = readers[0];
