@@ -2,6 +2,7 @@ use dataflow::backlog::SingleReadHandle;
 use dataflow::prelude::*;
 use dataflow::Readers;
 use futures::future::{self, Either};
+use futures::try_ready;
 use std::cell::RefCell;
 use std::collections::HashMap;
 use std::{mem, time};
@@ -107,7 +108,7 @@ pub(crate) fn handle_message(
                         })))
                     } else {
                         let trigger = time::Duration::from_micros(RETRY_TIMEOUT_US);
-                        let retry = time::Duration::from_micros(10);
+                        let retry = time::Duration::from_micros(RETRY_TIMEOUT_US);
                         let now = time::Instant::now();
                         Either::A(Either::B(BlockingRead {
                             tag,
@@ -157,65 +158,65 @@ impl Future for BlockingRead {
     type Item = Tagged<ReadReply>;
     type Error = ();
     fn poll(&mut self) -> Result<Async<Self::Item>, Self::Error> {
-        READERS.with(move |readers_cache| {
-            let mut readers_cache = readers_cache.borrow_mut();
-            let s = &self.truth;
-            let target = &self.target;
-            let reader = readers_cache.entry(self.target.clone()).or_insert_with(|| {
-                let readers = s.lock().unwrap();
-                readers.get(target).unwrap().clone()
+        loop {
+            let _ = try_ready!(self.retry.poll().map_err(|e| {
+                unreachable!("timer failure: {:?}", e);
+            }))
+            .expect("interval stopped yielding");
+
+            let missing = READERS.with(|readers_cache| {
+                let mut readers_cache = readers_cache.borrow_mut();
+                let s = &self.truth;
+                let target = &self.target;
+                let reader = readers_cache.entry(self.target.clone()).or_insert_with(|| {
+                    let readers = s.lock().unwrap();
+                    readers.get(target).unwrap().clone()
+                });
+
+                let mut triggered = false;
+                let mut missing = false;
+                let now = time::Instant::now();
+                for (i, key) in self.keys.iter_mut().enumerate() {
+                    if key.is_empty() {
+                        // already have this value
+                    } else {
+                        // note that this *does* mean we'll trigger replay multiple times for things
+                        // that miss and aren't replayed in time, which is a little sad. but at the
+                        // same time, that replay trigger will just be ignored by the target domain.
+                        match reader.try_find_and(key, dup).map(|r| r.0) {
+                            Ok(Some(rs)) => {
+                                self.read[i] = rs;
+                                key.clear();
+                            }
+                            Err(()) => {
+                                unreachable!("map became not ready?");
+                            }
+                            Ok(None) => {
+                                if now > self.next_trigger {
+                                    // maybe the key was filled but then evicted, and we missed it?
+                                    reader.trigger(key);
+                                    triggered = true;
+                                }
+                                missing = true;
+                            }
+                        }
+                    }
+                }
+
+                if triggered {
+                    self.trigger_timeout *= 2;
+                    self.next_trigger = now + self.trigger_timeout;
+                }
+
+                missing
             });
 
-            let mut triggered = false;
-            let mut missing = false;
-            let now = time::Instant::now();
-            for (i, key) in self.keys.iter_mut().enumerate() {
-                if key.is_empty() {
-                    // already have this value
-                } else {
-                    // note that this *does* mean we'll trigger replay multiple times for things
-                    // that miss and aren't replayed in time, which is a little sad. but at the
-                    // same time, that replay trigger will just be ignored by the target domain.
-                    match reader.try_find_and(key, dup).map(|r| r.0) {
-                        Ok(Some(rs)) => {
-                            self.read[i] = rs;
-                            key.clear();
-                        }
-                        Err(()) => {
-                            unreachable!("map became not ready?");
-                        }
-                        Ok(None) => {
-                            if now > self.next_trigger {
-                                // maybe the key was filled but then evicted, and we missed it?
-                                reader.trigger(key);
-                                triggered = true;
-                            }
-                            missing = true;
-                        }
-                    }
-                }
-            }
-
-            if triggered {
-                self.trigger_timeout *= 2;
-                self.next_trigger = now + self.trigger_timeout;
-            }
-
-            if missing {
-                loop {
-                    match self.retry.poll() {
-                        Ok(Async::Ready(Some(_))) => {}
-                        Ok(Async::Ready(None)) => unreachable!("interval stopped yielding"),
-                        Ok(Async::NotReady) => return Ok(Async::NotReady),
-                        Err(e) => unreachable!("{:?}", e),
-                    }
-                }
-            } else {
-                Ok(Async::Ready(Tagged {
+            if !missing {
+                return Ok(Async::Ready(Tagged {
                     tag: self.tag,
                     v: ReadReply::Normal(Ok(mem::replace(&mut self.read, Vec::new()))),
-                }))
+                }));
             }
-        })
+        }
     }
 }
