@@ -1,4 +1,3 @@
-use fnv::FnvHashMap;
 use petgraph::graph::NodeIndex;
 use std::borrow::Cow;
 use std::cell;
@@ -22,8 +21,6 @@ use stream_cancel::Valve;
 use timekeeper::{RealTime, SimpleTracker, ThreadTime, Timer, TimerSet};
 use tokio::{self, prelude::*};
 use Readers;
-
-type EnqueuedSends = FnvHashMap<ReplicaAddr, VecDeque<Box<Packet>>>;
 
 #[derive(Debug)]
 pub enum PollEvent {
@@ -483,15 +480,9 @@ impl Domain {
         }
     }
 
-    fn dispatch(
-        &mut self,
-        m: Box<Packet>,
-        sends: &mut EnqueuedSends,
-        executor: &mut Executor,
-    ) -> HashMap<LocalNodeIndex, Vec<Record>> {
+    fn dispatch(&mut self, m: Box<Packet>, sends: &mut EnqueuedSends, executor: &mut Executor) {
         let src = m.src();
         let me = m.dst();
-        let mut output_messages = HashMap::new();
 
         match self.mode {
             DomainMode::Forwarding => (),
@@ -501,13 +492,13 @@ impl Domain {
                 ..
             } if to == &me => {
                 buffered.push_back(m);
-                return output_messages;
+                return;
             }
             DomainMode::Replaying { .. } => (),
         }
 
         if !self.not_ready.is_empty() && self.not_ready.contains(&me) {
-            return output_messages;
+            return;
         }
 
         let (mut m, evictions) = {
@@ -531,7 +522,7 @@ impl Domain {
 
             if m.is_none() {
                 // no need to deal with our children if we're not sending them anything
-                return output_messages;
+                return;
             }
 
             // normally, we ignore misses during regular forwarding.
@@ -643,7 +634,7 @@ impl Domain {
         match m.as_ref().unwrap() {
             m @ &box Packet::Message { .. } if m.is_empty() => {
                 // no need to deal with our children if we're not sending them anything
-                return output_messages;
+                return;
             }
             &box Packet::Message { .. } => {}
             &box Packet::ReplayPiece { .. } => {
@@ -675,18 +666,8 @@ impl Domain {
             }
             m.link_mut().dst = childi;
 
-            for (k, mut v) in self.dispatch(m, sends, executor) {
-                use std::collections::hash_map::Entry;
-                match output_messages.entry(k) {
-                    Entry::Occupied(mut rs) => rs.get_mut().append(&mut v),
-                    Entry::Vacant(slot) => {
-                        slot.insert(v);
-                    }
-                }
-            }
+            self.dispatch(m, sends, executor);
         }
-
-        output_messages
     }
 
     fn handle(

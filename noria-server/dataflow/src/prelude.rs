@@ -31,6 +31,10 @@ pub type ReplicaAddr = (DomainIndex, usize);
 pub use DurabilityMode;
 pub use PersistenceParameters;
 
+use fnv::FnvHashMap;
+use std::collections::VecDeque;
+pub type EnqueuedSends = FnvHashMap<ReplicaAddr, VecDeque<Box<Packet>>>;
+
 /// Channel coordinator type specialized for domains
 pub type ChannelCoordinator = noria::channel::ChannelCoordinator<(DomainIndex, usize), Box<Packet>>;
 pub trait Executor {

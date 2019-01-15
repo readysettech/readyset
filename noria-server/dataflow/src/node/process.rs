@@ -14,7 +14,7 @@ impl Node {
         nodes: &DomainNodes,
         on_shard: Option<usize>,
         swap: bool,
-        output: &mut FnvHashMap<ReplicaAddr, VecDeque<Box<Packet>>>,
+        output: &mut EnqueuedSends,
         ex: &mut Executor,
     ) -> (Vec<Miss>, HashSet<Vec<DataType>>) {
         m.as_mut().unwrap().trace(PacketEvent::Process);
