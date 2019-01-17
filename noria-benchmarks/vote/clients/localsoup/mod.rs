@@ -1,7 +1,6 @@
-use crate::clients::{Operation, Parameters, Request, VoteClient};
+use crate::clients::{Parameters, ReadRequest, VoteClient, WriteRequest};
 use clap;
 use failure::ResultExt;
-use futures::try_ready;
 use noria::{self, TableOperation};
 use std::path::PathBuf;
 use std::sync::Arc;
@@ -119,65 +118,66 @@ impl VoteClient for LocalNoria {
     }
 }
 
-impl Service<Request> for LocalNoria {
+impl Service<ReadRequest> for LocalNoria {
     type Response = ();
     type Error = failure::Error;
     type Future = Box<Future<Item = (), Error = failure::Error> + Send>;
 
     fn poll_ready(&mut self) -> Poll<(), Self::Error> {
-        // TODO: only poll_ready the relevant op?
-        try_ready!(
-            Service::<Vec<TableOperation>>::poll_ready(self.w.as_mut().unwrap())
-                .map_err(failure::Error::from)
-        );
-        try_ready!(self
-            .r
+        self.r
             .as_mut()
             .unwrap()
             .poll_ready()
-            .map_err(failure::Error::from));
-        Ok(Async::Ready(()))
+            .map_err(failure::Error::from)
     }
 
-    fn call(&mut self, req: Request) -> Self::Future {
-        match req.op {
-            Operation::Write => {
-                let data: Vec<TableOperation> = req
-                    .ids
-                    .into_iter()
-                    .map(|article_id| vec![(article_id as usize).into(), 0.into()].into())
-                    .collect();
+    fn call(&mut self, req: ReadRequest) -> Self::Future {
+        let len = req.0.len();
+        let arg = req
+            .0
+            .into_iter()
+            .map(|article_id| vec![(article_id as usize).into()])
+            .collect();
 
-                Box::new(
-                    self.w
-                        .as_mut()
-                        .unwrap()
-                        .call(data)
-                        .map(|_| ())
-                        .map_err(failure::Error::from),
-                )
-            }
-            Operation::Read => {
-                let len = req.ids.len();
-                let arg = req
-                    .ids
-                    .into_iter()
-                    .map(|article_id| vec![(article_id as usize).into()])
-                    .collect();
+        Box::new(
+            self.r
+                .as_mut()
+                .unwrap()
+                .call((arg, true))
+                .map(move |rows| {
+                    // TODO: assert_eq!(rows.map(|rows| rows.len()), Ok(1));
+                    assert_eq!(rows.len(), len);
+                })
+                .map_err(failure::Error::from),
+        )
+    }
+}
 
-                Box::new(
-                    self.r
-                        .as_mut()
-                        .unwrap()
-                        .call((arg, true))
-                        .map(move |rows| {
-                            // TODO: assert_eq!(rows.map(|rows| rows.len()), Ok(1));
-                            assert_eq!(rows.len(), len);
-                        })
-                        .map_err(failure::Error::from),
-                )
-            }
-        }
+impl Service<WriteRequest> for LocalNoria {
+    type Response = ();
+    type Error = failure::Error;
+    type Future = Box<Future<Item = (), Error = failure::Error> + Send>;
+
+    fn poll_ready(&mut self) -> Poll<(), Self::Error> {
+        Service::<Vec<TableOperation>>::poll_ready(self.w.as_mut().unwrap())
+            .map_err(failure::Error::from)
+    }
+
+    fn call(&mut self, req: WriteRequest) -> Self::Future {
+        let data: Vec<TableOperation> = req
+            .0
+            .into_iter()
+            .map(|article_id| vec![(article_id as usize).into(), 0.into()].into())
+            .collect();
+
+        Box::new(
+            self.w
+                .as_mut()
+                .unwrap()
+                .call(data)
+                .map(|_| ())
+                .map_err(failure::Error::from),
+        )
     }
 }
 

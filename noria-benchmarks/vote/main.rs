@@ -31,14 +31,17 @@ fn throughput(ops: usize, took: time::Duration) -> f64 {
 const MAX_BATCH_TIME_US: u32 = 1000;
 
 mod clients;
-use self::clients::{Operation, Parameters, Request, VoteClient};
+use self::clients::{Parameters, ReadRequest, VoteClient, WriteRequest};
 
 fn run<C>(global_args: &clap::ArgMatches, local_args: &clap::ArgMatches)
 where
     C: VoteClient + 'static,
-    C: Service<Request, Error = failure::Error> + Clone + Send,
-    <C as Service<Request>>::Future: Send,
-    <C as Service<Request>>::Response: Send,
+    C: Service<ReadRequest, Response = (), Error = failure::Error> + Clone + Send,
+    C: Service<WriteRequest, Response = (), Error = failure::Error> + Clone + Send,
+    <C as Service<ReadRequest>>::Future: Send,
+    <C as Service<ReadRequest>>::Response: Send,
+    <C as Service<WriteRequest>>::Future: Send,
+    <C as Service<WriteRequest>>::Response: Send,
 {
     // zipf takes ~66ns to generate a random number depending on the CPU,
     // so each load generator cannot reasonably generate much more than ~1M reqs/s.
@@ -246,10 +249,13 @@ fn run_generator<C, R>(
 ) -> (f64, f64)
 where
     C: VoteClient + 'static,
-    C: Service<Request, Error = failure::Error> + Clone + Send,
     R: rand::distributions::Distribution<usize>,
-    <C as Service<Request>>::Future: Send,
-    <C as Service<Request>>::Response: Send,
+    C: Service<ReadRequest, Response = (), Error = failure::Error> + Clone + Send,
+    C: Service<WriteRequest, Response = (), Error = failure::Error> + Clone + Send,
+    <C as Service<ReadRequest>>::Future: Send,
+    <C as Service<ReadRequest>>::Response: Send,
+    <C as Service<WriteRequest>>::Future: Send,
+    <C as Service<WriteRequest>>::Response: Send,
 {
     let early_exit = !global_args.is_present("no-early-exit");
     let runtime = time::Duration::from_secs(value_t_or_exit!(global_args, "runtime", u64));
@@ -299,10 +305,7 @@ where
         let fut = if write {
             future::Either::A(
                 client
-                    .call(Request {
-                        ids: keys,
-                        op: Operation::Write,
-                    })
+                    .call(WriteRequest(keys))
                     .then(|r| r.context("failed to handle writes")),
             )
         } else {
@@ -311,10 +314,7 @@ where
             keys.dedup();
             future::Either::B(
                 client
-                    .call(Request {
-                        ids: keys,
-                        op: Operation::Read,
-                    })
+                    .call(ReadRequest(keys))
                     .then(|r| r.context("failed to handle reads")),
             )
         }
@@ -353,7 +353,7 @@ where
     };
 
     let mut worker_ops = None;
-    while next < end {
+    'outer: while next < end {
         let now = time::Instant::now();
         // NOTE: while, not if, in case we start falling behind
         while next <= now {
@@ -386,35 +386,45 @@ where
         if let Some(f) = next_send {
             if f <= now {
                 // time to send at least one batch
-                if let Async::NotReady = task.enter(|| handle.poll_ready().unwrap()) {
-                    // we can't send the request yet -- generate a larger batch
-                    // TODO: check if we should exit instead?
-                    continue;
-                }
-
                 if !queued_w.is_empty() && now.duration_since(queued_w[0]) >= max_batch_time {
-                    ops += queued_w.len();
-                    enqueue(
-                        &mut handle,
-                        queued_w.split_off(0),
-                        queued_w_keys.split_off(0),
-                        true,
-                    );
+                    if let Async::Ready(()) =
+                        task.enter(|| Service::<WriteRequest>::poll_ready(&mut handle).unwrap())
+                    {
+                        ops += queued_w.len();
+                        enqueue(
+                            &mut handle,
+                            queued_w.split_off(0),
+                            queued_w_keys.split_off(0),
+                            true,
+                        );
+                    } else {
+                        // we can't send the request yet -- generate a larger batch
+                    }
                 }
 
                 if !queued_r.is_empty() && now.duration_since(queued_r[0]) >= max_batch_time {
-                    ops += queued_r.len();
-                    enqueue(
-                        &mut handle,
-                        queued_r.split_off(0),
-                        queued_r_keys.split_off(0),
-                        false,
-                    );
+                    if let Async::Ready(()) =
+                        task.enter(|| Service::<ReadRequest>::poll_ready(&mut handle).unwrap())
+                    {
+                        ops += queued_r.len();
+                        enqueue(
+                            &mut handle,
+                            queued_r.split_off(0),
+                            queued_r_keys.split_off(0),
+                            false,
+                        );
+                    } else {
+                        // we can't send the request yet -- generate a larger batch
+                    }
                 }
 
                 // since next_send = Some, we better have sent at least one batch!
+                // if not, the service must have not been ready, so we just continue
+                if !queued_r.is_empty() && !queued_w.is_empty() {
+                    continue 'outer;
+                }
+
                 next_send = None;
-                assert!(queued_r.is_empty() || queued_w.is_empty());
                 if let Some(&qw) = queued_w.get(0) {
                     next_send = Some(qw + max_batch_time);
                 }

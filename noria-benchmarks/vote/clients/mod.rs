@@ -7,15 +7,8 @@ pub(crate) struct Parameters {
     pub(crate) articles: usize,
 }
 
-pub(crate) enum Operation {
-    Read,
-    Write,
-}
-
-pub(crate) struct Request {
-    pub ids: Vec<i32>,
-    pub op: Operation,
-}
+pub(crate) struct WriteRequest(pub Vec<i32>);
+pub(crate) struct ReadRequest(pub Vec<i32>);
 
 pub(crate) trait VoteClient
 where
