@@ -1,7 +1,7 @@
 use crate::clients::{Operation, Parameters, Request, VoteClient};
 use clap;
 use failure::ResultExt;
-use futures::{try_ready, Future};
+use futures::try_ready;
 use noria::{self, TableOperation};
 use std::path::PathBuf;
 use std::sync::Arc;
