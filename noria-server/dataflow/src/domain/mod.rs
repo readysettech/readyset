@@ -866,7 +866,7 @@ impl Domain {
                                             assert_eq!(miss.len(), 1);
                                             &txs[::shard_by(&miss[0], n)]
                                         };
-                                        tx.unbounded_send(Vec::from(miss)).unwrap();
+                                        tx.unbounded_send(Vec::from(miss)).is_ok()
                                     });
 
                                 let mut n = self.nodes[node].borrow_mut();

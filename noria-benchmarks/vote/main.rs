@@ -15,6 +15,7 @@ use std::sync::{atomic, Arc, Barrier, Mutex};
 use std::thread;
 use std::time;
 use tokio::prelude::*;
+use tower_service::Service;
 
 thread_local! {
     static SJRN_W: RefCell<Histogram<u64>> = RefCell::new(Histogram::new_with_bounds(10, 1_000_000, 4).unwrap());
@@ -30,11 +31,14 @@ fn throughput(ops: usize, took: time::Duration) -> f64 {
 const MAX_BATCH_TIME_US: u32 = 1000;
 
 mod clients;
-use self::clients::{Parameters, VoteClient};
+use self::clients::{Operation, Parameters, Request, VoteClient};
 
 fn run<C>(global_args: &clap::ArgMatches, local_args: &clap::ArgMatches)
 where
-    C: VoteClient + Send + 'static,
+    C: VoteClient + 'static,
+    C: Service<Request, Error = failure::Error> + Clone + Send,
+    <C as Service<Request>>::Future: Send,
+    <C as Service<Request>>::Response: Send,
 {
     // zipf takes ~66ns to generate a random number depending on the CPU,
     // so each load generator cannot reasonably generate much more than ~1M reqs/s.
@@ -115,7 +119,7 @@ where
         // we know that we won't drop the original args until the runtime has exited
         let local_args: clap::ArgMatches<'static> = unsafe { mem::transmute(local_args) };
         let ex = rt.executor();
-        rt.block_on(future::lazy(move || C::spawn(ex, params, local_args)))
+        rt.block_on(future::lazy(move || C::new(ex, params, local_args)))
             .unwrap()
     };
 
@@ -241,8 +245,11 @@ fn run_generator<C, R>(
     global_args: clap::ArgMatches,
 ) -> (f64, f64)
 where
-    C: VoteClient,
+    C: VoteClient + 'static,
+    C: Service<Request, Error = failure::Error> + Clone + Send,
     R: rand::distributions::Distribution<usize>,
+    <C as Service<Request>>::Future: Send,
+    <C as Service<Request>>::Response: Send,
 {
     let early_exit = !global_args.is_present("no-early-exit");
     let runtime = time::Duration::from_secs(value_t_or_exit!(global_args, "runtime", u64));
@@ -269,6 +276,7 @@ where
     let mut queued_r_keys = Vec::new();
 
     let mut rng = rand::thread_rng();
+    let mut task = tokio_mock_task::MockTask::new();
 
     // we *could* use a rayon::scope here to safely access stack variables from inside each job,
     // but that would *also* force us to place the load generators *on* the thread pool (because of
@@ -282,13 +290,19 @@ where
     use std::mem;
     let ndone: &'static atomic::AtomicUsize = unsafe { mem::transmute(&ndone) };
 
+    // when https://github.com/rust-lang/rust/issues/56556 is fixed, take &[i32] instead, make
+    // Request hold &'a [i32] (then need for<'a> C: Service<Request<'a>>). then we no longer need
+    // .split_off in calls to enqueue.
     let enqueue = move |client: &mut C, queued: Vec<_>, mut keys: Vec<_>, write| {
         let n = keys.len();
         let sent = time::Instant::now();
         let fut = if write {
             future::Either::A(
                 client
-                    .handle_writes(&keys[..])
+                    .call(Request {
+                        ids: keys,
+                        op: Operation::Write,
+                    })
                     .then(|r| r.context("failed to handle writes")),
             )
         } else {
@@ -297,7 +311,10 @@ where
             keys.dedup();
             future::Either::B(
                 client
-                    .handle_reads(&keys[..])
+                    .call(Request {
+                        ids: keys,
+                        op: Operation::Read,
+                    })
                     .then(|r| r.context("failed to handle reads")),
             )
         }
@@ -332,7 +349,7 @@ where
             }
         });
 
-        ex.spawn(fut.map_err(|e| eprintln!("enqueued request failed: {:?}", e)));
+        ex.spawn(fut.map_err(|e| eprintln!("failed to enqueue request: {}", e)));
     };
 
     let mut worker_ops = None;
@@ -369,6 +386,11 @@ where
         if let Some(f) = next_send {
             if f <= now {
                 // time to send at least one batch
+                if let Async::NotReady = task.enter(|| handle.poll_ready().unwrap()) {
+                    // we can't send the request yet -- generate a larger batch
+                    // TODO: check if we should exit instead?
+                    continue;
+                }
 
                 if !queued_w.is_empty() && now.duration_since(queued_w[0]) >= max_batch_time {
                     ops += queued_w.len();
@@ -698,7 +720,7 @@ fn main() {
         .get_matches();
 
     match args.subcommand() {
-        //("localsoup", Some(largs)) => run::<clients::localsoup::LocalNoria>(&args, largs),
+        ("localsoup", Some(largs)) => run::<clients::localsoup::LocalNoria>(&args, largs),
         //("netsoup", Some(largs)) => run::<clients::netsoup::Conn>(&args, largs),
         //("memcached", Some(largs)) => run::<clients::memcached::Constructor>(&args, largs),
         //("mssql", Some(largs)) => run::<clients::mssql::Conf>(&args, largs),

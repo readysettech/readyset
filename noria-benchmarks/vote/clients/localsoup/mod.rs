@@ -1,11 +1,13 @@
-use crate::clients::{Parameters, VoteClient};
+use crate::clients::{Operation, Parameters, Request, VoteClient};
 use clap;
 use failure::ResultExt;
-use futures::Future;
-use noria::{self, DataType};
+use futures::{try_ready, Future};
+use noria::{self, TableOperation};
 use std::path::PathBuf;
 use std::sync::Arc;
 use std::time;
+use tokio::prelude::*;
+use tower_service::Service;
 
 pub(crate) mod graph;
 
@@ -23,16 +25,12 @@ pub(crate) struct LocalNoria {
 unsafe impl Send for LocalNoria {}
 
 impl VoteClient for LocalNoria {
-    // TODO: existential once https://github.com/rust-lang/rust/issues/53546 is fixed
-    type NewFuture = Box<Future<Item = Self, Error = failure::Error> + Send>;
-    type ReadFuture = Box<Future<Item = (), Error = failure::Error> + Send>;
-    type WriteFuture = Box<Future<Item = (), Error = failure::Error> + Send>;
-
-    fn spawn(
+    type Future = Box<Future<Item = Self, Error = failure::Error> + Send>;
+    fn new(
         ex: tokio::runtime::TaskExecutor,
         params: Parameters,
         args: clap::ArgMatches,
-    ) -> Self::NewFuture {
+    ) -> <Self as VoteClient>::Future {
         use noria::{DurabilityMode, PersistenceParameters};
 
         assert!(params.prime);
@@ -87,9 +85,10 @@ impl VoteClient for LocalNoria {
                         ]
                     }))
                     .map(move |_| g)
+                    .map_err(|e| e.error)
                     .then(|r| {
                         r.context("failed to do article prepopulation")
-                            .map_err(Into::into)
+                            .map_err(failure::Error::from)
                     })
                 })
                 .and_then(move |mut g| {
@@ -118,44 +117,67 @@ impl VoteClient for LocalNoria {
                 }),
         )
     }
+}
 
-    fn handle_writes(&mut self, ids: &[i32]) -> Self::WriteFuture {
-        let data: Vec<Vec<DataType>> = ids
-            .into_iter()
-            .map(|&article_id| vec![(article_id as usize).into(), 0.into()])
-            .collect();
+impl Service<Request> for LocalNoria {
+    type Response = ();
+    type Error = failure::Error;
+    type Future = Box<Future<Item = (), Error = failure::Error> + Send>;
 
-        Box::new(
-            self.w
-                .as_mut()
-                .unwrap()
-                .perform_all(data)
-                .map_err(failure::Error::from),
-        )
+    fn poll_ready(&mut self) -> Poll<(), Self::Error> {
+        // TODO: only poll_ready the relevant op?
+        try_ready!(
+            Service::<Vec<TableOperation>>::poll_ready(self.w.as_mut().unwrap())
+                .map_err(failure::Error::from)
+        );
+        try_ready!(self
+            .r
+            .as_mut()
+            .unwrap()
+            .poll_ready()
+            .map_err(failure::Error::from));
+        Ok(Async::Ready(()))
     }
 
-    fn handle_reads(&mut self, ids: &[i32]) -> Self::ReadFuture {
-        let arg = ids
-            .into_iter()
-            .map(|&article_id| vec![(article_id as usize).into()])
-            .collect();
+    fn call(&mut self, req: Request) -> Self::Future {
+        match req.op {
+            Operation::Write => {
+                let data: Vec<TableOperation> = req
+                    .ids
+                    .into_iter()
+                    .map(|article_id| vec![(article_id as usize).into(), 0.into()].into())
+                    .collect();
 
-        let len = ids.len();
-        Box::new(
-            self.r
-                .as_mut()
-                .unwrap()
-                .multi_lookup(arg, true)
-                .map(|rows| {
-                    // TODO
-                    //assert_eq!(rows.map(|rows| rows.len()), Ok(1));
-                    rows.len()
-                })
-                .map(move |rows| {
-                    assert_eq!(rows, len);
-                })
-                .map_err(failure::Error::from),
-        )
+                Box::new(
+                    self.w
+                        .as_mut()
+                        .unwrap()
+                        .call(data)
+                        .map(|_| ())
+                        .map_err(failure::Error::from),
+                )
+            }
+            Operation::Read => {
+                let len = req.ids.len();
+                let arg = req
+                    .ids
+                    .into_iter()
+                    .map(|article_id| vec![(article_id as usize).into()])
+                    .collect();
+
+                Box::new(
+                    self.r
+                        .as_mut()
+                        .unwrap()
+                        .call((arg, true))
+                        .map(move |rows| {
+                            // TODO: assert_eq!(rows.map(|rows| rows.len()), Ok(1));
+                            assert_eq!(rows.len(), len);
+                        })
+                        .map_err(failure::Error::from),
+                )
+            }
+        }
     }
 }
 

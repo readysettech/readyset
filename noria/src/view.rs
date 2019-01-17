@@ -72,7 +72,7 @@ impl From<<ViewRpc as Service<Tagged<ReadQuery>>>::Error> for AsyncViewError {
     fn from(e: <ViewRpc as Service<Tagged<ReadQuery>>>::Error) -> Self {
         AsyncViewError {
             view: None,
-            error: ViewError::TransportError(e),
+            error: ViewError::from(e),
         }
     }
 }
@@ -86,6 +86,12 @@ pub enum ViewError {
     /// A lower-level error occurred while communicating with Soup.
     #[fail(display = "{}", _0)]
     TransportError(#[cause] <ViewRpc as Service<Tagged<ReadQuery>>>::Error),
+}
+
+impl From<<ViewRpc as Service<Tagged<ReadQuery>>>::Error> for ViewError {
+    fn from(e: <ViewRpc as Service<Tagged<ReadQuery>>>::Error) -> Self {
+        ViewError::TransportError(e)
+    }
 }
 
 #[doc(hidden)]
@@ -197,6 +203,59 @@ impl fmt::Debug for View {
     }
 }
 
+impl Service<(Vec<Vec<DataType>>, bool)> for View {
+    type Response = Vec<Datas>;
+    type Error = ViewError;
+    // existential once https://github.com/rust-lang/rust/issues/53443 is fixed
+    type Future = Box<Future<Item = Self::Response, Error = Self::Error> + Send>;
+
+    fn poll_ready(&mut self) -> Poll<(), Self::Error> {
+        for s in &mut self.shards {
+            try_ready!(s.poll_ready().map_err(ViewError::from));
+        }
+        Ok(Async::Ready(()))
+    }
+
+    fn call(&mut self, (keys, block): (Vec<Vec<DataType>>, bool)) -> Self::Future {
+        // TODO: optimize for when there's only one shard
+        assert!(keys.iter().all(|k| k.len() == 1));
+        let mut shard_queries = vec![Vec::new(); self.shards.len()];
+        for key in keys {
+            let shard = crate::shard_by(&key[0], self.shards.len());
+            shard_queries[shard].push(key);
+        }
+
+        let node = self.node;
+        Box::new(
+            futures::stream::futures_ordered(
+                self.shards
+                    .iter_mut()
+                    .enumerate()
+                    .zip(shard_queries.into_iter())
+                    .filter(|&(_, ref shard_queries)| !shard_queries.is_empty())
+                    .map(move |((shardi, shard), shard_queries)| {
+                        shard
+                            .call(
+                                ReadQuery::Normal {
+                                    target: (node, shardi),
+                                    keys: shard_queries,
+                                    block,
+                                }
+                                .into(),
+                            )
+                            .map_err(ViewError::from)
+                            .and_then(|reply| match reply.v {
+                                ReadReply::Normal(Ok(rows)) => Ok(rows),
+                                ReadReply::Normal(Err(())) => Err(ViewError::NotYetAvailable),
+                                _ => unreachable!(),
+                            })
+                    }),
+            )
+            .concat2(),
+        )
+    }
+}
+
 #[cfg_attr(feature = "cargo-clippy", allow(clippy::len_without_is_empty))]
 impl View {
     /// Get the list of columns in this view.
@@ -246,75 +305,24 @@ impl View {
     /// If `block` is false, misses will be returned as empty results. Any requested keys that have
     /// missing state will be backfilled (asynchronously if `block` is `false`).
     pub fn multi_lookup(
-        mut self,
+        self,
         keys: Vec<Vec<DataType>>,
         block: bool,
     ) -> impl Future<Item = (Self, Vec<Datas>), Error = AsyncViewError> + Send {
-        // TODO: optimize for when there's only one shard
-        assert!(keys.iter().all(|k| k.len() == 1));
-        let mut shard_queries = vec![Vec::new(); self.shards.len()];
-        for key in keys {
-            let shard = crate::shard_by(&key[0], self.shards.len());
-            shard_queries[shard].push(key);
-        }
-
-        let node = self.node;
-        futures::stream::futures_ordered(
-            self.shards
-                .drain(..)
-                .enumerate()
-                .zip(shard_queries.into_iter())
-                .map(|((shardi, shard), shard_queries)| {
-                    if shard_queries.is_empty() {
-                        return future::Either::A(future::ok(Ok((shard, Vec::new()))));
-                    }
-
-                    future::Either::B(shard.ready().map_err(AsyncViewError::from).and_then(
-                        move |mut svc| {
-                            svc.call(
-                                ReadQuery::Normal {
-                                    target: (node, shardi),
-                                    keys: shard_queries,
-                                    block,
-                                }
-                                .into(),
-                            )
-                            .map_err(AsyncViewError::from)
-                            .map(move |reply| match reply.v {
-                                ReadReply::Normal(Ok(rows)) => Ok((svc, rows)),
-                                ReadReply::Normal(Err(())) => Err(svc),
-                                _ => unreachable!(),
-                            })
-                        },
-                    ))
-                }),
-        )
-        .fold((Ok(self), Vec::new()), |(this, mut acc), rs| {
-            match (this, rs) {
-                (Ok(mut this), Ok((svc, mut rows))) => {
-                    this.shards.push(svc);
-                    if acc.is_empty() {
-                        acc = rows;
-                    } else {
-                        acc.append(&mut rows);
-                    }
-                    future::ok::<_, AsyncViewError>((Ok(this), acc))
-                }
-                (Ok(mut this), Err(svc))
-                | (Err(mut this), Ok((svc, _)))
-                | (Err(mut this), Err(svc)) => {
-                    this.shards.push(svc);
-                    future::ok::<_, AsyncViewError>((Err(this), Vec::new()))
-                }
-            }
-        })
-        .and_then(|r| match r {
-            (Ok(this), rows) => Ok((this, rows)),
-            (Err(this), _) => Err(AsyncViewError {
-                view: Some(this),
-                error: ViewError::NotYetAvailable,
-            }),
-        })
+        self.ready()
+            .map_err(|e| match e {
+                ViewError::NotYetAvailable => unreachable!("can't occur in poll_ready"),
+                ViewError::TransportError(e) => AsyncViewError::from(e),
+            })
+            .and_then(move |mut svc| {
+                svc.call((keys, block)).then(move |res| match res {
+                    Ok(res) => Ok((svc, res)),
+                    Err(e) => Err(AsyncViewError {
+                        view: Some(svc),
+                        error: e,
+                    }),
+                })
+            })
     }
 
     /// Retrieve the query results for the given parameter value.

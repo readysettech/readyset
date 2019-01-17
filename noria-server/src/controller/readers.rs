@@ -194,7 +194,10 @@ impl Future for BlockingRead {
                             Ok(None) => {
                                 if now > self.next_trigger {
                                     // maybe the key was filled but then evicted, and we missed it?
-                                    reader.trigger(key);
+                                    if !reader.trigger(key) {
+                                        // server is shutting down and won't do the backfill
+                                        return Err(());
+                                    }
                                     triggered = true;
                                 }
                                 missing = true;
@@ -208,8 +211,8 @@ impl Future for BlockingRead {
                     self.next_trigger = now + self.trigger_timeout;
                 }
 
-                missing
-            });
+                Ok(missing)
+            })?;
 
             if !missing {
                 return Ok(Async::Ready(Tagged {
