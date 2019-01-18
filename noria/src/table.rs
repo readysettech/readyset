@@ -13,7 +13,7 @@ use std::sync::{Arc, Mutex};
 use std::{fmt, io};
 use tokio::prelude::*;
 use tokio_tower::multiplex;
-use tower_balance::{choose, Pool};
+use tower_balance::{choose, pool, Pool};
 use tower_buffer::Buffer;
 use tower_service::Service;
 use tower_util::ext::ServiceExt;
@@ -178,11 +178,15 @@ impl TableBuilder {
                         Entry::Vacant(h) => {
                             // TODO: maybe always use the same local port?
                             let c = Buffer::new(
-                                Pool::new(
-                                    multiplex::client::Maker::new(TableEndpoint(addr)),
-                                    (),
-                                    choose::RoundRobin::default(),
-                                ),
+                                pool::Builder::new()
+                                    .urgency(0.03)
+                                    .loaded_above(0.2)
+                                    .underutilized_below(0.00001)
+                                    .build(
+                                        multiplex::client::Maker::new(TableEndpoint(addr)),
+                                        (),
+                                        choose::RoundRobin::default(),
+                                    ),
                                 0,
                             )
                             .unwrap_or_else(|_| panic!("no active tokio runtime"));
