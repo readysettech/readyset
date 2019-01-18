@@ -349,7 +349,11 @@ where
             }
         });
 
-        ex.spawn(fut.map_err(|e| eprintln!("failed to enqueue request: {}", e)));
+        ex.spawn(fut.map_err(move |e| {
+            if time::Instant::now() < end {
+                eprintln!("failed to enqueue request: {:?}", e)
+            }
+        }));
     };
 
     let mut worker_ops = None;

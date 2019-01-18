@@ -588,7 +588,11 @@ fn listen_reads(
                     ServiceFn::new(move |req| readers::handle_message(req, &readers)),
                 )
                 .map_err(|e| -> () {
-                    eprintln!("!!! reader client protocol error: {:?}", e);
+                    if let server::Error::Service(()) = e {
+                        // server is shutting down -- no need to report this error
+                    } else {
+                        eprintln!("!!! reader client protocol error: {:?}", e);
+                    }
                 })
             }),
     )
