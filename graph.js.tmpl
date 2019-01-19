@@ -1,45 +1,32 @@
-    <script src="https://cdnjs.cloudflare.com/ajax/libs/require.js/2.1.15/require.min.js"></script>
+    <script src="https://ajax.googleapis.com/ajax/libs/jquery/3.3.1/jquery.min.js"></script>
+    <script src="//d3js.org/d3.v5.min.js"></script>
+    <script src="https://unpkg.com/viz.js@1.8.1/viz.js" type="application/javascript"></script>
+    <script src="https://unpkg.com/d3-graphviz@2.6.0/build/d3-graphviz.min.js"></script>
+
     <script>
-    requirejs.config({
-    // By default load any module IDs from js/lib
-    baseUrl: 'js',
-    // except, if the module ID starts with "app",
-    // load it from the js/app directory. paths
-    // config is relative to the baseUrl, and
-    // never includes a ".js" extension since
-    // the paths config could be for a directory.
-    paths: {
-      d3: 'https://cdnjs.cloudflare.com/ajax/libs/d3/3.5.3/d3.min',
-      'dot-checker': 'https://cdn.rawgit.com/mstefaniuk/graph-viz-d3-js/cf2160ee3ca39b843b081d5231d5d51f1a901617/dist/dot-checker',
-      'layout-worker': 'layout-worker',
-          renderer: 'https://cdn.rawgit.com/mstefaniuk/graph-viz-d3-js/cf2160ee3ca39b843b081d5231d5d51f1a901617/dist/renderer',
-          jquery: 'https://ajax.googleapis.com/ajax/libs/jquery/3.2.1/jquery.min',
-    }
-    });
+    var transition = d3.transition("t")
+                       .duration(500)
+                       .ease(d3.easeLinear);
 
-    require(["renderer", "jquery"], function (renderer, $) {
-      renderer.init("#graph");
+    var graphviz = d3.select("#graph").graphviz(false);
 
-      $.ajax({
-        url: "http://" + controller_addr + "/graph",
+    function render() {
+      var graph_data = $.ajax({
+        url: "http://" + controller_addr + "/simple_graph",
         dataType: "text",
         success: function(data) {
-          renderer.render(data);
+          $("#error-msg").removeClass("show");
+          graphviz.transition(transition).renderDot(data);
         },
         error: function(e) {
           $("#error-msg").html("AJAX request to controller API failed: " + e.statusText).addClass("show");
-          renderer.render('digraph {}');
+          graphviz.transition(transition).renderDot('digraph {}');
         }
       });
 
-      setInterval(function(){
-        $.ajax({
-          url: "http://" + controller_addr + "/graph",
-          dataType: "text",
-          success: function(data) {
-            renderer.render(data);
-          },
-        });
-      }, 1000);
-    });
+    }
+
+    setInterval(function() {
+      render();
+    }, 1000);
     </script>
