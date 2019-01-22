@@ -1,0 +1,40 @@
+    <script>
+      $("#node-table").bootstrapTable();
+
+      // https://stackoverflow.com/a/21903119
+      var getUrlParameter = function getUrlParameter(sParam) {
+          var sPageURL = decodeURIComponent(window.location.search.substring(1)),
+              sURLVariables = sPageURL.split('&'),
+              sParameterName,
+              i;
+
+          for (i = 0; i < sURLVariables.length; i++) {
+              sParameterName = sURLVariables[i].split('=');
+
+              if (sParameterName[0] === sParam) {
+                  return sParameterName[1] === undefined ? true : sParameterName[1];
+              }
+          }
+      };
+
+      function update() {
+        var node = getUrlParameter("n");
+        var resturl = "http://" + controller_addr + "/get_statistics";
+
+        $.ajax({
+          url: resturl,
+          dataType: "json",
+          success: function(data) {
+            $("#error-msg").removeClass("show");
+            $("#stats").text(data);
+            //$("#stats").bootstrapTable('load', data);
+            //feather.replace()
+          },
+          error: function(e) {
+            $("#error-msg").html("AJAX request to controller API failed: " + e.statusText).addClass("show");
+          }
+        });
+      }
+
+      update();
+    </script>
