@@ -26,9 +26,15 @@
           dataType: "json",
           success: function(data) {
             $("#error-msg").removeClass("show");
-            $("#stats").text(data);
-            //$("#stats").bootstrapTable('load', data);
-            //feather.replace()
+            // rather inelegant iteration over all domains and vertices
+            $.each(data["domains"], function (idx, domain) {
+              $.each(domain[1], function (ni, stats) {
+                if (ni == node) {
+                  $("#mat-status").text(stats["materialized"]);
+                  $("#mem-size").text(stats["mem_size"] + " bytes");
+                }
+              });
+            });
           },
           error: function(e) {
             $("#error-msg").html("AJAX request to controller API failed: " + e.statusText).addClass("show");
