@@ -56,6 +56,12 @@ if you're using [`rustup.rs`](https://rustup.rs/). To build
 $ cargo build --release --bin noria-server
 ```
 
+You may need to install some dependencies for the above to work:
+
+ - libclang-dev
+ - libssl-dev
+ - liblz4-dev
+
 To start a long-running `noria-server` instance, ensure that ZooKeeper
 is running, and then run:
 
