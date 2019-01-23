@@ -17,10 +17,26 @@
 
       function update() {
         var node = getUrlParameter("n");
-        var resturl = "http://" + controller_addr + "/get_statistics";
+        var stats_url = "http://" + controller_addr + "/get_statistics";
+        var nodes_url = "http://" + controller_addr + "/nodes";
+
+        var node_data = {};
 
         $.ajax({
-          url: resturl,
+          url: nodes_url,
+          dataType: "json",
+          success: function(data) {
+            $.each(data, function (i, rec) {
+              node_data[rec[0]] = { "name": rec[1], "type": rec[2] };
+            })
+          },
+          error: function(e) {
+            $("#error-msg").html("AJAX request to controller API failed: " + e.statusText).addClass("show");
+          }
+        });
+
+        $.ajax({
+          url: stats_url,
           dataType: "json",
           success: function(data) {
             $("#error-msg").removeClass("show");
@@ -28,6 +44,8 @@
             $.each(data["domains"], function (idx, domain) {
               $.each(domain[1], function (ni, stats) {
                 if (ni == node) {
+                  $("#node-name").text(node_data[ni]["name"]);
+                  $("#desc").text(stats["desc"]);
                   $("#mat-status").text(stats["materialized"]);
                   $("#mem-size").text(stats["mem_size"] + " bytes");
                 }
