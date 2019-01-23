@@ -1,6 +1,6 @@
         <main role="main" class="col-md-9 ml-sm-auto col-lg-10 pt-3 px-4">
           <div class="d-flex justify-content-between flex-wrap flex-md-nowrap align-items-center pb-2 mb-3 border-bottom">
-            <h1 class="h2" id="title">Data-flow vertex</h1>
+            <h1 class="h2" id="title">Data-flow vertex &quot;<span id="node-name"></span>&quot;</h1>
 
             <!-- Error message -->
             <div id="error-msg" class="alert alert-danger alert-dismissible fade" role="alert">
@@ -9,6 +9,10 @@
           </div>
 
           <table id="stats-table">
+            <tr>
+              <td>Description:</td>
+              <td id="desc">Loading...</td>
+            </tr>
             <tr>
               <td>Materialization status:</td>
               <td id="mat-status">Loading...</td>
