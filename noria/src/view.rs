@@ -39,6 +39,10 @@ impl Service<()> for ViewEndpoint {
     fn call(&mut self, _: ()) -> Self::Future {
         Box::new(
             tokio::net::TcpStream::connect(&self.0)
+                .and_then(|s| {
+                    s.set_nodelay(true)?;
+                    Ok(s)
+                })
                 .map(AsyncBincodeStream::from)
                 .map(AsyncBincodeStream::for_async)
                 .map(|t| multiplex::MultiplexTransport::new(t, Tagger::default())),

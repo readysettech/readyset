@@ -43,6 +43,10 @@ impl Service<()> for TableEndpoint {
     fn call(&mut self, _: ()) -> Self::Future {
         Box::new(
             tokio::net::TcpStream::connect(&self.0)
+                .and_then(|s| {
+                    s.set_nodelay(true)?;
+                    Ok(s)
+                })
                 .map(|mut s| {
                     s.write_all(&[CONNECTION_FROM_BASE]).unwrap();
                     s.flush().unwrap();
