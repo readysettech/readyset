@@ -58,6 +58,7 @@ $ cargo build --release --bin noria-server
 
 You may need to install some dependencies for the above to work:
 
+ - clang
  - libclang-dev
  - libssl-dev
  - liblz4-dev
