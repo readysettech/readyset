@@ -30,14 +30,14 @@ pub struct ViewEndpoint(SocketAddr);
 impl Service<()> for ViewEndpoint {
     type Response = multiplex::MultiplexTransport<Transport, Tagger>;
     type Error = tokio::io::Error;
-    type Future = Box<Future<Item = Self::Response, Error = Self::Error> + Send>;
+    // have to repeat types because https://github.com/rust-lang/rust/issues/57807
+    existential type Future: Future<Item = multiplex::MultiplexTransport<Transport, Tagger>, Error = tokio::io::Error>;
 
     fn poll_ready(&mut self) -> Poll<(), Self::Error> {
         Ok(Async::Ready(()))
     }
 
     fn call(&mut self, _: ()) -> Self::Future {
-        Box::new(
             tokio::net::TcpStream::connect(&self.0)
                 .and_then(|s| {
                     s.set_nodelay(true)?;
@@ -45,8 +45,7 @@ impl Service<()> for ViewEndpoint {
                 })
                 .map(AsyncBincodeStream::from)
                 .map(AsyncBincodeStream::for_async)
-                .map(|t| multiplex::MultiplexTransport::new(t, Tagger::default())),
-        )
+                .map(|t| multiplex::MultiplexTransport::new(t, Tagger::default()))
     }
 }
 
@@ -214,8 +213,8 @@ impl fmt::Debug for View {
 impl Service<(Vec<Vec<DataType>>, bool)> for View {
     type Response = Vec<Datas>;
     type Error = ViewError;
-    // existential once https://github.com/rust-lang/rust/issues/53443 is fixed
-    type Future = Box<Future<Item = Self::Response, Error = Self::Error> + Send>;
+    // have to repeat types because https://github.com/rust-lang/rust/issues/57807
+    existential type Future: Future<Item = Vec<Datas>, Error = ViewError>;
 
     fn poll_ready(&mut self) -> Poll<(), Self::Error> {
         for s in &mut self.shards {
@@ -234,7 +233,6 @@ impl Service<(Vec<Vec<DataType>>, bool)> for View {
         }
 
         let node = self.node;
-        Box::new(
             futures::stream::futures_ordered(
                 self.shards
                     .iter_mut()
@@ -259,8 +257,7 @@ impl Service<(Vec<Vec<DataType>>, bool)> for View {
                             })
                     }),
             )
-            .concat2(),
-        )
+            .concat2()
     }
 }
 

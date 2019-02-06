@@ -1,7 +1,6 @@
 #![feature(nll)]
 #![feature(box_syntax)]
 #![feature(box_patterns)]
-#![feature(if_while_or_patterns)]
 #![deny(unused_extern_crates)]
 
 #[cfg(debug_assertions)]
