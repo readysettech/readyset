@@ -583,6 +583,7 @@ fn listen_reads(
             .filter_map(|c| c)
             .map(move |stream| {
                 let readers = readers.clone();
+                stream.set_nodelay(true).expect("could not set TCP_NODELAY");
                 server::Server::new(
                     AsyncBincodeStream::from(stream).for_async(),
                     ServiceFn::new(move |req| readers::handle_message(req, &readers)),
@@ -1326,6 +1327,11 @@ impl Replica {
             debug!(self.log, "established new connection"; "base" => ?is_base);
             let slot = self.inputs.stream_slot();
             let token = slot.token();
+            if let Err(e) = stream.set_nodelay(true) {
+                warn!(self.log,
+                      "failed to set TCP_NODELAY for new connection: {:?}", e;
+                      "from" => ?stream.peer_addr().unwrap());
+            }
             let tcp = if is_base {
                 DualTcpStream::upgrade(BufStream::new(stream), move |Tagged { v: input, tag }| {
                     Box::new(Packet::Input {
