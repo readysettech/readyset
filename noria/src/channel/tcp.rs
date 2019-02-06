@@ -72,6 +72,7 @@ impl<T: Serialize> TcpSender<T> {
             .reuse_address(true)?
             .bind((Ipv4Addr::UNSPECIFIED, sport.unwrap_or(0)))?
             .connect(addr)?;
+        s.set_nodelay(true)?;
         Self::new(s)
     }
 
