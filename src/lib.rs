@@ -336,7 +336,7 @@ impl<B: MysqlShim<W>, R: Read, W: Write> MysqlIntermediary<B, R, W> {
                         coltype: myc::constants::ColumnType::MYSQL_TYPE_SHORT,
                         colflags: myc::constants::ColumnFlags::UNSIGNED_FLAG,
                     }];
-                    writers::write_column_definitions(cols, &mut self.writer, true);
+                    writers::write_column_definitions(cols, &mut self.writer, true)?;
                 }
                 Command::Init(_) | Command::Ping => {
                     writers::write_ok_packet(&mut self.writer, 0, 0, StatusFlags::empty())?;
