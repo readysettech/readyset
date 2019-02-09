@@ -150,7 +150,7 @@ mod tests {
             Command::Query(&b"select @@version_comment limit 1"[..])
         );
     }
-use std::str;
+
     #[test]
     fn it_handles_list_fields(){
        // mysql_list_fields (CommandByte::COM_FIELD_LIST / 0x04) has been deprecated in mysql 5.7 and will be removed
