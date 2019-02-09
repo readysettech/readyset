@@ -30,6 +30,7 @@ named!(
 #[derive(Debug, PartialEq, Eq)]
 pub enum Command<'a> {
     Query(&'a [u8]),
+    ListFields(&'a [u8]),
     Close(u32),
     Prepare(&'a [u8]),
     Init(&'a [u8]),
@@ -78,6 +79,7 @@ named!(
     pub parse<Command>,
     alt!(
         preceded!(tag!(&[CommandByte::COM_QUERY as u8]), apply!(nom::rest,)) => { |sql| Command::Query(sql) } |
+        preceded!(tag!(&[CommandByte::COM_FIELD_LIST as u8]), apply!(nom::rest,)) => { |filter| Command::ListFields(filter) } |
         preceded!(tag!(&[CommandByte::COM_INIT_DB as u8]), apply!(nom::rest,)) => { |db| Command::Init(db) } |
         preceded!(tag!(&[CommandByte::COM_STMT_PREPARE as u8]), apply!(nom::rest,)) => { |sql| Command::Prepare(sql) } |
         preceded!(tag!(&[CommandByte::COM_STMT_EXECUTE as u8]), execute) |
@@ -146,6 +148,26 @@ mod tests {
         assert_eq!(
             cmd,
             Command::Query(&b"select @@version_comment limit 1"[..])
+        );
+    }
+
+    #[test]
+    fn it_handles_list_fields(){
+       // mysql_list_fields (CommandByte::COM_FIELD_LIST / 0x04) has been deprecated in mysql 5.7 and will be removed
+       // in a future version. The mysql command line tool issues one of these commands after
+       // switching databases with USE <DB>.
+        let data = &[
+            0x21, 0x00, 0x00, 0x00, 0x04, 0x73, 0x65, 0x6c, 0x65, 0x63, 0x74, 0x20, 0x40, 0x40,
+            0x76, 0x65, 0x72, 0x73, 0x69, 0x6f, 0x6e, 0x5f, 0x63, 0x6f, 0x6d, 0x6d, 0x65, 0x6e,
+            0x74, 0x20, 0x6c, 0x69, 0x6d, 0x69, 0x74, 0x20, 0x31,
+        ];
+        let r = Cursor::new(&data[..]);
+        let mut pr = PacketReader::new(r);
+        let (_, p) = pr.next().unwrap().unwrap();
+        let (_, cmd) = parse(&p).unwrap();
+        assert_eq!(
+            cmd,
+            Command::ListFields(&b"select @@version_comment limit 1"[..])
         );
     }
 }
