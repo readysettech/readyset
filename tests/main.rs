@@ -781,3 +781,23 @@ fn prepared_no_cols() {
         assert_eq!(db.prep_exec("SELECT a, b FROM foo", ()).unwrap().count(), 0);
     })
 }
+
+
+#[test]
+fn it_inits() {
+    struct TestBackend{ pub database: String }
+    impl MysqlShim<net::TcpStream> for TestBackend {
+        type Error = io::Error;
+        fn on_prepare(&mut self, _: &str, _: StatementMetaWriter<net::TcpStream>) -> io::Result<()> { Ok(()) }
+        fn on_execute(&mut self, _: u32, _: ParamParser, _: QueryResultWriter<net::TcpStream>) -> io::Result<()> {Ok(())}
+        fn on_close(&mut self, _: u32) {}
+        fn on_query(&mut self, _: &str, _: QueryResultWriter<net::TcpStream>) -> io::Result<()> { Ok(()) }
+        fn on_init(&mut self, schema: &str) -> io::Result<()> { 
+            self.database = schema.to_owned();
+            Ok(()) 
+        }
+    }
+    let mut backend = TestBackend{database: String::from("NA")};
+    backend.on_init("foobardb").unwrap();
+    assert_eq!(backend.database, "foobardb".to_string());
+}
