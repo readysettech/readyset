@@ -793,11 +793,19 @@ fn it_inits() {
         fn on_close(&mut self, _: u32) {}
         fn on_query(&mut self, _: &str, _: QueryResultWriter<net::TcpStream>) -> io::Result<()> { Ok(()) }
         fn on_init(&mut self, schema: &str) -> io::Result<()> { 
-            self.database = schema.to_owned();
-            Ok(()) 
+            if schema == "foobar" {
+                self.database = schema.to_owned();
+                Ok(()) 
+            } else {
+                Err(io::Error::new(io::ErrorKind::NotFound,format!("The rain falls down")))
+            }
         }
     }
     let mut backend = TestBackend{database: String::from("NA")};
-    backend.on_init("foobardb").unwrap();
-    assert_eq!(backend.database, "foobardb".to_string());
+    backend.on_init("foobar").unwrap();
+    assert_eq!(backend.database, "foobar".to_string());
+    match backend.on_init("foobar-not-found") {
+        Ok(()) => assert!(false),
+        Err(e) => assert_eq!( e.to_string(), io::Error::new(io::ErrorKind::NotFound, format!("The rain falls down")).to_string()),
+    }
 }
