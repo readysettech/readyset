@@ -349,7 +349,7 @@ impl<B: MysqlShim<W>, R: Read, W: Write> MysqlIntermediary<B, R, W> {
                                     .map_err(|e| io::Error::new(io::ErrorKind::InvalidData, e))?
                                     );
                     match result {
-                        Ok(_x) => writers::write_ok_packet(&mut self.writer, 0, 0, StatusFlags::empty())?,
+                        Ok(()) => writers::write_ok_packet(&mut self.writer, 0, 0, StatusFlags::empty())?,
                         Err(_e) => {
                             let err_code = ErrorKind::from(ErrorKind::ER_DATABASE_NAME);
                             writers::write_err(err_code, "Database name error".as_bytes() , &mut self.writer)?
