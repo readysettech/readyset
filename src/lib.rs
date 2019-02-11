@@ -37,6 +37,8 @@
 //!     }
 //!     fn on_close(&mut self, _: u32) {}
 //!
+//!     fn on_init(&mut self, _: &str) -> io::Result<()> { Ok(()) }
+//!
 //!     fn on_query(&mut self, _: &str, results: QueryResultWriter<W>) -> io::Result<()> {
 //!         let cols = [
 //!             Column {
@@ -171,6 +173,9 @@ pub trait MysqlShim<W: Write> {
     /// Results should be returned using the given
     /// [`QueryResultWriter`](struct.QueryResultWriter.html).
     fn on_query(&mut self, query: &str, results: QueryResultWriter<W>) -> Result<(), Self::Error>;
+
+    /// Called when client switches database.
+    fn on_init(&mut self, _schema: &str) -> Result<(), Self::Error> { Ok(()) }
 }
 
 /// A server that speaks the MySQL/MariaDB protocol, and can delegate client commands to a backend
@@ -338,7 +343,20 @@ impl<B: MysqlShim<W>, R: Read, W: Write> MysqlIntermediary<B, R, W> {
                     }];
                     writers::write_column_definitions(cols, &mut self.writer, true)?;
                 }
-                Command::Init(_) | Command::Ping => {
+                Command::Init(schema) => {
+                    let result = self.shim.on_init(
+                        ::std::str::from_utf8(schema)
+                                    .map_err(|e| io::Error::new(io::ErrorKind::InvalidData, e))?
+                                    );
+                    match result {
+                        Ok(_x) => writers::write_ok_packet(&mut self.writer, 0, 0, StatusFlags::empty())?,
+                        Err(_e) => {
+                            let err_code = ErrorKind::from(ErrorKind::ER_DATABASE_NAME);
+                            writers::write_err(err_code, "Database name error".as_bytes() , &mut self.writer)?
+                        },
+                    }
+                }
+                Command::Ping => {
                     writers::write_ok_packet(&mut self.writer, 0, 0, StatusFlags::empty())?;
                 }
                 Command::Quit => {
