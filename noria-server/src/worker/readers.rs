@@ -1,15 +1,20 @@
+use async_bincode::AsyncBincodeStream;
 use dataflow::backlog::SingleReadHandle;
+use dataflow::prelude::DataType;
 use dataflow::prelude::*;
 use dataflow::Readers;
 use futures::future::{self, Either};
 use futures::try_ready;
+use futures::{self, Future, Stream};
+use noria::{ReadQuery, ReadReply, Tagged};
 use std::cell::RefCell;
 use std::collections::HashMap;
-use std::{mem, time};
-use tokio;
+use std::mem;
+use std::time;
+use stream_cancel::Valve;
 use tokio::prelude::*;
-
-use noria::{ReadQuery, ReadReply, Tagged};
+use tokio_tower::multiplex::server;
+use tower_util::ServiceFn;
 
 /// If a blocking reader finds itself waiting this long for a backfill to complete, it will
 /// re-issue the replay request. To avoid the system falling over if replays are slow for a little
@@ -21,6 +26,45 @@ thread_local! {
         (NodeIndex, usize),
         SingleReadHandle,
     >> = Default::default();
+}
+
+pub(crate) fn listen(
+    valve: &Valve,
+    ioh: &tokio_io_pool::Handle,
+    on: tokio::net::TcpListener,
+    readers: Readers,
+) -> impl Future<Item = (), Error = ()> {
+    ioh.spawn_all(
+        valve
+            .wrap(on.incoming())
+            .map(Some)
+            .or_else(|_| {
+                // io error from client: just ignore it
+                Ok(None)
+            })
+            .filter_map(|c| c)
+            .map(move |stream| {
+                let readers = readers.clone();
+                stream.set_nodelay(true).expect("could not set TCP_NODELAY");
+                server::Server::new(
+                    AsyncBincodeStream::from(stream).for_async(),
+                    ServiceFn::new(move |req| handle_message(req, &readers)),
+                )
+                .map_err(|e| -> () {
+                    if let server::Error::Service(()) = e {
+                        // server is shutting down -- no need to report this error
+                    } else {
+                        eprintln!("!!! reader client protocol error: {:?}", e);
+                    }
+                })
+            }),
+    )
+    .map_err(|e: tokio_io_pool::StreamSpawnError<()>| {
+        eprintln!(
+            "io pool is shutting down, so can't handle more reads: {:?}",
+            e
+        );
+    })
 }
 
 fn dup(rs: &[Vec<DataType>]) -> Vec<Vec<DataType>> {

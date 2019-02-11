@@ -13,7 +13,7 @@ use tokio::prelude::*;
 use tokio_io_pool;
 
 /// A handle to a controller that is running in the same process as this one.
-pub struct WorkerHandle<A: Authority + 'static> {
+pub struct Handle<A: Authority + 'static> {
     c: Option<ControllerHandle<A>>,
     #[allow(dead_code)]
     event_tx: Option<futures::sync::mpsc::UnboundedSender<Event>>,
@@ -21,27 +21,27 @@ pub struct WorkerHandle<A: Authority + 'static> {
     iopool: Option<tokio_io_pool::Runtime>,
 }
 
-impl<A: Authority> Deref for WorkerHandle<A> {
+impl<A: Authority> Deref for Handle<A> {
     type Target = ControllerHandle<A>;
     fn deref(&self) -> &Self::Target {
         self.c.as_ref().unwrap()
     }
 }
 
-impl<A: Authority> DerefMut for WorkerHandle<A> {
+impl<A: Authority> DerefMut for Handle<A> {
     fn deref_mut(&mut self) -> &mut Self::Target {
         self.c.as_mut().unwrap()
     }
 }
 
-impl<A: Authority + 'static> WorkerHandle<A> {
+impl<A: Authority + 'static> Handle<A> {
     pub(super) fn new(
         authority: Arc<A>,
         event_tx: futures::sync::mpsc::UnboundedSender<Event>,
         kill: Trigger,
         io: tokio_io_pool::Runtime,
     ) -> impl Future<Item = Self, Error = failure::Error> {
-        ControllerHandle::make(authority).map(move |c| WorkerHandle {
+        ControllerHandle::make(authority).map(move |c| Handle {
             c: Some(c),
             event_tx: Some(event_tx),
             kill: Some(kill),
@@ -159,27 +159,27 @@ impl<A: Authority + 'static> WorkerHandle<A> {
     }
 }
 
-impl<A: Authority> Drop for WorkerHandle<A> {
+impl<A: Authority> Drop for Handle<A> {
     fn drop(&mut self) {
         self.shutdown();
     }
 }
 
 /// A synchronous handle to a worker.
-pub struct SyncWorkerHandle<A: Authority + 'static> {
+pub struct SyncHandle<A: Authority + 'static> {
     pub(crate) rt: Option<tokio::runtime::Runtime>,
-    pub(crate) wh: WorkerHandle<A>,
+    pub(crate) wh: Handle<A>,
     // this is an Option so we can drop it
     pub(crate) sh: Option<SyncControllerHandle<A, tokio::runtime::TaskExecutor>>,
 }
 
-impl<A: Authority> SyncWorkerHandle<A> {
+impl<A: Authority> SyncHandle<A> {
     /// Construct a new synchronous handle on top of an existing runtime.
     ///
-    /// Note that the given `WorkerHandle` must have been created through the given `Runtime`.
-    pub fn from_existing(rt: tokio::runtime::Runtime, wh: WorkerHandle<A>) -> Self {
+    /// Note that the given `Handle` must have been created through the given `Runtime`.
+    pub fn from_existing(rt: tokio::runtime::Runtime, wh: Handle<A>) -> Self {
         let sch = wh.sync_handle(rt.executor());
-        SyncWorkerHandle {
+        SyncHandle {
             rt: Some(rt),
             wh,
             sh: Some(sch),
@@ -188,11 +188,11 @@ impl<A: Authority> SyncWorkerHandle<A> {
 
     /// Construct a new synchronous handle on top of an existing external runtime.
     ///
-    /// Note that the given `WorkerHandle` must have been created through the `Runtime` backing the
+    /// Note that the given `Handle` must have been created through the `Runtime` backing the
     /// given executor.
-    pub fn from_executor(ex: tokio::runtime::TaskExecutor, wh: WorkerHandle<A>) -> Self {
+    pub fn from_executor(ex: tokio::runtime::TaskExecutor, wh: Handle<A>) -> Self {
         let sch = wh.sync_handle(ex);
-        SyncWorkerHandle {
+        SyncHandle {
             rt: None,
             wh,
             sh: Some(sch),
@@ -207,7 +207,7 @@ impl<A: Authority> SyncWorkerHandle<A> {
     /// Run an operation on the underlying asynchronous worker handle.
     pub fn on_worker<F, FF>(&mut self, f: F) -> Result<FF::Item, FF::Error>
     where
-        F: FnOnce(&mut WorkerHandle<A>) -> FF,
+        F: FnOnce(&mut Handle<A>) -> FF,
         FF: IntoFuture,
         FF::Future: Send + 'static,
         FF::Item: Send + 'static,
@@ -228,20 +228,20 @@ impl<A: Authority> SyncWorkerHandle<A> {
     }
 }
 
-impl<A: Authority> Deref for SyncWorkerHandle<A> {
+impl<A: Authority> Deref for SyncHandle<A> {
     type Target = SyncControllerHandle<A, tokio::runtime::TaskExecutor>;
     fn deref(&self) -> &Self::Target {
         self.sh.as_ref().unwrap()
     }
 }
 
-impl<A: Authority> DerefMut for SyncWorkerHandle<A> {
+impl<A: Authority> DerefMut for SyncHandle<A> {
     fn deref_mut(&mut self) -> &mut Self::Target {
         self.sh.as_mut().unwrap()
     }
 }
 
-impl<A: Authority + 'static> Drop for SyncWorkerHandle<A> {
+impl<A: Authority + 'static> Drop for SyncHandle<A> {
     fn drop(&mut self) {
         drop(self.sh.take());
         self.wh.shutdown();
@@ -257,11 +257,11 @@ mod tests {
     #[should_panic]
     #[cfg_attr(not(debug_assertions), allow_fail)]
     fn limit_mutator_creation() {
-        use crate::controller::WorkerBuilder;
+        use crate::controller::Builder;
         let r_txt = "CREATE TABLE a (x int, y int, z int);\n
                      CREATE TABLE b (r int, s int);\n";
 
-        let mut c = WorkerBuilder::default().start_simple().unwrap();
+        let mut c = Builder::default().start_simple().unwrap();
         assert!(c.install_recipe(r_txt).is_ok());
         for _ in 0..2500 {
             let _ = c.table("a").unwrap();

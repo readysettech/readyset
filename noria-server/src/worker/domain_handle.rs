@@ -1,21 +1,21 @@
-use crate::controller::{Worker, WorkerIdentifier};
+use super::{Worker, WorkerIdentifier};
 use dataflow::prelude::*;
 use noria::channel::tcp;
 use slog::Logger;
 use std::collections::HashMap;
 use std::io;
 
-pub(super) struct DomainShardHandle {
-    pub(super) worker: WorkerIdentifier,
-    pub(super) tx: Box<dyn noria::channel::Sender<Item = Box<Packet>> + Send>,
+pub(crate) struct DomainShardHandle {
+    pub(crate) worker: WorkerIdentifier,
+    pub(crate) tx: Box<dyn noria::channel::Sender<Item = Box<Packet>> + Send>,
 }
 
 /// A `DomainHandle` is a handle that allows communicating with all of the shards of a given
 /// domain.
 pub(crate) struct DomainHandle {
-    pub(super) idx: DomainIndex,
-    pub(super) shards: Vec<DomainShardHandle>,
-    pub(super) log: Logger,
+    pub(crate) idx: DomainIndex,
+    pub(crate) shards: Vec<DomainShardHandle>,
+    pub(crate) log: Logger,
 }
 
 impl DomainHandle {
@@ -35,7 +35,7 @@ impl DomainHandle {
         self.shards.iter().any(|s| s.worker == *worker)
     }
 
-    pub(super) fn send_to_healthy(
+    pub(crate) fn send_to_healthy(
         &mut self,
         p: Box<Packet>,
         workers: &HashMap<WorkerIdentifier, Worker>,
@@ -54,7 +54,7 @@ impl DomainHandle {
         Ok(())
     }
 
-    pub(super) fn send_to_healthy_shard(
+    pub(crate) fn send_to_healthy_shard(
         &mut self,
         i: usize,
         p: Box<Packet>,

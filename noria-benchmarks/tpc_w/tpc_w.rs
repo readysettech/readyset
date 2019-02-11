@@ -5,7 +5,7 @@ mod populate;
 extern crate clap;
 
 use crate::parameters::SampleKeys;
-use noria::{LocalAuthority, SyncWorkerHandle, WorkerBuilder};
+use noria::{Builder, LocalAuthority, SyncHandle};
 use rand::Rng;
 use std::collections::HashMap;
 use std::sync::{Arc, Barrier};
@@ -14,7 +14,7 @@ use std::{thread, time};
 
 pub struct Backend {
     r: String,
-    g: SyncWorkerHandle<LocalAuthority>,
+    g: SyncHandle<LocalAuthority>,
     parallel_prepop: bool,
     prepop_counts: HashMap<String, usize>,
     barrier: Arc<Barrier>,
@@ -61,7 +61,7 @@ fn make(
     use std::io::Read;
 
     // set up graph
-    let mut b = WorkerBuilder::default();
+    let mut b = Builder::default();
 
     let main_log = noria::logger_pls();
     b.log_with(main_log);

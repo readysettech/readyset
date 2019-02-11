@@ -1,10 +1,9 @@
 use crate::controller::migrate::materialization::Materializations;
 use crate::controller::recipe::Schema;
 use crate::controller::schema;
-use crate::controller::{
-    ControllerState, DomainHandle, DomainShardHandle, Migration, Recipe, Worker, WorkerIdentifier,
-};
+use crate::controller::{ControllerState, Migration, Recipe};
 use crate::coordination::{CoordinationMessage, CoordinationPayload, DomainDescriptor};
+use crate::worker::{DomainHandle, DomainShardHandle, Worker, WorkerIdentifier};
 use dataflow::payload::ControlReplyPacket;
 use dataflow::prelude::*;
 use dataflow::{node, payload, DomainBuilder, DomainConfig};

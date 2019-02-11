@@ -10,7 +10,7 @@ use self::mir::{MirNodeRef, SqlToMirConverter};
 use self::query_graph::{to_query_graph, QueryGraph};
 use self::query_signature::Signature;
 use self::reuse::{ReuseConfig, ReuseConfigType};
-use crate::controller::mir_to_flow::mir_query_to_flow_parts;
+use super::mir_to_flow::mir_query_to_flow_parts;
 use crate::controller::Migration;
 use ::mir::query::{MirQuery, QueryFlowParts};
 use ::mir::reuse as mir_reuse;
@@ -748,14 +748,14 @@ impl SqlIncorporator {
     fn rewrite_query(&mut self, q: SqlQuery, mig: &mut Migration) -> Result<SqlQuery, String> {
         // TODO: make this not take &mut self
 
-        use crate::controller::sql::passes::alias_removal::AliasRemoval;
-        use crate::controller::sql::passes::count_star_rewrite::CountStarRewrite;
-        use crate::controller::sql::passes::implied_tables::ImpliedTableExpansion;
-        use crate::controller::sql::passes::key_def_coalescing::KeyDefinitionCoalescing;
-        use crate::controller::sql::passes::negation_removal::NegationRemoval;
-        use crate::controller::sql::passes::star_expansion::StarExpansion;
-        use crate::controller::sql::passes::subqueries::SubQueries;
-        use crate::controller::sql::query_utils::ReferredTables;
+        use passes::alias_removal::AliasRemoval;
+        use passes::count_star_rewrite::CountStarRewrite;
+        use passes::implied_tables::ImpliedTableExpansion;
+        use passes::key_def_coalescing::KeyDefinitionCoalescing;
+        use passes::negation_removal::NegationRemoval;
+        use passes::star_expansion::StarExpansion;
+        use passes::subqueries::SubQueries;
+        use query_utils::ReferredTables;
 
         // need to increment here so that each subquery has a unique name.
         // (subqueries call recursively into `nodes_for_named_query` via `add_parsed_query` below,

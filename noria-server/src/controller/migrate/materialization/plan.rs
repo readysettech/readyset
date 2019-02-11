@@ -1,8 +1,7 @@
-use crate::controller::domain_handle::DomainHandle;
-use crate::controller::{
-    inner::{graphviz, DomainReplies},
-    keys, Worker, WorkerIdentifier,
-};
+use crate::controller::inner::{graphviz, DomainReplies};
+use crate::controller::keys;
+use crate::worker::domain_handle::DomainHandle;
+use crate::worker::{Worker, WorkerIdentifier};
 use dataflow::payload::{SourceSelection, TriggerEndpoint};
 use dataflow::prelude::*;
 use std::collections::{HashMap, HashSet};

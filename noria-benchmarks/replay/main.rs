@@ -20,8 +20,7 @@ use itertools::Itertools;
 use zookeeper::ZooKeeper;
 
 use noria::{
-    DataType, DurabilityMode, PersistenceParameters, SyncWorkerHandle, WorkerBuilder,
-    ZookeeperAuthority,
+    Builder, DataType, DurabilityMode, PersistenceParameters, SyncHandle, ZookeeperAuthority,
 };
 
 // If we .batch_put a huge amount of rows we'll end up with a deadlock when the base
@@ -55,8 +54,8 @@ fn build_graph(
     authority: Arc<ZookeeperAuthority>,
     persistence: PersistenceParameters,
     verbose: bool,
-) -> SyncWorkerHandle<ZookeeperAuthority> {
-    let mut builder = WorkerBuilder::default();
+) -> SyncHandle<ZookeeperAuthority> {
+    let mut builder = Builder::default();
     if verbose {
         builder.log_with(noria::logger_pls());
     }
@@ -66,10 +65,10 @@ fn build_graph(
     let mut rt = tokio::runtime::Runtime::new().unwrap();
     let fut = builder.start(authority);
     let wh = rt.block_on(fut).unwrap();
-    SyncWorkerHandle::from_existing(rt, wh)
+    SyncHandle::from_existing(rt, wh)
 }
 
-fn populate(g: &mut SyncWorkerHandle<ZookeeperAuthority>, rows: i64, skewed: bool) {
+fn populate(g: &mut SyncHandle<ZookeeperAuthority>, rows: i64, skewed: bool) {
     let mut mutator = g.table("TableRow").unwrap().into_sync();
 
     (0..rows)
@@ -94,7 +93,7 @@ fn populate(g: &mut SyncWorkerHandle<ZookeeperAuthority>, rows: i64, skewed: boo
 
 // Synchronously read `reads` times, where each read should trigger a full replay from the base.
 fn perform_reads(
-    g: &mut SyncWorkerHandle<ZookeeperAuthority>,
+    g: &mut SyncHandle<ZookeeperAuthority>,
     reads: i64,
     rows: i64,
     skewed: bool,
@@ -128,7 +127,7 @@ fn perform_reads(
 
 // Reads every row with the primary key index.
 fn perform_primary_reads(
-    g: &mut SyncWorkerHandle<ZookeeperAuthority>,
+    g: &mut SyncHandle<ZookeeperAuthority>,
     hist: &mut Histogram<u64>,
     row_ids: Vec<i64>,
 ) {
@@ -154,7 +153,7 @@ fn perform_primary_reads(
 
 // Reads each row from one of the secondary indices.
 fn perform_secondary_reads(
-    g: &mut SyncWorkerHandle<ZookeeperAuthority>,
+    g: &mut SyncHandle<ZookeeperAuthority>,
     hist: &mut Histogram<u64>,
     rows: i64,
     row_ids: Vec<i64>,

@@ -5,11 +5,12 @@
 //! domains, but does not perform that copying itself (that is the role of the `augmentation`
 //! module).
 
-use crate::controller::domain_handle::DomainHandle;
 use crate::controller::{
     inner::{graphviz, DomainReplies},
-    keys, Worker, WorkerIdentifier,
+    keys,
 };
+use crate::worker::domain_handle::DomainHandle;
+use crate::worker::{Worker, WorkerIdentifier};
 use dataflow::prelude::*;
 use petgraph;
 use petgraph::graph::NodeIndex;
@@ -238,10 +239,10 @@ impl Materializations {
 
             for columns in indices {
                 info!(self.log,
-                          "adding lookup index to view";
-                          "node" => ni.index(),
-                          "columns" => ?columns,
-                      );
+                    "adding lookup index to view";
+                    "node" => ni.index(),
+                    "columns" => ?columns,
+                );
 
                 if self.have.entry(mi).or_default().insert(columns.clone()) {
                     // also add a replay obligation to enable partial
@@ -734,9 +735,9 @@ impl Materializations {
 
             if reconstructed {
                 info!(self.log, "reconstruction completed";
-                      "ms" => start.elapsed().as_millis(),
-                      "node" => ni.index(),
-                      );
+                "ms" => start.elapsed().as_millis(),
+                "node" => ni.index(),
+                );
             }
         }
 

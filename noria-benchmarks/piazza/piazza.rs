@@ -1,7 +1,7 @@
 #[macro_use]
 extern crate clap;
 
-use noria::{DataType, LocalAuthority, ReuseConfigType, SyncWorkerHandle, WorkerBuilder};
+use noria::{Builder, DataType, LocalAuthority, ReuseConfigType, SyncHandle};
 use std::collections::HashMap;
 use std::fs::File;
 use std::io::Write;
@@ -13,7 +13,7 @@ mod populate;
 use crate::populate::{Populate, NANOS_PER_SEC};
 
 pub struct Backend {
-    g: SyncWorkerHandle<LocalAuthority>,
+    g: SyncHandle<LocalAuthority>,
 }
 
 #[derive(PartialEq)]
@@ -25,7 +25,7 @@ enum PopulateType {
 
 impl Backend {
     pub fn new(partial: bool, _shard: bool, reuse: &str) -> Backend {
-        let mut cb = WorkerBuilder::default();
+        let mut cb = Builder::default();
         let log = noria::logger_pls();
         let blender_log = log.clone();
 

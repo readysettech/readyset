@@ -6,8 +6,8 @@
 //!  - Egress nodes must be added to nodes that now have children in a different domain
 //!  - Egress nodes that gain new children must gain channels to facilitate forwarding
 
-use crate::controller::domain_handle::DomainHandle;
-use crate::controller::{Worker, WorkerIdentifier};
+use crate::worker::domain_handle::DomainHandle;
+use crate::worker::{Worker, WorkerIdentifier};
 use dataflow::node;
 use dataflow::prelude::*;
 use petgraph;
@@ -147,17 +147,17 @@ pub fn add(
 
                 if parent == source {
                     trace!(log,
-                               "adding source ingress";
-                               "base" => node.index(),
-                               "ingress" => ingress.index()
-                        );
+                           "adding source ingress";
+                           "base" => node.index(),
+                           "ingress" => ingress.index()
+                    );
                 } else {
                     trace!(log,
-                               "adding cross-domain ingress";
-                               "to" => node.index(),
-                               "from" => parent.index(),
-                               "ingress" => ingress.index()
-                        );
+                           "adding cross-domain ingress";
+                           "to" => node.index(),
+                           "from" => parent.index(),
+                           "ingress" => ingress.index()
+                    );
                 }
 
                 ingress
@@ -282,10 +282,10 @@ pub(super) fn connect(
             let sender_node = &graph[sender];
             if sender_node.is_egress() {
                 trace!(log,
-                           "connecting";
-                           "egress" => sender.index(),
-                           "ingress" => node.index()
-                    );
+                       "connecting";
+                       "egress" => sender.index(),
+                       "ingress" => node.index()
+                );
 
                 let shards = domains[&n.domain()].shards();
                 let domain = domains.get_mut(&sender_node.domain()).unwrap();
@@ -329,10 +329,10 @@ pub(super) fn connect(
                 }
             } else if sender_node.is_sharder() {
                 trace!(log,
-                           "connecting";
-                           "sharder" => sender.index(),
-                           "ingress" => node.index()
-                    );
+                       "connecting";
+                       "sharder" => sender.index(),
+                       "ingress" => node.index()
+                );
 
                 let shards = domains[&n.domain()].shards();
                 let txs = (0..shards).map(|i| (n.domain(), i)).collect();
