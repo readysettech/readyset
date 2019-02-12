@@ -783,29 +783,29 @@ fn prepared_no_cols() {
 }
 
 
-#[test]
-fn it_inits() {
-    struct TestBackend{ pub database: String }
-    impl MysqlShim<net::TcpStream> for TestBackend {
-        type Error = io::Error;
-        fn on_prepare(&mut self, _: &str, _: StatementMetaWriter<net::TcpStream>) -> io::Result<()> { Ok(()) }
-        fn on_execute(&mut self, _: u32, _: ParamParser, _: QueryResultWriter<net::TcpStream>) -> io::Result<()> {Ok(())}
-        fn on_close(&mut self, _: u32) {}
-        fn on_query(&mut self, _: &str, _: QueryResultWriter<net::TcpStream>) -> io::Result<()> { Ok(()) }
-        fn on_init(&mut self, schema: &str) -> io::Result<()> { 
-            if schema == "foobar" {
-                self.database = schema.to_owned();
-                Ok(()) 
-            } else {
-                Err(io::Error::new(io::ErrorKind::NotFound,format!("The rain falls down")))
-            }
-        }
-    }
-    let mut backend = TestBackend{database: String::from("NA")};
-    backend.on_init("foobar").unwrap();
-    assert_eq!(backend.database, "foobar".to_string());
-    match backend.on_init("foobar-not-found") {
-        Ok(()) => assert!(false),
-        Err(e) => assert_eq!( e.to_string(), io::Error::new(io::ErrorKind::NotFound, format!("The rain falls down")).to_string()),
-    }
-}
+//#[test]
+//fn it_inits() {
+//    struct TestBackend{ pub database: String }
+//    impl MysqlShim<net::TcpStream> for TestBackend {
+//        type Error = io::Error;
+//        fn on_prepare(&mut self, _: &str, _: StatementMetaWriter<net::TcpStream>) -> io::Result<()> { Ok(()) }
+//        fn on_execute(&mut self, _: u32, _: ParamParser, _: QueryResultWriter<net::TcpStream>) -> io::Result<()> {Ok(())}
+//        fn on_close(&mut self, _: u32) {}
+//        fn on_query(&mut self, _: &str, _: QueryResultWriter<net::TcpStream>) -> io::Result<()> { Ok(()) }
+//        fn on_init(&mut self, schema: &str) -> io::Result<()> { 
+//            if schema == "foobar" {
+//                self.database = schema.to_owned();
+//                Ok(()) 
+//            } else {
+//                Err(io::Error::new(io::ErrorKind::NotFound,format!("The rain falls down")))
+//            }
+//        }
+//    }
+//    let mut backend = TestBackend{database: String::from("NA")};
+//    backend.on_init("foobar").unwrap();
+//    assert_eq!(backend.database, "foobar".to_string());
+//    match backend.on_init("foobar-not-found") {
+//        Ok(()) => assert!(false),
+//        Err(e) => assert_eq!( e.to_string(), io::Error::new(io::ErrorKind::NotFound, format!("The rain falls down")).to_string()),
+//    }
+//}
