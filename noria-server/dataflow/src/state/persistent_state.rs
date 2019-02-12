@@ -16,11 +16,11 @@ type IndexEpoch = u64;
 type IndexSeq = u64;
 
 // RocksDB key used for storing meta information (like indices).
-const META_KEY: &'static [u8] = b"meta";
+const META_KEY: &[u8] = b"meta";
 // A default column family is always created, so we'll make use of that for meta information.
 // The indices themselves are stored in a column family each, with their position in
 // PersistentState::indices as name.
-const DEFAULT_CF: &'static str = "default";
+const DEFAULT_CF: &str = "default";
 
 // Maximum rows per WriteBatch when building new indices for existing rows.
 const INDEX_BATCH_SIZE: usize = 100_000;
@@ -214,7 +214,7 @@ impl State for PersistentState {
             .unwrap();
 
         // Build the new index for existing values:
-        if self.indices.len() > 0 {
+        if !self.indices.is_empty() {
             for chunk in self.all_rows().chunks(INDEX_BATCH_SIZE).into_iter() {
                 let mut batch = WriteBatch::default();
                 for (ref pk, ref value) in chunk {
@@ -261,18 +261,18 @@ impl State for PersistentState {
     }
 
     fn is_useful(&self) -> bool {
-        self.indices.len() > 0
+        !self.indices.is_empty()
     }
 
     fn is_partial(&self) -> bool {
         false
     }
 
-    fn mark_filled(&mut self, _: Vec<DataType>, _: &Tag) {
+    fn mark_filled(&mut self, _: Vec<DataType>, _: Tag) {
         unreachable!("PersistentState can't be partial")
     }
 
-    fn mark_hole(&mut self, _: &[DataType], _: &Tag) {
+    fn mark_hole(&mut self, _: &[DataType], _: Tag) {
         unreachable!("PersistentState can't be partial")
     }
 
@@ -280,7 +280,7 @@ impl State for PersistentState {
         unreachable!("can't evict keys from PersistentState")
     }
 
-    fn evict_keys(&mut self, _: &Tag, _: &[Vec<DataType>]) -> Option<(&[usize], u64)> {
+    fn evict_keys(&mut self, _: Tag, _: &[Vec<DataType>]) -> Option<(&[usize], u64)> {
         unreachable!("can't evict keys from PersistentState")
     }
 }
@@ -357,7 +357,7 @@ impl PersistentState {
             _directory: directory,
         };
 
-        if primary_key.is_some() && state.indices.len() == 0 {
+        if primary_key.is_some() && state.indices.is_empty() {
             // This is the first time we're initializing this PersistentState,
             // so persist the primary key index right away.
             let cf = state
@@ -1121,8 +1121,7 @@ mod tests {
         };
 
         // Then check that the rest exist:
-        for i in 1..3 {
-            let record = &records[i];
+        for record in &records[1..3] {
             match state.lookup(&[0], &KeyType::Single(&record[0])) {
                 LookupResult::Some(RecordResult::Owned(rows)) => assert_eq!(rows[0], **record),
                 _ => unreachable!(),
@@ -1131,6 +1130,7 @@ mod tests {
     }
 
     #[test]
+    #[allow(clippy::op_ref)]
     fn persistent_state_prefix_transform() {
         let mut state = setup_persistent("persistent_state_prefix_transform");
         state.add_key(&[0], None);
@@ -1156,7 +1156,6 @@ mod tests {
         assert!(prefix <= other_prefix);
 
         // 4) prefix(prefix(key)) == prefix(key)
-        let p = prefix.clone();
-        assert_eq!(prefix, transform_fns.transform(&p));
+        assert_eq!(prefix, transform_fns.transform(&prefix));
     }
 }

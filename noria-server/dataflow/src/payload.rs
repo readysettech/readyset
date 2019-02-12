@@ -78,6 +78,7 @@ pub struct SourceChannelIdentifier {
 }
 
 #[derive(Clone, Serialize, Deserialize)]
+#[allow(clippy::large_enum_variant)]
 pub enum Packet {
     // Data messages
     //
@@ -329,22 +330,22 @@ impl Packet {
     pub fn clone_data(&self) -> Self {
         match *self {
             Packet::Message {
-                ref link,
+                link,
                 ref data,
                 ref tracer,
             } => Packet::Message {
-                link: link.clone(),
+                link,
                 data: data.clone(),
                 tracer: tracer.clone(),
             },
             Packet::ReplayPiece {
-                ref link,
-                ref tag,
+                link,
+                tag,
                 ref data,
                 ref context,
             } => Packet::ReplayPiece {
-                link: link.clone(),
-                tag: tag.clone(),
+                link,
+                tag,
                 data: data.clone(),
                 context: context.clone(),
             },
@@ -353,20 +354,18 @@ impl Packet {
     }
 
     pub fn trace(&self, event: PacketEvent) {
-        match *self {
-            Packet::Message {
-                tracer: Some((tag, Some(ref sender))),
-                ..
-            } => {
-                use noria::debug::trace::{Event, EventType};
-                sender
-                    .send(Event {
-                        instant: time::Instant::now(),
-                        event: EventType::PacketEvent(event, tag),
-                    })
-                    .unwrap();
-            }
-            _ => {}
+        if let Packet::Message {
+            tracer: Some((tag, Some(ref sender))),
+            ..
+        } = *self
+        {
+            use noria::debug::trace::{Event, EventType};
+            sender
+                .send(Event {
+                    instant: time::Instant::now(),
+                    event: EventType::PacketEvent(event, tag),
+                })
+                .unwrap();
         }
     }
 

@@ -359,6 +359,8 @@
 #![deny(unused_extern_crates)]
 #![feature(fnbox)]
 #![feature(vec_remove_item)]
+#![allow(clippy::too_many_arguments)]
+#![allow(clippy::type_complexity)]
 
 #[macro_use]
 extern crate failure;
@@ -397,7 +399,7 @@ where
     use tokio::prelude::*;
     use tokio_threadpool::blocking;
     let mut wrap = Some(f);
-    future::poll_fn(|| blocking(|| wrap.take().unwrap()()))
+    future::poll_fn(|| blocking(wrap.take().unwrap()))
         .wait()
         .unwrap()
 }

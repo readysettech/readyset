@@ -243,6 +243,12 @@ pub struct ChannelCoordinator<K: Eq + Hash + Clone, T> {
     inner: RwLock<ChannelCoordinatorInner<K, T>>,
 }
 
+impl<K: Eq + Hash + Clone, T> Default for ChannelCoordinator<K, T> {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl<K: Eq + Hash + Clone, T> ChannelCoordinator<K, T> {
     pub fn new() -> Self {
         Self {
@@ -327,7 +333,7 @@ impl<T: Write> NonBlockingWriter<T> {
     }
 
     pub fn flush_to_inner(&mut self) -> io::Result<()> {
-        if self.buffer.len() > 0 {
+        if !self.buffer.is_empty() {
             while self.cursor < self.buffer.len() {
                 match self.writer.write(&self.buffer[self.cursor..])? {
                     0 => return Err(io::Error::from(io::ErrorKind::BrokenPipe)),

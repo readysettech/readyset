@@ -81,7 +81,7 @@ impl<A: Authority + 'static> Handle<A> {
     {
         let (ret_tx, ret_rx) = futures::sync::oneshot::channel();
         let (fin_tx, fin_rx) = futures::sync::oneshot::channel();
-        let b = Box::new(move |m: &mut Migration| -> () {
+        let b = Box::new(move |m: &mut Migration| {
             if ret_tx.send(f(m)).is_err() {
                 unreachable!("could not return migration result");
             }
@@ -134,10 +134,7 @@ impl<A: Authority + 'static> Handle<A> {
 
             let mut fields: Vec<_> = context.keys().collect();
             fields.sort();
-            let record: Vec<DataType> = fields
-                .iter()
-                .map(|&f| context.get(f).unwrap().clone())
-                .collect();
+            let record: Vec<DataType> = fields.iter().map(|&f| context[f].clone()).collect();
 
             c.table(&bname).and_then(|table| {
                 table

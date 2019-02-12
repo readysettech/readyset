@@ -146,6 +146,7 @@ where
 
     /// Process a single incoming message, optionally producing an update to be propagated to
     /// children.
+    #[allow(clippy::too_many_arguments)]
     fn on_input(
         &mut self,
         executor: &mut Executor,
@@ -157,6 +158,7 @@ where
         states: &StateMap,
     ) -> ProcessingResult;
 
+    #[allow(clippy::too_many_arguments)]
     fn on_input_raw(
         &mut self,
         executor: &mut Executor,
@@ -192,6 +194,8 @@ where
         false
     }
 
+    #[allow(clippy::type_complexity)]
+    #[allow(clippy::option_option)]
     fn query_through<'a>(
         &self,
         _columns: &[usize],
@@ -208,6 +212,8 @@ where
     ///  - `None` => no materialization of the parent state exists
     ///  - `Some(None)` => materialization exists, but lookup got a miss
     ///  - `Some(Some(rs))` => materialization exists, and got results rs
+    #[allow(clippy::type_complexity)]
+    #[allow(clippy::option_option)]
     fn lookup<'a>(
         &self,
         parent: LocalNodeIndex,

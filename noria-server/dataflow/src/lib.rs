@@ -130,8 +130,8 @@ impl PersistenceParameters {
         log_prefix: Option<String>,
         persistence_threads: i32,
     ) -> Self {
-        let log_prefix = log_prefix.unwrap_or(String::from("soup"));
-        assert!(!log_prefix.contains("-"));
+        let log_prefix = log_prefix.unwrap_or_else(|| String::from("soup"));
+        assert!(!log_prefix.contains('-'));
 
         Self {
             flush_timeout,

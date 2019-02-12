@@ -954,7 +954,7 @@ fn it_works_with_join_arithmetic() {
     // Retrieve the result of the count query:
     let result = getter.lookup(&[id.into()], true).unwrap();
     assert_eq!(result.len(), 1);
-    assert_eq!(result[0][1], (price as f64 * fraction).into());
+    assert_eq!(result[0][1], (f64::from(price) * fraction).into());
 }
 
 #[test]
@@ -969,7 +969,7 @@ fn it_works_with_function_arithmetic() {
     let mut mutator = g.table("Bread").unwrap().into_sync();
     let mut getter = g.view("Price").unwrap().into_sync();
     let max_price = 20;
-    for (i, price) in (10..max_price + 1).enumerate() {
+    for (i, price) in (10..=max_price).enumerate() {
         let id = i + 1;
         mutator.insert(vec![id.into(), price.into()]).unwrap();
     }
@@ -1242,10 +1242,7 @@ fn migrate_added_columns() {
 
     // set up graph
     let mut g = start_simple("migrate_added_columns");
-    let a = g.migrate(|mig| {
-        let a = mig.add_base("a", &["a", "b"], Base::new(vec![1.into(), 2.into()]));
-        a
-    });
+    let a = g.migrate(|mig| mig.add_base("a", &["a", "b"], Base::new(vec![1.into(), 2.into()])));
     let mut muta = g.table("a").unwrap().into_sync();
 
     // send a value on a
@@ -1761,7 +1758,6 @@ fn migration_depends_on_unchanged_domain() {
         );
         mig.add_ingredient("join", &["a", "b"], j);
     });
-    assert!(true);
 }
 
 fn do_full_vote_migration(sharded: bool, old_puts_after: bool) {
@@ -2157,9 +2153,9 @@ fn finkelstein1982_queries() {
         f.read_to_string(&mut s).unwrap();
         let lines: Vec<String> = s
             .lines()
-            .filter(|l| !l.is_empty() && !l.starts_with("#"))
+            .filter(|l| !l.is_empty() && !l.starts_with('#'))
             .map(|l| {
-                if !(l.ends_with("\n") || l.ends_with(";")) {
+                if !(l.ends_with('\n') || l.ends_with(';')) {
                     String::from(l) + "\n"
                 } else {
                     String::from(l)

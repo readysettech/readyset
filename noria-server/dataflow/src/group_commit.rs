@@ -4,6 +4,7 @@ use std::time;
 
 pub struct GroupCommitQueueSet {
     /// Packets that are queued to be persisted.
+    #[allow(clippy::vec_box)]
     pending_packets: Map<(time::Instant, Vec<Box<Packet>>)>,
     params: PersistenceParameters,
 }
@@ -18,8 +19,8 @@ impl GroupCommitQueueSet {
     }
 
     /// Returns whether the given packet should be persisted.
-    pub fn should_append(&self, p: &Box<Packet>, nodes: &DomainNodes) -> bool {
-        if let Packet::Input { .. } = **p {
+    pub fn should_append(&self, p: &Packet, nodes: &DomainNodes) -> bool {
+        if let Packet::Input { .. } = *p {
             assert!(nodes[p.dst()].borrow().is_base());
             true
         } else {
@@ -50,7 +51,7 @@ impl GroupCommitQueueSet {
 
     /// Add a new packet to be persisted, and if this triggered a flush return an iterator over the
     /// packets that were written.
-    pub fn append<'a>(&mut self, p: Box<Packet>) -> Option<Box<Packet>> {
+    pub fn append(&mut self, p: Box<Packet>) -> Option<Box<Packet>> {
         let node = p.dst();
         let pp = self
             .pending_packets
@@ -141,6 +142,7 @@ impl GroupCommitQueueSet {
     }
 
     /// Merge the contents of packets into a single packet, emptying packets in the process.
+    #[allow(clippy::vec_box)]
     fn merge_packets(packets: &mut Vec<Box<Packet>>) -> Option<Box<Packet>> {
         if packets.is_empty() {
             return None;

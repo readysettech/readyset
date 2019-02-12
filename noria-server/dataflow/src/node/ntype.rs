@@ -3,6 +3,7 @@ use ops;
 use processing::Ingredient;
 
 #[derive(Clone, Serialize, Deserialize)]
+#[allow(clippy::large_enum_variant)]
 pub enum NodeType {
     Ingress,
     Base(special::Base),

@@ -1,4 +1,6 @@
+#![feature(duration_float)]
 #![feature(type_ascription)]
+
 #[macro_use]
 extern crate clap;
 extern crate noria;
@@ -26,7 +28,10 @@ impl Backend {
     }
 
     pub fn read(&self, uid: i32) {
-        let qstring = format!("SELECT p_author, COUNT(p_id) FROM Post WHERE p_author={} GROUP BY p_author", uid);
+        let qstring = format!(
+            "SELECT p_author, COUNT(p_id) FROM Post WHERE p_author={} GROUP BY p_author",
+            uid
+        );
         self.pool.prep_exec(qstring, ()).unwrap();
     }
 
@@ -64,29 +69,30 @@ impl Backend {
     }
 
     fn populate(&self, name: &'static str, records: Vec<Vec<DataType>>) {
-        let params_arr: Vec<_> = records.iter().map(|ref r| {
-            match name.as_ref() {
-                "Role" => params!{
+        let params_arr: Vec<_> = records
+            .iter()
+            .map(|ref r| match name.as_ref() {
+                "Role" => params! {
                     "r_uid" => r[0].clone().into() : i32,
                     "r_cid" => r[1].clone().into() : i32,
                     "r_role" => r[2].clone().into() : i32,
                 },
-                "User" => params!{
+                "User" => params! {
                     "u_id" => r[0].clone().into() : i32,
                 },
-                "Post" => params!{
+                "Post" => params! {
                     "p_id" => r[0].clone().into() : i32,
                     "p_cid" => r[1].clone().into() : i32,
                     "p_author" => r[2].clone().into() : i32,
                     "p_content" => r[3].clone().into() : String,
                     "p_private" => r[4].clone().into() : i32,
                 },
-                "Class" => params!{
+                "Class" => params! {
                     "c_id" => r[0].clone().into() : i32,
                 },
                 _ => panic!("unspecified table"),
-            }
-        }).collect();
+            })
+            .collect();
 
         let qstring = match name.as_ref() {
             "Role" => "INSERT INTO Role (r_uid, r_cid, r_role) VALUES (:r_uid, :r_cid, :r_role)",
@@ -102,7 +108,7 @@ impl Backend {
                 stmt.execute(params).unwrap();
             }
         }
-        let dur = dur_to_fsec!(start.elapsed());
+        let dur = start.elapsed().as_float_secs();
         println!(
             "Inserted {} {} in {:.2}s ({:.2} PUTs/sec)!",
             records.len(),
@@ -127,50 +133,57 @@ impl Backend {
     }
 
     fn create_tables(&self) {
-        self.pool.prep_exec(
-            "CREATE TABLE Post ( \
-              p_id int(11) NOT NULL, \
-              p_cid int(11) NOT NULL, \
-              p_author int(11) NOT NULL, \
-              p_content varchar(258) NOT NULL, \
-              p_private tinyint(1) NOT NULL default '0', \
-              PRIMARY KEY (p_id), \
-              UNIQUE KEY p_id (p_id), \
-              KEY p_cid (p_cid), \
-              KEY p_author (p_author) \
-            );",
-            (),
-        ).unwrap();
+        self.pool
+            .prep_exec(
+                "CREATE TABLE Post ( \
+                 p_id int(11) NOT NULL, \
+                 p_cid int(11) NOT NULL, \
+                 p_author int(11) NOT NULL, \
+                 p_content varchar(258) NOT NULL, \
+                 p_private tinyint(1) NOT NULL default '0', \
+                 PRIMARY KEY (p_id), \
+                 UNIQUE KEY p_id (p_id), \
+                 KEY p_cid (p_cid), \
+                 KEY p_author (p_author) \
+                 );",
+                (),
+            )
+            .unwrap();
 
-        self.pool.prep_exec(
-            "CREATE TABLE User ( \
-              u_id int(11) NOT NULL, \
-              PRIMARY KEY  (u_id), \
-              UNIQUE KEY u_id (u_id) \
-            );",
-            (),
-        ).unwrap();
+        self.pool
+            .prep_exec(
+                "CREATE TABLE User ( \
+                 u_id int(11) NOT NULL, \
+                 PRIMARY KEY  (u_id), \
+                 UNIQUE KEY u_id (u_id) \
+                 );",
+                (),
+            )
+            .unwrap();
 
-        self.pool.prep_exec(
-            "CREATE TABLE Class ( \
-              c_id int(11) NOT NULL, \
-              PRIMARY KEY  (c_id), \
-              UNIQUE KEY c_id (c_id) \
-            );",
-            (),
-        ).unwrap();
+        self.pool
+            .prep_exec(
+                "CREATE TABLE Class ( \
+                 c_id int(11) NOT NULL, \
+                 PRIMARY KEY  (c_id), \
+                 UNIQUE KEY c_id (c_id) \
+                 );",
+                (),
+            )
+            .unwrap();
 
-        self.pool.prep_exec(
-            "CREATE TABLE Role ( \
-              r_uid int(11) NOT NULL, \
-              r_cid int(11) NOT NULL, \
-              r_role tinyint(1) NOT NULL default '0', \
-              KEY r_uid (r_uid), \
-              KEY r_cid (r_cid) \
-            );",
-            (),
-        ).unwrap();
-
+        self.pool
+            .prep_exec(
+                "CREATE TABLE Role ( \
+                 r_uid int(11) NOT NULL, \
+                 r_cid int(11) NOT NULL, \
+                 r_role tinyint(1) NOT NULL default '0', \
+                 KEY r_uid (r_uid), \
+                 KEY r_cid (r_cid) \
+                 );",
+                (),
+            )
+            .unwrap();
     }
 }
 
@@ -180,10 +193,7 @@ fn main() {
     let args = App::new("piazza-mysql")
         .version("0.1")
         .about("Benchmarks a forum like application with security policies using MySql")
-        .arg(
-            Arg::with_name("dbname")
-                .required(true),
-        )
+        .arg(Arg::with_name("dbname").required(true))
         .arg(
             Arg::with_name("nusers")
                 .short("u")
@@ -238,7 +248,7 @@ fn main() {
         backend.read(uid);
     }
 
-    let dur = dur_to_fsec!(start.elapsed());
+    let dur = start.elapsed().as_float_secs();
     println!(
         "GET without security: {} in {:.2}s ({:.2} GET/sec)!",
         nusers,
@@ -251,12 +261,11 @@ fn main() {
     for uid in 0..nusers {
         backend.secure_read(uid, 0);
     }
-    let dur = dur_to_fsec!(start.elapsed());
+    let dur = start.elapsed().as_float_secs();
     println!(
         "GET with security: {} in {:.2}s ({:.2} GET/sec)!",
         nusers,
         dur,
         (nusers) as f64 / dur
     );
-
 }

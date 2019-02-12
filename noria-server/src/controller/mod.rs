@@ -103,13 +103,11 @@ pub(crate) fn main<A: Authority + 'static>(
                             ctrl.external_request(method, path, query, body, &authority)
                         });
 
-                        if let Err(_) = reply_tx.send(reply) {
+                        if reply_tx.send(reply).is_err() {
                             warn!(log, "client hung up");
                         }
-                    } else {
-                        if let Err(_) = reply_tx.send(Err(StatusCode::NOT_FOUND)) {
-                            warn!(log, "client hung up for 404");
-                        }
+                    } else if reply_tx.send(Err(StatusCode::NOT_FOUND)).is_err() {
+                        warn!(log, "client hung up for 404");
                     }
                 }
                 #[cfg(test)]

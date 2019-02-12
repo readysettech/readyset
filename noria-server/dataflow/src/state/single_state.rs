@@ -117,12 +117,10 @@ impl SingleState {
                 // it *should* be impossible to get a negative for a record that we don't have
                 debug_assert_eq!(r, &rs[0][..]);
                 Some(rs.swap_remove(0))
+            } else if let Some(i) = rs.iter().position(|rsr| &rsr[..] == r) {
+                Some(rs.swap_remove(i))
             } else {
-                if let Some(i) = rs.iter().position(|rsr| &rsr[..] == r) {
-                    Some(rs.swap_remove(i))
-                } else {
-                    None
-                }
+                None
             };
 
             if rm.is_some() {
@@ -328,13 +326,11 @@ impl SingleState {
     pub fn lookup<'a>(&'a self, key: &KeyType) -> LookupResult<'a> {
         if let Some(rs) = self.state.lookup(key) {
             LookupResult::Some(RecordResult::Borrowed(&rs[..]))
+        } else if self.partial() {
+            // partially materialized, so this is a hole (empty results would be vec![])
+            LookupResult::Missing
         } else {
-            if self.partial() {
-                // partially materialized, so this is a hole (empty results would be vec![])
-                LookupResult::Missing
-            } else {
-                LookupResult::Some(RecordResult::Owned(vec![]))
-            }
+            LookupResult::Some(RecordResult::Owned(vec![]))
         }
     }
 }

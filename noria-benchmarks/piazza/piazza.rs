@@ -1,3 +1,5 @@
+#![feature(duration_float)]
+
 #[macro_use]
 extern crate clap;
 
@@ -10,7 +12,7 @@ use std::{thread, time};
 #[macro_use]
 mod populate;
 
-use crate::populate::{Populate, NANOS_PER_SEC};
+use crate::populate::Populate;
 
 pub struct Backend {
     g: SyncHandle<LocalAuthority>,
@@ -33,7 +35,7 @@ impl Backend {
             cb.disable_partial();
         }
 
-        match reuse.as_ref() {
+        match reuse {
             "finkelstein" => cb.set_reuse(ReuseConfigType::Finkelstein),
             "full" => cb.set_reuse(ReuseConfigType::Full),
             "noreuse" => cb.set_reuse(ReuseConfigType::NoReuse),
@@ -45,7 +47,7 @@ impl Backend {
 
         let g = cb.start_simple().unwrap();
 
-        Backend { g: g }
+        Backend { g }
     }
 
     pub fn populate(&mut self, name: &'static str, mut records: Vec<Vec<DataType>>) -> usize {
@@ -58,7 +60,7 @@ impl Backend {
             mutator.insert(r).unwrap();
         }
 
-        let dur = dur_to_fsec!(start.elapsed());
+        let dur = start.elapsed().as_float_secs();
         println!(
             "Inserted {} {} in {:.2}s ({:.2} PUTs/sec)!",
             i,
@@ -255,7 +257,7 @@ fn main() {
     backend.set_security_config(ploc);
     backend.migrate(sloc, Some(qloc)).unwrap();
 
-    let populate = match populate.as_ref() {
+    let populate = match populate {
         "before" => PopulateType::Before,
         "after" => PopulateType::After,
         _ => PopulateType::NoPopulate,
@@ -287,7 +289,7 @@ fn main() {
 
     // if partial, read 25% of the keys
     if partial {
-        let leaf = format!("post_count");
+        let leaf = "post_count".to_string();
         let mut getter = backend.g.view(&leaf).unwrap().into_sync();
         for author in 0..nusers / 4 {
             getter.lookup(&[author.into()], false).unwrap();
@@ -299,7 +301,7 @@ fn main() {
     for i in 0..nlogged {
         let start = time::Instant::now();
         backend.login(make_user(i)).is_ok();
-        let dur = dur_to_fsec!(start.elapsed());
+        let dur = start.elapsed().as_float_secs();
         println!("Migration {} took {:.2}s!", i, dur,);
 
         // if partial, read 25% of the keys
@@ -334,13 +336,13 @@ fn main() {
             dur += start.elapsed();
         }
 
-        let dur = dur_to_fsec!(dur);
+        let dur = dur.as_float_secs();
 
         println!(
             "Read {} keys in {:.2}s ({:.2} GETs/sec)!",
             nlogged * nusers,
             dur,
-            (nlogged * nusers) as f64 / dur,
+            f64::from(nlogged * nusers) / dur,
         );
     }
 

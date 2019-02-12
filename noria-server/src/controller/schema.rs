@@ -159,15 +159,9 @@ pub fn column_schema(
 
     let mut col_type = None;
     for p in paths {
-        match trace_column_type_on_path(p, graph, recipe, log) {
-            t @ Some(_) => col_type = t,
-            _ => (),
+        if let t @ Some(_) = trace_column_type_on_path(p, graph, recipe, log) {
+            col_type = t;
         }
-    }
-
-    // we found no schema for this column
-    if col_type.is_none() {
-        return None;
     }
 
     // found something, so return a ColumnSpecification
@@ -178,7 +172,8 @@ pub fn column_schema(
             alias: None,
             function: None,
         },
-        col_type.unwrap(),
+        // ? in case we found no schema for this column
+        col_type?,
     );
     Some(cs)
 }

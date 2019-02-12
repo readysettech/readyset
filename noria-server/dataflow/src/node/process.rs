@@ -6,6 +6,7 @@ use std::collections::{HashSet, VecDeque};
 use std::mem;
 
 impl Node {
+    #[allow(clippy::too_many_arguments)]
     pub(crate) fn process(
         &mut self,
         m: &mut Option<Box<Packet>>,
@@ -110,7 +111,7 @@ impl Node {
                         (&mut Packet::ReplayPiece {
                             context: payload::ReplayPieceContext::Regular { last },
                             ..
-                        },) => ReplayContext::Full { last: last },
+                        },) => ReplayContext::Full { last },
                         _ => ReplayContext::None,
                     };
 
@@ -305,6 +306,7 @@ fn reroute_miss(nodes: &DomainNodes, miss: &mut Miss) {
     }
 }
 
+#[allow(clippy::borrowed_box)]
 pub fn materialize(rs: &mut Records, partial: Option<Tag>, state: Option<&mut Box<State>>) {
     // our output changed -- do we need to modify materialized state?
     if state.is_none() {

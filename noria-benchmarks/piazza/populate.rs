@@ -3,14 +3,6 @@ use rand;
 use rand::Rng;
 use std::collections::HashMap;
 
-pub const NANOS_PER_SEC: u64 = 1_000_000_000;
-macro_rules! dur_to_fsec {
-    ($d:expr) => {{
-        let d = $d;
-        (d.as_secs() * NANOS_PER_SEC + d.subsec_nanos() as u64) as f64 / NANOS_PER_SEC as f64
-    }};
-}
-
 const CLASSES_PER_STUDENT: usize = 5;
 pub const TAS_PER_CLASS: usize = 5;
 
@@ -27,10 +19,10 @@ pub struct Populate {
 impl Populate {
     pub fn new(nposts: i32, nusers: i32, nclasses: i32, private: f32) -> Populate {
         Populate {
-            nposts: nposts,
-            nusers: nusers,
-            nclasses: nclasses,
-            private: private,
+            nposts,
+            nusers,
+            nclasses,
+            private,
             rng: rand::thread_rng(),
             students: HashMap::new(),
             tas: HashMap::new(),

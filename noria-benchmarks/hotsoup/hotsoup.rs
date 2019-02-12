@@ -1,3 +1,5 @@
+#![feature(duration_float)]
+
 mod populate;
 
 #[macro_use]
@@ -24,9 +26,9 @@ fn make(blacklist: &str, sharding: bool, partial: bool) -> Box<Backend> {
     bf.read_to_string(&mut s).unwrap();
     let blacklisted_queries = s
         .lines()
-        .filter(|l| !l.is_empty() && !l.starts_with("#"))
-        .map(|l| String::from(l.split(":").next().unwrap()))
-        .map(|l| String::from(l.split("_").nth(1).unwrap()))
+        .filter(|l| !l.is_empty() && !l.starts_with('#'))
+        .map(|l| String::from(l.split(':').next().unwrap()))
+        .map(|l| String::from(l.split('_').nth(1).unwrap()))
         .collect();
 
     // set up graph
@@ -46,8 +48,8 @@ fn make(blacklist: &str, sharding: bool, partial: bool) -> Box<Backend> {
     Box::new(Backend {
         blacklist: blacklisted_queries,
         r: String::new(),
-        log: log,
-        g: g,
+        log,
+        g,
     })
 }
 
@@ -56,7 +58,7 @@ impl Backend {
         use std::fs::File;
         use std::io::Read;
 
-        let ref blacklist = self.blacklist;
+        let blacklist = &self.blacklist;
 
         let mut sf = File::open(schema_file).unwrap();
         let mut s = String::new();
@@ -85,8 +87,8 @@ impl Backend {
                     &s.lines()
                         .filter(|ref l| {
                             // make sure to skip blacklisted queries
-                            for ref q in blacklist {
-                                if l.contains(*q) || l.contains("LIKE") || l.contains("like") {
+                            for q in blacklist {
+                                if l.contains(q) || l.contains("LIKE") || l.contains("like") {
                                     blacklisted += 1;
                                     return false;
                                 }
@@ -283,14 +285,11 @@ fn main() {
         } else {
             Some(qf.1.to_str().unwrap())
         };
-        match backend.migrate(&sf.1.to_str().unwrap(), queries) {
-            Err(e) => {
-                let graph_fname = format!("{}/failed_hotcrp_{}.gv", gloc.unwrap(), schema_version);
-                let mut gf = File::create(graph_fname).unwrap();
-                assert!(write!(gf, "{}", backend.g.graphviz().unwrap()).is_ok());
-                panic!(e)
-            }
-            _ => (),
+        if let Err(e) = backend.migrate(&sf.1.to_str().unwrap(), queries) {
+            let graph_fname = format!("{}/failed_hotcrp_{}.gv", gloc.unwrap(), schema_version);
+            let mut gf = File::create(graph_fname).unwrap();
+            assert!(write!(gf, "{}", backend.g.graphviz().unwrap()).is_ok());
+            panic!(e)
         }
 
         if gloc.is_some() {

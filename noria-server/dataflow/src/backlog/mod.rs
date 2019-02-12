@@ -68,13 +68,13 @@ fn new_inner(
         partial: trigger.is_some(),
         handle: w,
         key: Vec::from(key),
-        cols: cols,
+        cols,
         contiguous,
         mem_size: 0,
     };
     let r = SingleReadHandle {
         handle: r,
-        trigger: trigger,
+        trigger,
         key: Vec::from(key),
     };
 
@@ -84,7 +84,7 @@ fn new_inner(
 mod multir;
 mod multiw;
 
-fn key_to_single<'a>(k: Key<'a>) -> Cow<'a, DataType> {
+fn key_to_single(k: Key) -> Cow<DataType> {
     assert_eq!(k.len(), 1);
     match k {
         Cow::Owned(mut k) => Cow::Owned(k.swap_remove(0)),
@@ -92,7 +92,7 @@ fn key_to_single<'a>(k: Key<'a>) -> Cow<'a, DataType> {
     }
 }
 
-fn key_to_double<'a>(k: Key<'a>) -> Cow<'a, (DataType, DataType)> {
+fn key_to_double(k: Key) -> Cow<(DataType, DataType)> {
     assert_eq!(k.len(), 2);
     match k {
         Cow::Owned(k) => {
@@ -170,7 +170,7 @@ where
     match record.into() {
         Cow::Owned(mut record) => {
             let mut i = 0;
-            let mut keep = key.into_iter().peekable();
+            let mut keep = key.iter().peekable();
             record.retain(|_| {
                 i += 1;
                 if let Some(&&next) = keep.peek() {
@@ -267,7 +267,7 @@ impl WriteHandle {
             match self.handle.empty_at_index(rng.gen()) {
                 None => (),
                 Some(vs) => {
-                    let size: u64 = vs.into_iter().map(|r| r.deep_size_of() as u64).sum();
+                    let size: u64 = vs.iter().map(|r| r.deep_size_of() as u64).sum();
                     bytes_to_be_freed += size;
                 }
             }
@@ -340,6 +340,11 @@ impl SingleReadHandle {
         self.handle.len()
     }
 
+    #[allow(dead_code)]
+    pub fn is_empty(&self) -> bool {
+        self.handle.len() == 0
+    }
+
     /// Count the number of rows in the reader.
     /// This is a potentially very costly operation, since it will
     /// hold up writers until all rows are iterated through.
@@ -390,6 +395,10 @@ impl ReadHandle {
         }
     }
 
+    pub fn is_empty(&self) -> bool {
+        self.len() == 0
+    }
+
     pub fn set_single_handle(&mut self, shard: Option<usize>, handle: SingleReadHandle) {
         match (self, shard) {
             (&mut ReadHandle::Singleton(ref mut srh), None) => {
@@ -398,12 +407,12 @@ impl ReadHandle {
             (&mut ReadHandle::Sharded(ref mut rhs), None) => {
                 // when ::SHARDS == 1, sharded domains think they're unsharded
                 assert_eq!(rhs.len(), 1);
-                let srh = rhs.get_mut(0).unwrap();
+                let srh = &mut rhs[0];
                 assert!(srh.is_none());
                 *srh = Some(handle)
             }
             (&mut ReadHandle::Sharded(ref mut rhs), Some(shard)) => {
-                let srh = rhs.get_mut(shard).unwrap();
+                let srh = &mut rhs[shard];
                 assert!(srh.is_none());
                 *srh = Some(handle)
             }

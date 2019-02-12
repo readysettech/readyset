@@ -25,13 +25,11 @@ fn extract_condition_columns(ce: &ConditionExpression) -> Vec<Column> {
             ..
         }) => {
             let mut cols = vec![];
-            match *left {
-                ConditionExpression::Base(ConditionBase::Field(ref f)) => cols.push(f.clone()),
-                _ => (),
+            if let ConditionExpression::Base(ConditionBase::Field(ref f)) = *left {
+                cols.push(f.clone());
             }
-            match *right {
-                ConditionExpression::Base(ConditionBase::Field(ref f)) => cols.push(f.clone()),
-                _ => (),
+            if let ConditionExpression::Base(ConditionBase::Field(ref f)) = *right {
+                cols.push(f.clone());
             }
 
             cols
@@ -48,16 +46,12 @@ impl CountStarRewrite for SqlQuery {
 
         let rewrite_count_star =
             |c: &mut Column, tables: &Vec<Table>, avoid_columns: &Vec<Column>| {
-                assert!(tables.len() > 0);
+                assert!(!tables.is_empty());
                 if let Some(box CountStar) = c.function {
-                    let bogo_table = tables.get(0).unwrap();
+                    let bogo_table = &tables[0];
                     let mut schema_iter = write_schemas.get(&bogo_table.name).unwrap().iter();
                     let mut bogo_column = schema_iter.next().unwrap();
-                    while avoid_columns
-                        .iter()
-                        .position(|c| c.name == *bogo_column)
-                        .is_some()
-                    {
+                    while avoid_columns.iter().any(|c| c.name == *bogo_column) {
                         bogo_column = schema_iter
                             .next()
                             .expect("ran out of columns trying to pick a bogo column for COUNT(*)");
@@ -81,19 +75,18 @@ impl CountStarRewrite for SqlQuery {
                 // Expand within field list
                 let tables = sq.tables.clone();
                 let mut avoid_cols = vec![];
-                match sq.group_by {
-                    Some(ref gbc) => avoid_cols.extend(gbc.columns.clone()),
-                    None => (),
-                };
+                if let Some(ref gbc) = sq.group_by {
+                    avoid_cols.extend(gbc.columns.clone());
+                }
                 if let Some(ref w) = sq.where_clause {
                     avoid_cols.extend(extract_condition_columns(w));
                 }
                 for field in sq.fields.iter_mut() {
-                    match field {
-                        &mut FieldDefinitionExpression::All => panic!(err),
-                        &mut FieldDefinitionExpression::AllInTable(_) => panic!(err),
-                        &mut FieldDefinitionExpression::Value(_) => (),
-                        &mut FieldDefinitionExpression::Col(ref mut c) => {
+                    match *field {
+                        FieldDefinitionExpression::All => panic!(err),
+                        FieldDefinitionExpression::AllInTable(_) => panic!(err),
+                        FieldDefinitionExpression::Value(_) => (),
+                        FieldDefinitionExpression::Col(ref mut c) => {
                             rewrite_count_star(c, &tables, &avoid_cols)
                         }
                     }

@@ -58,7 +58,7 @@ impl ReuseConfig {
     pub fn reorder_joins(
         &self,
         qg: &mut QueryGraph,
-        reuse_candidates: &Vec<(ReuseType, (u64, &QueryGraph))>,
+        reuse_candidates: &[(ReuseType, (u64, &QueryGraph))],
     ) {
         reorder_joins(qg, reuse_candidates);
     }
@@ -74,12 +74,9 @@ impl ReuseConfig {
         let (_, group) = universe;
 
         // Find one universe that belongs to the same group
-        match universes.get(&group) {
-            Some(ref uids) => {
-                let grouped = uids.first().unwrap().clone();
-                reuse_universes.push(grouped);
-            }
-            None => (),
+        if let Some(ref uids) = universes.get(&group) {
+            let grouped = uids.first().unwrap().clone();
+            reuse_universes.push(grouped);
         }
 
         reuse_universes

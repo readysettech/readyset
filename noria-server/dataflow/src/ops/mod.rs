@@ -16,6 +16,7 @@ pub mod trigger;
 pub mod union;
 
 #[derive(Clone, Serialize, Deserialize)]
+#[allow(clippy::large_enum_variant)]
 pub enum NodeOperator {
     Sum(grouped::GroupedOperator<grouped::aggregate::Aggregator>),
     Extremum(grouped::GroupedOperator<grouped::extremum::ExtremumOperator>),
@@ -188,6 +189,7 @@ impl Ingredient for NodeOperator {
     fn can_query_through(&self) -> bool {
         impl_ingredient_fn_ref!(self, can_query_through,)
     }
+    #[allow(clippy::type_complexity)]
     fn query_through<'a>(
         &self,
         columns: &[usize],
@@ -197,6 +199,7 @@ impl Ingredient for NodeOperator {
     ) -> Option<Option<Box<Iterator<Item = Cow<'a, [DataType]>> + 'a>>> {
         impl_ingredient_fn_ref!(self, query_through, columns, key, nodes, states)
     }
+    #[allow(clippy::type_complexity)]
     fn lookup<'a>(
         &self,
         parent: LocalNodeIndex,
@@ -237,6 +240,7 @@ pub mod test {
         remap: HashMap<NodeIndex, IndexPair>,
     }
 
+    #[allow(clippy::new_without_default)]
     impl MockGraph {
         pub fn new() -> MockGraph {
             let mut graph = Graph::new();
@@ -246,8 +250,8 @@ pub mod test {
                 node::NodeType::Source,
             ));
             MockGraph {
-                graph: graph,
-                source: source,
+                graph,
+                source,
                 nut: None,
                 states: StateMap::new(),
                 nodes: DomainNodes::default(),
@@ -438,8 +442,7 @@ pub mod test {
             if let Some(ref mut state) = self.states.get_mut(*base) {
                 state.process_records(&mut vec![data].into(), None);
             } else {
-                assert!(
-                    false,
+                panic!(
                     "unnecessary seed value for {} (never used by any node)",
                     base.as_global().index()
                 );

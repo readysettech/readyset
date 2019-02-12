@@ -72,7 +72,7 @@ fn hash_query(q: &SqlQuery) -> QueryID {
 
 #[inline]
 fn is_ident(chr: u8) -> bool {
-    is_alphanumeric(chr) || chr == '_' as u8
+    is_alphanumeric(chr) || chr as char == '_'
 }
 
 named!(query_expr<&[u8], (bool, Option<String>, SqlQuery)>,
@@ -178,7 +178,7 @@ impl Recipe {
                     Some(na) => Ok(na),
                 }
             }
-            None => Err(format!("Recipe not applied")),
+            None => Err("Recipe not applied".to_string()),
         }
     }
 
@@ -191,7 +191,7 @@ impl Recipe {
                     None => inc.get_view_schema(name),
                     Some(ref internal_qn) => inc.get_view_schema(internal_qn),
                 };
-                s.map(|s| Schema::View(s))
+                s.map(Schema::View)
             }
             Some(s) => Some(Schema::Table(s)),
         }
@@ -252,7 +252,7 @@ impl Recipe {
                         aliases.insert(name.clone(), qid);
                     }
                 }
-                (qid.into(), (n, q, is_leaf))
+                (qid, (n, q, is_leaf))
             })
             .collect::<HashMap<QueryID, (Option<String>, SqlQuery, bool)>>();
 
@@ -269,14 +269,14 @@ impl Recipe {
         debug!(log, "{} duplicate queries", duplicates; "version" => 0);
 
         Recipe {
-            expressions: expressions,
-            expression_order: expression_order,
-            aliases: aliases,
+            expressions,
+            expression_order,
+            aliases,
             security_config: None,
             version: 0,
             prior: None,
             inc: Some(inc),
-            log: log,
+            log,
         }
     }
 
@@ -569,10 +569,10 @@ impl Recipe {
     fn parse(recipe_text: &str) -> Result<Vec<(Option<String>, SqlQuery, bool)>, String> {
         let lines: Vec<&str> = recipe_text
             .lines()
-            .filter(|l| !l.is_empty() && !l.starts_with("#"))
+            .filter(|l| !l.is_empty() && !l.starts_with('#'))
             .map(|l| {
                 // remove inline comments, too
-                match l.find("#") {
+                match l.find('#') {
                     None => l.trim(),
                     Some(pos) => &l[0..pos - 1].trim(),
                 }
@@ -581,7 +581,7 @@ impl Recipe {
         let mut query_strings = Vec::new();
         let mut q = String::new();
         for l in lines {
-            if !l.ends_with(";") {
+            if !l.ends_with(';') {
                 q.push_str(l);
                 q.push_str(" ");
             } else {
@@ -594,20 +594,20 @@ impl Recipe {
 
         let parsed_queries = query_strings
             .iter()
-            .map(|ref q| (q.clone(), query_expr(q.as_bytes())))
+            .map(|q| (q, query_expr(q.as_bytes())))
             .collect::<Vec<_>>();
 
         if !parsed_queries.iter().all(|pq| pq.1.is_done()) {
             for pq in parsed_queries {
                 match pq.1 {
                     nom::IResult::Error(e) => {
-                        return Err(format!("Query \"{}\", parse error: {}", pq.0, e))
+                        return Err(format!("Query \"{}\", parse error: {}", pq.0, e));
                     }
                     nom::IResult::Done(_, _) => (),
                     nom::IResult::Incomplete(_) => unreachable!(),
                 }
             }
-            return Err(format!("Failed to parse recipe!"));
+            return Err("Failed to parse recipe!".to_string());
         }
 
         Ok(parsed_queries
@@ -620,8 +620,8 @@ impl Recipe {
     }
 
     /// Returns the predecessor from which this `Recipe` was migrated to.
-    pub fn prior(&self) -> Option<&Box<Recipe>> {
-        self.prior.as_ref()
+    pub fn prior(&self) -> Option<&Recipe> {
+        self.prior.as_ref().map(|p| &**p)
     }
 
     pub(crate) fn remove_query(&mut self, qname: &str) -> bool {

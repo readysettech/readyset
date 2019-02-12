@@ -32,7 +32,7 @@ impl Extremum {
             src,
             ExtremumOperator {
                 op: self,
-                over: over,
+                over,
                 group: group_by.into(),
             },
         )
@@ -79,7 +79,7 @@ impl GroupedOperation for ExtremumOperator {
 
     fn to_diff(&self, r: &[DataType], pos: bool) -> Self::Diff {
         let v = match r[self.over] {
-            DataType::Int(n) => n as i64,
+            DataType::Int(n) => i64::from(n),
             DataType::BigInt(n) => n,
             _ => {
                 // the column we're aggregating over is non-numerical (or rather, this value is).
@@ -112,7 +112,7 @@ impl GroupedOperation for ExtremumOperator {
         let mut extreme_values: Vec<i64> = vec![];
         if let Some(data) = current {
             match *data {
-                DataType::Int(n) => extreme_values.push(n as i64),
+                DataType::Int(n) => extreme_values.push(i64::from(n)),
                 DataType::BigInt(n) => extreme_values.push(n),
                 _ => unreachable!(),
             }
@@ -121,7 +121,7 @@ impl GroupedOperation for ExtremumOperator {
         let is_extreme_value = |x: i64| {
             if let Some(data) = current {
                 let n = match *data {
-                    DataType::Int(n) => n as i64,
+                    DataType::Int(n) => i64::from(n),
                     DataType::BigInt(n) => n,
                     _ => unreachable!(),
                 };

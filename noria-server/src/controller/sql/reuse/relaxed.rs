@@ -39,12 +39,9 @@ impl ReuseConfiguration for Relaxed {
                 .signature()
                 .is_weak_generalization_of(&qg.signature())
             {
-                match Self::check_compatibility(&qg, &existing_qg) {
-                    Some(reuse) => {
-                        // QGs are compatible, we can reuse `existing_qg` as part of `qg`!
-                        reuse_candidates.push((reuse, (sig.clone(), existing_qg)));
-                    }
-                    None => (),
+                if let Some(reuse) = Self::check_compatibility(&qg, &existing_qg) {
+                    // QGs are compatible, we can reuse `existing_qg` as part of `qg`!
+                    reuse_candidates.push((reuse, (*sig, existing_qg)));
                 }
             }
         }
@@ -163,6 +160,6 @@ impl Relaxed {
         // projected columns don't influence the reuse opportunities in this case, since
         // we are only trying to reuse the query partially, not completely extending it.
 
-        return Some(ReuseType::DirectExtension);
+        Some(ReuseType::DirectExtension)
     }
 }

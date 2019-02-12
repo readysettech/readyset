@@ -24,17 +24,14 @@ impl ReuseConfiguration for Finkelstein {
                 .signature()
                 .is_generalization_of(&qg.signature())
             {
-                match Self::check_compatibility(&qg, &existing_qg) {
-                    Some(reuse) => {
-                        // QGs are compatible, we can reuse `existing_qg` as part of `qg`!
-                        reuse_candidates.push((reuse, (sig.clone(), existing_qg)));
-                    }
-                    None => (),
+                if let Some(reuse) = Self::check_compatibility(&qg, &existing_qg) {
+                    // QGs are compatible, we can reuse `existing_qg` as part of `qg`!
+                    reuse_candidates.push((reuse, (*sig, existing_qg)));
                 }
             }
         }
 
-        if reuse_candidates.len() > 0 {
+        if !reuse_candidates.is_empty() {
             vec![Self::choose_best_option(reuse_candidates)]
         } else {
             reuse_candidates
@@ -161,7 +158,7 @@ impl Finkelstein {
         }
 
         // we don't need to check projected columns to reuse a prefix of the query
-        return Some(ReuseType::DirectExtension);
+        Some(ReuseType::DirectExtension)
 
         // 5. Consider projected columns
         //   5a. NQG projects a subset of EQG's edges --> can use directly

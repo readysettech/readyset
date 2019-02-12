@@ -28,7 +28,7 @@ impl DomainHandle {
     }
 
     pub fn assignment(&self, shard: usize) -> WorkerIdentifier {
-        self.shards[shard].worker.clone()
+        self.shards[shard].worker
     }
 
     pub fn assigned_to_worker(&self, worker: &WorkerIdentifier) -> bool {

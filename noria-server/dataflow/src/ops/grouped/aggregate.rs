@@ -32,7 +32,7 @@ impl Aggregation {
             src,
             Aggregator {
                 op: self,
-                over: over,
+                over,
                 group: group_by.into(),
             },
         )
@@ -79,7 +79,7 @@ impl GroupedOperation for Aggregator {
             Aggregation::COUNT => -1,
             Aggregation::SUM => {
                 let v = match r[self.over] {
-                    DataType::Int(n) => n as i64,
+                    DataType::Int(n) => i64::from(n),
                     DataType::BigInt(n) => n,
                     DataType::None => 0,
                     ref x => unreachable!("tried to aggregate over {:?} on {:?}", x, r),
@@ -99,12 +99,12 @@ impl GroupedOperation for Aggregator {
         diffs: &mut Iterator<Item = Self::Diff>,
     ) -> DataType {
         let n = match current {
-            Some(&DataType::Int(n)) => n as i64,
+            Some(&DataType::Int(n)) => i64::from(n),
             Some(&DataType::BigInt(n)) => n,
             None => 0,
             _ => unreachable!(),
         };
-        diffs.into_iter().fold(n, |n, d| n + d).into()
+        diffs.fold(n, |n, d| n + d).into()
     }
 
     fn description(&self, detailed: bool) -> String {
@@ -175,6 +175,7 @@ mod tests {
     }
 
     #[test]
+    #[allow(clippy::cyclomatic_complexity)]
     fn it_forwards() {
         let mut c = setup(true);
 
@@ -297,6 +298,7 @@ mod tests {
     }
 
     #[test]
+    #[allow(clippy::cyclomatic_complexity)]
     fn it_groups_by_multiple_columns() {
         let mut c = setup_multicolumn(true);
 

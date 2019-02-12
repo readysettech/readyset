@@ -7,6 +7,7 @@ use prelude::*;
 
 type FnvHashMap<K, V> = RaHashMap<K, V, FnvBuildHasher>;
 
+#[allow(clippy::type_complexity)]
 pub enum KeyedState {
     Single(FnvHashMap<DataType, Vec<Row>>),
     Double(FnvHashMap<(DataType, DataType), Vec<Row>>),

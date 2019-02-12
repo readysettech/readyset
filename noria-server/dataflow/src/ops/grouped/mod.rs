@@ -123,16 +123,11 @@ where
 
         // build a translation mechanism for going from output columns to input columns
         let colfix: Vec<_> = (0..self.cols)
-            .into_iter()
-            .filter_map(|col| {
-                if self.group_by.iter().any(|c| c == &col) {
-                    // since the generated value goes at the end,
-                    // this is the n'th output value
-                    Some(col)
-                } else {
-                    // this column does not appear in output
-                    None
-                }
+            .filter(|col| {
+                // since the generated value goes at the end,
+                // this is the n'th output value
+                // otherwise this column does not appear in output
+                self.group_by.iter().any(|c| c == col)
             })
             .collect();
         self.colfix.extend(colfix.into_iter());
@@ -274,7 +269,7 @@ where
 
         ProcessingResult {
             results: out.into(),
-            misses: misses,
+            misses,
         }
     }
 

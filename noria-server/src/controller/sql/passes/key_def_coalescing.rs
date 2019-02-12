@@ -18,7 +18,7 @@ impl KeyDefinitionCoalescing for SqlQuery {
                 for cs in pkeys {
                     pk.push(cs.column.clone())
                 }
-                if pk.len() > 0 {
+                if !pk.is_empty() {
                     ctq.keys = match ctq.keys {
                         None => Some(vec![TableKey::PrimaryKey(pk)]),
                         Some(mut ks) => {

@@ -27,7 +27,7 @@ impl Backend {
 
         cb.log_with(blender_log);
 
-        match reuse.as_ref() {
+        match reuse {
             "finkelstein" => cb.set_reuse(ReuseConfigType::Finkelstein),
             "full" => cb.set_reuse(ReuseConfigType::Full),
             "noreuse" => cb.set_reuse(ReuseConfigType::NoReuse),
@@ -37,7 +37,7 @@ impl Backend {
 
         let g = cb.start_simple().unwrap();
 
-        Backend { g: g }
+        Backend { g }
     }
 
     fn login(&mut self, user_context: HashMap<String, DataType>) -> Result<(), String> {
@@ -190,5 +190,5 @@ fn main() {
     }
 
     // sleep "forever"
-    thread::sleep(time::Duration::from_millis(200000000));
+    thread::sleep(time::Duration::from_millis(200_000_000));
 }

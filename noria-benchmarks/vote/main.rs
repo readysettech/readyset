@@ -1,6 +1,7 @@
 #![feature(try_from)]
 #![feature(try_blocks)]
 #![feature(existential_type)]
+#![feature(duration_float)]
 
 #[macro_use]
 extern crate clap;
@@ -25,7 +26,7 @@ thread_local! {
 }
 
 fn throughput(ops: usize, took: time::Duration) -> f64 {
-    ops as f64 / (took.as_secs() as f64 + took.subsec_nanos() as f64 / 1_000_000_000f64)
+    ops as f64 / took.as_float_secs()
 }
 
 const MAX_BATCH_TIME_US: u32 = 1000;
@@ -55,7 +56,7 @@ where
 
     let params = Parameters {
         prime: !global_args.is_present("no-prime"),
-        articles: articles,
+        articles,
     };
 
     let skewed = match global_args.value_of("distribution") {
@@ -138,7 +139,7 @@ where
             thread::Builder::new()
                 .name(format!("load-gen{}", geni))
                 .spawn(move || {
-                    let ops = if skewed {
+                    if skewed {
                         run_generator(
                             handle,
                             ex,
@@ -154,8 +155,7 @@ where
                             target,
                             global_args,
                         )
-                    };
-                    ops
+                    }
                 })
                 .unwrap()
         })
@@ -325,7 +325,8 @@ where
             if sent.duration_since(start) > warmup {
                 let remote_t = done.duration_since(sent);
                 let rmt = if write { &RMT_W } else { &RMT_R };
-                let us = remote_t.as_secs() * 1_000_000 + remote_t.subsec_nanos() as u64 / 1_000;
+                let us =
+                    remote_t.as_secs() * 1_000_000 + u64::from(remote_t.subsec_nanos()) / 1_000;
                 rmt.with(|h| {
                     let mut h = h.borrow_mut();
                     if h.record(us).is_err() {
@@ -337,7 +338,8 @@ where
                 let sjrn = if write { &SJRN_W } else { &SJRN_R };
                 for started in queued {
                     let sjrn_t = done.duration_since(started);
-                    let us = sjrn_t.as_secs() * 1_000_000 + sjrn_t.subsec_nanos() as u64 / 1_000;
+                    let us =
+                        sjrn_t.as_secs() * 1_000_000 + u64::from(sjrn_t.subsec_nanos()) / 1_000;
                     sjrn.with(|h| {
                         let mut h = h.borrow_mut();
                         if h.record(us).is_err() {
@@ -366,7 +368,7 @@ where
             // only queue a new request if we're told to. if this is not the case, we've
             // just been woken up so we can realize we need to send a batch
             let id = id_rng.sample(&mut rng) as i32;
-            if rng.gen_bool(1.0 / every as f64) {
+            if rng.gen_bool(1.0 / f64::from(every)) {
                 if queued_w.is_empty() && next_send.is_none() {
                     next_send = Some(next + max_batch_time);
                 }

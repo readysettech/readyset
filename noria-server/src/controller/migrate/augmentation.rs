@@ -60,7 +60,7 @@ pub fn inform(
             trace!(log, "request addition of node"; "node" => ni.index());
             ctx.send_to_healthy(
                 box Packet::AddNode {
-                    node: node,
+                    node,
                     parents: old_parents,
                 },
                 &controller.workers,

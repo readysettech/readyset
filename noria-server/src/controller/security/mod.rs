@@ -32,7 +32,7 @@ impl SecurityConfig {
 
         SecurityConfig {
             groups: groups_map,
-            policies: policies,
+            policies,
         }
     }
 

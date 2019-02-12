@@ -94,7 +94,7 @@ impl Builder {
                 vote: inputs["Vote"],
                 article: inputs["Article"],
                 end: outputs["ArticleWithVoteCount"],
-                stupid: stupid,
+                stupid,
                 graph,
             })
     }

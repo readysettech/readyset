@@ -24,6 +24,7 @@ use std::boxed::FnBox;
 pub(crate) use crate::handle::Handle;
 pub(crate) use crate::Config;
 
+#[allow(clippy::large_enum_variant)]
 pub(crate) enum Event {
     InternalMessage(CoordinationMessage),
     ExternalRequest(
@@ -242,7 +243,7 @@ fn listen_external<A: Authority + 'static>(
             let mut res = Response::builder();
             // disable CORS to allow use as API server
             res.header(hyper::header::ACCESS_CONTROL_ALLOW_ORIGIN, "*");
-            if let &Method::GET = req.method() {
+            if let Method::GET = *req.method() {
                 match req.uri().path() {
                     "/graph.html" => {
                         res.header(CONTENT_TYPE, "text/html");

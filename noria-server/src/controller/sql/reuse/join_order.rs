@@ -36,7 +36,7 @@ impl JoinChain {
         !self.tables.is_disjoint(&other.tables)
     }
 
-    fn has_table(&self, table: &String) -> bool {
+    fn has_table(&self, table: &str) -> bool {
         self.tables.contains(table)
     }
 
@@ -50,9 +50,9 @@ impl JoinChain {
         let stopped = self.stopped && other.stopped;
 
         JoinChain {
-            tables: tables,
-            join_order: join_order,
-            stopped: stopped,
+            tables,
+            join_order,
+            stopped,
         }
     }
 }
@@ -116,15 +116,13 @@ fn chains_to_order(chains: Vec<JoinChain>, order: &mut Vec<JoinRef>) {
 }
 
 fn from_join_ref<'a>(jref: &JoinRef, qg: &'a QueryGraph) -> &'a ConditionTree {
-    let edge = qg.edges.get(&(jref.src.clone(), jref.dst.clone())).unwrap();
-    match *edge {
-        QueryGraphEdge::Join(ref jps) => jps.get(jref.index).unwrap(),
-        QueryGraphEdge::LeftJoin(ref jps) => jps.get(jref.index).unwrap(),
+    match qg.edges[&(jref.src.clone(), jref.dst.clone())] {
+        QueryGraphEdge::Join(ref jps) | QueryGraphEdge::LeftJoin(ref jps) => &jps[jref.index],
         QueryGraphEdge::GroupBy(_) => unreachable!(),
     }
 }
 
-pub fn reorder_joins(qg: &mut QueryGraph, reuse_candidates: &Vec<(ReuseType, (u64, &QueryGraph))>) {
+pub fn reorder_joins(qg: &mut QueryGraph, reuse_candidates: &[(ReuseType, (u64, &QueryGraph))]) {
     let mut join_chains = Vec::new();
     // For each reuse candidate, let's find the common join
     // chains it has with the new query graph.

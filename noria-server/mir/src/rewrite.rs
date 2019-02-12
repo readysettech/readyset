@@ -39,7 +39,7 @@ pub fn pull_required_base_columns(q: &mut MirQuery) {
 
         let mut found: Vec<&Column> = Vec::new();
         for ancestor in mn.borrow().ancestors() {
-            if ancestor.borrow().ancestors().len() == 0 {
+            if ancestor.borrow().ancestors().is_empty() {
                 // base, do nothing
                 continue;
             }
@@ -62,7 +62,7 @@ pub fn push_all_base_columns(q: &mut MirQuery) {
 
     while !queue.is_empty() {
         let mn = queue.pop().unwrap();
-        let columns: Vec<Column> = mn.borrow().columns().into_iter().cloned().collect();
+        let columns = mn.borrow().columns().to_vec();
         for child in mn.borrow().children() {
             // N.B. this terminates before reaching the actual leaf, since the last node of the
             // query (before the MIR `Leaf` node) already carries the query name. (`Leaf` nodes are

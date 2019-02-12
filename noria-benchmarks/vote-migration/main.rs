@@ -46,7 +46,7 @@ impl Reporter {
     pub fn new(every: time::Duration) -> Self {
         Reporter {
             last: time::Instant::now(),
-            every: every,
+            every,
             count: 0,
         }
     }
@@ -212,13 +212,10 @@ fn one(s: &graph::Builder, skewed: bool, args: &clap::ArgMatches, w: Option<fs::
                         vec![DataType::from(if skewed { id_zipf } else { id_uniform })]
                     })
                     .collect();
-                match read_new.multi_lookup(ids, false) {
-                    Ok(rss) => {
-                        hits += rss.into_iter().filter(|rs| !rs.is_empty()).count();
-                    }
-                    _ => {
-                        // miss, or view not yet ready
-                    }
+                if let Ok(rss) = read_new.multi_lookup(ids, false) {
+                    hits += rss.into_iter().filter(|rs| !rs.is_empty()).count();
+                } else {
+                    // miss, or view not yet ready
                 }
 
                 if let Some((_, count)) = reporter.report(n) {
@@ -334,7 +331,7 @@ fn main() {
 
     if args.is_present("all") || args.is_present("relevant") {
         let narticles = value_t_or_exit!(args, "narticles", usize);
-        let mills = format!("{}", narticles as f64 / 1_000_000 as f64);
+        let mills = format!("{}", narticles as f64 / 1_000_000.0);
 
         // do the ones we need for the paper first
         eprintln!("==> full no reuse (zipf)");

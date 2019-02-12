@@ -93,7 +93,7 @@ impl<'a> Migration<'a> {
             self.mainline.ingredients.add_edge(parent, ni, ());
         }
         // and tell the caller its id
-        ni.into()
+        ni
     }
 
     /// Add the given `Base` to the Soup.
@@ -127,7 +127,7 @@ impl<'a> Migration<'a> {
             .ingredients
             .add_edge(self.mainline.source, ni, ());
         // and tell the caller its id
-        ni.into()
+        ni
     }
 
     /// Returns the context of this migration
@@ -206,7 +206,8 @@ impl<'a> Migration<'a> {
     }
 
     fn ensure_reader_for(&mut self, n: NodeIndex, name: Option<String>) {
-        if !self.readers.contains_key(&n) {
+        use std::collections::hash_map::Entry;
+        if let Entry::Vacant(e) = self.readers.entry(n) {
             // make a reader
             let r = node::special::Reader::new(n);
             let r = if let Some(name) = name {
@@ -216,7 +217,7 @@ impl<'a> Migration<'a> {
             };
             let r = self.mainline.ingredients.add_node(r);
             self.mainline.ingredients.add_edge(n, r, ());
-            self.readers.insert(n, r);
+            e.insert(r);
         }
     }
 
@@ -253,6 +254,7 @@ impl<'a> Migration<'a> {
     /// This will spin up an execution thread for each new thread domain, and hook those new
     /// domains into the larger Soup graph. The returned map contains entry points through which
     /// new updates should be sent to introduce them into the Soup.
+    #[allow(clippy::cyclomatic_complexity)]
     pub fn commit(self) {
         info!(self.log, "finalizing migration"; "#nodes" => self.added.len());
 
@@ -501,12 +503,12 @@ impl<'a> Migration<'a> {
                 let m = match change.clone() {
                     ColumnChange::Add(field, default) => box payload::Packet::AddBaseColumn {
                         node: n.local_addr(),
-                        field: field,
-                        default: default,
+                        field,
+                        default,
                     },
                     ColumnChange::Drop(column) => box payload::Packet::DropBaseColumn {
                         node: n.local_addr(),
-                        column: column,
+                        column,
                     },
                 };
 

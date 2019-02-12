@@ -32,7 +32,7 @@ pub fn make_rewrite_nodes(
     let mut parent = prev_node;
 
     for p in rewrite_policies {
-        let fields = parent.borrow().columns().iter().cloned().collect();
+        let fields = parent.borrow().columns().to_vec();
         let should_rewrite = mir_converter.get_view(&p.rewrite_view)?;
 
         let rw = MirNode::new(

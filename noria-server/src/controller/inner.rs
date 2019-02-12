@@ -283,7 +283,7 @@ impl ControllerInner {
                     self.remove_nodes(vec![args].as_slice())
                         .map(|r| json::to_string(&r).unwrap())
                 }),
-            _ => return Err(StatusCode::NOT_FOUND),
+            _ => Err(StatusCode::NOT_FOUND),
         }
     }
 
@@ -430,7 +430,7 @@ impl ControllerInner {
 
         ControllerInner {
             ingredients: g,
-            source: source,
+            source,
             ndomains: 0,
 
             materializations,
@@ -439,7 +439,7 @@ impl ControllerInner {
             persistence: state.config.persistence,
             heartbeat_every: state.config.heartbeat_every,
             healthcheck_every: state.config.healthcheck_every,
-            recipe: recipe,
+            recipe,
             quorum: state.config.quorum,
             log,
 
@@ -625,7 +625,7 @@ impl ControllerInner {
             .collect();
 
         DomainHandle {
-            idx: idx,
+            idx,
             shards,
             log: log.clone(),
         }
@@ -653,7 +653,7 @@ impl ControllerInner {
             added: Default::default(),
             columns: Default::default(),
             readers: Default::default(),
-            context: context,
+            context,
             start: time::Instant::now(),
             log: miglog,
         };
@@ -769,7 +769,7 @@ impl ControllerInner {
             ViewBuilder {
                 node: r,
                 columns,
-                schema: schema,
+                schema,
                 shards,
             }
         })
@@ -844,7 +844,7 @@ impl ControllerInner {
         Some(TableBuilder {
             txs,
             addr: node.local_addr().into(),
-            key: key,
+            key,
             key_is_primary: is_primary,
             dropped: base_operator.get_dropped(),
             table_name: node.name().to_owned(),
@@ -877,7 +877,7 @@ impl ControllerInner {
             })
             .collect();
 
-        GraphStats { domains: domains }
+        GraphStats { domains }
     }
 
     pub fn get_instances(&self) -> Vec<(WorkerIdentifier, bool, Duration)> {

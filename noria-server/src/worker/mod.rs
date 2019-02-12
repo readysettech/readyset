@@ -188,14 +188,14 @@ pub(crate) fn main(
             }
             Either::B(futures::future::ok(()))
         })
-        .and_then(|v| {
+        .and_then(|()| {
             // shutting down...
             //
             // NOTE: the Trigger in InstanceState::Active is dropped when the for_each
             // closure above is dropped, which will also shut down the worker.
             //
             // TODO: maybe flush things or something?
-            Ok(v)
+            Ok(())
         })
         .map_err(|e| panic!("{:?}", e))
 }
@@ -284,7 +284,6 @@ fn listen_df(
             })
             .map_err(|_| {
                 // we're probably just shutting down
-                ()
             }),
     );
 
@@ -383,6 +382,7 @@ fn listen_df(
     Ok(())
 }
 
+#[allow(clippy::type_complexity)]
 fn do_eviction(
     log: &slog::Logger,
     memory_limit: Option<usize>,
@@ -406,7 +406,7 @@ fn do_eviction(
                     ds.1,
                     size
                 );
-                (ds.clone(), size)
+                (*ds, size)
             })
             .collect()
     });

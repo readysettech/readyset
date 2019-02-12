@@ -193,7 +193,7 @@ impl<'a> Plan<'a> {
 
                 // build the message we send to this domain to tell it about this replay path.
                 let mut setup = box Packet::SetupReplayPath {
-                    tag: tag,
+                    tag,
                     source: None,
                     path: locals,
                     notify_done: false,
@@ -298,7 +298,7 @@ impl<'a> Plan<'a> {
                             *notify_done = true;
                             assert!(pending.is_none());
                             pending = Some(PendingReplay {
-                                tag: tag,
+                                tag,
                                 source: self.graph[segments[0].1[0].0].local_addr(),
                                 source_domain: segments[0].0,
                                 target_domain: domain,

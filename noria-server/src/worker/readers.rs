@@ -50,7 +50,7 @@ pub(crate) fn listen(
                     AsyncBincodeStream::from(stream).for_async(),
                     ServiceFn::new(move |req| handle_message(req, &readers)),
                 )
-                .map_err(|e| -> () {
+                .map_err(|e| {
                     if let server::Error::Service(()) = e {
                         // server is shutting down -- no need to report this error
                     } else {
@@ -68,7 +68,7 @@ pub(crate) fn listen(
 }
 
 fn dup(rs: &[Vec<DataType>]) -> Vec<Vec<DataType>> {
-    rs.into_iter()
+    rs.iter()
         .map(|r| r.iter().map(|v| v.deep_clone()).collect())
         .collect()
 }
@@ -86,7 +86,7 @@ pub(crate) fn handle_message(
         } => {
             let immediate = READERS.with(|readers_cache| {
                 let mut readers_cache = readers_cache.borrow_mut();
-                let reader = readers_cache.entry(target.clone()).or_insert_with(|| {
+                let reader = readers_cache.entry(target).or_insert_with(|| {
                     let readers = s.lock().unwrap();
                     readers.get(&target).unwrap().clone()
                 });
@@ -171,7 +171,7 @@ pub(crate) fn handle_message(
         ReadQuery::Size { target } => {
             let size = READERS.with(|readers_cache| {
                 let mut readers_cache = readers_cache.borrow_mut();
-                let reader = readers_cache.entry(target.clone()).or_insert_with(|| {
+                let reader = readers_cache.entry(target).or_insert_with(|| {
                     let readers = s.lock().unwrap();
                     readers.get(&target).unwrap().clone()
                 });
@@ -212,7 +212,7 @@ impl Future for BlockingRead {
                 let mut readers_cache = readers_cache.borrow_mut();
                 let s = &self.truth;
                 let target = &self.target;
-                let reader = readers_cache.entry(self.target.clone()).or_insert_with(|| {
+                let reader = readers_cache.entry(self.target).or_insert_with(|| {
                     let readers = s.lock().unwrap();
                     readers.get(target).unwrap().clone()
                 });

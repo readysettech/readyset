@@ -28,9 +28,9 @@ pub trait State: SizeOf + Send {
     // are removed from `records` (thus the mutable reference).
     fn process_records(&mut self, records: &mut Records, partial_tag: Option<Tag>);
 
-    fn mark_hole(&mut self, key: &[DataType], tag: &Tag);
+    fn mark_hole(&mut self, key: &[DataType], tag: Tag);
 
-    fn mark_filled(&mut self, key: Vec<DataType>, tag: &Tag);
+    fn mark_filled(&mut self, key: Vec<DataType>, tag: Tag);
 
     fn lookup<'a>(&'a self, columns: &[usize], key: &KeyType) -> LookupResult<'a>;
 
@@ -47,7 +47,7 @@ pub trait State: SizeOf + Send {
 
     /// Evict the listed keys from the materialization targeted by `tag`, returning the key columns
     /// of the index that was evicted from and the number of bytes evicted.
-    fn evict_keys(&mut self, tag: &Tag, keys: &[Vec<DataType>]) -> Option<(&[usize], u64)>;
+    fn evict_keys(&mut self, tag: Tag, keys: &[Vec<DataType>]) -> Option<(&[usize], u64)>;
 }
 
 #[derive(Clone, Debug)]
@@ -84,6 +84,13 @@ impl<'a> RecordResult<'a> {
             RecordResult::Owned(ref rs) => rs.len(),
         }
     }
+
+    pub fn is_empty(&self) -> bool {
+        match *self {
+            RecordResult::Borrowed(rs) => rs.is_empty(),
+            RecordResult::Owned(ref rs) => rs.is_empty(),
+        }
+    }
 }
 
 impl<'a> IntoIterator for RecordResult<'a> {
@@ -92,7 +99,7 @@ impl<'a> IntoIterator for RecordResult<'a> {
 
     fn into_iter(self) -> Self::IntoIter {
         match self {
-            RecordResult::Borrowed(rs) => RecordResultIterator::Borrowed(rs.into_iter()),
+            RecordResult::Borrowed(rs) => RecordResultIterator::Borrowed(rs.iter()),
             RecordResult::Owned(rs) => RecordResultIterator::Owned(rs.into_iter()),
         }
     }
@@ -108,7 +115,7 @@ impl<'a> Iterator for RecordResultIterator<'a> {
     fn next(&mut self) -> Option<Self::Item> {
         match self {
             RecordResultIterator::Borrowed(iter) => iter.next().map(|r| Cow::from(&r[..])),
-            RecordResultIterator::Owned(iter) => iter.next().map(|r| Cow::from(r)),
+            RecordResultIterator::Owned(iter) => iter.next().map(Cow::from),
         }
     }
 }
