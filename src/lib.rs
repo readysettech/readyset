@@ -37,7 +37,7 @@
 //!     }
 //!     fn on_close(&mut self, _: u32) {}
 //!
-//!     fn on_init(&mut self, _: &str) -> io::Result<()> { Ok(()) }
+//!     fn on_init(&mut self, _: &str, writer: InitWriter<W>) -> io::Result<()> { Ok(()) }
 //!
 //!     fn on_query(&mut self, _: &str, results: QueryResultWriter<W>) -> io::Result<()> {
 //!         let cols = [
@@ -135,7 +135,7 @@ pub struct Column {
 
 pub use errorcodes::ErrorKind;
 pub use params::{ParamParser, ParamValue, Params};
-pub use resultset::{QueryResultWriter, RowWriter, StatementMetaWriter};
+pub use resultset::{QueryResultWriter, RowWriter, StatementMetaWriter, InitWriter};
 pub use value::{ToMysqlValue, Value, ValueInner};
 
 /// Implementors of this trait can be used to drive a MySQL-compatible database backend.
@@ -143,7 +143,7 @@ pub trait MysqlShim<W: Write> {
     /// The error type produced by operations on this shim.
     ///
     /// Must implement `From<io::Error>` so that transport-level errors can be lifted.
-    type Error: From<io::Error> + ToString;
+    type Error: From<io::Error>;
 
     /// Called when the client issues a request to prepare `query` for later execution.
     ///
@@ -175,7 +175,7 @@ pub trait MysqlShim<W: Write> {
     fn on_query(&mut self, query: &str, results: QueryResultWriter<W>) -> Result<(), Self::Error>;
 
     /// Called when client switches database.
-    fn on_init(&mut self, _schema: &str) -> Result<(), Self::Error> { Ok(()) }
+    fn on_init(&mut self, _: &str, _: InitWriter<W>) -> Result<(), Self::Error> { Ok(()) }
 }
 
 /// A server that speaks the MySQL/MariaDB protocol, and can delegate client commands to a backend
@@ -344,17 +344,14 @@ impl<B: MysqlShim<W>, R: Read, W: Write> MysqlIntermediary<B, R, W> {
                     writers::write_column_definitions(cols, &mut self.writer, true)?;
                 }
                 Command::Init(schema) => {
-                    let result = self.shim.on_init(
+                    let w = InitWriter {
+                        writer: &mut self.writer,
+                    };
+                    self.shim.on_init(
                         ::std::str::from_utf8(schema)
-                                    .map_err(|e| io::Error::new(io::ErrorKind::InvalidData, e))?
-                                    );
-                    match result {
-                        Ok(()) => writers::write_ok_packet(&mut self.writer, 0, 0, StatusFlags::empty())?,
-                        Err(e) => {
-                            let err_code = ErrorKind::from(ErrorKind::ER_BAD_DB_ERROR);
-                            writers::write_err(err_code, e.to_string().as_bytes(), &mut self.writer)?
-                        },
-                    }
+                                    .map_err(|e| io::Error::new(io::ErrorKind::InvalidData, e))?,
+                                    w
+                                    )?;
                 }
                 Command::Ping => {
                     writers::write_ok_packet(&mut self.writer, 0, 0, StatusFlags::empty())?;
