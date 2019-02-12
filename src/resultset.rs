@@ -8,6 +8,27 @@ use value::ToMysqlValue;
 use writers;
 use {Column, ErrorKind, StatementData};
 
+/// Convenience type for responding to a client `USE <db>` command.
+pub struct InitWriter<'a, W: Write + 'a> {
+    pub(crate) writer: &'a mut PacketWriter<W>,
+}
+
+impl<'a, W: Write + 'a> InitWriter<'a, W> {
+    /// Tell client that database context has been changed
+    pub fn ok(self) -> io::Result<()>
+    {
+        writers::write_ok_packet(self.writer, 0, 0, StatusFlags::empty())
+    }
+
+    /// Tell client that there was a problem changing the database context.
+    pub fn error<E>(self, kind: ErrorKind, msg: &E) -> io::Result<()>
+    where
+        E: Borrow<[u8]> + ?Sized,
+    {
+        writers::write_err(kind, msg.borrow(), self.writer)
+    }
+}
+
 /// Convenience type for responding to a client `PREPARE` command.
 ///
 /// This type should not be dropped without calling
