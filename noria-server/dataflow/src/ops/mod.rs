@@ -231,11 +231,11 @@ pub mod test {
 
     use petgraph::graph::NodeIndex;
 
-    pub struct MockGraph {
+    pub(super) struct MockGraph {
         graph: Graph,
         source: NodeIndex,
         nut: Option<IndexPair>, // node under test
-        pub states: StateMap,
+        pub(super) states: StateMap,
         nodes: DomainNodes,
         remap: HashMap<NodeIndex, IndexPair>,
     }
@@ -289,57 +289,6 @@ pub mod test {
             self.states.insert(local, box MemoryState::default());
             self.remap.insert(global, ip);
             ip
-        }
-
-        pub fn graphviz(&self) -> String {
-            let mut s = String::new();
-
-            let indentln = |s: &mut String| s.push_str("    ");
-
-            // header.
-            s.push_str("digraph {{\n");
-
-            // global formatting.
-            indentln(&mut s);
-            s.push_str("node [shape=record, fontsize=10]\n");
-
-            // node descriptions.
-            for index in self.graph.node_indices() {
-                let node = &self.graph[index];
-                let materialization_status = if node.is_localized() {
-                    match self.states.get(node.local_addr()) {
-                        Some(ref s) => {
-                            if s.is_partial() {
-                                MaterializationStatus::Partial
-                            } else {
-                                MaterializationStatus::Full
-                            }
-                        }
-                        None => MaterializationStatus::Not,
-                    }
-                } else {
-                    MaterializationStatus::Not
-                };
-                indentln(&mut s);
-                s.push_str(&format!("{}", index.index()));
-                s.push_str(&node.describe(index, true, materialization_status));
-            }
-
-            // edges.
-            for (_, edge) in self.graph.raw_edges().iter().enumerate() {
-                indentln(&mut s);
-                s.push_str(&format!(
-                    "{} -> {}",
-                    edge.source().index(),
-                    edge.target().index()
-                ));
-                s.push_str("\n");
-            }
-
-            // footer.
-            s.push_str("}}");
-
-            s
         }
 
         pub fn set_op<I>(&mut self, name: &str, fields: &[&str], mut i: I, materialized: bool)

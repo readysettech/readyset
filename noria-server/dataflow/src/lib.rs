@@ -1,6 +1,7 @@
 #![feature(nll)]
 #![feature(box_syntax)]
 #![feature(box_patterns)]
+#![feature(crate_visibility_modifier)]
 #![deny(unused_extern_crates)]
 
 #[cfg(debug_assertions)]
@@ -29,12 +30,12 @@ extern crate timekeeper;
 extern crate tokio;
 extern crate vec_map;
 
-pub mod backlog;
+crate mod backlog;
 pub mod node;
 pub mod ops;
-pub mod payload;
+pub mod payload; // it makes me _really_ sad that this has to be pub
 pub mod prelude;
-pub mod state;
+crate mod state;
 
 mod domain;
 mod group_commit;
@@ -45,6 +46,7 @@ use std::path::PathBuf;
 use std::sync::{Arc, Mutex};
 use std::time;
 
+pub use backlog::SingleReadHandle;
 pub type Readers =
     Arc<Mutex<HashMap<(petgraph::graph::NodeIndex, usize), backlog::SingleReadHandle>>>;
 pub type DomainConfig = domain::Config;

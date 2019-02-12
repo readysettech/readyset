@@ -355,10 +355,12 @@
 #![feature(box_syntax)]
 #![feature(nll)]
 #![feature(try_blocks)]
-#![deny(missing_docs)]
-#![deny(unused_extern_crates)]
 #![feature(fnbox)]
 #![feature(vec_remove_item)]
+#![feature(crate_visibility_modifier)]
+#![deny(missing_docs)]
+#![deny(unused_extern_crates)]
+//#![deny(unreachable_pub)]
 #![allow(clippy::too_many_arguments)]
 #![allow(clippy::type_complexity)]
 
@@ -371,18 +373,26 @@ extern crate serde_derive;
 #[macro_use]
 extern crate slog;
 
-pub(crate) mod builder;
-pub(crate) mod controller;
-pub(crate) mod coordination;
-pub(crate) mod handle;
-pub(crate) mod startup;
-pub(crate) mod worker;
+mod builder;
+mod controller;
+mod coordination;
+mod handle;
+mod startup;
+mod worker;
 
 #[cfg(test)]
 mod integration;
 
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[allow(missing_docs)]
+pub enum ReuseConfigType {
+    Finkelstein,
+    Relaxed,
+    Full,
+    NoReuse,
+}
+
 pub use crate::builder::Builder;
-pub use crate::controller::sql::reuse::ReuseConfigType;
 pub use crate::handle::{Handle, SyncHandle};
 pub use dataflow::{DurabilityMode, PersistenceParameters};
 pub use noria::consensus::LocalAuthority;
@@ -405,16 +415,16 @@ where
 }
 
 #[derive(Clone, Serialize, Deserialize, PartialEq)]
-pub(crate) struct Config {
-    pub sharding: Option<usize>,
-    pub partial_enabled: bool,
-    pub domain_config: DomainConfig,
-    pub persistence: PersistenceParameters,
-    pub heartbeat_every: time::Duration,
-    pub healthcheck_every: time::Duration,
-    pub quorum: usize,
-    pub reuse: ReuseConfigType,
-    pub threads: Option<usize>,
+crate struct Config {
+    crate sharding: Option<usize>,
+    crate partial_enabled: bool,
+    crate domain_config: DomainConfig,
+    crate persistence: PersistenceParameters,
+    crate heartbeat_every: time::Duration,
+    crate healthcheck_every: time::Duration,
+    crate quorum: usize,
+    crate reuse: ReuseConfigType,
+    crate threads: Option<usize>,
 }
 impl Default for Config {
     fn default() -> Self {

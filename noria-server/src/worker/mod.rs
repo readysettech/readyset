@@ -26,29 +26,10 @@ use tokio::prelude::future::Either;
 use tokio::prelude::*;
 use tokio_io_pool;
 
-pub(crate) mod domain_handle;
-pub(crate) mod readers;
-pub(crate) mod replica;
-pub(crate) use domain_handle::{DomainHandle, DomainShardHandle};
+mod readers;
+mod replica;
 
-pub(crate) struct Worker {
-    pub(crate) healthy: bool,
-    pub(crate) last_heartbeat: time::Instant,
-    pub(crate) sender: TcpSender<CoordinationMessage>,
-}
-
-impl Worker {
-    pub fn new(sender: TcpSender<CoordinationMessage>) -> Self {
-        Worker {
-            healthy: true,
-            last_heartbeat: time::Instant::now(),
-            sender,
-        }
-    }
-}
-
-pub(crate) type WorkerIdentifier = SocketAddr;
-pub(crate) type ChannelCoordinator = channel::ChannelCoordinator<ReplicaIndex, Box<Packet>>;
+type ChannelCoordinator = channel::ChannelCoordinator<ReplicaIndex, Box<Packet>>;
 
 enum InstanceState {
     Pining,
@@ -64,7 +45,7 @@ impl InstanceState {
         ::std::mem::replace(self, InstanceState::Pining)
     }
 }
-pub(crate) fn main(
+pub(super) fn main(
     ioh: tokio_io_pool::Handle,
     worker_rx: futures::sync::mpsc::UnboundedReceiver<Event>,
     listen_addr: IpAddr,

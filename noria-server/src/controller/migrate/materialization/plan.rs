@@ -1,12 +1,12 @@
+use crate::controller::domain_handle::DomainHandle;
 use crate::controller::inner::{graphviz, DomainReplies};
 use crate::controller::keys;
-use crate::worker::domain_handle::DomainHandle;
-use crate::worker::{Worker, WorkerIdentifier};
-use dataflow::payload::{SourceSelection, TriggerEndpoint};
+use crate::controller::{Worker, WorkerIdentifier};
+use dataflow::payload::{ReplayPathSegment, SourceSelection, TriggerEndpoint};
 use dataflow::prelude::*;
 use std::collections::{HashMap, HashSet};
 
-pub(crate) struct Plan<'a> {
+pub(super) struct Plan<'a> {
     m: &'a mut super::Materializations,
     graph: &'a Graph,
     node: NodeIndex,
@@ -20,11 +20,11 @@ pub(crate) struct Plan<'a> {
 }
 
 #[derive(Debug)]
-pub(crate) struct PendingReplay {
-    pub tag: Tag,
-    pub source: LocalNodeIndex,
-    pub source_domain: DomainIndex,
-    pub target_domain: DomainIndex,
+pub(super) struct PendingReplay {
+    pub(super) tag: Tag,
+    pub(super) source: LocalNodeIndex,
+    pub(super) source_domain: DomainIndex,
+    target_domain: DomainIndex,
 }
 
 impl<'a> Plan<'a> {
@@ -105,7 +105,7 @@ impl<'a> Plan<'a> {
     /// Finds the appropriate replay paths for the given index, and inform all domains on those
     /// paths about them. It also notes if any data backfills will need to be run, which is
     /// eventually reported back by `finalize`.
-    pub fn add(&mut self, index_on: Vec<usize>, replies: &mut DomainReplies) {
+    pub(super) fn add(&mut self, index_on: Vec<usize>, replies: &mut DomainReplies) {
         if !self.partial && !self.paths.is_empty() {
             // non-partial views should not have one replay path per index. that would cause us to
             // replay several times, even though one full replay should always be sufficient.
@@ -355,7 +355,7 @@ impl<'a> Plan<'a> {
     /// instantaneous.
     ///
     /// Returns a list of backfill replays that need to happen before the migration is complete.
-    pub fn finalize(mut self) -> Vec<PendingReplay> {
+    pub(super) fn finalize(mut self) -> Vec<PendingReplay> {
         use dataflow::payload::InitialState;
 
         // NOTE: we cannot use the impl of DerefMut here, since it (reasonably) disallows getting
@@ -436,7 +436,7 @@ impl<'a> Plan<'a> {
         self.pending
     }
 
-    pub(crate) fn on_join<'b>(
+    pub(super) fn on_join<'b>(
         graph: &'b Graph,
     ) -> impl FnMut(NodeIndex, &[Option<usize>], &[NodeIndex]) -> Option<NodeIndex> + 'b {
         move |node, cols, parents| {

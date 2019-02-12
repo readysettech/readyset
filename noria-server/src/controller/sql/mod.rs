@@ -3,18 +3,20 @@ mod passes;
 mod query_graph;
 mod query_signature;
 mod query_utils;
-pub mod reuse;
-pub mod security;
+mod reuse;
+pub(super) mod security;
 
-use self::mir::{MirNodeRef, SqlToMirConverter};
+use self::mir::SqlToMirConverter;
 use self::query_graph::{to_query_graph, QueryGraph};
 use self::query_signature::Signature;
-use self::reuse::{ReuseConfig, ReuseConfigType};
+use self::reuse::ReuseConfig;
 use super::mir_to_flow::mir_query_to_flow_parts;
 use crate::controller::Migration;
+use crate::ReuseConfigType;
 use ::mir::query::{MirQuery, QueryFlowParts};
 use ::mir::reuse as mir_reuse;
 use ::mir::Column;
+use ::mir::MirNodeRef;
 use dataflow::prelude::DataType;
 use nom_sql::parser as sql_parser;
 use nom_sql::{ArithmeticBase, CreateTableStatement, SqlQuery};
@@ -26,7 +28,7 @@ use std::collections::HashMap;
 use std::str;
 use std::vec::Vec;
 
-pub type UniverseId = (DataType, Option<DataType>);
+type UniverseId = (DataType, Option<DataType>);
 
 #[derive(Clone, Debug)]
 enum QueryGraphReuse {
@@ -41,7 +43,8 @@ enum QueryGraphReuse {
 /// the Soup graph `grap`.
 /// The incorporator shares the lifetime of the flow graph it is associated with.
 #[derive(Clone, Debug)]
-pub struct SqlIncorporator {
+// crate viz for tests
+crate struct SqlIncorporator {
     log: slog::Logger,
     mir_converter: SqlToMirConverter,
     leaf_addresses: HashMap<String, NodeIndex>,
@@ -90,7 +93,7 @@ impl Default for SqlIncorporator {
 
 impl SqlIncorporator {
     /// Creates a new `SqlIncorporator` for an empty flow graph.
-    pub fn new(log: slog::Logger) -> Self {
+    pub(super) fn new(log: slog::Logger) -> Self {
         let lc = log.clone();
         SqlIncorporator {
             log,
@@ -101,13 +104,13 @@ impl SqlIncorporator {
 
     /// Disable node reuse for future migrations.
     #[allow(unused)]
-    pub fn disable_reuse(&mut self) {
+    pub(super) fn disable_reuse(&mut self) {
         self.reuse_type = ReuseConfigType::NoReuse;
     }
 
     /// Disable node reuse for future migrations.
     #[allow(unused)]
-    pub fn enable_reuse(&mut self, reuse_type: ReuseConfigType) {
+    pub(super) fn enable_reuse(&mut self, reuse_type: ReuseConfigType) {
         self.reuse_type = reuse_type;
     }
 
@@ -119,8 +122,8 @@ impl SqlIncorporator {
     ///
     /// The return value is a tuple containing the query name (specified or computing) and a `Vec`
     /// of `NodeIndex`es representing the nodes added to support the query.
-    #[allow(unused)]
-    pub fn add_query(
+    #[cfg(test)]
+    crate fn add_query(
         &mut self,
         query: &str,
         name: Option<String>,
@@ -136,7 +139,7 @@ impl SqlIncorporator {
     ///
     /// The return value is a tuple containing the query name (specified or computing) and a `Vec`
     /// of `NodeIndex`es representing the nodes added to support the query.
-    pub fn add_parsed_query(
+    pub(super) fn add_parsed_query(
         &mut self,
         query: SqlQuery,
         name: Option<String>,
@@ -149,11 +152,11 @@ impl SqlIncorporator {
         }
     }
 
-    pub fn get_base_schema(&self, name: &str) -> Option<CreateTableStatement> {
+    pub(super) fn get_base_schema(&self, name: &str) -> Option<CreateTableStatement> {
         self.base_schemas.get(name).cloned()
     }
 
-    pub fn get_view_schema(&self, name: &str) -> Option<Vec<String>> {
+    pub(super) fn get_view_schema(&self, name: &str) -> Option<Vec<String>> {
         self.view_schemas.get(name).cloned()
     }
 
@@ -164,18 +167,18 @@ impl SqlIncorporator {
 
     /// Retrieves the flow node associated with a given query's leaf view.
     #[allow(unused)]
-    pub fn get_query_address(&self, name: &str) -> Option<NodeIndex> {
+    pub(super) fn get_query_address(&self, name: &str) -> Option<NodeIndex> {
         match self.leaf_addresses.get(name) {
             None => self.mir_converter.get_leaf(name),
             Some(na) => Some(*na),
         }
     }
 
-    pub fn is_leaf_address(&self, ni: NodeIndex) -> bool {
+    pub(super) fn is_leaf_address(&self, ni: NodeIndex) -> bool {
         self.leaf_addresses.values().any(|nn| *nn == ni)
     }
 
-    pub fn get_queries_for_node(&self, ni: NodeIndex) -> Vec<String> {
+    pub(super) fn get_queries_for_node(&self, ni: NodeIndex) -> Vec<String> {
         self.leaf_addresses
             .iter()
             .filter_map(|(name, idx)| if *idx == ni { Some(name.clone()) } else { None })
@@ -544,7 +547,7 @@ impl SqlIncorporator {
         Ok((qfp, mir))
     }
 
-    pub fn remove_query(&mut self, query_name: &str, mig: &Migration) -> Option<NodeIndex> {
+    pub(super) fn remove_query(&mut self, query_name: &str, mig: &Migration) -> Option<NodeIndex> {
         let nodeid = self
             .leaf_addresses
             .remove(query_name)
@@ -594,7 +597,7 @@ impl SqlIncorporator {
         }
     }
 
-    pub fn remove_base(&mut self, name: &str) {
+    pub(super) fn remove_base(&mut self, name: &str) {
         info!(self.log, "Removing base {} from SqlIncorporator", name);
         if self.base_schemas.remove(name).is_none() {
             warn!(
@@ -877,7 +880,7 @@ impl SqlIncorporator {
 
     /// Upgrades the schema version that any nodes created for queries will be tagged with.
     /// `new_version` must be strictly greater than the current version in `self.schema_version`.
-    pub fn upgrade_schema(&mut self, new_version: usize) {
+    pub(super) fn upgrade_schema(&mut self, new_version: usize) {
         assert!(new_version > self.schema_version);
         info!(
             self.log,
@@ -889,7 +892,7 @@ impl SqlIncorporator {
 }
 
 /// Enables incorporation of a textual SQL query into a Soup graph.
-pub trait ToFlowParts {
+trait ToFlowParts {
     /// Turn a SQL query into a set of nodes inserted into the Soup graph managed by
     /// the `SqlIncorporator` in the second argument. The query can optionally be named by the
     /// string in the `Option<String>` in the third argument.

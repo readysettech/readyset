@@ -50,7 +50,7 @@ impl<A: Authority + 'static> Handle<A> {
     }
 
     #[cfg(test)]
-    pub(crate) fn ready<E>(self) -> impl Future<Item = Self, Error = E> {
+    fn ready<E>(self) -> impl Future<Item = Self, Error = E> {
         let snd = self.event_tx.clone().unwrap();
         future::loop_fn((self, snd), |(this, snd)| {
             let (tx, rx) = futures::sync::oneshot::channel();
@@ -74,7 +74,7 @@ impl<A: Authority + 'static> Handle<A> {
     }
 
     #[cfg(test)]
-    pub fn migrate<F, T>(&mut self, f: F) -> T
+    fn migrate<F, T>(&mut self, f: F) -> T
     where
         F: FnOnce(&mut Migration) -> T + Send + 'static,
         T: Send + 'static,
@@ -101,16 +101,13 @@ impl<A: Authority + 'static> Handle<A> {
 
     /// Install a new set of policies on the controller.
     #[must_use]
-    pub fn set_security_config(
-        &mut self,
-        p: String,
-    ) -> impl Future<Item = (), Error = failure::Error> {
+    fn set_security_config(&mut self, p: String) -> impl Future<Item = (), Error = failure::Error> {
         self.rpc("set_security_config", p, "failed to set security config")
     }
 
     /// Install a new set of policies on the controller.
     #[must_use]
-    pub fn create_universe(
+    fn create_universe(
         &mut self,
         context: HashMap<String, DataType>,
     ) -> impl Future<Item = (), Error = failure::Error> {
@@ -149,7 +146,7 @@ impl<A: Authority + 'static> Handle<A> {
     }
 
     /// Inform the local instance that it should exit.
-    pub fn shutdown(&mut self) {
+    fn shutdown(&mut self) {
         if let Some(io) = self.iopool.take() {
             drop(self.c.take());
             drop(self.event_tx.take());
@@ -167,17 +164,17 @@ impl<A: Authority> Drop for Handle<A> {
 
 /// A synchronous handle to a worker.
 pub struct SyncHandle<A: Authority + 'static> {
-    pub(crate) rt: Option<tokio::runtime::Runtime>,
-    pub(crate) wh: Handle<A>,
+    rt: Option<tokio::runtime::Runtime>,
+    wh: Handle<A>,
     // this is an Option so we can drop it
-    pub(crate) sh: Option<SyncControllerHandle<A, tokio::runtime::TaskExecutor>>,
+    sh: Option<SyncControllerHandle<A, tokio::runtime::TaskExecutor>>,
 }
 
 impl<A: Authority> SyncHandle<A> {
     /// Construct a new synchronous handle on top of an existing runtime.
     ///
     /// Note that the given `Handle` must have been created through the given `Runtime`.
-    pub fn from_existing(rt: tokio::runtime::Runtime, wh: Handle<A>) -> Self {
+    fn from_existing(rt: tokio::runtime::Runtime, wh: Handle<A>) -> Self {
         let sch = wh.sync_handle(rt.executor());
         SyncHandle {
             rt: Some(rt),
@@ -190,7 +187,7 @@ impl<A: Authority> SyncHandle<A> {
     ///
     /// Note that the given `Handle` must have been created through the `Runtime` backing the
     /// given executor.
-    pub fn from_executor(ex: tokio::runtime::TaskExecutor, wh: Handle<A>) -> Self {
+    fn from_executor(ex: tokio::runtime::TaskExecutor, wh: Handle<A>) -> Self {
         let sch = wh.sync_handle(ex);
         SyncHandle {
             rt: None,
@@ -200,12 +197,12 @@ impl<A: Authority> SyncHandle<A> {
     }
 
     /// Stash away the given runtime inside this worker handle.
-    pub fn wrap_rt(&mut self, rt: tokio::runtime::Runtime) {
+    fn wrap_rt(&mut self, rt: tokio::runtime::Runtime) {
         self.rt = Some(rt);
     }
 
     /// Run an operation on the underlying asynchronous worker handle.
-    pub fn on_worker<F, FF>(&mut self, f: F) -> Result<FF::Item, FF::Error>
+    fn on_worker<F, FF>(&mut self, f: F) -> Result<FF::Item, FF::Error>
     where
         F: FnOnce(&mut Handle<A>) -> FF,
         FF: IntoFuture,
@@ -218,7 +215,7 @@ impl<A: Authority> SyncHandle<A> {
     }
 
     #[cfg(test)]
-    pub fn migrate<F, T>(&mut self, f: F) -> T
+    fn migrate<F, T>(&mut self, f: F) -> T
     where
         F: FnOnce(&mut Migration) -> T + Send + 'static,
         T: Send + 'static,

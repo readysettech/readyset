@@ -50,7 +50,7 @@ impl<A: Authority + 'static> Handle<A> {
     }
 
     #[cfg(test)]
-    pub(crate) fn ready<E>(self) -> impl Future<Item = Self, Error = E> {
+    pub(super) fn ready<E>(self) -> impl Future<Item = Self, Error = E> {
         let snd = self.event_tx.clone().unwrap();
         future::loop_fn((self, snd), |(this, snd)| {
             let (tx, rx) = futures::sync::oneshot::channel();
@@ -74,7 +74,7 @@ impl<A: Authority + 'static> Handle<A> {
     }
 
     #[cfg(test)]
-    pub fn migrate<F, T>(&mut self, f: F) -> T
+    crate fn migrate<F, T>(&mut self, f: F) -> T
     where
         F: FnOnce(&mut Migration) -> T + Send + 'static,
         T: Send + 'static,
@@ -164,10 +164,10 @@ impl<A: Authority> Drop for Handle<A> {
 
 /// A synchronous handle to a worker.
 pub struct SyncHandle<A: Authority + 'static> {
-    pub(crate) rt: Option<tokio::runtime::Runtime>,
-    pub(crate) wh: Handle<A>,
+    rt: Option<tokio::runtime::Runtime>,
+    wh: Handle<A>,
     // this is an Option so we can drop it
-    pub(crate) sh: Option<SyncControllerHandle<A, tokio::runtime::TaskExecutor>>,
+    sh: Option<SyncControllerHandle<A, tokio::runtime::TaskExecutor>>,
 }
 
 impl<A: Authority> SyncHandle<A> {
@@ -215,7 +215,7 @@ impl<A: Authority> SyncHandle<A> {
     }
 
     #[cfg(test)]
-    pub fn migrate<F, T>(&mut self, f: F) -> T
+    crate fn migrate<F, T>(&mut self, f: F) -> T
     where
         F: FnOnce(&mut Migration) -> T + Send + 'static,
         T: Send + 'static,

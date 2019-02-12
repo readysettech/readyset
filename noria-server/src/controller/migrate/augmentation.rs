@@ -16,7 +16,7 @@ use petgraph::graph::NodeIndex;
 
 use slog::Logger;
 
-pub fn inform(
+pub(super) fn inform(
     log: &Logger,
     controller: &mut controller::ControllerInner,
     nodes: HashMap<DomainIndex, Vec<(NodeIndex, bool)>>,

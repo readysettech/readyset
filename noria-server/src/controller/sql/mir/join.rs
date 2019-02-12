@@ -11,13 +11,13 @@ struct JoinChain {
 }
 
 impl JoinChain {
-    pub fn merge_chain(self, other: JoinChain, last_node: MirNodeRef) -> JoinChain {
+    pub(super) fn merge_chain(self, other: JoinChain, last_node: MirNodeRef) -> JoinChain {
         let tables = self.tables.union(&other.tables).cloned().collect();
 
         JoinChain { tables, last_node }
     }
 
-    pub fn has_table(&self, table: &str) -> bool {
+    pub(super) fn has_table(&self, table: &str) -> bool {
         self.tables.contains(table)
     }
 }
@@ -30,7 +30,7 @@ impl JoinChain {
 // If a predicate's parent tables haven't been used by any previous predicate,
 // a new join chain is started for the current predicate. And we assume that
 // a future predicate will bring these chains together.
-pub fn make_joins(
+pub(super) fn make_joins(
     mir_converter: &SqlToMirConverter,
     name: &str,
     qg: &QueryGraph,

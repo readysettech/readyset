@@ -7,37 +7,37 @@ use prelude::*;
 // TODO: make a Key type that is an ArrayVec<DataType>
 
 #[derive(PartialEq, Eq, Debug)]
-pub(crate) struct Miss {
+crate struct Miss {
     /// The node we missed when looking up into.
-    pub(crate) on: LocalNodeIndex,
+    crate on: LocalNodeIndex,
     /// The columns of `on` we were looking up on.
-    pub(crate) lookup_idx: Vec<usize>,
+    crate lookup_idx: Vec<usize>,
     /// The columns of `record` we were using for the lookup.
-    pub(crate) lookup_cols: Vec<usize>,
+    crate lookup_cols: Vec<usize>,
     /// The columns of `record` that identify the replay key (if any).
-    pub(crate) replay_cols: Option<Vec<usize>>,
+    crate replay_cols: Option<Vec<usize>>,
     /// The record we were processing when we missed.
-    pub(crate) record: Vec<DataType>,
+    crate record: Vec<DataType>,
 }
 
 impl Miss {
-    pub(crate) fn replay_key<'a>(&'a self) -> Option<impl Iterator<Item = &DataType> + 'a> {
+    crate fn replay_key<'a>(&'a self) -> Option<impl Iterator<Item = &DataType> + 'a> {
         self.replay_cols
             .as_ref()
             .map(move |rc| rc.iter().map(move |&rc| &self.record[rc]))
     }
 
-    pub(crate) fn replay_key_vec(&self) -> Option<Vec<DataType>> {
+    crate fn replay_key_vec(&self) -> Option<Vec<DataType>> {
         self.replay_cols
             .as_ref()
             .map(|rc| rc.iter().map(|&rc| &self.record[rc]).cloned().collect())
     }
 
-    pub(crate) fn lookup_key<'a>(&'a self) -> impl Iterator<Item = &DataType> + 'a {
+    crate fn lookup_key<'a>(&'a self) -> impl Iterator<Item = &DataType> + 'a {
         self.lookup_cols.iter().map(move |&rc| &self.record[rc])
     }
 
-    pub(crate) fn lookup_key_vec(&self) -> Vec<DataType> {
+    crate fn lookup_key_vec(&self) -> Vec<DataType> {
         self.lookup_cols
             .iter()
             .map(|&rc| &self.record[rc])
@@ -46,12 +46,12 @@ impl Miss {
     }
 }
 
-pub struct ProcessingResult {
+crate struct ProcessingResult {
     pub(crate) results: Records,
     pub(crate) misses: Vec<Miss>,
 }
 
-pub enum RawProcessingResult {
+crate enum RawProcessingResult {
     Regular(ProcessingResult),
     FullReplay(Records, bool),
     CapturedFull,
@@ -63,7 +63,7 @@ pub enum RawProcessingResult {
 }
 
 #[derive(Debug)]
-pub enum ReplayContext {
+crate enum ReplayContext {
     None,
     Partial {
         key_cols: Vec<usize>,
@@ -84,7 +84,7 @@ impl ReplayContext {
     }
 }
 
-pub trait Ingredient
+crate trait Ingredient
 where
     Self: Send,
 {
@@ -240,10 +240,10 @@ where
             })
     }
 
-    // Translate a column in this ingredient into the corresponding column(s) in
-    // parent ingredients. None for the column means that the parent doesn't
-    // have an associated column. Similar to resolve, but does not depend on
-    // materialization, and returns results even for computed columns.
+    /// Translate a column in this ingredient into the corresponding column(s) in
+    /// parent ingredients. None for the column means that the parent doesn't
+    /// have an associated column. Similar to resolve, but does not depend on
+    /// materialization, and returns results even for computed columns.
     fn parent_columns(&self, column: usize) -> Vec<(NodeIndex, Option<usize>)>;
 
     /// Performance hint: should return true if this operator reduces the size of its input

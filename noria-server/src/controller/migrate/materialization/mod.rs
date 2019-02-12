@@ -5,12 +5,12 @@
 //! domains, but does not perform that copying itself (that is the role of the `augmentation`
 //! module).
 
+use crate::controller::domain_handle::DomainHandle;
 use crate::controller::{
     inner::{graphviz, DomainReplies},
     keys,
 };
-use crate::worker::domain_handle::DomainHandle;
-use crate::worker::{Worker, WorkerIdentifier};
+use crate::controller::{Worker, WorkerIdentifier};
 use dataflow::prelude::*;
 use petgraph;
 use petgraph::graph::NodeIndex;
@@ -23,7 +23,7 @@ mod plan;
 
 type Indices = HashSet<Vec<usize>>;
 
-pub struct Materializations {
+pub(in crate::controller) struct Materializations {
     log: Logger,
 
     have: HashMap<NodeIndex, Indices>,
@@ -32,15 +32,12 @@ pub struct Materializations {
     partial: HashSet<NodeIndex>,
     partial_enabled: bool,
 
-    // TODO: this doesn't belong here
-    pub domains_on_path: HashMap<Tag, Vec<DomainIndex>>,
-
     tag_generator: AtomicUsize,
 }
 
 impl Materializations {
     /// Create a new set of materializations.
-    pub fn new(logger: &Logger) -> Self {
+    pub(in crate::controller) fn new(logger: &Logger) -> Self {
         Materializations {
             log: logger.new(o!()),
 
@@ -50,19 +47,17 @@ impl Materializations {
             partial: HashSet::default(),
             partial_enabled: true,
 
-            domains_on_path: Default::default(),
-
             tag_generator: AtomicUsize::default(),
         }
     }
 
     #[allow(unused)]
-    pub fn set_logger(&mut self, logger: &Logger) {
+    pub(in crate::controller) fn set_logger(&mut self, logger: &Logger) {
         self.log = logger.new(o!());
     }
 
     /// Disable partial materialization for all new materializations.
-    pub fn disable_partial(&mut self) {
+    pub(in crate::controller) fn disable_partial(&mut self) {
         self.partial_enabled = false;
     }
 }
@@ -419,7 +414,11 @@ impl Materializations {
 
     /// Retrieves the materialization status of a given node, or None
     /// if the node isn't materialized.
-    pub fn get_status(&self, index: &NodeIndex, node: &Node) -> MaterializationStatus {
+    pub(in crate::controller) fn get_status(
+        &self,
+        index: &NodeIndex,
+        node: &Node,
+    ) -> MaterializationStatus {
         let is_materialized = self.have.contains_key(index)
             || node.with_reader(|r| r.is_materialized()).unwrap_or(false);
 

@@ -15,7 +15,10 @@ use mir::query::{MirQuery, QueryFlowParts};
 use mir::{Column, FlowNode, MirNodeRef};
 use petgraph::graph::NodeIndex;
 
-pub fn mir_query_to_flow_parts(mir_query: &mut MirQuery, mig: &mut Migration) -> QueryFlowParts {
+pub(super) fn mir_query_to_flow_parts(
+    mir_query: &mut MirQuery,
+    mig: &mut Migration,
+) -> QueryFlowParts {
     use std::collections::VecDeque;
 
     let mut new_nodes = Vec::new();
@@ -70,7 +73,7 @@ pub fn mir_query_to_flow_parts(mir_query: &mut MirQuery, mig: &mut Migration) ->
     }
 }
 
-pub fn mir_node_to_flow_parts(mir_node: &mut MirNode, mig: &mut Migration) -> FlowNode {
+fn mir_node_to_flow_parts(mir_node: &mut MirNode, mig: &mut Migration) -> FlowNode {
     let name = mir_node.name.clone();
     match mir_node.flow_node {
         None => {
@@ -307,7 +310,7 @@ pub fn mir_node_to_flow_parts(mir_node: &mut MirNode, mig: &mut Migration) -> Fl
     }
 }
 
-pub(crate) fn adapt_base_node(
+fn adapt_base_node(
     over_node: MirNodeRef,
     mig: &mut Migration,
     column_specs: &mut [(ColumnSpecification, Option<usize>)],
@@ -362,7 +365,7 @@ fn column_names<'a>(cs: &'a [Column]) -> Vec<&'a str> {
     cs.iter().map(|c| c.name.as_str()).collect()
 }
 
-pub(crate) fn make_base_node(
+fn make_base_node(
     name: &str,
     column_specs: &mut [(ColumnSpecification, Option<usize>)],
     pkey_columns: &[Column],
@@ -412,7 +415,7 @@ pub(crate) fn make_base_node(
     FlowNode::New(mig.add_base(name, column_names.as_slice(), base))
 }
 
-pub(crate) fn make_union_node(
+fn make_union_node(
     name: &str,
     columns: &[Column],
     emit: &[Vec<Column>],
@@ -443,7 +446,7 @@ pub(crate) fn make_union_node(
     FlowNode::New(node)
 }
 
-pub(crate) fn make_rewrite_node(
+fn make_rewrite_node(
     name: &str,
     src: MirNodeRef,
     should_rewrite: MirNodeRef,
@@ -470,7 +473,7 @@ pub(crate) fn make_rewrite_node(
     FlowNode::New(node)
 }
 
-pub(crate) fn make_filter_node(
+fn make_filter_node(
     name: &str,
     parent: MirNodeRef,
     columns: &[Column],
@@ -488,7 +491,7 @@ pub(crate) fn make_filter_node(
     FlowNode::New(node)
 }
 
-pub(crate) fn make_grouped_node(
+fn make_grouped_node(
     name: &str,
     parent: MirNodeRef,
     columns: &[Column],
@@ -539,7 +542,7 @@ pub(crate) fn make_grouped_node(
     FlowNode::New(na)
 }
 
-pub(crate) fn make_identity_node(
+fn make_identity_node(
     name: &str,
     parent: MirNodeRef,
     columns: &[Column],
@@ -556,7 +559,7 @@ pub(crate) fn make_identity_node(
     FlowNode::New(node)
 }
 
-pub(crate) fn make_join_node(
+fn make_join_node(
     name: &str,
     left: MirNodeRef,
     right: MirNodeRef,
@@ -677,7 +680,7 @@ pub(crate) fn make_join_node(
     FlowNode::New(n)
 }
 
-pub(crate) fn make_latest_node(
+fn make_latest_node(
     name: &str,
     parent: MirNodeRef,
     columns: &[Column],
@@ -716,7 +719,7 @@ fn generate_projection_base(parent: &MirNodeRef, base: &ArithmeticBase) -> Proje
     }
 }
 
-pub(crate) fn make_project_node(
+fn make_project_node(
     name: &str,
     parent: MirNodeRef,
     columns: &[Column],
@@ -759,7 +762,7 @@ pub(crate) fn make_project_node(
     FlowNode::New(n)
 }
 
-pub(crate) fn make_distinct_node(
+fn make_distinct_node(
     name: &str,
     parent: MirNodeRef,
     columns: &[Column],
@@ -791,7 +794,7 @@ pub(crate) fn make_distinct_node(
     FlowNode::New(na)
 }
 
-pub(crate) fn make_topk_node(
+fn make_topk_node(
     name: &str,
     parent: MirNodeRef,
     columns: &[Column],
@@ -845,7 +848,7 @@ pub(crate) fn make_topk_node(
     FlowNode::New(na)
 }
 
-pub(crate) fn materialize_leaf_node(
+fn materialize_leaf_node(
     parent: &MirNodeRef,
     name: String,
     key_cols: &[Column],

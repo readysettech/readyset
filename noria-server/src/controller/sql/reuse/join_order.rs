@@ -8,9 +8,9 @@ use std::vec::Vec;
 
 #[derive(Debug, Clone)]
 struct JoinChain {
-    pub join_order: Vec<JoinRef>,
+    join_order: Vec<JoinRef>,
     tables: HashSet<String>,
-    pub stopped: bool,
+    stopped: bool,
 }
 
 impl JoinChain {
@@ -122,7 +122,10 @@ fn from_join_ref<'a>(jref: &JoinRef, qg: &'a QueryGraph) -> &'a ConditionTree {
     }
 }
 
-pub fn reorder_joins(qg: &mut QueryGraph, reuse_candidates: &[(ReuseType, (u64, &QueryGraph))]) {
+pub(super) fn reorder_joins(
+    qg: &mut QueryGraph,
+    reuse_candidates: &[(ReuseType, (u64, &QueryGraph))],
+) {
     let mut join_chains = Vec::new();
     // For each reuse candidate, let's find the common join
     // chains it has with the new query graph.

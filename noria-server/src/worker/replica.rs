@@ -29,9 +29,9 @@ use streamunordered::{StreamUnordered, StreamYield};
 use tokio;
 use tokio::prelude::*;
 
-pub(crate) type ReplicaIndex = (DomainIndex, usize);
+pub(super) type ReplicaIndex = (DomainIndex, usize);
 
-pub(crate) struct Replica {
+pub(super) struct Replica {
     domain: Domain,
     log: slog::Logger,
 
@@ -62,7 +62,7 @@ pub(crate) struct Replica {
 }
 
 impl Replica {
-    pub fn new(
+    pub(super) fn new(
         valve: &Valve,
         mut domain: Domain,
         on: tokio::net::TcpListener,

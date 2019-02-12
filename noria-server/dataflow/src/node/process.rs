@@ -7,7 +7,7 @@ use std::mem;
 
 impl Node {
     #[allow(clippy::too_many_arguments)]
-    pub(crate) fn process(
+    crate fn process(
         &mut self,
         m: &mut Option<Box<Packet>>,
         keyed_by: Option<&Vec<usize>>,
@@ -227,7 +227,7 @@ impl Node {
         }
     }
 
-    pub fn process_eviction(
+    crate fn process_eviction(
         &mut self,
         from: LocalNodeIndex,
         key_columns: &[usize],
@@ -307,7 +307,8 @@ fn reroute_miss(nodes: &DomainNodes, miss: &mut Miss) {
 }
 
 #[allow(clippy::borrowed_box)]
-pub fn materialize(rs: &mut Records, partial: Option<Tag>, state: Option<&mut Box<State>>) {
+// crate visibility due to use by tests
+crate fn materialize(rs: &mut Records, partial: Option<Tag>, state: Option<&mut Box<State>>) {
     // our output changed -- do we need to modify materialized state?
     if state.is_none() {
         // nope

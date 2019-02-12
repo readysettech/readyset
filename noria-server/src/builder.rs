@@ -1,6 +1,6 @@
-use crate::controller::sql::reuse::ReuseConfigType;
 use crate::handle::{Handle, SyncHandle};
 use crate::Config;
+use crate::ReuseConfigType;
 use dataflow::PersistenceParameters;
 use failure;
 use noria::consensus::{Authority, LocalAuthority};

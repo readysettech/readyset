@@ -1,8 +1,8 @@
 use async_bincode::AsyncBincodeStream;
-use dataflow::backlog::SingleReadHandle;
 use dataflow::prelude::DataType;
 use dataflow::prelude::*;
 use dataflow::Readers;
+use dataflow::SingleReadHandle;
 use futures::future::{self, Either};
 use futures::try_ready;
 use futures::{self, Future, Stream};
@@ -28,7 +28,7 @@ thread_local! {
     >> = Default::default();
 }
 
-pub(crate) fn listen(
+pub(super) fn listen(
     valve: &Valve,
     ioh: &tokio_io_pool::Handle,
     on: tokio::net::TcpListener,
@@ -73,7 +73,7 @@ fn dup(rs: &[Vec<DataType>]) -> Vec<Vec<DataType>> {
         .collect()
 }
 
-pub(crate) fn handle_message(
+fn handle_message(
     m: Tagged<ReadQuery>,
     s: &Readers,
 ) -> impl Future<Item = Tagged<ReadReply>, Error = ()> + Send {

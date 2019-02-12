@@ -15,7 +15,7 @@ fn has_column(n: &MirNodeRef, column: &Column) -> bool {
     false
 }
 
-pub fn pull_required_base_columns(q: &mut MirQuery) {
+pub(super) fn pull_required_base_columns(q: &mut MirQuery) {
     let mut queue = Vec::new();
     queue.push(q.leaf.clone());
 
@@ -56,7 +56,7 @@ pub fn pull_required_base_columns(q: &mut MirQuery) {
 
 // currently unused
 #[allow(dead_code)]
-pub fn push_all_base_columns(q: &mut MirQuery) {
+pub(super) fn push_all_base_columns(q: &mut MirQuery) {
     let mut queue = Vec::new();
     queue.extend(q.roots.clone());
 

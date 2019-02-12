@@ -2,7 +2,7 @@ use crate::controller::sql::mir::SqlToMirConverter;
 use mir::node::{MirNode, MirNodeType};
 use mir::MirNodeRef;
 
-pub fn make_rewrite_nodes(
+pub(super) fn make_rewrite_nodes(
     mir_converter: &SqlToMirConverter,
     name: &str,
     prev_node: MirNodeRef,

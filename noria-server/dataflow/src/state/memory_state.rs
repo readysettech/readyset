@@ -57,7 +57,7 @@ impl State for MemoryState {
                 assert!(!old[0].partial());
                 for rs in old[0].values() {
                     for r in rs {
-                        new.insert_row(Row(r.0.clone()));
+                        new.insert_row(Row::from(r.0.clone()));
                     }
                 }
             }
@@ -190,11 +190,11 @@ impl MemoryState {
                 }
             };
             self.mem_size += r.deep_size_of();
-            self.state[i].insert_row(Row(r))
+            self.state[i].insert_row(Row::from(r))
         } else {
             let mut hit_any = false;
             for i in 0..self.state.len() {
-                hit_any |= self.state[i].insert_row(Row(r.clone()));
+                hit_any |= self.state[i].insert_row(Row::from(r.clone()));
             }
             if hit_any {
                 self.mem_size += r.deep_size_of();

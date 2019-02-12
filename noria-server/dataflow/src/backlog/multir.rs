@@ -10,7 +10,7 @@ pub(super) enum Handle {
 }
 
 impl Handle {
-    pub fn len(&self) -> usize {
+    pub(super) fn len(&self) -> usize {
         match *self {
             Handle::Single(ref h) => h.len(),
             Handle::Double(ref h) => h.len(),
@@ -18,18 +18,7 @@ impl Handle {
         }
     }
 
-    pub fn for_each<F>(&self, mut f: F)
-    where
-        F: FnMut(&[Vec<DataType>]),
-    {
-        match *self {
-            Handle::Single(ref h) => h.for_each(|_, v| f(v)),
-            Handle::Double(ref h) => h.for_each(|_, v| f(v)),
-            Handle::Many(ref h) => h.for_each(|_, v| f(v)),
-        }
-    }
-
-    pub fn meta_get_and<F, T>(&self, key: &[DataType], then: F) -> Option<(Option<T>, i64)>
+    pub(super) fn meta_get_and<F, T>(&self, key: &[DataType], then: F) -> Option<(Option<T>, i64)>
     where
         F: FnOnce(&[Vec<DataType>]) -> T,
     {

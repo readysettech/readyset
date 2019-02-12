@@ -11,10 +11,10 @@ use std::{slice, vec};
 use common::SizeOf;
 use prelude::*;
 
-pub use self::memory_state::MemoryState;
-pub use self::persistent_state::PersistentState;
+crate use self::memory_state::MemoryState;
+crate use self::persistent_state::PersistentState;
 
-pub trait State: SizeOf + Send {
+crate trait State: SizeOf + Send {
     /// Add an index keyed by the given columns and replayed to by the given partial tags.
     fn add_key(&mut self, columns: &[usize], partial: Option<Vec<Tag>>);
 
@@ -51,9 +51,15 @@ pub trait State: SizeOf + Send {
 }
 
 #[derive(Clone, Debug)]
-pub struct Row(pub(crate) Rc<Vec<DataType>>);
+crate struct Row(Rc<Vec<DataType>>);
 
 unsafe impl Send for Row {}
+
+impl From<Rc<Vec<DataType>>> for Row {
+    fn from(r: Rc<Vec<DataType>>) -> Self {
+        Self(r)
+    }
+}
 
 impl Deref for Row {
     type Target = Vec<DataType>;
@@ -72,20 +78,20 @@ impl SizeOf for Row {
 }
 
 /// An std::borrow::Cow-like wrapper around a collection of rows.
-pub enum RecordResult<'a> {
+crate enum RecordResult<'a> {
     Borrowed(&'a [Row]),
     Owned(Vec<Vec<DataType>>),
 }
 
 impl<'a> RecordResult<'a> {
-    pub fn len(&self) -> usize {
+    crate fn len(&self) -> usize {
         match *self {
             RecordResult::Borrowed(rs) => rs.len(),
             RecordResult::Owned(ref rs) => rs.len(),
         }
     }
 
-    pub fn is_empty(&self) -> bool {
+    crate fn is_empty(&self) -> bool {
         match *self {
             RecordResult::Borrowed(rs) => rs.is_empty(),
             RecordResult::Owned(ref rs) => rs.is_empty(),
@@ -105,7 +111,7 @@ impl<'a> IntoIterator for RecordResult<'a> {
     }
 }
 
-pub enum RecordResultIterator<'a> {
+crate enum RecordResultIterator<'a> {
     Owned(vec::IntoIter<Vec<DataType>>),
     Borrowed(slice::Iter<'a, Row>),
 }
@@ -120,7 +126,7 @@ impl<'a> Iterator for RecordResultIterator<'a> {
     }
 }
 
-pub enum LookupResult<'a> {
+crate enum LookupResult<'a> {
     Some(RecordResult<'a>),
     Missing,
 }

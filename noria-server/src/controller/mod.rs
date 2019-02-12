@@ -1,43 +1,65 @@
 use crate::controller::inner::ControllerInner;
+use crate::controller::migrate::Migration;
 use crate::controller::recipe::Recipe;
+use crate::coordination::CoordinationMessage;
 use crate::coordination::CoordinationPayload;
+use crate::startup::Event;
 use crate::Config;
 use async_bincode::AsyncBincodeReader;
 use dataflow::payload::ControlReplyPacket;
 use futures::sync::mpsc::UnboundedSender;
 use futures::{self, Future, Sink, Stream};
 use hyper::{self, StatusCode};
+use noria::channel::TcpSender;
 use noria::consensus::{Authority, Epoch, STATE_KEY};
 use noria::ControllerDescriptor;
 use serde_json;
 use slog;
+use std::net::SocketAddr;
 use std::sync::Arc;
 use std::thread::{self, JoinHandle};
+use std::time;
 use stream_cancel::Valve;
 use tokio;
 
-pub(crate) mod inner;
-pub(crate) mod keys;
-pub(crate) mod migrate;
-pub(crate) mod mir_to_flow;
-pub(crate) mod recipe;
-pub(crate) mod schema;
-pub(crate) mod security;
-pub(crate) mod sql;
-
-pub use crate::controller::migrate::Migration;
-use crate::startup::Event;
+mod domain_handle;
+mod inner;
+mod keys;
+crate mod migrate; // crate viz for tests
+mod mir_to_flow;
+crate mod recipe; // crate viz for tests
+mod schema;
+mod security;
+crate mod sql; // crate viz for tests
 
 #[derive(Clone, Serialize, Deserialize)]
-pub(crate) struct ControllerState {
-    pub config: Config,
-    pub epoch: Epoch,
+crate struct ControllerState {
+    crate config: Config,
+    crate epoch: Epoch,
 
-    pub recipe_version: usize,
-    pub recipes: Vec<String>,
+    recipe_version: usize,
+    recipes: Vec<String>,
 }
 
-pub(crate) fn main<A: Authority + 'static>(
+struct Worker {
+    healthy: bool,
+    last_heartbeat: time::Instant,
+    sender: TcpSender<CoordinationMessage>,
+}
+
+impl Worker {
+    fn new(sender: TcpSender<CoordinationMessage>) -> Self {
+        Worker {
+            healthy: true,
+            last_heartbeat: time::Instant::now(),
+            sender,
+        }
+    }
+}
+
+type WorkerIdentifier = SocketAddr;
+
+pub(super) fn main<A: Authority + 'static>(
     valve: &Valve,
     config: Config,
     descriptor: ControllerDescriptor,

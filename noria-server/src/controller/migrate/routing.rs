@@ -6,8 +6,8 @@
 //!  - Egress nodes must be added to nodes that now have children in a different domain
 //!  - Egress nodes that gain new children must gain channels to facilitate forwarding
 
-use crate::worker::domain_handle::DomainHandle;
-use crate::worker::{Worker, WorkerIdentifier};
+use crate::controller::domain_handle::DomainHandle;
+use crate::controller::{Worker, WorkerIdentifier};
 use dataflow::node;
 use dataflow::prelude::*;
 use petgraph;

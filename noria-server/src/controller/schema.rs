@@ -147,7 +147,7 @@ fn trace_column_type_on_path(
     }
 }
 
-pub fn column_schema(
+pub(super) fn column_schema(
     graph: &Graph,
     view: NodeIndex,
     recipe: &Recipe,

@@ -21,11 +21,11 @@ use tokio_io_pool;
 #[cfg(test)]
 use std::boxed::FnBox;
 
-pub(crate) use crate::handle::Handle;
-pub(crate) use crate::Config;
+use crate::handle::Handle;
+use crate::Config;
 
 #[allow(clippy::large_enum_variant)]
-pub(crate) enum Event {
+crate enum Event {
     InternalMessage(CoordinationMessage),
     ExternalRequest(
         Method,
@@ -41,7 +41,7 @@ pub(crate) enum Event {
     IsReady(futures::sync::oneshot::Sender<bool>),
     #[cfg(test)]
     ManualMigration {
-        f: Box<FnBox(&mut crate::controller::Migration) + Send + 'static>,
+        f: Box<FnBox(&mut crate::controller::migrate::Migration) + Send + 'static>,
         done: futures::sync::oneshot::Sender<()>,
     },
 }
@@ -65,7 +65,7 @@ impl fmt::Debug for Event {
 
 /// Start up a new instance and return a handle to it. Dropping the handle will stop the
 /// instance. Make sure that this method is run while on a runtime.
-pub(crate) fn start_instance<A: Authority + 'static>(
+pub(super) fn start_instance<A: Authority + 'static>(
     authority: Arc<A>,
     listen_addr: IpAddr,
     config: Config,

@@ -1,12 +1,11 @@
 use mir::node::{GroupedNodeType, MirNode, MirNodeType};
 use mir::query::MirQuery;
-pub use mir::{Column, MirNodeRef};
+use mir::{Column, MirNodeRef};
 use noria::DataType;
 use petgraph::graph::NodeIndex;
 // TODO(malte): remove if possible
 use dataflow::ops::filter::FilterCondition;
 use dataflow::ops::join::JoinType;
-pub use mir::FlowNode;
 
 use crate::controller::sql::query_graph::{OutputColumn, QueryGraph};
 use crate::controller::sql::query_signature::Signature;
@@ -96,7 +95,7 @@ fn value_columns_needed_for_predicates(
 }
 
 #[derive(Clone, Debug)]
-pub struct SqlToMirConverter {
+pub(super) struct SqlToMirConverter {
     base_schemas: HashMap<String, Vec<(usize, Vec<ColumnSpecification>)>>,
     current: HashMap<String, usize>,
     log: slog::Logger,
@@ -121,7 +120,7 @@ impl Default for SqlToMirConverter {
 }
 
 impl SqlToMirConverter {
-    pub fn with_logger(log: slog::Logger) -> Self {
+    pub(super) fn with_logger(log: slog::Logger) -> Self {
         SqlToMirConverter {
             log,
             ..Default::default()
@@ -132,12 +131,12 @@ impl SqlToMirConverter {
     /// We need this, because different universes will have different
     /// security policies and therefore different nodes that are not
     /// represent in the the query graph
-    pub fn set_universe(&mut self, universe: Universe) {
+    pub(super) fn set_universe(&mut self, universe: Universe) {
         self.universe = universe;
     }
 
     /// Set the universe to a policy-free universe
-    pub fn clear_universe(&mut self) {
+    pub(super) fn clear_universe(&mut self) {
         self.universe = Universe::default();
     }
 
@@ -225,7 +224,7 @@ impl SqlToMirConverter {
         filters
     }
 
-    pub fn add_leaf_below(
+    pub(super) fn add_leaf_below(
         &mut self,
         prior_leaf: MirNodeRef,
         name: &str,
@@ -301,7 +300,7 @@ impl SqlToMirConverter {
         }
     }
 
-    pub fn compound_query_to_mir(
+    pub(super) fn compound_query_to_mir(
         &mut self,
         name: &str,
         sqs: Vec<&MirQuery>,
@@ -393,7 +392,8 @@ impl SqlToMirConverter {
         }
     }
 
-    pub fn get_flow_node_address(&self, name: &str, version: usize) -> Option<NodeIndex> {
+    // pub(super) viz for tests
+    pub(super) fn get_flow_node_address(&self, name: &str, version: usize) -> Option<NodeIndex> {
         match self.nodes.get(&(name.to_string(), version)) {
             None => None,
             Some(ref node) => match node.borrow().flow_node {
@@ -403,14 +403,14 @@ impl SqlToMirConverter {
         }
     }
 
-    pub fn get_leaf(&self, name: &str) -> Option<NodeIndex> {
+    pub(super) fn get_leaf(&self, name: &str) -> Option<NodeIndex> {
         match self.current.get(name) {
             None => None,
             Some(v) => self.get_flow_node_address(name, *v),
         }
     }
 
-    pub fn named_base_to_mir(&mut self, name: &str, query: &SqlQuery) -> MirQuery {
+    pub(super) fn named_base_to_mir(&mut self, name: &str, query: &SqlQuery) -> MirQuery {
         match *query {
             SqlQuery::CreateTable(ref ctq) => {
                 assert_eq!(name, ctq.table.name);
@@ -427,7 +427,7 @@ impl SqlToMirConverter {
         }
     }
 
-    pub fn remove_query(&mut self, name: &str, mq: &MirQuery) {
+    pub(super) fn remove_query(&mut self, name: &str, mq: &MirQuery) {
         use std::collections::VecDeque;
 
         let v = self
@@ -458,7 +458,7 @@ impl SqlToMirConverter {
         }
     }
 
-    pub fn remove_base(&mut self, name: &str, mq: &MirQuery) {
+    pub(super) fn remove_base(&mut self, name: &str, mq: &MirQuery) {
         info!(self.log, "Removing base {} from SqlTomirconverter", name);
         self.remove_query(name, mq);
         if self.base_schemas.remove(name).is_none() {
@@ -469,7 +469,7 @@ impl SqlToMirConverter {
         }
     }
 
-    pub fn named_query_to_mir(
+    pub(super) fn named_query_to_mir(
         &mut self,
         name: &str,
         sq: &SelectStatement,
@@ -515,7 +515,7 @@ impl SqlToMirConverter {
         })
     }
 
-    pub fn upgrade_schema(&mut self, new_version: usize) {
+    pub(super) fn upgrade_schema(&mut self, new_version: usize) {
         assert!(new_version > self.schema_version);
         self.schema_version = new_version;
     }
