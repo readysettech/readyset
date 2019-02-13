@@ -5,27 +5,30 @@ extern crate mysql_common as myc;
 extern crate nom;
 
 use std::io;
+use std::io::{Read,Write};
 use std::net;
 use std::thread;
 
 use msql_srv::{
     Column, ErrorKind, MysqlIntermediary, MysqlShim, ParamParser, QueryResultWriter,
-    StatementMetaWriter,
+    StatementMetaWriter, InitWriter,
 };
 
-struct TestingShim<Q, P, E> {
+struct TestingShim<Q, P, E, I> {
     columns: Vec<Column>,
     params: Vec<Column>,
     on_q: Q,
     on_p: P,
     on_e: E,
+    on_i: I,
 }
 
-impl<Q, P, E> MysqlShim<net::TcpStream> for TestingShim<Q, P, E>
+impl<Q, P, E, I> MysqlShim<net::TcpStream> for TestingShim<Q, P, E, I>
 where
     Q: FnMut(&str, QueryResultWriter<net::TcpStream>) -> io::Result<()>,
     P: FnMut(&str) -> u32,
     E: FnMut(u32, Vec<msql_srv::ParamValue>, QueryResultWriter<net::TcpStream>) -> io::Result<()>,
+    I: FnMut(&str, InitWriter<net::TcpStream>) -> io::Result<()>,
 {
     type Error = io::Error;
 
@@ -49,6 +52,10 @@ where
 
     fn on_close(&mut self, _: u32) {}
 
+    fn on_init(&mut self, schema: &str, writer: InitWriter<net::TcpStream>) -> io::Result<()> {
+        (self.on_i)(schema, writer)
+    }
+
     fn on_query(
         &mut self,
         query: &str,
@@ -58,21 +65,23 @@ where
     }
 }
 
-impl<Q, P, E> TestingShim<Q, P, E>
+impl<Q, P, E, I> TestingShim<Q, P, E, I>
 where
     Q: 'static + Send + FnMut(&str, QueryResultWriter<net::TcpStream>) -> io::Result<()>,
     P: 'static + Send + FnMut(&str) -> u32,
     E: 'static
         + Send
         + FnMut(u32, Vec<msql_srv::ParamValue>, QueryResultWriter<net::TcpStream>) -> io::Result<()>,
+    I: 'static + Send + FnMut(&str, InitWriter<net::TcpStream>) -> io::Result<()>,
 {
-    fn new(on_q: Q, on_p: P, on_e: E) -> Self {
+    fn new(on_q: Q, on_p: P, on_e: E, on_i: I) -> Self {
         TestingShim {
             columns: Vec::new(),
             params: Vec::new(),
             on_q,
             on_p,
             on_e,
+            on_i,
         }
     }
 
@@ -102,6 +111,22 @@ where
         drop(db);
         jh.join().unwrap().unwrap();
     }
+
+    fn test_stream<C>(self, c: C)
+    where
+        C: FnOnce(&mut net::TcpStream) -> (),
+    {
+        let listener = net::TcpListener::bind("127.0.0.1:0").unwrap();
+        let port = listener.local_addr().unwrap().port();
+        let jh = thread::spawn(move || {
+            let (s, _) = listener.accept().unwrap();
+            MysqlIntermediary::run_on_tcp(self, s)
+        });
+        let mut stream = net::TcpStream::connect(format!("127.0.0.1:{}", port)).unwrap();
+        c(&mut stream);
+        drop(stream);
+        jh.join().unwrap().unwrap();
+    }
 }
 
 #[test]
@@ -110,8 +135,84 @@ fn it_connects() {
         |_, _| unreachable!(),
         |_| unreachable!(),
         |_, _, _| unreachable!(),
+        |_, _| unreachable!(),
     ).test(|_| {})
 }
+
+// The current version of the mysql client does not support the select_db()
+// function. A pull request has been accepted to that project
+// (https://github.com/blackbeam/rust-mysql-simple/pull/171) however it
+// is not on crates.io yet. In the meantime, we can simulate enough of a mysql client
+// to perform a handshake and send the initdb packet. Sometime in the future,
+// when the mysql client supports select_db() we can replace this test with a
+// call to mysql::Conn.select_db()
+#[test]
+fn it_inits_ok() {
+    TestingShim::new(
+        |_, _| unreachable!(),
+        |_| unreachable!(),
+        |_, _, _| unreachable!(),
+        move |schema, writer| {
+            assert_eq!(schema, "test");
+            writer.ok()
+            //writer.error(ErrorKind::ER_BAD_DB_ERROR,"the rain".as_bytes())
+        }
+    ).test_stream(|stream|{
+        // handshake
+        stream.read(&mut [0; 128]).unwrap();
+        let hs_resp = &[
+            0x25, 0x00, 0x00, 0x01, 0x85, 0xa6, 0x3f, 0x20, 0x00, 0x00, 0x00, 0x01, 0x21, 0x00,
+            0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+            0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x6a, 0x6f, 0x6e, 0x00, 0x00,
+        ];
+        stream.write(hs_resp).unwrap();
+        stream.read(&mut [0; 128]).unwrap();
+
+        // init_db packet
+        let init_db_packet = &[0x05, 0x00, 0x00, 0x00, 0x02, 0x74, 0x65, 0x73, 0x74];
+        stream.write(init_db_packet).unwrap();
+        let mut resp_u8 = [0; 128];
+        stream.read(&mut resp_u8).unwrap();
+
+        // check for OK packet
+        let p1 = resp_u8[4];
+        assert_eq!(p1, 0x00);
+    })
+}
+
+#[test]
+fn it_inits_error() {
+    TestingShim::new(
+        |_, _| unreachable!(),
+        |_| unreachable!(),
+        |_, _, _| unreachable!(),
+        move |schema, writer| {
+            assert_eq!(schema, "test");
+            writer.error(ErrorKind::ER_BAD_DB_ERROR,"the rain".as_bytes())
+        }
+    ).test_stream(|stream|{
+        // handshake
+        stream.read(&mut [0; 128]).unwrap();
+        let hs_resp = &[
+            0x25, 0x00, 0x00, 0x01, 0x85, 0xa6, 0x3f, 0x20, 0x00, 0x00, 0x00, 0x01, 0x21, 0x00,
+            0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+            0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x6a, 0x6f, 0x6e, 0x00, 0x00,
+        ];
+        stream.write(hs_resp).unwrap();
+        stream.read(&mut [0; 128]).unwrap();
+
+        // init_db packet
+        let init_db_packet = &[0x05, 0x00, 0x00, 0x00, 0x02, 0x74, 0x65, 0x73, 0x74];
+        stream.write(init_db_packet).unwrap();
+        let mut resp_u8 = [0; 128];
+        stream.read(&mut resp_u8).unwrap();
+
+        // check for ERR packet
+        let p1 = resp_u8[4];
+        assert_eq!(p1, 0xFF);
+    })
+}
+
 
 #[test]
 fn it_pings() {
@@ -119,6 +220,7 @@ fn it_pings() {
         |_, _| unreachable!(),
         |_| unreachable!(),
         |_, _, _| unreachable!(),
+        |_, _| unreachable!(),
     ).test(|db| assert_eq!(db.ping(), true))
 }
 
@@ -128,6 +230,7 @@ fn empty_response() {
         |_, w| w.completed(0, 0),
         |_| unreachable!(),
         |_, _, _| unreachable!(),
+        |_, _| unreachable!(),
     ).test(|db| {
         assert_eq!(db.query("SELECT a, b FROM foo").unwrap().count(), 0);
     })
@@ -145,6 +248,7 @@ fn no_rows() {
         move |_, w| w.start(&cols[..])?.finish(),
         |_| unreachable!(),
         |_, _, _| unreachable!(),
+        |_, _| unreachable!(),
     ).test(|db| {
         assert_eq!(db.query("SELECT a, b FROM foo").unwrap().count(), 0);
     })
@@ -156,6 +260,7 @@ fn no_columns() {
         move |_, w| w.start(&[])?.finish(),
         |_| unreachable!(),
         |_, _, _| unreachable!(),
+        |_, _| unreachable!(),
     ).test(|db| {
         assert_eq!(db.query("SELECT a, b FROM foo").unwrap().count(), 0);
     })
@@ -167,6 +272,7 @@ fn no_columns_but_rows() {
         move |_, w| w.start(&[])?.write_col(42).map(|_| ()),
         |_| unreachable!(),
         |_, _, _| unreachable!(),
+        |_, _| unreachable!(),
     ).test(|db| {
         assert_eq!(db.query("SELECT a, b FROM foo").unwrap().count(), 0);
     })
@@ -179,6 +285,7 @@ fn error_response() {
         move |_, w| w.error(err.0, err.1.as_bytes()),
         |_| unreachable!(),
         |_, _, _| unreachable!(),
+        |_, _| unreachable!(),
     ).test(|db| {
         if let mysql::Error::MySqlError(e) = db.query("SELECT a, b FROM foo").unwrap_err() {
             assert_eq!(
@@ -207,6 +314,7 @@ fn empty_on_drop() {
         move |_, w| w.start(&cols[..]).map(|_| ()),
         |_| unreachable!(),
         |_, _, _| unreachable!(),
+        |_, _| unreachable!(),
     ).test(|db| {
         assert_eq!(db.query("SELECT a, b FROM foo").unwrap().count(), 0);
     })
@@ -228,6 +336,7 @@ fn it_queries_nulls() {
         },
         |_| unreachable!(),
         |_, _, _| unreachable!(),
+        |_, _| unreachable!(),
     ).test(|db| {
         let row = db
             .query("SELECT a, b FROM foo")
@@ -255,6 +364,7 @@ fn it_queries() {
         },
         |_| unreachable!(),
         |_, _, _| unreachable!(),
+        |_, _| unreachable!(),
     ).test(|db| {
         let row = db
             .query("SELECT a, b FROM foo")
@@ -285,6 +395,7 @@ fn multi_result() {
         },
         |_| unreachable!(),
         |_, _, _| unreachable!(),
+        |_, _| unreachable!(),
     ).test(|db| {
         let mut result = db.query("SELECT a FROM foo; SELECT a FROM foo").unwrap();
         assert!(result.more_results_exists());
@@ -330,6 +441,7 @@ fn it_queries_many_rows() {
         },
         |_| unreachable!(),
         |_, _, _| unreachable!(),
+        |_, _| unreachable!(),
     ).test(|db| {
         let mut rows = 0;
         for row in db.query("SELECT a, b FROM foo").unwrap() {
@@ -378,6 +490,7 @@ fn it_prepares() {
             w.write_col(1024i16)?;
             w.finish()
         },
+        |_, _| unreachable!(),
     ).with_params(params)
         .with_columns(cols2)
         .test(|db| {
@@ -487,6 +600,7 @@ fn insert_exec() {
 
             w.completed(42, 1)
         },
+        |_, _| unreachable!(),
     ).with_params(params)
         .test(|db| {
             let res =
@@ -546,6 +660,7 @@ fn send_long() {
             w.write_col(1024i16)?;
             w.finish()
         },
+        |_, _| unreachable!(),
     ).with_params(params)
         .with_columns(cols2)
         .test(|db| {
@@ -594,6 +709,7 @@ fn it_prepares_many() {
             w.write_row(&[1024i16, 1025i16])?;
             w.finish()
         },
+        |_, _| unreachable!(),
     ).with_params(Vec::new())
         .with_columns(cols2)
         .test(|db| {
@@ -631,6 +747,7 @@ fn prepared_empty() {
             assert!(!params.is_empty());
             w.completed(0, 0)
         },
+        |_, _| unreachable!(),
     ).with_params(params)
         .with_columns(cols2)
         .test(|db| {
@@ -663,6 +780,7 @@ fn prepared_no_params() {
             w.write_col(1024i16)?;
             w.finish()
         },
+        |_, _| unreachable!(),
     ).with_params(params)
         .with_columns(cols2)
         .test(|db| {
@@ -725,6 +843,7 @@ fn prepared_nulls() {
             w.write_row(vec![None::<i16>, Some(42)])?;
             w.finish()
         },
+        |_, _| unreachable!(),
     ).with_params(params)
         .with_columns(cols2)
         .test(|db| {
@@ -754,6 +873,7 @@ fn prepared_no_rows() {
         |_, _| unreachable!(),
         |_| 0,
         move |_, _, w| w.start(&cols[..])?.finish(),
+        |_, _| unreachable!(),
     ).with_columns(cols2)
         .test(|db| {
             assert_eq!(db.prep_exec("SELECT a, b FROM foo", ()).unwrap().count(), 0);
@@ -766,6 +886,7 @@ fn prepared_no_cols_but_rows() {
         |_, _| unreachable!(),
         |_| 0,
         move |_, _, w| w.start(&[])?.write_col(42).map(|_| ()),
+        |_, _| unreachable!(),
     ).test(|db| {
         assert_eq!(db.prep_exec("SELECT a, b FROM foo", ()).unwrap().count(), 0);
     })
@@ -777,35 +898,9 @@ fn prepared_no_cols() {
         |_, _| unreachable!(),
         |_| 0,
         move |_, _, w| w.start(&[])?.finish(),
+        |_, _| unreachable!(),
     ).test(|db| {
         assert_eq!(db.prep_exec("SELECT a, b FROM foo", ()).unwrap().count(), 0);
     })
 }
 
-
-//#[test]
-//fn it_inits() {
-//    struct TestBackend{ pub database: String }
-//    impl MysqlShim<net::TcpStream> for TestBackend {
-//        type Error = io::Error;
-//        fn on_prepare(&mut self, _: &str, _: StatementMetaWriter<net::TcpStream>) -> io::Result<()> { Ok(()) }
-//        fn on_execute(&mut self, _: u32, _: ParamParser, _: QueryResultWriter<net::TcpStream>) -> io::Result<()> {Ok(())}
-//        fn on_close(&mut self, _: u32) {}
-//        fn on_query(&mut self, _: &str, _: QueryResultWriter<net::TcpStream>) -> io::Result<()> { Ok(()) }
-//        fn on_init(&mut self, schema: &str) -> io::Result<()> { 
-//            if schema == "foobar" {
-//                self.database = schema.to_owned();
-//                Ok(()) 
-//            } else {
-//                Err(io::Error::new(io::ErrorKind::NotFound,format!("The rain falls down")))
-//            }
-//        }
-//    }
-//    let mut backend = TestBackend{database: String::from("NA")};
-//    backend.on_init("foobar").unwrap();
-//    assert_eq!(backend.database, "foobar".to_string());
-//    match backend.on_init("foobar-not-found") {
-//        Ok(()) => assert!(false),
-//        Err(e) => assert_eq!( e.to_string(), io::Error::new(io::ErrorKind::NotFound, format!("The rain falls down")).to_string()),
-//    }
-//}
