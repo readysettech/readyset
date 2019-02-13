@@ -37,6 +37,8 @@
 //!     }
 //!     fn on_close(&mut self, _: u32) {}
 //!
+//!     fn on_init(&mut self, _: &str, writer: InitWriter<W>) -> io::Result<()> { Ok(()) }
+//!
 //!     fn on_query(&mut self, _: &str, results: QueryResultWriter<W>) -> io::Result<()> {
 //!         let cols = [
 //!             Column {
@@ -133,7 +135,7 @@ pub struct Column {
 
 pub use errorcodes::ErrorKind;
 pub use params::{ParamParser, ParamValue, Params};
-pub use resultset::{QueryResultWriter, RowWriter, StatementMetaWriter};
+pub use resultset::{QueryResultWriter, RowWriter, StatementMetaWriter, InitWriter};
 pub use value::{ToMysqlValue, Value, ValueInner};
 
 /// Implementors of this trait can be used to drive a MySQL-compatible database backend.
@@ -171,6 +173,9 @@ pub trait MysqlShim<W: Write> {
     /// Results should be returned using the given
     /// [`QueryResultWriter`](struct.QueryResultWriter.html).
     fn on_query(&mut self, query: &str, results: QueryResultWriter<W>) -> Result<(), Self::Error>;
+
+    /// Called when client switches database.
+    fn on_init(&mut self, _: &str, _: InitWriter<W>) -> Result<(), Self::Error> { Ok(()) }
 }
 
 /// A server that speaks the MySQL/MariaDB protocol, and can delegate client commands to a backend
@@ -338,7 +343,17 @@ impl<B: MysqlShim<W>, R: Read, W: Write> MysqlIntermediary<B, R, W> {
                     }];
                     writers::write_column_definitions(cols, &mut self.writer, true)?;
                 }
-                Command::Init(_) | Command::Ping => {
+                Command::Init(schema) => {
+                    let w = InitWriter {
+                        writer: &mut self.writer,
+                    };
+                    self.shim.on_init(
+                        ::std::str::from_utf8(schema)
+                                    .map_err(|e| io::Error::new(io::ErrorKind::InvalidData, e))?,
+                                    w
+                                    )?;
+                }
+                Command::Ping => {
                     writers::write_ok_packet(&mut self.writer, 0, 0, StatusFlags::empty())?;
                 }
                 Command::Quit => {

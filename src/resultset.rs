@@ -8,6 +8,30 @@ use value::ToMysqlValue;
 use writers;
 use {Column, ErrorKind, StatementData};
 
+/// Convenience type for responding to a client `USE <db>` command.
+pub struct InitWriter<'a, W: Write + 'a> {
+    pub(crate) writer: &'a mut PacketWriter<W>,
+}
+
+impl<'a, W: Write + 'a> InitWriter<'a, W> {
+    /// Tell client that database context has been changed
+    pub fn ok(self) -> io::Result<()>
+    {
+        writers::write_ok_packet(self.writer, 0, 0, StatusFlags::empty())
+    }
+
+    /// Tell client that there was a problem changing the database context.
+    /// Although you can return any valid MySQL error code you probably want
+    /// to keep it similar to the MySQL server and issue either a
+    /// `ErrorKind::ER_BAD_DB_ERROR` or a `ErrorKind::ER_DBACCESS_DENIED_ERROR`.
+    pub fn error<E>(self, kind: ErrorKind, msg: &E) -> io::Result<()>
+    where
+        E: Borrow<[u8]> + ?Sized,
+    {
+        writers::write_err(kind, msg.borrow(), self.writer)
+    }
+}
+
 /// Convenience type for responding to a client `PREPARE` command.
 ///
 /// This type should not be dropped without calling
