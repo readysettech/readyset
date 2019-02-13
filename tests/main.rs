@@ -5,7 +5,6 @@ extern crate mysql_common as myc;
 extern crate nom;
 
 use std::io;
-use std::io::{Read,Write};
 use std::net;
 use std::thread;
 
@@ -111,22 +110,6 @@ where
         drop(db);
         jh.join().unwrap().unwrap();
     }
-
-    fn test_stream<C>(self, c: C)
-    where
-        C: FnOnce(&mut net::TcpStream) -> (),
-    {
-        let listener = net::TcpListener::bind("127.0.0.1:0").unwrap();
-        let port = listener.local_addr().unwrap().port();
-        let jh = thread::spawn(move || {
-            let (s, _) = listener.accept().unwrap();
-            MysqlIntermediary::run_on_tcp(self, s)
-        });
-        let mut stream = net::TcpStream::connect(format!("127.0.0.1:{}", port)).unwrap();
-        c(&mut stream);
-        drop(stream);
-        jh.join().unwrap().unwrap();
-    }
 }
 
 #[test]
@@ -139,45 +122,17 @@ fn it_connects() {
     ).test(|_| {})
 }
 
-// The current version of the mysql client does not support the select_db()
-// function. A pull request has been accepted to that project
-// (https://github.com/blackbeam/rust-mysql-simple/pull/171) however it
-// is not on crates.io yet. In the meantime, we can simulate enough of a mysql client
-// to perform a handshake and send the initdb packet. Sometime in the future,
-// when the mysql client supports select_db() we can replace this test with a
-// call to mysql::Conn.select_db()
 #[test]
 fn it_inits_ok() {
     TestingShim::new(
         |_, _| unreachable!(),
         |_| unreachable!(),
         |_, _, _| unreachable!(),
-        move |schema, writer| {
+        |schema, writer| {
             assert_eq!(schema, "test");
             writer.ok()
-            //writer.error(ErrorKind::ER_BAD_DB_ERROR,"the rain".as_bytes())
         }
-    ).test_stream(|stream|{
-        // handshake
-        stream.read(&mut [0; 128]).unwrap();
-        let hs_resp = &[
-            0x25, 0x00, 0x00, 0x01, 0x85, 0xa6, 0x3f, 0x20, 0x00, 0x00, 0x00, 0x01, 0x21, 0x00,
-            0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
-            0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x6a, 0x6f, 0x6e, 0x00, 0x00,
-        ];
-        stream.write(hs_resp).unwrap();
-        stream.read(&mut [0; 128]).unwrap();
-
-        // init_db packet
-        let init_db_packet = &[0x05, 0x00, 0x00, 0x00, 0x02, 0x74, 0x65, 0x73, 0x74];
-        stream.write(init_db_packet).unwrap();
-        let mut resp_u8 = [0; 128];
-        stream.read(&mut resp_u8).unwrap();
-
-        // check for OK packet
-        let p1 = resp_u8[4];
-        assert_eq!(p1, 0x00);
-    })
+    ).test(|db| assert_eq!(true, db.select_db("test")));
 }
 
 #[test]
@@ -186,33 +141,12 @@ fn it_inits_error() {
         |_, _| unreachable!(),
         |_| unreachable!(),
         |_, _, _| unreachable!(),
-        move |schema, writer| {
+        |schema, writer| {
             assert_eq!(schema, "test");
-            writer.error(ErrorKind::ER_BAD_DB_ERROR,"the rain".as_bytes())
+            writer.error(ErrorKind::ER_BAD_DB_ERROR, format!("Database {} not found", schema).as_bytes())
         }
-    ).test_stream(|stream|{
-        // handshake
-        stream.read(&mut [0; 128]).unwrap();
-        let hs_resp = &[
-            0x25, 0x00, 0x00, 0x01, 0x85, 0xa6, 0x3f, 0x20, 0x00, 0x00, 0x00, 0x01, 0x21, 0x00,
-            0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
-            0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x6a, 0x6f, 0x6e, 0x00, 0x00,
-        ];
-        stream.write(hs_resp).unwrap();
-        stream.read(&mut [0; 128]).unwrap();
-
-        // init_db packet
-        let init_db_packet = &[0x05, 0x00, 0x00, 0x00, 0x02, 0x74, 0x65, 0x73, 0x74];
-        stream.write(init_db_packet).unwrap();
-        let mut resp_u8 = [0; 128];
-        stream.read(&mut resp_u8).unwrap();
-
-        // check for ERR packet
-        let p1 = resp_u8[4];
-        assert_eq!(p1, 0xFF);
-    })
+    ).test(|db| assert_eq!(false, db.select_db("test")));
 }
-
 
 #[test]
 fn it_pings() {
