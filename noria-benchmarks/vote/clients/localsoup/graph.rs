@@ -1,6 +1,4 @@
-use noria::{
-    self, LocalAuthority, NodeIndex, PersistenceParameters, SyncWorkerHandle, WorkerBuilder,
-};
+use noria::{self, LocalAuthority, NodeIndex, PersistenceParameters, SyncHandle};
 use tokio::prelude::*;
 
 pub(crate) const RECIPE: &str = "# base tables
@@ -19,7 +17,7 @@ pub struct Graph {
     pub vote: NodeIndex,
     pub article: NodeIndex,
     pub end: NodeIndex,
-    pub graph: SyncWorkerHandle<LocalAuthority>,
+    pub graph: SyncHandle<LocalAuthority>,
 }
 
 pub struct Builder {
@@ -61,7 +59,7 @@ impl Builder {
         persistence_params: PersistenceParameters,
     ) -> impl Future<Item = Graph, Error = failure::Error> {
         // XXX: why isn't PersistenceParameters inside self?
-        let mut g = WorkerBuilder::default();
+        let mut g = noria::Builder::default();
         if !self.partial {
             g.disable_partial();
         }
@@ -76,7 +74,7 @@ impl Builder {
 
         let graph = g
             .start_local()
-            .map(move |wh| SyncWorkerHandle::from_executor(ex, wh));
+            .map(move |wh| SyncHandle::from_executor(ex, wh));
 
         let logging = self.logging;
         let stupid = self.stupid;
@@ -96,7 +94,7 @@ impl Builder {
                 vote: inputs["Vote"],
                 article: inputs["Article"],
                 end: outputs["ArticleWithVoteCount"],
-                stupid: stupid,
+                stupid,
                 graph,
             })
     }

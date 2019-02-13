@@ -16,13 +16,10 @@ fn traverse(path: &Path) -> Vec<PathBuf> {
         let entry = entry.unwrap();
         let path = entry.path();
         if path.is_file() {
-            match path.extension() {
-                Some(e) => {
-                    if e.to_str().unwrap() == "php" || e.to_str().unwrap() == "inc" {
-                        files.push(path.clone())
-                    }
+            if let Some(e) = path.extension() {
+                if e.to_str().unwrap() == "php" || e.to_str().unwrap() == "inc" {
+                    files.push(path.clone())
                 }
-                _ => (),
             }
         } else if path.is_dir() {
             files.extend(traverse(path.as_path()));
@@ -57,6 +54,7 @@ fn process_file(fp: &Path, git_rev: &str) -> Vec<(String, String)> {
     queries
 }
 
+#[allow(clippy::trivial_regex)]
 fn reformat(queries: Vec<(String, String)>) -> Vec<(String, String)> {
     use regex::Regex;
 
@@ -81,7 +79,7 @@ fn reformat(queries: Vec<(String, String)>) -> Vec<(String, String)> {
         .map(|(qn, q)| (qn, question_mark_a.replace_all(&q, "=?").to_string()))
         .map(|(qn, q)| (qn, unclosed_quote.replace_all(&q, "=?").to_string()))
         .map(|(qn, q)| {
-            if !q.ends_with(";") {
+            if !q.ends_with(';') {
                 (qn, format!("{};", q))
             } else {
                 (qn, q.to_string())

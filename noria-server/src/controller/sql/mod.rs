@@ -3,18 +3,20 @@ mod passes;
 mod query_graph;
 mod query_signature;
 mod query_utils;
-pub mod reuse;
-pub mod security;
+mod reuse;
+pub(super) mod security;
 
-use self::mir::{MirNodeRef, SqlToMirConverter};
+use self::mir::SqlToMirConverter;
 use self::query_graph::{to_query_graph, QueryGraph};
 use self::query_signature::Signature;
-use self::reuse::{ReuseConfig, ReuseConfigType};
-use crate::controller::mir_to_flow::mir_query_to_flow_parts;
+use self::reuse::ReuseConfig;
+use super::mir_to_flow::mir_query_to_flow_parts;
 use crate::controller::Migration;
+use crate::ReuseConfigType;
 use ::mir::query::{MirQuery, QueryFlowParts};
 use ::mir::reuse as mir_reuse;
 use ::mir::Column;
+use ::mir::MirNodeRef;
 use dataflow::prelude::DataType;
 use nom_sql::parser as sql_parser;
 use nom_sql::{ArithmeticBase, CreateTableStatement, SqlQuery};
@@ -26,7 +28,7 @@ use std::collections::HashMap;
 use std::str;
 use std::vec::Vec;
 
-pub type UniverseId = (DataType, Option<DataType>);
+type UniverseId = (DataType, Option<DataType>);
 
 #[derive(Clone, Debug)]
 enum QueryGraphReuse {
@@ -41,7 +43,8 @@ enum QueryGraphReuse {
 /// the Soup graph `grap`.
 /// The incorporator shares the lifetime of the flow graph it is associated with.
 #[derive(Clone, Debug)]
-pub struct SqlIncorporator {
+// crate viz for tests
+crate struct SqlIncorporator {
     log: slog::Logger,
     mir_converter: SqlToMirConverter,
     leaf_addresses: HashMap<String, NodeIndex>,
@@ -90,10 +93,10 @@ impl Default for SqlIncorporator {
 
 impl SqlIncorporator {
     /// Creates a new `SqlIncorporator` for an empty flow graph.
-    pub fn new(log: slog::Logger) -> Self {
+    pub(super) fn new(log: slog::Logger) -> Self {
         let lc = log.clone();
         SqlIncorporator {
-            log: log,
+            log,
             mir_converter: SqlToMirConverter::with_logger(lc),
             ..Default::default()
         }
@@ -101,13 +104,13 @@ impl SqlIncorporator {
 
     /// Disable node reuse for future migrations.
     #[allow(unused)]
-    pub fn disable_reuse(&mut self) {
+    pub(super) fn disable_reuse(&mut self) {
         self.reuse_type = ReuseConfigType::NoReuse;
     }
 
     /// Disable node reuse for future migrations.
     #[allow(unused)]
-    pub fn enable_reuse(&mut self, reuse_type: ReuseConfigType) {
+    pub(super) fn enable_reuse(&mut self, reuse_type: ReuseConfigType) {
         self.reuse_type = reuse_type;
     }
 
@@ -119,8 +122,8 @@ impl SqlIncorporator {
     ///
     /// The return value is a tuple containing the query name (specified or computing) and a `Vec`
     /// of `NodeIndex`es representing the nodes added to support the query.
-    #[allow(unused)]
-    pub fn add_query(
+    #[cfg(test)]
+    crate fn add_query(
         &mut self,
         query: &str,
         name: Option<String>,
@@ -136,7 +139,7 @@ impl SqlIncorporator {
     ///
     /// The return value is a tuple containing the query name (specified or computing) and a `Vec`
     /// of `NodeIndex`es representing the nodes added to support the query.
-    pub fn add_parsed_query(
+    pub(super) fn add_parsed_query(
         &mut self,
         query: SqlQuery,
         name: Option<String>,
@@ -149,11 +152,11 @@ impl SqlIncorporator {
         }
     }
 
-    pub fn get_base_schema(&self, name: &str) -> Option<CreateTableStatement> {
+    pub(super) fn get_base_schema(&self, name: &str) -> Option<CreateTableStatement> {
         self.base_schemas.get(name).cloned()
     }
 
-    pub fn get_view_schema(&self, name: &str) -> Option<Vec<String>> {
+    pub(super) fn get_view_schema(&self, name: &str) -> Option<Vec<String>> {
         self.view_schemas.get(name).cloned()
     }
 
@@ -164,18 +167,18 @@ impl SqlIncorporator {
 
     /// Retrieves the flow node associated with a given query's leaf view.
     #[allow(unused)]
-    pub fn get_query_address(&self, name: &str) -> Option<NodeIndex> {
+    pub(super) fn get_query_address(&self, name: &str) -> Option<NodeIndex> {
         match self.leaf_addresses.get(name) {
             None => self.mir_converter.get_leaf(name),
-            Some(na) => Some(na.clone()),
+            Some(na) => Some(*na),
         }
     }
 
-    pub fn is_leaf_address(&self, ni: NodeIndex) -> bool {
+    pub(super) fn is_leaf_address(&self, ni: NodeIndex) -> bool {
         self.leaf_addresses.values().any(|nn| *nn == ni)
     }
 
-    pub fn get_queries_for_node(&self, ni: NodeIndex) -> Vec<String> {
+    pub(super) fn get_queries_for_node(&self, ni: NodeIndex) -> Vec<String> {
         self.leaf_addresses
             .iter()
             .filter_map(|(name, idx)| if *idx == ni { Some(name.clone()) } else { None })
@@ -298,53 +301,40 @@ impl SqlIncorporator {
                         // present in the query graph (because a later migration added the column to
                         // a base schema after the query was added to the graph). In this case, we
                         // move on to other reuse options.
-                        let params = qg
-                            .parameters()
-                            .into_iter()
-                            .map(|c| Column::from(c))
-                            .collect();
-                        match mir_reuse::rewind_until_columns_found(mir_query.leaf.clone(), &params)
+                        let params: Vec<_> =
+                            qg.parameters().into_iter().map(Column::from).collect();
+                        if let Some(mn) =
+                            mir_reuse::rewind_until_columns_found(mir_query.leaf.clone(), &params)
                         {
-                            Some(mn) => {
-                                use ::mir::node::MirNodeType;
-                                let project_columns = match mn.borrow().inner {
-                                    MirNodeType::Project { .. } => None,
-                                    _ => {
-                                        // N.B.: we can't just add an identity here, since we might
-                                        // have backtracked above a projection in order to get the
-                                        // new parameter column(s). In this case, we need to add a
-                                        // new projection that includes the same columns as the one
-                                        // for the existing query, but also additional parameter
-                                        // columns. The latter get added later; here we simply
-                                        // extract the columns that need reprojecting and pass them
-                                        // along with the reuse instruction.
-                                        let existing_projection = mir_query
-                                            .leaf
-                                            .borrow()
-                                            .ancestors()
-                                            .iter()
-                                            .next()
-                                            .unwrap()
-                                            .clone();
-                                        let project_columns = existing_projection
-                                            .borrow()
-                                            .columns()
-                                            .into_iter()
-                                            .cloned()
-                                            .collect();
-                                        Some(project_columns)
-                                    }
-                                };
-                                return (
-                                    qg,
-                                    QueryGraphReuse::ReaderOntoExisting(
-                                        mn,
-                                        project_columns,
-                                        params,
-                                    ),
-                                );
-                            }
-                            None => (),
+                            use ::mir::node::MirNodeType;
+                            let project_columns = match mn.borrow().inner {
+                                MirNodeType::Project { .. } => None,
+                                _ => {
+                                    // N.B.: we can't just add an identity here, since we might
+                                    // have backtracked above a projection in order to get the
+                                    // new parameter column(s). In this case, we need to add a
+                                    // new projection that includes the same columns as the one
+                                    // for the existing query, but also additional parameter
+                                    // columns. The latter get added later; here we simply
+                                    // extract the columns that need reprojecting and pass them
+                                    // along with the reuse instruction.
+                                    let existing_projection = mir_query
+                                        .leaf
+                                        .borrow()
+                                        .ancestors()
+                                        .iter()
+                                        .next()
+                                        .unwrap()
+                                        .clone();
+                                    let project_columns =
+                                        existing_projection.borrow().columns().to_vec();
+                                    Some(project_columns)
+                                }
+                            };
+                            return (
+                                qg,
+                                QueryGraphReuse::ReaderOntoExisting(mn, project_columns, params),
+                            );
                         }
                     }
                 }
@@ -356,7 +346,7 @@ impl SqlIncorporator {
         // Find a promising set of query graphs
         let reuse_candidates = reuse_config.reuse_candidates(&mut qg, &self.query_graphs);
 
-        if reuse_candidates.len() > 0 {
+        if !reuse_candidates.is_empty() {
             info!(
                 self.log,
                 "Identified {} candidate QGs for reuse",
@@ -393,7 +383,7 @@ impl SqlIncorporator {
     fn add_leaf_to_existing_query(
         &mut self,
         query_name: &str,
-        params: &Vec<Column>,
+        params: &[Column],
         final_query_node: MirNodeRef,
         project_columns: Option<Vec<Column>>,
         mut mig: &mut Migration,
@@ -557,17 +547,17 @@ impl SqlIncorporator {
         Ok((qfp, mir))
     }
 
-    pub fn remove_query(&mut self, query_name: &str, mig: &Migration) -> Option<NodeIndex> {
+    pub(super) fn remove_query(&mut self, query_name: &str, mig: &Migration) -> Option<NodeIndex> {
         let nodeid = self
             .leaf_addresses
             .remove(query_name)
             .expect("tried to remove unknown query");
 
-        let qg_hash = self.named_queries.remove(query_name).expect(&format!(
-            "missing query hash for named query \"{}\"",
-            query_name
-        ));
-        let mir = self.mir_queries.get(&(qg_hash, mig.universe())).unwrap();
+        let qg_hash = self
+            .named_queries
+            .remove(query_name)
+            .unwrap_or_else(|| panic!("missing query hash for named query \"{}\"", query_name));
+        let mir = &self.mir_queries[&(qg_hash, mig.universe())];
 
         // traverse self.leaf__addresses
         if self
@@ -607,7 +597,7 @@ impl SqlIncorporator {
         }
     }
 
-    pub fn remove_base(&mut self, name: &str) {
+    pub(super) fn remove_base(&mut self, name: &str) {
         info!(self.log, "Removing base {} from SqlIncorporator", name);
         if self.base_schemas.remove(name).is_none() {
             warn!(
@@ -619,7 +609,7 @@ impl SqlIncorporator {
         let mir = self
             .base_mir_queries
             .get(name)
-            .expect(&format!("tried to remove unknown base {}", name));
+            .unwrap_or_else(|| panic!("tried to remove unknown base {}", name));
         self.mir_converter.remove_base(name, mir)
     }
 
@@ -636,7 +626,7 @@ impl SqlIncorporator {
             .leaf
             .borrow()
             .columns()
-            .into_iter()
+            .iter()
             .map(|c| String::from(c.name.as_str()))
             .collect::<Vec<_>>();
 
@@ -700,7 +690,7 @@ impl SqlIncorporator {
             if !self.mir_queries.contains_key(&m) {
                 continue;
             }
-            let mq = self.mir_queries.get(&m).unwrap();
+            let mq = &self.mir_queries[&m];
             let res = merge_mir_for_queries(&self.log, &reused_mir, &mq);
             reused_mir = res.0;
             if res.1 > num_reused_nodes {
@@ -748,14 +738,14 @@ impl SqlIncorporator {
     fn rewrite_query(&mut self, q: SqlQuery, mig: &mut Migration) -> Result<SqlQuery, String> {
         // TODO: make this not take &mut self
 
-        use crate::controller::sql::passes::alias_removal::AliasRemoval;
-        use crate::controller::sql::passes::count_star_rewrite::CountStarRewrite;
-        use crate::controller::sql::passes::implied_tables::ImpliedTableExpansion;
-        use crate::controller::sql::passes::key_def_coalescing::KeyDefinitionCoalescing;
-        use crate::controller::sql::passes::negation_removal::NegationRemoval;
-        use crate::controller::sql::passes::star_expansion::StarExpansion;
-        use crate::controller::sql::passes::subqueries::SubQueries;
-        use crate::controller::sql::query_utils::ReferredTables;
+        use passes::alias_removal::AliasRemoval;
+        use passes::count_star_rewrite::CountStarRewrite;
+        use passes::implied_tables::ImpliedTableExpansion;
+        use passes::key_def_coalescing::KeyDefinitionCoalescing;
+        use passes::negation_removal::NegationRemoval;
+        use passes::star_expansion::StarExpansion;
+        use passes::subqueries::SubQueries;
+        use query_utils::ReferredTables;
 
         // need to increment here so that each subquery has a unique name.
         // (subqueries call recursively into `nodes_for_named_query` via `add_parsed_query` below,
@@ -878,7 +868,7 @@ impl SqlIncorporator {
             }
             SqlQuery::Select(sq) => self.add_select_query(&query_name, &sq, is_leaf, mig)?.0,
             ref q @ SqlQuery::CreateTable { .. } => self.add_base_via_mir(&query_name, &q, mig),
-            ref q @ _ => panic!("unhandled query type in recipe: {:?}", q),
+            q => panic!("unhandled query type in recipe: {:?}", q),
         };
 
         // record info about query
@@ -890,7 +880,7 @@ impl SqlIncorporator {
 
     /// Upgrades the schema version that any nodes created for queries will be tagged with.
     /// `new_version` must be strictly greater than the current version in `self.schema_version`.
-    pub fn upgrade_schema(&mut self, new_version: usize) {
+    pub(super) fn upgrade_schema(&mut self, new_version: usize) {
         assert!(new_version > self.schema_version);
         info!(
             self.log,
@@ -902,7 +892,7 @@ impl SqlIncorporator {
 }
 
 /// Enables incorporation of a textual SQL query into a Soup graph.
-pub trait ToFlowParts {
+trait ToFlowParts {
     /// Turn a SQL query into a set of nodes inserted into the Soup graph managed by
     /// the `SqlIncorporator` in the second argument. The query can optionally be named by the
     /// string in the `Option<String>` in the third argument.
@@ -956,7 +946,7 @@ mod tests {
     fn get_node<'a>(inc: &SqlIncorporator, mig: &'a Migration, name: &str) -> &'a Node {
         let na = inc
             .get_flow_node_address(name, 0)
-            .expect(&format!("No node named \"{}\" exists", name));
+            .unwrap_or_else(|| panic!("No node named \"{}\" exists", name));
         mig.graph().node_weight(na).unwrap()
     }
 

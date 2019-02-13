@@ -26,7 +26,7 @@ use std::panic;
 use std::thread;
 use std::time;
 
-use noria_server::{DataType, WorkerBuilder};
+use noria_server::{Builder, DataType};
 
 const DIRECTORY_PREFIX: &str = "tests/mysql_comparison_tests";
 
@@ -279,7 +279,7 @@ fn check_query(
         .chain(Some(query_name.to_owned() + ": " + &query.select_query))
         .collect();
 
-    let mut g = WorkerBuilder::default().start_simple().unwrap();
+    let mut g = Builder::default().start_simple().unwrap();
     g.install_recipe(&queries.join("\n")).unwrap();
 
     for (table_name, table) in tables.iter() {

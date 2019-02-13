@@ -552,13 +552,14 @@ mod tests {
     fn real_to_string() {
         let a: DataType = (2.5).into();
         let b: DataType = (-2.01).into();
-        let c: DataType = (-0.012345678).into();
+        let c: DataType = (-0.012_345_678).into();
         assert_eq!(a.to_string(), "2.500000000");
         assert_eq!(b.to_string(), "-2.010000000");
         assert_eq!(c.to_string(), "-0.012345678");
     }
 
     #[test]
+    #[allow(clippy::float_cmp)]
     fn real_to_float() {
         let original = 2.5;
         let data_type: DataType = original.into();
@@ -654,6 +655,7 @@ mod tests {
     }
 
     #[test]
+    #[allow(clippy::cyclomatic_complexity)]
     fn data_type_fungibility() {
         use std::convert::TryFrom;
 

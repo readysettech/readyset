@@ -58,9 +58,7 @@ fn find_and_merge_filter_chains(q: &MirQuery) {
 
 fn try_add_node_to_chain(node: &MirNodeRef, chained_filters: &mut Vec<MirNodeRef>) {
     // any filter node can start a new chain
-    if chained_filters.is_empty() {
-        chained_filters.push(node.clone());
-    } else if node.borrow().ancestors.len() == 1 {
+    if chained_filters.is_empty() || node.borrow().ancestors.len() == 1 {
         chained_filters.push(node.clone());
     } else {
         end_filter_chain(chained_filters);
@@ -83,7 +81,7 @@ fn end_filter_chain(chained_filters: &mut Vec<MirNodeRef>) {
     {
         let first_node = chained_filters.first().unwrap();
         let last_node = chained_filters.last().unwrap();
-        let schema_version = first_node.borrow().from_version.clone();
+        let schema_version = first_node.borrow().from_version;
 
         let name =
             chained_filters
@@ -94,7 +92,7 @@ fn end_filter_chain(chained_filters: &mut Vec<MirNodeRef>) {
                 });
 
         let prev_node = first_node.borrow().ancestors.first().unwrap().clone();
-        let fields: Vec<_> = prev_node.borrow().columns().iter().cloned().collect();
+        let fields = prev_node.borrow().columns().to_vec();
         let width = chained_filters.iter().fold(0, |mut acc, ref node| {
             let w = match node.borrow().inner {
                 MirNodeType::Filter { ref conditions } => conditions.len(),
@@ -133,7 +131,7 @@ fn end_filter_chain(chained_filters: &mut Vec<MirNodeRef>) {
 }
 
 fn to_conditions(
-    chained_filters: &Vec<MirNodeRef>,
+    chained_filters: &[MirNodeRef],
     num_columns: usize,
 ) -> Vec<Option<FilterCondition>> {
     let mut merged_conditions = vec![None; num_columns];

@@ -56,18 +56,15 @@ where
     } else {
         None
     };
+
     match ep_op_needed {
-        None => return false,
+        None => false,
         Some(op) => {
             // TODO(malte): the condition is actually weaker than
             // this inequality suggests -- it's sufficient for the
             // needed operator to be *weaker* than ep.operator to
             // reject the EQG.
-            if *eop != op {
-                return false;
-            } else {
-                return true;
-            }
+            *eop == op
         }
     }
 }
@@ -98,16 +95,13 @@ pub fn predicate_is_equivalent(np: &ConditionTree, ep: &ConditionTree) -> bool {
 pub fn complex_predicate_implies(np: &ConditionExpression, ep: &ConditionExpression) -> bool {
     match *ep {
         LogicalOp(ref ect) => {
-            match *np {
-                LogicalOp(ref nct) => {
-                    if nct.operator == ect.operator {
-                        return (complex_predicate_implies(&*nct.left, &*ect.left)
-                            && complex_predicate_implies(&*nct.right, &*ect.right))
-                            || (complex_predicate_implies(&*nct.left, &*ect.right)
-                                && complex_predicate_implies(&*nct.right, &*ect.left));
-                    }
+            if let LogicalOp(ref nct) = *np {
+                if nct.operator == ect.operator {
+                    return (complex_predicate_implies(&*nct.left, &*ect.left)
+                        && complex_predicate_implies(&*nct.right, &*ect.right))
+                        || (complex_predicate_implies(&*nct.left, &*ect.right)
+                            && complex_predicate_implies(&*nct.right, &*ect.left));
                 }
-                _ => (),
             }
 
             match ect.operator {

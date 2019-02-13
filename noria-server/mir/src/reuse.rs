@@ -4,7 +4,7 @@ use query::MirQuery;
 use slog;
 use MirNodeRef;
 
-pub fn rewind_until_columns_found(leaf: MirNodeRef, columns: &Vec<Column>) -> Option<MirNodeRef> {
+pub fn rewind_until_columns_found(leaf: MirNodeRef, columns: &[Column]) -> Option<MirNodeRef> {
     let mut cur = leaf;
     loop {
         if cur.borrow().ancestors().len() != 1 {
@@ -16,7 +16,7 @@ pub fn rewind_until_columns_found(leaf: MirNodeRef, columns: &Vec<Column>) -> Op
             .ancestors()
             .iter()
             .next()
-            .expect(&format!("{:?} has no ancestors", cur))
+            .unwrap_or_else(|| panic!("{:?} has no ancestors", cur))
             .clone();
 
         cur = next;
@@ -33,6 +33,7 @@ pub fn rewind_until_columns_found(leaf: MirNodeRef, columns: &Vec<Column>) -> Op
     }
 }
 
+#[allow(clippy::cyclomatic_complexity)]
 pub fn merge_mir_for_queries(
     log: &slog::Logger,
     new_query: &MirQuery,
@@ -165,7 +166,7 @@ pub fn merge_mir_for_queries(
             })
             .cloned()
             .collect();
-        let original_children: Vec<_> = n.borrow().children().iter().cloned().collect();
+        let original_children = n.borrow().children().to_vec();
         let children: Vec<_> = n
             .borrow()
             .children()
@@ -308,15 +309,13 @@ mod tests {
 
         // when merging with ourselves, the result should consist entirely of reuse nodes
         let (merged_reflexive, _) = merge_mir_for_queries(&log, &mq1, &mq1);
-        assert!(
-            merged_reflexive
-                .topo_nodes()
-                .iter()
-                .all(|n| match n.borrow().inner {
-                    MirNodeType::Reuse { .. } => true,
-                    _ => false,
-                },)
-        );
+        assert!(merged_reflexive
+            .topo_nodes()
+            .iter()
+            .all(|n| match n.borrow().inner {
+                MirNodeType::Reuse { .. } => true,
+                _ => false,
+            },));
 
         let (a, b, c, d) = make_nodes();
         let e = MirNode::new(

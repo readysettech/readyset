@@ -36,7 +36,7 @@ impl Sharder {
         use std::mem;
         let txs = mem::replace(&mut self.txs, Vec::new());
         Self {
-            txs: txs,
+            txs,
             sharded: VecMap::default(),
             shard_by: self.shard_by,
         }
@@ -122,7 +122,7 @@ impl Sharder {
 
         for (i, &mut (dst, addr)) in self.txs.iter_mut().enumerate() {
             if let Some(mut shard) = self.sharded.remove(i) {
-                shard.link_mut().src = index.into();
+                shard.link_mut().src = index;
                 shard.link_mut().dst = dst;
                 output.entry(addr).or_default().push_back(shard);
             }
@@ -153,8 +153,8 @@ impl Sharder {
                         keys: Vec::new(),
                         tag,
                     });
-                match p {
-                    &mut box Packet::EvictKeys { ref mut keys, .. } => keys.push(key.to_vec()),
+                match **p {
+                    Packet::EvictKeys { ref mut keys, .. } => keys.push(key.to_vec()),
                     _ => unreachable!(),
                 }
             }

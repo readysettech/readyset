@@ -29,8 +29,8 @@ impl Trigger {
         Trigger {
             us: None,
             src: src.into(),
-            trigger: trigger,
-            key: key,
+            trigger,
+            key,
         }
     }
 
@@ -107,7 +107,7 @@ impl Ingredient for Trigger {
             .iter()
             .filter_map(|k| match db.lookup(&[self.key], &KeyType::Single(&k)) {
                 LookupResult::Some(rs) => {
-                    if rs.len() == 0 {
+                    if rs.is_empty() {
                         Some(k)
                     } else {
                         None

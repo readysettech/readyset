@@ -46,7 +46,7 @@ impl ControllerRequest {
     fn new<Q: Serialize>(path: &'static str, r: Q) -> Result<Self, serde_json::Error> {
         Ok(ControllerRequest {
             path,
-            request: serde_json::to_vec(&r)?.into(),
+            request: serde_json::to_vec(&r)?,
         })
     }
 }

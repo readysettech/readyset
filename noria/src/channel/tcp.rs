@@ -201,6 +201,8 @@ where
     type Item = T;
     type Error = bincode::Error;
     fn poll(&mut self) -> Result<Async<Option<Self::Item>>, Self::Error> {
+        // https://github.com/rust-lang/rust-clippy/issues/3071
+        #[allow(clippy::redundant_closure)]
         match *self {
             DualTcpStream::Passthrough(ref mut abr) => abr.poll(),
             DualTcpStream::Upgrade(ref mut abr, ref mut upgrade) => match abr.poll() {
@@ -242,7 +244,7 @@ where
         };
 
         Self {
-            stream: stream,
+            stream,
             poisoned: false,
             deserialize_receiver: DeserializeReceiver::new(),
             phantom: PhantomData,

@@ -1,15 +1,20 @@
-use dataflow::backlog::SingleReadHandle;
+use async_bincode::AsyncBincodeStream;
+use dataflow::prelude::DataType;
 use dataflow::prelude::*;
 use dataflow::Readers;
+use dataflow::SingleReadHandle;
 use futures::future::{self, Either};
 use futures::try_ready;
+use futures::{self, Future, Stream};
+use noria::{ReadQuery, ReadReply, Tagged};
 use std::cell::RefCell;
 use std::collections::HashMap;
-use std::{mem, time};
-use tokio;
+use std::mem;
+use std::time;
+use stream_cancel::Valve;
 use tokio::prelude::*;
-
-use noria::{ReadQuery, ReadReply, Tagged};
+use tokio_tower::multiplex::server;
+use tower_util::ServiceFn;
 
 /// If a blocking reader finds itself waiting this long for a backfill to complete, it will
 /// re-issue the replay request. To avoid the system falling over if replays are slow for a little
@@ -23,13 +28,52 @@ thread_local! {
     >> = Default::default();
 }
 
+pub(super) fn listen(
+    valve: &Valve,
+    ioh: &tokio_io_pool::Handle,
+    on: tokio::net::TcpListener,
+    readers: Readers,
+) -> impl Future<Item = (), Error = ()> {
+    ioh.spawn_all(
+        valve
+            .wrap(on.incoming())
+            .map(Some)
+            .or_else(|_| {
+                // io error from client: just ignore it
+                Ok(None)
+            })
+            .filter_map(|c| c)
+            .map(move |stream| {
+                let readers = readers.clone();
+                stream.set_nodelay(true).expect("could not set TCP_NODELAY");
+                server::Server::new(
+                    AsyncBincodeStream::from(stream).for_async(),
+                    ServiceFn::new(move |req| handle_message(req, &readers)),
+                )
+                .map_err(|e| {
+                    if let server::Error::Service(()) = e {
+                        // server is shutting down -- no need to report this error
+                    } else {
+                        eprintln!("!!! reader client protocol error: {:?}", e);
+                    }
+                })
+            }),
+    )
+    .map_err(|e: tokio_io_pool::StreamSpawnError<()>| {
+        eprintln!(
+            "io pool is shutting down, so can't handle more reads: {:?}",
+            e
+        );
+    })
+}
+
 fn dup(rs: &[Vec<DataType>]) -> Vec<Vec<DataType>> {
-    rs.into_iter()
+    rs.iter()
         .map(|r| r.iter().map(|v| v.deep_clone()).collect())
         .collect()
 }
 
-pub(crate) fn handle_message(
+fn handle_message(
     m: Tagged<ReadQuery>,
     s: &Readers,
 ) -> impl Future<Item = Tagged<ReadReply>, Error = ()> + Send {
@@ -42,7 +86,7 @@ pub(crate) fn handle_message(
         } => {
             let immediate = READERS.with(|readers_cache| {
                 let mut readers_cache = readers_cache.borrow_mut();
-                let reader = readers_cache.entry(target.clone()).or_insert_with(|| {
+                let reader = readers_cache.entry(target).or_insert_with(|| {
                     let readers = s.lock().unwrap();
                     readers.get(&target).unwrap().clone()
                 });
@@ -127,7 +171,7 @@ pub(crate) fn handle_message(
         ReadQuery::Size { target } => {
             let size = READERS.with(|readers_cache| {
                 let mut readers_cache = readers_cache.borrow_mut();
-                let reader = readers_cache.entry(target.clone()).or_insert_with(|| {
+                let reader = readers_cache.entry(target).or_insert_with(|| {
                     let readers = s.lock().unwrap();
                     readers.get(&target).unwrap().clone()
                 });
@@ -168,7 +212,7 @@ impl Future for BlockingRead {
                 let mut readers_cache = readers_cache.borrow_mut();
                 let s = &self.truth;
                 let target = &self.target;
-                let reader = readers_cache.entry(self.target.clone()).or_insert_with(|| {
+                let reader = readers_cache.entry(self.target).or_insert_with(|| {
                     let readers = s.lock().unwrap();
                     readers.get(target).unwrap().clone()
                 });

@@ -1,7 +1,7 @@
-use crate::controller::sql::query_graph::{QueryGraph, QueryGraphEdge};
-use crate::controller::sql::query_signature::Signature;
-use crate::controller::sql::reuse::helpers::predicate_implication::complex_predicate_implies;
-use crate::controller::sql::reuse::{ReuseConfiguration, ReuseType};
+use super::super::query_graph::{QueryGraph, QueryGraphEdge};
+use super::super::query_signature::Signature;
+use super::helpers::predicate_implication::complex_predicate_implies;
+use super::{ReuseConfiguration, ReuseType};
 
 use std::collections::HashMap;
 use std::vec::Vec;
@@ -39,12 +39,9 @@ impl ReuseConfiguration for Relaxed {
                 .signature()
                 .is_weak_generalization_of(&qg.signature())
             {
-                match Self::check_compatibility(&qg, &existing_qg) {
-                    Some(reuse) => {
-                        // QGs are compatible, we can reuse `existing_qg` as part of `qg`!
-                        reuse_candidates.push((reuse, (sig.clone(), existing_qg)));
-                    }
-                    None => (),
+                if let Some(reuse) = Self::check_compatibility(&qg, &existing_qg) {
+                    // QGs are compatible, we can reuse `existing_qg` as part of `qg`!
+                    reuse_candidates.push((reuse, (*sig, existing_qg)));
                 }
             }
         }
@@ -57,11 +54,9 @@ impl Relaxed {
     fn check_compatibility(new_qg: &QueryGraph, existing_qg: &QueryGraph) -> Option<ReuseType> {
         // 1. NQG's nodes is subset of EQG's nodes
         // -- already established via signature check
-        assert!(
-            existing_qg
-                .signature()
-                .is_weak_generalization_of(&new_qg.signature())
-        );
+        assert!(existing_qg
+            .signature()
+            .is_weak_generalization_of(&new_qg.signature()));
 
         // Check if the queries are join compatible -- if the new query
         // performs a superset of the joins in the existing query.
@@ -165,6 +160,6 @@ impl Relaxed {
         // projected columns don't influence the reuse opportunities in this case, since
         // we are only trying to reuse the query partially, not completely extending it.
 
-        return Some(ReuseType::DirectExtension);
+        Some(ReuseType::DirectExtension)
     }
 }

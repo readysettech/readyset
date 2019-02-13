@@ -110,7 +110,7 @@
 //! This crate also provides `LocalAuthority`, which allows you to _embed_ a `noriad` worker, and
 //! not bother with setting up ZooKeeper or multiple workers. This provides no fault-tolerance and
 //! no multi-machine operations, but can be a convenient way to set things up for development and
-//! testing. See `WorkerBuilder::build_local` or the `basic-recipe` example for details.
+//! testing. See `Builder::build_local` or the `basic-recipe` example for details.
 //!
 //! # I'm a visual learner
 //!
@@ -355,10 +355,14 @@
 #![feature(box_syntax)]
 #![feature(nll)]
 #![feature(try_blocks)]
-#![deny(missing_docs)]
-#![deny(unused_extern_crates)]
 #![feature(fnbox)]
 #![feature(vec_remove_item)]
+#![feature(crate_visibility_modifier)]
+#![deny(missing_docs)]
+#![deny(unused_extern_crates)]
+//#![deny(unreachable_pub)]
+#![allow(clippy::too_many_arguments)]
+#![allow(clippy::type_complexity)]
 
 #[macro_use]
 extern crate failure;
@@ -369,18 +373,83 @@ extern crate serde_derive;
 #[macro_use]
 extern crate slog;
 
+mod builder;
 mod controller;
 mod coordination;
+mod handle;
+mod startup;
+mod worker;
 
 #[cfg(test)]
 mod integration;
 
-pub use crate::controller::sql::reuse::ReuseConfigType;
-pub use crate::controller::{SyncWorkerHandle, WorkerBuilder, WorkerHandle};
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[allow(missing_docs)]
+pub enum ReuseConfigType {
+    Finkelstein,
+    Relaxed,
+    Full,
+    NoReuse,
+}
+
+pub use crate::builder::Builder;
+pub use crate::handle::{Handle, SyncHandle};
 pub use dataflow::{DurabilityMode, PersistenceParameters};
 pub use noria::consensus::LocalAuthority;
 pub use noria::*;
 pub use petgraph::graph::NodeIndex;
+
+use dataflow::DomainConfig;
+use std::time;
+
+pub(crate) fn block_on<F, T>(f: F) -> T
+where
+    F: FnOnce() -> T,
+{
+    use tokio::prelude::*;
+    use tokio_threadpool::blocking;
+    let mut wrap = Some(f);
+    future::poll_fn(|| blocking(wrap.take().unwrap()))
+        .wait()
+        .unwrap()
+}
+
+#[derive(Clone, Serialize, Deserialize, PartialEq)]
+crate struct Config {
+    crate sharding: Option<usize>,
+    crate partial_enabled: bool,
+    crate domain_config: DomainConfig,
+    crate persistence: PersistenceParameters,
+    crate heartbeat_every: time::Duration,
+    crate healthcheck_every: time::Duration,
+    crate quorum: usize,
+    crate reuse: ReuseConfigType,
+    crate threads: Option<usize>,
+}
+impl Default for Config {
+    fn default() -> Self {
+        Self {
+            #[cfg(test)]
+            sharding: Some(2),
+            #[cfg(not(test))]
+            sharding: None,
+            partial_enabled: true,
+            domain_config: DomainConfig {
+                concurrent_replays: 512,
+                replay_batch_timeout: time::Duration::new(0, 10_000),
+            },
+            persistence: Default::default(),
+            heartbeat_every: time::Duration::from_secs(1),
+            healthcheck_every: time::Duration::from_secs(10),
+            quorum: 1,
+            reuse: ReuseConfigType::Finkelstein,
+            #[cfg(any(debug_assertions, test))]
+            threads: Some(2),
+            #[cfg(not(any(debug_assertions, test)))]
+            threads: None,
+        }
+    }
+}
 
 /// Just give me a damn terminal logger
 pub fn logger_pls() -> slog::Logger {
@@ -389,4 +458,75 @@ pub fn logger_pls() -> slog::Logger {
     use slog_term::term_full;
     use std::sync::Mutex;
     Logger::root(Mutex::new(term_full()).fuse(), o!())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use noria::consensus::ZookeeperAuthority;
+    use std::{sync::Arc, thread, time};
+    use tokio::prelude::*;
+
+    // Controller without any domains gets dropped once it leaves the scope.
+    #[test]
+    #[ignore]
+    #[allow_fail]
+    fn it_works_default() {
+        // Controller gets dropped. It doesn't have Domains, so we don't see any dropped.
+        let authority = ZookeeperAuthority::new("127.0.0.1:2181/it_works_default").unwrap();
+        {
+            tokio::runtime::current_thread::block_on_all(
+                Builder::default().start(Arc::new(authority)),
+            )
+            .unwrap();
+            thread::sleep(time::Duration::from_millis(100));
+        }
+        thread::sleep(time::Duration::from_millis(100));
+    }
+
+    // Controller with a few domains drops them once it leaves the scope.
+    #[test]
+    #[allow_fail]
+    fn it_works_blender_with_migration() {
+        let r_txt = "CREATE TABLE a (x int, y int, z int);\n
+                     CREATE TABLE b (r int, s int);\n";
+
+        use rand::Rng;
+        let zk = format!(
+            "127.0.0.1:2181/it_works_blender_with_migration_{}",
+            rand::thread_rng()
+                .sample_iter(&rand::distributions::Alphanumeric)
+                .take(8)
+                .collect::<String>()
+        );
+        let authority = ZookeeperAuthority::new(&zk).unwrap();
+        tokio::runtime::current_thread::block_on_all(
+            Builder::default()
+                .start(Arc::new(authority))
+                .and_then(|mut c| c.install_recipe(r_txt)),
+        )
+        .unwrap();
+    }
+
+    // Controller without any domains gets dropped once it leaves the scope.
+    #[test]
+    #[ignore]
+    fn it_works_default_local() {
+        // Controller gets dropped. It doesn't have Domains, so we don't see any dropped.
+        {
+            let _c = Builder::default().start_simple().unwrap();
+            thread::sleep(time::Duration::from_millis(100));
+        }
+        thread::sleep(time::Duration::from_millis(100));
+    }
+
+    // Controller with a few domains drops them once it leaves the scope.
+    #[test]
+    fn it_works_blender_with_migration_local() {
+        let r_txt = "CREATE TABLE a (x int, y int, z int);\n
+                     CREATE TABLE b (r int, s int);\n";
+
+        let mut c = Builder::default().start_simple().unwrap();
+        assert!(c.install_recipe(r_txt).is_ok());
+    }
 }

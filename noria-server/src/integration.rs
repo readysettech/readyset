@@ -1,6 +1,6 @@
 use crate::controller::recipe::Recipe;
 use crate::controller::sql::SqlIncorporator;
-use crate::controller::{SyncWorkerHandle, WorkerBuilder, WorkerHandle};
+use crate::{Builder, Handle, SyncHandle};
 use dataflow::node::special::Base;
 use dataflow::ops::grouped::aggregate::Aggregation;
 use dataflow::ops::identity::Identity;
@@ -32,34 +32,34 @@ fn get_persistence_params(prefix: &str) -> PersistenceParameters {
 }
 
 // Builds a local worker with the given log prefix.
-pub fn start_simple(prefix: &str) -> SyncWorkerHandle<LocalAuthority> {
+pub fn start_simple(prefix: &str) -> SyncHandle<LocalAuthority> {
     build(prefix, DEFAULT_SHARDING, false)
 }
 
-fn wrap_sync<A, F>(fut: F) -> SyncWorkerHandle<A>
+fn wrap_sync<A, F>(fut: F) -> SyncHandle<A>
 where
     A: Authority + 'static,
-    F: Future<Item = WorkerHandle<A>> + Send + 'static,
+    F: Future<Item = Handle<A>> + Send + 'static,
     F::Error: std::fmt::Debug + Send,
 {
     let mut rt = tokio::runtime::Runtime::new().unwrap();
     let wh = rt.block_on(fut).unwrap();
-    SyncWorkerHandle::from_existing(rt, wh)
+    SyncHandle::from_existing(rt, wh)
 }
 
 #[allow(dead_code)]
-pub fn start_simple_unsharded(prefix: &str) -> SyncWorkerHandle<LocalAuthority> {
+pub fn start_simple_unsharded(prefix: &str) -> SyncHandle<LocalAuthority> {
     build(prefix, None, false)
 }
 
 #[allow(dead_code)]
-pub fn start_simple_logging(prefix: &str) -> SyncWorkerHandle<LocalAuthority> {
+pub fn start_simple_logging(prefix: &str) -> SyncHandle<LocalAuthority> {
     build(prefix, DEFAULT_SHARDING, true)
 }
 
-fn build(prefix: &str, sharding: Option<usize>, log: bool) -> SyncWorkerHandle<LocalAuthority> {
+fn build(prefix: &str, sharding: Option<usize>, log: bool) -> SyncHandle<LocalAuthority> {
     use crate::logger_pls;
-    let mut builder = WorkerBuilder::default();
+    let mut builder = Builder::default();
     if log {
         builder.log_with(logger_pls());
     }
@@ -86,7 +86,7 @@ fn sleep() {
 #[test]
 fn it_works_basic() {
     // set up graph
-    let mut b = WorkerBuilder::default();
+    let mut b = Builder::default();
     b.set_persistence(PersistenceParameters::new(
         DurabilityMode::DeleteOnExit,
         Duration::from_millis(1),
@@ -558,7 +558,7 @@ fn it_works_with_vote() {
 
 #[test]
 fn it_works_with_double_query_through() {
-    let mut builder = WorkerBuilder::default();
+    let mut builder = Builder::default();
     builder.set_persistence(get_persistence_params("it_works_with_double_query_through"));
     // TODO: sharding::shard picks the wrong column to shard on, since both aid and bid resolves to
     // all ancestors (and bid comes first). The reader is on aid though, so the sharder should pick
@@ -736,7 +736,7 @@ fn it_recovers_persisted_bases() {
     );
 
     {
-        let mut g = WorkerBuilder::default();
+        let mut g = Builder::default();
         g.set_persistence(persistence_params.clone());
         let mut g = wrap_sync(g.start(authority.clone()));
 
@@ -757,7 +757,7 @@ fn it_recovers_persisted_bases() {
         sleep();
     }
 
-    let mut g = WorkerBuilder::default();
+    let mut g = Builder::default();
     g.set_persistence(persistence_params);
     let mut g = wrap_sync(g.start(authority.clone()));
     let mut getter = g.view("CarPrice").unwrap().into_sync();
@@ -836,7 +836,7 @@ fn it_recovers_persisted_bases_w_multiple_nodes() {
     );
 
     {
-        let mut g = WorkerBuilder::default();
+        let mut g = Builder::default();
         g.set_persistence(persistence_parameters.clone());
         let mut g = wrap_sync(g.start(authority.clone()));
 
@@ -859,7 +859,7 @@ fn it_recovers_persisted_bases_w_multiple_nodes() {
 
     // Create a new controller with the same authority, and make sure that it recovers to the same
     // state that the other one had.
-    let mut g = WorkerBuilder::default();
+    let mut g = Builder::default();
     g.set_persistence(persistence_parameters);
     let mut g = wrap_sync(g.start(authority.clone()));
     for (i, table) in tables.iter().enumerate() {
@@ -954,7 +954,7 @@ fn it_works_with_join_arithmetic() {
     // Retrieve the result of the count query:
     let result = getter.lookup(&[id.into()], true).unwrap();
     assert_eq!(result.len(), 1);
-    assert_eq!(result[0][1], (price as f64 * fraction).into());
+    assert_eq!(result[0][1], (f64::from(price) * fraction).into());
 }
 
 #[test]
@@ -969,7 +969,7 @@ fn it_works_with_function_arithmetic() {
     let mut mutator = g.table("Bread").unwrap().into_sync();
     let mut getter = g.view("Price").unwrap().into_sync();
     let max_price = 20;
-    for (i, price) in (10..max_price + 1).enumerate() {
+    for (i, price) in (10..=max_price).enumerate() {
         let id = i + 1;
         mutator.insert(vec![id.into(), price.into()]).unwrap();
     }
@@ -1242,10 +1242,7 @@ fn migrate_added_columns() {
 
     // set up graph
     let mut g = start_simple("migrate_added_columns");
-    let a = g.migrate(|mig| {
-        let a = mig.add_base("a", &["a", "b"], Base::new(vec![1.into(), 2.into()]));
-        a
-    });
+    let a = g.migrate(|mig| mig.add_base("a", &["a", "b"], Base::new(vec![1.into(), 2.into()])));
     let mut muta = g.table("a").unwrap().into_sync();
 
     // send a value on a
@@ -1381,7 +1378,7 @@ fn replay_during_replay() {
     // the join key that does not exist in the view the record was sent from. since joins only do
     // lookups into the origin view during forward processing when it receives things from the
     // right in a left join, that's what we have to construct.
-    let mut g = WorkerBuilder::default();
+    let mut g = Builder::default();
     g.disable_partial();
     g.set_persistence(get_persistence_params("replay_during_replay"));
     let mut g = g.start_simple().unwrap();
@@ -1481,7 +1478,7 @@ fn replay_during_replay() {
 
 #[test]
 fn cascading_replays_with_sharding() {
-    let mut g = WorkerBuilder::default();
+    let mut g = Builder::default();
     g.set_sharding(Some(2));
     g.set_persistence(get_persistence_params("cascading_replays_with_sharding"));
     let mut g = g.start_simple().unwrap();
@@ -1761,7 +1758,6 @@ fn migration_depends_on_unchanged_domain() {
         );
         mig.add_ingredient("join", &["a", "b"], j);
     });
-    assert!(true);
 }
 
 fn do_full_vote_migration(sharded: bool, old_puts_after: bool) {
@@ -2157,9 +2153,9 @@ fn finkelstein1982_queries() {
         f.read_to_string(&mut s).unwrap();
         let lines: Vec<String> = s
             .lines()
-            .filter(|l| !l.is_empty() && !l.starts_with("#"))
+            .filter(|l| !l.is_empty() && !l.starts_with('#'))
             .map(|l| {
-                if !(l.ends_with("\n") || l.ends_with(";")) {
+                if !(l.ends_with('\n') || l.ends_with(';')) {
                     String::from(l) + "\n"
                 } else {
                     String::from(l)
@@ -2199,7 +2195,7 @@ fn soupy_lobsters() {
 #[allow_fail]
 fn node_removal() {
     // set up graph
-    let mut b = WorkerBuilder::default();
+    let mut b = Builder::default();
     b.set_persistence(PersistenceParameters::new(
         DurabilityMode::DeleteOnExit,
         Duration::from_millis(1),
@@ -2277,7 +2273,7 @@ fn remove_query() {
     let r2_txt = "CREATE TABLE b (a int, c text, x text);\n
                   QUERY qa: SELECT a FROM b;";
 
-    let mut g = WorkerBuilder::default().start_simple().unwrap();
+    let mut g = Builder::default().start_simple().unwrap();
     g.install_recipe(r_txt).unwrap();
     assert_eq!(g.inputs().unwrap().len(), 1);
     assert_eq!(g.outputs().unwrap().len(), 2);

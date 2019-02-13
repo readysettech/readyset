@@ -56,7 +56,7 @@ fn rewrite_conditional(
             box right,
         }) => {
             let rewritten_ct = ConditionTree {
-                operator: operator,
+                operator,
                 left: Box::new(rewrite_conditional(table_aliases, left)),
                 right: Box::new(rewrite_conditional(table_aliases, right)),
             };

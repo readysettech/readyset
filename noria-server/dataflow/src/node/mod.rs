@@ -2,19 +2,23 @@ use domain;
 use ops;
 use petgraph;
 use prelude::*;
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::ops::{Deref, DerefMut};
 
 mod process;
-pub use self::process::materialize;
+#[cfg(test)]
+crate use self::process::materialize;
 
 pub mod special;
 pub use self::special::StreamUpdate;
 
 mod ntype;
-pub use self::ntype::NodeType;
+crate use self::ntype::NodeType; // crate viz for tests
 
 mod debug;
+
+// NOTE(jfrg): the migration code should probably move into the dataflow crate...
+// it is the reason why so much stuff here is pub
 
 #[derive(Clone, Serialize, Deserialize)]
 pub struct Node {
@@ -79,6 +83,101 @@ impl DanglingDomainNode {
     }
 }
 
+// expternal parts of Ingredient
+impl Node {
+    /// Called when a node is first connected to the graph.
+    ///
+    /// All its ancestors are present, but this node and its children may not have been connected
+    /// yet.
+    pub fn on_connected(&mut self, graph: &Graph) {
+        Ingredient::on_connected(&mut **self, graph)
+    }
+
+    pub fn on_commit(&mut self, remap: &HashMap<NodeIndex, IndexPair>) {
+        // this is *only* overwritten for these asserts.
+        assert!(!self.taken);
+        if let NodeType::Internal(ref mut i) = self.inner {
+            i.on_commit(self.index.unwrap().as_global(), remap)
+        }
+    }
+
+    /// May return a set of nodes such that *one* of the given ancestors *must* be the one to be
+    /// replayed if this node's state is to be initialized.
+    pub fn must_replay_among(&self) -> Option<HashSet<NodeIndex>> {
+        Ingredient::must_replay_among(&**self)
+    }
+
+    /// Translate a column in this ingredient into the corresponding column(s) in
+    /// parent ingredients. None for the column means that the parent doesn't
+    /// have an associated column. Similar to resolve, but does not depend on
+    /// materialization, and returns results even for computed columns.
+    pub fn parent_columns(&self, column: usize) -> Vec<(NodeIndex, Option<usize>)> {
+        Ingredient::parent_columns(&**self, column)
+    }
+
+    /// Resolve where the given field originates from. If the view is materialized, or the value is
+    /// otherwise created by this view, None should be returned.
+    pub fn resolve(&self, i: usize) -> Option<Vec<(NodeIndex, usize)>> {
+        Ingredient::resolve(&**self, i)
+    }
+
+    /// Returns true if this operator requires a full materialization
+    pub fn requires_full_materialization(&self) -> bool {
+        Ingredient::requires_full_materialization(&**self)
+    }
+
+    pub fn can_query_through(&self) -> bool {
+        Ingredient::can_query_through(&**self)
+    }
+
+    pub fn is_join(&self) -> bool {
+        Ingredient::is_join(&**self)
+    }
+
+    pub fn ancestors(&self) -> Vec<NodeIndex> {
+        Ingredient::ancestors(&**self)
+    }
+
+    /// Produce a compact, human-readable description of this node for Graphviz.
+    ///
+    /// If `detailed` is true, emit more info.
+    ///
+    ///  Symbol   Description
+    /// --------|-------------
+    ///    B    |  Base
+    ///    ||   |  Concat
+    ///    ⧖    |  Latest
+    ///    γ    |  Group by
+    ///   |*|   |  Count
+    ///    𝛴    |  Sum
+    ///    ⋈    |  Join
+    ///    ⋉    |  Left join
+    ///    ⋃    |  Union
+    pub fn description(&self, detailed: bool) -> String {
+        Ingredient::description(&**self, detailed)
+    }
+}
+
+// publicly accessible attributes
+impl Node {
+    pub fn name(&self) -> &str {
+        &*self.name
+    }
+
+    pub fn fields(&self) -> &[String] {
+        &self.fields[..]
+    }
+
+    pub fn sharded_by(&self) -> Sharding {
+        self.sharded_by
+    }
+
+    /// Set this node's sharding property.
+    pub fn shard_by(&mut self, s: Sharding) {
+        self.sharded_by = s;
+    }
+}
+
 // events
 impl Node {
     pub fn take(&mut self) -> DanglingDomainNode {
@@ -100,24 +199,11 @@ impl Node {
     pub fn remove(&mut self) {
         self.inner = NodeType::Dropped;
     }
-
-    /// Set this node's sharding property.
-    pub fn shard_by(&mut self, s: Sharding) {
-        self.sharded_by = s;
-    }
-
-    pub fn on_commit(&mut self, remap: &HashMap<NodeIndex, IndexPair>) {
-        // this is *only* overwritten for these asserts.
-        assert!(!self.taken);
-        if let NodeType::Internal(ref mut i) = self.inner {
-            i.on_commit(self.index.unwrap().as_global(), remap)
-        }
-    }
 }
 
 // derefs
 impl Node {
-    pub fn with_sharder_mut<F>(&mut self, f: F)
+    crate fn with_sharder_mut<F>(&mut self, f: F)
     where
         F: FnOnce(&mut special::Sharder),
     {
@@ -138,7 +224,7 @@ impl Node {
         }
     }
 
-    pub fn with_egress_mut<F>(&mut self, f: F)
+    crate fn with_egress_mut<F>(&mut self, f: F)
     where
         F: FnOnce(&mut special::Egress),
     {
@@ -167,6 +253,14 @@ impl Node {
         match self.inner {
             NodeType::Reader(ref r) => Ok(f(r)),
             _ => Err(()),
+        }
+    }
+
+    pub fn get_base(&self) -> Option<&special::Base> {
+        if let NodeType::Base(ref b) = self.inner {
+            Some(b)
+        } else {
+            None
         }
     }
 
@@ -201,34 +295,22 @@ impl DerefMut for Node {
 
 // children
 impl Node {
-    pub fn children(&self) -> &[LocalNodeIndex] {
-        &self.children[..]
-    }
-
-    pub fn child(&self, i: usize) -> &LocalNodeIndex {
+    crate fn child(&self, i: usize) -> &LocalNodeIndex {
         &self.children[i]
     }
 
-    pub fn has_children(&self) -> bool {
-        !self.children.is_empty()
-    }
-
-    pub fn nchildren(&self) -> usize {
+    crate fn nchildren(&self) -> usize {
         self.children.len()
     }
 }
 
 // attributes
 impl Node {
-    pub fn sharded_by(&self) -> Sharding {
-        self.sharded_by
-    }
-
-    pub fn add_child(&mut self, child: LocalNodeIndex) {
+    crate fn add_child(&mut self, child: LocalNodeIndex) {
         self.children.push(child);
     }
 
-    pub fn try_remove_child(&mut self, child: LocalNodeIndex) -> bool {
+    crate fn try_remove_child(&mut self, child: LocalNodeIndex) -> bool {
         for i in 0..self.children.len() {
             if self.children[i] == child {
                 self.children.swap_remove(i);
@@ -241,14 +323,6 @@ impl Node {
     pub fn add_column(&mut self, field: &str) -> usize {
         self.fields.push(field.to_string());
         self.fields.len() - 1
-    }
-
-    pub fn name(&self) -> &str {
-        &*self.name
-    }
-
-    pub fn fields(&self) -> &[String] {
-        &self.fields[..]
     }
 
     pub fn has_domain(&self) -> bool {
@@ -284,40 +358,12 @@ impl Node {
         }
     }
 
-    pub fn get_index(&self) -> &IndexPair {
-        self.index.as_ref().unwrap()
-    }
-
-    pub fn get_base(&self) -> Option<&special::Base> {
-        if let NodeType::Base(ref b) = self.inner {
-            Some(b)
-        } else {
-            None
-        }
-    }
-
     pub fn get_base_mut(&mut self) -> Option<&mut special::Base> {
         if let NodeType::Base(ref mut b) = self.inner {
             Some(b)
         } else {
             None
         }
-    }
-
-    pub fn is_base(&self) -> bool {
-        if let NodeType::Base(..) = self.inner {
-            true
-        } else {
-            false
-        }
-    }
-
-    pub fn is_localized(&self) -> bool {
-        self.index
-            .as_ref()
-            .map(|idx| idx.has_local())
-            .unwrap_or(false)
-            && self.domain.is_some()
     }
 
     pub fn add_to(&mut self, domain: domain::Index) {
@@ -333,14 +379,6 @@ impl Node {
 
 // is this or that?
 impl Node {
-    pub fn is_source(&self) -> bool {
-        if let NodeType::Source { .. } = self.inner {
-            true
-        } else {
-            false
-        }
-    }
-
     pub fn is_dropped(&self) -> bool {
         if let NodeType::Dropped = self.inner {
             true
@@ -351,14 +389,6 @@ impl Node {
 
     pub fn is_egress(&self) -> bool {
         if let NodeType::Egress { .. } = self.inner {
-            true
-        } else {
-            false
-        }
-    }
-
-    pub fn is_sharder(&self) -> bool {
-        if let NodeType::Sharder { .. } = self.inner {
             true
         } else {
             false
@@ -381,6 +411,13 @@ impl Node {
         }
     }
 
+    pub fn is_sender(&self) -> bool {
+        match self.inner {
+            NodeType::Egress { .. } | NodeType::Sharder(..) => true,
+            _ => false,
+        }
+    }
+
     pub fn is_internal(&self) -> bool {
         if let NodeType::Internal(..) = self.inner {
             true
@@ -389,10 +426,27 @@ impl Node {
         }
     }
 
-    pub fn is_sender(&self) -> bool {
-        match self.inner {
-            NodeType::Egress { .. } | NodeType::Sharder(..) => true,
-            _ => false,
+    pub fn is_source(&self) -> bool {
+        if let NodeType::Source { .. } = self.inner {
+            true
+        } else {
+            false
+        }
+    }
+
+    pub fn is_sharder(&self) -> bool {
+        if let NodeType::Sharder { .. } = self.inner {
+            true
+        } else {
+            false
+        }
+    }
+
+    pub fn is_base(&self) -> bool {
+        if let NodeType::Base(..) = self.inner {
+            true
+        } else {
+            false
         }
     }
 
@@ -401,15 +455,6 @@ impl Node {
             u.is_shard_merger()
         } else {
             false
-        }
-    }
-
-    /// A node is considered to be an output node if changes to its state are visible outside of
-    /// its domain.
-    pub fn is_output(&self) -> bool {
-        match self.inner {
-            NodeType::Egress { .. } | NodeType::Reader(..) | NodeType::Sharder(..) => true,
-            _ => false,
         }
     }
 }

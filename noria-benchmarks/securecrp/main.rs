@@ -5,19 +5,19 @@ extern crate slog;
 
 mod test_populate;
 
-use noria::{DataType, LocalAuthority, ReuseConfigType, SyncWorkerHandle, WorkerBuilder};
+use noria::{Builder, DataType, LocalAuthority, ReuseConfigType, SyncHandle};
 use std::collections::HashMap;
 use std::fs::File;
 use std::io::Write;
 use std::{thread, time};
 
 pub struct Backend {
-    g: SyncWorkerHandle<LocalAuthority>,
+    g: SyncHandle<LocalAuthority>,
 }
 
 impl Backend {
     pub fn new(partial: bool, _shard: bool, reuse: &str) -> Backend {
-        let mut cb = WorkerBuilder::default();
+        let mut cb = Builder::default();
         let log = noria::logger_pls();
         let blender_log = log.clone();
 
@@ -27,7 +27,7 @@ impl Backend {
 
         cb.log_with(blender_log);
 
-        match reuse.as_ref() {
+        match reuse {
             "finkelstein" => cb.set_reuse(ReuseConfigType::Finkelstein),
             "full" => cb.set_reuse(ReuseConfigType::Full),
             "noreuse" => cb.set_reuse(ReuseConfigType::NoReuse),
@@ -37,7 +37,7 @@ impl Backend {
 
         let g = cb.start_simple().unwrap();
 
-        Backend { g: g }
+        Backend { g }
     }
 
     fn login(&mut self, user_context: HashMap<String, DataType>) -> Result<(), String> {
@@ -190,5 +190,5 @@ fn main() {
     }
 
     // sleep "forever"
-    thread::sleep(time::Duration::from_millis(200000000));
+    thread::sleep(time::Duration::from_millis(200_000_000));
 }

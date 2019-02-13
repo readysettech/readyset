@@ -163,7 +163,7 @@ impl Ingredient for Union {
                     .drain()
                     .map(|(mut k, v)| {
                         k.remap(remap);
-                        cols_l.insert(*k, v.clone());
+                        cols_l.insert(*k, v);
                         (k, v)
                     })
                     .collect();
@@ -453,7 +453,7 @@ impl Ingredient for Union {
                         assert!(self.replay_pieces.is_empty());
                         return RawProcessingResult::ReplayPiece {
                             rows: rs,
-                            keys: keys.into_iter().cloned().collect(),
+                            keys: keys.iter().cloned().collect(),
                             captured: HashSet::new(),
                         };
                     }
@@ -580,7 +580,7 @@ impl Ingredient for Union {
                 RawProcessingResult::ReplayPiece {
                     rows: rs,
                     keys: released,
-                    captured: captured,
+                    captured,
                 }
             }
         }

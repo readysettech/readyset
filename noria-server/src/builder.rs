@@ -1,5 +1,6 @@
-use crate::controller::sql::reuse::ReuseConfigType;
-use crate::controller::{self, SyncWorkerHandle, WorkerConfig, WorkerHandle};
+use crate::handle::{Handle, SyncHandle};
+use crate::Config;
+use crate::ReuseConfigType;
 use dataflow::PersistenceParameters;
 use failure;
 use noria::consensus::{Authority, LocalAuthority};
@@ -10,17 +11,17 @@ use std::time;
 use tokio::prelude::*;
 
 /// Used to construct a worker.
-pub struct WorkerBuilder {
-    config: WorkerConfig,
+pub struct Builder {
+    config: Config,
     memory_limit: Option<usize>,
     memory_check_frequency: Option<time::Duration>,
     listen_addr: IpAddr,
     log: slog::Logger,
 }
-impl Default for WorkerBuilder {
+impl Default for Builder {
     fn default() -> Self {
         Self {
-            config: WorkerConfig::default(),
+            config: Config::default(),
             listen_addr: "127.0.0.1".parse().unwrap(),
             log: slog::Logger::root(slog::Discard, o!()),
             memory_limit: None,
@@ -28,7 +29,7 @@ impl Default for WorkerBuilder {
         }
     }
 }
-impl WorkerBuilder {
+impl Builder {
     /// Set the maximum number of concurrent partial replay requests a domain can have outstanding
     /// at any given time.
     ///
@@ -93,13 +94,13 @@ impl WorkerBuilder {
         self.config.threads = Some(threads);
     }
 
-    /// Start a worker and return a handle to it.
+    /// Start a server instance and return a handle to it.
     #[must_use]
     pub fn start<A: Authority + 'static>(
         &self,
         authority: Arc<A>,
-    ) -> impl Future<Item = WorkerHandle<A>, Error = failure::Error> {
-        let WorkerBuilder {
+    ) -> impl Future<Item = Handle<A>, Error = failure::Error> {
+        let Builder {
             listen_addr,
             ref config,
             memory_limit,
@@ -110,7 +111,7 @@ impl WorkerBuilder {
         let config = config.clone();
         let log = log.clone();
         future::lazy(move || {
-            controller::start_instance(
+            crate::startup::start_instance(
                 authority,
                 listen_addr,
                 config,
@@ -124,17 +125,17 @@ impl WorkerBuilder {
     /// Start a local worker and return a handle to it.
     ///
     /// The returned handle executes all operations synchronously on a tokio runtime.
-    pub fn start_simple(&self) -> Result<SyncWorkerHandle<LocalAuthority>, failure::Error> {
+    pub fn start_simple(&self) -> Result<SyncHandle<LocalAuthority>, failure::Error> {
         let mut rt = tokio::runtime::Runtime::new()?;
         let wh = rt.block_on(self.start_local())?;
-        Ok(SyncWorkerHandle::from_existing(rt, wh))
+        Ok(SyncHandle::from_existing(rt, wh))
     }
 
     /// Start a local-only worker, and return a handle to it.
     #[must_use]
     pub fn start_local(
         &self,
-    ) -> impl Future<Item = WorkerHandle<LocalAuthority>, Error = failure::Error> {
+    ) -> impl Future<Item = Handle<LocalAuthority>, Error = failure::Error> {
         #[allow(unused_mut)]
         self.start(Arc::new(LocalAuthority::new()))
             .and_then(|mut wh| {

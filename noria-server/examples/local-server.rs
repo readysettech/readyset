@@ -1,7 +1,7 @@
 extern crate futures;
 extern crate noria_server;
 
-use noria_server::WorkerBuilder;
+use noria_server::Builder;
 
 use std::thread;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
@@ -29,7 +29,7 @@ fn main() {
     );
 
     // set up Soup via recipe
-    let mut builder = WorkerBuilder::default();
+    let mut builder = Builder::default();
 
     builder.log_with(noria_server::logger_pls());
     builder.set_persistence(persistence_params);

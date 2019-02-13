@@ -19,7 +19,7 @@ impl ReuseConfiguration for Full {
         sorted_keys.sort();
         sorted_keys
             .iter()
-            .map(|k| (ReuseType::DirectExtension, (k.clone(), &query_graphs[k])))
+            .map(|k| (ReuseType::DirectExtension, (*k, &query_graphs[k])))
             .collect()
     }
 }

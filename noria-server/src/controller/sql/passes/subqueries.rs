@@ -8,10 +8,10 @@ pub enum Subquery<'a> {
 }
 
 pub trait SubQueries {
-    fn extract_subqueries<'a>(&'a mut self) -> Vec<Subquery>;
+    fn extract_subqueries(&mut self) -> Vec<Subquery>;
 }
 
-fn extract_subqueries_from_condition<'a>(ce: &'a mut ConditionExpression) -> Vec<Subquery> {
+fn extract_subqueries_from_condition(ce: &mut ConditionExpression) -> Vec<Subquery> {
     use nom_sql::ConditionBase::NestedSelect;
     match *ce {
         ComparisonOp(ref mut ct) | LogicalOp(ref mut ct) => {
@@ -62,26 +62,17 @@ pub fn query_from_condition_base(cond: &ConditionBase) -> (SqlQuery, Column) {
 }
 
 impl SubQueries for SqlQuery {
-    fn extract_subqueries<'a>(&'a mut self) -> Vec<Subquery> {
+    fn extract_subqueries(&mut self) -> Vec<Subquery> {
         let mut subqueries = Vec::new();
-        match *self {
-            SqlQuery::Select(ref mut st) => {
-                for jc in &mut st.join {
-                    match jc.right {
-                        ref mut jrs @ JoinRightSide::NestedSelect(_, _) => {
-                            subqueries.push(Subquery::InJoin(jrs));
-                        }
-                        _ => (),
-                    }
-                }
-                match st.where_clause {
-                    Some(ref mut ce) => {
-                        subqueries.extend(extract_subqueries_from_condition(ce));
-                    }
-                    None => (),
+        if let SqlQuery::Select(ref mut st) = *self {
+            for jc in &mut st.join {
+                if let JoinRightSide::NestedSelect(_, _) = jc.right {
+                    subqueries.push(Subquery::InJoin(&mut jc.right));
                 }
             }
-            _ => (),
+            if let Some(ref mut ce) = st.where_clause {
+                subqueries.extend(extract_subqueries_from_condition(ce));
+            }
         }
 
         subqueries

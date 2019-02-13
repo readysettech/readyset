@@ -87,9 +87,9 @@ fn main() {
 
     // start the benchmark
     let start = time::Instant::now();
-    let mut n = 0;
+    let mut num = 0;
     for _ in (0..votes).step_by(batch) {
-        n += batch;
+        num += batch;
         v.perform_all((0..batch).map(|_| {
             TableOperation::from(vec![
                 DataType::from(rng.gen_range(0, articles) + 1),
@@ -101,10 +101,10 @@ fn main() {
     let took = start.elapsed();
 
     // all done!
-    println!("# votes: {}", n);
+    println!("# votes: {}", num);
     println!("# took: {:?}", took);
     println!(
         "# achieved ops/s: {:.2}",
-        n as f64 / (took.as_nanos() as f64 / 1_000_000_000.)
+        num as f64 / (took.as_nanos() as f64 / 1_000_000_000.)
     );
 }

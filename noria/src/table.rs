@@ -35,26 +35,29 @@ impl Service<()> for TableEndpoint {
     type Response = multiplex::MultiplexTransport<Transport, Tagger>;
     type Error = tokio::io::Error;
     // have to repeat types because https://github.com/rust-lang/rust/issues/57807
-    existential type Future: Future<Item = multiplex::MultiplexTransport<Transport, Tagger>, Error = tokio::io::Error>;
+    existential type Future: Future<
+        Item = multiplex::MultiplexTransport<Transport, Tagger>,
+        Error = tokio::io::Error,
+    >;
 
     fn poll_ready(&mut self) -> Poll<(), Self::Error> {
         Ok(Async::Ready(()))
     }
 
     fn call(&mut self, _: ()) -> Self::Future {
-            tokio::net::TcpStream::connect(&self.0)
-                .and_then(|s| {
-                    s.set_nodelay(true)?;
-                    Ok(s)
-                })
-                .map(|mut s| {
-                    s.write_all(&[CONNECTION_FROM_BASE]).unwrap();
-                    s.flush().unwrap();
-                    s
-                })
-                .map(AsyncBincodeStream::from)
-                .map(AsyncBincodeStream::for_async)
-                .map(|t| multiplex::MultiplexTransport::new(t, Tagger::default()))
+        tokio::net::TcpStream::connect(&self.0)
+            .and_then(|s| {
+                s.set_nodelay(true)?;
+                Ok(s)
+            })
+            .map(|mut s| {
+                s.write_all(&[CONNECTION_FROM_BASE]).unwrap();
+                s.flush().unwrap();
+                s
+            })
+            .map(AsyncBincodeStream::from)
+            .map(AsyncBincodeStream::for_async)
+            .map(|t| multiplex::MultiplexTransport::new(t, Tagger::default()))
     }
 }
 
@@ -355,7 +358,7 @@ impl Service<TableOperation> for Table {
     }
 
     fn call(&mut self, op: TableOperation) -> Self::Future {
-        let i = self.prep_records(vec![op.into()]);
+        let i = self.prep_records(vec![op]);
         <Table as Service<Input>>::call(self, i)
     }
 }
@@ -490,20 +493,20 @@ impl Table {
         Self: Service<Request, Error = TableError>,
         <Self as Service<Request>>::Future: Send,
     {
-            self.ready()
-                .map_err(|e| match e {
-                    TableError::TransportError(e) => AsyncTableError::from(e),
-                    e => unreachable!("{:?}", e),
+        self.ready()
+            .map_err(|e| match e {
+                TableError::TransportError(e) => AsyncTableError::from(e),
+                e => unreachable!("{:?}", e),
+            })
+            .and_then(move |mut svc| {
+                svc.call(r).then(move |r| match r {
+                    Ok(_) => Ok(svc),
+                    Err(e) => Err(AsyncTableError {
+                        table: Some(svc),
+                        error: e,
+                    }),
                 })
-                .and_then(move |mut svc| {
-                    svc.call(r).then(move |r| match r {
-                        Ok(_) => Ok(svc),
-                        Err(e) => Err(AsyncTableError {
-                            table: Some(svc),
-                            error: e,
-                        }),
-                    })
-                })
+            })
     }
 
     /// Insert a single row of data into this base table.

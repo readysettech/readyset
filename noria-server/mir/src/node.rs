@@ -41,8 +41,8 @@ impl MirNode {
         let mn = MirNode {
             name: String::from(name),
             from_version: v,
-            columns: columns,
-            inner: inner,
+            columns,
+            inner,
             ancestors: ancestors.clone(),
             children: children.clone(),
             flow_node: None,
@@ -51,7 +51,7 @@ impl MirNode {
         let rc_mn = Rc::new(RefCell::new(mn));
 
         // register as child on ancestors
-        for ref ancestor in ancestors {
+        for ancestor in &ancestors {
             ancestor.borrow_mut().add_child(rc_mn.clone());
         }
 
@@ -72,7 +72,7 @@ impl MirNode {
                 ..
             } => {
                 let new_column_specs: Vec<(ColumnSpecification, Option<usize>)> = column_specs
-                    .into_iter()
+                    .iter()
                     .cloned()
                     .filter(|&(ref cs, _)| !removed_cols.contains(&cs))
                     .chain(
@@ -101,14 +101,14 @@ impl MirNode {
                         columns_removed: removed_cols.into_iter().cloned().collect(),
                     }),
                 };
-                return MirNode::new(
+                MirNode::new(
                     &over_node.name,
                     over_node.from_version,
                     new_columns,
                     new_inner,
                     vec![],
                     over_node.children.clone(),
-                );
+                )
             }
             _ => unreachable!(),
         }
@@ -130,9 +130,7 @@ impl MirNode {
             flow_node: None, // will be set in `into_flow_parts`
         };
 
-        let rc_mn = Rc::new(RefCell::new(mn));
-
-        rc_mn
+        Rc::new(RefCell::new(mn))
     }
 
     pub fn can_reuse_as(&self, for_node: &MirNode) -> bool {
@@ -276,7 +274,7 @@ impl MirNode {
 
     pub fn referenced_columns(&self) -> Vec<Column> {
         // all projected columns
-        let mut columns: Vec<Column> = self.columns.iter().cloned().collect();
+        let mut columns = self.columns.clone();
 
         // + any parent columns referenced internally by the operator
         match self.inner {
@@ -475,22 +473,21 @@ impl MirNodeType {
             MirNodeType::Reuse { .. } => (), // handled below
             _ => {
                 // we're not a `Reuse` ourselves, but the other side might be
-                match *other {
+                if let MirNodeType::Reuse { ref node } = *other {
                     // it is, so dig deeper
-                    MirNodeType::Reuse { ref node } => {
-                        // this does not check the projected columns of the inner node for two
-                        // reasons:
-                        // 1) our own projected columns aren't accessible on `MirNodeType`, but
-                        //    only on the outer `MirNode`, which isn't accessible here; but more
-                        //    importantly
-                        // 2) since this is already a node reuse, the inner, reused node must have
-                        //    *at least* a superset of our own (inaccessible) projected columns.
-                        // Hence, it is sufficient to check the projected columns on the parent
-                        // `MirNode`, and if that check passes, it also holds for the nodes reused
-                        // here.
-                        return self.can_reuse_as(&node.borrow().inner);
-                    }
-                    _ => (), // handled below
+                    // this does not check the projected columns of the inner node for two
+                    // reasons:
+                    // 1) our own projected columns aren't accessible on `MirNodeType`, but
+                    //    only on the outer `MirNode`, which isn't accessible here; but more
+                    //    importantly
+                    // 2) since this is already a node reuse, the inner, reused node must have
+                    //    *at least* a superset of our own (inaccessible) projected columns.
+                    // Hence, it is sufficient to check the projected columns on the parent
+                    // `MirNode`, and if that check passes, it also holds for the nodes reused
+                    // here.
+                    return self.can_reuse_as(&node.borrow().inner);
+                } else {
+                    // handled below
                 }
             }
         }
@@ -710,7 +707,7 @@ impl Debug for MirNodeType {
                 f,
                 "B [{}; ⚷: {}]",
                 column_specs
-                    .into_iter()
+                    .iter()
                     .map(|&(ref cs, _)| cs.column.name.as_str())
                     .collect::<Vec<_>>()
                     .join(", "),
@@ -848,7 +845,7 @@ impl Debug for MirNodeType {
                     .collect::<Vec<_>>()
                     .join(", "),
                 if arithmetic.is_empty() {
-                    format!("")
+                    "".into()
                 } else {
                     format!(
                         ", {}",
@@ -860,7 +857,7 @@ impl Debug for MirNodeType {
                     )
                 },
                 if literals.is_empty() {
-                    format!("")
+                    "".into()
                 } else {
                     format!(
                         ", lit: {}",

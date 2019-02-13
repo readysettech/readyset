@@ -1,3 +1,5 @@
+#![feature(duration_float)]
+
 mod parameters;
 mod populate;
 
@@ -5,7 +7,7 @@ mod populate;
 extern crate clap;
 
 use crate::parameters::SampleKeys;
-use noria::{LocalAuthority, SyncWorkerHandle, WorkerBuilder};
+use noria::{Builder, LocalAuthority, SyncHandle};
 use rand::Rng;
 use std::collections::HashMap;
 use std::sync::{Arc, Barrier};
@@ -14,18 +16,10 @@ use std::{thread, time};
 
 pub struct Backend {
     r: String,
-    g: SyncWorkerHandle<LocalAuthority>,
+    g: SyncHandle<LocalAuthority>,
     parallel_prepop: bool,
     prepop_counts: HashMap<String, usize>,
     barrier: Arc<Barrier>,
-}
-
-const NANOS_PER_SEC: u64 = 1_000_000_000;
-macro_rules! dur_to_fsec {
-    ($d:expr) => {{
-        let d = $d;
-        (d.as_secs() * NANOS_PER_SEC + d.subsec_nanos() as u64) as f64 / NANOS_PER_SEC as f64
-    }};
 }
 
 fn get_queries(recipe_location: &str, random: bool) -> Vec<String> {
@@ -61,7 +55,7 @@ fn make(
     use std::io::Read;
 
     // set up graph
-    let mut b = WorkerBuilder::default();
+    let mut b = Builder::default();
 
     let main_log = noria::logger_pls();
     b.log_with(main_log);
@@ -119,7 +113,7 @@ fn make(
 
 impl Backend {
     fn extend(mut self, query: &str) -> Backend {
-        let query_name = query.split(":").next().unwrap();
+        let query_name = query.split(':').next().unwrap();
 
         let mut new_recipe = self.r.clone();
         new_recipe.push_str("\n");
@@ -128,7 +122,7 @@ impl Backend {
         let start = time::Instant::now();
         self.g.install_recipe(&new_recipe).unwrap();
 
-        let dur = dur_to_fsec!(start.elapsed());
+        let dur = start.elapsed().as_float_secs();
         println!("Migrate query {}: ({:.2} sec)", query_name, dur,);
 
         self.r = new_recipe;
@@ -159,7 +153,7 @@ impl Backend {
         let mut g = self
             .g
             .view(query_name)
-            .expect(&format!("no node for {}!", query_name))
+            .unwrap_or_else(|e| panic!("no node for {}: {:?}", query_name, e))
             .into_sync();
         let query_name = String::from(query_name);
 
@@ -171,16 +165,16 @@ impl Backend {
 
             let start = time::Instant::now();
             for i in 0..num {
-                match g.lookup(&params[i..(i + 1)], true) {
+                match g.lookup(&params[i..=i], true) {
                     Err(_) => continue,
                     Ok(datas) => {
-                        if datas.len() > 0 {
+                        if !datas.is_empty() {
                             ok += 1;
                         }
                     }
                 }
             }
-            let dur = dur_to_fsec!(start.elapsed());
+            let dur = start.elapsed().as_float_secs();
             println!(
                 "{}: ({:.2} GETs/sec) (ok: {})!",
                 query_name,
@@ -308,7 +302,7 @@ fn main() {
     let mut backend = make(&rloc, parallel_prepop, single_query, disable_partial);
 
     println!("Prepopulating from data files in {}", ploc);
-    let (item_write, author_write, order_line_write) = match write_to.as_ref() {
+    let (item_write, author_write, order_line_write) = match write_to {
         "item" => (write, 1.0, 1.0),
         "author" => (1.0, write, 1.0),
         "order_line" => (1.0, 1.0, write),
@@ -409,7 +403,7 @@ fn main() {
         }*/
     }
 
-    match write_to.as_ref() {
+    match write_to {
         "item" => populate_items(&mut backend, &ploc, write, false),
         "author" => populate_authors(&mut backend, &ploc, write, false),
         "order_line" => populate_order_line(&mut backend, &ploc, write, false),

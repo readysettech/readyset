@@ -7,18 +7,14 @@ use rand::{Rng, ThreadRng};
 use std::sync::Arc;
 
 /// Allocate a new end-user facing result table.
-pub(crate) fn new(cols: usize, key: &[usize]) -> (SingleReadHandle, WriteHandle) {
+crate fn new(cols: usize, key: &[usize]) -> (SingleReadHandle, WriteHandle) {
     new_inner(cols, key, None)
 }
 
 /// Allocate a new partially materialized end-user facing result table.
 ///
 /// Misses in this table will call `trigger` to populate the entry, and retry until successful.
-pub(crate) fn new_partial<F>(
-    cols: usize,
-    key: &[usize],
-    trigger: F,
-) -> (SingleReadHandle, WriteHandle)
+crate fn new_partial<F>(cols: usize, key: &[usize], trigger: F) -> (SingleReadHandle, WriteHandle)
 where
     F: Fn(&[DataType]) -> bool + 'static + Send + Sync,
 {
@@ -68,13 +64,13 @@ fn new_inner(
         partial: trigger.is_some(),
         handle: w,
         key: Vec::from(key),
-        cols: cols,
+        cols,
         contiguous,
         mem_size: 0,
     };
     let r = SingleReadHandle {
         handle: r,
-        trigger: trigger,
+        trigger,
         key: Vec::from(key),
     };
 
@@ -84,7 +80,7 @@ fn new_inner(
 mod multir;
 mod multiw;
 
-fn key_to_single<'a>(k: Key<'a>) -> Cow<'a, DataType> {
+fn key_to_single(k: Key) -> Cow<DataType> {
     assert_eq!(k.len(), 1);
     match k {
         Cow::Owned(mut k) => Cow::Owned(k.swap_remove(0)),
@@ -92,7 +88,7 @@ fn key_to_single<'a>(k: Key<'a>) -> Cow<'a, DataType> {
     }
 }
 
-fn key_to_double<'a>(k: Key<'a>) -> Cow<'a, (DataType, DataType)> {
+fn key_to_double(k: Key) -> Cow<(DataType, DataType)> {
     assert_eq!(k.len(), 2);
     match k {
         Cow::Owned(k) => {
@@ -105,7 +101,7 @@ fn key_to_double<'a>(k: Key<'a>) -> Cow<'a, (DataType, DataType)> {
     }
 }
 
-pub(crate) struct WriteHandle {
+crate struct WriteHandle {
     handle: multiw::Handle,
     partial: bool,
     cols: usize,
@@ -115,17 +111,17 @@ pub(crate) struct WriteHandle {
 }
 
 type Key<'a> = Cow<'a, [DataType]>;
-pub(crate) struct MutWriteHandleEntry<'a> {
+crate struct MutWriteHandleEntry<'a> {
     handle: &'a mut WriteHandle,
     key: Key<'a>,
 }
-pub(crate) struct WriteHandleEntry<'a> {
+crate struct WriteHandleEntry<'a> {
     handle: &'a WriteHandle,
     key: Key<'a>,
 }
 
 impl<'a> MutWriteHandleEntry<'a> {
-    pub fn mark_filled(self) {
+    crate fn mark_filled(self) {
         if let Some((None, _)) = self
             .handle
             .handle
@@ -137,7 +133,7 @@ impl<'a> MutWriteHandleEntry<'a> {
         }
     }
 
-    pub fn mark_hole(self) {
+    crate fn mark_hole(self) {
         let size = self
             .handle
             .handle
@@ -152,7 +148,7 @@ impl<'a> MutWriteHandleEntry<'a> {
 }
 
 impl<'a> WriteHandleEntry<'a> {
-    pub(crate) fn try_find_and<F, T>(self, mut then: F) -> Result<(Option<T>, i64), ()>
+    crate fn try_find_and<F, T>(self, mut then: F) -> Result<(Option<T>, i64), ()>
     where
         F: FnMut(&[Vec<DataType>]) -> T,
     {
@@ -170,7 +166,7 @@ where
     match record.into() {
         Cow::Owned(mut record) => {
             let mut i = 0;
-            let mut keep = key.into_iter().peekable();
+            let mut keep = key.iter().peekable();
             record.retain(|_| {
                 i += 1;
                 if let Some(&&next) = keep.peek() {
@@ -192,7 +188,7 @@ where
 }
 
 impl WriteHandle {
-    pub(crate) fn mut_with_key<'a, K>(&'a mut self, key: K) -> MutWriteHandleEntry<'a>
+    crate fn mut_with_key<'a, K>(&'a mut self, key: K) -> MutWriteHandleEntry<'a>
     where
         K: Into<Key<'a>>,
     {
@@ -202,7 +198,7 @@ impl WriteHandle {
         }
     }
 
-    pub(crate) fn with_key<'a, K>(&'a self, key: K) -> WriteHandleEntry<'a>
+    crate fn with_key<'a, K>(&'a self, key: K) -> WriteHandleEntry<'a>
     where
         K: Into<Key<'a>>,
     {
@@ -213,7 +209,7 @@ impl WriteHandle {
     }
 
     #[allow(dead_code)]
-    pub(crate) fn mut_entry_from_record<'a, R>(&'a mut self, record: R) -> MutWriteHandleEntry<'a>
+    fn mut_entry_from_record<'a, R>(&'a mut self, record: R) -> MutWriteHandleEntry<'a>
     where
         R: Into<Cow<'a, [DataType]>>,
     {
@@ -221,7 +217,7 @@ impl WriteHandle {
         self.mut_with_key(key)
     }
 
-    pub(crate) fn entry_from_record<'a, R>(&'a self, record: R) -> WriteHandleEntry<'a>
+    crate fn entry_from_record<'a, R>(&'a self, record: R) -> WriteHandleEntry<'a>
     where
         R: Into<Cow<'a, [DataType]>>,
     {
@@ -229,14 +225,14 @@ impl WriteHandle {
         self.with_key(key)
     }
 
-    pub(crate) fn swap(&mut self) {
+    crate fn swap(&mut self) {
         self.handle.refresh();
     }
 
     /// Add a new set of records to the backlog.
     ///
     /// These will be made visible to readers after the next call to `swap()`.
-    pub(crate) fn add<I>(&mut self, rs: I)
+    crate fn add<I>(&mut self, rs: I)
     where
         I: IntoIterator<Item = Record>,
     {
@@ -251,13 +247,13 @@ impl WriteHandle {
         }
     }
 
-    pub(crate) fn is_partial(&self) -> bool {
+    crate fn is_partial(&self) -> bool {
         self.partial
     }
 
     /// Evict `count` randomly selected keys from state and return them along with the number of
     /// bytes that will be freed once the underlying `evmap` applies the operation.
-    pub fn evict_random_key(&mut self, rng: &mut ThreadRng) -> u64 {
+    crate fn evict_random_key(&mut self, rng: &mut ThreadRng) -> u64 {
         let mut bytes_to_be_freed = 0;
         if self.mem_size > 0 {
             if self.handle.is_empty() {
@@ -267,7 +263,7 @@ impl WriteHandle {
             match self.handle.empty_at_index(rng.gen()) {
                 None => (),
                 Some(vs) => {
-                    let size: u64 = vs.into_iter().map(|r| r.deep_size_of() as u64).sum();
+                    let size: u64 = vs.iter().map(|r| r.deep_size_of() as u64).sum();
                     bytes_to_be_freed += size;
                 }
             }
@@ -335,80 +331,12 @@ impl SingleReadHandle {
             })
     }
 
-    #[allow(dead_code)]
     pub fn len(&self) -> usize {
         self.handle.len()
     }
 
-    /// Count the number of rows in the reader.
-    /// This is a potentially very costly operation, since it will
-    /// hold up writers until all rows are iterated through.
-    pub fn count_rows(&self) -> usize {
-        let mut nrows = 0;
-        self.handle.for_each(|v| nrows += v.len());
-        nrows
-    }
-}
-
-#[derive(Clone)]
-pub enum ReadHandle {
-    Sharded(Vec<Option<SingleReadHandle>>),
-    Singleton(Option<SingleReadHandle>),
-}
-
-impl ReadHandle {
-    /// Find all entries that matched the given conditions.
-    ///
-    /// Returned records are passed to `then` before being returned.
-    ///
-    /// Note that not all writes will be included with this read -- only those that have been
-    /// swapped in by the writer.
-    ///
-    /// A hole in partially materialized state is returned as `Ok((None, _))`.
-    pub fn try_find_and<F, T>(&self, key: &[DataType], then: F) -> Result<(Option<T>, i64), ()>
-    where
-        F: FnMut(&[Vec<DataType>]) -> T,
-    {
-        match *self {
-            ReadHandle::Sharded(ref shards) => {
-                assert_eq!(key.len(), 1);
-                shards[::shard_by(&key[0], shards.len())]
-                    .as_ref()
-                    .unwrap()
-                    .try_find_and(key, then)
-            }
-            ReadHandle::Singleton(ref srh) => srh.as_ref().unwrap().try_find_and(key, then),
-        }
-    }
-
-    pub fn len(&self) -> usize {
-        match *self {
-            ReadHandle::Sharded(ref shards) => {
-                shards.iter().map(|s| s.as_ref().unwrap().len()).sum()
-            }
-            ReadHandle::Singleton(ref srh) => srh.as_ref().unwrap().len(),
-        }
-    }
-
-    pub fn set_single_handle(&mut self, shard: Option<usize>, handle: SingleReadHandle) {
-        match (self, shard) {
-            (&mut ReadHandle::Singleton(ref mut srh), None) => {
-                *srh = Some(handle);
-            }
-            (&mut ReadHandle::Sharded(ref mut rhs), None) => {
-                // when ::SHARDS == 1, sharded domains think they're unsharded
-                assert_eq!(rhs.len(), 1);
-                let srh = rhs.get_mut(0).unwrap();
-                assert!(srh.is_none());
-                *srh = Some(handle)
-            }
-            (&mut ReadHandle::Sharded(ref mut rhs), Some(shard)) => {
-                let srh = rhs.get_mut(shard).unwrap();
-                assert!(srh.is_none());
-                *srh = Some(handle)
-            }
-            _ => unreachable!(),
-        }
+    pub fn is_empty(&self) -> bool {
+        self.handle.len() == 0
     }
 }
 

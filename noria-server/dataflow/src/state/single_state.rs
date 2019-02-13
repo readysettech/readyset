@@ -5,14 +5,14 @@ use common::SizeOf;
 use prelude::*;
 use state::keyed_state::KeyedState;
 
-pub struct SingleState {
+pub(super) struct SingleState {
     key: Vec<usize>,
     state: KeyedState,
     partial: bool,
     rows: usize,
 }
 impl SingleState {
-    pub fn new(columns: &[usize], partial: bool) -> Self {
+    pub(super) fn new(columns: &[usize], partial: bool) -> Self {
         Self {
             key: Vec::from(columns),
             state: columns.into(),
@@ -23,7 +23,7 @@ impl SingleState {
 
     /// Inserts the given record, or returns false if a hole was encountered (and the record hence
     /// not inserted).
-    pub fn insert_row(&mut self, r: Row) -> bool {
+    pub(super) fn insert_row(&mut self, r: Row) -> bool {
         use rahashmap::Entry;
         match self.state {
             KeyedState::Single(ref mut map) => {
@@ -110,19 +110,17 @@ impl SingleState {
     }
 
     /// Attempt to remove row `r`.
-    pub fn remove_row(&mut self, r: &[DataType], hit: &mut bool) -> Option<Row> {
+    pub(super) fn remove_row(&mut self, r: &[DataType], hit: &mut bool) -> Option<Row> {
         let mut do_remove = |self_rows: &mut usize, rs: &mut Vec<Row>| -> Option<Row> {
             *hit = true;
             let rm = if rs.len() == 1 {
                 // it *should* be impossible to get a negative for a record that we don't have
                 debug_assert_eq!(r, &rs[0][..]);
                 Some(rs.swap_remove(0))
+            } else if let Some(i) = rs.iter().position(|rsr| &rsr[..] == r) {
+                Some(rs.swap_remove(i))
             } else {
-                if let Some(i) = rs.iter().position(|rsr| &rsr[..] == r) {
-                    Some(rs.swap_remove(i))
-                } else {
-                    None
-                }
+                None
             };
 
             if rm.is_some() {
@@ -194,7 +192,7 @@ impl SingleState {
         None
     }
 
-    pub fn mark_filled(&mut self, key: Vec<DataType>) {
+    pub(super) fn mark_filled(&mut self, key: Vec<DataType>) {
         let mut key = key.into_iter();
         let replaced = match self.state {
             KeyedState::Single(ref mut map) => map.insert(key.next().unwrap(), Vec::new()),
@@ -243,7 +241,7 @@ impl SingleState {
         assert!(replaced.is_none());
     }
 
-    pub fn mark_hole(&mut self, key: &[DataType]) -> u64 {
+    pub(super) fn mark_hole(&mut self, key: &[DataType]) -> u64 {
         let removed = match self.state {
             KeyedState::Single(ref mut map) => map.remove(&key[0]),
             KeyedState::Double(ref mut map) => map.remove(&(key[0].clone(), key[1].clone())),
@@ -283,7 +281,7 @@ impl SingleState {
 
     /// Evict `count` randomly selected keys from state and return them along with the number of
     /// bytes freed.
-    pub fn evict_random_keys(
+    pub(super) fn evict_random_keys(
         &mut self,
         count: usize,
         rng: &mut ThreadRng,
@@ -302,11 +300,11 @@ impl SingleState {
     }
 
     /// Evicts a specified key from this state, returning the number of bytes freed.
-    pub fn evict_keys(&mut self, keys: &[Vec<DataType>]) -> u64 {
+    pub(super) fn evict_keys(&mut self, keys: &[Vec<DataType>]) -> u64 {
         keys.iter().map(|k| self.state.evict(k)).sum()
     }
 
-    pub fn values<'a>(&'a self) -> Box<Iterator<Item = &'a Vec<Row>> + 'a> {
+    pub(super) fn values<'a>(&'a self) -> Box<Iterator<Item = &'a Vec<Row>> + 'a> {
         match self.state {
             KeyedState::Single(ref map) => Box::new(map.values()),
             KeyedState::Double(ref map) => Box::new(map.values()),
@@ -316,25 +314,23 @@ impl SingleState {
             KeyedState::Sex(ref map) => Box::new(map.values()),
         }
     }
-    pub fn key(&self) -> &[usize] {
+    pub(super) fn key(&self) -> &[usize] {
         &self.key
     }
-    pub fn partial(&self) -> bool {
+    pub(super) fn partial(&self) -> bool {
         self.partial
     }
-    pub fn rows(&self) -> usize {
+    pub(super) fn rows(&self) -> usize {
         self.rows
     }
-    pub fn lookup<'a>(&'a self, key: &KeyType) -> LookupResult<'a> {
+    pub(super) fn lookup<'a>(&'a self, key: &KeyType) -> LookupResult<'a> {
         if let Some(rs) = self.state.lookup(key) {
             LookupResult::Some(RecordResult::Borrowed(&rs[..]))
+        } else if self.partial() {
+            // partially materialized, so this is a hole (empty results would be vec![])
+            LookupResult::Missing
         } else {
-            if self.partial() {
-                // partially materialized, so this is a hole (empty results would be vec![])
-                LookupResult::Missing
-            } else {
-                LookupResult::Some(RecordResult::Owned(vec![]))
-            }
+            LookupResult::Some(RecordResult::Owned(vec![]))
         }
     }
 }

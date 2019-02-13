@@ -52,7 +52,7 @@ impl<'a> QuerySignature<'a> {
             return false;
         }
 
-        return true;
+        true
     }
 
     // Checks if a query is a weak generalization of the other by analyzing their
@@ -69,7 +69,7 @@ impl<'a> QuerySignature<'a> {
             return false;
         }
 
-        return true;
+        true
     }
 }
 

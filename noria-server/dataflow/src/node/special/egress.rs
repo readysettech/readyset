@@ -60,7 +60,7 @@ impl Egress {
         } = self;
 
         // send any queued updates to all external children
-        assert!(txs.len() > 0);
+        assert!(!txs.is_empty());
         let txn = txs.len() - 1;
 
         // we need to find the ingress node following this egress according to the path
@@ -68,7 +68,7 @@ impl Egress {
         // to that ingress node.
         let replay_to = m.as_ref().unwrap().tag().map(|tag| {
             tags.get(&tag)
-                .map(|n| *n)
+                .cloned()
                 .expect("egress node told about replay message, but not on replay path")
         });
 

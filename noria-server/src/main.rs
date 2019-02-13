@@ -3,7 +3,7 @@ extern crate clap;
 extern crate noria_server;
 extern crate slog;
 
-use noria_server::{ReuseConfigType, WorkerBuilder, ZookeeperAuthority};
+use noria_server::{Builder, ReuseConfigType, ZookeeperAuthority};
 use std::path::PathBuf;
 use std::sync::Arc;
 use std::time::Duration;
@@ -132,7 +132,7 @@ fn main() {
 
     let mut authority =
         ZookeeperAuthority::new(&format!("{}/{}", zookeeper_addr, deployment_name)).unwrap();
-    let mut builder = WorkerBuilder::default();
+    let mut builder = Builder::default();
     builder.set_listen_addr(listen_addr);
     if memory > 0 {
         builder.set_memory_limit(memory, Duration::from_millis(memory_check_freq));

@@ -182,7 +182,7 @@ impl DomainBuilder {
 
             group_commit_queues,
 
-            state_size: state_size,
+            state_size,
             total_time: Timer::new(),
             total_ptime: Timer::new(),
             wait_time: Timer::new(),
@@ -421,8 +421,8 @@ impl Domain {
         }
     }
 
-    fn finished_partial_replay(&mut self, tag: &Tag, num: usize) {
-        match self.replay_paths[tag].trigger {
+    fn finished_partial_replay(&mut self, tag: Tag, num: usize) {
+        match self.replay_paths[&tag].trigger {
             TriggerEndpoint::End { .. } => {
                 // A backfill request we made to another domain was just satisfied!
                 // We can now issue another request from the concurrent replay queue.
@@ -432,7 +432,7 @@ impl Domain {
                 // `self.concurrent_replays` constantly grows by +1 (+2 for the backfill requests,
                 // -1 when satisfied), which would lead to a deadlock!
                 let mut requests_satisfied = {
-                    let last = self.replay_paths[tag].path.last().unwrap();
+                    let last = self.replay_paths[&tag].path.last().unwrap();
                     self.replay_paths
                         .iter()
                         .filter(|&(_, p)| {
@@ -601,11 +601,10 @@ impl Domain {
                 let mut evictions = HashMap::new();
                 for miss in misses {
                     for &(tag, ref keys) in &deps {
-                        evictions.entry(tag).or_insert_with(HashSet::new).insert(
-                            keys.into_iter()
-                                .map(|&key| miss.record[key].clone())
-                                .collect(),
-                        );
+                        evictions
+                            .entry(tag)
+                            .or_insert_with(HashSet::new)
+                            .insert(keys.iter().map(|&key| miss.record[key].clone()).collect());
                     }
                 }
 
@@ -624,7 +623,7 @@ impl Domain {
                     Box::new(Packet::EvictKeys {
                         keys: keys.into_iter().collect(),
                         link: Link::new(src, me),
-                        tag: tag,
+                        tag,
                     }),
                     sends,
                 );
@@ -670,6 +669,7 @@ impl Domain {
         }
     }
 
+    #[allow(clippy::cyclomatic_complexity)]
     fn handle(
         &mut self,
         m: Box<Packet>,
@@ -840,7 +840,7 @@ impl Domain {
                                                 .map(move |miss| box Packet::RequestReaderReplay {
                                                     key: miss,
                                                     cols: key.clone(),
-                                                    node: node,
+                                                    node,
                                                 })
                                                 .fold(sender, move |sender, m| {
                                                     sender.send(m).map_err(|e| {
@@ -1047,8 +1047,8 @@ impl Domain {
                         // we may already have processed some other messages that are not yet a
                         // part of state.
                         let p = box Packet::ReplayPiece {
-                            tag: tag,
-                            link: link.clone(),
+                            tag,
+                            link,
                             context: ReplayPieceContext::Regular {
                                 last: state.is_empty(),
                             },
@@ -1114,12 +1114,12 @@ impl Domain {
                                     // and then forward on tx (if there is one)
                                     while let Some((i, chunk)) = iter.next() {
                                         use std::iter::FromIterator;
-                                        let chunk = Records::from_iter(chunk.into_iter().map(&fix));
+                                        let chunk = Records::from_iter(chunk.map(&fix));
                                         let len = chunk.len();
                                         let last = iter.peek().is_none();
                                         let p = box Packet::ReplayPiece {
-                                            tag: tag,
-                                            link: link.clone(), // to is overwritten by receiver
+                                            tag,
+                                            link, // to is overwritten by receiver
                                             context: ReplayPieceContext::Regular { last },
                                             data: chunk,
                                         };
@@ -1210,7 +1210,7 @@ impl Domain {
                             .nodes
                             .values()
                             .filter_map(|nd| {
-                                let ref n = *nd.borrow();
+                                let n = &*nd.borrow();
                                 let local_index = n.local_addr();
                                 let node_index: NodeIndex = n.global_addr();
 
@@ -1257,7 +1257,7 @@ impl Domain {
                                             desc: format!("{:?}", n),
                                             process_time: time.unwrap(),
                                             process_ptime: ptime.unwrap(),
-                                            mem_size: mem_size,
+                                            mem_size,
                                             materialized: mat_state,
                                         },
                                     ))
@@ -1339,7 +1339,7 @@ impl Domain {
             return Record::Positive(row);
         }
 
-        return row.into_owned().into();
+        row.into_owned().into()
     }
 
     fn seed_all(
@@ -1375,7 +1375,7 @@ impl Domain {
                 let m = if !keys.is_empty() {
                     Some(box Packet::ReplayPiece {
                         link: Link::new(source, path[0].node),
-                        tag: tag,
+                        tag,
                         context: ReplayPieceContext::Partial {
                             for_keys: keys,
                             ignore: false,
@@ -1492,7 +1492,7 @@ impl Domain {
 
                     let m = Some(box Packet::ReplayPiece {
                         link: Link::new(source, path[0].node),
-                        tag: tag,
+                        tag,
                         context: ReplayPieceContext::Partial {
                             for_keys: k,
                             ignore: false,
@@ -1529,6 +1529,7 @@ impl Domain {
         }
     }
 
+    #[allow(clippy::cyclomatic_complexity)]
     fn handle_replay(&mut self, m: Box<Packet>, sends: &mut EnqueuedSends, ex: &mut Executor) {
         let tag = m.tag().unwrap();
         if self.nodes[self.replay_paths[&tag].path.last().unwrap().node]
@@ -1541,9 +1542,10 @@ impl Domain {
         let mut finished = None;
         let mut need_replay = Vec::new();
         let mut finished_partial = 0;
-        'outer: loop {
-            // this loop is just here so we have a way of giving up the borrow of self.replay_paths
 
+        // this loop is just here so we have a way of giving up the borrow of self.replay_paths
+        #[allow(clippy::never_loop)]
+        'outer: loop {
             let &mut ReplayPath {
                 ref path,
                 notify_done,
@@ -1646,7 +1648,7 @@ impl Domain {
 
                     // forward the current message through all local nodes.
                     let m = box Packet::ReplayPiece {
-                        link: link.clone(),
+                        link,
                         tag,
                         data,
                         context: context.clone(),
@@ -1689,18 +1691,18 @@ impl Domain {
                             // triggered this replay initially.
                             if let Some(state) = self.state.get_mut(segment.node) {
                                 for key in backfill_keys.iter() {
-                                    state.mark_filled(key.clone(), &tag);
+                                    state.mark_filled(key.clone(), tag);
                                 }
                             } else {
                                 n.with_reader_mut(|r| {
                                     // we must be filling a hole in a Reader. we need to ensure
                                     // that the hole for the key we're replaying ends up being
                                     // filled, even if that hole is empty!
-                                    r.writer_mut().map(|wh| {
+                                    if let Some(wh) = r.writer_mut() {
                                         for key in backfill_keys.iter() {
                                             wh.mut_with_key(&key[..]).mark_filled();
                                         }
-                                    });
+                                    }
                                 })
                                 .unwrap();
                             }
@@ -1746,22 +1748,24 @@ impl Domain {
                                 // it's important that we clear out any partially-filled holes.
                                 if let Some(state) = self.state.get_mut(segment.node) {
                                     for miss in &missed_on {
-                                        state.mark_hole(&miss[..], &tag);
+                                        state.mark_hole(&miss[..], tag);
                                     }
                                 } else {
                                     n.with_reader_mut(|r| {
-                                        r.writer_mut().map(|wh| {
+                                        if let Some(wh) = r.writer_mut() {
                                             for miss in &missed_on {
                                                 wh.mut_with_key(&miss[..]).mark_hole();
                                             }
-                                        });
+                                        }
                                     })
                                     .unwrap();
                                 }
                             } else if is_reader {
                                 // we filled a hole! swap the reader.
                                 n.with_reader_mut(|r| {
-                                    r.writer_mut().map(|wh| wh.swap());
+                                    if let Some(wh) = r.writer_mut() {
+                                        wh.swap();
+                                    }
                                 })
                                 .unwrap();
                                 // and also unmark the replay request
@@ -1780,15 +1784,15 @@ impl Domain {
                             // so we didn't *actually* fill those keys after all!
                             if let Some(state) = self.state.get_mut(segment.node) {
                                 for key in &captured {
-                                    state.mark_hole(&key[..], &tag);
+                                    state.mark_hole(&key[..], tag);
                                 }
                             } else {
                                 n.with_reader_mut(|r| {
-                                    r.writer_mut().map(|wh| {
+                                    if let Some(wh) = r.writer_mut() {
                                         for key in &captured {
                                             wh.mut_with_key(&key[..]).mark_hole();
                                         }
-                                    });
+                                    }
                                 })
                                 .unwrap();
                             }
@@ -1971,7 +1975,7 @@ impl Domain {
         }
 
         if finished_partial != 0 {
-            self.finished_partial_replay(&tag, finished_partial);
+            self.finished_partial_replay(tag, finished_partial);
         }
 
         for (node, while_replaying_key, miss_key, miss_cols, tag) in need_replay {
@@ -2010,10 +2014,12 @@ impl Domain {
                 // continue with their replays.
                 for key in for_keys.unwrap() {
                     let hole = (key_cols.clone(), key);
-                    let replay = waiting.redos.remove(&hole).expect(&format!(
-                        "got backfill for unnecessary key {:?} via tag {:?}",
-                        hole.1, tag
-                    ));
+                    let replay = waiting.redos.remove(&hole).unwrap_or_else(|| {
+                        panic!(
+                            "got backfill for unnecessary key {:?} via tag {:?}",
+                            hole.1, tag
+                        )
+                    });
 
                     // we may need more holes to fill before some replays should be re-attempted
                     let replay: Vec<_> = replay
@@ -2164,6 +2170,7 @@ impl Domain {
     }
 
     pub fn handle_eviction(&mut self, m: Box<Packet>, sends: &mut EnqueuedSends) {
+        #[allow(clippy::too_many_arguments)]
         fn trigger_downstream_evictions(
             log: &Logger,
             key_columns: &[usize],
@@ -2207,7 +2214,7 @@ impl Domain {
                             continue;
                         }
 
-                        state[target.node].evict_keys(&tag, &keys[..]);
+                        state[target.node].evict_keys(*tag, &keys[..]);
                         trigger_downstream_evictions(
                             log,
                             &target.partial_key.as_ref().unwrap()[..],
@@ -2253,7 +2260,7 @@ impl Domain {
                     self.nodes
                         .values()
                         .filter_map(|nd| {
-                            let ref n = *nd.borrow();
+                            let n = &*nd.borrow();
                             let local_index = n.local_addr();
 
                             if n.is_reader() {
@@ -2364,7 +2371,7 @@ impl Domain {
                         if self.nodes[target].borrow().is_dropped() {
                             return;
                         }
-                        if let Some(evicted) = self.state[target].evict_keys(&tag, &keys) {
+                        if let Some(evicted) = self.state[target].evict_keys(tag, &keys) {
                             let key_columns = evicted.0.to_vec();
                             trigger_downstream_evictions(
                                 &self.log,
@@ -2404,7 +2411,7 @@ impl Domain {
             .nodes
             .values()
             .map(|nd| {
-                let ref n = *nd.borrow();
+                let n = &*nd.borrow();
                 let local_index = n.local_addr();
 
                 if n.is_reader() {

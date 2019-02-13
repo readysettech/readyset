@@ -197,6 +197,7 @@ impl QueryGraph {
     }
 }
 
+#[allow(clippy::derive_hash_xor_eq)]
 impl Hash for QueryGraph {
     fn hash<H: Hasher>(&self, state: &mut H) {
         // sorted iteration over relations, edges to ensure consistent hash
@@ -250,7 +251,7 @@ fn split_conjunctions(ces: Vec<ConditionExpression>) -> Vec<ConditionExpression>
 // 4. Collect remaining predicates as global predicates
 fn classify_conditionals(
     ce: &ConditionExpression,
-    tables: &Vec<Table>,
+    tables: &[Table],
     local: &mut HashMap<String, Vec<ConditionExpression>>,
     join: &mut Vec<ConditionTree>,
     global: &mut Vec<ConditionExpression>,
@@ -455,6 +456,7 @@ fn classify_conditionals(
     }
 }
 
+#[allow(clippy::cyclomatic_complexity)]
 pub fn to_query_graph(st: &SelectStatement) -> Result<QueryGraph, String> {
     let mut qg = QueryGraph::new();
 
@@ -667,19 +669,13 @@ pub fn to_query_graph(st: &SelectStatement) -> Result<QueryGraph, String> {
             if let ConditionExpression::Base(ConditionBase::Field(ref l)) = *jp.left.as_ref() {
                 if let ConditionExpression::Base(ConditionBase::Field(ref r)) = *jp.right.as_ref() {
                     // If tables aren't already in the relations, add them.
-                    if !qg.relations.contains_key(&l.table.clone().unwrap()) {
-                        qg.relations.insert(
-                            l.table.clone().unwrap(),
-                            new_node(l.table.clone().unwrap(), Vec::new(), st),
-                        );
-                    }
+                    qg.relations
+                        .entry(l.table.clone().unwrap())
+                        .or_insert_with(|| new_node(l.table.clone().unwrap(), Vec::new(), st));
 
-                    if !qg.relations.contains_key(&r.table.clone().unwrap()) {
-                        qg.relations.insert(
-                            r.table.clone().unwrap(),
-                            new_node(r.table.clone().unwrap(), Vec::new(), st),
-                        );
-                    }
+                    qg.relations
+                        .entry(r.table.clone().unwrap())
+                        .or_insert_with(|| new_node(r.table.clone().unwrap(), Vec::new(), st));
 
                     let e = qg
                         .edges
@@ -761,7 +757,7 @@ pub fn to_query_graph(st: &SelectStatement) -> Result<QueryGraph, String> {
                 }
 
                 qg.columns.push(OutputColumn::Arithmetic(ArithmeticColumn {
-                    name: a.alias.clone().unwrap_or(a.to_string()),
+                    name: a.alias.clone().unwrap_or_else(|| a.to_string()),
                     table: None,
                     expression: a.clone(),
                 }));

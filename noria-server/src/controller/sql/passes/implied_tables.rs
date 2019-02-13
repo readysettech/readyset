@@ -12,10 +12,10 @@ pub trait ImpliedTableExpansion {
 fn rewrite_conditional<F>(
     expand_columns: &F,
     ce: ConditionExpression,
-    avail_tables: &Vec<Table>,
+    avail_tables: &[Table],
 ) -> ConditionExpression
 where
-    F: Fn(Column, &Vec<Table>) -> Column,
+    F: Fn(Column, &[Table]) -> Column,
 {
     use nom_sql::ConditionBase::*;
     use nom_sql::ConditionExpression::*;
@@ -45,7 +45,7 @@ where
             box left,
             box right,
         }) => LogicalOp(ConditionTree {
-            operator: operator,
+            operator,
             left: Box::new(rewrite_conditional(expand_columns, left, avail_tables)),
             right: Box::new(rewrite_conditional(expand_columns, right, avail_tables)),
         }),
@@ -81,11 +81,11 @@ fn rewrite_selection(
     // Tries to find a table with a matching column in the `tables_in_query` (information
     // passed as `write_schemas`; this is not something the parser or the expansion pass can
     // know on their own). Panics if no match is found or the match is ambiguous.
-    let find_table = |f: &Column, tables_in_query: &Vec<Table>| -> Option<String> {
+    let find_table = |f: &Column, tables_in_query: &[Table]| -> Option<String> {
         let mut matches = write_schemas
             .iter()
             .filter(|&(t, _)| {
-                if tables_in_query.len() > 0 {
+                if !tables_in_query.is_empty() {
                     for qt in tables_in_query {
                         if qt.name == *t {
                             return true;
@@ -130,7 +130,7 @@ fn rewrite_selection(
     // Traverses a query and calls `find_table` on any column that has no explicit table set,
     // including computed columns. Should not be used for CREATE TABLE and INSERT queries,
     // which can use the simpler `set_table`.
-    let expand_columns = |mut f: Column, tables_in_query: &Vec<Table>| -> Column {
+    let expand_columns = |mut f: Column, tables_in_query: &[Table]| -> Column {
         f.table = match f.table {
             None => {
                 match f.function {
@@ -138,13 +138,13 @@ fn rewrite_selection(
                         // There is no implied table (other than "self") for anonymous function
                         // columns, but we have to peek inside the function to expand implied
                         // tables in its specification
-                        match (*f).as_mut() {
-                            &mut Avg(ref mut fe, _)
-                            | &mut Count(ref mut fe, _)
-                            | &mut Sum(ref mut fe, _)
-                            | &mut Min(ref mut fe)
-                            | &mut Max(ref mut fe)
-                            | &mut GroupConcat(ref mut fe, _) => {
+                        match **f {
+                            Avg(ref mut fe, _)
+                            | Count(ref mut fe, _)
+                            | Sum(ref mut fe, _)
+                            | Min(ref mut fe)
+                            | Max(ref mut fe)
+                            | GroupConcat(ref mut fe, _) => {
                                 if fe.table.is_none() {
                                     fe.table = find_table(fe, tables_in_query);
                                 }
@@ -172,11 +172,11 @@ fn rewrite_selection(
     }
     // Expand within field list
     for field in sq.fields.iter_mut() {
-        match field {
-            &mut FieldDefinitionExpression::All => panic!(err),
-            &mut FieldDefinitionExpression::AllInTable(_) => panic!(err),
-            &mut FieldDefinitionExpression::Value(FieldValueExpression::Literal(_)) => (),
-            &mut FieldDefinitionExpression::Value(FieldValueExpression::Arithmetic(ref mut e)) => {
+        match *field {
+            FieldDefinitionExpression::All => panic!(err),
+            FieldDefinitionExpression::AllInTable(_) => panic!(err),
+            FieldDefinitionExpression::Value(FieldValueExpression::Literal(_)) => (),
+            FieldDefinitionExpression::Value(FieldValueExpression::Arithmetic(ref mut e)) => {
                 if let ArithmeticBase::Column(ref mut c) = e.left {
                     *c = expand_columns(c.clone(), &tables);
                 }
@@ -185,7 +185,7 @@ fn rewrite_selection(
                     *c = expand_columns(c.clone(), &tables);
                 }
             }
-            &mut FieldDefinitionExpression::Col(ref mut f) => {
+            FieldDefinitionExpression::Col(ref mut f) => {
                 *f = expand_columns(f.clone(), &tables);
             }
         }

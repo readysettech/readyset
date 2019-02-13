@@ -23,7 +23,7 @@ impl Latest {
         Latest {
             us: None,
             src: src.into(),
-            key: key,
+            key,
         }
     }
 }
@@ -109,7 +109,7 @@ impl Ingredient for Latest {
 
         ProcessingResult {
             results: out.into(),
-            misses: misses,
+            misses,
         }
     }
 

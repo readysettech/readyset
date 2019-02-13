@@ -1,7 +1,7 @@
-use crate::controller::sql::query_graph::{QueryGraph, QueryGraphEdge};
-use crate::controller::sql::query_signature::Signature;
-use crate::controller::sql::reuse::helpers::predicate_implication::complex_predicate_implies;
-use crate::controller::sql::reuse::{ReuseConfiguration, ReuseType};
+use super::super::query_graph::{QueryGraph, QueryGraphEdge};
+use super::super::query_signature::Signature;
+use super::helpers::predicate_implication::complex_predicate_implies;
+use super::{ReuseConfiguration, ReuseType};
 
 use std::collections::HashMap;
 use std::vec::Vec;
@@ -24,17 +24,14 @@ impl ReuseConfiguration for Finkelstein {
                 .signature()
                 .is_generalization_of(&qg.signature())
             {
-                match Self::check_compatibility(&qg, &existing_qg) {
-                    Some(reuse) => {
-                        // QGs are compatible, we can reuse `existing_qg` as part of `qg`!
-                        reuse_candidates.push((reuse, (sig.clone(), existing_qg)));
-                    }
-                    None => (),
+                if let Some(reuse) = Self::check_compatibility(&qg, &existing_qg) {
+                    // QGs are compatible, we can reuse `existing_qg` as part of `qg`!
+                    reuse_candidates.push((reuse, (*sig, existing_qg)));
                 }
             }
         }
 
-        if reuse_candidates.len() > 0 {
+        if !reuse_candidates.is_empty() {
             vec![Self::choose_best_option(reuse_candidates)]
         } else {
             reuse_candidates
@@ -81,11 +78,9 @@ impl Finkelstein {
         // -- already established via signature check
         // 2. NQG's attributes is subset of NQG's edges
         // -- already established via signature check
-        assert!(
-            existing_qg
-                .signature()
-                .is_generalization_of(&new_qg.signature())
-        );
+        assert!(existing_qg
+            .signature()
+            .is_generalization_of(&new_qg.signature()));
 
         // 3. NQC's edges are superset of EQG's
         //    (N.B.: this does not yet consider the relationships of the edge predicates; we do that
@@ -163,7 +158,7 @@ impl Finkelstein {
         }
 
         // we don't need to check projected columns to reuse a prefix of the query
-        return Some(ReuseType::DirectExtension);
+        Some(ReuseType::DirectExtension)
 
         // 5. Consider projected columns
         //   5a. NQG projects a subset of EQG's edges --> can use directly
