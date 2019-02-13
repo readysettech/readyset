@@ -30,7 +30,7 @@ chrono = "0.4"
 
 [dev-dependencies]
 postgres = "0.15"
-mysql = "12.0.4"
+mysql = { git = "https://github.com/blackbeam/rust-mysql-simple", branch = "master" }
 mysql_async = "0.14"
 slab = "0.4"
 tokio-core = "0.1"
