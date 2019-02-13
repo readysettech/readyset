@@ -21,6 +21,9 @@ impl<'a, W: Write + 'a> InitWriter<'a, W> {
     }
 
     /// Tell client that there was a problem changing the database context.
+    /// Although you can return any valid MySQL error code you probably want
+    /// to keep it similar to the MySQL server and issue either a
+    /// ErrorKind::ER_BAD_DB_ERROR or a ErrorKind::ER_DBACCESS_DENIED_ERROR.
     pub fn error<E>(self, kind: ErrorKind, msg: &E) -> io::Result<()>
     where
         E: Borrow<[u8]> + ?Sized,
