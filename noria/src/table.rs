@@ -73,10 +73,8 @@ pub(crate) type TableRpc = Buffer<
 
 type E = tower_buffer::Error<
     tower_balance::Error<
-        tower_buffer::Error<
-            tokio_tower::multiplex::client::Error<
-                tokio_tower::multiplex::MultiplexTransport<Transport, Tagger>,
-            >,
+        tokio_tower::multiplex::client::Error<
+            tokio_tower::multiplex::MultiplexTransport<Transport, Tagger>,
         >,
         tokio_tower::multiplex::client::SpawnError<std::io::Error>,
     >,
