@@ -1,6 +1,6 @@
 [package]
 name = "msql-srv"
-version = "0.8.2"
+version = "0.8.3"
 
 description = "Bindings for emulating a MySQL/MariaDB server"
 readme = "README.md"
@@ -30,7 +30,7 @@ chrono = "0.4"
 
 [dev-dependencies]
 postgres = "0.15"
-mysql = { git = "https://github.com/blackbeam/rust-mysql-simple", branch = "master" }
+mysql = "15.1.0"
 mysql_async = "0.14"
 slab = "0.4"
 tokio-core = "0.1"
