@@ -191,7 +191,7 @@ impl TableBuilder {
                                         (),
                                         choose::RoundRobin::default(),
                                     ),
-                                0,
+                                1,
                             )
                             .unwrap_or_else(|_| panic!("no active tokio runtime"));
                             h.insert(c.clone());
@@ -333,6 +333,11 @@ impl Service<Input> for Table {
                     };
 
                     wait_for.push(self.shards[s].call(p.into()));
+                } else {
+                    // poll_ready reserves a sender slot which we have to release
+                    // we do that by dropping the old handle and replacing it with a clone
+                    // https://github.com/tokio-rs/tokio/issues/898
+                    self.shards[s] = self.shards[s].clone()
                 }
             }
 

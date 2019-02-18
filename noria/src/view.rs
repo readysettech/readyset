@@ -168,7 +168,7 @@ impl ViewBuilder {
                                 (),
                                 choose::RoundRobin::default(),
                             ),
-                        0,
+                        1,
                     )
                     .unwrap_or_else(|_| panic!("no active tokio runtime"));
                     h.insert(c.clone());
@@ -241,7 +241,17 @@ impl Service<(Vec<Vec<DataType>>, bool)> for View {
                 .iter_mut()
                 .enumerate()
                 .zip(shard_queries.into_iter())
-                .filter(|&(_, ref shard_queries)| !shard_queries.is_empty())
+                .filter_map(|((shardi, shard), shard_queries)| {
+                    if shard_queries.is_empty() {
+                        // poll_ready reserves a sender slot which we have to release
+                        // we do that by dropping the old handle and replacing it with a clone
+                        // https://github.com/tokio-rs/tokio/issues/898
+                        *shard = shard.clone();
+                        None
+                    } else {
+                        Some(((shardi, shard), shard_queries))
+                    }
+                })
                 .map(move |((shardi, shard), shard_queries)| {
                     shard
                         .call(

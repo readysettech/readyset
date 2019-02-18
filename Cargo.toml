@@ -11,7 +11,6 @@ debug=true
 
 [patch.crates-io]
 tower-service = { git = "https://github.com/jonhoo/tower.git", branch = "dynamic-balance" }
-tower-direct-service = { git = "https://github.com/jonhoo/tower.git", branch = "dynamic-balance" }
 tower-discover = { git = "https://github.com/jonhoo/tower.git", branch = "dynamic-balance"  }
 tower-balance = { git = "https://github.com/jonhoo/tower.git", branch = "dynamic-balance"  }
 tower-buffer = { git = "https://github.com/jonhoo/tower.git", branch = "dynamic-balance"  }
