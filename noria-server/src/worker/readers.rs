@@ -68,9 +68,15 @@ pub(super) fn listen(
 }
 
 fn dup(rs: &[Vec<DataType>]) -> Vec<Vec<DataType>> {
-    rs.iter()
-        .map(|r| r.iter().map(|v| v.deep_clone()).collect())
-        .collect()
+    let mut outer = Vec::with_capacity(rs.len());
+    for r in rs {
+        let mut inner = Vec::with_capacity(r.len());
+        for v in r {
+            inner.push(v.deep_clone())
+        }
+        outer.push(inner);
+    }
+    outer
 }
 
 fn handle_message(
