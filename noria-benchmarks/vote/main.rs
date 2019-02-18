@@ -268,7 +268,6 @@ where
     let interarrival = rand::distributions::exponential::Exp::new(target * 1e-9);
 
     let every = value_t_or_exit!(global_args, "ratio", u32);
-    let ndone = atomic::AtomicUsize::new(0);
 
     let mut ops = 0;
 
@@ -288,13 +287,12 @@ where
     // but that would *also* force us to place the load generators *on* the thread pool (because of
     // https://github.com/rayon-rs/rayon/issues/562). that comes with a number of unfortunate
     // side-effects, such as having to manage allocations of clients to workers, clean exiting,
-    // etc. we *instead* unsafely make the one reference we care about (`ndone`) `&'static` so that
-    // they can be accessed from inside the jobs. we know this is safe because of our barrier on
-    // `finished`, which will only be passed (and hence the stack frame only destroyed) when there
-    // are no more jobs in the pool. this may change with
-    // https://github.com/rayon-rs/rayon/issues/544, but that's what we have to do for now.
-    use std::mem;
-    let ndone: &'static atomic::AtomicUsize = unsafe { mem::transmute(&ndone) };
+    // etc. we *instead* just leak the one thing we care about (`ndone`) so that they can be
+    // accessed from inside the jobs.
+    //
+    // this may change with https://github.com/rayon-rs/rayon/issues/544, but that's what we have
+    // to do for now.
+    let ndone: &'static _ = &*Box::leak(Box::new(atomic::AtomicUsize::new(0)));
 
     // when https://github.com/rust-lang/rust/issues/56556 is fixed, take &[i32] instead, make
     // Request hold &'a [i32] (then need for<'a> C: Service<Request<'a>>). then we no longer need
