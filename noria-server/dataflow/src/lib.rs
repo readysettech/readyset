@@ -4,6 +4,9 @@
 #![feature(crate_visibility_modifier)]
 #![deny(unused_extern_crates)]
 
+#[global_allocator]
+static ALLOC: jemallocator::Jemalloc = jemallocator::Jemalloc;
+
 #[cfg(debug_assertions)]
 extern crate backtrace;
 extern crate bincode;
