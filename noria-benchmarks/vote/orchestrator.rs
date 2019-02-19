@@ -17,7 +17,7 @@ use std::fs::File;
 use std::io::prelude::*;
 use std::{io, thread, time};
 
-const SOUP_AMI: &str = "ami-04db1e82afa245def";
+const SOUP_AMI: &str = "ami-0fe49768bcb2d68f4";
 
 #[derive(Clone, Copy)]
 struct ClientParameters<'a> {
