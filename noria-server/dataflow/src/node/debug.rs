@@ -102,7 +102,7 @@ impl Node {
                 self.domain
                     .map(|d| -> usize { d.into() })
                     .map(|d| format!("\"/set312/{}\"", (d % 12) + 1))
-                    .unwrap_or("white".into())
+                    .unwrap_or_else(|| "white".into())
             ));
 
             let materialized = match materialization_status {
@@ -113,7 +113,7 @@ impl Node {
 
             let sharding = match self.sharded_by {
                 Sharding::ByColumn(k, w) => format!("shard ⚷: {} / {}-way", self.fields[k], w),
-                Sharding::Random(_) => format!("shard randomly"),
+                Sharding::Random(_) => "shard randomly".to_owned(),
                 Sharding::None => "unsharded".to_owned(),
                 Sharding::ForcedNone => "desharded to avoid SS".to_owned(),
             };
@@ -171,7 +171,7 @@ impl Node {
                     ))
                 }
                 NodeType::Internal(ref i) => {
-                    s.push_str(&format!("{{"));
+                    s.push_str("{{");
 
                     // Output node name and description. First row.
                     s.push_str(&format!(

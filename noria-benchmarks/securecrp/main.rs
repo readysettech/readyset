@@ -5,19 +5,19 @@ extern crate slog;
 
 mod test_populate;
 
-use noria::{ControllerBuilder, DataType, LocalAuthority, LocalControllerHandle, ReuseConfigType};
+use noria::{Builder, DataType, LocalAuthority, ReuseConfigType, SyncHandle};
 use std::collections::HashMap;
 use std::fs::File;
 use std::io::Write;
 use std::{thread, time};
 
 pub struct Backend {
-    g: LocalControllerHandle<LocalAuthority>,
+    g: SyncHandle<LocalAuthority>,
 }
 
 impl Backend {
     pub fn new(partial: bool, _shard: bool, reuse: &str) -> Backend {
-        let mut cb = ControllerBuilder::default();
+        let mut cb = Builder::default();
         let log = noria::logger_pls();
         let blender_log = log.clone();
 
@@ -27,7 +27,7 @@ impl Backend {
 
         cb.log_with(blender_log);
 
-        match reuse.as_ref() {
+        match reuse {
             "finkelstein" => cb.set_reuse(ReuseConfigType::Finkelstein),
             "full" => cb.set_reuse(ReuseConfigType::Full),
             "noreuse" => cb.set_reuse(ReuseConfigType::NoReuse),
@@ -35,13 +35,15 @@ impl Backend {
             _ => panic!("reuse configuration not supported"),
         }
 
-        let g = cb.build_local().unwrap();
+        let g = cb.start_simple().unwrap();
 
-        Backend { g: g }
+        Backend { g }
     }
 
     fn login(&mut self, user_context: HashMap<String, DataType>) -> Result<(), String> {
-        self.g.create_universe(user_context.clone());
+        self.g
+            .on_worker(|w| w.create_universe(user_context.clone()))
+            .unwrap();
 
         Ok(())
     }
@@ -53,7 +55,7 @@ impl Backend {
         cf.read_to_string(&mut config).unwrap();
 
         // Install recipe with policies
-        self.g.set_security_config(config);
+        self.g.on_worker(|w| w.set_security_config(config)).unwrap();
     }
 
     fn migrate(&mut self, schema_file: &str, query_file: Option<&str>) -> Result<(), String> {
@@ -188,5 +190,5 @@ fn main() {
     }
 
     // sleep "forever"
-    thread::sleep(time::Duration::from_millis(200000000));
+    thread::sleep(time::Duration::from_millis(200_000_000));
 }

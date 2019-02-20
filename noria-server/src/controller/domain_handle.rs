@@ -12,26 +12,26 @@ pub(super) struct DomainShardHandle {
 
 /// A `DomainHandle` is a handle that allows communicating with all of the shards of a given
 /// domain.
-pub(crate) struct DomainHandle {
+pub(super) struct DomainHandle {
     pub(super) idx: DomainIndex,
     pub(super) shards: Vec<DomainShardHandle>,
     pub(super) log: Logger,
 }
 
 impl DomainHandle {
-    pub fn index(&self) -> DomainIndex {
+    pub(super) fn index(&self) -> DomainIndex {
         self.idx
     }
 
-    pub fn shards(&self) -> usize {
+    pub(super) fn shards(&self) -> usize {
         self.shards.len()
     }
 
-    pub fn assignment(&self, shard: usize) -> WorkerIdentifier {
-        self.shards[shard].worker.clone()
+    pub(super) fn assignment(&self, shard: usize) -> WorkerIdentifier {
+        self.shards[shard].worker
     }
 
-    pub fn assigned_to_worker(&self, worker: &WorkerIdentifier) -> bool {
+    pub(super) fn assigned_to_worker(&self, worker: &WorkerIdentifier) -> bool {
         self.shards.iter().any(|s| s.worker == *worker)
     }
 

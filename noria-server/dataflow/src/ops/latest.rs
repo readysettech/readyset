@@ -23,7 +23,7 @@ impl Latest {
         Latest {
             us: None,
             src: src.into(),
-            key: key,
+            key,
         }
     }
 }
@@ -46,6 +46,7 @@ impl Ingredient for Latest {
 
     fn on_input(
         &mut self,
+        _: &mut Executor,
         from: LocalNodeIndex,
         rs: Records,
         _: &mut Tracer,
@@ -108,7 +109,7 @@ impl Ingredient for Latest {
 
         ProcessingResult {
             results: out.into(),
-            misses: misses,
+            misses,
         }
     }
 

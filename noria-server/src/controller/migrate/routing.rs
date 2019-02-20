@@ -147,17 +147,17 @@ pub fn add(
 
                 if parent == source {
                     trace!(log,
-                               "adding source ingress";
-                               "base" => node.index(),
-                               "ingress" => ingress.index()
-                        );
+                           "adding source ingress";
+                           "base" => node.index(),
+                           "ingress" => ingress.index()
+                    );
                 } else {
                     trace!(log,
-                               "adding cross-domain ingress";
-                               "to" => node.index(),
-                               "from" => parent.index(),
-                               "ingress" => ingress.index()
-                        );
+                           "adding cross-domain ingress";
+                           "to" => node.index(),
+                           "from" => parent.index(),
+                           "ingress" => ingress.index()
+                    );
                 }
 
                 ingress
@@ -282,10 +282,10 @@ pub(super) fn connect(
             let sender_node = &graph[sender];
             if sender_node.is_egress() {
                 trace!(log,
-                           "connecting";
-                           "egress" => sender.index(),
-                           "ingress" => node.index()
-                    );
+                       "connecting";
+                       "egress" => sender.index(),
+                       "ingress" => node.index()
+                );
 
                 let shards = domains[&n.domain()].shards();
                 let domain = domains.get_mut(&sender_node.domain()).unwrap();
@@ -329,10 +329,10 @@ pub(super) fn connect(
                 }
             } else if sender_node.is_sharder() {
                 trace!(log,
-                           "connecting";
-                           "sharder" => sender.index(),
-                           "ingress" => node.index()
-                    );
+                       "connecting";
+                       "sharder" => sender.index(),
+                       "ingress" => node.index()
+                );
 
                 let shards = domains[&n.domain()].shards();
                 let txs = (0..shards).map(|i| (n.domain(), i)).collect();

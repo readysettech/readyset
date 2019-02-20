@@ -21,7 +21,7 @@ impl Distinct {
         Distinct {
             src: src.into(),
             us: None,
-            group_by: group_by,
+            group_by,
         }
     }
 }
@@ -38,6 +38,7 @@ impl Ingredient for Distinct {
 
     fn on_input(
         &mut self,
+        _: &mut Executor,
         from: LocalNodeIndex,
         rs: Records,
         _: &mut Tracer,
@@ -109,20 +110,18 @@ impl Ingredient for Distinct {
             // make ready for the new one
             prev_grp.clear();
             prev_grp.extend(group_by.iter().map(|&col| &rec[col]).cloned());
-            prev_pos = rec.is_positive().clone();
+            prev_pos = rec.is_positive();
 
             let positive = rec.is_positive();
             match db.lookup(group_by, &KeyType::from(&group[..])) {
                 LookupResult::Some(rr) => {
                     if positive {
                         //println!("record {:?}", rr);
-                        if rr.len() == 0 {
+                        if rr.is_empty() {
                             output.push(rec.clone());
                         }
-                    } else {
-                        if rr.len() != 0 {
-                            output.push(rec.clone());
-                        }
+                    } else if !rr.is_empty() {
+                        output.push(rec.clone());
                     }
                 }
                 LookupResult::Missing => unimplemented!("Distinct does not yet support partial"),

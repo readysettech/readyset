@@ -11,16 +11,13 @@ struct JoinChain {
 }
 
 impl JoinChain {
-    pub fn merge_chain(self, other: JoinChain, last_node: MirNodeRef) -> JoinChain {
+    pub(super) fn merge_chain(self, other: JoinChain, last_node: MirNodeRef) -> JoinChain {
         let tables = self.tables.union(&other.tables).cloned().collect();
 
-        JoinChain {
-            tables: tables,
-            last_node: last_node,
-        }
+        JoinChain { tables, last_node }
     }
 
-    pub fn has_table(&self, table: &String) -> bool {
+    pub(super) fn has_table(&self, table: &str) -> bool {
         self.tables.contains(table)
     }
 }
@@ -33,7 +30,7 @@ impl JoinChain {
 // If a predicate's parent tables haven't been used by any previous predicate,
 // a new join chain is started for the current predicate. And we assume that
 // a future predicate will bring these chains together.
-pub fn make_joins(
+pub(super) fn make_joins(
     mir_converter: &SqlToMirConverter,
     name: &str,
     qg: &QueryGraph,
@@ -70,33 +67,32 @@ pub fn make_joins(
 }
 
 fn from_join_ref<'a>(jref: &JoinRef, qg: &'a QueryGraph) -> (JoinType, &'a ConditionTree) {
-    let edge = qg.edges.get(&(jref.src.clone(), jref.dst.clone())).unwrap();
-    match *edge {
-        QueryGraphEdge::Join(ref jps) => (JoinType::Inner, jps.get(jref.index).unwrap()),
-        QueryGraphEdge::LeftJoin(ref jps) => (JoinType::Left, jps.get(jref.index).unwrap()),
+    match qg.edges[&(jref.src.clone(), jref.dst.clone())] {
+        QueryGraphEdge::Join(ref jps) => (JoinType::Inner, &jps[jref.index]),
+        QueryGraphEdge::LeftJoin(ref jps) => (JoinType::Left, &jps[jref.index]),
         QueryGraphEdge::GroupBy(_) => unreachable!(),
     }
 }
 
 fn pick_join_chains(
-    src: &String,
-    dst: &String,
+    src: &str,
+    dst: &str,
     join_chains: &mut Vec<JoinChain>,
     node_for_rel: &HashMap<&str, MirNodeRef>,
 ) -> (JoinChain, JoinChain) {
     let left_chain = match join_chains.iter().position(|chain| chain.has_table(src)) {
         Some(idx) => join_chains.swap_remove(idx),
         None => JoinChain {
-            tables: vec![src.clone()].into_iter().collect(),
-            last_node: node_for_rel[src.as_str()].clone(),
+            tables: std::iter::once(src.to_owned()).collect(),
+            last_node: node_for_rel[src].clone(),
         },
     };
 
     let right_chain = match join_chains.iter().position(|chain| chain.has_table(dst)) {
         Some(idx) => join_chains.swap_remove(idx),
         None => JoinChain {
-            tables: vec![dst.clone()].into_iter().collect(),
-            last_node: node_for_rel[dst.as_str()].clone(),
+            tables: std::iter::once(dst.to_owned()).collect(),
+            last_node: node_for_rel[dst].clone(),
         },
     };
 

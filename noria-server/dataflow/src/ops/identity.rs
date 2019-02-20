@@ -33,6 +33,7 @@ impl Ingredient for Identity {
 
     fn on_input(
         &mut self,
+        _: &mut Executor,
         _: LocalNodeIndex,
         rs: Records,
         _: &mut Tracer,

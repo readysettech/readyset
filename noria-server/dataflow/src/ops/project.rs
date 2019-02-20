@@ -25,11 +25,7 @@ impl ProjectExpression {
         left: ProjectExpressionBase,
         right: ProjectExpressionBase,
     ) -> ProjectExpression {
-        ProjectExpression {
-            op: op,
-            left: left,
-            right: right,
-        }
+        ProjectExpression { op, left, right }
     }
 }
 
@@ -76,8 +72,8 @@ impl Project {
     ) -> Project {
         Project {
             emit: Some(emit.into()),
-            additional: additional,
-            expressions: expressions,
+            additional,
+            expressions,
             src: src.into(),
             cols: 0,
             us: None,
@@ -142,6 +138,7 @@ impl Ingredient for Project {
         true
     }
 
+    #[allow(clippy::type_complexity)]
     fn query_through<'a>(
         &self,
         columns: &[usize],
@@ -158,7 +155,7 @@ impl Ingredient for Project {
         if let Some(ref emit) = self.emit {
             in_cols = Cow::Owned(
                 columns
-                    .into_iter()
+                    .iter()
                     .map(|&outi| {
                         assert!(
                             outi <= emit.len(),
@@ -174,10 +171,10 @@ impl Ingredient for Project {
             .and_then(|result| match result {
                 Some(rs) => {
                     let r = match emit {
-                        Some(emit) => Box::new(rs.into_iter().map(move |r| {
+                        Some(emit) => Box::new(rs.map(move |r| {
                             let mut new_r = Vec::with_capacity(r.len());
                             let mut expr: Vec<DataType> = if let Some(ref e) = expressions {
-                                e.into_iter().map(|i| eval_expression(i, &r[..])).collect()
+                                e.iter().map(|i| eval_expression(i, &r[..])).collect()
                             } else {
                                 vec![]
                             };
@@ -197,7 +194,7 @@ impl Ingredient for Project {
 
                             Cow::from(new_r)
                         })) as Box<_>,
-                        None => Box::new(rs.into_iter()) as Box<_>,
+                        None => Box::new(rs) as Box<_>,
                     };
 
                     Some(Some(r))
@@ -231,6 +228,7 @@ impl Ingredient for Project {
 
     fn on_input(
         &mut self,
+        _: &mut Executor,
         from: LocalNodeIndex,
         mut rs: Records,
         _: &mut Tracer,
@@ -248,7 +246,7 @@ impl Ingredient for Project {
                 }
 
                 if let Some(ref e) = self.expressions {
-                    new_r.extend(e.into_iter().map(|i| eval_expression(i, &r[..])));
+                    new_r.extend(e.iter().map(|i| eval_expression(i, &r[..])));
                 }
 
                 if let Some(ref a) = self.additional {
@@ -363,7 +361,7 @@ mod tests {
         let expression = ProjectExpression {
             left: ProjectExpressionBase::Column(0),
             right: ProjectExpressionBase::Column(1),
-            op: op,
+            op,
         };
 
         setup_arithmetic(expression)

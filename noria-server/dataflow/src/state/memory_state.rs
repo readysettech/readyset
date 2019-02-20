@@ -57,7 +57,7 @@ impl State for MemoryState {
                 assert!(!old[0].partial());
                 for rs in old[0].values() {
                     for r in rs {
-                        new.insert_row(Row(r.0.clone()));
+                        new.insert_row(Row::from(r.0.clone()));
                     }
                 }
             }
@@ -114,15 +114,15 @@ impl State for MemoryState {
         self.state.iter().map(|s| s.rows()).sum()
     }
 
-    fn mark_filled(&mut self, key: Vec<DataType>, tag: &Tag) {
+    fn mark_filled(&mut self, key: Vec<DataType>, tag: Tag) {
         debug_assert!(!self.state.is_empty(), "filling uninitialized index");
-        let index = self.by_tag[tag];
+        let index = self.by_tag[&tag];
         self.state[index].mark_filled(key);
     }
 
-    fn mark_hole(&mut self, key: &[DataType], tag: &Tag) {
+    fn mark_hole(&mut self, key: &[DataType], tag: Tag) {
         debug_assert!(!self.state.is_empty(), "filling uninitialized index");
-        let index = self.by_tag[tag];
+        let index = self.by_tag[&tag];
         let freed_bytes = self.state[index].mark_hole(key);
         self.mem_size = self.mem_size.checked_sub(freed_bytes).unwrap();
     }
@@ -140,6 +140,7 @@ impl State for MemoryState {
     }
 
     fn cloned_records(&self) -> Vec<Vec<DataType>> {
+        #[allow(clippy::ptr_arg)]
         fn fix<'a>(rs: &'a Vec<Row>) -> impl Iterator<Item = Vec<DataType>> + 'a {
             rs.iter().map(|r| Vec::clone(&**r))
         }
@@ -156,11 +157,11 @@ impl State for MemoryState {
         (self.state[index].key(), keys, bytes_freed)
     }
 
-    fn evict_keys(&mut self, tag: &Tag, keys: &[Vec<DataType>]) -> Option<(&[usize], u64)> {
+    fn evict_keys(&mut self, tag: Tag, keys: &[Vec<DataType>]) -> Option<(&[usize], u64)> {
         // we may be told to evict from a tag that add_key hasn't been called for yet
         // this can happen if an upstream domain issues an eviction for a replay path that we have
         // been told about, but that has not yet been finalized.
-        self.by_tag.get(tag).cloned().map(move |index| {
+        self.by_tag.get(&tag).cloned().map(move |index| {
             let bytes = self.state[index].evict_keys(keys);
             self.mem_size = self.mem_size.saturating_sub(bytes);
             (self.state[index].key(), bytes)
@@ -189,11 +190,11 @@ impl MemoryState {
                 }
             };
             self.mem_size += r.deep_size_of();
-            self.state[i].insert_row(Row(r))
+            self.state[i].insert_row(Row::from(r))
         } else {
             let mut hit_any = false;
             for i in 0..self.state.len() {
-                hit_any |= self.state[i].insert_row(Row(r.clone()));
+                hit_any |= self.state[i].insert_row(Row::from(r.clone()));
             }
             if hit_any {
                 self.mem_size += r.deep_size_of();
@@ -247,8 +248,7 @@ mod tests {
         };
 
         // Then check that the rest exist:
-        for i in 1..3 {
-            let record = &records[i];
+        for record in &records[1..3] {
             match state.lookup(&[0], &KeyType::Single(&record[0])) {
                 LookupResult::Some(RecordResult::Borrowed(rows)) => {
                     assert_eq!(&*rows[0], &**record)

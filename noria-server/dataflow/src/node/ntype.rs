@@ -3,6 +3,7 @@ use ops;
 use processing::Ingredient;
 
 #[derive(Clone, Serialize, Deserialize)]
+#[allow(clippy::large_enum_variant)]
 pub enum NodeType {
     Ingress,
     Base(special::Base),
@@ -15,7 +16,7 @@ pub enum NodeType {
 }
 
 impl NodeType {
-    pub fn take(&mut self) -> Self {
+    pub(super) fn take(&mut self) -> Self {
         match *self {
             NodeType::Base(ref mut b) => NodeType::Base(b.take()),
             NodeType::Egress(ref mut e) => NodeType::Egress(e.take()),

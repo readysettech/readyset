@@ -1,5 +1,6 @@
-use crate::controller::sql::reuse::ReuseConfigType;
-use crate::controller::{self, ControllerConfig, LocalControllerHandle};
+use crate::handle::{Handle, SyncHandle};
+use crate::Config;
+use crate::ReuseConfigType;
 use dataflow::PersistenceParameters;
 use failure;
 use noria::consensus::{Authority, LocalAuthority};
@@ -7,19 +8,20 @@ use slog;
 use std::net::IpAddr;
 use std::sync::Arc;
 use std::time;
+use tokio::prelude::*;
 
-/// Used to construct a controller.
-pub struct ControllerBuilder {
-    config: ControllerConfig,
+/// Used to construct a worker.
+pub struct Builder {
+    config: Config,
     memory_limit: Option<usize>,
     memory_check_frequency: Option<time::Duration>,
     listen_addr: IpAddr,
     log: slog::Logger,
 }
-impl Default for ControllerBuilder {
+impl Default for Builder {
     fn default() -> Self {
         Self {
-            config: ControllerConfig::default(),
+            config: Config::default(),
             listen_addr: "127.0.0.1".parse().unwrap(),
             log: slog::Logger::root(slog::Discard, o!()),
             memory_limit: None,
@@ -27,7 +29,7 @@ impl Default for ControllerBuilder {
         }
     }
 }
-impl ControllerBuilder {
+impl Builder {
     /// Set the maximum number of concurrent partial replay requests a domain can have outstanding
     /// at any given time.
     ///
@@ -57,8 +59,8 @@ impl ControllerBuilder {
         self.config.sharding = shards;
     }
 
-    /// Set how many workers the controller should wait for before starting. More workers can join
-    /// later, but they won't be assigned any of the initial domains.
+    /// Set how many workers this worker should wait for before becoming a controller. More workers
+    /// can join later, but they won't be assigned any of the initial domains.
     pub fn set_quorum(&mut self, quorum: usize) {
         assert_ne!(quorum, 0);
         self.config.quorum = quorum;
@@ -72,12 +74,12 @@ impl ControllerBuilder {
         self.memory_check_frequency = Some(check_freq);
     }
 
-    /// Set the IP address that the controller should use for listening.
+    /// Set the IP address that the worker should use for listening.
     pub fn set_listen_addr(&mut self, listen_addr: IpAddr) {
         self.listen_addr = listen_addr;
     }
 
-    /// Set the logger that the derived controller should use. By default, it uses `slog::Discard`.
+    /// Set the logger that the derived worker should use. By default, it uses `slog::Discard`.
     pub fn log_with(&mut self, log: slog::Logger) {
         self.log = log;
     }
@@ -92,27 +94,55 @@ impl ControllerBuilder {
         self.config.threads = Some(threads);
     }
 
-    /// Build a controller and return a handle to it.
-    pub fn build<A: Authority + 'static>(
-        self,
+    /// Start a server instance and return a handle to it.
+    #[must_use]
+    pub fn start<A: Authority + 'static>(
+        &self,
         authority: Arc<A>,
-    ) -> Result<LocalControllerHandle<A>, failure::Error> {
-        controller::start_instance(
-            authority,
-            self.listen_addr,
-            self.config,
-            self.memory_limit,
-            self.memory_check_frequency,
-            self.log,
-        )
+    ) -> impl Future<Item = Handle<A>, Error = failure::Error> {
+        let Builder {
+            listen_addr,
+            ref config,
+            memory_limit,
+            memory_check_frequency,
+            ref log,
+        } = *self;
+
+        let config = config.clone();
+        let log = log.clone();
+        future::lazy(move || {
+            crate::startup::start_instance(
+                authority,
+                listen_addr,
+                config,
+                memory_limit,
+                memory_check_frequency,
+                log,
+            )
+        })
     }
 
-    /// Build a local controller, and return a ControllerHandle to provide access to it.
-    pub fn build_local(self) -> Result<LocalControllerHandle<LocalAuthority>, failure::Error> {
+    /// Start a local worker and return a handle to it.
+    ///
+    /// The returned handle executes all operations synchronously on a tokio runtime.
+    pub fn start_simple(&self) -> Result<SyncHandle<LocalAuthority>, failure::Error> {
+        let mut rt = tokio::runtime::Runtime::new()?;
+        let wh = rt.block_on(self.start_local())?;
+        Ok(SyncHandle::from_existing(rt, wh))
+    }
+
+    /// Start a local-only worker, and return a handle to it.
+    #[must_use]
+    pub fn start_local(
+        &self,
+    ) -> impl Future<Item = Handle<LocalAuthority>, Error = failure::Error> {
         #[allow(unused_mut)]
-        let mut lch = self.build(Arc::new(LocalAuthority::new()))?;
-        #[cfg(test)]
-        lch.wait_until_ready();
-        Ok(lch)
+        self.start(Arc::new(LocalAuthority::new()))
+            .and_then(|mut wh| {
+                #[cfg(test)]
+                return wh.ready();
+                #[cfg(not(test))]
+                Ok(wh)
+            })
     }
 }

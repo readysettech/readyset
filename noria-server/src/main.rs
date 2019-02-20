@@ -3,14 +3,14 @@ extern crate clap;
 extern crate noria_server;
 extern crate slog;
 
-use noria_server::{ControllerBuilder, ReuseConfigType, ZookeeperAuthority};
+use noria_server::{Builder, ReuseConfigType, ZookeeperAuthority};
 use std::path::PathBuf;
 use std::sync::Arc;
 use std::time::Duration;
 
 fn main() {
     use clap::{App, Arg};
-    let matches = App::new("controller")
+    let matches = App::new("noria-server")
         .version("0.0.1")
         .arg(
             Arg::with_name("address")
@@ -132,7 +132,7 @@ fn main() {
 
     let mut authority =
         ZookeeperAuthority::new(&format!("{}/{}", zookeeper_addr, deployment_name)).unwrap();
-    let mut builder = ControllerBuilder::default();
+    let mut builder = Builder::default();
     builder.set_listen_addr(listen_addr);
     if memory > 0 {
         builder.set_memory_limit(memory, Duration::from_millis(memory_check_freq));
@@ -167,5 +167,13 @@ fn main() {
         builder.log_with(log);
     }
 
-    builder.build(Arc::new(authority)).unwrap().wait();
+    let mut rt = tokio::runtime::Builder::new();
+    rt.name_prefix("worker-");
+    if let Some(threads) = None {
+        rt.core_threads(threads);
+    }
+    rt.build()
+        .unwrap()
+        .block_on_all(builder.start(Arc::new(authority)))
+        .unwrap();
 }

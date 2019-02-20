@@ -9,12 +9,12 @@ impl ReferredTables for SqlQuery {
         match *self {
             SqlQuery::CreateTable(ref ctq) => vec![ctq.table.clone()],
             SqlQuery::Insert(ref iq) => vec![iq.table.clone()],
-            SqlQuery::Select(ref sq) => sq.tables.iter().cloned().collect(),
+            SqlQuery::Select(ref sq) => sq.tables.to_vec(),
             SqlQuery::CompoundSelect(ref csq) => {
                 csq.selects
                     .iter()
                     .fold(Vec::new(), |mut acc, &(_, ref sq)| {
-                        acc.extend(sq.tables.iter().cloned().collect::<Vec<_>>());
+                        acc.extend(sq.tables.to_vec());
                         acc
                     })
             }
@@ -39,15 +39,14 @@ impl ReferredTables for ConditionExpression {
                     }
                 }
             }
-            ConditionExpression::Base(ConditionBase::Field(ref f)) => match f.table {
-                Some(ref t) => {
+            ConditionExpression::Base(ConditionBase::Field(ref f)) => {
+                if let Some(ref t) = f.table {
                     let t = Table::from(t.as_ref());
                     if !tables.contains(&t) {
                         tables.push(t);
                     }
                 }
-                None => (),
-            },
+            }
             _ => unimplemented!(),
         }
         tables

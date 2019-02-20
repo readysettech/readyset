@@ -34,6 +34,13 @@ petgraph = { version = "0.4.11", features = ["serde-1"] }
 arccstr = "1.2.0"
 fnv = "1.0.5"
 chrono = { version = "0.4.0", features = ["serde"] }
+tower-service = "0.2"
+tower-balance = "0.1"
+tower-discover = "0.1"
+tower-buffer = "0.1"
+tokio-tower = { git = "https://github.com/tower-rs/tokio-tower.git" }
+tower-util = "0.1"
+slab = "0.4"
 
 # consensus/
 slog = "2.4.0"
@@ -53,7 +60,7 @@ path = "src/lib.rs"
 name = "noria"
 
 [[example]]
-name = "basic-recipe"
+name = "quickstart"
 
 [[example]]
 name = "basic-distribution"

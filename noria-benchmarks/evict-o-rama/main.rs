@@ -1,7 +1,6 @@
 extern crate noria;
 
-use noria::ControllerBuilder;
-
+use noria::Builder;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 static NUM_ARTICLES: usize = 10_000;
@@ -30,7 +29,7 @@ fn main() {
     );
 
     // set up Soup via recipe
-    let mut builder = ControllerBuilder::default();
+    let mut builder = Builder::default();
     builder.log_with(noria::logger_pls());
     builder.set_persistence(persistence_params);
     builder.set_memory_limit(100 * 1024, Duration::from_millis(1000));
@@ -39,13 +38,13 @@ fn main() {
     // test passes again.
     //builder.disable_partial();
 
-    let mut blender = builder.build_local().unwrap();
+    let mut blender = builder.start_simple().unwrap();
     blender.install_recipe(sql).unwrap();
 
     // Get mutators and getter.
-    let mut article = blender.table("Article").unwrap();
-    let mut vote = blender.table("Vote").unwrap();
-    let mut awvc = blender.view("ArticleWithVoteCount").unwrap();
+    let mut article = blender.table("Article").unwrap().into_sync();
+    let mut vote = blender.table("Vote").unwrap().into_sync();
+    let mut awvc = blender.view("ArticleWithVoteCount").unwrap().into_sync();
 
     println!("Creating articles...");
     for aid in 1..NUM_ARTICLES {

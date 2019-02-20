@@ -67,15 +67,15 @@ impl Reader {
     }
 
     #[allow(dead_code)]
-    pub(crate) fn writer(&self) -> Option<&backlog::WriteHandle> {
+    fn writer(&self) -> Option<&backlog::WriteHandle> {
         self.writer.as_ref()
     }
 
-    pub(crate) fn writer_mut(&mut self) -> Option<&mut backlog::WriteHandle> {
+    crate fn writer_mut(&mut self) -> Option<&mut backlog::WriteHandle> {
         self.writer.as_mut()
     }
 
-    pub fn take(&mut self) -> Self {
+    pub(in crate::node) fn take(&mut self) -> Self {
         use std::mem;
         Self {
             writer: self.writer.take(),
@@ -85,7 +85,7 @@ impl Reader {
         }
     }
 
-    pub fn add_streamer(
+    crate fn add_streamer(
         &mut self,
         new_streamer: channel::StreamSender<Vec<StreamUpdate>>,
     ) -> Result<(), channel::StreamSender<Vec<StreamUpdate>>> {
@@ -97,14 +97,14 @@ impl Reader {
         self.state.is_some()
     }
 
-    pub fn is_partial(&self) -> bool {
+    crate fn is_partial(&self) -> bool {
         match self.writer {
             None => false,
             Some(ref state) => state.is_partial(),
         }
     }
 
-    pub(crate) fn set_write_handle(&mut self, wh: backlog::WriteHandle) {
+    crate fn set_write_handle(&mut self, wh: backlog::WriteHandle) {
         assert!(self.writer.is_none());
         self.writer = Some(wh);
     }
@@ -121,7 +121,7 @@ impl Reader {
         }
     }
 
-    pub fn state_size(&self) -> Option<u64> {
+    crate fn state_size(&self) -> Option<u64> {
         use common::SizeOf;
         self.writer.as_ref().map(|w| w.deep_size_of())
     }
@@ -129,7 +129,7 @@ impl Reader {
     /// Evict a randomly selected key, returning the number of bytes evicted.
     /// Note that due to how `evmap` applies the evictions asynchronously, we can only evict a
     /// single key at a time here.
-    pub fn evict_random_key(&mut self) -> u64 {
+    crate fn evict_random_key(&mut self) -> u64 {
         let mut bytes_freed = 0;
         if let Some(ref mut handle) = self.writer {
             use rand;
@@ -140,7 +140,7 @@ impl Reader {
         bytes_freed
     }
 
-    pub fn on_eviction(&mut self, _key_columns: &[usize], keys: &[Vec<DataType>]) {
+    pub(in crate::node) fn on_eviction(&mut self, _key_columns: &[usize], keys: &[Vec<DataType>]) {
         // NOTE: *could* be None if reader has been created but its state hasn't been built yet
         if let Some(w) = self.writer.as_mut() {
             for k in keys {
@@ -150,7 +150,7 @@ impl Reader {
         }
     }
 
-    pub fn process(&mut self, m: &mut Option<Box<Packet>>, swap: bool) {
+    pub(in crate::node) fn process(&mut self, m: &mut Option<Box<Packet>>, swap: bool) {
         if let Some(ref mut state) = self.writer {
             let m = m.as_mut().unwrap();
             // make sure we don't fill a partial materialization

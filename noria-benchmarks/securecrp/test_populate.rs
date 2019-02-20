@@ -47,9 +47,13 @@ pub fn create_users(backend: &mut Backend) {
         .map(|v| v.into_iter().map(|e| e.into()).collect::<Vec<DataType>>())
         .collect();
 
-    let mut mutator = backend.g.table("UserProfile").unwrap();
-
-    mutator.insert_all(users).unwrap();
+    backend
+        .g
+        .table("UserProfile")
+        .unwrap()
+        .into_sync()
+        .perform_all(users)
+        .unwrap();
 }
 
 pub fn create_papers(backend: &mut Backend) {
@@ -93,21 +97,34 @@ pub fn create_papers(backend: &mut Backend) {
         ],
     ];
 
-    let mut mutator = backend.g.table("Paper").unwrap();
-    mutator.insert_all(papers).unwrap();
-
-    let mut mutator = backend.g.table("PaperVersion").unwrap();
-    mutator.insert_all(paper_versions).unwrap();
+    backend
+        .g
+        .table("Paper")
+        .unwrap()
+        .into_sync()
+        .perform_all(papers)
+        .unwrap();
+    backend
+        .g
+        .table("PaperVersion")
+        .unwrap()
+        .into_sync()
+        .perform_all(paper_versions)
+        .unwrap();
 }
 
 pub fn dump_papers(backend: &mut Backend, user: &str) {
-    let mut get = backend.g.view(&format!("PaperList_u{}", user)).unwrap();
+    let mut get = backend
+        .g
+        .view(&format!("PaperList_u{}", user))
+        .unwrap()
+        .into_sync();
 
     println!("{:?}", get.lookup(&[0.into()], true));
 }
 
 pub fn dump_all_papers(backend: &mut Backend) {
-    let mut get = backend.g.view("PaperList").unwrap();
+    let mut get = backend.g.view("PaperList").unwrap().into_sync();
 
     println!("{:?}", get.lookup(&[0.into()], true));
 }

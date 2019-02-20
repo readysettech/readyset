@@ -22,6 +22,7 @@ tokio = "0.1"
 vec_map = { version = "0.8.0", features = ["eders"] }
 hyper = "0.12.0"
 tempfile = "3.0.2"
+jemallocator = "0.1.8"
 
 # need features
 backtrace = { version = "0.3.2", features = ["serialize-serde"] }

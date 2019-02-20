@@ -17,7 +17,7 @@ use std::fs::File;
 use std::io::prelude::*;
 use std::{io, thread, time};
 
-const SOUP_AMI: &str = "ami-04db1e82afa245def";
+const SOUP_AMI: &str = "ami-0fe49768bcb2d68f4";
 
 #[derive(Clone, Copy)]
 struct ClientParameters<'a> {
@@ -900,7 +900,7 @@ fn run_clients(
             any_not_overloaded = false;
         } else if !stderr.is_empty() {
             eprintln!("{} reported:", host);
-            let stderr = stderr.trim_right().replace('\n', "\n > ");
+            let stderr = stderr.trim_end().replace('\n', "\n > ");
             eprintln!(" > {}", stderr);
         }
     }
@@ -969,7 +969,7 @@ fn ec2_instance_type_cores(it: &str) -> Option<u16> {
         "nano" | "micro" | "small" => Some(1),
         "medium" | "large" => Some(2),
         t if t.ends_with("xlarge") => {
-            let mult = t.trim_right_matches("xlarge").parse::<u16>().unwrap_or(1);
+            let mult = t.trim_end_matches("xlarge").parse::<u16>().unwrap_or(1);
             Some(4 * mult)
         }
         _ => None,

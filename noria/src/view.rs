@@ -1,18 +1,89 @@
-use crate::channel::rpc::RpcClient;
 use crate::data::*;
-use crate::error::TransportError;
-use crate::{ExclusiveConnection, SharedConnection};
+use crate::{Tagged, Tagger};
+use async_bincode::{AsyncBincodeStream, AsyncDestination};
 use nom_sql::ColumnSpecification;
 use petgraph::graph::NodeIndex;
-use std::cell::RefCell;
 use std::collections::HashMap;
+use std::fmt;
 use std::io;
 use std::net::SocketAddr;
-use std::rc::Rc;
+use std::sync::{Arc, Mutex};
+use tokio::prelude::*;
+use tokio_tower::multiplex;
+use tower_balance::{choose, pool, Pool};
+use tower_buffer::Buffer;
+use tower_service::Service;
+use tower_util::ServiceExt;
 
-pub(crate) type ViewRpc = Rc<RefCell<RpcClient<ReadQuery, ReadReply>>>;
+type Transport = AsyncBincodeStream<
+    tokio::net::tcp::TcpStream,
+    Tagged<ReadReply>,
+    Tagged<ReadQuery>,
+    AsyncDestination,
+>;
 
-/// A failed View operation.
+#[derive(Debug)]
+#[doc(hidden)]
+// only pub because we use it to figure out the error type for ViewError
+pub struct ViewEndpoint(SocketAddr);
+
+impl Service<()> for ViewEndpoint {
+    type Response = multiplex::MultiplexTransport<Transport, Tagger>;
+    type Error = tokio::io::Error;
+    // have to repeat types because https://github.com/rust-lang/rust/issues/57807
+    existential type Future: Future<
+        Item = multiplex::MultiplexTransport<Transport, Tagger>,
+        Error = tokio::io::Error,
+    >;
+
+    fn poll_ready(&mut self) -> Poll<(), Self::Error> {
+        Ok(Async::Ready(()))
+    }
+
+    fn call(&mut self, _: ()) -> Self::Future {
+        tokio::net::TcpStream::connect(&self.0)
+            .and_then(|s| {
+                s.set_nodelay(true)?;
+                Ok(s)
+            })
+            .map(AsyncBincodeStream::from)
+            .map(AsyncBincodeStream::for_async)
+            .map(|t| multiplex::MultiplexTransport::new(t, Tagger::default()))
+    }
+}
+
+pub(crate) type ViewRpc = Buffer<
+    Pool<
+        choose::RoundRobin,
+        multiplex::client::Maker<ViewEndpoint, Tagged<ReadQuery>>,
+        (),
+        Tagged<ReadQuery>,
+    >,
+    Tagged<ReadQuery>,
+>;
+
+/// A failed [`View`] operation.
+#[derive(Debug)]
+pub struct AsyncViewError {
+    /// The `View` whose operation failed.
+    ///
+    /// Not available if the underlying transport failed.
+    pub view: Option<View>,
+
+    /// The error that caused the operation to fail.
+    pub error: ViewError,
+}
+
+impl From<<ViewRpc as Service<Tagged<ReadQuery>>>::Error> for AsyncViewError {
+    fn from(e: <ViewRpc as Service<Tagged<ReadQuery>>>::Error) -> Self {
+        AsyncViewError {
+            view: None,
+            error: ViewError::from(e),
+        }
+    }
+}
+
+/// A failed [`SyncView`] operation.
 #[derive(Debug, Fail)]
 pub enum ViewError {
     /// The given view is not yet available.
@@ -20,11 +91,11 @@ pub enum ViewError {
     NotYetAvailable,
     /// A lower-level error occurred while communicating with Soup.
     #[fail(display = "{}", _0)]
-    TransportError(#[cause] TransportError),
+    TransportError(#[cause] <ViewRpc as Service<Tagged<ReadQuery>>>::Error),
 }
 
-impl From<TransportError> for ViewError {
-    fn from(e: TransportError) -> Self {
+impl From<<ViewRpc as Service<Tagged<ReadQuery>>>::Error> for ViewError {
+    fn from(e: <ViewRpc as Service<Tagged<ReadQuery>>>::Error) -> Self {
         ViewError::TransportError(e)
     }
 }
@@ -64,132 +135,147 @@ pub struct ViewBuilder {
     pub columns: Vec<String>,
     pub schema: Option<Vec<ColumnSpecification>>,
     pub shards: Vec<SocketAddr>,
-    // one per shard
-    pub local_ports: Vec<u16>,
 }
 
 impl ViewBuilder {
-    #[doc(hidden)]
-    pub fn build_exclusive(self) -> io::Result<View<ExclusiveConnection>> {
-        let conns = self
-            .shards
-            .iter()
-            .map(move |addr| RpcClient::connect(addr, false).map(|rpc| Rc::new(RefCell::new(rpc))))
-            .collect::<io::Result<Vec<_>>>()?;
-
-        Ok(View {
-            node: self.node,
-            columns: self.columns,
-            schema: self.schema,
-            shard_addrs: self.shards,
-            shards: conns,
-            exclusivity: ExclusiveConnection,
-        })
-    }
-
-    /// Set the local port to bind to when making the shared connection.
-    pub(crate) fn with_local_port(mut self, port: u16) -> ViewBuilder {
-        assert!(self.local_ports.is_empty());
-        self.local_ports = vec![port];
-        self
-    }
-
     /// Build a `View` out of a `ViewBuilder`
-    pub(crate) fn build(
-        mut self,
-        rpcs: &mut HashMap<(SocketAddr, usize), ViewRpc>,
-    ) -> io::Result<View<SharedConnection>> {
-        let sports = &mut self.local_ports;
-        let conns = self
-            .shards
-            .iter()
-            .enumerate()
-            .map(move |(shardi, addr)| {
-                use std::collections::hash_map::Entry;
+    #[doc(hidden)]
+    pub fn build(
+        &self,
+        rpcs: Arc<Mutex<HashMap<(SocketAddr, usize), ViewRpc>>>,
+    ) -> impl Future<Item = View, Error = io::Error> + Send {
+        let node = self.node;
+        let columns = self.columns.clone();
+        let shards = self.shards.clone();
+        let schema = self.schema.clone();
+        future::join_all(shards.into_iter().enumerate().map(move |(shardi, addr)| {
+            use std::collections::hash_map::Entry;
 
-                // one entry per shard so that we can send sharded requests in parallel even if
-                // they happen to be targeting the same machine.
-                match rpcs.entry((*addr, shardi)) {
-                    Entry::Occupied(e) => Ok(Rc::clone(e.get())),
-                    Entry::Vacant(h) => {
-                        let c = RpcClient::connect_from(sports.get(shardi).cloned(), addr, false)?;
-                        if shardi >= sports.len() {
-                            assert!(shardi == sports.len());
-                            sports.push(c.local_addr()?.port());
-                        }
-
-                        let c = Rc::new(RefCell::new(c));
-                        h.insert(Rc::clone(&c));
-                        Ok(c)
-                    }
+            // one entry per shard so that we can send sharded requests in parallel even if
+            // they happen to be targeting the same machine.
+            let mut rpcs = rpcs.lock().unwrap();
+            match rpcs.entry((addr, shardi)) {
+                Entry::Occupied(e) => Ok((addr, e.get().clone())),
+                Entry::Vacant(h) => {
+                    // TODO: maybe always use the same local port?
+                    let c = Buffer::new(
+                        pool::Builder::new()
+                            .urgency(0.03)
+                            .loaded_above(0.2)
+                            .underutilized_below(0.00001)
+                            .build(
+                                multiplex::client::Maker::new(ViewEndpoint(addr)),
+                                (),
+                                choose::RoundRobin::default(),
+                            ),
+                        1,
+                    )
+                    .unwrap_or_else(|_| panic!("no active tokio runtime"));
+                    h.insert(c.clone());
+                    Ok((addr, c))
                 }
-            })
-            .collect::<io::Result<Vec<_>>>()?;
-
-        Ok(View {
-            node: self.node,
-            columns: self.columns,
-            schema: self.schema,
-            shard_addrs: self.shards,
-            shards: conns,
-            exclusivity: SharedConnection,
+            }
+        }))
+        .map(move |shards| {
+            let (addrs, conns) = shards.into_iter().unzip();
+            View {
+                node,
+                schema,
+                columns,
+                shard_addrs: addrs,
+                shards: conns,
+            }
         })
     }
 }
 
 /// A `View` is used to query previously defined external views.
 ///
-/// If you create multiple `View` handles from a single `ControllerHandle`, they may share
-/// connections to the Soup workers. For this reason, `View` is *not* `Send` or `Sync`. To
-/// get a handle that can be sent to a different thread (i.e., one with its own dedicated
-/// connections), call `View::into_exclusive`.
-pub struct View<E = SharedConnection> {
+/// Note that if you create multiple `View` handles from a single `ControllerHandle`, they may
+/// share connections to the Soup workers.
+#[derive(Clone)]
+pub struct View {
     node: NodeIndex,
     columns: Vec<String>,
     schema: Option<Vec<ColumnSpecification>>,
 
     shards: Vec<ViewRpc>,
     shard_addrs: Vec<SocketAddr>,
-
-    #[allow(dead_code)]
-    exclusivity: E,
 }
 
-impl Clone for View<SharedConnection> {
-    fn clone(&self) -> Self {
-        View {
-            node: self.node,
-            columns: self.columns.clone(),
-            schema: self.schema.clone(),
-            shards: self.shards.clone(),
-            shard_addrs: self.shard_addrs.clone(),
-            exclusivity: SharedConnection,
-        }
+impl fmt::Debug for View {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        f.debug_struct("View")
+            .field("node", &self.node)
+            .field("columns", &self.columns)
+            .field("shard_addrs", &self.shard_addrs)
+            .finish()
     }
 }
 
-unsafe impl Send for View<ExclusiveConnection> {}
+impl Service<(Vec<Vec<DataType>>, bool)> for View {
+    type Response = Vec<Datas>;
+    type Error = ViewError;
+    // have to repeat types because https://github.com/rust-lang/rust/issues/57807
+    existential type Future: Future<Item = Vec<Datas>, Error = ViewError>;
 
-impl View<SharedConnection> {
-    /// Produce a `View` with dedicated Soup connections so it can be safely sent across
-    /// threads.
-    pub fn into_exclusive(self) -> io::Result<View<ExclusiveConnection>> {
-        ViewBuilder {
-            node: self.node,
-            local_ports: vec![],
-            columns: self.columns,
-            schema: self.schema,
-            shards: self.shard_addrs,
+    fn poll_ready(&mut self) -> Poll<(), Self::Error> {
+        for s in &mut self.shards {
+            try_ready!(s.poll_ready().map_err(ViewError::from));
         }
-        .build_exclusive()
+        Ok(Async::Ready(()))
+    }
+
+    fn call(&mut self, (keys, block): (Vec<Vec<DataType>>, bool)) -> Self::Future {
+        // TODO: optimize for when there's only one shard
+        assert!(keys.iter().all(|k| k.len() == 1));
+        let mut shard_queries = vec![Vec::new(); self.shards.len()];
+        for key in keys {
+            let shard = crate::shard_by(&key[0], self.shards.len());
+            shard_queries[shard].push(key);
+        }
+
+        let node = self.node;
+        futures::stream::futures_ordered(
+            self.shards
+                .iter_mut()
+                .enumerate()
+                .zip(shard_queries.into_iter())
+                .filter_map(|((shardi, shard), shard_queries)| {
+                    if shard_queries.is_empty() {
+                        // poll_ready reserves a sender slot which we have to release
+                        // we do that by dropping the old handle and replacing it with a clone
+                        // https://github.com/tokio-rs/tokio/issues/898
+                        *shard = shard.clone();
+                        None
+                    } else {
+                        Some(((shardi, shard), shard_queries))
+                    }
+                })
+                .map(move |((shardi, shard), shard_queries)| {
+                    shard
+                        .call(
+                            ReadQuery::Normal {
+                                target: (node, shardi),
+                                keys: shard_queries,
+                                block,
+                            }
+                            .into(),
+                        )
+                        .map_err(ViewError::from)
+                        .and_then(|reply| match reply.v {
+                            ReadReply::Normal(Ok(rows)) => Ok(rows),
+                            ReadReply::Normal(Err(())) => Err(ViewError::NotYetAvailable),
+                            _ => unreachable!(),
+                        })
+                }),
+        )
+        .concat2()
     }
 }
 
-#[cfg_attr(
-    feature = "cargo-clippy",
-    allow(clippy::len_without_is_empty)
-)]
-impl<E> View<E> {
+#[allow(clippy::len_without_is_empty)]
+impl View {
     /// Get the list of columns in this view.
     pub fn columns(&self) -> &[String] {
         self.columns.as_slice()
@@ -200,42 +286,35 @@ impl<E> View<E> {
         self.schema.as_ref().map(|s| s.as_slice())
     }
 
-    /// Get the local address this `View` is bound to.
-    pub fn local_addr(&self) -> io::Result<SocketAddr> {
-        self.shards[0].borrow().local_addr()
-    }
-
     /// Get the current size of this view.
-    pub fn len(&mut self) -> Result<usize, ViewError> {
-        if self.shards.len() == 1 {
-            let mut shard = self.shards[0].borrow_mut();
-            let reply = shard
-                .send(&ReadQuery::Size {
-                    target: (self.node, 0),
-                })
-                .map_err(TransportError::from)?;
-            match reply {
-                ReadReply::Size(rows) => Ok(rows),
-                _ => unreachable!(),
-            }
-        } else {
-            let shard_queries = 0..self.shards.len();
-            shard_queries.fold(Ok(0), |acc, shardi| {
-                acc.and_then(|acc| {
-                    let mut shard = self.shards[shardi].borrow_mut();
-                    let reply = shard
-                        .send(&ReadQuery::Size {
-                            target: (self.node, shardi),
+    ///
+    /// Note that you must also continue to poll this `View` for the returned future to resolve.
+    pub fn len(mut self) -> impl Future<Item = (Self, usize), Error = AsyncViewError> + Send {
+        let node = self.node;
+        futures::stream::futures_ordered(self.shards.drain(..).enumerate().map(
+            |(shardi, shard)| {
+                shard
+                    .ready()
+                    .map_err(AsyncViewError::from)
+                    .and_then(move |mut svc| {
+                        svc.call(
+                            ReadQuery::Size {
+                                target: (node, shardi),
+                            }
+                            .into(),
+                        )
+                        .map_err(AsyncViewError::from)
+                        .map(move |reply| match reply.v {
+                            ReadReply::Size(rows) => (svc, rows),
+                            _ => unreachable!(),
                         })
-                        .map_err(TransportError::from)?;
-
-                    match reply {
-                        ReadReply::Size(rows) => Ok(acc + rows),
-                        _ => unreachable!(),
-                    }
-                })
-            })
-        }
+                    })
+            },
+        ))
+        .fold((self, 0), |(mut this, acc), (svc, rows)| {
+            this.shards.push(svc);
+            future::ok::<_, AsyncViewError>((this, acc + rows))
+        })
     }
 
     /// Retrieve the query results for the given parameter values.
@@ -244,72 +323,112 @@ impl<E> View<E> {
     /// If `block` is false, misses will be returned as empty results. Any requested keys that have
     /// missing state will be backfilled (asynchronously if `block` is `false`).
     pub fn multi_lookup(
-        &mut self,
+        self,
         keys: Vec<Vec<DataType>>,
         block: bool,
-    ) -> Result<Vec<Datas>, ViewError> {
-        if self.shards.len() == 1 {
-            let mut shard = self.shards[0].borrow_mut();
-            let reply = shard
-                .send(&ReadQuery::Normal {
-                    target: (self.node, 0),
-                    keys,
-                    block,
+    ) -> impl Future<Item = (Self, Vec<Datas>), Error = AsyncViewError> + Send {
+        self.ready()
+            .map_err(|e| match e {
+                ViewError::NotYetAvailable => unreachable!("can't occur in poll_ready"),
+                ViewError::TransportError(e) => AsyncViewError::from(e),
+            })
+            .and_then(move |mut svc| {
+                svc.call((keys, block)).then(move |res| match res {
+                    Ok(res) => Ok((svc, res)),
+                    Err(e) => Err(AsyncViewError {
+                        view: Some(svc),
+                        error: e,
+                    }),
                 })
-                .map_err(TransportError::from)?;
-            match reply {
-                ReadReply::Normal(Ok(rows)) => Ok(rows),
-                ReadReply::Normal(Err(())) => Err(ViewError::NotYetAvailable),
-                _ => unreachable!(),
-            }
-        } else {
-            assert!(keys.iter().all(|k| k.len() == 1));
-            let mut shard_queries = vec![Vec::new(); self.shards.len()];
-            for key in keys {
-                let shard = crate::shard_by(&key[0], self.shards.len());
-                shard_queries[shard].push(key);
-            }
-
-            let mut borrow_all: Vec<_> = self.shards.iter().map(|s| s.borrow_mut()).collect();
-
-            let qs = borrow_all
-                .iter_mut()
-                .enumerate()
-                .zip(shard_queries.iter_mut())
-                .filter(|&(_, ref sq)| !sq.is_empty())
-                .map(|((shardi, shard), shard_queries)| {
-                    use std::mem;
-                    Ok(shard
-                        .send_async(&ReadQuery::Normal {
-                            target: (self.node, shardi),
-                            keys: mem::replace(shard_queries, Vec::new()),
-                            block,
-                        })
-                        .map_err(TransportError::from)?)
-                })
-                .collect::<Result<Vec<_>, ViewError>>()?;
-
-            let mut results = Vec::new();
-            for res in qs {
-                let reply = res.wait().map_err(TransportError::from)?;
-                match reply {
-                    ReadReply::Normal(Ok(rows)) => {
-                        results.extend(rows);
-                    }
-                    ReadReply::Normal(Err(())) => return Err(ViewError::NotYetAvailable),
-                    _ => unreachable!(),
-                }
-            }
-            Ok(results)
-        }
+            })
     }
 
     /// Retrieve the query results for the given parameter value.
     ///
     /// The method will block if the results are not yet available only when `block` is `true`.
-    pub fn lookup(&mut self, key: &[DataType], block: bool) -> Result<Datas, ViewError> {
+    pub fn lookup(
+        self,
+        key: &[DataType],
+        block: bool,
+    ) -> impl Future<Item = (Self, Datas), Error = AsyncViewError> + Send {
         // TODO: Optimized version of this function?
         self.multi_lookup(vec![Vec::from(key)], block)
-            .map(|rs| rs.into_iter().next().unwrap())
+            .map(|(this, rs)| (this, rs.into_iter().next().unwrap()))
+    }
+
+    /// Switch to a synchronous interface for this view.
+    pub fn into_sync(self) -> SyncView {
+        SyncView(Some(self))
+    }
+}
+
+/// A synchronous wrapper around [`View`] where all methods block (using `wait`) for the operation
+/// to complete before returning.
+#[derive(Clone, Debug)]
+pub struct SyncView(Option<View>);
+
+macro_rules! sync {
+    ($self:ident.$method:ident($($args:expr),*)) => {
+        match $self
+            .0
+            .take()
+            .expect("tried to use View after its transport has failed")
+            .$method($($args),*)
+            .wait()
+        {
+            Ok((this, res)) => {
+                $self.0 = Some(this);
+                Ok(res)
+            }
+            Err(e) => {
+                $self.0 = e.view;
+                Err(e.error)
+            },
+        }
+    };
+}
+
+#[allow(clippy::len_without_is_empty)]
+impl SyncView {
+    /// Get the list of columns in this view.
+    pub fn columns(&self) -> &[String] {
+        self.0
+            .as_ref()
+            .expect("tried to use View after its transport has failed")
+            .columns()
+    }
+
+    /// Get the schema definition of this view.
+    pub fn schema(&self) -> Option<&[ColumnSpecification]> {
+        self.0
+            .as_ref()
+            .expect("tried to use View after its transport has failed")
+            .schema()
+    }
+
+    /// See [`View::len`].
+    pub fn len(&mut self) -> Result<usize, ViewError> {
+        sync!(self.len())
+    }
+
+    /// See [`View::multi_lookup`].
+    pub fn multi_lookup(
+        &mut self,
+        keys: Vec<Vec<DataType>>,
+        block: bool,
+    ) -> Result<Vec<Datas>, ViewError> {
+        sync!(self.multi_lookup(keys, block))
+    }
+
+    /// See [`View::lookup`].
+    pub fn lookup(&mut self, key: &[DataType], block: bool) -> Result<Datas, ViewError> {
+        sync!(self.lookup(key, block))
+    }
+
+    /// Switch back to an asynchronous interface for this view.
+    pub fn into_async(mut self) -> View {
+        self.0
+            .take()
+            .expect("tried to use View after its transport has failed")
     }
 }

@@ -24,7 +24,7 @@ fn target_columns_from_computed_column(computed_col: &nom_sql::Column) -> Column
 }
 
 // Move predicates above grouped_by nodes
-pub fn make_predicates_above_grouped<'a>(
+pub(super) fn make_predicates_above_grouped<'a>(
     mir_converter: &SqlToMirConverter,
     name: &str,
     qg: &QueryGraph,
@@ -69,7 +69,7 @@ pub fn make_predicates_above_grouped<'a>(
     (created_predicates, predicates_above_group_by_nodes)
 }
 
-pub fn make_grouped(
+pub(super) fn make_grouped(
     mir_converter: &SqlToMirConverter,
     name: &str,
     qg: &QueryGraph,
@@ -120,14 +120,12 @@ pub fn make_grouped(
                         _ => unimplemented!(),
                     };
 
-                    let new_fn_col = nom_sql::Column {
+                    nom_sql::Column {
                         function: Some(Box::new(new_func)),
                         name: computed_col.name.clone(),
                         alias: computed_col.alias.clone(),
                         table: computed_col.table.clone(),
-                    };
-
-                    new_fn_col
+                    }
                 } else {
                     computed_col.clone()
                 };
@@ -155,9 +153,7 @@ pub fn make_grouped(
                         match **e {
                             QueryGraphEdge::GroupBy(ref gbc) => {
                                 let table = gbc.first().unwrap().table.as_ref().unwrap();
-                                assert!(
-                                    gbc.into_iter().all(|c| c.table.as_ref().unwrap() == table)
-                                );
+                                assert!(gbc.iter().all(|c| c.table.as_ref().unwrap() == table));
                                 gb_cols.extend(gbc);
                             }
                             _ => unreachable!(),
@@ -179,7 +175,7 @@ pub fn make_grouped(
                     let gb_and_param_cols: Vec<Column> = dedup_gb_cols
                         .into_iter()
                         .chain(param_cols.into_iter())
-                        .map(|c| Column::from(c))
+                        .map(Column::from)
                         .collect();
 
                     let mut have_parent_cols = HashSet::new();
@@ -209,8 +205,7 @@ pub fn make_grouped(
 
                     (parent_node, gb_and_param_cols)
                 } else {
-                    let ref proj_cols_from_target_table =
-                        qg.relations.get(over_table).as_ref().unwrap().columns;
+                    let proj_cols_from_target_table = &qg.relations[over_table].columns;
 
                     let (group_cols, parent_node) = if proj_cols_from_target_table.is_empty() {
                         // slightly messy hack: if there are no group columns and the
@@ -231,8 +226,8 @@ pub fn make_grouped(
                     } else {
                         (
                             proj_cols_from_target_table
-                                .into_iter()
-                                .map(|c| Column::from(c))
+                                .iter()
+                                .map(Column::from)
                                 .collect(),
                             parent_node,
                         )

@@ -1,5 +1,6 @@
 #[macro_use]
 extern crate clap;
+extern crate futures;
 extern crate hdrhistogram;
 extern crate itertools;
 extern crate noria;
@@ -19,8 +20,7 @@ use itertools::Itertools;
 use zookeeper::ZooKeeper;
 
 use noria::{
-    ControllerBuilder, DataType, DurabilityMode, LocalControllerHandle, PersistenceParameters,
-    ZookeeperAuthority,
+    Builder, DataType, DurabilityMode, PersistenceParameters, SyncHandle, ZookeeperAuthority,
 };
 
 // If we .batch_put a huge amount of rows we'll end up with a deadlock when the base
@@ -54,19 +54,22 @@ fn build_graph(
     authority: Arc<ZookeeperAuthority>,
     persistence: PersistenceParameters,
     verbose: bool,
-) -> LocalControllerHandle<ZookeeperAuthority> {
-    let mut builder = ControllerBuilder::default();
+) -> SyncHandle<ZookeeperAuthority> {
+    let mut builder = Builder::default();
     if verbose {
         builder.log_with(noria::logger_pls());
     }
 
     builder.set_persistence(persistence);
     builder.set_sharding(None);
-    builder.build(authority).unwrap()
+    let mut rt = tokio::runtime::Runtime::new().unwrap();
+    let fut = builder.start(authority);
+    let wh = rt.block_on(fut).unwrap();
+    SyncHandle::from_existing(rt, wh)
 }
 
-fn populate(g: &mut LocalControllerHandle<ZookeeperAuthority>, rows: i64, skewed: bool) {
-    let mut mutator = g.table("TableRow").unwrap();
+fn populate(g: &mut SyncHandle<ZookeeperAuthority>, rows: i64, skewed: bool) {
+    let mut mutator = g.table("TableRow").unwrap().into_sync();
 
     (0..rows)
         .map(|i| {
@@ -84,13 +87,13 @@ fn populate(g: &mut LocalControllerHandle<ZookeeperAuthority>, rows: i64, skewed
         .into_iter()
         .for_each(|chunk| {
             let rs: Vec<Vec<DataType>> = chunk.collect();
-            mutator.insert_all(rs).unwrap();
+            mutator.perform_all(rs).unwrap();
         });
 }
 
 // Synchronously read `reads` times, where each read should trigger a full replay from the base.
 fn perform_reads(
-    g: &mut LocalControllerHandle<ZookeeperAuthority>,
+    g: &mut SyncHandle<ZookeeperAuthority>,
     reads: i64,
     rows: i64,
     skewed: bool,
@@ -124,11 +127,11 @@ fn perform_reads(
 
 // Reads every row with the primary key index.
 fn perform_primary_reads(
-    g: &mut LocalControllerHandle<ZookeeperAuthority>,
+    g: &mut SyncHandle<ZookeeperAuthority>,
     hist: &mut Histogram<u64>,
     row_ids: Vec<i64>,
 ) {
-    let mut getter = g.view("ReadRow").unwrap();
+    let mut getter = g.view("ReadRow").unwrap().into_sync();
 
     for i in row_ids {
         let id: DataType = DataType::BigInt(i);
@@ -150,14 +153,14 @@ fn perform_primary_reads(
 
 // Reads each row from one of the secondary indices.
 fn perform_secondary_reads(
-    g: &mut LocalControllerHandle<ZookeeperAuthority>,
+    g: &mut SyncHandle<ZookeeperAuthority>,
     hist: &mut Histogram<u64>,
     rows: i64,
     row_ids: Vec<i64>,
 ) {
     let indices = 10;
     let mut getters: Vec<_> = (1..indices)
-        .map(|i| g.view(&format!("query_c{}", i)).unwrap())
+        .map(|i| g.view(&format!("query_c{}", i)).unwrap().into_sync())
         .collect();
 
     let skewed = row_ids.len() == 1;

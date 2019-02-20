@@ -25,9 +25,11 @@
 //! requires a nightly release of Rust to run for the time being.
 //!
 //! ```no_run
+//! use tokio::prelude::*;
 //! # use noria::*;
 //! # let zookeeper_addr = "127.0.0.1:2181";
-//! let mut db = ControllerHandle::from_zk(zookeeper_addr).unwrap();
+//! let mut rt = tokio::runtime::Runtime::new().unwrap();
+//! let mut db = SyncControllerHandle::from_zk(zookeeper_addr, rt.executor()).unwrap();
 //!
 //! // if this is the first time we interact with Noria, we must give it the schema
 //! db.install_recipe("
@@ -36,8 +38,8 @@
 //! ");
 //!
 //! // we can then get handles that let us insert into the new tables
-//! let mut article = db.table("Article").unwrap();
-//! let mut vote = db.table("Vote").unwrap();
+//! let mut article = db.table("Article").unwrap().into_sync();
+//! let mut vote = db.table("Vote").unwrap().into_sync();
 //!
 //! // let's make a new article
 //! let aid = 42;
@@ -61,7 +63,7 @@
 //!       WHERE Article.aid = ?;");
 //!
 //! // and then get handles that let us execute those queries to fetch their results
-//! let mut awvc = db.view("ArticleWithVoteCount").unwrap();
+//! let mut awvc = db.view("ArticleWithVoteCount").unwrap().into_sync();
 //! // looking up article 42 should yield the article we inserted with a vote count of 1
 //! assert_eq!(
 //!     awvc.lookup(&[aid.into()], true).unwrap(),
@@ -93,6 +95,14 @@
 //! similar operations as SQL tables, such as [`Table::insert`], [`Table::update`],
 //! [`Table::delete`], and also more esoteric operations like [`Table::insert_or_update`].
 //!
+//! # Synchronous and asynchronous operation
+//!
+//! By default, the Noria client operates with an asynchronous API based on futures. While this
+//! allows great flexibility for clients as to how they schedule concurrent requests, it can be
+//! awkward to work with when writing less performance-sensitive code. Most of the Noria API types
+//! also have a synchronous version with a `Sync` prefix in the name that you can get at by calling
+//! `into_sync` on the asynchronous handle.
+//!
 //! # Alternatives
 //!
 //! Noria provides a [MySQL adapter](https://github.com/mit-pdos/noria-mysql) that implements the
@@ -101,6 +111,8 @@
 #![feature(try_from)]
 #![feature(allow_fail)]
 #![feature(bufreader_buffer)]
+#![feature(try_blocks)]
+#![feature(existential_type)]
 #![deny(missing_docs)]
 #![deny(unused_extern_crates)]
 
@@ -110,9 +122,12 @@ extern crate failure;
 extern crate serde_derive;
 #[macro_use]
 extern crate slog;
+#[macro_use]
+extern crate futures;
 
 use petgraph::graph::NodeIndex;
 use std::collections::HashMap;
+use tokio_tower::multiplex;
 
 mod controller;
 mod data;
@@ -133,43 +148,51 @@ use crate::internal::*;
 pub mod prelude {
     pub use super::ActivationResult;
     pub use super::ControllerHandle;
-    pub use super::Table;
-    pub use super::View;
+    pub use super::{SyncTable, Table};
+    pub use super::{SyncView, View};
 }
 
 /// Noria errors.
 pub mod error {
     pub use crate::table::TableError;
     pub use crate::view::ViewError;
+}
 
-    /// An error occured during transport (i.e., while sending or receiving).
-    #[derive(Debug, Fail)]
-    pub enum TransportError {
-        /// A network-level error occurred.
-        #[fail(display = "{}", _0)]
-        Channel(#[cause] crate::channel::tcp::SendError),
-        /// A protocol-level error occurred.
-        #[fail(display = "{}", _0)]
-        Serialization(#[cause] bincode::Error),
+#[derive(Debug, Default)]
+#[doc(hidden)]
+// only pub because we use it to figure out the error type for ViewError
+pub struct Tagger(slab::Slab<()>);
+
+impl<Request, Response> multiplex::TagStore<Tagged<Request>, Tagged<Response>> for Tagger {
+    type Tag = u32;
+
+    fn assign_tag(&mut self, r: &mut Tagged<Request>) -> Self::Tag {
+        r.tag = self.0.insert(()) as u32;
+        r.tag
     }
-
-    impl From<crate::channel::tcp::SendError> for TransportError {
-        fn from(e: crate::channel::tcp::SendError) -> Self {
-            TransportError::Channel(e)
-        }
-    }
-
-    impl From<bincode::Error> for TransportError {
-        fn from(e: bincode::Error) -> Self {
-            TransportError::Serialization(e)
-        }
+    fn finish_tag(&mut self, r: &Tagged<Response>) -> Self::Tag {
+        self.0.remove(r.tag as usize);
+        r.tag
     }
 }
 
-pub use crate::controller::{ControllerDescriptor, ControllerHandle, ControllerPointer};
+#[doc(hidden)]
+#[derive(Serialize, Deserialize, Debug)]
+pub struct Tagged<T> {
+    pub tag: u32,
+    pub v: T,
+}
+
+impl<T> From<T> for Tagged<T> {
+    fn from(t: T) -> Self {
+        Tagged { tag: 0, v: t }
+    }
+}
+
+pub use crate::controller::{ControllerDescriptor, ControllerHandle, SyncControllerHandle};
 pub use crate::data::{DataType, Modification, Operation, TableOperation};
-pub use crate::table::Table;
-pub use crate::view::View;
+pub use crate::table::{SyncTable, Table};
+pub use crate::view::{SyncView, View};
 
 #[doc(hidden)]
 pub use crate::table::Input;
@@ -185,17 +208,6 @@ pub mod builders {
 
 /// Types used when debugging Noria.
 pub mod debug;
-
-/// Marker for a handle that has its own connection to Noria.
-///
-/// Such a handle can freely be sent between threads.
-pub struct ExclusiveConnection;
-
-/// Marker for a handle that shares its underlying connection with other handles owned by the same
-/// thread.
-///
-/// This kind of handle can only be used on a single thread.
-pub struct SharedConnection;
 
 /// Represents the result of a recipe activation.
 #[derive(Clone, Debug, Deserialize, Serialize)]

@@ -197,14 +197,14 @@ mod tests {
         let a = g.add_node(node::Node::new(
             "a",
             &["a1", "a2"],
-            node::NodeType::from(node::special::Base::default()),
+            node::special::Base::default(),
         ));
         g.add_edge(src, a, ());
 
         let b = g.add_node(node::Node::new(
             "b",
             &["b1", "b2"],
-            node::NodeType::from(node::special::Base::default()),
+            node::special::Base::default(),
         ));
         g.add_edge(src, b, ());
 
@@ -261,12 +261,7 @@ mod tests {
         let x = g.add_node(node::Node::new(
             "x",
             &["x2", "x1"],
-            node::NodeType::from(ops::NodeOperator::Project(ops::project::Project::new(
-                a,
-                &[1, 0],
-                None,
-                None,
-            ))),
+            ops::NodeOperator::Project(ops::project::Project::new(a, &[1, 0], None, None)),
         ));
         g.add_edge(a, x, ());
 
@@ -290,12 +285,12 @@ mod tests {
         let x = g.add_node(node::Node::new(
             "x",
             &["x1", "foo"],
-            node::NodeType::from(ops::NodeOperator::Project(ops::project::Project::new(
+            ops::NodeOperator::Project(ops::project::Project::new(
                 a,
                 &[0],
                 Some(vec![3.14.into()]),
                 None,
-            ))),
+            )),
         ));
         g.add_edge(a, x, ());
 
@@ -320,9 +315,9 @@ mod tests {
         let x = g.add_node(node::Node::new(
             "x",
             &["x1", "x2"],
-            node::NodeType::from(ops::NodeOperator::Union(ops::union::Union::new(
+            ops::NodeOperator::Union(ops::union::Union::new(
                 vec![(a, vec![0, 1]), (b, vec![0, 1])].into_iter().collect(),
-            ))),
+            )),
         ));
         g.add_edge(a, x, ());
         g.add_edge(b, x, ());
@@ -354,7 +349,7 @@ mod tests {
         let x = g.add_node(node::Node::new(
             "x",
             &["a1", "a2b1", "b2"],
-            node::NodeType::from(ops::NodeOperator::Join(ops::join::Join::new(
+            ops::NodeOperator::Join(ops::join::Join::new(
                 a,
                 b,
                 ops::join::JoinType::Inner,
@@ -363,7 +358,7 @@ mod tests {
                     ops::join::JoinSource::B(1, 0),
                     ops::join::JoinSource::R(1),
                 ],
-            ))),
+            )),
         ));
         g.add_edge(a, x, ());
         g.add_edge(b, x, ());

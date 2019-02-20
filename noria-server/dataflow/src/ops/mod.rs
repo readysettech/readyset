@@ -16,6 +16,7 @@ pub mod trigger;
 pub mod union;
 
 #[derive(Clone, Serialize, Deserialize)]
+#[allow(clippy::large_enum_variant)]
 pub enum NodeOperator {
     Sum(grouped::GroupedOperator<grouped::aggregate::Aggregator>),
     Extremum(grouped::GroupedOperator<grouped::extremum::ExtremumOperator>),
@@ -135,6 +136,7 @@ impl Ingredient for NodeOperator {
     }
     fn on_input(
         &mut self,
+        ex: &mut Executor,
         from: LocalNodeIndex,
         data: Records,
         tracer: &mut Tracer,
@@ -145,6 +147,7 @@ impl Ingredient for NodeOperator {
         impl_ingredient_fn_mut!(
             self,
             on_input,
+            ex,
             from,
             data,
             tracer,
@@ -155,6 +158,7 @@ impl Ingredient for NodeOperator {
     }
     fn on_input_raw(
         &mut self,
+        ex: &mut Executor,
         from: LocalNodeIndex,
         data: Records,
         tracer: &mut Tracer,
@@ -165,6 +169,7 @@ impl Ingredient for NodeOperator {
         impl_ingredient_fn_mut!(
             self,
             on_input_raw,
+            ex,
             from,
             data,
             tracer,
@@ -184,6 +189,7 @@ impl Ingredient for NodeOperator {
     fn can_query_through(&self) -> bool {
         impl_ingredient_fn_ref!(self, can_query_through,)
     }
+    #[allow(clippy::type_complexity)]
     fn query_through<'a>(
         &self,
         columns: &[usize],
@@ -193,6 +199,7 @@ impl Ingredient for NodeOperator {
     ) -> Option<Option<Box<Iterator<Item = Cow<'a, [DataType]>> + 'a>>> {
         impl_ingredient_fn_ref!(self, query_through, columns, key, nodes, states)
     }
+    #[allow(clippy::type_complexity)]
     fn lookup<'a>(
         &self,
         parent: LocalNodeIndex,
@@ -224,15 +231,16 @@ pub mod test {
 
     use petgraph::graph::NodeIndex;
 
-    pub struct MockGraph {
+    pub(super) struct MockGraph {
         graph: Graph,
         source: NodeIndex,
         nut: Option<IndexPair>, // node under test
-        pub states: StateMap,
+        pub(super) states: StateMap,
         nodes: DomainNodes,
         remap: HashMap<NodeIndex, IndexPair>,
     }
 
+    #[allow(clippy::new_without_default)]
     impl MockGraph {
         pub fn new() -> MockGraph {
             let mut graph = Graph::new();
@@ -242,8 +250,8 @@ pub mod test {
                 node::NodeType::Source,
             ));
             MockGraph {
-                graph: graph,
-                source: source,
+                graph,
+                source,
                 nut: None,
                 states: StateMap::new(),
                 nodes: DomainNodes::default(),
@@ -281,57 +289,6 @@ pub mod test {
             self.states.insert(local, box MemoryState::default());
             self.remap.insert(global, ip);
             ip
-        }
-
-        pub fn graphviz(&self) -> String {
-            let mut s = String::new();
-
-            let indentln = |s: &mut String| s.push_str("    ");
-
-            // header.
-            s.push_str("digraph {{\n");
-
-            // global formatting.
-            indentln(&mut s);
-            s.push_str("node [shape=record, fontsize=10]\n");
-
-            // node descriptions.
-            for index in self.graph.node_indices() {
-                let node = &self.graph[index];
-                let materialization_status = if node.is_localized() {
-                    match self.states.get(node.local_addr()) {
-                        Some(ref s) => {
-                            if s.is_partial() {
-                                MaterializationStatus::Partial
-                            } else {
-                                MaterializationStatus::Full
-                            }
-                        }
-                        None => MaterializationStatus::Not,
-                    }
-                } else {
-                    MaterializationStatus::Not
-                };
-                indentln(&mut s);
-                s.push_str(&format!("{}", index.index()));
-                s.push_str(&node.describe(index, true, materialization_status));
-            }
-
-            // edges.
-            for (_, edge) in self.graph.raw_edges().iter().enumerate() {
-                indentln(&mut s);
-                s.push_str(&format!(
-                    "{} -> {}",
-                    edge.source().index(),
-                    edge.target().index()
-                ));
-                s.push_str("\n");
-            }
-
-            // footer.
-            s.push_str("}}");
-
-            s
         }
 
         pub fn set_op<I>(&mut self, name: &str, fields: &[&str], mut i: I, materialized: bool)
@@ -434,8 +391,7 @@ pub mod test {
             if let Some(ref mut state) = self.states.get_mut(*base) {
                 state.process_records(&mut vec![data].into(), None);
             } else {
-                assert!(
-                    false,
+                panic!(
                     "unnecessary seed value for {} (never used by any node)",
                     base.as_global().index()
                 );
@@ -460,10 +416,25 @@ pub mod test {
             assert!(self.nut.is_some());
             assert!(!remember || self.states.contains_key(*self.nut.unwrap()));
 
+            struct Ex;
+
+            impl Executor for Ex {
+                fn ack(&mut self, _: SourceChannelIdentifier) {}
+                fn create_universe(&mut self, _: HashMap<String, DataType>) {}
+            }
+
             let mut u = {
                 let id = self.nut.unwrap();
                 let mut n = self.nodes[*id].borrow_mut();
-                let m = n.on_input(*src, u.into(), &mut None, None, &self.nodes, &self.states);
+                let m = n.on_input(
+                    &mut Ex,
+                    *src,
+                    u.into(),
+                    &mut None,
+                    None,
+                    &self.nodes,
+                    &self.states,
+                );
                 assert_eq!(m.misses, vec![]);
                 m.results
             };

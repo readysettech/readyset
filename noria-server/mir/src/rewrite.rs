@@ -1,7 +1,7 @@
 use column::Column;
 use query::MirQuery;
-use MirNodeRef;
 use std::collections::HashMap;
+use MirNodeRef;
 
 fn has_column(n: &MirNodeRef, column: &Column) -> bool {
     if n.borrow().columns().contains(column) {
@@ -16,7 +16,7 @@ fn has_column(n: &MirNodeRef, column: &Column) -> bool {
     false
 }
 
-pub fn make_universe_naming_consistent(
+pub(super) fn make_universe_naming_consistent(
     q: &mut MirQuery,
     table_mapping: &HashMap<(String, Option<String>), String>,
     base_name: String,
@@ -65,7 +65,7 @@ pub fn make_universe_naming_consistent(
     }
 }
 
-pub fn pull_required_base_columns(
+pub(super) fn pull_required_base_columns(
     q: &mut MirQuery,
     table_mapping: Option<&HashMap<(String, Option<String>), String>>,
     sec: bool,
@@ -150,13 +150,13 @@ pub fn pull_required_base_columns(
 
 // currently unused
 #[allow(dead_code)]
-pub fn push_all_base_columns(q: &mut MirQuery) {
+pub(super) fn push_all_base_columns(q: &mut MirQuery) {
     let mut queue = Vec::new();
     queue.extend(q.roots.clone());
 
     while !queue.is_empty() {
         let mn = queue.pop().unwrap();
-        let columns: Vec<Column> = mn.borrow().columns().into_iter().cloned().collect();
+        let columns = mn.borrow().columns().to_vec();
         for child in mn.borrow().children() {
             // N.B. this terminates before reaching the actual leaf, since the last node of the
             // query (before the MIR `Leaf` node) already carries the query name. (`Leaf` nodes are

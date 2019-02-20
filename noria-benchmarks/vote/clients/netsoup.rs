@@ -1,135 +1,137 @@
-use clap;
 use crate::clients::localsoup::graph::RECIPE;
-use crate::clients::{Parameters, VoteClient, VoteClientConstructor};
-use failure::Error;
-use noria::{self, ControllerHandle, DataType, ZookeeperAuthority};
-
-use std::thread;
-use std::time::Duration;
-
-pub(crate) struct Client {
-    c: Constructor,
-    r: noria::View<noria::ExclusiveConnection>,
-    #[allow(dead_code)]
-    w: noria::Table<noria::ExclusiveConnection>,
-}
-
-type Handle = ControllerHandle<ZookeeperAuthority>;
-
-fn make_mutator(
-    c: &mut Handle,
-    view: &str,
-) -> Result<noria::Table<noria::ExclusiveConnection>, Error> {
-    Ok(c.table(view)?.into_exclusive()?)
-}
-
-fn make_getter(
-    c: &mut Handle,
-    view: &str,
-) -> Result<noria::View<noria::ExclusiveConnection>, Error> {
-    Ok(c.view(view)?.into_exclusive()?)
-}
+use crate::clients::{Parameters, ReadRequest, VoteClient, WriteRequest};
+use clap;
+use failure::ResultExt;
+use noria::{self, ControllerHandle, TableOperation, ZookeeperAuthority};
+use tokio::prelude::*;
+use tower_service::Service;
 
 #[derive(Clone)]
-pub(crate) struct Constructor(String);
-impl Constructor {
-    fn try_make(&mut self) -> Result<Client, Error> {
-        let mut ch = Handle::new(ZookeeperAuthority::new(&self.0).unwrap()).unwrap();
-
-        Ok(Client {
-            c: self.clone(),
-            r: make_getter(&mut ch, "ArticleWithVoteCount")?,
-            w: make_mutator(&mut ch, "Vote")?,
-        })
-    }
+pub(crate) struct Conn {
+    ch: ControllerHandle<ZookeeperAuthority>,
+    r: Option<noria::View>,
+    w: Option<noria::Table>,
 }
 
-impl VoteClientConstructor for Constructor {
-    type Instance = Client;
-
-    fn new(params: &Parameters, args: &clap::ArgMatches) -> Self {
+impl VoteClient for Conn {
+    type Future = Box<Future<Item = Self, Error = failure::Error> + Send>;
+    fn new(
+        _: tokio::runtime::TaskExecutor,
+        params: Parameters,
+        args: clap::ArgMatches,
+    ) -> <Self as VoteClient>::Future {
         let zk = format!(
             "{}/{}",
             args.value_of("zookeeper").unwrap(),
             args.value_of("deployment").unwrap()
         );
 
-        if params.prime {
-            // for prepop, we need a mutator
-            let mut ch = Handle::new(ZookeeperAuthority::new(&zk).unwrap()).unwrap();
-            ch.install_recipe(RECIPE).unwrap();
-            let mut m = make_mutator(&mut ch, "Article").unwrap();
-            let mut id = 0;
-            while id < params.articles {
-                let end = ::std::cmp::min(id + 1000, params.articles);
-                m.batch_insert(
-                    (id..end)
-                        .map(|i| vec![((i + 1) as i32).into(), format!("Article #{}", i).into()]),
-                )
-                .unwrap();
-                id = end;
-            }
-        }
-
-        Constructor(zk)
-    }
-
-    fn make(&mut self) -> Self::Instance {
-        let mut ch = Handle::new(ZookeeperAuthority::new(&self.0).unwrap()).unwrap();
-
-        Client {
-            c: self.clone(),
-            r: make_getter(&mut ch, "ArticleWithVoteCount").unwrap(),
-            w: make_mutator(&mut ch, "Vote").unwrap(),
-        }
+        Box::new(
+            ZookeeperAuthority::new(&zk)
+                .into_future()
+                .and_then(ControllerHandle::new)
+                .and_then(move |mut c| {
+                    if params.prime {
+                        // for prepop, we need a mutator
+                        future::Either::A(
+                            c.install_recipe(RECIPE)
+                                .and_then(move |_| c.table("Article").map(move |a| (c, a)))
+                                .and_then(move |(c, a)| {
+                                    a.perform_all((0..params.articles).map(|i| {
+                                        vec![
+                                            ((i + 1) as i32).into(),
+                                            format!("Article #{}", i).into(),
+                                        ]
+                                    }))
+                                    .map(move |_| c)
+                                    .map_err(|e| e.error)
+                                    .then(|r| {
+                                        r.context("failed to do article prepopulation")
+                                            .map_err(Into::into)
+                                    })
+                                }),
+                        )
+                    } else {
+                        future::Either::B(future::ok(c))
+                    }
+                })
+                .and_then(|mut c| c.table("Vote").map(move |v| (c, v)))
+                .and_then(|(mut c, v)| c.view("ArticleWithVoteCount").map(move |awvc| (c, v, awvc)))
+                .map(|(c, v, awvc)| Conn {
+                    ch: c,
+                    r: Some(awvc),
+                    w: Some(v),
+                }),
+        )
     }
 }
 
-impl VoteClient for Client {
-    fn handle_writes(&mut self, ids: &[i32]) {
-        let data: Vec<Vec<DataType>> = ids
-            .into_iter()
-            .map(|&article_id| vec![(article_id as usize).into(), 0.into()])
-            .collect();
+impl Service<ReadRequest> for Conn {
+    type Response = ();
+    type Error = failure::Error;
+    type Future = Box<Future<Item = (), Error = failure::Error> + Send>;
 
-        while let Err(_) = self.w.insert_all(data.clone()) {
-            loop {
-                if let Ok(c) = self.c.try_make() {
-                    *self = c;
-                    break;
-                }
-                thread::sleep(Duration::from_millis(100));
-            }
-        }
+    fn poll_ready(&mut self) -> Poll<(), Self::Error> {
+        self.r
+            .as_mut()
+            .unwrap()
+            .poll_ready()
+            .map_err(failure::Error::from)
     }
 
-    fn handle_reads(&mut self, ids: &[i32]) {
-        let arg: Vec<_> = ids
+    fn call(&mut self, req: ReadRequest) -> Self::Future {
+        let len = req.0.len();
+        let arg = req
+            .0
             .into_iter()
-            .map(|&article_id| vec![(article_id as usize).into()])
+            .map(|article_id| vec![(article_id as usize).into()])
             .collect();
 
-        loop {
-            match self.r.multi_lookup(arg.clone(), true) {
-                Ok(rows) => {
-                    let rows = rows
-                        .into_iter()
-                        .map(|_rows| {
-                            // TODO
-                            //assert_eq!(rows.map(|rows| rows.len()), Ok(1));
-                        })
-                        .count();
-                    assert_eq!(rows, ids.len());
-                    break;
-                }
-                Err(_) => loop {
-                    if let Ok(c) = self.c.try_make() {
-                        *self = c;
-                        break;
-                    }
-                    thread::sleep(Duration::from_millis(100));
-                },
-            }
-        }
+        Box::new(
+            self.r
+                .as_mut()
+                .unwrap()
+                .call((arg, true))
+                .map(move |rows| {
+                    // TODO: assert_eq!(rows.map(|rows| rows.len()), Ok(1));
+                    assert_eq!(rows.len(), len);
+                })
+                .map_err(failure::Error::from),
+        )
+    }
+}
+
+impl Service<WriteRequest> for Conn {
+    type Response = ();
+    type Error = failure::Error;
+    type Future = Box<Future<Item = (), Error = failure::Error> + Send>;
+
+    fn poll_ready(&mut self) -> Poll<(), Self::Error> {
+        Service::<Vec<TableOperation>>::poll_ready(self.w.as_mut().unwrap())
+            .map_err(failure::Error::from)
+    }
+
+    fn call(&mut self, req: WriteRequest) -> Self::Future {
+        let data: Vec<TableOperation> = req
+            .0
+            .into_iter()
+            .map(|article_id| vec![(article_id as usize).into(), 0.into()].into())
+            .collect();
+
+        Box::new(
+            self.w
+                .as_mut()
+                .unwrap()
+                .call(data)
+                .map(|_| ())
+                .map_err(failure::Error::from),
+        )
+    }
+}
+
+impl Drop for Conn {
+    fn drop(&mut self) {
+        drop(self.r.take());
+        drop(self.w.take());
     }
 }

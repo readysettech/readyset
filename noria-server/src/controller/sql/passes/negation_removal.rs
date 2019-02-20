@@ -47,7 +47,7 @@ fn normalize_condition_expr(ce: &mut ConditionExpression, negate: bool) {
             normalize_condition_expr(right, false);
         }
         ConditionExpression::NegationOp(_) => {
-            let inner = if let &mut ConditionExpression::NegationOp(box ref mut inner) = ce {
+            let inner = if let ConditionExpression::NegationOp(box ref mut inner) = *ce {
                 mem::replace(
                     inner,
                     ConditionExpression::Base(ConditionBase::Literal(Literal::Placeholder)),

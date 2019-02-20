@@ -1,29 +1,26 @@
+use crate::controller::domain_handle::{DomainHandle, DomainShardHandle};
 use crate::controller::migrate::materialization::Materializations;
-use crate::controller::{
-    ControllerState, DomainHandle, DomainShardHandle, Migration, Recipe, Worker, WorkerIdentifier,
-};
 use crate::controller::recipe::Schema;
 use crate::controller::schema;
+use crate::controller::{ControllerState, Migration, Recipe};
+use crate::controller::{Worker, WorkerIdentifier};
 use crate::coordination::{CoordinationMessage, CoordinationPayload, DomainDescriptor};
-use dataflow::payload::ControlReplyPacket;
 use dataflow::prelude::*;
-use dataflow::{node, payload, DomainBuilder, DomainConfig};
+use dataflow::{node, payload::ControlReplyPacket, prelude::Packet, DomainBuilder, DomainConfig};
 use hyper::{self, Method, StatusCode};
 use mio::net::TcpListener;
+use nom_sql::ColumnSpecification;
 use noria::builders::*;
 use noria::channel::tcp::{SendError, TcpSender};
 use noria::consensus::{Authority, Epoch, STATE_KEY};
 use noria::debug::stats::{DomainStats, GraphStats, NodeStats};
 use noria::ActivationResult;
-use nom_sql::ColumnSpecification;
-use petgraph;
 use petgraph::visit::Bfs;
-use slog;
 use slog::Logger;
 use std::collections::{BTreeMap, HashMap};
 use std::mem;
 use std::net::SocketAddr;
-use std::sync::Arc;
+use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 use std::{cell, io, thread, time};
 use tokio::prelude::*;
@@ -34,7 +31,7 @@ use tokio::prelude::*;
 /// does not allow direct manipulation of the graph. Instead, changes must be instigated through a
 /// `Migration`, which can be performed using `ControllerInner::migrate`. Only one `Migration` can
 /// occur at any given point in time.
-pub struct ControllerInner {
+pub(super) struct ControllerInner {
     pub(super) ingredients: Graph,
     pub(super) source: NodeIndex,
     pub(super) ndomains: usize,
@@ -71,10 +68,12 @@ pub struct ControllerInner {
 
     log: slog::Logger,
 
-    pub(crate) replies: DomainReplies,
+    pub(in crate::controller) replies: DomainReplies,
 }
 
-pub(crate) struct DomainReplies(futures::sync::mpsc::UnboundedReceiver<ControlReplyPacket>);
+pub(in crate::controller) struct DomainReplies(
+    futures::sync::mpsc::UnboundedReceiver<ControlReplyPacket>,
+);
 
 impl DomainReplies {
     fn read_n_domain_replies(&mut self, n: usize) -> Vec<ControlReplyPacket> {
@@ -102,7 +101,7 @@ impl DomainReplies {
         }
     }
 
-    pub(crate) fn wait_for_acks(&mut self, d: &DomainHandle) {
+    pub(in crate::controller) fn wait_for_acks(&mut self, d: &DomainHandle) {
         for r in self.read_n_domain_replies(d.shards()) {
             match r {
                 ControlReplyPacket::Ack(_) => {}
@@ -111,7 +110,7 @@ impl DomainReplies {
         }
     }
 
-    pub(crate) fn wait_for_statistics(
+    fn wait_for_statistics(
         &mut self,
         d: &DomainHandle,
     ) -> Vec<(DomainStats, HashMap<NodeIndex, NodeStats>)> {
@@ -126,7 +125,7 @@ impl DomainReplies {
     }
 }
 
-pub(crate) fn graphviz(
+pub(super) fn graphviz(
     graph: &Graph,
     detailed: bool,
     materializations: &Materializations,
@@ -182,7 +181,7 @@ pub(crate) fn graphviz(
 }
 
 impl ControllerInner {
-    pub fn external_request<A: Authority + 'static>(
+    pub(super) fn external_request<A: Authority + 'static>(
         &mut self,
         method: hyper::Method,
         path: String,
@@ -195,14 +194,14 @@ impl ControllerInner {
         match (&method, path.as_ref()) {
             (&Method::GET, "/simple_graph") => return Ok(Ok(self.graphviz(false))),
             (&Method::POST, "/simple_graphviz") => {
-                return Ok(Ok(json::to_string(&self.graphviz(false)).unwrap()))
+                return Ok(Ok(json::to_string(&self.graphviz(false)).unwrap()));
             }
             (&Method::GET, "/graph") => return Ok(Ok(self.graphviz(true))),
             (&Method::POST, "/graphviz") => {
-                return Ok(Ok(json::to_string(&self.graphviz(true)).unwrap()))
+                return Ok(Ok(json::to_string(&self.graphviz(true)).unwrap()));
             }
             (&Method::GET, "/get_statistics") => {
-                return Ok(Ok(json::to_string(&self.get_statistics()).unwrap()))
+                return Ok(Ok(json::to_string(&self.get_statistics()).unwrap()));
             }
             _ => {}
         }
@@ -288,11 +287,11 @@ impl ControllerInner {
                     self.remove_nodes(vec![args].as_slice())
                         .map(|r| json::to_string(&r).unwrap())
                 }),
-            _ => return Err(StatusCode::NOT_FOUND),
+            _ => Err(StatusCode::NOT_FOUND),
         }
     }
 
-    pub(crate) fn handle_register(
+    pub(super) fn handle_register(
         &mut self,
         msg: &CoordinationMessage,
         remote: &SocketAddr,
@@ -387,7 +386,7 @@ impl ControllerInner {
             .expect("failed to activate original recipe");
     }
 
-    pub(crate) fn handle_heartbeat(&mut self, msg: &CoordinationMessage) -> Result<(), io::Error> {
+    pub(super) fn handle_heartbeat(&mut self, msg: &CoordinationMessage) -> Result<(), io::Error> {
         match self.workers.get_mut(&msg.source) {
             None => crit!(
                 self.log,
@@ -435,7 +434,7 @@ impl ControllerInner {
 
         ControllerInner {
             ingredients: g,
-            source: source,
+            source,
             ndomains: 0,
 
             materializations,
@@ -444,7 +443,7 @@ impl ControllerInner {
             persistence: state.config.persistence,
             heartbeat_every: state.config.heartbeat_every,
             healthcheck_every: state.config.healthcheck_every,
-            recipe: recipe,
+            recipe,
             quorum: state.config.quorum,
             log,
 
@@ -471,7 +470,7 @@ impl ControllerInner {
     ///
     /// This function may only be called once because the receiving end it returned.
     #[allow(unused)]
-    pub fn create_tracer_channel(&mut self) -> TcpListener {
+    fn create_tracer_channel(&mut self) -> TcpListener {
         assert!(self.debug_channel.is_none());
         let addr: SocketAddr = "127.0.0.1:0".parse().unwrap();
         let listener = TcpListener::bind(&addr).unwrap();
@@ -495,12 +494,12 @@ impl ControllerInner {
     ///
     /// Must be called before any domains have been created.
     #[allow(unused)]
-    pub fn with_persistence_options(&mut self, params: PersistenceParameters) {
+    fn with_persistence_options(&mut self, params: PersistenceParameters) {
         assert_eq!(self.ndomains, 0);
         self.persistence = params;
     }
 
-    pub(crate) fn place_domain(
+    pub(in crate::controller) fn place_domain(
         &mut self,
         idx: DomainIndex,
         num_shards: Option<usize>,
@@ -630,7 +629,7 @@ impl ControllerInner {
             .collect();
 
         DomainHandle {
-            idx: idx,
+            idx,
             shards,
             log: log.clone(),
         }
@@ -640,14 +639,14 @@ impl ControllerInner {
     ///
     /// By default, all log messages are discarded.
     #[allow(unused)]
-    pub fn log_with(&mut self, log: slog::Logger) {
+    fn log_with(&mut self, log: slog::Logger) {
         self.log = log;
         self.materializations.set_logger(&self.log);
     }
 
     /// Adds a new user universe.
     /// User universes automatically enforce security policies.
-    pub fn add_universe<F, T>(&mut self, context: HashMap<String, DataType>, f: F) -> T
+    fn add_universe<F, T>(&mut self, context: HashMap<String, DataType>, f: F) -> T
     where
         F: FnOnce(&mut Migration) -> T,
     {
@@ -658,7 +657,7 @@ impl ControllerInner {
             added: Default::default(),
             columns: Default::default(),
             readers: Default::default(),
-            context: context,
+            context,
             start: time::Instant::now(),
             log: miglog,
         };
@@ -668,7 +667,8 @@ impl ControllerInner {
     }
 
     /// Perform a new query schema migration.
-    pub fn migrate<F, T>(&mut self, f: F) -> T
+    // crate viz for tests
+    crate fn migrate<F, T>(&mut self, f: F) -> T
     where
         F: FnOnce(&mut Migration) -> T,
     {
@@ -689,7 +689,7 @@ impl ControllerInner {
     }
 
     #[cfg(test)]
-    pub fn graph(&self) -> &Graph {
+    crate fn graph(&self) -> &Graph {
         &self.ingredients
     }
 
@@ -697,7 +697,7 @@ impl ControllerInner {
     ///
     /// Input nodes are here all nodes of type `Table`. The addresses returned by this function will
     /// all have been returned as a key in the map from `commit` at some point in the past.
-    pub fn inputs(&self) -> BTreeMap<String, NodeIndex> {
+    fn inputs(&self) -> BTreeMap<String, NodeIndex> {
         self.ingredients
             .neighbors_directed(self.source, petgraph::EdgeDirection::Outgoing)
             .map(|n| {
@@ -712,7 +712,7 @@ impl ControllerInner {
     ///
     /// Output nodes here refers to nodes of type `Reader`, which is the nodes created in response
     /// to calling `.maintain` or `.stream` for a node during a migration.
-    pub fn outputs(&self) -> BTreeMap<String, NodeIndex> {
+    fn outputs(&self) -> BTreeMap<String, NodeIndex> {
         self.ingredients
             .externals(petgraph::EdgeDirection::Outgoing)
             .filter_map(|n| {
@@ -751,7 +751,7 @@ impl ControllerInner {
 
     /// Obtain a `ViewBuilder` that can be sent to a client and then used to query a given
     /// (already maintained) reader node called `name`.
-    pub fn view_builder(&self, name: &str) -> Option<ViewBuilder> {
+    fn view_builder(&self, name: &str) -> Option<ViewBuilder> {
         // first try to resolve the node via the recipe, which handles aliasing between identical
         // queries.
         let node = match self.recipe.node_addr_for(name) {
@@ -772,10 +772,9 @@ impl ControllerInner {
                 .collect();
 
             ViewBuilder {
-                local_ports: vec![],
                 node: r,
                 columns,
-                schema: schema,
+                schema,
                 shards,
             }
         })
@@ -797,7 +796,7 @@ impl ControllerInner {
 
     /// Obtain a TableBuild that can be used to construct a Table to perform writes and deletes
     /// from the given named base node.
-    pub fn table_builder(&self, base: &str) -> Option<TableBuilder> {
+    fn table_builder(&self, base: &str) -> Option<TableBuilder> {
         let ni = match self.recipe.node_addr_for(base) {
             Ok(ni) => ni,
             Err(_) => *self.inputs().get(base)?,
@@ -848,10 +847,9 @@ impl ControllerInner {
         });
 
         Some(TableBuilder {
-            local_port: None,
             txs,
             addr: node.local_addr().into(),
-            key: key,
+            key,
             key_is_primary: is_primary,
             dropped: base_operator.get_dropped(),
             table_name: node.name().to_owned(),
@@ -861,7 +859,7 @@ impl ControllerInner {
     }
 
     /// Get statistics about the time spent processing different parts of the graph.
-    pub fn get_statistics(&mut self) -> GraphStats {
+    fn get_statistics(&mut self) -> GraphStats {
         let workers = &self.workers;
         let replies = &mut self.replies;
         // TODO: request stats from domains in parallel.
@@ -869,7 +867,7 @@ impl ControllerInner {
             .domains
             .iter_mut()
             .flat_map(|(di, s)| {
-                s.send_to_healthy(box payload::Packet::GetStatistics, workers)
+                s.send_to_healthy(box Packet::GetStatistics, workers)
                     .unwrap();
                 replies.wait_for_statistics(&s).into_iter().enumerate().map(
                     move |(i, (domain_stats, node_stats))| {
@@ -884,17 +882,17 @@ impl ControllerInner {
             })
             .collect();
 
-        GraphStats { domains: domains }
+        GraphStats { domains }
     }
 
-    pub fn get_instances(&self) -> Vec<(WorkerIdentifier, bool, Duration)> {
+    fn get_instances(&self) -> Vec<(WorkerIdentifier, bool, Duration)> {
         self.workers
             .iter()
             .map(|(&id, ref status)| (id, status.healthy, status.last_heartbeat.elapsed()))
             .collect()
     }
 
-    pub fn flush_partial(&mut self) -> u64 {
+    fn flush_partial(&mut self) -> u64 {
         // get statistics for current domain sizes
         // and evict all state from partial nodes
         let workers = &self.workers;
@@ -903,7 +901,7 @@ impl ControllerInner {
             .domains
             .iter_mut()
             .map(|(di, s)| {
-                s.send_to_healthy(box payload::Packet::GetStatistics, workers)
+                s.send_to_healthy(box Packet::GetStatistics, workers)
                     .unwrap();
                 let to_evict: Vec<(NodeIndex, u64)> = replies
                     .wait_for_statistics(&s)
@@ -929,7 +927,7 @@ impl ControllerInner {
                     .get_mut(&di)
                     .unwrap()
                     .send_to_healthy(
-                        box payload::Packet::Evict {
+                        box Packet::Evict {
                             node: Some(na),
                             num_bytes: bytes as usize,
                         },
@@ -948,7 +946,10 @@ impl ControllerInner {
         total_evicted
     }
 
-    pub fn create_universe(&mut self, context: HashMap<String, DataType>) -> Result<(), String> {
+    pub(super) fn create_universe(
+        &mut self,
+        context: HashMap<String, DataType>,
+    ) -> Result<(), String> {
         let log = self.log.clone();
         let mut r = self.recipe.clone();
         let groups = self.recipe.security_groups();
@@ -961,12 +962,18 @@ impl ControllerInner {
             .clone();
         let uid = &[uid];
         if context.get("group").is_none() {
+            let x = Arc::new(Mutex::new(HashMap::new()));
             for g in groups {
+                // TODO: this should use external APIs through noria::ControllerHandle
+                // TODO: can this move to the client entirely?
                 let rgb: Option<ViewBuilder> = self.view_builder(&g);
-                let mut view = rgb.map(|rgb| rgb.build_exclusive().unwrap()).unwrap();
+                // TODO: is it even okay to use wait() here?
+                let view = rgb.map(|rgb| rgb.build(x.clone()).wait().unwrap()).unwrap();
                 let my_groups: Vec<DataType> = view
                     .lookup(uid, true)
+                    .wait()
                     .unwrap()
+                    .1
                     .iter()
                     .map(|v| v[1].clone())
                     .collect();
@@ -994,10 +1001,8 @@ impl ControllerInner {
         Ok(())
     }
 
-    pub fn set_security_config(&mut self, config: (String, String)) -> Result<(), String> {
-        let p = config.0;
-        let url = config.1;
-        self.recipe.set_security_config(&p, url);
+    fn set_security_config(&mut self, p: String) -> Result<(), String> {
+        self.recipe.set_security_config(&p);
         Ok(())
     }
 
@@ -1062,7 +1067,7 @@ impl ControllerInner {
         r
     }
 
-    pub fn extend_recipe<A: Authority + 'static>(
+    fn extend_recipe<A: Authority + 'static>(
         &mut self,
         authority: &Arc<A>,
         add_txt: String,
@@ -1098,7 +1103,7 @@ impl ControllerInner {
         }
     }
 
-    pub fn install_recipe<A: Authority + 'static>(
+    fn install_recipe<A: Authority + 'static>(
         &mut self,
         authority: &Arc<A>,
         r_txt: String,
@@ -1131,7 +1136,7 @@ impl ControllerInner {
         }
     }
 
-    pub fn graphviz(&self, detailed: bool) -> String {
+    fn graphviz(&self, detailed: bool) -> String {
         graphviz(&self.ingredients, detailed, &self.materializations)
     }
 
@@ -1179,10 +1184,10 @@ impl ControllerInner {
             // nodes can have only one reader attached
             assert!(readers.len() <= 1);
             debug!(
-                        self.log,
-                        "Removing query leaf \"{}\"", self.ingredients[leaf].name();
-                        "node" => leaf.index(),
-                    );
+                self.log,
+                "Removing query leaf \"{}\"", self.ingredients[leaf].name();
+                "node" => leaf.index(),
+            );
             if !readers.is_empty() {
                 removals.push(readers[0]);
                 leaf = readers[0];
@@ -1252,7 +1257,7 @@ impl ControllerInner {
                 .domains
                 .get_mut(&domain)
                 .unwrap()
-                .send_to_healthy(box payload::Packet::RemoveNodes { nodes }, &self.workers)
+                .send_to_healthy(box Packet::RemoveNodes { nodes }, &self.workers)
             {
                 Ok(_) => (),
                 Err(e) => match e {
@@ -1333,7 +1338,7 @@ impl Drop for ControllerInner {
             // XXX: this is a terrible ugly hack to ensure that all workers exit
             for _ in 0..100 {
                 // don't unwrap, because given domain may already have terminated
-                drop(d.send_to_healthy(box payload::Packet::Quit, &self.workers));
+                drop(d.send_to_healthy(box Packet::Quit, &self.workers));
             }
         }
     }

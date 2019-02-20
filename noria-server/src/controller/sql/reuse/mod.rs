@@ -1,13 +1,11 @@
 use crate::controller::sql::query_graph::QueryGraph;
-use nom_sql::Table;
-
-use std::collections::HashMap;
-use std::vec::Vec;
-
 use crate::controller::sql::reuse::join_order::reorder_joins;
 use crate::controller::sql::UniverseId;
-
+use crate::ReuseConfigType;
 use dataflow::prelude::DataType;
+use nom_sql::Table;
+use std::collections::HashMap;
+use std::vec::Vec;
 
 mod finkelstein;
 mod full;
@@ -16,28 +14,19 @@ mod join_order;
 mod relaxed;
 
 #[derive(Clone, Debug)]
-pub enum ReuseType {
+pub(in crate::controller) enum ReuseType {
     DirectExtension,
     PrefixReuse,
     #[allow(dead_code)]
     BackjoinRequired(Vec<Table>),
 }
 
-#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
-#[allow(missing_docs)]
-pub enum ReuseConfigType {
-    Finkelstein,
-    Relaxed,
-    Full,
-    NoReuse,
-}
-
-pub struct ReuseConfig {
+pub(in crate::controller) struct ReuseConfig {
     config: ReuseConfigType,
 }
 
 impl ReuseConfig {
-    pub fn reuse_candidates<'a>(
+    pub(in crate::controller) fn reuse_candidates<'a>(
         &self,
         qg: &mut QueryGraph,
         query_graphs: &'a HashMap<u64, QueryGraph>,
@@ -55,16 +44,16 @@ impl ReuseConfig {
         reuse_candidates
     }
 
-    pub fn reorder_joins(
+    fn reorder_joins(
         &self,
         qg: &mut QueryGraph,
-        reuse_candidates: &Vec<(ReuseType, (u64, &QueryGraph))>,
+        reuse_candidates: &[(ReuseType, (u64, &QueryGraph))],
     ) {
         reorder_joins(qg, reuse_candidates);
     }
 
     // Return which universes are available for reuse opportunities
-    pub fn reuse_universes(
+    pub(in crate::controller) fn reuse_universes(
         &self,
         universe: UniverseId,
         universes: &HashMap<Option<DataType>, Vec<UniverseId>>,
@@ -74,18 +63,15 @@ impl ReuseConfig {
         let (_, group) = universe;
 
         // Find one universe that belongs to the same group
-        match universes.get(&group) {
-            Some(ref uids) => {
-                let grouped = uids.first().unwrap().clone();
-                reuse_universes.push(grouped);
-            }
-            None => (),
+        if let Some(ref uids) = universes.get(&group) {
+            let grouped = uids.first().unwrap().clone();
+            reuse_universes.push(grouped);
         }
 
         reuse_universes
     }
 
-    pub fn new(reuse_type: ReuseConfigType) -> ReuseConfig {
+    pub(in crate::controller) fn new(reuse_type: ReuseConfigType) -> ReuseConfig {
         match reuse_type {
             ReuseConfigType::Finkelstein => ReuseConfig::finkelstein(),
             ReuseConfigType::Relaxed => ReuseConfig::relaxed(),
@@ -94,26 +80,26 @@ impl ReuseConfig {
         }
     }
 
-    pub fn full() -> ReuseConfig {
+    fn full() -> ReuseConfig {
         ReuseConfig {
             config: ReuseConfigType::Full,
         }
     }
 
-    pub fn finkelstein() -> ReuseConfig {
+    fn finkelstein() -> ReuseConfig {
         ReuseConfig {
             config: ReuseConfigType::Finkelstein,
         }
     }
 
-    pub fn relaxed() -> ReuseConfig {
+    fn relaxed() -> ReuseConfig {
         ReuseConfig {
             config: ReuseConfigType::Relaxed,
         }
     }
 }
 
-pub trait ReuseConfiguration {
+trait ReuseConfiguration {
     fn reuse_candidates<'a>(
         qg: &QueryGraph,
         query_graphs: &'a HashMap<u64, QueryGraph>,

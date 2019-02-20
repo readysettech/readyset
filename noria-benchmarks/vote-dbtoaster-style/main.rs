@@ -1,5 +1,3 @@
-#![feature(duration_as_u128)]
-
 #[macro_use]
 extern crate clap;
 extern crate rand;
@@ -56,20 +54,20 @@ fn main() {
     persistence.log_prefix = "vote-dbtoaster".to_string();
 
     // setup db
-    let mut s = graph::Setup::default();
+    let mut s = graph::Builder::default();
     s.logging = args.is_present("verbose");
     s.sharding = None;
     s.stupid = false;
     s.partial = false;
     s.threads = Some(1);
-    let mut g = s.make(persistence);
+    let mut g = s.start_sync(persistence).unwrap();
 
     // prepopulate
     if args.is_present("verbose") {
         eprintln!("==> prepopulating with {} articles", articles);
     }
-    let mut a = g.graph.table("Article").unwrap();
-    a.batch_insert((0..articles).map(|i| {
+    let mut a = g.graph.table("Article").unwrap().into_sync();
+    a.perform_all((0..articles).map(|i| {
         vec![
             ((i + 1) as i32).into(),
             format!("Article #{}", i + 1).into(),
@@ -84,31 +82,29 @@ fn main() {
     thread::sleep(time::Duration::from_secs(1));
 
     let mut rng = rand::thread_rng();
-    let mut v = g.graph.table("Vote").unwrap();
+    let mut v = g.graph.table("Vote").unwrap().into_sync();
     v.i_promise_dst_is_same_process();
 
     // start the benchmark
     let start = time::Instant::now();
-    let mut n = 0;
-    v.batch_insert_then_wait((0..votes).step_by(batch).map(|_| {
-        n += batch;
-        (0..batch)
-            .map(|_| {
-                TableOperation::from(vec![
-                    DataType::from(rng.gen_range(0, articles) + 1),
-                    0.into(),
-                ])
-            })
-            .collect()
-    }))
-    .unwrap();
+    let mut num = 0;
+    for _ in (0..votes).step_by(batch) {
+        num += batch;
+        v.perform_all((0..batch).map(|_| {
+            TableOperation::from(vec![
+                DataType::from(rng.gen_range(0, articles) + 1),
+                0.into(),
+            ])
+        }))
+        .unwrap();
+    }
     let took = start.elapsed();
 
     // all done!
-    println!("# votes: {}", n);
+    println!("# votes: {}", num);
     println!("# took: {:?}", took);
     println!(
         "# achieved ops/s: {:.2}",
-        n as f64 / (took.as_nanos() as f64 / 1_000_000_000.)
+        num as f64 / (took.as_nanos() as f64 / 1_000_000_000.)
     );
 }

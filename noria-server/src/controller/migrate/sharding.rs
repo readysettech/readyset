@@ -120,7 +120,7 @@ pub fn shard(
         }
 
         let mut complex = false;
-        for (_, &(ref lookup_col, _)) in &need_sharding {
+        for &(ref lookup_col, _) in need_sharding.values() {
             if lookup_col.len() != 1 {
                 complex = true;
             }
@@ -131,7 +131,7 @@ pub fn shard(
                 // TODO: if we're sharding by a two-part key and need sharding by the *first* part
                 // of that key, we can probably re-use the existing sharding?
                 error!(log, "de-sharding for lack of multi-key sharding support"; "node" => ?node);
-                for (&ni, _) in &input_shardings {
+                for &ni in input_shardings.keys() {
                     reshard(log, new, &mut swaps, graph, ni, node, Sharding::ForcedNone);
                 }
             }
@@ -141,7 +141,7 @@ pub fn shard(
         // if a node does a lookup into itself by a given key, it must be sharded by that key (or
         // not at all). this *also* means that its inputs must be sharded by the column(s) that the
         // output column resolves to.
-        if let Some((want_sharding, _)) = need_sharding.remove(&node.into()) {
+        if let Some((want_sharding, _)) = need_sharding.remove(&node) {
             assert_eq!(want_sharding.len(), 1);
             let want_sharding = want_sharding[0];
 
@@ -156,7 +156,7 @@ pub fn shard(
                 Some(
                     graph
                         .neighbors_directed(node, petgraph::EdgeDirection::Incoming)
-                        .map(|ni| (ni.into(), want_sharding))
+                        .map(|ni| (ni, want_sharding))
                         .collect(),
                 )
             };
@@ -245,7 +245,7 @@ pub fn shard(
         debug!(log, "testing for sharding opportunities"; "node" => ?node);
         'outer: for col in 0..graph[node].fields().len() {
             let srcs = if graph[node].is_base() {
-                vec![(node.into(), None)]
+                vec![(node, None)]
             } else {
                 graph[node].parent_columns(col)
             };
@@ -419,8 +419,8 @@ pub fn shard(
                     swaps.remove(&(c, p)).unwrap();
                     // unwire the child from the sharder and wire to the base directly
                     let e = graph.find_edge(n, c).unwrap();
-                    let w = graph.remove_edge(e).unwrap();
-                    graph.add_edge(p, c, w);
+                    graph.remove_edge(e).unwrap();
+                    graph.add_edge(p, c, ());
                 }
                 // also unwire the sharder from the base
                 let e = graph.find_edge(p, n).unwrap();
@@ -500,11 +500,11 @@ pub fn shard(
                     .detach();
                 while let Some((_, gc)) = grandc.next(&graph) {
                     let e = graph.find_edge(c, gc).unwrap();
-                    let w = graph.remove_edge(e).unwrap();
+                    graph.remove_edge(e).unwrap();
                     // undo any swaps as well
                     swaps.remove(&(gc, p));
                     // add back the original edge
-                    graph.add_edge(p, gc, w);
+                    graph.add_edge(p, gc, ());
                 }
                 // c is now entirely disconnected from the graph
                 // if petgraph indices were stable, we could now remove c (if != n) from the graph
@@ -528,9 +528,9 @@ pub fn shard(
             let new = graph[grandp].mirror(node::special::Sharder::new(src_col));
             *graph.node_weight_mut(n).unwrap() = new;
             let e = graph.find_edge(grandp, p).unwrap();
-            let w = graph.remove_edge(e).unwrap();
+            graph.remove_edge(e).unwrap();
             graph.add_edge(grandp, n, ());
-            graph.add_edge(n, p, w);
+            graph.add_edge(n, p, ());
             swaps.remove(&(p, grandp)); // may be None
             swaps.insert((p, real_grandp), n);
 
@@ -599,7 +599,7 @@ fn reshard(
         Sharding::None | Sharding::ForcedNone => {
             // NOTE: this *must* be a union so that we correctly buffer partial replays
             let n: NodeOperator =
-                ops::union::Union::new_deshard(src.into(), graph[src].sharded_by()).into();
+                ops::union::Union::new_deshard(src, graph[src].sharded_by()).into();
             let mut n = graph[src].mirror(n);
             n.shard_by(to);
             n
@@ -626,9 +626,9 @@ fn reshard(
 
     // hook in node that does appropriate shuffle
     let old = graph.find_edge(src, dst).unwrap();
-    let was_materialized = graph.remove_edge(old).unwrap();
+    graph.remove_edge(old).unwrap();
     graph.add_edge(src, node, ());
-    graph.add_edge(node, dst, was_materialized);
+    graph.add_edge(node, dst, ());
 
     // if `dst` refers to `src`, it now needs to refer to `node` instead
     let old = swaps.insert((dst, src), node);
@@ -659,7 +659,7 @@ pub fn validate(
 
     // ensure that each node matches the sharding of each of its ancestors, unless the ancestor is
     // a sharder or a shard merger
-    'nodes: for node in topo_list {
+    for node in topo_list {
         let n = &graph[node];
         if n.is_internal() && n.is_shard_merger() {
             // shard mergers legitimately have a different sharding than their ancestors

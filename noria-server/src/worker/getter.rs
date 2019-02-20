@@ -3,18 +3,13 @@ use dataflow::prelude::*;
 use dataflow::Readers;
 
 /// A handle for looking up results in a materialized view.
-pub struct Getter {
-    pub(crate) handle: backlog::ReadHandle,
+struct Getter {
+    handle: backlog::ReadHandle,
 }
 
 #[allow(unused)]
 impl Getter {
-    pub(crate) fn new(
-        node: NodeIndex,
-        sharded: bool,
-        readers: &Readers,
-        ingredients: &Graph,
-    ) -> Option<Self> {
+    fn new(node: NodeIndex, sharded: bool, readers: &Readers, ingredients: &Graph) -> Option<Self> {
         let rh = if sharded {
             let vr = readers.lock().unwrap();
 
@@ -39,7 +34,7 @@ impl Getter {
     }
 
     /// Returns the number of populated keys
-    pub fn len(&self) -> usize {
+    fn len(&self) -> usize {
         self.handle.len()
     }
 
@@ -50,7 +45,7 @@ impl Getter {
     ///
     /// If you need to clone values out of the returned rows, make sure to use
     /// `DataType::deep_clone` to avoid contention on internally de-duplicated strings!
-    pub fn lookup_map<F, T>(&self, q: &[DataType], mut f: F, block: bool) -> Result<Option<T>, ()>
+    fn lookup_map<F, T>(&self, q: &[DataType], mut f: F, block: bool) -> Result<Option<T>, ()>
     where
         F: FnMut(&[Vec<DataType>]) -> T,
     {
@@ -58,7 +53,7 @@ impl Getter {
     }
 
     /// Query for the results for the given key, optionally blocking if it is not yet available.
-    pub fn lookup(&self, q: &[DataType], block: bool) -> Result<Datas, ()> {
+    fn lookup(&self, q: &[DataType], block: bool) -> Result<Datas, ()> {
         self.lookup_map(
             q,
             |rs| {
@@ -67,6 +62,7 @@ impl Getter {
                     .collect()
             },
             block,
-        ).map(|r| r.unwrap_or_else(Vec::new))
+        )
+        .map(|r| r.unwrap_or_else(Vec::new))
     }
 }

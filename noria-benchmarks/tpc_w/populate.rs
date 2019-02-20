@@ -10,16 +10,8 @@ use std::time;
 use super::Backend;
 use noria::DataType;
 
-const NANOS_PER_SEC: u64 = 1_000_000_000;
-macro_rules! dur_to_fsec {
-    ($d:expr) => {{
-        let d = $d;
-        (d.as_secs() * NANOS_PER_SEC + d.subsec_nanos() as u64) as f64 / NANOS_PER_SEC as f64
-    }};
-}
-
 fn populate(backend: &mut Backend, name: &'static str, mut records: Vec<Vec<DataType>>) -> usize {
-    let mut mutator = backend.g.table(name).unwrap().into_exclusive().unwrap();
+    let mut mutator = backend.g.table(name).unwrap().into_sync();
 
     let i = records.len();
 
@@ -31,7 +23,7 @@ fn populate(backend: &mut Backend, name: &'static str, mut records: Vec<Vec<Data
             mutator.insert(r).unwrap();
         }
 
-        let dur = dur_to_fsec!(start.elapsed());
+        let dur = start.elapsed().as_float_secs();
         println!(
             "Inserted {} {} in {:.2}s ({:.2} PUTs/sec)!",
             i,
@@ -72,7 +64,7 @@ pub fn populate_addresses(backend: &mut Backend, data_location: &str) -> usize {
     let mut records = Vec::new();
     while reader.read_line(&mut s).unwrap() > 0 {
         {
-            let fields: Vec<&str> = s.split("\t").map(str::trim).collect();
+            let fields: Vec<&str> = s.split('\t').map(str::trim).collect();
             let addr_id = i32::from_str(fields[0]).unwrap();
             let addr_street1 = fields[1];
             let addr_street2 = fields[2];
@@ -113,7 +105,7 @@ pub fn populate_authors(
     let mut records = Vec::new();
     while reader.read_line(&mut s).unwrap() > 0 {
         {
-            let fields: Vec<&str> = s.split("\t").map(str::trim).collect();
+            let fields: Vec<&str> = s.split('\t').map(str::trim).collect();
             let a_id = i32::from_str(fields[0]).unwrap();
             let a_fname = fields[1];
             let a_lname = fields[2];
@@ -147,7 +139,7 @@ pub fn populate_cc_xacts(backend: &mut Backend, data_location: &str) -> usize {
     let mut records = Vec::new();
     while reader.read_line(&mut s).unwrap() > 0 {
         {
-            let fields: Vec<&str> = s.split("\t").map(str::trim).collect();
+            let fields: Vec<&str> = s.split('\t').map(str::trim).collect();
             let cx_o_id = i32::from_str(fields[0]).unwrap();
             let cx_type = fields[1];
             let cx_num = fields[2];
@@ -186,7 +178,7 @@ pub fn populate_countries(backend: &mut Backend, data_location: &str) -> usize {
     let mut records = Vec::new();
     while reader.read_line(&mut s).unwrap() > 0 {
         {
-            let fields: Vec<&str> = s.split("\t").map(str::trim).collect();
+            let fields: Vec<&str> = s.split('\t').map(str::trim).collect();
             let co_id = i32::from_str(fields[0]).unwrap();
             let co_name = fields[1];
             let co_exchange = f64::from_str(fields[2]).unwrap();
@@ -216,7 +208,7 @@ pub fn populate_customers(backend: &mut Backend, data_location: &str) -> usize {
     let mut records = Vec::new();
     while reader.read_line(&mut s).unwrap() > 0 {
         {
-            let fields: Vec<&str> = s.split("\t").map(str::trim).collect();
+            let fields: Vec<&str> = s.split('\t').map(str::trim).collect();
             let c_id = i32::from_str(fields[0]).unwrap();
             let c_uname = fields[1];
             let c_passwd = fields[2];
@@ -275,7 +267,7 @@ pub fn populate_items(
     let mut records = Vec::new();
     while reader.read_line(&mut s).unwrap() > 0 {
         {
-            let fields: Vec<&str> = s.split("\t").map(str::trim).collect();
+            let fields: Vec<&str> = s.split('\t').map(str::trim).collect();
             let i_id = i32::from_str(fields[0]).unwrap();
             let i_title = fields[1];
             let i_a_id = i32::from_str(fields[2]).unwrap();
@@ -341,7 +333,7 @@ pub fn populate_orders(backend: &mut Backend, data_location: &str) -> usize {
     let mut records = Vec::new();
     while reader.read_line(&mut s).unwrap() > 0 {
         {
-            let fields: Vec<&str> = s.split("\t").map(str::trim).collect();
+            let fields: Vec<&str> = s.split('\t').map(str::trim).collect();
             let o_id = i32::from_str(fields[0]).unwrap();
             let o_c_id = i32::from_str(fields[1]).unwrap();
             let o_date = NaiveDateTime::parse_from_str(fields[2], "'%Y-%m-%d %H:%M:%S'")
@@ -393,7 +385,7 @@ pub fn populate_order_line(
     let mut records = Vec::new();
     while reader.read_line(&mut s).unwrap() > 0 {
         {
-            let fields: Vec<&str> = s.split("\t").map(str::trim).collect();
+            let fields: Vec<&str> = s.split('\t').map(str::trim).collect();
             let ol_id = i32::from_str(fields[0]).unwrap();
             let ol_o_id = i32::from_str(fields[1]).unwrap();
             let ol_i_id = i32::from_str(fields[2]).unwrap();

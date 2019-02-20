@@ -1,6 +1,7 @@
+extern crate futures;
 extern crate noria_server;
 
-use noria_server::ControllerBuilder;
+use noria_server::Builder;
 
 use std::thread;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
@@ -28,19 +29,19 @@ fn main() {
     );
 
     // set up Soup via recipe
-    let mut builder = ControllerBuilder::default();
+    let mut builder = Builder::default();
 
     builder.log_with(noria_server::logger_pls());
     builder.set_persistence(persistence_params);
 
-    let mut blender = builder.build_local().unwrap();
+    let mut blender = builder.start_simple().unwrap();
     blender.install_recipe(sql).unwrap();
     println!("{}", blender.graphviz().unwrap());
 
     // Get mutators and getter.
-    let mut article = blender.table("Article").unwrap();
-    let mut vote = blender.table("Vote").unwrap();
-    let mut awvc = blender.view("ArticleWithVoteCount").unwrap();
+    let mut article = blender.table("Article").unwrap().into_sync();
+    let mut vote = blender.table("Vote").unwrap().into_sync();
+    let mut awvc = blender.view("ArticleWithVoteCount").unwrap().into_sync();
 
     println!("Creating article...");
     let aid = 1;

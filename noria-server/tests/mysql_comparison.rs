@@ -2,6 +2,7 @@
 
 extern crate backtrace;
 extern crate diff;
+extern crate futures;
 extern crate mysql;
 extern crate noria_server;
 #[macro_use]
@@ -25,7 +26,7 @@ use std::panic;
 use std::thread;
 use std::time;
 
-use noria_server::{ControllerBuilder, DataType};
+use noria_server::{Builder, DataType};
 
 const DIRECTORY_PREFIX: &str = "tests/mysql_comparison_tests";
 
@@ -243,10 +244,11 @@ fn compare_results(mysql: &Vec<Vec<String>>, soup: &Vec<Vec<String>>) -> Option<
     soup.sort();
 
     // TODO: Remove hack to drop key column from Soup output.
-    if mysql.len() == soup.len() && mysql
-        .iter()
-        .zip(soup.iter())
-        .all(|(m, s)| m == s || m[..] == s[..(s.len() - 1)])
+    if mysql.len() == soup.len()
+        && mysql
+            .iter()
+            .zip(soup.iter())
+            .all(|(m, s)| m == s || m[..] == s[..(s.len() - 1)])
     {
         return None;
     }
@@ -277,11 +279,11 @@ fn check_query(
         .chain(Some(query_name.to_owned() + ": " + &query.select_query))
         .collect();
 
-    let mut g = ControllerBuilder::default().build_local().unwrap();
+    let mut g = Builder::default().start_simple().unwrap();
     g.install_recipe(&queries.join("\n")).unwrap();
 
     for (table_name, table) in tables.iter() {
-        let mut mutator = g.table(table_name).unwrap();
+        let mut mutator = g.table(table_name).unwrap().into_sync();
         for row in table.data.as_ref().unwrap().iter() {
             assert_eq!(row.len(), table.types.len());
             let row: Vec<DataType> = row
@@ -295,7 +297,7 @@ fn check_query(
 
     thread::sleep(time::Duration::from_millis(300));
 
-    let mut getter = g.view(query_name).unwrap();
+    let mut getter = g.view(query_name).unwrap().into_sync();
 
     for (i, query_parameter) in query.values.iter().enumerate() {
         let query_param = query.types[0].make_datatype(&query_parameter[0]);
@@ -323,7 +325,7 @@ fn check_query(
                 return Err(format!(
                     "MySQL and Soup results do not match for ? = {:?}\n{}",
                     query_parameter, diff
-                ))
+                ));
             }
             None => {}
         }

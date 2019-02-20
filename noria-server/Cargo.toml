@@ -43,6 +43,8 @@ vec_map = { version = "0.8.0", features = ["eders"] }
 timer_heap = "0.3.0"
 serde = { version = "1.0.8", features = ["rc"] }
 zookeeper = "0.5.3"
+tokio-tower = { git = "https://github.com/tower-rs/tokio-tower.git" }
+tower-util = "0.1"
 
 # local deps
 dataflow = { path = "dataflow" }
@@ -73,4 +75,4 @@ name = "noria-zk"
 path = "src/bin/zk.rs"
 
 [[example]]
-name = "basic-recipe"
+name = "local-server"

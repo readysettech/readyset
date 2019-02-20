@@ -116,11 +116,11 @@ impl Join {
         Self {
             left: left.into(),
             right: right.into(),
-            on: on,
-            emit: emit,
+            on,
+            emit,
             in_place_left_emit,
             in_place_right_emit,
-            kind: kind,
+            kind,
         }
     }
 
@@ -140,12 +140,10 @@ impl Join {
                     } else {
                         left[col].clone()
                     }
+                } else if let Preprocessed::Right = reusing {
+                    right[i].clone()
                 } else {
-                    if let Preprocessed::Right = reusing {
-                        right[i].clone()
-                    } else {
-                        right[col].clone()
-                    }
+                    right[col].clone()
                 }
             })
             .collect()
@@ -227,8 +225,10 @@ impl Ingredient for Join {
         self.right.remap(remap);
     }
 
+    #[allow(clippy::cyclomatic_complexity)]
     fn on_input(
         &mut self,
+        _: &mut Executor,
         from: LocalNodeIndex,
         rs: Records,
         _: &mut Tracer,
@@ -252,7 +252,7 @@ impl Ingredient for Join {
         };
 
         let replay_key_cols = replay_key_cols.map(|cols| {
-            cols.into_iter()
+            cols.iter()
                 .map(|&col| {
                     match self.emit[col] {
                         (true, l) if from == *self.left => l,
@@ -317,7 +317,7 @@ impl Ingredient for Join {
                         .iter()
                         .position(|r| r[from_key] != prev_join_key)
                         .map(|p| at + p)
-                        .unwrap_or(rs.len());
+                        .unwrap_or_else(|| rs.len());
                     continue;
                 } else {
                     let rc = rc.unwrap().count();
@@ -344,7 +344,7 @@ impl Ingredient for Join {
                     .iter()
                     .position(|r| r[from_key] != prev_join_key)
                     .map(|p| at + p)
-                    .unwrap_or(rs.len());
+                    .unwrap_or_else(|| rs.len());
                 misses.extend((from..at).map(|i| Miss {
                     on: other,
                     lookup_idx: vec![other_key],
@@ -388,7 +388,7 @@ impl Ingredient for Join {
                         .iter()
                         .position(|r| r[from_key] != prev_join_key)
                         .map(|p| at + p)
-                        .unwrap_or(rs.len());
+                        .unwrap_or_else(|| rs.len());
                     misses.extend((start..at).map(|i| Miss {
                         on: from,
                         lookup_idx: vec![self.on.1],
@@ -407,15 +407,15 @@ impl Ingredient for Join {
                     .iter()
                     .position(|r| r[from_key] != prev_join_key)
                     .map(|p| at + p)
-                    .unwrap_or(rs.len());
+                    .unwrap_or_else(|| rs.len());
             }
 
             let mut other_rows_count = 0;
-            for ri in start..at {
+            for r in &mut rs[start..at] {
                 use std::mem;
 
                 // put something bogus in rs (which will be discarded anyway) so we can take r.
-                let r = mem::replace(&mut rs[ri], Record::Positive(Vec::new()));
+                let r = mem::replace(r, Record::Positive(Vec::new()));
                 let (row, positive) = r.extract();
 
                 if let Some(other_rows) = other_rows.take() {
@@ -519,7 +519,7 @@ impl Ingredient for Join {
 
         ProcessingResult {
             results: ret.into(),
-            misses: misses,
+            misses,
         }
     }
 
@@ -651,7 +651,7 @@ mod tests {
         j.one_row(r, r_z2.clone(), false);
 
         // forward c3 from left; should produce [c3 + None] since no records in right are 3
-        let null = vec![((vec![3.into(), "c".into(), DataType::None], true))].into();
+        let null = vec![(vec![3.into(), "c".into(), DataType::None], true)].into();
         j.seed(l, l_c3.clone());
         let rs = j.one_row(l, l_c3.clone(), false);
         assert_eq!(rs, null);
@@ -694,7 +694,7 @@ mod tests {
         let rs = j.one_row(l, l_b2.clone(), false);
         assert_eq!(
             rs,
-            vec![((vec![2.into(), "b".into(), "z".into()], true))].into()
+            vec![(vec![2.into(), "b".into(), "z".into()], true)].into()
         );
 
         // forward from left with two matching records on right
@@ -703,8 +703,8 @@ mod tests {
         assert_eq!(
             rs,
             vec![
-                ((vec![1.into(), "a".into(), "x".into()], true)),
-                ((vec![1.into(), "a".into(), "y".into()], true)),
+                (vec![1.into(), "a".into(), "x".into()], true),
+                (vec![1.into(), "a".into(), "y".into()], true),
             ]
             .into()
         );
@@ -715,8 +715,8 @@ mod tests {
         assert_eq!(
             rs,
             vec![
-                ((vec![3.into(), "c".into(), "w".into()], true)),
-                ((vec![3.into(), "c".into(), "w".into()], true)),
+                (vec![3.into(), "c".into(), "w".into()], true),
+                (vec![3.into(), "c".into(), "w".into()], true),
             ]
             .into()
         );

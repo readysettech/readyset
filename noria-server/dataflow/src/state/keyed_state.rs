@@ -7,7 +7,8 @@ use prelude::*;
 
 type FnvHashMap<K, V> = RaHashMap<K, V, FnvBuildHasher>;
 
-pub enum KeyedState {
+#[allow(clippy::type_complexity)]
+pub(super) enum KeyedState {
     Single(FnvHashMap<DataType, Vec<Row>>),
     Double(FnvHashMap<(DataType, DataType), Vec<Row>>),
     Tri(FnvHashMap<(DataType, DataType, DataType), Vec<Row>>),
@@ -17,29 +18,7 @@ pub enum KeyedState {
 }
 
 impl KeyedState {
-    pub fn is_empty(&self) -> bool {
-        match *self {
-            KeyedState::Single(ref m) => m.is_empty(),
-            KeyedState::Double(ref m) => m.is_empty(),
-            KeyedState::Tri(ref m) => m.is_empty(),
-            KeyedState::Quad(ref m) => m.is_empty(),
-            KeyedState::Quin(ref m) => m.is_empty(),
-            KeyedState::Sex(ref m) => m.is_empty(),
-        }
-    }
-
-    pub fn len(&self) -> usize {
-        match *self {
-            KeyedState::Single(ref m) => m.len(),
-            KeyedState::Double(ref m) => m.len(),
-            KeyedState::Tri(ref m) => m.len(),
-            KeyedState::Quad(ref m) => m.len(),
-            KeyedState::Quin(ref m) => m.len(),
-            KeyedState::Sex(ref m) => m.len(),
-        }
-    }
-
-    pub fn lookup<'a>(&'a self, key: &KeyType) -> Option<&'a Vec<Row>> {
+    pub(super) fn lookup<'a>(&'a self, key: &KeyType) -> Option<&'a Vec<Row>> {
         match (self, key) {
             (&KeyedState::Single(ref m), &KeyType::Single(k)) => m.get(k),
             (&KeyedState::Double(ref m), &KeyType::Double(ref k)) => m.get(k),
@@ -53,7 +32,7 @@ impl KeyedState {
 
     /// Remove all rows for the first key at or after `index`, returning that key along with the
     /// number of bytes freed. Returns None if already empty.
-    pub fn evict_at_index(&mut self, index: usize) -> Option<(u64, Vec<DataType>)> {
+    pub(super) fn evict_at_index(&mut self, index: usize) -> Option<(u64, Vec<DataType>)> {
         let (rs, key) = match *self {
             KeyedState::Single(ref mut m) => m.remove_at_index(index).map(|(k, rs)| (rs, vec![k])),
             KeyedState::Double(ref mut m) => {
@@ -82,7 +61,7 @@ impl KeyedState {
     }
 
     /// Remove all rows for the given key, returning the number of bytes freed.
-    pub fn evict(&mut self, key: &[DataType]) -> u64 {
+    pub(super) fn evict(&mut self, key: &[DataType]) -> u64 {
         match *self {
             KeyedState::Single(ref mut m) => m.remove(&(key[0])),
             KeyedState::Double(ref mut m) => m.remove(&(key[0].clone(), key[1].clone())),

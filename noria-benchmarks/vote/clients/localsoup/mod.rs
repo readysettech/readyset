@@ -1,34 +1,41 @@
+use crate::clients::{Parameters, ReadRequest, VoteClient, WriteRequest};
 use clap;
-use crate::clients::{Parameters, VoteClient, VoteClientConstructor};
-use noria::{self, DataType};
+use failure::ResultExt;
+use noria::{self, TableOperation};
 use std::path::PathBuf;
-use std::thread;
+use std::sync::Arc;
 use std::time;
+use tokio::prelude::*;
+use tower_service::Service;
 
 pub(crate) mod graph;
 
-pub(crate) struct Client {
-    _ch: noria::ControllerHandle<noria::LocalAuthority>,
-    r: noria::View,
-    #[allow(dead_code)]
-    w: noria::Table,
+#[derive(Clone)]
+pub(crate) struct LocalNoria {
+    _g: Arc<graph::Graph>,
+    // in Option because we need to drop them first
+    // see https://aochagavia.github.io/blog/enforcing-drop-order-in-rust/
+    r: Option<noria::View>,
+    w: Option<noria::Table>,
 }
 
-pub(crate) struct Constructor(graph::Graph, bool);
+// View and Table are both Send, but graph::Graph isn't Sync, so Arc<Graph> isn't Send.
+// We only stick Graph inside an Arc so that it won't be dropped, we never actually access it!
+unsafe impl Send for LocalNoria {}
 
-// this is *only* safe because the only method we call is `duplicate` which is safe to call from
-// other threads.
-unsafe impl Send for Constructor {}
-
-impl VoteClientConstructor for Constructor {
-    type Instance = Client;
-
-    fn new(params: &Parameters, args: &clap::ArgMatches) -> Self {
+impl VoteClient for LocalNoria {
+    type Future = Box<Future<Item = Self, Error = failure::Error> + Send>;
+    fn new(
+        ex: tokio::runtime::TaskExecutor,
+        params: Parameters,
+        args: clap::ArgMatches,
+    ) -> <Self as VoteClient>::Future {
         use noria::{DurabilityMode, PersistenceParameters};
 
         assert!(params.prime);
 
         let verbose = args.is_present("verbose");
+        let fudge = args.is_present("fudge-rpcs");
 
         let mut persistence = PersistenceParameters::default();
         persistence.mode = if args.is_present("durability") {
@@ -49,81 +56,134 @@ impl VoteClientConstructor for Constructor {
             .and_then(|p| Some(PathBuf::from(p)));
 
         // setup db
-        let mut s = graph::Setup::default();
+        let mut s = graph::Builder::default();
         s.logging = verbose;
         s.sharding = match value_t_or_exit!(args, "shards", usize) {
             0 => None,
             x => Some(x),
         };
         s.stupid = args.is_present("stupid");
-        let mut g = s.make(persistence);
+        let g = s.start(ex, persistence);
 
         // prepopulate
         if verbose {
             println!("Prepopulating with {} articles", params.articles);
         }
-        let mut a = g.graph.table("Article").unwrap();
-        a.batch_insert((0..params.articles).map(|i| {
-            vec![
-                ((i + 1) as i32).into(),
-                format!("Article #{}", i + 1).into(),
-            ]
-        }))
-        .unwrap();
-        if verbose {
-            println!("Done with prepopulation");
-        }
 
-        let fudge = args.is_present("fudge-rpcs");
+        Box::new(
+            g.and_then(|mut g| g.graph.handle().table("Article").map(move |a| (g, a)))
+                .and_then(move |(g, mut a)| {
+                    if fudge {
+                        a.i_promise_dst_is_same_process();
+                    }
 
-        // allow writes to propagate
-        thread::sleep(time::Duration::from_secs(1));
+                    a.perform_all((0..params.articles).map(|i| {
+                        vec![
+                            ((i + 1) as i32).into(),
+                            format!("Article #{}", i + 1).into(),
+                        ]
+                    }))
+                    .map(move |_| g)
+                    .map_err(|e| e.error)
+                    .then(|r| {
+                        r.context("failed to do article prepopulation")
+                            .map_err(failure::Error::from)
+                    })
+                })
+                .and_then(move |mut g| {
+                    if verbose {
+                        println!("Done with prepopulation");
+                    }
 
-        Constructor(g, fudge)
-    }
+                    // TODO: allow writes to propagate
 
-    fn make(&mut self) -> Self::Instance {
-        let mut ch = self.0.graph.pointer().connect().unwrap();
-        let r = ch.view("ArticleWithVoteCount").unwrap();
-        let mut w = ch.table("Vote").unwrap();
-        if self.1 {
-            // fudge write rpcs by sending just the pointer over tcp
-            w.i_promise_dst_is_same_process();
-        }
-        Client { _ch: ch, r, w }
-    }
-
-    fn spawns_threads() -> bool {
-        true
+                    g.graph
+                        .handle()
+                        .view("ArticleWithVoteCount")
+                        .and_then(move |r| {
+                            g.graph.handle().table("Vote").map(move |mut w| {
+                                if fudge {
+                                    // fudge write rpcs by sending just the pointer over tcp
+                                    w.i_promise_dst_is_same_process();
+                                }
+                                LocalNoria {
+                                    _g: Arc::new(g),
+                                    r: Some(r),
+                                    w: Some(w),
+                                }
+                            })
+                        })
+                }),
+        )
     }
 }
 
-impl VoteClient for Client {
-    fn handle_writes(&mut self, ids: &[i32]) {
-        let data: Vec<Vec<DataType>> = ids
-            .into_iter()
-            .map(|&article_id| vec![(article_id as usize).into(), 0.into()])
-            .collect();
+impl Service<ReadRequest> for LocalNoria {
+    type Response = ();
+    type Error = failure::Error;
+    type Future = Box<Future<Item = (), Error = failure::Error> + Send>;
 
-        self.w.insert_all(data).unwrap();
+    fn poll_ready(&mut self) -> Poll<(), Self::Error> {
+        self.r
+            .as_mut()
+            .unwrap()
+            .poll_ready()
+            .map_err(failure::Error::from)
     }
 
-    fn handle_reads(&mut self, ids: &[i32]) {
-        let arg = ids
+    fn call(&mut self, req: ReadRequest) -> Self::Future {
+        let len = req.0.len();
+        let arg = req
+            .0
             .into_iter()
-            .map(|&article_id| vec![(article_id as usize).into()])
+            .map(|article_id| vec![(article_id as usize).into()])
             .collect();
 
-        let rows = self
-            .r
-            .multi_lookup(arg, true)
-            .unwrap()
+        Box::new(
+            self.r
+                .as_mut()
+                .unwrap()
+                .call((arg, true))
+                .map(move |rows| {
+                    // TODO: assert_eq!(rows.map(|rows| rows.len()), Ok(1));
+                    assert_eq!(rows.len(), len);
+                })
+                .map_err(failure::Error::from),
+        )
+    }
+}
+
+impl Service<WriteRequest> for LocalNoria {
+    type Response = ();
+    type Error = failure::Error;
+    type Future = Box<Future<Item = (), Error = failure::Error> + Send>;
+
+    fn poll_ready(&mut self) -> Poll<(), Self::Error> {
+        Service::<Vec<TableOperation>>::poll_ready(self.w.as_mut().unwrap())
+            .map_err(failure::Error::from)
+    }
+
+    fn call(&mut self, req: WriteRequest) -> Self::Future {
+        let data: Vec<TableOperation> = req
+            .0
             .into_iter()
-            .map(|_rows| {
-                // TODO
-                //assert_eq!(rows.map(|rows| rows.len()), Ok(1));
-            })
-            .count();
-        assert_eq!(rows, ids.len());
+            .map(|article_id| vec![(article_id as usize).into(), 0.into()].into())
+            .collect();
+
+        Box::new(
+            self.w
+                .as_mut()
+                .unwrap()
+                .call(data)
+                .map(|_| ())
+                .map_err(failure::Error::from),
+        )
+    }
+}
+
+impl Drop for LocalNoria {
+    fn drop(&mut self) {
+        drop(self.r.take());
+        drop(self.w.take());
     }
 }

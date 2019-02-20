@@ -6,7 +6,8 @@ use std::collections::{HashSet, VecDeque};
 use std::mem;
 
 impl Node {
-    pub(crate) fn process(
+    #[allow(clippy::too_many_arguments)]
+    crate fn process(
         &mut self,
         m: &mut Option<Box<Packet>>,
         keyed_by: Option<&Vec<usize>>,
@@ -14,8 +15,8 @@ impl Node {
         nodes: &DomainNodes,
         on_shard: Option<usize>,
         swap: bool,
-        output: &mut FnvHashMap<ReplicaAddr, VecDeque<Box<Packet>>>,
-        executor: Option<&mut Executor>,
+        output: &mut EnqueuedSends,
+        ex: &mut Executor,
     ) -> (Vec<Miss>, HashSet<Vec<DataType>>) {
         m.as_mut().unwrap().trace(PacketEvent::Process);
 
@@ -33,9 +34,7 @@ impl Node {
                 // NOTE: bases only accept BaseOperations
                 match m.take() {
                     Some(box Packet::Input {
-                        inner,
-                        src,
-                        mut senders,
+                        inner, mut senders, ..
                     }) => {
                         let Input { dst, data, tracer } = unsafe { inner.take() };
                         let mut rs = b.process(addr, data, &*state);
@@ -53,16 +52,12 @@ impl Node {
 
                         // Send write-ACKs to all the clients with updates that made
                         // it into this merged packet:
-                        if let Some(ex) = executor {
-                            senders.drain(..).for_each(|src| ex.send_back(src, ()));
-                        }
+                        senders.drain(..).for_each(|src| ex.ack(src));
 
                         *m = Some(Box::new(Packet::Message {
                             link: Link::new(dst, dst),
-                            src,
                             data: rs,
                             tracer,
-                            senders,
                         }));
                     }
                     Some(ref p) => {
@@ -116,7 +111,7 @@ impl Node {
                         (&mut Packet::ReplayPiece {
                             context: payload::ReplayPieceContext::Regular { last },
                             ..
-                        },) => ReplayContext::Full { last: last },
+                        },) => ReplayContext::Full { last },
                         _ => ReplayContext::None,
                     };
 
@@ -126,7 +121,8 @@ impl Node {
                         // we need to own the data
                         let old_data = mem::replace(data, Records::default());
 
-                        match i.on_input_raw(from, old_data, &mut tracer, &replay, nodes, state) {
+                        match i.on_input_raw(ex, from, old_data, &mut tracer, &replay, nodes, state)
+                        {
                             RawProcessingResult::Regular(m) => {
                                 mem::replace(data, m.results);
                                 misses = m.misses;
@@ -231,7 +227,7 @@ impl Node {
         }
     }
 
-    pub fn process_eviction(
+    crate fn process_eviction(
         &mut self,
         from: LocalNodeIndex,
         key_columns: &[usize],
@@ -310,7 +306,9 @@ fn reroute_miss(nodes: &DomainNodes, miss: &mut Miss) {
     }
 }
 
-pub fn materialize(rs: &mut Records, partial: Option<Tag>, state: Option<&mut Box<State>>) {
+#[allow(clippy::borrowed_box)]
+// crate visibility due to use by tests
+crate fn materialize(rs: &mut Records, partial: Option<Tag>, state: Option<&mut Box<State>>) {
     // our output changed -- do we need to modify materialized state?
     if state.is_none() {
         // nope

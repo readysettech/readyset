@@ -72,7 +72,7 @@ impl TopK {
 
             group_by,
             order: order.into(),
-            k: k,
+            k,
         }
     }
 }
@@ -111,8 +111,10 @@ impl Ingredient for TopK {
         self.us = Some(remap[&us]);
     }
 
+    #[allow(clippy::cyclomatic_complexity)]
     fn on_input(
         &mut self,
+        _: &mut Executor,
         from: LocalNodeIndex,
         rs: Records,
         _: &mut Tracer,
@@ -259,7 +261,7 @@ impl Ingredient for TopK {
                 match r {
                     Record::Positive(r) => current.push((Cow::Owned(r), true)),
                     Record::Negative(r) => {
-                        if let Some(p) = current.iter().position(|&(ref x, _)| &*r == &**x) {
+                        if let Some(p) = current.iter().position(|&(ref x, _)| *r == **x) {
                             let (_, was_new) = current.swap_remove(p);
                             if !was_new {
                                 out.push(Record::Negative(r));
@@ -275,7 +277,7 @@ impl Ingredient for TopK {
 
         ProcessingResult {
             results: out.into(),
-            misses: misses,
+            misses,
         }
     }
 
@@ -543,16 +545,14 @@ mod tests {
         // [3, z, 10]
 
         let emit = g.narrow_one(
-            Records::from(vec![Record::Negative(r4.clone()), Record::Positive(r4a.clone())].into()),
+            vec![Record::Negative(r4.clone()), Record::Positive(r4a.clone())],
             true,
         );
         // nothing should have been emitted, as [4, z, 10] doesn't enter Top-K
         assert_eq!(emit, Vec::<Record>::new().into());
 
         let emit = g.narrow_one(
-            Records::from(
-                vec![Record::Negative(r4a.clone()), Record::Positive(r4b.clone())].into(),
-            ),
+            vec![Record::Negative(r4a.clone()), Record::Positive(r4b.clone())],
             true,
         );
 

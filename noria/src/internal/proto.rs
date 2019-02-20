@@ -1,4 +1,5 @@
 use serde::{Deserialize, Deserializer, Serialize, Serializer};
+use std::fmt;
 
 struct LocalBypass<T>(*mut T);
 
@@ -73,6 +74,22 @@ where
 #[doc(hidden)]
 #[derive(Serialize, Deserialize, Clone)]
 pub struct LocalOrNot<T>(LocalOrNotInner<T>);
+
+impl<T> fmt::Debug for LocalOrNot<T>
+where
+    T: fmt::Debug,
+{
+    fn fmt(&self, fmt: &mut fmt::Formatter) -> fmt::Result {
+        let name = if let LocalOrNotInner::Local(..) = self.0 {
+            "LocalOrNot::Local"
+        } else {
+            "LocalOrNot::Not"
+        };
+        fmt.debug_tuple(name)
+            .field(unsafe { self.0.deref() })
+            .finish()
+    }
+}
 
 impl<T> LocalOrNot<T> {
     #[doc(hidden)]
