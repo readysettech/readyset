@@ -1,4 +1,5 @@
 use nom::multispace;
+use nom::types::CompleteByteSlice;
 use std::fmt;
 use std::str;
 
@@ -41,16 +42,16 @@ impl fmt::Display for OrderClause {
     }
 }
 
-named!(pub order_type<&[u8], OrderType>,
-    alt_complete!(
+named!(pub order_type<CompleteByteSlice, OrderType>,
+    alt!(
           map!(tag_no_case!("desc"), |_| OrderType::OrderDescending)
         | map!(tag_no_case!("asc"), |_| OrderType::OrderAscending)
     )
 );
 
 /// Parse ORDER BY clause
-named!(pub order_clause<&[u8], OrderClause>,
-    complete!(do_parse!(
+named!(pub order_clause<CompleteByteSlice, OrderClause>,
+    do_parse!(
         opt_multispace >>
         tag_no_case!("order by") >>
         multispace >>
@@ -58,19 +59,19 @@ named!(pub order_clause<&[u8], OrderClause>,
             do_parse!(
                 fieldname: column_identifier_no_alias >>
                 ordering: opt!(
-                    complete!(do_parse!(
+                    do_parse!(
                         opt_multispace >>
                         ordering: order_type >>
                         (ordering)
-                    ))
+                    )
                 ) >>
                 opt!(
-                    complete!(do_parse!(
+                    do_parse!(
                         opt_multispace >>
                         tag!(",") >>
                         opt_multispace >>
                         ()
-                    ))
+                    )
                 ) >>
                 (fieldname, ordering.unwrap_or(OrderType::OrderAscending))
             )
@@ -82,7 +83,7 @@ named!(pub order_clause<&[u8], OrderClause>,
             //     Some(ref o) => o.clone(),
             // },
         })
-    ))
+    )
 );
 
 #[cfg(test)]
@@ -109,9 +110,9 @@ mod tests {
             columns: vec![("name".into(), OrderType::OrderAscending)],
         };
 
-        let res1 = selection(qstring1.as_bytes());
-        let res2 = selection(qstring2.as_bytes());
-        let res3 = selection(qstring3.as_bytes());
+        let res1 = selection(CompleteByteSlice(qstring1.as_bytes()));
+        let res2 = selection(CompleteByteSlice(qstring2.as_bytes()));
+        let res3 = selection(CompleteByteSlice(qstring3.as_bytes()));
         assert_eq!(res1.unwrap().1.order, Some(expected_ord1));
         assert_eq!(res2.unwrap().1.order, Some(expected_ord2));
         assert_eq!(res3.unwrap().1.order, Some(expected_ord3));

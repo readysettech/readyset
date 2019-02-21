@@ -1,4 +1,5 @@
-use nom::{alphanumeric, digit, is_alphanumeric, line_ending, multispace, IResult};
+use nom::{alphanumeric, digit, is_alphanumeric, line_ending, multispace, Compare, IResult};
+use nom::types::CompleteByteSlice;
 use std::fmt::{self, Display};
 use std::str;
 use std::str::FromStr;
@@ -305,8 +306,8 @@ pub fn is_sql_identifier(chr: u8) -> bool {
 }
 
 #[inline]
-fn len_as_u16(len: &[u8]) -> u16 {
-    match str::from_utf8(len) {
+fn len_as_u16(len: CompleteByteSlice) -> u16 {
+    match str::from_utf8(*len) {
         Ok(s) => match u16::from_str(s) {
             Ok(v) => v,
             Err(e) => panic!(e),
@@ -315,24 +316,24 @@ fn len_as_u16(len: &[u8]) -> u16 {
     }
 }
 
-named!(pub precision<&[u8], (u8, Option<u8>)>,
+named!(pub precision<CompleteByteSlice, (u8, Option<u8>)>,
     delimited!(tag!("("),
                do_parse!(
-                   m: map_res!(digit, str::from_utf8) >>
+                   m: digit >>
                    d: opt!(do_parse!(
                              tag!(",") >>
                              opt_multispace >>
-                             d: map_res!(digit, str::from_utf8) >>
+                             d: digit >>
                              (d)
                         )) >>
-                   ((u8::from_str(m).unwrap(), d.map(|r| u8::from_str(r).unwrap())))
+                   ((m.0[0], d.map(|r| r.0[0])))
                ),
                tag!(")"))
 );
 
 /// A SQL type specifier.
-named!(pub type_identifier<&[u8], SqlType>,
-    alt_complete!(
+named!(pub type_identifier<CompleteByteSlice, SqlType>,
+    alt!(
           do_parse!(
               tag_no_case!("bool") >>
               (SqlType::Bool)
@@ -392,20 +393,20 @@ named!(pub type_identifier<&[u8], SqlType>,
                tag_no_case!("tinyint") >>
                len: opt!(delimited!(tag!("("), digit, tag!(")"))) >>
                opt_multispace >>
-               _signed: opt!(alt_complete!(tag_no_case!("unsigned") | tag_no_case!("signed"))) >>
+               _signed: opt!(alt!(tag_no_case!("unsigned") | tag_no_case!("signed"))) >>
                (SqlType::Tinyint(len.map(|l|len_as_u16(l)).unwrap_or(1)))
            )
          | do_parse!(
                tag_no_case!("bigint") >>
                len: opt!(delimited!(tag!("("), digit, tag!(")"))) >>
                opt_multispace >>
-               _signed: opt!(alt_complete!(tag_no_case!("unsigned") | tag_no_case!("signed"))) >>
+               _signed: opt!(alt!(tag_no_case!("unsigned") | tag_no_case!("signed"))) >>
                (SqlType::Bigint(len.map(|l|len_as_u16(l)).unwrap_or(1)))
            )
          | do_parse!(
                tag_no_case!("double") >>
                opt_multispace >>
-               _signed: opt!(alt_complete!(tag_no_case!("unsigned") | tag_no_case!("signed"))) >>
+               _signed: opt!(alt!(tag_no_case!("unsigned") | tag_no_case!("signed"))) >>
                (SqlType::Double)
            )
          | do_parse!(
@@ -434,7 +435,7 @@ named!(pub type_identifier<&[u8], SqlType>,
          | do_parse!(
                tag_no_case!("real") >>
                opt_multispace >>
-               _signed: opt!(alt_complete!(tag_no_case!("unsigned") | tag_no_case!("signed"))) >>
+               _signed: opt!(alt!(tag_no_case!("unsigned") | tag_no_case!("signed"))) >>
                (SqlType::Real)
            )
          | do_parse!(
@@ -453,10 +454,10 @@ named!(pub type_identifier<&[u8], SqlType>,
                (SqlType::Char(len_as_u16(len)))
            )
          | do_parse!(
-               alt_complete!(tag_no_case!("integer") | tag_no_case!("int") | tag_no_case!("smallint")) >>
+               alt!(tag_no_case!("integer") | tag_no_case!("int") | tag_no_case!("smallint")) >>
                len: opt!(delimited!(tag!("("), digit, tag!(")"))) >>
                opt_multispace >>
-               _signed: opt!(alt_complete!(tag_no_case!("unsigned") | tag_no_case!("signed"))) >>
+               _signed: opt!(alt!(tag_no_case!("unsigned") | tag_no_case!("signed"))) >>
                (SqlType::Int(match len {
                    Some(len) => len_as_u16(len),
                    None => 32 as u16,
@@ -472,7 +473,7 @@ named!(pub type_identifier<&[u8], SqlType>,
                // TODO(malte): not strictly ok to treat DECIMAL and NUMERIC as identical; the
                // former has "at least" M precision, the latter "exactly".
                // See https://dev.mysql.com/doc/refman/5.7/en/precision-math-decimal-characteristics.html
-               alt_complete!(tag_no_case!("decimal") | tag_no_case!("numeric")) >>
+               alt!(tag_no_case!("decimal") | tag_no_case!("numeric")) >>
                prec: opt!(precision) >>
                opt_multispace >>
                (match prec {
@@ -486,7 +487,7 @@ named!(pub type_identifier<&[u8], SqlType>,
 
 /// Parses the arguments for an agregation function, and also returns whether the distinct flag is
 /// present.
-named!(pub function_arguments<&[u8], (Column, bool)>,
+named!(pub function_arguments<CompleteByteSlice, (Column, bool)>,
        do_parse!(
            distinct: opt!(do_parse!(
                tag_no_case!("distinct") >>
@@ -498,8 +499,8 @@ named!(pub function_arguments<&[u8], (Column, bool)>,
        )
 );
 
-named!(pub column_function<&[u8], FunctionExpression>,
-    alt_complete!(
+named!(pub column_function<CompleteByteSlice, FunctionExpression>,
+    alt!(
         do_parse!(
             tag_no_case!("count(*)") >>
             (FunctionExpression::CountStar)
@@ -532,7 +533,7 @@ named!(pub column_function<&[u8], FunctionExpression>,
     |   do_parse!(
             tag_no_case!("group_concat") >>
             spec: delimited!(tag!("("),
-                       complete!(do_parse!(
+                       do_parse!(
                                column: column_identifier_no_alias >>
                                seperator: opt!(
                                    do_parse!(
@@ -540,11 +541,11 @@ named!(pub column_function<&[u8], FunctionExpression>,
                                        tag_no_case!("separator") >>
                                        sep: delimited!(tag!("'"), opt!(alphanumeric), tag!("'")) >>
                                        opt_multispace >>
-                                       (sep.unwrap_or("".as_bytes()))
+                                       (sep.unwrap_or(CompleteByteSlice(&[])))
                                    )
                                ) >>
                                (column, seperator)
-                       )),
+                       ),
                        tag!(")")) >>
             ({
                 let (ref col, ref sep) = spec;
@@ -561,8 +562,8 @@ named!(pub column_function<&[u8], FunctionExpression>,
 );
 
 /// Parses a SQL column identifier in the table.column format
-named!(pub column_identifier_no_alias<&[u8], Column>,
-    alt_complete!(
+named!(pub column_identifier_no_alias<CompleteByteSlice, Column>,
+    alt!(
         do_parse!(
             function: column_function >>
             (Column {
@@ -575,14 +576,14 @@ named!(pub column_identifier_no_alias<&[u8], Column>,
         | do_parse!(
             table: opt!(
                 do_parse!(
-                    tbl_name: map_res!(sql_identifier, str::from_utf8) >>
+                    tbl_name: sql_identifier >>
                     tag!(".") >>
-                    (tbl_name)
+                    (str::from_utf8(*tbl_name).unwrap())
                 )
             ) >>
-            column: map_res!(sql_identifier, str::from_utf8) >>
+            column: sql_identifier >>
             (Column {
-                name: String::from(column),
+                name: String::from(str::from_utf8(*column).unwrap()),
                 alias: None,
                 table: match table {
                     None => None,
@@ -595,8 +596,8 @@ named!(pub column_identifier_no_alias<&[u8], Column>,
 );
 
 /// Parses a SQL column identifier in the table.column format
-named!(pub column_identifier<&[u8], Column>,
-    alt_complete!(
+named!(pub column_identifier<CompleteByteSlice, Column>,
+    alt!(
         do_parse!(
             function: column_function >>
             alias: opt!(as_alias) >>
@@ -616,15 +617,15 @@ named!(pub column_identifier<&[u8], Column>,
         | do_parse!(
             table: opt!(
                 do_parse!(
-                    tbl_name: map_res!(sql_identifier, str::from_utf8) >>
+                    tbl_name: sql_identifier >>
                     tag!(".") >>
-                    (tbl_name)
+                    (str::from_utf8(*tbl_name).unwrap())
                 )
             ) >>
-            column: map_res!(sql_identifier, str::from_utf8) >>
+            column: sql_identifier >>
             alias: opt!(as_alias) >>
             (Column {
-                name: String::from(column),
+                name: String::from_utf8(column.to_vec()).unwrap(),
                 alias: match alias {
                     None => None,
                     Some(a) => Some(String::from(a)),
@@ -640,8 +641,8 @@ named!(pub column_identifier<&[u8], Column>,
 );
 
 /// Parses a SQL identifier (alphanumeric and "_").
-named!(pub sql_identifier<&[u8], &[u8]>,
-    alt_complete!(
+named!(pub sql_identifier<CompleteByteSlice, CompleteByteSlice>,
+    alt!(
           do_parse!(
                 not!(peek!(sql_keyword)) >>
                 ident: take_while1!(is_sql_identifier) >>
@@ -653,29 +654,32 @@ named!(pub sql_identifier<&[u8], &[u8]>,
 );
 
 /// Parse an unsigned integer.
-named!(pub unsigned_number<&[u8], u64>,
-    map_res!(
-        map_res!(digit, str::from_utf8),
-        FromStr::from_str
+named!(pub unsigned_number<CompleteByteSlice, u64>,
+    do_parse!(
+        d: digit >>
+        (FromStr::from_str(str::from_utf8(*d).unwrap()).unwrap())
     )
 );
 
 /// Parse a terminator that ends a SQL statement.
-named!(pub statement_terminator,
-    delimited!(
-        opt_multispace,
-        alt_complete!(tag!(";") | line_ending | eof!()),
-        opt_multispace
+named!(pub statement_terminator<CompleteByteSlice, ()>,
+    do_parse!(
+        delimited!(
+            opt_multispace,
+            alt!(tag!(";") | line_ending | eof!()),
+            opt_multispace
+        ) >>
+        ()
     )
 );
 
-named!(pub opt_multispace<&[u8], Option<&[u8]>>,
-       opt!(complete!(multispace))
+named!(pub opt_multispace<CompleteByteSlice, Option<CompleteByteSlice>>,
+       opt!(multispace)
 );
 
 /// Parse binary comparison operators
-named!(pub binary_comparison_operator<&[u8], Operator>,
-    alt_complete!(
+named!(pub binary_comparison_operator<CompleteByteSlice, Operator>,
+    alt!(
            map!(tag_no_case!("not_like"), |_| Operator::NotLike)
          | map!(tag_no_case!("like"), |_| Operator::Like)
          | map!(tag_no_case!("!="), |_| Operator::NotEqual)
@@ -690,19 +694,17 @@ named!(pub binary_comparison_operator<&[u8], Operator>,
 );
 
 /// Parse rule for AS-based aliases for SQL entities.
-named!(pub as_alias<&[u8], &str>,
-    complete!(
-        do_parse!(
-            multispace >>
-            opt!(do_parse!(tag_no_case!("as") >> multispace >> ())) >>
-            alias: map_res!(sql_identifier, str::from_utf8) >>
-            (alias)
-        )
+named!(pub as_alias<CompleteByteSlice, &str>,
+    do_parse!(
+        multispace >>
+        opt!(do_parse!(tag_no_case!("as") >> multispace >> ())) >>
+        alias: sql_identifier >>
+        (str::from_utf8(*alias).unwrap())
     )
 );
 
-named!(field_value_expr<&[u8], FieldValueExpression>,
-    alt_complete!(
+named!(field_value_expr<CompleteByteSlice, FieldValueExpression>,
+    alt!(
         map!(literal, |l| FieldValueExpression::Literal(LiteralExpression {
             value: l.into(),
             alias: None,
@@ -711,7 +713,7 @@ named!(field_value_expr<&[u8], FieldValueExpression>,
     )
 );
 
-named!(assignment_expr<&[u8], (Column, FieldValueExpression) >,
+named!(assignment_expr<CompleteByteSlice, (Column, FieldValueExpression) >,
     do_parse!(
         column: column_identifier_no_alias >>
         opt_multispace >>
@@ -722,17 +724,17 @@ named!(assignment_expr<&[u8], (Column, FieldValueExpression) >,
     )
 );
 
-named!(pub assignment_expr_list<&[u8], Vec<(Column, FieldValueExpression)> >,
+named!(pub assignment_expr_list<CompleteByteSlice, Vec<(Column, FieldValueExpression)> >,
        many1!(
            do_parse!(
                field_value: assignment_expr >>
                opt!(
-                   complete!(do_parse!(
+                   do_parse!(
                        opt_multispace >>
                        tag!(",") >>
                        opt_multispace >>
                        ()
-                   ))
+                   )
                ) >>
                (field_value)
            )
@@ -740,17 +742,17 @@ named!(pub assignment_expr_list<&[u8], Vec<(Column, FieldValueExpression)> >,
 );
 
 /// Parse rule for a comma-separated list of fields without aliases.
-named!(pub field_list<&[u8], Vec<Column> >,
+named!(pub field_list<CompleteByteSlice, Vec<Column> >,
        many0!(
            do_parse!(
                fieldname: column_identifier_no_alias >>
                opt!(
-                   complete!(do_parse!(
+                   do_parse!(
                        opt_multispace >>
                        tag!(",") >>
                        opt_multispace >>
                        ()
-                   ))
+                   )
                ) >>
                (fieldname)
            )
@@ -758,10 +760,10 @@ named!(pub field_list<&[u8], Vec<Column> >,
 );
 
 /// Parse list of column/field definitions.
-named!(pub field_definition_expr<&[u8], Vec<FieldDefinitionExpression>>,
+named!(pub field_definition_expr<CompleteByteSlice, Vec<FieldDefinitionExpression>>,
        many0!(
            do_parse!(
-               field: alt_complete!(
+               field: alt!(
                    do_parse!(
                        tag!("*") >>
                        (FieldDefinitionExpression::All)
@@ -787,12 +789,12 @@ named!(pub field_definition_expr<&[u8], Vec<FieldDefinitionExpression>>,
                  )
                ) >>
                opt!(
-                   complete!(do_parse!(
+                   do_parse!(
                        opt_multispace >>
                        tag!(",") >>
                        opt_multispace >>
                        ()
-                   ))
+                   )
                ) >>
                (field)
            )
@@ -801,17 +803,17 @@ named!(pub field_definition_expr<&[u8], Vec<FieldDefinitionExpression>>,
 
 /// Parse list of table names.
 /// XXX(malte): add support for aliases
-named!(pub table_list<&[u8], Vec<Table> >,
+named!(pub table_list<CompleteByteSlice, Vec<Table> >,
        many0!(
            do_parse!(
                table: table_reference >>
                opt!(
-                   complete!(do_parse!(
+                   do_parse!(
                        opt_multispace >>
                        tag!(",") >>
                        opt_multispace >>
                        ()
-                   ))
+                   )
                ) >>
                (table)
            )
@@ -819,12 +821,12 @@ named!(pub table_list<&[u8], Vec<Table> >,
 );
 
 /// Integer literal value
-named!(pub integer_literal<&[u8], Literal>,
+named!(pub integer_literal<CompleteByteSlice, Literal>,
     do_parse!(
         sign: opt!(tag!("-")) >>
         val: digit >>
         ({
-            let mut intval = i64::from_str(str::from_utf8(val).unwrap()).unwrap();
+            let mut intval = i64::from_str(str::from_utf8(*val).unwrap()).unwrap();
             if sign.is_some() {
                 intval *= -1;
             }
@@ -834,7 +836,7 @@ named!(pub integer_literal<&[u8], Literal>,
 );
 
 /// Floating point literal value
-named!(pub float_literal<&[u8], Literal>,
+named!(pub float_literal<CompleteByteSlice, Literal>,
     do_parse!(
         sign: opt!(tag!("-")) >>
         mant: digit >>
@@ -846,11 +848,11 @@ named!(pub float_literal<&[u8], Literal>,
             };
             Literal::FixedPoint(Real {
                 integral: if sign.is_some() {
-                    -1 * unpack(mant)
+                    -1 * unpack(mant.0)
                 } else {
-                    unpack(mant)
+                    unpack(mant.0)
                 },
-                fractional: unpack(frac) as i32,
+                fractional: unpack(frac.0) as i32,
             })
         })
     )
@@ -858,7 +860,7 @@ named!(pub float_literal<&[u8], Literal>,
 
 /// String literal value
 
-fn raw_string_quoted(input: &[u8], quote: u8) -> IResult<&[u8], Vec<u8>> { 
+fn raw_string_quoted(input: CompleteByteSlice, quote: u8) -> IResult<CompleteByteSlice, Vec<u8>> {
     let quote_slice: &[u8] = &[quote];
     let double_quote_slice: &[u8] = &[quote, quote];
     let backslash_quote: &[u8] = &[b'\\', quote];
@@ -867,22 +869,22 @@ fn raw_string_quoted(input: &[u8], quote: u8) -> IResult<&[u8], Vec<u8>> {
         fold_many0!(
             alt!(
                 is_not!(backslash_quote) |
-                map!(complete!(tag!(double_quote_slice)), |_| quote_slice) |
-                map!(complete!(tag!("\\\\")), |_| &b"\\"[..]) |
-                map!(complete!(tag!("\\b")), |_| &b"\x7f"[..]) |
-                map!(complete!(tag!("\\r")), |_| &b"\r"[..]) |
-                map!(complete!(tag!("\\n")), |_| &b"\n"[..]) |
-                map!(complete!(tag!("\\t")), |_| &b"\t"[..]) |
-                map!(complete!(tag!("\\0")), |_| &b"\0"[..]) |
-                map!(complete!(tag!("\\Z")), |_| &b"\x1A"[..]) |
+                map!(tag!(double_quote_slice), |_| CompleteByteSlice(quote_slice)) |
+                map!(tag!("\\\\"), |_| CompleteByteSlice(&b"\\"[..])) |
+                map!(tag!("\\b"), |_| CompleteByteSlice(&b"\x7f"[..])) |
+                map!(tag!("\\r"), |_| CompleteByteSlice(&b"\r"[..])) |
+                map!(tag!("\\n"), |_| CompleteByteSlice(&b"\n"[..])) |
+                map!(tag!("\\t"), |_| CompleteByteSlice(&b"\t"[..])) |
+                map!(tag!("\\0"), |_| CompleteByteSlice(&b"\0"[..])) |
+                map!(tag!("\\Z"), |_| CompleteByteSlice(&b"\x1A"[..])) |
                 do_parse!(
                         _escape: tag!("\\") >>
                         escaped: take!(1) >>
-                        ({ escaped }))
+                        (escaped ))
             ),
             Vec::new(),
-            |mut acc: Vec<u8>, bytes: &[u8]| {
-                acc.extend(bytes);
+            |mut acc: Vec<u8>, bytes: CompleteByteSlice| {
+                acc.extend(bytes.0);
                 acc
             }
         ),
@@ -890,11 +892,11 @@ fn raw_string_quoted(input: &[u8], quote: u8) -> IResult<&[u8], Vec<u8>> {
     )
 }
 
-named!(raw_string_singlequoted< Vec<u8> >, call!(raw_string_quoted, b'\''));
-named!(raw_string_doublequoted< Vec<u8> >, call!(raw_string_quoted, b'"'));
+named!(raw_string_singlequoted< CompleteByteSlice, Vec<u8> >, call!(raw_string_quoted, b'\''));
+named!(raw_string_doublequoted< CompleteByteSlice, Vec<u8> >, call!(raw_string_quoted, b'"'));
 
-named!(pub string_literal<&[u8], Literal>,
-       map!(alt_complete!(raw_string_singlequoted | raw_string_doublequoted),
+named!(pub string_literal<CompleteByteSlice, Literal>,
+       map!(alt!(raw_string_singlequoted | raw_string_doublequoted),
              |bytes| match String::from_utf8(bytes) {
                  Ok(s) => Literal::String(s),
                  Err(err) => Literal::Blob(err.into_bytes())
@@ -903,8 +905,8 @@ named!(pub string_literal<&[u8], Literal>,
 );
 
 /// Any literal value.
-named!(pub literal<&[u8], Literal>,
-    alt_complete!(
+named!(pub literal<CompleteByteSlice, Literal>,
+    alt!(
           float_literal
         | integer_literal
         | string_literal
@@ -916,7 +918,7 @@ named!(pub literal<&[u8], Literal>,
     )
 );
 
-named!(pub literal_expression<&[u8], LiteralExpression>,
+named!(pub literal_expression<CompleteByteSlice, LiteralExpression>,
     do_parse!(
         literal: delimited!(opt!(tag!("(")), literal, opt!(tag!(")"))) >>
         alias: opt!(as_alias) >>
@@ -928,17 +930,17 @@ named!(pub literal_expression<&[u8], LiteralExpression>,
 );
 
 /// Parse a list of values (e.g., for INSERT syntax).
-named!(pub value_list<&[u8], Vec<Literal> >,
+named!(pub value_list<CompleteByteSlice, Vec<Literal> >,
        many0!(
            do_parse!(
                val: literal >>
                opt!(
-                   complete!(do_parse!(
+                   do_parse!(
                        opt_multispace >>
                        tag!(",") >>
                        opt_multispace >>
                        ()
-                   ))
+                   )
                ) >>
                (val)
            )
@@ -947,12 +949,12 @@ named!(pub value_list<&[u8], Vec<Literal> >,
 
 /// Parse a reference to a named table, with an optional alias
 /// TODO(malte): add support for schema.table notation
-named!(pub table_reference<&[u8], Table>,
+named!(pub table_reference<CompleteByteSlice, Table>,
     do_parse!(
-        table: map_res!(sql_identifier, str::from_utf8) >>
+        table: sql_identifier >>
         alias: opt!(as_alias) >>
         (Table {
-            name: String::from(table),
+            name: String::from(str::from_utf8(*table).unwrap()),
             alias: match alias {
                 Some(a) => Some(String::from(a)),
                 None => None,
@@ -962,36 +964,35 @@ named!(pub table_reference<&[u8], Table>,
 );
 
 /// Parse rule for a comment part.
-named!(pub parse_comment<&[u8], String>,
+named!(pub parse_comment<CompleteByteSlice, String>,
     do_parse!(
         opt_multispace >>
         tag_no_case!("comment") >>
         multispace >>
-        comment: map_res!(delimited!(tag!("'"), take_until!("'"), tag!("'")), str::from_utf8) >>
-        (String::from(comment))
+        comment: delimited!(tag!("'"), take_until!("'"), tag!("'")) >>
+        (String::from(str::from_utf8(*comment).unwrap()))
     )
 );
 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use nom::IResult;
 
     #[test]
     fn sql_identifiers() {
-        let id1 = b"foo";
-        let id2 = b"f_o_o";
-        let id3 = b"foo12";
-        let id4 = b":fo oo";
-        let id5 = b"primary ";
-        let id6 = b"`primary`";
+        let id1 = CompleteByteSlice(b"foo");
+        let id2 = CompleteByteSlice(b"f_o_o");
+        let id3 = CompleteByteSlice(b"foo12");
+        let id4 = CompleteByteSlice(b":fo oo");
+        let id5 = CompleteByteSlice(b"primary ");
+        let id6 = CompleteByteSlice(b"`primary`");
 
-        assert!(sql_identifier(id1).is_done());
-        assert!(sql_identifier(id2).is_done());
-        assert!(sql_identifier(id3).is_done());
+        assert!(sql_identifier(id1).is_ok());
+        assert!(sql_identifier(id2).is_ok());
+        assert!(sql_identifier(id3).is_ok());
         assert!(sql_identifier(id4).is_err());
         assert!(sql_identifier(id5).is_err());
-        assert!(sql_identifier(id6).is_done());
+        assert!(sql_identifier(id6).is_ok());
     }
 
     #[test]
@@ -1001,11 +1002,11 @@ mod tests {
 
         let res_ok: Vec<_> = ok
             .iter()
-            .map(|t| type_identifier(t.as_bytes()).unwrap().1)
+            .map(|t| type_identifier(CompleteByteSlice(t.as_bytes())).unwrap().1)
             .collect();
         let res_not_ok: Vec<_> = not_ok
             .iter()
-            .map(|t| type_identifier(t.as_bytes()).is_done())
+            .map(|t| type_identifier(CompleteByteSlice(t.as_bytes())).is_ok())
             .collect();
 
         assert_eq!(
@@ -1020,7 +1021,7 @@ mod tests {
     fn simple_column_function() {
         let qs = b"max(addr_id)";
 
-        let res = column_identifier(qs);
+        let res = column_identifier(CompleteByteSlice(qs));
         let expected = Column {
             name: String::from("max(addr_id)"),
             alias: None,
@@ -1032,7 +1033,7 @@ mod tests {
 
     #[test]
     fn comment_data() {
-        let res = parse_comment(b" COMMENT 'test'");
+        let res = parse_comment(CompleteByteSlice(b" COMMENT 'test'"));
         assert_eq!(res.unwrap().1, "test");
     }
 
@@ -1041,23 +1042,23 @@ mod tests {
         let all_escaped = br#"\0\'\"\b\n\r\t\Z\\\%\_"#;
         for quote in [&b"'"[..], &b"\""[..]].iter() {
             let quoted = &[quote, &all_escaped[..], quote].concat();
-            let res = string_literal(quoted);
+            let res = string_literal(CompleteByteSlice(quoted));
             let expected = Literal::String("\0\'\"\x7F\n\r\t\x1a\\%_".to_string());
-            assert_eq!(res, IResult::Done(&b""[..], expected));
+            assert_eq!(res, Ok((CompleteByteSlice(&b""[..]), expected)));
         }
     }
 
     #[test]
     fn literal_string_single_quote() {
-        let res = string_literal(b"'a''b'");
+        let res = string_literal(CompleteByteSlice(b"'a''b'"));
         let expected = Literal::String("a'b".to_string());
-        assert_eq!(res, IResult::Done(&b""[..], expected));
+        assert_eq!(res, Ok((CompleteByteSlice(&b""[..]), expected)));
     }
 
     #[test]
     fn literal_string_double_quote() {
-        let res = string_literal(br#""a""b""#);
+        let res = string_literal(CompleteByteSlice(br#""a""b""#));
         let expected = Literal::String(r#"a"b"#.to_string());
-        assert_eq!(res, IResult::Done(&b""[..], expected));
+        assert_eq!(res, Ok((CompleteByteSlice(&b""[..]), expected)));
     }
 }

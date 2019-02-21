@@ -1,4 +1,5 @@
 use nom::multispace;
+use nom::types::CompleteByteSlice;
 use std::fmt;
 use std::str;
 
@@ -51,13 +52,13 @@ impl fmt::Display for CompoundSelectStatement {
 }
 
 /// Parse compound operator
-named!(compound_op<&[u8], CompoundSelectOperator>,
-    alt_complete!(
+named!(compound_op<CompleteByteSlice, CompoundSelectOperator>,
+    alt!(
           do_parse!(
               tag_no_case!("union") >>
               distinct: opt!(
                   preceded!(multispace,
-                            alt_complete!(  map!(tag_no_case!("all"), |_| { false })
+                            alt!(  map!(tag_no_case!("all"), |_| { false })
                                           | map!(tag_no_case!("distinct"), |_| { true }))
                             )) >>
               (match distinct {
@@ -78,21 +79,19 @@ named!(compound_op<&[u8], CompoundSelectOperator>,
 );
 
 /// Parse compound selection
-named!(pub compound_selection<&[u8], CompoundSelectStatement>,
-    complete!(do_parse!(
+named!(pub compound_selection<CompleteByteSlice, CompoundSelectStatement>,
+    do_parse!(
         first_select: delimited!(opt!(tag!("(")), nested_selection, opt!(tag!(")"))) >>
         other_selects: many1!(
-            complete!(
-                do_parse!(opt_multispace >>
-                       op: compound_op >>
-                       multispace >>
-                       opt!(tag!("(")) >>
-                       opt_multispace >>
-                       select: nested_selection >>
-                       opt_multispace >>
-                       opt!(tag!(")")) >>
-                       (Some(op), select)
-                )
+            do_parse!(opt_multispace >>
+                    op: compound_op >>
+                    multispace >>
+                    opt!(tag!("(")) >>
+                    opt_multispace >>
+                    select: nested_selection >>
+                    opt_multispace >>
+                    opt!(tag!(")")) >>
+                    (Some(op), select)
             )
         ) >>
         opt_multispace >>
@@ -109,7 +108,7 @@ named!(pub compound_selection<&[u8], CompoundSelectStatement>,
                 limit: limit,
             }
         })
-    ))
+    )
 );
 
 #[cfg(test)]
@@ -123,8 +122,8 @@ mod tests {
     fn union() {
         let qstr = "SELECT id, 1 FROM Vote UNION SELECT id, stars from Rating;";
         let qstr2 = "(SELECT id, 1 FROM Vote) UNION (SELECT id, stars from Rating);";
-        let res = compound_selection(qstr.as_bytes());
-        let res2 = compound_selection(qstr2.as_bytes());
+        let res = compound_selection(CompleteByteSlice(qstr.as_bytes()));
+        let res2 = compound_selection(CompleteByteSlice(qstr2.as_bytes()));
 
         let first_select = SelectStatement {
             tables: vec![Table::from("Vote")],
@@ -162,7 +161,7 @@ mod tests {
         let qstr = "SELECT id, 1 FROM Vote \
                     UNION SELECT id, stars from Rating \
                     UNION DISTINCT SELECT 42, 5 FROM Vote;";
-        let res = compound_selection(qstr.as_bytes());
+        let res = compound_selection(CompleteByteSlice(qstr.as_bytes()));
 
         let first_select = SelectStatement {
             tables: vec![Table::from("Vote")],
@@ -211,7 +210,7 @@ mod tests {
     #[test]
     fn union_all() {
         let qstr = "SELECT id, 1 FROM Vote UNION ALL SELECT id, stars from Rating;";
-        let res = compound_selection(qstr.as_bytes());
+        let res = compound_selection(CompleteByteSlice(qstr.as_bytes()));
 
         let first_select = SelectStatement {
             tables: vec![Table::from("Vote")],

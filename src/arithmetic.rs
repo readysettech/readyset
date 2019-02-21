@@ -1,4 +1,5 @@
 use nom::multispace;
+use nom::types::CompleteByteSlice;
 use std::{fmt, str};
 
 use column::Column;
@@ -74,8 +75,8 @@ impl fmt::Display for ArithmeticExpression {
     }
 }
 
-named!(pub arithmetic_cast<&[u8], (ArithmeticBase, Option<SqlType>)>,
-    alt_complete!(
+named!(pub arithmetic_cast<CompleteByteSlice, (ArithmeticBase, Option<SqlType>)>,
+    alt!(
         do_parse!(
             tag_no_case!("cast") >>
             opt_multispace >>
@@ -98,8 +99,8 @@ named!(pub arithmetic_cast<&[u8], (ArithmeticBase, Option<SqlType>)>,
 
 /// Parse standard math operators.
 /// TODO(malte): this doesn't currently observe operator precedence.
-named!(pub arithmetic_operator<&[u8], ArithmeticOperator>,
-    alt_complete!(
+named!(pub arithmetic_operator<CompleteByteSlice, ArithmeticOperator>,
+    alt!(
           map!(tag!("+"), |_| ArithmeticOperator::Add)
         | map!(tag!("-"), |_| ArithmeticOperator::Subtract)
         | map!(tag!("*"), |_| ArithmeticOperator::Multiply)
@@ -108,8 +109,8 @@ named!(pub arithmetic_operator<&[u8], ArithmeticOperator>,
 );
 
 /// Base case for nested arithmetic expressions: column name or literal.
-named!(pub arithmetic_base<&[u8], ArithmeticBase>,
-    alt_complete!(
+named!(pub arithmetic_base<CompleteByteSlice, ArithmeticBase>,
+    alt!(
           map!(integer_literal, |il| ArithmeticBase::Scalar(il))
         | map!(column_identifier_no_alias, |ci| ArithmeticBase::Column(ci))
     )
@@ -117,8 +118,8 @@ named!(pub arithmetic_base<&[u8], ArithmeticBase>,
 
 /// Parse simple arithmetic expressions combining literals, and columns and literals.
 /// TODO(malte): this doesn't currently support nested expressions.
-named!(pub arithmetic_expression<&[u8], ArithmeticExpression>,
-    complete!(do_parse!(
+named!(pub arithmetic_expression<CompleteByteSlice, ArithmeticExpression>,
+    do_parse!(
         left: arithmetic_cast >>
         opt_multispace >>
         op: arithmetic_operator >>
@@ -135,7 +136,7 @@ named!(pub arithmetic_expression<&[u8], ArithmeticExpression>,
                 Some(a) => Some(String::from(a)),
             },
         })
-    ))
+    )
 );
 
 #[cfg(test)]
@@ -206,14 +207,14 @@ mod tests {
         ];
 
         for (i, e) in lit_ae.iter().enumerate() {
-            let res = arithmetic_expression(e.as_bytes());
-            assert!(res.is_done());
+            let res = arithmetic_expression(CompleteByteSlice(e.as_bytes()));
+            assert!(res.is_ok());
             assert_eq!(res.unwrap().1, expected_lit_ae[i]);
         }
 
         for (i, e) in col_lit_ae.iter().enumerate() {
-            let res = arithmetic_expression(e.as_bytes());
-            assert!(res.is_done());
+            let res = arithmetic_expression(CompleteByteSlice(e.as_bytes()));
+            assert!(res.is_ok());
             assert_eq!(res.unwrap().1, expected_col_lit_ae[i]);
         }
     }
@@ -278,8 +279,8 @@ mod tests {
         ];
 
         for (i, e) in exprs.iter().enumerate() {
-            let res = arithmetic_expression(e.as_bytes());
-            assert!(res.is_done(), "{} failed to parse", e);
+            let res = arithmetic_expression(CompleteByteSlice(e.as_bytes()));
+            assert!(res.is_ok(), "{} failed to parse", e);
             assert_eq!(res.unwrap().1, expected[i]);
         }
     }

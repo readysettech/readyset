@@ -1,11 +1,12 @@
 use nom::{alphanumeric, multispace};
+use nom::types::CompleteByteSlice;
 
 use common::{
     integer_literal, opt_multispace, sql_identifier, string_literal,
 };
 
-named!(pub table_options<()>, do_parse!(
-       separated_list_complete!(table_options_separator, create_option)
+named!(pub table_options<CompleteByteSlice, ()>, do_parse!(
+       separated_list!(table_options_separator, create_option)
         >>
         (
             // TODO: make the create options accessible
@@ -13,8 +14,8 @@ named!(pub table_options<()>, do_parse!(
         )
 ));
 
-named!(table_options_separator<()>, do_parse!(
-    alt_complete!(
+named!(table_options_separator<CompleteByteSlice, ()>, do_parse!(
+    alt!(
         map!(multispace, |_| ()) |
         do_parse!(
             opt_multispace >>
@@ -25,7 +26,7 @@ named!(table_options_separator<()>, do_parse!(
     ) >> ()
 ));
 
-named!(create_option<()>, alt_complete!(
+named!(create_option<CompleteByteSlice, ()>, alt!(
         create_option_type |
         create_option_pack_keys |
         create_option_engine |
@@ -39,7 +40,7 @@ named!(create_option<()>, alt_complete!(
         create_option_key_block_size
 ));
 
-named!(create_option_type<()>, complete!(
+named!(create_option_type<CompleteByteSlice, ()>,
     do_parse!(
         tag_no_case!("type") >>
         opt_multispace >>
@@ -48,20 +49,20 @@ named!(create_option_type<()>, complete!(
         alphanumeric >>
         ()
     )
-));
+);
 
-named!(create_option_pack_keys<()>, complete!(
+named!(create_option_pack_keys<CompleteByteSlice, ()>,
     do_parse!(
         tag_no_case!("pack_keys") >>
         opt_multispace >>
         tag!("=") >>
         opt_multispace >>
-        alt_complete!(tag!("0") | tag!("1")) >>
+        alt!(tag!("0") | tag!("1")) >>
         ()
     )
-));
+);
 
-named!(create_option_engine<()>, complete!(
+named!(create_option_engine<CompleteByteSlice, ()>,
     do_parse!(
         tag_no_case!("engine") >>
         opt_multispace >>
@@ -70,9 +71,9 @@ named!(create_option_engine<()>, complete!(
         opt!(alphanumeric) >>
         ()
     )
-));
+);
 
-named!(create_option_auto_increment<()>, complete!(
+named!(create_option_auto_increment<CompleteByteSlice, ()>,
     do_parse!(
         tag_no_case!("auto_increment") >>
         opt_multispace >>
@@ -81,15 +82,15 @@ named!(create_option_auto_increment<()>, complete!(
         integer_literal >>
         ()
     )
-));
+);
 
-named!(create_option_default_charset<()>, complete!(
+named!(create_option_default_charset<CompleteByteSlice, ()>,
     do_parse!(
         tag_no_case!("default charset") >>
         opt_multispace >>
         tag!("=") >>
         opt_multispace >>
-        alt_complete!(
+        alt!(
             tag!("utf8mb4") |
             tag!("utf8") |
             tag!("binary") |
@@ -99,9 +100,9 @@ named!(create_option_default_charset<()>, complete!(
             ) >>
         ()
     )
-));
+);
 
-named!(create_option_collate<()>, complete!(
+named!(create_option_collate<CompleteByteSlice, ()>,
     do_parse!(
         tag_no_case!("collate") >>
         opt_multispace >>
@@ -111,9 +112,9 @@ named!(create_option_collate<()>, complete!(
         sql_identifier >>
         ()
     )
-));
+);
 
-named!(create_option_comment<()>, complete!(
+named!(create_option_comment<CompleteByteSlice, ()>,
     do_parse!(
         tag_no_case!("comment") >>
         opt_multispace >>
@@ -122,9 +123,9 @@ named!(create_option_comment<()>, complete!(
         string_literal >>
         ()
     )
-));
+);
 
-named!(create_option_max_rows<()>, complete!(
+named!(create_option_max_rows<CompleteByteSlice, ()>,
     do_parse!(
         tag_no_case!("max_rows") >>
         opt_multispace >>
@@ -133,9 +134,9 @@ named!(create_option_max_rows<()>, complete!(
         integer_literal >>
         ()
     )
-));
+);
 
-named!(create_option_avg_row_length<()>, complete!(
+named!(create_option_avg_row_length<CompleteByteSlice, ()>,
     do_parse!(
         tag_no_case!("avg_row_length") >>
         opt_multispace >>
@@ -144,15 +145,15 @@ named!(create_option_avg_row_length<()>, complete!(
         integer_literal >>
         ()
     )
-));
+);
 
-named!(create_option_row_format<()>, complete!(
+named!(create_option_row_format<CompleteByteSlice, ()>,
     do_parse!(
         tag_no_case!("row_format") >>
         opt_multispace >>
         opt!(tag!("=")) >>
         opt_multispace >>
-        alt_complete!(
+        alt!(
             tag_no_case!("DEFAULT")|
             tag_no_case!("DYNAMIC") |
             tag_no_case!("FIXED") |
@@ -162,9 +163,9 @@ named!(create_option_row_format<()>, complete!(
         ) >>
         ()
     )
-));
+);
 
-named!(create_option_key_block_size<()>, complete!(
+named!(create_option_key_block_size<CompleteByteSlice, ()>,
     do_parse!(
         tag_no_case!("key_block_size") >>
         opt_multispace >>
@@ -173,17 +174,16 @@ named!(create_option_key_block_size<()>, complete!(
         integer_literal >>
         ()
     )
-));
+);
 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use nom::IResult;
 
     fn should_parse_all(qstring: &str) {
         assert_eq!(
-            IResult::Done(&b""[..], ()),
-            table_options(qstring.as_bytes())
+            Ok((CompleteByteSlice(&b""[..]), ())),
+            table_options(CompleteByteSlice(qstring.as_bytes()))
         )
     }
 
