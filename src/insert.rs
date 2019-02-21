@@ -1,4 +1,5 @@
 use nom::multispace;
+use nom::types::CompleteByteSlice;
 use std::fmt;
 use std::str;
 
@@ -53,8 +54,8 @@ impl fmt::Display for InsertStatement {
 
 /// Parse rule for a SQL insert query.
 /// TODO(malte): support REPLACE, nested selection, DEFAULT VALUES
-named!(pub insertion<&[u8], InsertStatement>,
-    complete!(do_parse!(
+named!(pub insertion<CompleteByteSlice, InsertStatement>,
+    do_parse!(
         tag_no_case!("insert") >>
         ignore: opt!(preceded!(multispace, tag_no_case!("ignore"))) >>
         multispace >>
@@ -80,23 +81,23 @@ named!(pub insertion<&[u8], InsertStatement>,
                 values: value_list >>
                 tag!(")") >>
                 opt!(
-                    complete!(do_parse!(
+                    do_parse!(
                             opt_multispace >>
                             tag!(",") >>
                             opt_multispace >>
                             ()
-                    ))
+                    )
                 ) >>
                 (values)
             )
         ) >>
-        upd_if_dup: opt!(complete!(do_parse!(
+        upd_if_dup: opt!(do_parse!(
                 opt_multispace >>
                 tag_no_case!("on duplicate key update") >>
                 multispace >>
                 assigns: assignment_expr_list >>
                 (assigns)
-        ))) >>
+        )) >>
         statement_terminator >>
         ({
             // "table AS alias" isn't legal in INSERT statements
@@ -109,7 +110,7 @@ named!(pub insertion<&[u8], InsertStatement>,
                 on_duplicate: upd_if_dup,
             }
         })
-    ))
+    )
 );
 
 #[cfg(test)]
@@ -123,7 +124,7 @@ mod tests {
     fn simple_insert() {
         let qstring = "INSERT INTO users VALUES (42, \"test\");";
 
-        let res = insertion(qstring.as_bytes());
+        let res = insertion(CompleteByteSlice(qstring.as_bytes()));
         assert_eq!(
             res.unwrap().1,
             InsertStatement {
@@ -139,7 +140,7 @@ mod tests {
     fn complex_insert() {
         let qstring = "INSERT INTO users VALUES (42, 'test', \"test\", CURRENT_TIMESTAMP);";
 
-        let res = insertion(qstring.as_bytes());
+        let res = insertion(CompleteByteSlice(qstring.as_bytes()));
         assert_eq!(
             res.unwrap().1,
             InsertStatement {
@@ -160,7 +161,7 @@ mod tests {
     fn insert_with_field_names() {
         let qstring = "INSERT INTO users (id, name) VALUES (42, \"test\");";
 
-        let res = insertion(qstring.as_bytes());
+        let res = insertion(CompleteByteSlice(qstring.as_bytes()));
         assert_eq!(
             res.unwrap().1,
             InsertStatement {
@@ -177,7 +178,7 @@ mod tests {
     fn insert_without_spaces() {
         let qstring = "INSERT INTO users(id, name) VALUES(42, \"test\");";
 
-        let res = insertion(qstring.as_bytes());
+        let res = insertion(CompleteByteSlice(qstring.as_bytes()));
         assert_eq!(
             res.unwrap().1,
             InsertStatement {
@@ -193,7 +194,7 @@ mod tests {
     fn multi_insert() {
         let qstring = "INSERT INTO users (id, name) VALUES (42, \"test\"),(21, \"test2\");";
 
-        let res = insertion(qstring.as_bytes());
+        let res = insertion(CompleteByteSlice(qstring.as_bytes()));
         assert_eq!(
             res.unwrap().1,
             InsertStatement {
@@ -212,7 +213,7 @@ mod tests {
     fn insert_with_parameters() {
         let qstring = "INSERT INTO users (id, name) VALUES (?, ?);";
 
-        let res = insertion(qstring.as_bytes());
+        let res = insertion(CompleteByteSlice(qstring.as_bytes()));
         assert_eq!(
             res.unwrap().1,
             InsertStatement {
@@ -229,7 +230,7 @@ mod tests {
         let qstring = "INSERT INTO keystores (`key`, `value`) VALUES (?, ?) \
                        ON DUPLICATE KEY UPDATE `value` = `value` + 1";
 
-        let res = insertion(qstring.as_bytes());
+        let res = insertion(CompleteByteSlice(qstring.as_bytes()));
         let expected_ae = ArithmeticExpression {
             op: ArithmeticOperator::Add,
             left: ArithmeticBase::Column(Column::from("value")),

@@ -1,4 +1,5 @@
 use nom::multispace;
+use nom::types::CompleteByteSlice;
 use std::{fmt, str};
 
 use column::Column;
@@ -39,7 +40,7 @@ impl fmt::Display for UpdateStatement {
     }
 }
 
-named!(pub updating<&[u8], UpdateStatement>,
+named!(pub updating<CompleteByteSlice, UpdateStatement>,
     do_parse!(
         tag_no_case!("update") >>
         multispace >>
@@ -74,7 +75,7 @@ mod tests {
     fn simple_update() {
         let qstring = "UPDATE users SET id = 42, name = 'test'";
 
-        let res = updating(qstring.as_bytes());
+        let res = updating(CompleteByteSlice(qstring.as_bytes()));
         assert_eq!(
             res.unwrap().1,
             UpdateStatement {
@@ -100,7 +101,7 @@ mod tests {
     fn update_with_where_clause() {
         let qstring = "UPDATE users SET id = 42, name = 'test' WHERE id = 1";
 
-        let res = updating(qstring.as_bytes());
+        let res = updating(CompleteByteSlice(qstring.as_bytes()));
         let expected_left = Base(Field(Column::from("id")));
         let expected_where_cond = Some(ComparisonOp(ConditionTree {
             left: Box::new(expected_left),
@@ -133,7 +134,7 @@ mod tests {
     fn format_update_with_where_clause() {
         let qstring = "UPDATE users SET id = 42, name = 'test' WHERE id = 1";
         let expected = "UPDATE users SET id = 42, name = 'test' WHERE id = 1";
-        let res = updating(qstring.as_bytes());
+        let res = updating(CompleteByteSlice(qstring.as_bytes()));
         assert_eq!(format!("{}", res.unwrap().1), expected);
     }
 
@@ -141,7 +142,7 @@ mod tests {
     fn updated_with_neg_float() {
         let qstring = "UPDATE `stories` SET `hotness` = -19216.5479744 WHERE `stories`.`id` = ?";
 
-        let res = updating(qstring.as_bytes());
+        let res = updating(CompleteByteSlice(qstring.as_bytes()));
         let expected_left = Base(Field(Column::from("stories.id")));
         let expected_where_cond = Some(ComparisonOp(ConditionTree {
             left: Box::new(expected_left),
@@ -171,7 +172,7 @@ mod tests {
     fn update_with_arithmetic_and_where() {
         let qstring = "UPDATE users SET karma = karma + 1 WHERE users.id = ?;";
 
-        let res = updating(qstring.as_bytes());
+        let res = updating(CompleteByteSlice(qstring.as_bytes()));
         let expected_where_cond = Some(ComparisonOp(ConditionTree {
             left: Box::new(Base(Field(Column::from("users.id")))),
             right: Box::new(Base(Literal(Literal::Placeholder))),
@@ -201,7 +202,7 @@ mod tests {
     fn update_with_arithmetic() {
         let qstring = "UPDATE users SET karma = karma + 1;";
 
-        let res = updating(qstring.as_bytes());
+        let res = updating(CompleteByteSlice(qstring.as_bytes()));
         let expected_ae = ArithmeticExpression {
             op: ArithmeticOperator::Add,
             left: ArithmeticBase::Column(Column::from("karma")),

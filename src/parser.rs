@@ -1,4 +1,4 @@
-use nom::IResult;
+use nom::types::CompleteByteSlice;
 use std::fmt;
 use std::str;
 
@@ -40,8 +40,8 @@ impl fmt::Display for SqlQuery {
     }
 }
 
-named!(sql_query<&[u8], SqlQuery>,
-    alt_complete!(
+named!(sql_query<CompleteByteSlice, SqlQuery>,
+    alt!(
           do_parse!(c: creation >> (SqlQuery::CreateTable(c)))
         | do_parse!(i: insertion >> (SqlQuery::Insert(i)))
         | do_parse!(c: compound_selection >> (SqlQuery::CompoundSelect(c)))
@@ -56,10 +56,9 @@ named!(sql_query<&[u8], SqlQuery>,
 
 pub fn parse_query_bytes<T>(input: T) -> Result<SqlQuery, &'static str>
     where T: AsRef<[u8]> {
-    match sql_query(input.as_ref()) {
-        IResult::Done(_, o) => Ok(o),
-        IResult::Error(_) => Err("failed to parse query"),
-        IResult::Incomplete(_) => unreachable!(),
+    match sql_query(CompleteByteSlice(input.as_ref())) {
+        Ok((_, o)) => Ok(o),
+        Err(_) => Err("failed to parse query"),
     }
 }
 
