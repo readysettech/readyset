@@ -350,7 +350,6 @@
 //! ```
 #![feature(allow_fail)]
 #![feature(optin_builtin_traits)]
-#![feature(try_from)]
 #![feature(box_patterns)]
 #![feature(box_syntax)]
 #![feature(nll)]

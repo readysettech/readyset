@@ -1,4 +1,3 @@
-#![feature(try_from)]
 #![feature(try_blocks)]
 #![feature(existential_type)]
 #![feature(duration_float)]
