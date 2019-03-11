@@ -1,4 +1,4 @@
-use noria::{SyncControllerHandle, DataType, SyncTable, SyncView, ZookeeperAuthority};
+use noria::{SyncControllerHandle, DataType, SyncTable, SyncView, TableOperation, ZookeeperAuthority};
 
 use failure;
 use msql_srv::{self, *};
@@ -739,11 +739,8 @@ impl NoriaBackend {
             putter.insert_or_update(buf[0].clone(), updates)
         } else {
             trace!(self.log, "inserting {:?}", buf);
-            for r in buf {
-                // XXX(malte): fix error handling
-                putter.insert(r).unwrap();
-            }
-            Ok(())
+            let buf: Vec<_> = buf.into_iter().map(|r| TableOperation::Insert(r.into())).collect();
+            putter.perform_all(buf)
         };
 
         match result {
