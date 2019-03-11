@@ -1,4 +1,4 @@
-use noria::{ControllerHandle, DataType, Table, View, ZookeeperAuthority};
+use noria::{SyncControllerHandle, DataType, SyncTable, SyncView, ZookeeperAuthority};
 
 use failure;
 use msql_srv::{self, *};
@@ -45,9 +45,9 @@ impl fmt::Debug for PreparedStatement {
 }
 
 struct NoriaBackendInner {
-    noria: ControllerHandle<ZookeeperAuthority>,
-    inputs: BTreeMap<String, Table>,
-    outputs: BTreeMap<String, View>,
+    noria: SyncControllerHandle<ZookeeperAuthority, tokio::runtime::TaskExecutor>,
+    inputs: BTreeMap<String, SyncTable>,
+    outputs: BTreeMap<String, SyncView>,
 }
 
 impl NoriaBackendInner {
@@ -56,21 +56,23 @@ impl NoriaBackendInner {
         zk_auth.log_with(log.clone());
 
         debug!(log, "Connecting to Noria...",);
-        let mut ch = ControllerHandle::new(zk_auth).unwrap();
+        let rt = tokio::runtime::Runtime::new().unwrap();
+        let executor = rt.executor();
+        let mut ch = SyncControllerHandle::new(zk_auth, executor).unwrap();
 
         let b = NoriaBackendInner {
             inputs: ch
                 .inputs()
                 .expect("couldn't get inputs from Noria")
                 .into_iter()
-                .map(|(n, _)| (n.clone(), ch.table(&n).unwrap()))
-                .collect::<BTreeMap<String, Table>>(),
+                .map(|(n, _)| (n.clone(), ch.table(&n).unwrap().into_sync()))
+                .collect::<BTreeMap<String, SyncTable>>(),
             outputs: ch
                 .outputs()
                 .expect("couldn't get outputs from Noria")
                 .into_iter()
-                .map(|(n, _)| (n.clone(), ch.view(&n).unwrap()))
-                .collect::<BTreeMap<String, View>>(),
+                .map(|(n, _)| (n.clone(), ch.view(&n).unwrap().into_sync()))
+                .collect::<BTreeMap<String, SyncView>>(),
             noria: ch,
         };
 
@@ -79,12 +81,12 @@ impl NoriaBackendInner {
         b
     }
 
-    fn ensure_mutator<'a, 'b>(&'a mut self, table: &'b str) -> &'a mut Table {
+    fn ensure_mutator<'a, 'b>(&'a mut self, table: &'b str) -> &'a mut SyncTable {
         self.get_or_make_mutator(table)
             .expect(&format!("no table named '{}'!", table))
     }
 
-    fn ensure_getter<'a, 'b>(&'a mut self, view: &'b str) -> &'a mut View {
+    fn ensure_getter<'a, 'b>(&'a mut self, view: &'b str) -> &'a mut SyncView {
         self.get_or_make_getter(view)
             .expect(&format!("no view named '{}'!", view))
     }
@@ -92,11 +94,11 @@ impl NoriaBackendInner {
     fn get_or_make_mutator<'a, 'b>(
         &'a mut self,
         table: &'b str,
-    ) -> Result<&'a mut Table, failure::Error> {
+    ) -> Result<&'a mut SyncTable, failure::Error> {
         let noria = &mut self.noria;
         if !self.inputs.contains_key(table) {
             let t = noria.table(table)?;
-            self.inputs.insert(table.to_owned(), t);
+            self.inputs.insert(table.to_owned(), t.into_sync());
         }
         Ok(self.inputs.get_mut(table).unwrap())
     }
@@ -104,11 +106,11 @@ impl NoriaBackendInner {
     fn get_or_make_getter<'a, 'b>(
         &'a mut self,
         view: &'b str,
-    ) -> Result<&'a mut View, failure::Error> {
+    ) -> Result<&'a mut SyncView, failure::Error> {
         let noria = &mut self.noria;
         if !self.outputs.contains_key(view) {
             let vh = noria.view(view)?;
-            self.outputs.insert(view.to_owned(), vh);
+            self.outputs.insert(view.to_owned(), vh.into_sync());
         }
         Ok(self.outputs.get_mut(view).unwrap())
     }
@@ -737,7 +739,11 @@ impl NoriaBackend {
             putter.insert_or_update(buf[0].clone(), updates)
         } else {
             trace!(self.log, "inserting {:?}", buf);
-            putter.batch_insert(buf)
+            for r in buf {
+                // XXX(malte): fix error handling
+                putter.insert(r).unwrap();
+            }
+            Ok(())
         };
 
         match result {
