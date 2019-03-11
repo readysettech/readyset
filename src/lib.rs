@@ -1,6 +1,5 @@
 #![feature(box_syntax, box_patterns)]
 #![feature(nll)]
-#![feature(try_from)]
 #![feature(allow_fail)]
 
 extern crate arccstr;
