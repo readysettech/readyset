@@ -1,4 +1,5 @@
 use crate::data::*;
+use crate::BoxDynError;
 use crate::{Tagged, Tagger};
 use async_bincode::{AsyncBincodeStream, AsyncDestination};
 use nom_sql::ColumnSpecification;
@@ -62,6 +63,8 @@ pub(crate) type ViewRpc = Buffer<
     Tagged<ReadQuery>,
 >;
 
+type E = <ViewRpc as Service<Tagged<ReadQuery>>>::Error;
+
 /// A failed [`View`] operation.
 #[derive(Debug)]
 pub struct AsyncViewError {
@@ -74,12 +77,18 @@ pub struct AsyncViewError {
     pub error: ViewError,
 }
 
-impl From<<ViewRpc as Service<Tagged<ReadQuery>>>::Error> for AsyncViewError {
-    fn from(e: <ViewRpc as Service<Tagged<ReadQuery>>>::Error) -> Self {
+impl From<E> for AsyncViewError {
+    fn from(e: E) -> Self {
         AsyncViewError {
             view: None,
             error: ViewError::from(e),
         }
+    }
+}
+
+impl From<BoxDynError<E>> for AsyncViewError {
+    fn from(e: BoxDynError<E>) -> Self {
+        From::from(e.into_inner())
     }
 }
 
@@ -91,12 +100,12 @@ pub enum ViewError {
     NotYetAvailable,
     /// A lower-level error occurred while communicating with Soup.
     #[fail(display = "{}", _0)]
-    TransportError(#[cause] <ViewRpc as Service<Tagged<ReadQuery>>>::Error),
+    TransportError(#[cause] BoxDynError<E>),
 }
 
-impl From<<ViewRpc as Service<Tagged<ReadQuery>>>::Error> for ViewError {
-    fn from(e: <ViewRpc as Service<Tagged<ReadQuery>>>::Error) -> Self {
-        ViewError::TransportError(e)
+impl From<E> for ViewError {
+    fn from(e: E) -> Self {
+        ViewError::TransportError(BoxDynError::from(e))
     }
 }
 

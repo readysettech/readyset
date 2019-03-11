@@ -2,6 +2,7 @@ use crate::channel::CONNECTION_FROM_BASE;
 use crate::data::*;
 use crate::debug::trace::Tracer;
 use crate::internal::*;
+use crate::BoxDynError;
 use crate::LocalOrNot;
 use crate::{Tagged, Tagger};
 use async_bincode::{AsyncBincodeStream, AsyncDestination};
@@ -71,14 +72,7 @@ pub(crate) type TableRpc = Buffer<
     Tagged<LocalOrNot<Input>>,
 >;
 
-type E = tower_buffer::Error<
-    tower_balance::Error<
-        tokio_tower::multiplex::client::Error<
-            tokio_tower::multiplex::MultiplexTransport<Transport, Tagger>,
-        >,
-        tokio_tower::multiplex::client::SpawnError<std::io::Error>,
-    >,
->;
+type E = <TableRpc as Service<Tagged<LocalOrNot<Input>>>>::Error;
 
 /// A failed [`Table`] operation.
 #[derive(Debug)]
@@ -92,11 +86,11 @@ pub struct AsyncTableError {
     pub error: TableError,
 }
 
-impl From<E> for AsyncTableError {
-    fn from(e: E) -> Self {
+impl From<BoxDynError<E>> for AsyncTableError {
+    fn from(e: BoxDynError<E>) -> Self {
         AsyncTableError {
             table: None,
-            error: TableError::from(e),
+            error: TableError::from(e.into_inner()),
         }
     }
 }
@@ -120,12 +114,12 @@ pub enum TableError {
 
     /// The underlying connection to Noria produced an error.
     #[fail(display = "{}", _0)]
-    TransportError(#[cause] E),
+    TransportError(#[cause] BoxDynError<<TableRpc as Service<Tagged<LocalOrNot<Input>>>>::Error>),
 }
 
 impl From<E> for TableError {
     fn from(e: E) -> Self {
-        TableError::TransportError(e)
+        TableError::TransportError(BoxDynError::from(e))
     }
 }
 
@@ -343,7 +337,7 @@ impl Service<Input> for Table {
 
             future::Either::B(
                 wait_for
-                    .fold((), |_, _| Ok(()))
+                    .for_each(|_| Ok(()))
                     .map_err(TableError::from)
                     .map(Tagged::from),
             )

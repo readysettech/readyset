@@ -10,8 +10,9 @@ members = [
 debug=true
 
 [patch.crates-io]
-tower-service = { git = "https://github.com/jonhoo/tower.git", branch = "dynamic-balance" }
-tower-discover = { git = "https://github.com/jonhoo/tower.git", branch = "dynamic-balance"  }
-tower-balance = { git = "https://github.com/jonhoo/tower.git", branch = "dynamic-balance"  }
-tower-buffer = { git = "https://github.com/jonhoo/tower.git", branch = "dynamic-balance"  }
-tower-util = { git = "https://github.com/jonhoo/tower.git", branch = "dynamic-balance"  }
+tower-service = { git = "https://github.com/tower-rs/tower.git" }
+tower-discover = { git = "https://github.com/tower-rs/tower.git" }
+tower-balance = { git = "https://github.com/tower-rs/tower.git" }
+tower-buffer = { git = "https://github.com/tower-rs/tower.git" }
+tower-util = { git = "https://github.com/tower-rs/tower.git" }
+tokio-sync = { git = "https://github.com/jonhoo/tokio.git", branch = "tokio-sync-lease" }
