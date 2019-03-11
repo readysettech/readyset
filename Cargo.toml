@@ -15,6 +15,7 @@ slog = "2.4.0"
 #slog = { version = "2.4.0", features = ["max_level_trace", "release_max_level_trace"] }
 slog-term = "2.4.0"
 regex = "1.0.0"
+tokio = "0.1"
 chrono = "0.4"
 
 [dev-dependencies]
@@ -31,3 +32,10 @@ path = "src/lib.rs"
 ###[patch."https://github.com/mit-pdos/noria.git"]
 ###noria = { path = "../noria/noria/" }
 ###noria-server = { path = "../noria/noria-server/" }
+
+[patch.crates-io]
+tower-service = { git = "https://github.com/jonhoo/tower.git", branch = "dynamic-balance" }
+tower-discover = { git = "https://github.com/jonhoo/tower.git", branch = "dynamic-balance"  }
+tower-balance = { git = "https://github.com/jonhoo/tower.git", branch = "dynamic-balance"  }
+tower-buffer = { git = "https://github.com/jonhoo/tower.git", branch = "dynamic-balance"  }
+tower-util = { git = "https://github.com/jonhoo/tower.git", branch = "dynamic-balance"  }
