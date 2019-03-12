@@ -8,14 +8,14 @@ fn parse_queryset(queries: Vec<String>) -> (i32, i32) {
     let mut parsed_ok = Vec::new();
     let mut parsed_err = 0;
     for query in queries.iter() {
-        //println!("Trying to parse '{}': ", &query);
+        println!("Trying to parse '{}': ", &query);
         match nom_sql::parser::parse_query(&query) {
             Ok(_) => {
-                //println!("ok");
+                println!("ok");
                 parsed_ok.push(query);
             }
             Err(_) => {
-                println!("failed: '{}'", &query);
+                println!("failed");
                 parsed_err += 1;
             }
         }
@@ -23,9 +23,9 @@ fn parse_queryset(queries: Vec<String>) -> (i32, i32) {
 
     println!("\nParsing failed: {} queries", parsed_err);
     println!("Parsed successfully: {} queries", parsed_ok.len());
-    //println!("\nSuccessfully parsed queries:");
+    println!("\nSuccessfully parsed queries:");
     for q in parsed_ok.iter() {
-        //println!("{:?}", q);
+        println!("{:?}", q);
     }
 
     (parsed_ok.len() as i32, parsed_err)
@@ -39,7 +39,7 @@ fn test_queries_from_file(f: &Path, name: &str) -> Result<i32, i32> {
     f.read_to_string(&mut s).unwrap();
     let lines: Vec<String> = s
         .lines()
-        .filter(|l| !l.is_empty() && !l.starts_with("#") && !l.starts_with("--"))
+        .filter(|l| !l.is_empty() && !l.starts_with("#") && !l.starts_with("--") && !l.starts_with("/*"))
         .map(|l| {
             if !(l.ends_with("\n") || l.ends_with(";")) {
                 String::from(l) + "\n"
@@ -52,7 +52,6 @@ fn test_queries_from_file(f: &Path, name: &str) -> Result<i32, i32> {
     // Try parsing them all
     let (ok, err) = parse_queryset(lines);
 
-    // For the moment, we're always good
     if err > 0 {
         return Err(err);
     }
